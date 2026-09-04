@@ -202,10 +202,14 @@ continue without silently deleting it.
   and cgroup cleanup pending. Boot mismatch requires stable leaf absence and rejects present/unstable state; launching
   recovery retains provisional absence through exact task reap. Only fresh-recovery cgroup admission callbacks run
   outside the `cleanupLease` mutex; ordinary `Complete` still serializes cleanup effects under it. These capabilities
-  use pointer-shared close-once state. Same-boot dead-process reconciliation, controller
-  enablement/readiness and exact limit readback, replacement of `entry.go` path-based cgroup operations, production
-  child spawning and create/start/stop composition, network/firewall lease transfer, final live topology verification,
-  full reconciliation, API wiring, and live L2/Tier 3/system tests remain pending. This is not yet production host
+  use pointer-shared close-once state. Private typed policy-v1 launch control now proves fixed `cpu`, `memory`, and
+  `pids` readiness root-first then parent, enables only missing controllers additively with readback, repeats readiness
+  immediately before handoff, and verifies exact CPU quota/period/weight, memory high/max/swap, and PID limits before
+  membership and on retry. Errors retain the same authority; recovery and no-intent launches never mutate controllers.
+  Relay and Firecracker handoff progress is independent, so a partial relay-success retry resumes only Firecracker.
+  Same-boot dead-process reconciliation, replacement of `entry.go` path-based cgroup operations, production child
+  spawning and create/start/stop composition, network/firewall lease transfer, final live topology verification, full
+  reconciliation, API wiring, and live L2/Tier 3/system tests remain pending. This is not yet production host
   enforcement or release evidence.
 - Private firewall generation authority with a strict committed/applying record and codec, descriptor-relative
   exclusive store at `/var/lib/mvmctl/firewall/generation.json`, and never-unlinked global
@@ -422,10 +426,14 @@ active or launching Firecracker identity, durably enters `cleaning`, and re-admi
 membership. Admission failure retains the same cleanup lease and pending cgroup work. Boot mismatch requires stable
 leaf absence; launching recovery retains provisional absence through reap. Only fresh-recovery cgroup admission
 callbacks run outside the `cleanupLease` mutex; ordinary `Complete` still serializes cleanup effects under it. No
-production VM lifecycle constructs or consumes this graph yet. Same-boot dead-process cgroup reconciliation,
-controller readiness and exact limit readback, replacement of `entry.go` path-based prepare/remove, production
-create/start/stop wiring, live topology verification, network/firewall and mount/output integration, public actions,
-reconciliation, and live L2/Tier 3/system qualification remain pending.
+production VM lifecycle constructs or consumes this graph yet. The private policy-v1 path proves root-then-parent
+`cpu`/`memory`/`pids` readiness with additive missing-only enablement and exact readback, repeats that proof at the last
+handoff boundary, and verifies exact CPU quota/period/weight, memory high/max/swap, and PID leaf values before
+membership and on retry. All failures retain the same cgroup authority. Recovery and no-intent paths do not mutate
+controllers, and partial relay handoff is explicitly retryable without a duplicate relay release. Same-boot
+dead-process cgroup reconciliation, replacement of `entry.go` path-based prepare/remove, production create/start/stop
+wiring, live topology verification, network/firewall and mount/output integration, public actions, reconciliation, and
+live L2/Tier 3/system qualification remain pending.
 
 The global lock order is:
 
@@ -460,10 +468,19 @@ persistent outputs, creates the runtime directory, marks propagation private, an
 descriptors. The relay receives only inherited PTY, pinned log, and pinned runtime-directory descriptors and never
 retains the VM namespace.
 
+For a retained policy-v1 intent, cgroup preparation verifies `cpu`, `memory`, and `pids` controller readiness first at
+the root and then at the parent. It writes only missing enablement tokens and requires descriptor-relative readback.
+The last pre-handoff check repeats complete readiness. After Jailer creates the leaf, activation reads back exact
+`cpu.max`, `cpu.weight`, `memory.high`, `memory.max`, `memory.swap.max`, and `pids.max` policy values before sole
+membership; retry repeats both without replacing the authority. Recovery and no-intent launch paths perform no
+controller mutation.
+
 The launch lease retains VM, network, and firewall leases. It creates all links down, applies the complete atomic
 nftables generation, verifies it freshly, and only then raises and reverifies links. An unknown firewall outcome keeps
 links down and both children blocked. Only after those effects and exact relay readiness does the parent recheck the
-fresh jail destination and release the child to Jailer with the pinned netns. Jailer 1.16.1 copies
+fresh jail destination and release the child to Jailer with the pinned netns. Relay and Firecracker handoff progress is
+retained independently: if relay release succeeds and Firecracker release fails, retry resumes only the pending
+Firecracker handoff on the same lease. Jailer 1.16.1 copies
 Firecracker, joins netns/cgroup, unshares and pivots into a new final mount namespace, drops credentials, and execs its
 copy. The initial namespace therefore cannot be recorded as the final namespace, and the trusted-store inode cannot be
 recorded as `/proc/<pid>/exe`. `activateVerifiedProcess(ctx)` consumes the launch lease's retained prepared release and

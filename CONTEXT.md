@@ -343,6 +343,17 @@ retryable descriptor-relative removal and commits durable `cleaned` only afterwa
 after proven removal converges rather than retrying a reused descriptor. This authority adds no cgroup path to the
 schema and is not yet production host enforcement.
 
+Private launch cgroup control now accepts only a typed policy-v1 intent: CPU quota, period, and weight; memory high,
+maximum, and swap maximum; and an exact PID maximum. Preparation checks fixed `cpu`, `memory`, and `pids` controller
+readiness at the cgroup root and then the compiled parent, writes only missing enablement tokens additively, and reads
+back each result through retained descriptors. It repeats the complete readiness proof immediately before Jailer
+handoff. After handoff, exact descriptor-relative reads of `cpu.max`, `cpu.weight`, `memory.high`, `memory.max`,
+`memory.swap.max`, and `pids.max` must match the retained policy before the pidfd/start-tick-bound sole-membership
+proof. Every retry repeats limit readback and membership verification, and every error returns the same retained
+cgroup authority. Recovery and launch without a cgroup policy never mutate controller state. Process handoff tracks
+relay and Firecracker release independently, so a retry after successful relay handoff but failed Firecracker handoff
+resumes only the remaining handoff on the same launch authority.
+
 Fresh private cleanup admission now reopens the record's exact pidfd/start-tick-bound processes and observes the
 Firecracker as either the committed active identity or the exact launching task before durably transferring authority
 to `cleaning`. It then re-admits the fixed cgroup leaf only when that task is its sole member. A re-admission or final
@@ -385,11 +396,10 @@ state and cache their first cleanup result.
 Fresh cleanup now reopens the exact existing per-VM runtime directory through the root-controlled hierarchy before
 runtime cleanup. It creates or repairs nothing, treats an absent hierarchy as already clean, and preserves retryable
 `cleaning` on unsafe state. No production child launcher, privileged VM action, or public VM lifecycle constructs or
-consumes this private graph. Same-boot dead-process cgroup reconciliation, cgroup controller enablement and readiness
-plus exact limit readback, replacement of the path-based cgroup prepare/remove calls in `entry.go`, production topology
-and network/firewall lease transfer, stale Jailer-tree reconciliation, mount/output cleanup, public create/start/stop
-and other lifecycle wiring, status observation and full reconciliation, and live L2, Tier 3, and system qualification
-remain pending.
+consumes this private graph. Same-boot dead-process cgroup reconciliation, replacement of the path-based cgroup
+prepare/remove calls in `entry.go`, production topology and network/firewall lease transfer, stale Jailer-tree
+reconciliation, mount/output cleanup, public create/start/stop and other lifecycle wiring, status observation and full
+reconciliation, and live L2, Tier 3, and system qualification remain pending.
 
 The transitional public relaunch path now has a separate, private normal-process `vmRelaunchState` increment. Start,
 reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,

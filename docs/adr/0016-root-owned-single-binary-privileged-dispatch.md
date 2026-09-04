@@ -1397,7 +1397,9 @@ The activation order is fixed:
    and destination absence immediately before handoff so every accepted destination is freshly created by this Jailer.
    Prepare the separate fixed-name cgroup-v2 authority by descriptor-pinning `/sys/fs/cgroup`, its compiled `mvmctl`
    parent, and the `<vm-id>` leaf boundary with exact metadata and mount checks. The VM leaf must be freshly absent;
-   an existing legacy leaf is never adopted.
+   an existing legacy leaf is never adopted. For a typed policy-v1 launch intent, require fixed `cpu`, `memory`, and
+   `pids` controller readiness at the root and then the parent. Enable only missing controllers additively and verify
+   each descriptor-relative readback; never disable an existing controller.
 5. Prepare fixed outputs, the runtime directory, initial private mount namespace, and named mounts. With the launch
    lease's VM lock already retained, acquire and retain only the later network, then firewall leases; create
    namespace/local and host
@@ -1407,8 +1409,9 @@ The activation order is fixed:
    same leases.
 6. Release the relay, observe and record its exact caller credentials, empty supplementary groups, host mount
    namespace/root, root-owned `/usr/local/bin/mvm` executable metadata and digest, and verify readiness.
-7. Recheck the pinned release, fresh jail-destination absence, and cgroup-leaf absence at the last handoff boundary,
-   then release the Firecracker child to the exact Jailer with the pinned network namespace. Record successful
+7. Recheck the pinned release, fresh jail-destination absence, cgroup-leaf absence, and root-then-parent controller
+   readiness at the last handoff boundary, then release the Firecracker child to the exact Jailer with the pinned
+   network namespace. Record successful
    Jailer-handoff provenance in the retained cgroup authority before it may bind the resulting leaf. The prepared
    release supplies the fixed store paths; the caller supplies neither a hash nor path. This release occurs only after
    the complete firewall generation and links are verified.
@@ -1424,9 +1427,10 @@ The activation order is fixed:
 10. Change the final jail root and copied executable to exact `root:root` mode `0755`, beneath exact `root:root` mode
    `0700` Jailer base and per-VM ancestors. Hash the sealed copy against the exact release manifest and recheck metadata.
 11. Re-observe boot ID, PID/start ticks, credentials, empty groups, cgroup, namespaces, root, executable, relay identity,
-    and pidfd liveness. Cgroup verification uses the retained authority to prove that the pidfd/start-tick-bound task is
-    the exact leaf's sole member; a failed proof preserves that same lease for retry. Then atomically replace
-    `launching` with `active`.
+    and pidfd liveness. Before membership, descriptor-relatively read back exact policy-v1 `cpu.max`, `cpu.weight`,
+    `memory.high`, `memory.max`, `memory.swap.max`, and `pids.max` values. Then prove through the retained cgroup
+    authority that the pidfd/start-tick-bound task is the exact leaf's sole member. A failed limit or membership proof
+    preserves that same lease, and retry repeats both. Then atomically replace `launching` with `active`.
 
 Sealing makes the copied inode immutable to the dropped caller and preserves the exact-content proof established at
 activation. Later status batches can compare the root-owned inode and metadata without rehashing every executable;
@@ -1482,6 +1486,16 @@ termination and reap. Cleanup requires the exact unreplaced leaf to be empty, re
 retryable replacement-safe convergence before durable `cleaned`, and treats a terminal close error after proven
 removal as converged.
 
+The private launch intent may also retain one closed policy-v1 cgroup-control policy: CPU quota/period/weight, memory
+high/max/swap max, and a PID maximum. Preparation proves `cpu`, `memory`, and `pids` readiness first at the fixed root
+and then at the compiled parent. It writes only missing `+controller` tokens, preserves extra enabled controllers, and
+requires exact descriptor-relative readback after each additive write. The final pre-handoff boundary repeats the
+complete readiness check. After Jailer handoff, activation reads and parses the six fixed leaf files and requires exact
+policy equality before sole-membership verification; a retry repeats both checks on the same retained authority.
+Recovery and launches without this intent perform no controller mutation. A relay handoff that succeeded before the
+Firecracker handoff failed is recorded independently, so retry resumes only the pending Firecracker release instead of
+releasing the relay twice.
+
 Fresh private `BeginCleanup` now integrates that authority without reconstructing a path or extending schema 3. It
 reopens the exact recorded process set through pidfds and start ticks, admits Firecracker as either the complete active
 identity or the exact launching task, durably transfers the record and retained resources into `cleaning`, and
@@ -1511,11 +1525,11 @@ state preserves the `cleaning` record and retained VM lock for retry.
 
 The schema-2 complete-identity experiment was not integrated because it fabricated pre-Jailer final identity and
 compared the trusted-store inode with Jailer's copy. The implemented process graph remains private and uncomposed:
-same-boot dead-process cgroup reconciliation, controller enablement/readiness and exact limit readback, replacement of
-`entry.go`'s path-based cgroup preparation/removal, production child spawning and launch activation, network/firewall
-acquisition, final live topology verification, stale-tree and mount/output cleanup, status observation and complete
-reconciliation, privileged/public create/start/stop wiring, and live L2, Tier 3, and system qualification remain
-pending. The private cgroup capability is not production host enforcement or release evidence.
+same-boot dead-process cgroup reconciliation, replacement of `entry.go`'s path-based cgroup preparation/removal,
+production child spawning and launch activation, network/firewall acquisition, final live topology verification,
+stale-tree and mount/output cleanup, status observation and complete reconciliation, privileged/public
+create/start/stop wiring, and live L2, Tier 3, and system qualification remain pending. The private cgroup capability
+is not production host enforcement or release evidence.
 
 Live snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only
 that namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain

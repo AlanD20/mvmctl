@@ -437,7 +437,7 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 ### Task 7: Add private mount and process identity primitives
 
 **Owner:** engineer
-**Status:** Private blocked-process, pidfd, Jailer-destination, fixed-name cgroup-v2, runtime-directory lifecycle,
+**Status:** Private blocked-process, pidfd, Jailer-destination, fixed-name cgroup-v2/control, runtime-directory lifecycle,
 activation, and cleanup/recovery authority implemented; production child launch/composition, complete effects,
 privileged actions, same-boot dead-process cgroup reconciliation, and qualification pending
 **Foundation dependency:** Task 4
@@ -455,8 +455,7 @@ privileged actions, same-boot dead-process cgroup reconciliation, and qualificat
   only the same-UID tombstone and generations, with no launch-specific GID, cache, release, or process identity.
   - [x] The strict record/codec, lifecycle-shape validation, pure transitions, and manifest release validation are
     implemented. The private verifier can now commit `active` with retained exact sole-member cgroup authority, but
-    production activation, topology verification, cgroup controller/limit readiness, and same-boot dead-process
-    reconciliation keep this item open.
+    production activation, topology verification, and same-boot dead-process reconciliation keep this item open.
 - [ ] Launch a child blocked by an inherited EOF-fails-closed two-way handshake in an initial private mount namespace
   and an optional blocked dropped-caller console relay in the host mount namespace. Open each pidfd, issue a fresh
   parent challenge, and require the still-blocked child to acknowledge it before accepting PID-derived evidence;
@@ -470,6 +469,8 @@ privileged actions, same-boot dead-process cgroup reconciliation, and qualificat
     The separate private runtime-directory foundation now creates and pins the exact output directory only from that
     durable authority and transfers it through activation or abort and cleanup. It is not mounted. Production spawning,
     initial namespace, outputs, mounts, mirrors, and action composition remain pending.
+    Relay and Firecracker gate releases are tracked separately: retry after relay success and Firecracker handoff
+    failure resumes only the pending Firecracker release on the same launch authority.
 - [x] Make `preparedRelease.registerLaunching` consume its pinned admission/store/slot resources, derive release
   identity internally, and transfer them into the launch lease. Make `activateVerifiedProcess(ctx)` consume only that
   retained prepared release. Pre-rename failure keeps the source lease; post-rename failure returns the non-nil target
@@ -487,6 +488,11 @@ privileged actions, same-boot dead-process cgroup reconciliation, and qualificat
   and exact relay readiness succeed. Invoke Jailer 1.16.1
   without `--daemonize` or `--new-pid-ns`; the original PID/start/pidfd must survive Jailer and Firecracker exec. Do not
   trust Jailer's PID file or a user-visible PID mirror.
+  - [x] Implement the private policy-v1 cgroup-control slice. Prove fixed `cpu`, `memory`, and `pids` readiness first at
+    root and then parent; add only missing controller enablement and read it back; repeat readiness at the final
+    pre-handoff boundary; and retain the same launch authority across readiness and partial relay/Firecracker handoff
+    errors. Recovery and launches without cgroup intent perform no controller mutation. Network/firewall/topology and
+    production handoff composition keep the parent item open.
 - [ ] Observe `/proc/<pid>/exe` with a bounded context-aware 10-second budget and 25-millisecond minimum interval until
   it is Jailer's copied Firecracker. Retain the original pidfd for stable identity and nonblocking exit detection; it
   does not notify `exec`, and observed exit ends the loop. Then descriptor-relatively require the host jail root
@@ -496,8 +502,10 @@ privileged actions, same-boot dead-process cgroup reconciliation, and qualificat
   trusted-store Firecracker inode.
   - [x] Implement the private bounded verifier with strict `/proc` parsing, descriptor-pinned observations, a 10-second
     budget and 25-millisecond minimum interval, pidfd exit checks, exact root/copy binding, sealing, manifest hashing,
-    active-record replacement, and retained cgroup-authority verification. Production topology, controller/limit
-    readiness, lifecycle wiring, and live qualification remain pending.
+    active-record replacement, and retained cgroup-authority verification. Policy-v1 verification reads back exact
+    CPU quota/period/weight, memory high/max/swap, and PID values descriptor-relatively before membership and repeats
+    both checks on retry with the same retained authority. Production topology, lifecycle wiring, and live
+    qualification remain pending.
 - [ ] Recheck PID, boot ID, start ticks, all UID/GID identities, the exact empty supplementary-group set, cgroup, final
   namespace/root/executable identity, process liveness, and release binding before signal or `setns`. The network
   namespace identity remains owned by the closed topology capability rather than a raw path/fd field.
@@ -553,7 +561,9 @@ privileged actions, same-boot dead-process cgroup reconciliation, and qualificat
     checks, legacy-leaf refusal, handoff provenance, membership/replacement races, retryable empty removal, terminal
     close convergence, fresh active/launching recovery, boot-mismatch stable-absence rejection, pending same-lease
     retry, fresh-recovery admission callback re-entry outside the `cleanupLease` mutex, ordinary `Complete`
-    serialization, and close-once cleanup.
+    serialization, root/parent controller readiness and additive readback, final pre-handoff recheck, exact policy-v1
+    leaf readback before membership and on retry, no-mutation recovery/no-intent paths, partial relay-handoff retry, and
+    close-once cleanup.
 - [ ] L1 crash-window tests cover pre-record handshake EOF, every `launching` effect stage, partial final-copy sealing,
   post-rename durability uncertainty, `launching -> active`, and repeated `cleaning` recovery.
 
@@ -984,9 +994,14 @@ lifecycle, host-reboot reconciliation, API relay/policy/audit integration, and P
     mismatch; retain launching provisional absence through reap; run only fresh-recovery cgroup admission callbacks
     outside the `cleanupLease` mutex; and keep ordinary `Complete` cleanup effects serialized under it. Add no cgroup
     path to schema 3.
-  - [ ] Add same-boot dead-process cgroup reconciliation; enable and prove controller readiness; read back exact limits;
-    replace `entry.go` path-based prepare/remove; wire production/public create/start/stop; and complete live L2, Tier 3,
-    and system qualification. This is not yet host enforcement or release evidence.
+  - [x] Add private typed policy-v1 control. Require root-then-parent `cpu`/`memory`/`pids` readiness; write only missing
+    controller enablement and read it back; recheck readiness before handoff; and read back exact CPU
+    quota/period/weight, memory high/max/swap, and PID leaf values before membership and on retry. Preserve the same
+    authority on error, retry partial relay/Firecracker handoff without releasing the relay twice, and perform no
+    controller mutation for recovery or a launch without cgroup intent.
+  - [ ] Add same-boot dead-process cgroup reconciliation; replace `entry.go` path-based prepare/remove; wire
+    production/public create/start/stop; and complete live L2, Tier 3, and system qualification. This is not yet host
+    enforcement or release evidence.
 - [ ] Remove process-local semaphore admission and user-DB-as-root-authority designs.
 - [ ] L1/L2 fault injection covers kill at every effect stage, reboot, PID reuse, partial cleanup, and repeated reconcile.
 - [ ] L1 proves relaunch emits the vsock device and L2 proves `mvm exec` after stop/start, reboot, host reboot plus start,

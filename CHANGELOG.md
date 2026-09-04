@@ -28,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > remote-exec trust flag described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
-> marker-only sudo policy, schema-3 Jailer launch composition, same-boot dead-process cgroup reconciliation, controller
-> and exact-limit readiness, final live topology verification and reconciliation, complete relaunch parity and
+> marker-only sudo policy, schema-3 Jailer launch and cgroup-control production composition, same-boot dead-process
+> cgroup reconciliation, final live topology verification and reconciliation, complete relaunch parity and
 > qualification, and remaining typed privileged operations are not
 > implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
@@ -491,19 +491,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before binding. Activation proves the pidfd/start-tick-bound Firecracker is the sole member and preserves the same
   lease for retry. Authority transfers launch -> active -> cleanup; abort binds only after exact task reap; and cleanup
   removes only the exact empty unreplaced leaf before durable `cleaned`, with retryable removal and terminal
-  post-removal close convergence. Fresh recovery integration is described below; same-boot dead-process
-  reconciliation, controller enablement/readiness and exact limit readback, replacement of `entry.go` path-based
-  prepare/remove, production/public create/start/stop wiring, and live L2/Tier 3/system qualification remain pending.
-  This private increment is not production host enforcement or release evidence.
+  post-removal close convergence. Fresh recovery and control integration are described below; same-boot dead-process
+  reconciliation, replacement of `entry.go` path-based prepare/remove, production/public create/start/stop wiring, and
+  live L2/Tier 3/system qualification remain pending. This private increment is not production host enforcement or
+  release evidence.
 - Integrated fresh cgroup cleanup admission into the private lifecycle. Recovery reopens the record's exact processes,
   accepts the active or launching Firecracker identity, durably transfers `cleaning` authority, and re-admits the fixed
   leaf only when that task is its sole member. Admission or final-check failure keeps the same cleanup lease and cgroup
   work pending for retry. A boot mismatch requires stable leaf absence and rejects a present or unstable leaf;
   launching recovery retains provisional absence through exact task reap. Only fresh-recovery cgroup admission
   callbacks run outside the `cleanupLease` mutex; ordinary `Complete` still serializes cleanup effects under it. Schema
-  3 still stores no cgroup path. Same-boot dead-process reconciliation, controller readiness and
-  exact limit readback, raw `entry.go` replacement, public production wiring, and live/system qualification remain
-  pending.
+  3 still stores no cgroup path. Same-boot dead-process reconciliation, raw `entry.go` replacement, public production
+  wiring, and live/system qualification remain pending.
+- Added private typed policy-v1 cgroup control for CPU quota/period/weight, memory high/max/swap max, and an exact PID
+  maximum. Preparation proves fixed `cpu`, `memory`, and `pids` readiness at the root and then parent, enables only
+  missing controllers additively with descriptor-relative readback, and repeats readiness immediately before Jailer
+  handoff. Activation reads back all six fixed leaf values exactly before sole-membership verification and repeats
+  limit plus membership checks on retry without replacing the retained authority. Recovery and launches without a
+  cgroup intent perform no controller mutation. Relay and Firecracker handoff progress is independent, so retry after
+  relay success resumes only the pending Firecracker release. Focused L1 evidence covers missing-only controller
+  writes/readback, ordering, final readiness drift, strict limit parsing/mismatch, same-authority retry, no-mutation
+  recovery/no-intent paths, and partial relay handoff. This remains private and is not production host enforcement.
 
 #### Private trusted-release authority substrate
 
@@ -775,9 +783,8 @@ The following items are release blockers and are intentionally not described abo
   action. Carry the remaining mount, network, and firewall resources through launch, active, and cleaning without lock
   release/reacquisition, and preserve the returned post-rename authority on every failure.
 - Compose the private fixed-name cgroup-v2 authority into production create/start/stop and other lifecycle actions. Add
-  same-boot dead-process reconciliation, controller enablement/readiness, exact limit readback, replacement of
-  `entry.go` path-based prepare/remove, and live L2, Tier 3, and system qualification before treating it as host
-  enforcement or release evidence.
+  same-boot dead-process reconciliation, replace `entry.go` path-based prepare/remove, and complete live L2, Tier 3,
+  and system qualification before treating it as host enforcement or release evidence.
 - Compose the implemented exact-absent Jailer destination and pre-handoff recheck into production; add safe admission
   and descriptor-relative removal for only an exact non-mounted stale fixed tree after process absence. Create links
   down, apply and freshly verify the complete atomic nftables generation, then raise links; release the blocked child
