@@ -31,6 +31,9 @@ type DestinationSession struct {
 	done          chan struct{}
 	closeOnce     sync.Once
 	closeErr      error
+	// The clock and timer seams remain immutable after Open starts so lifetime expiry stays race-free.
+	now              func() time.Time
+	newLifetimeTimer func(time.Time) (<-chan time.Time, func())
 }
 
 // NewDestinationSession creates a single-use session over an already selected destination connection.
@@ -38,7 +41,12 @@ func NewDestinationSession(conn net.Conn) (*DestinationSession, error) {
 	if conn == nil {
 		return nil, errs.New(errs.CodeValidationFailed, "destination session requires a selected connection")
 	}
-	return &DestinationSession{conn: conn, done: make(chan struct{})}, nil
+	return &DestinationSession{
+		conn:             conn,
+		done:             make(chan struct{}),
+		now:              time.Now,
+		newLifetimeTimer: destinationLifetimeTimer,
+	}, nil
 }
 
 // Open sends the session's only validated host-built destination request.
@@ -53,7 +61,8 @@ func (session *DestinationSession) Open(ctx context.Context, request vmexecwire.
 		return errs.New(errs.CodeValidationFailed, "destination session is closed")
 	}
 	session.openClaimed = true
-	session.deadline = effectiveDestinationDeadline(ctx)
+	deadline := effectiveDestinationDeadline(ctx, session.now())
+	session.deadline = deadline
 	session.mu.Unlock()
 
 	if err := request.Validate(); err != nil {
@@ -62,7 +71,7 @@ func (session *DestinationSession) Open(ctx context.Context, request vmexecwire.
 	if err := session.setWriteOperationDeadline(ctx); err != nil {
 		return session.fail(err, "open destination session")
 	}
-	session.bindLifetime(ctx)
+	session.bindLifetime(ctx, deadline)
 	if err := vmexecwire.EncodeDestinationRequest(ctx, session.conn, request); err != nil {
 		return session.failContext(ctx, err, "open destination session")
 	}
@@ -177,7 +186,12 @@ func (session *DestinationSession) Close() error {
 		session.closed = true
 		session.mu.Unlock()
 		if err := session.conn.Close(); err != nil {
-			session.closeErr = errs.WrapMsg(errs.CodeProcessError, "close destination session", err)
+			session.closeErr = errs.WrapMsg(
+				errs.CodeProcessError,
+				"close destination session",
+				err,
+				errs.WithClass(errs.ClassInternal),
+			)
 		}
 		close(session.done)
 	})
@@ -193,8 +207,8 @@ func destinationTerminalFrame(frame vmexecwire.ResponseFrame) bool {
 	}
 }
 
-func effectiveDestinationDeadline(ctx context.Context) time.Time {
-	deadline := time.Now().Add(vmexecwire.MaxExecutionDuration)
+func effectiveDestinationDeadline(ctx context.Context, now time.Time) time.Time {
+	deadline := now.Add(vmexecwire.MaxExecutionDuration)
 	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
 		return contextDeadline
 	}
@@ -207,7 +221,11 @@ func (session *DestinationSession) operationDeadline(ctx context.Context) (time.
 	closed := session.closed
 	session.mu.Unlock()
 	if closed {
-		return time.Time{}, errs.New(errs.CodeProcessError, "destination session is closed")
+		return time.Time{}, errs.New(
+			errs.CodeProcessError,
+			"destination session is closed",
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
 		deadline = contextDeadline
@@ -221,7 +239,12 @@ func (session *DestinationSession) setReadOperationDeadline(ctx context.Context)
 		return err
 	}
 	if err := session.conn.SetReadDeadline(deadline); err != nil {
-		return errs.WrapMsg(errs.CodeProcessError, "set destination session read deadline", err)
+		return errs.WrapMsg(
+			errs.CodeProcessError,
+			"set destination session read deadline",
+			err,
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 	return nil
 }
@@ -232,16 +255,38 @@ func (session *DestinationSession) setWriteOperationDeadline(ctx context.Context
 		return err
 	}
 	if err := session.conn.SetWriteDeadline(deadline); err != nil {
-		return errs.WrapMsg(errs.CodeProcessError, "set destination session write deadline", err)
+		return errs.WrapMsg(
+			errs.CodeProcessError,
+			"set destination session write deadline",
+			err,
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 	return nil
 }
 
-func (session *DestinationSession) bindLifetime(ctx context.Context) {
+func destinationLifetimeTimer(deadline time.Time) (<-chan time.Time, func()) {
+	timer := time.NewTimer(time.Until(deadline))
+	return timer.C, func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}
+}
+
+func (session *DestinationSession) bindLifetime(ctx context.Context, deadline time.Time) {
+	expired, stopTimer := session.newLifetimeTimer(deadline)
 	go func() {
+		defer stopTimer()
 		select {
 		case <-ctx.Done():
 			// The opening context owns the destination session lifetime.
+			_ = session.Close()
+		case <-expired:
+			// The fixed deadline releases idle sessions even when the opening context remains live.
 			_ = session.Close()
 		case <-session.done:
 		}
@@ -264,15 +309,54 @@ func (session *DestinationSession) watchOperationContext(ctx context.Context) fu
 
 func (session *DestinationSession) failContext(ctx context.Context, err error, message string) error {
 	if ctx.Err() != nil {
-		err = errs.WrapMsg(errs.CodeProcessError, message, ctx.Err())
+		err = errs.WrapMsg(
+			errs.CodeProcessError,
+			message,
+			ctx.Err(),
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 	return session.fail(err, message)
 }
 
 func (session *DestinationSession) fail(err error, message string) error {
+	err = normalizeDestinationSessionError(err, message)
 	closeErr := session.Close()
 	if closeErr == nil {
 		return err
 	}
-	return errs.WrapMsg(errs.CodeProcessError, message, errors.Join(err, closeErr))
+	return errs.WrapMsg(
+		errs.CodeProcessError,
+		message,
+		errors.Join(err, closeErr),
+		errs.WithClass(errs.ClassInternal),
+	)
+}
+
+func normalizeDestinationSessionError(err error, message string) error {
+	var domainErr *errs.DomainError
+	if errors.As(err, &domainErr) {
+		switch domainErr.Code {
+		case errs.CodeValidationFailed:
+			if domainErr.Class == errs.ClassValidation {
+				return err
+			}
+			return errs.WrapMsg(
+				errs.CodeValidationFailed,
+				domainErr.Message,
+				err,
+				errs.WithClass(errs.ClassValidation),
+			)
+		case errs.CodeProcessError:
+			if domainErr.Class == errs.ClassInternal {
+				return err
+			}
+		}
+	}
+	return errs.WrapMsg(
+		errs.CodeProcessError,
+		message,
+		err,
+		errs.WithClass(errs.ClassInternal),
+	)
 }

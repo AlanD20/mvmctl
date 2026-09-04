@@ -210,7 +210,7 @@ func TestDestinationSessionOpenIsValidatedAndSingleAttempt(t *testing.T) {
 	t.Run("nil connection", func(t *testing.T) {
 		_, err := NewDestinationSession(nil)
 		require.Error(t, err)
-		assertDestinationSessionErrorCode(t, err, errs.CodeValidationFailed)
+		assertDestinationSessionError(t, err, errs.CodeValidationFailed, errs.ClassValidation)
 	})
 
 	t.Run("invalid request consumes the attempt and closes", func(t *testing.T) {
@@ -224,14 +224,14 @@ func TestDestinationSessionOpenIsValidatedAndSingleAttempt(t *testing.T) {
 		request.AgentToken = "invalid"
 		err = session.Open(t.Context(), request)
 		require.Error(t, err)
-		assertDestinationSessionErrorCode(t, err, errs.CodeValidationFailed)
+		assertDestinationSessionError(t, err, errs.CodeValidationFailed, errs.ClassValidation)
 		_, peerErr := agentConn.Read(make([]byte, 1))
 		assert.ErrorIs(t, peerErr, io.EOF)
 
 		err = session.Open(t.Context(), validDestinationSessionRequest())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "single open attempt")
-		assertDestinationSessionErrorCode(t, err, errs.CodeValidationFailed)
+		assertDestinationSessionError(t, err, errs.CodeValidationFailed, errs.ClassValidation)
 	})
 
 	t.Run("successful request cannot be reopened", func(t *testing.T) {
@@ -254,10 +254,116 @@ func TestDestinationSessionOpenIsValidatedAndSingleAttempt(t *testing.T) {
 		err = session.Open(t.Context(), validDestinationSessionRequest())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "single open attempt")
-		assertDestinationSessionErrorCode(t, err, errs.CodeValidationFailed)
+		assertDestinationSessionError(t, err, errs.CodeValidationFailed, errs.ClassValidation)
 		require.NoError(t, session.Close())
 		awaitDestinationError(t, "destination peer", peerDone)
 	})
+}
+
+func TestDestinationSessionLifetimeDeadlineClosesIdleTransport(t *testing.T) {
+	// Rationale: callers can leave a successful session idle with a background context. The fixed execution deadline
+	// must still release its transport without relying on a later Read, Cancel, or Close call.
+	hostPipe, agentConn := net.Pipe()
+	hostConn := &controlledDestinationConn{Conn: hostPipe}
+	session, err := NewDestinationSession(hostConn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close() })
+	t.Cleanup(func() { _ = agentConn.Close() })
+	fixedNow := time.Date(2026, time.September, 4, 10, 0, 0, 0, time.UTC)
+	expired := make(chan time.Time)
+	deadlineSeen := make(chan time.Time, 1)
+	timerStopped := make(chan struct{})
+	var stopTimerOnce sync.Once
+	session.now = func() time.Time { return fixedNow }
+	session.newLifetimeTimer = func(deadline time.Time) (<-chan time.Time, func()) {
+		deadlineSeen <- deadline
+		return expired, func() { stopTimerOnce.Do(func() { close(timerStopped) }) }
+	}
+	peerDone := make(chan error, 1)
+	go func() {
+		_, peerErr := vmexecwire.DecodeDestinationRequest(context.Background(), agentConn)
+		if peerErr == nil {
+			_, peerErr = agentConn.Read(make([]byte, 1))
+			if errors.Is(peerErr, io.EOF) {
+				peerErr = nil
+			}
+		}
+		peerDone <- peerErr
+	}()
+
+	openErr := session.Open(context.Background(), validDestinationSessionRequest())
+	if openErr != nil {
+		_ = session.Close()
+		_ = agentConn.Close()
+		awaitDestinationError(t, "idle destination peer cleanup", peerDone)
+		require.NoError(t, openErr)
+	}
+	select {
+	case deadline := <-deadlineSeen:
+		assert.True(t, deadline.Equal(fixedNow.Add(vmexecwire.MaxExecutionDuration)))
+		_, writeDeadlines := hostConn.directionalDeadlines()
+		require.Len(t, writeDeadlines, 1)
+		assert.True(t, writeDeadlines[0].Equal(deadline))
+	case <-time.After(destinationSessionTestTimeout):
+		_ = session.Close()
+		awaitDestinationError(t, "idle destination peer cleanup", peerDone)
+		t.Fatal("destination lifetime timer was not armed")
+	}
+	close(expired)
+	awaitDestinationError(t, "idle destination peer", peerDone)
+	select {
+	case <-timerStopped:
+	case <-time.After(destinationSessionTestTimeout):
+		t.Fatal("destination lifetime timer was not released")
+	}
+	assert.Equal(t, int32(1), hostConn.closeCalls.Load())
+}
+
+func TestDestinationSessionCanceledBlockedOpenClosesTransport(t *testing.T) {
+	// Rationale: request framing uses multiple writes, so opening-context cancellation must interrupt a write blocked
+	// before the destination reads even the first frame byte.
+	hostPipe, agentConn := net.Pipe()
+	hostConn := &controlledDestinationConn{Conn: hostPipe, writeStarted: make(chan struct{})}
+	hostConn.observeWrites.Store(true)
+	session, err := NewDestinationSession(hostConn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close() })
+	t.Cleanup(func() { _ = agentConn.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	openDone := make(chan error, 1)
+	go func() { openDone <- session.Open(ctx, validDestinationSessionRequest()) }()
+	select {
+	case <-hostConn.writeStarted:
+	case <-time.After(destinationSessionTestTimeout):
+		cancel()
+		_ = session.Close()
+		select {
+		case <-openDone:
+		case <-time.After(destinationSessionTestTimeout):
+			t.Fatal("blocked destination open did not stop after cleanup")
+		}
+		t.Fatal("destination open did not reach the blocked write")
+	}
+	cancel()
+	var openErr error
+	select {
+	case openErr = <-openDone:
+	case <-time.After(destinationSessionTestTimeout):
+		_ = session.Close()
+		select {
+		case openErr = <-openDone:
+		case <-time.After(destinationSessionTestTimeout):
+			t.Fatal("blocked destination open did not stop after close")
+		}
+		t.Fatal("blocked destination open outlived cancellation")
+	}
+	require.Error(t, openErr)
+	assert.ErrorIs(t, openErr, context.Canceled)
+	assertDestinationSessionError(t, openErr, errs.CodeProcessError, errs.ClassInternal)
+	assert.Equal(t, int32(1), hostConn.closeCalls.Load())
+	_, err = agentConn.Read(make([]byte, 1))
+	assert.ErrorIs(t, err, io.EOF)
 }
 
 func TestDestinationSessionReadRequiresOpenAndOneSequentialReader(t *testing.T) {
@@ -272,7 +378,7 @@ func TestDestinationSessionReadRequiresOpenAndOneSequentialReader(t *testing.T) 
 		assert.Nil(t, frame)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not open")
-		assertDestinationSessionErrorCode(t, err, errs.CodeValidationFailed)
+		assertDestinationSessionError(t, err, errs.CodeValidationFailed, errs.ClassValidation)
 	})
 
 	t.Run("concurrent reader", func(t *testing.T) {
@@ -296,7 +402,7 @@ func TestDestinationSessionReadRequiresOpenAndOneSequentialReader(t *testing.T) 
 		assert.Nil(t, frame)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "single reader")
-		assertDestinationSessionErrorCode(t, err, errs.CodeValidationFailed)
+		assertDestinationSessionError(t, err, errs.CodeValidationFailed, errs.ClassValidation)
 
 		response, err := vmexecwire.NewResponseWriter(agentConn, destinationSessionTestRequestID)
 		require.NoError(t, err)
@@ -370,7 +476,7 @@ func TestDestinationSessionReadRejectsInvalidResponseAndCloses(t *testing.T) {
 			frame, err := session.Read(ctx)
 			assert.Nil(t, frame)
 			require.Error(t, err)
-			assertDestinationSessionErrorCode(t, err, errs.CodeValidationFailed)
+			assertDestinationSessionError(t, err, errs.CodeValidationFailed, errs.ClassValidation)
 			awaitDestinationError(t, "invalid response writer", peerDone)
 			assert.Equal(t, int32(1), hostConn.closeCalls.Load())
 		})
@@ -388,7 +494,7 @@ func TestDestinationSessionCancelWritesExactRequestOnce(t *testing.T) {
 		err = session.Cancel(t.Context())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not open")
-		assertDestinationSessionErrorCode(t, err, errs.CodeValidationFailed)
+		assertDestinationSessionError(t, err, errs.CodeValidationFailed, errs.ClassValidation)
 	})
 
 	t.Run("exact identity and duplicate", func(t *testing.T) {
@@ -415,10 +521,98 @@ func TestDestinationSessionCancelWritesExactRequestOnce(t *testing.T) {
 		err := session.Cancel(t.Context())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "single cancellation")
-		assertDestinationSessionErrorCode(t, err, errs.CodeValidationFailed)
+		assertDestinationSessionError(t, err, errs.CodeValidationFailed, errs.ClassValidation)
 		require.NoError(t, session.Close())
 		awaitDestinationError(t, "destination cancellation reader", peerDone)
 	})
+}
+
+func TestDestinationSessionCanceledBlockedCancelClosesTransport(t *testing.T) {
+	// Rationale: cancellation itself can block behind destination backpressure, so its operation context must remain
+	// able to interrupt that write without disturbing a simultaneous reader's deadline machinery.
+	hostPipe, agentConn := net.Pipe()
+	hostConn := &controlledDestinationConn{Conn: hostPipe, writeStarted: make(chan struct{})}
+	session := openDestinationSession(t, hostConn, agentConn)
+	hostConn.observeWrites.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancelDone := make(chan error, 1)
+	go func() { cancelDone <- session.Cancel(ctx) }()
+	select {
+	case <-hostConn.writeStarted:
+	case <-time.After(destinationSessionTestTimeout):
+		cancel()
+		_ = session.Close()
+		select {
+		case <-cancelDone:
+		case <-time.After(destinationSessionTestTimeout):
+			t.Fatal("blocked destination cancellation did not stop after cleanup")
+		}
+		t.Fatal("destination cancellation did not reach the blocked write")
+	}
+	cancel()
+	var cancelErr error
+	select {
+	case cancelErr = <-cancelDone:
+	case <-time.After(destinationSessionTestTimeout):
+		_ = session.Close()
+		select {
+		case cancelErr = <-cancelDone:
+		case <-time.After(destinationSessionTestTimeout):
+			t.Fatal("blocked destination cancellation did not stop after close")
+		}
+		t.Fatal("blocked destination cancellation outlived its operation context")
+	}
+	require.Error(t, cancelErr)
+	assert.ErrorIs(t, cancelErr, context.Canceled)
+	assertDestinationSessionError(t, cancelErr, errs.CodeProcessError, errs.ClassInternal)
+	assert.Equal(t, int32(1), hostConn.closeCalls.Load())
+	_, err := agentConn.Read(make([]byte, 1))
+	assert.ErrorIs(t, err, io.EOF)
+}
+
+func TestDestinationSessionDeadlineFailuresJoinCloseAsInternal(t *testing.T) {
+	// Rationale: deadline and cleanup failures are system failures even when their raw causes do not carry a domain
+	// class. Joined cleanup evidence must remain discoverable without weakening the returned classification.
+	tests := map[string]struct {
+		failRead bool
+	}{
+		"open write deadline": {},
+		"response read deadline": {
+			failRead: true,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			hostPipe, agentConn := net.Pipe()
+			deadlineErr := errors.New("controlled destination deadline failure")
+			closeErr := errors.New("controlled destination cleanup failure")
+			hostConn := &controlledDestinationConn{Conn: hostPipe, closeErr: closeErr}
+			var session *DestinationSession
+			var err error
+			if test.failRead {
+				session = openDestinationSession(t, hostConn, agentConn)
+				hostConn.readDeadlineErr = deadlineErr
+				_, err = session.Read(t.Context())
+			} else {
+				hostConn.writeDeadlineErr = deadlineErr
+				session, err = NewDestinationSession(hostConn)
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = session.Close() })
+				t.Cleanup(func() { _ = agentConn.Close() })
+				err = session.Open(t.Context(), validDestinationSessionRequest())
+			}
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, deadlineErr)
+			assert.ErrorIs(t, err, closeErr)
+			assertDestinationSessionError(t, err, errs.CodeProcessError, errs.ClassInternal)
+			assert.Equal(t, int32(1), hostConn.closeCalls.Load())
+			_, peerErr := agentConn.Read(make([]byte, 1))
+			assert.ErrorIs(t, peerErr, io.EOF)
+		})
+	}
 }
 
 func TestDestinationSessionPartialReadStopsOnCancellationOrClose(t *testing.T) {
@@ -427,15 +621,18 @@ func TestDestinationSessionPartialReadStopsOnCancellationOrClose(t *testing.T) {
 	tests := map[string]struct {
 		closeSession bool
 		wantCode     errs.Code
+		wantClass    errs.Class
 		canceled     bool
 	}{
 		"context cancellation": {
-			wantCode: errs.CodeProcessError,
-			canceled: true,
+			wantCode:  errs.CodeProcessError,
+			wantClass: errs.ClassInternal,
+			canceled:  true,
 		},
 		"session close": {
 			closeSession: true,
 			wantCode:     errs.CodeValidationFailed,
+			wantClass:    errs.ClassValidation,
 		},
 	}
 
@@ -485,7 +682,7 @@ func TestDestinationSessionPartialReadStopsOnCancellationOrClose(t *testing.T) {
 			}
 			assert.Nil(t, result.frame)
 			require.Error(t, result.err)
-			assertDestinationSessionErrorCode(t, result.err, test.wantCode)
+			assertDestinationSessionError(t, result.err, test.wantCode, test.wantClass)
 			if test.canceled {
 				assert.ErrorIs(t, result.err, context.Canceled)
 			}
@@ -628,11 +825,11 @@ func TestDestinationSessionCloseRunsOnceAndCachesDomainError(t *testing.T) {
 	firstErr := session.Close()
 	require.Error(t, firstErr)
 	assert.ErrorIs(t, firstErr, closeErr)
-	assertDestinationSessionErrorCode(t, firstErr, errs.CodeProcessError)
+	assertDestinationSessionError(t, firstErr, errs.CodeProcessError, errs.ClassInternal)
 	secondErr := session.Close()
 	require.Error(t, secondErr)
 	assert.ErrorIs(t, secondErr, closeErr)
-	assertDestinationSessionErrorCode(t, secondErr, errs.CodeProcessError)
+	assertDestinationSessionError(t, secondErr, errs.CodeProcessError, errs.ClassInternal)
 	assert.Equal(t, int32(1), hostConn.closeCalls.Load())
 	_, err = agentConn.Read(make([]byte, 1))
 	assert.ErrorIs(t, err, io.EOF)
@@ -683,11 +880,12 @@ func openDestinationSession(t *testing.T, hostConn net.Conn, agentConn net.Conn)
 	return session
 }
 
-func assertDestinationSessionErrorCode(t *testing.T, err error, code errs.Code) {
+func assertDestinationSessionError(t *testing.T, err error, code errs.Code, class errs.Class) {
 	t.Helper()
 	var domainErr *errs.DomainError
 	require.ErrorAs(t, err, &domainErr)
 	assert.Equal(t, code, domainErr.Code)
+	assert.Equal(t, class, domainErr.Class)
 }
 
 func awaitDestinationError(t *testing.T, name string, result <-chan error) {
@@ -719,6 +917,8 @@ type controlledDestinationConn struct {
 	deadlineMu             sync.Mutex
 	readDeadlines          []time.Time
 	writeDeadlines         []time.Time
+	readDeadlineErr        error
+	writeDeadlineErr       error
 }
 
 func (conn *controlledDestinationConn) signalAfterReads(reads int32) {
@@ -750,6 +950,9 @@ func (conn *controlledDestinationConn) SetReadDeadline(deadline time.Time) error
 	conn.deadlineMu.Lock()
 	conn.readDeadlines = append(conn.readDeadlines, deadline)
 	conn.deadlineMu.Unlock()
+	if conn.readDeadlineErr != nil {
+		return conn.readDeadlineErr
+	}
 	return conn.Conn.SetReadDeadline(deadline)
 }
 
@@ -757,6 +960,9 @@ func (conn *controlledDestinationConn) SetWriteDeadline(deadline time.Time) erro
 	conn.deadlineMu.Lock()
 	conn.writeDeadlines = append(conn.writeDeadlines, deadline)
 	conn.deadlineMu.Unlock()
+	if conn.writeDeadlineErr != nil {
+		return conn.writeDeadlineErr
+	}
 	return conn.Conn.SetWriteDeadline(deadline)
 }
 
