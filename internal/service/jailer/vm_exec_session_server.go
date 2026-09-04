@@ -23,6 +23,7 @@ type VMExecSessionConnection interface {
 
 // VMExecSessionStopWait is a closed, server-owned handle for one armed absolute stop. Pending distinguishes waits that
 // require caller readiness publication from immediate results, while Wait joins the normalized result.
+// THREAD-SAFE: Copies share pointer-held sync.Once state and one cached result receive.
 type VMExecSessionStopWait struct {
 	state *vmExecSessionStopWaitState
 }
