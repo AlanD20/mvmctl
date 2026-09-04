@@ -51,6 +51,8 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 	t.Helper()
 
 	authority, _ := newTestInstanceAuthority(t)
+	cgroup := newManagedVMCgroupTestFixture(t)
+	authority.cgroupDeps = cgroup.deps()
 	prepared := prepareTestRelease(t, authority)
 	preparedSnapshot := prepared.snapshot()
 	firecrackerContent := readProcessTestDescriptor(
@@ -194,6 +196,13 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 		topologySelectedNetworkNamespace{identity: firecrackerNetworkNamespace},
 	))
 	require.NoError(t, topology.Release(t.Context()))
+	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+	t.Cleanup(func() {
+		preparedCgroup := launch.state.preparedManagedVMCgroup
+		if preparedCgroup != nil && !preparedCgroup.snapshot().released {
+			require.NoError(t, preparedCgroup.Release(context.Background()))
+		}
+	})
 	require.NoError(t, launch.releaseToJailer(t.Context()))
 
 	return &processIdentityFixture{

@@ -167,6 +167,39 @@ func prepareManagedVMCgroup(
 	return prepared, nil
 }
 
+// RecheckAbsent proves the derived VM leaf is still absent immediately before the Jailer handoff.
+func (prepared *preparedManagedVMCgroup) RecheckAbsent(ctx context.Context) error {
+	if prepared == nil || prepared.state == nil {
+		return instanceStateError("", "prepared managed VM cgroup is not active")
+	}
+	state := prepared.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if ctx == nil {
+		return instanceAtomicError("recheck managed VM cgroup absence: context is required", nil)
+	}
+	if state.released || state.binding || !state.leafAbsent || state.rootFD < 0 || state.parentFD < 0 {
+		return instanceStateError(state.vmID, "prepared managed VM cgroup is not active")
+	}
+	if err := ctx.Err(); err != nil {
+		return instanceAtomicError("recheck managed VM cgroup absence", err)
+	}
+	how := unix.OpenHow{
+		Flags:   uint64(managedVMCgroupDirectoryFlags),
+		Resolve: uint64(managedVMCgroupResolveFlags),
+	}
+	leafFD, err := state.deps.openAt2(ctx, state.parentFD, state.vmID, &how)
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if err != nil {
+		return instanceAtomicError("recheck managed VM cgroup leaf absence", err)
+	}
+	closeErr := state.deps.close(context.WithoutCancel(ctx), leafFD)
+	primary := instanceStateError(state.vmID, "managed VM cgroup appeared before Jailer handoff")
+	return appendInstanceOperationError(primary, "close unexpected managed VM cgroup", closeErr)
+}
+
 // Bind pins the exact Jailer-created leaf after preparation proved its fixed name absent. After safe leaf admission,
 // ownership transfers to the returned lease and the prepared value becomes inert. Every subsequent verification
 // failure returns that non-nil lease with the error so exact cleanup authority cannot be lost. Membership is read only

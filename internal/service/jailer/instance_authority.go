@@ -14,6 +14,7 @@ type instanceAuthority struct {
 	policy        instanceAuthorityPolicy
 	authorityTree instanceAuthorityTree
 	runtimeDeps   managedVMRuntimeDeps
+	cgroupDeps    managedVMCgroupDeps
 }
 
 const maxInstanceAuthorityCleanupDetailBytes = 512
@@ -32,6 +33,9 @@ type launchLeaseState struct {
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
 	runtimeDirectory        *managedVMRuntimeLease
+	cgroupDeps              managedVMCgroupDeps
+	preparedManagedVMCgroup *preparedManagedVMCgroup
+	managedVMCgroup         *managedVMCgroupLease
 	record                  instanceRecord
 	released                bool
 	cleanupErr              error
@@ -45,6 +49,8 @@ type launchLeaseSnapshot struct {
 	hasPreparedJailDestination bool
 	hasJailDestination         bool
 	hasRuntimeDirectory        bool
+	hasPreparedManagedVMCgroup bool
+	hasManagedVMCgroup         bool
 	prepared                   preparedReleaseSnapshot
 	released                   bool
 }
@@ -85,6 +91,8 @@ type cleanupLeaseState struct {
 	networkNamespace        *topologySelectedNetworkNamespace
 	runtimeDirectory        *managedVMRuntimeLease
 	runtimeRecovery         *managedVMRuntimeRecovery
+	preparedManagedVMCgroup *preparedManagedVMCgroup
+	managedVMCgroup         *managedVMCgroupLease
 	record                  instanceRecord
 	released                bool
 	releaseErr              error
@@ -94,6 +102,7 @@ type releaseSlotLease struct {
 	roots       *instanceAuthorityRoots
 	releaseLock *authorityLock
 	slot        releaseSlot
+	cgroupDeps  managedVMCgroupDeps
 }
 
 type lockedInstance struct {
@@ -135,6 +144,7 @@ func newInstanceAuthorityWithPolicy(
 		policy:        policy,
 		authorityTree: authorityTree,
 		runtimeDeps:   realManagedVMRuntimeDeps(),
+		cgroupDeps:    realManagedVMCgroupDeps(),
 	}
 }
 
@@ -168,7 +178,9 @@ func (authority *instanceAuthority) lockReleaseSlot(
 	if err != nil {
 		return nil, err
 	}
-	lease := &releaseSlotLease{roots: roots, releaseLock: releaseLock, slot: slot}
+	lease := &releaseSlotLease{
+		roots: roots, releaseLock: releaseLock, slot: slot, cgroupDeps: authority.cgroupDeps,
+	}
 	roots = nil
 	releaseLock = nil
 	return lease, nil
@@ -291,6 +303,7 @@ func (prepared *preparedRelease) registerLaunching(
 		state: &launchLeaseState{
 			directories: directories,
 			vmLock:      vmLock,
+			cgroupDeps:  preparedState.slotLease.cgroupDeps,
 			prepared: &preparedRelease{state: &preparedReleaseState{
 				status:    preparedReleaseOpen,
 				slotLease: preparedState.slotLease,
@@ -702,6 +715,9 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 		}
 	}
 	cleanupCtx := context.WithoutCancel(ctx)
+	if err := releaseCleanupManagedVMCgroupLocked(cleanupCtx, state); err != nil {
+		return err
+	}
 	if state.jailDestination != nil {
 		if err := state.jailDestination.Release(cleanupCtx); err != nil {
 			return appendInstanceOperationError(nil, "release cleanup jail destination authority", err)
@@ -738,6 +754,35 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 		}
 		state.runtimeDirectory = nil
 	}
+	return nil
+}
+
+func releaseCleanupManagedVMCgroupLocked(ctx context.Context, state *cleanupLeaseState) error {
+	if state.preparedManagedVMCgroup != nil {
+		bound, present, err := state.preparedManagedVMCgroup.BindForCleanup(ctx)
+		if err != nil {
+			return err
+		}
+		if present {
+			state.managedVMCgroup = bound
+			state.preparedManagedVMCgroup = nil
+		} else {
+			if err := state.preparedManagedVMCgroup.Release(ctx); err != nil {
+				return appendInstanceOperationError(nil, "release absent cleanup managed VM cgroup", err)
+			}
+			state.preparedManagedVMCgroup = nil
+		}
+	}
+	if state.managedVMCgroup == nil {
+		return nil
+	}
+	if err := state.managedVMCgroup.Remove(ctx); err != nil {
+		return err
+	}
+	if err := state.managedVMCgroup.Release(ctx); err != nil {
+		return appendInstanceOperationError(nil, "release cleanup managed VM cgroup", err)
+	}
+	state.managedVMCgroup = nil
 	return nil
 }
 
@@ -854,6 +899,26 @@ func (lease *launchLease) prepareJailDestination(
 	return nil
 }
 
+// prepareManagedVMCgroup pins the fixed cgroup-v2 root and managed parent while this launch retains its VM lock.
+func (lease *launchLease) prepareManagedVMCgroup(ctx context.Context) error {
+	if lease == nil || lease.state == nil {
+		return instanceStateError("", "launch lease is not active")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.vmLock == nil || !state.vmLock.isActive() || state.directories == nil ||
+		state.processes == nil || state.preparedManagedVMCgroup != nil || state.managedVMCgroup != nil {
+		return instanceStateError(state.record.vmID, "launch lease cannot prepare a managed VM cgroup")
+	}
+	prepared, err := prepareManagedVMCgroup(ctx, state.cgroupDeps, state.record.vmID)
+	if err != nil {
+		return err
+	}
+	state.preparedManagedVMCgroup = prepared
+	return nil
+}
+
 func (lease *launchLease) releaseToJailer(ctx context.Context) error {
 	if lease == nil || lease.state == nil {
 		return instanceStateError("", "launch lease is not active")
@@ -862,7 +927,8 @@ func (lease *launchLease) releaseToJailer(ctx context.Context) error {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.released || state.processes == nil || state.processes.state == nil ||
-		state.preparedJailDestination == nil || state.networkNamespace == nil {
+		state.preparedJailDestination == nil || state.networkNamespace == nil ||
+		state.preparedManagedVMCgroup == nil || state.managedVMCgroup != nil {
 		return instanceStateError(state.record.vmID, "launch lease is not ready for Jailer handoff")
 	}
 	destinationState, err := state.preparedJailDestination.lockForHandoff(ctx)
@@ -877,7 +943,10 @@ func (lease *launchLease) releaseToJailer(ctx context.Context) error {
 		ctx,
 		processState,
 		func(recheckCtx context.Context) error {
-			return recheckPreparedJailDestinationAbsentLocked(recheckCtx, destinationState)
+			if err := recheckPreparedJailDestinationAbsentLocked(recheckCtx, destinationState); err != nil {
+				return err
+			}
+			return state.preparedManagedVMCgroup.RecheckAbsent(recheckCtx)
 		},
 	)
 	if err != nil {
@@ -939,6 +1008,8 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 		jailDestination:         state.jailDestination,
 		networkNamespace:        state.networkNamespace,
 		runtimeDirectory:        state.runtimeDirectory,
+		preparedManagedVMCgroup: state.preparedManagedVMCgroup,
+		managedVMCgroup:         state.managedVMCgroup,
 		record:                  record,
 	}}
 	state.directories = nil
@@ -949,6 +1020,8 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 	state.jailDestination = nil
 	state.networkNamespace = nil
 	state.runtimeDirectory = nil
+	state.preparedManagedVMCgroup = nil
+	state.managedVMCgroup = nil
 	state.record = record
 	state.released = true
 	if writeErr != nil {
@@ -1020,6 +1093,8 @@ func (lease *launchLease) snapshot() launchLeaseSnapshot {
 		hasPreparedJailDestination: state.preparedJailDestination != nil,
 		hasJailDestination:         state.jailDestination != nil,
 		hasRuntimeDirectory:        state.runtimeDirectory != nil,
+		hasPreparedManagedVMCgroup: state.preparedManagedVMCgroup != nil,
+		hasManagedVMCgroup:         state.managedVMCgroup != nil,
 		released:                   state.released,
 	}
 	if state.prepared != nil {
@@ -1164,7 +1239,9 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 		state.preparedJailDestination != nil ||
 		state.jailDestination != nil ||
 		state.runtimeDirectory != nil ||
-		state.runtimeRecovery != nil {
+		state.runtimeRecovery != nil ||
+		state.preparedManagedVMCgroup != nil ||
+		state.managedVMCgroup != nil {
 		return instanceStateError(state.record.vmID, "cleanup must complete before releasing retained authority")
 	}
 	result := error(nil)
@@ -1191,6 +1268,8 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 	state.processes = nil
 	state.preparedJailDestination = nil
 	state.jailDestination = nil
+	state.preparedManagedVMCgroup = nil
+	state.managedVMCgroup = nil
 	state.released = true
 	state.releaseErr = result
 	return state.releaseErr
