@@ -913,10 +913,14 @@ func TestPreparedManagedVMCgroupRejectsUnsafeMembershipControlMetadata(t *testin
 	t.Parallel()
 
 	tests := map[string]func(*unix.Statx_t){
-		"type":         func(stat *unix.Statx_t) { stat.Mode = stat.Mode&^unix.S_IFMT | unix.S_IFDIR },
-		"mode":         func(stat *unix.Statx_t) { stat.Mode = stat.Mode&^0o7777 | 0o600 },
-		"group":        func(stat *unix.Statx_t) { stat.Gid++ },
+		"type":  func(stat *unix.Statx_t) { stat.Mode = stat.Mode&^unix.S_IFMT | unix.S_IFDIR },
+		"mode":  func(stat *unix.Statx_t) { stat.Mode = stat.Mode&^0o7777 | 0o600 },
+		"group": func(stat *unix.Statx_t) { stat.Gid++ },
+		"mount identity": func(stat *unix.Statx_t) {
+			stat.Mnt_id++
+		},
 		"device major": func(stat *unix.Statx_t) { stat.Dev_major++ },
+		"device minor": func(stat *unix.Statx_t) { stat.Dev_minor++ },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {

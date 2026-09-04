@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -103,7 +104,11 @@ func TestPreparedManagedVMCgroupBindRequiresJailerHandoffProvenance(t *testing.T
 	)
 	assert.Nil(t, lease)
 	require.Error(t, err)
-	assert.Equal(t, preparedManagedVMCgroupSnapshot{leafAbsent: true}, prepared.snapshot())
+	assertPreparedManagedVMCgroupSnapshot(
+		t,
+		preparedManagedVMCgroupSnapshot{leafAbsent: true},
+		prepared.snapshot(),
+	)
 	assert.True(t, fixture.vmLeafPresent(testVMID))
 
 	require.NoError(t, prepared.MarkJailerHandoff())
@@ -136,7 +141,13 @@ func TestManagedVMCgroupVerifyMembershipRejectsReentrantEffectsWithoutHoldingLoc
 	)
 	require.ErrorIs(t, err, pidReuseErr)
 	assert.NoError(t, verifier.callbackLockErr)
-	assert.Equal(t, managedVMCgroupLeaseSnapshot{}, verifier.snapshot)
+	if diff := cmp.Diff(
+		managedVMCgroupLeaseSnapshot{},
+		verifier.snapshot,
+		cmp.AllowUnexported(managedVMCgroupLeaseSnapshot{}),
+	); diff != "" {
+		t.Errorf("reentrant lease snapshot mismatch (-want +got):\n%s", diff)
+	}
 	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(verifier.nestedVerifyErr).Code)
 	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(verifier.removeErr).Code)
 	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(verifier.releaseErr).Code)
@@ -174,7 +185,11 @@ func TestPreparedManagedVMCgroupBindForCleanupReportsAbsentWithoutMutation(t *te
 	require.NoError(t, err)
 	assert.Nil(t, lease)
 	assert.False(t, present)
-	assert.Equal(t, preparedManagedVMCgroupSnapshot{leafAbsent: true}, prepared.snapshot())
+	assertPreparedManagedVMCgroupSnapshot(
+		t,
+		preparedManagedVMCgroupSnapshot{leafAbsent: true},
+		prepared.snapshot(),
+	)
 	assert.Equal(t, originalRootFD, prepared.state.rootFD)
 	assert.Equal(t, originalParentFD, prepared.state.parentFD)
 	assert.Equal(t, originalRetained, prepared.state.retained)
@@ -219,7 +234,11 @@ func TestPreparedManagedVMCgroupBindForCleanupRejectsUnsafeLeafWithoutTransfer(t
 	require.Error(t, err)
 	assert.Nil(t, lease)
 	assert.False(t, present)
-	assert.Equal(t, preparedManagedVMCgroupSnapshot{leafAbsent: true}, prepared.snapshot())
+	assertPreparedManagedVMCgroupSnapshot(
+		t,
+		preparedManagedVMCgroupSnapshot{leafAbsent: true},
+		prepared.snapshot(),
+	)
 	require.NoError(t, prepared.Release(t.Context()))
 	assert.True(t, fixture.vmLeafPresent(testVMID))
 }
@@ -269,7 +288,11 @@ func TestPreparedManagedVMCgroupBindForCleanupRejectsLeafOutsidePinnedIdentity(t
 			assert.Equal(t, originalRootFD, prepared.state.rootFD)
 			assert.Equal(t, originalParentFD, prepared.state.parentFD)
 			assert.Equal(t, originalRetained, prepared.state.retained)
-			assert.Equal(t, preparedManagedVMCgroupSnapshot{leafAbsent: true}, prepared.snapshot())
+			assertPreparedManagedVMCgroupSnapshot(
+				t,
+				preparedManagedVMCgroupSnapshot{leafAbsent: true},
+				prepared.snapshot(),
+			)
 			require.NoError(t, prepared.Release(t.Context()))
 			assert.True(t, fixture.vmLeafPresent(testVMID))
 		})
@@ -369,10 +392,21 @@ func TestPreparedManagedVMCgroupRecheckAbsentRejectsReentryWithoutHoldingLock(t 
 
 	require.NoError(t, prepared.RecheckAbsent(t.Context()))
 	assert.NoError(t, callbackLockErr)
-	assert.Equal(t, preparedManagedVMCgroupSnapshot{leafAbsent: true}, snapshot)
+	assertPreparedManagedVMCgroupSnapshot(t, preparedManagedVMCgroupSnapshot{leafAbsent: true}, snapshot)
 	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(nestedBindErr).Code)
 	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(nestedRecheckErr).Code)
 	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(releaseErr).Code)
 	require.NoError(t, prepared.RecheckAbsent(t.Context()))
 	require.NoError(t, prepared.Release(t.Context()))
+}
+
+func assertPreparedManagedVMCgroupSnapshot(
+	t *testing.T,
+	want preparedManagedVMCgroupSnapshot,
+	got preparedManagedVMCgroupSnapshot,
+) {
+	t.Helper()
+	if diff := cmp.Diff(want, got, cmp.AllowUnexported(preparedManagedVMCgroupSnapshot{})); diff != "" {
+		t.Errorf("prepared cgroup snapshot mismatch (-want +got):\n%s", diff)
+	}
 }

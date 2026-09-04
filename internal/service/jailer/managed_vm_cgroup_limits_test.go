@@ -21,16 +21,25 @@ func TestPrepareManagedVMCgroupForLaunchRejectsInvalidLimitsBeforeEffects(t *tes
 
 	valid := testManagedVMCgroupLimits()
 	tests := map[string]func(*model.VMCgroupLimits){
-		"policy zero":        func(limits *model.VMCgroupLimits) { limits.PolicyVersion = 0 },
-		"policy two":         func(limits *model.VMCgroupLimits) { limits.PolicyVersion = 2 },
-		"quota zero":         func(limits *model.VMCgroupLimits) { limits.CPUQuotaMicros = 0 },
-		"period zero":        func(limits *model.VMCgroupLimits) { limits.CPUPeriodMicros = 0 },
-		"weight zero":        func(limits *model.VMCgroupLimits) { limits.CPUWeight = 0 },
-		"weight above max":   func(limits *model.VMCgroupLimits) { limits.CPUWeight = 10001 },
-		"memory high zero":   func(limits *model.VMCgroupLimits) { limits.MemoryHighBytes = 0 },
-		"memory max zero":    func(limits *model.VMCgroupLimits) { limits.MemoryMaxBytes = 0 },
-		"high above max":     func(limits *model.VMCgroupLimits) { limits.MemoryHighBytes = limits.MemoryMaxBytes + 1 },
-		"negative swap":      func(limits *model.VMCgroupLimits) { limits.SwapMaxBytes = -1 },
+		"policy zero":      func(limits *model.VMCgroupLimits) { limits.PolicyVersion = 0 },
+		"policy two":       func(limits *model.VMCgroupLimits) { limits.PolicyVersion = 2 },
+		"quota negative":   func(limits *model.VMCgroupLimits) { limits.CPUQuotaMicros = -1 },
+		"quota zero":       func(limits *model.VMCgroupLimits) { limits.CPUQuotaMicros = 0 },
+		"period negative":  func(limits *model.VMCgroupLimits) { limits.CPUPeriodMicros = -1 },
+		"period zero":      func(limits *model.VMCgroupLimits) { limits.CPUPeriodMicros = 0 },
+		"weight negative":  func(limits *model.VMCgroupLimits) { limits.CPUWeight = -1 },
+		"weight zero":      func(limits *model.VMCgroupLimits) { limits.CPUWeight = 0 },
+		"weight above max": func(limits *model.VMCgroupLimits) { limits.CPUWeight = 10001 },
+		"memory high negative": func(limits *model.VMCgroupLimits) {
+			limits.MemoryHighBytes = -1
+		},
+		"memory high zero": func(limits *model.VMCgroupLimits) { limits.MemoryHighBytes = 0 },
+		"memory max zero":  func(limits *model.VMCgroupLimits) { limits.MemoryMaxBytes = 0 },
+		"high above max":   func(limits *model.VMCgroupLimits) { limits.MemoryHighBytes = limits.MemoryMaxBytes + 1 },
+		"negative swap":    func(limits *model.VMCgroupLimits) { limits.SwapMaxBytes = -1 },
+		"process limit negative": func(limits *model.VMCgroupLimits) {
+			limits.PIDsMax = -1
+		},
 		"process limit zero": func(limits *model.VMCgroupLimits) { limits.PIDsMax = 0 },
 	}
 	for name, mutate := range tests {
@@ -61,10 +70,14 @@ func TestManagedVMCgroupLimitIntentIsCopiedTransferredAndReadBeforeMembership(t 
 	prepared, err := prepareManagedVMCgroupForLaunch(t.Context(), fixture.launchDeps(), testVMID, limits)
 	require.NoError(t, err)
 	assert.True(t, prepared.state.hasLimitIntent)
-	assert.Equal(t, wantLimits, prepared.state.limits)
+	if diff := cmp.Diff(wantLimits, prepared.state.limits); diff != "" {
+		t.Errorf("prepared limit intent mismatch (-want +got):\n%s", diff)
+	}
 	limits.CPUWeight++
 	limits.MemoryMaxBytes++
-	assert.Equal(t, wantLimits, prepared.state.limits)
+	if diff := cmp.Diff(wantLimits, prepared.state.limits); diff != "" {
+		t.Errorf("mutated caller limit intent changed preparation (-want +got):\n%s", diff)
+	}
 	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeafWithLimits(testVMID, wantLimits)
 
@@ -88,7 +101,9 @@ func TestManagedVMCgroupLimitIntentIsCopiedTransferredAndReadBeforeMembership(t 
 	require.NoError(t, err)
 	require.NotNil(t, lease)
 	assert.True(t, lease.state.hasLimits)
-	assert.Equal(t, wantLimits, lease.state.limits)
+	if diff := cmp.Diff(wantLimits, lease.state.limits); diff != "" {
+		t.Errorf("bound limit intent mismatch (-want +got):\n%s", diff)
+	}
 	wantOpened := []string{
 		testVMID,
 		"cpu.max",
@@ -158,9 +173,12 @@ func TestManagedVMCgroupLimitReadbackRejectsEveryMismatchAndMalformedControl(t *
 			)
 			requireManagedVMCgroupAtomicError(t, err)
 			require.NotNil(t, lease)
-			assert.Equal(t, limits, lease.state.limits)
+			if diff := cmp.Diff(limits, lease.state.limits); diff != "" {
+				t.Errorf("retained limit intent mismatch (-want +got):\n%s", diff)
+			}
 			assert.Zero(t, membershipOpens)
 			assert.Zero(t, verifier.beforeCalls)
+			assert.Zero(t, verifier.afterCalls)
 			fixture.setMembership(testVMID, "")
 			require.NoError(t, lease.Remove(t.Context()))
 			require.NoError(t, lease.Release(t.Context()))
@@ -272,24 +290,68 @@ func TestManagedVMCgroupLimitReadbackFailsClosedOnControlErrors(t *testing.T) {
 			fixture, prepared, _ := prepareManagedVMCgroupLimitTestBind(t)
 			cleanDeps := prepared.state.deps
 			tc.configure(t, &prepared.state.deps)
+			membershipOpens := 0
+			configuredOpenAt2 := prepared.state.deps.openAt2
+			prepared.state.deps.openAt2 = func(
+				ctx context.Context,
+				fd int,
+				name string,
+				how *unix.OpenHow,
+			) (int, error) {
+				if name == "cgroup.procs" {
+					membershipOpens++
+				}
+				return configuredOpenAt2(ctx, fd, name, how)
+			}
+			verifier := &managedVMCgroupTestProcessVerifier{}
 
 			lease, err := prepared.Bind(
 				t.Context(),
 				processTestLocator(),
 				processTestCgroupObservation(),
-				&managedVMCgroupTestProcessVerifier{},
+				verifier,
 			)
 			if tc.cause != nil {
 				require.ErrorIs(t, err, tc.cause)
 			}
 			requireManagedVMCgroupAtomicError(t, err)
 			require.NotNil(t, lease)
+			assert.Zero(t, membershipOpens)
+			assert.Zero(t, verifier.beforeCalls)
+			assert.Zero(t, verifier.afterCalls)
 			lease.state.deps = cleanDeps
 			fixture.setMembership(testVMID, "")
 			require.NoError(t, lease.Remove(t.Context()))
 			require.NoError(t, lease.Release(t.Context()))
 		})
 	}
+}
+
+// Rationale: abort cleanup must preserve the launch's positive typed limit intent even though it does not verify
+// Jailer-written values after the retained process has been terminated and reaped.
+func TestPreparedManagedVMCgroupBindForCleanupTransfersPositiveLimitIntent(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	wantLimits := testManagedVMCgroupLimits()
+	prepared, err := prepareManagedVMCgroupForLaunch(
+		t.Context(), fixture.launchDeps(), testVMID, wantLimits,
+	)
+	require.NoError(t, err)
+	require.NoError(t, prepared.MarkJailerHandoff())
+	fixture.addVMLeaf(testVMID)
+	fixture.setMembership(testVMID, "")
+
+	lease, present, err := prepared.BindForCleanup(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, lease)
+	assert.True(t, present)
+	assert.True(t, lease.state.hasLimits)
+	if diff := cmp.Diff(wantLimits, lease.state.limits); diff != "" {
+		t.Errorf("cleanup limit intent mismatch (-want +got):\n%s", diff)
+	}
+	require.NoError(t, lease.Remove(t.Context()))
+	require.NoError(t, lease.Release(t.Context()))
 }
 
 func TestManagedVMCgroupLimitReadbackRetriesOnSamePinnedLease(t *testing.T) {

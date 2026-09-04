@@ -17,6 +17,59 @@ import (
 	"mvmctl/pkg/errs"
 )
 
+// Rationale: every fixed cgroup pseudo-file has an independent metadata and write-authority contract. A neighboring
+// spec must not accidentally lend its basename, mode, or writable bit to cgroup.subtree_control or pids.max.
+func TestManagedVMCgroupControlSpec(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		control managedVMCgroupControlFile
+		want    managedVMCgroupControlFileSpec
+	}{
+		"controllers": {
+			control: managedVMCgroupControllersControl,
+			want:    managedVMCgroupControlFileSpec{name: "cgroup.controllers", mode: 0o444, writable: false},
+		},
+		"subtree control": {
+			control: managedVMCgroupSubtreeControl,
+			want:    managedVMCgroupControlFileSpec{name: "cgroup.subtree_control", mode: 0o644, writable: true},
+		},
+		"CPU maximum": {
+			control: managedVMCgroupCPUMaxControl,
+			want:    managedVMCgroupControlFileSpec{name: "cpu.max", mode: 0o644, writable: true},
+		},
+		"CPU weight": {
+			control: managedVMCgroupCPUWeightControl,
+			want:    managedVMCgroupControlFileSpec{name: "cpu.weight", mode: 0o644, writable: true},
+		},
+		"memory high": {
+			control: managedVMCgroupMemoryHighControl,
+			want:    managedVMCgroupControlFileSpec{name: "memory.high", mode: 0o644, writable: true},
+		},
+		"memory maximum": {
+			control: managedVMCgroupMemoryMaxControl,
+			want:    managedVMCgroupControlFileSpec{name: "memory.max", mode: 0o644, writable: true},
+		},
+		"swap maximum": {
+			control: managedVMCgroupMemorySwapMaxControl,
+			want:    managedVMCgroupControlFileSpec{name: "memory.swap.max", mode: 0o644, writable: true},
+		},
+		"process maximum": {
+			control: managedVMCgroupPIDsMaxControl,
+			want:    managedVMCgroupControlFileSpec{name: "pids.max", mode: 0o644, writable: true},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := managedVMCgroupControlSpec(tc.control)
+			require.NoError(t, err)
+			if diff := cmp.Diff(tc.want, got, cmp.AllowUnexported(managedVMCgroupControlFileSpec{})); diff != "" {
+				t.Errorf("control spec mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestParseManagedVMCgroupControllerSet(t *testing.T) {
 	t.Parallel()
 
@@ -935,6 +988,60 @@ func TestReadManagedVMCgroupControlReturnsSuccessfulOperationCloseError(t *testi
 	requireManagedVMCgroupAtomicError(t, err)
 }
 
+// Rationale: a cgroup pseudo-file write is incomplete until its descriptor closes successfully. The write cause must
+// remain primary when both the write and close fail, while a close failure after a full write must still be reported.
+func TestWriteManagedVMCgroupControlPreservesWriteAndCloseErrors(t *testing.T) {
+	t.Parallel()
+
+	writeErr := errors.New("injected subtree-control write failure")
+	closeErr := errors.New("injected subtree-control close failure")
+	tests := map[string]struct {
+		writeErr error
+	}{
+		"successful write and failed close": {},
+		"failed write and failed close":     {writeErr: writeErr},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newManagedVMCgroupTestFixture(t)
+			fixture.addVMLeaf(testVMID)
+			path := filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.subtree_control")
+			require.NoError(t, os.WriteFile(path, nil, 0o644))
+			deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
+			realWrite := deps.write
+			writeCalls := 0
+			deps.write = func(ctx context.Context, fd int, value []byte) (int, error) {
+				writeCalls++
+				if tc.writeErr != nil {
+					return 0, tc.writeErr
+				}
+				return realWrite(ctx, fd, value)
+			}
+			realClose := deps.close
+			deps.close = func(ctx context.Context, fd int) error {
+				return errors.Join(realClose(ctx, fd), closeErr)
+			}
+
+			err := addManagedVMCgroupSubtreeControllers(
+				t.Context(), deps, leafFD, leaf, managedVMCgroupControllerCPU,
+			)
+			if tc.writeErr != nil {
+				require.ErrorIs(t, err, tc.writeErr)
+			}
+			require.ErrorIs(t, err, closeErr)
+			requireManagedVMCgroupAtomicError(t, err)
+			assert.Equal(t, 1, writeCalls)
+			if tc.writeErr == nil {
+				written, readErr := os.ReadFile(path)
+				require.NoError(t, readErr)
+				if diff := cmp.Diff([]byte("+cpu\n"), written); diff != "" {
+					t.Errorf("subtree-control write mismatch (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
 func TestWriteManagedVMCgroupControlBytesEnforcesExactCap(t *testing.T) {
 	t.Parallel()
 
@@ -1104,6 +1211,109 @@ func TestPrepareManagedVMCgroupForLaunchFailsClosedOnControllerAvailabilityAndRe
 			requireManagedVMCgroupAtomicError(t, err)
 			assert.Equal(t, tc.wantWrites, writeCalls)
 		})
+	}
+}
+
+// Rationale: successful additive mutation is not readiness evidence. The parent subtree-control must be read back
+// through a fresh descriptor, and an I/O failure there must stop launch before the leaf-absence capability is returned.
+func TestPrepareManagedVMCgroupForLaunchRejectsParentControllerReadbackFailureAfterWrite(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	parentPath := createManagedVMCgroupControllerHierarchy(
+		t,
+		fixture,
+		"cpu memory pids\n",
+		"cpu memory pids\n",
+		"cpu memory pids\n",
+		"cpu memory\n",
+	)
+	deps := fixture.deps()
+	readbackErr := errors.New("injected parent subtree-control readback failure")
+	parentSubtreeOpens := 0
+	readbackFD := -1
+	realOpenAt2 := deps.openAt2
+	deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+		opened, err := realOpenAt2(ctx, fd, name, how)
+		if err != nil || name != "cgroup.subtree_control" {
+			return opened, err
+		}
+		parent, readlinkErr := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
+		require.NoError(t, readlinkErr)
+		if parent == parentPath {
+			parentSubtreeOpens++
+			if parentSubtreeOpens == 2 {
+				readbackFD = opened
+			}
+		}
+		return opened, nil
+	}
+	realPread := deps.pread
+	deps.pread = func(ctx context.Context, fd int, buffer []byte, offset int64) (int, error) {
+		if fd == readbackFD {
+			return 0, readbackErr
+		}
+		return realPread(ctx, fd, buffer, offset)
+	}
+	var writes []managedVMCgroupControllerWriteCall
+	deps.write = simulatedManagedVMCgroupControllerWrite(t, fixture.root, parentPath, &writes)
+
+	prepared, err := prepareManagedVMCgroupForLaunch(
+		t.Context(), deps, testVMID, testManagedVMCgroupLimits(),
+	)
+	assert.Nil(t, prepared)
+	require.ErrorIs(t, err, readbackErr)
+	requireManagedVMCgroupAtomicError(t, err)
+	wantWrites := []managedVMCgroupControllerWriteCall{{directory: "parent", value: "+pids\n"}}
+	if diff := cmp.Diff(wantWrites, writes, cmp.AllowUnexported(managedVMCgroupControllerWriteCall{})); diff != "" {
+		t.Errorf("controller writes mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: controller enablement is additive shared state. If root convergence succeeds before parent readiness
+// fails, retry must retain that root result and converge the parent without replaying the root write.
+func TestPrepareManagedVMCgroupForLaunchRetryDoesNotRepeatConvergedRootWrite(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	parentPath := createManagedVMCgroupControllerHierarchy(
+		t,
+		fixture,
+		"cpu memory pids\n",
+		"cpu\n",
+		"cpu memory\n",
+		"cpu memory\n",
+	)
+	deps := fixture.deps()
+	var writes []managedVMCgroupControllerWriteCall
+	deps.write = simulatedManagedVMCgroupControllerWrite(t, fixture.root, parentPath, &writes)
+
+	prepared, err := prepareManagedVMCgroupForLaunch(
+		t.Context(), deps, testVMID, testManagedVMCgroupLimits(),
+	)
+	assert.Nil(t, prepared)
+	requireManagedVMCgroupAtomicError(t, err)
+	parentControllersPath := filepath.Join(parentPath, "cgroup.controllers")
+	require.NoError(t, os.Chmod(parentControllersPath, 0o644))
+	require.NoError(t, os.WriteFile(
+		parentControllersPath,
+		[]byte("cpu memory pids\n"),
+		0o444,
+	))
+	require.NoError(t, os.Chmod(parentControllersPath, 0o444))
+
+	prepared, err = prepareManagedVMCgroupForLaunch(
+		t.Context(), deps, testVMID, testManagedVMCgroupLimits(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, prepared)
+	require.NoError(t, prepared.Release(t.Context()))
+	wantWrites := []managedVMCgroupControllerWriteCall{
+		{directory: "root", value: "+memory +pids\n"},
+		{directory: "parent", value: "+pids\n"},
+	}
+	if diff := cmp.Diff(wantWrites, writes, cmp.AllowUnexported(managedVMCgroupControllerWriteCall{})); diff != "" {
+		t.Errorf("controller retry writes mismatch (-want +got):\n%s", diff)
 	}
 }
 
