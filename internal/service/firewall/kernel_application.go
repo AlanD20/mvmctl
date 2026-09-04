@@ -13,6 +13,7 @@ type kernelApplicationConnection interface {
 	addChain(*nftables.Chain)
 	addRule(compiledRule)
 	flush() error
+	interrupt() error
 	close() error
 }
 
@@ -64,9 +65,17 @@ func applyKernelGeneration(
 	}
 
 	result := kernelApplicationResult{commitAttempted: true}
+	interruptResult := make(chan error, 1)
+	stopInterrupt := context.AfterFunc(ctx, func() {
+		interruptResult <- connection.interrupt()
+	})
 	flushErr := connection.flush()
+	var interruptErr error
+	if !stopInterrupt() {
+		interruptErr = <-interruptResult
+	}
 	closeErr := connection.close()
-	if err := errors.Join(ctx.Err(), flushErr, closeErr); err != nil {
+	if err := errors.Join(ctx.Err(), interruptErr, flushErr, closeErr); err != nil {
 		return result, generationAuthorityError("apply atomic kernel firewall generation", err, nil)
 	}
 	return result, nil

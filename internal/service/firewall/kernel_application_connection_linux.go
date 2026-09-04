@@ -39,8 +39,11 @@ type kernelApplicationSocketConfigurationDeps struct {
 	close         func(*netlink.Conn) error
 }
 
+type kernelApplicationNFTablesConstructor func(...nftables.ConnOption) (*nftables.Conn, error)
+
 type googleNFTablesApplicationConnection struct {
-	connection *nftables.Conn
+	connection        *nftables.Conn
+	netlinkConnection *netlink.Conn
 }
 
 func (connection *googleNFTablesApplicationConnection) deleteTable(table *nftables.Table) {
@@ -61,6 +64,15 @@ func (connection *googleNFTablesApplicationConnection) addRule(rule compiledRule
 
 func (connection *googleNFTablesApplicationConnection) flush() error {
 	return connection.connection.Flush()
+}
+
+// interrupt expires only the retained namespace-bound socket. It deliberately does not call CloseLasting: clearing
+// nftables.Conn.nlconn before Flush acquires its mutex would permit v0.3.0 to redial a transient socket elsewhere.
+func (connection *googleNFTablesApplicationConnection) interrupt() error {
+	if connection.netlinkConnection == nil {
+		return errors.New("retained kernel application socket is unavailable")
+	}
+	return connection.netlinkConnection.SetDeadline(time.Now())
 }
 
 func (connection *googleNFTablesApplicationConnection) close() error {
@@ -319,25 +331,61 @@ func realKernelApplicationNamespaceDeps(
 }
 
 func newGoogleNFTablesApplicationConnection(ctx context.Context) (kernelApplicationConnection, error) {
+	return newGoogleNFTablesApplicationConnectionWithDeps(
+		ctx,
+		time.Now(),
+		nftables.New,
+		realKernelApplicationSocketConfigurationDeps(),
+	)
+}
+
+func newGoogleNFTablesApplicationConnectionWithDeps(
+	ctx context.Context,
+	now time.Time,
+	constructor kernelApplicationNFTablesConstructor,
+	socketDeps kernelApplicationSocketConfigurationDeps,
+) (kernelApplicationConnection, error) {
 	if err := kernelObservationNamespaceContextErr(ctx); err != nil {
 		return nil, err
 	}
-	deadline := kernelApplicationSocketDeadline(ctx, time.Now())
+	if constructor == nil {
+		return nil, errors.New("kernel application nftables constructor is unavailable")
+	}
+	deadline := kernelApplicationSocketDeadline(ctx, now)
+	var retained *netlink.Conn
 	options := []nftables.ConnOption{
 		nftables.AsLasting(),
 		nftables.WithSockOptions(func(connection *netlink.Conn) error {
-			return configureKernelApplicationSocket(
-				connection,
-				deadline,
-				realKernelApplicationSocketConfigurationDeps(),
-			)
+			if err := configureKernelApplicationSocket(connection, deadline, socketDeps); err != nil {
+				return err
+			}
+			retained = connection
+			return nil
 		}),
 	}
-	connection, err := nftables.New(options...)
+	connection, err := constructor(options...)
 	if err != nil {
+		if retained != nil {
+			return nil, errors.Join(err, socketDeps.close(retained))
+		}
 		return nil, err
 	}
-	return &googleNFTablesApplicationConnection{connection: connection}, nil
+	if connection == nil {
+		if retained != nil {
+			return nil, errors.Join(
+				errors.New("kernel application nftables constructor returned no connection"),
+				socketDeps.close(retained),
+			)
+		}
+		return nil, errors.New("kernel application nftables constructor returned no connection")
+	}
+	if retained == nil {
+		return nil, errors.Join(
+			errors.New("kernel application constructor did not retain its configured socket"),
+			connection.CloseLasting(),
+		)
+	}
+	return &googleNFTablesApplicationConnection{connection: connection, netlinkConnection: retained}, nil
 }
 
 func kernelApplicationSocketDeadline(ctx context.Context, now time.Time) time.Time {
