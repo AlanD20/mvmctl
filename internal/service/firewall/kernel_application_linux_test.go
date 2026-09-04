@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -757,6 +758,53 @@ func TestGoogleNFTablesApplicationConnectionWiresLastingSocketConfiguration(t *t
 	require.NoError(t, connection.close())
 }
 
+// Rationale: Cancellation may expire only the retained netlink socket. Closing either the socket or nftables'
+// lasting connection would let a later Flush redial transiently outside the namespace selected at construction.
+func TestGoogleNFTablesApplicationConnectionInterruptsDeadlineWithoutClosing(t *testing.T) {
+	t.Parallel()
+
+	socket := &deadlineRecordingNetlinkSocket{}
+	netlinkConnection := netlink.NewConn(socket, 1)
+	t.Cleanup(func() { require.NoError(t, netlinkConnection.Close()) })
+	socketOptionCalls := 0
+	underlying, err := nftables.New(
+		nftables.AsLasting(),
+		nftables.WithSockOptions(func(*netlink.Conn) error {
+			socketOptionCalls++
+			return nil
+		}),
+		nftables.WithTestDial(func(request []netlink.Message) ([]netlink.Message, error) {
+			if len(request) == 0 {
+				return nil, errors.New("unexpected empty nftables request")
+			}
+			return []netlink.Message{{
+				Header: netlink.Header{Type: netlink.Error},
+				Data:   make([]byte, 4),
+			}}, nil
+		}),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, underlying.CloseLasting()) })
+	connection := &googleNFTablesApplicationConnection{
+		connection: underlying, netlinkConnection: netlinkConnection,
+	}
+
+	before := time.Now()
+	require.NoError(t, connection.interrupt())
+	after := time.Now()
+	deadlines, readDeadlineCalls, writeDeadlineCalls, closeCalls := socket.snapshot()
+	require.Len(t, deadlines, 1)
+	assert.False(t, deadlines[0].Before(before))
+	assert.False(t, deadlines[0].After(after))
+	assert.Zero(t, readDeadlineCalls)
+	assert.Zero(t, writeDeadlineCalls)
+	assert.Zero(t, closeCalls)
+
+	underlying.AddTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: "test_retained"})
+	require.NoError(t, underlying.Flush())
+	assert.Equal(t, 1, socketOptionCalls, "interrupt must not cause a transient nftables redial")
+}
+
 func TestKernelApplicationSocketConfigurationRejectsInadequateBuffersAndCloses(t *testing.T) {
 	t.Parallel()
 
@@ -876,6 +924,54 @@ type recordingKernelApplicationConnection struct {
 	closedWhileFlush bool
 	flushStarted     chan struct{}
 	flushRelease     chan struct{}
+}
+
+type deadlineRecordingNetlinkSocket struct {
+	mu                 sync.Mutex
+	deadlines          []time.Time
+	readDeadlineCalls  int
+	writeDeadlineCalls int
+	closeCalls         int
+}
+
+func (socket *deadlineRecordingNetlinkSocket) Close() error {
+	socket.mu.Lock()
+	defer socket.mu.Unlock()
+	socket.closeCalls++
+	return nil
+}
+
+func (*deadlineRecordingNetlinkSocket) Send(netlink.Message) error { return nil }
+
+func (*deadlineRecordingNetlinkSocket) SendMessages([]netlink.Message) error { return nil }
+
+func (*deadlineRecordingNetlinkSocket) Receive() ([]netlink.Message, error) { return nil, nil }
+
+func (socket *deadlineRecordingNetlinkSocket) SetDeadline(deadline time.Time) error {
+	socket.mu.Lock()
+	defer socket.mu.Unlock()
+	socket.deadlines = append(socket.deadlines, deadline)
+	return nil
+}
+
+func (socket *deadlineRecordingNetlinkSocket) SetReadDeadline(time.Time) error {
+	socket.mu.Lock()
+	defer socket.mu.Unlock()
+	socket.readDeadlineCalls++
+	return nil
+}
+
+func (socket *deadlineRecordingNetlinkSocket) SetWriteDeadline(time.Time) error {
+	socket.mu.Lock()
+	defer socket.mu.Unlock()
+	socket.writeDeadlineCalls++
+	return nil
+}
+
+func (socket *deadlineRecordingNetlinkSocket) snapshot() ([]time.Time, int, int, int) {
+	socket.mu.Lock()
+	defer socket.mu.Unlock()
+	return slices.Clone(socket.deadlines), socket.readDeadlineCalls, socket.writeDeadlineCalls, socket.closeCalls
 }
 
 func newBlockingKernelApplicationConnection() *recordingKernelApplicationConnection {
