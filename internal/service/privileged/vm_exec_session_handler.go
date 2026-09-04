@@ -27,7 +27,19 @@ type vmExecSessionHandlerEffects struct {
 
 type vmExecSessionHandlerLease interface {
 	bindDestination(context.Context, vmExecSessionConnection) error
+	waitStop(context.Context) error
 	release(context.Context) error
+}
+
+type vmExecSessionStopScope struct {
+	ctx        context.Context
+	parent     context.Context
+	cancel     context.CancelCauseFunc
+	done       <-chan struct{}
+	finishOnce sync.Once
+	// mu guards the stop-owned error published only when the waiter wins cancellation arbitration.
+	mu      sync.Mutex
+	stopErr *errs.DomainError
 }
 
 // vmExecSessionConnection is a borrowed view over a handler-owned retained connection.
@@ -113,69 +125,104 @@ func handleVMExecSession(
 			deps.control,
 		)
 	}
-	if err := deliverVMExecSourceRetained(ctx, endpoint, deps.control); err != nil {
-		return withVMExecSessionCleanupEvidence(err, resources.cleanup(ctx))
+	stopScope := startVMExecSessionStopWaiter(ctx, lease)
+	defer stopScope.finish()
+	if err := stopScope.finishIfInterrupted(); err != nil {
+		return failVMExecSession(ctx, endpoint, resources, err, deps.control)
+	}
+	if err := deliverVMExecSourceRetained(stopScope.ctx, endpoint, deps.control); err != nil {
+		return withVMExecSessionCleanupEvidence(stopScope.finishAndPrimary(err), resources.cleanup(ctx))
+	}
+	if err := stopScope.finishIfInterrupted(); err != nil {
+		return failVMExecSession(ctx, endpoint, resources, err, deps.control)
 	}
 
-	destinationDeadline := boundedReadDeadline(ctx, deps.control.now(), vmExecSessionSetupReadTimeout)
+	destinationDeadline := boundedReadDeadline(stopScope.ctx, deps.control.now(), vmExecSessionSetupReadTimeout)
 	destinationReader := newVMExecConnectionReaderWithDeps(
-		ctx,
+		stopScope.ctx,
 		int(endpoint.Fd()),
 		destinationDeadline,
 		deps.connectionReader,
 	)
-	destination, destinationErr := destinationReader.decodeBindDestinationAndRetain(ctx)
+	destination, destinationErr := destinationReader.decodeBindDestinationAndRetain(stopScope.ctx)
 	destinationCloseErr := destinationReader.Close()
 	if destinationErr != nil {
 		if errors.Is(destinationErr, io.EOF) {
-			return withVMExecSessionCleanupEvidence(destinationCloseErr, resources.cleanup(ctx))
+			return withVMExecSessionCleanupEvidence(
+				stopScope.finishAndPrimary(destinationCloseErr),
+				resources.cleanup(ctx),
+			)
 		}
 		return failVMExecSession(
 			ctx,
 			endpoint,
 			resources,
-			errors.Join(destinationErr, destinationCloseErr),
+			stopScope.finishAndPrimary(errors.Join(destinationErr, destinationCloseErr)),
 			deps.control,
 		)
 	}
 	if destinationCloseErr != nil {
-		return failVMExecSession(ctx, endpoint, resources, destinationCloseErr, deps.control)
+		return failVMExecSession(
+			ctx,
+			endpoint,
+			resources,
+			stopScope.finishAndPrimary(destinationCloseErr),
+			deps.control,
+		)
 	}
 	resources.destination = destination
 
-	if err := lease.bindDestination(ctx, vmExecSessionConnection{retained: destination}); err != nil {
+	if err := lease.bindDestination(stopScope.ctx, vmExecSessionConnection{retained: destination}); err != nil {
+		return failVMExecSession(ctx, endpoint, resources, stopScope.finishAndPrimary(err), deps.control)
+	}
+	if err := stopScope.finishIfInterrupted(); err != nil {
 		return failVMExecSession(ctx, endpoint, resources, err, deps.control)
 	}
-	if err := deliverVMExecReady(ctx, endpoint, deps.control); err != nil {
-		return withVMExecSessionCleanupEvidence(err, resources.cleanup(ctx))
+	if err := deliverVMExecReady(stopScope.ctx, endpoint, deps.control); err != nil {
+		return withVMExecSessionCleanupEvidence(stopScope.finishAndPrimary(err), resources.cleanup(ctx))
+	}
+	if err := stopScope.finishIfInterrupted(); err != nil {
+		return failVMExecSession(ctx, endpoint, resources, err, deps.control)
 	}
 
-	releaseDeadline := boundedReadDeadline(ctx, deps.control.now(), vmExecSessionReleaseReadTimeout)
+	releaseDeadline := boundedReadDeadline(stopScope.ctx, deps.control.now(), vmExecSessionReleaseReadTimeout)
 	releaseReader := newVMExecReleaseFrameReaderWithDeps(
-		ctx,
+		stopScope.ctx,
 		int(endpoint.Fd()),
 		releaseDeadline,
 		deps.connectionReader,
 	)
-	releaseErr := vmexecsessionwire.DecodeRelease(ctx, releaseReader)
+	releaseErr := vmexecsessionwire.DecodeRelease(stopScope.ctx, releaseReader)
 	if releaseErr == nil {
-		releaseErr = requireVMExecSessionReleaseEOF(ctx, releaseReader)
+		releaseErr = requireVMExecSessionReleaseEOF(stopScope.ctx, releaseReader)
 	}
 	releaseCloseErr := releaseReader.Close()
 	if releaseErr != nil {
 		if errors.Is(releaseErr, io.EOF) {
-			return withVMExecSessionCleanupEvidence(releaseCloseErr, resources.cleanup(ctx))
+			return withVMExecSessionCleanupEvidence(
+				stopScope.finishAndPrimary(releaseCloseErr),
+				resources.cleanup(ctx),
+			)
 		}
 		return failVMExecSession(
 			ctx,
 			endpoint,
 			resources,
-			errors.Join(releaseErr, releaseCloseErr),
+			stopScope.finishAndPrimary(errors.Join(releaseErr, releaseCloseErr)),
 			deps.control,
 		)
 	}
 	if releaseCloseErr != nil {
-		return failVMExecSession(ctx, endpoint, resources, releaseCloseErr, deps.control)
+		return failVMExecSession(
+			ctx,
+			endpoint,
+			resources,
+			stopScope.finishAndPrimary(releaseCloseErr),
+			deps.control,
+		)
+	}
+	if err := stopScope.finishAndPrimary(nil); err != nil {
+		return failVMExecSession(ctx, endpoint, resources, err, deps.control)
 	}
 
 	cleanupErr := resources.cleanup(ctx)
@@ -188,6 +235,115 @@ func handleVMExecSession(
 		)
 	}
 	return deliverVMExecReleased(ctx, endpoint, deps.control)
+}
+
+// CRITICAL: The waiter only cancels protocol work. The handler remains the sole cleanup and response owner, and
+// finish always cancels and joins the waiter before either responsibility can proceed.
+func startVMExecSessionStopWaiter(
+	ctx context.Context,
+	lease vmExecSessionHandlerLease,
+) *vmExecSessionStopScope {
+	stopCtx, cancel := context.WithCancelCause(ctx)
+	done := make(chan struct{}, 1)
+	scope := &vmExecSessionStopScope{ctx: stopCtx, parent: ctx, cancel: cancel, done: done}
+	go func() {
+		waitErr := lease.waitStop(stopCtx)
+		if stopCtx.Err() == nil {
+			primary := vmExecSessionStopError(waitErr)
+			cancel(primary)
+			if context.Cause(stopCtx) == primary {
+				scope.mu.Lock()
+				scope.stopErr = primary
+				scope.mu.Unlock()
+			}
+		}
+		done <- struct{}{}
+	}()
+	return scope
+}
+
+func vmExecSessionStopError(waitErr error) *errs.DomainError {
+	if waitErr == nil {
+		return errs.New(
+			errs.CodeProcessError,
+			"retained VM-exec session relay deadline expired",
+			errs.WithClass(errs.ClassInternal),
+		)
+	}
+	if domainErr := errs.AsDomainError(waitErr); domainErr != nil {
+		return domainErr
+	}
+	return errs.WrapMsg(
+		errs.CodeProcessError,
+		"retained VM-exec session stop failed",
+		waitErr,
+		errs.WithClass(errs.ClassInternal),
+	)
+}
+
+func (scope *vmExecSessionStopScope) finish() {
+	if scope == nil {
+		return
+	}
+	scope.finishOnce.Do(func() {
+		scope.cancel(nil)
+		<-scope.done
+	})
+}
+
+func (scope *vmExecSessionStopScope) finishIfInterrupted() error {
+	if scope == nil || scope.ctx.Err() == nil {
+		return nil
+	}
+	return scope.finishAndPrimary(nil)
+}
+
+func (scope *vmExecSessionStopScope) finishAndPrimary(operationErr error) error {
+	scope.finish()
+	scope.mu.Lock()
+	stopErr := scope.stopErr
+	scope.mu.Unlock()
+	if stopErr != nil {
+		return withVMExecSessionResponseEvidence(stopErr, operationErr)
+	}
+	if cause := context.Cause(scope.parent); cause != nil {
+		if domainErr := errs.AsDomainError(cause); domainErr != nil {
+			return withVMExecSessionResponseEvidence(domainErr, operationErr)
+		}
+		interruptionErr := errs.WrapMsg(
+			errs.CodeProcessError,
+			"retained VM-exec session interrupted",
+			cause,
+			errs.WithClass(errs.ClassInternal),
+		)
+		return withVMExecSessionResponseEvidence(interruptionErr, operationErr)
+	}
+	return operationErr
+}
+
+func withVMExecSessionResponseEvidence(primary *errs.DomainError, operationErr error) *errs.DomainError {
+	operationDomain := errs.AsDomainError(operationErr)
+	if primary == nil || operationDomain == nil {
+		return primary
+	}
+	responseStarted, ok := operationDomain.Details["response_started"].(bool)
+	if !ok {
+		return primary
+	}
+	details := make(map[string]any, len(primary.Details)+1)
+	for key, value := range primary.Details {
+		details[key] = value
+	}
+	details["response_started"] = responseStarted
+	return &errs.DomainError{
+		Code:    primary.Code,
+		Class:   primary.Class,
+		Message: primary.Message,
+		Err:     errors.Join(primary, operationErr),
+		Op:      primary.Op,
+		Entity:  primary.Entity,
+		Details: details,
+	}
 }
 
 func validateVMExecSessionHandlerInputs(
@@ -293,7 +449,7 @@ func deliverVMExecSourceRetained(
 	deps controlDeps,
 ) error {
 	deadline := boundedResponseDeadline(ctx, deps.now())
-	responseCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+	responseCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	if err := endpoint.SetWriteDeadline(deadline); err != nil {
 		return vmExecSessionResponseTransportError(err, false)
@@ -307,7 +463,7 @@ func deliverVMExecSourceRetained(
 
 func deliverVMExecReady(ctx context.Context, endpoint controlEndpoint, deps controlDeps) error {
 	deadline := boundedResponseDeadline(ctx, deps.now())
-	responseCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+	responseCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	if err := endpoint.SetWriteDeadline(deadline); err != nil {
 		return vmExecSessionResponseTransportError(err, false)

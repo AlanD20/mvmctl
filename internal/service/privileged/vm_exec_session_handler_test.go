@@ -32,6 +32,7 @@ type fakeVMExecSessionEndpoint struct {
 	writeLimit    int
 	deadlineErr   error
 	deadlineErrAt int
+	deadlineFunc  func(time.Time) error
 	writeCalls    int
 	shutdownCalls int
 	shutdownErr   error
@@ -42,6 +43,8 @@ type fakeVMExecSessionLease struct {
 	events                *[]string
 	bindErr               error
 	releaseErr            error
+	waitStopFunc          func(context.Context) error
+	releaseFunc           func(context.Context) error
 	sourceConnection      vmExecSessionConnection
 	destinationConnection vmExecSessionConnection
 	bound                 bool
@@ -49,9 +52,32 @@ type fakeVMExecSessionLease struct {
 	releaseCtx            context.Context
 }
 
-func TestHandleVMExecSessionSuccessUsesExactPhasesAndReverseCleanup(t *testing.T) {
+func TestHandleVMExecSessionExplicitReleaseWinsPendingExpiryAndUsesReverseCleanup(t *testing.T) {
 	events := make([]string, 0, 8)
-	lease := &fakeVMExecSessionLease{events: &events}
+	waitStarted := make(chan struct{})
+	waitFinished := make(chan struct{})
+	pendingExpiry := make(chan struct{})
+	lease := &fakeVMExecSessionLease{
+		events: &events,
+		waitStopFunc: func(ctx context.Context) error {
+			close(waitStarted)
+			defer close(waitFinished)
+			select {
+			case <-pendingExpiry:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+		releaseFunc: func(context.Context) error {
+			select {
+			case <-waitFinished:
+				return nil
+			default:
+				return errors.New("stop waiter was not joined before lease release")
+			}
+		},
+	}
 	endpoint, deps, sourceFD, destinationFD := newVMExecSessionHandlerFixture(
 		t,
 		vmExecSessionFrames(t, true, true, true),
@@ -81,6 +107,8 @@ func TestHandleVMExecSessionSuccessUsesExactPhasesAndReverseCleanup(t *testing.T
 	err := handleVMExecSession(t.Context(), endpoint, caller, effects, deps)
 
 	require.NoError(t, err)
+	assertVMExecSessionChannelClosed(t, waitStarted)
+	assertVMExecSessionChannelClosed(t, waitFinished)
 	if diff := cmp.Diff(caller, gotCaller, cmp.AllowUnexported(callerIdentity{})); diff != "" {
 		t.Errorf("caller identity mismatch (-want +got):\n%s", diff)
 	}
@@ -462,7 +490,7 @@ func TestHandleVMExecSessionResponseTransportFailureDoesNotStartSecondFrame(t *t
 	}
 }
 
-func TestHandleVMExecSessionCancellationUsesDetachedCleanup(t *testing.T) {
+func TestHandleVMExecSessionClassifiesParentCancellationAndUsesDetachedCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	events := make([]string, 0, 8)
 	phaseEvents := make([]string, 0, 6)
@@ -505,7 +533,7 @@ func TestHandleVMExecSessionCancellationUsesDetachedCleanup(t *testing.T) {
 	assert.False(t, outcome.Released())
 	operationErr := outcome.OperationError()
 	require.NotNil(t, operationErr)
-	assert.Equal(t, errs.CodeValidationFailed, operationErr.Code)
+	assert.Equal(t, errs.CodeProcessError, operationErr.Code)
 	assert.Equal(t, errs.ClassInternal, operationErr.Class)
 	assertVMExecSessionEvents(t, []string{
 		"read_open_source",
@@ -520,6 +548,308 @@ func TestHandleVMExecSessionCancellationUsesDetachedCleanup(t *testing.T) {
 	assert.NoError(t, lease.releaseCtx.Err())
 	assertFDClosed(t, sourceFD)
 	assertFDClosed(t, destinationFD)
+}
+
+func TestHandleVMExecSessionStopWaiterFailsClosedBeforeRelease(t *testing.T) {
+	stopFault := errs.New(
+		errs.CodeVMAtomicFailed,
+		"wait for retained VM-exec relay stop",
+		errs.WithClass(errs.ClassConflict),
+		errs.WithEntity(testVMExecHandlerSource),
+	)
+	tests := map[string]struct {
+		frames      []vmExecSessionInputFrame
+		stopErr     error
+		wantReady   bool
+		wantCode    errs.Code
+		wantClass   errs.Class
+		wantCleanup []string
+	}{
+		"deadline while waiting for destination": {
+			frames:    vmExecSessionFrames(t, true, false, false),
+			wantCode:  errs.CodeProcessError,
+			wantClass: errs.ClassInternal,
+			wantCleanup: []string{
+				"open_source", "shutdown_source", "close_source", "release_lease",
+			},
+		},
+		"stop fault while waiting for release": {
+			frames:    vmExecSessionFrames(t, true, true, false),
+			stopErr:   stopFault,
+			wantReady: true,
+			wantCode:  errs.CodeVMAtomicFailed,
+			wantClass: errs.ClassConflict,
+			wantCleanup: []string{
+				"open_source", "bind_destination", "shutdown_destination", "close_destination",
+				"shutdown_source", "close_source", "release_lease",
+			},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			events := make([]string, 0, 8)
+			phaseEvents := make([]string, 0, 6)
+			waitStarted := make(chan struct{})
+			waitFinished := make(chan struct{})
+			triggerStop := make(chan struct{})
+			readBlocked := make(chan struct{})
+			lease := &fakeVMExecSessionLease{
+				events: &events,
+				waitStopFunc: func(ctx context.Context) error {
+					close(waitStarted)
+					defer close(waitFinished)
+					select {
+					case <-triggerStop:
+						return test.stopErr
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				},
+				releaseFunc: func(context.Context) error {
+					select {
+					case <-waitFinished:
+						return nil
+					default:
+						return errors.New("stop waiter was not joined before lease release")
+					}
+				},
+			}
+			endpoint, deps, sourceFD, destinationFD := newVMExecSessionHandlerFixture(t, test.frames, &events)
+			endpoint.phaseEvents = &phaseEvents
+			recvmsg := deps.connectionReader.recvmsg
+			var blockRead sync.Once
+			deps.connectionReader.recvmsg = func(
+				ctx context.Context,
+				fd int,
+				payload []byte,
+				control []byte,
+				flags int,
+			) (int, int, int, unix.Sockaddr, error) {
+				count, controlCount, receiveFlags, from, err := recvmsg(ctx, fd, payload, control, flags)
+				if count != 0 || controlCount != 0 || receiveFlags != 0 || from != nil || err != nil {
+					return count, controlCount, receiveFlags, from, err
+				}
+				blockRead.Do(func() { close(readBlocked) })
+				<-ctx.Done()
+				return 0, 0, 0, nil, ctx.Err()
+			}
+			result := make(chan error, 1)
+			go func() {
+				result <- handleVMExecSession(
+					t.Context(),
+					endpoint,
+					callerIdentity{uid: 1000, gid: 1000},
+					vmExecSessionEffectsForLease(lease),
+					deps,
+				)
+			}()
+
+			assertVMExecSessionChannelClosed(t, waitStarted)
+			assertVMExecSessionChannelClosed(t, readBlocked)
+			close(triggerStop)
+			require.NoError(t, <-result)
+
+			assertVMExecSessionChannelClosed(t, waitFinished)
+			responses := bytes.NewReader(endpoint.responseBytes())
+			retained, err := vmexecsessionwire.DecodeSourceRetained(t.Context(), responses)
+			require.NoError(t, err)
+			assert.True(t, retained.Retained())
+			wantPhases := []string{"read_open_source", "write_source_retained"}
+			if test.wantReady {
+				ready, readyErr := vmexecsessionwire.DecodeReady(t.Context(), responses)
+				require.NoError(t, readyErr)
+				assert.True(t, ready.Ready())
+				wantPhases = append(wantPhases, "read_bind_destination", "write_ready")
+			}
+			outcome, err := vmexecsessionwire.DecodeOutcome(t.Context(), responses)
+			require.NoError(t, err)
+			assert.False(t, outcome.Released())
+			operationErr := outcome.OperationError()
+			require.NotNil(t, operationErr)
+			assert.Equal(t, test.wantCode, operationErr.Code)
+			assert.Equal(t, test.wantClass, operationErr.Class)
+			assert.Zero(t, responses.Len())
+			assertVMExecSessionEvents(t, append(wantPhases, "write_failure"), phaseEvents)
+			assertVMExecSessionEvents(t, test.wantCleanup, events)
+			assert.Equal(t, 1, endpoint.shutdownCount())
+			assert.True(t, lease.released)
+			assertFDClosed(t, sourceFD)
+			if test.wantReady {
+				assertFDClosed(t, destinationFD)
+			} else {
+				assertFDOpen(t, destinationFD)
+				require.NoError(t, unix.Close(destinationFD))
+			}
+		})
+	}
+}
+
+func TestHandleVMExecSessionDeadlineCancelsIntermediateSuccessResponses(t *testing.T) {
+	tests := map[string]struct {
+		frames              []vmExecSessionInputFrame
+		blockedDeadlineCall int
+		wantSourceRetained  bool
+		wantDestination     bool
+		wantPhases          []string
+		wantCleanup         []string
+	}{
+		"before source retained": {
+			frames:              vmExecSessionFrames(t, true, false, false),
+			blockedDeadlineCall: 1,
+			wantPhases:          []string{"read_open_source"},
+			wantCleanup: []string{
+				"open_source", "shutdown_source", "close_source", "release_lease",
+			},
+		},
+		"before ready": {
+			frames:              vmExecSessionFrames(t, true, true, false),
+			blockedDeadlineCall: 2,
+			wantSourceRetained:  true,
+			wantDestination:     true,
+			wantPhases: []string{
+				"read_open_source", "write_source_retained", "read_bind_destination",
+			},
+			wantCleanup: []string{
+				"open_source", "bind_destination", "shutdown_destination", "close_destination",
+				"shutdown_source", "close_source", "release_lease",
+			},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			events := make([]string, 0, 8)
+			phaseEvents := make([]string, 0, 4)
+			triggerStop := make(chan struct{})
+			waitFinished := make(chan struct{})
+			waitContext := make(chan context.Context, 1)
+			responseBlocked := make(chan struct{})
+			releaseResponse := make(chan struct{})
+			lease := &fakeVMExecSessionLease{
+				events: &events,
+				waitStopFunc: func(ctx context.Context) error {
+					waitContext <- ctx
+					defer close(waitFinished)
+					select {
+					case <-triggerStop:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				},
+				releaseFunc: func(context.Context) error {
+					select {
+					case <-waitFinished:
+						return nil
+					default:
+						return errors.New("stop waiter was not joined before lease release")
+					}
+				},
+			}
+			endpoint, deps, sourceFD, destinationFD := newVMExecSessionHandlerFixture(t, test.frames, &events)
+			endpoint.phaseEvents = &phaseEvents
+			deadlineCall := 0
+			endpoint.deadlineFunc = func(time.Time) error {
+				deadlineCall++
+				if deadlineCall == test.blockedDeadlineCall {
+					close(responseBlocked)
+					<-releaseResponse
+				}
+				return nil
+			}
+			result := make(chan error, 1)
+			go func() {
+				result <- handleVMExecSession(
+					t.Context(),
+					endpoint,
+					callerIdentity{uid: 1000, gid: 1000},
+					vmExecSessionEffectsForLease(lease),
+					deps,
+				)
+			}()
+
+			var stopCtx context.Context
+			select {
+			case stopCtx = <-waitContext:
+			case <-t.Context().Done():
+				t.Fatal("stop waiter did not publish its context")
+			}
+			assertVMExecSessionChannelClosed(t, responseBlocked)
+			close(triggerStop)
+			assertVMExecSessionChannelClosed(t, stopCtx.Done())
+			close(releaseResponse)
+			handlerErr := <-result
+
+			domainErr := requireVMExecDomainError(t, handlerErr)
+			assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+			assert.Equal(t, errs.ClassInternal, domainErr.Class)
+			assert.Equal(t, false, domainErr.Details["response_started"])
+			assertVMExecSessionChannelClosed(t, waitFinished)
+			assertVMExecSessionEvents(t, test.wantPhases, phaseEvents)
+			assertVMExecSessionEvents(t, test.wantCleanup, events)
+			responses := bytes.NewReader(endpoint.responseBytes())
+			if test.wantSourceRetained {
+				retained, err := vmexecsessionwire.DecodeSourceRetained(t.Context(), responses)
+				require.NoError(t, err)
+				assert.True(t, retained.Retained())
+			}
+			assert.Zero(t, responses.Len())
+			assert.Equal(t, 0, endpoint.shutdownCount())
+			assert.True(t, lease.released)
+			assertFDClosed(t, sourceFD)
+			if test.wantDestination {
+				assertFDClosed(t, destinationFD)
+			} else {
+				assertFDOpen(t, destinationFD)
+				require.NoError(t, unix.Close(destinationFD))
+			}
+		})
+	}
+}
+
+func TestVMExecSessionStopErrorWrapsInfrastructureFailure(t *testing.T) {
+	stopFailure := errors.New("timerfd poll failed")
+
+	stopErr := vmExecSessionStopError(stopFailure)
+
+	assert.Equal(t, errs.CodeProcessError, stopErr.Code)
+	assert.Equal(t, errs.ClassInternal, stopErr.Class)
+	assert.ErrorIs(t, stopErr, stopFailure)
+}
+
+func TestVMExecSessionStopPrimaryPreservesPartialResponseEvidence(t *testing.T) {
+	stopErr := errs.New(errs.CodeVMAtomicFailed, "retained VM-exec relay stopped")
+	responseErr := vmExecSessionResponseTransportError(io.ErrClosedPipe, true)
+
+	primary := withVMExecSessionResponseEvidence(stopErr, responseErr)
+
+	assert.Equal(t, stopErr.Code, primary.Code)
+	assert.Equal(t, true, primary.Details["response_started"])
+	assert.ErrorIs(t, primary, stopErr)
+	assert.ErrorIs(t, primary, io.ErrClosedPipe)
+}
+
+func TestVMExecSessionIntermediateResponsesHonorCancellation(t *testing.T) {
+	tests := map[string]func(context.Context, controlEndpoint, controlDeps) error{
+		"source retained": deliverVMExecSourceRetained,
+		"ready":           deliverVMExecReady,
+	}
+	for name, deliver := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			endpoint := &fakeVMExecSessionEndpoint{}
+			deps := controlDeps{
+				now:           time.Now,
+				shutdownWrite: func(context.Context, int) error { return nil },
+			}
+
+			err := deliver(ctx, endpoint, deps)
+
+			require.Error(t, err)
+			assert.Equal(t, 1, endpoint.deadlineCount())
+			assert.Equal(t, 0, endpoint.writeCount())
+		})
+	}
 }
 
 func TestHandleVMExecSessionRejectsInactiveSeamsWithoutPanic(t *testing.T) {
@@ -564,10 +894,21 @@ func (lease *fakeVMExecSessionLease) bindDestination(
 	return lease.bindErr
 }
 
+func (lease *fakeVMExecSessionLease) waitStop(ctx context.Context) error {
+	if lease.waitStopFunc != nil {
+		return lease.waitStopFunc(ctx)
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func (lease *fakeVMExecSessionLease) release(ctx context.Context) error {
 	appendVMExecSessionEvent(lease.events, "release_lease")
 	lease.released = true
 	lease.releaseCtx = ctx
+	if lease.releaseFunc != nil {
+		return lease.releaseFunc(ctx)
+	}
 	return lease.releaseErr
 }
 
@@ -718,10 +1059,17 @@ func (*fakeVMExecSessionEndpoint) Fd() uintptr { return 0 }
 
 func (endpoint *fakeVMExecSessionEndpoint) SetWriteDeadline(deadline time.Time) error {
 	endpoint.mu.Lock()
-	defer endpoint.mu.Unlock()
 	endpoint.deadlines = append(endpoint.deadlines, deadline)
-	if endpoint.deadlineErrAt == 0 || endpoint.deadlineErrAt == len(endpoint.deadlines) {
-		return endpoint.deadlineErr
+	deadlineFunc := endpoint.deadlineFunc
+	deadlineErr := endpoint.deadlineErr
+	deadlineErrAt := endpoint.deadlineErrAt
+	deadlineCount := len(endpoint.deadlines)
+	endpoint.mu.Unlock()
+	if deadlineFunc != nil {
+		return deadlineFunc(deadline)
+	}
+	if deadlineErrAt == 0 || deadlineErrAt == deadlineCount {
+		return deadlineErr
 	}
 	return nil
 }
@@ -815,6 +1163,15 @@ func assertVMExecSessionEvents(t *testing.T, want []string, got []string) {
 	t.Helper()
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("VM-exec session event order mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func assertVMExecSessionChannelClosed(t *testing.T, channel <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-channel:
+	case <-t.Context().Done():
+		t.Fatal("VM-exec session synchronization channel did not close")
 	}
 }
 
