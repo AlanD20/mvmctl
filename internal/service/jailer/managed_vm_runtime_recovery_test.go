@@ -86,6 +86,17 @@ func TestFreshRecoveryCleanupRejectsUnsafeRuntimeParentBeforeCleaned(t *testing.
 	require.NoError(t, err)
 	require.Error(t, cleanup.Complete(t.Context()))
 	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
+	recordPath := filepath.Join(
+		root,
+		"var/lib/mvmctl/instances",
+		managedVMRuntimeUIDName(testAuthorityUID),
+		testVMID+".json",
+	)
+	raw, err := os.ReadFile(recordPath)
+	require.NoError(t, err)
+	persisted, err := decodeInstanceRecord(raw)
+	require.NoError(t, err)
+	assertInstanceRecordEqual(t, cleanup.snapshot(), persisted)
 	info, err := os.Lstat(runtimePath)
 	require.NoError(t, err)
 	assert.NotZero(t, info.Mode()&os.ModeSymlink)
@@ -93,6 +104,11 @@ func TestFreshRecoveryCleanupRejectsUnsafeRuntimeParentBeforeCleaned(t *testing.
 	require.NoError(t, os.Remove(runtimePath))
 	require.NoError(t, cleanup.Complete(t.Context()))
 	assert.Equal(t, instanceLifecycleCleaned, cleanup.snapshot().lifecycle)
+	raw, err = os.ReadFile(recordPath)
+	require.NoError(t, err)
+	persisted, err = decodeInstanceRecord(raw)
+	require.NoError(t, err)
+	assertInstanceRecordEqual(t, cleanup.snapshot(), persisted)
 	require.NoError(t, cleanup.Release(t.Context()))
 }
 
