@@ -828,6 +828,26 @@ func TestVMExecSessionStopPrimaryPreservesPartialResponseEvidence(t *testing.T) 
 	assert.ErrorIs(t, primary, io.ErrClosedPipe)
 }
 
+func TestVMExecSessionStopScopeLocalFinishWinsLateParentCancellation(t *testing.T) {
+	parentCtx, cancelParent := context.WithCancel(t.Context())
+	waitStarted := make(chan struct{})
+	waitFinished := make(chan struct{})
+	lease := &fakeVMExecSessionLease{waitStopFunc: func(ctx context.Context) error {
+		close(waitStarted)
+		<-ctx.Done()
+		close(waitFinished)
+		return ctx.Err()
+	}}
+	scope := startVMExecSessionStopWaiter(parentCtx, lease)
+	assertVMExecSessionChannelClosed(t, waitStarted)
+
+	scope.finish()
+	assertVMExecSessionChannelClosed(t, waitFinished)
+	cancelParent()
+
+	assert.NoError(t, scope.finishAndPrimary(nil))
+}
+
 func TestVMExecSessionIntermediateResponsesHonorCancellation(t *testing.T) {
 	tests := map[string]func(context.Context, controlEndpoint, controlDeps) error{
 		"source retained": deliverVMExecSourceRetained,

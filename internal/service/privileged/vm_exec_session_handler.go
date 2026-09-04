@@ -33,10 +33,10 @@ type vmExecSessionHandlerLease interface {
 
 type vmExecSessionStopScope struct {
 	ctx        context.Context
-	parent     context.Context
 	cancel     context.CancelCauseFunc
 	done       <-chan struct{}
 	finishOnce sync.Once
+	finishErr  *errs.DomainError
 	// mu guards the stop-owned error published only when the waiter wins cancellation arbitration.
 	mu      sync.Mutex
 	stopErr *errs.DomainError
@@ -245,7 +245,16 @@ func startVMExecSessionStopWaiter(
 ) *vmExecSessionStopScope {
 	stopCtx, cancel := context.WithCancelCause(ctx)
 	done := make(chan struct{}, 1)
-	scope := &vmExecSessionStopScope{ctx: stopCtx, parent: ctx, cancel: cancel, done: done}
+	scope := &vmExecSessionStopScope{
+		ctx:    stopCtx,
+		cancel: cancel,
+		done:   done,
+		finishErr: errs.New(
+			errs.CodeProcessError,
+			"retained VM-exec session stop waiter closed",
+			errs.WithClass(errs.ClassInternal),
+		),
+	}
 	go func() {
 		waitErr := lease.waitStop(stopCtx)
 		if stopCtx.Err() == nil {
@@ -286,7 +295,7 @@ func (scope *vmExecSessionStopScope) finish() {
 		return
 	}
 	scope.finishOnce.Do(func() {
-		scope.cancel(nil)
+		scope.cancel(scope.finishErr)
 		<-scope.done
 	})
 }
@@ -306,7 +315,11 @@ func (scope *vmExecSessionStopScope) finishAndPrimary(operationErr error) error 
 	if stopErr != nil {
 		return withVMExecSessionResponseEvidence(stopErr, operationErr)
 	}
-	if cause := context.Cause(scope.parent); cause != nil {
+	cause := context.Cause(scope.ctx)
+	if cause == scope.finishErr {
+		return operationErr
+	}
+	if cause != nil {
 		if domainErr := errs.AsDomainError(cause); domainErr != nil {
 			return withVMExecSessionResponseEvidence(domainErr, operationErr)
 		}
