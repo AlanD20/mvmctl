@@ -43,10 +43,11 @@ continue without silently deleting it.
   consumed only by an inert generation authority, and the LoopMount provision/inspect actions are registered only in
   the private receiver. The Network family also owns an exact per-VM namespace placeholder used only by the uncomposed
   namespace effect. A separate private Jailer lease now creates and pins the exact root-controlled
-  `/run/mvmctl/runtime/<uid>/<vm-id>` hierarchy and removes only the identity-checked empty VM directory, including
-  effectful-unlink and parent-sync retry reconciliation. Durable launch authority now retains it through activation or
-  abort and cleanup, which refuses `cleaned` while the directory is non-empty. It is not mounted or publicly composed
-  yet; no live production topology, public LoopMount backend cutover, or firewall kernel effect exists.
+  `/run/mvmctl/runtime/<uid>/<vm-id>` hierarchy, unlinks only the five compiled runtime leaves, and removes only the
+  identity-checked empty VM directory, including effectful-unlink and parent-sync retry reconciliation. Durable launch
+  authority retains it through activation or abort and cleanup, which refuses `cleaned` for a directory, mount, or
+  unexpected name. It is not mounted or publicly composed yet; no live production topology, public LoopMount backend
+  cutover, or firewall kernel effect exists.
 - Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
 - Private base VM launch-resource selection and lease for fixed rootfs, Firecracker configuration, kernel, and optional

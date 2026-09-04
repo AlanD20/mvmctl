@@ -291,8 +291,11 @@ with retryable unlink/parent-sync reconciliation. The lease remains private and 
 durable `launching` lease can derive the recorded owner and VM identity to create it; partial preparation stays retained
 for abort, and activation or abort followed by active cleanup transfers the same lease without reconstructing a path.
 Cleanup removes and releases the exact empty directory before committing `cleaned`; a non-empty directory keeps the
-record in retryable `cleaning`. The directory is not yet mounted inside the VM namespace or used by public lifecycle
-operations; fixed socket/PID-leaf cleanup and stale-runtime recovery remain pending.
+record in retryable `cleaning`. Before removal it unlinks only the five compiled socket/PID basenames through the
+retained directory descriptor. Missing leaves are already clean, symlinks are unlinked rather than followed, and a
+directory, mount, or unexpected name remains untouched and blocks `cleaned`. The directory is not yet mounted inside
+the VM namespace or used by public lifecycle operations; socket/PID-leaf admission and stale-runtime recovery remain
+pending.
 
 The final Jailer instance record is strict schema 3 with
 `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
@@ -356,8 +359,8 @@ state and cache their first cleanup result.
 
 No production child launcher, privileged VM action, or public VM lifecycle constructs or consumes this private graph.
 Production topology/cgroup final verification, network/firewall lease transfer, stale Jailer-tree reconciliation,
-fixed-leaf/mount/output cleanup, stale-runtime reopening, status observation and full reconciliation, API wiring, and
-live L2 qualification remain pending.
+mount/output cleanup, stale-runtime reopening, status observation and full reconciliation, API wiring, and live L2
+qualification remain pending.
 
 The transitional public relaunch path now has a separate, private normal-process `vmRelaunchState` increment. Start,
 reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,

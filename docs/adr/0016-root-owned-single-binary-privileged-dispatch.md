@@ -1229,9 +1229,11 @@ mutex-protected, cancellation-independent remove/release state and cache the fir
 durable `launching` authority derives the recorded owner UID/GID and VM ID to create it. A partial post-create failure
 remains attached for abort; activation and abort/active cleanup transfer the same lease without reopening a path; and
 cleanup removes and releases the exact empty directory before replacing `cleaning` with `cleaned`. A non-empty runtime
-directory fails closed and leaves retryable cleanup authority. The directory is not yet mounted at `/run/mvm/runtime`
-or wired to any privileged or public action. Fixed socket/PID-leaf admission and cleanup, stale-runtime reopening, and
-production launch rollback remain pending.
+directory fails closed and leaves retryable cleanup authority. Cleanup first unlinks only the five compiled runtime
+basenames through the retained directory descriptor. `ENOENT` is idempotent, symlinks are not followed, directory or
+mount entries fail closed, and unexpected names remain untouched. The directory is not yet mounted at
+`/run/mvm/runtime` or wired to any privileged or public action. Fixed socket/PID-leaf admission, stale-runtime
+reopening, and production launch rollback remain pending.
 
 The Network family also creates one exact root-owned
 `/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder while retaining its directory, leaf, and mount identity. The
@@ -1475,7 +1477,7 @@ cleanup, and recovery capabilities are pointer-shared, close once, and cache the
 The schema-2 complete-identity experiment was not integrated because it fabricated pre-Jailer final identity and
 compared the trusted-store inode with Jailer's copy. The implemented process graph remains private and uncomposed:
 production child spawning and launch activation, network/firewall acquisition, final live topology/cgroup verification,
-stale-tree, fixed-leaf/mount/output cleanup, stale-runtime reopening, status observation and complete reconciliation,
+stale-tree and mount/output cleanup, stale-runtime reopening, status observation and complete reconciliation,
 privileged/public wiring, and live qualification remain pending.
 
 Live snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only

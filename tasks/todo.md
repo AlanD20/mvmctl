@@ -174,10 +174,13 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
       parents, exclusive caller-owned mode-`0700` VM-directory creation, device/inode pinning, unsafe/existing-state
       rejection without repair, cleanup authority after partial preparation, identity-checked empty-only removal,
       effectful-unlink/parent-sync reconciliation, and pointer-shared cancellation-independent release. Mount
-      consumption, fixed-leaf cleanup, stale-runtime reopening, and public cutover remain pending.
+      consumption, stale-runtime reopening, and public cutover remain pending.
     - [x] Derive runtime ownership from durable `launching` authority; retain partial preparation through abort;
       transfer the same lease through activation or abort and active cleanup; and remove/release it before `cleaned`,
       while an unexpected non-empty directory remains in retryable `cleaning`.
+    - [x] Unlink only the five compiled runtime socket/PID names through the retained descriptor before directory
+      removal. Missing names are idempotent, symlinks are not followed, fixed-name directories fail closed, unexpected
+      names remain untouched, and effectful-unlink failure resumes safely.
   - [x] Freeze snapshot producer/restore leaves as `rootfs.img`, `memory`, and `vmstate`; derive restore and remove paths
     from the validated snapshot ID rather than SQLite file-path columns.
   - [ ] Remove the transitional `phantom-rootfs.img` symlink through the Task 7 namespace overlay and add the managed
@@ -524,9 +527,10 @@ reconciliation, and qualification pending
   leaves, requires cgroup emptiness, unlinks only the five runtime leaves, and removes descriptor-relative allowlisted
   directories bottom-up only when empty; never recursively traverse a caller-writable tree or one containing a mount.
   - [x] Private cleanup terminates and reaps the optional relay before Firecracker, releases retained process and Jailer
-    destination descriptors, removes/releases only the exact empty retained runtime directory, and writes `cleaned`
-    only afterward. Wait/reap failure or an unexpected runtime leaf leaves locks, resources, and the `cleaning` record
-    available for retry; fixed-leaf/mount/cgroup cleanup and stale-runtime reopening remain pending.
+    destination descriptors, unlinks only the five fixed runtime leaves, removes/releases only the exact empty retained
+    runtime directory, and writes `cleaned` only afterward. Wait/reap failure, fixed-name directory, mount, or an
+    unexpected runtime leaf leaves locks, resources, and the `cleaning` record available for retry; mount/cgroup
+    cleanup and stale-runtime reopening remain pending.
 - [ ] L1 fault tests cover source/target replacement, PID mismatch, process exit, setns, mount, unmount, and cleanup.
   - [x] Focused L1 evidence covers gate cancellation/EOF, pidfd and locator mismatch, liveness/exit/HUP classification,
     bounded executable observation, every identity recheck, active post-rename ownership, full-identity recovery,
