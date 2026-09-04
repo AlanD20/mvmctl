@@ -437,9 +437,10 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 ### Task 7: Add private mount and process identity primitives
 
 **Owner:** engineer
-**Status:** Private blocked-process, pidfd, Jailer-destination, runtime-directory lifecycle, activation, and
-cleanup/recovery authority implemented; production child launch/composition, complete effects, privileged actions,
-reconciliation, and qualification pending
+**Status:** Private blocked-process, pidfd, Jailer-destination, fixed-name cgroup-v2, runtime-directory lifecycle,
+activation, and cleanup/recovery authority implemented; production child launch/composition, complete effects,
+privileged actions,
+fresh-dispatcher/reboot cgroup recovery, reconciliation, and qualification pending
 **Foundation dependency:** Task 4
 **Full acceptance dependencies:** Tasks 5, 6, and 8
 
@@ -454,8 +455,8 @@ reconciliation, and qualification pending
   verifies exact derived cgroup membership and the closed topology capability's network namespace. `cleaned` retains
   only the same-UID tombstone and generations, with no launch-specific GID, cache, release, or process identity.
   - [x] The strict record/codec, lifecycle-shape validation, pure transitions, and manifest release validation are
-    implemented. The private process verifier can now commit `active`, but production activation and final live
-    cgroup/topology verification keep this item open.
+    implemented. The private verifier can now commit `active` with retained exact sole-member cgroup authority, but
+    production activation, topology verification, cgroup controller/limit readiness, and recovery keep this item open.
 - [ ] Launch a child blocked by an inherited EOF-fails-closed two-way handshake in an initial private mount namespace
   and an optional blocked dropped-caller console relay in the host mount namespace. Open each pidfd, issue a fresh
   parent challenge, and require the still-blocked child to acknowledge it before accepting PID-derived evidence;
@@ -495,13 +496,15 @@ reconciliation, and qualification pending
   trusted-store Firecracker inode.
   - [x] Implement the private bounded verifier with strict `/proc` parsing, descriptor-pinned observations, a 10-second
     budget and 25-millisecond minimum interval, pidfd exit checks, exact root/copy binding, sealing, manifest hashing,
-    and active-record replacement. Production topology/cgroup authority and live final verification remain pending.
+    active-record replacement, and retained cgroup-authority verification. Production topology, controller/limit
+    readiness, lifecycle wiring, and live qualification remain pending.
 - [ ] Recheck PID, boot ID, start ticks, all UID/GID identities, the exact empty supplementary-group set, cgroup, final
   namespace/root/executable identity, process liveness, and release binding before signal or `setns`. The network
   namespace identity remains owned by the closed topology capability rather than a raw path/fd field.
   - [x] The private activation verifier repeats these checks and compares the observed network namespace only with an
-    owner-bound topology-selected identity retained by the launch lease. Production topology selection, `setns`, and
-    live qualification remain pending.
+    owner-bound topology-selected identity retained by the launch lease. Exact cgroup membership now comes from the
+    fixed-name authority's pidfd/start-tick-bound sole-member proof, with same-lease retry and no schema cgroup path.
+    Production topology selection, `setns`, and live qualification remain pending.
 - [ ] Make launch, active, cleanup, release-slot, authority-root, and UID-directory leases pointer-shared,
   mutex-protected, close-once across copies/concurrent release, cancellation-independent during cleanup, and repeat the
   cached first cleanup result.
@@ -512,8 +515,9 @@ reconciliation, and qualification pending
   VM, pidfd, mount, network, and firewall resources into cleanup without unlocking/reacquiring the VM. Keep
   authority-level `BeginCleanup` only for fresh recovery admission.
   - [x] Implement consuming abort/active-cleanup transfer for the currently retained prepared release, VM lock, pidfds,
-    Jailer destination, topology-selected namespace identity, and runtime directory. Mount, network, and firewall lease
-    transfer remains pending.
+    Jailer destination, fixed-name cgroup authority, topology-selected namespace identity, and runtime directory.
+    Cgroup authority transfers launch -> active -> cleanup; abort binds it only after exact task reap. Mount, network,
+    and firewall lease transfer remains pending.
 - [ ] Require pidfd support for every mutating operation, signal only with `pidfd_send_signal`, observe exit through the
   pidfd, and fail host capability admission instead of falling back to raw PID signaling. Re-admit a present relay by
   exact locator and complete final identity after a crash; never signal an ambiguous or reused PID.
@@ -533,11 +537,15 @@ reconciliation, and qualification pending
     destination descriptors, unlinks only the five fixed runtime leaves, removes/releases only the exact empty retained
     runtime directory, and writes `cleaned` only afterward. Wait/reap failure, fixed-name directory, mount, or an
     unexpected runtime leaf leaves locks, resources, and the `cleaning` record available for retry. Fresh cleanup now
-    reopens that exact directory without creation or repair; mount/cgroup cleanup remains pending.
+    reopens that exact directory without creation or repair. The retained cgroup authority removes only its exact empty,
+    unreplaced leaf before durable `cleaned`, preserves the same lease for retry, and converges after a terminal close
+    error when removal is already proven. Mount cleanup and fresh-dispatcher/reboot cgroup recovery remain pending.
 - [ ] L1 fault tests cover source/target replacement, PID mismatch, process exit, setns, mount, unmount, and cleanup.
   - [x] Focused L1 evidence covers gate cancellation/EOF, pidfd and locator mismatch, liveness/exit/HUP classification,
     bounded executable observation, every identity recheck, active post-rename ownership, full-identity recovery,
-    boot-mismatch no-signal behavior, terminate/wait/reap retry, destination substitution, and close-once cleanup.
+    boot-mismatch no-signal behavior, terminate/wait/reap retry, destination substitution, cgroup descriptor/mount
+    checks, legacy-leaf refusal, handoff provenance, membership/replacement races, retryable empty removal, terminal
+    close convergence, and close-once cleanup.
 - [ ] L1 crash-window tests cover pre-record handshake EOF, every `launching` effect stage, partial final-copy sealing,
   post-rename durability uncertainty, `launching -> active`, and repeated `cleaning` recovery.
 
@@ -957,6 +965,14 @@ lifecycle, host-reboot reconciliation, API relay/policy/audit integration, and P
     transactional lifecycle and L2 qualification.
 - [ ] Preserve exact release identity and jail-visible paths across snapshot restore and live hotplug.
 - [ ] Harden cgroup readiness, membership, values, and process-aware cleanup.
+  - [x] Add the private schema-3 fixed-name cgroup-v2 authority: pin and exactly verify root/parent/leaf descriptors and
+    mount identity; reject legacy-leaf adoption; prove fresh absence and recheck it at the last Jailer handoff; require
+    successful handoff provenance; verify pidfd/start-tick-bound sole membership with same-lease retry; transfer
+    launch -> active -> cleanup; bind abort cleanup only after exact task reap; and remove only the exact empty
+    unreplaced leaf before durable `cleaned`, including terminal close-error convergence. Store no cgroup path.
+  - [ ] Add fresh-dispatcher/reboot cgroup recovery and reconciliation; enable and prove controller readiness; read back
+    exact limits; replace `entry.go` path-based prepare/remove; wire production/public create/start/stop; and complete
+    live L2, Tier 3, and system qualification. This is not yet host enforcement or release evidence.
 - [ ] Remove process-local semaphore admission and user-DB-as-root-authority designs.
 - [ ] L1/L2 fault injection covers kill at every effect stage, reboot, PID reuse, partial cleanup, and repeated reconcile.
 - [ ] L1 proves relaunch emits the vsock device and L2 proves `mvm exec` after stop/start, reboot, host reboot plus start,

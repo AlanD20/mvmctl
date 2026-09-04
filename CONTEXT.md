@@ -306,7 +306,8 @@ identity, host boot ID, launch/cleanup generations, the handshake-blocked child'
 absent relay or handshake-blocked relay PID/start locator. It does not
 claim final credentials, cgroup membership, final mount namespace, jail root, or executable identity. `active` records
 the receiver-observed credentials, final mount namespace, jail root, and executable, requires empty supplementary
-groups and exact derived cgroup membership, and binds the final copied Firecracker to the release. A present active
+groups and private authority verification of exact derived cgroup membership, and binds the final copied Firecracker
+to the release. The schema stores no cgroup path or caller-shaped cgroup value. A present active
 relay records its caller credentials, empty groups, host mount namespace/root, and exact root-owned
 `/usr/local/bin/mvm` executable metadata and digest; absence is explicit, and `console.pid` remains display-only.
 Network namespace identity remains in the separate closed topology capability and is compared during activation rather
@@ -330,6 +331,18 @@ proved absent/fresh immediately before that release; only an exactly admitted, n
 removed after process absence. `launchLease.Abort` and `activeLease.BeginCleanup` transfer their resources directly
 into cleanup without releasing and reacquiring the VM lock. Authority-level cleanup admission is recovery-only.
 
+The private schema-3 graph now also carries a fixed-name cgroup-v2 authority for
+`/sys/fs/cgroup/mvmctl/<vm-id>`. It descriptor-pins the cgroup root, compiled parent, and VM leaf and verifies exact
+metadata, mount identity, and replacement stability. Preparation accepts only a freshly absent VM leaf, never adopts a
+legacy leaf, and repeats the absence proof at the last handoff boundary. A successful blocked-child release records
+Jailer-handoff provenance before the leaf can be bound. Binding and activation prove that the pidfd/start-tick-bound
+Firecracker task is the leaf's sole member; a failed proof retains the same lease for retry. Cgroup authority transfers
+from launch to active to cleanup without path reconstruction. Abort first terminates and exactly reaps the retained
+task, then causally binds the leaf for cleanup. Completion requires the exact unreplaced leaf to be empty before
+retryable descriptor-relative removal and commits durable `cleaned` only afterward. A terminal descriptor-close error
+after proven removal converges rather than retrying a reused descriptor. This authority adds no cgroup path to the
+schema and is not yet production host enforcement.
+
 The original pidfd provides stable task identity and exit detection but does not notify `exec`. Activation uses a
 bounded context-aware `/proc/<pid>/exe` observation loop, stopping immediately on pidfd-observed exit, before final
 identity admission. After any active-record rename, even a later fsync/close error returns a non-nil active lease with
@@ -351,7 +364,8 @@ VM lock into durable `launching` authority.
 The private activation path uses strict bounded `/proc` parsing and descriptor-pinned observations, a 10-second
 executable-transition budget with a 25-millisecond minimum interval, and repeated boot, PID/start, pidfd-liveness,
 credential, empty-group, cgroup, network-namespace, root, copied-executable, release-digest, and optional-relay checks.
-It binds and seals the Jailer-created root and Firecracker copy before replacing `launching` with `active`. Private
+Its cgroup check consumes only the retained fixed-name authority and exact sole-member proof. It binds and seals the
+Jailer-created root and Firecracker copy before replacing `launching` with `active`. Private
 `Abort`, `BeginCleanup`, and `Complete` transitions retain cleanup ownership, signal only through pidfds, wait and reap
 before `cleaned`, accept both exit readability and the post-reap pidfd hangup as dead, and keep retryable failures in
 `cleaning`. Fresh cleanup recovery is bounded to the recorded Firecracker and optional relay and signals nothing across
@@ -362,9 +376,11 @@ state and cache their first cleanup result.
 Fresh cleanup now reopens the exact existing per-VM runtime directory through the root-controlled hierarchy before
 runtime cleanup. It creates or repairs nothing, treats an absent hierarchy as already clean, and preserves retryable
 `cleaning` on unsafe state. No production child launcher, privileged VM action, or public VM lifecycle constructs or
-consumes this private graph. Production topology/cgroup final verification, network/firewall lease transfer, stale
-Jailer-tree reconciliation, mount/output cleanup, status observation and full reconciliation, API wiring, and live L2
-qualification remain pending.
+consumes this private graph. Fresh-dispatcher and reboot cgroup recovery/reconciliation, cgroup controller enablement
+and readiness plus exact limit readback, replacement of the path-based cgroup prepare/remove calls in `entry.go`,
+production topology and network/firewall lease transfer, stale Jailer-tree reconciliation, mount/output cleanup,
+public create/start/stop and other lifecycle wiring, status observation and full reconciliation, and live L2, Tier 3,
+and system qualification remain pending.
 
 The transitional public relaunch path now has a separate, private normal-process `vmRelaunchState` increment. Start,
 reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,

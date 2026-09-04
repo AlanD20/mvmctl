@@ -1341,7 +1341,8 @@ object that is present or absent in the wrong lifecycle. v0.3 performs no record
 
 `launching` is durable pre-effect intent, not a process-health claim. Fixed cgroup and jail paths are derived from the
 VM ID and compiled constants; the exact cgroup membership and fixed jail metadata are verified rather than duplicated
-as caller-shaped strings. The record carries no caller path, raw descriptor, Jailer argv, or fabricated final identity.
+as caller-shaped strings. The record has no cgroup path or cgroup object. It carries no caller path, raw descriptor,
+Jailer argv, or fabricated final identity.
 
 The relay field is an explicit closed union in both state-specific objects. `launch.relay.kind` is either `absent`,
 with no locator fields, or `present`, with the handshake-blocked relay's PID and start ticks. `active.relay.kind` must
@@ -1394,6 +1395,9 @@ The activation order is fixed:
    non-mounted stale fixed tree descriptor-relatively and bottom-up. Any unexpected entry, mount at or below the tree,
    replacement race, or incomplete admission returns `unavailable`; Jailer is not executed. Recheck the pinned parent
    and destination absence immediately before handoff so every accepted destination is freshly created by this Jailer.
+   Prepare the separate fixed-name cgroup-v2 authority by descriptor-pinning `/sys/fs/cgroup`, its compiled `mvmctl`
+   parent, and the `<vm-id>` leaf boundary with exact metadata and mount checks. The VM leaf must be freshly absent;
+   an existing legacy leaf is never adopted.
 5. Prepare fixed outputs, the runtime directory, initial private mount namespace, and named mounts. With the launch
    lease's VM lock already retained, acquire and retain only the later network, then firewall leases; create
    namespace/local and host
@@ -1403,9 +1407,11 @@ The activation order is fixed:
    same leases.
 6. Release the relay, observe and record its exact caller credentials, empty supplementary groups, host mount
    namespace/root, root-owned `/usr/local/bin/mvm` executable metadata and digest, and verify readiness.
-7. Recheck the pinned release and fresh jail-destination absence, then release the Firecracker child to the exact
-   Jailer with the pinned network namespace. The prepared release supplies the fixed store paths; the caller supplies
-   neither a hash nor path. This release occurs only after the complete firewall generation and links are verified.
+7. Recheck the pinned release, fresh jail-destination absence, and cgroup-leaf absence at the last handoff boundary,
+   then release the Firecracker child to the exact Jailer with the pinned network namespace. Record successful
+   Jailer-handoff provenance in the retained cgroup authority before it may bind the resulting leaf. The prepared
+   release supplies the fixed store paths; the caller supplies neither a hash nor path. This release occurs only after
+   the complete firewall generation and links are verified.
 8. Retain the original pidfd for stable task identity and exit detection while bounded, context-aware observation
    repeatedly opens and verifies `/proc/<pid>/exe` until it is the copied Firecracker rather than transient Jailer
    state. The compiled observation budget is 10 seconds with a 25-millisecond minimum interval; an earlier context
@@ -1418,7 +1424,9 @@ The activation order is fixed:
 10. Change the final jail root and copied executable to exact `root:root` mode `0755`, beneath exact `root:root` mode
    `0700` Jailer base and per-VM ancestors. Hash the sealed copy against the exact release manifest and recheck metadata.
 11. Re-observe boot ID, PID/start ticks, credentials, empty groups, cgroup, namespaces, root, executable, relay identity,
-    and pidfd liveness, then atomically replace `launching` with `active`.
+    and pidfd liveness. Cgroup verification uses the retained authority to prove that the pidfd/start-tick-bound task is
+    the exact leaf's sole member; a failed proof preserves that same lease for retry. Then atomically replace
+    `launching` with `active`.
 
 Sealing makes the copied inode immutable to the dropped caller and preserves the exact-content proof established at
 activation. Later status batches can compare the root-owned inode and metadata without rehashing every executable;
@@ -1438,7 +1446,9 @@ never retries an unlock or close against a descriptor number that the kernel may
 
 `launchLease.Abort(ctx)` and `activeLease.BeginCleanup(ctx)` are consuming transitions. They atomically move the held
 release reference and slot lock, VM lock, pidfds, and every acquired output, mount, topology, network, and firewall
-resource lease into one `cleanupLease`; the source lease becomes inert. A post-registration error never releases and
+resource lease, including the fixed-name cgroup authority, into one `cleanupLease`; the source lease becomes inert.
+Abort may call the cgroup authority's causal `BindForCleanup` only after the exact retained task has been terminated
+and reaped. A post-registration error never releases and
 reacquires the VM lock before cleaning. `instanceAuthority.BeginCleanup(ctx, caller, vmID)` exists only for a fresh
 dispatcher performing recovery admission and reacquires the exact record and locks in global order. It is not the
 error-path transition for a live launch or active lease. There is one named `Abort` method, not interchangeable aliases
@@ -1454,13 +1464,23 @@ lease first. Those post-rename failures return that lease together with a `Domai
 bounded cleanup diagnostics, and never acts through the stale source lease. No process, VM, release, network, or
 firewall lock is dropped between record replacement and cleaning.
 
-Implementation note (2026-08-31): main implements the private strict schema-3 record/codec and the process-authority
+Implementation note (updated 2026-09-04): main implements the private strict schema-3 record/codec and process-authority
 side of its lifecycle. An already-created Firecracker child and optional relay can be admitted behind challenged
 EOF-fails-closed gates with retained close-on-exec pidfds, exact PID/start locators, and a pinned receiver executable.
 `preparedRelease.registerLaunching` rechecks that authority, derives the manifest release identity, writes durable
 `launching`, and transfers the process, pinned store, release-slot lock, executable admission, and VM lock into the
 launch lease. The lease can prove the exact Jailer destination absent immediately before child release, bind the
 Jailer-created root and copy afterward, and retain an owner-bound topology-selected network-namespace identity.
+
+The same private graph now owns a fixed-name cgroup-v2 capability without adding any cgroup path to schema 3. It pins
+the cgroup root, compiled parent, and VM leaf through descriptors; verifies exact metadata, mount identity, and
+replacement stability; refuses to adopt an existing legacy leaf; proves fresh absence during preparation and again at
+the last handoff boundary; and records successful Jailer-handoff provenance before binding. Binding and activation
+prove that the retained pidfd/start-tick task is the exact leaf's sole member, with same-lease retry after verification
+failure. That authority transfers through launch, active, and cleanup. Abort binds for cleanup only after exact task
+termination and reap. Cleanup requires the exact unreplaced leaf to be empty, removes it descriptor-relatively with
+retryable replacement-safe convergence before durable `cleaned`, and treats a terminal close error after proven
+removal as converged.
 
 Private `activateVerifiedProcess` uses strict bounded `/proc` parsing and descriptor-pinned observations. It enforces
 the 10-second/25-millisecond executable-transition loop, repeated pidfd liveness and PID/start identity, boot ID,
@@ -1481,9 +1501,11 @@ state preserves the `cleaning` record and retained VM lock for retry.
 
 The schema-2 complete-identity experiment was not integrated because it fabricated pre-Jailer final identity and
 compared the trusted-store inode with Jailer's copy. The implemented process graph remains private and uncomposed:
-production child spawning and launch activation, network/firewall acquisition, final live topology/cgroup verification,
-stale-tree and mount/output cleanup, status observation and complete reconciliation, privileged/public wiring, and live
-qualification remain pending.
+fresh-dispatcher and reboot cgroup recovery/reconciliation, controller enablement/readiness and exact limit readback,
+replacement of `entry.go`'s path-based cgroup preparation/removal, production child spawning and launch activation,
+network/firewall acquisition, final live topology verification, stale-tree and mount/output cleanup, status observation
+and complete reconciliation, privileged/public create/start/stop wiring, and live L2, Tier 3, and system qualification
+remain pending. The private cgroup capability is not production host enforcement or release evidence.
 
 Live snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only
 that namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain
@@ -1515,7 +1537,9 @@ A durable `launching` record exists before the first externally mutable privileg
 may exist first only while an inherited private handshake makes external mutation impossible and EOF forces exit.
 Every post-registration failure retains a live lifecycle handle and invokes a typed abort that verifies the persistent
 VM and optional relay PID/start locators, terminates either process only through its separately verified pidfd, checks
-cgroup emptiness, and cleans namespace/chroot/instance state in order.
+cgroup emptiness through retained private authority, and cleans namespace/chroot/instance state in order. Fresh
+dispatcher or reboot admission of cgroup authority remains pending, so this implemented cleanup applies only while the
+launch/active/cleanup lease graph retains provenance.
 
 Startup and pre-launch reconciliation compare root instance records, processes, cgroups, and chroot directories. They do
 not trust the user database as root authorization. Operations are idempotent and either converge to a known state or

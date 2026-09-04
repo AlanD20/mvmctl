@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > bounded raw nftables snapshot collection with a retained host-netns transport factory, the private Jailer and
 > LoopMount ephemeral-authority capabilities, the private root-pinned network namespace and down-only link effects,
 > strict schema-3 Jailer record/registration and private pidfd process-activation/
-> cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
+> cleanup-recovery authority with retained fixed-name cgroup-v2 lifecycle authority, and typed LoopMount
+> client/protocol, rootfs-authority, resource-lock adapter, split
 > effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, its destination-agent
 > non-root execution side, its isolated process-bound source-session foundation, its closed one-request destination
 > session, its typed command-redacted user audit sink, the private descriptor-pinned VM runtime-directory lifecycle,
@@ -27,8 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > remote-exec trust flag described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
-> marker-only sudo policy, schema-3 Jailer launch composition and final live topology/cgroup verification and
-> reconciliation, complete relaunch parity and qualification, and remaining typed privileged operations are not
+> marker-only sudo policy, schema-3 Jailer launch composition, fresh-dispatcher/reboot cgroup recovery, controller and
+> exact-limit readiness, final live topology verification and reconciliation, complete relaunch parity and
+> qualification, and remaining typed privileged operations are not
 > implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
 
@@ -481,8 +483,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identities and executable digests.
 - Process, prepared-destination, destination, active, cleanup, and recovered-process capabilities use pointer-shared
   close-once state and cache their first cleanup result. This graph remains private: production child spawning and
-  launch composition, network/firewall lease transfer, final live topology/cgroup verification, full runtime cleanup
-  and reconciliation, public wiring, and system qualification remain release blockers.
+  launch composition, network/firewall lease transfer, final live topology verification, full runtime cleanup and
+  reconciliation, public wiring, and system qualification remain release blockers.
+- Added a private fixed-name cgroup-v2 authority to the schema-3 lease graph without storing a cgroup path in the
+  record. It pins and exactly checks the root, compiled parent, and VM leaf plus mount identity; refuses legacy-leaf
+  adoption; proves fresh absence through the last handoff recheck; and requires successful Jailer-handoff provenance
+  before binding. Activation proves the pidfd/start-tick-bound Firecracker is the sole member and preserves the same
+  lease for retry. Authority transfers launch -> active -> cleanup; abort binds only after exact task reap; and cleanup
+  removes only the exact empty unreplaced leaf before durable `cleaned`, with retryable removal and terminal
+  post-removal close convergence. Fresh-dispatcher/reboot recovery, controller enablement/readiness and exact limit
+  readback, replacement of `entry.go` path-based prepare/remove, production/public create/start/stop wiring, and live
+  L2/Tier 3/system qualification remain pending. This private increment is not production host enforcement or release
+  evidence.
 
 #### Private trusted-release authority substrate
 
@@ -753,6 +765,10 @@ The following items are release blockers and are intentionally not described abo
 - Compose the implemented private process activation, abort, and cleanup/recovery authority into the production launch
   action. Carry the remaining mount, network, and firewall resources through launch, active, and cleaning without lock
   release/reacquisition, and preserve the returned post-rename authority on every failure.
+- Compose the private fixed-name cgroup-v2 authority into production create/start/stop and other lifecycle actions. Add
+  fresh-dispatcher/reboot recovery and reconciliation, controller enablement/readiness, exact limit readback, replacement
+  of `entry.go` path-based prepare/remove, and live L2, Tier 3, and system qualification before treating it as host
+  enforcement or release evidence.
 - Compose the implemented exact-absent Jailer destination and pre-handoff recheck into production; add safe admission
   and descriptor-relative removal for only an exact non-mounted stale fixed tree after process absence. Create links
   down, apply and freshly verify the complete atomic nftables generation, then raise links; release the blocked child

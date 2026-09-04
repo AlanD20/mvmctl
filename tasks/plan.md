@@ -190,11 +190,18 @@ continue without silently deleting it.
   optional relay processes can be challenge-authenticated while blocked, retained through close-on-exec pidfds, and
   transferred with the prepared release and VM lock into durable `launching` authority. The private launch lease can
   prove an exact absent Jailer destination before handoff; bind, seal, hash, and verify the resulting root/copy through
-  bounded `/proc` observation; and commit `active`. Private abort, active cleanup, and fresh-recovery cleanup retain
+  bounded `/proc` observation; and commit `active`. Its private fixed-name cgroup-v2 authority pins and exactly verifies
+  root/parent/leaf descriptors and mount identity, never adopts a legacy leaf, proves fresh absence through the last
+  handoff recheck, and binds only after successful Jailer-handoff provenance. It proves the pidfd/start-tick-bound task
+  is the sole leaf member with same-lease retry, transfers authority from launch through active to cleanup, and removes
+  only the exact empty unreplaced leaf before durable `cleaned`; abort binds for cleanup only after exact task reap, and
+  terminal post-removal close errors converge. Schema 3 stores no cgroup path. Private abort and active cleanup retain
   pidfd authority, signal/wait/reap without raw PID fallback, accept post-reap pidfd hangup, and keep retryable cleanup
-  ownership. These capabilities use pointer-shared close-once state. Production child spawning and launch composition,
-  network/firewall lease transfer, final live topology/cgroup verification, full runtime cleanup/reconciliation, API
-  wiring, and system tests remain pending.
+  ownership. These capabilities use pointer-shared close-once state. Fresh-dispatcher/reboot cgroup recovery,
+  controller enablement/readiness and exact limit readback, replacement of `entry.go` path-based cgroup operations,
+  production child spawning and create/start/stop composition, network/firewall lease transfer, final live topology
+  verification, full reconciliation, API wiring, and live L2/Tier 3/system tests remain pending. This is not yet
+  production host enforcement or release evidence.
 - Private firewall generation authority with a strict committed/applying record and codec, descriptor-relative
   exclusive store at `/var/lib/mvmctl/firewall/generation.json`, and never-unlinked global
   `/run/mvmctl/authority/firewall.lock`. Acquisition requires earlier network authority and admits only the current boot
@@ -390,20 +397,25 @@ release identity, host boot ID, launch/cleanup generations, the blocked child PI
 supplementary-group set, final mount namespace and jail root, and
 Jailer's copied Firecracker identity after it is sealed and hashed against the release. A present relay adds its full
 receiver-observed caller credentials, empty groups, host namespace/root, and exact root-owned `/usr/local/bin/mvm`
-executable metadata and digest; `console.pid` remains display-only. Activation also verifies the
-exact derived cgroup and the separate closed topology capability's network namespace. Failed cleanup remains
+executable metadata and digest; `console.pid` remains display-only. Activation also verifies the exact derived cgroup
+through a retained fixed-name cgroup-v2 authority and the separate closed topology capability's network namespace. No
+cgroup path is stored in schema 3. Failed cleanup remains
 `cleaning`. `cleaned` is a persistent same-UID ownership tombstone, carries no launch-specific GID, cache, release, or
 process identity, and may be relaunched only by that UID. Mount identity is deliberately not retained across cleanup
 because it is valid for only one mount lifetime.
 
 Implementation status: main now contains the private strict schema-3 record/codec plus blocked-process, pidfd,
-Jailer-destination, activation, and cleanup/recovery authority. A prepared release can consume its manifest-derived
-identity, pinned store/slot/executable authority, exact blocked-process locators, and retained pidfds into a durable
-`launching` lease that keeps the VM lock. Private `activateVerifiedProcess` performs bounded descriptor-pinned
-observation, seals and hashes the Jailer copy, and can commit `active`; consuming abort/cleanup paths retain authority
-until pidfd termination/reaping and `cleaned`. No production VM lifecycle constructs or consumes this graph yet.
-Production child spawning, live topology/cgroup final verification, network/firewall and mount/output resource
-integration, public actions, batch observation, complete reconciliation, and qualification remain pending.
+Jailer-destination, fixed-name cgroup-v2, activation, and cleanup authority. A prepared release can consume its
+manifest-derived identity, pinned store/slot/executable authority, exact blocked-process locators, and retained pidfds
+into a durable `launching` lease that keeps the VM lock. Private `activateVerifiedProcess` performs bounded descriptor-pinned
+observation, seals and hashes the Jailer copy, verifies pidfd/start-tick-bound sole cgroup membership, and can commit
+`active`. The cgroup lease pins and exactly checks root/parent/leaf descriptors and mount identity; refuses legacy-leaf
+adoption; requires a final absence recheck and successful handoff provenance; transfers launch -> active -> cleanup;
+and performs exact empty replacement-safe removal before `cleaned`, with same-lease retry and terminal close
+convergence. Abort binds only after exact task reap. No production VM lifecycle constructs or consumes this graph yet.
+Fresh-dispatcher/reboot cgroup recovery, controller readiness and exact limit readback, replacement of `entry.go`
+path-based prepare/remove, production create/start/stop wiring, live topology verification, network/firewall and
+mount/output integration, public actions, reconciliation, and live L2/Tier 3/system qualification remain pending.
 
 The global lock order is:
 
@@ -461,7 +473,9 @@ release, ignore cancellation during cleanup, and cache the first cleanup result.
 callback, or generic state mutation.
 
 `launchLease.Abort` and `activeLease.BeginCleanup` consume their source directly into a cleanup lease, transferring
-release/VM locks, pidfds, and all mount/network/firewall resources without unlock/reacquire. Authority-level
+release/VM locks, pidfds, and all cgroup/mount/network/firewall resources without unlock/reacquire. Abort binds the
+cgroup leaf for cleanup only after exact task termination and reap. Cleanup requires exact empty replacement-safe
+removal before `cleaned`; a terminal close error after proven removal converges. Authority-level
 `BeginCleanup` is only fresh recovery admission. Cleanup and reconciliation re-admit a present relay through pidfd plus
 its state-appropriate exact locator or full identity and never signal an ambiguous or reused PID.
 
