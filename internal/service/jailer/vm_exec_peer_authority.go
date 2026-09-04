@@ -160,7 +160,7 @@ func verifyVMExecFirecrackerPeerIdentity(
 	if !alive {
 		return vmExecPeerError(record.vmID, role, "connection peer is not live", nil)
 	}
-	if err := verifyRecoveredActiveIdentity(ctx, identityDeps, record); err != nil {
+	if _, err := verifyRecoveredActiveIdentity(ctx, identityDeps, record); err != nil {
 		return err
 	}
 	if err := processes.verifyLocators(ctx); err != nil {

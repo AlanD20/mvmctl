@@ -231,10 +231,10 @@ func (authority *vmExecSessionAuthority) recheckActivePairAfterCapacity(
 	if currentBootID != hostBootID {
 		return processVerificationError("", "host boot ID changed across VM-exec capacity reservation", nil)
 	}
-	if err := verifyRecoveredActiveIdentity(ctx, authority.identityDeps, sourceRecord); err != nil {
+	if _, err := verifyRecoveredActiveIdentity(ctx, authority.identityDeps, sourceRecord); err != nil {
 		return err
 	}
-	if err := verifyRecoveredActiveIdentity(ctx, authority.identityDeps, destinationRecord); err != nil {
+	if _, err := verifyRecoveredActiveIdentity(ctx, authority.identityDeps, destinationRecord); err != nil {
 		return err
 	}
 	if source == nil || destination == nil {
@@ -281,7 +281,7 @@ func (authority *vmExecSessionAuthority) readmitActivePair(
 			return "", nil, nil, err
 		}
 		processes[index] = recovered
-		if err := verifyRecoveredActiveIdentity(ctx, authority.identityDeps, record); err != nil {
+		if _, err := verifyRecoveredActiveIdentity(ctx, authority.identityDeps, record); err != nil {
 			return "", nil, nil, err
 		}
 		if err := recovered.verifyLocators(ctx); err != nil {

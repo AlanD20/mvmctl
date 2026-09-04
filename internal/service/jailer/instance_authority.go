@@ -609,7 +609,7 @@ func beginFreshRecoveryCleanupWithDeps(
 			return nil, appendInstanceOperationError(err, "release rejected cleanup lease", locked.Release(ctx))
 		}
 		if locked.record.active != nil {
-			if err := verifyRecoveredActiveIdentity(ctx, identityDeps, locked.record); err != nil {
+			if _, err := verifyRecoveredActiveIdentity(ctx, identityDeps, locked.record); err != nil {
 				return nil, appendInstanceOperationError(err, "release rejected cleanup lease", locked.Release(ctx))
 			}
 		}

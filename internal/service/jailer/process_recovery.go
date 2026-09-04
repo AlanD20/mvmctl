@@ -17,11 +17,12 @@ type reopenedRecordedProcesses struct {
 }
 
 type reopenedRecordedProcessesState struct {
-	// mu guards retained and the complete release lifecycle below. vmID is immutable.
+	// mu guards retained, verifying, and the complete release lifecycle below. vmID and deps are immutable.
 	mu         sync.Mutex
 	deps       processRecoveryDeps
 	vmID       string
 	retained   []recoveredRecordedProcess
+	verifying  bool
 	released   bool
 	releaseErr error
 }
@@ -42,6 +43,13 @@ type processRecoveryDeps struct {
 	terminatePIDFD  func(context.Context, int) error
 	waitReapPIDFD   func(context.Context, int) error
 	close           func(context.Context, int) error
+}
+
+type recoveredProcessVerification struct {
+	state    *reopenedRecordedProcessesState
+	deps     processRecoveryDeps
+	vmID     string
+	retained []recoveredRecordedProcess
 }
 
 // reopenRecordedProcesses is exclusively for fresh recovery while the record and VM authority are already locked.
@@ -154,6 +162,9 @@ func (processes *reopenedRecordedProcesses) terminateAndReap(ctx context.Context
 	if state.released {
 		return processVerificationError(state.vmID, "recovered process authority is not active", nil)
 	}
+	if state.verifying {
+		return processVerificationError(state.vmID, "recovered process verification is in progress", nil)
+	}
 	for index := len(state.retained) - 1; index >= 0; index-- {
 		process := &state.retained[index]
 		if process.reaped {
@@ -189,35 +200,31 @@ func (processes *reopenedRecordedProcesses) terminateAndReap(ctx context.Context
 }
 
 func (processes *reopenedRecordedProcesses) verifyLocators(ctx context.Context) error {
-	if processes == nil || processes.state == nil {
-		return processVerificationError("", "recovered process authority is not active", nil)
+	verification, err := processes.beginVerification(ctx)
+	if err != nil {
+		return err
 	}
-	state := processes.state
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if state.released {
-		return processVerificationError(state.vmID, "recovered process authority is not active", nil)
-	}
-	for index := range state.retained {
-		process := &state.retained[index]
-		derived, err := state.deps.deriveLocator(ctx, process.pidfd)
+	defer verification.finish()
+	for index := range verification.retained {
+		process := &verification.retained[index]
+		derived, err := verification.deps.deriveLocator(ctx, process.pidfd)
 		if err != nil {
-			return processVerificationError(state.vmID, "rederive recovered "+process.role+" locator", err)
+			return processVerificationError(verification.vmID, "rederive recovered "+process.role+" locator", err)
 		}
 		if derived != process.locator {
 			return processVerificationError(
-				state.vmID,
+				verification.vmID,
 				"recovered "+process.role+" pidfd locator changed during full verification",
 				nil,
 			)
 		}
-		alive, err := state.deps.pidfdAlive(ctx, process.pidfd)
+		alive, err := verification.deps.pidfdAlive(ctx, process.pidfd)
 		if err != nil {
-			return processVerificationError(state.vmID, "recheck recovered "+process.role+" liveness", err)
+			return processVerificationError(verification.vmID, "recheck recovered "+process.role+" liveness", err)
 		}
 		if !alive {
 			return processVerificationError(
-				state.vmID,
+				verification.vmID,
 				"recovered "+process.role+" exited during full verification",
 				nil,
 			)
@@ -226,17 +233,202 @@ func (processes *reopenedRecordedProcesses) verifyLocators(ctx context.Context) 
 	return nil
 }
 
+func (processes *reopenedRecordedProcesses) beginVerification(
+	ctx context.Context,
+) (*recoveredProcessVerification, error) {
+	if processes == nil || processes.state == nil {
+		return nil, processVerificationError("", "recovered process authority is not active", nil)
+	}
+	if ctx == nil {
+		return nil, processVerificationError(
+			processes.state.vmID,
+			"recovered process verification context is required",
+			nil,
+		)
+	}
+	state := processes.state
+	state.mu.Lock()
+	if state.released {
+		state.mu.Unlock()
+		return nil, processVerificationError(state.vmID, "recovered process authority is not active", nil)
+	}
+	if state.verifying {
+		state.mu.Unlock()
+		return nil, processVerificationError(state.vmID, "recovered process verification is in progress", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		state.mu.Unlock()
+		return nil, processVerificationError(state.vmID, "verify recovered process authority", err)
+	}
+	state.verifying = true
+	verification := &recoveredProcessVerification{
+		state: state, deps: state.deps, vmID: state.vmID,
+		retained: append([]recoveredRecordedProcess{}, state.retained...),
+	}
+	state.mu.Unlock()
+	return verification, nil
+}
+
+func (verification *recoveredProcessVerification) finish() {
+	verification.state.mu.Lock()
+	verification.state.verifying = false
+	verification.state.mu.Unlock()
+}
+
+func (verification *recoveredProcessVerification) firecracker() (recoveredRecordedProcess, error) {
+	for _, process := range verification.retained {
+		if process.role == "Firecracker" && !process.signalSent && !process.reaped {
+			return process, nil
+		}
+	}
+	return recoveredRecordedProcess{}, processVerificationError(
+		verification.vmID,
+		"recovered Firecracker pidfd authority is not active",
+		nil,
+	)
+}
+
+func (verification *recoveredProcessVerification) verifyFirecracker(
+	ctx context.Context,
+	process recoveredRecordedProcess,
+) error {
+	if err := requireProcessAlive(
+		ctx,
+		verification.deps.pidfdAlive,
+		process.pidfd,
+		verification.vmID,
+		"Firecracker",
+	); err != nil {
+		return err
+	}
+	return requireExactRecoveredPIDFDLocator(ctx, verification, process)
+}
+
+func requireExactRecoveredPIDFDLocator(
+	ctx context.Context,
+	verification *recoveredProcessVerification,
+	process recoveredRecordedProcess,
+) error {
+	derived, err := verification.deps.deriveLocator(ctx, process.pidfd)
+	if err != nil {
+		return processVerificationError(verification.vmID, "derive Firecracker locator from recovered pidfd", err)
+	}
+	if derived != process.locator {
+		return processVerificationError(
+			verification.vmID,
+			"Firecracker pidfd locator does not match recovered authority",
+			nil,
+		)
+	}
+	return nil
+}
+
+func (processes *reopenedRecordedProcesses) verifyFirecracker(
+	ctx context.Context,
+	vmID string,
+	locator instanceProcessLocator,
+) error {
+	verification, err := processes.beginVerification(ctx)
+	if err != nil {
+		return err
+	}
+	defer verification.finish()
+	if verification.vmID != vmID {
+		return processVerificationError(vmID, "cgroup verifier VM does not match recovered authority", nil)
+	}
+	process, err := verification.firecracker()
+	if err != nil {
+		return err
+	}
+	if process.locator != locator {
+		return processVerificationError(vmID, "cgroup verifier locator does not match recovered authority", nil)
+	}
+	return verification.verifyFirecracker(ctx, process)
+}
+
+func (processes *reopenedRecordedProcesses) observeLaunchingFirecracker(
+	ctx context.Context,
+	deps processIdentityVerifierDeps,
+) (_ processObservation, returnErr error) {
+	if deps.openProcessDirectory == nil || deps.readProcessMetadata == nil || deps.descriptorFlags == nil ||
+		deps.close == nil {
+		return processObservation{}, processVerificationError(
+			"",
+			"launching Firecracker observation dependencies are incomplete",
+			nil,
+		)
+	}
+	verification, err := processes.beginVerification(ctx)
+	if err != nil {
+		return processObservation{}, err
+	}
+	defer verification.finish()
+	process, err := verification.firecracker()
+	if err != nil {
+		return processObservation{}, err
+	}
+	if err := verification.verifyFirecracker(ctx, process); err != nil {
+		return processObservation{}, err
+	}
+	descriptors := processVerificationDescriptors{deps: deps, vmID: verification.vmID}
+	defer func() { returnErr = descriptors.closeAll(ctx, returnErr) }()
+	directoryFD, err := deps.openProcessDirectory(ctx, process.locator.pid)
+	if err != nil {
+		return processObservation{}, processVerificationError(
+			verification.vmID,
+			"open recovered launching Firecracker process directory",
+			err,
+		)
+	}
+	descriptors.add(directoryFD)
+	if err := requireProcessDescriptorCLOEXEC(
+		ctx,
+		deps,
+		directoryFD,
+		"recovered launching Firecracker process directory",
+	); err != nil {
+		return processObservation{}, processVerificationError(
+			verification.vmID,
+			"verify recovered launching Firecracker process directory",
+			err,
+		)
+	}
+	observation, err := observeProcessMetadata(ctx, deps, directoryFD, process.locator.pid)
+	if err != nil {
+		return processObservation{}, processVerificationError(
+			verification.vmID,
+			"read recovered launching Firecracker process metadata",
+			err,
+		)
+	}
+	if observation.startTimeTicks != process.locator.startTimeTicks {
+		return processObservation{}, processVerificationError(
+			verification.vmID,
+			"recovered launching Firecracker process does not match its launch locator",
+			nil,
+		)
+	}
+	if err := verification.verifyFirecracker(ctx, process); err != nil {
+		return processObservation{}, err
+	}
+	return observation, nil
+}
+
 func verifyRecoveredActiveIdentity(
 	ctx context.Context,
 	deps processIdentityVerifierDeps,
 	record instanceRecord,
-) error {
+) (processObservation, error) {
 	if record.launch == nil || record.active == nil {
-		return processVerificationError(record.vmID, "active recovery identity is incomplete", nil)
+		return processObservation{}, processVerificationError(
+			record.vmID,
+			"active recovery identity is incomplete",
+			nil,
+		)
 	}
 	observed, err := observeProcessIdentity(ctx, deps, record.vmID, "recovered Firecracker", record.launch.process)
 	if err != nil {
-		return err
+		return processObservation{}, err
 	}
 	active := record.active
 	wantCgroup := infra.CgroupV2Root + "/" + infra.JailerCgroupParent + "/" + record.vmID
@@ -244,23 +436,35 @@ func verifyRecoveredActiveIdentity(
 		!slices.Equal(observed.process.supplementaryGroups, active.supplementaryGroups) ||
 		observed.process.cgroupPath != wantCgroup || observed.mountNamespace != active.mountNamespace ||
 		observed.root != active.jailRoot || !processExecutableMatchesRecordedFirecracker(observed.executable, active.executable) {
-		return processVerificationError(record.vmID, "recovered Firecracker does not match full active identity", nil)
+		return processObservation{}, processVerificationError(
+			record.vmID,
+			"recovered Firecracker does not match full active identity",
+			nil,
+		)
 	}
 	digest, err := hashRecoveredProcessExecutable(ctx, deps, record.vmID, record.launch.process, "Firecracker")
 	if err != nil {
-		return err
+		return processObservation{}, err
 	}
 	if digest != active.executable.manifestSHA256 {
-		return processVerificationError(record.vmID, "recovered Firecracker digest does not match active identity", nil)
+		return processObservation{}, processVerificationError(
+			record.vmID,
+			"recovered Firecracker digest does not match active identity",
+			nil,
+		)
 	}
 	if active.relay.kind == instanceRelayAbsent {
 		if record.launch.relay.kind != instanceRelayAbsent {
-			return processVerificationError(record.vmID, "recovered relay presence does not match active identity", nil)
+			return processObservation{}, processVerificationError(
+				record.vmID,
+				"recovered relay presence does not match active identity",
+				nil,
+			)
 		}
-		return nil
+		return observed.process, nil
 	}
 	if record.launch.relay.kind != instanceRelayPresent {
-		return processVerificationError(record.vmID, "recovered relay locator is absent", nil)
+		return processObservation{}, processVerificationError(record.vmID, "recovered relay locator is absent", nil)
 	}
 	relay, err := observeProcessIdentity(
 		ctx,
@@ -270,13 +474,17 @@ func verifyRecoveredActiveIdentity(
 		record.launch.relay.locator,
 	)
 	if err != nil {
-		return err
+		return processObservation{}, err
 	}
 	if relay.process.userIDs != active.relay.userIDs || relay.process.groupIDs != active.relay.groupIDs ||
 		!slices.Equal(relay.process.supplementaryGroups, active.relay.supplementaryGroups) ||
 		relay.mountNamespace != active.relay.mountNamespace || relay.root != active.relay.root ||
 		!processExecutableMatchesRecordedRelay(relay.executable, active.relay.executable) {
-		return processVerificationError(record.vmID, "recovered relay does not match full active identity", nil)
+		return processObservation{}, processVerificationError(
+			record.vmID,
+			"recovered relay does not match full active identity",
+			nil,
+		)
 	}
 	relayDigest, err := hashRecoveredProcessExecutable(
 		ctx,
@@ -286,12 +494,16 @@ func verifyRecoveredActiveIdentity(
 		"relay",
 	)
 	if err != nil {
-		return err
+		return processObservation{}, err
 	}
 	if relayDigest != active.relay.executable.sha256 {
-		return processVerificationError(record.vmID, "recovered relay digest does not match active identity", nil)
+		return processObservation{}, processVerificationError(
+			record.vmID,
+			"recovered relay digest does not match active identity",
+			nil,
+		)
 	}
-	return nil
+	return observed.process, nil
 }
 
 func processExecutableMatchesRecordedFirecracker(
@@ -362,6 +574,9 @@ func (processes *reopenedRecordedProcesses) Release(ctx context.Context) error {
 	defer state.mu.Unlock()
 	if state.released {
 		return state.releaseErr
+	}
+	if state.verifying {
+		return processVerificationError(state.vmID, "recovered process verification is in progress", nil)
 	}
 	result := error(nil)
 	for index := len(state.retained) - 1; index >= 0; index-- {

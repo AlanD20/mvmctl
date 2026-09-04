@@ -1,12 +1,22 @@
 package jailer
 
-import "context"
+import (
+	"context"
+
+	"mvmctl/internal/infra"
+)
 
 type retainedLaunchCgroupProcessVerifier struct {
 	deps    processIdentityVerifierDeps
 	pidfd   int
 	locator instanceProcessLocator
 	vmID    string
+}
+
+type retainedRecoveredCgroupProcessVerifier struct {
+	processes *reopenedRecordedProcesses
+	locator   instanceProcessLocator
+	vmID      string
 }
 
 func (verifier retainedLaunchCgroupProcessVerifier) verifyBeforeCgroupMembership(
@@ -42,6 +52,45 @@ func (verifier retainedLaunchCgroupProcessVerifier) verify(
 		return err
 	}
 	return requireExactPIDFDLocator(ctx, verifier.deps, verifier.pidfd, verifier.locator, verifier.vmID, "Firecracker")
+}
+
+func (verifier retainedRecoveredCgroupProcessVerifier) verifyBeforeCgroupMembership(
+	ctx context.Context,
+	locator instanceProcessLocator,
+	observation processObservation,
+) error {
+	return verifier.verify(ctx, locator, observation)
+}
+
+func (verifier retainedRecoveredCgroupProcessVerifier) verifyAfterCgroupMembership(
+	ctx context.Context,
+	locator instanceProcessLocator,
+	observation processObservation,
+) error {
+	return verifier.verify(ctx, locator, observation)
+}
+
+func (verifier retainedRecoveredCgroupProcessVerifier) verify(
+	ctx context.Context,
+	locator instanceProcessLocator,
+	observation processObservation,
+) error {
+	if locator != verifier.locator {
+		return processVerificationError(
+			verifier.vmID,
+			"cgroup verifier locator does not match recovered authority",
+			nil,
+		)
+	}
+	wantCgroup := infra.CgroupV2Root + "/" + infra.JailerCgroupParent + "/" + verifier.vmID
+	if observation.startTimeTicks != locator.startTimeTicks || observation.cgroupPath != wantCgroup {
+		return processVerificationError(
+			verifier.vmID,
+			"cgroup verifier observation does not match recovered VM authority",
+			nil,
+		)
+	}
+	return verifier.processes.verifyFirecracker(ctx, verifier.vmID, verifier.locator)
 }
 
 func bindOrVerifyLaunchManagedVMCgroup(
