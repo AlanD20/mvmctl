@@ -3,11 +3,13 @@ package jailer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -205,6 +207,38 @@ func TestPrepareManagedVMCgroupRejectsUnsafeRootOrParent(t *testing.T) {
 	}
 }
 
+func TestPrepareManagedVMCgroupNormalizesOnlyFreshUmaskFilteredParent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fresh parent", func(t *testing.T) {
+		fixture := newManagedVMCgroupTestFixture(t)
+		deps := fixture.deps()
+		deps.mkdirAt = func(_ context.Context, parentFD int, name string, _ uint32) error {
+			return unix.Mkdirat(parentFD, name, 0o700)
+		}
+
+		prepared, err := prepareManagedVMCgroup(t.Context(), deps, testVMID)
+		require.NoError(t, err)
+		require.NoError(t, prepared.Release(t.Context()))
+		info, err := os.Lstat(filepath.Join(fixture.root, infra.JailerCgroupParent))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(managedVMCgroupParentMode), info.Mode().Perm())
+	})
+
+	t.Run("preexisting parent", func(t *testing.T) {
+		fixture := newManagedVMCgroupTestFixture(t)
+		parentPath := filepath.Join(fixture.root, infra.JailerCgroupParent)
+		require.NoError(t, os.Mkdir(parentPath, 0o700))
+
+		prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+		assert.Nil(t, prepared)
+		require.Error(t, err)
+		info, err := os.Lstat(parentPath)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+	})
+}
+
 func TestPreparedManagedVMCgroupBindsExactJailerLeafMembership(t *testing.T) {
 	t.Parallel()
 
@@ -308,18 +342,144 @@ func TestManagedVMCgroupRemoveNeverRemovesReplacementAfterEffectfulError(t *test
 	assert.True(t, fixture.vmLeafPresent(testVMID))
 }
 
+// Rationale: cleanup may unlink the exact leaf and then lose its first reconciliation observation. A later retry must
+// use the retained descriptor's zero link count to recognize the completed effect instead of becoming permanently
+// stuck on ENOENT.
+func TestManagedVMCgroupRemoveRetriesReconciliationAfterEffectfulUnlink(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	lease := fixture.bindLease(t, fixture.deps())
+	fixture.setMembership(testVMID, "")
+	realOpenAt2 := lease.state.deps.openAt2
+	realUnlinkAt := lease.state.deps.unlinkAt
+	unlinked := false
+	reconcileAttempts := 0
+	transientErr := errors.New("transient reconciliation failure")
+	lease.state.deps.openAt2 = func(ctx context.Context, parentFD int, name string, how *unix.OpenHow) (int, error) {
+		if unlinked && name == testVMID {
+			reconcileAttempts++
+			if reconcileAttempts == 1 {
+				return -1, transientErr
+			}
+		}
+		return realOpenAt2(ctx, parentFD, name, how)
+	}
+	lease.state.deps.unlinkAt = func(ctx context.Context, parentFD int, name string, flags int) error {
+		require.NoError(t, realUnlinkAt(ctx, parentFD, name, flags))
+		unlinked = true
+		return unix.EBUSY
+	}
+
+	err := lease.Remove(t.Context())
+	require.ErrorIs(t, err, unix.EBUSY)
+	require.ErrorIs(t, err, transientErr)
+	assert.False(t, lease.snapshot().removed)
+
+	require.NoError(t, lease.Remove(t.Context()))
+	assert.True(t, lease.snapshot().removed)
+	require.NoError(t, lease.Release(t.Context()))
+}
+
 func TestManagedVMCgroupRemoveConsumesCancellationIndependently(t *testing.T) {
 	t.Parallel()
 
 	fixture := newManagedVMCgroupTestFixture(t)
 	lease := fixture.bindLease(t, fixture.deps())
 	fixture.setMembership(testVMID, "")
+	realPread := lease.state.deps.pread
+	realUnlinkAt := lease.state.deps.unlinkAt
+	lease.state.deps.pread = func(ctx context.Context, fd int, buffer []byte, offset int64) (int, error) {
+		if err := ctx.Err(); err != nil {
+			return 0, fmt.Errorf("pread received cancelled cleanup context: %w", err)
+		}
+		return realPread(ctx, fd, buffer, offset)
+	}
+	lease.state.deps.unlinkAt = func(ctx context.Context, parentFD int, name string, flags int) error {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("unlink received cancelled cleanup context: %w", err)
+		}
+		return realUnlinkAt(ctx, parentFD, name, flags)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	require.NoError(t, lease.Remove(ctx))
 	require.NoError(t, lease.Release(ctx))
 	assert.False(t, fixture.vmLeafPresent(testVMID))
+}
+
+func TestPreparedManagedVMCgroupBindDoesNotHoldPreparedLockDuringProcessProof(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+	require.NoError(t, err)
+	fixture.addVMLeaf(testVMID)
+	verifier := &reentrantManagedVMCgroupTestVerifier{prepared: prepared}
+	result := make(chan struct {
+		lease *managedVMCgroupLease
+		err   error
+	}, 1)
+	go func() {
+		lease, bindErr := prepared.Bind(
+			t.Context(),
+			processTestLocator(),
+			processTestCgroupObservation(),
+			verifier,
+		)
+		result <- struct {
+			lease *managedVMCgroupLease
+			err   error
+		}{lease: lease, err: bindErr}
+	}()
+
+	select {
+	case got := <-result:
+		require.NoError(t, got.err)
+		require.NotNil(t, got.lease)
+		fixture.setMembership(testVMID, "")
+		require.NoError(t, got.lease.Remove(t.Context()))
+		require.NoError(t, got.lease.Release(t.Context()))
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("Bind deadlocked while the process verifier re-entered prepared state")
+	}
+}
+
+// Rationale: cgroup.procs is a dynamic pseudo-file and a short first read is not EOF. A later process must be
+// included in the membership proof rather than hidden behind the short read.
+func TestPreparedManagedVMCgroupBindRejectsMemberHiddenAfterShortRead(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+	require.NoError(t, err)
+	fixture.addVMLeaf(testVMID)
+	realPread := prepared.state.deps.pread
+	chunks := map[int64][]byte{0: []byte("4242\n"), 5: []byte("4343\n")}
+	prepared.state.deps.pread = func(_ context.Context, _ int, buffer []byte, offset int64) (int, error) {
+		chunk := chunks[offset]
+		return copy(buffer, chunk), nil
+	}
+
+	lease, err := prepared.Bind(
+		t.Context(),
+		processTestLocator(),
+		processTestCgroupObservation(),
+		&managedVMCgroupTestProcessVerifier{},
+	)
+	lease.state.deps.pread = realPread
+	if err == nil {
+		fixture.setMembership(testVMID, "")
+		require.NoError(t, lease.Remove(t.Context()))
+		require.NoError(t, lease.Release(t.Context()))
+		t.Error("Bind accepted a second cgroup member hidden after a short first read")
+		return
+	}
+	require.NotNil(t, lease)
+	fixture.setMembership(testVMID, "")
+	require.NoError(t, lease.Remove(t.Context()))
+	require.NoError(t, lease.Release(t.Context()))
 }
 
 func TestManagedVMCgroupCopiedConcurrentReleaseClosesOnceAndCachesFirstError(t *testing.T) {
@@ -371,6 +531,122 @@ func TestManagedVMCgroupCopiedConcurrentReleaseClosesOnceAndCachesFirstError(t *
 	}
 	for fd := range retained {
 		assert.Equal(t, 1, closed[fd])
+	}
+}
+
+func TestPreparedManagedVMCgroupCopiedConcurrentReleaseClosesOnceAndCachesFirstError(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+	require.NoError(t, err)
+	closeErr := errors.New("prepared descriptor close failed")
+	realClose := prepared.state.deps.close
+	retained := make(map[int]bool, len(prepared.state.retained))
+	for _, fd := range prepared.state.retained {
+		retained[fd] = true
+	}
+	var mu sync.Mutex
+	closed := make(map[int]int, len(retained))
+	prepared.state.deps.close = func(ctx context.Context, fd int) error {
+		mu.Lock()
+		if retained[fd] {
+			closed[fd]++
+		}
+		mu.Unlock()
+		err := realClose(ctx, fd)
+		if fd == prepared.state.parentFD {
+			return errors.Join(err, closeErr)
+		}
+		return err
+	}
+	copied := *prepared
+	results := make(chan error, 16)
+	var wait sync.WaitGroup
+	for index := 0; index < cap(results); index++ {
+		wait.Add(1)
+		go func(useCopy bool) {
+			defer wait.Done()
+			if useCopy {
+				results <- copied.Release(context.Background())
+				return
+			}
+			results <- prepared.Release(context.Background())
+		}(index%2 == 0)
+	}
+	wait.Wait()
+	close(results)
+	for err := range results {
+		require.ErrorIs(t, err, closeErr)
+	}
+	for fd := range retained {
+		assert.Equal(t, 1, closed[fd])
+	}
+}
+
+func TestPreparedManagedVMCgroupBindHandlesBoundedMembershipReads(t *testing.T) {
+	t.Parallel()
+
+	t.Run("retries EINTR", func(t *testing.T) {
+		fixture := newManagedVMCgroupTestFixture(t)
+		prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+		require.NoError(t, err)
+		fixture.addVMLeaf(testVMID)
+		realPread := prepared.state.deps.pread
+		calls := 0
+		prepared.state.deps.pread = func(ctx context.Context, fd int, buffer []byte, offset int64) (int, error) {
+			calls++
+			if calls == 1 {
+				return 0, unix.EINTR
+			}
+			return realPread(ctx, fd, buffer, offset)
+		}
+
+		lease, err := prepared.Bind(
+			t.Context(),
+			processTestLocator(),
+			processTestCgroupObservation(),
+			&managedVMCgroupTestProcessVerifier{},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, lease)
+		lease.state.deps.pread = realPread
+		fixture.setMembership(testVMID, "")
+		require.NoError(t, lease.Remove(t.Context()))
+		require.NoError(t, lease.Release(t.Context()))
+	})
+
+	tests := map[string]int{
+		"negative count":  -1,
+		"oversized count": managedVMCgroupMaxProcs + 2,
+	}
+	for name, count := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newManagedVMCgroupTestFixture(t)
+			prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+			require.NoError(t, err)
+			fixture.addVMLeaf(testVMID)
+			realPread := prepared.state.deps.pread
+			prepared.state.deps.pread = func(context.Context, int, []byte, int64) (int, error) {
+				return count, nil
+			}
+			var lease *managedVMCgroupLease
+			var bindErr error
+			assert.NotPanics(t, func() {
+				lease, bindErr = prepared.Bind(
+					t.Context(),
+					processTestLocator(),
+					processTestCgroupObservation(),
+					&managedVMCgroupTestProcessVerifier{},
+				)
+			})
+			require.Error(t, bindErr)
+			require.NotNil(t, lease)
+			lease.state.deps.pread = realPread
+			fixture.setMembership(testVMID, "")
+			require.NoError(t, lease.Remove(t.Context()))
+			require.NoError(t, lease.Release(t.Context()))
+		})
 	}
 }
 
@@ -487,6 +763,16 @@ func TestPreparedManagedVMCgroupRejectsLocatorMembershipMismatchAndPIDReuse(t *t
 			observation: processTestCgroupObservation(),
 			membership:  "4343\n",
 		},
+		"multiple members": {
+			locator:     processTestLocator(),
+			observation: processTestCgroupObservation(),
+			membership:  "4242\n4343\n",
+		},
+		"malformed member": {
+			locator:     processTestLocator(),
+			observation: processTestCgroupObservation(),
+			membership:  "04242\n",
+		},
 		"pid reuse after membership read": {
 			locator:     processTestLocator(),
 			observation: processTestCgroupObservation(),
@@ -525,6 +811,29 @@ type managedVMCgroupTestProcessVerifier struct {
 	afterErr    error
 	beforeCalls int
 	afterCalls  int
+}
+
+type reentrantManagedVMCgroupTestVerifier struct {
+	prepared *preparedManagedVMCgroup
+}
+
+func (verifier *reentrantManagedVMCgroupTestVerifier) verifyBeforeCgroupMembership(
+	context.Context,
+	instanceProcessLocator,
+	processObservation,
+) error {
+	if !verifier.prepared.snapshot().released {
+		return errors.New("prepared authority remained active after leaf admission")
+	}
+	return nil
+}
+
+func (verifier *reentrantManagedVMCgroupTestVerifier) verifyAfterCgroupMembership(
+	context.Context,
+	instanceProcessLocator,
+	processObservation,
+) error {
+	return verifier.prepared.Release(context.Background())
 }
 
 func (verifier *managedVMCgroupTestProcessVerifier) verifyBeforeCgroupMembership(
