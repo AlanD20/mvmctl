@@ -181,6 +181,7 @@ func TestSourceSessionWaitCancelRejectsInvalidLifecycle(t *testing.T) {
 }
 
 func TestSourceSessionWaitCancelPermitsOneWaiter(t *testing.T) {
+	// Rationale: two readers would race to consume the sole request-bound control frame.
 	hostPipe, agentConn := net.Pipe()
 	hostConn := &controlledSourceConn{Conn: hostPipe, readStarted: make(chan struct{})}
 	requestID := "00112233445566778899aabbccddeeff"
@@ -216,6 +217,7 @@ func TestSourceSessionWaitCancelPermitsOneWaiter(t *testing.T) {
 }
 
 func TestSourceSessionCanceledPartialCancelClosesTransport(t *testing.T) {
+	// Rationale: operation cancellation must interrupt a framed read blocked after a valid prefix fragment.
 	hostPipe, agentConn := net.Pipe()
 	hostConn := &controlledSourceConn{Conn: hostPipe, readStarted: make(chan struct{})}
 	session := openSourceSessionWithRequest(
@@ -249,6 +251,7 @@ func TestSourceSessionCanceledPartialCancelClosesTransport(t *testing.T) {
 }
 
 func TestSourceSessionCloseUnblocksPartialCancel(t *testing.T) {
+	// Rationale: Close is the lifecycle escape hatch for a cancellation waiter blocked mid-frame.
 	hostPipe, agentConn := net.Pipe()
 	hostConn := &controlledSourceConn{Conn: hostPipe, readStarted: make(chan struct{})}
 	session := openSourceSessionWithRequest(
@@ -282,21 +285,47 @@ func TestSourceSessionCloseUnblocksPartialCancel(t *testing.T) {
 func TestSourceSessionWaitCancelPreservesConcurrentResponseWrite(t *testing.T) {
 	// Rationale: a control read and response write must not overwrite each other's directional deadlines.
 	hostPipe, agentConn := net.Pipe()
-	hostConn := &controlledSourceConn{Conn: hostPipe, readStarted: make(chan struct{})}
+	hostConn := &controlledSourceConn{
+		Conn:         hostPipe,
+		readStarted:  make(chan struct{}),
+		writeStarted: make(chan struct{}),
+	}
 	requestID := "00112233445566778899aabbccddeeff"
 	session := openSourceSessionWithRequest(t, hostConn, agentConn, requestID)
+	operationCtx, cancelOperations := context.WithCancel(t.Context())
+	var stopOnce sync.Once
+	stopPeers := func() {
+		stopOnce.Do(func() {
+			cancelOperations()
+			_ = session.Close()
+			_ = agentConn.Close()
+		})
+	}
+	defer stopPeers()
+
 	hostConn.rejectCombinedDeadline.Store(true)
 	hostConn.observeReads.Store(true)
 	waitDone := make(chan error, 1)
-	go func() { waitDone <- session.WaitCancel(t.Context()) }()
+	go func() { waitDone <- session.WaitCancel(operationCtx) }()
 	select {
 	case <-hostConn.readStarted:
 	case <-time.After(time.Second):
+		stopPeers()
 		t.Fatal("cancellation waiter did not reach the transport")
 	}
 
+	hostConn.observeWrites.Store(true)
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- session.WriteStdout(operationCtx, []byte("still-running")) }()
+	select {
+	case <-hostConn.writeStarted:
+	case <-time.After(time.Second):
+		stopPeers()
+		t.Fatal("concurrent response write did not reach the transport")
+	}
+
 	cancelDone := make(chan error, 1)
-	go func() { cancelDone <- vmexecwire.WriteCancel(context.Background(), agentConn, requestID) }()
+	go func() { cancelDone <- vmexecwire.WriteCancel(operationCtx, agentConn, requestID) }()
 	responseDone := make(chan error, 1)
 	go func() {
 		reader, readerErr := vmexecwire.NewResponseReader(agentConn, requestID)
@@ -304,7 +333,7 @@ func TestSourceSessionWaitCancelPreservesConcurrentResponseWrite(t *testing.T) {
 			responseDone <- readerErr
 			return
 		}
-		frame, readerErr := reader.Read(context.Background())
+		frame, readerErr := reader.Read(operationCtx)
 		if readerErr != nil {
 			responseDone <- readerErr
 			return
@@ -317,10 +346,23 @@ func TestSourceSessionWaitCancelPreservesConcurrentResponseWrite(t *testing.T) {
 		responseDone <- nil
 	}()
 
-	assert.NoError(t, session.WriteStdout(t.Context(), []byte("still-running")))
-	assert.NoError(t, <-cancelDone)
-	assert.NoError(t, <-waitDone)
-	assert.NoError(t, <-responseDone)
+	// Timeouts below are bounded deadlock guards after both transport directions causally started.
+	await := func(name string, result <-chan error) {
+		t.Helper()
+		select {
+		case err := <-result:
+			if !assert.NoError(t, err, name+" failed") {
+				stopPeers()
+			}
+		case <-time.After(time.Second):
+			stopPeers()
+			t.Errorf("%s did not complete", name)
+		}
+	}
+	await("response write", writeDone)
+	await("cancel write", cancelDone)
+	await("cancel wait", waitDone)
+	await("response read", responseDone)
 }
 
 func TestConcurrentSourceSessionsRemainIsolated(t *testing.T) {
