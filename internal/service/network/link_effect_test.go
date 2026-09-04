@@ -410,10 +410,12 @@ type linkEffectFixture struct {
 	vmFD          int
 	hostFD        int
 
-	mu         sync.Mutex
-	closes     int
-	closeError error
-	closeCtx   []context.Context
+	mu          sync.Mutex
+	closes      int
+	closeError  error
+	closeErrors map[int]error
+	closeOrder  []int
+	closeCtx    []context.Context
 }
 
 func newLinkEffectFixture(t *testing.T) *linkEffectFixture {
@@ -454,7 +456,11 @@ func (fixture *linkEffectFixture) lease(fd int, identity namespaceIdentity) *lin
 				return fmt.Errorf("unexpected close fd %d", gotFD)
 			}
 			fixture.closes++
+			fixture.closeOrder = append(fixture.closeOrder, gotFD)
 			fixture.closeCtx = append(fixture.closeCtx, ctx)
+			if err := fixture.closeErrors[gotFD]; err != nil {
+				return err
+			}
 			return fixture.closeError
 		}},
 		fd: fd, identity: identity, ownerUID: owner,
@@ -465,6 +471,18 @@ func (fixture *linkEffectFixture) closeCount() int {
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()
 	return fixture.closes
+}
+
+func (fixture *linkEffectFixture) closeOrderSnapshot() []int {
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	return append([]int(nil), fixture.closeOrder...)
+}
+
+func (fixture *linkEffectFixture) closeContextsSnapshot() []context.Context {
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	return append([]context.Context(nil), fixture.closeCtx...)
 }
 
 func (fixture *linkEffectFixture) seedAttachedTopology(
@@ -550,6 +568,8 @@ type fakeRouteNetlink struct {
 	routes              map[int]map[int][]routeIPv4Observation
 	inspects            map[string]int
 	inspectCancellation map[string]bool
+	addressInspects     map[string]int
+	routeInspects       map[string]int
 	masterMutations     []linkMasterMutation
 	addressMutations    []addressMutation
 	stateMutations      []linkStateMutation
@@ -558,8 +578,10 @@ type fakeRouteNetlink struct {
 	cancelAlias         context.CancelFunc
 	addressError        error
 	applyAddress        bool
+	cancelAddress       context.CancelFunc
 	stateError          error
 	applyState          bool
+	cancelState         context.CancelFunc
 	deletes             int
 	createError         error
 	applyCreate         bool
@@ -567,6 +589,10 @@ type fakeRouteNetlink struct {
 	afterCreate         func(*routeLinkObservation)
 	afterVethCreate     func(*routeLinkObservation, *routeLinkObservation)
 	afterAddress        func(int, int, addressExpectation)
+	afterState          func(int, int, bool)
+	inspectError        func(int, linkName, int) error
+	addressInspectError func(context.Context, int, int, int) error
+	routeInspectError   func(context.Context, int, int, int) error
 	omitHostAfterCreate bool
 	omitPeerAfterCreate bool
 }
@@ -578,6 +604,8 @@ func newFakeRouteNetlink() *fakeRouteNetlink {
 		routes:              make(map[int]map[int][]routeIPv4Observation),
 		inspects:            make(map[string]int),
 		inspectCancellation: make(map[string]bool),
+		addressInspects:     make(map[string]int),
+		routeInspects:       make(map[string]int),
 		applyCreate:         true,
 		applyAlias:          true,
 		applyAddress:        true,
@@ -595,6 +623,11 @@ func (route *fakeRouteNetlink) inspectLink(
 	key := fmt.Sprintf("%d/%s", fd, name)
 	route.inspects[key]++
 	route.inspectCancellation[key] = ctx.Err() != nil
+	if route.inspectError != nil {
+		if err := route.inspectError(fd, name, route.inspects[key]); err != nil {
+			return nil, err
+		}
+	}
 	link, ok := route.links[fd][name]
 	if !ok {
 		return nil, nil
@@ -615,22 +648,36 @@ func (route *fakeRouteNetlink) listLinks(_ context.Context, fd int) ([]routeLink
 }
 
 func (route *fakeRouteNetlink) listIPv4Addresses(
-	_ context.Context,
+	ctx context.Context,
 	fd int,
 	ifIndex int,
 ) ([]routeAddressObservation, error) {
 	route.mu.Lock()
 	defer route.mu.Unlock()
+	key := fmt.Sprintf("%d/%d", fd, ifIndex)
+	route.addressInspects[key]++
+	if route.addressInspectError != nil {
+		if err := route.addressInspectError(ctx, fd, ifIndex, route.addressInspects[key]); err != nil {
+			return nil, err
+		}
+	}
 	return append([]routeAddressObservation(nil), route.addresses[fd][ifIndex]...), nil
 }
 
 func (route *fakeRouteNetlink) listIPv4Routes(
-	_ context.Context,
+	ctx context.Context,
 	fd int,
 	ifIndex int,
 ) ([]routeIPv4Observation, error) {
 	route.mu.Lock()
 	defer route.mu.Unlock()
+	key := fmt.Sprintf("%d/%d", fd, ifIndex)
+	route.routeInspects[key]++
+	if route.routeInspectError != nil {
+		if err := route.routeInspectError(ctx, fd, ifIndex, route.routeInspects[key]); err != nil {
+			return nil, err
+		}
+	}
 	return append([]routeIPv4Observation(nil), route.routes[fd][ifIndex]...), nil
 }
 
@@ -728,7 +775,7 @@ func (route *fakeRouteNetlink) setLinkAlias(_ context.Context, fd, ifIndex int, 
 }
 
 func (route *fakeRouteNetlink) addIPv4Address(
-	_ context.Context,
+	ctx context.Context,
 	fd int,
 	ifIndex int,
 	expectation addressExpectation,
@@ -739,6 +786,12 @@ func (route *fakeRouteNetlink) addIPv4Address(
 		namespaceFD: fd, ifIndex: ifIndex, prefix: expectation.prefix.String(),
 	})
 	if !route.applyAddress {
+		if route.cancelAddress != nil {
+			route.cancelAddress()
+		}
+		if route.addressError == nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return route.addressError
 	}
 	observation, err := addressExpectationToObservation(expectation, ifIndex)
@@ -752,6 +805,12 @@ func (route *fakeRouteNetlink) addIPv4Address(
 	if route.afterAddress != nil {
 		route.afterAddress(fd, ifIndex, expectation)
 	}
+	if route.cancelAddress != nil {
+		route.cancelAddress()
+	}
+	if route.addressError == nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	return route.addressError
 }
 
@@ -761,7 +820,7 @@ type linkStateMutation struct {
 	up          bool
 }
 
-func (route *fakeRouteNetlink) setLinkUp(_ context.Context, fd, ifIndex int, up bool) error {
+func (route *fakeRouteNetlink) setLinkUp(ctx context.Context, fd, ifIndex int, up bool) error {
 	route.mu.Lock()
 	defer route.mu.Unlock()
 	route.stateMutations = append(route.stateMutations, linkStateMutation{
@@ -780,6 +839,15 @@ func (route *fakeRouteNetlink) setLinkUp(_ context.Context, fd, ifIndex int, up 
 			route.links[fd][name] = link
 			break
 		}
+		if route.afterState != nil {
+			route.afterState(fd, ifIndex, up)
+		}
+	}
+	if route.cancelState != nil {
+		route.cancelState()
+	}
+	if route.stateError == nil && ctx.Err() != nil {
+		return ctx.Err()
 	}
 	return route.stateError
 }
@@ -855,6 +923,18 @@ func (route *fakeRouteNetlink) putLocked(fd int, link routeLinkObservation) {
 	route.links[fd][link.name] = link
 }
 
+func (route *fakeRouteNetlink) corruptLink(
+	fd int,
+	name linkName,
+	corrupt func(*routeLinkObservation),
+) {
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	link := route.links[fd][name]
+	corrupt(&link)
+	route.links[fd][name] = link
+}
+
 func (route *fakeRouteNetlink) link(fd int, name linkName) *routeLinkObservation {
 	route.mu.Lock()
 	defer route.mu.Unlock()
@@ -889,6 +969,12 @@ func (route *fakeRouteNetlink) inspectCount(fd int, name linkName) int {
 	route.mu.Lock()
 	defer route.mu.Unlock()
 	return route.inspects[fmt.Sprintf("%d/%s", fd, name)]
+}
+
+func (route *fakeRouteNetlink) addressInspectCount(fd, ifIndex int) int {
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	return route.addressInspects[fmt.Sprintf("%d/%d", fd, ifIndex)]
 }
 
 func (route *fakeRouteNetlink) lastInspectCancelled(fd int, name linkName) bool {
@@ -965,6 +1051,13 @@ func (route *fakeRouteNetlink) putRouteLocked(fd int, observation routeIPv4Obser
 		route.routes[fd] = make(map[int][]routeIPv4Observation)
 	}
 	route.routes[fd][observation.ifIndex] = append(route.routes[fd][observation.ifIndex], observation)
+}
+
+func (route *fakeRouteNetlink) replaceRoutesLocked(fd, ifIndex int, observations []routeIPv4Observation) {
+	if route.routes[fd] == nil {
+		route.routes[fd] = make(map[int][]routeIPv4Observation)
+	}
+	route.routes[fd][ifIndex] = append([]routeIPv4Observation(nil), observations...)
 }
 
 func (route *fakeRouteNetlink) deleteCount() int {

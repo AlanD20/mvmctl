@@ -120,9 +120,10 @@ type endpointL3 struct {
 }
 
 type loopbackL3Expectation struct {
-	address        addressExpectation
-	localRoute     routeExpectation
-	connectedRoute routeExpectation
+	address              addressExpectation
+	localRoute           routeExpectation
+	connectedRoute       routeExpectation
+	subnetBroadcastRoute routeExpectation
 }
 
 type fabricL3Expectation struct {
@@ -131,9 +132,8 @@ type fabricL3Expectation struct {
 }
 
 type bridgeKernelBookkeeping struct {
-	local            routeExpectation
-	networkBroadcast routeExpectation
-	subnetBroadcast  routeExpectation
+	local           routeExpectation
+	subnetBroadcast routeExpectation
 }
 
 var (
@@ -158,6 +158,15 @@ var (
 			kind:        routeKindLocal,
 			protocol:    routeProtocolKernel,
 			scope:       routeScopeHost,
+		},
+		subnetBroadcastRoute: routeExpectation{
+			destination: netip.MustParsePrefix("127.255.255.255/32"),
+			source:      netip.MustParseAddr("127.0.0.1"),
+			hasSource:   true,
+			table:       routeTableLocal,
+			kind:        routeKindBroadcast,
+			protocol:    routeProtocolKernel,
+			scope:       routeScopeLink,
 		},
 	}
 	canonicalFabricL3 = fabricL3Expectation{ipv4Addresses: zero, ipv4Routes: zero}
@@ -310,23 +319,16 @@ func deriveBridgeKernelBookkeeping(network managedNetworkL3) (bridgeKernelBookke
 		protocol:  routeProtocolKernel,
 	}
 	result := bridgeKernelBookkeeping{
-		local:            base,
-		networkBroadcast: base,
-		subnetBroadcast:  base,
+		local:           base,
+		subnetBroadcast: base,
 	}
 	result.local.destination = netip.PrefixFrom(gateway, 32)
 	result.local.kind = routeKindLocal
 	result.local.scope = routeScopeHost
-	result.networkBroadcast.destination = netip.PrefixFrom(prefix.Addr(), 32)
-	result.networkBroadcast.kind = routeKindBroadcast
-	result.networkBroadcast.scope = routeScopeLink
 	result.subnetBroadcast.destination = netip.PrefixFrom(lastIPv4Address(prefix), 32)
 	result.subnetBroadcast.kind = routeKindBroadcast
 	result.subnetBroadcast.scope = routeScopeLink
 	if err := validateRouteExpectation(result.local); err != nil {
-		return bridgeKernelBookkeeping{}, err
-	}
-	if err := validateRouteExpectation(result.networkBroadcast); err != nil {
 		return bridgeKernelBookkeeping{}, err
 	}
 	if err := validateRouteExpectation(result.subnetBroadcast); err != nil {

@@ -498,6 +498,7 @@ func TestEveryDerivedRouteDeclaresAndValidatesCanonicalSourcePresence(t *testing
 		"guest default":            {route: endpoint.defaultRoute, wantHasSource: false},
 		"loopback local":           {route: canonicalLoopbackL3.localRoute, wantHasSource: true},
 		"loopback connected":       {route: canonicalLoopbackL3.connectedRoute, wantHasSource: true},
+		"loopback broadcast":       {route: canonicalLoopbackL3.subnetBroadcastRoute, wantHasSource: true},
 	}
 
 	for name, test := range tests {
@@ -587,6 +588,15 @@ func TestFixedLoopbackAndFabricL3Expectations(t *testing.T) {
 			kind:        routeKindLocal,
 			protocol:    routeProtocolKernel,
 			scope:       routeScopeHost,
+		},
+		subnetBroadcastRoute: routeExpectation{
+			destination: netip.MustParsePrefix("127.255.255.255/32"),
+			source:      netip.MustParseAddr("127.0.0.1"),
+			hasSource:   true,
+			table:       routeTableLocal,
+			kind:        routeKindBroadcast,
+			protocol:    routeProtocolKernel,
+			scope:       routeScopeLink,
 		},
 	}
 	if diff := cmp.Diff(wantLoopback, canonicalLoopbackL3,

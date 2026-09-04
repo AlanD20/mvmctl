@@ -35,19 +35,13 @@ func TestLinkEffectConfiguresAndVerifiesOnlyCanonicalKernelDerivedL3(t *testing.
 	); diff != "" {
 		t.Errorf("managed bridge addresses mismatch (-want +got):\n%s", diff)
 	}
-	bridgeBookkeeping, err := deriveBridgeKernelBookkeeping(endpoint.network)
-	require.NoError(t, err)
-	wantBridgeRoutes := make([]routeIPv4Observation, 0, 4)
-	for _, route := range []routeExpectation{
-		endpoint.network.bridgeConnectedRoute,
-		bridgeBookkeeping.local,
-		bridgeBookkeeping.networkBroadcast,
-		bridgeBookkeeping.subnetBroadcast,
-	} {
-		wantBridgeRoutes = append(
-			wantBridgeRoutes,
-			mustRouteObservation(t, route, topology.managedBridge.ifIndex),
-		)
+	wantBridgeRoutes := []routeIPv4Observation{
+		literalRoute("10.44.0.0/24", "10.44.0.1", topology.managedBridge.ifIndex,
+			unix.RT_TABLE_MAIN, unix.RTPROT_KERNEL, unix.RT_SCOPE_LINK, unix.RTN_UNICAST),
+		literalRoute("10.44.0.1/32", "10.44.0.1", topology.managedBridge.ifIndex,
+			unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL),
+		literalRoute("10.44.0.255/32", "10.44.0.1", topology.managedBridge.ifIndex,
+			unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_LINK, unix.RTN_BROADCAST),
 	}
 	if diff := cmp.Diff(
 		wantBridgeRoutes,
@@ -71,8 +65,8 @@ func TestLinkEffectConfiguresAndVerifiesOnlyCanonicalKernelDerivedL3(t *testing.
 		t.Errorf("loopback addresses mismatch (-want +got):\n%s", diff)
 	}
 	wantLoopbackRoutes := []routeIPv4Observation{
-		mustRouteObservation(t, canonicalLoopbackL3.localRoute, loopback.ifIndex),
-		mustRouteObservation(t, canonicalLoopbackL3.connectedRoute, loopback.ifIndex),
+		literalRoute("127.0.0.1/32", "127.0.0.1", loopback.ifIndex,
+			unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL),
 	}
 	if diff := cmp.Diff(
 		wantLoopbackRoutes,
@@ -108,6 +102,25 @@ func TestLinkEffectConfiguresAndVerifiesOnlyCanonicalKernelDerivedL3(t *testing.
 		t.Errorf("address mutations mismatch (-want +got):\n%s", diff)
 	}
 	assert.Zero(t, fixture.route.stateMutationCount())
+	assert.NotZero(t, fixture.route.mustLink(t, fixture.hostFD, topology.managedBridge.name).flags&unix.IFF_UP)
+
+	require.NoError(t, fixture.effect.RaiseLoopback(t.Context(), fixture.pin, topology))
+	wantRaisedLoopbackRoutes := []routeIPv4Observation{
+		literalRoute("127.0.0.1/32", "127.0.0.1", loopback.ifIndex,
+			unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL),
+		literalRoute("127.0.0.0/8", "127.0.0.1", loopback.ifIndex,
+			unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL),
+		literalRoute("127.255.255.255/32", "127.0.0.1", loopback.ifIndex,
+			unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_LINK, unix.RTN_BROADCAST),
+	}
+	if diff := cmp.Diff(
+		wantRaisedLoopbackRoutes,
+		fixture.route.routesSnapshot(fixture.vmFD, loopback.ifIndex),
+		cmp.AllowUnexported(routeIPv4Observation{}),
+		cmpopts.EquateComparable(netip.Addr{}, netip.Prefix{}),
+	); diff != "" {
+		t.Errorf("raised loopback routes mismatch (-want +got):\n%s", diff)
+	}
 }
 
 // Rationale: Fabric links are fixed unnumbered L2 members. An unexpected IPv4 address or route is authority-bearing
@@ -264,6 +277,142 @@ func TestLinkEffectClassifiesProvenUncommittedAddressErrorForRetry(t *testing.T)
 	assert.Empty(t, fixture.route.addressesSnapshot(fixture.hostFD, topology.managedBridge.ifIndex))
 }
 
+func TestLinkEffectClassifiesAddressInspectionUncertainty(t *testing.T) {
+	t.Parallel()
+
+	fixture, topology, endpoint := newL3EffectFixture(t)
+	inspectionError := errors.New("injected post-address inspection failure")
+	fixture.route.addressInspectError = func(_ context.Context, fd, ifIndex, count int) error {
+		if fd == fixture.hostFD && ifIndex == topology.managedBridge.ifIndex && count == 2 {
+			return inspectionError
+		}
+		return nil
+	}
+
+	err := fixture.effect.ConfigureL3Down(t.Context(), fixture.pin, topology, endpoint)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, inspectionError)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, false, domainErr.Details["mutation_committed"])
+	assert.Equal(t, true, domainErr.Details["mutation_outcome_unknown"])
+}
+
+func TestLinkEffectRejectsAddressTargetReplacementAfterMutation(t *testing.T) {
+	t.Parallel()
+
+	fixture, topology, endpoint := newL3EffectFixture(t)
+	afterAddress := fixture.route.afterAddress
+	fixture.route.afterAddress = func(fd, ifIndex int, expectation addressExpectation) {
+		afterAddress(fd, ifIndex, expectation)
+		if fd == fixture.hostFD && ifIndex == topology.managedBridge.ifIndex {
+			link := fixture.route.links[fd][topology.managedBridge.name]
+			link.ifIndex++
+			fixture.route.links[fd][topology.managedBridge.name] = link
+		}
+	}
+
+	err := fixture.effect.ConfigureL3Down(t.Context(), fixture.pin, topology, endpoint)
+
+	require.Error(t, err)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, false, domainErr.Details["mutation_committed"])
+	assert.Equal(t, true, domainErr.Details["mutation_outcome_unknown"])
+	assert.Equal(t, 1, fixture.route.addressInspectCount(fixture.hostFD, topology.managedBridge.ifIndex),
+		"post-mutation inspection must not use the stale ifindex")
+	assert.Empty(t, fixture.route.addressesSnapshot(fixture.hostFD, topology.managedBridge.ifIndex+1),
+		"the replacement ifindex must never become address-inspection authority")
+}
+
+func TestLinkEffectReadmitsAddressTargetImmediatelyBeforeMutation(t *testing.T) {
+	t.Parallel()
+
+	fixture, topology, endpoint := newL3EffectFixture(t)
+	fixture.route.addressInspectError = func(_ context.Context, fd, ifIndex, count int) error {
+		if fd == fixture.hostFD && ifIndex == topology.managedBridge.ifIndex && count == 1 {
+			link := fixture.route.links[fd][topology.managedBridge.name]
+			link.ifIndex++
+			fixture.route.links[fd][topology.managedBridge.name] = link
+		}
+		return nil
+	}
+
+	err := fixture.effect.ConfigureL3Down(t.Context(), fixture.pin, topology, endpoint)
+
+	require.Error(t, err)
+	assert.Empty(t, fixture.route.addressMutationsSnapshot())
+}
+
+func TestLinkEffectRejectsEveryCorruptTopologyBindingBeforeL3Mutation(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*linkEffectFixture, *Topology){
+		"namespace binding": func(fixture *linkEffectFixture, topology *Topology) {
+			topology.managedBridge.namespace = fixture.vmNamespace
+		},
+		"name": func(fixture *linkEffectFixture, topology *Topology) {
+			fixture.route.corruptLink(fixture.vmFD, topology.localBridge.name, func(link *routeLinkObservation) {
+				link.name = "foreign0"
+			})
+		},
+		"ifindex": func(fixture *linkEffectFixture, topology *Topology) {
+			fixture.route.corruptLink(fixture.vmFD, topology.tap.name, func(link *routeLinkObservation) {
+				link.ifIndex++
+			})
+		},
+		"kind": func(fixture *linkEffectFixture, topology *Topology) {
+			fixture.route.corruptLink(fixture.hostFD, topology.managedBridge.name, func(link *routeLinkObservation) {
+				link.kind = "dummy"
+			})
+		},
+		"master": func(fixture *linkEffectFixture, topology *Topology) {
+			fixture.route.corruptLink(fixture.vmFD, topology.tap.name, func(link *routeLinkObservation) {
+				link.master++
+			})
+		},
+		"peer reciprocity": func(fixture *linkEffectFixture, topology *Topology) {
+			fixture.route.corruptLink(fixture.hostFD, topology.veth.host.name, func(link *routeLinkObservation) {
+				link.peer++
+			})
+		},
+		"TAP authority": func(fixture *linkEffectFixture, topology *Topology) {
+			fixture.route.corruptLink(fixture.vmFD, topology.tap.name, func(link *routeLinkObservation) {
+				link.tunOwner++
+			})
+		},
+		"loopback device": func(fixture *linkEffectFixture, _ *Topology) {
+			fixture.route.corruptLink(fixture.vmFD, loopbackLinkName, func(link *routeLinkObservation) {
+				link.deviceType = unix.ARPHRD_ETHER
+			})
+		},
+		"loopback extra authority": func(fixture *linkEffectFixture, _ *Topology) {
+			fixture.route.corruptLink(fixture.vmFD, loopbackLinkName, func(link *routeLinkObservation) {
+				link.alias = "foreign"
+			})
+		},
+		"managed bridge down": func(fixture *linkEffectFixture, topology *Topology) {
+			fixture.route.corruptLink(fixture.hostFD, topology.managedBridge.name, func(link *routeLinkObservation) {
+				link.flags &^= unix.IFF_UP
+			})
+		},
+	}
+
+	for name, corrupt := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture, topology, endpoint := newL3EffectFixture(t)
+			corrupt(fixture, &topology)
+
+			err := fixture.effect.ConfigureL3Down(t.Context(), fixture.pin, topology, endpoint)
+
+			require.Error(t, err)
+			assert.Empty(t, fixture.route.addressMutationsSnapshot())
+			assert.Zero(t, fixture.route.stateMutationCount())
+		})
+	}
+}
+
 // Rationale: Each activation mutation must re-admit the exact derived role and use only the ifindex returned by that
 // inspection. IFF_RUNNING/carrier is deliberately irrelevant; IFF_UP is the sole activation state bit.
 func TestLinkEffectRaisesAndLowersExactTopologyRoles(t *testing.T) {
@@ -367,6 +516,126 @@ func TestLinkEffectReconcilesLinkStateACKAmbiguity(t *testing.T) {
 	assert.Len(t, fixture.route.stateMutationsSnapshot(), 1)
 }
 
+func TestLinkEffectClassifiesStillBeforeLinkStateError(t *testing.T) {
+	t.Parallel()
+
+	fixture, topology, _ := newL3EffectFixture(t)
+	ackError := errors.New("injected rejected link mutation")
+	fixture.route.applyState = false
+	fixture.route.stateError = ackError
+
+	err := fixture.effect.RaiseHostVeth(t.Context(), fixture.pin, topology)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ackError)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, false, domainErr.Details["mutation_committed"])
+	assert.Equal(t, false, domainErr.Details["mutation_outcome_unknown"])
+}
+
+func TestLinkEffectClassifiesUnknownLinkStateInspection(t *testing.T) {
+	t.Parallel()
+
+	fixture, topology, _ := newL3EffectFixture(t)
+	ackLost := errors.New("injected link acknowledgement loss")
+	inspectionError := errors.New("injected post-link inspection failure")
+	fixture.route.stateError = ackLost
+	fixture.route.inspectError = func(_ int, name linkName, _ int) error {
+		if name == topology.managedBridge.name && len(fixture.route.stateMutations) > 0 {
+			return inspectionError
+		}
+		return nil
+	}
+
+	err := fixture.effect.RaiseHostVeth(t.Context(), fixture.pin, topology)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ackLost)
+	assert.ErrorIs(t, err, inspectionError)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, false, domainErr.Details["mutation_committed"])
+	assert.Equal(t, true, domainErr.Details["mutation_outcome_unknown"])
+}
+
+func TestLinkEffectPreservesDomainErrorClassification(t *testing.T) {
+	t.Parallel()
+
+	fixture, topology, endpoint := newL3EffectFixture(t)
+	cause := errs.New(
+		errs.CodeNetworkNotFound,
+		"classified inspection failure",
+		errs.WithClass(errs.ClassConflict),
+		errs.WithEntity("retained-network"),
+		errs.WithDetails(map[string]any{"proof": "preserved"}),
+	)
+	fixture.route.addressInspectError = func(context.Context, int, int, int) error { return cause }
+
+	err := fixture.effect.ConfigureL3Down(t.Context(), fixture.pin, topology, endpoint)
+
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, cause.Code, domainErr.Code)
+	assert.Equal(t, cause.Class, domainErr.Class)
+	assert.Equal(t, cause.Entity, domainErr.Entity)
+	assert.Equal(t, cause.Details, domainErr.Details)
+	assert.ErrorIs(t, err, cause)
+}
+
+func TestLinkEffectClosesBothNamespaceLeasesHostFirst(t *testing.T) {
+	t.Parallel()
+
+	fixture, topology, endpoint := newL3EffectFixture(t)
+	hostCloseError := errors.New("injected host lease close failure")
+	vmCloseError := errors.New("injected VM lease close failure")
+	fixture.closeErrors = map[int]error{
+		fixture.hostFD: hostCloseError,
+		fixture.vmFD:   vmCloseError,
+	}
+
+	err := fixture.effect.ConfigureL3Down(t.Context(), fixture.pin, topology, endpoint)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, hostCloseError)
+	assert.ErrorIs(t, err, vmCloseError)
+	assert.Equal(t, []int{fixture.hostFD, fixture.vmFD}, fixture.closeOrderSnapshot())
+}
+
+func TestLinkEffectPreservesPrimaryAndCloseFailures(t *testing.T) {
+	t.Parallel()
+
+	fixture, topology, endpoint := newL3EffectFixture(t)
+	primary := errors.New("injected primary inspection failure")
+	closeFailure := errors.New("injected close failure")
+	fixture.route.addressInspectError = func(context.Context, int, int, int) error { return primary }
+	fixture.closeErrors = map[int]error{fixture.hostFD: closeFailure}
+
+	err := fixture.effect.ConfigureL3Down(t.Context(), fixture.pin, topology, endpoint)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, primary)
+	assert.ErrorIs(t, err, closeFailure)
+	assert.Equal(t, []int{fixture.hostFD, fixture.vmFD}, fixture.closeOrderSnapshot())
+}
+
+func TestLinkEffectInspectsAndClosesWithoutCanceledMutationContext(t *testing.T) {
+	t.Parallel()
+
+	fixture, topology, endpoint := newL3EffectFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	fixture.route.cancelAddress = cancel
+
+	err := fixture.effect.ConfigureL3Down(ctx, fixture.pin, topology, endpoint)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, fixture.route.lastInspectCancelled(fixture.hostFD, topology.managedBridge.name))
+	for _, closeCtx := range fixture.closeContextsSnapshot() {
+		assert.NoError(t, closeCtx.Err())
+	}
+}
+
 func newL3EffectFixture(t *testing.T) (*linkEffectFixture, Topology, endpointL3) {
 	t.Helper()
 	fixture := newLinkEffectFixture(t)
@@ -380,6 +649,9 @@ func newL3EffectFixture(t *testing.T) (*linkEffectFixture, Topology, endpointL3)
 		fixture.names.managedBridge,
 		fixture.hostNamespace,
 	)
+	bridgeObservation := fixture.route.mustLink(t, fixture.hostFD, fixture.names.managedBridge)
+	bridgeObservation.flags |= unix.IFF_UP
+	fixture.route.put(fixture.hostFD, bridgeObservation)
 	topology := Topology{
 		key:           key,
 		handle:        fixture.pin.Handle(),
@@ -397,29 +669,61 @@ func newL3EffectFixture(t *testing.T) (*linkEffectFixture, Topology, endpointL3)
 		guestAddress: netip.MustParseAddr("10.44.0.2"),
 	})
 	require.NoError(t, err)
-	bridgeBookkeeping, err := deriveBridgeKernelBookkeeping(network)
-	require.NoError(t, err)
 	fixture.route.afterAddress = func(fd, ifIndex int, expectation addressExpectation) {
 		if expectation == canonicalLoopbackL3.address {
-			fixture.route.putRouteLocked(fd, mustRouteObservation(t, canonicalLoopbackL3.localRoute, ifIndex))
-			fixture.route.putRouteLocked(fd, mustRouteObservation(t, canonicalLoopbackL3.connectedRoute, ifIndex))
+			fixture.route.replaceRoutesLocked(fd, ifIndex, []routeIPv4Observation{
+				literalRoute("127.0.0.1/32", "127.0.0.1", ifIndex,
+					unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL),
+			})
 			return
 		}
-		for _, route := range []routeExpectation{
-			network.bridgeConnectedRoute,
-			bridgeBookkeeping.local,
-			bridgeBookkeeping.networkBroadcast,
-			bridgeBookkeeping.subnetBroadcast,
-		} {
-			fixture.route.putRouteLocked(fd, mustRouteObservation(t, route, ifIndex))
+		fixture.route.replaceRoutesLocked(fd, ifIndex, []routeIPv4Observation{
+			literalRoute("10.44.0.0/24", "10.44.0.1", ifIndex,
+				unix.RT_TABLE_MAIN, unix.RTPROT_KERNEL, unix.RT_SCOPE_LINK, unix.RTN_UNICAST),
+			literalRoute("10.44.0.1/32", "10.44.0.1", ifIndex,
+				unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL),
+			literalRoute("10.44.0.255/32", "10.44.0.1", ifIndex,
+				unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_LINK, unix.RTN_BROADCAST),
+		})
+	}
+	fixture.route.afterState = func(fd, ifIndex int, up bool) {
+		if fd != fixture.vmFD || ifIndex != 1 {
+			return
 		}
+		routes := []routeIPv4Observation{
+			literalRoute("127.0.0.1/32", "127.0.0.1", ifIndex,
+				unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL),
+		}
+		if up {
+			routes = append(routes,
+				literalRoute("127.0.0.0/8", "127.0.0.1", ifIndex,
+					unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL),
+				literalRoute("127.255.255.255/32", "127.0.0.1", ifIndex,
+					unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_LINK, unix.RTN_BROADCAST),
+			)
+		}
+		fixture.route.replaceRoutesLocked(fd, ifIndex, routes)
 	}
 	return fixture, topology, endpoint
 }
 
-func mustRouteObservation(t *testing.T, expectation routeExpectation, ifIndex int) routeIPv4Observation {
-	t.Helper()
-	observation, err := routeExpectationToObservation(expectation, ifIndex)
-	require.NoError(t, err)
-	return observation
+func literalRoute(
+	destination string,
+	source string,
+	ifIndex int,
+	table uint32,
+	protocol uint8,
+	scope uint8,
+	kind uint8,
+) routeIPv4Observation {
+	return routeIPv4Observation{
+		destination: netip.MustParsePrefix(destination),
+		source:      netip.MustParseAddr(source),
+		hasSource:   true,
+		ifIndex:     ifIndex,
+		table:       table,
+		protocol:    protocol,
+		scope:       scope,
+		kind:        kind,
+	}
 }

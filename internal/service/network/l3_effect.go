@@ -23,6 +23,13 @@ const (
 	linkStateHostVeth
 )
 
+type numberedL3Role uint8
+
+const (
+	numberedL3ManagedBridge numberedL3Role = iota + 1
+	numberedL3Loopback
+)
+
 type retainedL3Namespaces struct {
 	vmLease   *linkNamespaceLease
 	hostLease *linkNamespaceLease
@@ -42,6 +49,11 @@ type exactTopologyLinks struct {
 	hostVeth      routeLinkObservation
 }
 
+// ConfigureL3Down configures the exact bridge and down-loopback IPv4 authority without adding routes directly.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority, the NamespacePin,
+// Topology, and endpoint L3 authority for the entire call. The shared managed bridge must already be IFF_UP, while
+// every endpoint exposure link must remain down.
 func (effect *linkEffect) ConfigureL3Down(
 	ctx context.Context,
 	namespace NamespacePin,
@@ -58,11 +70,11 @@ func (effect *linkEffect) ConfigureL3Down(
 	defer func() {
 		returnErr = appendL3CloseError(returnErr, retained.close(context.WithoutCancel(ctx)))
 	}()
-	links, err := effect.inspectExactTopologyLinks(ctx, retained, topology, true)
+	_, err = effect.inspectExactTopologyLinks(ctx, retained, topology, true)
 	if err != nil {
 		return l3EffectError(topology.managedBridge.name, "inspect down L3 topology", err)
 	}
-	if err := effect.verifyFabricUnnumbered(ctx, retained, links); err != nil {
+	if err := effect.verifyFabricUnnumbered(ctx, retained, topology); err != nil {
 		return l3EffectError(topology.managedBridge.name, "verify unnumbered fabric links", err)
 	}
 	bridgeBookkeeping, err := deriveBridgeKernelBookkeeping(endpoint.network)
@@ -71,13 +83,13 @@ func (effect *linkEffect) ConfigureL3Down(
 	}
 	if err := effect.ensureCanonicalAddressAndRoutes(
 		ctx,
-		retained.hostFD,
-		links.managedBridge,
+		retained,
+		topology,
+		numberedL3ManagedBridge,
 		endpoint.network.bridgeAddress,
 		[]routeExpectation{
 			endpoint.network.bridgeConnectedRoute,
 			bridgeBookkeeping.local,
-			bridgeBookkeeping.networkBroadcast,
 			bridgeBookkeeping.subnetBroadcast,
 		},
 	); err != nil {
@@ -85,49 +97,91 @@ func (effect *linkEffect) ConfigureL3Down(
 	}
 	return effect.ensureCanonicalAddressAndRoutes(
 		ctx,
-		retained.vmFD,
-		links.loopback,
+		retained,
+		topology,
+		numberedL3Loopback,
 		canonicalLoopbackL3.address,
-		[]routeExpectation{canonicalLoopbackL3.localRoute, canonicalLoopbackL3.connectedRoute},
+		[]routeExpectation{canonicalLoopbackL3.localRoute},
 	)
 }
 
+// RaiseLoopback enables IFF_UP on the exact retained loopback and verifies its complete canonical IPv4 route set.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and
+// Topology for the entire call, and must have successfully completed ConfigureL3Down for the same authority.
 func (effect *linkEffect) RaiseLoopback(ctx context.Context, namespace NamespacePin, topology Topology) error {
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateLoopback, true)
 }
 
+// RaiseLocalBridge enables IFF_UP on the exact retained namespace-local bridge.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and
+// Topology for the entire call and must preserve the ordered activation preconditions.
 func (effect *linkEffect) RaiseLocalBridge(ctx context.Context, namespace NamespacePin, topology Topology) error {
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateLocalBridge, true)
 }
 
+// RaiseTAP enables IFF_UP on the exact retained TAP.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and
+// Topology for the entire call and must preserve the ordered activation preconditions.
 func (effect *linkEffect) RaiseTAP(ctx context.Context, namespace NamespacePin, topology Topology) error {
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateTAP, true)
 }
 
+// RaiseNamespaceVeth enables IFF_UP on the exact retained namespace veth endpoint.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and
+// Topology for the entire call and must preserve the ordered activation preconditions.
 func (effect *linkEffect) RaiseNamespaceVeth(ctx context.Context, namespace NamespacePin, topology Topology) error {
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateNamespaceVeth, true)
 }
 
+// RaiseHostVeth enables IFF_UP on the exact retained host veth endpoint.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and
+// Topology for the entire call, preserve ordered activation, and hold matching freshly verified firewall endpoint
+// authority. This low-level effect cannot mint or verify firewall authority and is intentionally not service-composed.
 func (effect *linkEffect) RaiseHostVeth(ctx context.Context, namespace NamespacePin, topology Topology) error {
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateHostVeth, true)
 }
 
+// LowerHostVeth disables IFF_UP on the exact retained host veth endpoint.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and
+// Topology for the entire call and must preserve the ordered rollback preconditions.
 func (effect *linkEffect) LowerHostVeth(ctx context.Context, namespace NamespacePin, topology Topology) error {
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateHostVeth, false)
 }
 
+// LowerNamespaceVeth disables IFF_UP on the exact retained namespace veth endpoint.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and
+// Topology for the entire call and must preserve the ordered rollback preconditions.
 func (effect *linkEffect) LowerNamespaceVeth(ctx context.Context, namespace NamespacePin, topology Topology) error {
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateNamespaceVeth, false)
 }
 
+// LowerTAP disables IFF_UP on the exact retained TAP.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and
+// Topology for the entire call and must preserve the ordered rollback preconditions.
 func (effect *linkEffect) LowerTAP(ctx context.Context, namespace NamespacePin, topology Topology) error {
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateTAP, false)
 }
 
+// LowerLocalBridge disables IFF_UP on the exact retained namespace-local bridge.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and
+// Topology for the entire call and must preserve the ordered rollback preconditions.
 func (effect *linkEffect) LowerLocalBridge(ctx context.Context, namespace NamespacePin, topology Topology) error {
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateLocalBridge, false)
 }
 
+// LowerLoopback disables IFF_UP on the exact retained loopback and verifies only its down-state local route remains.
+//
+// SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and
+// Topology for the entire call and must preserve the ordered rollback preconditions.
 func (effect *linkEffect) LowerLoopback(ctx context.Context, namespace NamespacePin, topology Topology) error {
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateLoopback, false)
 }
@@ -292,6 +346,9 @@ func (effect *linkEffect) inspectExactTopologyLinks(
 		tap.flags&unix.IFF_UP != 0 || namespaceVeth.flags&unix.IFF_UP != 0 || hostVeth.flags&unix.IFF_UP != 0) {
 		validationErr = errors.Join(validationErr, errors.New("topology exposure link is unexpectedly up"))
 	}
+	if requireDown && managedBridge.flags&unix.IFF_UP == 0 {
+		validationErr = errors.Join(validationErr, errors.New("shared managed bridge is unexpectedly down"))
+	}
 	if validationErr != nil {
 		return exactTopologyLinks{}, validationErr
 	}
@@ -365,28 +422,28 @@ func validateExactLoopback(observation routeLinkObservation) error {
 func (effect *linkEffect) verifyFabricUnnumbered(
 	ctx context.Context,
 	retained *retainedL3Namespaces,
-	links exactTopologyLinks,
+	topology Topology,
 ) error {
 	if canonicalFabricL3.ipv4Addresses != zero || canonicalFabricL3.ipv4Routes != zero {
 		return errors.New("canonical fabric L3 expectation is invalid")
 	}
-	targets := [...]struct {
-		namespaceFD int
-		link        routeLinkObservation
-	}{
-		{namespaceFD: retained.hostFD, link: links.hostVeth},
-		{namespaceFD: retained.vmFD, link: links.namespaceVeth},
-		{namespaceFD: retained.vmFD, link: links.localBridge},
-		{namespaceFD: retained.vmFD, link: links.tap},
-	}
-	for _, target := range targets {
-		addresses, routes, err := effect.inspectIPv4Authority(ctx, target.namespaceFD, target.link.ifIndex)
+	roles := [...]linkStateRole{linkStateHostVeth, linkStateNamespaceVeth, linkStateLocalBridge, linkStateTAP}
+	for _, role := range roles {
+		links, err := effect.inspectExactTopologyLinks(ctx, retained, topology, true)
+		if err != nil {
+			return err
+		}
+		namespaceFD, link, err := exactLinkStateTarget(retained, links, role)
+		if err != nil {
+			return err
+		}
+		addresses, routes, err := effect.inspectIPv4Authority(ctx, namespaceFD, link.ifIndex)
 		if err != nil {
 			return err
 		}
 		if len(addresses) != int(canonicalFabricL3.ipv4Addresses) ||
 			len(routes) != int(canonicalFabricL3.ipv4Routes) {
-			return fmt.Errorf("fabric link has unexpected IPv4 authority: %s", target.link.name)
+			return fmt.Errorf("fabric link has unexpected IPv4 authority: %s", link.name)
 		}
 	}
 	return nil
@@ -407,11 +464,16 @@ func (effect *linkEffect) inspectIPv4Authority(
 
 func (effect *linkEffect) ensureCanonicalAddressAndRoutes(
 	ctx context.Context,
-	namespaceFD int,
-	link routeLinkObservation,
+	retained *retainedL3Namespaces,
+	topology Topology,
+	role numberedL3Role,
 	address addressExpectation,
 	routes []routeExpectation,
 ) error {
+	namespaceFD, link, err := effect.resolveExactNumberedL3Target(ctx, retained, topology, role, true)
+	if err != nil {
+		return l3EffectError(topology.managedBridge.name, "resolve exact IPv4 target", err)
+	}
 	addressesBefore, routesBefore, err := effect.inspectIPv4Authority(ctx, namespaceFD, link.ifIndex)
 	if err != nil {
 		return l3EffectError(link.name, "inspect IPv4 authority", err)
@@ -423,32 +485,73 @@ func (effect *linkEffect) ensureCanonicalAddressAndRoutes(
 		return nil
 	}
 
-	mutationErr := effect.route.addIPv4Address(ctx, namespaceFD, link.ifIndex, address)
+	mutationFD, mutationLink, err := effect.resolveExactNumberedL3Target(ctx, retained, topology, role, true)
+	if err != nil {
+		return l3EffectError(link.name, "readmit exact IPv4 mutation target", err)
+	}
+	mutationErr := effect.route.addIPv4Address(ctx, mutationFD, mutationLink.ifIndex, address)
+	afterFD, afterLink, resolutionErr := effect.resolveExactNumberedL3Target(
+		context.WithoutCancel(ctx),
+		retained,
+		topology,
+		role,
+		true,
+	)
+	if resolutionErr != nil {
+		return l3MutationError(
+			mutationLink.name,
+			"resolve configured IPv4 target",
+			errors.Join(mutationErr, resolutionErr),
+			false,
+			true,
+		)
+	}
 	addressesAfter, routesAfter, inspectionErr := effect.inspectIPv4Authority(
 		context.WithoutCancel(ctx),
-		namespaceFD,
-		link.ifIndex,
+		afterFD,
+		afterLink.ifIndex,
 	)
 	if inspectionErr != nil {
 		return l3MutationError(
-			link.name,
+			mutationLink.name,
 			"inspect configured IPv4 authority",
 			errors.Join(mutationErr, inspectionErr),
 			false,
 			true,
 		)
 	}
-	validationErr := validateExactIPv4Authority(addressesAfter, routesAfter, address, routes, link.ifIndex)
+	validationErr := validateExactIPv4Authority(addressesAfter, routesAfter, address, routes, afterLink.ifIndex)
 	if mutationErr != nil && validationErr == nil {
-		return l3MutationError(link.name, "configure IPv4 address", mutationErr, true, false)
+		return l3MutationError(mutationLink.name, "configure IPv4 address", mutationErr, true, false)
 	}
 	if mutationErr != nil && len(addressesAfter) == 0 && len(routesAfter) == 0 {
-		return l3MutationError(link.name, "configure IPv4 address", mutationErr, false, false)
+		return l3MutationError(mutationLink.name, "configure IPv4 address", mutationErr, false, false)
 	}
 	if err := errors.Join(mutationErr, validationErr); err != nil {
-		return l3EffectError(link.name, "configure exact IPv4 authority", err)
+		return l3EffectError(mutationLink.name, "configure exact IPv4 authority", err)
 	}
 	return nil
+}
+
+func (effect *linkEffect) resolveExactNumberedL3Target(
+	ctx context.Context,
+	retained *retainedL3Namespaces,
+	topology Topology,
+	role numberedL3Role,
+	requireDown bool,
+) (int, routeLinkObservation, error) {
+	links, err := effect.inspectExactTopologyLinks(ctx, retained, topology, requireDown)
+	if err != nil {
+		return -1, routeLinkObservation{}, err
+	}
+	switch role {
+	case numberedL3ManagedBridge:
+		return retained.hostFD, links.managedBridge, nil
+	case numberedL3Loopback:
+		return retained.vmFD, links.loopback, nil
+	default:
+		return -1, routeLinkObservation{}, errors.New("numbered L3 role is invalid")
+	}
 }
 
 func validateExactIPv4Authority(
@@ -514,6 +617,11 @@ func (effect *linkEffect) setExactTopologyLinkState(
 		return l3EffectError(topology.veth.host.name, "select link-state target", err)
 	}
 	if linkIsUp(target) == up {
+		if role == linkStateLoopback {
+			if err := effect.verifyCanonicalLoopbackAuthority(ctx, namespaceFD, target, up); err != nil {
+				return l3EffectError(target.name, "verify loopback IPv4 authority", err)
+			}
+		}
 		return nil
 	}
 	mutationErr := effect.route.setLinkUp(ctx, namespaceFD, target.ifIndex, up)
@@ -531,6 +639,22 @@ func (effect *linkEffect) setExactTopologyLinkState(
 	if targetErr == nil && role == linkStateLoopback && afterTarget.ifIndex != target.ifIndex {
 		targetErr = errors.New("loopback ifindex changed during link-state mutation")
 	}
+	if targetErr == nil && linkIsUp(afterTarget) == up && role == linkStateLoopback {
+		if err := effect.verifyCanonicalLoopbackAuthority(
+			context.WithoutCancel(ctx),
+			namespaceFD,
+			afterTarget,
+			up,
+		); err != nil {
+			return l3MutationError(
+				target.name,
+				"inspect changed loopback IPv4 authority",
+				errors.Join(mutationErr, err),
+				false,
+				true,
+			)
+		}
+	}
 	if targetErr == nil && linkIsUp(afterTarget) == up {
 		if mutationErr != nil {
 			return l3MutationError(target.name, "change exact link state", mutationErr, true, false)
@@ -544,6 +668,33 @@ func (effect *linkEffect) setExactTopologyLinkState(
 		target.name,
 		"change exact link state",
 		errors.Join(mutationErr, targetErr, errors.New("requested IFF_UP state was not observed")),
+	)
+}
+
+func (effect *linkEffect) verifyCanonicalLoopbackAuthority(
+	ctx context.Context,
+	namespaceFD int,
+	loopback routeLinkObservation,
+	up bool,
+) error {
+	routes := []routeExpectation{canonicalLoopbackL3.localRoute}
+	if up {
+		routes = append(
+			routes,
+			canonicalLoopbackL3.connectedRoute,
+			canonicalLoopbackL3.subnetBroadcastRoute,
+		)
+	}
+	addresses, observedRoutes, err := effect.inspectIPv4Authority(ctx, namespaceFD, loopback.ifIndex)
+	if err != nil {
+		return err
+	}
+	return validateExactIPv4Authority(
+		addresses,
+		observedRoutes,
+		canonicalLoopbackL3.address,
+		routes,
+		loopback.ifIndex,
 	)
 }
 
@@ -575,6 +726,12 @@ func linkIsUp(link routeLinkObservation) bool {
 func l3EffectError(name linkName, stage string, cause error) *errs.DomainError {
 	if cause == nil {
 		cause = errors.New("failed to " + stage)
+	}
+	if domainErr := errs.AsDomainError(cause); domainErr != nil {
+		result := *domainErr
+		result.Details = maps.Clone(domainErr.Details)
+		result.Err = cause
+		return &result
 	}
 	return errs.WrapMsg(
 		errs.CodeNetworkCreateFailed,
