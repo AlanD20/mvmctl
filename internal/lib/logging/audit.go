@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -28,9 +29,9 @@ type AuditLog struct {
 // The underlying RotatingFileWriter is created at construction time (opening
 // the file immediately). If the file cannot be opened, the writer is nil and
 // Log/LogOperation silently succeed (no-op fallback).
-func NewAuditLog() *AuditLog {
+func NewAuditLog(ctx context.Context) *AuditLog {
 	path := infra.GetAuditLogPath()
-	writer, _ := rotating.NewRotatingFileWriter(path)
+	writer, _ := rotating.NewRotatingFileWriter(ctx, path)
 	return &AuditLog{path: path, writer: writer}
 }
 

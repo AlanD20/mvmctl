@@ -71,7 +71,7 @@ func newKeyOp(keyRepo key.Repository) *api.Operation {
 			Key: keyRepo,
 			VM:  testutil.NewVMRepo(),
 		},
-		AuditLog: logging.NewAuditLog(),
+		AuditLog: logging.NewAuditLog(t.Context()),
 	}
 }
 
@@ -266,7 +266,7 @@ func TestKeyStep_Destroy(t *testing.T) {
 						},
 						VM: testutil.NewVMRepo(),
 					},
-					AuditLog: logging.NewAuditLog(),
+					AuditLog: logging.NewAuditLog(t.Context()),
 				}
 			},
 			saved: model.ResourceState{
@@ -365,7 +365,7 @@ func TestKeyStep_Destroy_ContextCancelled(t *testing.T) {
 			Key: &ctxKeyRepo{KeyRepo: testutil.NewKeyRepo()},
 			VM:  testutil.NewVMRepo(),
 		},
-		AuditLog: logging.NewAuditLog(),
+		AuditLog: logging.NewAuditLog(t.Context()),
 	}
 	step := newKeyStep(t, op)
 

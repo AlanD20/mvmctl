@@ -173,7 +173,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Repos:                     r,
 		Services:                  s,
 		ProvisionerType:           provisionerType,
-		AuditLog:                  logging.NewAuditLog(),
+		AuditLog:                  logging.NewAuditLog(ctx),
 		hostSystemBinaryInstaller: s.Host,
 		hostSudoersConfigurer:     s.Host,
 		trustedReleaseClient:      jailer.NewTrustedReleaseClient(),

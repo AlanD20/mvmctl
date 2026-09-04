@@ -42,6 +42,75 @@ func TestRotatingFileWriterWriteCompatibilityPersistsRecord(t *testing.T) {
 	assertFileContent(t, path, record)
 }
 
+func TestNewRotatingFileWriterContextCancelsWhileStableLockIsHeld(t *testing.T) {
+	// Rationale: constructor admission performs filesystem effects and must not wait forever behind another process.
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "audit.log")
+	first := newTestWriter(t, path)
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseWrite) }) })
+	realWrite := first.deps.write
+	first.deps.write = func(ctx context.Context, fd int, p []byte) (int, error) {
+		close(writeStarted)
+		if err := waitForRelease(releaseWrite); err != nil {
+			return 0, err
+		}
+		return realWrite(ctx, fd, p)
+	}
+	firstResult := make(chan writeResult, 1)
+	go func() {
+		n, err := first.WriteContext(context.Background(), []byte("held-record\n"))
+		firstResult <- writeResult{n: n, err: err}
+	}()
+	awaitSignal(t, writeStarted)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	constructorResult := make(chan writerResult, 1)
+	go func() {
+		writer, err := NewRotatingFileWriter(ctx, path)
+		constructorResult <- writerResult{writer: writer, err: err}
+	}()
+	result := awaitWriterResult(t, constructorResult)
+	assert.Nil(t, result.writer)
+	require.Error(t, result.err)
+	assert.ErrorIs(t, result.err, context.DeadlineExceeded)
+
+	releaseOnce.Do(func() { close(releaseWrite) })
+	require.NoError(t, awaitResult(t, firstResult).err)
+}
+
+func TestNewRotatingFileWriterRejectsFIFOsWithoutBlocking(t *testing.T) {
+	// Rationale: a blocking open of an attacker-supplied FIFO can hang logging initialization before type admission.
+	t.Parallel()
+
+	for _, leaf := range []string{"log", "lock"} {
+		t.Run(leaf, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "audit.log")
+			fifoPath := path
+			if leaf == "lock" {
+				fifoPath += ".lock"
+			}
+			require.NoError(t, unix.Mkfifo(fifoPath, managedFileMode))
+
+			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+			defer cancel()
+			result := make(chan writerResult, 1)
+			go func() {
+				writer, err := NewRotatingFileWriter(ctx, path)
+				result <- writerResult{writer: writer, err: err}
+			}()
+			got := awaitWriterResult(t, result)
+			assert.Nil(t, got.writer)
+			require.Error(t, got.err)
+			assert.NotErrorIs(t, got.err, context.DeadlineExceeded, "FIFO admission must reject without waiting")
+		})
+	}
+}
+
 func TestRotatingFileWriterIndependentWritersSerializeRotationAndRefreshStaleInodes(t *testing.T) {
 	// Rationale: every writer retains its own descriptor, so cross-writer rotation must force the other writer to
 	// discover the replacement inode before it computes size or appends a record.
@@ -77,22 +146,22 @@ func TestRotatingFileWriterCancellationWhileAnotherWriterHoldsStableLock(t *test
 
 	writeStarted := make(chan struct{})
 	releaseWrite := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseWrite) }) })
 	realWrite := first.deps.write
 	first.deps.write = func(ctx context.Context, fd int, p []byte) (int, error) {
 		close(writeStarted)
-		<-releaseWrite
+		if err := waitForRelease(releaseWrite); err != nil {
+			return 0, err
+		}
 		return realWrite(ctx, fd, p)
-	}
-	type writeResult struct {
-		n   int
-		err error
 	}
 	firstResult := make(chan writeResult, 1)
 	go func() {
 		n, err := first.WriteContext(context.Background(), []byte("held-record\n"))
 		firstResult <- writeResult{n: n, err: err}
 	}()
-	<-writeStarted
+	awaitSignal(t, writeStarted)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
@@ -101,11 +170,52 @@ func TestRotatingFileWriterCancellationWhileAnotherWriterHoldsStableLock(t *test
 	assert.Zero(t, written)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
-	close(releaseWrite)
-	result := <-firstResult
+	releaseOnce.Do(func() { close(releaseWrite) })
+	result := awaitResult(t, firstResult)
 	require.NoError(t, result.err)
 	assert.Equal(t, len("held-record\n"), result.n)
 	assertFileContent(t, path, []byte("held-record\n"))
+}
+
+func TestRotatingFileWriterCancellationWhileSameWriterIsBusy(t *testing.T) {
+	// Rationale: local lifecycle serialization must not hide cancellation behind an operation using the same writer.
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "audit.log")
+	writer := newTestWriter(t, path)
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseWrite) }) })
+	realWrite := writer.deps.write
+	writer.deps.write = func(ctx context.Context, fd int, p []byte) (int, error) {
+		close(writeStarted)
+		if err := waitForRelease(releaseWrite); err != nil {
+			return 0, err
+		}
+		return realWrite(ctx, fd, p)
+	}
+	firstResult := make(chan writeResult, 1)
+	go func() {
+		n, err := writer.WriteContext(context.Background(), []byte("held-record\n"))
+		firstResult <- writeResult{n: n, err: err}
+	}()
+	awaitSignal(t, writeStarted)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	secondResult := make(chan writeResult, 1)
+	go func() {
+		n, err := writer.WriteContext(ctx, []byte("must-not-appear\n"))
+		secondResult <- writeResult{n: n, err: err}
+	}()
+	result := awaitResult(t, secondResult)
+	require.Error(t, result.err)
+	assert.Zero(t, result.n)
+	assert.ErrorIs(t, result.err, context.DeadlineExceeded)
+
+	releaseOnce.Do(func() { close(releaseWrite) })
+	require.NoError(t, awaitResult(t, firstResult).err)
 }
 
 func TestRotatingFileWriterRefreshesExternallyReplacedCurrentPath(t *testing.T) {
@@ -127,6 +237,165 @@ func TestRotatingFileWriterRefreshesExternallyReplacedCurrentPath(t *testing.T) 
 	require.NoError(t, err)
 	assertFileContent(t, detachedPath, []byte("old-inode\n"))
 	assertFileContent(t, path, []byte("replacement\nnew-inode\n"))
+}
+
+func TestRotatingFileWriterFailedRotationPreservesHistoryAndAllowsFreshRetry(t *testing.T) {
+	// Rationale: a partial backup shift can overwrite the oldest retained record and make every retry compound the
+	// damage. Each rename and reopen boundary must restore the exact pre-rotation namespace before returning an error.
+	tests := []struct {
+		name       string
+		failRename int
+		failReopen bool
+		failRemove bool
+	}{
+		{name: "stage current", failRename: 1},
+		{name: "stage backup one", failRename: 2},
+		{name: "stage backup two", failRename: 3},
+		{name: "stage backup three", failRename: 4},
+		{name: "publish current", failRename: 5},
+		{name: "publish backup one", failRename: 6},
+		{name: "publish backup two", failRename: 7},
+		{name: "reopen current", failReopen: true},
+		{name: "remove oldest", failRemove: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "audit.log")
+			seedRotationHistory(t, path)
+			writer := newTestWriter(t, path)
+			writer.maxBytes = 1
+			injected := errors.New("injected rotation boundary failure")
+
+			if test.failRename > 0 {
+				realRename := writer.deps.rename
+				renameCalls := 0
+				writer.deps.rename = func(ctx context.Context, oldPath, newPath string) error {
+					renameCalls++
+					if renameCalls == test.failRename {
+						return injected
+					}
+					return realRename(ctx, oldPath, newPath)
+				}
+			}
+			if test.failReopen {
+				realOpen := writer.deps.open
+				createAttempts := 0
+				writer.deps.open = func(ctx context.Context, openedPath string, flags int, mode uint32) (int, error) {
+					if openedPath == path && flags&unix.O_EXCL != 0 {
+						createAttempts++
+						if createAttempts == 2 {
+							return -1, injected
+						}
+					}
+					return realOpen(ctx, openedPath, flags, mode)
+				}
+			}
+			if test.failRemove {
+				realUnlink := writer.deps.unlink
+				failed := false
+				writer.deps.unlink = func(ctx context.Context, removedPath string) error {
+					if !failed {
+						failed = true
+						return injected
+					}
+					return realUnlink(ctx, removedPath)
+				}
+			}
+
+			n, err := writer.WriteContext(t.Context(), []byte("new-record\n"))
+			assert.Zero(t, n)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, injected)
+			require.NoError(t, writer.Close())
+			assertRotationHistory(t, path, originalRotationHistory())
+
+			retry, err := NewRotatingFileWriter(t.Context(), path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, retry.Close()) })
+			retry.maxBytes = 1
+			_, err = retry.WriteContext(t.Context(), []byte("retry-record\n"))
+			require.NoError(t, err)
+			assertRotationHistory(t, path, map[string]string{
+				"current": "retry-record\n",
+				".1":      "current\n",
+				".2":      "backup-one\n",
+				".3":      "backup-two\n",
+			})
+		})
+	}
+}
+
+func TestRotatingFileWriterRollbackFailureLeavesDiscoverableFailClosedState(t *testing.T) {
+	// Rationale: if rollback itself fails, its retained stage must prevent a new writer from compounding history loss.
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "audit.log")
+	seedRotationHistory(t, path)
+	writer := newTestWriter(t, path)
+	writer.maxBytes = 1
+	primaryFailure := errors.New("injected publish failure")
+	rollbackFailure := errors.New("injected rollback failure")
+	realRename := writer.deps.rename
+	renameCalls := 0
+	writer.deps.rename = func(ctx context.Context, oldPath, newPath string) error {
+		renameCalls++
+		switch renameCalls {
+		case 5:
+			return primaryFailure
+		case 6:
+			return rollbackFailure
+		default:
+			return realRename(ctx, oldPath, newPath)
+		}
+	}
+
+	_, err := writer.WriteContext(t.Context(), []byte("new-record\n"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, primaryFailure)
+	assert.ErrorIs(t, err, rollbackFailure)
+	require.NoError(t, writer.Close())
+	assertFileContent(t, rotationStagePath(path, 3), []byte("backup-three\n"))
+
+	reopened, reopenErr := NewRotatingFileWriter(t.Context(), path)
+	assert.Nil(t, reopened)
+	require.Error(t, reopenErr)
+	assert.Contains(t, reopenErr.Error(), "unfinished rotation state")
+}
+
+func TestRotatingFileWriterDetectsReplacementBeforeBoundRename(t *testing.T) {
+	// Rationale: a cooperative lock cannot prevent an external replacement, so every rename must recheck the exact
+	// inode it intends to move and reject the replacement rather than publish it as retained history.
+	t.Parallel()
+
+	directory := t.TempDir()
+	path := filepath.Join(directory, "audit.log")
+	detached := filepath.Join(directory, "detached-current")
+	seedRotationHistory(t, path)
+	writer := newTestWriter(t, path)
+	writer.maxBytes = 1
+	realLstat := writer.deps.lstat
+	currentStats := 0
+	writer.deps.lstat = func(ctx context.Context, inspectedPath string, stat *unix.Stat_t) error {
+		if inspectedPath == path {
+			currentStats++
+			if currentStats == 2 {
+				require.NoError(t, os.Rename(path, detached))
+				require.NoError(t, os.WriteFile(path, []byte("replacement\n"), managedFileMode))
+			}
+		}
+		return realLstat(ctx, inspectedPath, stat)
+	}
+
+	n, err := writer.WriteContext(t.Context(), []byte("new-record\n"))
+	assert.Zero(t, n)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "inode changed")
+	assertFileContent(t, path, []byte("replacement\n"))
+	assertFileContent(t, detached, []byte("current\n"))
+	assertFileContent(t, path+".1", []byte("backup-one\n"))
+	assertFileContent(t, path+".2", []byte("backup-two\n"))
+	assertFileContent(t, path+".3", []byte("backup-three\n"))
 }
 
 func TestRotatingFileWriterCreatesSecureLogAndPersistentLockFiles(t *testing.T) {
@@ -211,7 +480,7 @@ func TestNewRotatingFileWriterRejectsUnsafeManagedFiles(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "audit.log")
 			test.prepare(t, path)
-			writer, err := NewRotatingFileWriter(path)
+			writer, err := NewRotatingFileWriter(t.Context(), path)
 			if writer != nil {
 				t.Cleanup(func() { assert.NoError(t, writer.Close()) })
 			}
@@ -248,6 +517,7 @@ func TestNewRotatingFileWriterUsesNoFollowAndCloseOnExecForEveryOpen(t *testing.
 	for _, flags := range observedFlags {
 		assert.NotZero(t, flags&unix.O_NOFOLLOW)
 		assert.NotZero(t, flags&unix.O_CLOEXEC)
+		assert.NotZero(t, flags&unix.O_NONBLOCK)
 	}
 }
 
@@ -317,14 +587,36 @@ func TestRotatingFileWriterPropagatesFilesystemFailures(t *testing.T) {
 
 	t.Run("write stat failure", func(t *testing.T) {
 		injected := errors.New("injected write stat failure")
+		closeFailure := errors.New("injected candidate close failure")
 		path := filepath.Join(t.TempDir(), "audit.log")
 		writer := newTestWriter(t, path)
-		writer.deps.fstat = func(context.Context, int, *unix.Stat_t) error { return injected }
+		realFstat := writer.deps.fstat
+		fstatCalls := 0
+		candidateFD := -1
+		writer.deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
+			fstatCalls++
+			if fstatCalls == 1 {
+				candidateFD = fd
+			}
+			if fstatCalls == 2 {
+				return injected
+			}
+			return realFstat(ctx, fd, stat)
+		}
+		realClose := writer.deps.close
+		writer.deps.close = func(ctx context.Context, fd int) error {
+			closeErr := realClose(ctx, fd)
+			if fd == candidateFD {
+				return errors.Join(closeErr, closeFailure)
+			}
+			return closeErr
+		}
 
 		n, err := writer.WriteContext(t.Context(), []byte("record\n"))
 		assert.Zero(t, n)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
+		assert.ErrorIs(t, err, closeFailure)
 	})
 
 	t.Run("rotation path stat failure", func(t *testing.T) {
@@ -421,23 +713,121 @@ func TestRotatingFileWriterPropagatesFilesystemFailures(t *testing.T) {
 		assert.ErrorIs(t, err, io.ErrShortWrite)
 	})
 
-	t.Run("unlock failure", func(t *testing.T) {
-		injected := errors.New("injected unlock failure")
-		path := filepath.Join(t.TempDir(), "audit.log")
-		writer := newTestWriter(t, path)
-		realFlock := writer.deps.flock
-		writer.deps.flock = func(ctx context.Context, fd, how int) error {
-			if how == unix.LOCK_UN {
-				return injected
-			}
-			return realFlock(ctx, fd, how)
-		}
+}
 
-		n, err := writer.WriteContext(t.Context(), []byte("record\n"))
-		assert.Equal(t, len("record\n"), n)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, injected)
-	})
+func TestRotatingFileWriterUnlockFailurePoisonsAndDetachesExactDescriptors(t *testing.T) {
+	// Rationale: after an uncertain unlock, retaining either descriptor permits later writes under ambiguous locking
+	// authority and retrying a close could target a reused descriptor.
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "audit.log")
+	writer, err := NewRotatingFileWriter(t.Context(), path)
+	require.NoError(t, err)
+	originalFileFD := writer.fileFD
+	originalLockFD := writer.lockFD
+	unlockFailure := errors.New("injected unlock failure")
+	fileCloseFailure := errors.New("injected file close failure")
+	lockCloseFailure := errors.New("injected lock close failure")
+	realFlock := writer.deps.flock
+	writer.deps.flock = func(ctx context.Context, fd, how int) error {
+		if how == unix.LOCK_UN {
+			return unlockFailure
+		}
+		return realFlock(ctx, fd, how)
+	}
+	realClose := writer.deps.close
+	var closedFDs []int
+	writer.deps.close = func(ctx context.Context, fd int) error {
+		closeErr := realClose(ctx, fd)
+		switch fd {
+		case originalFileFD:
+			closedFDs = append(closedFDs, fd)
+			return errors.Join(closeErr, fileCloseFailure)
+		case originalLockFD:
+			closedFDs = append(closedFDs, fd)
+			return errors.Join(closeErr, lockCloseFailure)
+		default:
+			return closeErr
+		}
+	}
+
+	written, writeErr := writer.WriteContext(t.Context(), []byte("record\n"))
+	assert.Equal(t, len("record\n"), written)
+	require.Error(t, writeErr)
+	assert.ErrorIs(t, writeErr, unlockFailure)
+	assert.ErrorIs(t, writeErr, fileCloseFailure)
+	assert.ErrorIs(t, writeErr, lockCloseFailure)
+	if diff := cmp.Diff([]int{originalFileFD, originalLockFD}, closedFDs); diff != "" {
+		t.Errorf("detached descriptor targets mismatch (-want +got):\n%s", diff)
+	}
+
+	written, retryErr := writer.WriteContext(t.Context(), []byte("must-not-appear\n"))
+	assert.Zero(t, written)
+	require.Error(t, retryErr)
+	assert.ErrorIs(t, retryErr, unlockFailure)
+	assert.Error(t, writer.Close())
+	if diff := cmp.Diff([]int{originalFileFD, originalLockFD}, closedFDs); diff != "" {
+		t.Errorf("close retried detached descriptor (-want +got):\n%s", diff)
+	}
+	_, statErr := os.Stat(path + ".lock")
+	assert.NoError(t, statErr)
+}
+
+func TestRotatingFileWriterUnlockRetriesEINTR(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "audit.log")
+	writer := newTestWriter(t, path)
+	realFlock := writer.deps.flock
+	unlockCalls := 0
+	writer.deps.flock = func(ctx context.Context, fd, how int) error {
+		if how == unix.LOCK_UN {
+			unlockCalls++
+			if unlockCalls == 1 {
+				return unix.EINTR
+			}
+		}
+		return realFlock(ctx, fd, how)
+	}
+
+	_, err := writer.WriteContext(t.Context(), []byte("record\n"))
+	require.NoError(t, err)
+	assert.Equal(t, 2, unlockCalls)
+}
+
+func TestRotatingFileWriterNormalizesInvalidWriteCounts(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		writeResult int
+		writeErr    error
+		wantErr     error
+	}{
+		"negative count with error": {
+			writeResult: -1,
+			writeErr:    errInjectedNegativeWrite,
+			wantErr:     errInjectedNegativeWrite,
+		},
+		"count larger than input": {
+			writeResult: len("record\n") + 1,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "audit.log")
+			writer := newTestWriter(t, path)
+			writer.deps.write = func(context.Context, int, []byte) (int, error) {
+				return test.writeResult, test.writeErr
+			}
+
+			n, err := writer.WriteContext(t.Context(), []byte("record\n"))
+			assert.Zero(t, n)
+			require.Error(t, err)
+			if test.wantErr != nil {
+				assert.ErrorIs(t, err, test.wantErr)
+			}
+		})
+	}
 }
 
 func TestRotatingFileWriterCloseIsCachedAndRejectsLaterWrites(t *testing.T) {
@@ -446,12 +836,14 @@ func TestRotatingFileWriterCloseIsCachedAndRejectsLaterWrites(t *testing.T) {
 
 	injected := errors.New("injected close failure")
 	path := filepath.Join(t.TempDir(), "audit.log")
-	writer, err := NewRotatingFileWriter(path)
+	writer, err := NewRotatingFileWriter(t.Context(), path)
 	require.NoError(t, err)
 	realClose := writer.deps.close
-	closeCalls := 0
+	originalFileFD := writer.fileFD
+	originalLockFD := writer.lockFD
+	var closedFDs []int
 	writer.deps.close = func(ctx context.Context, fd int) error {
-		closeCalls++
+		closedFDs = append(closedFDs, fd)
 		return errors.Join(realClose(ctx, fd), injected)
 	}
 
@@ -460,7 +852,9 @@ func TestRotatingFileWriterCloseIsCachedAndRejectsLaterWrites(t *testing.T) {
 	assert.ErrorIs(t, firstErr, injected)
 	secondErr := writer.Close()
 	assert.Same(t, firstErr, secondErr)
-	assert.Equal(t, 2, closeCalls, "each retained descriptor must be closed only once")
+	if diff := cmp.Diff([]int{originalFileFD, originalLockFD}, closedFDs); diff != "" {
+		t.Errorf("closed descriptor targets mismatch (-want +got):\n%s", diff)
+	}
 
 	written, writeErr := writer.WriteContext(t.Context(), []byte("after-close\n"))
 	assert.Zero(t, written)
@@ -469,6 +863,10 @@ func TestRotatingFileWriterCloseIsCachedAndRejectsLaterWrites(t *testing.T) {
 	_, statErr := os.Stat(path + ".lock")
 	assert.NoError(t, statErr, "Close must leave the stable lock path in place")
 }
+
+var errInjectedNegativeWrite = errors.New("injected negative write failure")
+
+var errTestWaitTimeout = errors.New("timed out waiting for test release")
 
 func TestRotatingFileWriterRotatedFilesRemainPrivate(t *testing.T) {
 	t.Parallel()
@@ -490,7 +888,7 @@ func TestRotatingFileWriterRotatedFilesRemainPrivate(t *testing.T) {
 func newTestWriter(t *testing.T, path string) *RotatingFileWriter {
 	t.Helper()
 
-	writer, err := NewRotatingFileWriter(path)
+	writer, err := NewRotatingFileWriter(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := writer.Close(); err != nil {
@@ -524,4 +922,101 @@ func assertCloseOnExec(t *testing.T, fd int) {
 	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
 	require.NoError(t, err)
 	assert.NotZero(t, flags&unix.FD_CLOEXEC)
+}
+
+func seedRotationHistory(t *testing.T, path string) {
+	t.Helper()
+
+	for suffix, content := range originalRotationHistory() {
+		filePath := path
+		if suffix != "current" {
+			filePath += suffix
+		}
+		require.NoError(t, os.WriteFile(filePath, []byte(content), managedFileMode))
+		require.NoError(t, os.Chmod(filePath, managedFileMode))
+	}
+}
+
+func originalRotationHistory() map[string]string {
+	return map[string]string{
+		"current": "current\n",
+		".1":      "backup-one\n",
+		".2":      "backup-two\n",
+		".3":      "backup-three\n",
+	}
+}
+
+func assertRotationHistory(t *testing.T, path string, want map[string]string) {
+	t.Helper()
+
+	got := make(map[string]string, len(want))
+	for _, suffix := range []string{"current", ".1", ".2", ".3"} {
+		filePath := path
+		if suffix != "current" {
+			filePath += suffix
+		}
+		content, err := os.ReadFile(filePath)
+		if errors.Is(err, os.ErrNotExist) {
+			got[suffix] = "<absent>"
+			continue
+		}
+		require.NoError(t, err)
+		got[suffix] = string(content)
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("rotation history mismatch (-want +got):\n%s", diff)
+	}
+}
+
+type writeResult struct {
+	n   int
+	err error
+}
+
+type writerResult struct {
+	writer *RotatingFileWriter
+	err    error
+}
+
+func awaitSignal(t *testing.T, signal <-chan struct{}) {
+	t.Helper()
+
+	select {
+	case <-signal:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for signal")
+	}
+}
+
+func awaitResult(t *testing.T, result <-chan writeResult) writeResult {
+	t.Helper()
+
+	select {
+	case value := <-result:
+		return value
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for write result")
+		return writeResult{}
+	}
+}
+
+func awaitWriterResult(t *testing.T, result <-chan writerResult) writerResult {
+	t.Helper()
+
+	select {
+	case value := <-result:
+		return value
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for writer result")
+		return writerResult{}
+	}
+}
+
+func waitForRelease(release <-chan struct{}) error {
+	select {
+	case <-release:
+		return nil
+	case <-time.After(2 * time.Second):
+		return errTestWaitTimeout
+	}
 }

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -18,13 +17,13 @@ const (
 	managedFileMode = 0o600
 	lockRetryDelay  = 5 * time.Millisecond
 
-	logOpenFlags  = unix.O_WRONLY | unix.O_APPEND | unix.O_CLOEXEC | unix.O_NOFOLLOW
-	lockOpenFlags = unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW
+	logOpenFlags  = unix.O_WRONLY | unix.O_APPEND | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
+	lockOpenFlags = unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
 )
 
 // RotatingFileWriter writes complete records while serializing rotation across writer instances and processes.
 //
-// THREAD-SAFE: mu serializes the complete descriptor, rotation, write, and close lifecycle within one process.
+// THREAD-SAFE: gate serializes the complete descriptor, rotation, write, and close lifecycle within one process.
 type RotatingFileWriter struct {
 	path        string
 	lockPath    string
@@ -32,12 +31,14 @@ type RotatingFileWriter struct {
 	backupCount int
 	deps        writerDependencies
 
-	// mu guards both descriptors and the complete write, rotation, and close lifecycle.
-	mu       sync.Mutex
-	fileFD   int
-	lockFD   int
-	closed   bool
-	closeErr error
+	// gate guards both descriptors and the complete write, rotation, and close lifecycle.
+	gate      chan struct{}
+	fileFD    int
+	lockFD    int
+	closed    bool
+	closeErr  error
+	poisoned  bool
+	poisonErr error
 }
 
 type writerDependencies struct {
@@ -48,14 +49,18 @@ type writerDependencies struct {
 	flock  func(context.Context, int, int) error
 	close  func(context.Context, int) error
 	rename func(context.Context, string, string) error
+	unlink func(context.Context, string) error
 	write  func(context.Context, int, []byte) (int, error)
 	wait   func(context.Context) error
 	euid   func() uint32
 }
 
 // NewRotatingFileWriter opens or creates path and its stable sibling lock file.
-func NewRotatingFileWriter(path string) (*RotatingFileWriter, error) {
-	return newRotatingFileWriter(context.Background(), path, defaultWriterDependencies())
+func NewRotatingFileWriter(ctx context.Context, path string) (*RotatingFileWriter, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("rotating: initialize writer: nil context")
+	}
+	return newRotatingFileWriter(ctx, path, defaultWriterDependencies())
 }
 
 func newRotatingFileWriter(ctx context.Context, path string, deps writerDependencies) (*RotatingFileWriter, error) {
@@ -65,9 +70,11 @@ func newRotatingFileWriter(ctx context.Context, path string, deps writerDependen
 		maxBytes:    10 * 1024 * 1024,
 		backupCount: 3,
 		deps:        deps,
+		gate:        make(chan struct{}, 1),
 		fileFD:      -1,
 		lockFD:      -1,
 	}
+	writer.gate <- struct{}{}
 
 	lockFD, _, err := openManagedFile(ctx, deps, writer.lockPath, lockOpenFlags, true)
 	if err != nil {
@@ -78,7 +85,14 @@ func newRotatingFileWriter(ctx context.Context, path string, deps writerDependen
 		return nil, writer.abortInitialization(ctx, fmt.Errorf("acquire lock: %w", err))
 	}
 
-	fileFD, _, openErr := openManagedFile(ctx, deps, writer.path, logOpenFlags, false)
+	stageErr := ensureRotationStagesAbsent(ctx, deps, writer.path, writer.backupCount)
+	var fileFD int
+	var openErr error
+	if stageErr == nil {
+		fileFD, _, openErr = openManagedFile(ctx, deps, writer.path, logOpenFlags, false)
+	} else {
+		openErr = stageErr
+	}
 	if openErr == nil {
 		writer.fileFD = fileFD
 	}
@@ -99,16 +113,23 @@ func (w *RotatingFileWriter) WriteContext(ctx context.Context, p []byte) (n int,
 	if ctx == nil {
 		return 0, fmt.Errorf("rotating: write: nil context")
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	if err := w.acquireLifecycle(ctx); err != nil {
+		return 0, fmt.Errorf("rotating: write: acquire lifecycle: %w", err)
+	}
+	defer w.releaseLifecycle()
 	if w.closed {
 		return 0, fmt.Errorf("rotating: write: %w", os.ErrClosed)
+	}
+	if w.poisoned {
+		return 0, w.poisonErr
 	}
 	if err := w.acquireLock(ctx); err != nil {
 		return 0, fmt.Errorf("rotating: write: acquire lock: %w", err)
 	}
 	defer func() {
-		returnErr = errors.Join(returnErr, w.releaseLock(context.WithoutCancel(ctx)))
+		if unlockErr := w.releaseLock(context.WithoutCancel(ctx)); unlockErr != nil {
+			returnErr = errors.Join(returnErr, w.poison(context.WithoutCancel(ctx), unlockErr))
+		}
 	}()
 
 	stat, err := w.ensureCurrentFile(ctx)
@@ -122,6 +143,10 @@ func (w *RotatingFileWriter) WriteContext(ctx context.Context, p []byte) (n int,
 	}
 
 	n, err = w.deps.write(ctx, w.fileFD, p)
+	if n < 0 || n > len(p) {
+		invalidCountErr := fmt.Errorf("rotating: write record: invalid byte count %d for %d-byte input", n, len(p))
+		return 0, errors.Join(invalidCountErr, err)
+	}
 	if err != nil {
 		return n, fmt.Errorf("rotating: write record: %w", err)
 	}
@@ -136,12 +161,18 @@ func (w *RotatingFileWriter) Close() error {
 	if w == nil {
 		return nil
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	if err := w.acquireLifecycle(context.Background()); err != nil {
+		return err
+	}
+	defer w.releaseLifecycle()
 	if w.closed {
 		return w.closeErr
 	}
 	w.closed = true
+	if w.poisoned {
+		w.closeErr = w.poisonErr
+		return w.closeErr
+	}
 
 	ctx := context.Background()
 	var errs []error
@@ -157,6 +188,23 @@ func (w *RotatingFileWriter) Close() error {
 	return w.closeErr
 }
 
+func (w *RotatingFileWriter) acquireLifecycle(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-w.gate:
+		if err := ctx.Err(); err != nil {
+			w.releaseLifecycle()
+			return err
+		}
+		return nil
+	}
+}
+
+func (w *RotatingFileWriter) releaseLifecycle() {
+	w.gate <- struct{}{}
+}
+
 func (w *RotatingFileWriter) acquireLock(ctx context.Context) error {
 	for {
 		if err := ctx.Err(); err != nil {
@@ -164,9 +212,6 @@ func (w *RotatingFileWriter) acquireLock(ctx context.Context) error {
 		}
 		err := w.deps.flock(ctx, w.lockFD, unix.LOCK_EX|unix.LOCK_NB)
 		if err == nil {
-			if contextErr := ctx.Err(); contextErr != nil {
-				return errors.Join(contextErr, w.releaseLock(context.WithoutCancel(ctx)))
-			}
 			return nil
 		}
 		if errors.Is(err, unix.EINTR) {
@@ -182,13 +227,40 @@ func (w *RotatingFileWriter) acquireLock(ctx context.Context) error {
 }
 
 func (w *RotatingFileWriter) releaseLock(ctx context.Context) error {
-	if err := w.deps.flock(ctx, w.lockFD, unix.LOCK_UN); err != nil {
-		return fmt.Errorf("rotating: unlock: %w", err)
+	for {
+		if err := w.deps.flock(ctx, w.lockFD, unix.LOCK_UN); err != nil {
+			if errors.Is(err, unix.EINTR) {
+				continue
+			}
+			return fmt.Errorf("rotating: unlock: %w", err)
+		}
+		return nil
 	}
-	return nil
+}
+
+func (w *RotatingFileWriter) poison(ctx context.Context, cause error) error {
+	if w.poisoned {
+		return w.poisonErr
+	}
+	w.poisoned = true
+	var poisonErrors []error
+	poisonErrors = append(poisonErrors, cause)
+	if w.fileFD >= 0 {
+		poisonErrors = append(poisonErrors, wrapCloseError("log file", w.deps.close(ctx, w.fileFD)))
+		w.fileFD = -1
+	}
+	if w.lockFD >= 0 {
+		poisonErrors = append(poisonErrors, wrapCloseError("lock file", w.deps.close(ctx, w.lockFD)))
+		w.lockFD = -1
+	}
+	w.poisonErr = fmt.Errorf("rotating: writer poisoned after unlock failure: %w", errors.Join(poisonErrors...))
+	return w.poisonErr
 }
 
 func (w *RotatingFileWriter) ensureCurrentFile(ctx context.Context) (unix.Stat_t, error) {
+	if err := ensureRotationStagesAbsent(ctx, w.deps, w.path, w.backupCount); err != nil {
+		return unix.Stat_t{}, err
+	}
 	candidateFD, candidateStat, err := openManagedFile(ctx, w.deps, w.path, logOpenFlags, false)
 	if err != nil {
 		return unix.Stat_t{}, fmt.Errorf("reopen current log: %w", err)
@@ -227,52 +299,271 @@ func (w *RotatingFileWriter) ensureCurrentFile(ctx context.Context) (unix.Stat_t
 }
 
 func (w *RotatingFileWriter) rotate(ctx context.Context, currentStat unix.Stat_t) error {
+	transaction, err := prepareRotation(ctx, w, currentStat)
+	if err != nil {
+		return err
+	}
 	currentFD := w.fileFD
 	w.fileFD = -1
 	if err := w.deps.close(context.WithoutCancel(ctx), currentFD); err != nil {
 		return fmt.Errorf("close current log: %w", err)
 	}
 
-	pathStat, exists, err := inspectManagedPath(ctx, w.deps, w.path)
-	if err != nil {
-		return fmt.Errorf("stat current log: %w", err)
+	rollback := func(primary error) error {
+		return errors.Join(primary, transaction.rollback(context.WithoutCancel(ctx)))
 	}
-	if !exists || pathStat.Dev != currentStat.Dev || pathStat.Ino != currentStat.Ino {
-		return fmt.Errorf("admit current log: path no longer names the open file")
-	}
-
-	for index := w.backupCount - 1; index >= 1; index-- {
-		oldPath := fmt.Sprintf("%s.%d", w.path, index)
-		_, oldExists, err := inspectManagedPath(ctx, w.deps, oldPath)
-		if err != nil {
-			return fmt.Errorf("admit backup %d: %w", index, err)
-		}
-		if !oldExists {
+	for index := range transaction.entries {
+		entry := &transaction.entries[index]
+		if !entry.exists {
 			continue
 		}
-		newPath := fmt.Sprintf("%s.%d", w.path, index+1)
-		if _, _, err := inspectManagedPath(ctx, w.deps, newPath); err != nil {
-			return fmt.Errorf("admit backup %d: %w", index+1, err)
-		}
-		if err := w.deps.rename(ctx, oldPath, newPath); err != nil {
-			return fmt.Errorf("rename backup %d to %d: %w", index, index+1, err)
+		if err := transaction.move(ctx, index, entry.stage); err != nil {
+			return rollback(fmt.Errorf("stage rotation entry %d: %w", index, err))
 		}
 	}
 
-	firstBackup := w.path + ".1"
-	if _, _, err := inspectManagedPath(ctx, w.deps, firstBackup); err != nil {
-		return fmt.Errorf("admit backup 1: %w", err)
-	}
-	if err := w.deps.rename(ctx, w.path, firstBackup); err != nil {
-		return fmt.Errorf("rename current log: %w", err)
+	for index := 0; index < w.backupCount; index++ {
+		entry := &transaction.entries[index]
+		if !entry.exists {
+			continue
+		}
+		destination := transaction.entries[index+1].original
+		if err := transaction.move(ctx, index, destination); err != nil {
+			return rollback(fmt.Errorf("publish rotation entry %d: %w", index, err))
+		}
 	}
 
-	fileFD, _, err := openManagedFile(ctx, w.deps, w.path, logOpenFlags, false)
+	fileFD, fileStat, err := openManagedFile(ctx, w.deps, w.path, logOpenFlags, false)
 	if err != nil {
-		return fmt.Errorf("reopen rotated log: %w", err)
+		return rollback(fmt.Errorf("reopen rotated log: %w", err))
 	}
 	w.fileFD = fileFD
+	transaction.newCurrentFD = fileFD
+	transaction.newCurrentStat = fileStat
+
+	oldest := &transaction.entries[len(transaction.entries)-1]
+	if oldest.exists {
+		if err := transaction.removeOldest(ctx, oldest); err != nil {
+			return rollback(fmt.Errorf("remove oldest backup: %w", err))
+		}
+	}
+	transaction.committed = true
 	return nil
+}
+
+type rotationEntry struct {
+	original string
+	stage    string
+	location string
+	stat     unix.Stat_t
+	exists   bool
+}
+
+type rotationTransaction struct {
+	writer         *RotatingFileWriter
+	entries        []rotationEntry
+	newCurrentFD   int
+	newCurrentStat unix.Stat_t
+	committed      bool
+}
+
+func prepareRotation(
+	ctx context.Context,
+	writer *RotatingFileWriter,
+	currentStat unix.Stat_t,
+) (*rotationTransaction, error) {
+	transaction := &rotationTransaction{writer: writer, newCurrentFD: -1}
+	for index := 0; index <= writer.backupCount; index++ {
+		original := writer.path
+		if index > 0 {
+			original = fmt.Sprintf("%s.%d", writer.path, index)
+		}
+		stat, exists, err := inspectManagedPath(ctx, writer.deps, original)
+		if err != nil {
+			return nil, fmt.Errorf("inspect rotation entry %d: %w", index, err)
+		}
+		if index == 0 && (!exists || !sameFileIdentity(stat, currentStat)) {
+			return nil, fmt.Errorf("admit current log: path no longer names the open file")
+		}
+		stage := rotationStagePath(writer.path, index)
+		if _, stageExists, err := inspectManagedPath(ctx, writer.deps, stage); err != nil {
+			return nil, fmt.Errorf("inspect rotation stage %d: %w", index, err)
+		} else if stageExists {
+			return nil, fmt.Errorf("admit rotation stage %d: unfinished rotation state exists", index)
+		}
+		transaction.entries = append(transaction.entries, rotationEntry{
+			original: original,
+			stage:    stage,
+			location: original,
+			stat:     stat,
+			exists:   exists,
+		})
+	}
+	return transaction, nil
+}
+
+func (transaction *rotationTransaction) move(ctx context.Context, index int, destination string) error {
+	entry := &transaction.entries[index]
+	if !entry.exists {
+		return nil
+	}
+	source := entry.location
+	if err := verifyExpectedPath(ctx, transaction.writer.deps, source, entry.stat); err != nil {
+		return err
+	}
+	if _, exists, err := inspectManagedPath(ctx, transaction.writer.deps, destination); err != nil {
+		return fmt.Errorf("inspect rename destination %q: %w", destination, err)
+	} else if exists {
+		return fmt.Errorf("admit rename destination %q: path already exists", destination)
+	}
+
+	renameErr := transaction.writer.deps.rename(ctx, source, destination)
+	locatedAt, verifyErr := locateExpectedPath(ctx, transaction.writer.deps, entry.stat, source, destination)
+	if locatedAt != "" {
+		entry.location = locatedAt
+	}
+	if renameErr != nil {
+		renameErr = fmt.Errorf("rename %q to %q: %w", source, destination, renameErr)
+	}
+	return errors.Join(renameErr, verifyErr)
+}
+
+func (transaction *rotationTransaction) removeOldest(ctx context.Context, entry *rotationEntry) error {
+	if err := verifyExpectedPath(ctx, transaction.writer.deps, entry.location, entry.stat); err != nil {
+		return err
+	}
+	if err := transaction.writer.deps.unlink(ctx, entry.location); err != nil {
+		return err
+	}
+	if _, exists, err := inspectManagedPath(ctx, transaction.writer.deps, entry.location); err != nil {
+		return err
+	} else if exists {
+		return fmt.Errorf("removed oldest backup path still exists")
+	}
+	entry.exists = false
+	entry.location = ""
+	return nil
+}
+
+func (transaction *rotationTransaction) rollback(ctx context.Context) error {
+	if transaction.committed {
+		return nil
+	}
+	var rollbackErrors []error
+	if transaction.newCurrentFD >= 0 {
+		rollbackErrors = append(
+			rollbackErrors,
+			wrapCloseError("new current log", transaction.writer.deps.close(ctx, transaction.newCurrentFD)),
+		)
+		transaction.writer.fileFD = -1
+		transaction.newCurrentFD = -1
+		if err := unlinkExpectedPath(
+			ctx,
+			transaction.writer.deps,
+			transaction.writer.path,
+			transaction.newCurrentStat,
+		); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("remove new current log: %w", err))
+		}
+	}
+
+	for index := range transaction.entries {
+		entry := &transaction.entries[index]
+		if !entry.exists || entry.location == entry.stage {
+			continue
+		}
+		if err := transaction.move(ctx, index, entry.stage); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restage rotation entry %d: %w", index, err))
+		}
+	}
+	for index := len(transaction.entries) - 1; index >= 0; index-- {
+		entry := &transaction.entries[index]
+		if !entry.exists || entry.location != entry.stage {
+			continue
+		}
+		if err := transaction.move(ctx, index, entry.original); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore rotation entry %d: %w", index, err))
+		}
+	}
+	if err := errors.Join(rollbackErrors...); err != nil {
+		return fmt.Errorf("rollback rotation: %w", err)
+	}
+	return nil
+}
+
+func ensureRotationStagesAbsent(
+	ctx context.Context,
+	deps writerDependencies,
+	path string,
+	backupCount int,
+) error {
+	for index := 0; index <= backupCount; index++ {
+		stage := rotationStagePath(path, index)
+		if _, exists, err := inspectManagedPath(ctx, deps, stage); err != nil {
+			return fmt.Errorf("inspect rotation stage %d: %w", index, err)
+		} else if exists {
+			return fmt.Errorf("admit rotation stage %d: unfinished rotation state exists", index)
+		}
+	}
+	return nil
+}
+
+func rotationStagePath(path string, index int) string {
+	return fmt.Sprintf("%s.rotate-stage-%d", path, index)
+}
+
+func verifyExpectedPath(ctx context.Context, deps writerDependencies, path string, expected unix.Stat_t) error {
+	stat, exists, err := inspectManagedPath(ctx, deps, path)
+	if err != nil {
+		return fmt.Errorf("inspect %q before rename: %w", path, err)
+	}
+	if !exists || !sameFileIdentity(stat, expected) {
+		return fmt.Errorf("admit %q before rename: inode changed", path)
+	}
+	return nil
+}
+
+func locateExpectedPath(
+	ctx context.Context,
+	deps writerDependencies,
+	expected unix.Stat_t,
+	source string,
+	destination string,
+) (string, error) {
+	sourceStat, sourceExists, sourceErr := inspectManagedPath(ctx, deps, source)
+	destinationStat, destinationExists, destinationErr := inspectManagedPath(ctx, deps, destination)
+	if err := errors.Join(sourceErr, destinationErr); err != nil {
+		return "", fmt.Errorf("verify rename result: %w", err)
+	}
+	sourceMatches := sourceExists && sameFileIdentity(sourceStat, expected)
+	destinationMatches := destinationExists && sameFileIdentity(destinationStat, expected)
+	switch {
+	case sourceMatches && !destinationExists:
+		return source, nil
+	case destinationMatches && !sourceExists:
+		return destination, nil
+	default:
+		return "", fmt.Errorf("verify rename result: expected inode has ambiguous location")
+	}
+}
+
+func unlinkExpectedPath(ctx context.Context, deps writerDependencies, path string, expected unix.Stat_t) error {
+	if err := verifyExpectedPath(ctx, deps, path, expected); err != nil {
+		return err
+	}
+	if err := deps.unlink(ctx, path); err != nil {
+		return err
+	}
+	if _, exists, err := inspectManagedPath(ctx, deps, path); err != nil {
+		return err
+	} else if exists {
+		return fmt.Errorf("unlinked path still exists")
+	}
+	return nil
+}
+
+func sameFileIdentity(left, right unix.Stat_t) bool {
+	return left.Dev == right.Dev && left.Ino == right.Ino
 }
 
 func (w *RotatingFileWriter) abortInitialization(ctx context.Context, primary error) error {
@@ -400,6 +691,9 @@ func defaultWriterDependencies() writerDependencies {
 		},
 		rename: func(_ context.Context, oldPath, newPath string) error {
 			return unix.Rename(oldPath, newPath)
+		},
+		unlink: func(_ context.Context, path string) error {
+			return unix.Unlink(path)
 		},
 		write: func(_ context.Context, fd int, p []byte) (int, error) {
 			return unix.Write(fd, p)
