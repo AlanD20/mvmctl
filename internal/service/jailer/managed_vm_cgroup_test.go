@@ -109,6 +109,7 @@ func (fixture *managedVMCgroupTestFixture) bindLease(t *testing.T, deps managedV
 	t.Helper()
 	prepared, err := prepareManagedVMCgroup(t.Context(), deps, testVMID)
 	require.NoError(t, err)
+	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeaf(testVMID)
 	lease, err := prepared.Bind(
 		t.Context(),
@@ -285,6 +286,7 @@ func TestPreparedManagedVMCgroupBindsExactJailerLeafMembership(t *testing.T) {
 	fixture := newManagedVMCgroupTestFixture(t)
 	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 	require.NoError(t, err)
+	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeaf(testVMID)
 	verifier := &managedVMCgroupTestProcessVerifier{}
 
@@ -455,6 +457,7 @@ func TestPreparedManagedVMCgroupBindDoesNotHoldPreparedLockDuringProcessProof(t 
 	fixture := newManagedVMCgroupTestFixture(t)
 	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 	require.NoError(t, err)
+	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeaf(testVMID)
 	verifier := &reentrantManagedVMCgroupTestVerifier{prepared: prepared}
 	result := make(chan struct {
@@ -494,6 +497,7 @@ func TestPreparedManagedVMCgroupBindRejectsMemberHiddenAfterShortRead(t *testing
 	fixture := newManagedVMCgroupTestFixture(t)
 	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 	require.NoError(t, err)
+	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeaf(testVMID)
 	realPread := prepared.state.deps.pread
 	chunks := map[int64][]byte{0: []byte("4242\n"), 5: []byte("4343\n")}
@@ -672,6 +676,7 @@ func TestPreparedManagedVMCgroupBindHandlesBoundedMembershipReads(t *testing.T) 
 		fixture := newManagedVMCgroupTestFixture(t)
 		prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 		require.NoError(t, err)
+		require.NoError(t, prepared.MarkJailerHandoff())
 		fixture.addVMLeaf(testVMID)
 		realPread := prepared.state.deps.pread
 		calls := 0
@@ -701,6 +706,7 @@ func TestPreparedManagedVMCgroupBindHandlesBoundedMembershipReads(t *testing.T) 
 		fixture := newManagedVMCgroupTestFixture(t)
 		prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 		require.NoError(t, err)
+		require.NoError(t, prepared.MarkJailerHandoff())
 		fixture.addVMLeaf(testVMID)
 		realPread := prepared.state.deps.pread
 		totalRead := 0
@@ -741,6 +747,7 @@ func TestPreparedManagedVMCgroupBindHandlesBoundedMembershipReads(t *testing.T) 
 			fixture := newManagedVMCgroupTestFixture(t)
 			prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 			require.NoError(t, err)
+			require.NoError(t, prepared.MarkJailerHandoff())
 			fixture.addVMLeaf(testVMID)
 			realPread := prepared.state.deps.pread
 			prepared.state.deps.pread = func(context.Context, int, []byte, int64) (int, error) {
@@ -774,6 +781,7 @@ func TestPreparedManagedVMCgroupReturnsOwnedLeaseAfterPartialBindFailure(t *test
 	fixture := newManagedVMCgroupTestFixture(t)
 	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 	require.NoError(t, err)
+	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeaf(testVMID)
 	proofErr := errors.New("retained pidfd locator changed")
 	verifier := &managedVMCgroupTestProcessVerifier{afterErr: proofErr}
@@ -835,6 +843,7 @@ func TestPreparedManagedVMCgroupRejectsUnsafeJailerLeaf(t *testing.T) {
 			deps := fixture.deps()
 			prepared, err := prepareManagedVMCgroup(t.Context(), deps, testVMID)
 			require.NoError(t, err)
+			require.NoError(t, prepared.MarkJailerHandoff())
 			t.Cleanup(func() { require.NoError(t, prepared.Release(t.Context())) })
 			mutate(fixture, &deps)
 			prepared.state.deps = deps
@@ -902,6 +911,7 @@ func TestPreparedManagedVMCgroupRejectsLocatorMembershipMismatchAndPIDReuse(t *t
 			fixture := newManagedVMCgroupTestFixture(t)
 			prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 			require.NoError(t, err)
+			require.NoError(t, prepared.MarkJailerHandoff())
 			fixture.addVMLeaf(testVMID)
 			fixture.setMembership(testVMID, tc.membership)
 

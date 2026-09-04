@@ -60,6 +60,7 @@ func TestManagedVMCgroupVerifyMembershipRetriesOnSameLease(t *testing.T) {
 	fixture := newManagedVMCgroupTestFixture(t)
 	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 	require.NoError(t, err)
+	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeaf(testVMID)
 	fixture.setMembership(testVMID, "4343\n")
 	verifier := &managedVMCgroupTestProcessVerifier{}
@@ -81,6 +82,39 @@ func TestManagedVMCgroupVerifyMembershipRetriesOnSameLease(t *testing.T) {
 	))
 	assert.Equal(t, 2, verifier.beforeCalls)
 	assert.Equal(t, 1, verifier.afterCalls)
+	fixture.setMembership(testVMID, "")
+	require.NoError(t, lease.Remove(t.Context()))
+	require.NoError(t, lease.Release(t.Context()))
+}
+
+func TestPreparedManagedVMCgroupBindRequiresJailerHandoffProvenance(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+	require.NoError(t, err)
+	fixture.addVMLeaf(testVMID)
+
+	lease, err := prepared.Bind(
+		t.Context(),
+		processTestLocator(),
+		processTestCgroupObservation(),
+		&managedVMCgroupTestProcessVerifier{},
+	)
+	assert.Nil(t, lease)
+	require.Error(t, err)
+	assert.Equal(t, preparedManagedVMCgroupSnapshot{leafAbsent: true}, prepared.snapshot())
+	assert.True(t, fixture.vmLeafPresent(testVMID))
+
+	require.NoError(t, prepared.MarkJailerHandoff())
+	lease, err = prepared.Bind(
+		t.Context(),
+		processTestLocator(),
+		processTestCgroupObservation(),
+		&managedVMCgroupTestProcessVerifier{},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, lease)
 	fixture.setMembership(testVMID, "")
 	require.NoError(t, lease.Remove(t.Context()))
 	require.NoError(t, lease.Release(t.Context()))

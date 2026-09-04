@@ -117,17 +117,41 @@ func TestLaunchReleaseToJailerRechecksManagedVMCgroupAbsence(t *testing.T) {
 
 	authority, _ := newTestInstanceAuthority(t)
 	cgroup := newManagedVMCgroupTestFixture(t)
-	authority.cgroupDeps = cgroup.deps()
+	cgroupDeps := cgroup.deps()
+	realOpenAt2 := cgroupDeps.openAt2
+	realClose := cgroupDeps.close
+	leafFD := -1
+	leafOpens := 0
+	leafCloses := 0
+	cgroupDeps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+		opened, err := realOpenAt2(ctx, fd, name, how)
+		if err == nil && name == testVMID {
+			leafFD = opened
+			leafOpens++
+		}
+		return opened, err
+	}
+	cgroupDeps.close = func(ctx context.Context, fd int) error {
+		if fd == leafFD {
+			leafCloses++
+		}
+		return realClose(ctx, fd)
+	}
+	authority.cgroupDeps = cgroupDeps
 	launch := readyTestLaunchForCgroupHandoff(t, authority, false)
 	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
 	cgroup.addVMLeaf(testVMID)
 
 	require.Error(t, launch.releaseToJailer(t.Context()))
+	assert.Equal(t, 1, leafOpens)
+	assert.Equal(t, 1, leafCloses)
 	assert.Equal(t, blockedLaunchProcessesOpen, launch.state.processes.state.status)
 	cleanup, err := launch.Abort(t.Context())
 	require.NoError(t, err)
 	cgroup.setMembership(testVMID, "")
 	require.Error(t, cleanup.Complete(t.Context()))
+	assert.Equal(t, 2, leafOpens)
+	assert.Equal(t, 2, leafCloses)
 	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
 	assert.Nil(t, launch.state.preparedManagedVMCgroup)
 	assert.NotNil(t, cleanup.state.preparedManagedVMCgroup)

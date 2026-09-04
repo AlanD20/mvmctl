@@ -252,8 +252,8 @@ func (prepared *preparedManagedVMCgroup) Bind(
 		state.mu.Unlock()
 		return nil, instanceAtomicError("bind managed VM cgroup: context is required", nil)
 	}
-	if state.released || state.checking || state.binding || !state.leafAbsent || state.rootFD < 0 ||
-		state.parentFD < 0 {
+	if state.released || state.checking || state.binding || !state.jailerHandoff || !state.leafAbsent ||
+		state.rootFD < 0 || state.parentFD < 0 {
 		state.mu.Unlock()
 		return nil, instanceStateError(state.vmID, "prepared managed VM cgroup is not active")
 	}

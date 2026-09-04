@@ -128,8 +128,18 @@ func TestActivateVerifiedProcessPreAdmissionCgroupFailureRetainsPreparation(t *t
 	assert.False(t, fixture.launch.snapshot().hasManagedVMCgroup)
 
 	require.NoError(t, unix.Chmod(fixture.cgroup.vmLeafPath(testVMID), managedVMCgroupLeafMode))
-	fixture.cgroup.setMembership(testVMID, "")
-	releaseTestLaunch(t, fixture.launch)
+	fixture.fake.retainPostExecFirecracker()
+	active, err = activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	bound := active.state.managedVMCgroup
+	require.NotNil(t, bound)
+	assert.True(t, prepared.snapshot().released)
+	cleanup, err := active.BeginCleanup(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, cleanup.Complete(t.Context()))
+	assert.True(t, bound.snapshot().released)
+	require.NoError(t, cleanup.Release(t.Context()))
 }
 
 func TestActiveCleanupNonemptyManagedVMCgroupRetainsLeaseForRetry(t *testing.T) {
