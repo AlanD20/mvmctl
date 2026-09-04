@@ -25,9 +25,13 @@ type vmExecSessionHandlerEffects struct {
 	) (vmExecSessionHandlerLease, error)
 }
 
+// vmExecSessionStopWaitReady releases handler phases only after a blocking stop wait is armed. A wait that returns
+// immediately omits this signal so its result can be published first.
+type vmExecSessionStopWaitReady func()
+
 type vmExecSessionHandlerLease interface {
 	bindDestination(context.Context, vmExecSessionConnection) error
-	waitStop(context.Context) error
+	waitStop(context.Context, vmExecSessionStopWaitReady) error
 	release(context.Context) error
 }
 
@@ -245,6 +249,11 @@ func startVMExecSessionStopWaiter(
 ) *vmExecSessionStopScope {
 	stopCtx, cancel := context.WithCancelCause(ctx)
 	done := make(chan struct{}, 1)
+	observed := make(chan struct{})
+	var observeOnce sync.Once
+	observe := vmExecSessionStopWaitReady(func() {
+		observeOnce.Do(func() { close(observed) })
+	})
 	scope := &vmExecSessionStopScope{
 		ctx:    stopCtx,
 		cancel: cancel,
@@ -256,7 +265,7 @@ func startVMExecSessionStopWaiter(
 		),
 	}
 	go func() {
-		waitErr := lease.waitStop(stopCtx)
+		waitErr := lease.waitStop(stopCtx, observe)
 		if stopCtx.Err() == nil {
 			primary := vmExecSessionStopError(waitErr)
 			cancel(primary)
@@ -266,8 +275,10 @@ func startVMExecSessionStopWaiter(
 				scope.mu.Unlock()
 			}
 		}
+		observe()
 		done <- struct{}{}
 	}()
+	<-observed
 	return scope
 }
 

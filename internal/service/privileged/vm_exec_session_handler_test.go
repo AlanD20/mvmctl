@@ -22,6 +22,7 @@ import (
 const (
 	testVMExecHandlerSource      = "0123456789abcdef0123456789abcdef"
 	testVMExecHandlerDestination = "fedcba9876543210fedcba9876543210"
+	testVMExecHandlerSyncTimeout = time.Second
 )
 
 type fakeVMExecSessionEndpoint struct {
@@ -43,7 +44,7 @@ type fakeVMExecSessionLease struct {
 	events                *[]string
 	bindErr               error
 	releaseErr            error
-	waitStopFunc          func(context.Context) error
+	waitStopFunc          func(context.Context, vmExecSessionStopWaitReady) error
 	releaseFunc           func(context.Context) error
 	sourceConnection      vmExecSessionConnection
 	destinationConnection vmExecSessionConnection
@@ -59,9 +60,10 @@ func TestHandleVMExecSessionExplicitReleaseWinsPendingExpiryAndUsesReverseCleanu
 	pendingExpiry := make(chan struct{})
 	lease := &fakeVMExecSessionLease{
 		events: &events,
-		waitStopFunc: func(ctx context.Context) error {
+		waitStopFunc: func(ctx context.Context, ready vmExecSessionStopWaitReady) error {
 			close(waitStarted)
 			defer close(waitFinished)
+			ready()
 			select {
 			case <-pendingExpiry:
 				return nil
@@ -104,7 +106,11 @@ func TestHandleVMExecSessionExplicitReleaseWinsPendingExpiryAndUsesReverseCleanu
 		},
 	}
 
-	err := handleVMExecSession(t.Context(), endpoint, caller, effects, deps)
+	result := make(chan error, 1)
+	go func() {
+		result <- handleVMExecSession(t.Context(), endpoint, caller, effects, deps)
+	}()
+	err := requireVMExecSessionHandlerResult(t, result)
 
 	require.NoError(t, err)
 	assertVMExecSessionChannelClosed(t, waitStarted)
@@ -147,6 +153,61 @@ func TestHandleVMExecSessionExplicitReleaseWinsPendingExpiryAndUsesReverseCleanu
 	assertVMExecSessionResponses(t, endpoint.responseBytes(), true, true, true)
 	assertFDClosed(t, sourceFD)
 	assertFDClosed(t, destinationFD)
+}
+
+func TestHandleVMExecSessionImmediateExpiryWinsBeforeBufferedPhases(t *testing.T) {
+	events := make([]string, 0, 6)
+	phaseEvents := make([]string, 0, 2)
+	waitCalled := make(chan struct{})
+	waitFinished := make(chan struct{})
+	lease := &fakeVMExecSessionLease{
+		events: &events,
+		waitStopFunc: func(context.Context, vmExecSessionStopWaitReady) error {
+			close(waitCalled)
+			close(waitFinished)
+			return nil
+		},
+		releaseFunc: func(context.Context) error {
+			select {
+			case <-waitFinished:
+				return nil
+			default:
+				return errors.New("immediate stop was not observed before lease release")
+			}
+		},
+	}
+	endpoint, deps, sourceFD, destinationFD := newVMExecSessionHandlerFixture(
+		t,
+		vmExecSessionFrames(t, true, true, true),
+		&events,
+	)
+	endpoint.phaseEvents = &phaseEvents
+	result := make(chan error, 1)
+	go func() {
+		result <- handleVMExecSession(
+			t.Context(),
+			endpoint,
+			callerIdentity{uid: 1000, gid: 1000},
+			vmExecSessionEffectsForLease(lease),
+			deps,
+		)
+	}()
+
+	require.NoError(t, requireVMExecSessionHandlerResult(t, result))
+
+	assertVMExecSessionChannelClosed(t, waitCalled)
+	assertVMExecSessionChannelClosed(t, waitFinished)
+	assertVMExecSessionFailureOnly(t, endpoint.responseBytes())
+	assertVMExecSessionEvents(t, []string{"read_open_source", "write_failure"}, phaseEvents)
+	assertVMExecSessionEvents(t, []string{
+		"open_source", "shutdown_source", "close_source", "release_lease",
+	}, events)
+	assert.Equal(t, 1, endpoint.shutdownCount())
+	assert.False(t, lease.bound)
+	assert.True(t, lease.released)
+	assertFDClosed(t, sourceFD)
+	assertFDOpen(t, destinationFD)
+	require.NoError(t, unix.Close(destinationFD))
 }
 
 func TestHandleVMExecSessionGatesIntermediateResponsesOnEffects(t *testing.T) {
@@ -595,9 +656,10 @@ func TestHandleVMExecSessionStopWaiterFailsClosedBeforeRelease(t *testing.T) {
 			readBlocked := make(chan struct{})
 			lease := &fakeVMExecSessionLease{
 				events: &events,
-				waitStopFunc: func(ctx context.Context) error {
+				waitStopFunc: func(ctx context.Context, ready vmExecSessionStopWaitReady) error {
 					close(waitStarted)
 					defer close(waitFinished)
+					ready()
 					select {
 					case <-triggerStop:
 						return test.stopErr
@@ -647,7 +709,7 @@ func TestHandleVMExecSessionStopWaiterFailsClosedBeforeRelease(t *testing.T) {
 			assertVMExecSessionChannelClosed(t, waitStarted)
 			assertVMExecSessionChannelClosed(t, readBlocked)
 			close(triggerStop)
-			require.NoError(t, <-result)
+			require.NoError(t, requireVMExecSessionHandlerResult(t, result))
 
 			assertVMExecSessionChannelClosed(t, waitFinished)
 			responses := bytes.NewReader(endpoint.responseBytes())
@@ -726,9 +788,10 @@ func TestHandleVMExecSessionDeadlineCancelsIntermediateSuccessResponses(t *testi
 			releaseResponse := make(chan struct{})
 			lease := &fakeVMExecSessionLease{
 				events: &events,
-				waitStopFunc: func(ctx context.Context) error {
+				waitStopFunc: func(ctx context.Context, ready vmExecSessionStopWaitReady) error {
 					waitContext <- ctx
 					defer close(waitFinished)
+					ready()
 					select {
 					case <-triggerStop:
 						return nil
@@ -767,17 +830,12 @@ func TestHandleVMExecSessionDeadlineCancelsIntermediateSuccessResponses(t *testi
 				)
 			}()
 
-			var stopCtx context.Context
-			select {
-			case stopCtx = <-waitContext:
-			case <-t.Context().Done():
-				t.Fatal("stop waiter did not publish its context")
-			}
+			stopCtx := requireVMExecSessionStopContext(t, waitContext)
 			assertVMExecSessionChannelClosed(t, responseBlocked)
 			close(triggerStop)
 			assertVMExecSessionChannelClosed(t, stopCtx.Done())
 			close(releaseResponse)
-			handlerErr := <-result
+			handlerErr := requireVMExecSessionHandlerResult(t, result)
 
 			domainErr := requireVMExecDomainError(t, handlerErr)
 			assert.Equal(t, errs.CodeProcessError, domainErr.Code)
@@ -832,8 +890,9 @@ func TestVMExecSessionStopScopeLocalFinishWinsLateParentCancellation(t *testing.
 	parentCtx, cancelParent := context.WithCancel(t.Context())
 	waitStarted := make(chan struct{})
 	waitFinished := make(chan struct{})
-	lease := &fakeVMExecSessionLease{waitStopFunc: func(ctx context.Context) error {
+	lease := &fakeVMExecSessionLease{waitStopFunc: func(ctx context.Context, ready vmExecSessionStopWaitReady) error {
 		close(waitStarted)
+		ready()
 		<-ctx.Done()
 		close(waitFinished)
 		return ctx.Err()
@@ -841,7 +900,12 @@ func TestVMExecSessionStopScopeLocalFinishWinsLateParentCancellation(t *testing.
 	scope := startVMExecSessionStopWaiter(parentCtx, lease)
 	assertVMExecSessionChannelClosed(t, waitStarted)
 
-	scope.finish()
+	finishCompleted := make(chan struct{})
+	go func() {
+		scope.finish()
+		close(finishCompleted)
+	}()
+	assertVMExecSessionChannelClosed(t, finishCompleted)
 	assertVMExecSessionChannelClosed(t, waitFinished)
 	cancelParent()
 
@@ -914,10 +978,11 @@ func (lease *fakeVMExecSessionLease) bindDestination(
 	return lease.bindErr
 }
 
-func (lease *fakeVMExecSessionLease) waitStop(ctx context.Context) error {
+func (lease *fakeVMExecSessionLease) waitStop(ctx context.Context, ready vmExecSessionStopWaitReady) error {
 	if lease.waitStopFunc != nil {
-		return lease.waitStopFunc(ctx)
+		return lease.waitStopFunc(ctx, ready)
 	}
+	ready()
 	<-ctx.Done()
 	return ctx.Err()
 }
@@ -1188,10 +1253,38 @@ func assertVMExecSessionEvents(t *testing.T, want []string, got []string) {
 
 func assertVMExecSessionChannelClosed(t *testing.T, channel <-chan struct{}) {
 	t.Helper()
+	timer := time.NewTimer(testVMExecHandlerSyncTimeout)
+	defer timer.Stop()
 	select {
 	case <-channel:
-	case <-t.Context().Done():
+	case <-timer.C:
 		t.Fatal("VM-exec session synchronization channel did not close")
+	}
+}
+
+func requireVMExecSessionHandlerResult(t *testing.T, result <-chan error) error {
+	t.Helper()
+	timer := time.NewTimer(testVMExecHandlerSyncTimeout)
+	defer timer.Stop()
+	select {
+	case err := <-result:
+		return err
+	case <-timer.C:
+		t.Fatal("VM-exec session handler did not return")
+		return nil
+	}
+}
+
+func requireVMExecSessionStopContext(t *testing.T, contexts <-chan context.Context) context.Context {
+	t.Helper()
+	timer := time.NewTimer(testVMExecHandlerSyncTimeout)
+	defer timer.Stop()
+	select {
+	case ctx := <-contexts:
+		return ctx
+	case <-timer.C:
+		t.Fatal("VM-exec session stop waiter did not publish its context")
+		return nil
 	}
 }
 
