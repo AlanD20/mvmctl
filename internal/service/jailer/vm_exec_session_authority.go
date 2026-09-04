@@ -9,11 +9,14 @@ import (
 	"mvmctl/pkg/errs"
 )
 
+const productionVMExecMaxSessions uint32 = 8
+
 type vmExecSessionAuthority struct {
 	instances    *instanceAuthority
 	capacity     *vmExecCapacityAuthority
 	recoveryDeps processRecoveryDeps
 	identityDeps processIdentityVerifierDeps
+	peerDeps     vmExecPeerAuthorityDeps
 }
 
 type vmExecSessionVMAdmission struct {
@@ -42,11 +45,34 @@ type vmExecSessionLeaseState struct {
 	destination          *activeLease
 	sourceProcesses      *reopenedRecordedProcesses
 	destinationProcesses *reopenedRecordedProcesses
+	peerDeps             vmExecPeerAuthorityDeps
+	identityDeps         processIdentityVerifierDeps
+	sourcePeer           *vmExecFirecrackerPeer
+	destinationPeer      *vmExecFirecrackerPeer
 	capacity             *vmExecCapacityLease
 	admission            vmExecSessionAdmission
 	admissionValid       bool
+	sourceBound          bool
+	destinationBound     bool
+	bindingFailed        bool
 	released             bool
 	releaseErr           error
+}
+
+func newVMExecSessionAuthority() (*vmExecSessionAuthority, error) {
+	capacity, err := newVMExecCapacityAuthority(vmExecCapacityPolicy{
+		maxReservations: productionVMExecMaxSessions,
+	})
+	if err != nil {
+		return nil, vmExecSessionError("construct production VM-exec capacity authority", err)
+	}
+	return newVMExecSessionAuthorityWithPeerDeps(
+		newInstanceAuthority(),
+		capacity,
+		realProcessRecoveryDeps(),
+		realProcessIdentityVerifierDeps(),
+		realVMExecPeerAuthorityDeps(),
+	)
 }
 
 func newVMExecSessionAuthorityWithDeps(
@@ -67,6 +93,24 @@ func newVMExecSessionAuthorityWithDeps(
 	return &vmExecSessionAuthority{
 		instances: instances, capacity: capacity, recoveryDeps: recoveryDeps, identityDeps: identityDeps,
 	}, nil
+}
+
+func newVMExecSessionAuthorityWithPeerDeps(
+	instances *instanceAuthority,
+	capacity *vmExecCapacityAuthority,
+	recoveryDeps processRecoveryDeps,
+	identityDeps processIdentityVerifierDeps,
+	peerDeps vmExecPeerAuthorityDeps,
+) (*vmExecSessionAuthority, error) {
+	authority, err := newVMExecSessionAuthorityWithDeps(instances, capacity, recoveryDeps, identityDeps)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateVMExecPeerAuthorityDeps(peerDeps); err != nil {
+		return nil, vmExecSessionError("vm-exec session peer authority dependencies are incomplete", err)
+	}
+	authority.peerDeps = peerDeps
+	return authority, nil
 }
 
 // reserve admits two exact active runtimes and only then reserves the root-global execution capacity. The global lock
@@ -99,7 +143,7 @@ func (authority *vmExecSessionAuthority) reserve(
 			return
 		}
 		returnErr = releaseVMExecSessionResources(
-			ctx, returnErr, nil, destinationProcesses, sourceProcesses, destination, source, roots,
+			ctx, returnErr, nil, nil, nil, destinationProcesses, sourceProcesses, destination, source, roots,
 		)
 	}()
 
@@ -126,7 +170,7 @@ func (authority *vmExecSessionAuthority) reserve(
 	lease := &vmExecSessionLease{state: &vmExecSessionLeaseState{
 		roots: roots, source: source, destination: destination,
 		sourceProcesses: sourceProcesses, destinationProcesses: destinationProcesses,
-		capacity: capacity,
+		capacity: capacity, peerDeps: authority.peerDeps, identityDeps: authority.identityDeps,
 	}}
 	transferred = true
 	if capacity.state == nil {
@@ -317,6 +361,165 @@ func (lease *vmExecSessionLease) admission() (vmExecSessionAdmission, error) {
 	return state.admission, nil
 }
 
+// CRITICAL: bindSource consumes only a structurally admitted connection descriptor and binds its kernel peer to the
+// already-retained source runtime authority.
+func (lease *vmExecSessionLease) bindSource(ctx context.Context, connectionFD int) error {
+	if lease == nil || lease.state == nil {
+		return vmExecSessionError("vm-exec session lease is unavailable", nil)
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if err := validateVMExecSessionBindingState(ctx, state); err != nil {
+		return err
+	}
+	if state.sourceBound || state.sourcePeer != nil {
+		return vmExecSessionError("vm-exec source connection is already bound", nil)
+	}
+	if state.destinationBound || state.destinationPeer != nil {
+		return vmExecSessionError("vm-exec destination connection was bound before source", nil)
+	}
+	peer, err := admitVMExecFirecrackerPeer(
+		ctx,
+		statePeerDeps(state),
+		stateIdentityDeps(state),
+		state.source.snapshot(),
+		state.sourceProcesses,
+		connectionFD,
+		"source",
+	)
+	if err != nil {
+		state.bindingFailed = true
+		return err
+	}
+	state.sourcePeer = peer
+	if err := recheckVMExecSessionBindingBudget(ctx, state); err != nil {
+		state.bindingFailed = true
+		return err
+	}
+	state.sourceBound = true
+	return nil
+}
+
+// CRITICAL: bindDestination proves the destination peer, then rechecks both retained runtimes before readiness.
+func (lease *vmExecSessionLease) bindDestination(ctx context.Context, connectionFD int) error {
+	if lease == nil || lease.state == nil {
+		return vmExecSessionError("vm-exec session lease is unavailable", nil)
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if err := validateVMExecSessionBindingState(ctx, state); err != nil {
+		return err
+	}
+	if !state.sourceBound || state.sourcePeer == nil {
+		return vmExecSessionError("vm-exec source connection must be bound first", nil)
+	}
+	if state.destinationBound || state.destinationPeer != nil {
+		return vmExecSessionError("vm-exec destination connection is already bound", nil)
+	}
+	peer, err := admitVMExecFirecrackerPeer(
+		ctx,
+		statePeerDeps(state),
+		stateIdentityDeps(state),
+		state.destination.snapshot(),
+		state.destinationProcesses,
+		connectionFD,
+		"destination",
+	)
+	if err != nil {
+		state.bindingFailed = true
+		return err
+	}
+	state.destinationPeer = peer
+	if err := recheckVMExecSessionBoundAuthorities(ctx, state); err != nil {
+		state.bindingFailed = true
+		return err
+	}
+	state.destinationBound = true
+	return nil
+}
+
+func recheckVMExecSessionBoundAuthorities(ctx context.Context, state *vmExecSessionLeaseState) error {
+	if err := recheckVMExecSessionBindingBudget(ctx, state); err != nil {
+		return err
+	}
+	if err := state.sourcePeer.recheck(
+		ctx,
+		stateIdentityDeps(state),
+		state.source.snapshot(),
+		state.sourceProcesses,
+	); err != nil {
+		return err
+	}
+	if err := state.destinationPeer.recheck(
+		ctx,
+		stateIdentityDeps(state),
+		state.destination.snapshot(),
+		state.destinationProcesses,
+	); err != nil {
+		return err
+	}
+	return recheckVMExecSessionBindingBudget(ctx, state)
+}
+
+func validateVMExecSessionBindingState(ctx context.Context, state *vmExecSessionLeaseState) error {
+	if ctx == nil {
+		return vmExecSessionError("vm-exec session binding context is required", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return vmExecSessionError("vm-exec session binding was cancelled", err)
+	}
+	if state.released {
+		return vmExecSessionError("vm-exec session lease is released", nil)
+	}
+	if !state.admissionValid || state.source == nil || state.destination == nil ||
+		state.sourceProcesses == nil || state.destinationProcesses == nil || state.capacity == nil {
+		return vmExecSessionError("vm-exec session admission is incomplete", nil)
+	}
+	if state.bindingFailed {
+		return vmExecSessionError("vm-exec session connection binding already failed", nil)
+	}
+	if err := validateVMExecPeerAuthorityDeps(statePeerDeps(state)); err != nil {
+		return vmExecSessionError("vm-exec session peer authority is unavailable", err)
+	}
+	return nil
+}
+
+func statePeerDeps(state *vmExecSessionLeaseState) vmExecPeerAuthorityDeps {
+	if state == nil {
+		return vmExecPeerAuthorityDeps{}
+	}
+	return state.peerDeps
+}
+
+func stateIdentityDeps(state *vmExecSessionLeaseState) processIdentityVerifierDeps {
+	if state == nil {
+		return processIdentityVerifierDeps{}
+	}
+	return state.identityDeps
+}
+
+func recheckVMExecSessionBindingBudget(ctx context.Context, state *vmExecSessionLeaseState) error {
+	identityDeps := stateIdentityDeps(state)
+	bootID, err := identityDeps.readBootID(ctx)
+	if err != nil {
+		return vmExecSessionError("recheck host boot ID after VM-exec peer proof", err)
+	}
+	if bootID != state.admission.hostBootID {
+		return vmExecSessionError("host boot ID changed during VM-exec peer proof", nil)
+	}
+	capacityState := state.capacity.state
+	now, err := capacityState.authority.deps.clock.boottimeNS(ctx)
+	if err != nil {
+		return vmExecSessionError("recheck VM-exec relay CLOCK_BOOTTIME budget", err)
+	}
+	if now >= state.admission.relayStopBoottimeNS {
+		return vmExecSessionError("VM-exec relay CLOCK_BOOTTIME budget is exhausted", nil)
+	}
+	return nil
+}
+
 // Release drops capacity, destination/source process authorities, active leases in descending lexical VM-ID order,
 // and pair roots last. It never reacquires a lock and runs once across copied leases with cancellation detached.
 func (lease *vmExecSessionLease) Release(ctx context.Context) error {
@@ -338,6 +541,8 @@ func (lease *vmExecSessionLease) Release(ctx context.Context) error {
 	state.releaseErr = releaseVMExecSessionResources(
 		cleanupCtx,
 		state.releaseErr,
+		state.destinationPeer,
+		state.sourcePeer,
 		state.capacity,
 		state.destinationProcesses,
 		state.sourceProcesses,
@@ -345,6 +550,8 @@ func (lease *vmExecSessionLease) Release(ctx context.Context) error {
 		state.source,
 		state.roots,
 	)
+	state.destinationPeer = nil
+	state.sourcePeer = nil
 	state.capacity = nil
 	state.destinationProcesses = nil
 	state.destination = nil
@@ -358,6 +565,8 @@ func (lease *vmExecSessionLease) Release(ctx context.Context) error {
 func releaseVMExecSessionResources(
 	ctx context.Context,
 	primary error,
+	destinationPeer *vmExecFirecrackerPeer,
+	sourcePeer *vmExecFirecrackerPeer,
 	capacity *vmExecCapacityLease,
 	destinationProcesses *reopenedRecordedProcesses,
 	sourceProcesses *reopenedRecordedProcesses,
@@ -367,6 +576,20 @@ func releaseVMExecSessionResources(
 ) error {
 	cleanupCtx := context.WithoutCancel(ctx)
 	result := primary
+	if destinationPeer != nil {
+		result = appendVMExecSessionError(
+			result,
+			"release destination VM-exec Firecracker peer authority",
+			destinationPeer.Release(cleanupCtx),
+		)
+	}
+	if sourcePeer != nil {
+		result = appendVMExecSessionError(
+			result,
+			"release source VM-exec Firecracker peer authority",
+			sourcePeer.Release(cleanupCtx),
+		)
+	}
 	if capacity != nil {
 		result = appendVMExecSessionError(result, "release VM-exec capacity", capacity.Release(cleanupCtx))
 	}
