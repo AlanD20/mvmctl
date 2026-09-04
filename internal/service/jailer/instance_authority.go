@@ -93,6 +93,7 @@ type cleanupLeaseState struct {
 	runtimeDirectory        *managedVMRuntimeLease
 	runtimeRecovery         *managedVMRuntimeRecovery
 	freshRecoveryAdmission  *freshRecoveryAdmission
+	freshRecoveryAdmitting  bool
 	preparedManagedVMCgroup *preparedManagedVMCgroup
 	managedVMCgroup         *managedVMCgroupLease
 	record                  instanceRecord
@@ -683,12 +684,18 @@ func beginFreshRecoveryCleanupWithDeps(
 	if writeErr != nil {
 		return cleanup, writeErr
 	}
+	if err := cleanup.admitFreshRecovery(ctx); err != nil {
+		return cleanup, err
+	}
 	return cleanup, nil
 }
 
 func (lease *cleanupLease) Complete(ctx context.Context) error {
 	if lease == nil || lease.state == nil {
 		return instanceStateError("", "cleanup lease is not active")
+	}
+	if err := lease.admitFreshRecovery(ctx); err != nil {
+		return err
 	}
 	state := lease.state
 	state.mu.Lock()
@@ -699,8 +706,8 @@ func (lease *cleanupLease) Complete(ctx context.Context) error {
 	if state.released || state.vmLock == nil || !state.vmLock.isActive() || state.directories == nil {
 		return instanceStateError(state.record.vmID, "cleanup lease is not active")
 	}
-	if err := finishFreshRecoveryAdmissionLocked(ctx, state); err != nil {
-		return err
+	if state.freshRecoveryAdmission != nil || state.freshRecoveryAdmitting {
+		return instanceStateError(state.record.vmID, "fresh-recovery admission is incomplete")
 	}
 	if err := resolveCleanupManagedVMRuntimeLocked(ctx, state); err != nil {
 		return err
@@ -1210,6 +1217,9 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 	defer state.mu.Unlock()
 	if state.released {
 		return state.releaseErr
+	}
+	if state.freshRecoveryAdmitting {
+		return instanceStateError(state.record.vmID, "fresh-recovery admission is in progress")
 	}
 	if state.record.lifecycle != instanceLifecycleCleaned || state.processes != nil ||
 		state.recoveredProcesses != nil ||

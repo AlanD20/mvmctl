@@ -13,9 +13,9 @@ import (
 // adopting, or deleting cgroup state. Because no descriptor escapes this call, a second full chain observation binds
 // the result to the fixed hierarchy instead of a detached object replaced during the first observation.
 //
-// CALLER MUST HOLD: the per-VM authority lock for vmID across this entire call. Future recovery composition enters
-// through lockedInstance.requireFreshRecoveryManagedVMCgroupAbsent after lockOwnedInstance and before Release transfers
-// or drops that authority; BeginCleanup is deliberately not wired by this isolated proof slice.
+// CALLER MUST HOLD: the per-VM authority lock for vmID across this entire call. Recovery composition enters through
+// lockedInstance.requireFreshRecoveryManagedVMCgroupAbsent after lockOwnedInstance and before Release transfers or
+// drops that authority.
 func requireFreshRecoveryManagedVMCgroupAbsent(
 	ctx context.Context,
 	deps managedVMCgroupReadDeps,

@@ -1,6 +1,9 @@
 package jailer
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 type freshRecoveryAdmission struct {
 	sourceLifecycle instanceLifecycle
@@ -12,61 +15,120 @@ type freshRecoveryAdmission struct {
 	processVerifier retainedRecoveredCgroupProcessVerifier
 }
 
-// finishFreshRecoveryAdmissionLocked completes the evidence chain that began before the cleaning record was durable.
-// A failed proof leaves this exact admission, process authority, and any admitted cgroup lease owned by cleanup so a
-// later Complete call can retry without reconstructing authority.
-//
-// CALLER MUST HOLD: state.mu.
-func finishFreshRecoveryAdmissionLocked(ctx context.Context, state *cleanupLeaseState) error {
+// admitFreshRecovery completes the evidence chain that began before the cleaning record was durable. Callbacks run
+// without the cleanup mutex. A failed proof leaves the exact admission and every authority obtained during the
+// attempt owned by cleanup so Complete can retry without reconstructing them.
+func (lease *cleanupLease) admitFreshRecovery(ctx context.Context) error {
+	if lease == nil || lease.state == nil {
+		return instanceStateError("", "cleanup lease is not active")
+	}
+	state := lease.state
+	state.mu.Lock()
+	vmID := state.record.vmID
+	if ctx == nil {
+		state.mu.Unlock()
+		return instanceStateError(vmID, "fresh-recovery admission context is required")
+	}
+	if state.released || state.vmLock == nil || !state.vmLock.isActive() || state.directories == nil {
+		state.mu.Unlock()
+		return instanceStateError(vmID, "cleanup lease is not active")
+	}
+	if state.freshRecoveryAdmitting {
+		state.mu.Unlock()
+		return instanceStateError(vmID, "fresh-recovery admission is already in progress")
+	}
 	admission := state.freshRecoveryAdmission
 	if admission == nil {
+		state.mu.Unlock()
 		return nil
 	}
-	if state.recoveredProcesses == nil || admission.processVerifier.processes != state.recoveredProcesses ||
-		admission.processVerifier.locator != admission.locator || admission.processVerifier.vmID != state.record.vmID {
-		return instanceStateError(state.record.vmID, "fresh-recovery admission authority is inconsistent")
+	recovered := state.recoveredProcesses
+	if recovered == nil || admission.processVerifier.processes != recovered ||
+		admission.processVerifier.locator != admission.locator || admission.processVerifier.vmID != vmID ||
+		(state.managedVMCgroup != nil && state.preparedManagedVMCgroup != nil) {
+		state.mu.Unlock()
+		return instanceStateError(vmID, "fresh-recovery admission authority is inconsistent")
 	}
+	managed := state.managedVMCgroup
+	prepared := state.preparedManagedVMCgroup
+	state.freshRecoveryAdmitting = true
+	state.mu.Unlock()
 
-	if state.managedVMCgroup == nil {
-		cgroup, present, err := recoverManagedVMCgroup(
+	var admissionErr error
+	if managed != nil {
+		admissionErr = managed.VerifyMembership(
 			ctx,
-			admission.cgroupDeps,
-			state.record.vmID,
 			admission.locator,
 			admission.observation,
 			admission.processVerifier,
 		)
-		if cgroup != nil {
-			state.managedVMCgroup = cgroup
+	} else if prepared == nil {
+		var present bool
+		managed, present, admissionErr = recoverManagedVMCgroup(
+			ctx,
+			admission.cgroupDeps,
+			vmID,
+			admission.locator,
+			admission.observation,
+			admission.processVerifier,
+		)
+		if admissionErr == nil && present && managed == nil {
+			admissionErr = instanceStateError(vmID, "fresh-recovery managed VM cgroup admission is incomplete")
 		}
-		if err != nil {
-			return err
+		if admissionErr == nil && !present {
+			if admission.sourceLifecycle == instanceLifecycleActive {
+				admissionErr = instanceStateError(vmID, "active fresh recovery has no managed VM cgroup")
+			} else {
+				prepared, admissionErr = prepareFreshRecoveryManagedVMCgroup(
+					ctx,
+					admission.cgroupDeps,
+					vmID,
+				)
+			}
 		}
-		if present && cgroup == nil {
-			return instanceStateError(state.record.vmID, "fresh-recovery managed VM cgroup admission is incomplete")
+	}
+	if admissionErr == nil {
+		admissionErr = recovered.verifyLocators(ctx)
+	}
+	if admissionErr == nil {
+		var bootID string
+		bootID, admissionErr = admission.identityDeps.readBootID(ctx)
+		if admissionErr != nil {
+			admissionErr = processVerificationError(
+				vmID,
+				"recheck host boot ID after fresh recovery admission",
+				admissionErr,
+			)
+		} else if bootID != admission.hostBootID {
+			admissionErr = processVerificationError(
+				vmID,
+				"host boot ID changed during fresh recovery admission",
+				nil,
+			)
 		}
-		if !present && admission.sourceLifecycle == instanceLifecycleActive {
-			return instanceStateError(state.record.vmID, "active fresh recovery has no managed VM cgroup")
-		}
-	} else if err := state.managedVMCgroup.VerifyMembership(
-		ctx,
-		admission.locator,
-		admission.observation,
-		admission.processVerifier,
-	); err != nil {
-		return err
 	}
 
-	if err := state.recoveredProcesses.verifyLocators(ctx); err != nil {
-		return err
+	state.mu.Lock()
+	if state.managedVMCgroup == nil && managed != nil {
+		state.managedVMCgroup = managed
+	} else if managed != nil && state.managedVMCgroup != managed {
+		admissionErr = errors.Join(
+			admissionErr,
+			instanceStateError(vmID, "fresh-recovery managed cgroup authority changed"),
+		)
 	}
-	bootID, err := admission.identityDeps.readBootID(ctx)
-	if err != nil {
-		return processVerificationError(state.record.vmID, "recheck host boot ID after fresh recovery admission", err)
+	if state.preparedManagedVMCgroup == nil && prepared != nil {
+		state.preparedManagedVMCgroup = prepared
+	} else if prepared != nil && state.preparedManagedVMCgroup != prepared {
+		admissionErr = errors.Join(
+			admissionErr,
+			instanceStateError(vmID, "fresh-recovery prepared cgroup authority changed"),
+		)
 	}
-	if bootID != admission.hostBootID {
-		return processVerificationError(state.record.vmID, "host boot ID changed during fresh recovery admission", nil)
+	state.freshRecoveryAdmitting = false
+	if admissionErr == nil {
+		state.freshRecoveryAdmission = nil
 	}
-	state.freshRecoveryAdmission = nil
-	return nil
+	state.mu.Unlock()
+	return admissionErr
 }

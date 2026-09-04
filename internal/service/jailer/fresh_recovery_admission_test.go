@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -17,11 +18,20 @@ func TestFreshRecoveryActiveAdmissionPrecedesCleanupEffectsAndRemovesExactCgroup
 	t.Parallel()
 
 	fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleActive, true)
+	wantGeneration := fixture.record.cleanupGeneration + 1
 
 	cleanup, err := fixture.begin(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, cleanup)
+	assert.Equal(t, wantGeneration, cleanup.snapshot().cleanupGeneration)
+	assert.Nil(t, cleanup.state.freshRecoveryAdmission)
 	assert.True(t, fixture.cgroup.vmLeafPresent(testVMID))
+	if diff := cmp.Diff(
+		[]string{"record-write", "cgroup-admission", "cgroup-membership"},
+		fixture.events.snapshot(),
+	); diff != "" {
+		t.Errorf("BeginCleanup admission order mismatch (-want +got):\n%s", diff)
+	}
 	require.NoError(t, cleanup.Complete(t.Context()))
 	assert.False(t, fixture.cgroup.vmLeafPresent(testVMID))
 	assertInstanceRecordEqual(t, cleanup.snapshot(), fixture.readRecord(t))
@@ -40,6 +50,25 @@ func TestFreshRecoveryActiveAdmissionPrecedesCleanupEffectsAndRemovesExactCgroup
 	); diff != "" {
 		t.Errorf("fresh recovery cleanup order mismatch (-want +got):\n%s", diff)
 	}
+	require.NoError(t, cleanup.Release(t.Context()))
+}
+
+// Rationale: absence observed while a recovered process is live is provisional. Cleanup must retain that causal
+// absence until reap, then bind and remove an exact leaf that appeared in the meantime.
+func TestFreshRecoveryLaunchingAbsentLeafAppearingBeforeReapIsBoundAndRemoved(t *testing.T) {
+	t.Parallel()
+
+	fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleLaunching, false)
+	cleanup, err := fixture.begin(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, cleanup.state.preparedManagedVMCgroup)
+	assert.Nil(t, cleanup.state.freshRecoveryAdmission)
+
+	fixture.cgroup.addVMLeaf(testVMID)
+	require.NoError(t, cleanup.Complete(t.Context()))
+	assert.False(t, fixture.cgroup.vmLeafPresent(testVMID))
+	events := fixture.events.snapshot()
+	assert.Less(t, eventIndex(events, "process-reap"), eventIndex(events, "cgroup-remove"))
 	require.NoError(t, cleanup.Release(t.Context()))
 }
 
@@ -108,7 +137,9 @@ func TestFreshRecoveryBootMismatchRejectsPresentOrUnstableCgroupWithoutEffects(t
 			assert.Nil(t, cleanup)
 			require.Error(t, err)
 			assertInstanceRecordEqual(t, fixture.record, fixture.readRecord(t))
-			assert.Empty(t, fixture.processLog.snapshot())
+			if diff := cmp.Diff([]string{}, fixture.processLog.snapshot()); diff != "" {
+				t.Errorf("boot-mismatch process events mismatch (-want +got):\n%s", diff)
+			}
 			assert.NotContains(t, fixture.events.snapshot(), "record-write")
 			assert.NotContains(t, fixture.events.snapshot(), "process-terminate")
 			assert.NotContains(t, fixture.events.snapshot(), "cgroup-remove")
@@ -153,10 +184,7 @@ func TestFreshRecoveryActiveMissingCgroupStaysPendingAndRejectsReleaseUntilRetry
 
 	fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleActive, false)
 	cleanup, err := fixture.begin(t.Context())
-	require.NoError(t, err)
 	require.NotNil(t, cleanup)
-
-	err = cleanup.Complete(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "active fresh recovery has no managed VM cgroup")
 	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
@@ -203,9 +231,7 @@ func TestFreshRecoveryMembershipAndFinalLocatorFailuresRetryWithSameCgroupLease(
 			}
 
 			cleanup, err := fixture.begin(t.Context())
-			require.NoError(t, err)
 			require.NotNil(t, cleanup)
-			err = cleanup.Complete(t.Context())
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
 			retained := cleanup.state.managedVMCgroup
@@ -231,10 +257,7 @@ func TestFreshRecoveryFinalBootFailureRetainsPendingAdmissionAndSameLeaseForRetr
 	fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleActive, true)
 	fixture.identity.bootIDs = []string{processTestHostBootID, processOtherBootID, processTestHostBootID}
 	cleanup, err := fixture.begin(t.Context())
-	require.NoError(t, err)
 	require.NotNil(t, cleanup)
-
-	err = cleanup.Complete(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "host boot ID changed during fresh recovery admission")
 	retained := cleanup.state.managedVMCgroup
@@ -247,6 +270,212 @@ func TestFreshRecoveryFinalBootFailureRetainsPendingAdmissionAndSameLeaseForRetr
 	assert.Equal(t, 1, countFreshRecoveryEvents(fixture.events.snapshot(), "cgroup-admission"))
 	assert.True(t, retained.snapshot().released)
 	assert.False(t, fixture.cgroup.vmLeafPresent(testVMID))
+	require.NoError(t, cleanup.Release(t.Context()))
+}
+
+func TestFreshRecoveryFinalBootReadErrorRetainsPendingAdmissionAndSameLeaseForRetry(t *testing.T) {
+	t.Parallel()
+
+	fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleActive, true)
+	readErr := errors.New("injected final boot ID read failure")
+	reads := 0
+	fixture.identityDeps.readBootID = func(context.Context) (string, error) {
+		reads++
+		if reads == 2 {
+			return "", readErr
+		}
+		return processTestHostBootID, nil
+	}
+	cleanup, err := fixture.begin(t.Context())
+	require.NotNil(t, cleanup)
+	require.ErrorIs(t, err, readErr)
+	retained := cleanup.state.managedVMCgroup
+	require.NotNil(t, retained)
+	assert.NotContains(t, fixture.events.snapshot(), "process-terminate")
+	assertInstanceRecordEqual(t, cleanup.snapshot(), fixture.readRecord(t))
+
+	require.NoError(t, cleanup.Complete(t.Context()))
+	assert.Equal(t, 1, countFreshRecoveryEvents(fixture.events.snapshot(), "cgroup-admission"))
+	assert.True(t, retained.snapshot().released)
+	require.NoError(t, cleanup.Release(t.Context()))
+}
+
+func TestFreshRecoverySameBootRejectsUnsafeForeignOrReplacementLeafBeforeEffects(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		configure func(*testing.T, *freshRecoveryAdmissionTestFixture, *managedVMCgroupDeps)
+		repair    func(*testing.T, *freshRecoveryAdmissionTestFixture)
+	}{
+		"unsafe": {
+			configure: func(t *testing.T, fixture *freshRecoveryAdmissionTestFixture, _ *managedVMCgroupDeps) {
+				require.NoError(t, os.Chmod(fixture.cgroup.vmLeafPath(testVMID), 0o700))
+			},
+			repair: func(t *testing.T, fixture *freshRecoveryAdmissionTestFixture) {
+				require.NoError(t, os.Chmod(
+					fixture.cgroup.vmLeafPath(testVMID),
+					os.FileMode(managedVMCgroupLeafMode),
+				))
+			},
+		},
+		"foreign member": {
+			configure: func(_ *testing.T, fixture *freshRecoveryAdmissionTestFixture, _ *managedVMCgroupDeps) {
+				fixture.cgroup.setMembership(testVMID, "4343\n")
+			},
+			repair: func(_ *testing.T, fixture *freshRecoveryAdmissionTestFixture) {
+				fixture.cgroup.setMembership(testVMID, "4242\n")
+			},
+		},
+		"replacement mount identity": {
+			configure: func(_ *testing.T, _ *freshRecoveryAdmissionTestFixture, deps *managedVMCgroupDeps) {
+				realOpenAt2 := deps.openAt2
+				realStatx := deps.statx
+				leafFD := -1
+				mutated := false
+				deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+					opened, err := realOpenAt2(ctx, fd, name, how)
+					if err == nil && name == testVMID {
+						leafFD = opened
+					}
+					return opened, err
+				}
+				deps.statx = func(ctx context.Context, fd int, stat *unix.Statx_t) error {
+					if err := realStatx(ctx, fd, stat); err != nil {
+						return err
+					}
+					if fd == leafFD && !mutated {
+						mutated = true
+						stat.Mnt_id++
+					}
+					return nil
+				}
+			},
+			repair: func(*testing.T, *freshRecoveryAdmissionTestFixture) {},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleActive, true)
+			deps := fixture.cgroup.deps()
+			tc.configure(t, fixture, &deps)
+			fixture.installCgroupDeps(deps)
+
+			cleanup, err := fixture.begin(t.Context())
+			require.NotNil(t, cleanup)
+			require.Error(t, err)
+			assert.Equal(t, instanceLifecycleCleaning, fixture.readRecord(t).lifecycle)
+			assert.NotContains(t, fixture.events.snapshot(), "process-terminate")
+			assert.NotContains(t, fixture.events.snapshot(), "cgroup-remove")
+			tc.repair(t, fixture)
+			require.NoError(t, cleanup.Complete(t.Context()))
+			require.NoError(t, cleanup.Release(t.Context()))
+		})
+	}
+}
+
+// Rationale: admission invokes filesystem and process callbacks. Reentrant lifecycle calls must observe the shared
+// gate instead of deadlocking on the cleanup mutex or consuming authority mid-proof.
+func TestFreshRecoveryAdmissionCallbacksRunOutsideCleanupMutexAndRejectReentrancy(t *testing.T) {
+	t.Parallel()
+
+	fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleActive, true)
+	writeErr := errors.New("injected post-rename durability failure")
+	realFsync := fixture.authority.deps.fsync
+	fileSynced := false
+	failureInjected := false
+	fixture.authority.deps.fsync = func(ctx context.Context, fd int) error {
+		var stat unix.Stat_t
+		if err := unix.Fstat(fd, &stat); err == nil && stat.Mode&unix.S_IFMT == unix.S_IFREG {
+			fileSynced = true
+			return realFsync(ctx, fd)
+		}
+		if fileSynced && !failureInjected {
+			failureInjected = true
+			return writeErr
+		}
+		return realFsync(ctx, fd)
+	}
+	var cleanup *cleanupLease
+	var nestedCompleteErr, nestedReleaseErr, nestedAdmissionErr error
+	realOpenRoot := fixture.authority.cgroupDeps.openRoot
+	fixture.authority.cgroupDeps.openRoot = func(ctx context.Context) (int, error) {
+		if !cleanup.state.mu.TryLock() {
+			t.Error("cgroup callback ran under cleanup mutex")
+		} else {
+			cleanup.state.mu.Unlock()
+		}
+		nestedCompleteErr = cleanup.Complete(ctx)
+		nestedReleaseErr = cleanup.Release(ctx)
+		nestedAdmissionErr = cleanup.admitFreshRecovery(ctx)
+		return realOpenRoot(ctx)
+	}
+
+	var err error
+	cleanup, err = fixture.begin(t.Context())
+	require.ErrorIs(t, err, writeErr)
+	fixture.authority.deps.fsync = realFsync
+	require.NoError(t, cleanup.admitFreshRecovery(t.Context()))
+	for _, nestedErr := range []error{nestedCompleteErr, nestedReleaseErr, nestedAdmissionErr} {
+		require.Error(t, nestedErr)
+		assert.Contains(t, nestedErr.Error(), "in progress")
+	}
+	require.NoError(t, cleanup.Complete(t.Context()))
+	require.NoError(t, cleanup.Release(t.Context()))
+}
+
+func TestFreshRecoveryAdmissionGateRejectsConcurrentLifecycleCalls(t *testing.T) {
+	t.Parallel()
+
+	fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleActive, false)
+	cleanup, err := fixture.begin(t.Context())
+	require.NotNil(t, cleanup)
+	require.Error(t, err)
+	fixture.cgroup.addVMLeaf(testVMID)
+
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	defer func() {
+		select {
+		case <-unblock:
+		default:
+			close(unblock)
+		}
+	}()
+	realOpenRoot := cleanup.state.freshRecoveryAdmission.cgroupDeps.openRoot
+	cleanup.state.freshRecoveryAdmission.cgroupDeps.openRoot = func(ctx context.Context) (int, error) {
+		close(entered)
+		select {
+		case <-unblock:
+		case <-ctx.Done():
+			return -1, ctx.Err()
+		}
+		return realOpenRoot(ctx)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- cleanup.admitFreshRecovery(ctx) }()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatalf("wait for blocked admission callback: %v", ctx.Err())
+	}
+	for _, concurrentErr := range []error{
+		cleanup.Complete(t.Context()),
+		cleanup.Release(t.Context()),
+		cleanup.admitFreshRecovery(t.Context()),
+	} {
+		require.Error(t, concurrentErr)
+		assert.Contains(t, concurrentErr.Error(), "in progress")
+	}
+	close(unblock)
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatalf("wait for admission completion: %v", ctx.Err())
+	}
+	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
 }
 
@@ -444,4 +673,13 @@ func countFreshRecoveryEvents(events []string, want string) int {
 		}
 	}
 	return count
+}
+
+func eventIndex(events []string, want string) int {
+	for index, event := range events {
+		if event == want {
+			return index
+		}
+	}
+	return -1
 }

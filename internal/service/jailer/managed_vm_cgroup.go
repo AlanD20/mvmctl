@@ -15,19 +15,20 @@ type preparedManagedVMCgroup struct {
 type preparedManagedVMCgroupState struct {
 	mu sync.Mutex
 
-	deps          managedVMCgroupDeps
-	vmID          string
-	rootFD        int
-	parentFD      int
-	root          managedVMCgroupIdentity
-	parent        managedVMCgroupIdentity
-	retained      []int
-	leafAbsent    bool
-	checking      bool
-	binding       bool
-	jailerHandoff bool
-	released      bool
-	releaseErr    error
+	deps                 managedVMCgroupDeps
+	vmID                 string
+	rootFD               int
+	parentFD             int
+	root                 managedVMCgroupIdentity
+	parent               managedVMCgroupIdentity
+	retained             []int
+	leafAbsent           bool
+	checking             bool
+	binding              bool
+	jailerHandoff        bool
+	freshRecoveryCleanup bool
+	released             bool
+	releaseErr           error
 }
 
 type preparedManagedVMCgroupSnapshot struct {
@@ -167,6 +168,19 @@ func prepareManagedVMCgroup(
 	}}
 	retained = nil
 	return prepared, nil
+}
+
+// prepareFreshRecoveryManagedVMCgroup retains causal absence authority for a recovered process until it is reaped.
+func prepareFreshRecoveryManagedVMCgroup(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	vmID string,
+) (*preparedManagedVMCgroup, error) {
+	prepared, err := prepareManagedVMCgroup(ctx, deps, vmID)
+	if prepared != nil {
+		prepared.state.freshRecoveryCleanup = true
+	}
+	return prepared, err
 }
 
 // RecheckAbsent proves the derived VM leaf is still absent immediately before the Jailer handoff.
@@ -326,8 +340,8 @@ func (prepared *preparedManagedVMCgroup) Bind(
 // BindForCleanup pins a leaf created after this preparation proved its fixed name absent, without proving process
 // membership. The caller must hold the VM lifecycle lock continuously since preparation and must have terminated and
 // reaped every retained launch task before removing the returned leaf. An absent leaf leaves preparation active and
-// returns nil, false, nil. A present leaf additionally requires successful Jailer-handoff provenance. Safe admission
-// consumes preparation and returns the exact cleanup lease with present true.
+// returns nil, false, nil. A present leaf additionally requires successful Jailer-handoff or fresh-recovery cleanup
+// provenance. Safe admission consumes preparation and returns the exact cleanup lease with present true.
 func (prepared *preparedManagedVMCgroup) BindForCleanup(
 	ctx context.Context,
 ) (*managedVMCgroupLease, bool, error) {
@@ -356,6 +370,7 @@ func (prepared *preparedManagedVMCgroup) BindForCleanup(
 	parentFD := state.parentFD
 	parent := state.parent
 	jailerHandoff := state.jailerHandoff
+	freshRecoveryCleanup := state.freshRecoveryCleanup
 	retained := append([]int{}, state.retained...)
 	state.mu.Unlock()
 
@@ -372,12 +387,12 @@ func (prepared *preparedManagedVMCgroup) BindForCleanup(
 		finishRejectedManagedVMCgroupBind(state)
 		return nil, false, instanceAtomicError("open Jailer-created managed VM cgroup for cleanup", err)
 	}
-	if !jailerHandoff {
+	if !jailerHandoff && !freshRecoveryCleanup {
 		closeErr := closeRejectedManagedVMCgroupFD(
 			ctx,
 			deps,
 			leafFD,
-			instanceStateError(vmID, "managed VM cgroup has no successful Jailer handoff provenance"),
+			instanceStateError(vmID, "managed VM cgroup has no causal cleanup provenance"),
 		)
 		finishRejectedManagedVMCgroupBind(state)
 		return nil, false, closeErr

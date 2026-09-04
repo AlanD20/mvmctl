@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -299,7 +301,9 @@ func TestReopenedRecordedProcessesObservationCallbacksRunOutsideLockAndRejectCon
 	assert.Contains(t, nestedObservationErr.Error(), "verification is in progress")
 	require.Error(t, releaseErr)
 	assert.Contains(t, releaseErr.Error(), "verification is in progress")
-	assert.Empty(t, probe.closedFDs)
+	if diff := cmp.Diff([]int(nil), probe.closedFDs); diff != "" {
+		t.Errorf("prematurely closed recovered process descriptors mismatch (-want +got):\n%s", diff)
+	}
 	require.NoError(t, processes.Release(t.Context()))
 	if diff := cmp.Diff([]int{processTestRelayPIDFD, processTestFirecrackerPIDFD}, probe.closedFDs); diff != "" {
 		t.Errorf("released recovered process descriptors mismatch (-want +got):\n%s", diff)
@@ -345,11 +349,16 @@ func TestBeginFreshRecoveryCleanupVerifiesFullIdentityAndTerminatesThroughPIDFDs
 func TestBeginFreshRecoveryCleanupRejectsFullIdentityMismatchWithoutSignal(t *testing.T) {
 	t.Parallel()
 
-	record, fake := activeRecoveryTestRecord(t)
-	wrongNamespace := fake.stats[111][0]
-	wrongNamespace.Ino++
-	fake.stats[111] = []unix.Stat_t{wrongNamespace}
+	record, fake := activeRecoveryTestRecordWithRelay(t, true)
+	record.active.relay.executable.sha256 =
+		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 	authority, recoveryDeps, identityDeps, events := newActiveRecoveryTestAuthority(t, record, fake)
+	realRenameAt := authority.deps.renameAt
+	writes := 0
+	authority.deps.renameAt = func(ctx context.Context, oldFD int, oldName string, newFD int, newName string) error {
+		writes++
+		return realRenameAt(ctx, oldFD, oldName, newFD, newName)
+	}
 
 	cleanup, err := beginFreshRecoveryCleanupWithDeps(
 		t.Context(),
@@ -361,8 +370,21 @@ func TestBeginFreshRecoveryCleanupRejectsFullIdentityMismatchWithoutSignal(t *te
 	)
 	assert.Nil(t, cleanup)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "full active identity")
-	if diff := cmp.Diff([]string{"open:4242", "close:700"}, events.snapshot()); diff != "" {
+	assert.Contains(t, err.Error(), "recovered relay digest does not match active identity")
+	assert.Zero(t, writes)
+	raw, readErr := os.ReadFile(filepath.Join(
+		authority.policy.rootPath,
+		"var/lib/mvmctl/instances/1000",
+		testVMID+".json",
+	))
+	require.NoError(t, readErr)
+	persisted, decodeErr := decodeInstanceRecord(raw)
+	require.NoError(t, decodeErr)
+	assertInstanceRecordEqual(t, record, persisted)
+	if diff := cmp.Diff(
+		[]string{"open:4242", "open:4343", "close:701", "close:700"},
+		events.snapshot(),
+	); diff != "" {
 		t.Errorf("rejected fresh recovery event order mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -396,7 +418,9 @@ func TestBeginFreshRecoveryCleanupBootMismatchCleansWithoutOpeningOrSignalingPID
 	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
 	assert.Equal(t, 2, openRootCalls)
-	assert.Empty(t, events.snapshot())
+	if diff := cmp.Diff([]string{}, events.snapshot()); diff != "" {
+		t.Errorf("boot-mismatch process events mismatch (-want +got):\n%s", diff)
+	}
 }
 
 func activeRecoveryTestRecord(t *testing.T) (instanceRecord, *fakeProcessIdentityDeps) {
@@ -449,19 +473,29 @@ func newActiveRecoveryTestAuthority(
 		newTestInstanceAuthorityTree(),
 	)
 	events := &recoveryEventLog{}
-	alive := true
+	alive := map[int]bool{700: true, 701: true}
 	recoveryDeps := processRecoveryDeps{
 		pidfdOpen: func(_ context.Context, pid int) (int, error) {
 			events.add(fmt.Sprintf("open:%d", pid))
-			if pid != processTestFirecrackerPID {
+			switch pid {
+			case processTestFirecrackerPID:
+				return 700, nil
+			case processTestRelayPID:
+				return 701, nil
+			default:
 				return -1, fmt.Errorf("unexpected PID %d", pid)
 			}
-			return 700, nil
 		},
-		pidfdAlive:      func(context.Context, int) (bool, error) { return alive, nil },
+		pidfdAlive:      func(_ context.Context, fd int) (bool, error) { return alive[fd], nil },
 		descriptorFlags: func(context.Context, int) (int, error) { return unix.FD_CLOEXEC, nil },
-		deriveLocator: func(context.Context, int) (instanceProcessLocator, error) {
-			return record.launch.process, nil
+		deriveLocator: func(_ context.Context, fd int) (instanceProcessLocator, error) {
+			if fd == 700 {
+				return record.launch.process, nil
+			}
+			if fd == 701 && record.launch.relay.kind == instanceRelayPresent {
+				return record.launch.relay.locator, nil
+			}
+			return instanceProcessLocator{}, fmt.Errorf("unexpected pidfd %d", fd)
 		},
 		terminatePIDFD: func(_ context.Context, fd int) error {
 			events.add(fmt.Sprintf("signal:%d", fd))
@@ -469,7 +503,7 @@ func newActiveRecoveryTestAuthority(
 		},
 		waitReapPIDFD: func(_ context.Context, fd int) error {
 			events.add(fmt.Sprintf("reap:%d", fd))
-			alive = false
+			alive[fd] = false
 			return nil
 		},
 		close: func(_ context.Context, fd int) error {
