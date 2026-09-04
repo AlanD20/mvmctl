@@ -13,6 +13,7 @@ type instanceAuthority struct {
 	deps          instanceAuthorityDeps
 	policy        instanceAuthorityPolicy
 	authorityTree instanceAuthorityTree
+	runtimeDeps   managedVMRuntimeDeps
 }
 
 const maxInstanceAuthorityCleanupDetailBytes = 512
@@ -83,6 +84,7 @@ type cleanupLeaseState struct {
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
 	runtimeDirectory        *managedVMRuntimeLease
+	runtimeRecovery         *managedVMRuntimeRecovery
 	record                  instanceRecord
 	released                bool
 	releaseErr              error
@@ -128,7 +130,12 @@ func newInstanceAuthorityWithPolicy(
 	policy instanceAuthorityPolicy,
 	authorityTree instanceAuthorityTree,
 ) *instanceAuthority {
-	return &instanceAuthority{deps: deps, policy: policy, authorityTree: authorityTree}
+	return &instanceAuthority{
+		deps:          deps,
+		policy:        policy,
+		authorityTree: authorityTree,
+		runtimeDeps:   realManagedVMRuntimeDeps(),
+	}
 }
 
 func (authority *instanceAuthority) lockReleaseSlot(
@@ -635,7 +642,11 @@ func beginFreshRecoveryCleanupWithDeps(
 		directories:        locked.directories,
 		vmLock:             locked.vmLock,
 		recoveredProcesses: recovered,
-		record:             updated,
+		runtimeRecovery: &managedVMRuntimeRecovery{
+			deps:   authority.runtimeDeps,
+			policy: managedVMRuntimePolicyFromInstanceAuthority(authority.policy),
+		},
+		record: updated,
 	}}
 	recovered = nil
 	if writeErr != nil {
@@ -656,6 +667,9 @@ func (lease *cleanupLease) Complete(ctx context.Context) error {
 	}
 	if state.released || state.vmLock == nil || !state.vmLock.isActive() || state.directories == nil {
 		return instanceStateError(state.record.vmID, "cleanup lease is not active")
+	}
+	if err := resolveCleanupManagedVMRuntimeLocked(ctx, state); err != nil {
+		return err
 	}
 	if err := releaseCleanupRuntimeResourcesLocked(ctx, state); err != nil {
 		return err
@@ -1149,7 +1163,8 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 		state.recoveredProcesses != nil ||
 		state.preparedJailDestination != nil ||
 		state.jailDestination != nil ||
-		state.runtimeDirectory != nil {
+		state.runtimeDirectory != nil ||
+		state.runtimeRecovery != nil {
 		return instanceStateError(state.record.vmID, "cleanup must complete before releasing retained authority")
 	}
 	result := error(nil)

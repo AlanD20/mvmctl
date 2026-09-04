@@ -89,6 +89,9 @@ func createManagedVMRuntime(
 	if err := ctx.Err(); err != nil {
 		return nil, instanceAtomicError("create managed VM runtime", err)
 	}
+	if err := validateManagedVMRuntimeDeps(deps); err != nil {
+		return nil, err
+	}
 	if err := validateManagedVMRuntimePolicy(policy); err != nil {
 		return nil, err
 	}
@@ -439,6 +442,14 @@ func validateManagedVMRuntimePolicy(policy managedVMRuntimePolicy) error {
 		strings.ContainsRune(policy.rootPath, '\x00') || policy.trustedUID == math.MaxUint32 ||
 		policy.trustedGID == math.MaxUint32 {
 		return instanceAtomicError("managed VM runtime policy is invalid", nil)
+	}
+	return nil
+}
+
+func validateManagedVMRuntimeDeps(deps managedVMRuntimeDeps) error {
+	if deps.open == nil || deps.openAt2 == nil || deps.mkdirAt == nil || deps.fstat == nil || deps.fchown == nil ||
+		deps.fchmod == nil || deps.fsync == nil || deps.unlinkAt == nil || deps.close == nil {
+		return instanceAtomicError("managed VM runtime dependencies are incomplete", nil)
 	}
 	return nil
 }
