@@ -6,8 +6,6 @@ import (
 	"sync"
 
 	"golang.org/x/sys/unix"
-
-	"mvmctl/internal/infra"
 )
 
 type preparedManagedVMCgroup struct {
@@ -254,35 +252,92 @@ func (prepared *preparedManagedVMCgroup) Bind(
 	state.released = true
 	state.mu.Unlock()
 
-	if locator.pid <= 0 || locator.startTimeTicks == 0 || observation.startTimeTicks != locator.startTimeTicks {
-		return lease, processVerificationError(vmID, "cgroup process observation does not match its locator", nil)
+	return lease, lease.VerifyMembership(ctx, locator, observation, verifier)
+}
+
+// BindForCleanup pins a leaf created after this preparation proved its fixed name absent, without proving process
+// membership. The caller must hold the VM lifecycle lock continuously since preparation and must have terminated and
+// reaped every retained launch task before removing the returned leaf. An absent leaf leaves preparation active and
+// returns nil, false, nil. Safe admission consumes preparation and returns the exact cleanup lease with present true.
+func (prepared *preparedManagedVMCgroup) BindForCleanup(
+	ctx context.Context,
+) (*managedVMCgroupLease, bool, error) {
+	if prepared == nil || prepared.state == nil {
+		return nil, false, instanceStateError("", "prepared managed VM cgroup is not active")
 	}
-	wantCgroup := infra.CgroupV2Root + "/" + infra.JailerCgroupParent + "/" + vmID
-	if observation.cgroupPath != wantCgroup {
-		return lease, processVerificationError(
-			vmID,
-			"process observation does not match the derived VM cgroup",
-			nil,
-		)
+	state := prepared.state
+	state.mu.Lock()
+	if ctx == nil {
+		state.mu.Unlock()
+		return nil, false, instanceAtomicError("bind managed VM cgroup for cleanup: context is required", nil)
 	}
-	if err := verifier.verifyBeforeCgroupMembership(ctx, locator, observation); err != nil {
-		return lease, processVerificationError(vmID, "verify retained process before cgroup membership", err)
+	if state.released || state.binding || !state.leafAbsent || state.rootFD < 0 || state.parentFD < 0 {
+		state.mu.Unlock()
+		return nil, false, instanceStateError(state.vmID, "prepared managed VM cgroup is not active")
 	}
-	members, err := readManagedVMCgroupMembership(ctx, lease.state)
+	if err := ctx.Err(); err != nil {
+		state.mu.Unlock()
+		return nil, false, instanceAtomicError("bind managed VM cgroup for cleanup", err)
+	}
+	state.binding = true
+	deps := state.deps
+	vmID := state.vmID
+	rootFD := state.rootFD
+	parentFD := state.parentFD
+	parent := state.parent
+	retained := append([]int{}, state.retained...)
+	state.mu.Unlock()
+
+	how := unix.OpenHow{
+		Flags:   uint64(managedVMCgroupDirectoryFlags),
+		Resolve: uint64(managedVMCgroupResolveFlags),
+	}
+	leafFD, err := deps.openAt2(ctx, parentFD, vmID, &how)
+	if errors.Is(err, unix.ENOENT) {
+		finishRejectedManagedVMCgroupBind(state)
+		return nil, false, nil
+	}
 	if err != nil {
-		return lease, err
+		finishRejectedManagedVMCgroupBind(state)
+		return nil, false, instanceAtomicError("open Jailer-created managed VM cgroup for cleanup", err)
 	}
-	if len(members) != 1 || members[0] != locator.pid {
-		return lease, processVerificationError(
-			vmID,
-			"managed VM cgroup membership is not the retained process",
-			nil,
+	leaf, err := inspectManagedVMCgroupDirectory(
+		ctx,
+		deps,
+		leafFD,
+		"Jailer-created managed VM cgroup",
+		managedVMCgroupLeafMode,
+	)
+	if err != nil {
+		closeErr := closeRejectedManagedVMCgroupFD(ctx, deps, leafFD, err)
+		finishRejectedManagedVMCgroupBind(state)
+		return nil, false, closeErr
+	}
+	if leaf.mount != parent.mount || leaf.deviceMajor != parent.deviceMajor || leaf.deviceMinor != parent.deviceMinor {
+		closeErr := closeRejectedManagedVMCgroupFD(
+			ctx,
+			deps,
+			leafFD,
+			instanceAtomicError("Jailer-created managed VM cgroup is outside the pinned cgroup-v2 mount", nil),
 		)
+		finishRejectedManagedVMCgroupBind(state)
+		return nil, false, closeErr
 	}
-	if err := verifier.verifyAfterCgroupMembership(ctx, locator, observation); err != nil {
-		return lease, processVerificationError(vmID, "verify retained process after cgroup membership", err)
-	}
-	return lease, nil
+
+	retained = append(retained, leafFD)
+	lease := &managedVMCgroupLease{state: &managedVMCgroupLeaseState{
+		deps: deps, vmID: vmID, rootFD: rootFD, parentFD: parentFD, leafFD: leafFD,
+		parent: parent, leaf: leaf, retained: retained,
+	}}
+	state.mu.Lock()
+	state.rootFD = -1
+	state.parentFD = -1
+	state.retained = nil
+	state.leafAbsent = false
+	state.binding = false
+	state.released = true
+	state.mu.Unlock()
+	return lease, true, nil
 }
 
 func finishRejectedManagedVMCgroupBind(state *preparedManagedVMCgroupState) {
