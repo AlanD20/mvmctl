@@ -35,7 +35,8 @@ type kernelObservationNamespaceDeps struct {
 }
 
 type retainedKernelObservationNamespaceAuthority struct {
-	deps kernelObservationNamespaceDeps
+	deps            kernelObservationNamespaceDeps
+	applicationDeps kernelApplicationNamespaceDeps
 }
 
 type kernelObservationNamespaceLease struct {
@@ -44,13 +45,14 @@ type kernelObservationNamespaceLease struct {
 
 type kernelObservationNamespaceLeaseState struct {
 	// mu guards the retained namespace descriptor and every lifecycle field below.
-	mu         sync.Mutex
-	deps       kernelObservationNamespaceDeps
-	fd         int
-	identity   generationNamespaceIdentity
-	active     bool
-	released   bool
-	releaseErr error
+	mu              sync.Mutex
+	deps            kernelObservationNamespaceDeps
+	applicationDeps kernelApplicationNamespaceDeps
+	fd              int
+	identity        generationNamespaceIdentity
+	active          bool
+	released        bool
+	releaseErr      error
 }
 
 type retainedKernelObservationTransportFactory struct {
@@ -58,13 +60,21 @@ type retainedKernelObservationTransportFactory struct {
 }
 
 func newKernelObservationNamespaceAuthority() kernelObservationNamespaceAuthority {
-	return newKernelObservationNamespaceAuthorityWithDeps(realKernelObservationNamespaceDeps())
+	deps := realKernelObservationNamespaceDeps()
+	return newKernelObservationNamespaceAuthorityWithAllDeps(deps, realKernelApplicationNamespaceDeps(deps))
 }
 
 func newKernelObservationNamespaceAuthorityWithDeps(
 	deps kernelObservationNamespaceDeps,
 ) *retainedKernelObservationNamespaceAuthority {
-	return &retainedKernelObservationNamespaceAuthority{deps: deps}
+	return newKernelObservationNamespaceAuthorityWithAllDeps(deps, realKernelApplicationNamespaceDeps(deps))
+}
+
+func newKernelObservationNamespaceAuthorityWithAllDeps(
+	deps kernelObservationNamespaceDeps,
+	applicationDeps kernelApplicationNamespaceDeps,
+) *retainedKernelObservationNamespaceAuthority {
+	return &retainedKernelObservationNamespaceAuthority{deps: deps, applicationDeps: applicationDeps}
 }
 
 func (authority *retainedKernelObservationNamespaceAuthority) retainAfterGeneration(
@@ -190,7 +200,8 @@ func (authority *retainedKernelObservationNamespaceAuthority) retainAfterGenerat
 		return nil, generationCleanupError("close current kernel observation namespace", err)
 	}
 	lease := &kernelObservationNamespaceLease{state: &kernelObservationNamespaceLeaseState{
-		deps: authority.deps, fd: retainedFD, identity: retainedIdentity, active: true,
+		deps: authority.deps, applicationDeps: authority.applicationDeps,
+		fd: retainedFD, identity: retainedIdentity, active: true,
 	}}
 	retainedFD = -1
 	return lease, nil
