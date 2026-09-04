@@ -200,8 +200,9 @@ continue without silently deleting it.
   ownership. Fresh cleanup now reopens the exact recorded active or launching Firecracker process, durably transfers
   `cleaning` authority, and re-admits only a fixed leaf whose sole member is that process. Failure keeps the same lease
   and cgroup cleanup pending. Boot mismatch requires stable leaf absence and rejects present/unstable state; launching
-  recovery retains provisional absence through exact task reap. Cgroup callbacks run outside the cleanup mutex. These
-  capabilities use pointer-shared close-once state. Same-boot dead-process reconciliation, controller
+  recovery retains provisional absence through exact task reap. Only fresh-recovery cgroup admission callbacks run
+  outside the `cleanupLease` mutex; ordinary `Complete` still serializes cleanup effects under it. These capabilities
+  use pointer-shared close-once state. Same-boot dead-process reconciliation, controller
   enablement/readiness and exact limit readback, replacement of `entry.go` path-based cgroup operations, production
   child spawning and create/start/stop composition, network/firewall lease transfer, final live topology verification,
   full reconciliation, API wiring, and live L2/Tier 3/system tests remain pending. This is not yet production host
@@ -419,7 +420,8 @@ and performs exact empty replacement-safe removal before `cleaned`, with same-le
 convergence. Abort binds only after exact task reap. Fresh private cleanup reopens exact process authority, accepts the
 active or launching Firecracker identity, durably enters `cleaning`, and re-admits the leaf only with exact sole
 membership. Admission failure retains the same cleanup lease and pending cgroup work. Boot mismatch requires stable
-leaf absence; launching recovery retains provisional absence through reap; callbacks run outside the cleanup mutex. No
+leaf absence; launching recovery retains provisional absence through reap. Only fresh-recovery cgroup admission
+callbacks run outside the `cleanupLease` mutex; ordinary `Complete` still serializes cleanup effects under it. No
 production VM lifecycle constructs or consumes this graph yet. Same-boot dead-process cgroup reconciliation,
 controller readiness and exact limit readback, replacement of `entry.go` path-based prepare/remove, production
 create/start/stop wiring, live topology verification, network/firewall and mount/output integration, public actions,
@@ -487,8 +489,9 @@ removal before `cleaned`; a terminal close error after proven removal converges.
 fresh recovery admission. It now reopens the exact recorded processes, transfers durable `cleaning` authority, and
 re-admits the fixed leaf only for the exact active or launching Firecracker as sole member. Failure preserves the same
 lease and pending work; boot mismatch requires stable absence, and launching provisional absence remains retained
-through reap. Cgroup callbacks run outside the cleanup mutex. Cleanup and reconciliation re-admit a present relay
-through pidfd plus its state-appropriate exact locator or full identity and never signal an ambiguous or reused PID.
+through reap. Only fresh-recovery cgroup admission callbacks run outside the `cleanupLease` mutex; ordinary `Complete`
+still serializes cleanup effects under it. Cleanup and reconciliation re-admit a present relay through pidfd plus its
+state-appropriate exact locator or full identity and never signal an ambiguous or reused PID.
 
 The persistent VM outputs are fixed caller-owned `0600` one-link regular files: `firecracker.log`,
 `firecracker.console.log`, and, when enabled, `firecracker.metrics`. They are truncated once per launch after durable

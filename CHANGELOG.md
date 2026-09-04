@@ -499,8 +499,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepts the active or launching Firecracker identity, durably transfers `cleaning` authority, and re-admits the fixed
   leaf only when that task is its sole member. Admission or final-check failure keeps the same cleanup lease and cgroup
   work pending for retry. A boot mismatch requires stable leaf absence and rejects a present or unstable leaf;
-  launching recovery retains provisional absence through exact task reap. Cgroup callbacks run outside the cleanup
-  mutex, and schema 3 still stores no cgroup path. Same-boot dead-process reconciliation, controller readiness and
+  launching recovery retains provisional absence through exact task reap. Only fresh-recovery cgroup admission
+  callbacks run outside the `cleanupLease` mutex; ordinary `Complete` still serializes cleanup effects under it. Schema
+  3 still stores no cgroup path. Same-boot dead-process reconciliation, controller readiness and
   exact limit readback, raw `entry.go` replacement, public production wiring, and live/system qualification remain
   pending.
 

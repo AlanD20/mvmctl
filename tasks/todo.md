@@ -543,15 +543,17 @@ privileged actions, same-boot dead-process cgroup reconciliation, and qualificat
     unreplaced leaf before durable `cleaned`, preserves the same lease for retry, and converges after a terminal close
     error when removal is already proven. Fresh recovery preserves the same cleanup lease with cgroup work pending on
     admission/final-check error; boot mismatch requires stable absence, while launching retains provisional absence
-    through exact task reap. Its callbacks run outside the cleanup mutex. Mount cleanup and same-boot dead-process
-    cgroup reconciliation remain pending.
+    through exact task reap. Only fresh-recovery cgroup admission callbacks run outside the `cleanupLease` mutex;
+    ordinary `Complete` still serializes cleanup effects under it. Mount cleanup and same-boot dead-process cgroup
+    reconciliation remain pending.
 - [ ] L1 fault tests cover source/target replacement, PID mismatch, process exit, setns, mount, unmount, and cleanup.
   - [x] Focused L1 evidence covers gate cancellation/EOF, pidfd and locator mismatch, liveness/exit/HUP classification,
     bounded executable observation, every identity recheck, active post-rename ownership, full-identity recovery,
     boot-mismatch no-signal behavior, terminate/wait/reap retry, destination substitution, cgroup descriptor/mount
     checks, legacy-leaf refusal, handoff provenance, membership/replacement races, retryable empty removal, terminal
     close convergence, fresh active/launching recovery, boot-mismatch stable-absence rejection, pending same-lease
-    retry, callback re-entry outside the cleanup mutex, and close-once cleanup.
+    retry, fresh-recovery admission callback re-entry outside the `cleanupLease` mutex, ordinary `Complete`
+    serialization, and close-once cleanup.
 - [ ] L1 crash-window tests cover pre-record handshake EOF, every `launching` effect stage, partial final-copy sealing,
   post-rename durability uncertainty, `launching -> active`, and repeated `cleaning` recovery.
 
@@ -979,8 +981,9 @@ lifecycle, host-reboot reconciliation, API relay/policy/audit integration, and P
   - [x] Integrate private fresh cleanup recovery: reopen exact pidfd/start-tick process authority; admit active or
     launching Firecracker observation; durably transfer `cleaning`; re-admit only exact sole-member fixed leaves; retain
     the same lease and pending work on error; require stable absence and reject present/unstable state across boot
-    mismatch; retain launching provisional absence through reap; and run callbacks outside the cleanup mutex. Add no
-    cgroup path to schema 3.
+    mismatch; retain launching provisional absence through reap; run only fresh-recovery cgroup admission callbacks
+    outside the `cleanupLease` mutex; and keep ordinary `Complete` cleanup effects serialized under it. Add no cgroup
+    path to schema 3.
   - [ ] Add same-boot dead-process cgroup reconciliation; enable and prove controller readiness; read back exact limits;
     replace `entry.go` path-based prepare/remove; wire production/public create/start/stop; and complete live L2, Tier 3,
     and system qualification. This is not yet host enforcement or release evidence.

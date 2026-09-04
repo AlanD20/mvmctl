@@ -349,8 +349,8 @@ to `cleaning`. It then re-admits the fixed cgroup leaf only when that task is it
 membership error keeps the same cleanup lease authoritative with cgroup cleanup pending for retry. Across a host-boot
 mismatch it opens and signals no process, requires the fixed leaf to be stably absent, and rejects a present or unstable
 leaf. Recovery from `launching` retains its provisional leaf-absence proof through exact process termination and reap
-before binding for cleanup. Cgroup recovery and cleanup callbacks execute outside the cleanup-state mutex. None of
-this adds a cgroup path to schema 3.
+before binding for cleanup. Only fresh-recovery cgroup admission callbacks run outside the `cleanupLease` mutex;
+ordinary `Complete` still serializes cleanup effects under it. None of this adds a cgroup path to schema 3.
 
 The original pidfd provides stable task identity and exit detection but does not notify `exec`. Activation uses a
 bounded context-aware `/proc/<pid>/exe` observation loop, stopping immediately on pidfd-observed exit, before final

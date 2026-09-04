@@ -1488,8 +1488,9 @@ identity or the exact launching task, durably transfers the record and retained 
 re-admits the fixed leaf only with exact sole membership. A re-admission or final membership error preserves the same
 cleanup lease and marks cgroup cleanup pending for retry. A host-boot mismatch opens and signals no process; it may
 proceed only after proving the fixed leaf stably absent and rejects a present or changing leaf. Launching recovery
-retains its provisional absence proof through exact task termination and reap before causal `BindForCleanup`. Cleanup
-state remains serialized, but cgroup admission and cleanup callbacks run outside its mutex.
+retains its provisional absence proof through exact task termination and reap before causal `BindForCleanup`. Only
+fresh-recovery cgroup admission callbacks run outside the `cleanupLease` mutex; ordinary `Complete` still serializes
+cleanup effects under it.
 
 Private `activateVerifiedProcess` uses strict bounded `/proc` parsing and descriptor-pinned observations. It enforces
 the 10-second/25-millisecond executable-transition loop, repeated pidfd liveness and PID/start identity, boot ID,
