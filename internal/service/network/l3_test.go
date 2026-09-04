@@ -253,18 +253,23 @@ func TestDeriveEndpointL3UsesBothUsableSlashThirtyAssignments(t *testing.T) {
 
 	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
 	tests := map[string]struct {
-		gateway string
-		guest   string
+		gateway         string
+		guest           string
+		explicitGateway bool
 	}{
 		"default gateway and sole remaining guest": {gateway: "10.44.0.1", guest: "10.44.0.2"},
-		"explicit reversed gateway and guest":      {gateway: "10.44.0.2", guest: "10.44.0.1"},
+		"explicit reversed gateway and guest": {
+			gateway: "10.44.0.2", guest: "10.44.0.1", explicitGateway: true,
+		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			gateway := netip.MustParseAddr(test.gateway)
-			network, err := admitManagedNetworkL3(managedNetworkL3Input{
-				prefix: netip.MustParsePrefix("10.44.0.0/30"), gateway: &gateway,
-			})
+			input := managedNetworkL3Input{prefix: netip.MustParsePrefix("10.44.0.0/30")}
+			if test.explicitGateway {
+				input.gateway = &gateway
+			}
+			network, err := admitManagedNetworkL3(input)
 			require.NoError(t, err)
 
 			got, err := deriveEndpointL3(key, network, endpointL3Input{
@@ -272,8 +277,16 @@ func TestDeriveEndpointL3UsesBothUsableSlashThirtyAssignments(t *testing.T) {
 			})
 
 			require.NoError(t, err)
-			assert.Equal(t, netip.MustParsePrefix(test.guest+"/30"), got.address.prefix)
-			assert.Equal(t, gateway, got.defaultRoute.gateway)
+			if diff := cmp.Diff(
+				netip.MustParsePrefix(test.guest+"/30"),
+				got.address.prefix,
+				cmpopts.EquateComparable(netip.Prefix{}),
+			); diff != "" {
+				t.Errorf("guest prefix mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(gateway, got.defaultRoute.gateway, cmpopts.EquateComparable(netip.Addr{})); diff != "" {
+				t.Errorf("default-route gateway mismatch (-want +got):\n%s", diff)
+			}
 		})
 	}
 }
