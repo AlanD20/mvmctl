@@ -116,6 +116,18 @@ func vmExecRelayStopTimespec(relayStopBoottimeNS uint64) (unix.Timespec, error) 
 // Wait consumes the one-shot timerfd expiration. Polling is deliberately sliced so context cancellation remains
 // bounded without converting the CLOCK_BOOTTIME authority into a Go time source. Only one waiter owns the read.
 func (stop *vmExecRelayStop) Wait(ctx context.Context) error {
+	return stop.wait(ctx, nil)
+}
+
+// waitReady preserves the timerfd result/readiness ordering required by the retained privileged session handler.
+func (stop *vmExecRelayStop) waitReady(ctx context.Context, ready VMExecSessionStopWaitReady) error {
+	if ready == nil {
+		return vmExecRelayStopError("vm-exec relay-stop readiness signal is required", nil)
+	}
+	return stop.wait(ctx, ready)
+}
+
+func (stop *vmExecRelayStop) wait(ctx context.Context, ready VMExecSessionStopWaitReady) error {
 	if stop == nil || stop.state == nil {
 		return vmExecRelayStopError("vm-exec relay-stop capability is unavailable", nil)
 	}
@@ -143,7 +155,12 @@ func (stop *vmExecRelayStop) Wait(ctx context.Context) error {
 	state.waiting = true
 	state.mu.Unlock()
 
-	result := state.waitForExpiration(ctx)
+	var result error
+	if ready == nil {
+		result = state.waitForExpiration(ctx)
+	} else {
+		result = state.waitForExpirationReady(ctx, ready)
+	}
 	state.mu.Lock()
 	state.waiting = false
 	state.waited = true
@@ -152,10 +169,30 @@ func (stop *vmExecRelayStop) Wait(ctx context.Context) error {
 	return result
 }
 
+func (state *vmExecRelayStopState) waitForExpirationReady(
+	ctx context.Context,
+	ready VMExecSessionStopWaitReady,
+) error {
+	pending, result := state.observeImmediateExpiration(ctx, ready)
+	if !pending {
+		return result
+	}
+	// The successful zero-time observation and readiness callback run under the descriptor read pin. This linearizes
+	// the pending wait against Release; timerfd readiness is level-triggered, so any later expiry remains observable.
+	return state.waitForExpirationLoop(ctx, true)
+}
+
 func (state *vmExecRelayStopState) waitForExpiration(ctx context.Context) error {
+	return state.waitForExpirationLoop(ctx, false)
+}
+
+func (state *vmExecRelayStopState) waitForExpirationLoop(ctx context.Context, observeCancellation bool) error {
 	transientFailures := 0
 	for {
 		if err := ctx.Err(); err != nil {
+			if observeCancellation {
+				return state.finishCancelledWait(ctx, err)
+			}
 			return vmExecRelayStopError("wait for vm-exec relay-stop deadline", err)
 		}
 		deps, fd, unpin, err := state.beginOperation("vm-exec relay-stop timer closed while waiting")
@@ -165,6 +202,9 @@ func (state *vmExecRelayStopState) waitForExpiration(ctx context.Context) error 
 		pollFDs := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		count, err := deps.poll(ctx, pollFDs, vmExecRelayStopPollSliceMilliseconds)
 		unpin()
+		if observeCancellation && ctx.Err() != nil && (err == nil || errors.Is(err, ctx.Err())) {
+			return state.finishCancelledWait(ctx, ctx.Err())
+		}
 		if errors.Is(err, unix.EINTR) || errors.Is(err, unix.EAGAIN) {
 			transientFailures++
 			if transientFailures > vmExecRelayStopMaxTransientRetries {
@@ -193,10 +233,85 @@ func (state *vmExecRelayStopState) waitForExpiration(ctx context.Context) error 
 		}
 		expired, err := state.consumeExpiration(ctx)
 		if err != nil {
+			if observeCancellation && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return state.finishCancelledWait(ctx, ctx.Err())
+			}
 			return err
 		}
 		if expired {
 			return nil
+		}
+	}
+}
+
+func (state *vmExecRelayStopState) finishCancelledWait(ctx context.Context, cancellation error) error {
+	pending, result := state.observeImmediateExpiration(context.WithoutCancel(ctx), nil)
+	if !pending {
+		return result
+	}
+	return vmExecRelayStopError("wait for vm-exec relay-stop deadline", cancellation)
+}
+
+func (state *vmExecRelayStopState) observeImmediateExpiration(
+	ctx context.Context,
+	ready VMExecSessionStopWaitReady,
+) (bool, error) {
+	transientFailures := 0
+	for {
+		deps, fd, unpin, err := state.beginOperation("vm-exec relay-stop timer closed while waiting")
+		if err != nil {
+			return false, err
+		}
+		pollFDs := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		count, err := deps.poll(ctx, pollFDs, 0)
+		if errors.Is(err, unix.EINTR) || errors.Is(err, unix.EAGAIN) {
+			unpin()
+			transientFailures++
+			if transientFailures > vmExecRelayStopMaxTransientRetries {
+				return false, vmExecRelayStopError(
+					"poll vm-exec relay-stop timer exceeded transient retry bound",
+					err,
+				)
+			}
+			continue
+		}
+		if err != nil {
+			unpin()
+			return false, vmExecRelayStopError("poll vm-exec relay-stop timer", err)
+		}
+		if count == 0 {
+			if pollFDs[0].Revents != 0 {
+				unpin()
+				return false, vmExecRelayStopError("vm-exec relay-stop poll returned flags without an event", nil)
+			}
+			if ready != nil {
+				func() {
+					defer unpin()
+					ready()
+				}()
+			} else {
+				unpin()
+			}
+			return true, nil
+		}
+		if count != 1 {
+			unpin()
+			return false, vmExecRelayStopError(
+				fmt.Sprintf("vm-exec relay-stop poll returned unexpected event count %d", count),
+				nil,
+			)
+		}
+		if err := validateVMExecRelayStopPollEvents(pollFDs[0].Revents); err != nil {
+			unpin()
+			return false, err
+		}
+		unpin()
+		expired, err := state.consumeExpiration(ctx)
+		if err != nil {
+			return false, err
+		}
+		if expired {
+			return false, nil
 		}
 	}
 }

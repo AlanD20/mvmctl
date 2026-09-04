@@ -8,6 +8,7 @@ import (
 )
 
 // VMExecSessionCaller is the authenticated non-root identity requesting one retained VM-exec session.
+// CRITICAL: UID and GID must come exclusively from authenticated peer credentials, never request payload fields.
 type VMExecSessionCaller struct {
 	UID uint32
 	GID uint32
@@ -19,6 +20,10 @@ type VMExecSessionCaller struct {
 type VMExecSessionConnection interface {
 	BindVMExecSessionPeer(context.Context, VMExecSessionPeerBinder) error
 }
+
+// VMExecSessionStopWaitReady publishes that an armed stop has no immediate result and its pending result cannot be
+// missed. The callback is invoked exactly once for a pending wait and is omitted for every immediate result.
+type VMExecSessionStopWaitReady func()
 
 // VMExecSessionPeerBinder performs one server-selected source or destination peer binding.
 // Copies share one single-use invocation and its result.
@@ -78,7 +83,7 @@ func newVMExecSessionPeerBinder(bind func(context.Context, int) error) VMExecSes
 	}}
 }
 
-func (binder VMExecSessionPeerBinder) seal(ctx context.Context, connectionErr error) error {
+func (binder VMExecSessionPeerBinder) seal(connectionErr error) error {
 	connectionErr = preserveVMExecSessionServerError(
 		"bind vm-exec session peer connection",
 		connectionErr,
@@ -106,14 +111,7 @@ func (binder VMExecSessionPeerBinder) seal(ctx context.Context, connectionErr er
 	state.mu.Unlock()
 
 	if !finished {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			return joinVMExecSessionErrors(
-				connectionErr,
-				vmExecSessionError("vm-exec session peer binder did not finish before cancellation", ctx.Err()),
-			)
-		}
+		<-done
 	}
 
 	state.mu.Lock()
@@ -136,7 +134,7 @@ type vmExecSessionServerAuthorityLease interface {
 }
 
 type vmExecSessionServerStop interface {
-	Wait(context.Context) error
+	waitReady(context.Context, VMExecSessionStopWaitReady) error
 	Release(context.Context) error
 }
 
@@ -191,6 +189,7 @@ func newVMExecSessionServerWithDeps(deps vmExecSessionServerDeps) (*VMExecSessio
 
 // OpenSource reserves the exact active pair and capacity, binds the source peer, then arms the admitted absolute stop.
 // A failure after reservation returns a non-nil releasable lease so the caller retains cleanup authority.
+// CRITICAL: caller must be derived from the authenticated connection's peer credentials before this method is called.
 func (server *VMExecSessionServer) OpenSource(
 	ctx context.Context,
 	caller VMExecSessionCaller,
@@ -223,6 +222,7 @@ func (server *VMExecSessionServer) OpenSource(
 		request.SourceVMID,
 		request.DestinationVMID,
 	)
+	reserveErr = preserveVMExecSessionServerError("reserve vm-exec session authority", reserveErr)
 	if authority == nil {
 		if reserveErr != nil {
 			return nil, reserveErr
@@ -235,17 +235,17 @@ func (server *VMExecSessionServer) OpenSource(
 	}
 
 	binder := newVMExecSessionPeerBinder(authority.bindSource)
-	if err := binder.seal(ctx, connection.BindVMExecSessionPeer(ctx, binder)); err != nil {
+	if err := binder.seal(connection.BindVMExecSessionPeer(ctx, binder)); err != nil {
 		return lease, err
 	}
 	admission, err := authority.admission()
 	if err != nil {
-		return lease, err
+		return lease, preserveVMExecSessionServerError("read vm-exec session admission", err)
 	}
 	stop, armErr := server.deps.armStop(ctx, admission.relayStopBoottimeNS)
 	lease.state.stop = stop
 	if armErr != nil {
-		return lease, armErr
+		return lease, preserveVMExecSessionServerError("arm vm-exec session stop authority", armErr)
 	}
 	if stop == nil {
 		return lease, vmExecSessionError("vm-exec session stop authority returned no lease", nil)
@@ -292,11 +292,12 @@ func (lease *VMExecSessionServerLease) BindDestination(
 		return vmExecSessionError("vm-exec session server lease is released or incomplete", nil)
 	}
 	binder := newVMExecSessionPeerBinder(state.authority.bindDestination)
-	return binder.seal(ctx, connection.BindVMExecSessionPeer(ctx, binder))
+	return binder.seal(connection.BindVMExecSessionPeer(ctx, binder))
 }
 
-// WaitStop blocks until the authority's absolute CLOCK_BOOTTIME stop expires or waiting fails.
-func (lease *VMExecSessionServerLease) WaitStop(ctx context.Context) error {
+// WaitStop blocks until the authority's absolute CLOCK_BOOTTIME stop expires or waiting fails. For a pending wait,
+// ready is called exactly once only after an immediate result has been excluded and the later result cannot be missed.
+func (lease *VMExecSessionServerLease) WaitStop(ctx context.Context, ready VMExecSessionStopWaitReady) error {
 	if lease == nil || lease.state == nil {
 		return vmExecSessionError("vm-exec session server lease is unavailable", nil)
 	}
@@ -306,6 +307,9 @@ func (lease *VMExecSessionServerLease) WaitStop(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return vmExecSessionError("wait for vm-exec session stop was cancelled", err)
 	}
+	if ready == nil {
+		return vmExecSessionError("vm-exec session stop readiness signal is required", nil)
+	}
 	state := lease.state
 	state.mu.Lock()
 	if state.released || state.stop == nil {
@@ -314,7 +318,7 @@ func (lease *VMExecSessionServerLease) WaitStop(ctx context.Context) error {
 	}
 	stop := state.stop
 	state.mu.Unlock()
-	return stop.Wait(ctx)
+	return preserveVMExecSessionServerError("wait for vm-exec session stop", stop.waitReady(ctx, ready))
 }
 
 // Release closes the stop first and then the retained peer/pair/capacity authority exactly once.
@@ -341,7 +345,7 @@ func (lease *VMExecSessionServerLease) Release(ctx context.Context) error {
 			state.releaseErr = appendVMExecSessionError(
 				state.releaseErr,
 				"release vm-exec session stop authority",
-				vmExecSessionError("release vm-exec session stop authority", stopErr),
+				stopErr,
 			)
 		}
 	}
@@ -351,7 +355,7 @@ func (lease *VMExecSessionServerLease) Release(ctx context.Context) error {
 			state.releaseErr = appendVMExecSessionError(
 				state.releaseErr,
 				"release vm-exec retained authority",
-				vmExecSessionError("release vm-exec retained authority", authorityErr),
+				authorityErr,
 			)
 		}
 	}

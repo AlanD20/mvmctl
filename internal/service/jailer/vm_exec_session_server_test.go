@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -214,11 +215,78 @@ func TestVMExecSessionServerRejectsConcurrentCopiedSourceBinderCalls(t *testing.
 	require.NoError(t, lease.Release(t.Context()))
 }
 
+// Rationale: A connection may return after starting a binder call in another goroutine. Cancellation must not let
+// the server return while that borrowed descriptor is still being used by the retained authority.
+func TestVMExecSessionServerWaitsForStartedSourceBindAfterCancellation(t *testing.T) {
+	bindFailure := errors.New("source bind completed after cancellation")
+	bindStarted := make(chan struct{})
+	finishBind := make(chan struct{})
+	connectionReturned := make(chan struct{})
+	authority := &fakeVMExecServerAuthorityLease{
+		admissionValue: vmExecSessionAdmission{relayStopBoottimeNS: testVMExecServerDeadline},
+		bindSourceFunc: func(context.Context, int) error {
+			close(bindStarted)
+			<-finishBind
+			return bindFailure
+		},
+	}
+	server := mustFakeVMExecSessionServer(t, authority, &fakeVMExecServerStop{})
+	ctx, cancel := context.WithCancel(t.Context())
+	connection := fakeVMExecServerConnection{
+		bind: func(ctx context.Context, binder VMExecSessionPeerBinder) error {
+			go func() {
+				_ = binder.Bind(ctx, 47)
+			}()
+			<-bindStarted
+			cancel()
+			close(connectionReturned)
+			return nil
+		},
+	}
+	type openResult struct {
+		lease *VMExecSessionServerLease
+		err   error
+	}
+	results := make(chan openResult, 1)
+	go func() {
+		lease, err := server.OpenSource(
+			ctx,
+			VMExecSessionCaller{UID: testVMExecServerUID, GID: testVMExecServerGID},
+			testVMExecServerRequest,
+			connection,
+		)
+		results <- openResult{lease: lease, err: err}
+	}()
+
+	<-connectionReturned
+	select {
+	case early := <-results:
+		close(finishBind)
+		require.Failf(t, "server returned during source binding", "early error: %v", early.err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(finishBind)
+	result := <-results
+
+	require.Error(t, result.err)
+	assert.ErrorIs(t, result.err, bindFailure)
+	require.NotNil(t, errs.AsDomainError(result.err))
+	require.NotNil(t, result.lease)
+	require.NoError(t, result.lease.Release(t.Context()))
+}
+
 func TestVMExecSessionServerReturnsReleasablePartialLeaseAfterReservation(t *testing.T) {
 	bindFailure := errors.New("bind failed")
 	admissionFailure := errors.New("deadline unavailable")
 	armFailure := errors.New("timer arm failed")
 	reserveFailure := errors.New("reservation durability uncertain")
+	domainFailureCause := errors.New("structured dependency failure")
+	domainFailure := errs.WrapMsg(
+		errs.CodeUnauthorized,
+		"structured dependency rejection",
+		domainFailureCause,
+		errs.WithDetails(map[string]any{"dependency_evidence": "retained"}),
+	)
 	tests := map[string]struct {
 		reserveErr   error
 		bindErr      error
@@ -226,6 +294,7 @@ func TestVMExecSessionServerReturnsReleasablePartialLeaseAfterReservation(t *tes
 		armErr       error
 		armStop      *fakeVMExecServerStop
 		wantCause    error
+		wantDomain   *errs.DomainError
 	}{
 		"reservation_returns_authority_with_error": {
 			reserveErr: reserveFailure,
@@ -243,6 +312,22 @@ func TestVMExecSessionServerReturnsReleasablePartialLeaseAfterReservation(t *tes
 			armErr:    armFailure,
 			armStop:   &fakeVMExecServerStop{},
 			wantCause: armFailure,
+		},
+		"reservation_preserves_domain_error": {
+			reserveErr: domainFailure,
+			wantCause:  domainFailureCause,
+			wantDomain: domainFailure,
+		},
+		"deadline_read_preserves_domain_error": {
+			admissionErr: domainFailure,
+			wantCause:    domainFailureCause,
+			wantDomain:   domainFailure,
+		},
+		"arm_preserves_domain_error": {
+			armErr:     domainFailure,
+			armStop:    &fakeVMExecServerStop{},
+			wantCause:  domainFailureCause,
+			wantDomain: domainFailure,
 		},
 	}
 
@@ -282,6 +367,12 @@ func TestVMExecSessionServerReturnsReleasablePartialLeaseAfterReservation(t *tes
 
 			require.Error(t, err)
 			assert.ErrorIs(t, err, tc.wantCause)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			if tc.wantDomain != nil {
+				assert.Same(t, tc.wantDomain, domainErr)
+				assert.Equal(t, "retained", domainErr.Details["dependency_evidence"])
+			}
 			require.NotNil(t, lease)
 			require.NoError(t, lease.Release(t.Context()))
 			assert.Equal(t, 1, authority.releaseCalls)
@@ -374,17 +465,68 @@ func TestVMExecSessionServerLeaseRejectsSuppressedAndMultipleDestinationBinderFa
 
 func TestVMExecSessionServerLeaseWaitStopDelegatesToArmedStop(t *testing.T) {
 	waitFailure := errors.New("wait stopped")
-	stop := &fakeVMExecServerStop{waitErr: waitFailure}
+	domainFailure := errs.WrapMsg(
+		errs.CodeUnauthorized,
+		"structured wait rejection",
+		waitFailure,
+		errs.WithDetails(map[string]any{"wait_evidence": "retained"}),
+	)
+	tests := map[string]struct {
+		waitErr    error
+		wantDomain *errs.DomainError
+	}{
+		"raw_error_is_normalized": {waitErr: waitFailure},
+		"domain_error_is_preserved": {
+			waitErr:    domainFailure,
+			wantDomain: domainFailure,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			readyCalls := 0
+			stop := &fakeVMExecServerStop{waitErr: tc.waitErr}
+			server := mustFakeVMExecSessionServer(t, &fakeVMExecServerAuthorityLease{
+				admissionValue: vmExecSessionAdmission{relayStopBoottimeNS: testVMExecServerDeadline},
+			}, stop)
+			lease := openFakeVMExecServerLease(t, server)
+
+			err := lease.WaitStop(t.Context(), func() { readyCalls++ })
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, waitFailure)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			if tc.wantDomain != nil {
+				assert.Same(t, tc.wantDomain, domainErr)
+				assert.Equal(t, "retained", domainErr.Details["wait_evidence"])
+			}
+			assert.Equal(t, 1, stop.waitCalls)
+			assert.Equal(t, 0, readyCalls)
+			require.NoError(t, lease.Release(t.Context()))
+		})
+	}
+}
+
+func TestVMExecSessionServerLeaseWaitStopSignalsPendingReadinessOnce(t *testing.T) {
+	stop := &fakeVMExecServerStop{
+		waitFunc: func(_ context.Context, ready VMExecSessionStopWaitReady) error {
+			ready()
+			return nil
+		},
+	}
 	server := mustFakeVMExecSessionServer(t, &fakeVMExecServerAuthorityLease{
 		admissionValue: vmExecSessionAdmission{relayStopBoottimeNS: testVMExecServerDeadline},
 	}, stop)
 	lease := openFakeVMExecServerLease(t, server)
+	readyCalls := 0
 
-	err := lease.WaitStop(t.Context())
+	err := lease.WaitStop(t.Context(), func() { readyCalls++ })
 
-	require.Error(t, err)
-	assert.ErrorIs(t, err, waitFailure)
+	require.NoError(t, err)
+	assert.Equal(t, 1, readyCalls)
 	assert.Equal(t, 1, stop.waitCalls)
+	require.NoError(t, lease.Release(t.Context()))
 }
 
 func TestCopiedVMExecSessionServerLeaseReleasesStopThenAuthorityOnce(t *testing.T) {
@@ -473,6 +615,60 @@ func TestVMExecSessionServerLeaseNilReleaseContextRecordsEvidenceAndStillCleans(
 	assert.Equal(t, 1, authority.releaseCalls)
 }
 
+func TestVMExecSessionServerLeasePreservesStructuredCleanupEvidence(t *testing.T) {
+	cleanupCause := errors.New("structured cleanup cause")
+	stopFailure := errs.WrapMsg(
+		errs.CodeVMAtomicFailed,
+		"structured stop cleanup failure",
+		cleanupCause,
+		errs.WithDetails(map[string]any{"stop_evidence": "retained"}),
+	)
+	authorityFailure := errs.WrapMsg(
+		errs.CodeUnauthorized,
+		"structured authority cleanup failure",
+		cleanupCause,
+		errs.WithDetails(map[string]any{"authority_evidence": "retained"}),
+	)
+	tests := map[string]struct {
+		stopFailure      error
+		authorityFailure error
+		wantFailure      *errs.DomainError
+		wantEvidenceKey  string
+	}{
+		"stop": {
+			stopFailure:     stopFailure,
+			wantFailure:     stopFailure,
+			wantEvidenceKey: "stop_evidence",
+		},
+		"authority": {
+			authorityFailure: authorityFailure,
+			wantFailure:      authorityFailure,
+			wantEvidenceKey:  "authority_evidence",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			stop := &fakeVMExecServerStop{releaseErr: tc.stopFailure}
+			authority := &fakeVMExecServerAuthorityLease{
+				admissionValue: vmExecSessionAdmission{relayStopBoottimeNS: testVMExecServerDeadline},
+				releaseErr:     tc.authorityFailure,
+			}
+			lease := openFakeVMExecServerLease(t, mustFakeVMExecSessionServer(t, authority, stop))
+
+			err := lease.Release(t.Context())
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, cleanupCause)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, "retained", domainErr.Details[tc.wantEvidenceKey])
+			assert.Equal(t, true, domainErr.Details["vm_exec_session_cleanup_failed"])
+			assert.ErrorIs(t, err, tc.wantFailure)
+		})
+	}
+}
+
 func TestVMExecSessionServerBoundariesFailClosed(t *testing.T) {
 	cancelled, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -543,7 +739,7 @@ func TestVMExecSessionServerLeaseBoundariesFailClosedAndPartialReleaseIsSafe(t *
 	require.NoError(t, (&VMExecSessionServerLease{}).Release(t.Context()))
 
 	assert.Error(t, nilLease.BindDestination(t.Context(), fakeVMExecServerConnection{}))
-	assert.Error(t, nilLease.WaitStop(t.Context()))
+	assert.Error(t, nilLease.WaitStop(t.Context(), func() {}))
 
 	partial := &VMExecSessionServerLease{state: &vmExecSessionServerLeaseState{}}
 	assert.Error(t, partial.Release(nil))
@@ -564,6 +760,7 @@ func (connection fakeVMExecServerConnection) BindVMExecSessionPeer(
 }
 
 type fakeVMExecServerAuthorityLease struct {
+	// mu guards configured behavior, captured arguments, and call counts used by concurrent façade tests.
 	mu                    sync.Mutex
 	admissionValue        vmExecSessionAdmission
 	admissionErr          error
@@ -619,19 +816,26 @@ func (lease *fakeVMExecServerAuthorityLease) Release(ctx context.Context) error 
 }
 
 type fakeVMExecServerStop struct {
+	// mu guards configured behavior and call counts used by concurrent façade tests.
 	mu           sync.Mutex
 	waitCalls    int
 	waitErr      error
+	waitFunc     func(context.Context, VMExecSessionStopWaitReady) error
 	releaseCalls int
 	releaseErr   error
 	releaseFunc  func(context.Context)
 }
 
-func (stop *fakeVMExecServerStop) Wait(context.Context) error {
+func (stop *fakeVMExecServerStop) waitReady(ctx context.Context, ready VMExecSessionStopWaitReady) error {
 	stop.mu.Lock()
-	defer stop.mu.Unlock()
 	stop.waitCalls++
-	return stop.waitErr
+	wait := stop.waitFunc
+	err := stop.waitErr
+	stop.mu.Unlock()
+	if wait != nil {
+		return wait(ctx, ready)
+	}
+	return err
 }
 
 func (stop *fakeVMExecServerStop) Release(ctx context.Context) error {
