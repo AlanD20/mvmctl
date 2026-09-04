@@ -178,8 +178,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Registered only the exact `jailer-vm-exec-session` privileged action. Production construction composes its handler
   with the root-owned pair/capacity/peer authority and absolute stop. The caller UID/GID passed into that authority
   comes only from the authenticated control peer identity, never from action request bytes. Source and destination
-  descriptors remain opaque and pinned by handler ownership during their sole synchronous binder calls. The handler,
-  not outer dispatch, owns every action-specific response and all retained connection/authority cleanup.
+  descriptors remain opaque and pinned by handler ownership during their sole synchronous binder calls. Once
+  dispatched, the handler owns every action-specific response and all retained connection/authority cleanup; the outer
+  entry owns authenticated pre-dispatch `MVMXSES1` failures.
 - Authenticated pre-dispatch failures for this action use one bounded `MVMXSES1` terminal failure without draining
   request input; other actions retain the ordinary `MVMRES01` envelope. No API-owned relay listener/consumer invokes
   the registered action yet, and runtime directional-policy enforcement, command-redacted audit, relay payload

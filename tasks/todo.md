@@ -900,8 +900,10 @@ lifecycle work remain pending
   matching, complete active/retained process identity, and a final both-peer/both-process liveness sweep. Fix the
   host-global production ceiling at eight and add an absolute `CLOCK_BOOTTIME` timerfd stop primitive.
 - [x] Compose the peer-bound pair/capacity authority and absolute stop into the retained handler, close both retained
-  connections on expiry, release within the separate grace, and register only the exact sidecar action. Reserve before
-  relay effects and never substitute SQLite status, a guest-supplied ID, a socket path, or a process-local semaphore.
+  connections on expiry, and register only the exact sidecar action. Reserve before relay effects and never substitute
+  SQLite status, a guest-supplied ID, a socket path, or a process-local semaphore.
+- [ ] Bound cleanup so authority release completes within the persisted capacity record's separate four-second grace.
+  The implemented grace extends record expiry only and does not impose a cleanup deadline.
 - [ ] Make create/start/stop/remove/reboot/snapshot/restore/volume paths transactionally abortable and retryable.
 - [ ] Build one complete typed relaunch state for create/start/reboot/snapshot restore. Preserve a configured vsock CID,
   let root derive the fixed runtime UDS leaf, retain agent port/token only in the normal process, distinguish valid
