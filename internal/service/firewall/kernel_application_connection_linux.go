@@ -5,13 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"time"
 
 	"github.com/google/nftables"
 	"github.com/mdlayher/netlink"
 	"golang.org/x/sys/unix"
 )
 
-const kernelApplicationCurrentNetworkNamespacePath = "/proc/thread-self/ns/net"
+const (
+	kernelApplicationCurrentNetworkNamespacePath = "/proc/thread-self/ns/net"
+	kernelApplicationSocketBufferBytes           = 32 << 20
+	kernelApplicationSocketTimeout               = 30 * time.Second
+)
 
 type kernelApplicationNamespaceWorker func(context.Context) (kernelApplicationConnection, error)
 
@@ -24,6 +29,14 @@ type kernelApplicationNamespaceDeps struct {
 	setNamespace         func(context.Context, int) error
 	newConnection        func(context.Context) (kernelApplicationConnection, error)
 	closeNamespace       func(context.Context, int) error
+}
+
+type kernelApplicationSocketConfigurationDeps struct {
+	setDeadline   func(*netlink.Conn, time.Time) error
+	setReadBuffer func(*netlink.Conn, int) error
+	setSendBuffer func(*netlink.Conn, int) error
+	inspectBuffer func(*netlink.Conn) (readBytes int, sendBytes int, err error)
+	close         func(*netlink.Conn) error
 }
 
 type googleNFTablesApplicationConnection struct {
@@ -309,17 +322,101 @@ func newGoogleNFTablesApplicationConnection(ctx context.Context) (kernelApplicat
 	if err := kernelObservationNamespaceContextErr(ctx); err != nil {
 		return nil, err
 	}
-	options := []nftables.ConnOption{nftables.AsLasting()}
-	if deadline, ok := ctx.Deadline(); ok {
-		options = append(options, nftables.WithSockOptions(func(connection *netlink.Conn) error {
-			return connection.SetDeadline(deadline)
-		}))
+	deadline := kernelApplicationSocketDeadline(ctx, time.Now())
+	options := []nftables.ConnOption{
+		nftables.AsLasting(),
+		nftables.WithSockOptions(func(connection *netlink.Conn) error {
+			return configureKernelApplicationSocket(
+				connection,
+				deadline,
+				realKernelApplicationSocketConfigurationDeps(),
+			)
+		}),
 	}
 	connection, err := nftables.New(options...)
 	if err != nil {
 		return nil, err
 	}
 	return &googleNFTablesApplicationConnection{connection: connection}, nil
+}
+
+func kernelApplicationSocketDeadline(ctx context.Context, now time.Time) time.Time {
+	deadline := now.Add(kernelApplicationSocketTimeout)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		return callerDeadline
+	}
+	return deadline
+}
+
+func configureKernelApplicationSocket(
+	connection *netlink.Conn,
+	deadline time.Time,
+	deps kernelApplicationSocketConfigurationDeps,
+) error {
+	if connection == nil || deadline.IsZero() || deps.setDeadline == nil || deps.setReadBuffer == nil ||
+		deps.setSendBuffer == nil || deps.inspectBuffer == nil || deps.close == nil {
+		return errors.New("kernel application socket configuration is incomplete")
+	}
+	closeAfterFailure := func(stage string, err error) error {
+		return errors.Join(fmt.Errorf("%s: %w", stage, err), deps.close(connection))
+	}
+	if err := deps.setDeadline(connection, deadline); err != nil {
+		return closeAfterFailure("set kernel application socket deadline", err)
+	}
+	if err := deps.setReadBuffer(connection, kernelApplicationSocketBufferBytes); err != nil {
+		return closeAfterFailure("set kernel application receive buffer", err)
+	}
+	if err := deps.setSendBuffer(connection, kernelApplicationSocketBufferBytes); err != nil {
+		return closeAfterFailure("set kernel application send buffer", err)
+	}
+	readBytes, sendBytes, err := deps.inspectBuffer(connection)
+	if err != nil {
+		return closeAfterFailure("inspect kernel application socket buffers", err)
+	}
+	if readBytes < kernelApplicationSocketBufferBytes || sendBytes < kernelApplicationSocketBufferBytes {
+		return closeAfterFailure(
+			"verify kernel application socket buffers",
+			fmt.Errorf("receive=%d send=%d", readBytes, sendBytes),
+		)
+	}
+	return nil
+}
+
+func realKernelApplicationSocketConfigurationDeps() kernelApplicationSocketConfigurationDeps {
+	return kernelApplicationSocketConfigurationDeps{
+		setDeadline: func(connection *netlink.Conn, deadline time.Time) error {
+			return connection.SetDeadline(deadline)
+		},
+		setReadBuffer: func(connection *netlink.Conn, bytes int) error {
+			return connection.SetReadBuffer(bytes)
+		},
+		setSendBuffer: func(connection *netlink.Conn, bytes int) error {
+			return connection.SetWriteBuffer(bytes)
+		},
+		inspectBuffer: inspectKernelApplicationSocketBuffers,
+		close:         func(connection *netlink.Conn) error { return connection.Close() },
+	}
+}
+
+func inspectKernelApplicationSocketBuffers(connection *netlink.Conn) (int, int, error) {
+	raw, err := connection.SyscallConn()
+	if err != nil {
+		return 0, 0, err
+	}
+	if raw == nil {
+		return 0, 0, errors.New("kernel application socket descriptor is unavailable")
+	}
+	readBytes := 0
+	sendBytes := 0
+	var inspectErr error
+	controlErr := raw.Control(func(fd uintptr) {
+		readBytes, inspectErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_RCVBUF)
+		if inspectErr != nil {
+			return
+		}
+		sendBytes, inspectErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_SNDBUF)
+	})
+	return readBytes, sendBytes, errors.Join(controlErr, inspectErr)
 }
 
 var _ kernelApplicationConnection = (*googleNFTablesApplicationConnection)(nil)

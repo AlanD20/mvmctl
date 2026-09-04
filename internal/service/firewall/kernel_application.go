@@ -62,15 +62,8 @@ func applyKernelGeneration(
 	}
 
 	result := kernelApplicationResult{commitAttempted: true}
-	closeResult := make(chan error, 1)
-	stopClose := context.AfterFunc(ctx, func() { closeResult <- connection.close() })
 	flushErr := connection.flush()
-	var closeErr error
-	if stopClose() {
-		closeErr = connection.close()
-	} else {
-		closeErr = <-closeResult
-	}
+	closeErr := connection.close()
 	if err := errors.Join(ctx.Err(), flushErr, closeErr); err != nil {
 		return result, generationAuthorityError("apply atomic kernel firewall generation", err, nil)
 	}

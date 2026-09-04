@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/nftables"
@@ -185,6 +186,23 @@ func TestKernelGenerationApplicationReturnsAmbiguousCloseFailure(t *testing.T) {
 	assert.Equal(t, 1, connection.closeCalls)
 }
 
+func TestKernelGenerationApplicationPreservesFlushAndCloseFailures(t *testing.T) {
+	t.Parallel()
+
+	target, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+	flushFailure := errors.New("injected batch failure")
+	closeFailure := errors.New("injected lasting-connection close failure")
+	connection := &recordingKernelApplicationConnection{flushErr: flushFailure, closeErr: closeFailure}
+
+	result, err := applyKernelGeneration(t.Context(), connection, kernelObservation{empty: true}, target)
+	require.ErrorIs(t, err, flushFailure)
+	require.ErrorIs(t, err, closeFailure)
+	assert.True(t, result.commitAttempted)
+	assert.Equal(t, 1, connection.flushCalls)
+	assert.Equal(t, 1, connection.closeCalls)
+}
+
 // Rationale: Cancellation after opening but before queueing is known not to have crossed the commit boundary. The
 // unused lasting connection is nevertheless an owned resource and must be closed exactly once.
 func TestKernelGenerationApplicationCancellationBeforeQueueingClosesConnection(t *testing.T) {
@@ -203,23 +221,29 @@ func TestKernelGenerationApplicationCancellationBeforeQueueingClosesConnection(t
 	assert.Equal(t, 1, connection.closeCalls)
 }
 
-// Rationale: Cancellation must close the lasting socket to interrupt a blocked Flush. A completed-looking flush after
-// cancellation cannot be reported as success, and the connection must still be closed exactly once.
-func TestKernelGenerationApplicationCancellationInterruptsFlushAndClosesOnce(t *testing.T) {
+// Rationale: v0.3.0 serializes Flush and CloseLasting on one mutex. Cancellation must not race CloseLasting against
+// Flush because a winning close would let Flush open a transient socket outside the retained namespace.
+func TestKernelGenerationApplicationCancellationKeepsLastingConnectionUntilFlushReturns(t *testing.T) {
 	t.Parallel()
 
 	target, err := compileGeneration(compatibilityIntent())
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
 	connection := newBlockingKernelApplicationConnection()
+	closeCallsDuringFlush := make(chan int, 1)
 	go func() {
 		<-connection.flushStarted
 		cancel()
+		connection.mu.Lock()
+		closeCallsDuringFlush <- connection.closeCalls
+		connection.mu.Unlock()
+		close(connection.flushRelease)
 	}()
 
 	result, err := applyKernelGeneration(ctx, connection, kernelObservation{empty: true}, target)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.True(t, result.commitAttempted)
+	assert.Equal(t, 0, <-closeCallsDuringFlush)
 	assert.Equal(t, 1, connection.flushCalls)
 	assert.Equal(t, 1, connection.closeCalls)
 }
@@ -285,6 +309,147 @@ func TestKernelApplicationConnectionRetiresWorkerWhenNamespaceRestorationDiffers
 	assert.NotContains(t, fixture.events, "unlock thread")
 }
 
+// Rationale: Once setns succeeds, every constructor failure and cancellation must restore and verify the original
+// namespace with an uncancelled cleanup context before any descriptor is closed or the worker is unlocked.
+func TestKernelApplicationConnectionRestoresAfterPostSetnsConstructorCancellation(t *testing.T) {
+	t.Parallel()
+
+	identity := generationNamespaceIdentity{device: 41, inode: 73}
+	constructorFailure := errors.New("injected lasting-connection constructor failure")
+	ctx, cancel := context.WithCancel(t.Context())
+	fixture := newKernelApplicationNamespaceFixture(identity, nil)
+	fixture.newConnectionHook = cancel
+	fixture.newConnectionErr = constructorFailure
+	lease := &kernelObservationNamespaceLease{state: &kernelObservationNamespaceLeaseState{
+		deps: fixture.observationDeps(), applicationDeps: fixture.applicationDeps(), fd: 20, identity: identity,
+		active: true,
+	}}
+
+	got, err := lease.newApplicationConnection(ctx)
+	assert.Nil(t, got)
+	require.ErrorIs(t, err, constructorFailure)
+	want := []string{
+		"inspect retained 20",
+		"run worker",
+		"lock thread",
+		"open current",
+		"inspect current 30",
+		"inspect retained 20",
+		"setns 20",
+		"open current",
+		"inspect current 31",
+		"new lasting connection",
+		"setns 30",
+		"open current",
+		"inspect current 32",
+		"close 32",
+		"close 31",
+		"close 30",
+		"unlock thread",
+	}
+	if diff := cmp.Diff(want, fixture.events); diff != "" {
+		t.Errorf("constructor-failure restoration order mismatch (-want +got):\n%s", diff)
+	}
+	for _, contextErr := range fixture.cleanupContextErrors {
+		assert.NoError(t, contextErr)
+	}
+}
+
+func TestKernelApplicationSocketConfigurationSetsDeadlineAndVerifiedScaleBuffers(t *testing.T) {
+	t.Parallel()
+
+	connection := new(netlink.Conn)
+	deadline := time.Unix(1_800_000_000, 0)
+	var calls []string
+	deps := kernelApplicationSocketConfigurationDeps{
+		setDeadline: func(got *netlink.Conn, value time.Time) error {
+			assert.Same(t, connection, got)
+			assert.Equal(t, deadline, value)
+			calls = append(calls, "deadline")
+			return nil
+		},
+		setReadBuffer: func(got *netlink.Conn, bytes int) error {
+			assert.Same(t, connection, got)
+			assert.Equal(t, kernelApplicationSocketBufferBytes, bytes)
+			calls = append(calls, "receive buffer")
+			return nil
+		},
+		setSendBuffer: func(got *netlink.Conn, bytes int) error {
+			assert.Same(t, connection, got)
+			assert.Equal(t, kernelApplicationSocketBufferBytes, bytes)
+			calls = append(calls, "send buffer")
+			return nil
+		},
+		inspectBuffer: func(got *netlink.Conn) (int, int, error) {
+			assert.Same(t, connection, got)
+			calls = append(calls, "inspect buffers")
+			return kernelApplicationSocketBufferBytes, kernelApplicationSocketBufferBytes, nil
+		},
+		close: func(*netlink.Conn) error {
+			calls = append(calls, "close")
+			return nil
+		},
+	}
+
+	err := configureKernelApplicationSocket(connection, deadline, deps)
+	require.NoError(t, err)
+	want := []string{"deadline", "receive buffer", "send buffer", "inspect buffers"}
+	if diff := cmp.Diff(want, calls); diff != "" {
+		t.Errorf("socket configuration order mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: google/nftables v0.3.0 does not close the netlink connection when a SockOption fails. The one mvmctl
+// callback must therefore close it itself and preserve both the configuration and close failures.
+func TestKernelApplicationSocketConfigurationFailureClosesAndPreservesErrors(t *testing.T) {
+	t.Parallel()
+
+	optionFailure := errors.New("injected send buffer failure")
+	closeFailure := errors.New("injected option cleanup failure")
+	var calls []string
+	deps := kernelApplicationSocketConfigurationDeps{
+		setDeadline: func(*netlink.Conn, time.Time) error {
+			calls = append(calls, "deadline")
+			return nil
+		},
+		setReadBuffer: func(*netlink.Conn, int) error {
+			calls = append(calls, "receive buffer")
+			return nil
+		},
+		setSendBuffer: func(*netlink.Conn, int) error {
+			calls = append(calls, "send buffer")
+			return optionFailure
+		},
+		inspectBuffer: func(*netlink.Conn) (int, int, error) {
+			calls = append(calls, "inspect buffers")
+			return 0, 0, nil
+		},
+		close: func(*netlink.Conn) error {
+			calls = append(calls, "close")
+			return closeFailure
+		},
+	}
+
+	err := configureKernelApplicationSocket(new(netlink.Conn), time.Unix(1_800_000_000, 0), deps)
+	require.ErrorIs(t, err, optionFailure)
+	require.ErrorIs(t, err, closeFailure)
+	want := []string{"deadline", "receive buffer", "send buffer", "close"}
+	if diff := cmp.Diff(want, calls); diff != "" {
+		t.Errorf("failed socket configuration order mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestKernelApplicationSocketDeadlineUsesEarlierCallerBound(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(1_800_000_000, 0)
+	assert.Equal(t, now.Add(kernelApplicationSocketTimeout), kernelApplicationSocketDeadline(t.Context(), now))
+	callerDeadline := now.Add(kernelApplicationSocketTimeout / 2)
+	ctx, cancel := context.WithDeadline(t.Context(), callerDeadline)
+	defer cancel()
+	assert.Equal(t, callerDeadline, kernelApplicationSocketDeadline(ctx, now))
+}
+
 type recordingKernelApplicationConnection struct {
 	mu           sync.Mutex
 	events       []string
@@ -293,13 +458,13 @@ type recordingKernelApplicationConnection struct {
 	flushCalls   int
 	closeCalls   int
 	flushStarted chan struct{}
-	closed       chan struct{}
+	flushRelease chan struct{}
 }
 
 func newBlockingKernelApplicationConnection() *recordingKernelApplicationConnection {
 	return &recordingKernelApplicationConnection{
 		flushStarted: make(chan struct{}),
-		closed:       make(chan struct{}),
+		flushRelease: make(chan struct{}),
 	}
 }
 
@@ -325,11 +490,11 @@ func (connection *recordingKernelApplicationConnection) flush() error {
 	connection.flushCalls++
 	connection.events = append(connection.events, "flush")
 	started := connection.flushStarted
-	closed := connection.closed
+	release := connection.flushRelease
 	connection.mu.Unlock()
 	if started != nil {
 		close(started)
-		<-closed
+		<-release
 	}
 	return connection.flushErr
 }
@@ -339,10 +504,6 @@ func (connection *recordingKernelApplicationConnection) close() error {
 	defer connection.mu.Unlock()
 	connection.closeCalls++
 	connection.events = append(connection.events, "close")
-	if connection.closed != nil {
-		close(connection.closed)
-		connection.closed = nil
-	}
 	return connection.closeErr
 }
 
@@ -379,11 +540,14 @@ func kernelObservationFromCompiledGeneration(t *testing.T, generation compiledGe
 }
 
 type kernelApplicationNamespaceFixture struct {
-	identity   generationNamespaceIdentity
-	connection kernelApplicationConnection
-	events     []string
-	openFDs    []int
-	inspected  map[int]generationNamespaceIdentity
+	identity             generationNamespaceIdentity
+	connection           kernelApplicationConnection
+	events               []string
+	openFDs              []int
+	inspected            map[int]generationNamespaceIdentity
+	newConnectionHook    func()
+	newConnectionErr     error
+	cleanupContextErrors []error
 }
 
 func newKernelApplicationNamespaceFixture(
@@ -428,16 +592,23 @@ func (fixture *kernelApplicationNamespaceFixture) applicationDeps() kernelApplic
 			fixture.events = append(fixture.events, fmt.Sprintf("inspect %s %d", label, fd))
 			return fixture.inspected[fd], nil
 		},
-		setNamespace: func(_ context.Context, fd int) error {
+		setNamespace: func(ctx context.Context, fd int) error {
 			fixture.events = append(fixture.events, fmt.Sprintf("setns %d", fd))
+			if fd != 20 {
+				fixture.cleanupContextErrors = append(fixture.cleanupContextErrors, ctx.Err())
+			}
 			return nil
 		},
 		newConnection: func(context.Context) (kernelApplicationConnection, error) {
 			fixture.events = append(fixture.events, "new lasting connection")
-			return fixture.connection, nil
+			if fixture.newConnectionHook != nil {
+				fixture.newConnectionHook()
+			}
+			return fixture.connection, fixture.newConnectionErr
 		},
-		closeNamespace: func(_ context.Context, fd int) error {
+		closeNamespace: func(ctx context.Context, fd int) error {
 			fixture.events = append(fixture.events, fmt.Sprintf("close %d", fd))
+			fixture.cleanupContextErrors = append(fixture.cleanupContextErrors, ctx.Err())
 			return nil
 		},
 	}
