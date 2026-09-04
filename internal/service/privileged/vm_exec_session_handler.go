@@ -41,7 +41,7 @@ type vmExecSessionStopScope struct {
 	done       <-chan struct{}
 	finishOnce sync.Once
 	finishErr  *errs.DomainError
-	// mu guards the stop-owned error published only when the waiter wins cancellation arbitration.
+	// mu guards the stop-owned error published for every result not caused by stopCtx cancellation.
 	mu      sync.Mutex
 	stopErr *errs.DomainError
 }
@@ -266,14 +266,15 @@ func startVMExecSessionStopWaiter(
 	}
 	go func() {
 		waitErr := lease.waitStop(stopCtx, observe)
-		if stopCtx.Err() == nil {
+		cancellationErr := stopCtx.Err()
+		// A matching cancellation return is local waiter shutdown. Nil or another result retains a final stop
+		// observation even when finish canceled the blocking wait first.
+		if cancellationErr == nil || !errors.Is(waitErr, cancellationErr) {
 			primary := vmExecSessionStopError(waitErr)
+			scope.mu.Lock()
+			scope.stopErr = primary
+			scope.mu.Unlock()
 			cancel(primary)
-			if context.Cause(stopCtx) == primary {
-				scope.mu.Lock()
-				scope.stopErr = primary
-				scope.mu.Unlock()
-			}
 		}
 		observe()
 		done <- struct{}{}

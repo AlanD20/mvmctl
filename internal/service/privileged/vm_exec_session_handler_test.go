@@ -68,7 +68,12 @@ func TestHandleVMExecSessionExplicitReleaseWinsPendingExpiryAndUsesReverseCleanu
 			case <-pendingExpiry:
 				return nil
 			case <-ctx.Done():
-				return ctx.Err()
+				return errs.WrapMsg(
+					errs.CodeVMAtomicFailed,
+					"wait for VM-exec relay stop",
+					ctx.Err(),
+					errs.WithClass(errs.ClassRetryable),
+				)
 			}
 		},
 		releaseFunc: func(context.Context) error {
@@ -151,6 +156,89 @@ func TestHandleVMExecSessionExplicitReleaseWinsPendingExpiryAndUsesReverseCleanu
 	assert.True(t, lease.released)
 	assert.NoError(t, lease.releaseCtx.Err())
 	assertVMExecSessionResponses(t, endpoint.responseBytes(), true, true, true)
+	assertFDClosed(t, sourceFD)
+	assertFDClosed(t, destinationFD)
+}
+
+func TestHandleVMExecSessionArmedExpiryObservedAfterFinishBeatsRelease(t *testing.T) {
+	events := make([]string, 0, 8)
+	phaseEvents := make([]string, 0, 6)
+	waitStarted := make(chan struct{})
+	waitFinished := make(chan struct{})
+	lease := &fakeVMExecSessionLease{
+		events: &events,
+		waitStopFunc: func(ctx context.Context, ready vmExecSessionStopWaitReady) error {
+			close(waitStarted)
+			defer close(waitFinished)
+			ready()
+			<-ctx.Done()
+			return nil
+		},
+		releaseFunc: func(context.Context) error {
+			select {
+			case <-waitFinished:
+				return nil
+			default:
+				return errors.New("stop waiter was not joined before lease release")
+			}
+		},
+	}
+	endpoint, deps, sourceFD, destinationFD := newVMExecSessionHandlerFixture(
+		t,
+		vmExecSessionFrames(t, true, true, true),
+		&events,
+	)
+	endpoint.phaseEvents = &phaseEvents
+	result := make(chan error, 1)
+	go func() {
+		result <- handleVMExecSession(
+			t.Context(),
+			endpoint,
+			callerIdentity{uid: 1000, gid: 1000},
+			vmExecSessionEffectsForLease(lease),
+			deps,
+		)
+	}()
+
+	require.NoError(t, requireVMExecSessionHandlerResult(t, result))
+
+	assertVMExecSessionChannelClosed(t, waitStarted)
+	assertVMExecSessionChannelClosed(t, waitFinished)
+	responses := bytes.NewReader(endpoint.responseBytes())
+	retained, err := vmexecsessionwire.DecodeSourceRetained(t.Context(), responses)
+	require.NoError(t, err)
+	assert.True(t, retained.Retained())
+	ready, err := vmexecsessionwire.DecodeReady(t.Context(), responses)
+	require.NoError(t, err)
+	assert.True(t, ready.Ready())
+	outcome, err := vmexecsessionwire.DecodeOutcome(t.Context(), responses)
+	require.NoError(t, err)
+	assert.False(t, outcome.Released())
+	operationErr := outcome.OperationError()
+	require.NotNil(t, operationErr)
+	assert.Equal(t, errs.CodeProcessError, operationErr.Code)
+	assert.Equal(t, errs.ClassInternal, operationErr.Class)
+	assert.Zero(t, responses.Len())
+	assertVMExecSessionEvents(t, []string{
+		"read_open_source",
+		"write_source_retained",
+		"read_bind_destination",
+		"write_ready",
+		"read_release",
+		"write_failure",
+	}, phaseEvents)
+	assertVMExecSessionEvents(t, []string{
+		"open_source",
+		"bind_destination",
+		"shutdown_destination",
+		"close_destination",
+		"shutdown_source",
+		"close_source",
+		"release_lease",
+	}, events)
+	assert.Equal(t, 1, endpoint.shutdownCount())
+	assert.True(t, lease.bound)
+	assert.True(t, lease.released)
 	assertFDClosed(t, sourceFD)
 	assertFDClosed(t, destinationFD)
 }
