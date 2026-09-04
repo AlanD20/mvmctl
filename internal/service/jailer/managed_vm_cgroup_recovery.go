@@ -9,6 +9,241 @@ import (
 	"mvmctl/internal/infra"
 )
 
+// requireFreshRecoveryManagedVMCgroupAbsent proves the fixed VM leaf is stably absent without creating, repairing,
+// adopting, or deleting cgroup state. Because no descriptor escapes this call, a second full chain observation binds
+// the result to the fixed hierarchy instead of a detached object replaced during the first observation.
+func requireFreshRecoveryManagedVMCgroupAbsent(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	vmID string,
+) (returnErr error) {
+	if ctx == nil {
+		return instanceAtomicError("require fresh-recovery managed VM cgroup absence: context is required", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return instanceAtomicError("require fresh-recovery managed VM cgroup absence", err)
+	}
+	if err := validateManagedVMCgroupDeps(deps); err != nil {
+		return err
+	}
+	if !vmIDPattern.MatchString(vmID) {
+		return instanceValidationError("fresh-recovery managed VM cgroup VM ID is invalid")
+	}
+
+	retained := make([]int, 0, 6)
+	defer func() {
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"close fresh-recovery managed VM cgroup absence descriptors",
+			closeManagedVMCgroupFDs(context.WithoutCancel(ctx), deps, retained),
+		)
+	}()
+	how := unix.OpenHow{
+		Flags:   uint64(managedVMCgroupDirectoryFlags),
+		Resolve: uint64(managedVMCgroupResolveFlags),
+	}
+
+	rootFD, err := deps.openRoot(ctx)
+	if err != nil {
+		return instanceAtomicError("open fixed cgroup-v2 root for fresh-recovery absence", err)
+	}
+	retained = append(retained, rootFD)
+	root, err := inspectFreshRecoveryManagedVMCgroupRoot(ctx, deps, rootFD, "fresh-recovery cgroup-v2 root")
+	if err != nil {
+		return err
+	}
+
+	parentFD, err := deps.openAt2(ctx, rootFD, infra.JailerCgroupParent, &how)
+	parentPresent := err == nil
+	if err != nil && !errors.Is(err, unix.ENOENT) {
+		return instanceAtomicError("open existing managed cgroup parent for fresh-recovery absence", err)
+	}
+	var parent managedVMCgroupIdentity
+	if parentPresent {
+		retained = append(retained, parentFD)
+		parent, err = inspectFreshRecoveryManagedVMCgroupChild(
+			ctx,
+			deps,
+			parentFD,
+			"fresh-recovery managed cgroup parent",
+			managedVMCgroupParentMode,
+			root,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	leafFD := -1
+	leafPresent := false
+	var leaf managedVMCgroupIdentity
+	if parentPresent {
+		leafFD, err = deps.openAt2(ctx, parentFD, vmID, &how)
+		leafPresent = err == nil
+		if err != nil && !errors.Is(err, unix.ENOENT) {
+			return instanceAtomicError("open managed VM cgroup leaf for fresh-recovery absence", err)
+		}
+		if leafPresent {
+			retained = append(retained, leafFD)
+			leaf, err = inspectFreshRecoveryManagedVMCgroupChild(
+				ctx,
+				deps,
+				leafFD,
+				"fresh-recovery managed VM cgroup leaf",
+				managedVMCgroupLeafMode,
+				parent,
+			)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	recheckRootFD, err := deps.openRoot(ctx)
+	if err != nil {
+		return instanceAtomicError("reopen fixed cgroup-v2 root for fresh-recovery absence", err)
+	}
+	retained = append(retained, recheckRootFD)
+	recheckRoot, err := inspectFreshRecoveryManagedVMCgroupRoot(
+		ctx,
+		deps,
+		recheckRootFD,
+		"rechecked fresh-recovery cgroup-v2 root",
+	)
+	if err != nil {
+		return err
+	}
+	if recheckRoot != root {
+		return instanceAtomicError("fixed cgroup-v2 root was replaced during fresh-recovery absence proof", nil)
+	}
+
+	recheckParentFD, err := deps.openAt2(ctx, recheckRootFD, infra.JailerCgroupParent, &how)
+	if !parentPresent {
+		if errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		if err != nil {
+			return instanceAtomicError("recheck absent managed cgroup parent for fresh recovery", err)
+		}
+		retained = append(retained, recheckParentFD)
+		if _, err := inspectFreshRecoveryManagedVMCgroupChild(
+			ctx,
+			deps,
+			recheckParentFD,
+			"appeared fresh-recovery managed cgroup parent",
+			managedVMCgroupParentMode,
+			recheckRoot,
+		); err != nil {
+			return err
+		}
+		return instanceAtomicError("managed cgroup parent appeared during fresh-recovery absence proof", nil)
+	}
+	if errors.Is(err, unix.ENOENT) {
+		return instanceAtomicError("managed cgroup parent disappeared during fresh-recovery absence proof", nil)
+	}
+	if err != nil {
+		return instanceAtomicError("reopen managed cgroup parent for fresh-recovery absence", err)
+	}
+	retained = append(retained, recheckParentFD)
+	recheckParent, err := inspectFreshRecoveryManagedVMCgroupChild(
+		ctx,
+		deps,
+		recheckParentFD,
+		"rechecked fresh-recovery managed cgroup parent",
+		managedVMCgroupParentMode,
+		recheckRoot,
+	)
+	if err != nil {
+		return err
+	}
+	if recheckParent != parent {
+		return instanceAtomicError("managed cgroup parent was replaced during fresh-recovery absence proof", nil)
+	}
+
+	recheckLeafFD, err := deps.openAt2(ctx, recheckParentFD, vmID, &how)
+	if !leafPresent {
+		if errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		if err != nil {
+			return instanceAtomicError("recheck absent managed VM cgroup leaf for fresh recovery", err)
+		}
+		retained = append(retained, recheckLeafFD)
+		if _, err := inspectFreshRecoveryManagedVMCgroupChild(
+			ctx,
+			deps,
+			recheckLeafFD,
+			"appeared fresh-recovery managed VM cgroup leaf",
+			managedVMCgroupLeafMode,
+			recheckParent,
+		); err != nil {
+			return err
+		}
+		return instanceAtomicError("managed VM cgroup leaf appeared during fresh-recovery absence proof", nil)
+	}
+	if errors.Is(err, unix.ENOENT) {
+		return instanceAtomicError("managed VM cgroup leaf disappeared during fresh-recovery absence proof", nil)
+	}
+	if err != nil {
+		return instanceAtomicError("reopen managed VM cgroup leaf for fresh-recovery absence", err)
+	}
+	retained = append(retained, recheckLeafFD)
+	recheckLeaf, err := inspectFreshRecoveryManagedVMCgroupChild(
+		ctx,
+		deps,
+		recheckLeafFD,
+		"rechecked fresh-recovery managed VM cgroup leaf",
+		managedVMCgroupLeafMode,
+		recheckParent,
+	)
+	if err != nil {
+		return err
+	}
+	if recheckLeaf != leaf {
+		return instanceAtomicError("managed VM cgroup leaf was replaced during fresh-recovery absence proof", nil)
+	}
+	return instanceStateError(vmID, "managed VM cgroup exists during fresh-recovery absence proof")
+}
+
+func inspectFreshRecoveryManagedVMCgroupRoot(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	rootFD int,
+	description string,
+) (managedVMCgroupIdentity, error) {
+	root, err := inspectManagedVMCgroupDirectory(ctx, deps, rootFD, description, managedVMCgroupRootMode)
+	if err != nil {
+		return managedVMCgroupIdentity{}, err
+	}
+	var filesystem unix.Statfs_t
+	if err := deps.statfs(ctx, rootFD, &filesystem); err != nil {
+		return managedVMCgroupIdentity{}, instanceAtomicError("inspect "+description+" filesystem", err)
+	}
+	if filesystem.Type != unix.CGROUP2_SUPER_MAGIC {
+		return managedVMCgroupIdentity{}, instanceAtomicError(description+" is not a cgroup-v2 mount", nil)
+	}
+	return root, nil
+}
+
+func inspectFreshRecoveryManagedVMCgroupChild(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	fd int,
+	description string,
+	wantMode uint32,
+	parent managedVMCgroupIdentity,
+) (managedVMCgroupIdentity, error) {
+	child, err := inspectManagedVMCgroupDirectory(ctx, deps, fd, description, wantMode)
+	if err != nil {
+		return managedVMCgroupIdentity{}, err
+	}
+	if child.mount != parent.mount ||
+		child.deviceMajor != parent.deviceMajor || child.deviceMinor != parent.deviceMinor {
+		return managedVMCgroupIdentity{}, instanceAtomicError(description+" is outside the pinned cgroup-v2 mount", nil)
+	}
+	return child, nil
+}
+
 // recoverManagedVMCgroup reopens only the fixed existing cgroup-v2 hierarchy for fresh recovery. Missing managed
 // state is already clean. Once the exact leaf is admitted, ownership transfers to the returned lease before process
 // membership verification, so every subsequent proof failure retains exact retry and cleanup authority.
