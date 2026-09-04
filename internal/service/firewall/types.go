@@ -106,6 +106,8 @@ type compiledGeneration struct {
 	id              string
 	empty           bool
 	applicationSeal [32]byte
+	endpointIDs     []string
+	networkIDs      []string
 	bridge          compiledTable
 	inet            compiledTable
 	ingressGuards   map[string]ingressGuardSet

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,9 +30,9 @@ func TestKernelGenerationApplicationQueuesOneCompleteReplacementBatch(t *testing
 	require.NoError(t, err)
 	observed := kernelObservationFromCompiled(before)
 	connection := &recordingKernelApplicationConnection{}
-	record := kernelApplicationApplyingRecord(t, before, target)
+	lease := kernelApplicationLease(t, before, target)
 
-	result, err := applyKernelGeneration(t.Context(), connection, record, observed, before, target)
+	result, err := lease.applyKernelGeneration(t.Context(), connection, observed, before, target)
 	require.NoError(t, err)
 	assert.True(t, result.commitAttempted)
 
@@ -73,10 +74,10 @@ func TestKernelGenerationApplicationDoesNotDeleteAbsentTables(t *testing.T) {
 	before, err := compileGeneration(generationIntent{})
 	require.NoError(t, err)
 	connection := &recordingKernelApplicationConnection{}
-	record := kernelApplicationApplyingRecord(t, before, target)
+	lease := kernelApplicationLease(t, before, target)
 
-	result, err := applyKernelGeneration(
-		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	result, err := lease.applyKernelGeneration(
+		t.Context(), connection, kernelObservation{empty: true}, before, target,
 	)
 	require.NoError(t, err)
 	assert.True(t, result.commitAttempted)
@@ -94,14 +95,16 @@ func TestKernelGenerationApplicationRejectsEmptyBeforeWithoutEmptyRecordAuthorit
 	require.NoError(t, err)
 	before, err := compileGeneration(generationIntent{})
 	require.NoError(t, err)
-	record := kernelApplicationApplyingRecord(t, before, target)
+	lease := kernelApplicationLease(t, before, target)
+	lease.state.mu.Lock()
 	foreignBefore := generationRecordIdentity{id: testFirewallGenerationC}
-	record.committed = foreignBefore
-	record.before = &foreignBefore
+	lease.state.record.committed = foreignBefore
+	lease.state.record.before = &foreignBefore
+	lease.state.mu.Unlock()
 	connection := &recordingKernelApplicationConnection{}
 
-	result, err := applyKernelGeneration(
-		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	result, err := lease.applyKernelGeneration(
+		t.Context(), connection, kernelObservation{empty: true}, before, target,
 	)
 	require.Error(t, err)
 	assert.False(t, result.commitAttempted)
@@ -121,42 +124,44 @@ func TestKernelGenerationApplicationRejectsUnqualifiedPreStateBeforeQueueing(t *
 	targetIntent.hostServices = nil
 	target, err := compileGeneration(targetIntent)
 	require.NoError(t, err)
-	tests := map[string]func(*generationRecord, *kernelObservation){
-		"empty marker with tables": func(_ *generationRecord, observed *kernelObservation) {
+	tests := map[string]func(*persistentGenerationLease, *kernelObservation){
+		"empty marker with tables": func(_ *persistentGenerationLease, observed *kernelObservation) {
 			observed.empty = true
 		},
-		"partial tables": func(_ *generationRecord, observed *kernelObservation) {
+		"partial tables": func(_ *persistentGenerationLease, observed *kernelObservation) {
 			observed.tables = observed.tables[:1]
 		},
-		"wrong fixed name": func(_ *generationRecord, observed *kernelObservation) {
+		"wrong fixed name": func(_ *persistentGenerationLease, observed *kernelObservation) {
 			observed.tables[0].name = "foreign_bridge"
 		},
-		"reordered tables": func(_ *generationRecord, observed *kernelObservation) {
+		"reordered tables": func(_ *persistentGenerationLease, observed *kernelObservation) {
 			observed.tables[0], observed.tables[1] = observed.tables[1], observed.tables[0]
 		},
-		"same-name foreign chain": func(_ *generationRecord, observed *kernelObservation) {
+		"same-name foreign chain": func(_ *persistentGenerationLease, observed *kernelObservation) {
 			observed.tables[0].chains[0].name = "foreign"
 		},
-		"same-name foreign userdata": func(_ *generationRecord, observed *kernelObservation) {
+		"same-name foreign userdata": func(_ *persistentGenerationLease, observed *kernelObservation) {
 			observed.tables[0].rules[0].userdata[0] ^= 0xff
 		},
-		"same-name foreign expression": func(_ *generationRecord, observed *kernelObservation) {
+		"same-name foreign expression": func(_ *persistentGenerationLease, observed *kernelObservation) {
 			observed.tables[0].rules[0].expressions[0].(*expr.Meta).Register++
 		},
-		"record target mismatch": func(record *generationRecord, _ *kernelObservation) {
-			record.target = &generationRecordIdentity{id: testFirewallGenerationC}
+		"record target mismatch": func(lease *persistentGenerationLease, _ *kernelObservation) {
+			lease.state.mu.Lock()
+			lease.state.record.target = &generationRecordIdentity{id: testFirewallGenerationC}
+			lease.state.mu.Unlock()
 		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			record := kernelApplicationApplyingRecord(t, before, target)
+			lease := kernelApplicationLease(t, before, target)
 			observed := kernelObservationFromCompiled(before)
-			mutate(&record, &observed)
+			mutate(lease, &observed)
 			connection := &recordingKernelApplicationConnection{}
 
-			result, err := applyKernelGeneration(
-				t.Context(), connection, record, observed, before, target,
+			result, err := lease.applyKernelGeneration(
+				t.Context(), connection, observed, before, target,
 			)
 			require.Error(t, err)
 			assert.False(t, result.commitAttempted)
@@ -192,6 +197,17 @@ func TestKernelGenerationApplicationRejectsBrokenDefaultDenyAndParentChainBefore
 			target.inet.rules = nil
 			target.ingressGuards = nil
 		},
+		"one authoritative network loses every base rule": func(target *compiledGeneration) {
+			wipedNetwork := target.networkIDs[1]
+			retained := target.inet.rules[:0]
+			for _, rule := range target.inet.rules {
+				if strings.HasSuffix(rule.identity, "."+wipedNetwork) {
+					continue
+				}
+				retained = append(retained, rule)
+			}
+			target.inet.rules = retained
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -203,10 +219,10 @@ func TestKernelGenerationApplicationRejectsBrokenDefaultDenyAndParentChainBefore
 			connection := &recordingKernelApplicationConnection{}
 			before, beforeErr := compileGeneration(generationIntent{})
 			require.NoError(t, beforeErr)
-			record := kernelApplicationApplyingRecord(t, before, target)
+			lease := kernelApplicationLease(t, before, target)
 
-			result, err := applyKernelGeneration(
-				t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+			result, err := lease.applyKernelGeneration(
+				t.Context(), connection, kernelObservation{empty: true}, before, target,
 			)
 			require.Error(t, err)
 			assert.False(t, result.commitAttempted)
@@ -215,6 +231,94 @@ func TestKernelGenerationApplicationRejectsBrokenDefaultDenyAndParentChainBefore
 			}
 		})
 	}
+}
+
+func TestKernelGenerationApplicationSealRejectsMutatedAllowExpressionBeforeQueueing(t *testing.T) {
+	t.Parallel()
+
+	target, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+	allow := requireCompiledRule(t, target, "bridge.allow.vm."+compatibilityIntent().vmGrants[0].id)
+	comparison, ok := allow.Exprs[1].(*expr.Cmp)
+	require.True(t, ok)
+	comparison.Register++
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
+	lease := kernelApplicationLease(t, before, target)
+	connection := &recordingKernelApplicationConnection{}
+
+	result, err := lease.applyKernelGeneration(
+		t.Context(), connection, kernelObservation{empty: true}, before, target,
+	)
+	require.ErrorContains(t, err, "integrity seal")
+	assert.False(t, result.commitAttempted)
+	if diff := cmp.Diff([]string{"close"}, connection.events); diff != "" {
+		t.Errorf("unsealed compiler mutation effects mismatch (-want +got):\n%s", diff)
+	}
+	assert.Zero(t, connection.flushCalls)
+}
+
+// Rationale: A structurally valid applying record is copyable data, not the retained global lock/store capability.
+// Fabricating an exact record without those live capabilities must never authorize deletion or Flush.
+func TestKernelGenerationApplicationRejectsFabricatedRecordWithoutPersistentLeaseAuthority(t *testing.T) {
+	t.Parallel()
+
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
+	target, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+	fabricated := kernelApplicationApplyingRecord(t, before, target)
+	require.NoError(t, validateGenerationRecord(fabricated))
+	lease := &persistentGenerationLease{state: &persistentGenerationLeaseState{
+		record: fabricated, evidence: generationRecordFileEvidence{device: 41, inode: 73}, active: true,
+	}}
+	connection := &recordingKernelApplicationConnection{}
+
+	result, err := lease.applyKernelGeneration(
+		t.Context(), connection, kernelObservationFromCompiled(before), before, target,
+	)
+	require.ErrorContains(t, err, "does not retain complete mutation authority")
+	assert.False(t, result.commitAttempted)
+	if diff := cmp.Diff([]string{"close"}, connection.events); diff != "" {
+		t.Errorf("fabricated-record effects mismatch (-want +got):\n%s", diff)
+	}
+	assert.Zero(t, connection.flushCalls)
+}
+
+func TestPersistentGenerationLeaseSerializesAuthorityAcrossKernelFlush(t *testing.T) {
+	t.Parallel()
+
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
+	target, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+	lease := kernelApplicationLease(t, before, target)
+	connection := newBlockingKernelApplicationConnection()
+	type applicationResult struct {
+		result kernelApplicationResult
+		err    error
+	}
+	completed := make(chan applicationResult, 1)
+	go func() {
+		result, applyErr := lease.applyKernelGeneration(
+			t.Context(), connection, kernelObservation{empty: true}, before, target,
+		)
+		completed <- applicationResult{result: result, err: applyErr}
+	}()
+	<-connection.flushStarted
+	if lease.state.applicationMu.TryLock() {
+		lease.state.applicationMu.Unlock()
+		t.Fatal("persistent application serialization was not held across Flush")
+	}
+	connection.mu.Lock()
+	flushRelease := connection.flushRelease
+	connection.flushRelease = nil
+	close(flushRelease)
+	connection.mu.Unlock()
+
+	got := <-completed
+	require.NoError(t, got.err)
+	assert.True(t, got.result.commitAttempted)
 }
 
 func TestGoogleNFTablesApplicationConnectionFlushesOneProtocolBatch(t *testing.T) {
@@ -245,10 +349,10 @@ func TestGoogleNFTablesApplicationConnectionFlushesOneProtocolBatch(t *testing.T
 	)
 	require.NoError(t, err)
 	connection := &googleNFTablesApplicationConnection{connection: underlying}
-	record := kernelApplicationApplyingRecord(t, before, target)
+	lease := kernelApplicationLease(t, before, target)
 
-	result, err := applyKernelGeneration(
-		t.Context(), connection, record, kernelObservationFromCompiled(before), before, target,
+	result, err := lease.applyKernelGeneration(
+		t.Context(), connection, kernelObservationFromCompiled(before), before, target,
 	)
 	require.NoError(t, err)
 	assert.True(t, result.commitAttempted)
@@ -281,10 +385,10 @@ func TestKernelGenerationApplicationReturnsAmbiguousSingleFlushFailure(t *testin
 	require.NoError(t, err)
 	flushFailure := errors.New("injected batch failure")
 	connection := &recordingKernelApplicationConnection{flushErr: flushFailure}
-	record := kernelApplicationApplyingRecord(t, before, target)
+	lease := kernelApplicationLease(t, before, target)
 
-	result, err := applyKernelGeneration(
-		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	result, err := lease.applyKernelGeneration(
+		t.Context(), connection, kernelObservation{empty: true}, before, target,
 	)
 	require.ErrorIs(t, err, flushFailure)
 	assert.True(t, result.commitAttempted)
@@ -303,10 +407,10 @@ func TestKernelGenerationApplicationReturnsAmbiguousCloseFailure(t *testing.T) {
 	require.NoError(t, err)
 	closeFailure := errors.New("injected lasting-connection close failure")
 	connection := &recordingKernelApplicationConnection{closeErr: closeFailure}
-	record := kernelApplicationApplyingRecord(t, before, target)
+	lease := kernelApplicationLease(t, before, target)
 
-	result, err := applyKernelGeneration(
-		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	result, err := lease.applyKernelGeneration(
+		t.Context(), connection, kernelObservation{empty: true}, before, target,
 	)
 	require.ErrorIs(t, err, closeFailure)
 	assert.True(t, result.commitAttempted)
@@ -324,10 +428,10 @@ func TestKernelGenerationApplicationPreservesFlushAndCloseFailures(t *testing.T)
 	flushFailure := errors.New("injected batch failure")
 	closeFailure := errors.New("injected lasting-connection close failure")
 	connection := &recordingKernelApplicationConnection{flushErr: flushFailure, closeErr: closeFailure}
-	record := kernelApplicationApplyingRecord(t, before, target)
+	lease := kernelApplicationLease(t, before, target)
 
-	result, err := applyKernelGeneration(
-		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	result, err := lease.applyKernelGeneration(
+		t.Context(), connection, kernelObservation{empty: true}, before, target,
 	)
 	require.ErrorIs(t, err, flushFailure)
 	require.ErrorIs(t, err, closeFailure)
@@ -348,9 +452,9 @@ func TestKernelGenerationApplicationCancellationBeforeQueueingClosesConnection(t
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	connection := &recordingKernelApplicationConnection{}
-	record := kernelApplicationApplyingRecord(t, before, target)
+	lease := kernelApplicationLease(t, before, target)
 
-	result, err := applyKernelGeneration(ctx, connection, record, kernelObservation{empty: true}, before, target)
+	result, err := lease.applyKernelGeneration(ctx, connection, kernelObservation{empty: true}, before, target)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.False(t, result.commitAttempted)
 	if diff := cmp.Diff([]string{"close"}, connection.events); diff != "" {
@@ -372,13 +476,13 @@ func TestKernelGenerationApplicationCancellationInterruptsRetainedSocketBeforeCl
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
 	connection := newBlockingKernelApplicationConnection()
-	record := kernelApplicationApplyingRecord(t, before, target)
+	lease := kernelApplicationLease(t, before, target)
 	go func() {
 		<-connection.flushStarted
 		cancel()
 	}()
 
-	result, err := applyKernelGeneration(ctx, connection, record, kernelObservation{empty: true}, before, target)
+	result, err := lease.applyKernelGeneration(ctx, connection, kernelObservation{empty: true}, before, target)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.True(t, result.commitAttempted)
 	assert.Equal(t, 1, connection.flushCalls)
@@ -404,13 +508,13 @@ func TestKernelGenerationApplicationPreservesCancellationInterruptFlushAndCloseF
 	connection.interruptErr = errors.New("injected retained-socket interrupt failure")
 	connection.flushErr = errors.New("injected cancelled flush failure")
 	connection.closeErr = errors.New("injected cancelled close failure")
-	record := kernelApplicationApplyingRecord(t, before, target)
+	lease := kernelApplicationLease(t, before, target)
 	go func() {
 		<-connection.flushStarted
 		cancel()
 	}()
 
-	result, err := applyKernelGeneration(ctx, connection, record, kernelObservation{empty: true}, before, target)
+	result, err := lease.applyKernelGeneration(ctx, connection, kernelObservation{empty: true}, before, target)
 	require.ErrorIs(t, err, context.Canceled)
 	require.ErrorIs(t, err, connection.interruptErr)
 	require.ErrorIs(t, err, connection.flushErr)
@@ -991,6 +1095,26 @@ func kernelApplicationApplyingRecord(
 	)
 	require.NoError(t, err)
 	return applying
+}
+
+func kernelApplicationLease(
+	t *testing.T,
+	before compiledGeneration,
+	target compiledGeneration,
+) *persistentGenerationLease {
+	t.Helper()
+	authority, _, _ := testPersistentGenerationAuthority(
+		kernelApplicationApplyingRecord(t, before, target),
+		true,
+	)
+	lease, err := authority.acquireAfterNetwork(t.Context(), testGenerationNetworkAuthority())
+	require.NoError(t, err)
+	concrete, ok := lease.(*persistentGenerationLease)
+	require.True(t, ok)
+	t.Cleanup(func() {
+		require.NoError(t, concrete.Release(context.Background()))
+	})
+	return concrete
 }
 
 type kernelApplicationNamespaceFixture struct {

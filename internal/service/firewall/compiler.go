@@ -95,6 +95,8 @@ func newGenerationCompiler(intent generationIntent) *generationCompiler {
 
 	generation := &compiledGeneration{
 		ingressGuards: make(map[string]ingressGuardSet, len(intent.endpoints)),
+		endpointIDs:   make([]string, 0, len(intent.endpoints)),
+		networkIDs:    make([]string, 0, len(intent.networks)),
 		bridge: compiledTable{
 			table:  bridgeTable,
 			chains: []*nftables.Chain{bridgePrerouting, bridgeForward},
@@ -104,6 +106,14 @@ func newGenerationCompiler(intent generationIntent) *generationCompiler {
 			chains: []*nftables.Chain{inetForward, inetInput, inetNAT},
 		},
 	}
+	for _, endpoint := range intent.endpoints {
+		generation.endpointIDs = append(generation.endpointIDs, endpoint.id)
+	}
+	for _, network := range intent.networks {
+		generation.networkIDs = append(generation.networkIDs, network.id)
+	}
+	slices.Sort(generation.endpointIDs)
+	slices.Sort(generation.networkIDs)
 
 	compiler := &generationCompiler{
 		generation: generation,

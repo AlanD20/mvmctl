@@ -65,6 +65,8 @@ type persistentGenerationLease struct {
 }
 
 type persistentGenerationLeaseState struct {
+	// applicationMu serializes the multi-step record/kernel/record transaction across copied lease values.
+	applicationMu sync.Mutex
 	// mu guards the admitted record, retained capabilities, and every lifecycle field below.
 	mu                sync.Mutex
 	global            firewallGlobalAuthority
@@ -213,6 +215,16 @@ func (lease *persistentGenerationLease) replaceAdmittedRecord(
 		return generationAuthorityError("persistent firewall generation lease is unavailable", nil, nil)
 	}
 	state := lease.state
+	state.applicationMu.Lock()
+	defer state.applicationMu.Unlock()
+	return lease.replaceAdmittedRecordDuringApplication(ctx, replacement)
+}
+
+func (lease *persistentGenerationLease) replaceAdmittedRecordDuringApplication(
+	ctx context.Context,
+	replacement generationRecord,
+) error {
+	state := lease.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if !state.active {
@@ -270,6 +282,8 @@ func (lease *persistentGenerationLease) Release(ctx context.Context) error {
 		return nil
 	}
 	state := lease.state
+	state.applicationMu.Lock()
+	defer state.applicationMu.Unlock()
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.released {

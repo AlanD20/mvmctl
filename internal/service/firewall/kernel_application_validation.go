@@ -60,6 +60,12 @@ func validateKernelApplicationTarget(target compiledGeneration) error {
 	if err := validateGenerationID(target.id); err != nil {
 		return err
 	}
+	if err := validateKernelApplicationInventory(target.endpointIDs, "endpoint"); err != nil {
+		return err
+	}
+	if err := validateKernelApplicationInventory(target.networkIDs, "network"); err != nil {
+		return err
+	}
 	seal, err := deriveGenerationApplicationSeal(target)
 	if err != nil {
 		return err
@@ -70,10 +76,13 @@ func validateKernelApplicationTarget(target compiledGeneration) error {
 	if target.empty {
 		if target.bridge.table != nil || target.inet.table != nil || len(target.bridge.chains) != 0 ||
 			len(target.inet.chains) != 0 || len(target.bridge.rules) != 0 || len(target.inet.rules) != 0 ||
-			len(target.ingressGuards) != 0 {
+			len(target.ingressGuards) != 0 || len(target.endpointIDs) != 0 || len(target.networkIDs) != 0 {
 			return invalidGeneration("empty kernel application target contains managed state")
 		}
 		return nil
+	}
+	if len(target.networkIDs) == 0 {
+		return invalidGeneration("kernel application target has no authoritative managed-network inventory")
 	}
 	if target.bridge.table == nil || target.inet.table == nil ||
 		target.bridge.table.Family != managedTableIdentities[0].family ||
@@ -94,6 +103,15 @@ func validateKernelApplicationTarget(target compiledGeneration) error {
 		return err
 	}
 	return validateKernelApplicationDefaultDeny(target, rules)
+}
+
+func validateKernelApplicationInventory(identities []string, resource string) error {
+	for index, identity := range identities {
+		if !validResourceID(identity) || index > 0 && identities[index-1] >= identity {
+			return invalidGeneration("kernel application target " + resource + " inventory is invalid")
+		}
+	}
+	return nil
 }
 
 type kernelApplicationChainSpec struct {
@@ -181,7 +199,7 @@ func validateKernelApplicationDefaultDeny(
 	target compiledGeneration,
 	rules map[string]compiledRule,
 ) error {
-	endpointIDs, err := kernelApplicationResourceIDs(rules, []string{
+	observedEndpointIDs, err := kernelApplicationResourceIDs(rules, []string{
 		"bridge.spoof.mac.",
 		"bridge.spoof.ipv4.",
 		"bridge.spoof.arp-mac.",
@@ -194,10 +212,10 @@ func validateKernelApplicationDefaultDeny(
 	if err != nil {
 		return err
 	}
-	if len(endpointIDs) != len(target.ingressGuards) {
+	if !slices.Equal(observedEndpointIDs, target.endpointIDs) || len(target.endpointIDs) != len(target.ingressGuards) {
 		return invalidGeneration("kernel application target ingress guard set is incomplete")
 	}
-	for _, id := range endpointIDs {
+	for _, id := range target.endpointIDs {
 		guards, exists := target.ingressGuards[id]
 		if !exists {
 			return invalidGeneration("kernel application target ingress guard set is incomplete")
@@ -242,12 +260,12 @@ func validateKernelApplicationDefaultDeny(
 	if !kernelApplicationRuleTailMatches(
 		target.bridge.rules,
 		target.bridge.chains[1],
-		kernelApplicationRuleIdentities(endpointIDs, "bridge.default-deny."),
+		kernelApplicationRuleIdentities(target.endpointIDs, "bridge.default-deny."),
 	) {
 		return invalidGeneration("kernel application target bridge default-deny rules are not terminal")
 	}
 
-	networkIDs, err := kernelApplicationResourceIDs(rules, []string{
+	observedNetworkIDs, err := kernelApplicationResourceIDs(rules, []string{
 		"inet.forward.established.",
 		"inet.forward.egress.",
 		"inet.forward.default-deny.",
@@ -259,13 +277,10 @@ func validateKernelApplicationDefaultDeny(
 	if err != nil {
 		return err
 	}
-	if len(endpointIDs) > 0 && len(networkIDs) == 0 {
-		return invalidGeneration("kernel application target has endpoints without a managed network")
+	if !slices.Equal(observedNetworkIDs, target.networkIDs) {
+		return invalidGeneration("kernel application target managed-network rule inventory is incomplete")
 	}
-	if len(networkIDs) == 0 {
-		return invalidGeneration("kernel application target has no authoritative managed-network rule inventory")
-	}
-	for _, id := range networkIDs {
+	for _, id := range target.networkIDs {
 		for _, required := range [...]struct {
 			identity string
 			chain    *nftables.Chain
@@ -287,8 +302,8 @@ func validateKernelApplicationDefaultDeny(
 			}
 		}
 	}
-	forwardDenyIdentities := make([]string, 0, len(networkIDs)*2)
-	for _, id := range networkIDs {
+	forwardDenyIdentities := make([]string, 0, len(target.networkIDs)*2)
+	for _, id := range target.networkIDs {
 		forwardDenyIdentities = append(
 			forwardDenyIdentities,
 			"inet.forward.default-deny."+id,
@@ -299,7 +314,7 @@ func validateKernelApplicationDefaultDeny(
 		!kernelApplicationRuleTailMatches(
 			target.inet.rules,
 			target.inet.chains[1],
-			kernelApplicationRuleIdentities(networkIDs, "inet.input.default-deny."),
+			kernelApplicationRuleIdentities(target.networkIDs, "inet.input.default-deny."),
 		) {
 		return invalidGeneration("kernel application target inet default-deny rules are not terminal")
 	}

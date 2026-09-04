@@ -25,6 +25,14 @@ func deriveGenerationApplicationSeal(generation compiledGeneration) ([sha256.Siz
 	encoder.text("schema", generationApplicationSealSchema)
 	encoder.text("generation-id", generation.id)
 	encoder.boolean("generation.empty", generation.empty)
+	encoder.count("authority.endpoints", len(generation.endpointIDs))
+	for _, identity := range generation.endpointIDs {
+		encoder.text("authority.endpoint", identity)
+	}
+	encoder.count("authority.networks", len(generation.networkIDs))
+	for _, identity := range generation.networkIDs {
+		encoder.text("authority.network", identity)
+	}
 	if err := encodeCanonicalOutput(&encoder, generation); err != nil {
 		return [sha256.Size]byte{}, err
 	}
