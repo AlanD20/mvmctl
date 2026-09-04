@@ -28,6 +28,30 @@ func (lease *persistentGenerationLease) applyKernelGeneration(
 	expectedBefore compiledGeneration,
 	target compiledGeneration,
 ) (kernelApplicationResult, error) {
+	if lease == nil || lease.state == nil {
+		return lease.applyKernelGenerationDuringApplication(
+			ctx,
+			connection,
+			observedBefore,
+			expectedBefore,
+			target,
+		)
+	}
+	state := lease.state
+	state.applicationMu.Lock()
+	defer state.applicationMu.Unlock()
+	return lease.applyKernelGenerationDuringApplication(ctx, connection, observedBefore, expectedBefore, target)
+}
+
+// applyKernelGenerationDuringApplication runs only while the caller owns state.applicationMu. Keeping this stage
+// non-locking lets the outer durable record -> kernel -> durable record transaction acquire that mutex exactly once.
+func (lease *persistentGenerationLease) applyKernelGenerationDuringApplication(
+	ctx context.Context,
+	connection kernelApplicationConnection,
+	observedBefore kernelObservation,
+	expectedBefore compiledGeneration,
+	target compiledGeneration,
+) (kernelApplicationResult, error) {
 	if connection == nil {
 		return kernelApplicationResult{}, generationAuthorityError(
 			"kernel application connection is required",
@@ -54,10 +78,7 @@ func (lease *persistentGenerationLease) applyKernelGeneration(
 			connection.close(),
 		)
 	}
-	state := lease.state
-	state.applicationMu.Lock()
-	defer state.applicationMu.Unlock()
-	record, err := state.kernelApplicationRecord()
+	record, err := lease.state.kernelApplicationRecord()
 	if err != nil {
 		return kernelApplicationResult{}, errors.Join(err, connection.close())
 	}
@@ -97,41 +118,18 @@ func (lease *persistentGenerationLease) applyKernelGeneration(
 }
 
 func (state *persistentGenerationLeaseState) kernelApplicationRecord() (generationRecord, error) {
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if !state.active || state.released {
-		return generationRecord{}, generationAuthorityError(
-			"persistent firewall generation lease is released",
-			nil,
-			nil,
-		)
-	}
-	if state.mutationAmbiguous {
-		return generationRecord{}, generationAuthorityError(
-			"persistent firewall generation authority outcome is ambiguous",
-			nil,
-			nil,
-		)
-	}
-	if state.global == nil || state.lock == nil || state.store == nil ||
-		state.evidence == (generationRecordFileEvidence{}) {
-		return generationRecord{}, generationAuthorityError(
-			"persistent firewall generation lease does not retain complete mutation authority",
-			nil,
-			nil,
-		)
-	}
-	if err := validateGenerationRecord(state.record); err != nil {
+	record, err := state.retainedGenerationRecord()
+	if err != nil {
 		return generationRecord{}, err
 	}
-	if state.record.lifecycle != generationRecordApplying {
+	if record.lifecycle != generationRecordApplying {
 		return generationRecord{}, generationAuthorityError(
 			"persistent firewall generation lease has no admitted applying transition",
 			nil,
 			nil,
 		)
 	}
-	return cloneGenerationRecord(state.record), nil
+	return record, nil
 }
 
 func queueKernelApplicationTable(connection kernelApplicationConnection, table compiledTable) {

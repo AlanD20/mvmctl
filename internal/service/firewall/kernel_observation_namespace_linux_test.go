@@ -250,6 +250,15 @@ func (*fakeKernelObservationGenerationLease) replaceAdmittedRecord(context.Conte
 	return errors.New("unexpected generation replacement")
 }
 
+func (*fakeKernelObservationGenerationLease) applyCompiledGeneration(
+	context.Context,
+	generationKernelApplication,
+	compiledGeneration,
+	compiledGeneration,
+) error {
+	return errors.New("unexpected generation application")
+}
+
 func (*fakeKernelObservationGenerationLease) Release(context.Context) error { return nil }
 
 type kernelObservationNamespaceFixture struct {

@@ -26,6 +26,7 @@ type generationPersistentAuthority interface {
 
 type generationPersistentLease interface {
 	admittedRecord() (generationRecord, error)
+	applyCompiledGeneration(context.Context, generationKernelApplication, compiledGeneration, compiledGeneration) error
 	replaceAdmittedRecord(context.Context, generationRecord) error
 	Release(context.Context) error
 }
@@ -203,6 +204,37 @@ func (lease *persistentGenerationLease) admittedRecord() (generationRecord, erro
 			nil,
 			nil,
 		)
+	}
+	return cloneGenerationRecord(state.record), nil
+}
+
+func (state *persistentGenerationLeaseState) retainedGenerationRecord() (generationRecord, error) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.active || state.released {
+		return generationRecord{}, generationAuthorityError(
+			"persistent firewall generation lease is released",
+			nil,
+			nil,
+		)
+	}
+	if state.mutationAmbiguous {
+		return generationRecord{}, generationAuthorityError(
+			"persistent firewall generation authority outcome is ambiguous",
+			nil,
+			nil,
+		)
+	}
+	if state.global == nil || state.lock == nil || state.store == nil ||
+		state.evidence == (generationRecordFileEvidence{}) {
+		return generationRecord{}, generationAuthorityError(
+			"persistent firewall generation lease does not retain complete mutation authority",
+			nil,
+			nil,
+		)
+	}
+	if err := validateGenerationRecord(state.record); err != nil {
+		return generationRecord{}, err
 	}
 	return cloneGenerationRecord(state.record), nil
 }

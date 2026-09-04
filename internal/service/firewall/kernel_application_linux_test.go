@@ -322,6 +322,30 @@ func TestPersistentGenerationLeaseSerializesAuthorityAcrossKernelFlush(t *testin
 	assert.True(t, got.result.commitAttempted)
 }
 
+// Rationale: Release revokes the concrete retained generation authority. Even a matching applying record snapshot
+// held by the caller cannot authorize queueing after the real lease has closed its lock, store, and global authority.
+func TestKernelGenerationApplicationAfterPersistentLeaseReleaseIsCloseOnly(t *testing.T) {
+	t.Parallel()
+
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
+	target, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+	lease := kernelApplicationLease(t, before, target)
+	require.NoError(t, lease.Release(t.Context()))
+	connection := &recordingKernelApplicationConnection{}
+
+	result, err := lease.applyKernelGeneration(
+		t.Context(), connection, kernelObservation{empty: true}, before, target,
+	)
+	require.Error(t, err)
+	assert.False(t, result.commitAttempted)
+	if diff := cmp.Diff([]string{"close"}, connection.events); diff != "" {
+		t.Errorf("released lease effects mismatch (-want +got):\n%s", diff)
+	}
+	assert.Zero(t, connection.flushCalls)
+}
+
 func TestGoogleNFTablesApplicationConnectionFlushesOneProtocolBatch(t *testing.T) {
 	t.Parallel()
 
