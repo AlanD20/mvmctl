@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/netip"
 	"strconv"
@@ -22,6 +21,13 @@ type ipv4Address struct {
 }
 
 type guestMAC [6]byte
+
+type guestMACSelection uint8
+
+const (
+	guestMACDerived guestMACSelection = iota + 1
+	guestMACExplicit
+)
 
 type addressScope uint8
 
@@ -63,7 +69,6 @@ type l3Cardinality uint8
 
 const (
 	zero l3Cardinality = iota
-	exactlyOne
 )
 
 type addressExpectation struct {
@@ -74,6 +79,7 @@ type addressExpectation struct {
 type routeExpectation struct {
 	destination netip.Prefix
 	source      netip.Addr
+	hasSource   bool
 	gateway     netip.Addr
 	hasGateway  bool
 	table       routeTable
@@ -99,24 +105,17 @@ type managedNetworkL3 struct {
 type endpointL3Input struct {
 	guestAddress netip.Addr
 	requestedMAC *string
-	reservations guestMACReservationSnapshot
 }
 
 type endpointL3 struct {
+	key            topologyKey
 	network        managedNetworkL3
 	guestAddress   ipv4Address
 	mac            guestMAC
+	macSelection   guestMACSelection
 	address        addressExpectation
 	connectedRoute routeExpectation
 	defaultRoute   routeExpectation
-}
-
-type guestMACReservationSnapshot struct {
-	state *guestMACReservationState
-}
-
-type guestMACReservationState struct {
-	values []guestMAC
 }
 
 type loopbackL3Expectation struct {
@@ -138,6 +137,7 @@ var (
 		localRoute: routeExpectation{
 			destination: netip.MustParsePrefix("127.0.0.1/32"),
 			source:      netip.MustParseAddr("127.0.0.1"),
+			hasSource:   true,
 			table:       routeTableLocal,
 			kind:        routeKindLocal,
 			protocol:    routeProtocolKernel,
@@ -146,6 +146,7 @@ var (
 		connectedRoute: routeExpectation{
 			destination: netip.MustParsePrefix("127.0.0.0/8"),
 			source:      netip.MustParseAddr("127.0.0.1"),
+			hasSource:   true,
 			table:       routeTableLocal,
 			kind:        routeKindLocal,
 			protocol:    routeProtocolKernel,
@@ -188,7 +189,7 @@ func admitManagedNetworkL3(input managedNetworkL3Input) (managedNetworkL3, error
 		)
 	}
 
-	return managedNetworkL3{
+	network := managedNetworkL3{
 		prefix:  ipv4Prefix{value: input.prefix},
 		gateway: ipv4Address{value: gateway},
 		bridgeAddress: addressExpectation{
@@ -197,23 +198,25 @@ func admitManagedNetworkL3(input managedNetworkL3Input) (managedNetworkL3, error
 		bridgeConnectedRoute: routeExpectation{
 			destination: input.prefix,
 			source:      gateway,
+			hasSource:   true,
 			table:       routeTableMain,
 			kind:        routeKindUnicast,
 			protocol:    routeProtocolKernel,
 			scope:       routeScopeLink,
 		},
-	}, nil
+	}
+	if err := validateRouteExpectation(network.bridgeConnectedRoute); err != nil {
+		return managedNetworkL3{}, err
+	}
+	return network, nil
 }
 
-func admitEndpointL3(key topologyKey, network managedNetworkL3, input endpointL3Input) (endpointL3, error) {
+func deriveEndpointL3(key topologyKey, network managedNetworkL3, input endpointL3Input) (endpointL3, error) {
 	if err := validateTopologyKey(key); err != nil {
 		return endpointL3{}, err
 	}
 	if err := validateManagedNetworkL3(network); err != nil {
 		return endpointL3{}, err
-	}
-	if input.reservations.state == nil {
-		return endpointL3{}, topologyValidationError("guest MAC reservation snapshot is required")
 	}
 	if !usableIPv4Address(network.prefix.value, input.guestAddress) {
 		return endpointL3{}, topologyValidationError(
@@ -225,21 +228,22 @@ func admitEndpointL3(key topologyKey, network managedNetworkL3, input endpointL3
 	}
 
 	mac := deriveDefaultGuestMAC(key.ownerUID, key.vmID)
+	macSelection := guestMACDerived
 	if input.requestedMAC != nil {
 		parsed, err := parseCanonicalGuestMAC(*input.requestedMAC)
 		if err != nil {
 			return endpointL3{}, err
 		}
 		mac = parsed
-	}
-	if input.reservations.contains(mac) {
-		return endpointL3{}, topologyValidationError("selected guest MAC is already reserved")
+		macSelection = guestMACExplicit
 	}
 
-	return endpointL3{
+	endpoint := endpointL3{
+		key:          key,
 		network:      network,
 		guestAddress: ipv4Address{value: input.guestAddress},
 		mac:          mac,
+		macSelection: macSelection,
 		address: addressExpectation{
 			prefix: netip.PrefixFrom(input.guestAddress, network.prefix.value.Bits()),
 			scope:  addressScopeUniverse,
@@ -247,6 +251,7 @@ func admitEndpointL3(key topologyKey, network managedNetworkL3, input endpointL3
 		connectedRoute: routeExpectation{
 			destination: network.prefix.value,
 			source:      input.guestAddress,
+			hasSource:   true,
 			table:       routeTableMain,
 			kind:        routeKindUnicast,
 			protocol:    routeProtocolKernel,
@@ -261,7 +266,14 @@ func admitEndpointL3(key topologyKey, network managedNetworkL3, input endpointL3
 			protocol:    routeProtocolBoot,
 			scope:       routeScopeUniverse,
 		},
-	}, nil
+	}
+	if err := validateRouteExpectation(endpoint.connectedRoute); err != nil {
+		return endpointL3{}, err
+	}
+	if err := validateRouteExpectation(endpoint.defaultRoute); err != nil {
+		return endpointL3{}, err
+	}
+	return endpoint, nil
 }
 
 func validateManagedNetworkL3(network managedNetworkL3) error {
@@ -278,22 +290,36 @@ func validateManagedNetworkL3(network managedNetworkL3) error {
 	return nil
 }
 
-func newGuestMACReservationSnapshot(values []guestMAC) guestMACReservationSnapshot {
-	return guestMACReservationSnapshot{state: &guestMACReservationState{
-		values: append([]guestMAC(nil), values...),
-	}}
-}
-
-func (snapshot guestMACReservationSnapshot) contains(candidate guestMAC) bool {
-	if snapshot.state == nil {
-		return false
+func validateEndpointL3(key topologyKey, network managedNetworkL3, endpoint endpointL3) error {
+	if err := validateTopologyKey(key); err != nil {
+		return err
 	}
-	for _, reserved := range snapshot.state.values {
-		if reserved == candidate {
-			return true
-		}
+	if err := validateManagedNetworkL3(network); err != nil {
+		return err
 	}
-	return false
+	if endpoint.key != key || endpoint.network != network {
+		return topologyValidationError("endpoint L3 authority is rebound to different topology authority")
+	}
+	var requestedMAC *string
+	switch endpoint.macSelection {
+	case guestMACDerived:
+	case guestMACExplicit:
+		mac := endpoint.mac.String()
+		requestedMAC = &mac
+	default:
+		return topologyValidationError("endpoint L3 MAC selection is invalid")
+	}
+	want, err := deriveEndpointL3(key, network, endpointL3Input{
+		guestAddress: endpoint.guestAddress.value,
+		requestedMAC: requestedMAC,
+	})
+	if err != nil {
+		return err
+	}
+	if want != endpoint {
+		return topologyValidationError("endpoint L3 authority is not canonical")
+	}
+	return nil
 }
 
 func deriveDefaultGuestMAC(ownerUID OwnerUID, vmID VMID) guestMAC {
@@ -371,13 +397,21 @@ func lastIPv4Address(prefix netip.Prefix) netip.Addr {
 
 func validateRouteExpectation(expectation routeExpectation) error {
 	if !expectation.destination.IsValid() || !expectation.destination.Addr().Is4() ||
-		expectation.destination != expectation.destination.Masked() || !expectation.source.Is4() ||
+		expectation.destination != expectation.destination.Masked() ||
 		expectation.table == 0 || expectation.kind == 0 || expectation.protocol == 0 || expectation.scope == 0 {
-		return errors.New("route expectation is incomplete")
+		return topologyValidationError("route expectation is incomplete")
+	}
+	if expectation.hasSource != expectation.source.IsValid() ||
+		(expectation.hasSource && !expectation.source.Is4()) {
+		return topologyValidationError("route expectation has invalid preferred-source state")
+	}
+	if (expectation.protocol == routeProtocolKernel && !expectation.hasSource) ||
+		(expectation.protocol == routeProtocolBoot && expectation.hasSource) {
+		return topologyValidationError("route expectation has non-canonical preferred-source presence")
 	}
 	if expectation.hasGateway != expectation.gateway.IsValid() ||
-		(expectation.hasGateway && !expectation.gateway.Is4()) || expectation.hasMetric {
-		return errors.New("route expectation has unsupported gateway or metric state")
+		(expectation.hasGateway && !expectation.gateway.Is4()) || expectation.hasMetric || expectation.metric != 0 {
+		return topologyValidationError("route expectation has unsupported gateway or metric state")
 	}
 	return nil
 }
