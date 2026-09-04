@@ -43,8 +43,7 @@ func (lease *persistentGenerationLease) applyKernelGeneration(
 	return lease.applyKernelGenerationDuringApplication(ctx, connection, observedBefore, expectedBefore, target)
 }
 
-// applyKernelGenerationDuringApplication runs only while the caller owns state.applicationMu. Keeping this stage
-// non-locking lets the outer durable record -> kernel -> durable record transaction acquire that mutex exactly once.
+// CALLER MUST HOLD: state.applicationMu.
 func (lease *persistentGenerationLease) applyKernelGenerationDuringApplication(
 	ctx context.Context,
 	connection kernelApplicationConnection,

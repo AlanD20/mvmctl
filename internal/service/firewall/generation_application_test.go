@@ -3,8 +3,12 @@ package firewall
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -294,6 +298,82 @@ func TestGenerationApplicationRecoveryInspectionFailureRetainsApplying(t *testin
 	assert.Equal(t, generationRecordApplying, got.lifecycle)
 }
 
+// Rationale: Exact-before readback makes the kernel outcome known, but it does not make a failed durable rollback
+// disappear. The applying record remains authoritative until a later reconciliation can persist committed-before.
+func TestGenerationApplicationPreservesExactBeforeRollbackWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	before, target := testGenerationApplicationPair(t)
+	flushFailure := errors.New("injected ambiguous flush")
+	rollbackFailure := errors.New("injected committed-before write failure")
+	lease, store := testGenerationApplicationLease(t, committedRecordForCompiled(t, before))
+	store.replaceErrors = []error{nil, rollbackFailure}
+	kernel := &fakeKernelGenerationApplication{
+		observations: []kernelObservation{
+			kernelObservationFromCompiled(before),
+			kernelObservationFromCompiled(before),
+		},
+		results:     []kernelApplicationResult{{commitAttempted: true}},
+		applyErrors: []error{flushFailure},
+	}
+
+	err := lease.applyCompiledGeneration(t.Context(), kernel, before, target)
+	require.ErrorIs(t, err, flushFailure)
+	require.ErrorIs(t, err, rollbackFailure)
+	assert.False(t, generationApplicationOutcomeUnknown(err))
+	assert.Equal(t, string(generationApplicationKernelBefore), generationApplicationKernelStateDetail(err))
+	got, admittedErr := lease.admittedRecord()
+	require.NoError(t, admittedErr)
+	assert.Equal(t, generationRecordApplying, got.lifecycle)
+	require.NotNil(t, got.before)
+	require.NotNil(t, got.target)
+	assert.Equal(t, generationRecordIdentityFromCompiled(before), *got.before)
+	assert.Equal(t, generationRecordIdentityFromCompiled(target), *got.target)
+}
+
+// Rationale: If committed-target rename may have happened but returned no qualifying evidence, both the final write
+// error and the Flush error remain visible. In-memory applying authority is retained and all later mutation is barred.
+func TestGenerationApplicationBlocksAfterAmbiguousExactTargetCommitWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	before, target := testGenerationApplicationPair(t)
+	flushFailure := errors.New("injected ambiguous flush")
+	commitFailure := generationAuthorityError(
+		"injected committed-target write failure",
+		errors.New("injected record readback failure"),
+		map[string]any{"record_replaced": true},
+	)
+	lease, store := testGenerationApplicationLease(t, committedRecordForCompiled(t, before))
+	store.replaceErrors = []error{nil, commitFailure}
+	kernel := &fakeKernelGenerationApplication{
+		observations: []kernelObservation{
+			kernelObservationFromCompiled(before),
+			kernelObservationFromCompiled(target),
+		},
+		results:     []kernelApplicationResult{{commitAttempted: true}},
+		applyErrors: []error{flushFailure},
+	}
+
+	err := lease.applyCompiledGeneration(t.Context(), kernel, before, target)
+	require.ErrorIs(t, err, flushFailure)
+	require.ErrorIs(t, err, commitFailure)
+	assert.False(t, generationApplicationOutcomeUnknown(err))
+	assert.Equal(t, string(generationApplicationKernelTarget), generationApplicationKernelStateDetail(err))
+	got, admittedErr := lease.admittedRecord()
+	require.NoError(t, admittedErr)
+	assert.Equal(t, generationRecordApplying, got.lifecycle)
+	require.NotNil(t, got.before)
+	require.NotNil(t, got.target)
+	assert.Equal(t, generationRecordIdentityFromCompiled(before), *got.before)
+	assert.Equal(t, generationRecordIdentityFromCompiled(target), *got.target)
+
+	blockedKernel := &fakeKernelGenerationApplication{}
+	blockedErr := lease.applyCompiledGeneration(t.Context(), blockedKernel, before, target)
+	require.Error(t, blockedErr)
+	assert.ErrorContains(t, blockedErr, "ambiguous")
+	assert.Empty(t, blockedKernel.events)
+}
+
 func TestGenerationApplicationDoesNotMutateAfterApplyingRecordWriteFailure(t *testing.T) {
 	t.Parallel()
 
@@ -370,8 +450,6 @@ func TestGenerationApplicationSerializesTransactionsAcrossCopiedLeaseValues(t *t
 // Rationale: Standalone durable-record replacement uses the same mutex as the whole application transaction. It may
 // run after reconciliation, but never between the admitted applying record and its exact committed outcome.
 func TestGenerationApplicationSerializesStandaloneReplacementAfterReconciliation(t *testing.T) {
-	t.Parallel()
-
 	before, target := testGenerationApplicationPair(t)
 	lease, store := testGenerationApplicationLease(t, committedRecordForCompiled(t, before))
 	copiedLease := *lease
@@ -394,14 +472,24 @@ func TestGenerationApplicationSerializesStandaloneReplacementAfterReconciliation
 	}()
 	<-applyStarted
 
-	replacementStarted := make(chan struct{})
 	replacementResult := make(chan error, 1)
 	replacement := committedRecordForCompiled(t, before)
 	go func() {
-		close(replacementStarted)
 		replacementResult <- copiedLease.replaceAdmittedRecord(t.Context(), replacement)
 	}()
-	<-replacementStarted
+	completed, blockErr := waitForGenerationApplicationMutexBlock(
+		t,
+		replacementResult,
+		"(*persistentGenerationLease).replaceAdmittedRecord",
+	)
+	if blockErr != nil {
+		close(applyRelease)
+		<-applicationResult
+		if !completed {
+			<-replacementResult
+		}
+		t.Fatal(blockErr)
+	}
 	close(applyRelease)
 
 	require.NoError(t, <-applicationResult)
@@ -415,8 +503,6 @@ func TestGenerationApplicationSerializesStandaloneReplacementAfterReconciliation
 // Rationale: Release shares the application mutex across copied lease values. It closes retained resources only after
 // exact post-Flush reconciliation and the final committed record have completed.
 func TestGenerationApplicationSerializesReleaseAfterReconciliation(t *testing.T) {
-	t.Parallel()
-
 	before, target := testGenerationApplicationPair(t)
 	lease, store := testGenerationApplicationLease(t, committedRecordForCompiled(t, before))
 	copiedLease := *lease
@@ -451,13 +537,23 @@ func TestGenerationApplicationSerializesReleaseAfterReconciliation(t *testing.T)
 	}()
 	<-applyStarted
 
-	releaseStarted := make(chan struct{})
 	releaseResult := make(chan error, 1)
 	go func() {
-		close(releaseStarted)
 		releaseResult <- copiedLease.Release(t.Context())
 	}()
-	<-releaseStarted
+	completed, blockErr := waitForGenerationApplicationMutexBlock(
+		t,
+		releaseResult,
+		"(*persistentGenerationLease).Release",
+	)
+	if blockErr != nil {
+		close(applyRelease)
+		<-applicationResult
+		if !completed {
+			<-releaseResult
+		}
+		t.Fatal(blockErr)
+	}
 	close(applyRelease)
 
 	require.NoError(t, <-applicationResult)
@@ -476,6 +572,37 @@ func TestGenerationApplicationSerializesReleaseAfterReconciliation(t *testing.T)
 	}
 	_, err := lease.admittedRecord()
 	require.Error(t, err)
+}
+
+// waitForGenerationApplicationMutexBlock positively observes the named competing method stopped beneath
+// sync.Mutex while the first transaction holds applicationMu. A sleep or immediate default-select could run before
+// the competitor and mistake scheduler timing for serialization, so these two non-parallel tests inspect the bounded
+// goroutine snapshot instead of inferring that the method started.
+func waitForGenerationApplicationMutexBlock(
+	t *testing.T,
+	completed <-chan error,
+	method string,
+) (bool, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	stack := make([]byte, 1<<20)
+	for {
+		select {
+		case err := <-completed:
+			return true, fmt.Errorf("%s completed while the first application transaction was held: %v", method, err)
+		case <-ctx.Done():
+			return false, fmt.Errorf("observe %s blocked at application mutex: %w", method, ctx.Err())
+		default:
+		}
+		written := runtime.Stack(stack, true)
+		for _, goroutine := range strings.Split(string(stack[:written]), "\n\n") {
+			if strings.Contains(goroutine, method) && strings.Contains(goroutine, "[sync.Mutex.Lock]") {
+				return false, nil
+			}
+		}
+		runtime.Gosched()
+	}
 }
 
 func testGenerationApplicationPair(t *testing.T) (compiledGeneration, compiledGeneration) {

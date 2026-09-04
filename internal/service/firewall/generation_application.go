@@ -70,8 +70,7 @@ func (lease *persistentGenerationLease) applyCompiledGeneration(
 	return lease.applyCompiledGenerationDuringApplication(ctx, kernel, before, target)
 }
 
-// applyCompiledGenerationDuringApplication owns the non-locking stages of one serialized record -> kernel -> record
-// transaction. Its caller holds state.applicationMu for the entire sequence, including fresh reconciliation.
+// CALLER MUST HOLD: state.applicationMu.
 func (lease *persistentGenerationLease) applyCompiledGenerationDuringApplication(
 	ctx context.Context,
 	kernel generationKernelApplication,
