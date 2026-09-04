@@ -311,7 +311,12 @@ func (peer *vmExecFirecrackerPeer) recheckLocatorAndLiveness(
 		return vmExecPeerError(record.vmID, state.role, "rederive retained connection peer locator", err)
 	}
 	if derived != record.launch.process {
-		return vmExecPeerError(record.vmID, state.role, "retained connection peer locator no longer matches Firecracker", nil)
+		return vmExecPeerError(
+			record.vmID,
+			state.role,
+			"retained connection peer locator no longer matches Firecracker",
+			nil,
+		)
 	}
 	alive, err := state.deps.pidfdAlive(ctx, state.pidfd)
 	if err != nil {
