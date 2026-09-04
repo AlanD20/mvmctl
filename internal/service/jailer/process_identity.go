@@ -13,8 +13,51 @@ import (
 )
 
 type verifiedLaunchIdentity struct {
-	identity    instanceActiveIdentity
-	destination *jailDestinationLease
+	identity         instanceActiveIdentity
+	destination      *jailDestinationLease
+	finalFirecracker processObservation
+}
+
+type retainedLaunchCgroupProcessVerifier struct {
+	deps    processIdentityVerifierDeps
+	pidfd   int
+	locator instanceProcessLocator
+	vmID    string
+}
+
+func (verifier retainedLaunchCgroupProcessVerifier) verifyBeforeCgroupMembership(
+	ctx context.Context,
+	locator instanceProcessLocator,
+	_ processObservation,
+) error {
+	return verifier.verify(ctx, locator)
+}
+
+func (verifier retainedLaunchCgroupProcessVerifier) verifyAfterCgroupMembership(
+	ctx context.Context,
+	locator instanceProcessLocator,
+	_ processObservation,
+) error {
+	return verifier.verify(ctx, locator)
+}
+
+func (verifier retainedLaunchCgroupProcessVerifier) verify(
+	ctx context.Context,
+	locator instanceProcessLocator,
+) error {
+	if locator != verifier.locator {
+		return processVerificationError(verifier.vmID, "cgroup verifier locator does not match launch authority", nil)
+	}
+	if err := requireProcessAlive(
+		ctx,
+		verifier.deps.pidfdAlive,
+		verifier.pidfd,
+		verifier.vmID,
+		"Firecracker",
+	); err != nil {
+		return err
+	}
+	return requireExactPIDFDLocator(ctx, verifier.deps, verifier.pidfd, verifier.locator, verifier.vmID, "Firecracker")
 }
 
 type observedJailDestination struct {
@@ -52,6 +95,7 @@ func activateVerifiedProcessWithDeps(
 	if state.released || state.directories == nil || state.vmLock == nil || state.prepared == nil ||
 		state.processes == nil || state.processes.state == nil ||
 		state.networkNamespace == nil ||
+		(state.preparedManagedVMCgroup == nil) == (state.managedVMCgroup == nil) ||
 		(state.preparedJailDestination == nil && state.jailDestination == nil) {
 		return nil, processVerificationError(vmID, "launch process authority is not active", nil)
 	}
@@ -97,6 +141,34 @@ func activateVerifiedProcessWithDeps(
 	if err != nil {
 		return nil, err
 	}
+	cgroupVerifier := retainedLaunchCgroupProcessVerifier{
+		deps: deps, pidfd: processState.firecracker.pidfd, locator: record.launch.process, vmID: vmID,
+	}
+	if state.preparedManagedVMCgroup != nil {
+		bound, bindErr := state.preparedManagedVMCgroup.Bind(
+			ctx,
+			record.launch.process,
+			verified.finalFirecracker,
+			cgroupVerifier,
+		)
+		if bound != nil {
+			state.managedVMCgroup = bound
+			state.preparedManagedVMCgroup = nil
+		}
+		if bindErr != nil {
+			return nil, bindErr
+		}
+		if bound == nil {
+			return nil, processVerificationError(vmID, "managed VM cgroup binding is incomplete", nil)
+		}
+	} else if err := state.managedVMCgroup.VerifyMembership(
+		ctx,
+		record.launch.process,
+		verified.finalFirecracker,
+		cgroupVerifier,
+	); err != nil {
+		return nil, err
+	}
 	activeRecord, err := activateInstanceRecord(record, verified.identity)
 	if err != nil {
 		return nil, processVerificationError(vmID, "validate verified active process identity", err)
@@ -113,6 +185,7 @@ func activateVerifiedProcessWithDeps(
 		jailDestination:  verified.destination,
 		networkNamespace: state.networkNamespace,
 		runtimeDirectory: state.runtimeDirectory,
+		managedVMCgroup:  state.managedVMCgroup,
 		record:           activeRecord,
 	}}
 	state.directories = nil
@@ -122,6 +195,7 @@ func activateVerifiedProcessWithDeps(
 	state.jailDestination = nil
 	state.networkNamespace = nil
 	state.runtimeDirectory = nil
+	state.managedVMCgroup = nil
 	state.record = activeRecord
 	state.released = true
 	if writeErr != nil {
@@ -244,13 +318,25 @@ func verifyRetainedLaunchProcesses(
 	if err != nil {
 		return verifiedLaunchIdentity{}, err
 	}
-	preSealFirecracker, preSealDestination, err := observeFirecrackerExecTransition(
-		ctx,
-		deps,
-		record,
-		processes,
-		destination,
-	)
+	destination.state.mu.Lock()
+	destinationSealed := destination.state.sealed
+	destination.state.mu.Unlock()
+	var preSealFirecracker observedProcessIdentity
+	var preSealDestination observedJailDestination
+	if destinationSealed {
+		preSealDestination, err = inspectJailDestination(ctx, deps, destination, manifest.firecracker)
+		if err == nil {
+			preSealFirecracker, err = verifyFirecrackerObservation(ctx, deps, record, preSealDestination)
+		}
+	} else {
+		preSealFirecracker, preSealDestination, err = observeFirecrackerExecTransition(
+			ctx,
+			deps,
+			record,
+			processes,
+			destination,
+		)
+	}
 	if err != nil {
 		return verifiedLaunchIdentity{}, err
 	}
@@ -261,8 +347,10 @@ func verifyRetainedLaunchProcesses(
 			nil,
 		)
 	}
-	if err := destination.seal(ctx, record.ownerUID, record.launch.ownerGID); err != nil {
-		return verifiedLaunchIdentity{}, err
+	if !destinationSealed {
+		if err := destination.seal(ctx, record.ownerUID, record.launch.ownerGID); err != nil {
+			return verifiedLaunchIdentity{}, err
+		}
 	}
 	sealedDestination, err := inspectJailDestination(ctx, deps, destination, manifest.firecracker)
 	if err != nil {
@@ -358,7 +446,9 @@ func verifyRetainedLaunchProcesses(
 	if err := validateInstanceActiveIdentity(record, identity); err != nil {
 		return verifiedLaunchIdentity{}, processVerificationError(vmID, "observed process identity is invalid", err)
 	}
-	return verifiedLaunchIdentity{identity: identity, destination: destination}, nil
+	return verifiedLaunchIdentity{
+		identity: identity, destination: destination, finalFirecracker: finalFirecracker.process,
+	}, nil
 }
 
 func observeFirecrackerExecTransition(

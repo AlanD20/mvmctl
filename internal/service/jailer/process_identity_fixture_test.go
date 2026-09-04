@@ -35,6 +35,7 @@ const (
 type processIdentityFixture struct {
 	launch                      *launchLease
 	processSource               *blockedLaunchProcesses
+	cgroup                      *managedVMCgroupTestFixture
 	fake                        *fakeProcessIdentityDeps
 	firecrackerNamespace        instanceObjectIdentity
 	firecrackerNetworkNamespace instanceObjectIdentity
@@ -89,10 +90,13 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 	}
 
 	fake := &fakeProcessIdentityDeps{
-		bootIDs: []string{processTestHostBootID, processTestHostBootID, processTestHostBootID},
+		bootIDs: []string{
+			processTestHostBootID, processTestHostBootID, processTestHostBootID,
+			processTestHostBootID, processTestHostBootID, processTestHostBootID,
+		},
 		alive: map[int][]bool{
-			processTestFirecrackerPIDFD: {true, true},
-			processTestRelayPIDFD:       {true, true},
+			processTestFirecrackerPIDFD: {true, true, true, true, true, true},
+			processTestRelayPIDFD:       {true, true, true, true},
 		},
 		processDirectories: map[int]int{
 			processTestFirecrackerPID: processTestFirecrackerDirFD,
@@ -197,17 +201,23 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 	))
 	require.NoError(t, topology.Release(t.Context()))
 	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
-	t.Cleanup(func() {
-		preparedCgroup := launch.state.preparedManagedVMCgroup
-		if preparedCgroup != nil && !preparedCgroup.snapshot().released {
-			require.NoError(t, preparedCgroup.Release(context.Background()))
-		}
-	})
 	require.NoError(t, launch.releaseToJailer(t.Context()))
+	cgroup.addVMLeaf(testVMID)
+	originalWaitReap := launch.state.processes.state.deps.waitReapPIDFD
+	launch.state.processes.state.deps.waitReapPIDFD = func(ctx context.Context, fd int) error {
+		if err := originalWaitReap(ctx, fd); err != nil {
+			return err
+		}
+		if fd == processTestFirecrackerPIDFD {
+			cgroup.setMembership(testVMID, "")
+		}
+		return nil
+	}
 
 	return &processIdentityFixture{
 		launch:                      launch,
 		processSource:               processes,
+		cgroup:                      cgroup,
 		fake:                        fake,
 		firecrackerNamespace:        firecrackerNamespace,
 		firecrackerNetworkNamespace: firecrackerNetworkNamespace,
@@ -306,6 +316,7 @@ type fakeProcessIdentityDeps struct {
 	clock                   time.Time
 	waits                   []time.Duration
 	deriveLocatorOverride   func(context.Context, int) (instanceProcessLocator, error)
+	postExecStable          bool
 	onPread                 func(int)
 	preadCalls              int
 }
@@ -373,6 +384,10 @@ func (fake *fakeProcessIdentityDeps) deps() processIdentityVerifierDeps {
 	}
 }
 
+func (fake *fakeProcessIdentityDeps) retainPostExecFirecracker() {
+	fake.postExecStable = true
+}
+
 func (fake *fakeProcessIdentityDeps) newPreparedDestination() *preparedJailDestination {
 	parent := fake.stats[200][0]
 	deps := jailDestinationDeps{
@@ -404,16 +419,23 @@ func (fake *fakeProcessIdentityDeps) newPreparedDestination() *preparedJailDesti
 			stat.Mnt_id = 77
 			return nil
 		},
-		fchmod: func(context.Context, int, uint32) error {
+		fchmod: func(_ context.Context, fd int, mode uint32) error {
 			fake.mu.Lock()
 			defer fake.mu.Unlock()
 			fake.destinationMutations++
+			for index := range fake.stats[fd] {
+				fake.stats[fd][index].Mode = fake.stats[fd][index].Mode&unix.S_IFMT | mode
+			}
 			return nil
 		},
-		fchown: func(context.Context, int, int, int) error {
+		fchown: func(_ context.Context, fd int, uid int, gid int) error {
 			fake.mu.Lock()
 			defer fake.mu.Unlock()
 			fake.destinationMutations++
+			for index := range fake.stats[fd] {
+				fake.stats[fd][index].Uid = uint32(uid)
+				fake.stats[fd][index].Gid = uint32(gid)
+			}
 			return nil
 		},
 		close: func(_ context.Context, fd int) error {
@@ -496,6 +518,9 @@ func (fake *fakeProcessIdentityDeps) pinProcessObject(
 	index := fake.processObjectIndex[key]
 	fake.processObjectIndex[key]++
 	values := fake.processObjects[key]
+	if fake.postExecStable && directoryFD == processTestFirecrackerDirFD {
+		index++
+	}
 	if index >= len(values) {
 		return -1, io.EOF
 	}

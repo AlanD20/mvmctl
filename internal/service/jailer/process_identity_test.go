@@ -63,17 +63,105 @@ func TestActivateVerifiedProcessUsesRetainedPIDFDsAndPinnedExecutable(t *testing
 		t.Errorf("active identity mismatch (-want +got):\n%s", diff)
 	}
 	assert.True(t, fixture.launch.snapshot().released)
+	assert.False(t, fixture.launch.snapshot().hasPreparedManagedVMCgroup)
+	assert.False(t, fixture.launch.snapshot().hasManagedVMCgroup)
 	assert.Equal(t, blockedLaunchProcessesTransferred, fixture.processSource.state.status)
 	require.NotNil(t, active.state.processes)
+	boundCgroup := active.state.managedVMCgroup
+	require.NotNil(t, boundCgroup)
+	require.Error(t, active.Release(t.Context()))
 	assert.Equal(t, blockedLaunchProcessesReleasedToJailer, active.state.processes.state.status)
 	require.NoError(t, fixture.launch.Release(t.Context()))
 	cleanup, err := active.BeginCleanup(t.Context())
 	require.NoError(t, err)
+	assert.Nil(t, active.state.managedVMCgroup)
+	assert.Same(t, boundCgroup, cleanup.state.managedVMCgroup)
 	require.NoError(t, cleanup.Complete(t.Context()))
+	assert.True(t, boundCgroup.snapshot().released)
+	assert.False(t, fixture.cgroup.vmLeafPresent(testVMID))
 	require.NoError(t, cleanup.Release(t.Context()))
 	if diff := cmp.Diff([]int{203, 202, 201, 200}, fixture.fake.destinationCloseOrder()); diff != "" {
 		t.Errorf("destination cleanup order mismatch (-want +got):\n%s", diff)
 	}
+}
+
+func TestActivateVerifiedProcessRetriesMembershipProofOnSameBoundCgroup(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProcessIdentityFixture(t, false)
+	fixture.cgroup.setMembership(testVMID, "4343\n")
+
+	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
+	assert.Nil(t, active)
+	require.Error(t, err)
+	bound := fixture.launch.state.managedVMCgroup
+	require.NotNil(t, bound)
+	assert.Nil(t, fixture.launch.state.preparedManagedVMCgroup)
+	assert.False(t, fixture.launch.snapshot().hasPreparedManagedVMCgroup)
+	assert.True(t, fixture.launch.snapshot().hasManagedVMCgroup)
+
+	fixture.cgroup.setMembership(testVMID, "4242\n")
+	fixture.fake.retainPostExecFirecracker()
+	active, err = activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	assert.Same(t, bound, active.state.managedVMCgroup)
+	cleanup, err := active.BeginCleanup(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, cleanup.Complete(t.Context()))
+	require.NoError(t, cleanup.Release(t.Context()))
+}
+
+func TestActivateVerifiedProcessPreAdmissionCgroupFailureRetainsPreparation(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProcessIdentityFixture(t, false)
+	prepared := fixture.launch.state.preparedManagedVMCgroup
+	require.NoError(t, unix.Chmod(fixture.cgroup.vmLeafPath(testVMID), 0o700))
+
+	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
+	assert.Nil(t, active)
+	require.Error(t, err)
+	assert.Same(t, prepared, fixture.launch.state.preparedManagedVMCgroup)
+	assert.Nil(t, fixture.launch.state.managedVMCgroup)
+	assert.True(t, fixture.launch.snapshot().hasPreparedManagedVMCgroup)
+	assert.False(t, fixture.launch.snapshot().hasManagedVMCgroup)
+
+	require.NoError(t, unix.Chmod(fixture.cgroup.vmLeafPath(testVMID), managedVMCgroupLeafMode))
+	fixture.cgroup.setMembership(testVMID, "")
+	releaseTestLaunch(t, fixture.launch)
+}
+
+func TestActiveCleanupNonemptyManagedVMCgroupRetainsLeaseForRetry(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProcessIdentityFixture(t, false)
+	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
+	require.NoError(t, err)
+	bound := active.state.managedVMCgroup
+	require.NotNil(t, bound)
+	originalWait := active.state.processes.state.deps.waitReapPIDFD
+	active.state.processes.state.deps.waitReapPIDFD = func(ctx context.Context, fd int) error {
+		if err := originalWait(ctx, fd); err != nil {
+			return err
+		}
+		if fd == processTestFirecrackerPIDFD {
+			fixture.cgroup.setMembership(testVMID, "4242\n")
+		}
+		return nil
+	}
+	cleanup, err := active.BeginCleanup(t.Context())
+	require.NoError(t, err)
+
+	require.Error(t, cleanup.Complete(t.Context()))
+	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
+	assert.Same(t, bound, cleanup.state.managedVMCgroup)
+	assert.True(t, fixture.cgroup.vmLeafPresent(testVMID))
+	fixture.cgroup.setMembership(testVMID, "")
+	require.NoError(t, cleanup.Complete(t.Context()))
+	assert.True(t, bound.snapshot().released)
+	assert.Equal(t, instanceLifecycleCleaned, cleanup.snapshot().lifecycle)
+	require.NoError(t, cleanup.Release(t.Context()))
 }
 
 func TestBoundJailDestinationUsesOperableRootDescriptor(t *testing.T) {
@@ -456,9 +544,15 @@ func TestActivateVerifiedProcessReturnsTargetAfterActiveRecordRename(t *testing.
 	assert.Equal(t, true, domainErr.Details["record_replaced"])
 	assert.Equal(t, true, domainErr.Details["durability_uncertain"])
 	assert.True(t, fixture.launch.snapshot().released)
+	assert.False(t, fixture.launch.snapshot().hasManagedVMCgroup)
+	bound := active.state.managedVMCgroup
+	require.NotNil(t, bound)
 	cleanup, cleanupErr := active.BeginCleanup(t.Context())
 	require.ErrorIs(t, cleanupErr, fault)
 	require.NotNil(t, cleanup)
+	assert.Nil(t, active.state.managedVMCgroup)
+	assert.Same(t, bound, cleanup.state.managedVMCgroup)
 	require.ErrorIs(t, cleanup.Complete(t.Context()), fault)
+	assert.True(t, bound.snapshot().released)
 	require.NoError(t, cleanup.Release(t.Context()))
 }

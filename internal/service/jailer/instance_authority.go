@@ -69,6 +69,7 @@ type activeLeaseState struct {
 	jailDestination  *jailDestinationLease
 	networkNamespace *topologySelectedNetworkNamespace
 	runtimeDirectory *managedVMRuntimeLease
+	managedVMCgroup  *managedVMCgroupLease
 	record           instanceRecord
 	released         bool
 	releaseErr       error
@@ -1172,6 +1173,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 		jailDestination:  state.jailDestination,
 		networkNamespace: state.networkNamespace,
 		runtimeDirectory: state.runtimeDirectory,
+		managedVMCgroup:  state.managedVMCgroup,
 		record:           record,
 	}}
 	state.roots = nil
@@ -1182,6 +1184,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 	state.jailDestination = nil
 	state.networkNamespace = nil
 	state.runtimeDirectory = nil
+	state.managedVMCgroup = nil
 	state.record = record
 	state.released = true
 	if writeErr != nil {
@@ -1219,7 +1222,7 @@ func (lease *activeLease) Release(ctx context.Context) error {
 		return state.releaseErr
 	}
 	if state.prepared != nil || state.processes != nil || state.jailDestination != nil ||
-		state.runtimeDirectory != nil {
+		state.runtimeDirectory != nil || state.managedVMCgroup != nil {
 		return instanceStateError(state.record.vmID, "live active authority must be consumed by BeginCleanup")
 	}
 	state.releaseErr = releaseInstanceOperationResources(
