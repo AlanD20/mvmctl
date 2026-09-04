@@ -29,6 +29,96 @@ func TestVMExecCapacityAuthorityRequiresPositivePrivatePolicy(t *testing.T) {
 	assert.Equal(t, errs.ClassValidation, errs.AsDomainError(err).Class)
 }
 
+// Rationale: session budget enforcement may observe CLOCK_BOOTTIME only through a live capacity lease. This keeps the
+// clock dependency and the lease's release race inside the authority that owns both.
+func TestVMExecCapacityLeaseObservesRelayBoottimeThroughValidatedAuthority(t *testing.T) {
+	fixture := newVMExecCapacityFixture(t, 1)
+	authority := fixture.authority(t)
+	validLease := func() *vmExecCapacityLease {
+		return &vmExecCapacityLease{state: &vmExecCapacityLeaseState{authority: authority}}
+	}
+
+	observed, err := validLease().observedRelayBoottimeNS(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, fixture.boottimeNS, observed)
+
+	tests := []struct {
+		name        string
+		lease       func() *vmExecCapacityLease
+		context     func() context.Context
+		wantMessage string
+		wantCause   error
+	}{
+		{
+			name:        "missing_lease",
+			lease:       func() *vmExecCapacityLease { return nil },
+			context:     t.Context,
+			wantMessage: "lease is unavailable",
+		},
+		{
+			name:        "missing_state",
+			lease:       func() *vmExecCapacityLease { return &vmExecCapacityLease{} },
+			context:     t.Context,
+			wantMessage: "lease is unavailable",
+		},
+		{
+			name:        "missing_context",
+			lease:       validLease,
+			context:     func() context.Context { return nil },
+			wantMessage: "clock context is required",
+		},
+		{
+			name:  "cancelled_context",
+			lease: validLease,
+			context: func() context.Context {
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				return ctx
+			},
+			wantMessage: "observe VM-exec relay CLOCK_BOOTTIME",
+			wantCause:   context.Canceled,
+		},
+		{
+			name: "released_lease",
+			lease: func() *vmExecCapacityLease {
+				return &vmExecCapacityLease{state: &vmExecCapacityLeaseState{authority: authority, released: true}}
+			},
+			context:     t.Context,
+			wantMessage: "lease is released",
+		},
+		{
+			name: "missing_authority",
+			lease: func() *vmExecCapacityLease {
+				return &vmExecCapacityLease{state: &vmExecCapacityLeaseState{}}
+			},
+			context:     t.Context,
+			wantMessage: "lease clock is unavailable",
+		},
+		{
+			name: "missing_clock",
+			lease: func() *vmExecCapacityLease {
+				authorityWithoutClock := *authority
+				authorityWithoutClock.deps.clock = nil
+				return &vmExecCapacityLease{state: &vmExecCapacityLeaseState{authority: &authorityWithoutClock}}
+			},
+			context:     t.Context,
+			wantMessage: "lease clock is unavailable",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := test.lease().observedRelayBoottimeNS(test.context())
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.wantMessage)
+			if test.wantCause != nil {
+				assert.ErrorIs(t, err, test.wantCause)
+			}
+		})
+	}
+}
+
 func TestVMExecCapacityAuthorityReservesRootGeneratedBootBoundRecord(t *testing.T) {
 	t.Parallel()
 

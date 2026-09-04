@@ -317,6 +317,22 @@ func unusedVMExecPeerAuthorityDeps() vmExecPeerAuthorityDeps {
 	}
 }
 
+func TestVMExecSessionAuthorityConstructorRequiresPeerAuthorityDependencies(t *testing.T) {
+	fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
+
+	authority, err := newVMExecSessionAuthorityWithDeps(
+		fixture.instances,
+		fixture.capacity.authority(t),
+		fixture.authority.recoveryDeps,
+		fixture.identity.deps(),
+		vmExecPeerAuthorityDeps{},
+	)
+
+	assert.Nil(t, authority)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "peer authority dependencies are incomplete")
+}
+
 func TestInstanceAuthorityLocksActivePairBehindNamedBoundary(t *testing.T) {
 	t.Parallel()
 

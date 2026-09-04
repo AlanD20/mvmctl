@@ -24,6 +24,7 @@ const (
 )
 
 type vmExecSessionPeerFixture struct {
+	// mu guards injected liveness state and peer close observations shared with authority effect callbacks.
 	mu          sync.Mutex
 	records     map[int]instanceRecord
 	peerPIDFDs  map[int]int
@@ -35,6 +36,110 @@ type vmExecSessionPeerFixture struct {
 
 	exitSourceOnDestinationAliveCall int
 	sourceExited                     bool
+}
+
+// Rationale: directional peer state is monotonic. Reordering or rebinding either capability would make readiness
+// ambiguous and could replace an already-proven Firecracker peer.
+func TestVMExecSessionRejectsOutOfOrderAndDuplicatePeerBinding(t *testing.T) {
+	tests := []struct {
+		name        string
+		exercise    func(*testing.T, *vmExecSessionLease) error
+		wantMessage string
+	}{
+		{
+			name: "destination_before_source",
+			exercise: func(t *testing.T, lease *vmExecSessionLease) error {
+				return lease.bindDestination(t.Context(), testVMExecDestinationConnectionFD)
+			},
+			wantMessage: "source connection must be bound first",
+		},
+		{
+			name: "duplicate_source",
+			exercise: func(t *testing.T, lease *vmExecSessionLease) error {
+				require.NoError(t, lease.bindSource(t.Context(), testVMExecSourceConnectionFD))
+				return lease.bindSource(t.Context(), testVMExecSourceConnectionFD)
+			},
+			wantMessage: "source connection is already bound",
+		},
+		{
+			name: "duplicate_destination",
+			exercise: func(t *testing.T, lease *vmExecSessionLease) error {
+				require.NoError(t, lease.bindSource(t.Context(), testVMExecSourceConnectionFD))
+				require.NoError(t, lease.bindDestination(t.Context(), testVMExecDestinationConnectionFD))
+				return lease.bindDestination(t.Context(), testVMExecDestinationConnectionFD)
+			},
+			wantMessage: "destination connection is already bound",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
+			prepareVMExecSessionBindingIdentity(fixture)
+			peers := newVMExecSessionPeerFixture(fixture.sourceRecord, fixture.destinationRecord)
+			fixture.authority.peerDeps = peers.deps()
+			lease, err := fixture.authority.reserve(
+				t.Context(), testInstanceCaller(), vmExecSessionSourceID, vmExecSessionDestinationID,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, lease)
+			t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
+
+			err = test.exercise(t, lease)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.wantMessage)
+		})
+	}
+}
+
+// Rationale: connection setup consumes the same fixed execution budget as the relay and cannot cross a host reboot.
+// Either boundary invalidates the retained admission before a directional binding becomes usable.
+func TestVMExecSessionBindingRejectsBootDriftAndExhaustedRelayBudget(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutate      func(*testing.T, *vmExecSessionAuthorityFixture, *vmExecSessionLease)
+		wantMessage string
+	}{
+		{
+			name: "boot_drift",
+			mutate: func(t *testing.T, fixture *vmExecSessionAuthorityFixture, _ *vmExecSessionLease) {
+				fixture.identity.mu.Lock()
+				defer fixture.identity.mu.Unlock()
+				require.Less(t, fixture.identity.bootIndex, len(fixture.identity.bootIDs))
+				fixture.identity.bootIDs[fixture.identity.bootIndex] = processOtherBootID
+			},
+			wantMessage: "host boot ID changed during VM-exec peer proof",
+		},
+		{
+			name: "relay_budget_exhausted",
+			mutate: func(_ *testing.T, fixture *vmExecSessionAuthorityFixture, lease *vmExecSessionLease) {
+				fixture.capacity.boottimeNS = lease.state.admission.relayStopBoottimeNS
+			},
+			wantMessage: "vm-exec relay CLOCK_BOOTTIME budget is exhausted",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
+			prepareVMExecSessionBindingIdentity(fixture)
+			peers := newVMExecSessionPeerFixture(fixture.sourceRecord, fixture.destinationRecord)
+			fixture.authority.peerDeps = peers.deps()
+			lease, err := fixture.authority.reserve(
+				t.Context(), testInstanceCaller(), vmExecSessionSourceID, vmExecSessionDestinationID,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, lease)
+			t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
+			test.mutate(t, fixture, lease)
+
+			err = lease.bindSource(t.Context(), testVMExecSourceConnectionFD)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.wantMessage)
+		})
+	}
 }
 
 func TestVMExecSessionBindsAndRetainsBothExactFirecrackerPeers(t *testing.T) {
@@ -221,6 +326,8 @@ func TestProductionVMExecSessionAuthorityUsesFixedGlobalCeiling(t *testing.T) {
 	require.NoError(t, validateVMExecPeerAuthorityDeps(authority.peerDeps))
 }
 
+// newVMExecSessionPeerFixture maps each directional connection to its exact Firecracker credentials, pidfd, and
+// launch locator while retaining observable liveness and close state.
 func newVMExecSessionPeerFixture(
 	source instanceRecord,
 	destination instanceRecord,
@@ -244,6 +351,8 @@ func newVMExecSessionPeerFixture(
 	}
 }
 
+// deps exposes the exact, deterministic peer evidence for both directional connections and records retained-pidfd
+// liveness and cleanup observations under the fixture mutex.
 func (fixture *vmExecSessionPeerFixture) deps() vmExecPeerAuthorityDeps {
 	return vmExecPeerAuthorityDeps{
 		peerCredentials: func(_ context.Context, connectionFD int) (*unix.Ucred, error) {
@@ -306,6 +415,8 @@ func (fixture *vmExecSessionPeerFixture) closedSnapshot() []int {
 	return append([]int{}, fixture.closed...)
 }
 
+// prepareVMExecSessionBindingIdentity extends the admission fixture with the ordered complete-identity observations
+// consumed by source admission and the later source/destination readiness rechecks.
 func prepareVMExecSessionBindingIdentity(fixture *vmExecSessionAuthorityFixture) {
 	fake := fixture.identity
 	sequence := []vmExecSessionRole{
@@ -349,6 +460,8 @@ func prepareVMExecSessionBindingIdentity(fixture *vmExecSessionAuthorityFixture)
 	}
 }
 
+// appendVMExecSessionBindingObjects adds one role's pinned namespace, root, and executable observations in verifier
+// call order; executable checks consume an extra stable descriptor for digest comparison.
 func appendVMExecSessionBindingObjects(fake *fakeProcessIdentityDeps, role vmExecSessionRole) {
 	mountFD := 111
 	networkFD := 141
