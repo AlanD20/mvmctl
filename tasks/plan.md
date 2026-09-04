@@ -81,6 +81,9 @@ continue without silently deleting it.
   random 32-lowercase-hex session ID and permits one source request/response stream. A named ordinary non-TTY exec path
   carries only that ID; normal exec/copy does not open a source session, and the old `remote_vm`, generic
   `OnHostFrame`, shared `activeConn`, and `internal/vsockhandler` paths are removed.
+  After `ReadRequest`, exactly one `WaitCancel` reader may consume the matching request-ID-bound `cancel` frame.
+  Invalid or context-cancelled partial control input closes the transport fail-closed, explicit `Close` and context
+  cancellation unblock the reader, and directional deadlines preserve concurrent response writes.
   Inside the source guest, the pending session is bound to the exact outer command's atomically acquired pidfd and
   stable PID/start identity. The mode-`0666` local AF_UNIX broker requires matching `SO_PEERCRED`/`SO_PEERPIDFD`,
   retained live pidfds, UID/GID, and a twice-stable bounded parent chain before one claim. The session ID is

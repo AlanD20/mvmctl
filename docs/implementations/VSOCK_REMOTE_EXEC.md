@@ -73,10 +73,13 @@ runtime capacity.
 `MVMSRC01` bootstrap, and requires an exact ready response for that ID. The source guest authenticates the agent token
 in constant time before it registers the ID. Duplicate IDs, malformed frames, and unsupported schemas fail closed.
 
-The host session then accepts exactly one closed source request and emits the bounded response stream. A terminal
-`result` or `error` closes the physical transport so the guest must observe EOF. Session and per-operation contexts set
-effective deadlines; cancellation closes the connection to interrupt partial reads and blocked writes. `Close` is
-idempotent and repeats its first cleanup result.
+The host session then accepts exactly one closed source request and emits the bounded response stream. After
+`ReadRequest` succeeds, `WaitCancel` may claim exactly one control reader bound to the accepted request ID and accepts
+only its matching `cancel` frame. Malformed, non-cancel, wrong-ID, and context-cancelled partial input closes the
+transport fail-closed. Explicit `Close` and context cancellation unblock a partial control read. The cancel reader sets
+only a read deadline while concurrent response operations set only write deadlines, preserving full-duplex output.
+A terminal `result` or `error` closes the physical transport so the guest must observe EOF. Session and per-operation
+contexts retain their effective deadlines, and `Close` is idempotent and repeats its first cleanup result.
 
 This type is deliberately dormant until `pkg/api` receives a root-admitted active source identity and constructs the
 relay.

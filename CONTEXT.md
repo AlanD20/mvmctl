@@ -471,6 +471,12 @@ session ID; normal exec, shell, and copy do not open or inspect a source session
 are protocol failures. The legacy generic `OnHostFrame`, shared `activeConn`, `remote_vm`, and
 `internal/vsockhandler` paths are removed.
 
+After `ReadRequest` succeeds, `SourceSession.WaitCancel` permits exactly one control reader bound to that request's
+ID. It accepts only the matching `cancel` frame. Malformed, non-cancel, wrong-ID, and context-cancelled partial control
+input closes the source transport fail-closed; explicit `Close` and context cancellation unblock a partial read. The
+cancel reader sets only the read deadline while response writers set only the write deadline, preserving full-duplex
+source response output. This is a dormant source-side primitive, not destination cancellation or relay composition.
+
 Inside the source guest, the agent binds a pending session to the exact outer command process created by the matching
 ordinary exec. The outer command may run as root or non-root, starts in a new session/process group, and receives no
 token through its environment, arguments, or filesystem. The mode-`0666` local AF_UNIX broker authorizes by process

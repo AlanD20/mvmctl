@@ -99,6 +99,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MVMSRC01`/version-1 bootstrap and ready frames are capped at 512 bytes, authenticate the configured agent token
   before registration, and bind one random 32-lowercase-hex session ID to one bounded request/response stream. The
   named ordinary non-TTY exec path carries only that ID; normal exec, shell, and copy do not open a source session.
+- Added `SourceSession.WaitCancel` after the source request is read. It claims the session's sole control reader and
+  accepts only one exact `cancel` frame for that request ID. Malformed, non-cancel, wrong-ID, and context-cancelled
+  partial input closes the transport fail-closed; explicit `Close` and context cancellation unblock a partial read.
+  Separate read and write deadlines preserve concurrent response output while cancellation is awaited.
 - Added the process-bound source guest broker and `mvm-agent remote --user <non-root> <destination> -- <command>`.
   The outer source command may run as root or non-root and receives no token through its environment, arguments,
   filesystem, or local request. The mode-`0666` AF_UNIX

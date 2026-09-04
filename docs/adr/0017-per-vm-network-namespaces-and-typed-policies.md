@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-04 (registered peer-bound VM-exec authority sidecar)
+**Last Updated:** 2026-09-04 (request-bound source cancellation reader)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -357,6 +357,13 @@ both ends; agent shutdown releases every session and pin. The outer command runs
 that group is killed on cancellation with a two-second wait bound. This is not per-command cgroup authority and does
 not claim control of a descendant that deliberately escapes the process group.
 
+The host source session now exposes `WaitCancel` only after `ReadRequest` has bound the accepted request ID. Exactly one
+waiter may claim the control reader, and it accepts only one `cancel` frame for that ID. Malformed, non-cancel,
+wrong-ID, and context-cancelled partial input closes the source transport fail-closed; explicit `Close` and context
+cancellation unblock a partial control read. The waiter sets only a read deadline and response operations set only
+write deadlines, so source response writes remain full-duplex while cancellation is awaited. This adds no destination
+session, relay, runtime-policy, or audit effect.
+
 This slice also removes the generic `OnHostFrame`, shared `activeConn`, legacy `remote_vm` protocol, and
 `internal/vsockhandler` package. The local `mvm-agent remote --user <non-root> <destination> -- <command>` client emits
 a strict source request, preserves binary output, requires terminal plus physical EOF, and redacts local failures.
@@ -487,7 +494,10 @@ Implementation remains fail-closed and proceeds in these independently reviewabl
 3. [x] Add exact Firecracker peer/pidfd binding, the fixed global ceiling, and the absolute-boottime stop primitive
    behind private, unregistered boundaries.
 4. [x] Compose those boundaries into the retained sidecar, enforce expiry, then register the exact privileged action.
-5. [ ] Add `SourceSession.WaitCancel`, a closed destination session, and a typed error-reporting audit sink.
+5. Complete the remaining relay primitives without activating the relay:
+   - [x] Add the exact request-ID-bound, single-reader `SourceSession.WaitCancel` lifecycle described above.
+   - [ ] Add a closed destination session.
+   - [ ] Add a typed error-reporting audit sink.
 6. [ ] Add the explicit public trigger and API relay, then qualify same-network, cross-network, and no-IP-network
    behavior plus denial, cancellation, crash, reboot, ceiling, and cleanup paths in Python L2.
 
@@ -644,12 +654,13 @@ credentials/environment, binary output and nonzero exit, redaction, output overf
 process-group cancellation, effective vsock deadlines, bounded terminal writes, and shutdown of partial reads.
 
 Source-side L1 covers dedicated-transport isolation, ordinary-exec non-regression, one-request sessions, duplicate and
-partial bootstrap, cancellation of blocked reads/writes, terminal close/EOF, concurrent-session isolation, bounded
-local admission/read time, host disconnect and shutdown cleanup, root/non-root outer accounts, exact AF_UNIX
-peer/pidfd checks, PID-reuse and zombie rejection, stable bounded process ancestry, one claim, process-group
-cancellation, binary CLI output, and redacted failures. This does not qualify API/root source-VM admission, relay policy
-enforcement/audit, capacity composition, detached-descendant cleanup, a kernel lacking `SO_PEERPIDFD`, or a live
-VM-to-VM path.
+partial bootstrap, the exact request-bound single cancel reader, malformed/wrong-request cancellation rejection,
+cancelled and explicitly closed partial control reads, concurrent full-duplex response writes with directional
+deadlines, cancellation of blocked reads/writes, terminal close/EOF, concurrent-session isolation, bounded local
+admission/read time, host disconnect and shutdown cleanup, root/non-root outer accounts, exact AF_UNIX peer/pidfd
+checks, PID-reuse and zombie rejection, stable bounded process ancestry, one claim, process-group cancellation, binary
+CLI output, and redacted failures. This does not qualify API/root source-VM admission, relay policy enforcement/audit,
+capacity composition, detached-descendant cleanup, a kernel lacking `SO_PEERPIDFD`, or a live VM-to-VM path.
 
 Capacity L1 covers the strict record/codec/store, exact root-owned layout, global lock serialization across independent
 authority instances, cross-owner ceiling enforcement, collision handling, stale-boot/expiration pruning, corrupt-state

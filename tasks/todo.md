@@ -694,6 +694,10 @@ execution remains fail-closed
   and bound admission, request read, process depth, wire lifetime, cancellation, disconnect, and cleanup. Normal
   exec/copy remains unchanged; the generic host-frame/shared-connection path is removed. This is a dormant foundation,
   not source-VM authorization or a positive relay.
+- [x] After `ReadRequest`, allow exactly one `SourceSession.WaitCancel` reader for the accepted request ID. Fail closed
+  and close the transport on malformed, non-cancel, wrong-ID, or context-cancelled partial input; make `Close` and
+  context cancellation unblock a partial read; and use directional deadlines so concurrent response writes remain
+  full-duplex. This is a source-session primitive only.
 - [ ] Wire the source session into the API-owned relay listener. `internal/vsockhandler` must not return; the API
   resolves shared identities only after root runtime admission and supplies an already authority-admitted connection
   to the source-session module.
