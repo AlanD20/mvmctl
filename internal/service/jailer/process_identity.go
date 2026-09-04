@@ -18,48 +18,6 @@ type verifiedLaunchIdentity struct {
 	finalFirecracker processObservation
 }
 
-type retainedLaunchCgroupProcessVerifier struct {
-	deps    processIdentityVerifierDeps
-	pidfd   int
-	locator instanceProcessLocator
-	vmID    string
-}
-
-func (verifier retainedLaunchCgroupProcessVerifier) verifyBeforeCgroupMembership(
-	ctx context.Context,
-	locator instanceProcessLocator,
-	_ processObservation,
-) error {
-	return verifier.verify(ctx, locator)
-}
-
-func (verifier retainedLaunchCgroupProcessVerifier) verifyAfterCgroupMembership(
-	ctx context.Context,
-	locator instanceProcessLocator,
-	_ processObservation,
-) error {
-	return verifier.verify(ctx, locator)
-}
-
-func (verifier retainedLaunchCgroupProcessVerifier) verify(
-	ctx context.Context,
-	locator instanceProcessLocator,
-) error {
-	if locator != verifier.locator {
-		return processVerificationError(verifier.vmID, "cgroup verifier locator does not match launch authority", nil)
-	}
-	if err := requireProcessAlive(
-		ctx,
-		verifier.deps.pidfdAlive,
-		verifier.pidfd,
-		verifier.vmID,
-		"Firecracker",
-	); err != nil {
-		return err
-	}
-	return requireExactPIDFDLocator(ctx, verifier.deps, verifier.pidfd, verifier.locator, verifier.vmID, "Firecracker")
-}
-
 type observedJailDestination struct {
 	root       instanceObjectIdentity
 	executable processExecutableDescriptorIdentity
@@ -141,32 +99,7 @@ func activateVerifiedProcessWithDeps(
 	if err != nil {
 		return nil, err
 	}
-	cgroupVerifier := retainedLaunchCgroupProcessVerifier{
-		deps: deps, pidfd: processState.firecracker.pidfd, locator: record.launch.process, vmID: vmID,
-	}
-	if state.preparedManagedVMCgroup != nil {
-		bound, bindErr := state.preparedManagedVMCgroup.Bind(
-			ctx,
-			record.launch.process,
-			verified.finalFirecracker,
-			cgroupVerifier,
-		)
-		if bound != nil {
-			state.managedVMCgroup = bound
-			state.preparedManagedVMCgroup = nil
-		}
-		if bindErr != nil {
-			return nil, bindErr
-		}
-		if bound == nil {
-			return nil, processVerificationError(vmID, "managed VM cgroup binding is incomplete", nil)
-		}
-	} else if err := state.managedVMCgroup.VerifyMembership(
-		ctx,
-		record.launch.process,
-		verified.finalFirecracker,
-		cgroupVerifier,
-	); err != nil {
+	if err := bindOrVerifyLaunchManagedVMCgroup(ctx, state, deps, record, processState, verified); err != nil {
 		return nil, err
 	}
 	activeRecord, err := activateInstanceRecord(record, verified.identity)
