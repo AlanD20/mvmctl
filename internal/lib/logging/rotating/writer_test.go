@@ -915,26 +915,53 @@ func TestRotatingFileWriterPropagatesFilesystemFailures(t *testing.T) {
 	})
 
 	t.Run("write failure", func(t *testing.T) {
+		// Rationale: a failed record write can have changed the file even when the returned byte count is zero. The
+		// writer must stop accepting records so a later JSON line cannot be joined to ambiguous bytes.
 		injected := errors.New("injected write failure")
 		path := filepath.Join(t.TempDir(), "audit.log")
-		writer := newTestWriter(t, path)
-		writer.deps.write = func(context.Context, int, []byte) (int, error) { return 0, injected }
+		writer, err := NewRotatingFileWriter(t.Context(), path)
+		require.NoError(t, err)
+		writeCalls := 0
+		writer.deps.write = func(context.Context, int, []byte) (int, error) {
+			writeCalls++
+			return 0, injected
+		}
 
 		n, err := writer.WriteContext(t.Context(), []byte("record\n"))
 		assert.Zero(t, n)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
+
+		n, retryErr := writer.WriteContext(t.Context(), []byte("must-not-appear\n"))
+		assert.Zero(t, n)
+		require.Error(t, retryErr)
+		assert.ErrorIs(t, retryErr, injected)
+		assert.Equal(t, 1, writeCalls)
+		assert.ErrorIs(t, writer.Close(), injected)
 	})
 
 	t.Run("short write", func(t *testing.T) {
+		// Rationale: appending another record after a partial line would make both audit records unauthoritative.
 		path := filepath.Join(t.TempDir(), "audit.log")
-		writer := newTestWriter(t, path)
-		writer.deps.write = func(context.Context, int, []byte) (int, error) { return 2, nil }
+		writer, err := NewRotatingFileWriter(t.Context(), path)
+		require.NoError(t, err)
+		writeCalls := 0
+		writer.deps.write = func(context.Context, int, []byte) (int, error) {
+			writeCalls++
+			return 2, nil
+		}
 
 		n, err := writer.WriteContext(t.Context(), []byte("record\n"))
 		assert.Equal(t, 2, n)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, io.ErrShortWrite)
+
+		n, retryErr := writer.WriteContext(t.Context(), []byte("must-not-appear\n"))
+		assert.Zero(t, n)
+		require.Error(t, retryErr)
+		assert.ErrorIs(t, retryErr, io.ErrShortWrite)
+		assert.Equal(t, 1, writeCalls)
+		assert.ErrorIs(t, writer.Close(), io.ErrShortWrite)
 	})
 
 }
@@ -1020,6 +1047,8 @@ func TestRotatingFileWriterUnlockRetriesEINTR(t *testing.T) {
 }
 
 func TestRotatingFileWriterNormalizesInvalidWriteCounts(t *testing.T) {
+	// Rationale: an impossible byte count means the record boundary is unknowable, so normalization must also leave
+	// the writer poisoned instead of allowing another append.
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -1039,7 +1068,8 @@ func TestRotatingFileWriterNormalizesInvalidWriteCounts(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "audit.log")
-			writer := newTestWriter(t, path)
+			writer, openErr := NewRotatingFileWriter(t.Context(), path)
+			require.NoError(t, openErr)
 			writer.deps.write = func(context.Context, int, []byte) (int, error) {
 				return test.writeResult, test.writeErr
 			}
@@ -1049,6 +1079,12 @@ func TestRotatingFileWriterNormalizesInvalidWriteCounts(t *testing.T) {
 			require.Error(t, err)
 			if test.wantErr != nil {
 				assert.ErrorIs(t, err, test.wantErr)
+			}
+
+			closeErr := writer.Close()
+			require.Error(t, closeErr)
+			if test.wantErr != nil {
+				assert.ErrorIs(t, closeErr, test.wantErr)
 			}
 		})
 	}

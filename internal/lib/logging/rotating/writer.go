@@ -133,9 +133,14 @@ func (w *RotatingFileWriter) WriteContext(ctx context.Context, p []byte) (n int,
 	if err := w.acquireLock(ctx); err != nil {
 		return 0, fmt.Errorf("rotating: write: acquire lock: %w", err)
 	}
+	var poisonCause error
 	defer func() {
+		cleanupCause := poisonCause
 		if unlockErr := w.releaseLock(context.WithoutCancel(ctx)); unlockErr != nil {
-			returnErr = errors.Join(returnErr, w.poison(context.WithoutCancel(ctx), unlockErr))
+			cleanupCause = errors.Join(cleanupCause, unlockErr)
+		}
+		if cleanupCause != nil {
+			returnErr = errors.Join(returnErr, w.poison(context.WithoutCancel(ctx), cleanupCause))
 		}
 	}()
 	if err := ctx.Err(); err != nil {
@@ -155,13 +160,16 @@ func (w *RotatingFileWriter) WriteContext(ctx context.Context, p []byte) (n int,
 	n, err = w.deps.write(ctx, w.fileFD, p)
 	if n < 0 || n > len(p) {
 		invalidCountErr := fmt.Errorf("rotating: write record: invalid byte count %d for %d-byte input", n, len(p))
-		return 0, errors.Join(invalidCountErr, err)
+		poisonCause = errors.Join(invalidCountErr, err)
+		return 0, poisonCause
 	}
 	if err != nil {
-		return n, fmt.Errorf("rotating: write record: %w", err)
+		poisonCause = fmt.Errorf("rotating: write record: %w", err)
+		return n, poisonCause
 	}
 	if n != len(p) {
-		return n, fmt.Errorf("rotating: write record: %w", io.ErrShortWrite)
+		poisonCause = fmt.Errorf("rotating: write record: %w", io.ErrShortWrite)
+		return n, poisonCause
 	}
 	return n, nil
 }
@@ -263,7 +271,10 @@ func (w *RotatingFileWriter) poison(ctx context.Context, cause error) error {
 		poisonErrors = append(poisonErrors, wrapCloseError("lock file", w.deps.close(ctx, w.lockFD)))
 		w.lockFD = -1
 	}
-	w.poisonErr = fmt.Errorf("rotating: writer poisoned after unlock failure: %w", errors.Join(poisonErrors...))
+	w.poisonErr = fmt.Errorf(
+		"rotating: writer poisoned after incomplete or uncertain record: %w",
+		errors.Join(poisonErrors...),
+	)
 	return w.poisonErr
 }
 
