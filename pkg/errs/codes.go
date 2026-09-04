@@ -173,6 +173,8 @@ const (
 	CodeVsockExecFailed        Code = "vsock.exec_failed"
 	CodeVsockUpgradeInProgress Code = "vsock.upgrade_in_progress"
 	CodeVsockConfigNotFound    Code = "vsock.config.not_found"
+	CodeVsockAuditInvalid      Code = "vsock.audit.invalid"
+	CodeVsockAuditFailed       Code = "vsock.audit.failed"
 
 	// --- Remote exec domain ---
 	CodeUnauthorized Code = "auth.unauthorized"

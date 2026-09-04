@@ -251,6 +251,8 @@ var codeClassMap = map[Code]Class{
 
 	// --- Vsock domain ---
 	CodeVsockUpgradeInProgress: ClassConflict,
+	CodeVsockAuditInvalid:      ClassValidation,
+	CodeVsockAuditFailed:       ClassInternal,
 
 	// --- BundledAsset domain ---
 	CodeBundledAssetError:    ClassInternal,
@@ -433,6 +435,8 @@ var codeOpMap = map[Code]string{
 	CodeBundledAssetNotFound: "asset",
 
 	CodeVsockUpgradeInProgress: "vsock",
+	CodeVsockAuditInvalid:      "vsock",
+	CodeVsockAuditFailed:       "vsock",
 
 	CodeCacheCleanFailed: "cache",
 
