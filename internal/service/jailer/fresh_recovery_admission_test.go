@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,6 +54,39 @@ func TestFreshRecoveryActiveAdmissionPrecedesCleanupEffectsAndRemovesExactCgroup
 	require.NoError(t, cleanup.Release(t.Context()))
 }
 
+func TestCleanupCompleteNilContextPreservesOrdinaryCompletionError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ordinary cleanup", func(t *testing.T) {
+		fixture := newProcessIdentityFixture(t, false)
+		cleanup, err := fixture.launch.Abort(t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, cleanup)
+
+		err = cleanup.Complete(nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cleanup completion context is required")
+		assert.NotContains(t, err.Error(), "fresh-recovery admission")
+		require.NoError(t, cleanup.Complete(t.Context()))
+		require.NoError(t, cleanup.Release(t.Context()))
+	})
+
+	t.Run("fresh cleanup with pending admission", func(t *testing.T) {
+		fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleActive, false)
+		cleanup, err := fixture.begin(t.Context())
+		require.Error(t, err)
+		require.NotNil(t, cleanup)
+
+		err = cleanup.Complete(nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cleanup completion context is required")
+		assert.NotContains(t, err.Error(), "fresh-recovery admission context")
+		fixture.cgroup.addVMLeaf(testVMID)
+		require.NoError(t, cleanup.Complete(t.Context()))
+		require.NoError(t, cleanup.Release(t.Context()))
+	})
+}
+
 // Rationale: absence observed while a recovered process is live is provisional. Cleanup must retain that causal
 // absence until reap, then bind and remove an exact leaf that appeared in the meantime.
 func TestFreshRecoveryLaunchingAbsentLeafAppearingBeforeReapIsBoundAndRemoved(t *testing.T) {
@@ -61,14 +95,23 @@ func TestFreshRecoveryLaunchingAbsentLeafAppearingBeforeReapIsBoundAndRemoved(t 
 	fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleLaunching, false)
 	cleanup, err := fixture.begin(t.Context())
 	require.NoError(t, err)
-	require.NotNil(t, cleanup.state.preparedManagedVMCgroup)
+	prepared := cleanup.state.preparedManagedVMCgroup
+	require.NotNil(t, prepared)
 	assert.Nil(t, cleanup.state.freshRecoveryAdmission)
+	realOpenAt2 := prepared.state.deps.openAt2
+	var bindObserved atomic.Bool
+	prepared.state.deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+		if name == testVMID && bindObserved.CompareAndSwap(false, true) {
+			fixture.events.add("cgroup-bind")
+		}
+		return realOpenAt2(ctx, fd, name, how)
+	}
 
 	fixture.cgroup.addVMLeaf(testVMID)
 	require.NoError(t, cleanup.Complete(t.Context()))
 	assert.False(t, fixture.cgroup.vmLeafPresent(testVMID))
 	events := fixture.events.snapshot()
-	assert.Less(t, eventIndex(events, "process-reap"), eventIndex(events, "cgroup-remove"))
+	requireFreshRecoveryEventOrder(t, events, "process-reap", "cgroup-bind", "cgroup-remove")
 	require.NoError(t, cleanup.Release(t.Context()))
 }
 
@@ -395,26 +438,75 @@ func TestFreshRecoveryAdmissionCallbacksRunOutsideCleanupMutexAndRejectReentranc
 		}
 		return realFsync(ctx, fd)
 	}
-	var cleanup *cleanupLease
-	var nestedCompleteErr, nestedReleaseErr, nestedAdmissionErr error
-	realOpenRoot := fixture.authority.cgroupDeps.openRoot
-	fixture.authority.cgroupDeps.openRoot = func(ctx context.Context) (int, error) {
-		if !cleanup.state.mu.TryLock() {
-			t.Error("cgroup callback ran under cleanup mutex")
-		} else {
-			cleanup.state.mu.Unlock()
-		}
-		nestedCompleteErr = cleanup.Complete(ctx)
-		nestedReleaseErr = cleanup.Release(ctx)
-		nestedAdmissionErr = cleanup.admitFreshRecovery(ctx)
-		return realOpenRoot(ctx)
-	}
-
-	var err error
-	cleanup, err = fixture.begin(t.Context())
+	cleanup, err := fixture.begin(t.Context())
 	require.ErrorIs(t, err, writeErr)
 	fixture.authority.deps.fsync = realFsync
-	require.NoError(t, cleanup.admitFreshRecovery(t.Context()))
+
+	mutexHeldErr := errors.New("cleanup mutex held during admission callback")
+	callbackEvents := &recoveryEventLog{}
+	var nestedCompleteErr, nestedReleaseErr, nestedAdmissionErr error
+	var reentered atomic.Bool
+	checkUnlocked := func() error {
+		if !cleanup.state.mu.TryLock() {
+			return mutexHeldErr
+		}
+		cleanup.state.mu.Unlock()
+		if reentered.CompareAndSwap(false, true) {
+			nestedCompleteErr = cleanup.Complete(t.Context())
+			nestedReleaseErr = cleanup.Release(t.Context())
+			nestedAdmissionErr = cleanup.admitFreshRecovery(t.Context())
+		}
+		return nil
+	}
+	admission := cleanup.state.freshRecoveryAdmission
+	realOpenRoot := admission.cgroupDeps.openRoot
+	admission.cgroupDeps.openRoot = func(ctx context.Context) (int, error) {
+		callbackEvents.add("cgroup-open-root")
+		if err := checkUnlocked(); err != nil {
+			return -1, err
+		}
+		return realOpenRoot(ctx)
+	}
+	recoveredState := cleanup.state.recoveredProcesses.state
+	realDeriveLocator := recoveredState.deps.deriveLocator
+	recoveredState.deps.deriveLocator = func(ctx context.Context, fd int) (instanceProcessLocator, error) {
+		callbackEvents.add("recovered-locator")
+		if err := checkUnlocked(); err != nil {
+			return instanceProcessLocator{}, err
+		}
+		return realDeriveLocator(ctx, fd)
+	}
+	realReadBootID := admission.identityDeps.readBootID
+	admission.identityDeps.readBootID = func(ctx context.Context) (string, error) {
+		callbackEvents.add("final-boot-id")
+		if err := checkUnlocked(); err != nil {
+			return "", err
+		}
+		return realReadBootID(ctx)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- cleanup.admitFreshRecovery(ctx) }()
+	select {
+	case err = <-result:
+	case <-ctx.Done():
+		t.Fatalf("wait for reentrant fresh-recovery admission: %v", ctx.Err())
+	}
+	require.NotErrorIs(t, err, mutexHeldErr)
+	require.NoError(t, err)
+	if diff := cmp.Diff(
+		[]string{
+			"cgroup-open-root",
+			"recovered-locator",
+			"recovered-locator",
+			"recovered-locator",
+			"final-boot-id",
+		},
+		callbackEvents.snapshot(),
+	); diff != "" {
+		t.Errorf("unlocked fresh-recovery callbacks mismatch (-want +got):\n%s", diff)
+	}
 	for _, nestedErr := range []error{nestedCompleteErr, nestedReleaseErr, nestedAdmissionErr} {
 		require.Error(t, nestedErr)
 		assert.Contains(t, nestedErr.Error(), "in progress")
@@ -675,11 +767,19 @@ func countFreshRecoveryEvents(events []string, want string) int {
 	return count
 }
 
-func eventIndex(events []string, want string) int {
-	for index, event := range events {
-		if event == want {
-			return index
+func requireFreshRecoveryEventOrder(t *testing.T, events []string, wants ...string) {
+	t.Helper()
+	previous := -1
+	for _, want := range wants {
+		index := -1
+		for candidate, event := range events {
+			if event == want {
+				index = candidate
+				break
+			}
 		}
+		require.NotEqual(t, -1, index, "missing event %q in %v", want, events)
+		assert.Greater(t, index, previous, "event %q is out of order in %v", want, events)
+		previous = index
 	}
-	return -1
 }

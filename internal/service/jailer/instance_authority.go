@@ -694,6 +694,12 @@ func (lease *cleanupLease) Complete(ctx context.Context) error {
 	if lease == nil || lease.state == nil {
 		return instanceStateError("", "cleanup lease is not active")
 	}
+	if ctx == nil {
+		state := lease.state
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return instanceStateError(state.record.vmID, "cleanup completion context is required")
+	}
 	if err := lease.admitFreshRecovery(ctx); err != nil {
 		return err
 	}
