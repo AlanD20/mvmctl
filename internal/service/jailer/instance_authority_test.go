@@ -583,6 +583,7 @@ func TestInstanceAuthorityReleaseSlotReferenceCheckTracksLifecycle(t *testing.T)
 	t.Parallel()
 
 	authority, root := newTestInstanceAuthority(t)
+	authority.cgroupDeps = newManagedVMCgroupTestFixture(t).deps()
 	caller := testInstanceCaller()
 	launch, err := registerTestLaunch(t, context.Background(), authority, caller, testLaunchIntent(false))
 	require.NoError(t, err)
@@ -1028,6 +1029,7 @@ func TestInstanceAuthorityPostRenameCleanupErrorReturnsCleanupLease(t *testing.T
 		testInstanceAuthorityPolicy(root),
 		newTestInstanceAuthorityTree(),
 	)
+	authority.cgroupDeps = newManagedVMCgroupTestFixture(t).deps()
 
 	cleanup, err := authority.BeginCleanup(context.Background(), testInstanceCaller(), testVMID)
 	require.NotNil(t, cleanup)

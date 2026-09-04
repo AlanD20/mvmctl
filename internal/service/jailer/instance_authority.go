@@ -92,6 +92,7 @@ type cleanupLeaseState struct {
 	networkNamespace        *topologySelectedNetworkNamespace
 	runtimeDirectory        *managedVMRuntimeLease
 	runtimeRecovery         *managedVMRuntimeRecovery
+	freshRecoveryAdmission  *freshRecoveryAdmission
 	preparedManagedVMCgroup *preparedManagedVMCgroup
 	managedVMCgroup         *managedVMCgroupLease
 	record                  instanceRecord
@@ -571,6 +572,7 @@ func beginFreshRecoveryCleanupWithDeps(
 		)
 	}
 	var recovered *reopenedRecordedProcesses
+	var observation processObservation
 	defer func() {
 		if returnErr == nil || recovered == nil {
 			return
@@ -609,28 +611,24 @@ func beginFreshRecoveryCleanupWithDeps(
 			return nil, appendInstanceOperationError(err, "release rejected cleanup lease", locked.Release(ctx))
 		}
 		if locked.record.active != nil {
-			if _, err := verifyRecoveredActiveIdentity(ctx, identityDeps, locked.record); err != nil {
+			observation, err = verifyRecoveredActiveIdentity(ctx, identityDeps, locked.record)
+			if err != nil {
+				return nil, appendInstanceOperationError(err, "release rejected cleanup lease", locked.Release(ctx))
+			}
+		} else {
+			observation, err = recovered.observeLaunchingFirecracker(ctx, identityDeps)
+			if err != nil {
 				return nil, appendInstanceOperationError(err, "release rejected cleanup lease", locked.Release(ctx))
 			}
 		}
 		if err := recovered.verifyLocators(ctx); err != nil {
 			return nil, appendInstanceOperationError(err, "release rejected cleanup lease", locked.Release(ctx))
 		}
-		finalBootID, err := identityDeps.readBootID(ctx)
-		if err != nil {
-			return nil, appendInstanceOperationError(
-				processVerificationError(vmID, "recheck host boot ID after fresh recovery verification", err),
-				"release rejected cleanup lease",
-				locked.Release(ctx),
-			)
-		}
-		if finalBootID != bootID {
-			return nil, appendInstanceOperationError(
-				processVerificationError(vmID, "host boot ID changed during fresh recovery verification", nil),
-				"release rejected cleanup lease",
-				locked.Release(ctx),
-			)
-		}
+	} else if err := locked.requireFreshRecoveryManagedVMCgroupAbsent(
+		ctx,
+		managedVMCgroupReadDepsFrom(authority.cgroupDeps),
+	); err != nil {
+		return nil, appendInstanceOperationError(err, "release rejected cleanup lease", locked.Release(ctx))
 	}
 	updated, err := beginInstanceCleanup(caller, locked.record)
 	if err != nil {
@@ -651,7 +649,7 @@ func beginFreshRecoveryCleanupWithDeps(
 			)
 		}
 	}
-	cleanup := &cleanupLease{state: &cleanupLeaseState{
+	cleanupState := &cleanupLeaseState{
 		roots:              locked.roots,
 		directories:        locked.directories,
 		vmLock:             locked.vmLock,
@@ -661,7 +659,26 @@ func beginFreshRecoveryCleanupWithDeps(
 			policy: managedVMRuntimePolicyFromInstanceAuthority(authority.policy),
 		},
 		record: updated,
-	}}
+	}
+	if recovered != nil {
+		cleanupState.freshRecoveryAdmission = &freshRecoveryAdmission{
+			sourceLifecycle: locked.record.lifecycle,
+			hostBootID:      bootID,
+			observation:     observation,
+			locator:         locked.record.launch.process,
+			cgroupDeps:      authority.cgroupDeps,
+			identityDeps:    identityDeps,
+			processVerifier: retainedRecoveredCgroupProcessVerifier{
+				processes: recovered,
+				locator:   locked.record.launch.process,
+				vmID:      locked.record.vmID,
+			},
+		}
+	}
+	cleanup := &cleanupLease{state: cleanupState}
+	locked.roots = nil
+	locked.directories = nil
+	locked.vmLock = nil
 	recovered = nil
 	if writeErr != nil {
 		return cleanup, writeErr
@@ -681,6 +698,9 @@ func (lease *cleanupLease) Complete(ctx context.Context) error {
 	}
 	if state.released || state.vmLock == nil || !state.vmLock.isActive() || state.directories == nil {
 		return instanceStateError(state.record.vmID, "cleanup lease is not active")
+	}
+	if err := finishFreshRecoveryAdmissionLocked(ctx, state); err != nil {
+		return err
 	}
 	if err := resolveCleanupManagedVMRuntimeLocked(ctx, state); err != nil {
 		return err
@@ -1197,6 +1217,7 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 		state.jailDestination != nil ||
 		state.runtimeDirectory != nil ||
 		state.runtimeRecovery != nil ||
+		state.freshRecoveryAdmission != nil ||
 		state.preparedManagedVMCgroup != nil ||
 		state.managedVMCgroup != nil {
 		return instanceStateError(state.record.vmID, "cleanup must complete before releasing retained authority")
@@ -1225,6 +1246,7 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 	state.processes = nil
 	state.preparedJailDestination = nil
 	state.jailDestination = nil
+	state.freshRecoveryAdmission = nil
 	state.preparedManagedVMCgroup = nil
 	state.managedVMCgroup = nil
 	state.released = true

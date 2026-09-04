@@ -124,6 +124,7 @@ func newManagedVMRuntimeRecoveryTestAuthority(
 		testInstanceAuthorityPolicy(root),
 		newTestInstanceAuthorityTree(),
 	)
+	authority.cgroupDeps = newManagedVMCgroupTestFixture(t).deps()
 	identityDeps := realProcessIdentityVerifierDeps()
 	identityDeps.readBootID = func(context.Context) (string, error) { return processOtherBootID, nil }
 	return authority, realProcessRecoveryDeps(), identityDeps

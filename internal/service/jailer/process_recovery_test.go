@@ -311,6 +311,17 @@ func TestBeginFreshRecoveryCleanupVerifiesFullIdentityAndTerminatesThroughPIDFDs
 
 	record, fake := activeRecoveryTestRecord(t)
 	authority, recoveryDeps, identityDeps, events := newActiveRecoveryTestAuthority(t, record, fake)
+	cgroup := newManagedVMCgroupTestFixture(t)
+	cgroup.addVMLeaf(testVMID)
+	authority.cgroupDeps = cgroup.deps()
+	realWaitReap := recoveryDeps.waitReapPIDFD
+	recoveryDeps.waitReapPIDFD = func(ctx context.Context, fd int) error {
+		if err := realWaitReap(ctx, fd); err != nil {
+			return err
+		}
+		cgroup.setMembership(testVMID, "")
+		return nil
+	}
 
 	cleanup, err := beginFreshRecoveryCleanupWithDeps(
 		t.Context(),
@@ -324,6 +335,7 @@ func TestBeginFreshRecoveryCleanupVerifiesFullIdentityAndTerminatesThroughPIDFDs
 	require.NotNil(t, cleanup)
 	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
 	require.NoError(t, cleanup.Complete(t.Context()))
+	assert.False(t, cgroup.vmLeafPresent(testVMID))
 	require.NoError(t, cleanup.Release(t.Context()))
 	if diff := cmp.Diff([]string{"open:4242", "signal:700", "reap:700", "close:700"}, events.snapshot()); diff != "" {
 		t.Errorf("fresh recovery event order mismatch (-want +got):\n%s", diff)
@@ -361,6 +373,15 @@ func TestBeginFreshRecoveryCleanupBootMismatchCleansWithoutOpeningOrSignalingPID
 	record, fake := activeRecoveryTestRecord(t)
 	authority, recoveryDeps, identityDeps, events := newActiveRecoveryTestAuthority(t, record, fake)
 	identityDeps.readBootID = func(context.Context) (string, error) { return processOtherBootID, nil }
+	cgroup := newManagedVMCgroupTestFixture(t)
+	cgroupDeps := cgroup.deps()
+	realOpenRoot := cgroupDeps.openRoot
+	openRootCalls := 0
+	cgroupDeps.openRoot = func(ctx context.Context) (int, error) {
+		openRootCalls++
+		return realOpenRoot(ctx)
+	}
+	authority.cgroupDeps = cgroupDeps
 
 	cleanup, err := beginFreshRecoveryCleanupWithDeps(
 		t.Context(),
@@ -374,6 +395,7 @@ func TestBeginFreshRecoveryCleanupBootMismatchCleansWithoutOpeningOrSignalingPID
 	require.NotNil(t, cleanup)
 	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
+	assert.Equal(t, 2, openRootCalls)
 	assert.Empty(t, events.snapshot())
 }
 
