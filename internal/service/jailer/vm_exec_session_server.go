@@ -21,9 +21,37 @@ type VMExecSessionConnection interface {
 	BindVMExecSessionPeer(context.Context, VMExecSessionPeerBinder) error
 }
 
-// VMExecSessionStopWaitReady publishes that an armed stop has no immediate result and its pending result cannot be
-// missed. The callback is invoked exactly once for a pending wait and is omitted for every immediate result.
-type VMExecSessionStopWaitReady func()
+// VMExecSessionStopWait is a closed, server-owned handle for one armed absolute stop. Pending distinguishes waits that
+// require caller readiness publication from immediate results, while Wait joins the normalized result.
+type VMExecSessionStopWait struct {
+	state *vmExecSessionStopWaitState
+}
+
+type vmExecSessionStopWaitState struct {
+	pending bool
+	result  <-chan error
+	once    sync.Once
+	waitErr error
+}
+
+// Pending reports whether StartStopWait excluded an immediate result and established a joinable pending wait.
+func (wait *VMExecSessionStopWait) Pending() bool {
+	return wait != nil && wait.state != nil && wait.state.pending
+}
+
+// Wait joins the server-owned stop result. Copies share one receive and its normalized cached result.
+func (wait *VMExecSessionStopWait) Wait() error {
+	if wait == nil || wait.state == nil || wait.state.result == nil {
+		return vmExecSessionError("vm-exec session stop wait is unavailable", nil)
+	}
+	wait.state.once.Do(func() {
+		wait.state.waitErr = preserveVMExecSessionServerError(
+			"wait for vm-exec session stop",
+			<-wait.state.result,
+		)
+	})
+	return wait.state.waitErr
+}
 
 // VMExecSessionPeerBinder performs one server-selected source or destination peer binding.
 // Copies share one single-use invocation and its result.
@@ -133,8 +161,20 @@ type vmExecSessionServerAuthorityLease interface {
 	Release(context.Context) error
 }
 
+type vmExecSessionServerStopWait struct {
+	pending bool
+	result  <-chan error
+}
+
+func newVMExecSessionServerStopWait(pending bool, result error) vmExecSessionServerStopWait {
+	results := make(chan error, 1)
+	results <- result
+	close(results)
+	return vmExecSessionServerStopWait{pending: pending, result: results}
+}
+
 type vmExecSessionServerStop interface {
-	waitReady(context.Context, VMExecSessionStopWaitReady) error
+	startWait(context.Context) vmExecSessionServerStopWait
 	Release(context.Context) error
 }
 
@@ -295,30 +335,34 @@ func (lease *VMExecSessionServerLease) BindDestination(
 	return binder.seal(connection.BindVMExecSessionPeer(ctx, binder))
 }
 
-// WaitStop blocks until the authority's absolute CLOCK_BOOTTIME stop expires or waiting fails. For a pending wait,
-// ready is called exactly once only after an immediate result has been excluded and the later result cannot be missed.
-func (lease *VMExecSessionServerLease) WaitStop(ctx context.Context, ready VMExecSessionStopWaitReady) error {
+// StartStopWait starts one wait for the authority's absolute CLOCK_BOOTTIME stop. The returned closed handle reports
+// whether the caller must publish readiness before joining the result, without executing caller code inside jailer.
+func (lease *VMExecSessionServerLease) StartStopWait(ctx context.Context) (*VMExecSessionStopWait, error) {
 	if lease == nil || lease.state == nil {
-		return vmExecSessionError("vm-exec session server lease is unavailable", nil)
+		return nil, vmExecSessionError("vm-exec session server lease is unavailable", nil)
 	}
 	if ctx == nil {
-		return vmExecSessionError("vm-exec session stop wait context is required", nil)
+		return nil, vmExecSessionError("vm-exec session stop wait context is required", nil)
 	}
 	if err := ctx.Err(); err != nil {
-		return vmExecSessionError("wait for vm-exec session stop was cancelled", err)
-	}
-	if ready == nil {
-		return vmExecSessionError("vm-exec session stop readiness signal is required", nil)
+		return nil, vmExecSessionError("wait for vm-exec session stop was cancelled", err)
 	}
 	state := lease.state
 	state.mu.Lock()
 	if state.released || state.stop == nil {
 		state.mu.Unlock()
-		return vmExecSessionError("vm-exec session stop authority is unavailable", nil)
+		return nil, vmExecSessionError("vm-exec session stop authority is unavailable", nil)
 	}
 	stop := state.stop
 	state.mu.Unlock()
-	return preserveVMExecSessionServerError("wait for vm-exec session stop", stop.waitReady(ctx, ready))
+	privateWait := stop.startWait(ctx)
+	if privateWait.result == nil {
+		return nil, vmExecSessionError("vm-exec session stop authority returned no wait result", nil)
+	}
+	return &VMExecSessionStopWait{state: &vmExecSessionStopWaitState{
+		pending: privateWait.pending,
+		result:  privateWait.result,
+	}}, nil
 }
 
 // Release closes the stop first and then the retained peer/pair/capacity authority exactly once.
@@ -342,7 +386,7 @@ func (lease *VMExecSessionServerLease) Release(ctx context.Context) error {
 	if state.stop != nil {
 		stopErr := state.stop.Release(cleanupCtx)
 		if stopErr != nil {
-			state.releaseErr = appendVMExecSessionError(
+			state.releaseErr = appendVMExecSessionServerReleaseError(
 				state.releaseErr,
 				"release vm-exec session stop authority",
 				stopErr,
@@ -352,7 +396,7 @@ func (lease *VMExecSessionServerLease) Release(ctx context.Context) error {
 	if state.authority != nil {
 		authorityErr := state.authority.Release(cleanupCtx)
 		if authorityErr != nil {
-			state.releaseErr = appendVMExecSessionError(
+			state.releaseErr = appendVMExecSessionServerReleaseError(
 				state.releaseErr,
 				"release vm-exec retained authority",
 				authorityErr,
@@ -363,4 +407,27 @@ func (lease *VMExecSessionServerLease) Release(ctx context.Context) error {
 	state.authority = nil
 	state.released = true
 	return state.releaseErr
+}
+
+func appendVMExecSessionServerReleaseError(primary error, message string, cause error) error {
+	result := appendVMExecSessionError(primary, message, cause)
+	domainErr := errs.AsDomainError(result)
+	if domainErr == nil {
+		return result
+	}
+	causeDomainErr := errs.AsDomainError(cause)
+	if causeDomainErr == nil || len(causeDomainErr.Details) == 0 {
+		return result
+	}
+	merged := *domainErr
+	merged.Details = cloneInstanceErrorDetails(domainErr.Details)
+	if merged.Details == nil {
+		merged.Details = make(map[string]any, len(causeDomainErr.Details))
+	}
+	for key, value := range causeDomainErr.Details {
+		if _, exists := merged.Details[key]; !exists {
+			merged.Details[key] = value
+		}
+	}
+	return &merged
 }

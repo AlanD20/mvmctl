@@ -356,7 +356,7 @@ func TestVMExecRelayStopWaitRepollsAfterNonblockingReadWouldBlock(t *testing.T) 
 	require.NoError(t, stop.Release(context.Background()))
 }
 
-func TestVMExecRelayStopWaitReadyOmitsReadinessForImmediateResult(t *testing.T) {
+func TestVMExecRelayStopStartWaitOmitsReadinessForImmediateResult(t *testing.T) {
 	tests := map[string]struct {
 		pollFn  func([]unix.PollFd) (int, error)
 		readFn  func(context.Context, int, []byte) (int, error)
@@ -383,9 +383,9 @@ func TestVMExecRelayStopWaitReadyOmitsReadinessForImmediateResult(t *testing.T) 
 				return tc.pollFn(pollFDs)
 			}
 			stop := armFakeVMExecRelayStop(t, effects)
-			readyCalls := 0
-
-			err := stop.waitReady(context.Background(), func() { readyCalls++ })
+			wait := stop.startWait(context.Background())
+			assert.False(t, wait.pending)
+			err := <-wait.result
 
 			if tc.wantErr == nil {
 				require.NoError(t, err)
@@ -393,7 +393,6 @@ func TestVMExecRelayStopWaitReadyOmitsReadinessForImmediateResult(t *testing.T) 
 				require.Error(t, err)
 				assert.ErrorIs(t, err, tc.wantErr)
 			}
-			assert.Equal(t, 0, readyCalls)
 			if diff := cmp.Diff([]int{0}, effects.pollCalls); diff != "" {
 				t.Errorf("poll timeouts mismatch (-want +got):\n%s", diff)
 			}
@@ -402,7 +401,7 @@ func TestVMExecRelayStopWaitReadyOmitsReadinessForImmediateResult(t *testing.T) 
 	}
 }
 
-func TestVMExecRelayStopWaitReadySignalsOnceBeforePendingResult(t *testing.T) {
+func TestVMExecRelayStopStartWaitPublishesPendingResult(t *testing.T) {
 	blockingPollEntered := make(chan struct{})
 	allowExpiration := make(chan struct{})
 	effects := &fakeVMExecRelayStopEffects{createFD: 41, readFn: successfulVMExecRelayStopRead}
@@ -416,28 +415,24 @@ func TestVMExecRelayStopWaitReadySignalsOnceBeforePendingResult(t *testing.T) {
 		return 1, nil
 	}
 	stop := armFakeVMExecRelayStop(t, effects)
-	ready := make(chan struct{})
-	result := make(chan error, 1)
-	go func() {
-		result <- stop.waitReady(context.Background(), func() { close(ready) })
-	}()
+	wait := stop.startWait(context.Background())
 
-	<-ready
+	assert.True(t, wait.pending)
 	<-blockingPollEntered
 	select {
-	case err := <-result:
+	case err := <-wait.result:
 		t.Fatalf("pending wait returned before expiration: %v", err)
 	default:
 	}
 	close(allowExpiration)
-	require.NoError(t, <-result)
+	require.NoError(t, <-wait.result)
 	if diff := cmp.Diff([]int{0, vmExecRelayStopPollSliceMilliseconds}, effects.pollCalls); diff != "" {
 		t.Errorf("poll timeouts mismatch (-want +got):\n%s", diff)
 	}
 	require.NoError(t, stop.Release(context.Background()))
 }
 
-func TestVMExecRelayStopWaitReadyFinalObservationPreservesExpirationAcrossCancellation(t *testing.T) {
+func TestVMExecRelayStopStartWaitFinalObservationPreservesExpirationAcrossCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	pollCall := 0
 	effects := &fakeVMExecRelayStopEffects{createFD: 41, readFn: successfulVMExecRelayStopRead}
@@ -452,15 +447,12 @@ func TestVMExecRelayStopWaitReadyFinalObservationPreservesExpirationAcrossCancel
 		return 1, nil
 	}
 	stop := armFakeVMExecRelayStop(t, effects)
-	readyCalls := 0
-
-	err := stop.waitReady(ctx, func() {
-		readyCalls++
-		cancel()
-	})
+	wait := stop.startWait(ctx)
+	assert.True(t, wait.pending)
+	cancel()
+	err := <-wait.result
 
 	require.NoError(t, err)
-	assert.Equal(t, 1, readyCalls)
 	if diff := cmp.Diff([]int{0, 0}, effects.pollCalls); diff != "" {
 		t.Errorf("poll timeouts mismatch (-want +got):\n%s", diff)
 	}

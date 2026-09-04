@@ -116,18 +116,70 @@ func vmExecRelayStopTimespec(relayStopBoottimeNS uint64) (unix.Timespec, error) 
 // Wait consumes the one-shot timerfd expiration. Polling is deliberately sliced so context cancellation remains
 // bounded without converting the CLOCK_BOOTTIME authority into a Go time source. Only one waiter owns the read.
 func (stop *vmExecRelayStop) Wait(ctx context.Context) error {
-	return stop.wait(ctx, nil)
+	return stop.wait(ctx)
 }
 
-// waitReady preserves the timerfd result/readiness ordering required by the retained privileged session handler.
-func (stop *vmExecRelayStop) waitReady(ctx context.Context, ready VMExecSessionStopWaitReady) error {
-	if ready == nil {
-		return vmExecRelayStopError("vm-exec relay-stop readiness signal is required", nil)
+// startWait returns a closed server-owned handle after its zero-time timer observation establishes whether the result
+// is immediate or pending. A pending result is produced asynchronously and remains joinable by the façade.
+func (stop *vmExecRelayStop) startWait(ctx context.Context) vmExecSessionServerStopWait {
+	if stop == nil || stop.state == nil {
+		return newVMExecSessionServerStopWait(
+			false,
+			vmExecRelayStopError("vm-exec relay-stop capability is unavailable", nil),
+		)
 	}
-	return stop.wait(ctx, ready)
+	if ctx == nil {
+		return newVMExecSessionServerStopWait(
+			false,
+			vmExecRelayStopError("vm-exec relay-stop wait context is required", nil),
+		)
+	}
+	if err := ctx.Err(); err != nil {
+		return newVMExecSessionServerStopWait(
+			false,
+			vmExecRelayStopError("wait for vm-exec relay-stop deadline", err),
+		)
+	}
+	state := stop.state
+	state.mu.Lock()
+	if state.released {
+		state.mu.Unlock()
+		return newVMExecSessionServerStopWait(
+			false,
+			vmExecRelayStopError("vm-exec relay-stop timer was released before wait", nil),
+		)
+	}
+	if state.waited {
+		result := state.waitErr
+		state.mu.Unlock()
+		return newVMExecSessionServerStopWait(false, result)
+	}
+	if state.waiting {
+		state.mu.Unlock()
+		return newVMExecSessionServerStopWait(
+			false,
+			vmExecRelayStopError("vm-exec relay-stop timer already has a waiter", nil),
+		)
+	}
+	state.waiting = true
+	state.mu.Unlock()
+
+	pending, immediateResult := state.observeImmediateExpiration(ctx)
+	if !pending {
+		state.completeWait(immediateResult)
+		return newVMExecSessionServerStopWait(false, immediateResult)
+	}
+	results := make(chan error, 1)
+	go func() {
+		result := state.waitForExpirationLoop(ctx, true)
+		state.completeWait(result)
+		results <- result
+		close(results)
+	}()
+	return vmExecSessionServerStopWait{pending: true, result: results}
 }
 
-func (stop *vmExecRelayStop) wait(ctx context.Context, ready VMExecSessionStopWaitReady) error {
+func (stop *vmExecRelayStop) wait(ctx context.Context) error {
 	if stop == nil || stop.state == nil {
 		return vmExecRelayStopError("vm-exec relay-stop capability is unavailable", nil)
 	}
@@ -155,31 +207,17 @@ func (stop *vmExecRelayStop) wait(ctx context.Context, ready VMExecSessionStopWa
 	state.waiting = true
 	state.mu.Unlock()
 
-	var result error
-	if ready == nil {
-		result = state.waitForExpiration(ctx)
-	} else {
-		result = state.waitForExpirationReady(ctx, ready)
-	}
+	result := state.waitForExpiration(ctx)
+	state.completeWait(result)
+	return result
+}
+
+func (state *vmExecRelayStopState) completeWait(result error) {
 	state.mu.Lock()
 	state.waiting = false
 	state.waited = true
 	state.waitErr = result
 	state.mu.Unlock()
-	return result
-}
-
-func (state *vmExecRelayStopState) waitForExpirationReady(
-	ctx context.Context,
-	ready VMExecSessionStopWaitReady,
-) error {
-	pending, result := state.observeImmediateExpiration(ctx, ready)
-	if !pending {
-		return result
-	}
-	// The successful zero-time observation and readiness callback run under the descriptor read pin. This linearizes
-	// the pending wait against Release; timerfd readiness is level-triggered, so any later expiry remains observable.
-	return state.waitForExpirationLoop(ctx, true)
 }
 
 func (state *vmExecRelayStopState) waitForExpiration(ctx context.Context) error {
@@ -245,7 +283,7 @@ func (state *vmExecRelayStopState) waitForExpirationLoop(ctx context.Context, ob
 }
 
 func (state *vmExecRelayStopState) finishCancelledWait(ctx context.Context, cancellation error) error {
-	pending, result := state.observeImmediateExpiration(context.WithoutCancel(ctx), nil)
+	pending, result := state.observeImmediateExpiration(context.WithoutCancel(ctx))
 	if !pending {
 		return result
 	}
@@ -254,7 +292,6 @@ func (state *vmExecRelayStopState) finishCancelledWait(ctx context.Context, canc
 
 func (state *vmExecRelayStopState) observeImmediateExpiration(
 	ctx context.Context,
-	ready VMExecSessionStopWaitReady,
 ) (bool, error) {
 	transientFailures := 0
 	for {
@@ -284,14 +321,7 @@ func (state *vmExecRelayStopState) observeImmediateExpiration(
 				unpin()
 				return false, vmExecRelayStopError("vm-exec relay-stop poll returned flags without an event", nil)
 			}
-			if ready != nil {
-				func() {
-					defer unpin()
-					ready()
-				}()
-			} else {
-				unpin()
-			}
+			unpin()
 			return true, nil
 		}
 		if count != 1 {
