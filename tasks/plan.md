@@ -218,9 +218,9 @@ continue without silently deleting it.
   and host network namespace. A bounded raw-netlink snapshot collector reads only the exact managed
   tables/chains/rules and rejects unknown expressions, forbidden object classes, generation drift, and cap violations.
   The generation lease supports evidence-bound atomic record replacement and retains one application mutex across
-  record -> kernel -> record reconciliation, standalone replacement, and release. After network and generation
-  authority agree, the retained exact-host-netns capability supplies fresh snapshot transports and one lasting
-  application connection with verified buffers and a bounded deadline. Exact-before authorizes one `Flush`,
+  record -> kernel -> record reconciliation, standalone replacement, and generation-lease `Release`. After network and
+  generation authority agree, the retained exact-host-netns capability supplies fresh snapshot transports and one
+  lasting application connection with verified buffers and a bounded deadline. Exact-before authorizes one `Flush`,
   exact-target commits without replay, unknown retains applying authority, and applied empty means both managed tables
   are absent. This is private L0/L1 behavior only: initial inspection/adoption, a privileged/public consumer,
   real-kernel/Tier tests, and production enforcement remain absent.
@@ -923,11 +923,13 @@ validation, encoding, or finalization failures. Module or expression-set changes
 digest-version bump. The isolated representative 1,000-VM benchmark was roughly 23–28 ms, 10 MB, and 179,000
 allocations, with a 250,000-allocation L1 ceiling.
 
-The compiler itself creates no connection or effect. The admitted generation lease now privately composes its strict
-committed/applying record, exclusive descriptor-relative store, never-unlinked global lock, retained exact-host-netns
-authority, raw collector, and typed application adapter. One retained application mutex serializes the complete
-record -> kernel -> record transaction, standalone record replacement, and release across copied lease values while
-the global firewall lock and namespace pin remain held.
+The compiler itself creates no connection or effect. The private coordinator combines the admitted generation lease's
+strict committed/applying record, exclusive descriptor-relative store, and never-unlinked global lock with a
+caller-supplied retained exact-host-netns authority, raw collector, and typed application adapter. One retained
+application mutex serializes the complete record -> kernel -> record transaction, standalone record replacement, and
+generation-lease `Release` across copied lease values while the global firewall lock remains held. Each observation or
+application connection separately revalidates the namespace lease under its own lifecycle lock. The application mutex
+neither retains that namespace lease nor serializes its release, so it may otherwise be released between calls.
 
 Before mutation, the adapter validates the compiler-bound application seal, exact managed-resource inventories,
 table/chain/rule shape, terminal default-deny invariants, applying record, and exact observed-before snapshot. It
@@ -939,15 +941,17 @@ Cancellation expires only the retained socket deadline until `Flush` finishes, p
 
 Reconciliation durably records applying before mutation. Exact-before permits one flush; exact-target takes the
 record-completion path without replay; unknown preserves applying authority. After any commit attempt, one fresh
-inspection runs under a cancellation-independent five-second bound and the same transaction lock, global lock, and
-namespace pin. Exact-before attempts to restore committed-before and returns an error; exact-target attempts to commit
-while preserving any cancellation/flush/close error; and unknown retains applying with explicit outcome evidence. A
-known pre-commit failure also attempts to restore committed-before. Record-finalization failures remain explicit, and
-ambiguous committed replacement blocks later mutation.
+inspection runs under a cancellation-independent five-second bound and the same transaction and global locks. That
+observation separately revalidates the caller-supplied namespace lease under its lifecycle lock. Exact-before attempts
+to restore committed-before and returns an error; exact-target attempts to commit while preserving any
+cancellation/flush/close error; and unknown retains applying with explicit outcome evidence. A known pre-commit failure
+also attempts to restore committed-before. Record-finalization failures remain explicit, and ambiguous committed
+replacement blocks later mutation.
 
-Applied empty means both reserved tables are absent. Exact empty-to-empty is an inspection-only no-op, while an exact
-admitted non-empty generation can delete both tables in the one replacement batch. Partial, foreign, mismatched,
-corrupt, wrong-boot, wrong-namespace, missing-record, and ambiguous state cannot authorize deletion.
+Applied empty means both reserved tables are absent. Exact empty-to-empty verifies absence through fresh raw-netlink
+observation without a mutation/`Flush` transaction, while an exact admitted non-empty generation can delete both tables
+in the one replacement batch. Partial, foreign, mismatched, corrupt, wrong-boot, wrong-namespace, missing-record, and
+ambiguous state cannot authorize deletion.
 
 This kernel application/reconciliation path remains private and unreferenced by production composition. Qualified
 initial inspection/adoption, the root/`CAP_NET_ADMIN` threat-model decision, privileged/public wiring, live link and

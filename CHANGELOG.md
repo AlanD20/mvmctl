@@ -284,8 +284,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Private nftables kernel application and reconciliation foundation
 
 - Added a closed coordinator that retains the generation lease's application mutex across the complete
-  record -> kernel -> record transaction. Copied lease applications, standalone record replacement, and release are
-  serialized while the host-global firewall lock and exact host-network-namespace pin remain retained.
+  record -> kernel -> record transaction. Copied lease applications, standalone record replacement, and generation-lease
+  `Release` are serialized while the host-global firewall lock remains retained. Each observation or application
+  connection separately revalidates the caller-supplied retained namespace lease under its own lifecycle lock. The
+  application mutex neither retains that namespace lease nor serializes its release, so it may otherwise be released
+  between calls.
 - Before mutation, application validates the compiler-bound seal, exact resource inventories, table/chain/rule shape,
   terminal default-deny invariants, applying record, and exact observed-before snapshot. Fixed names or a digest alone
   never grant deletion authority.
@@ -298,14 +301,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and cancellation cannot produce success.
 - The durable applying record precedes mutation. Exact-before authorizes one flush, exact-target takes the
   record-completion path without replay, and unknown retains applying authority. After a commit attempt, one fresh
-  cancellation-independent five-second inspection classifies before/target/unknown under the same transaction lock,
-  firewall lock, and namespace pin. Exact-before attempts to restore the prior committed record and returns an error;
-  exact-target attempts to commit while retaining any application error; unknown remains recoverable with explicit
-  outcome evidence. Record-finalization failures remain explicit, and ambiguous committed replacement blocks later
-  mutation.
-- Applied empty means both reserved tables are absent. Exact empty-to-empty verifies absence without a netlink
-  transaction; an exact admitted non-empty generation can delete both reserved tables in one batch. Partial, foreign,
-  mismatched, corrupt, wrong-boot, wrong-namespace, missing-record, and ambiguous state cannot authorize deletion.
+  cancellation-independent five-second inspection classifies before/target/unknown under the same transaction and
+  firewall locks. That observation separately revalidates the caller-supplied namespace lease under its lifecycle lock.
+  Exact-before attempts to restore the prior committed record and returns an error; exact-target attempts to commit
+  while retaining any application error; unknown remains recoverable with explicit outcome evidence.
+  Record-finalization failures remain explicit, and ambiguous committed replacement blocks later mutation.
+- Applied empty means both reserved tables are absent. Exact empty-to-empty verifies absence through fresh raw-netlink
+  observation without a mutation/`Flush` transaction; an exact admitted non-empty generation can delete both reserved
+  tables in one batch. Partial, foreign, mismatched, corrupt, wrong-boot, wrong-namespace, missing-record, and ambiguous
+  state cannot authorize deletion.
 - This is private L0/L1 evidence only. Qualified initial inspection/adoption, the root/`CAP_NET_ADMIN` threat-model
   decision, production privileged/public composition, live policy and link enforcement, legacy backend/CLI removal,
   direct capability probes, real-kernel/Tier tests, and release qualification remain pending.

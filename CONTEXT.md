@@ -860,9 +860,12 @@ record only after re-reading both its exact contents and retained file evidence;
 
 The admitted lease now also retains a private application mutex across the complete record -> kernel -> record
 transaction. The mutex serializes copied lease values, standalone record replacement, application/reconciliation, and
-release while the global firewall lock and exact host-network-namespace pin remain held. Before any kernel effect, the
-adapter revalidates the compiled generation's closed application seal, resource inventories, table/chain/rule shape,
-and terminal default-deny invariants against the durable applying record and a fresh exact kernel snapshot.
+generation-lease `Release` while the global firewall lock remains held. Each observation or application connection
+separately revalidates the caller-supplied retained namespace lease under that lease's lifecycle lock. The application
+mutex neither retains the namespace lease nor serializes its release, so the namespace lease may otherwise be released
+between calls. Before any kernel effect, the adapter revalidates the compiled generation's closed application seal,
+resource inventories, table/chain/rule shape, and terminal default-deny invariants against the durable applying record
+and a fresh exact kernel snapshot.
 
 The raw-netlink collector issues only receiver-chosen read requests for the two exact managed tables, five fixed chains,
 their rules, and the absence of sets, objects, and flowtables. It brackets collection with ruleset-generation reads,
@@ -882,16 +885,17 @@ interrupt, flush, and close errors are all preserved; cancellation cannot be rep
 The durable `applying` record precedes mutation. A fresh exact-before observation authorizes one flush, exact-target
 takes the record-completion path without replay, and unknown state preserves applying authority. After a commit attempt,
 one fresh inspection uses a cancellation-independent five-second recovery context under the same transaction lock,
-global firewall lock, and namespace pin. Exact-before attempts to restore the committed-before record and returns an
-error; exact-target attempts to commit target while retaining any application error; and unknown preserves applying
-state with explicit `kernel_generation_state` and `outcome_unknown` evidence. A known failure before the commit boundary
-attempts to restore committed-before without pretending that a kernel mutation occurred. Record-finalization failures
-remain explicit, and an ambiguous committed replacement blocks later mutation.
+global firewall lock. That observation separately revalidates the caller-supplied namespace lease under its lifecycle
+lock. Exact-before attempts to restore the committed-before record and returns an error; exact-target attempts to commit
+target while retaining any application error; and unknown preserves applying state with explicit
+`kernel_generation_state` and `outcome_unknown` evidence. A known failure before the commit boundary attempts to restore
+committed-before without pretending that a kernel mutation occurred. Record-finalization failures remain explicit, and
+an ambiguous committed replacement blocks later mutation.
 
-Applied empty now means both reserved tables are absent. Exact empty-to-empty verifies absence without a netlink
-transaction; an exact admitted non-empty generation may delete both tables in its one replacement batch. Partial,
-foreign, mismatched, corrupt, wrong-boot, wrong-namespace, missing-record, or otherwise ambiguous state never grants
-deletion authority.
+Applied empty now means both reserved tables are absent. Exact empty-to-empty verifies absence through fresh raw-netlink
+observation without a mutation/`Flush` transaction; an exact admitted non-empty generation may delete both tables in
+its one replacement batch. Partial, foreign, mismatched, corrupt, wrong-boot, wrong-namespace, missing-record, or
+otherwise ambiguous state never grants deletion authority.
 
 This application and reconciliation path is private and has no production caller. Qualified initial
 inspection/adoption, the root/`CAP_NET_ADMIN` threat-model decision, privileged/public composition, link-activation and
