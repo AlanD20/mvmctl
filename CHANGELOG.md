@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
 > effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, its destination-agent
 > non-root execution side, its isolated process-bound source-session foundation, the private inert root-owned VM-exec
-> capacity and active-pair authorities, its inert exact-one descriptor transport and structural admission, its closed
+> capacity and active-pair authorities with a fixed global ceiling, its exact Firecracker peer/pidfd binding and
+> absolute-boottime stop primitive, its inert exact-one descriptor transport and structural admission, its closed
 > retained-sidecar wire/process/Jailer-client/unregistered-handler lifecycle, and clean-break removal of the VM-wide
 > remote-exec trust flag described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
@@ -117,8 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migration inspection or migration application with an explicit clean-install-required validation error and remain
   unchanged; no legacy bit is converted into a directional exec policy.
 - Public execution-policy CRUD, the wire, source session, and destination side still do not activate VM-to-VM
-  execution. The API-owned relay listener, production use of the retained sidecar, exact source/destination
-  process-and-VM identity binding, production capacity ceiling and composition, absolute boottime enforcement, runtime
+  execution. The API-owned relay listener, production use of the retained sidecar, composition of the implemented
+  process/VM-bound authority and fixed capacity ceiling into that sidecar, absolute boottime enforcement, runtime
   policy resolution/enforcement and redacted audit, and positive Python L2 qualification remain pending. The
   implemented cancellation boundaries are process-group guarantees, not per-command cgroup authority, and do not
   claim cleanup of descendants that deliberately leave their group.
@@ -144,8 +145,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   roots, both active leases, and both exact pidfd-bound process sets; proves both complete identities and final
   liveness; reserves root-global capacity; then rechecks boot, both identities, and both final locator/liveness proofs
   before publishing an immutable owner/source/destination launch-generation admission.
-- The pair lease cleans up once in reverse order: capacity, destination/source process capabilities, descending lexical
-  active leases, then pair roots.
+- The pair lease cleans up once in reverse order: destination/source peer pidfds, capacity, destination/source process
+  capabilities, descending lexical active leases, then pair roots.
+- Added exact Firecracker peer authority for both retained VM-exec connections. Admission obtains `SO_PEERCRED` and
+  `SO_PEERPIDFD` from the same socket, immediately owns and verifies the close-on-exec pidfd, matches PID and effective
+  UID/GID to the admitted record, and proves exact PID/start, complete active identity, retained process identity, and
+  liveness. Destination binding finishes with a bounded last-look sweep of both peer pidfds and both retained process
+  sets before the final host-boot and relay-budget check.
+- Selected a fixed private production ceiling of eight host-global sessions and composed it with the active-pair and
+  peer authorities behind a private constructor. There is still no production caller or registered action.
+- Added a private absolute `CLOCK_BOOTTIME` relay-stop primitive backed by an absolute `timerfd`, bounded polling,
+  cancellation, close-once lifecycle, and cleanup-error evidence. It is not yet wired into the retained sidecar.
 - Added a private exact-one VM-exec descriptor transport. Its single-use sender puts one duplicated connection in one
   `SCM_RIGHTS` message on the first non-NUL frame byte, sends the remainder with no ancillary data through
   cancellation-bounded nonblocking I/O, and closes its duplicate exactly once even across copied owners and failures.
@@ -164,10 +174,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   acknowledgement, retains and binds destination before ready, cleans destination/source/effect authority once on
   explicit release, EOF, setup, or response failure, and reports released only after successful cleanup. It accepts no
   path, token, user, command, policy material, relay payload, or raw descriptor accessor.
-- The capacity, pair, descriptor, and retained-sidecar foundations remain private and inert. The exact action is
-  deliberately unregistered and rejected without reading request bytes. No production peer identity binding,
-  capacity ceiling/composition, absolute boottime enforcement, relay/API consumer, runtime policy enforcement,
-  redacted audit, or positive VM-to-VM path exists.
+- The capacity, pair/peer, descriptor, stop, and retained-sidecar foundations remain private and inert. The exact action
+  is deliberately unregistered and rejected without reading request bytes. No production sidecar composition,
+  absolute boottime enforcement, relay/API consumer, runtime policy enforcement, redacted audit, or positive
+  VM-to-VM path exists.
 
 #### Typed nftables compiler foundation
 - Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and
@@ -688,9 +698,8 @@ The following items are release blockers and are intentionally not described abo
   `crashed`, and `unavailable` batch observations before wiring privileged VM actions to the root-owned lifecycle and
   per-VM lock.
 - Transfer the Jailer VM-lock lease into the implemented root-owned managed-network registration foundation and add
-  persistent per-VM topology. Select the production VM-exec ceiling and compose the implemented private
-  active-pair/capacity authority with the implemented structural descriptor transport only after the retained sidecar
-  transfers and binds both descriptors to exact process/VM authority. Activate neither topology nor capacity through
+  persistent per-VM topology. Compose the selected fixed VM-exec ceiling and implemented private peer-bound
+  active-pair/capacity authority with the retained sidecar and absolute stop. Activate neither topology nor capacity through
   user SQLite state; user state must not authorize host-global namespace, link, firewall, process, mount, cgroup, or
   admission decisions.
 - Carry the managed-cache locator and base launch selection through the privileged protocol, bind the cache identity in
@@ -728,10 +737,10 @@ The following items are release blockers and are intentionally not described abo
   a kernel application.
 - Complete typed traffic API/CLI and nftables application plus the API-owned vsock relay over the implemented isolated
   source-session, typed policy, and destination-agent foundations. Directional exec-policy CRUD is public but does not
-  activate the relay. Compose the implemented retained sidecar only after exact process/VM identity binding for its
-  transferred source and destination descriptors; select and wire the production capacity ceiling and absolute
-  boottime stop; invoke the implemented private active-pair/capacity authority; enforce runtime policy/redacted audit;
-  and complete positive L2 qualification before claiming the destination path end to end. The
+  activate the relay. Compose the retained sidecar with the implemented exact process/VM-bound active-pair/capacity
+  authority, fixed global ceiling, and absolute-boottime stop; enforce stop expiry and runtime policy/redacted audit;
+  register only the exact action; and complete positive L2 qualification before claiming the destination path end to
+  end. The
   legacy guest relay, generic host-frame callback, shared guest connection, and VM-wide remote-exec field/flags are
   removed; the routed `ServiceAccessPolicy` and other transitional surfaces still require atomic removal.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the

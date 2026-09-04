@@ -664,10 +664,10 @@ pending
 **Owner:** engineer
 **Status:** Public directional exec-policy CRUD, the closed bounded wire, destination-agent non-root execution, and the
 isolated process-bound source-session, private root-owned capacity/active-pair authorities, and inert exact-one
-structural descriptor transport plus unregistered retained-sidecar lifecycle are implemented; API-owned relay,
-production sidecar use, source/destination process-and-VM identity binding, production capacity ceiling/composition,
-absolute boottime stop, runtime policy/audit, and Python qualification remain pending, so VM-to-VM execution remains
-fail-closed
+structural descriptor transport plus exact Firecracker peer binding, a fixed global ceiling, an absolute-boottime stop
+primitive, and the unregistered retained-sidecar lifecycle are implemented; API-owned relay, production sidecar
+composition/registration and stop enforcement, runtime policy/audit, and Python qualification remain pending, so
+VM-to-VM execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
@@ -707,9 +707,11 @@ fail-closed
 - [ ] Compose that destination capability only behind the authenticated source session and API-owned relay. Reject
   VM-to-host execution, missing/reverse policy, foreign owner, stale target, and every identity mismatch before the
   host constructs the destination request.
-- [ ] Enforce the same wire limits at the relay, select the production ceiling, compose Task 15's implemented private
-  active-pair/capacity authority through the retained sidecar with exact process/VM-bound source and destination
-  descriptors, and add command-redacted source/destination/timing/result audit records.
+- [x] Select a fixed host-global ceiling of eight and add private exact Firecracker peer binding for both retained
+  descriptors plus an absolute `CLOCK_BOOTTIME` stop primitive. Keep all three unreachable from production dispatch.
+- [ ] Enforce the same wire limits at the relay, compose Task 15's implemented private peer-bound
+  active-pair/capacity authority and absolute stop through the retained sidecar, register only the exact action, and add
+  command-redacted source/destination/timing/result audit records.
 - [ ] Python T2 proves same-network, cross-network, and no-IP-network exec behavior plus all denials and limits.
 
 ## Phase 3: Finish the privilege boundary and lifecycle
@@ -843,8 +845,9 @@ optimization, unsupported-behavior scope decisions, and host-mutation migration 
 
 **Owner:** engineer
 **Status:** Private inert VM-exec capacity reservation, active-pair, exact-one structural descriptor, and unregistered
-retained-sidecar lifecycle foundations implemented; peer identity binding, production ceiling/composition and boottime
-enforcement, action registration, and all reconciliation and lifecycle work remain pending
+retained-sidecar lifecycle foundations plus exact Firecracker peer binding, the fixed global ceiling, and the absolute
+boottime-stop primitive are implemented; sidecar composition/enforcement, action registration, and all reconciliation
+and lifecycle work remain pending
 **Dependencies:** Tasks 8-14
 
 - [ ] Add root-authoritative startup/pre-launch reconciliation for records, processes, cgroups, namespaces, links,
@@ -877,7 +880,7 @@ enforcement, action registration, and all reconciliation and lifecycle work rema
   roots, both active leases, and both exact pidfd-bound process authorities. Prove both complete identities and final
   liveness, reserve root-global capacity, then recheck boot, both identities, and both locators before exposing an
   immutable owner/source/destination launch-generation admission. Release exactly once in reverse authority order.
-  This foundation has no production constructor or caller and admits no source connection FD.
+  Its private production constructor and exact peer-binding operations remain without a production caller.
 - [x] Add the private inert exact-one descriptor transport and structural admission foundation. Attach one duplicate
   through one `SCM_RIGHTS` message on the first non-NUL frame byte; use cancellation-bounded nonblocking ordinary
   remainder I/O; receive every byte through `recvmsg(MSG_CMSG_CLOEXEC)`; own all installed descriptors before
@@ -888,12 +891,16 @@ enforcement, action registration, and all reconciliation and lifecycle work rema
   and private privileged handler lifecycle. Transfer source and destination duplicates only with their exact ordered
   frames, keep caller originals open, expose only borrowed connection capabilities to private effects, report release
   only after successful cleanup, and clean up once on EOF, cancellation, setup, response, and explicit-release paths.
-  Keep the fixed action unregistered and the handler without production peer identity, pair/capacity, policy, or relay
-  effects.
-- [ ] Bind both retained descriptors to exact Firecracker process/VM authority, select the fixed positive production
-  ceiling, compose the implemented pair/capacity authority, enforce its absolute `CLOCK_BOOTTIME` relay-stop deadline,
-  and register only the exact sidecar action. Reserve before relay effects, release within the separate grace, and
-  never substitute SQLite status, a guest-supplied ID, a socket path, or a process-local semaphore.
+  Keep the fixed action unregistered and the handler without composition of the separately implemented peer identity,
+  pair/capacity, stop, policy, or relay effects.
+- [x] Bind retained source/destination descriptors in the private authority to exact Firecracker process/VM identity
+  with same-socket `SO_PEERCRED`/`SO_PEERPIDFD`, close-on-exec pidfd ownership, exact PID/effective UID/GID and locator
+  matching, complete active/retained process identity, and a final both-peer/both-process liveness sweep. Fix the
+  host-global production ceiling at eight and add an absolute `CLOCK_BOOTTIME` timerfd stop primitive. Keep all of
+  these boundaries private and unregistered.
+- [ ] Compose the peer-bound pair/capacity authority and absolute stop into the retained handler, close both retained
+  connections on expiry, release within the separate grace, and register only the exact sidecar action. Reserve before
+  relay effects and never substitute SQLite status, a guest-supplied ID, a socket path, or a process-local semaphore.
 - [ ] Make create/start/stop/remove/reboot/snapshot/restore/volume paths transactionally abortable and retryable.
 - [ ] Build one complete typed relaunch state for create/start/reboot/snapshot restore. Preserve a configured vsock CID,
   let root derive the fixed runtime UDS leaf, retain agent port/token only in the normal process, distinguish valid

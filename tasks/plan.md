@@ -101,8 +101,16 @@ continue without silently deleting it.
   `active` records, opens their authorities separately, and locks canonical VM IDs lexically. It retains pair roots,
   both active leases, and both exact pidfd-bound process authorities; proves both complete identities and final
   liveness; reserves global capacity; then rechecks boot, both identities, and both locators before exposing an
-  immutable owner/source/destination launch-generation admission. Close-once cleanup releases capacity, process
-  authorities, descending lexical active leases, and roots in reverse. No production caller or relay uses it.
+  immutable owner/source/destination launch-generation admission. Close-once cleanup releases destination/source peer
+  pidfds, capacity, process authorities, descending lexical active leases, and roots in reverse. Its private production
+  constructor fixes the
+  host-global capacity ceiling at eight. Exact source and destination binding obtains same-socket `SO_PEERCRED` and
+  `SO_PEERPIDFD`, immediately owns the close-on-exec pidfd, proves the record's PID/effective UID/GID, complete active
+  identity, retained process identity, and liveness, then finishes with a both-peer/both-process locator/liveness sweep
+  before the final boot/budget check. No production caller or relay uses it.
+- Private inert absolute `CLOCK_BOOTTIME` relay-stop primitive. An absolute close-on-exec, nonblocking `timerfd`,
+  bounded polling, cancellation, shared close-once lifecycle, and cleanup-error evidence are implemented, but the
+  retained sidecar does not yet construct or enforce it.
 - Private inert exact-one VM-exec descriptor transport and structural-admission foundation. Its single-use sender puts
   one duplicated connection in one `SCM_RIGHTS` message on the first non-NUL frame byte, writes the remainder without
   ancillary data through cancellation-bounded nonblocking I/O, and closes the duplicate exactly once. The receiver
@@ -114,7 +122,8 @@ continue without silently deleting it.
   transport, named Jailer client, and privileged handler lifecycle transfer owned source and destination duplicates in
   order, retain caller originals, bound cancellation/reaping, and clean up once on explicit release, EOF, setup, or
   response failure. The handler is deliberately absent from privileged dispatch and has no production effect,
-  identity binding, capacity composition, boottime stop, policy/audit payload, or relay caller.
+  composition of the separately implemented peer-bound authority or boottime stop, policy/audit payload, or relay
+  caller.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
@@ -837,13 +846,13 @@ The public policy families are:
 
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
 nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, destination-agent
-non-root process side, isolated process-bound source session, and private Task 15 root-owned capacity and active-pair
-authorities plus exact-one structural descriptor transport and unregistered retained-sidecar lifecycle are
-implemented. The API-owned relay listener, production use of the sidecar, source/destination process-and-VM identity
-binding, selected production capacity ceiling and composition, absolute boottime stop, runtime policy
-resolution/enforcement/audit, Python system qualification, and the traffic family's replacement public surface remain
-pending. No production host path opens a source session, invokes the sidecar or pair authority, consumes a capacity
-reservation, or constructs an authorized destination request, so VM-to-VM execution is unavailable.
+non-root process side, isolated process-bound source session, and private Task 15 root-owned capacity, active-pair,
+exact Firecracker peer-binding, fixed-ceiling, absolute-boottime-stop, exact-one structural descriptor, and
+unregistered retained-sidecar foundations are implemented. The API-owned relay listener, production composition and
+registration of the sidecar, absolute-stop enforcement, runtime policy resolution/enforcement/audit, Python system
+qualification, and the traffic family's replacement public surface remain pending. No production host path opens a
+source session, invokes the sidecar or pair authority, consumes a capacity reservation, or constructs an authorized
+destination request, so VM-to-VM execution is unavailable.
 
 ### LoopMount privilege foundation
 

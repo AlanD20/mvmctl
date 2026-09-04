@@ -506,9 +506,21 @@ the two VM locks in canonical lexical ID order. After releasing the index, it re
 both active leases, reopens both recorded process sets into pidfds, and proves both complete active identities plus
 final pidfd locator/liveness. It then reserves root-global capacity and rechecks the host boot ID, both complete
 identities, and both final pidfd locator/liveness proofs before exposing an immutable owner/source/destination
-launch-generation, reservation, boot, and relay-stop admission. Its close-once cleanup releases capacity,
-destination/source process capabilities, active leases in descending lexical order, and the pair roots last without
-reacquiring a lock.
+launch-generation, reservation, boot, and relay-stop admission. Its close-once cleanup releases destination/source
+peer pidfds, capacity, destination/source process capabilities, active leases in descending lexical order, and the pair
+roots last without reacquiring a lock.
+
+Its private production constructor fixes a host-global ceiling of eight sessions. Each retained source and destination
+connection can be bound to the corresponding admitted Firecracker through `SO_PEERCRED` and `SO_PEERPIDFD`, exact
+PID/start identity, matching effective UID/GID, complete active-process identity, and retained-process proof. After
+both expensive identity proofs, readiness performs a bounded final locator/liveness sweep of both peer pidfds and both
+retained process sets, followed by one final host-boot and relay-budget check. The authority and its fixed ceiling have
+no production caller and remain unreachable from privileged dispatch.
+
+A private absolute `CLOCK_BOOTTIME` stop primitive is also implemented and inert. It arms a close-on-exec,
+nonblocking `timerfd` with `TFD_TIMER_ABSTIME`, waits through bounded polling with cancellation, rejects a concurrent
+second waiter, caches the completed wait result for later calls, and releases once while retaining cleanup-error
+evidence. The retained sidecar does not yet construct or enforce it.
 
 The exact-one VM-exec descriptor transport and structural-admission foundation is also implemented and inert. Its
 single-use sender attaches one duplicate through one `SCM_RIGHTS` message on the first non-NUL frame byte, sends the
@@ -534,14 +546,14 @@ response failure. It reports `released` only after explicit-release cleanup succ
 command, token, target user, policy material, payload, or raw descriptor accessor. It is deliberately absent from the
 privileged dispatcher, whose unknown-action path rejects the fixed action without reading its request bytes.
 
-Neither private authority has a production constructor or caller. No production effect binds the retained descriptors
-to Firecracker records, composes the active-pair/capacity authority, selects and enforces the positive production
-ceiling and absolute `CLOCK_BOOTTIME` stop, or registers the sidecar action.
+The peer-bound pair/capacity authority has a private production constructor but no production caller. No production
+effect composes it with the retained descriptors, constructs and enforces the absolute `CLOCK_BOOTTIME` stop, or
+registers the sidecar action.
 
 These components still do not form a positive VM-to-VM path. No API-owned relay listener opens a root-authority-admitted
 source FD, invokes the retained sidecar client, binds either transferred descriptor to exact process/VM authority,
 reads its request, enforces the exact runtime exec policy, constructs a destination request, composes the production
-ceiling and reservation, or writes a command-redacted audit record.
+peer-bound authority and stop with the retained sidecar lifecycle, or writes a command-redacted audit record.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
 environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
 Python L2 qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status,
