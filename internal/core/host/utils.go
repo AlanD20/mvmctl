@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -121,24 +120,6 @@ func RemoveUserFromGroup(ctx context.Context, username, groupName string) (bool,
 	return true, nil
 }
 
-// --- ValidateSudoersBinaries ---
-func ValidateSudoersBinaries() error {
-	for binary, pkg := range infra.PrivilegedBinaries {
-		if _, err := os.Stat(binary); os.IsNotExist(err) {
-			return errs.New(
-				errs.CodeHostInitFailed,
-				fmt.Sprintf(
-					"Required binary not found: %s (install %s)",
-					binary,
-					pkg,
-				),
-				errs.WithClass(errs.ClassInternal),
-			)
-		}
-	}
-	return nil
-}
-
 // --- GenerateSudoersContent ---
 // Map iteration order is random; iterate over an ordered key slice instead.
 func GenerateSudoersContent(groupName string) string {
@@ -153,74 +134,6 @@ func GenerateSudoersContent(groupName string) string {
 			"%%%s ALL=(root) NOPASSWD: %s\n",
 		infra.ProjectName, infra.ProjectName, groupName, binariesStr,
 	)
-}
-
-// --- WriteSudoers ---
-func WriteSudoers(ctx context.Context, path string, content string) error {
-	if err := ValidateSudoersBinaries(); err != nil {
-		return err
-	}
-
-	// Write to temp file using tempfile.NamedTemporaryFile equivalent:
-	// mode="w", suffix=".sudoers", delete=False
-	tmpFile, err := os.CreateTemp("", "*.sudoers")
-	if err != nil {
-		return errs.New(
-			errs.CodeHostInitFailed,
-			fmt.Sprintf("Failed to create temp file: %v", err),
-			errs.WithClass(errs.ClassInternal),
-		)
-	}
-	tmpPath := tmpFile.Name()
-	if _, err := tmpFile.Write([]byte(content)); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-		return errs.New(
-			errs.CodeHostInitFailed,
-			fmt.Sprintf("Failed to write sudoers file %s: %v", path, err),
-			errs.WithClass(errs.ClassInternal),
-		)
-	}
-	tmpFile.Close()
-	// Clean up temp file on function exit.
-	defer func() {
-		os.Remove(tmpPath) // ignore error
-	}()
-
-	// Validate with visudo; non-zero exit indicates invalid syntax.
-	// If the binary is not found, RunCmd returns an execution error.
-	result, err := system.DefaultRunner.Run(ctx, []string{"visudo", "-c", "-f", tmpPath},
-		system.RunCmdOpts{Check: false, Capture: true})
-	if err != nil {
-		// Command not found or other execution failure → "visudo not found"
-		return errs.New(
-			errs.CodePrivilegeSudoers,
-			"visudo not found — cannot validate sudoers syntax",
-			errs.WithClass(errs.ClassInternal),
-		)
-	}
-	if !result.Success() {
-		return errs.New(
-			errs.CodePrivilegeSudoers,
-			fmt.Sprintf(
-				"Generated sudoers file failed visudo validation: %s",
-				result.Stderr,
-			),
-			errs.WithClass(errs.ClassInternal),
-		)
-	}
-
-	// Write to final location
-	if err := os.MkdirAll(filepath.Dir(path), infra.DirPerm); err != nil {
-		return errs.New(errs.CodeHostInitFailed,
-			fmt.Sprintf("Failed to write sudoers file %s: %v", path, err), errs.WithClass(errs.ClassInternal))
-	}
-	if err := os.WriteFile(path, []byte(content), infra.SudoersPerm); err != nil {
-		return errs.New(errs.CodeHostInitFailed,
-			fmt.Sprintf("Failed to write sudoers file %s: %v", path, err), errs.WithClass(errs.ClassInternal))
-	}
-
-	return nil
 }
 
 // --- RemoveSudoers ---
