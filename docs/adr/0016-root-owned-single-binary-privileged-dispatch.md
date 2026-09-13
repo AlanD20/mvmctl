@@ -1171,21 +1171,30 @@ In particular, a QCOW2 file's physical length is not its virtual capacity, so a 
 The caller-owned `firecracker.json` is admission evidence, not launch authority. Immediately before allocation or
 reading, root repeats synchronized metadata inspection and enforces the 1-byte-through-1-MiB bound. It uses positioned
 reads, an EOF growth probe, cancellation checks, and pre/post device, inode, type, mode, owner, group, link, size,
-mtime, and ctime equality. Strict closed JSON must be semantically identical to the complete root-built intent. Caller
-bytes are then discarded and the source descriptor is closed before root creates the authoritative configuration.
+mtime, and ctime equality. Malformed UTF-8 is rejected before JSON decoding; strict closed JSON must be semantically
+identical to the complete root-built intent. Caller bytes are then discarded and the source descriptor is closed before
+root creates the authoritative configuration.
 
 Root writes its canonical bytes to a fresh `MFD_CLOEXEC|MFD_ALLOW_SEALING` memfd, sets root ownership and mode `0444`,
-and verifies exact metadata, zero offset, byte-for-byte readback, and all of `F_SEAL_SEAL`, `F_SEAL_SHRINK`,
-`F_SEAL_GROW`, `F_SEAL_WRITE`, and `F_SEAL_FUTURE_WRITE`. The retained private capability contains only its descriptor
-and checked close operation. It exposes no path, raw bytes, generic syscall surface, or public descriptor accessor. The
-mount transaction must consume that capability descriptor directly and apply read-only, nosuid, nodev, and noexec mount
-attributes; pathname reopening or `/proc/self/fd` reconstruction is prohibited.
+and verifies exact metadata, exact `FD_CLOEXEC`, zero offset, cancellation-aware byte-for-byte readback, and all of
+`F_SEAL_SEAL`, `F_SEAL_SHRINK`, `F_SEAL_GROW`, `F_SEAL_WRITE`, and `F_SEAL_FUTURE_WRITE`. Required-seal inclusion
+permits the additional `F_SEAL_EXEC` set by `MFD_NOEXEC_SEAL`, including when selected by `vm.memfd_noexec=1`; see the
+[kernel memfd documentation](https://cdn.kernel.org/doc/html/latest/userspace-api/mfd_noexec.html). A real
+`MFD_NOEXEC_SEAL` test covers this case without changing host sysctls.
+
+The retained private capability shares its descriptor and synchronized checked-close state across copied handles.
+Release closes once without caller cancellation and returns the first cached result, including cleanup failure.
+It exposes no path, raw bytes, generic syscall surface, or public descriptor accessor. The mount transaction must
+consume that capability descriptor directly and apply read-only, nosuid, nodev, and noexec mount attributes; pathname
+reopening or `/proc/self/fd` reconstruction is prohibited.
 
 Implementation note (2026-08-30): the private Jailer service implements the base launch selection, resource lease, and
 sealed configuration authority described above. It transfers the remaining descriptor chain and the sealed capability
 into checked reverse cleanup. The privileged request does not yet carry the cache locator and base selection, the
 root-owned instance record does not bind the cache identity, and the mount-namespace launch path does not consume the
-root-side lease or sealed configuration. Snapshot, volume, output, and image-provisioning policies remain pending.
+root-side lease or sealed configuration. Snapshot, volume, and image-provisioning admission policies remain pending.
+Persistent outputs follow the fixed-`0600`, one-launch-retention policy below; preparation and launch consumption remain
+separate implementation work.
 
 Sockets and PID mirrors are not persistent cache artifacts. Their host layout is fixed beneath the root-controlled
 ephemeral runtime tree:

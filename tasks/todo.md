@@ -193,8 +193,11 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Define base VM launch admission: rootfs 128 MiB through 16 TiB with exact bounded size equality, config 1 byte
     through 1 MiB, kernel 1 byte through 1 GiB, and optional cloud-init ISO 1 byte through 256 MiB. All are caller-owned,
     one-link regular files with resource-specific owner access and no group/world write or special bits.
-  - [ ] Define snapshot restore memory/state, volume count/format/capacity, writable snapshot creation, persistent output,
-    and image-provisioning policies in their owning increments. QCOW2 physical length must not be confused with virtual
+  - [x] Define persistent output policy as fixed caller-owned `0600` one-link regular files, truncated once after
+    durable launch registration, with bounded readers and one-launch retention but no hard live-size cap.
+    Descriptor preparation and launch consumption remain pending.
+  - [ ] Define snapshot restore memory/state, volume count/format/capacity, writable snapshot creation, and
+    image-provisioning policies in their owning increments. QCOW2 physical length must not be confused with virtual
     capacity or inspected by an unrestricted root subprocess.
 - [x] Implement the private base launch-resource lease for fixed `vms/<vm-id>/rootfs.img`,
   `vms/<vm-id>/firecracker.json`, optional `vms/<vm-id>/cloud-init.iso`, and `kernels/<kernel-id>`: component traversal
@@ -204,6 +207,10 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [x] Make caller `firecracker.json` admission-only evidence: repeat the 1-byte-through-1-MiB bound before allocation,
   require stable positioned reads and strict semantic equality with root-built typed launch intent, consume the source
   descriptor, and retain only a root-owned `0444` fully sealed memfd with verified readback and checked cleanup.
+- [x] Harden the private sealed configuration with malformed UTF-8 rejection, exact `FD_CLOEXEC`, cancellation-aware
+  readback, and synchronized close-once state shared by copied handles with cached cleanup errors. Require every
+  immutability seal while accepting kernel-added `F_SEAL_EXEC`; cover a real `MFD_NOEXEC_SEAL` descriptor without
+  changing host sysctls. Integrated as `0ded9203`; the launch consumer remains pending.
 - [ ] Consume the sealed configuration through Task 7's descriptor-only mount transaction. The private capability has
   no live privileged action or launch consumer yet, and current public launches remain transitional.
 - [ ] Extend open-once beneath/no-symlink/no-magic-link traversal to snapshot, volume, output, and image-provisioning

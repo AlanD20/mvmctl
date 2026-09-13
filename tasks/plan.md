@@ -1,6 +1,6 @@
 # v0.3.0 Clean-Break Security Release Plan
 
-**Status:** Approved — work paused after prepared integrations
+**Status:** Approved — bounded stale-work salvage and integration active
 **Branch:** `0.3.0-release`
 **Release gate:** Draft only until every CI and Python system-test requirement below passes
 
@@ -18,9 +18,49 @@ Checks used local Go `1.27.0-X:nodwarf5`, offline dependencies, and worktree-loc
 temporary/cache paths. Go 1.26.3, live-kernel/system QA, and full release CI were
 not qualified by this batch. The documentation delta was checked against source.
 
-Stop here: no further release implementation, review, or qualification is queued.
-Resume only after another explicit user instruction. The release remains
-unfinished, and the user's unrelated uncommitted changes remain outside this batch.
+That batch ended with an explicit pause; it did not queue further release implementation,
+review, or qualification. The subsequent user authorization below resumes a bounded scope.
+The release remains unfinished, and unrelated user changes remain outside both batches.
+
+## Authorized stale-work salvage (2026-09-13)
+
+The user subsequently approved stale-branch cleanup and completion of useful remaining
+work into the release. The reviewed release baseline is `6e37af8d`, with the independent
+user kernel commit `1aa83f4d` preserved; isolated writers may start from either checkpoint.
+Each retained change requires a current dependency, a bounded implementation or documentation
+diff, focused verification, and integration review.
+Obsolete prototype behavior is not a release requirement merely because its branch exists.
+
+The cleanup deleted 28 stale local branch references without creating archives or changing
+remote references. Seven implementation sources remain retained at these original tips:
+
+| Source | Current disposition and remaining dependency |
+|--------|----------------------------------------------|
+| `agent-config-authority-v2` at `831171d4` | Sealed-configuration hardening from `c2f281c8` integrated as `0ded9203`; focused release race checks passed. |
+| `agent-host-init` at `a5ad1929` | Atomic sudoers publisher approved and in progress; preserve existing grants. Full init/reset and journal work require lifecycle/network quiescence and an operator decision. |
+| `agent-jailer-output-commit` at `022a2127` | Snapshot/volume policy and admission reference; its snapshot/volume bounds and QCOW2 strategy remain unapproved. |
+| `agent-jailer-output-v2` at `0eb12fb4` | Schema-3 retained persistent-output preparation in progress under the approved policy: fixed `0600` files with no hard live-size cap. Public mounts and launch composition remain pending. |
+| `agent-network-authority-v2` at `82b0c4ba` | Obsolete adapter recommended for discard, retained pending cleanup. Its unique synthetic ownership and schema-1 assumptions conflict with current authority; reusable primitives already exist. |
+| `agent-policy-firewall-intent` at `99200930` | ARP grammar correction in progress without arbitrary input ceilings; public traffic/exec drafts require current topology and relay authority. |
+| `agent-runtime-reconcile` at `0dcbe78b` | Private schema-3 batched observation in progress; public status activation requires the lifecycle authority writer and recovery. |
+
+The separate dirty documentation source `agent-docs-firewall-raw-observer` at `6fb3a77b`
+has its accurate distinct substance extracted into `142a3cac`, integrated as `3dd00d8a`
+after exact source-delta review. The old dirty worktree remains retained and unchanged.
+
+Sealed-configuration integration review caught and corrected an exact-seal equality
+regression: admission requires all immutability seals while permitting kernel-added
+`F_SEAL_EXEC`. The real `MFD_NOEXEC_SEAL` regression test covers that compatibility without
+changing host sysctls. The final correction delta was reviewed, and the focused release
+config/resource race checks passed in 1.524 seconds with Go 1.26.7. This private hardening
+does not wire the sealed descriptor into launch.
+
+Integration proceeds through fixed-diff review, focused tests and integration checks, and
+separate commits for each completed chunk. No entire source branch is accepted by this
+record. Root-worktree commit `1aa83f4d` is an independent user kernel change outside this
+scope; unrelated staged, unstaged, and untracked files remain excluded. No host installation
+is authorized by this batch, and no salvage result qualifies live-kernel behavior, full
+release CI, publication, or release readiness.
 
 ## Outcome
 

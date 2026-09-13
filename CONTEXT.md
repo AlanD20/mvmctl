@@ -513,9 +513,12 @@ Production route/link activation, firewall capability/application, Jailer launch
 reconciliation implementation, and system QA remain pending.
 
 The private Jailer resource foundation now treats caller-owned `firecracker.json` as admission evidence only. It
-requires complete semantic equality with root-built typed intent, closes the source, and retains a root-owned `0444`
-sealed memfd. This is not active runtime protection yet: the typed privileged launch and descriptor-only mount consumer
-remain pending, so current public launches still use the transitional configuration path.
+rejects malformed UTF-8, requires complete semantic equality with root-built typed intent, closes the source, and
+retains a root-owned `0444` sealed memfd. Final admission requires exact `FD_CLOEXEC`, all required immutability seals
+while permitting kernel-added `F_SEAL_EXEC`, and cancellation-aware canonical readback. Copied private handles share
+one synchronized, cancellation-independent close and retain its first result, including cleanup errors. The typed
+privileged launch and descriptor-only mount consumer remain pending, so current public launches still use the
+transitional configuration path.
 
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An

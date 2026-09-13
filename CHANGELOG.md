@@ -653,6 +653,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Successful preparation writes root-built canonical bytes into a root-owned mode-`0444` memfd and verifies CLOEXEC,
   zero offset, exact readback, and the full seal set preventing writes, growth, shrink, and future writable mappings.
   The retained capability exposes no path, byte slice, generic operation, or public descriptor accessor.
+- Hardened private configuration admission with malformed UTF-8 rejection, exact descriptor flags, and cancellation
+  checks throughout sealed readback. All required immutability seals remain mandatory while kernel-added
+  `F_SEAL_EXEC` is accepted, with a real `MFD_NOEXEC_SEAL` regression test. Copied handles now share one synchronized,
+  cancellation-independent close and return its cached result, including cleanup errors.
 - Successful admission transfers the complete cache and resource descriptor chain into one private lease. Rejection
   leaves the cache lease reusable; release and failure cleanup attempt every retained descriptor in reverse order with
   an uncancelled context and preserve primary `DomainError` metadata on cleanup failure.
