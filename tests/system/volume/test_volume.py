@@ -12,7 +12,9 @@ VIOLATIONS REMOVED:
 from __future__ import annotations
 
 import json
+import shlex
 import uuid
+from pathlib import PurePosixPath
 from typing import Generator
 
 import pytest
@@ -61,7 +63,7 @@ class TestVolumeLifecycle:
 
     Order within this class:
         1. Read-only / listing / inspection
-        2. Create (various formats, edge cases)
+        2. Create (raw backing, options, edge cases)
         3. Error paths (bad input, nonexistent)
         4. Modify operations (resize)
         5. Remove / destructive operations (last)
@@ -138,10 +140,9 @@ class TestVolumeLifecycle:
     # ── 2. Create operations ─────────────────────────────────────────────
 
     def test_volume_create(self, runner_vm: str, unique_key_name: str) -> None:
-        # Rationale: Needs a real volume (1-3s). Verifies size and status via
-        # inspect --json. Catches silent create failures where the volume
-        # appears in ls but has wrong metadata.
-        """Create a volume and verify size/status via inspect --json."""
+        # Rationale: Verify both persisted metadata and the real backing
+        # format so a raw label cannot hide a QCOW2 file.
+        """Create a volume with raw storage and metadata by default."""
         vol_name = f"sys-vol-{unique_key_name}"
         try:
             result = _run_mvm(
@@ -160,17 +161,28 @@ class TestVolumeLifecycle:
             assert data["volume"]["name"] == vol_name
             assert data["volume"]["size_bytes"] == 512 * 1024 * 1024
             assert data["volume"]["status"] == "available"
+            assert data["volume"]["format"] == "raw"
+            assert data["volume"]["is_read_only"] is False
+            assert data["volume"]["cache_type"] == "Unsafe"
+
+            path = data["volume"]["path"]
+            assert PurePosixPath(path).suffix == ".raw"
+            disk_info = _guest_run(
+                runner_vm, f"qemu-img info --output=json {shlex.quote(path)}"
+            )
+            disk = json.loads(disk_info.stdout)
+            assert disk["format"] == "raw"
+            assert disk["virtual-size"] == 512 * 1024 * 1024
         finally:
             _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
 
-    def test_volume_create_with_format_qcow2(
+    def test_volume_create_raw_with_read_only_shareable_writeback(
         self, runner_vm: str, unique_key_name: str
     ) -> None:
-        # Rationale: Needs a real volume (1-3s). Tests --format qcow2 and
-        # verifies format field — regression where --format is ignored
-        # would silently create raw volumes instead.
-        """Create a volume with --format qcow2 and verify format via inspect --json."""
-        vol_name = f"sys-vol-qcow2-{unique_key_name}"
+        # Rationale: Preserve the shared asset-volume option combination
+        # while raw becomes the only data-volume format.
+        """Raw volumes retain read-only, shareable, and writeback options."""
+        vol_name = f"sys-vol-options-{unique_key_name}"
         try:
             result = _run_mvm(
                 runner_vm,
@@ -178,39 +190,9 @@ class TestVolumeLifecycle:
                 "create",
                 vol_name,
                 "512M",
-                "--format",
-                "qcow2",
-            )
-            assert result.returncode == 0
-
-            inspect = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
-            data = json.loads(inspect.stdout)
-            assert data["volume"]["name"] == vol_name
-            assert data["volume"]["format"] == "qcow2"
-            assert data["volume"]["size_bytes"] == 512 * 1024 * 1024
-            assert data["volume"]["status"] == "available"
-        finally:
-            _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
-
-    def test_volume_create_with_format_raw(
-        self, runner_vm: str, unique_key_name: str
-    ) -> None:
-        # Rationale: Needs a real volume (1-3s). Tests --format raw (the
-        # default) explicitly — catches regression where format is
-        # misidentified or default changes.
-        """Create a volume with --format raw and verify format via inspect --json."""
-        vol_name = f"sys-vol-raw-{unique_key_name}"
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "volume",
-                "create",
-                vol_name,
-                "512M",
-                "--format",
-                "raw",
+                "--read-only",
+                "--shareable",
+                "--writeback",
             )
             assert result.returncode == 0
 
@@ -222,8 +204,19 @@ class TestVolumeLifecycle:
             assert data["volume"]["format"] == "raw"
             assert data["volume"]["size_bytes"] == 512 * 1024 * 1024
             assert data["volume"]["status"] == "available"
+            assert data["volume"]["is_read_only"] is True
+            assert data["volume"]["cache_type"] == "Writeback"
+            assert PurePosixPath(data["volume"]["path"]).suffix == ".raw"
+
+            ls_result = _run_mvm(runner_vm, "volume", "ls", "--json")
+            volumes = json.loads(ls_result.stdout)
+            matching = [v for v in volumes if v["name"] == vol_name]
+            assert len(matching) == 1
+            assert matching[0]["is_shareable"] is True
         finally:
-            _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
+            _run_mvm(
+                runner_vm, "volume", "rm", vol_name, "--force", check=False
+            )
 
     # ── Read-only flag tests ─────────────────────────────────────────────
 
@@ -390,28 +383,52 @@ class TestVolumeLifecycle:
             volumes = json.loads(ls_result.stdout)
             assert not any(v["name"] == "invalid-size-vol" for v in volumes)
 
-    def test_volume_create_invalid_format_fails(
-        self, runner_vm: str, unique_key_name: str
+    @pytest.mark.parametrize("removed_format", ["raw", "qcow2", "vmdk"])
+    def test_volume_create_removed_format_flag_rejected_without_side_effects(
+        self,
+        runner_vm: str,
+        shared_volume: str,
+        unique_key_name: str,
+        removed_format: str,
     ) -> None:
-        # Rationale: No resources needed — error path for invalid format.
-        """Creating a volume with invalid --format should be rejected."""
-        vol_name = f"sys-vol-badfmt-{unique_key_name}"
-        result = _run_mvm(
-            runner_vm,
-            "volume",
-            "create",
-            vol_name,
-            "512M",
-            "--format",
-            "vmdk",
-            check=False,
+        # Rationale: Both former formats must fail during flag parsing,
+        # before creating a volume record or a backing file.
+        """The removed --format flag rejects every value without creating a volume."""
+        vol_name = f"sys-vol-removedfmt-{unique_key_name}"
+        inspect = _run_mvm(
+            runner_vm, "volume", "inspect", shared_volume, "--json"
         )
-        assert result.returncode != 0
+        volume_dir = PurePosixPath(json.loads(inspect.stdout)["volume"]["path"]).parent
+        list_backing_files = (
+            f"find {shlex.quote(str(volume_dir))} -mindepth 1 -maxdepth 1 -print"
+        )
+        backing_files_before = _guest_run(runner_vm, list_backing_files)
+        try:
+            result = _run_mvm(
+                runner_vm,
+                "volume",
+                "create",
+                vol_name,
+                "512M",
+                "--format",
+                removed_format,
+                check=False,
+            )
+            assert result.returncode != 0
+            assert "unknown flag: --format" in (result.stdout + result.stderr).lower()
 
-        ls_result = _run_mvm(runner_vm, "volume", "ls", "--json", check=False)
-        if ls_result.returncode == 0:
+            ls_result = _run_mvm(runner_vm, "volume", "ls", "--json")
             volumes = json.loads(ls_result.stdout)
             assert not any(v["name"] == vol_name for v in volumes)
+
+            backing_files_after = _guest_run(runner_vm, list_backing_files)
+            assert set(backing_files_after.stdout.splitlines()) == set(
+                backing_files_before.stdout.splitlines()
+            ), backing_files_after.stdout
+        finally:
+            _run_mvm(
+                runner_vm, "volume", "rm", vol_name, "--force", check=False
+            )
 
     def test_volume_inspect_nonexistent_fails(self, runner_vm: str) -> None:
         # Rationale: No resources needed — error path for nonexistent volume.

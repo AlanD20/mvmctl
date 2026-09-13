@@ -616,8 +616,6 @@ def _create_and_seed_volume() -> None:
         "--shareable",
         "--read-only",
         "--writeback",
-        "--format",
-        "raw",
         timeout=30,
     )
 
