@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > generation digest, the private firewall generation record/store/lock and evidence-bound replacement authority,
 > bounded raw nftables snapshot collection and private exact-host-netns generation application/reconciliation,
 > the private Jailer and LoopMount ephemeral-authority capabilities, the private root-pinned network namespace and
-> down-only link effects,
+> link effects and canonical L3/address/link-state foundations,
 > strict schema-3 Jailer record/registration and private pidfd process-activation/
 > cleanup-recovery authority with retained fixed-name cgroup-v2 lifecycle authority, and typed LoopMount
 > client/protocol, rootfs-authority, resource-lock adapter, split
@@ -340,6 +340,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registration/topology and the nftables, route/address, link-activation, Jailer `--netns`, persistent VM-topology,
   and qualification stages are implemented.
 
+#### Private canonical L3 and exact link-state effects
+
+- Added private canonical prefix/gateway/guest/MAC admission and namespace-bound IPv4 address/route codecs.
+- Added exact managed-bridge and down-loopback address preparation, state-dependent loopback route verification,
+  and per-role raise/lower effects. Routes are observed as kernel-created state, not inserted directly.
+- Re-admitted topology identity before and after address mutation, rejected a down shared managed bridge, and
+  preserved partial/unknown-outcome and close-error evidence. Firewall-gated activation sequencing, production
+  composition, and live-kernel/system qualification remain pending.
+
 #### Private per-VM network-namespace authority and effect
 - Added a closed Network authority capability for the exact root-owned
   `/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder. It retains and rechecks directory, leaf, and mount identity,
@@ -369,7 +378,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selection. For enabled NAT, root discovers exactly one eligible IPv4 main-table default-route uplink through typed
   host-netns rtnetlink, persists its ifindex/name/kind/namespace identity, and revalidates it. Zero, multiple, changed,
   or multipath uplinks fail closed; multi-uplink selection is unsupported.
-- This contract is documentation, not completed runtime behavior. Production route/address and link activation,
+- The private foundations do not complete this runtime contract. Production route/address and link activation,
   firewall endpoint capability/application, `TopologyHold` and Jailer composition, durable reconciliation, public
   lifecycle cutover, `NATGateways` input/model/compiler removal and tests, and system QA remain pending. Incompatible
   `/31` or `/32`, non-private, schema-1, mutable-name, host-global, or ambiguous legacy state will be refused as a clean
@@ -875,8 +884,8 @@ The following items are release blockers and are intentionally not described abo
   live-kernel qualification and backend cutover for the now-registered LoopMount provision/inspect handlers, then remove
   the public root
   `mvm run jailer` and `mvm run provision` entry points.
-- Compose the implemented private namespace and down-only link effects into the owner-bound VM lifecycle, add the
-  canonical route/address stages, require the freshly verified opaque firewall endpoint lease, raise host veth last,
+- Compose the implemented private namespace, link, and canonical L3 effects into the owner-bound VM lifecycle,
+  require the freshly verified opaque firewall endpoint lease, raise host veth last,
   make one namespace mandatory per VM, and pass its pinned handle to Jailer. Integrate retained activation, rollback,
   reconciliation, cleanup, root-selected single-uplink NAT authority, and snapshot endpoint preservation, then complete
   live L2, snapshot, reboot/failure, clean-break, and leak-free system QA.

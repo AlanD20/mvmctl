@@ -591,9 +591,9 @@ privileged actions, same-boot dead-process cgroup reconciliation, and qualificat
 ### Task 9: Add root network authority and mandatory per-VM namespaces
 
 **Owner:** engineer
-**Status:** Private namespace target authority plus complete down-only bridge/veth/TAP effects implemented but not
-production-composed; route/address, link-up, firewall, Jailer, persistence, public cutover, and qualification remain
-pending
+**Status:** Private namespace authority, down-only bridge/veth/TAP creation, canonical L3 admission, and exact IPv4
+address/link-state effects implemented but not production-composed; firewall-gated activation, Jailer, persistence,
+public cutover, and qualification remain pending
 **Dependencies:** Tasks 4, 7, and 8
 
 - [x] Add the private topology-preparation foundation: derive owner/network and owner/VM names, require a non-forgeable
@@ -618,6 +618,11 @@ pending
   `/dev/net/tun`, use exact `TUNSETIFF` TAP/no-PI/exclusive flags and `TUNSETOWNER`, set no group, and reverify owner,
   absent group, alias, ifindex, type, and down/non-persistent state before final persistence. The outer link effect
   reverifies the persistent TAP.
+- [x] Add private canonical prefix/gateway/guest/MAC admission and exact namespace-bound IPv4 address/route codecs.
+  Configure managed-bridge and down-loopback addresses without directly inserting routes; re-admit topology before
+  and after mutation; verify state-dependent loopback routes; and preserve partial/unknown-outcome and close errors.
+- [x] Add exact per-role raise/lower effects. These low-level methods do not enforce the complete activation sequence
+  or mint firewall authority; the production firewall-gated coordinator remains pending.
 - [ ] Compose the private service/effect in production. No current constructor call, Jailer handoff, public action, or
   live-kernel qualification exists.
 - [ ] Keep managed-network registration in network creation under the ownership-index then per-network locks. During

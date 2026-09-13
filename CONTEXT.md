@@ -474,13 +474,19 @@ exact namespace-local bridge, host/namespace veth pair, and TAP down; attaches o
 deletes only exact retained identities. Every rtnetlink operation uses an explicit retained network-namespace
 descriptor. TAP creation enters the retained VM namespace on a disposable locked thread, opens only `/dev/net/tun`,
 uses `TUNSETIFF` and `TUNSETOWNER` with no group authority, and reverifies owner, no-PI, down state, and the managed
-alias before final persistence. Neither `newService` nor the composed topology effect has a production caller, and
-there is no Jailer VM-lock transfer, route/address or link-up stage, firewall application, persistent VM-topology
-record, privileged action, public behavior, or live-kernel qualification. The `/run/mvmctl/runtime` tree remains
-uncomposed; only the separate private runtime-directory foundation described above can create and pin it.
+alias before final persistence. Separate private L3 effects now admit canonical endpoint values, configure exact
+managed-bridge and down-loopback addresses, inspect kernel-created IPv4 routes, and provide per-role raise/lower
+methods. Address mutation re-admits the exact topology before and after the effect; loopback verification follows the
+requested `IFF_UP` state, and errors preserve partial/unknown-outcome and close evidence. The shared managed bridge
+must already be up during down-endpoint preparation. These low-level methods do not enforce the complete activation
+sequence or supply firewall authority. Neither `newService` nor the composed topology effect has a production caller;
+Jailer VM-lock transfer, firewall-gated activation, persistent VM-topology records, privileged/public composition, and
+live-kernel qualification remain pending. The `/run/mvmctl/runtime` tree remains uncomposed; only the separate private
+runtime-directory foundation described above can create and pin it.
 
-ADR-0017 now fixes the production L3 contract without claiming implementation. The per-VM namespace is an L2 extension
-of one managed bridge. A canonical RFC1918 IPv4 prefix is limited to `/30` or shorter; an omitted gateway resolves to
+ADR-0017 fixes the production L3 contract; its private foundations do not yet provide production behavior. The per-VM
+namespace is an L2 extension of one managed bridge. A canonical RFC1918 IPv4 prefix is limited to `/30` or shorter;
+an omitted gateway resolves to
 the first usable address. Only the host managed bridge (`gateway/prefix`) and guest `eth0` (`guest/prefix`) are
 numbered. The veth pair, namespace-local bridge, and TAP are unnumbered and own no routes. Namespace loopback is
 `127.0.0.1/8`; the host bridge and guest receive only their kernel-connected routes, and the guest receives the default

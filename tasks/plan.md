@@ -1,8 +1,26 @@
 # v0.3.0 Clean-Break Security Release Plan
 
-**Status:** Approved — implementation in progress
+**Status:** Approved — work paused after prepared integrations
 **Branch:** `0.3.0-release`
 **Release gate:** Draft only until every CI and Python system-test requirement below passes
+
+## Prepared integration checkpoint (2026-09-13)
+
+The user-authorized batch is complete. Network L3 identity and exact address/link
+effects are integrated through `fdf285cc`; the nftables application documentation
+and its lifecycle correction are integrated through `9a75baa4`. Correction-delta
+reviews found no remaining blocker for these private foundations.
+
+Focused network `gofmt`, `golines`, `go vet ./internal/service/network`, and
+`go test -race ./internal/service/network -count=1` passed on the integration
+branch. The prepared network branch also passed its ordinary package tests.
+Checks used local Go `1.27.0-X:nodwarf5`, offline dependencies, and worktree-local
+temporary/cache paths. Go 1.26.3, live-kernel/system QA, and full release CI were
+not qualified by this batch. The documentation delta was checked against source.
+
+Stop here: no further release implementation, review, or qualification is queued.
+Resume only after another explicit user instruction. The release remains
+unfinished, and the user's unrelated uncommitted changes remain outside this batch.
 
 ## Outcome
 
@@ -157,8 +175,9 @@ continue without silently deleting it.
   private link adapter now completes the topology-effect boundary: it creates, down-inspects, attaches, and
   identity-bound deletes the exact local bridge, veth pair, and TAP through explicitly namespace-bound rtnetlink. TAP
   creation uses only fixed `/dev/net/tun`, `TUNSETIFF`, and `TUNSETOWNER`, sets no group, and reverifies its managed
-  alias before persistence. These effects are not production-composed and create no route, firewall state, link-up,
-  public action, or Jailer handoff.
+  alias before persistence. Private canonical L3 admission and exact address/link-state effects are also implemented.
+  They verify kernel-created IPv4 routes instead of inserting routes directly. These effects are not
+  production-composed; firewall-gated activation, public actions, and Jailer handoff remain pending.
 - Private typed nftables compiler pinned to `github.com/google/nftables v0.3.0`, with fixed bridge/inet tables and
   chains, raw-priority ingress guards, same-network/routed/host-service/default-deny/conditional-egress/NAT rules,
   compiler-derived canonical SHA-256 generation identity, strict digest-bound userdata, explicit empty output,
@@ -902,8 +921,11 @@ It creates and inspects the exact local bridge, veth pair, and TAP down, attache
 only exact retained identities through explicitly namespace-bound rtnetlink. TAP creation enters the retained namespace,
 uses fixed `/dev/net/tun` with `TUNSETIFF`/`TUNSETOWNER` and no group, and reverifies the managed alias before final
 persistence. The complete private effect remains uncomposed: neither `newService` nor `newTopologyEffect` has a
-production caller. VM-lock transfer, route/address and verified link-up stages, firewall application, durable per-VM
-topology lifecycle, production construction, Jailer handoff, public cutover, and live qualification remain pending.
+production caller. Separate private L3 effects now admit canonical endpoint values, configure exact managed-bridge and
+down-loopback addresses, inspect kernel-created routes, and provide exact per-role link-state transitions. They
+re-admit topology identity around mutation and retain partial/unknown-outcome evidence. VM-lock transfer, composition
+of those effects behind verified firewall endpoint authority, durable per-VM topology lifecycle, production
+construction, Jailer handoff, public cutover, and live qualification remain pending.
 
 The private root-side compiler in `internal/service/firewall/` pins `github.com/google/nftables v0.3.0` and receives
 only mvmctl-owned typed resolved intent. It builds fixed bridge and inet tables/chains. Raw-priority bridge prerouting
