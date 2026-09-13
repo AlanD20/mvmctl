@@ -189,7 +189,7 @@ func encodeCanonicalTable(encoder *generationDigestEncoder, boundGenerationID st
 		encoder.text("chain", rule.Chain.Name)
 		encoder.uint64("position", rule.Position)
 		encoder.uint32("flags", rule.Flags)
-		placeholderUserData, err := encodeRuleIdentity(ruleIdentity{
+		placeholderUserData, err := appendRuleIdentity(encoder.placeholderUserDataScratch[:0], ruleIdentity{
 			generation: generationDigestPlaceholder,
 			rule:       compiled.identity,
 		})
@@ -202,7 +202,7 @@ func encodeCanonicalTable(encoder *generationDigestEncoder, boundGenerationID st
 			)
 		}
 		if len(rule.UserData) != 0 {
-			expectedUserData, encodeErr := encodeRuleIdentity(ruleIdentity{
+			expectedUserData, encodeErr := appendRuleIdentity(encoder.expectedUserDataScratch[:0], ruleIdentity{
 				generation: boundGenerationID,
 				rule:       compiled.identity,
 			})
@@ -373,6 +373,10 @@ type generationDigestEncoder struct {
 	lengthScratch [binary.MaxVarintLen64]byte
 	numberScratch [8]byte
 	boolScratch   [1]byte
+	// Both encodings are live until the bound userdata is checked and the placeholder is written.
+	// They never back retained rule.UserData; Write consumes the placeholder before the next rule reuses it.
+	placeholderUserDataScratch [maxRuleUserDataBytes]byte
+	expectedUserDataScratch    [maxRuleUserDataBytes]byte
 }
 
 const generationDigestBufferBytes = 64 << 10

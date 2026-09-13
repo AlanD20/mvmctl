@@ -4,7 +4,11 @@ import (
 	"bytes"
 )
 
-const ruleUserDataMagic = "MVMNFT01"
+const (
+	ruleUserDataMagic = "MVMNFT01"
+	// The codec already requires a 64-byte generation ID and a rule ID of at most 255 bytes.
+	maxRuleUserDataBytes = len(ruleUserDataMagic) + 2 + 64 + 255
+)
 
 type ruleIdentity struct {
 	generation string
@@ -12,6 +16,10 @@ type ruleIdentity struct {
 }
 
 func encodeRuleIdentity(identity ruleIdentity) ([]byte, error) {
+	return appendRuleIdentity(nil, identity)
+}
+
+func appendRuleIdentity(encoded []byte, identity ruleIdentity) ([]byte, error) {
 	if err := validateGenerationID(identity.generation); err != nil {
 		return nil, err
 	}
@@ -19,7 +27,13 @@ func encodeRuleIdentity(identity ruleIdentity) ([]byte, error) {
 		return nil, err
 	}
 
-	encoded := make([]byte, 0, len(ruleUserDataMagic)+2+len(identity.generation)+len(identity.rule))
+	additional := len(ruleUserDataMagic) + 2 + len(identity.generation) + len(identity.rule)
+	if additional > cap(encoded)-len(encoded) {
+		// A single allocation preserves the large-generation budget under race instrumentation too.
+		grown := make([]byte, len(encoded), len(encoded)+additional)
+		copy(grown, encoded)
+		encoded = grown
+	}
 	encoded = append(encoded, ruleUserDataMagic...)
 	encoded = append(encoded, byte(len(identity.generation)), byte(len(identity.rule)))
 	encoded = append(encoded, identity.generation...)

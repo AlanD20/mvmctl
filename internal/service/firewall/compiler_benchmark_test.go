@@ -25,7 +25,7 @@ func TestCompileGeneration1000VMAllocationGrowthIsBounded(t *testing.T) {
 		compiled, compileErr = compileGeneration(large)
 	})
 	require.NoError(t, compileErr)
-	assert.Len(t, compiled.bridge.rules, 9*1000)
+	assert.Len(t, compiled.bridge.rules, 11*1000)
 
 	// The input grows by 4x. A 6x ceiling leaves room for map/sort capacity
 	// steps while rejecting quadratic allocation growth.

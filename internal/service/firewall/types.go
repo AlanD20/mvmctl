@@ -116,6 +116,8 @@ type compiledGeneration struct {
 type ingressGuardSet struct {
 	mac           *nftables.Rule
 	ipv4          *nftables.Rule
+	arpHeader     *nftables.Rule
+	arpOperation  *nftables.Rule
 	arpMAC        *nftables.Rule
 	arpIPv4       *nftables.Rule
 	unsupportedL3 *nftables.Rule

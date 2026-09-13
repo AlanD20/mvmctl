@@ -202,6 +202,8 @@ func validateKernelApplicationDefaultDeny(
 	observedEndpointIDs, err := kernelApplicationResourceIDs(rules, []string{
 		"bridge.spoof.mac.",
 		"bridge.spoof.ipv4.",
+		"bridge.spoof.arp-header.",
+		"bridge.spoof.arp-operation.",
 		"bridge.spoof.arp-mac.",
 		"bridge.spoof.arp-ipv4.",
 		"bridge.unsupported-l3.",
@@ -226,6 +228,8 @@ func validateKernelApplicationDefaultDeny(
 		}{
 			{"bridge.spoof.mac." + id, guards.mac},
 			{"bridge.spoof.ipv4." + id, guards.ipv4},
+			{"bridge.spoof.arp-header." + id, guards.arpHeader},
+			{"bridge.spoof.arp-operation." + id, guards.arpOperation},
 			{"bridge.spoof.arp-mac." + id, guards.arpMAC},
 			{"bridge.spoof.arp-ipv4." + id, guards.arpIPv4},
 			{"bridge.unsupported-l3." + id, guards.unsupportedL3},

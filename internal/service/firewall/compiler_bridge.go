@@ -24,17 +24,28 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 				rejectIPv4AddressMismatch(12, endpoint.ipv4),
 				dropVerdict(),
 			))
+		// CRITICAL: Fixed sender-address offsets require the Ethernet/IPv4 ARP header shape first.
+		// These compiler-owned primitives are immutable during encoding, validation, and nftables marshaling.
+		// Each guard gets its own expression slice; only this endpoint's ARP match prefix is shared.
+		arpInput := joinExpressions(matchInputInterface(endpoint.hostVeth), matchEtherType(etherTypeARP))
+		guards.arpHeader = compiler.addRule(
+			&compiler.generation.bridge,
+			prerouting,
+			"bridge.spoof.arp-header."+endpoint.id,
+			joinExpressions(arpInput, matchARPHeader(expr.CmpOpNeq), dropVerdict()),
+		)
+		guards.arpOperation = compiler.addRule(
+			&compiler.generation.bridge, prerouting, "bridge.spoof.arp-operation."+endpoint.id,
+			joinExpressions(arpInput, matchARPOperation(expr.CmpOpNeq), dropVerdict()))
 		guards.arpMAC = compiler.addRule(&compiler.generation.bridge, prerouting, "bridge.spoof.arp-mac."+endpoint.id,
 			joinExpressions(
-				matchInputInterface(endpoint.hostVeth),
-				matchEtherType(etherTypeARP),
+				arpInput,
 				matchARPSourceMAC(endpoint.mac, expr.CmpOpNeq),
 				dropVerdict(),
 			))
 		guards.arpIPv4 = compiler.addRule(&compiler.generation.bridge, prerouting, "bridge.spoof.arp-ipv4."+endpoint.id,
 			joinExpressions(
-				matchInputInterface(endpoint.hostVeth),
-				matchEtherType(etherTypeARP),
+				arpInput,
 				matchARPAddress(14, endpoint.ipv4, expr.CmpOpNeq),
 				dropVerdict(),
 			))
@@ -51,6 +62,7 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 			joinExpressions(
 				matchInputInterface(endpoint.hostVeth),
 				matchEtherType(etherTypeARP),
+				matchSupportedARP(),
 				acceptVerdict(),
 			))
 		compiler.addRule(&compiler.generation.bridge, forward, "bridge.established."+endpoint.id,

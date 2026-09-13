@@ -85,6 +85,32 @@ func matchARPAddress(offset uint32, address netip.Addr, operation expr.CmpOp) []
 	}
 }
 
+func matchARPHeader(operation expr.CmpOp) []expr.Any {
+	return []expr.Any{
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 0, Len: 6},
+		&expr.Cmp{Op: operation, Register: 1, Data: []byte{0, 1, 8, 0, 6, 4}},
+	}
+}
+
+func matchARPOperation(operation expr.CmpOp) []expr.Any {
+	return []expr.Any{
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 6, Len: 2},
+		&expr.Range{Op: operation, Register: 1, FromData: []byte{0, 1}, ToData: []byte{0, 2}},
+	}
+}
+
+func matchSupportedARP() []expr.Any {
+	// Linux struct arphdr places hardware/protocol types, their address lengths, then the opcode in eight bytes.
+	// Ethernet/IPv4 request/reply is the only supported grammar. Target addresses remain unconstrained, but loading
+	// the final target IPv4 proves the complete 28-byte payload exists: a truncated payload breaks the allow rule.
+	// See https://www.rfc-editor.org/rfc/rfc826.html.
+	return joinExpressions(
+		matchARPHeader(expr.CmpOpEq),
+		matchARPOperation(expr.CmpOpEq),
+		[]expr.Any{&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 24, Len: 4}},
+	)
+}
+
 func matchIPv4Prefix(offset uint32, prefix netip.Prefix) []expr.Any {
 	prefix = prefix.Masked()
 	address := prefix.Addr().As4()

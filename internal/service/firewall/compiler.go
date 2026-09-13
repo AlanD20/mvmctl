@@ -432,6 +432,8 @@ func validateIngressGuardInvariant(intent generationIntent, generation compiledG
 		for _, rule := range [...](*nftables.Rule){
 			guards.mac,
 			guards.ipv4,
+			guards.arpHeader,
+			guards.arpOperation,
 			guards.arpMAC,
 			guards.arpIPv4,
 			guards.unsupportedL3,

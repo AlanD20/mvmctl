@@ -121,6 +121,8 @@ func TestCompileGenerationSeparatesIngressGuardsFromForwardPolicy(t *testing.T) 
 	for _, identityPrefix := range []string{
 		"bridge.spoof.mac.",
 		"bridge.spoof.ipv4.",
+		"bridge.spoof.arp-header.",
+		"bridge.spoof.arp-operation.",
 		"bridge.spoof.arp-mac.",
 		"bridge.spoof.arp-ipv4.",
 		"bridge.unsupported-l3.",
@@ -253,6 +255,38 @@ func TestRuleUserDataRoundTripRejectsAmbiguity(t *testing.T) {
 	}
 }
 
+// Rationale: Canonical encoding may reuse private scratch, but retained rule userdata must remain caller-owned.
+func TestEncodeRuleIdentityOwnsMaximumLengthResult(t *testing.T) {
+	identity := ruleIdentity{generation: strings.Repeat("a", 64), rule: strings.Repeat("b", 255)}
+	want := []byte("MVMNFT01\x40\xff" + identity.generation + identity.rule)
+	first, err := encodeRuleIdentity(identity)
+	require.NoError(t, err)
+	assert.Equal(t, want, first)
+	second, err := encodeRuleIdentity(identity)
+	require.NoError(t, err)
+	first[len(first)-1] = 'c'
+	assert.Equal(t, want, second)
+
+	identity.rule += "b"
+	_, err = encodeRuleIdentity(identity)
+	assert.Error(t, err, "the existing 255-byte rule identity limit remains enforced")
+}
+
+func TestAppendRuleIdentityPreservesPrefix(t *testing.T) {
+	identity := ruleIdentity{generation: strings.Repeat("a", 64), rule: "x"}
+	want := []byte("prefixMVMNFT01\x40\x01" + identity.generation + identity.rule)
+	for name, capacity := range map[string]int{"requires growth": 6, "existing capacity": len(want)} {
+		t.Run(name, func(t *testing.T) {
+			prefix := make([]byte, 6, capacity)
+			copy(prefix, "prefix")
+			encoded, err := appendRuleIdentity(prefix, identity)
+			require.NoError(t, err)
+			assert.Equal(t, want, encoded)
+			assert.Equal(t, []byte("prefix"), prefix)
+		})
+	}
+}
+
 func TestCompileGenerationIsDeterministicAcrossInputOrder(t *testing.T) {
 	ordered := compatibilityIntent()
 	ordered.vmGrants = append(ordered.vmGrants, vmTrafficGrant{
@@ -319,7 +353,7 @@ func TestCompileGenerationCanonicalDigestGoldenVectors(t *testing.T) {
 		},
 		"complete compatibility generation": {
 			intent: compatibilityIntent(),
-			wantID: "d7c37c0a23b5769be18b6555f1c41c70b26d86316ac532dba317b82787c8bd00",
+			wantID: "ed632a55b0e0edac1cb28a0241c7b18d70bf49f7b837adf56b87ff744a6ec083",
 		},
 	}
 
