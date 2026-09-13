@@ -26,8 +26,11 @@ does pass `--enable-pci` when `PCIEnabled` is selected; [nested virtualization](
 forces that selection. Existing public launches therefore are not all MMIO. Those transitional paths are not evidence
 that the corresponding private volume admission and lifecycle contracts exist.
 
-[Snapshot creation](../../pkg/api/snapshot.go) currently copies rootfs and requests `memory` and `vmstate`; its SQLite
-RAM/vCPU fields are caller-owned metadata, not trusted restore authority. The
+[Snapshot creation](../../pkg/api/snapshot.go) currently copies rootfs and requests `memory` and `vmstate` for running
+or paused source VMs. Stopped VMs retain the existing rootfs-only snapshot mode, with no memory or VM-state capture.
+The memory, `vmstate`, and Full/Diff discussion below applies only to stateful snapshots from running or paused VMs;
+it does not remove or change that rootfs-only mode. SQLite RAM/vCPU fields are caller-owned metadata, not trusted
+restore authority. The
 [Firecracker client](../../internal/lib/firecracker/client.go) omits `snapshot_type`, which upstream defaults to `Full`
 ([`CreateSnapshotParams`][snapshot-config]). Data-volume content capture, consistency, and restoration remain a separate
 contract. [Image import](../../internal/core/image/service.go) must retain QCOW2-to-raw conversion before rootfs extraction.
