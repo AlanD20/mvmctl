@@ -711,8 +711,9 @@ public cutover, and qualification remain pending
   includes, commands, descriptors, or generic operation. Production privileged/public composition remains pending.
 - [ ] Compose the private application behind a typed privileged action. Caller-controlled syntax, files, includes,
   commands, and library/netlink types must not cross that wire.
-- [ ] Keep `github.com/mdlayher/netlink` transitive only; do not add a second low-level adapter or a production CLI
-  fallback.
+- [ ] Keep `github.com/google/nftables` as the final firewall compiler and rule-mutation engine. Direct
+  `github.com/mdlayher/netlink` use is limited to private read-only raw observation/collection/transport and the
+  retained application's socket lifecycle; add no second rule encoder, mutation adapter, or production CLI fallback.
 - [ ] Install bridge-family anti-spoofing and same-network filtering.
 - [ ] Install routed, VM-to-host, established reply, required system service, egress, and NAT rules.
 - [x] Queue each exact-before -> target replacement on one exact-host-netns lasting `nftables.Conn`, call `Flush` once,

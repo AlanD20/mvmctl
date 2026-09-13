@@ -876,9 +876,12 @@ and a fresh exact kernel snapshot.
 The raw-netlink collector issues only receiver-chosen read requests for the two exact managed tables, five fixed chains,
 their rules, and the absence of sets, objects, and flowtables. It brackets collection with ruleset-generation reads,
 uses a shared 32-MiB/20,000-message budget across fresh single-request transports, and feeds the replies to the strict
-raw decoder, which rejects unknown expressions and structural drift. The retained namespace authority requires the
-earlier network and generation identities to agree, pins and rechecks the exact current host network namespace, and
-supplies both fresh snapshot transports and a fresh lasting `nftables.Conn` through that descriptor.
+raw decoder, which rejects unknown expressions and structural drift. The comparator covers every compiler-projected
+field in chain-by-chain rule order; the decoder checks exact predecessor-handle evidence and one consistent 16-bit
+`nft_base_seq`, which the collector binds to the bracketed ruleset generation's low 16 bits for non-empty state.
+The retained namespace authority requires the earlier network and generation identities to agree, pins and rechecks
+the exact current host network namespace, and supplies both fresh snapshot transports and a fresh lasting
+`nftables.Conn` through that descriptor.
 
 Application creates the lasting connection while a disposable locked OS thread is in the retained namespace, then
 restores and verifies the original namespace before returning it. The retained netlink socket has verified 32-MiB
@@ -916,8 +919,12 @@ exact-state deletion and empty application, but no missing-record initial-adopti
 or ambiguous authority never permits deletion.
 
 `github.com/google/nftables v0.3.0` exposes rule userdata but no table/chain ownership metadata, and its structured rule
-reader can omit expression types it does not understand. The raw collector and retained host-netns factory close the
-expression-decoder and namespace-selection seams. The private application coordinator composes them only for an
+reader can omit expression types it does not understand. It remains the private firewall compiler and rule-mutation
+engine. Direct `github.com/mdlayher/netlink` use in that adapter is limited to strict read-only raw observation,
+collection, and namespace-bound transport, plus buffer configuration, deadlines, cancellation, and cleanup of the socket
+retained by `google/nftables`. It supplies no second rule encoder, mutation engine, or firewall backend.
+The raw collector and retained host-netns factory close the expression-decoder and namespace-selection seams.
+The private application coordinator composes them only for an
 already admitted record; root-record-bound initial live inspection within an accepted threat model for another root or
 `CAP_NET_ADMIN` actor and real-kernel delete/recreate batch atomicity remain explicit activation gates. After those
 gates, production composition must remove iptables, the backend selector, backend-specific repositories, and the

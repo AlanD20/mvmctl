@@ -268,6 +268,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   truth. Qualified initial inspection/adoption, privileged/public wiring, and system qualification remain pending.
 
 #### Bounded raw nftables snapshot foundation
+- Direct `github.com/mdlayher/netlink` use in the private firewall adapter supports strict read-only raw observation
+  because the pinned structured decoder can omit unknown expressions. It also supports the retained application's
+  socket lifecycle; `github.com/google/nftables` remains the sole compiler and rule-mutation engine, with library and
+  netlink types private to the adapter.
 - Added a private raw-netlink collector that brackets one logical observation with ruleset-generation reads and chooses
   only exact read-only lookups for the two managed tables, five fixed chains, their rules, and the absence of sets,
   objects, and flowtables.

@@ -257,11 +257,13 @@ Jailer handoff, public cutover, and live qualification remain pending.
 v0.3.0 requires nftables. The final implementation removes the iptables backend, configuration option, repositories,
 renderers, fallback behavior, and tests.
 
-The final root-owned adapter in `internal/service/firewall/` must program the kernel through a reviewed, pinned version
-of `github.com/google/nftables`. The module speaks the nftables netlink protocol directly;
-`github.com/mdlayher/netlink`
-may remain its transitive implementation dependency but is not a second mvmctl adapter. Final production must not
-execute or parse the `nft` CLI, link `libnftnl`, depend on `nftables.service`, or fall back to a CLI implementation.
+The final root-owned adapter in `internal/service/firewall/` must compile and mutate nftables rules through the reviewed,
+pinned `github.com/google/nftables`. Direct `github.com/mdlayher/netlink` use is permitted within that private adapter
+for the strict read-only raw decoder, collector, and namespace-bound transport because the pinned structured decoder
+can omit unknown expression grammar. It also supports buffer configuration, deadlines, cancellation, and cleanup of the
+socket retained by `google/nftables`; rule mutation still uses only `google/nftables`. These uses do not introduce a
+second firewall backend or mutation adapter. Final production must not execute or parse the `nft` CLI, link `libnftnl`,
+depend on `nftables.service`, or fall back to a CLI implementation.
 Hosts still require the applicable kernel nftables, bridge-family, connection-tracking, and NAT capabilities, and the
 privileged receiver still requires the authority needed to program them.
 
@@ -743,11 +745,11 @@ adds quoting and version-dependent error surfaces, and weakens typed inspection.
 atomic, so the direct adapter is selected for a smaller and more structured effect boundary rather than for new
 atomicity.
 
-### Build directly on `github.com/mdlayher/netlink`
+### Build the compiler or mutation adapter directly on `github.com/mdlayher/netlink`
 
-Rejected. It would make mvmctl own low-level nftables message and expression encoding already provided by
-`github.com/google/nftables`. The lower-level module remains an implementation detail unless a proven missing capability
-requires a separate decision.
+Rejected. It would make mvmctl own low-level nftables mutation and expression encoding already provided by
+`github.com/google/nftables`. The narrow private read-only observation and retained-socket lifecycle uses described
+above address inspection and transport requirements without adding another rule encoder or mutation engine.
 
 ### Generic policy selectors and actions
 
