@@ -740,6 +740,9 @@ Dead code deleted and docs consolidated:
 
 ## Before Submitting, Self-Check
 
+Use the applicable items for the changed surface, following the focused
+[verification requirements in AGENTS.md](../../AGENTS.md#verification).
+
 ```
 [ ] Did I classify the scenario using the decision tree?
 [ ] L0: No I/O, no DB, no subprocess — just a table-driven Go test?
@@ -750,7 +753,19 @@ Dead code deleted and docs consolidated:
 [ ] L2 tests: Do they assert on real side effects (output, files, system state)?
 [ ] L1/L0 tests: Do they follow HOW_AGENTS_WRITE_UNIT_TESTS.md patterns?
 [ ] Is every destructive test explicitly marked (not ordered by filename)?
-[ ] Does `go test ./...` pass? (checks L0/L1)
-[ ] Does `pytest tests/system/` pass inside the runner VM? (checks L2)
-[ ] Zero skipped tests? (skip = broken environment or incomplete test)
+[ ] Do focused format, vet, and Go tests pass when L0/L1 code changed?
+[ ] Does collection pass for the affected Python system tests?
+[ ] Does the smallest affected orchestrator or runner test pass?
+[ ] When exercising CLI behavior, does the affected L2 scenario or domain pass in its prescribed environment?
+[ ] Zero skipped tests in the selected scope? (skip = broken environment or incomplete test)
 ```
+
+Complete CI remains the integration owner's gate before declaring the PR or
+release ready. Run the full system-test matrix at the release gate or when the
+current task explicitly requests it, using
+[How to Run System Tests](HOW_TO_RUN_SYSTEM_TESTS.md#41-run-all-tests-release-gate-only)
+and [RC QA](../RC_QA.md). Do not run the entire pytest tree as a default
+per-change check. A focused pass does not replace release qualification; report
+the scope tested and any pending runtime verification. Host-direct and Tier 3
+execution still require the explicit authorization and clean environment defined
+by those guides and `AGENTS.md`.
