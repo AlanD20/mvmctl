@@ -103,6 +103,36 @@ func assertSudoersFiles(t *testing.T, f *sudoersFixture, content string) {
 	}
 }
 
+// Snapshot through independent syscalls: rejection must preserve the admitted
+// pathname object, including an unsafe file or symlink, without repairing it.
+func snapshotSudoersObject(t *testing.T, target string) (unix.Stat_t, []byte) {
+	t.Helper()
+	var stat unix.Stat_t
+	require.NoError(t, unix.Lstat(target, &stat))
+	var content []byte
+	if kind := stat.Mode & unix.S_IFMT; kind == unix.S_IFREG || kind == unix.S_IFLNK {
+		var err error
+		content, err = os.ReadFile(target)
+		require.NoError(t, err)
+	}
+	return stat, content
+}
+
+func assertSudoersObjectUnchanged(t *testing.T, target string, before unix.Stat_t, content []byte) {
+	t.Helper()
+	after, afterContent := snapshotSudoersObject(t, target)
+	assert.Equal(t, before.Dev, after.Dev)
+	assert.Equal(t, before.Ino, after.Ino)
+	assert.Equal(t, before.Mode, after.Mode)
+	assert.Equal(t, before.Uid, after.Uid)
+	assert.Equal(t, before.Gid, after.Gid)
+	assert.Equal(t, before.Nlink, after.Nlink)
+	assert.Equal(t, before.Size, after.Size)
+	if diff := cmp.Diff(content, afterContent); diff != "" {
+		t.Errorf("preserved policy content (-want +got):\n%s", diff)
+	}
+}
+
 func TestSudoersPublisherRejectsUnsafeExistingObjectsEvenWithMatchingContent(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -118,7 +148,7 @@ func TestSudoersPublisherRejectsUnsafeExistingObjectsEvenWithMatchingContent(t *
 			"hardlink",
 			func(t *testing.T, f *sudoersFixture) { require.NoError(t, os.Link(f.target, f.target+".other")) },
 		},
-		{"owner", func(_ *testing.T, f *sudoersFixture) { f.policy.uid++ }},
+		{"ancestor owner", func(_ *testing.T, f *sudoersFixture) { f.policy.uid++ }},
 		{"oversized", func(t *testing.T, f *sudoersFixture) {
 			require.NoError(t, os.Chmod(f.target, 0640))
 			require.NoError(t, os.Truncate(f.target, 65537))
@@ -138,6 +168,7 @@ func TestSudoersPublisherRejectsUnsafeExistingObjectsEvenWithMatchingContent(t *
 			f := newSudoersFixture(t)
 			f.seed(t, expectedTransitionalSudoers)
 			tt.mutate(t, f)
+			before, content := snapshotSudoersObject(t, f.target)
 			f.deps.run = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
 				t.Fatal("unsafe policy must fail before validation")
 				return nil, nil
@@ -146,6 +177,44 @@ func TestSudoersPublisherRejectsUnsafeExistingObjectsEvenWithMatchingContent(t *
 			require.Error(t, err)
 			assert.False(t, changed)
 			assert.NotNil(t, errs.AsDomainError(err))
+			assertSudoersObjectUnchanged(t, f.target, before, content)
+		})
+	}
+}
+
+func TestSudoersPublisherRejectsTargetUIDAndGIDWithoutChangingPolicy(t *testing.T) {
+	for _, field := range []string{"uid", "gid"} {
+		t.Run(field, func(t *testing.T) {
+			f := newSudoersFixture(t)
+			f.seed(t, expectedTransitionalSudoers)
+			before, content := snapshotSudoersObject(t, f.target)
+			fstat := f.deps.fstat
+			injected := false
+			f.deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
+				if err := fstat(ctx, fd, stat); err != nil {
+					return err
+				}
+				// Match only the policy inode; every directory retains valid metadata.
+				if stat.Dev == before.Dev && stat.Ino == before.Ino {
+					injected = true
+					if field == "uid" {
+						stat.Uid++
+					} else {
+						stat.Gid++
+					}
+				}
+				return nil
+			}
+			f.deps.run = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
+				t.Fatal("unsafe target must fail before visudo validation")
+				return nil, nil
+			}
+			changed, err := f.publish(context.Background())
+			require.Error(t, err)
+			assert.False(t, changed)
+			assert.True(t, injected, "valid ancestors must allow inspection to reach the target inode")
+			assertSudoersObjectUnchanged(t, f.target, before, content)
+			assertSudoersFiles(t, f, expectedTransitionalSudoers)
 		})
 	}
 }
@@ -219,12 +288,6 @@ func TestSudoersPublisherPreservesPolicyBeforeCommit(t *testing.T) {
 		{"validation execution", func(f *sudoersFixture) {
 			f.deps.run = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) { return nil, failure }
 		}},
-		{"missing required tool", func(f *sudoersFixture) {
-			f.deps.stat = func(context.Context, string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-		}},
-		{"unreadable required tool", func(f *sudoersFixture) {
-			f.deps.stat = func(context.Context, string) (os.FileInfo, error) { return nil, os.ErrPermission }
-		}},
 		{"candidate close", func(f *sudoersFixture) {
 			closeFD := f.deps.close
 			f.deps.close = func(ctx context.Context, fd int) error {
@@ -273,6 +336,48 @@ func TestSudoersPublisherPreservesPolicyBeforeCommit(t *testing.T) {
 			assert.False(t, changed)
 			assertSudoersFiles(t, f, "# previous policy\n")
 		})
+	}
+}
+
+func TestSudoersPublisherChecksEveryGrantedToolBeforeVisudo(t *testing.T) {
+	// Independent contract list: do not derive expectations from the production allowlist.
+	grantedTools := []string{
+		"/usr/sbin/ip", "/usr/sbin/iptables", "/usr/sbin/iptables-restore", "/usr/sbin/iptables-save",
+		"/usr/sbin/nft", "/usr/sbin/sysctl", "/usr/sbin/modprobe",
+	}
+	for index, binary := range grantedTools {
+		for _, failure := range []struct {
+			name string
+			err  error
+		}{
+			{"missing", os.ErrNotExist}, {"unreadable", os.ErrPermission},
+		} {
+			t.Run(binary+"/"+failure.name, func(t *testing.T) {
+				f := newSudoersFixture(t)
+				f.seed(t, "# previous policy\n")
+				before, content := snapshotSudoersObject(t, f.target)
+				var inspected []string
+				f.deps.stat = func(_ context.Context, path string) (os.FileInfo, error) {
+					inspected = append(inspected, path)
+					if path == binary {
+						return nil, failure.err
+					}
+					return nil, nil
+				}
+				f.deps.run = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
+					t.Fatal("a failed granted-tool preflight must not invoke visudo")
+					return nil, nil
+				}
+				changed, err := f.publish(context.Background())
+				require.ErrorIs(t, err, failure.err)
+				assert.False(t, changed)
+				if diff := cmp.Diff(grantedTools[:index+1], inspected); diff != "" {
+					t.Errorf("preflight must progress to the failing tool and stop (-want +got):\n%s", diff)
+				}
+				assertSudoersObjectUnchanged(t, f.target, before, content)
+				assertSudoersFiles(t, f, "# previous policy\n")
+			})
+		}
 	}
 }
 
