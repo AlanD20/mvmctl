@@ -44,6 +44,8 @@ func TestRuntimeStatusLifecycleClassification(t *testing.T) {
 				require.Error(t, err)
 				assert.Nil(t, got)
 				assert.Empty(t, f.opened)
+				assert.Zero(t, f.processDirectoryReads)
+				assert.Zero(t, f.processMetadataReads)
 				return
 			}
 			require.NoError(t, err)
@@ -52,6 +54,8 @@ func TestRuntimeStatusLifecycleClassification(t *testing.T) {
 			}
 			if tc.want == runtimeStatusStopped {
 				assert.Empty(t, f.opened, "no PID from another boot may be opened")
+				assert.Zero(t, f.processDirectoryReads, "stopped authority must not open process directories")
+				assert.Zero(t, f.processMetadataReads, "stopped authority must not inspect process metadata")
 			}
 		})
 	}
@@ -79,6 +83,23 @@ func TestRuntimeStatusAbsentAuthorityDoesNotCreateDurableState(t *testing.T) {
 	}
 	assert.NoDirExists(t, filepath.Join(f.root, "var/lib/mvmctl"))
 	assert.Empty(t, f.opened)
+	assert.Zero(t, f.processDirectoryReads)
+	assert.Zero(t, f.processMetadataReads)
+}
+
+func TestRuntimeStatusAbsentRecordDoesNotReadProcesses(t *testing.T) {
+	t.Parallel()
+	other := runtimeStatusCleanedRecord()
+	other.vmID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	f := newRuntimeStatusFixture(t, other)
+	got, err := f.observe(t.Context(), testVMID)
+	require.NoError(t, err)
+	if diff := cmp.Diff(map[string]runtimeStatus{testVMID: runtimeStatusStopped}, got); diff != "" {
+		t.Errorf("absent record observation mismatch (-want +got):\n%s", diff)
+	}
+	assert.Empty(t, f.opened)
+	assert.Zero(t, f.processDirectoryReads)
+	assert.Zero(t, f.processMetadataReads)
 }
 
 func TestRuntimeStatusBatchInputValidation(t *testing.T) {
