@@ -5,7 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync/atomic"
+	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -15,6 +15,50 @@ import (
 
 	"mvmctl/pkg/errs"
 )
+
+// observePersistentOutputDescriptors derives cleanup expectations from successful syscalls, never lease bookkeeping.
+func observePersistentOutputDescriptors(t *testing.T, fixture *persistentOutputFixture) func() {
+	t.Helper()
+	// mu guards the independent acquisition/close observations across copied leases.
+	var mu sync.Mutex
+	var acquired, closed []int
+	realOpen := fixture.deps.openAt2
+	fixture.deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+		if how.Flags&unix.O_TMPFILE == unix.O_TMPFILE {
+			// Anonymous creation is already a mutation: abort authority must precede even this first effect.
+			if assert.NotNil(t, fixture.launch.state.persistentOutputs) {
+				assert.False(t, fixture.launch.state.persistentOutputs.state.ready)
+			}
+		}
+		opened, err := realOpen(ctx, fd, name, how)
+		if err == nil {
+			mu.Lock()
+			acquired = append(acquired, opened)
+			mu.Unlock()
+		}
+		return opened, err
+	}
+	realClose := fixture.deps.close
+	fixture.deps.close = func(ctx context.Context, fd int) error {
+		mu.Lock()
+		closed = append(closed, fd)
+		mu.Unlock()
+		return realClose(ctx, fd)
+	}
+	return func() {
+		t.Helper()
+		mu.Lock()
+		defer mu.Unlock()
+		wantClosed := append([]int(nil), acquired...)
+		for left, right := 0, len(wantClosed)-1; left < right; left, right = left+1, right-1 {
+			wantClosed[left], wantClosed[right] = wantClosed[right], wantClosed[left]
+		}
+		assert.NotEmpty(t, acquired)
+		if diff := cmp.Diff(wantClosed, closed); diff != "" {
+			t.Errorf("all acquired descriptors closed once in reverse order (-want +got):\n%s", diff)
+		}
+	}
+}
 
 // Rationale: each failure before publication must leave no named file; errors after the link must preserve it and
 // report the exact publication or uncertain-outcome boundary instead of permitting a destructive retry.
@@ -90,6 +134,7 @@ func TestPersistentOutputPublicationFailureBoundaries(t *testing.T) {
 					return fault
 				}
 			}
+			assertClosed := observePersistentOutputDescriptors(t, fixture)
 			err := fixture.prepare(t.Context(), managedPersistentMetricsEnabled)
 			require.Error(t, err)
 			domain := errs.AsDomainError(err)
@@ -113,6 +158,14 @@ func TestPersistentOutputPublicationFailureBoundaries(t *testing.T) {
 				assert.Empty(t, entries)
 			}
 			require.Error(t, fixture.prepare(t.Context(), managedPersistentMetricsEnabled))
+			if tc.visible {
+				assert.Equal(t, "evidence after failure", readPersistentOutput(t, fixture.directory, "firecracker.log"))
+			}
+			cleanup, err := fixture.launch.Abort(t.Context())
+			require.NoError(t, err)
+			require.NoError(t, cleanup.Complete(t.Context()))
+			require.NoError(t, cleanup.Release(t.Context()))
+			assertClosed()
 			if tc.visible {
 				assert.Equal(t, "evidence after failure", readPersistentOutput(t, fixture.directory, "firecracker.log"))
 			}
@@ -160,25 +213,85 @@ func TestPersistentOutputPartialTruncationCannotBeRetried(t *testing.T) {
 
 func TestPersistentOutputsCopiedLaunchPreparesOnlyOnce(t *testing.T) {
 	t.Parallel()
-	fixture := newPersistentOutputFixture(t)
-	fixture.write(t, "firecracker.log", "previous log")
-	fixture.write(t, "firecracker.console.log", "previous console")
-	copyOf := *fixture.launch
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	for _, lease := range []*launchLease{fixture.launch, &copyOf} {
-		go func() {
-			<-start
-			results <- preparePersistentOutputsWithDeps(t.Context(), lease, fixture.cache, managedPersistentMetricsDisabled, fixture.deps)
-		}()
+	for name, metrics := range map[string]managedPersistentMetricsPresence{
+		"metrics disabled": managedPersistentMetricsDisabled,
+		"metrics enabled":  managedPersistentMetricsEnabled,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newPersistentOutputFixture(t)
+			type fileIdentity struct{ Device, Inode uint64 }
+			wantTruncations := make(map[fileIdentity]int)
+			for _, name := range []string{"firecracker.log", "firecracker.console.log", "firecracker.metrics"} {
+				fixture.write(t, name, "previous evidence")
+				var stat unix.Stat_t
+				require.NoError(t, unix.Lstat(filepath.Join(fixture.directory, name), &stat))
+				count := 1
+				if name == "firecracker.metrics" && metrics == managedPersistentMetricsDisabled {
+					count = 0
+				}
+				wantTruncations[fileIdentity{Device: uint64(stat.Dev), Inode: stat.Ino}] = count
+			}
+			// Count by independently statted input inodes, so duplicated calls cannot hide behind empty file bytes.
+			truncations := make(map[fileIdentity]int)
+			for identity := range wantTruncations {
+				truncations[identity] = 0
+			}
+			// mu guards syscall observations without relying on production's launch serialization.
+			var mu sync.Mutex
+			firstMutation := true
+			realTruncate := fixture.deps.ftruncate
+			fixture.deps.ftruncate = func(ctx context.Context, fd int, size int64) error {
+				var stat unix.Stat_t
+				if err := unix.Fstat(fd, &stat); err != nil {
+					return err
+				}
+				mu.Lock()
+				if firstMutation {
+					if assert.NotNil(t, fixture.launch.state.persistentOutputs) {
+						assert.False(t, fixture.launch.state.persistentOutputs.state.ready)
+					}
+					firstMutation = false
+				}
+				truncations[fileIdentity{Device: uint64(stat.Dev), Inode: stat.Ino}]++
+				mu.Unlock()
+				return realTruncate(ctx, fd, size)
+			}
+			copyOf := *fixture.launch
+			start := make(chan struct{})
+			results := make(chan error, 2)
+			for _, lease := range []*launchLease{fixture.launch, &copyOf} {
+				go func() {
+					<-start
+					results <- preparePersistentOutputsWithDeps(t.Context(), lease, fixture.cache, metrics, fixture.deps)
+				}()
+			}
+			close(start)
+			first, second := <-results, <-results
+			assert.True(t, (first == nil) != (second == nil), "exactly one preparation succeeds")
+			if diff := cmp.Diff(wantTruncations, truncations); diff != "" {
+				t.Errorf("first attempt truncations by inode (-want +got):\n%s", diff)
+			}
+			for _, name := range []string{"firecracker.log", "firecracker.console.log", "firecracker.metrics"} {
+				want := ""
+				if name == "firecracker.metrics" && metrics == managedPersistentMetricsDisabled {
+					want = "previous evidence"
+				}
+				assert.Equal(t, want, readPersistentOutput(t, fixture.directory, name))
+			}
+			fixture.write(t, "firecracker.log", "new launch log")
+			for _, lease := range []*launchLease{fixture.launch, &copyOf} {
+				require.Error(
+					t,
+					preparePersistentOutputsWithDeps(t.Context(), lease, fixture.cache, metrics, fixture.deps),
+				)
+			}
+			if diff := cmp.Diff(wantTruncations, truncations); diff != "" {
+				t.Errorf("retries must add no truncations (-want +got):\n%s", diff)
+			}
+			assert.Equal(t, "new launch log", readPersistentOutput(t, fixture.directory, "firecracker.log"))
+		})
 	}
-	close(start)
-	first, second := <-results, <-results
-	assert.True(t, (first == nil) != (second == nil), "exactly one preparation succeeds")
-	assertPersistentOutputFiles(t, fixture, []string{"firecracker.console.log", "firecracker.log"})
-	fixture.write(t, "firecracker.log", "new launch log")
-	require.Error(t, fixture.prepare(t.Context(), managedPersistentMetricsDisabled))
-	assert.Equal(t, "new launch log", readPersistentOutput(t, fixture.directory, "firecracker.log"))
 }
 
 // Rationale: cancellation must stop before another output is mutated, but retain any already-published evidence.
@@ -204,22 +317,15 @@ func TestPersistentOutputCancellationPreservesPublishedFile(t *testing.T) {
 func TestPersistentOutputsReleaseCopiesOnceInReverseOrder(t *testing.T) {
 	t.Parallel()
 	fixture := newPersistentOutputFixture(t)
+	assertClosed := observePersistentOutputDescriptors(t, fixture)
 	require.NoError(t, fixture.prepare(t.Context(), managedPersistentMetricsEnabled))
 	outputs := fixture.launch.state.persistentOutputs
 	copyOf := *outputs
 	state := outputs.state
-	wantClosed := append([]int(nil), state.retained...)
-	for left, right := 0, len(wantClosed)-1; left < right; left, right = left+1, right-1 {
-		wantClosed[left], wantClosed[right] = wantClosed[right], wantClosed[left]
-	}
-	closed := make([]int, 0, len(wantClosed))
 	fault := errors.New("terminal descriptor close error")
 	realClose := state.deps.close
-	var closeCount atomic.Int32
 	state.deps.close = func(ctx context.Context, fd int) error {
 		assert.NoError(t, ctx.Err())
-		closed = append(closed, fd)
-		closeCount.Add(1)
 		return errors.Join(realClose(ctx, fd), fault)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -230,10 +336,7 @@ func TestPersistentOutputsReleaseCopiesOnceInReverseOrder(t *testing.T) {
 	first, second := <-results, <-results
 	require.ErrorIs(t, first, fault)
 	assert.Same(t, first, second)
-	if diff := cmp.Diff(wantClosed, closed); diff != "" {
-		t.Errorf("descriptor release order (-want +got):\n%s", diff)
-	}
-	assert.Equal(t, int32(len(wantClosed)), closeCount.Load())
+	assertClosed()
 	assertPersistentOutputFiles(
 		t,
 		fixture,
@@ -246,5 +349,5 @@ func TestPersistentOutputsReleaseCopiesOnceInReverseOrder(t *testing.T) {
 	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
 	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
-	assert.Equal(t, int32(len(wantClosed)), closeCount.Load())
+	assertClosed()
 }
