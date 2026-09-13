@@ -57,6 +57,9 @@ func activateVerifiedProcessWithDeps(
 		(state.preparedJailDestination == nil && state.jailDestination == nil) {
 		return nil, processVerificationError(vmID, "launch process authority is not active", nil)
 	}
+	if err := state.persistentOutputs.requireReady(); err != nil {
+		return nil, err
+	}
 	record := cloneInstanceRecord(state.record)
 	vmID = record.vmID
 	if err := validateInstanceRecord(record); err != nil {
@@ -111,15 +114,16 @@ func activateVerifiedProcessWithDeps(
 		return nil, writeErr
 	}
 	target := &activeLease{state: &activeLeaseState{
-		directories:      state.directories,
-		vmLock:           state.vmLock,
-		prepared:         state.prepared,
-		processes:        state.processes,
-		jailDestination:  verified.destination,
-		networkNamespace: state.networkNamespace,
-		runtimeDirectory: state.runtimeDirectory,
-		managedVMCgroup:  state.managedVMCgroup,
-		record:           activeRecord,
+		directories:       state.directories,
+		vmLock:            state.vmLock,
+		prepared:          state.prepared,
+		processes:         state.processes,
+		jailDestination:   verified.destination,
+		networkNamespace:  state.networkNamespace,
+		runtimeDirectory:  state.runtimeDirectory,
+		persistentOutputs: state.persistentOutputs,
+		managedVMCgroup:   state.managedVMCgroup,
+		record:            activeRecord,
 	}}
 	state.directories = nil
 	state.vmLock = nil
@@ -128,6 +132,7 @@ func activateVerifiedProcessWithDeps(
 	state.jailDestination = nil
 	state.networkNamespace = nil
 	state.runtimeDirectory = nil
+	state.persistentOutputs = nil
 	state.managedVMCgroup = nil
 	state.record = activeRecord
 	state.released = true

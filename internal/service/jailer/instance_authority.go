@@ -33,6 +33,9 @@ type launchLeaseState struct {
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
 	runtimeDirectory        *managedVMRuntimeLease
+	persistentOutputs       *managedVMPersistentOutputLease
+	// A post-replacement error still returns abort authority but must not authorize new output effects.
+	registrationComplete    bool
 	cgroupDeps              managedVMCgroupDeps
 	preparedManagedVMCgroup *preparedManagedVMCgroup
 	managedVMCgroup         *managedVMCgroupLease
@@ -60,19 +63,20 @@ type activeLease struct {
 }
 
 type activeLeaseState struct {
-	mu               sync.Mutex
-	roots            *instanceAuthorityRoots
-	directories      *instanceUIDDirectories
-	vmLock           *vmAuthorityLease
-	prepared         *preparedRelease
-	processes        *blockedLaunchProcesses
-	jailDestination  *jailDestinationLease
-	networkNamespace *topologySelectedNetworkNamespace
-	runtimeDirectory *managedVMRuntimeLease
-	managedVMCgroup  *managedVMCgroupLease
-	record           instanceRecord
-	released         bool
-	releaseErr       error
+	mu                sync.Mutex
+	roots             *instanceAuthorityRoots
+	directories       *instanceUIDDirectories
+	vmLock            *vmAuthorityLease
+	prepared          *preparedRelease
+	processes         *blockedLaunchProcesses
+	jailDestination   *jailDestinationLease
+	networkNamespace  *topologySelectedNetworkNamespace
+	runtimeDirectory  *managedVMRuntimeLease
+	persistentOutputs *managedVMPersistentOutputLease
+	managedVMCgroup   *managedVMCgroupLease
+	record            instanceRecord
+	released          bool
+	releaseErr        error
 }
 
 type cleanupLease struct {
@@ -91,6 +95,7 @@ type cleanupLeaseState struct {
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
 	runtimeDirectory        *managedVMRuntimeLease
+	persistentOutputs       *managedVMPersistentOutputLease
 	runtimeRecovery         *managedVMRuntimeRecovery
 	freshRecoveryAdmission  *freshRecoveryAdmission
 	freshRecoveryAdmitting  bool
@@ -337,6 +342,7 @@ func (prepared *preparedRelease) registerLaunching(
 	if indexReleaseErr != nil {
 		return launch, annotateInstanceRecordReplacement(indexReleaseErr, false)
 	}
+	launch.state.registrationComplete = true
 	return launch, nil
 }
 
@@ -788,7 +794,7 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 		}
 		state.runtimeDirectory = nil
 	}
-	return nil
+	return releaseCleanupPersistentOutputsLocked(cleanupCtx, state)
 }
 
 func (authority *instanceAuthority) lockOwnedInstance(
@@ -916,6 +922,9 @@ func (lease *launchLease) releaseToJailer(ctx context.Context) error {
 		state.preparedManagedVMCgroup == nil || state.managedVMCgroup != nil {
 		return instanceStateError(state.record.vmID, "launch lease is not ready for Jailer handoff")
 	}
+	if err := state.persistentOutputs.requireReady(); err != nil {
+		return err
+	}
 	destinationState, err := state.preparedJailDestination.lockForHandoff(ctx)
 	if err != nil {
 		return err
@@ -996,6 +1005,7 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 		jailDestination:         state.jailDestination,
 		networkNamespace:        state.networkNamespace,
 		runtimeDirectory:        state.runtimeDirectory,
+		persistentOutputs:       state.persistentOutputs,
 		preparedManagedVMCgroup: state.preparedManagedVMCgroup,
 		managedVMCgroup:         state.managedVMCgroup,
 		record:                  record,
@@ -1008,6 +1018,7 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 	state.jailDestination = nil
 	state.networkNamespace = nil
 	state.runtimeDirectory = nil
+	state.persistentOutputs = nil
 	state.preparedManagedVMCgroup = nil
 	state.managedVMCgroup = nil
 	state.record = record
@@ -1138,16 +1149,17 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 		return nil, writeErr
 	}
 	target := &cleanupLease{state: &cleanupLeaseState{
-		roots:            state.roots,
-		directories:      state.directories,
-		vmLock:           state.vmLock,
-		prepared:         state.prepared,
-		processes:        state.processes,
-		jailDestination:  state.jailDestination,
-		networkNamespace: state.networkNamespace,
-		runtimeDirectory: state.runtimeDirectory,
-		managedVMCgroup:  state.managedVMCgroup,
-		record:           record,
+		roots:             state.roots,
+		directories:       state.directories,
+		vmLock:            state.vmLock,
+		prepared:          state.prepared,
+		processes:         state.processes,
+		jailDestination:   state.jailDestination,
+		networkNamespace:  state.networkNamespace,
+		runtimeDirectory:  state.runtimeDirectory,
+		persistentOutputs: state.persistentOutputs,
+		managedVMCgroup:   state.managedVMCgroup,
+		record:            record,
 	}}
 	state.roots = nil
 	state.directories = nil
@@ -1157,6 +1169,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 	state.jailDestination = nil
 	state.networkNamespace = nil
 	state.runtimeDirectory = nil
+	state.persistentOutputs = nil
 	state.managedVMCgroup = nil
 	state.record = record
 	state.released = true
@@ -1195,7 +1208,7 @@ func (lease *activeLease) Release(ctx context.Context) error {
 		return state.releaseErr
 	}
 	if state.prepared != nil || state.processes != nil || state.jailDestination != nil ||
-		state.runtimeDirectory != nil || state.managedVMCgroup != nil {
+		state.runtimeDirectory != nil || state.managedVMCgroup != nil || state.persistentOutputs != nil {
 		return instanceStateError(state.record.vmID, "live active authority must be consumed by BeginCleanup")
 	}
 	state.releaseErr = releaseInstanceOperationResources(
@@ -1232,6 +1245,7 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 		state.preparedJailDestination != nil ||
 		state.jailDestination != nil ||
 		state.runtimeDirectory != nil ||
+		state.persistentOutputs != nil ||
 		state.runtimeRecovery != nil ||
 		state.freshRecoveryAdmission != nil ||
 		state.preparedManagedVMCgroup != nil ||
