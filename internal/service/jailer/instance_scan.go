@@ -12,6 +12,63 @@ type instanceLocation struct {
 	stateFD int
 }
 
+// findRuntimeStatusOwners resolves the requested global claims in one owner-directory scan. The caller holds the
+// index lock until all per-VM observations finish; the returned owners are never process or cleanup authority.
+func (roots *instanceAuthorityRoots) findRuntimeStatusOwners(
+	ctx context.Context,
+	vmIDs []string,
+) (owners map[string]uint32, returnErr error) {
+	names, err := roots.deps.readDirNames(ctx, roots.stateFD)
+	if err != nil {
+		return nil, instanceAtomicError("enumerate runtime status authority owners", err)
+	}
+	sort.Strings(names)
+	owners = make(map[string]uint32)
+	for _, name := range names {
+		uid, valid := validateCanonicalUIDName(name)
+		if !valid {
+			return nil, instanceAtomicError("runtime status owner directory name is invalid", nil)
+		}
+		fd, err := openInstanceDirectory(
+			ctx,
+			roots.deps,
+			roots.stateFD,
+			name,
+			false,
+			instancePrivateDirectory,
+			roots.policy,
+		)
+		if err != nil {
+			return nil, err
+		}
+		directories := &instanceUIDDirectories{deps: roots.deps, policy: roots.policy, uid: uid, stateFD: fd}
+		for _, id := range vmIDs {
+			_, found, readErr := directories.readRecord(ctx, id)
+			if readErr != nil {
+				return nil, appendInstanceOperationError(
+					readErr,
+					"close rejected runtime status owner",
+					directories.Release(ctx),
+				)
+			}
+			if found {
+				if _, duplicate := owners[id]; duplicate {
+					return nil, appendInstanceOperationError(
+						instanceAtomicError("duplicate global VM authority claim", nil),
+						"close duplicate runtime status owner",
+						directories.Release(ctx),
+					)
+				}
+				owners[id] = uid
+			}
+		}
+		if err := directories.Release(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return owners, nil
+}
+
 func (roots *instanceAuthorityRoots) findInstance(
 	ctx context.Context,
 	vmID string,
