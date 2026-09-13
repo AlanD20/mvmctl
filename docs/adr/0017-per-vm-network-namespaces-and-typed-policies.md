@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-04 (lock lifecycle, root-selected uplink, and snapshot endpoint authority)
+**Last Updated:** 2026-09-13 (supported ARP grammar and private application status)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -298,6 +298,12 @@ egress allow. The compiler rejects overlapping prefixes and unusable IPv4 author
 deterministically. The caller no longer supplies generation identity. Explicit empty intent compiles to an empty
 generation with no reserved tables or rules.
 
+Implementation note (2026-09-13): ARP ingress now rejects a non-Ethernet/IPv4 header or an opcode outside request/reply
+before the fixed sender-address checks. The ARP allow rule separately requires that supported header, opcode, and the
+complete 28-byte payload. The private application validator also verifies the new ingress guards. L1 covers malformed
+headers/opcodes, truncated payloads, spoofed senders, and valid request/reply packets; live kernel packet qualification
+remains pending.
+
 The compiler derives SHA-256 from a versioned canonical closed projection of normalized intent and the exact managed
 tables, chains, rules, expressions, order, and userdata schema. The userdata generation slot uses a fixed placeholder
 while hashing to break self-reference; the derived digest and rule identity are then bound into every emitted rule.
@@ -308,15 +314,16 @@ The projection covers every field of exactly the eight expression structs emitte
 Any nftables module upgrade or emitted-expression change requires an explicit field-coverage audit and digest-schema
 version bump.
 
-On the isolated representative 1,000-VM compiler benchmark, the observed range was roughly 23–28 ms with about 10 MB
-and 179,000 allocations. L1 retains ratio-based growth evidence and enforces a 250,000-allocation regression ceiling.
+After the ARP correction, the representative 1,000-endpoint/1,000-grant fixture emits 11,007 rules and used 243,345
+allocations normally and 243,346 under race instrumentation. The 250,000-allocation L1 ceiling is unchanged. These are
+compiler measurements, not live VM or kernel enforcement evidence.
 
-This remains an inert compiler foundation. The separate generation authority, evidence-bound record replacement, raw
-snapshot collector, and retained exact host-netns transport factory described below are implemented, but there is no
-qualified initial inspection or adoption, `nftables.Conn`/`Flush`, actual empty-generation deletion/application,
-mutation or recovery orchestration, privileged action, public policy cutover, legacy `nft` CLI removal, or L2
-qualification. No kernel-application, atomicity, enforcement, or release-readiness claim follows from these
-foundations.
+The compiler remains effect-free. The separate private generation authority, evidence-bound record replacement, raw
+snapshot collector, retained exact host-netns transport, and application/reconciliation coordinator described below
+are implemented, including typed `nftables.Conn`/`Flush` application and empty-generation deletion. Qualified initial
+inspection, production topology composition, privileged/public policy cutover, legacy `nft` CLI removal, and L2
+qualification remain pending. Private implementation and L1 evidence do not establish live kernel enforcement,
+atomicity qualification, or release readiness.
 
 #### Firewall generation authority and inspection gates
 

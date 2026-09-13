@@ -31,22 +31,27 @@ Each retained change requires a current dependency, a bounded implementation or 
 diff, focused verification, and integration review.
 Obsolete prototype behavior is not a release requirement merely because its branch exists.
 
-The cleanup deleted 28 stale local branch references without creating archives or changing
-remote references. Seven implementation sources remain retained at these original tips:
+The cleanup deleted 33 stale local source references in this batch, including the stale
+documentation source, without creating archives or changing remote references. Three
+implementation source branches remain alongside `main` and `0.3.0-release`: output admission,
+firewall intent, and runtime reconciliation. Four completed clean scratch worktrees were
+also removed. Source tips below identify the reviewed history, not wholesale integration
+or completion of every feature:
 
 | Source | Current disposition and remaining dependency |
 |--------|----------------------------------------------|
-| `agent-config-authority-v2` at `831171d4` | Sealed-configuration hardening from `c2f281c8` integrated as `0ded9203`; focused release race checks passed. |
-| `agent-host-init` at `a5ad1929` | Atomic sudoers publisher approved and in progress; preserve existing grants. Full init/reset and journal work require lifecycle/network quiescence and an operator decision. |
-| `agent-jailer-output-commit` at `022a2127` | Snapshot/volume policy and admission reference; its snapshot/volume bounds and QCOW2 strategy remain unapproved. |
-| `agent-jailer-output-v2` at `0eb12fb4` | Schema-3 retained persistent-output preparation in progress under the approved policy: fixed `0600` files with no hard live-size cap. Public mounts and launch composition remain pending. |
-| `agent-network-authority-v2` at `82b0c4ba` | Obsolete adapter recommended for discard, retained pending cleanup. Its unique synthetic ownership and schema-1 assumptions conflict with current authority; reusable primitives already exist. |
-| `agent-policy-firewall-intent` at `99200930` | ARP grammar correction in progress without arbitrary input ceilings; public traffic/exec drafts require current topology and relay authority. |
-| `agent-runtime-reconcile` at `0dcbe78b` | Private schema-3 batched observation in progress; public status activation requires the lifecycle authority writer and recovery. |
+| `agent-config-authority-v2` at `831171d4` | Sealed-configuration hardening integrated as `0ded9203`; focused release race checks passed. Source reference removed. |
+| `agent-host-init` at `a5ad1929` | Atomic sudoers publication integrated as `7903b444`, with test correction `8ce69542`; exact transitional grants preserved. Source reference removed after confirming the useful port and superseded/incompatible remainder. Full init/reset and journal work still require lifecycle/network quiescence. |
+| `agent-jailer-output-commit` at `022a2127` | Snapshot/volume admission reference retained. Raw-only VM data volumes are approved; QCOW2 image import/conversion remains supported. The resource-limit proposal is recorded; numerical policy remains unapproved. |
+| `agent-jailer-output-v2` at `0eb12fb4` | Retained persistent-output preparation integrated as `9a5a5a5e`, with ownership-test correction `39d29d73`. Source reference removed after confirming the useful port and superseded/incompatible remainder. Fixed `0600` policy has no hard live-size cap; public mounts and launch composition remain pending. |
+| `agent-network-authority-v2` at `82b0c4ba` | Source reference removed without porting obsolete synthetic ownership and schema-1 assumptions; reusable primitives already exist. |
+| `agent-policy-firewall-intent` at `99200930` | ARP grammar correction integrated as `81b62163`; public traffic/exec drafts require current topology and relay authority. |
+| `agent-runtime-reconcile` at `0dcbe78b` | Private schema-3 batch observer integrated as `5080fd17`, with test correction `a04f5cce`. Public status activation requires the lifecycle authority writer and recovery. |
 
 The separate dirty documentation source `agent-docs-firewall-raw-observer` at `6fb3a77b`
 has its accurate distinct substance extracted into `142a3cac`, integrated as `3dd00d8a`
-after exact source-delta review. The old dirty worktree remains retained and unchanged.
+after exact source-delta review. Its stale dirty draft worktree and branch were subsequently
+removed with explicit authorization, without an archive.
 
 Sealed-configuration integration review caught and corrected an exact-seal equality
 regression: admission requires all immutability seals while permitting kernel-added
@@ -54,6 +59,34 @@ regression: admission requires all immutability seals while permitting kernel-ad
 changing host sysctls. The final correction delta was reviewed, and the focused release
 config/resource race checks passed in 1.524 seconds with Go 1.26.7. This private hardening
 does not wire the sealed descriptor into launch.
+
+The ARP correction admits only complete Ethernet/IPv4 request/reply payloads and preserves
+the existing 250,000-allocation ceiling: the representative 1,000-endpoint L1 fixture now
+emits 11,007 rules and used 243,345 allocations normally and 243,346 under race testing.
+These compiler measurements are not kernel enforcement evidence. Focused integrated race
+checks passed for firewall (4.244 seconds), host (1.578 seconds), persistent outputs
+(1.419 seconds), and status observation (1.261 seconds). The combined integrated package
+race pass on `a04f5cce` also passed Jailer (28.123 seconds), firewall (6.159 seconds), and
+host (3.437 seconds). Checks used local Go 1.26.7, offline dependencies, and separate
+worktree-local temporary/cache paths; the package pass allowed local `getsockopt` fixtures
+outside the sandbox and changed no host runtime. No full CI or system qualification follows.
+
+The output capability transfers before admission or mutation, prepares files only after
+successful durable schema-3 registration while both children remain blocked, and follows
+abort/active/cleanup ownership without deleting published files. The private batch observer
+holds one index scan and at most one VM lock/process set, returns no partial map on failure,
+and never signals or repairs state. It compares persisted mount/root/executable metadata;
+network namespace identity is checked for stability between observations only because
+schema 3 does not persist it. Its 1,000-record L1 benchmark uses real record files with fake
+process and lock effects, one owner, and no relays; it is not live 1,000-VM qualification.
+
+The user approved eventual administrator initialization through authenticated sudo and
+direct root with an explicitly selected non-root operator. That enrollment flow remains
+pending. Raw-only VM data-volume implementation is a separate bounded increment; this
+decision does not approve the old draft's 16-volume, 16-TiB data-volume, or 1-GiB snapshot
+state limits. The [resource-limit proposal](../docs/improvements/volume-snapshot-resource-limits.md), integrated as
+`6cef6161` with rootfs-only snapshot clarification `61e7bc4d`, records the rationale and open choices. Its numerical
+recommendations remain unapproved and are not implemented by this batch.
 
 Integration proceeds through fixed-diff review, focused tests and integration checks, and
 separate commits for each completed chunk. No entire source branch is accepted by this
@@ -114,8 +147,8 @@ continue without silently deleting it.
   cloud-init leaves, with descriptor-relative no-cross-mount opening, synchronized admission checks, descriptor
   transfer, and checked reverse cleanup. Caller configuration is strict admission evidence for root-built typed intent;
   only a root-owned `0444` sealed memfd survives successful preparation.
-  The locator and base selection are not yet carried by a privileged action, cache identity is not bound into the
-  instance record, and the root-side leases and sealed configuration are not consumed by launch.
+  The private schema-3 instance record binds cache identity, but the locator and base selection are not yet carried
+  by a public launch action, and public launch does not consume the root-side leases or sealed configuration.
 - Typed SQLite allow-intent foundations for source-network and exact-source-VM traffic grants plus directional,
   exact-user VM-to-VM execution grants. Their repositories enforce exact identities, foreign keys, duplicate
   constraints, and atomic cross-table VM invalidation. Directional exec-policy intent is now exposed through typed
@@ -982,8 +1015,10 @@ field of exactly the emitted `expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp
 `expr.Range`, and `expr.Verdict` structs from pinned `github.com/google/nftables v0.3.0`; typed-nil and unknown
 expressions fail closed. Digest encoding streams through a fixed 64-KiB buffer into SHA-256 and returns canonical
 validation, encoding, or finalization failures. Module or expression-set changes require a schema audit and
-digest-version bump. The isolated representative 1,000-VM benchmark was roughly 23–28 ms, 10 MB, and 179,000
-allocations, with a 250,000-allocation L1 ceiling.
+digest-version bump. ARP admission now requires supported Ethernet/IPv4 request/reply grammar and the full payload,
+with header/opcode guards before fixed sender offsets. The representative 1,000-endpoint/1,000-grant fixture emits
+11,007 rules and used 243,345 allocations normally and 243,346 under race instrumentation, below the unchanged
+250,000-allocation L1 ceiling. Live kernel packet qualification remains pending.
 
 The compiler itself creates no connection or effect. The private coordinator combines the admitted generation lease's
 strict committed/applying record, exclusive descriptor-relative store, and never-unlinked global lock with a
@@ -1173,6 +1208,14 @@ missing-capability, and incomplete inspection outcomes are `unavailable`. Stoppe
 observations. Any unavailable item fails the complete list/inspect operation rather than returning partial or stale
 rows. The user database may be updated after the authoritative observation, but it never decides whether a privileged
 process is live.
+
+The private schema-3 observer is implemented for up to 1,000 canonical unique VM IDs. It scans the ownership index
+once, retains at most one VM lock/process set, double-observes active metadata through pidfds, and returns no partial
+map. It never signals or repairs records; same-boot `launching`/`cleaning` is unavailable. Persisted mount/root/
+executable metadata is compared, while the network namespace is stability-only between observations because schema 3
+does not persist its identity. Public composition still requires the schema-3 lifecycle writer and recovery; otherwise
+transitional VMs would appear stopped. The current L1 benchmark uses real record files with fake process and lock
+effects, one owner, and no relays; it does not establish live 1,000-VM performance.
 
 An interrupted `launching` record is reconciled before projection. Boot mismatch cleans without signaling. Missing PID
 or start mismatch never signals a current task. The exact same task already running the final copied Firecracker may

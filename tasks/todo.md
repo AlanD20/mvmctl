@@ -157,6 +157,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     handler.
 - [ ] Bind the pinned cache device/inode/mount identity into the root-owned instance record and require later operations
   to re-pin the same identity.
+  - [x] Persist cache identity in private schema-3 launch authority and require the output-preparation cache lease to
+    match it. Public lifecycle and later-operation composition remain pending.
 - [ ] Land canonical producer names before descriptor pinning:
   - [x] ID-based `volumes/<volume-id>.<raw|qcow2>` storage.
   - [x] Content-addressed `kernels/<kernel-id>` storage with receiver-owned staging; kernel pull inputs cannot select an
@@ -166,7 +168,14 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     into the fixed managed leaf, rebuild relaunch paths instead of trusting SQLite path columns, and reject alternate
     manifest basenames in the transitional Jailer receiver.
   - [ ] Make persistent outputs caller-owned `0600` one-link regular files and truncate them only after durable launch
-    registration. The current launch still creates/truncates outputs before registration.
+    registration. The current public launch still creates/truncates outputs before registration.
+    - [x] Implement private fixed log/console and optional metrics preparation after successful durable schema-3
+      registration while both children remain blocked. Retain capability ownership before admission or mutation;
+      truncate existing admitted files once; prepare missing files with `O_TMPFILE`, fsync, and no-replace linking;
+      preserve mutation/durability evidence; and reject replay of partial attempts.
+    - [x] Transfer output authority through abort, activation, and cleanup with shared close-once release. Preserve
+      published files after stop/failure; expose no public path or descriptor accessor.
+    - [ ] Compose the prepared descriptors into public launch and the final mount transaction.
   - [x] Freeze API/vsock/console socket and PID mirror basenames and remove their filename configuration/relay flags.
   - [ ] Relocate those ephemeral leaves beneath `/run/mvmctl/runtime/<uid>/<vm-id>`; the root-controlled parent and
     pinned caller-owned VM directory must replace the current whole-cache-VM-directory bind.
@@ -195,10 +204,14 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     one-link regular files with resource-specific owner access and no group/world write or special bits.
   - [x] Define persistent output policy as fixed caller-owned `0600` one-link regular files, truncated once after
     durable launch registration, with bounded readers and one-launch retention but no hard live-size cap.
-    Descriptor preparation and launch consumption remain pending.
-  - [ ] Define snapshot restore memory/state, volume count/format/capacity, writable snapshot creation, and
-    image-provisioning policies in their owning increments. QCOW2 physical length must not be confused with virtual
-    capacity or inspected by an unrestricted root subprocess.
+    Private descriptor preparation is implemented; public launch consumption remains pending.
+  - [x] Select raw-only VM data volumes while preserving QCOW2 image import/conversion. This is an approved format
+    decision; the separate production/API/CLI change remains pending integration.
+  - [ ] Define snapshot restore memory/state, volume count/capacity, writable snapshot creation, and
+    image-provisioning policies in their owning increments. Justify volume count/capacity and snapshot-state limits
+    before approval; the stale draft's 16 volumes, 16-TiB data volumes, and 1-GiB state are not accepted policy. The
+    [resource-limit proposal](../docs/improvements/volume-snapshot-resource-limits.md) records recommendations and open
+    choices, not approval or implementation.
 - [x] Implement the private base launch-resource lease for fixed `vms/<vm-id>/rootfs.img`,
   `vms/<vm-id>/firecracker.json`, optional `vms/<vm-id>/cloud-init.iso`, and `kernels/<kernel-id>`: component traversal
   beneath the pinned cache, `NO_XDEV`, synchronized ownership/type/link/mode/size checks, descriptor transfer, reverse
@@ -475,7 +488,8 @@ privileged actions, same-boot dead-process cgroup reconciliation, and qualificat
     relay separation, pinned receiver-executable verification, and ownership transfer into durable `launching`.
     The separate private runtime-directory foundation now creates and pins the exact output directory only from that
     durable authority and transfers it through activation or abort and cleanup. It is not mounted. Production spawning,
-    initial namespace, outputs, mounts, mirrors, and action composition remain pending.
+    initial namespace, output consumption, mounts, mirrors, and action composition remain pending; private persistent
+    output preparation now follows the same durable registration and retained cleanup authority.
     Relay and Firecracker gate releases are tracked separately: retry after relay success and Firecracker handoff
     failure resumes only the pending Firecracker release on the same launch authority.
 - [x] Make `preparedRelease.registerLaunching` consume its pinned admission/store/slot resources, derive release
@@ -526,13 +540,14 @@ privileged actions, same-boot dead-process cgroup reconciliation, and qualificat
   mutex-protected, close-once across copies/concurrent release, cancellation-independent during cleanup, and repeat the
   cached first cleanup result.
   - [x] Extend pointer-shared close-once/cached-result ownership to blocked and recovered processes, prepared and bound
-    Jailer destinations, active leases, and cleanup leases. Later output, mount, network, and firewall resources keep
-    the complete item open.
+    Jailer destinations, persistent outputs, active leases, and cleanup leases. Later mount, network, and firewall
+    resources keep the complete item open.
 - [ ] Add consuming `launchLease.Abort(ctx)` and `activeLease.BeginCleanup(ctx)` transitions that transfer held release,
   VM, pidfd, mount, network, and firewall resources into cleanup without unlocking/reacquiring the VM. Keep
   authority-level `BeginCleanup` only for fresh recovery admission.
   - [x] Implement consuming abort/active-cleanup transfer for the currently retained prepared release, VM lock, pidfds,
-    Jailer destination, fixed-name cgroup authority, topology-selected namespace identity, and runtime directory.
+    Jailer destination, fixed-name cgroup authority, topology-selected namespace identity, runtime directory, and
+    persistent outputs.
     Cgroup authority transfers launch -> active -> cleanup; abort binds it only after exact task reap. Mount, network,
     and firewall lease transfer remains pending.
 - [ ] Require pidfd support for every mutating operation, signal only with `pidfd_send_signal`, observe exit through the
@@ -682,6 +697,10 @@ public cutover, and qualification remain pending
   overlap/unusable-IPv4 rejection. It performs no kernel or privileged effect.
 - [x] Add deterministic input-order coverage and bounded allocation-growth evidence for a 1,000-VM, 1,000-grant
   generation.
+- [x] Guard Ethernet/IPv4 ARP header and request/reply opcode before fixed sender offsets, and require the complete
+  28-byte payload before ARP acceptance. Revalidate the new guards before private application; cover malformed,
+  truncated, spoofed, and valid request/reply cases. The 11,007-rule fixture remains below the unchanged
+  250,000-allocation ceiling in ordinary and race tests. Kernel packet qualification remains pending.
 - [x] Derive SHA-256 generation identity from the versioned canonical closed projection of normalized intent and exact
   compiled managed tables/chains/rules/order/userdata. The caller supplies no ID; explicit empty input emits no tables
   or rules. Cover all fields of exactly the eight emitted v0.3.0 expression structs, reject typed-nil/unknown
@@ -934,6 +953,11 @@ optimization, unsupported-behavior scope decisions, and host-mutation migration 
 - [ ] Move required module/sysctl/host mutations behind exact compiled allowlists.
 - [ ] Keep `host init`, `host reset`, group membership, and sudoers changes as explicit administrator operations; do not
   route authorization-boundary changes through the passwordless operator dispatcher.
+- [x] Publish the fixed sudoers policy descriptor-relatively after canonical-binary and tool preflight, validate stdin
+  through bounded absolute `visudo` with a fixed environment, fsync and rename atomically, and retain replacement/
+  durability/cleanup evidence. Preserve exact transitional grants; this does not activate the marker-only policy.
+- [ ] Implement the approved administrator entry modes: authenticated sudo, or direct root with an explicit non-root
+  operator. Operator selection/enrollment remains separate from the completed sudoers publisher.
 - [ ] Replace `HostInit`'s `any` / `map[string]any` result with one typed result and one consistent interaction channel.
 - [ ] Make administrator host setup/reset fail closed on every mutation and state-write error; remove ignored group,
   sysctl, KVM, firewall, repository, and ownership-repair failures.
@@ -978,6 +1002,11 @@ lifecycle, host-reboot reconciliation, API relay/policy/audit integration, and P
   as `crashed`, and treat permission, I/O, corrupt-record, missing-capability, or incomplete inspection as
   `unavailable`. Update SQLite only after a complete authoritative result and never perform a per-VM sudo, Firecracker
   API, SSH, or guest-agent liveness tick. Any unavailable item fails the read instead of returning partial/stale rows.
+  - [x] Implement the private schema-3 observer for at most 1,000 canonical unique VM IDs: one ownership-index scan,
+    at most one VM lock/process set at a time, pidfd-bound double observation and final liveness sweep, no executable
+    rehash, no partial map, and no process signaling or record repair. Same-boot `launching`/`cleaning` is unavailable.
+    Persisted mount/root/executable metadata is compared; network namespace identity is stability-only between reads
+    because schema 3 has no network namespace field. Public activation still requires the schema-3 lifecycle writer.
 - [ ] Reconcile interrupted `launching` records exactly: boot mismatch cleans without signaling; PID/start mismatch
   never signals; the same task with the exact final copied Firecracker may complete idempotent sealing and commit
   `active` only when the optional relay proves its state-appropriate identity; the same task still in
@@ -986,6 +1015,10 @@ lifecycle, host-reboot reconciliation, API relay/policy/audit integration, and P
   authority. Resume `cleaning` idempotently.
 - [ ] Benchmark 1,000 authority records in L1 and enforce the reviewed regression budget without one goroutine, process,
   or control connection per VM.
+  - [x] Add the private 1,000-record fixture using real record files with fake process and lock effects, one owner, and
+    no relays. Per-operation measurements from a three-iteration benchmark were 47.2 ms stopped and 277.2 ms active.
+    This measures L1 observation work, not live 1,000-VM performance or host-reboot behavior; the release regression
+    budget is pending.
 - [x] Add the root-owned global VM-exec capacity reservation foundation. Store strict schema-1 records at
   `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` under exact `root:root` mode-`0700` managed directories
   with one-link exact `root:root` mode-`0600` records. Bind non-root owner, exact source/destination VM IDs and launch

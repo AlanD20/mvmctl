@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Security release status:** `0.3.0` is still under development. The canonical Jailer, cgroup policy, routed
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
 > and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
-> authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation with a canonical
-> generation digest, the private firewall generation record/store/lock and evidence-bound replacement authority,
+> authority, retained persistent-output preparation, private schema-3 batch status observation, atomic transitional
+> sudoers publication, typed traffic/exec policy persistence, topology preparation, typed nftables compilation with a
+> canonical generation digest, the private firewall generation record/store/lock and evidence-bound replacement authority,
 > bounded raw nftables snapshot collection and private exact-host-netns generation application/reconciliation,
 > the private Jailer and LoopMount ephemeral-authority capabilities, the private root-pinned network namespace and
 > link effects and canonical L3/address/link-state foundations,
@@ -81,6 +82,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Enforced VM resource envelopes
 - Jailed VMs now require cgroup v2 and launch with persisted, verified CPU, memory, swap, and PID limits; `mvm vm inspect` reports requested, observed, and current cgroup state.
+
+#### Private persistent-output preparation and status observation
+
+- Added retained preparation for fixed caller-owned one-link `0600` log/console and optional metrics files. It requires
+  successful durable schema-3 launch registration with both children blocked, owns partial progress before mutation,
+  truncates existing admitted files once, and publishes missing files through synced `O_TMPFILE` and no-replace links.
+  Abort, activation, and cleanup transfer the same close-once capability; published files remain for inspection.
+  Public launch and mount consumers remain pending, and no hard live-size cap or rotation is promised.
+- Added a private batch observer for up to 1,000 canonical unique VM IDs with one ownership-index scan and at most one
+  VM lock/process set. It returns closed `running`, `stopped`, and `crashed` observations or fails the complete read as
+  unavailable; it never returns partial results, signals processes, or repairs records. Active checks compare persisted
+  credentials, mount/root/executable metadata, and the derived cgroup path using retained pidfds without executable
+  rehashing. Network namespace identity is only checked for stability between observations because schema 3 does not
+  persist it. Same-boot `launching`/`cleaning` needs recovery. Public status remains unwired until public lifecycle
+  operations write schema 3. The 1,000-record L1 fixture uses real files with fake process/lock effects, one owner, and
+  no relays; its measurements do not qualify live 1,000-VM performance or host reboot.
 
 #### Routed service-access policies
 - `mvm policy` now persists exact network-to-VM TCP/UDP allows while both firewall backends default-deny other managed cross-network and VM-to-host traffic without blocking NoCloud, established replies, or internet egress.
@@ -247,8 +264,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `expr.Verdict`. Typed-nil and unknown expressions fail closed. Digest encoding streams through a fixed 64-KiB buffer
   directly into SHA-256; validation, encoding, and finalization errors surface to the compiler caller. A module
   upgrade or expression-set change requires an explicit schema audit and digest-version bump.
-- Deterministic input-order evidence remains in L1. On the isolated representative 1,000-VM benchmark, compilation was
-  roughly 23–28 ms with about 10 MB and 179,000 allocations; the regression test enforces a 250,000-allocation ceiling.
+- ARP admission now requires Ethernet/IPv4 request/reply grammar and the complete 28-byte payload. Header and opcode
+  guards precede fixed sender-address checks, and the private application validator verifies them. Malformed,
+  truncated, spoofed, and valid cases have L1 coverage; live kernel packet qualification remains pending.
+- The representative 1,000-endpoint/1,000-grant fixture now emits 11,007 rules and used 243,345 allocations normally
+  and 243,346 under race instrumentation, below the unchanged 250,000-allocation ceiling.
 - The compiler itself remains effect-free. Its sealed output is now consumed by the separate private application and
   reconciliation foundation below; no public caller or production policy path invokes that foundation.
 
@@ -467,6 +487,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   database, logging, and environment overrides.
 - `host init` now verifies the canonical system binary before reconciling the managed sudoers drop-in. System installation
   is deliberately separate from host initialization.
+- Sudoers reconciliation now pins the fixed root-owned directory chain and one-link `0440` policy, validates the
+  generated content through bounded absolute `visudo` on stdin with a fixed environment, and publishes by file fsync,
+  atomic rename, and directory fsync. Failures retain replacement/durability evidence. The transitional grants are
+  unchanged; administrator enrollment, full init/reset hardening, and marker-only policy activation remain pending.
 
 #### Privileged-dispatch foundation
 - Added the reserved, versioned privileged entry point to the root-owned `mvm` binary. Selection occurs before Cobra or
@@ -861,26 +885,26 @@ The following items are release blockers and are intentionally not described abo
   and descriptor-relative removal for only an exact non-mounted stale fixed tree after process absence. Create links
   down, apply and freshly verify the complete atomic nftables generation, then raise links; release the blocked child
   only after firewall and relay success.
-- Extend the implemented close-once process/destination/active/cleanup foundation to every remaining output, mount,
-  network, and firewall resource. Add complete interrupted-`launching` recovery and closed `running`, `stopped`,
-  `crashed`, and `unavailable` batch observations before wiring privileged VM actions to the root-owned lifecycle and
-  per-VM lock.
+- Extend the implemented close-once process/destination/output/active/cleanup foundation to remaining mount, network,
+  and firewall resources. Add complete interrupted-`launching` recovery and compose the private batch observer only
+  after public lifecycle operations write schema-3 authority; wire privileged VM actions to that lifecycle and VM lock.
 - Keep managed-network registration in network creation, then consume the real Jailer VM lock's `TopologyHold` into a
   persistent per-VM topology lease during launch. Activate neither topology nor the production-composed VM-exec
   capacity authority through user SQLite state; user state must not authorize host-global namespace, link, firewall,
   process, mount, cgroup, or admission decisions.
-- Carry the managed-cache locator and base launch selection through the privileged protocol, bind the cache identity in
-  the root-owned instance record, and create/consume the implemented descriptor lease inside the root process and
-  private mount-namespace launch path. Add separate closed descriptor policies for snapshots, volumes, persistent
-  outputs, and image provisioning.
+- Carry the managed-cache locator and base launch selection through the privileged protocol, consume the private
+  schema-3 cache-identity binding, and create/consume the implemented descriptor lease inside the root process and
+  private mount-namespace launch path. Add separate closed descriptor policies for snapshots, raw-only data volumes,
+  and image provisioning, then compose the implemented persistent-output preparation. Snapshot-state and data-volume
+  count/capacity bounds have a recorded resource-limit proposal, but numerical policy remains unapproved; QCOW2 image
+  import/conversion remains supported.
 - Keep the implemented closed Firewall capability, evidence-bound generation record replacement, retained host-netns
   snapshot factory, raw collector, and application/reconciliation coordinator private until qualified initial kernel
   inspection/adoption follows network authority; do not add generic paths, descriptors, or lock names.
-  Then create the separate caller-owned socket/PID output directories beneath
-  `/run/mvmctl/runtime`; stop
+  Then compose the private caller-owned socket/PID directory capability beneath `/run/mvmctl/runtime`; stop
   mounting the whole cache VM directory, pin persistent config/output leaves individually, truncate enabled `0600`
-  log/console/metrics files only after durable launch registration, and retain them after stop. The runtime tree is not
-  implemented by the completed Jailer authority migration.
+  log/console/metrics files only after durable launch registration, and retain them after stop. The private runtime and
+  persistent-output capabilities are implemented; public mount and lifecycle consumption remain pending.
 - Treat the current fixed-name Jailer checks as transitional defense-in-depth only: public Firecracker launch still
   reads a caller-writable configuration from the whole mounted VM directory. Wire the implemented sealed root-built
   configuration capability into the final descriptor-only mount transaction and derive/verify every jail-visible path
