@@ -19,8 +19,7 @@ import (
 )
 
 // --- Service.CreateDisk ---
-// Rationale: Tests disk creation for raw and qcow2 formats, invalid format
-// rejection, and propagation of subprocess failures (context cancellation).
+// Rationale: Tests raw disk creation and propagation of subprocess failures.
 
 func TestService_CreateDisk(t *testing.T) {
 	ctx := context.Background()
@@ -33,18 +32,6 @@ func TestService_CreateDisk(t *testing.T) {
 		wantCmd string // first element of args expected in FakeRunner call
 	}{
 		// --- Error paths ---
-		"error/invalid_format_returns_error": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:     "vol-bad",
-					Name:   "bad-format",
-					Path:   filepath.Join(tmpDir, "test.img"),
-					Format: "unsupported",
-				}
-			},
-			wantErr: true,
-			errCode: errs.CodeVolumeError,
-		},
 		"error/context_cancellation_returns_error": {
 			vol: func(tmpDir string) *model.VolumeItem {
 				return &model.VolumeItem{
@@ -72,19 +59,6 @@ func TestService_CreateDisk(t *testing.T) {
 				}
 			},
 			wantCmd: "fallocate",
-		},
-		"creates_qcow2_volume_with_qemu_img": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:        "vol-qcow2-001",
-					Name:      "test-qcow2",
-					Path:      filepath.Join(tmpDir, "test.qcow2"),
-					Format:    model.VolumeFormatQCOW2,
-					SizeBytes: 2_097_152,
-					CreatedAt: "2025-01-01T00:00:00Z",
-				}
-			},
-			wantCmd: "qemu-img",
 		},
 	}
 
@@ -254,7 +228,7 @@ func TestService_Remove_ContextCancellation(t *testing.T) {
 }
 
 // --- Service.ResizeDisk ---
-// Rationale: Tests raw and qcow2 resize operations, and error when the disk file
+// Rationale: Tests raw resize operations, and error when the disk file
 // does not exist on the filesystem.
 
 func TestService_ResizeDisk(t *testing.T) {
@@ -315,21 +289,6 @@ func TestService_ResizeDisk(t *testing.T) {
 			newSize:    2_097_152,
 			createFile: true,
 			wantCmd:    "fallocate",
-		},
-		"qcow2_resize_with_qemu_img": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:        "vol-resize-qcow2",
-					Name:      "resize-qcow2",
-					Path:      filepath.Join(tmpDir, "resize.qcow2"),
-					Format:    model.VolumeFormatQCOW2,
-					SizeBytes: 1_048_576,
-					CreatedAt: "2025-01-01T00:00:00Z",
-				}
-			},
-			newSize:    4_194_304,
-			createFile: true,
-			wantCmd:    "qemu-img",
 		},
 	}
 

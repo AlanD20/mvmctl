@@ -145,7 +145,7 @@ type VMCreateRequest struct {
 	networkResolver *network.Resolver
 	binaryResolver  *binary.Resolver
 	keyResolver     *key.Resolver
-	volumeResolver  *volume.Resolver
+	volumeRepo      volume.Repository
 	leaseRepo       network.LeaseRepository
 }
 
@@ -174,7 +174,7 @@ func NewVMCreateRequest(
 		networkResolver: network.NewResolver(networkRepo, nil),
 		binaryResolver:  binary.NewResolver(binaryRepo, system.RuntimeArch()),
 		keyResolver:     key.NewResolver(keyRepo),
-		volumeResolver:  volume.NewResolver(volumeRepo),
+		volumeRepo:      volumeRepo,
 		leaseRepo:       leaseRepo,
 	}
 }
@@ -310,11 +310,8 @@ func (r *VMCreateRequest) resolveVolumes(ctx context.Context, input *VMCreateInp
 	if len(input.Volumes) == 0 {
 		return nil, nil
 	}
-	result := r.volumeResolver.ResolveMany(ctx, input.Volumes)
-	if len(result.Errors) > 0 && len(result.Volumes) == 0 {
-		return nil, errs.NotFound(errs.CodeVolumeNotFound, result.Errors[0])
-	}
-	return result.Volumes, nil
+	volumeInput := VolumeInput{Identifiers: input.Volumes}
+	return volumeInput.ResolveRaw(ctx, r.volumeRepo)
 }
 
 // resolveMemory resolves mem_size_mib from input or defaults to setting.

@@ -12,19 +12,17 @@ import (
 
 // VolumeCreateInput specifies volume create input.
 type VolumeCreateInput struct {
-	Name      string  `json:"name"`
-	Size      string  `json:"size"`
-	Format    *string `json:"format,omitempty"`
-	ReadOnly  *bool   `json:"read_only,omitempty"`
-	Shareable *bool   `json:"shareable,omitempty"`
-	Writeback *bool   `json:"writeback,omitempty"`
+	Name      string `json:"name"`
+	Size      string `json:"size"`
+	ReadOnly  *bool  `json:"read_only,omitempty"`
+	Shareable *bool  `json:"shareable,omitempty"`
+	Writeback *bool  `json:"writeback,omitempty"`
 }
 
 // ResolvedVolumeCreateInput specifies resolved volume create input.
 type ResolvedVolumeCreateInput struct {
 	Name        string
 	SizeBytes   int64
-	Format      model.VolumeFormat
 	IsReadOnly  bool
 	IsShareable bool
 	CacheType   string
@@ -38,17 +36,11 @@ func (i *VolumeCreateInput) Validate() error {
 	if i.Size == "" {
 		return fmt.Errorf("volume size is required")
 	}
-	if i.Format != nil {
-		f := *i.Format
-		if f != "raw" && f != "qcow2" {
-			return fmt.Errorf("unsupported format: %s. Use 'raw' or 'qcow2'", f)
-		}
-	}
 	return nil
 }
 
 // Resolve resolves the create input to a ResolvedVolumeCreateInput.
-// Parses size, defaults format and read-only, validates name, and checks
+// Parses size, defaults read-only, validates name, and checks
 // for existing volumes with the same name.
 func (i *VolumeCreateInput) Resolve(ctx context.Context, repo volume.Repository) (*ResolvedVolumeCreateInput, error) {
 	if err := i.Validate(); err != nil {
@@ -57,17 +49,6 @@ func (i *VolumeCreateInput) Resolve(ctx context.Context, repo volume.Repository)
 	sizeBytes, err := disk.ParseDiskSizeToBytes(i.Size)
 	if err != nil {
 		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid volume size: %s", err.Error()))
-	}
-	// Default format is "raw"
-	format := model.VolumeFormatRaw
-	if i.Format != nil {
-		format = model.VolumeFormat(*i.Format)
-	}
-	if format != model.VolumeFormatRaw && format != model.VolumeFormatQCOW2 {
-		return nil, errs.New(
-			errs.CodeValidationFailed,
-			fmt.Sprintf("Unsupported format: %s. Use 'raw' or 'qcow2'.", format),
-		)
 	}
 	isReadOnly := false
 	if i.ReadOnly != nil {
@@ -88,7 +69,6 @@ func (i *VolumeCreateInput) Resolve(ctx context.Context, repo volume.Repository)
 	result := &ResolvedVolumeCreateInput{
 		Name:        i.Name,
 		SizeBytes:   sizeBytes,
-		Format:      format,
 		IsReadOnly:  isReadOnly,
 		IsShareable: isShareable,
 		CacheType:   cacheType,

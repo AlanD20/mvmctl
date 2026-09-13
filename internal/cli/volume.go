@@ -87,7 +87,6 @@ func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.C
 }
 
 func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
-	var format string
 	var readOnly bool
 	var shareable bool
 	var writeback bool
@@ -100,10 +99,6 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 			name := args[0]
 			sizeStr := args[1]
 
-			var formatPtr *string
-			if cmd.Flags().Changed("format") {
-				formatPtr = &format
-			}
 			var readOnlyPtr *bool
 			if cmd.Flags().Changed("read-only") || cmd.Flags().Changed("readonly") {
 				readOnlyPtr = &readOnly
@@ -119,7 +114,6 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 			input := inputs.VolumeCreateInput{
 				Name:      name,
 				Size:      sizeStr,
-				Format:    formatPtr,
 				ReadOnly:  readOnlyPtr,
 				Shareable: shareablePtr,
 				Writeback: writebackPtr,
@@ -147,7 +141,6 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&format, "format", "", "Disk format: raw or qcow2 (default: raw)")
 	// Accept both --read-only and --readonly as aliases
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "readonly", false, "Mount volume as read-only (default: writable)")

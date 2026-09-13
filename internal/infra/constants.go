@@ -664,9 +664,9 @@ func GetVolumesDir() string {
 	return path
 }
 
-// GetVolumePath returns the canonical managed path for a volume ID and format.
-func GetVolumePath(volumeID, format string) string {
-	return filepath.Join(GetVolumesDir(), fmt.Sprintf("%s.%s", volumeID, format))
+// GetVolumePath returns the canonical managed raw-volume path for a volume ID.
+func GetVolumePath(volumeID string) string {
+	return filepath.Join(GetVolumesDir(), volumeID+".raw")
 }
 
 func GetBinDir() string {

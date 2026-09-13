@@ -59,11 +59,11 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 		ID:          volumeID,
 		Name:        resolved.Name,
 		SizeBytes:   resolved.SizeBytes,
-		Format:      resolved.Format,
+		Format:      model.VolumeFormatRaw,
 		IsReadOnly:  resolved.IsReadOnly,
 		IsShareable: resolved.IsShareable,
 		CacheType:   cacheType,
-		Path:        infra.GetVolumePath(volumeID, string(resolved.Format)),
+		Path:        infra.GetVolumePath(volumeID),
 		Status:      model.VolumeStatusAvailable,
 		CreatedAt:   timestamp,
 		UpdatedAt:   timestamp,
@@ -196,9 +196,9 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 // VolumeResize resizes a volume.
 func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreateInput) error {
 	volInput := inputs.VolumeInput{Identifiers: []string{input.Name}}
-	volumes, err := volInput.Resolve(ctx, op.Repos.Volume)
+	volumes, err := volInput.ResolveRaw(ctx, op.Repos.Volume)
 	if err != nil {
-		return errs.WrapMsg(errs.CodeVolumeNotFound, err.Error(), err)
+		return err
 	}
 	vol := volumes[0]
 	sizeBytes, err := disk.ParseDiskSizeToBytes(input.Size)
@@ -235,10 +235,9 @@ func (op *Operation) VolumeAttach(
 	if err != nil {
 		return err
 	}
-	// Resolve volume using VolumeInput.Resolve (uses ResolveMany).
-	volumes, resolveErr := input.Resolve(ctx, op.Repos.Volume)
+	volumes, resolveErr := input.ResolveRaw(ctx, op.Repos.Volume)
 	if resolveErr != nil {
-		return errs.NotFound(errs.CodeVolumeNotFound, fmt.Sprintf("Volume not found: %v", resolveErr))
+		return resolveErr
 	}
 	if len(volumes) != 1 {
 		return errs.NotFound(errs.CodeVolumeNotFound, "Expected exactly one volume identifier")

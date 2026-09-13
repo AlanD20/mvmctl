@@ -1066,16 +1066,44 @@ func vsockToInspectInfo(v *model.VsockConfigItem) *results.VMVsockInfo {
 // --- Start / Stop / Reboot / Pause / Resume ---
 
 type vmRelaunchState struct {
-	vm    *model.VMItem
-	vsock *model.VsockConfigItem
+	vm      *model.VMItem
+	vsock   *model.VsockConfigItem
+	volumes []*model.VolumeItem
+}
+
+func (op *Operation) resolveVMVolumes(ctx context.Context, vmItem *model.VMItem) ([]*model.VolumeItem, error) {
+	if len(vmItem.VolumeIDs) == 0 {
+		return nil, nil
+	}
+	input := inputs.VolumeInput{Identifiers: vmItem.VolumeIDs}
+	volumes, err := input.ResolveRaw(ctx, op.Repos.Volume)
+	if err != nil {
+		return nil, err
+	}
+	// Persisted IDs are exact references, unlike user-facing names and ID prefixes.
+	resolvedIDs := make(map[string]bool, len(volumes))
+	for _, vol := range volumes {
+		resolvedIDs[vol.ID] = true
+	}
+	for _, id := range vmItem.VolumeIDs {
+		if !resolvedIDs[id] {
+			return nil, errs.NotFound(errs.CodeVolumeNotFound,
+				fmt.Sprintf("persisted volume ID %q was not resolved exactly", id))
+		}
+	}
+	return volumes, nil
 }
 
 func (op *Operation) loadVMRelaunchState(ctx context.Context, vmItem *model.VMItem) (*vmRelaunchState, error) {
+	volumes, err := op.resolveVMVolumes(ctx, vmItem)
+	if err != nil {
+		return nil, err
+	}
 	row, err := op.Repos.Vsock.GetByVMID(ctx, vmItem.ID)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeDatabaseError, "failed to load VM vsock relaunch state", err)
 	}
-	state := &vmRelaunchState{vm: vmItem}
+	state := &vmRelaunchState{vm: vmItem, volumes: volumes}
 	if row == nil {
 		return state, nil
 	}
@@ -1102,6 +1130,7 @@ func (op *Operation) relaunchVM(
 	snapshotDir string,
 ) error {
 	state.vm.Vsock = state.vsock
+	state.vm.Volumes = state.volumes
 	if op.relaunchSpawn != nil {
 		return op.relaunchSpawn(ctx, state, snapshotMode, snapshotDir)
 	}
@@ -1123,7 +1152,7 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 		return &errs.BatchResult{Items: results}
 	}
 	if op.Enr != nil && len(vms) > 0 {
-		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
+		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases")
 		// Enrichment is best-effort: enriched data improves inspect output but is not
 		// required for the operation to succeed. A failed enrichment should not fail
 		// the operation itself.
@@ -1144,6 +1173,14 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 				continue
 			}
 		} else {
+			if _, err := op.resolveVMVolumes(ctx, vmLocal); err != nil {
+				results = append(results, errs.OperationResult{
+					Status: "error", Code: "vm.start_failed",
+					Message:   fmt.Sprintf("start '%s': %v", vmLocal.Name, err),
+					Exception: err,
+				})
+				continue
+			}
 			controller := vm.NewController(vmLocal, repo)
 			if err := controller.Start(ctx); err != nil {
 				results = append(results, errs.OperationResult{
@@ -1395,8 +1432,8 @@ func buildRespawnFirecrackerConfig(
 		cid := state.vsock.GuestCID
 		config.VsockGuestCID = &cid
 	}
-	if len(v.Volumes) > 0 {
-		config.ExtraDrives = volume.VolumesToDrives(v.Volumes)
+	if len(state.volumes) > 0 {
+		config.ExtraDrives = volume.VolumesToDrives(state.volumes)
 	}
 	return config
 }
@@ -1431,7 +1468,7 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 		return &errs.BatchResult{Items: results}
 	}
 	if op.Enr != nil && len(vms) > 0 {
-		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
+		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases")
 		// Enrichment is best-effort: enriched data improves inspect output but is not
 		// required for the operation to succeed. A failed enrichment should not fail
 		// the operation itself.

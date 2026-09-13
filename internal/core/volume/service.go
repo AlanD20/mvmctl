@@ -33,34 +33,13 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("create disk directory: %s", err))
 	}
 
-	switch vol.Format {
-	case model.VolumeFormatRaw:
-		_, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{"fallocate", "-l", strconv.FormatInt(vol.SizeBytes, 10), vol.Path},
-			system.RunCmdOpts{Check: true, Capture: true},
-		)
-		if err != nil {
-			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("fallocate failed: %s", err.Error()))
-		}
-	case model.VolumeFormatQCOW2:
-		_, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{
-				"qemu-img",
-				"create",
-				"-f",
-				string(model.VolumeFormatQCOW2),
-				vol.Path,
-				strconv.FormatInt(vol.SizeBytes, 10),
-			},
-			system.RunCmdOpts{Check: true, Capture: true},
-		)
-		if err != nil {
-			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("qemu-img create failed: %s", err.Error()))
-		}
-	default:
-		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("Unsupported format: %s", vol.Format))
+	_, err := system.DefaultRunner.Run(
+		ctx,
+		[]string{"fallocate", "-l", strconv.FormatInt(vol.SizeBytes, 10), vol.Path},
+		system.RunCmdOpts{Check: true, Capture: true},
+	)
+	if err != nil {
+		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("fallocate failed: %s", err.Error()))
 	}
 
 	if err := s.repo.Upsert(ctx, vol); err != nil {
@@ -94,27 +73,13 @@ func (s *Service) ResizeDisk(
 		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("stat disk file: %s", err))
 	}
 
-	switch vol.Format {
-	case model.VolumeFormatRaw:
-		_, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{"fallocate", "-l", strconv.FormatInt(newSizeBytes, 10), vol.Path},
-			system.RunCmdOpts{Check: true, Capture: true},
-		)
-		if err != nil {
-			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("fallocate resize failed: %s", err.Error()))
-		}
-	case model.VolumeFormatQCOW2:
-		_, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{"qemu-img", "resize", vol.Path, strconv.FormatInt(newSizeBytes, 10)},
-			system.RunCmdOpts{Check: true, Capture: true},
-		)
-		if err != nil {
-			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("qemu-img resize failed: %s", err.Error()))
-		}
-	default:
-		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("Unsupported format: %s", vol.Format))
+	_, err := system.DefaultRunner.Run(
+		ctx,
+		[]string{"fallocate", "-l", strconv.FormatInt(newSizeBytes, 10), vol.Path},
+		system.RunCmdOpts{Check: true, Capture: true},
+	)
+	if err != nil {
+		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("fallocate resize failed: %s", err.Error()))
 	}
 
 	// Update volume fields before upserting.
