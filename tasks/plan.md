@@ -1,6 +1,6 @@
 # v0.3.0 Clean-Break Security Release Plan
 
-**Status:** Approved — bounded stale-work salvage and integration active
+**Status:** Approved — current bounded salvage batch complete; release work remains
 **Branch:** `0.3.0-release`
 **Release gate:** Draft only until every CI and Python system-test requirement below passes
 
@@ -34,7 +34,7 @@ Obsolete prototype behavior is not a release requirement merely because its bran
 The cleanup deleted 33 stale local source references in this batch, including the stale
 documentation source, without creating archives or changing remote references. Three
 implementation source branches remain alongside `main` and `0.3.0-release`: output admission,
-firewall intent, and runtime reconciliation. Four completed clean scratch worktrees were
+firewall intent, and runtime reconciliation. Finished clean scratch worktrees were
 also removed. Source tips below identify the reviewed history, not wholesale integration
 or completion of every feature:
 
@@ -42,7 +42,7 @@ or completion of every feature:
 |--------|----------------------------------------------|
 | `agent-config-authority-v2` at `831171d4` | Sealed-configuration hardening integrated as `0ded9203`; focused release race checks passed. Source reference removed. |
 | `agent-host-init` at `a5ad1929` | Atomic sudoers publication integrated as `7903b444`, with test correction `8ce69542`; exact transitional grants preserved. Source reference removed after confirming the useful port and superseded/incompatible remainder. Full init/reset and journal work still require lifecycle/network quiescence. |
-| `agent-jailer-output-commit` at `022a2127` | Snapshot/volume admission reference retained. Raw-only VM data volumes are approved; QCOW2 image import/conversion remains supported. The resource-limit proposal is recorded; numerical policy remains unapproved. |
+| `agent-jailer-output-commit` at `022a2127` | Snapshot/volume admission reference retained. Raw-only public data-volume cutover integrated as `9214b09f`; QCOW2 image import/conversion remains supported. The resource-limit proposal is recorded; numerical policy and root descriptor admission remain pending. |
 | `agent-jailer-output-v2` at `0eb12fb4` | Retained persistent-output preparation integrated as `9a5a5a5e`, with ownership-test correction `39d29d73`. Source reference removed after confirming the useful port and superseded/incompatible remainder. Fixed `0600` policy has no hard live-size cap; public mounts and launch composition remain pending. |
 | `agent-network-authority-v2` at `82b0c4ba` | Source reference removed without porting obsolete synthetic ownership and schema-1 assumptions; reusable primitives already exist. |
 | `agent-policy-firewall-intent` at `99200930` | ARP grammar correction integrated as `81b62163`; public traffic/exec drafts require current topology and relay authority. |
@@ -82,15 +82,28 @@ process and lock effects, one owner, and no relays; it is not live 1,000-VM qual
 
 The user approved eventual administrator initialization through authenticated sudo and
 direct root with an explicitly selected non-root operator. That enrollment flow remains
-pending. Raw-only VM data-volume implementation is a separate bounded increment; this
-decision does not approve the old draft's 16-volume, 16-TiB data-volume, or 1-GiB snapshot
-state limits. The [resource-limit proposal](../docs/improvements/volume-snapshot-resource-limits.md), integrated as
+pending. The completed raw-only VM data-volume increment does not approve the old draft's
+16-volume, 16-TiB data-volume, or 1-GiB snapshot state limits. The
+[resource-limit proposal](../docs/improvements/volume-snapshot-resource-limits.md), integrated as
 `6cef6161` with rootfs-only snapshot clarification `61e7bc4d`, records the rationale and open choices. Its numerical
 recommendations remain unapproved and are not implemented by this batch.
 
-Integration proceeds through fixed-diff review, focused tests and integration checks, and
-separate commits for each completed chunk. No entire source branch is accepted by this
-record. Root-worktree commit `1aa83f4d` is an independent user kernel change outside this
+Raw-only data volumes landed as `9214b09f`, with Python QA changes in `fb94982c`. The public create-format input/flag
+and QCOW2 data-volume create/resize paths are removed. Use paths require complete raw-volume selections; common
+relaunch additionally requires exact persisted IDs. Read-only, shareable, and writeback semantics and all image-format
+support remain intact. This is normal-process validation before VM-specific/lifecycle effects, not root descriptor
+admission; VM create may still create the shared empty `vms` parent before input failure.
+
+The five affected integrated Go packages passed on `fb94982c`: API inputs (0.012 seconds), API (0.026 seconds), volume
+core (0.144 seconds), CLI (0.022 seconds), and infrastructure (0.161 seconds). Python verification collected 37 volume
+cases and 88 cases across the affected volume/image/VM-persistence tests, and passed five runner unit tests. These are
+collection and local test results, not a live L2 run or full release CI.
+
+This closes the current bounded batch after fixed-diff review, focused tests, integration
+checks, and separate completed chunks. No further release queue is started by this record.
+Public lifecycle composition, numerical policy approval, and live qualification remain pending.
+No entire source branch is accepted by this record. Root-worktree commit `1aa83f4d` is an
+independent user kernel change outside this
 scope; unrelated staged, unstaged, and untracked files remain excluded. No host installation
 is authorized by this batch, and no salvage result qualifies live-kernel behavior, full
 release CI, publication, or release readiness.

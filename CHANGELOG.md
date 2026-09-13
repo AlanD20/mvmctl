@@ -759,7 +759,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Managed storage identity
 - Newly created volume backing files are named from the immutable 64-character volume ID rather than the user-visible
-  display name. Raw and qcow2 formats remain explicit suffixes; database paths are derived metadata, not root authority.
+  display name and always use the fixed `.raw` suffix. `volume create --format` and `VolumeCreateInput.Format` are
+  removed, including explicit `--format raw`; read-only, shareable, and writeback behavior is preserved. QCOW2 image
+  import/conversion and environment image-format selection remain supported.
+- Data-volume QCOW2 create/resize paths are removed. Existing non-raw records remain inspectable/removable, but VM
+  create/start/reboot/common snapshot relaunch and volume attach/resize reject non-raw or incomplete volume
+  selections before VM-specific or lifecycle effects. Persisted VM volume IDs must resolve exactly, with no name or
+  prefix fallback. These normal-process input checks do not supply privileged descriptor admission or adopt numerical
+  count/capacity limits.
 - Kernel download, build, and import now stage files under the kernel service's configured managed directory and install
   final artifacts as `kernels/<kernel-id>`. Import identity is computed from the receiver-owned staged bytes, so a
   caller-controlled display name or a source-file replacement cannot select or escape the managed destination.

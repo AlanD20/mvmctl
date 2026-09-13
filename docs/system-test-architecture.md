@@ -140,7 +140,7 @@ its bounded captured output is retained for diagnosis. Repair the writable host 
 the shared copy. Checksum/version metadata may still be fetched upstream even when the large artifact is served locally.
 
 ```bash
-mvm volume create asset-mirror 6G --shareable --read-only --writeback --format raw
+mvm volume create asset-mirror 6G --shareable --read-only --writeback
 # Populated without sudo or a host mount. The runner pins the canonical regular
 # file with component-by-component O_NOFOLLOW traversal and passes that fd:
 mkfs.ext4 -F -d ~/.cache/mvm-asset-mirror /proc/self/fd/<pinned-volume-fd>

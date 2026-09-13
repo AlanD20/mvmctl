@@ -546,6 +546,15 @@ durability evidence and cannot be replayed. The capability transfers through abo
 shared close-once release; published files remain for inspection. Public launch and descriptor-only output mounts
 remain pending. The policy promises one-launch retention and bounded readers, with no hard live-size cap.
 
+VM data volumes now use only raw backing files at `volumes/<volume-id>.raw`. The public create input and CLI no longer
+accept a format selection; even `--format raw` is rejected. Read-only, shareable, and writeback semantics are preserved,
+as are QCOW2 image import/conversion and environment image-format selection. Unsupported persisted volume rows remain
+inspectable/removable, but VM create/start/reboot/common snapshot relaunch and volume attach/resize require a complete
+raw-volume selection before VM-specific or lifecycle effects. Relaunch resolves persisted volume IDs exactly rather
+than accepting a name/prefix substitute, and carries the verified selection through its normal-process relaunch state.
+These API input checks use the user database and do not establish root descriptor authority. Numerical volume/snapshot
+limits, privileged admission, public schema-3 lifecycle composition, and live qualification remain pending.
+
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An
 untagged RC build must pass the intended version explicitly. Otherwise `git describe` can inherit the previous release

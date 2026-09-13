@@ -599,7 +599,13 @@ mvm cp vm1:/data/file.txt vm2:/data/
 
 ### `mvm volume`
 
-Persistent data disk management.
+Persistent raw data disk management. Creation always uses `volumes/<volume-id>.raw`; `volume create --format` is
+removed, including `--format raw`. Read-only, shareable, and writeback options are preserved. QCOW2 image import and
+conversion remain supported through `mvm image`.
+
+Existing non-raw volume records remain available for inspection and removal, but cannot be attached, resized, or used
+by VM create, start, reboot, or restore. Every selected volume must resolve successfully. Persisted VM volume IDs must
+resolve exactly; a matching name or ID prefix cannot replace a missing referenced volume.
 
 #### Selectors
 
@@ -610,7 +616,7 @@ The volume resolver tries selectors in priority order:
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm volume create` | `NAME`, `SIZE`, `--format` | Create a new persistent volume |
+| `mvm volume create` | `NAME`, `SIZE` | Create a new persistent raw volume |
 | `mvm volume rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more volumes |
 | `mvm volume ls` | `--json, --long` | List all volumes |
 | `mvm volume inspect` | `SELECTOR`, `--json` | Show detailed information about a volume |
@@ -624,7 +630,6 @@ The volume resolver tries selectors in priority order:
 |------|-------------|---------|
 | `NAME` | Volume name (required) | — |
 | `SIZE` | Volume size, e.g. `10G`, `512M` (required) | — |
-| `--format FORMAT` | Disk format: `raw` or `qcow2` | `raw` |
 | `--read-only`, `--readonly`, `--ro` | Mount volume as read-only | writable |
 | `--shareable, -s` | Allow volume to be attached to multiple VMs | `false` |
 | `--writeback` | Use writeback cache mode | `false` |

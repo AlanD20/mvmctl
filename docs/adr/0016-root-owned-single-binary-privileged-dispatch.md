@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-09-13 (sudoers publication, retained outputs, and private status observation)
+**Last Updated:** 2026-09-13 (sudoers publication, retained outputs, private status, and raw data volumes)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md), and
@@ -1152,7 +1152,7 @@ The v0.3 canonical persistent layout is:
 | Cloud-init ISO | `vms/<vm-id>/cloud-init.iso` |
 | Firecracker configuration | `vms/<vm-id>/firecracker.json` |
 | Persistent VM outputs | Fixed `vms/<vm-id>/firecracker.log`, `firecracker.console.log`, and optional `firecracker.metrics` regular-file leaves |
-| Volume | `volumes/<volume-id>.<raw|qcow2>` |
+| Volume | `volumes/<volume-id>.raw` |
 | Kernel | `kernels/<kernel-id>` |
 | Snapshot | `snapshots/<snapshot-id>/{rootfs.img,memory,vmstate}` |
 | Durable image | `images/<image-id>.zst` |
@@ -1176,11 +1176,13 @@ limits are:
 The expected rootfs size is an equality check inside the receiver's hard range; it never raises the hard maximum. These
 checks authorize only the base launch set. Snapshot restore, volume attachment, snapshot creation, output creation, and
 image provisioning each require their own closed policy before their descriptors can join a launch or mutation lease.
-The approved data-volume format is raw only; QCOW2 remains supported for image import/conversion. The producer/API/CLI
-cutover is a separate increment. Volume count/capacity and snapshot memory/state limits require a justified proposal
-before approval; the old draft's 16-volume, 16-TiB data-volume, and 1-GiB state limits are not accepted policy. Existing
-base rootfs and image policies are unchanged. The [resource-limit proposal](../improvements/volume-snapshot-resource-limits.md)
-records the analysis and open choices; its numerical recommendations remain unapproved.
+The data-volume producer/API/CLI now supports raw only, with no create-time format selection. QCOW2 remains supported
+for image import/conversion. Public use paths reject unsupported persisted volume formats and incomplete selections;
+relaunch requires exact persisted IDs. This is normal-process input validation, not privileged descriptor admission.
+Volume count/capacity and snapshot memory/state limits remain unapproved; the old draft's 16-volume, 16-TiB data-volume,
+and 1-GiB state limits are not accepted policy. Existing base rootfs and image policies are unchanged. The
+[resource-limit proposal](../improvements/volume-snapshot-resource-limits.md) records the analysis and open choices;
+its numerical recommendations remain unapproved.
 
 The caller-owned `firecracker.json` is admission evidence, not launch authority. Immediately before allocation or
 reading, root repeats synchronized metadata inspection and enforces the 1-byte-through-1-MiB bound. It uses positioned

@@ -160,7 +160,7 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Persist cache identity in private schema-3 launch authority and require the output-preparation cache lease to
     match it. Public lifecycle and later-operation composition remain pending.
 - [ ] Land canonical producer names before descriptor pinning:
-  - [x] ID-based `volumes/<volume-id>.<raw|qcow2>` storage.
+  - [x] Fixed raw-only `volumes/<volume-id>.raw` storage.
   - [x] Content-addressed `kernels/<kernel-id>` storage with receiver-owned staging; kernel pull inputs cannot select an
     output directory, name, or path.
   - [x] Freeze persistent VM producer basenames as `rootfs.img`, `cloud-init.iso`, `firecracker.json`,
@@ -205,8 +205,12 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Define persistent output policy as fixed caller-owned `0600` one-link regular files, truncated once after
     durable launch registration, with bounded readers and one-launch retention but no hard live-size cap.
     Private descriptor preparation is implemented; public launch consumption remains pending.
-  - [x] Select raw-only VM data volumes while preserving QCOW2 image import/conversion. This is an approved format
-    decision; the separate production/API/CLI change remains pending integration.
+  - [x] Implement raw-only VM data volumes with no create-time format input/flag, preserving read-only/shareable/
+    writeback semantics and QCOW2 image import/conversion. Reject unsupported persisted formats and incomplete
+    selections before VM-specific/lifecycle effects in VM create/start/reboot/common snapshot relaunch and volume
+    attach/resize; require exact persisted volume IDs. These public input checks do not implement root descriptor admission.
+  - [x] Update Python volume cases and the asset-mirror creator for the removed format flag; collection and focused
+    runner unit checks pass. Live L2 volume qualification remains pending.
   - [ ] Define snapshot restore memory/state, volume count/capacity, writable snapshot creation, and
     image-provisioning policies in their owning increments. Justify volume count/capacity and snapshot-state limits
     before approval; the stale draft's 16 volumes, 16-TiB data volumes, and 1-GiB state are not accepted policy. The
