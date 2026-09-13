@@ -354,7 +354,7 @@ func TestPinVMLaunchResourcesPinsFixedBaseLeaves(t *testing.T) {
 			assertManagedDescriptorMatchesPath(t, lease.rootfsFD, fixture.rootfsPath)
 			require.NotNil(t, lease.preparedConfig)
 			var preparedStat unix.Stat_t
-			require.NoError(t, unix.Fstat(lease.preparedConfig.fd, &preparedStat))
+			require.NoError(t, unix.Fstat(lease.preparedConfig.state.fd, &preparedStat))
 			assert.Zero(t, preparedStat.Nlink)
 			assertManagedDescriptorMatchesPath(t, lease.kernelFD, fixture.kernelPath)
 			if tc.cloudInit == cloudInitPresent {

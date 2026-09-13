@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -444,6 +445,45 @@ func TestPrepareManagedFirecrackerConfigCancelsDuringCanonicalWrite(t *testing.T
 		},
 		closes.closePhases,
 	)
+}
+
+// Rationale: The post-seal readback is part of authority admission. Cancellation after partial readback must reject
+// and close the sealed descriptor instead of publishing a capability whose verification did not finish.
+func TestPrepareManagedFirecrackerConfigCancelsDuringCanonicalReadback(t *testing.T) {
+	intent := testVMFirecrackerLaunchIntent(cloudInitAbsent)
+	raw := mustMarshalManagedFirecrackerConfig(t, buildManagedFirecrackerConfig(intent))
+	deps, sourceFD := managedFirecrackerConfigTestSource(t, raw)
+	prepareManagedFirecrackerRootDepsForUnprivilegedTest(&deps)
+	ctx, cancel := context.WithCancel(context.Background())
+	createdFD := -1
+	realCreate := deps.memfdCreate
+	deps.memfdCreate = func(ctx context.Context, name string, flags int) (int, error) {
+		fd, err := realCreate(ctx, name, flags)
+		createdFD = fd
+		return fd, err
+	}
+	realPread := deps.pread
+	deps.pread = func(ctx context.Context, fd int, value []byte, offset int64) (int, error) {
+		if fd == createdFD && offset == 0 {
+			count, err := realPread(ctx, fd, value[:1], offset)
+			cancel()
+			return count, err
+		}
+		return realPread(ctx, fd, value, offset)
+	}
+	closes := observeManagedFirecrackerConfigCloses(&deps)
+
+	prepared, err := prepareManagedFirecrackerConfig(ctx, deps, sourceFD, intent)
+	assert.Nil(t, prepared)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.True(t, closes.sourceClosedBeforeMemfd)
+	wantClosePhases := []managedFirecrackerConfigClosePhase{
+		managedFirecrackerSourceClosePhase,
+		managedFirecrackerPreparedClosePhase,
+	}
+	if diff := cmp.Diff(wantClosePhases, closes.closePhases); diff != "" {
+		t.Errorf("configuration cleanup phases mismatch (-want +got):\n%s", diff)
+	}
 }
 
 // Rationale: Every syscall and readback stage constructing root authority must fail closed and release its memfd.
@@ -933,6 +973,28 @@ func TestPrepareManagedFirecrackerConfigRejectsStrictJSONAndIntentMismatches(t *
 	}
 }
 
+// Rationale: encoding/json replaces malformed UTF-8 with U+FFFD. Without an explicit byte-level check, malformed
+// caller bytes can become semantically equal to a root intent that legitimately contains the replacement character.
+func TestPrepareManagedFirecrackerConfigRejectsMalformedUTF8BeforeMemfd(t *testing.T) {
+	intent := testVMFirecrackerLaunchIntent(cloudInitAbsent)
+	intent.bootArgs = "console=ttyS0 replacement=\uFFFD"
+	valid := mustMarshalManagedFirecrackerConfig(t, buildManagedFirecrackerConfig(intent))
+	malformed := bytes.Replace(valid, []byte("\uFFFD"), []byte{0xff}, 1)
+	require.False(t, bytes.Equal(valid, malformed))
+
+	deps, sourceFD := managedFirecrackerConfigTestSource(t, malformed)
+	memfdCalls := 0
+	deps.memfdCreate = func(context.Context, string, int) (int, error) {
+		memfdCalls++
+		return -1, errors.New("must not create")
+	}
+
+	prepared, err := prepareManagedFirecrackerConfig(context.Background(), deps, sourceFD, intent)
+	assert.Nil(t, prepared)
+	requireManagedVMResourceDomainErrorCode(t, err, errs.CodeValidationFailed)
+	assert.Zero(t, memfdCalls)
+}
+
 func TestPrepareManagedFirecrackerConfigCreatesSealedCanonicalCapability(t *testing.T) {
 	intent := testVMFirecrackerLaunchIntent(cloudInitPresent)
 	expected := buildManagedFirecrackerConfig(intent)
@@ -944,11 +1006,35 @@ func TestPrepareManagedFirecrackerConfigCreatesSealedCanonicalCapability(t *test
 	prepareManagedFirecrackerRootDepsForUnprivilegedTest(&deps)
 	var sourceStat unix.Stat_t
 	require.NoError(t, unix.Fstat(sourceFD, &sourceStat))
+	var observedMemfdName string
+	var observedMemfdFlags int
+	var observedUID int
+	var observedGID int
+	var observedMode uint32
+	var observedSeals int
+	realFchown := deps.fchown
+	deps.fchown = func(ctx context.Context, fd, uid, gid int) error {
+		observedUID = uid
+		observedGID = gid
+		return realFchown(ctx, fd, uid, gid)
+	}
+	realFchmod := deps.fchmod
+	deps.fchmod = func(ctx context.Context, fd int, mode uint32) error {
+		observedMode = mode
+		return realFchmod(ctx, fd, mode)
+	}
+	realAddSeals := deps.addSeals
+	deps.addSeals = func(ctx context.Context, fd, seals int) error {
+		observedSeals = seals
+		return realAddSeals(ctx, fd, seals)
+	}
 
 	// CRITICAL: Occupying the released source descriptor during memfd creation prevents Linux from reusing its numeric
 	// value. This lets the test prove both ownership transfer and object separation through independent kernel state.
 	realMemfdCreate := deps.memfdCreate
 	deps.memfdCreate = func(ctx context.Context, name string, flags int) (int, error) {
+		observedMemfdName = name
+		observedMemfdFlags = flags
 		guardFD, openErr := unix.Open("/dev/null", unix.O_RDONLY|unix.O_CLOEXEC, 0)
 		if openErr != nil {
 			return -1, openErr
@@ -976,6 +1062,12 @@ func TestPrepareManagedFirecrackerConfigCreatesSealedCanonicalCapability(t *test
 	t.Cleanup(func() { require.NoError(t, prepared.Release(context.Background())) })
 	assert.True(t, closes.sourceClosedBeforeMemfd)
 	assert.Equal(t, 1, closes.memfdCreateCalls)
+	assert.Equal(t, managedVMConfigMemfdName, observedMemfdName)
+	assert.Equal(t, managedVMConfigMemfdFlags, observedMemfdFlags)
+	assert.Zero(t, observedUID)
+	assert.Zero(t, observedGID)
+	assert.Equal(t, managedVMConfigMemfdMode, observedMode)
+	assert.Equal(t, managedVMConfigRequiredSeals, observedSeals)
 	assert.Equal(
 		t,
 		[]managedFirecrackerConfigClosePhase{managedFirecrackerSourceClosePhase},
@@ -985,34 +1077,34 @@ func TestPrepareManagedFirecrackerConfigCreatesSealedCanonicalCapability(t *test
 	assert.ErrorIs(t, unix.Fstat(sourceFD, &closedSourceStat), unix.EBADF)
 
 	var stat unix.Stat_t
-	require.NoError(t, unix.Fstat(prepared.fd, &stat))
+	require.NoError(t, unix.Fstat(prepared.state.fd, &stat))
 	assert.False(
 		t,
 		sourceStat.Dev == stat.Dev && sourceStat.Ino == stat.Ino,
 		"prepared configuration must not retain the caller source object",
 	)
-	assert.Equal(t, uint32(0444), stat.Mode&07777)
+	assert.Equal(t, uint32(unix.S_IFREG)|managedVMConfigMemfdMode, stat.Mode&(unix.S_IFMT|07777))
 	assert.Zero(t, stat.Nlink)
 	assert.Equal(t, int64(len(canonical)), stat.Size)
-	flags, err := unix.FcntlInt(uintptr(prepared.fd), unix.F_GETFD, 0)
+	flags, err := unix.FcntlInt(uintptr(prepared.state.fd), unix.F_GETFD, 0)
 	require.NoError(t, err)
-	assert.NotZero(t, flags&unix.FD_CLOEXEC)
-	offset, err := unix.Seek(prepared.fd, 0, unix.SEEK_CUR)
+	assert.Equal(t, unix.FD_CLOEXEC, flags)
+	offset, err := unix.Seek(prepared.state.fd, 0, unix.SEEK_CUR)
 	require.NoError(t, err)
 	assert.Zero(t, offset)
-	seals, err := unix.FcntlInt(uintptr(prepared.fd), unix.F_GET_SEALS, 0)
+	seals, err := unix.FcntlInt(uintptr(prepared.state.fd), unix.F_GET_SEALS, 0)
 	require.NoError(t, err)
 	assert.Equal(t, managedVMConfigRequiredSeals, seals&managedVMConfigRequiredSeals)
 
 	got := make([]byte, len(canonical))
-	count, err := unix.Pread(prepared.fd, got, 0)
+	count, err := unix.Pread(prepared.state.fd, got, 0)
 	require.NoError(t, err)
 	assert.Equal(t, len(canonical), count)
 	if diff := cmp.Diff(canonical, got); diff != "" {
 		t.Errorf("prepared Firecracker configuration mismatch (-want +got):\n%s", diff)
 	}
 
-	duplicate, err := unix.Dup(prepared.fd)
+	duplicate, err := unix.Dup(prepared.state.fd)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, unix.Close(duplicate)) })
 	_, err = unix.Pwrite(duplicate, []byte("x"), 0)
@@ -1053,7 +1145,7 @@ func TestPrepareManagedFirecrackerConfigIsolatesCallerMutationAndReplacement(t *
 	require.NoError(t, os.WriteFile(path, []byte(`{"forged":true}`), 0600))
 	require.NoError(t, os.WriteFile(detached, []byte(`{"also":"forged"}`), 0600))
 	got := make([]byte, len(canonical))
-	count, err := unix.Pread(prepared.fd, got, 0)
+	count, err := unix.Pread(prepared.state.fd, got, 0)
 	require.NoError(t, err)
 	assert.Equal(t, len(canonical), count)
 	if diff := cmp.Diff(canonical, got); diff != "" {
@@ -1122,13 +1214,54 @@ func TestPrepareManagedFirecrackerConfigRejectsSealFaults(t *testing.T) {
 	}
 }
 
+// Rationale: vm.memfd_noexec=1 implicitly adds F_SEAL_EXEC without weakening the required immutability seals.
+// Requesting the same kernel behavior directly proves admission without changing host or namespace sysctls.
+// See https://cdn.kernel.org/doc/html/latest/userspace-api/mfd_noexec.html.
+func TestPrepareManagedFirecrackerConfigAcceptsKernelNoexecSeal(t *testing.T) {
+	intent := testVMFirecrackerLaunchIntent(cloudInitAbsent)
+	raw := mustMarshalManagedFirecrackerConfig(t, buildManagedFirecrackerConfig(intent))
+	deps, sourceFD := managedFirecrackerConfigTestSource(t, raw)
+	prepareManagedFirecrackerRootDepsForUnprivilegedTest(&deps)
+	realMemfdCreate := deps.memfdCreate
+	deps.memfdCreate = func(ctx context.Context, name string, flags int) (int, error) {
+		return realMemfdCreate(ctx, name, flags|unix.MFD_NOEXEC_SEAL)
+	}
+
+	prepared, err := prepareManagedFirecrackerConfig(context.Background(), deps, sourceFD, intent)
+	require.NoError(t, err)
+	require.NotNil(t, prepared)
+	t.Cleanup(func() { require.NoError(t, prepared.Release(context.Background())) })
+	seals, err := unix.FcntlInt(uintptr(prepared.state.fd), unix.F_GET_SEALS, 0)
+	require.NoError(t, err)
+	assert.Equal(t, managedVMConfigRequiredSeals, seals&managedVMConfigRequiredSeals)
+	assert.Equal(t, unix.F_SEAL_EXEC, seals&unix.F_SEAL_EXEC)
+}
+
+// Rationale: The private capability permits exactly close-on-exec. Accepting an unknown descriptor flag would silently
+// broaden the authority contract when Linux adds another flag or a dependency returns an impossible state.
+func TestPrepareManagedFirecrackerConfigRejectsUnexpectedDescriptorFlags(t *testing.T) {
+	intent := testVMFirecrackerLaunchIntent(cloudInitAbsent)
+	raw := mustMarshalManagedFirecrackerConfig(t, buildManagedFirecrackerConfig(intent))
+	deps, sourceFD := managedFirecrackerConfigTestSource(t, raw)
+	prepareManagedFirecrackerRootDepsForUnprivilegedTest(&deps)
+	deps.getFDFlags = func(context.Context, int) (int, error) {
+		return unix.FD_CLOEXEC | 1<<20, nil
+	}
+
+	prepared, err := prepareManagedFirecrackerConfig(context.Background(), deps, sourceFD, intent)
+	assert.Nil(t, prepared)
+	requireManagedVMResourceDomainErrorCode(t, err, errs.CodeVMAtomicFailed)
+}
+
 // Rationale: Seals alone are insufficient; the retained anonymous file must also have exact safe metadata.
 func TestPrepareManagedFirecrackerConfigRejectsUnsafeCanonicalMemfdMetadata(t *testing.T) {
 	mutations := map[string]func(*unix.Stat_t){
-		"non-root owner": func(stat *unix.Stat_t) { stat.Uid = 1 },
-		"writable mode":  func(stat *unix.Stat_t) { stat.Mode = stat.Mode&^07777 | 0644 },
-		"linked object":  func(stat *unix.Stat_t) { stat.Nlink = 1 },
-		"wrong size":     func(stat *unix.Stat_t) { stat.Size++ },
+		"non-regular type": func(stat *unix.Stat_t) { stat.Mode = unix.S_IFIFO | managedVMConfigMemfdMode },
+		"non-root owner":   func(stat *unix.Stat_t) { stat.Uid = 1 },
+		"non-root group":   func(stat *unix.Stat_t) { stat.Gid = 1 },
+		"writable mode":    func(stat *unix.Stat_t) { stat.Mode = stat.Mode&^07777 | 0644 },
+		"linked object":    func(stat *unix.Stat_t) { stat.Nlink = 1 },
+		"wrong size":       func(stat *unix.Stat_t) { stat.Size++ },
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
@@ -1300,24 +1433,47 @@ func cloneManagedFirecrackerConfigForTest(
 	return cloned
 }
 
-// Rationale: Release must close through an uncancelled cleanup context and erase its sole retained capability.
-func TestPreparedFirecrackerConfigReleaseUsesUncancelledContext(t *testing.T) {
-	closed := false
-	prepared := &preparedFirecrackerConfig{
+// Rationale: Copied capability handles must share one checked close result; otherwise a stale copy can close a reused
+// descriptor, and concurrent cleanup can race or hide the first close failure.
+func TestPreparedFirecrackerConfigReleaseIsSharedAndIdempotent(t *testing.T) {
+	var mu sync.Mutex
+	closeCalls := 0
+	closeErr := io.ErrClosedPipe
+	prepared := &preparedFirecrackerConfig{state: &preparedFirecrackerConfigState{
 		fd: 91,
 		close: func(ctx context.Context, fd int) error {
 			assert.NoError(t, ctx.Err())
 			assert.Equal(t, 91, fd)
-			closed = true
-			return io.ErrClosedPipe
+			mu.Lock()
+			closeCalls++
+			mu.Unlock()
+			return closeErr
 		},
-	}
+	}}
+	copied := *prepared
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := prepared.Release(ctx)
-	require.Error(t, err)
-	assert.True(t, closed)
-	assert.Equal(t, -1, prepared.fd)
-	assert.Nil(t, prepared.close)
-	assert.NoError(t, prepared.Release(context.Background()))
+
+	results := make(chan error, 2)
+	var releaseWG sync.WaitGroup
+	releaseWG.Add(2)
+	go func() {
+		defer releaseWG.Done()
+		results <- prepared.Release(ctx)
+	}()
+	go func() {
+		defer releaseWG.Done()
+		results <- copied.Release(context.Background())
+	}()
+	releaseWG.Wait()
+	close(results)
+
+	for err := range results {
+		assert.ErrorIs(t, err, closeErr)
+	}
+	mu.Lock()
+	assert.Equal(t, 1, closeCalls)
+	mu.Unlock()
+	assert.ErrorIs(t, prepared.Release(context.Background()), closeErr)
+	assert.ErrorIs(t, copied.Release(context.Background()), closeErr)
 }

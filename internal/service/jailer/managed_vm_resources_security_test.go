@@ -619,8 +619,8 @@ func TestVMLaunchResourceLeaseReleasesEveryDescriptorInReverseWithoutCancellatio
 		closed = append(closed, fd)
 		return realClose(ctx, fd)
 	}
-	lease.preparedConfig.close = lease.deps.close
-	wantClosed := []int{lease.preparedConfig.fd}
+	lease.preparedConfig.state.close = lease.deps.close
+	wantClosed := []int{lease.preparedConfig.state.fd}
 	for index := len(lease.retained) - 1; index >= 0; index-- {
 		wantClosed = append(wantClosed, lease.retained[index])
 	}
@@ -650,7 +650,7 @@ func TestVMLaunchResourceLeaseReportsCloseFailureAfterClosingAllDescriptors(t *t
 	require.NotNil(t, lease)
 
 	require.NotNil(t, lease.preparedConfig)
-	failedFD := lease.preparedConfig.fd
+	failedFD := lease.preparedConfig.state.fd
 	realClose := lease.deps.close
 	var closeCalls int
 	lease.deps.close = func(ctx context.Context, fd int) error {
@@ -661,7 +661,7 @@ func TestVMLaunchResourceLeaseReportsCloseFailureAfterClosingAllDescriptors(t *t
 		}
 		return closeErr
 	}
-	lease.preparedConfig.close = lease.deps.close
+	lease.preparedConfig.state.close = lease.deps.close
 	wantCloseCalls := len(lease.retained) + 1
 	err = lease.Release(context.Background())
 	require.Error(t, err)
@@ -888,7 +888,7 @@ func TestPinVMLaunchResourcesResistsContinuousSymlinkReplacementAtEveryFixedLeve
 				assertManagedDescriptorInode(t, lease.rootfsFD, rootfsInode)
 				require.NotNil(t, lease.preparedConfig)
 				var configStat unix.Stat_t
-				require.NoError(t, unix.Fstat(lease.preparedConfig.fd, &configStat))
+				require.NoError(t, unix.Fstat(lease.preparedConfig.state.fd, &configStat))
 				assert.Zero(t, configStat.Nlink)
 				assertManagedDescriptorInode(t, lease.kernelFD, kernelInode)
 				assertManagedDescriptorInode(t, lease.cloudInitFD, cloudInitInode)

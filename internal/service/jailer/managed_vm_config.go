@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 
@@ -145,8 +147,18 @@ type managedFirecrackerConfigDeps struct {
 // preparedFirecrackerConfig is the sole retained authority for launch configuration bytes. It intentionally exposes
 // no descriptor, path, byte slice, or generic operation until a named mount/launch consumer is implemented.
 type preparedFirecrackerConfig struct {
+	state *preparedFirecrackerConfigState
+}
+
+type preparedFirecrackerConfigState struct {
+	// mu guards the descriptor and the cached checked-close result shared by every copied capability handle.
+	mu sync.Mutex
+
 	close func(context.Context, int) error
 	fd    int
+
+	released   bool
+	releaseErr error
 }
 
 func validateVMFirecrackerLaunchIntent(intent vmFirecrackerLaunchIntent) error {
@@ -483,7 +495,7 @@ func createPreparedFirecrackerConfig(
 	if err := inspectFinalPreparedFirecrackerConfig(ctx, deps, fd, canonical); err != nil {
 		return nil, err
 	}
-	return &preparedFirecrackerConfig{close: deps.close, fd: fd}, nil
+	return &preparedFirecrackerConfig{state: &preparedFirecrackerConfigState{close: deps.close, fd: fd}}, nil
 }
 
 func inspectInitialPreparedFirecrackerConfig(
@@ -525,7 +537,7 @@ func inspectFinalPreparedFirecrackerConfig(
 	if err != nil {
 		return managedVMResourceAtomicError("inspect sealed Firecracker configuration descriptor flags", err)
 	}
-	if flags&unix.FD_CLOEXEC == 0 {
+	if flags != unix.FD_CLOEXEC {
 		return managedVMResourceAtomicError("sealed Firecracker configuration is not close-on-exec", nil)
 	}
 	offset, err := deps.seek(ctx, fd, 0, unix.SEEK_CUR)
@@ -544,6 +556,9 @@ func inspectFinalPreparedFirecrackerConfig(
 	}
 	readback := make([]byte, len(canonical))
 	for offset := 0; offset < len(readback); {
+		if err := ctx.Err(); err != nil {
+			return managedVMResourceAtomicError("read back sealed Firecracker configuration", err)
+		}
 		count, readErr := deps.pread(ctx, fd, readback[offset:], int64(offset))
 		if count < 0 || count > len(readback)-offset {
 			return managedVMResourceAtomicError(
@@ -559,6 +574,9 @@ func inspectFinalPreparedFirecrackerConfig(
 			return managedVMResourceAtomicError("read back sealed Firecracker configuration", io.ErrUnexpectedEOF)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return managedVMResourceAtomicError("probe sealed Firecracker configuration", err)
+	}
 	var probe [1]byte
 	count, readErr := deps.pread(ctx, fd, probe[:], int64(len(readback)))
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
@@ -566,6 +584,9 @@ func inspectFinalPreparedFirecrackerConfig(
 	}
 	if count != 0 || !bytes.Equal(canonical, readback) {
 		return managedVMResourceAtomicError("sealed Firecracker configuration readback mismatch", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return managedVMResourceAtomicError("reinspect sealed Firecracker configuration", err)
 	}
 	var after unix.Stat_t
 	if err := deps.fstat(ctx, fd, &after); err != nil {
@@ -580,17 +601,44 @@ func inspectFinalPreparedFirecrackerConfig(
 }
 
 func (prepared *preparedFirecrackerConfig) Release(ctx context.Context) error {
-	if prepared == nil || prepared.fd < 0 {
+	if prepared == nil {
 		return nil
 	}
-	fd := prepared.fd
-	closeConfig := prepared.close
-	prepared.fd = -1
-	prepared.close = nil
-	if err := closeConfig(context.WithoutCancel(ctx), fd); err != nil {
-		return managedVMResourceCleanupError("release sealed Firecracker configuration", err)
+	if prepared.state == nil {
+		return managedVMResourceAtomicError("sealed Firecracker configuration capability is not active", nil)
 	}
-	return nil
+	state := prepared.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released {
+		return state.releaseErr
+	}
+
+	cleanupCtx := context.Background()
+	var result error
+	if ctx == nil {
+		result = managedVMResourceAtomicError("sealed Firecracker configuration cleanup context is required", nil)
+	} else {
+		cleanupCtx = context.WithoutCancel(ctx)
+	}
+	if state.fd < 0 || state.close == nil {
+		result = appendManagedVMResourceCleanupError(
+			result,
+			"release sealed Firecracker configuration",
+			errors.New("sealed Firecracker configuration capability is incomplete"),
+		)
+	} else if err := state.close(cleanupCtx, state.fd); err != nil {
+		result = appendManagedVMResourceCleanupError(
+			result,
+			"release sealed Firecracker configuration",
+			err,
+		)
+	}
+	state.fd = -1
+	state.close = nil
+	state.released = true
+	state.releaseErr = result
+	return state.releaseErr
 }
 
 func realManagedFirecrackerConfigDeps() managedFirecrackerConfigDeps {
@@ -697,6 +745,9 @@ func managedVMObjectSchema(required []string, optional ...string) *managedVMJSON
 }
 
 func validateManagedFirecrackerJSON(data []byte) error {
+	if !utf8.Valid(data) {
+		return errors.New("configuration is not valid UTF-8")
+	}
 	modifierSchema := managedVMObjectSchema([]string{"register", "bitmap"})
 	cpuConfigSchema := &managedVMJSONSchema{fields: map[string]managedVMJSONField{
 		"kvm_capabilities": managedVMRequired(&managedVMJSONSchema{element: managedVMScalarSchema}),
