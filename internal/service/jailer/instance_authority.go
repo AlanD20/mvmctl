@@ -63,20 +63,22 @@ type activeLease struct {
 }
 
 type activeLeaseState struct {
-	mu                sync.Mutex
-	roots             *instanceAuthorityRoots
-	directories       *instanceUIDDirectories
-	vmLock            *vmAuthorityLease
-	prepared          *preparedRelease
-	processes         *blockedLaunchProcesses
-	jailDestination   *jailDestinationLease
-	networkNamespace  *topologySelectedNetworkNamespace
-	runtimeDirectory  *managedVMRuntimeLease
-	persistentOutputs *managedVMPersistentOutputLease
-	managedVMCgroup   *managedVMCgroupLease
-	record            instanceRecord
-	released          bool
-	releaseErr        error
+	mu                 sync.Mutex
+	roots              *instanceAuthorityRoots
+	directories        *instanceUIDDirectories
+	vmLock             *vmAuthorityLease
+	prepared           *preparedRelease
+	processes          *blockedLaunchProcesses
+	jailDestination    *jailDestinationLease
+	networkNamespace   *topologySelectedNetworkNamespace
+	runtimeDirectory   *managedVMRuntimeLease
+	persistentOutputs  *managedVMPersistentOutputLease
+	managedVMCgroup    *managedVMCgroupLease
+	activationComplete bool
+	detachStarted      bool
+	record             instanceRecord
+	released           bool
+	releaseErr         error
 }
 
 type cleanupLease struct {
@@ -1127,7 +1129,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 	state := lease.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.released || state.vmLock == nil || state.directories == nil {
+	if state.released || state.detachStarted || state.vmLock == nil || state.directories == nil {
 		return nil, instanceStateError(state.record.vmID, "active lease is not active")
 	}
 	if ctx == nil {

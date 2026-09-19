@@ -139,6 +139,7 @@ func activateVerifiedProcessWithDeps(
 	if writeErr != nil {
 		return target, writeErr
 	}
+	target.state.activationComplete = true
 	return target, nil
 }
 
