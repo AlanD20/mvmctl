@@ -50,9 +50,20 @@ func (lease *activeLease) detachCommittedLaunch(ctx context.Context) error {
 		state.runtimeDirectory = nil
 	}
 	if state.persistentOutputs != nil {
+		// Private VMM sockets remain available only through root authority after detach.
 		state.releaseErr = appendInstanceOperationError(state.releaseErr, "detach persistent output descriptors",
 			state.persistentOutputs.Release(cleanupCtx))
 		state.persistentOutputs = nil
+	}
+	if state.privateRuntimeDirectory != nil {
+		state.releaseErr = appendInstanceOperationError(state.releaseErr, "detach private VMM runtime", state.privateRuntimeDirectory.detachCommittedLaunch(cleanupCtx, state.record))
+		state.privateRuntimeDirectory.state.mu.Lock()
+		released := state.privateRuntimeDirectory.state.released
+		state.privateRuntimeDirectory.state.mu.Unlock()
+		if !released {
+			return state.releaseErr
+		}
+		state.privateRuntimeDirectory = nil
 	}
 	if state.jailDestination != nil {
 		state.releaseErr = appendInstanceOperationError(state.releaseErr, "detach jail destination descriptors",
@@ -125,8 +136,14 @@ func (lease *managedVMRuntimeLease) detachCommittedLaunch(ctx context.Context, r
 	if state.released {
 		return state.releaseErr
 	}
-	if record.launch == nil || state.vmID != record.vmID || state.caller.uid != record.ownerUID ||
-		state.caller.gid != record.launch.ownerGID || state.removed || !state.leafCreated || state.parentSyncPending {
+	if record.launch == nil {
+		return instanceStateError(record.vmID, "runtime launch binding is absent")
+	}
+	expected := instanceCaller{uid: record.ownerUID, gid: record.launch.ownerGID}
+	if state.private {
+		expected = instanceCaller{uid: record.launch.executionIdentity.uid, gid: record.launch.executionIdentity.gid}
+	}
+	if state.vmID != record.vmID || state.caller != expected || state.removed || !state.leafCreated || state.parentSyncPending {
 		return instanceStateError(record.vmID, "active runtime authority cannot detach")
 	}
 	state.releaseErr = closeManagedVMRuntimeFDs(ctx, state.deps, state.retained)

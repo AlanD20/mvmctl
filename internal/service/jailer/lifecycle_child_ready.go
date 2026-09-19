@@ -37,7 +37,7 @@ func (lease *launchLease) awaitCopiedLaunchExecutable(ctx context.Context) error
 		if err := requireExactPIDFDLocator(ctx, deps, processes.firecracker.pidfd, state.record.launch.process, state.record.vmID, "Firecracker"); err != nil {
 			return err
 		}
-		ready, err := copiedLaunchExecutableReady(ctx, prepared, state.record.launch.ownerGID, state.record.ownerUID)
+		ready, err := copiedLaunchExecutableReady(ctx, prepared, state.record.launch.executionIdentity.gid, state.record.launch.executionIdentity.uid)
 		if err != nil {
 			return err
 		}

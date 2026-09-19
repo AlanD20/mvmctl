@@ -36,6 +36,7 @@ type launchLeaseState struct {
 	networkNamespace        *topologySelectedNetworkNamespace
 	topology                *network.VMTopologyLease
 	runtimeDirectory        *managedVMRuntimeLease
+	privateRuntimeDirectory *managedVMRuntimeLease
 	persistentOutputs       *managedVMPersistentOutputLease
 	// A post-replacement error still returns abort authority but must not authorize new output effects.
 	registrationComplete    bool
@@ -66,23 +67,24 @@ type activeLease struct {
 }
 
 type activeLeaseState struct {
-	mu                 sync.Mutex
-	roots              *instanceAuthorityRoots
-	directories        *instanceUIDDirectories
-	vmLock             *vmAuthorityLease
-	prepared           *preparedRelease
-	processes          *blockedLaunchProcesses
-	jailDestination    *jailDestinationLease
-	networkNamespace   *topologySelectedNetworkNamespace
-	topology           *network.VMTopologyLease
-	runtimeDirectory   *managedVMRuntimeLease
-	persistentOutputs  *managedVMPersistentOutputLease
-	managedVMCgroup    *managedVMCgroupLease
-	activationComplete bool
-	detachStarted      bool
-	record             instanceRecord
-	released           bool
-	releaseErr         error
+	mu                      sync.Mutex
+	roots                   *instanceAuthorityRoots
+	directories             *instanceUIDDirectories
+	vmLock                  *vmAuthorityLease
+	prepared                *preparedRelease
+	processes               *blockedLaunchProcesses
+	jailDestination         *jailDestinationLease
+	networkNamespace        *topologySelectedNetworkNamespace
+	topology                *network.VMTopologyLease
+	runtimeDirectory        *managedVMRuntimeLease
+	privateRuntimeDirectory *managedVMRuntimeLease
+	persistentOutputs       *managedVMPersistentOutputLease
+	managedVMCgroup         *managedVMCgroupLease
+	activationComplete      bool
+	detachStarted           bool
+	record                  instanceRecord
+	released                bool
+	releaseErr              error
 }
 
 type cleanupLease struct {
@@ -102,6 +104,7 @@ type cleanupLeaseState struct {
 	networkNamespace        *topologySelectedNetworkNamespace
 	topology                *network.VMTopologyLease
 	runtimeDirectory        *managedVMRuntimeLease
+	privateRuntimeDirectory *managedVMRuntimeLease
 	persistentOutputs       *managedVMPersistentOutputLease
 	runtimeRecovery         *managedVMRuntimeRecovery
 	priorBootAbsence        *system.PriorBootVMAbsence
@@ -305,6 +308,28 @@ func (prepared *preparedRelease) registerLaunching(
 			return nil, instanceAtomicError("instance authority record disappeared while locked", nil)
 		}
 		existing = &record
+	}
+	if existing != nil {
+		if err := authorizeInstanceRecord(caller, *existing); err != nil {
+			return nil, err
+		}
+		if existing.lifecycle != instanceLifecycleCleaned {
+			return nil, instanceStateError(intent.vmID, "execution identity allocation requires a cleaned instance")
+		}
+	}
+	execution, err := vmLock.prepareExecutionIdentity(ctx, caller, intent.vmID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		returnErr = appendInstanceOperationError(returnErr, "release execution identity allocation", execution.Release(context.WithoutCancel(ctx)))
+	}()
+	intent.executionIdentity, err = execution.Identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := prepareProtectedVMGrantInventory(ctx, caller.uid); err != nil {
+		return nil, err
 	}
 	record, err := registerLaunchingInstanceRecord(caller, intent, locators, release, existing)
 	if err != nil {
@@ -769,6 +794,12 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 	if err := releaseCleanupManagedVMCgroupLocked(cleanupCtx, state); err != nil {
 		return err
 	}
+	if err := revokeProtectedVMGrants(cleanupCtx, state.record.ownerUID, state.record.vmID, state.record.launch.executionIdentity.uid); err != nil {
+		return err
+	}
+	if err := revokeIsolatedPersistentOutputs(cleanupCtx, state.record); err != nil {
+		return err
+	}
 	if state.jailDestination != nil {
 		if err := state.jailDestination.Release(cleanupCtx); err != nil {
 			return appendInstanceOperationError(nil, "release cleanup jail destination authority", err)
@@ -804,6 +835,18 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 			return appendInstanceOperationError(nil, "release cleanup managed VM runtime directory", err)
 		}
 		state.runtimeDirectory = nil
+	}
+	if state.privateRuntimeDirectory != nil {
+		if err := state.privateRuntimeDirectory.RemoveFixedLeaves(cleanupCtx); err != nil {
+			return err
+		}
+		if err := state.privateRuntimeDirectory.Remove(cleanupCtx); err != nil {
+			return err
+		}
+		if err := state.privateRuntimeDirectory.Release(cleanupCtx); err != nil {
+			return err
+		}
+		state.privateRuntimeDirectory = nil
 	}
 	return releaseCleanupPersistentOutputsLocked(cleanupCtx, state)
 }
@@ -1017,6 +1060,7 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 		networkNamespace:        state.networkNamespace,
 		topology:                state.topology,
 		runtimeDirectory:        state.runtimeDirectory,
+		privateRuntimeDirectory: state.privateRuntimeDirectory,
 		persistentOutputs:       state.persistentOutputs,
 		preparedManagedVMCgroup: state.preparedManagedVMCgroup,
 		managedVMCgroup:         state.managedVMCgroup,
@@ -1031,6 +1075,7 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 	state.networkNamespace = nil
 	state.topology = nil
 	state.runtimeDirectory = nil
+	state.privateRuntimeDirectory = nil
 	state.persistentOutputs = nil
 	state.preparedManagedVMCgroup = nil
 	state.managedVMCgroup = nil
@@ -1119,6 +1164,15 @@ func (lease *launchLease) snapshot() launchLeaseSnapshot {
 func cloneInstanceRecord(record instanceRecord) instanceRecord {
 	if record.launch != nil {
 		launch := *record.launch
+		launch.cacheLocator.components = append([]string(nil), launch.cacheLocator.components...)
+		if launch.outputIdentity != nil {
+			outputs := *launch.outputIdentity
+			if outputs.metrics != nil {
+				metrics := *outputs.metrics
+				outputs.metrics = &metrics
+			}
+			launch.outputIdentity = &outputs
+		}
 		record.launch = &launch
 	}
 	if record.active != nil {
@@ -1153,7 +1207,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 	if state.record.active == nil {
 		return nil, instanceStateError(state.record.vmID, "active authority identity is incomplete")
 	}
-	caller := instanceCaller{uid: state.record.ownerUID, gid: state.record.active.groupIDs.real}
+	caller := instanceCaller{uid: state.record.ownerUID, gid: state.record.launch.ownerGID}
 	record, err := beginInstanceCleanup(caller, cloneInstanceRecord(state.record))
 	if err != nil {
 		return nil, err
@@ -1163,18 +1217,19 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 		return nil, writeErr
 	}
 	target := &cleanupLease{state: &cleanupLeaseState{
-		roots:             state.roots,
-		directories:       state.directories,
-		vmLock:            state.vmLock,
-		prepared:          state.prepared,
-		processes:         state.processes,
-		jailDestination:   state.jailDestination,
-		networkNamespace:  state.networkNamespace,
-		topology:          state.topology,
-		runtimeDirectory:  state.runtimeDirectory,
-		persistentOutputs: state.persistentOutputs,
-		managedVMCgroup:   state.managedVMCgroup,
-		record:            record,
+		roots:                   state.roots,
+		directories:             state.directories,
+		vmLock:                  state.vmLock,
+		prepared:                state.prepared,
+		processes:               state.processes,
+		jailDestination:         state.jailDestination,
+		networkNamespace:        state.networkNamespace,
+		topology:                state.topology,
+		runtimeDirectory:        state.runtimeDirectory,
+		privateRuntimeDirectory: state.privateRuntimeDirectory,
+		persistentOutputs:       state.persistentOutputs,
+		managedVMCgroup:         state.managedVMCgroup,
+		record:                  record,
 	}}
 	state.roots = nil
 	state.directories = nil
@@ -1185,6 +1240,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 	state.networkNamespace = nil
 	state.topology = nil
 	state.runtimeDirectory = nil
+	state.privateRuntimeDirectory = nil
 	state.persistentOutputs = nil
 	state.managedVMCgroup = nil
 	state.record = record
@@ -1224,7 +1280,7 @@ func (lease *activeLease) Release(ctx context.Context) error {
 		return state.releaseErr
 	}
 	if state.topology != nil || state.prepared != nil || state.processes != nil || state.jailDestination != nil ||
-		state.runtimeDirectory != nil || state.managedVMCgroup != nil || state.persistentOutputs != nil {
+		state.runtimeDirectory != nil || state.privateRuntimeDirectory != nil || state.managedVMCgroup != nil || state.persistentOutputs != nil {
 		return instanceStateError(state.record.vmID, "live active authority must be consumed by BeginCleanup")
 	}
 	state.releaseErr = releaseInstanceOperationResources(
@@ -1261,6 +1317,7 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 		state.preparedJailDestination != nil ||
 		state.jailDestination != nil ||
 		state.runtimeDirectory != nil ||
+		state.privateRuntimeDirectory != nil ||
 		state.persistentOutputs != nil ||
 		state.runtimeRecovery != nil ||
 		state.freshRecoveryAdmission != nil ||

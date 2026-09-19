@@ -89,6 +89,9 @@ func (guard *HostResetGuard) requireNoJailResources(ctx context.Context) error {
 }
 
 func (guard *HostResetGuard) requireNoRuntimeResources(ctx context.Context) error {
+	if err := guard.requireNoPrivateRuntimeResources(ctx); err != nil {
+		return err
+	}
 	parent := guard.state.roots.retained[0]
 	for index, name := range []string{"run", "mvmctl", "runtime"} {
 		mode := uint32(0)
@@ -120,6 +123,47 @@ func (guard *HostResetGuard) requireNoRuntimeResources(ctx context.Context) erro
 			return instanceAtomicError("runtime owner disappeared during reset admission", nil)
 		}
 		if err := guard.requireResetDirectoryEmpty(ctx, fd, "managed runtime owner"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (guard *HostResetGuard) requireNoPrivateRuntimeResources(ctx context.Context) error {
+	parent := guard.state.roots.retained[0]
+	for index, name := range []string{"run", "mvmctl", "vmm-runtime"} {
+		mode := uint32(0)
+		if index == 1 {
+			mode = managedVMRuntimeParentMode
+		}
+		if index == 2 {
+			mode = 0700
+		}
+		fd, err := guard.openResetDirectory(ctx, parent, name, mode)
+		if err != nil {
+			return err
+		}
+		if fd < 0 {
+			return nil
+		}
+		parent = fd
+	}
+	names, err := guard.state.roots.deps.readDirNames(ctx, parent)
+	if err != nil {
+		return instanceAtomicError("enumerate private runtime owners", err)
+	}
+	for _, name := range names {
+		if _, valid := validateCanonicalUIDName(name); !valid {
+			return instanceAtomicError("private runtime owner is not canonical", nil)
+		}
+		fd, err := guard.openResetDirectory(ctx, parent, name, 0700)
+		if err != nil {
+			return err
+		}
+		if fd < 0 {
+			return instanceAtomicError("private runtime owner disappeared", nil)
+		}
+		if err := guard.requireResetDirectoryEmpty(ctx, fd, "private VMM runtime owner"); err != nil {
 			return err
 		}
 	}

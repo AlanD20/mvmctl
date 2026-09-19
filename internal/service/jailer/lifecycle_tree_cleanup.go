@@ -105,7 +105,7 @@ func removeJailDirectory(
 	}
 	ownerAllowed := original.Uid == 0 && original.Gid == 0
 	if kind == jailCleanupDevices || kind == jailCleanupDeviceNet {
-		ownerAllowed = ownerAllowed || original.Uid == record.ownerUID && original.Gid == record.launch.ownerGID
+		ownerAllowed = ownerAllowed || original.Uid == record.launch.executionIdentity.uid && original.Gid == record.launch.executionIdentity.gid
 	}
 	if original.Mode != unix.S_IFDIR|mode || !ownerAllowed {
 		return processAuthorityError(record.vmID, "stopped jail directory metadata is not admitted", nil)
@@ -160,6 +160,8 @@ func allowedJailCleanupEntry(kind jailCleanupDirectory, name string) (jailCleanu
 		}
 	case jailCleanupRoot:
 		switch name {
+		case "vmm-runtime":
+			return jailCleanupRuntime, false, nil
 		case "run":
 			return jailCleanupRun, false, nil
 		case "dev":
@@ -222,7 +224,7 @@ func removeJailFixedLeaf(
 		return err
 	}
 	ownerAllowed := original.Uid == 0 && original.Gid == 0 ||
-		original.Uid == record.ownerUID && original.Gid == record.launch.ownerGID
+		original.Uid == record.launch.executionIdentity.uid && original.Gid == record.launch.executionIdentity.gid
 	if !ownerAllowed || original.Nlink != 1 || original.Mode&0022 != 0 {
 		return processAuthorityError(record.vmID, "stopped jail leaf metadata is not admitted", nil)
 	}

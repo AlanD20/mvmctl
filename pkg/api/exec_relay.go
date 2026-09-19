@@ -261,13 +261,9 @@ func vmExecDenialRecord(
 func dialVMExecAgent(ctx context.Context, config *model.VsockConfigItem, timeout time.Duration) (*net.UnixConn, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, min(timeout, 5*time.Second))
 	defer cancel()
-	connection, err := (&net.Dialer{}).DialContext(dialCtx, "unix", config.UDSPath)
+	conn, err := jailer.NewHostVsockClient().Open(dialCtx, config.VmID)
 	if err != nil {
 		return nil, vmExecRelayFailed()
-	}
-	conn, ok := connection.(*net.UnixConn)
-	if !ok {
-		return nil, errors.Join(vmExecRelayFailed(), connection.Close())
 	}
 	stop := context.AfterFunc(dialCtx, func() {
 		// Closing is required to interrupt a partial CONNECT exchange on cancellation.

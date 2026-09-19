@@ -58,6 +58,7 @@ type managedVMRuntimeLeaseState struct {
 
 	deps              managedVMRuntimeDeps
 	caller            instanceCaller
+	private           bool
 	vmID              string
 	uidDirectoryFD    int
 	vmDirectoryFD     int

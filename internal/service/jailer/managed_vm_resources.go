@@ -52,19 +52,21 @@ type vmLaunchResourceSpec struct {
 }
 
 type vmLaunchResourceLease struct {
-	deps           managedCacheDeps
-	vmID           vmResourceID
-	cacheIdentity  managedCacheIdentity
-	ownerUID       uint32
-	rootfsFD       int
-	kernelFD       int
-	cloudInitFD    int
-	preparedConfig *preparedFirecrackerConfig
-	volumes        []pinnedVMVolumeResource
-	deviceProfile  *vmFirecrackerDeviceProfile
-	pciEnabled     bool
-	nestedVirt     bool
-	retained       []int
+	deps              managedCacheDeps
+	vmID              vmResourceID
+	kernelID          kernelResourceID
+	cacheIdentity     managedCacheIdentity
+	ownerUID          uint32
+	rootfsFD          int
+	kernelFD          int
+	cloudInitFD       int
+	preparedConfig    *preparedFirecrackerConfig
+	protectedBackings *isolatedLaunchBackings
+	volumes           []pinnedVMVolumeResource
+	deviceProfile     *vmFirecrackerDeviceProfile
+	pciEnabled        bool
+	nestedVirt        bool
+	retained          []int
 }
 
 type managedVMRegularFilePolicy struct {
@@ -116,6 +118,17 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	ctx context.Context,
 	spec vmLaunchResourceSpec,
 ) (_ *vmLaunchResourceLease, returnErr error) {
+	return nil, managedVMResourceValidationError("launch requires isolated protected backing authority")
+}
+
+func (cache *managedCacheLease) pinIsolatedVMLaunchResources(
+	ctx context.Context,
+	spec vmLaunchResourceSpec,
+	backings *isolatedLaunchBackings,
+) (_ *vmLaunchResourceLease, returnErr error) {
+	if backings == nil || backings.rootfs == nil {
+		return nil, managedVMResourceValidationError("protected rootfs authority is absent")
+	}
 	if err := validateActiveManagedCacheLease(cache); err != nil {
 		return nil, err
 	}
@@ -182,24 +195,14 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	}
 	openedBeforeConfig = append(openedBeforeConfig, vmFD)
 
-	rootfsFD, err := openManagedVMResourceFile(
-		ctx,
-		cache.deps,
-		vmFD,
-		infra.VMRootfsFilename,
-		managedVMRegularFilePolicy{
-			name:              "VM rootfs",
-			minimumBytes:      managedVMRootfsMinBytes,
-			maximumBytes:      managedVMRootfsMaxBytes,
-			exactBytes:        spec.expectedRootfsBytes,
-			requiredOwnerMode: 0600,
-		},
-		cache.ownerUID,
-	)
+	rootfsFD := backings.rootfs.fd
+	rootBinding, err := backings.rootfs.Binding(ctx)
 	if err != nil {
 		return nil, err
 	}
-	openedBeforeConfig = append(openedBeforeConfig, rootfsFD)
+	if rootBinding.kind != protectedBackingRootfs || rootBinding.logicalID != string(spec.vmID) || rootBinding.bytes != spec.expectedRootfsBytes || rootBinding.ownerUID != cache.ownerUID || rootBinding.cacheIdentity != cache.identity {
+		return nil, managedVMResourceValidationError("protected rootfs does not match launch selection")
+	}
 	configFD, err := openManagedVMResourceFileWithFlags(
 		ctx,
 		cache.deps,
@@ -221,60 +224,30 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 
 	cloudInitFD := -1
 	if spec.firecracker.cloudInit == cloudInitPresent {
-		cloudInitFD, err = openManagedVMResourceFile(
-			ctx,
-			cache.deps,
-			vmFD,
-			infra.VMCloudInitISOFilename,
-			managedVMRegularFilePolicy{
-				name:              "cloud-init ISO",
-				minimumBytes:      managedVMCloudInitMinBytes,
-				maximumBytes:      managedVMCloudInitMaxBytes,
-				requiredOwnerMode: 0400,
-			},
-			cache.ownerUID,
-		)
+		if backings.cloudInit == nil {
+			return nil, managedVMResourceValidationError("protected cloud-init authority is absent")
+		}
+		cloudInitFD = backings.cloudInit.fd
+	}
+	if backings.kernel == nil {
+		return nil, managedVMResourceValidationError("protected kernel authority is absent")
+	}
+	kernelFD := backings.kernel.fd
+	volumes := make([]pinnedVMVolumeResource, 0, len(spec.firecracker.volumes))
+	for _, volume := range spec.firecracker.volumes {
+		backing := backings.volumes[volume.id]
+		if backing == nil {
+			return nil, managedVMResourceValidationError("protected volume selection is incomplete")
+		}
+		binding, err := backing.Binding(ctx)
 		if err != nil {
 			return nil, err
 		}
-		openedAfterConfig = append(openedAfterConfig, cloudInitFD)
+		if binding.kind != protectedBackingVolume || binding.logicalID != string(volume.id) || binding.bytes != volume.expectedBytes || binding.ownerUID != cache.ownerUID || binding.cacheIdentity != cache.identity {
+			return nil, managedVMResourceValidationError("protected volume binding differs from launch selection")
+		}
+		volumes = append(volumes, pinnedVMVolumeResource{spec: volume, fd: backing.fd, identity: binding.identity})
 	}
-
-	kernelsFD, err := openManagedVMResourceDirectory(
-		ctx,
-		cache.deps,
-		cache.cacheFD,
-		"kernels",
-		"kernel store",
-		cache.ownerUID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	openedAfterConfig = append(openedAfterConfig, kernelsFD)
-	kernelFD, err := openManagedVMResourceFile(
-		ctx,
-		cache.deps,
-		kernelsFD,
-		string(spec.kernelID),
-		managedVMRegularFilePolicy{
-			name:              "kernel",
-			minimumBytes:      managedVMKernelMinBytes,
-			maximumBytes:      managedVMKernelMaxBytes,
-			requiredOwnerMode: 0400,
-			allowExecute:      true,
-		},
-		cache.ownerUID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	openedAfterConfig = append(openedAfterConfig, kernelFD)
-	volumes, volumeFDs, err := admitVMVolumeResourceFiles(ctx, cache, spec.firecracker.volumes)
-	if err != nil {
-		return nil, err
-	}
-	openedAfterConfig = append(openedAfterConfig, volumeFDs...)
 
 	consumedConfigFD := configSourceFD
 	configSourceFD = -1
@@ -293,19 +266,21 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	retained = append(retained, openedBeforeConfig...)
 	retained = append(retained, openedAfterConfig...)
 	lease := &vmLaunchResourceLease{
-		vmID:           spec.vmID,
-		deps:           cache.deps,
-		cacheIdentity:  cache.identity,
-		ownerUID:       cache.ownerUID,
-		rootfsFD:       rootfsFD,
-		kernelFD:       kernelFD,
-		cloudInitFD:    cloudInitFD,
-		preparedConfig: preparedConfig,
-		volumes:        volumes,
-		deviceProfile:  spec.firecracker.deviceProfile,
-		pciEnabled:     spec.firecracker.pciEnabled,
-		nestedVirt:     spec.firecracker.nestedVirt,
-		retained:       retained,
+		vmID:              spec.vmID,
+		kernelID:          spec.kernelID,
+		deps:              cache.deps,
+		cacheIdentity:     cache.identity,
+		ownerUID:          cache.ownerUID,
+		rootfsFD:          rootfsFD,
+		kernelFD:          kernelFD,
+		cloudInitFD:       cloudInitFD,
+		preparedConfig:    preparedConfig,
+		protectedBackings: backings,
+		volumes:           volumes,
+		deviceProfile:     spec.firecracker.deviceProfile,
+		pciEnabled:        spec.firecracker.pciEnabled,
+		nestedVirt:        spec.firecracker.nestedVirt,
+		retained:          retained,
 	}
 	cache.retained = nil
 	cache.cacheFD = -1
@@ -524,8 +499,12 @@ func (lease *vmLaunchResourceLease) Release(ctx context.Context) error {
 		return nil
 	}
 	var result error
+	if lease.protectedBackings != nil {
+		result = lease.protectedBackings.Release(context.WithoutCancel(ctx))
+		lease.protectedBackings = nil
+	}
 	if lease.preparedConfig != nil {
-		result = lease.preparedConfig.Release(context.WithoutCancel(ctx))
+		result = errors.Join(result, lease.preparedConfig.Release(context.WithoutCancel(ctx)))
 	}
 	if closeErr := closeManagedCacheFDs(ctx, lease.deps, lease.retained); closeErr != nil {
 		result = appendManagedVMResourceCleanupError(

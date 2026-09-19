@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	instanceRecordSchemaVersion = uint32(3)
+	instanceRecordSchemaVersion = uint32(4)
 	maxInstanceRecordBytes      = 16 * 1024
 )
 
@@ -68,18 +68,30 @@ type instanceLaunchRelay struct {
 }
 
 type launchIntent struct {
-	vmID          string
-	hostBootID    string
-	cacheIdentity managedCacheIdentity
+	vmID              string
+	hostBootID        string
+	cacheIdentity     managedCacheIdentity
+	cacheLocator      managedCacheLocator
+	executionIdentity vmExecutionIdentity
+	snapshotID        string
 }
 
 type instanceLaunchRecord struct {
-	ownerGID      uint32
-	hostBootID    string
-	process       instanceProcessLocator
-	relay         instanceLaunchRelay
-	cacheIdentity managedCacheIdentity
-	release       releaseIdentity
+	ownerGID          uint32
+	executionIdentity vmExecutionIdentity
+	snapshotID        string
+	outputIdentity    *instanceOutputIdentities
+	hostBootID        string
+	process           instanceProcessLocator
+	relay             instanceLaunchRelay
+	cacheIdentity     managedCacheIdentity
+	cacheLocator      managedCacheLocator
+	release           releaseIdentity
+}
+
+type instanceOutputIdentities struct {
+	log     instanceObjectIdentity
+	metrics *instanceObjectIdentity
 }
 
 type processCredentialIdentity struct {
@@ -192,12 +204,15 @@ func registerLaunchingInstanceRecord(
 		cleanupGeneration = existing.cleanupGeneration
 	}
 	launch := &instanceLaunchRecord{
-		ownerGID:      caller.gid,
-		hostBootID:    intent.hostBootID,
-		process:       processes.process,
-		relay:         processes.relay,
-		cacheIdentity: intent.cacheIdentity,
-		release:       release,
+		ownerGID:          caller.gid,
+		executionIdentity: intent.executionIdentity,
+		snapshotID:        intent.snapshotID,
+		hostBootID:        intent.hostBootID,
+		process:           processes.process,
+		relay:             processes.relay,
+		cacheIdentity:     intent.cacheIdentity,
+		cacheLocator:      intent.cacheLocator,
+		release:           release,
 	}
 	record := instanceRecord{
 		schemaVersion:     instanceRecordSchemaVersion,
@@ -364,6 +379,9 @@ func validateInstanceRecord(record instanceRecord) error {
 		return instanceAtomicError("instance authority lifecycle is invalid", nil)
 	}
 	if record.launch != nil {
+		if record.launch.executionIdentity.uid == record.ownerUID {
+			return instanceAtomicError("execution identity must be isolated from the operator", nil)
+		}
 		if err := validateInstanceLaunchRecord(*record.launch); err != nil {
 			return instanceAtomicError(err.Error(), nil)
 		}
@@ -377,6 +395,23 @@ func validateInstanceRecord(record instanceRecord) error {
 }
 
 func validateInstanceLaunchRecord(launch instanceLaunchRecord) error {
+	if launch.outputIdentity != nil {
+		if launch.outputIdentity.log.device == 0 || launch.outputIdentity.log.inode == 0 {
+			return fmt.Errorf("instance log identity is invalid")
+		}
+		if launch.outputIdentity.metrics != nil && (launch.outputIdentity.metrics.device == 0 || launch.outputIdentity.metrics.inode == 0) {
+			return fmt.Errorf("instance metrics identity is invalid")
+		}
+	}
+	if err := validateManagedCacheLocator(launch.cacheLocator); err != nil {
+		return err
+	}
+	if launch.snapshotID != "" && !isCanonicalManagedResourceID(launch.snapshotID, 64) {
+		return fmt.Errorf("instance snapshot binding is invalid")
+	}
+	if err := validateInstanceCaller(instanceCaller{uid: launch.executionIdentity.uid, gid: launch.executionIdentity.gid}); err != nil {
+		return fmt.Errorf("instance authority execution identity is invalid: %w", err)
+	}
 	if launch.ownerGID == 0 || launch.ownerGID == math.MaxUint32 {
 		return fmt.Errorf("instance authority owner GID is invalid")
 	}
@@ -442,8 +477,8 @@ func validateInstanceActiveIdentity(record instanceRecord, identity instanceActi
 	if record.launch == nil {
 		return fmt.Errorf("instance authority launch identity is absent")
 	}
-	if !processCredentialIdentityMatches(record.ownerUID, identity.userIDs) ||
-		!processCredentialIdentityMatches(record.launch.ownerGID, identity.groupIDs) {
+	if !processCredentialIdentityMatches(record.launch.executionIdentity.uid, identity.userIDs) ||
+		!processCredentialIdentityMatches(record.launch.executionIdentity.gid, identity.groupIDs) {
 		return fmt.Errorf("instance authority Firecracker credentials do not match its owner")
 	}
 	if len(identity.supplementaryGroups) != 0 {

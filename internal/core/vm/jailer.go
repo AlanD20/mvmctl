@@ -54,7 +54,7 @@ func translateConfigForJail(config *model.FirecrackerVMConfig) *model.Firecracke
 	}
 	if config.Vsock != nil {
 		vsock := *config.Vsock
-		vsock.UDSPath = filepath.Join("/run/mvm/runtime", infra.VMVsockSocketFilename)
+		vsock.UDSPath = filepath.Join("/vmm-runtime", infra.VMVsockSocketFilename)
 		translated.Vsock = &vsock
 	}
 	return &translated

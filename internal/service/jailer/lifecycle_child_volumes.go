@@ -46,8 +46,8 @@ func mountLaunchChildVolumes(
 		if volume.ReadOnly {
 			mode = 0400
 		}
-		if before.uid != plan.UID || before.size != volume.ExpectedBytes || before.nlink != 1 ||
-			before.mode&unix.S_IFMT != unix.S_IFREG || before.mode&mode != mode || before.mode&07133 != 0 {
+		if before.uid != 0 || before.gid != 0 || before.size != volume.ExpectedBytes || before.nlink != 1 ||
+			before.mode&unix.S_IFMT != unix.S_IFREG || before.mode&mode != mode || before.mode&07107 != 0 {
 			return instanceValidationError("launch child pinned volume has unsafe or changed metadata")
 		}
 		if err := mountLaunchChildResource(

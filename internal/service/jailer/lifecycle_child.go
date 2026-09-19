@@ -26,7 +26,7 @@ const launchChildMarker = "__mvm_jailer_child_v1"
 const (
 	launchChildGateFD      = 3
 	launchChildSetupFD     = 4
-	launchChildPacketLimit = 32 * 1024
+	launchChildPacketLimit = 128 * 1024
 	launchChildSetupBudget = 30 * time.Second
 )
 
@@ -36,20 +36,31 @@ func IsLaunchChildInvocation(args []string) bool {
 }
 
 type launchChildPlan struct {
-	Schema           uint32               `json:"schema"`
-	VMID             string               `json:"vm_id"`
-	UID              uint32               `json:"uid"`
-	GID              uint32               `json:"gid"`
-	Release          ReleaseSlot          `json:"release"`
-	Limits           model.VMCgroupLimits `json:"limits"`
-	CloudInit        bool                 `json:"cloud_init"`
-	Metrics          bool                 `json:"metrics"`
-	Console          bool                 `json:"console"`
-	Volumes          []VMLaunchVolume     `json:"volumes,omitempty"`
-	PCIEnabled       bool                 `json:"pci_enabled"`
-	NestedVirt       bool                 `json:"nested_virt"`
-	HostBootID       string               `json:"host_boot_id"`
-	LaunchGeneration uint64               `json:"launch_generation"`
+	Schema            uint32                    `json:"schema"`
+	VMID              string                    `json:"vm_id"`
+	OwnerUID          uint32                    `json:"owner_uid"`
+	RootfsBacking     protectedBackingBinding   `json:"rootfs_backing"`
+	KernelID          string                    `json:"kernel_id"`
+	KernelBacking     protectedBackingBinding   `json:"kernel_backing"`
+	CloudInitBacking  *protectedBackingBinding  `json:"cloud_init_backing,omitempty"`
+	VolumeBackings    []protectedBackingBinding `json:"volume_backings"`
+	NetworkID         string                    `json:"network_id"`
+	GuestIPv4         string                    `json:"guest_ipv4"`
+	GuestMAC          string                    `json:"guest_mac"`
+	UID               uint32                    `json:"uid"`
+	GID               uint32                    `json:"gid"`
+	Release           ReleaseSlot               `json:"release"`
+	FirecrackerSHA256 string                    `json:"firecracker_sha256"`
+	JailerSHA256      string                    `json:"jailer_sha256"`
+	Limits            model.VMCgroupLimits      `json:"limits"`
+	CloudInit         bool                      `json:"cloud_init"`
+	Metrics           bool                      `json:"metrics"`
+	Console           bool                      `json:"console"`
+	Volumes           []VMLaunchVolume          `json:"volumes,omitempty"`
+	PCIEnabled        bool                      `json:"pci_enabled"`
+	NestedVirt        bool                      `json:"nested_virt"`
+	HostBootID        string                    `json:"host_boot_id"`
+	LaunchGeneration  uint64                    `json:"launch_generation"`
 }
 
 // The descriptor ordering is fixed by the root-built launch plan; none is selected by caller argv.
@@ -218,6 +229,21 @@ func receiveLaunchChildPlan(ctx context.Context) (_ launchChildPlan, descriptors
 }
 
 func validateLaunchChildPlan(plan launchChildPlan, descriptors []int) error {
+	if !authorityHashPattern.MatchString(plan.FirecrackerSHA256) || !authorityHashPattern.MatchString(plan.JailerSHA256) {
+		return instanceValidationError("launch child release hashes are incomplete")
+	}
+	if plan.RootfsBacking.kind != protectedBackingRootfs || plan.RootfsBacking.logicalID != plan.VMID || plan.RootfsBacking.ownerUID != plan.OwnerUID {
+		return instanceValidationError("launch child protected rootfs binding differs")
+	}
+	if plan.KernelBacking.kind != "kernel" || plan.KernelBacking.logicalID != plan.KernelID || plan.KernelBacking.ownerUID != plan.OwnerUID {
+		return instanceValidationError("launch child protected kernel binding differs")
+	}
+	if plan.CloudInit != (plan.CloudInitBacking != nil) {
+		return instanceValidationError("launch child protected seed binding differs")
+	}
+	if len(plan.VolumeBackings) != len(plan.Volumes) {
+		return instanceValidationError("protected volume binding inventory differs")
+	}
 	if len(plan.Volumes) > managedMMIOMaxInterruptSlots {
 		return instanceValidationError("launch child volume descriptor selection exceeds the MMIO pool")
 	}
@@ -237,7 +263,7 @@ func validateLaunchChildPlan(plan launchChildPlan, descriptors []int) error {
 	if err := validateVMVolumeResourceSelection(volumes); err != nil {
 		return err
 	}
-	if plan.Schema != 1 || !vmIDPattern.MatchString(plan.VMID) || plan.HostBootID == "" || plan.LaunchGeneration == 0 {
+	if plan.Schema != 1 || !vmIDPattern.MatchString(plan.VMID) || plan.HostBootID == "" || plan.LaunchGeneration == 0 || plan.OwnerUID == 0 || plan.OwnerUID == plan.UID {
 		return instanceValidationError("launch child setup identity is invalid")
 	}
 	if err := validateInstanceCaller(instanceCaller{uid: plan.UID, gid: plan.GID}); err != nil {
@@ -331,7 +357,7 @@ func prepareLaunchChildMounts(ctx context.Context, plan launchChildPlan, fds []i
 		{fds[childRootfs], rootFD, "rootfs", false, false},
 		{fds[childKernel], rootFD, "kernel", true, false},
 		{fds[childConfig], mvmFD, infra.VMFirecrackerConfigFilename, true, false},
-		{fds[childRuntime], mvmFD, "runtime", false, true},
+		{fds[childRuntime], rootFD, "vmm-runtime", false, true},
 		{fds[childLog], mvmFD, infra.VMFirecrackerLogFilename, false, false},
 	}
 	extra := childBaseDescriptors
@@ -460,7 +486,7 @@ func execLaunchChildJailer(ctx context.Context, plan launchChildPlan, fds []int,
 		"--cgroup", "memory.max=max",
 		"--cgroup", fmt.Sprintf("memory.swap.max=%d", limits.SwapMaxBytes),
 		"--cgroup", fmt.Sprintf("pids.max=%d", limits.PIDsMax), "--",
-		"--api-sock", managedVMRuntimeMountPath + "/" + infra.VMFirecrackerAPISocketFilename,
+		"--api-sock", managedVMPrivateRuntimeMountPath + "/" + infra.VMFirecrackerAPISocketFilename,
 		"--config-file", managedVMPersistentMountPath + "/" + infra.VMFirecrackerConfigFilename}
 	if plan.PCIEnabled {
 		args = append(args, "--enable-pci")

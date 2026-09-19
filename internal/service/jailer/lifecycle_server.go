@@ -151,7 +151,7 @@ func (server *VMLifecycleServer) Launch(
 	launching, err = prepared.registerLaunching(
 		ctx,
 		caller,
-		launchIntent{vmID: request.VMID, hostBootID: bootID, cacheIdentity: cache.identity},
+		launchIntent{vmID: request.VMID, hostBootID: bootID, cacheIdentity: cache.identity, cacheLocator: cache.locator},
 		processes,
 	)
 	if err != nil {
@@ -170,6 +170,9 @@ func (server *VMLifecycleServer) Launch(
 	); err != nil {
 		return VMLaunchResult{}, err
 	}
+	if err := launching.preparePrivateRuntimeDirectory(ctx); err != nil {
+		return VMLaunchResult{}, err
+	}
 	outputCache, err := pinManagedCache(ctx, realManagedCacheDeps(), productionManagedCachePolicy(), caller, locator)
 	if err != nil {
 		return VMLaunchResult{}, err
@@ -186,6 +189,9 @@ func (server *VMLifecycleServer) Launch(
 		metrics = managedPersistentMetricsEnabled
 	}
 	if err := launching.preparePersistentOutputs(ctx, outputCache, metrics); err != nil {
+		return VMLaunchResult{}, err
+	}
+	if err := launching.grantExecutionOutputAccess(ctx); err != nil {
 		return VMLaunchResult{}, err
 	}
 	if console != nil {
@@ -207,7 +213,12 @@ func (server *VMLifecycleServer) Launch(
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
-	resources, err := cache.pinVMLaunchResources(ctx, spec)
+	backings, err := prepareIsolatedLaunchBackings(ctx, cache, spec, launching.state.record)
+	if err != nil {
+		return VMLaunchResult{}, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, backings.Release(context.WithoutCancel(ctx))) }()
+	resources, err := cache.pinIsolatedVMLaunchResources(ctx, spec, backings)
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
@@ -353,6 +364,9 @@ func (server *VMLifecycleServer) Remove(
 		)
 	}()
 	if err := network.ForgetVMEndpoint(ctx, hold, locked.record.launchGeneration); err != nil {
+		return VMCleanupResult{}, err
+	}
+	if err := retireRemovedVMExecution(ctx, locked, instanceCaller{uid: ownerUID, gid: ownerGID}); err != nil {
 		return VMCleanupResult{}, err
 	}
 	return result, nil

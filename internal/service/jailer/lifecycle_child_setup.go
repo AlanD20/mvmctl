@@ -56,7 +56,10 @@ func (lease *launchLease) sendChildSetup(
 	if cgroup.released || !cgroup.hasLimitIntent || cgroup.vmID != state.record.vmID {
 		return instanceStateError(state.record.vmID, "launch child cgroup intent is unavailable")
 	}
-	runtime := state.runtimeDirectory.state
+	if state.privateRuntimeDirectory == nil {
+		return instanceStateError(state.record.vmID, "private VMM runtime is unavailable")
+	}
+	runtime := state.privateRuntimeDirectory.state
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	if runtime.released || runtime.removed || !runtime.leafCreated || runtime.vmID != state.record.vmID {
@@ -88,15 +91,34 @@ func (lease *launchLease) sendChildSetup(
 	if logFD < 0 || consoleFD < 0 {
 		return instanceStateError(state.record.vmID, "launch child fixed output descriptors are missing")
 	}
+	if resources.protectedBackings == nil {
+		return instanceStateError(state.record.vmID, "protected backing handoff is absent")
+	}
+	rootfsBinding, err := resources.protectedBackings.rootfs.Binding(ctx)
+	if err != nil {
+		return err
+	}
+	kernelBinding, err := resources.protectedBackings.kernel.Binding(ctx)
+	if err != nil {
+		return err
+	}
+	topology, err := state.networkNamespace.production.Binding(ctx)
+	if err != nil {
+		return err
+	}
 	plan := launchChildPlan{
+		FirecrackerSHA256: state.record.launch.release.firecrackerSHA256, JailerSHA256: state.record.launch.release.jailerSHA256,
+		RootfsBacking: rootfsBinding, KernelID: string(resources.kernelID), KernelBacking: kernelBinding,
+		NetworkID: topology.NetworkID, GuestIPv4: topology.GuestIPv4.String(), GuestMAC: topology.GuestMAC,
 		HostBootID:       state.record.launch.hostBootID,
 		LaunchGeneration: state.record.launchGeneration,
 		PCIEnabled:       resources.pciEnabled,
 		NestedVirt:       resources.nestedVirt,
 		Schema:           1,
 		VMID:             state.record.vmID,
-		UID:              state.record.ownerUID,
-		GID:              state.record.launch.ownerGID,
+		OwnerUID:         state.record.ownerUID,
+		UID:              state.record.launch.executionIdentity.uid,
+		GID:              state.record.launch.executionIdentity.gid,
 		Release: ReleaseSlot{
 			Version:      state.record.launch.release.version,
 			Architecture: state.record.launch.release.architecture,
@@ -104,6 +126,13 @@ func (lease *launchLease) sendChildSetup(
 		Limits:    cgroup.limits,
 		CloudInit: resources.cloudInitFD >= 0,
 		Metrics:   metricsFD >= 0,
+	}
+	if resources.protectedBackings.cloudInit != nil {
+		binding, err := resources.protectedBackings.cloudInit.Binding(ctx)
+		if err != nil {
+			return err
+		}
+		plan.CloudInitBacking = &binding
 	}
 	fds := []int{destination.parent.fd, resources.rootfsFD, resources.kernelFD, config.fd,
 		runtime.vmDirectoryFD, logFD, consoleFD}
@@ -114,6 +143,11 @@ func (lease *launchLease) sendChildSetup(
 		fds = append(fds, metricsFD)
 	}
 	for _, volume := range resources.volumes {
+		binding, err := resources.protectedBackings.volumes[volume.spec.id].Binding(ctx)
+		if err != nil {
+			return err
+		}
+		plan.VolumeBackings = append(plan.VolumeBackings, binding)
 		identity, err := stableManagedVMConfigStat(ctx, realManagedFirecrackerConfigDeps(), volume.fd)
 		if err != nil {
 			return err

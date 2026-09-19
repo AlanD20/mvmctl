@@ -64,7 +64,9 @@ type managedCacheLease struct {
 	configDeps managedFirecrackerConfigDeps
 	cacheFD    int
 	ownerUID   uint32
+	ownerGID   uint32
 	identity   managedCacheIdentity
+	locator    managedCacheLocator
 	retained   []int
 }
 
@@ -188,7 +190,9 @@ func pinManagedCache(
 		configDeps: realManagedFirecrackerConfigDeps(),
 		cacheFD:    parentFD,
 		ownerUID:   caller.uid,
+		ownerGID:   caller.gid,
 		identity:   identity,
+		locator:    managedCacheLocator{components: append([]string(nil), locator.components...)},
 		retained:   retained,
 	}
 	retained = nil

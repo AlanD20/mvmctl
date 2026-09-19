@@ -114,10 +114,10 @@ func (lease *cleanupLease) requestGracefulStop(ctx context.Context) error {
 	if err := resolveCleanupManagedVMRuntimeLocked(ctx, state); err != nil {
 		return err
 	}
-	if state.runtimeDirectory == nil {
+	if state.privateRuntimeDirectory == nil {
 		return nil
 	}
-	runtime := state.runtimeDirectory.state
+	runtime := state.privateRuntimeDirectory.state
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	path := fmt.Sprintf("/proc/self/fd/%d/%s", runtime.vmDirectoryFD, infra.VMFirecrackerAPISocketFilename)
@@ -189,7 +189,7 @@ func admitStopAPIPeer(ctx context.Context, fd int, record instanceRecord, retain
 		return err
 	}
 	defer func() { returnErr = errors.Join(returnErr, unix.Close(peerPIDFD)) }()
-	if credentials == nil || int(credentials.Pid) != record.launch.process.pid || credentials.Uid != record.ownerUID || credentials.Gid != record.launch.ownerGID {
+	if credentials == nil || int(credentials.Pid) != record.launch.process.pid || credentials.Uid != record.launch.executionIdentity.uid || credentials.Gid != record.launch.executionIdentity.gid {
 		return processVerificationError(record.vmID, "graceful API peer differs from admitted Firecracker", nil)
 	}
 	identity := realProcessIdentityVerifierDeps()

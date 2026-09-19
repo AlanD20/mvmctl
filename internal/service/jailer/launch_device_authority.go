@@ -12,39 +12,56 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/model"
 )
 
 const (
 	launchDeviceAuthorityLeaf     = ".mvm-device-authority.json"
-	launchDeviceAuthorityMaxBytes = 64 * 1024
+	launchDeviceAuthorityMaxBytes = int(managedVMConfigMaxBytes) + 64*1024
 )
 
 // vmLaunchDeviceAuthority is written exclusively by the authenticated root child before exec.
 // CRITICAL: It describes admitted launch state, not the mutable Firecracker API or caller SQLite.
 type vmLaunchDeviceAuthority struct {
-	Schema           uint32               `json:"schema"`
-	VMID             string               `json:"vm_id"`
-	OwnerUID         uint32               `json:"owner_uid"`
-	HostBootID       string               `json:"host_boot_id"`
-	LaunchGeneration uint64               `json:"launch_generation"`
-	Release          ReleaseSlot          `json:"release"`
-	PCIEnabled       bool                 `json:"pci_enabled"`
-	NestedVirt       bool                 `json:"nested_virt"`
-	CloudInit        bool                 `json:"cloud_init"`
-	Vsock            bool                 `json:"vsock"`
-	BootArgs         string               `json:"boot_args"`
-	ConfigSHA256     string               `json:"config_sha256"`
-	Volumes          []launchDeviceVolume `json:"volumes"`
+	Schema            uint32                   `json:"schema"`
+	VMID              string                   `json:"vm_id"`
+	OwnerUID          uint32                   `json:"owner_uid"`
+	ExecutionUID      uint32                   `json:"execution_uid"`
+	ExecutionGID      uint32                   `json:"execution_gid"`
+	Config            managedFirecrackerConfig `json:"config"`
+	Rootfs            protectedBackingBinding  `json:"rootfs"`
+	KernelID          string                   `json:"kernel_id"`
+	KernelBacking     protectedBackingBinding  `json:"kernel_backing"`
+	CloudInitBacking  *protectedBackingBinding `json:"cloud_init_backing,omitempty"`
+	CgroupLimits      model.VMCgroupLimits     `json:"cgroup_limits"`
+	NetworkID         string                   `json:"network_id"`
+	GuestIPv4         string                   `json:"guest_ipv4"`
+	GuestMAC          string                   `json:"guest_mac"`
+	HostBootID        string                   `json:"host_boot_id"`
+	LaunchGeneration  uint64                   `json:"launch_generation"`
+	Release           ReleaseSlot              `json:"release"`
+	FirecrackerSHA256 string                   `json:"firecracker_sha256"`
+	JailerSHA256      string                   `json:"jailer_sha256"`
+	PCIEnabled        bool                     `json:"pci_enabled"`
+	NestedVirt        bool                     `json:"nested_virt"`
+	CloudInit         bool                     `json:"cloud_init"`
+	Vsock             bool                     `json:"vsock"`
+	BootArgs          string                   `json:"boot_args"`
+	ConfigSHA256      string                   `json:"config_sha256"`
+	Volumes           []launchDeviceVolume     `json:"volumes"`
 }
 
 type launchDeviceVolume struct {
-	Selection   VMLaunchVolume `json:"selection"`
-	DeviceMajor uint32         `json:"device_major"`
-	DeviceMinor uint32         `json:"device_minor"`
-	Inode       uint64         `json:"inode"`
-	UID         uint32         `json:"uid"`
-	GID         uint32         `json:"gid"`
-	Mode        uint16         `json:"mode"`
+	GuestDriveID string                  `json:"guest_drive_id"`
+	Path         string                  `json:"path"`
+	Backing      protectedBackingBinding `json:"backing"`
+	Selection    VMLaunchVolume          `json:"selection"`
+	DeviceMajor  uint32                  `json:"device_major"`
+	DeviceMinor  uint32                  `json:"device_minor"`
+	Inode        uint64                  `json:"inode"`
+	UID          uint32                  `json:"uid"`
+	GID          uint32                  `json:"gid"`
+	Mode         uint16                  `json:"mode"`
 }
 
 func writeVMLaunchDeviceAuthority(
@@ -67,7 +84,10 @@ func writeVMLaunchDeviceAuthority(
 	}
 	digest := sha256.Sum256(configBytes)
 	metadata := vmLaunchDeviceAuthority{
-		Schema: 1, VMID: plan.VMID, OwnerUID: plan.UID, HostBootID: plan.HostBootID,
+		FirecrackerSHA256: plan.FirecrackerSHA256, JailerSHA256: plan.JailerSHA256,
+		Rootfs: plan.RootfsBacking, KernelID: plan.KernelID, KernelBacking: plan.KernelBacking, CloudInitBacking: plan.CloudInitBacking, CgroupLimits: plan.Limits,
+		NetworkID: plan.NetworkID, GuestIPv4: plan.GuestIPv4, GuestMAC: plan.GuestMAC,
+		Schema: 2, VMID: plan.VMID, OwnerUID: plan.OwnerUID, ExecutionUID: plan.UID, ExecutionGID: plan.GID, Config: config, HostBootID: plan.HostBootID,
 		LaunchGeneration: plan.LaunchGeneration, Release: plan.Release, PCIEnabled: plan.PCIEnabled,
 		NestedVirt: plan.NestedVirt, CloudInit: plan.CloudInit, Vsock: config.Vsock != nil,
 		BootArgs: config.BootSource.BootArgs, ConfigSHA256: hex.EncodeToString(digest[:]),
@@ -78,10 +98,11 @@ func writeVMLaunchDeviceAuthority(
 		if err != nil {
 			return err
 		}
-		if identity.uid != plan.UID || identity.size != selection.ExpectedBytes || identity.nlink != 1 {
+		if identity.uid != 0 || identity.size != selection.ExpectedBytes || identity.nlink != 1 {
 			return instanceValidationError("launch volume source changed before device authority publication")
 		}
 		metadata.Volumes = append(metadata.Volumes, launchDeviceVolume{
+			GuestDriveID: selection.ID, Path: selection.private().jailPath(), Backing: plan.VolumeBackings[index],
 			Selection:   selection,
 			DeviceMajor: identity.deviceMajor,
 			DeviceMinor: identity.deviceMinor,
@@ -202,16 +223,30 @@ func readVMLaunchDeviceAuthority(
 		return vmLaunchDeviceAuthority{}, err
 	}
 	if metadata.VMID != record.vmID || metadata.OwnerUID != record.ownerUID ||
+		metadata.ExecutionUID != record.launch.executionIdentity.uid || metadata.ExecutionGID != record.launch.executionIdentity.gid ||
 		metadata.HostBootID != record.launch.hostBootID || metadata.LaunchGeneration != record.launchGeneration ||
 		metadata.Release.Version != record.launch.release.version ||
-		metadata.Release.Architecture != record.launch.release.architecture {
+		metadata.Release.Architecture != record.launch.release.architecture || metadata.FirecrackerSHA256 != record.launch.release.firecrackerSHA256 || metadata.JailerSHA256 != record.launch.release.jailerSHA256 {
 		return vmLaunchDeviceAuthority{}, instanceStateError(record.vmID, "launch device authority binding differs")
 	}
 	return metadata, nil
 }
 
 func (metadata vmLaunchDeviceAuthority) validate() error {
-	if metadata.Schema != 1 || !vmIDPattern.MatchString(metadata.VMID) || metadata.OwnerUID == 0 ||
+	if !authorityHashPattern.MatchString(metadata.FirecrackerSHA256) || !authorityHashPattern.MatchString(metadata.JailerSHA256) {
+		return instanceValidationError("launch device release hashes are incomplete")
+	}
+	if metadata.Rootfs.kind != protectedBackingRootfs || metadata.Rootfs.logicalID != metadata.VMID || metadata.Rootfs.ownerUID != metadata.OwnerUID || metadata.Rootfs.bytes < managedVMRootfsMinBytes || metadata.Rootfs.bytes > managedVMRootfsMaxBytes {
+		return instanceValidationError("launch protected rootfs metadata differs")
+	}
+	if metadata.CloudInit != (metadata.CloudInitBacking != nil) {
+		return instanceValidationError("launch protected seed metadata differs")
+	}
+	if metadata.KernelBacking.kind != "kernel" || metadata.KernelBacking.logicalID != metadata.KernelID || metadata.KernelBacking.ownerUID != metadata.OwnerUID {
+		return instanceValidationError("launch protected kernel metadata differs")
+	}
+	if metadata.Schema != 2 || !vmIDPattern.MatchString(metadata.VMID) || metadata.OwnerUID == 0 ||
+		metadata.ExecutionUID == 0 || metadata.ExecutionUID == metadata.OwnerUID || metadata.ExecutionGID == 0 ||
 		metadata.HostBootID == "" || metadata.LaunchGeneration == 0 ||
 		!isCanonicalManagedResourceID(metadata.ConfigSHA256, 64) {
 		return instanceValidationError("launch device authority identity is invalid")
@@ -232,18 +267,24 @@ func (metadata vmLaunchDeviceAuthority) validate() error {
 	}
 	volumes := make([]vmVolumeResourceSpec, 0, len(metadata.Volumes))
 	for _, volume := range metadata.Volumes {
+		if !isCanonicalManagedResourceID(volume.GuestDriveID, 64) || volume.Path != "/volumes/"+volume.GuestDriveID+".raw" || volume.Backing.kind != protectedBackingVolume || volume.Backing.logicalID != volume.Selection.ID || volume.Backing.ownerUID != metadata.OwnerUID || volume.Backing.bytes != volume.Selection.ExpectedBytes {
+			return instanceValidationError("launch protected volume metadata differs")
+		}
 		if err := volume.Selection.Validate(); err != nil {
 			return err
 		}
 		if volume.Inode == 0 || volume.DeviceMajor == 0 && volume.DeviceMinor == 0 {
 			return instanceValidationError("launch device authority volume source identity is incomplete")
 		}
-		if volume.Mode&unix.S_IFMT != unix.S_IFREG || volume.Mode&07022 != 0 {
+		if volume.Mode&unix.S_IFMT != unix.S_IFREG || volume.UID != 0 || volume.Mode&07007 != 0 {
 			return instanceValidationError("launch device authority volume source mode is not admitted")
 		}
 		volumes = append(volumes, volume.Selection.private())
 	}
-	return validateVMVolumeResourceSelection(volumes)
+	if err := validateVMVolumeResourceSelection(volumes); err != nil {
+		return err
+	}
+	return metadata.matchesConfig(metadata.Config)
 }
 
 // admitVolumeCount admits the complete post-operation data-volume inventory, not a delta.
@@ -277,7 +318,7 @@ func (metadata vmLaunchDeviceAuthority) matchesConfig(config managedFirecrackerC
 	}
 	for index, volume := range metadata.Volumes {
 		drive := config.Drives[start+index]
-		if drive.DriveID != volume.Selection.ID || drive.PathOnHost != volume.Selection.private().jailPath() ||
+		if drive.DriveID != volume.GuestDriveID || drive.PathOnHost != volume.Path ||
 			drive.IsRootDevice || drive.IsReadOnly != volume.Selection.ReadOnly ||
 			drive.CacheType != volume.Selection.CacheType || drive.IOEngine != "Sync" || drive.Partuuid != nil {
 			return instanceValidationError("launch volume authority differs from sealed configuration")

@@ -81,8 +81,8 @@ func activateVerifiedProcessWithDeps(
 	if state.jailDestination == nil {
 		destination, bindErr := state.preparedJailDestination.bindAfterHandoff(
 			ctx,
-			record.ownerUID,
-			record.launch.ownerGID,
+			record.launch.executionIdentity.uid,
+			record.launch.executionIdentity.gid,
 		)
 		if bindErr != nil {
 			return nil, bindErr
@@ -114,17 +114,18 @@ func activateVerifiedProcessWithDeps(
 		return nil, writeErr
 	}
 	target := &activeLease{state: &activeLeaseState{
-		directories:       state.directories,
-		vmLock:            state.vmLock,
-		prepared:          state.prepared,
-		processes:         state.processes,
-		jailDestination:   verified.destination,
-		networkNamespace:  state.networkNamespace,
-		topology:          state.topology,
-		runtimeDirectory:  state.runtimeDirectory,
-		persistentOutputs: state.persistentOutputs,
-		managedVMCgroup:   state.managedVMCgroup,
-		record:            activeRecord,
+		directories:             state.directories,
+		vmLock:                  state.vmLock,
+		prepared:                state.prepared,
+		processes:               state.processes,
+		jailDestination:         verified.destination,
+		networkNamespace:        state.networkNamespace,
+		topology:                state.topology,
+		runtimeDirectory:        state.runtimeDirectory,
+		privateRuntimeDirectory: state.privateRuntimeDirectory,
+		persistentOutputs:       state.persistentOutputs,
+		managedVMCgroup:         state.managedVMCgroup,
+		record:                  activeRecord,
 	}}
 	state.directories = nil
 	state.vmLock = nil
@@ -134,6 +135,7 @@ func activateVerifiedProcessWithDeps(
 	state.networkNamespace = nil
 	state.topology = nil
 	state.runtimeDirectory = nil
+	state.privateRuntimeDirectory = nil
 	state.persistentOutputs = nil
 	state.managedVMCgroup = nil
 	state.record = activeRecord
@@ -295,7 +297,7 @@ func verifyRetainedLaunchProcesses(
 		}
 	}
 	if !destinationSealed {
-		if err := destination.seal(ctx, record.ownerUID, record.launch.ownerGID); err != nil {
+		if err := destination.seal(ctx, record.launch.executionIdentity.uid, record.launch.executionIdentity.gid); err != nil {
 			return verifiedLaunchIdentity{}, err
 		}
 	}
@@ -468,8 +470,8 @@ func observeFirecrackerExecTransition(
 		preSealDestination, err := inspectPreSealJailDestination(
 			ctx,
 			destination,
-			record.ownerUID,
-			record.launch.ownerGID,
+			record.launch.executionIdentity.uid,
+			record.launch.executionIdentity.gid,
 		)
 		if err != nil {
 			return observedProcessIdentity{}, observedJailDestination{}, err
@@ -480,8 +482,8 @@ func observeFirecrackerExecTransition(
 			record.vmID,
 			"Firecracker",
 			record.launch.process,
-			record.ownerUID,
-			record.launch.ownerGID,
+			record.launch.executionIdentity.uid,
+			record.launch.executionIdentity.gid,
 			true,
 		)
 		if err != nil && !errors.Is(err, unix.ENOENT) {
@@ -491,8 +493,8 @@ func observeFirecrackerExecTransition(
 			sameExecutableObject(observed.executable, preSealDestination.executable) {
 			if err := requireExpectedProcessCredentials(
 				observed.process,
-				record.ownerUID,
-				record.launch.ownerGID,
+				record.launch.executionIdentity.uid,
+				record.launch.executionIdentity.gid,
 				"Firecracker",
 			); err != nil {
 				return observedProcessIdentity{}, observedJailDestination{}, processVerificationError(
@@ -574,8 +576,8 @@ func verifyFirecrackerObservation(
 	}
 	if err := requireExpectedProcessCredentials(
 		observed.process,
-		record.ownerUID,
-		record.launch.ownerGID,
+		record.launch.executionIdentity.uid,
+		record.launch.executionIdentity.gid,
 		"Firecracker",
 	); err != nil {
 		return observedProcessIdentity{}, processVerificationError(record.vmID, err.Error(), nil)

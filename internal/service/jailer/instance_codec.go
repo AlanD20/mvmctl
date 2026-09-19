@@ -22,13 +22,27 @@ type instanceRecordWire struct {
 }
 
 type instanceLaunchWire struct {
-	OwnerGID       uint32                   `json:"owner_gid"`
-	HostBootID     string                   `json:"host_boot_id"`
-	PID            int                      `json:"pid"`
-	StartTimeTicks uint64                   `json:"start_time_ticks"`
-	Relay          instanceLaunchRelayWire  `json:"relay"`
-	ManagedCache   managedCacheIdentityWire `json:"managed_cache"`
-	Release        releaseIdentityWire      `json:"release"`
+	OwnerGID          uint32                        `json:"owner_gid"`
+	ExecutionIdentity instanceExecutionIdentityWire `json:"execution_identity"`
+	SnapshotID        string                        `json:"snapshot_id"`
+	CacheLocator      string                        `json:"cache_locator"`
+	OutputIdentity    *instanceOutputIdentitiesWire `json:"output_identity,omitempty"`
+	HostBootID        string                        `json:"host_boot_id"`
+	PID               int                           `json:"pid"`
+	StartTimeTicks    uint64                        `json:"start_time_ticks"`
+	Relay             instanceLaunchRelayWire       `json:"relay"`
+	ManagedCache      managedCacheIdentityWire      `json:"managed_cache"`
+	Release           releaseIdentityWire           `json:"release"`
+}
+
+type instanceExecutionIdentityWire struct {
+	UID uint32 `json:"uid"`
+	GID uint32 `json:"gid"`
+}
+
+type instanceOutputIdentitiesWire struct {
+	Log     instanceObjectIdentityWire  `json:"log"`
+	Metrics *instanceObjectIdentityWire `json:"metrics,omitempty"`
 }
 
 type instanceLaunchRelayWire struct {
@@ -267,7 +281,19 @@ func instanceJSONObjectFields(
 	case "record":
 		return instanceRecordJSONFields(wire), nil
 	case "launch":
-		return instanceLaunchJSONFields(), nil
+		fields := instanceLaunchJSONFields()
+		if wire.Launch != nil && wire.Launch.OutputIdentity != nil {
+			fields["output_identity"] = instanceJSONField{kind: instanceJSONObject, child: "output_identity"}
+		}
+		return fields, nil
+	case "output_identity":
+		fields := map[string]instanceJSONField{"log": {kind: instanceJSONObject, child: "object_identity"}}
+		if wire.Launch != nil && wire.Launch.OutputIdentity != nil && wire.Launch.OutputIdentity.Metrics != nil {
+			fields["metrics"] = instanceJSONField{kind: instanceJSONObject, child: "object_identity"}
+		}
+		return fields, nil
+	case "execution_identity":
+		return instanceScalarJSONFields("uid", "gid"), nil
 	case "launch_relay":
 		return instanceLaunchRelayJSONFields(wire), nil
 	case "managed_cache":
@@ -327,11 +353,12 @@ func instanceRecordJSONFields(wire instanceRecordWire) map[string]instanceJSONFi
 
 func instanceLaunchJSONFields() map[string]instanceJSONField {
 	return instanceObjectJSONFields(
-		[]string{"owner_gid", "host_boot_id", "pid", "start_time_ticks"},
+		[]string{"owner_gid", "host_boot_id", "pid", "start_time_ticks", "snapshot_id", "cache_locator"},
 		map[string]string{
-			"relay":         "launch_relay",
-			"managed_cache": "managed_cache",
-			"release":       "release",
+			"execution_identity": "execution_identity",
+			"relay":              "launch_relay",
+			"managed_cache":      "managed_cache",
+			"release":            "release",
 		},
 	)
 }
@@ -470,12 +497,15 @@ func instanceRecordToWire(record instanceRecord) instanceRecordWire {
 }
 
 func instanceLaunchToWire(launch instanceLaunchRecord) *instanceLaunchWire {
-	return &instanceLaunchWire{
-		OwnerGID:       launch.ownerGID,
-		HostBootID:     launch.hostBootID,
-		PID:            launch.process.pid,
-		StartTimeTicks: launch.process.startTimeTicks,
-		Relay:          instanceLaunchRelayToWire(launch.relay),
+	wire := &instanceLaunchWire{
+		OwnerGID:          launch.ownerGID,
+		ExecutionIdentity: instanceExecutionIdentityWire{UID: launch.executionIdentity.uid, GID: launch.executionIdentity.gid},
+		SnapshotID:        launch.snapshotID,
+		CacheLocator:      "/" + strings.Join(launch.cacheLocator.components, "/"),
+		HostBootID:        launch.hostBootID,
+		PID:               launch.process.pid,
+		StartTimeTicks:    launch.process.startTimeTicks,
+		Relay:             instanceLaunchRelayToWire(launch.relay),
 		ManagedCache: managedCacheIdentityWire{
 			DeviceMajor: launch.cacheIdentity.deviceMajor,
 			DeviceMinor: launch.cacheIdentity.deviceMinor,
@@ -492,6 +522,13 @@ func instanceLaunchToWire(launch instanceLaunchRecord) *instanceLaunchWire {
 			JailerSHA256:      launch.release.jailerSHA256,
 		},
 	}
+	if launch.outputIdentity != nil {
+		wire.OutputIdentity = &instanceOutputIdentitiesWire{Log: instanceObjectIdentityWire{Device: launch.outputIdentity.log.device, Inode: launch.outputIdentity.log.inode}}
+		if launch.outputIdentity.metrics != nil {
+			wire.OutputIdentity.Metrics = &instanceObjectIdentityWire{Device: launch.outputIdentity.metrics.device, Inode: launch.outputIdentity.metrics.inode}
+		}
+	}
+	return wire
 }
 
 func instanceLaunchRelayToWire(relay instanceLaunchRelay) instanceLaunchRelayWire {
@@ -582,6 +619,10 @@ func instanceRecordFromWire(wire instanceRecordWire) (instanceRecord, error) {
 }
 
 func instanceLaunchFromWire(wire instanceLaunchWire) (instanceLaunchRecord, error) {
+	locator, err := parseManagedCacheLocator(wire.CacheLocator)
+	if err != nil {
+		return instanceLaunchRecord{}, err
+	}
 	cacheIdentity, err := managedCacheIdentityFromWire(wire.ManagedCache)
 	if err != nil {
 		return instanceLaunchRecord{}, err
@@ -593,19 +634,29 @@ func instanceLaunchFromWire(wire instanceLaunchWire) (instanceLaunchRecord, erro
 	if wire.Relay.StartTimeTicks != nil {
 		relay.locator.startTimeTicks = *wire.Relay.StartTimeTicks
 	}
-	return instanceLaunchRecord{
-		ownerGID:      wire.OwnerGID,
-		hostBootID:    wire.HostBootID,
-		process:       instanceProcessLocator{pid: wire.PID, startTimeTicks: wire.StartTimeTicks},
-		relay:         relay,
-		cacheIdentity: cacheIdentity,
+	launch := instanceLaunchRecord{
+		ownerGID:          wire.OwnerGID,
+		executionIdentity: vmExecutionIdentity{uid: wire.ExecutionIdentity.UID, gid: wire.ExecutionIdentity.GID},
+		snapshotID:        wire.SnapshotID,
+		cacheLocator:      locator,
+		hostBootID:        wire.HostBootID,
+		process:           instanceProcessLocator{pid: wire.PID, startTimeTicks: wire.StartTimeTicks},
+		relay:             relay,
+		cacheIdentity:     cacheIdentity,
 		release: releaseIdentity{
 			version:           wire.Release.Version,
 			architecture:      wire.Release.Architecture,
 			firecrackerSHA256: wire.Release.FirecrackerSHA256,
 			jailerSHA256:      wire.Release.JailerSHA256,
 		},
-	}, nil
+	}
+	if wire.OutputIdentity != nil {
+		launch.outputIdentity = &instanceOutputIdentities{log: instanceObjectIdentity{device: wire.OutputIdentity.Log.Device, inode: wire.OutputIdentity.Log.Inode}}
+		if wire.OutputIdentity.Metrics != nil {
+			launch.outputIdentity.metrics = &instanceObjectIdentity{device: wire.OutputIdentity.Metrics.Device, inode: wire.OutputIdentity.Metrics.Inode}
+		}
+	}
+	return launch, nil
 }
 
 func instanceActiveFromWire(wire instanceActiveWire) (instanceActiveIdentity, error) {

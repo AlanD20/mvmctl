@@ -318,7 +318,7 @@ func buildManagedFirecrackerConfig(intent vmFirecrackerLaunchIntent) managedFire
 	}
 	if intent.vsockCID != nil {
 		config.Vsock = &managedFirecrackerVsock{
-			GuestCID: *intent.vsockCID, UDSPath: managedVMRuntimeMountPath + "/" + infra.VMVsockSocketFilename,
+			GuestCID: *intent.vsockCID, UDSPath: managedVMPrivateRuntimeMountPath + "/" + infra.VMVsockSocketFilename,
 		}
 	}
 	return config
