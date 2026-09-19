@@ -7,10 +7,12 @@ import (
 
 	"mvmctl/internal/app"
 	"mvmctl/internal/cli/common"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/internal/service/privileged"
 )
 
 type entrypoints struct {
+	launchChild       func(context.Context, []string) error
 	privileged        func(context.Context, []string) error
 	systemInstall     func(context.Context, []string) error
 	hostAdministrator func(context.Context, []string) (*app.HostAdministratorResult, error)
@@ -19,6 +21,7 @@ type entrypoints struct {
 
 func main() {
 	os.Exit(run(context.Background(), os.Args[1:], entrypoints{
+		launchChild:       jailer.RunLaunchChild,
 		privileged:        privileged.Run,
 		systemInstall:     app.RunHostInstallSystemBinary,
 		hostAdministrator: app.RunHostAdministrator,
@@ -27,6 +30,15 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, entries entrypoints) int {
+	if jailer.IsLaunchChildInvocation(args) {
+		// The child owns a locked namespace thread. Every result returns directly
+		// to main's os.Exit; it must never enter ordinary application initialization.
+		if err := entries.launchChild(ctx, args); err != nil {
+			slog.Error("launch child failed", "error", err)
+			return 1
+		}
+		return 0
+	}
 	if privileged.IsInvocation(args) {
 		if err := entries.privileged(ctx, args); err != nil {
 			slog.Error("privileged request failed", "error", err)
