@@ -11,6 +11,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
+	networksvc "mvmctl/internal/service/network"
 	"mvmctl/pkg/errs"
 )
 
@@ -71,6 +72,11 @@ func (s *FirecrackerSpawner) Cleanup(ctx context.Context) {
 
 // Generate builds the Firecracker VM config.
 func (s *FirecrackerSpawner) Generate() (*model.FirecrackerVMConfig, error) {
+	tapName, err := networksvc.VMTAPName(uint32(os.Geteuid()), s.config.NetworkID, s.vmID())
+	if err != nil {
+		return nil, err
+	}
+	s.config.TapName = tapName
 	// Nested virt requires PCI — force it on
 	if s.config.NestedVirt {
 		s.config.PCIEnabled = true

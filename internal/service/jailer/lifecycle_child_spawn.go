@@ -162,3 +162,48 @@ func (session *launchChildSession) Release(ctx context.Context) error {
 	state.released = true
 	return state.releaseErr
 }
+
+// attachBlockedLaunchConsole consumes the root-spawned relay before registration.
+func (processes *blockedLaunchProcesses) attachBlockedLaunchConsole(ctx context.Context, source *blockedLaunchProcessSource) error {
+	if processes == nil || processes.state == nil || source == nil || source.pidfd < 0 || source.gate == nil {
+		return processAuthorityError("", "blocked console source is unavailable", nil)
+	}
+	state := processes.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.status != blockedLaunchProcessesOpen || state.relay != nil {
+		return processAuthorityError(state.vmID, "blocked console attachment phase is invalid", nil)
+	}
+	duplicate, err := unix.FcntlInt(uintptr(source.pidfd), unix.F_DUPFD_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	relay, err := admitBlockedProcess(ctx, state.deps, blockedLaunchProcessSource{pidfd: duplicate, gate: source.gate}, "relay")
+	if err != nil {
+		return processAuthorityError(state.vmID, "admit blocked console relay", err)
+	}
+	if relay.locator.pid == state.firecracker.locator.pid {
+		return errors.Join(processAuthorityError(state.vmID, "console relay matches Firecracker process", nil), unix.Close(duplicate))
+	}
+	state.relay = &relay
+	err = unix.Close(source.pidfd)
+	source.pidfd = -1
+	source.gate = nil
+	return err
+}
+
+func releaseUnconsumedConsoleSource(ctx context.Context, source *blockedLaunchProcessSource) error {
+	if source == nil {
+		return nil
+	}
+	var result error
+	if source.pidfd >= 0 {
+		result = errors.Join(terminateProcessThroughPIDFD(ctx, source.pidfd), waitAndReapProcessThroughPIDFD(ctx, source.pidfd), unix.Close(source.pidfd))
+		source.pidfd = -1
+	}
+	if source.gate != nil {
+		result = errors.Join(result, source.gate.Release(ctx))
+		source.gate = nil
+	}
+	return result
+}

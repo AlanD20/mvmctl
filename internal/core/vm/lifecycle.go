@@ -72,9 +72,6 @@ func (s *FirecrackerSpawner) lifecycleRequest() (jailersvc.VMLaunchRequest, erro
 	if s.config.PCIEnabled || s.config.NestedVirt {
 		return jailersvc.VMLaunchRequest{}, errs.New(errs.CodeFirecrackerSpawnError, "managed launch does not admit PCI devices")
 	}
-	if s.config.EnableConsole {
-		return jailersvc.VMLaunchRequest{}, errs.New(errs.CodeFirecrackerSpawnError, "managed console relay launch is not yet composed")
-	}
 	config, err := s.Generate()
 	if err != nil {
 		return jailersvc.VMLaunchRequest{}, err
@@ -94,6 +91,7 @@ func (s *FirecrackerSpawner) lifecycleRequest() (jailersvc.VMLaunchRequest, erro
 		SMT: config.MachineConfig.SMT, TrackDirtyPages: config.MachineConfig.TrackDirtyPages,
 		RootfsCacheType: config.Drives[0].CacheType, CloudInit: s.config.CloudInitISOPath != nil && *s.config.CloudInitISOPath != "",
 		Logging: s.config.EnableLogging, LogLevel: s.config.LogLevel, Metrics: s.config.EnableMetrics,
+		Console:   s.config.EnableConsole,
 		CPUConfig: config.CPUConfig, CgroupLimits: s.config.CgroupLimits,
 	}
 	if s.config.VsockGuestCID != nil {

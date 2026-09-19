@@ -56,9 +56,15 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 	processes, session, err := spawnBlockedLaunchChild(ctx, request.VMID)
 	var launching *launchLease
 	var active *activeLease
+	var console *launchConsoleSession
+	var consoleSource *blockedLaunchProcessSource
 	committed := false
 	defer func() {
 		cleanupCtx := context.WithoutCancel(ctx)
+		returnErr = appendInstanceOperationError(returnErr, "release unconsumed console source", releaseUnconsumedConsoleSource(cleanupCtx, consoleSource))
+		if console != nil {
+			returnErr = appendInstanceOperationError(returnErr, "close parent console session", console.Release(cleanupCtx))
+		}
 		if session != nil {
 			returnErr = appendInstanceOperationError(returnErr, "close child setup channel", session.Release(cleanupCtx))
 		}
@@ -84,6 +90,15 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 	}()
 	if err != nil {
 		return VMLaunchResult{}, err
+	}
+	if request.Console {
+		consoleSource, console, err = spawnBlockedLaunchConsole(ctx, request.VMID, caller)
+		if err != nil {
+			return VMLaunchResult{}, err
+		}
+		if err := processes.attachBlockedLaunchConsole(ctx, consoleSource); err != nil {
+			return VMLaunchResult{}, err
+		}
 	}
 	launching, err = prepared.registerLaunching(ctx, caller, launchIntent{vmID: request.VMID, hostBootID: bootID, cacheIdentity: cache.identity}, processes)
 	if err != nil {
@@ -112,6 +127,11 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 	if err := launching.preparePersistentOutputs(ctx, outputCache, metrics); err != nil {
 		return VMLaunchResult{}, err
 	}
+	if console != nil {
+		if err := console.prepare(ctx, launching); err != nil {
+			return VMLaunchResult{}, err
+		}
+	}
 	guestIP, _ := netip.ParseAddr(request.GuestIPv4)
 	topology, err := launching.prepareProductionTopology(ctx, network.VMIntent{NetworkID: request.NetworkID, GuestIPv4: guestIP, MAC: &request.GuestMAC})
 	if err != nil {
@@ -128,7 +148,7 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 	defer func() {
 		returnErr = appendInstanceOperationError(returnErr, "release launch resource pins", resources.Release(context.WithoutCancel(ctx)))
 	}()
-	if err := launching.sendChildSetup(ctx, session, resources); err != nil {
+	if err := launching.sendChildSetup(ctx, session, resources, console); err != nil {
 		return VMLaunchResult{}, err
 	}
 	if err := launching.releaseToJailer(ctx); err != nil {
@@ -147,6 +167,11 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 	}
 	if err := launching.awaitCopiedLaunchExecutable(ctx); err != nil {
 		return VMLaunchResult{}, err
+	}
+	if console != nil {
+		if err := console.waitReady(ctx); err != nil {
+			return VMLaunchResult{}, err
+		}
 	}
 	active, err = launching.activateVerifiedProcess(ctx)
 	if err != nil {

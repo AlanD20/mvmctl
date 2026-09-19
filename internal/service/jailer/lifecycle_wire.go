@@ -45,6 +45,7 @@ type VMLaunchRequest struct {
 	Logging         bool                 `json:"logging"`
 	LogLevel        string               `json:"log_level"`
 	Metrics         bool                 `json:"metrics"`
+	Console         bool                 `json:"console"`
 	CPUConfig       *model.CpuConfig     `json:"cpu_config,omitempty"`
 	VsockCID        *uint32              `json:"vsock_cid,omitempty"`
 	CgroupLimits    model.VMCgroupLimits `json:"cgroup_limits"`
@@ -66,7 +67,7 @@ func (request *VMLaunchRequest) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
-	for _, name := range []string{"vm_id", "cache_root", "kernel_id", "rootfs_bytes", "release", "network_id", "guest_ipv4", "guest_mac", "boot_args", "vcpus", "memory_mib", "smt", "track_dirty_pages", "rootfs_cache_type", "cloud_init", "logging", "log_level", "metrics", "cgroup_limits"} {
+	for _, name := range []string{"vm_id", "cache_root", "kernel_id", "rootfs_bytes", "release", "network_id", "guest_ipv4", "guest_mac", "boot_args", "vcpus", "memory_mib", "smt", "track_dirty_pages", "rootfs_cache_type", "cloud_init", "logging", "log_level", "metrics", "console", "cgroup_limits"} {
 		field, ok := fields[name]
 		if !ok || bytes.Equal(bytes.TrimSpace(field), []byte("null")) {
 			return fmt.Errorf("launch request %s is required", name)

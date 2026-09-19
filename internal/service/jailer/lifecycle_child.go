@@ -44,6 +44,7 @@ type launchChildPlan struct {
 	Limits    model.VMCgroupLimits `json:"limits"`
 	CloudInit bool                 `json:"cloud_init"`
 	Metrics   bool                 `json:"metrics"`
+	Console   bool                 `json:"console"`
 }
 
 // The descriptor ordering is fixed by the root-built launch plan; none is selected by caller argv.
@@ -223,6 +224,9 @@ func validateLaunchChildPlan(plan launchChildPlan, descriptors []int) error {
 	if plan.Metrics {
 		want++
 	}
+	if plan.Console {
+		want++
+	}
 	if len(descriptors) != want {
 		return instanceValidationError("launch child setup has unexpected descriptor count")
 	}
@@ -359,8 +363,17 @@ func execLaunchChildJailer(ctx context.Context, plan launchChildPlan, fds []int,
 	if err := unix.Setns(namespaceFD, unix.CLONE_NEWNET); err != nil {
 		return err
 	}
+	output := fds[childConsoleLog]
+	if plan.Console {
+		output = fds[len(fds)-1]
+	}
 	for _, target := range []int{1, 2} {
-		if err := unix.Dup3(fds[childConsoleLog], target, 0); err != nil {
+		if err := unix.Dup3(output, target, 0); err != nil {
+			return err
+		}
+	}
+	if plan.Console {
+		if err := unix.Dup3(output, 0, 0); err != nil {
 			return err
 		}
 	}

@@ -11,7 +11,7 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-func (lease *launchLease) sendChildSetup(ctx context.Context, session *launchChildSession, resources *vmLaunchResourceLease) error {
+func (lease *launchLease) sendChildSetup(ctx context.Context, session *launchChildSession, resources *vmLaunchResourceLease, console *launchConsoleSession) error {
 	if lease == nil || lease.state == nil || session == nil || session.state == nil || resources == nil {
 		return instanceStateError("", "launch child setup capabilities are incomplete")
 	}
@@ -89,6 +89,13 @@ func (lease *launchLease) sendChildSetup(ctx context.Context, session *launchChi
 	}
 	if plan.Metrics {
 		fds = append(fds, metricsFD)
+	}
+	if console != nil {
+		if console.slave == nil || state.record.launch.relay.kind != instanceRelayPresent {
+			return instanceStateError(state.record.vmID, "console slave does not match durable relay authority")
+		}
+		plan.Console = true
+		fds = append(fds, int(console.slave.Fd()))
 	}
 	if err := validateLaunchChildPlan(plan, fds); err != nil {
 		return err
