@@ -21,10 +21,10 @@ type executionIdentityStore struct {
 	retained  []int
 }
 
-func openExecutionIdentityStore(ctx context.Context, create bool) (_ *executionIdentityStore, returnErr error) {
+func openExecutionIdentityStore(ctx context.Context, create bool) (result *executionIdentityStore, returnErr error) {
 	store := &executionIdentityStore{directory: -1, lock: -1}
 	defer func() {
-		if returnErr != nil {
+		if result == nil {
 			returnErr = errors.Join(returnErr, store.close(context.WithoutCancel(ctx)))
 		}
 	}()
@@ -46,6 +46,9 @@ func openExecutionIdentityStore(ctx context.Context, create bool) (_ *executionI
 			class = instancePrivateDirectory
 		}
 		fd, err := openInstanceDirectory(ctx, deps, parent, name, create && index >= 2, class, policy)
+		if !create && index >= 2 && errors.Is(err, unix.ENOENT) {
+			return nil, nil
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -263,8 +266,12 @@ func (store *executionIdentityStore) requireDistinct(ctx context.Context, select
 		if record.VMID == selected.VMID {
 			continue
 		}
-		if record.Name == selected.Name || (record.Phase == executionIdentityReady &&
-			(*record.UID == *selected.UID || *record.GID == *selected.GID)) {
+		if record.Phase == executionIdentityRetired {
+			continue
+		}
+		if record.Name == selected.Name ||
+			((record.Phase == executionIdentityReady || record.Phase == executionIdentityRetiring) &&
+				(*record.UID == *selected.UID || *record.GID == *selected.GID)) {
 			return instanceAtomicError("execution credentials are reserved by another VM", nil)
 		}
 	}

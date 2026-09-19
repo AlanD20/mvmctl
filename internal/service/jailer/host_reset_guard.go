@@ -19,12 +19,13 @@ type HostResetGuard struct{ state *hostResetGuardState }
 
 type hostResetGuardState struct {
 	// mu guards release and all retained descriptor/lock ownership.
-	mu         sync.Mutex
-	roots      *instanceAuthorityRoots
-	index      *authorityLock
-	retained   []int
-	released   bool
-	releaseErr error
+	mu                  sync.Mutex
+	roots               *instanceAuthorityRoots
+	index               *authorityLock
+	executionIdentities *executionIdentityResetGuard
+	retained            []int
+	released            bool
+	releaseErr          error
 }
 
 // AcquireHostResetGuard admits only globally cleaned schema-3 instance authority
@@ -49,10 +50,21 @@ func AcquireHostResetGuard(ctx context.Context) (_ *HostResetGuard, returnErr er
 	guard := &HostResetGuard{state: &hostResetGuardState{roots: roots}}
 	defer func() {
 		if returnErr != nil {
-			returnErr = appendInstanceOperationError(returnErr, "release rejected host reset guard", guard.Release(context.WithoutCancel(ctx)))
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"release rejected host reset guard",
+				guard.Release(context.WithoutCancel(ctx)),
+			)
 		}
 	}()
-	if err := verifyInstanceDirectory(ctx, deps, rootFD, "host reset filesystem root", policy, instanceAncestorDirectory); err != nil {
+	if err := verifyInstanceDirectory(
+		ctx,
+		deps,
+		rootFD,
+		"host reset filesystem root",
+		policy,
+		instanceAncestorDirectory,
+	); err != nil {
 		return nil, err
 	}
 	authority, err := (systemInstanceAuthorityTree{}).openJailer(ctx)
@@ -77,6 +89,10 @@ func AcquireHostResetGuard(ctx context.Context) (_ *HostResetGuard, returnErr er
 		return nil, err
 	}
 	if err := guard.requireNoCgroupResources(ctx); err != nil {
+		return nil, err
+	}
+	guard.state.executionIdentities, err = acquireExecutionIdentityResetGuard(ctx)
+	if err != nil {
 		return nil, err
 	}
 	return guard, nil
@@ -130,7 +146,15 @@ func (guard *HostResetGuard) requireCleanedInstanceInventory(ctx context.Context
 		if !canonical {
 			return instanceAtomicError("host reset found a noncanonical instance owner", nil)
 		}
-		fd, err := openInstanceDirectory(ctx, roots.deps, roots.stateFD, name, false, instancePrivateDirectory, roots.policy)
+		fd, err := openInstanceDirectory(
+			ctx,
+			roots.deps,
+			roots.stateFD,
+			name,
+			false,
+			instancePrivateDirectory,
+			roots.policy,
+		)
 		if err != nil {
 			return err
 		}
@@ -162,7 +186,11 @@ func (guard *HostResetGuard) requireCleanedInstanceInventory(ctx context.Context
 	return nil
 }
 
-func readHostResetRecord(ctx context.Context, directories *instanceUIDDirectories, vmID string) (_ instanceRecord, returnErr error) {
+func readHostResetRecord(
+	ctx context.Context,
+	directories *instanceUIDDirectories,
+	vmID string,
+) (_ instanceRecord, returnErr error) {
 	fd, err := unix.Openat2(directories.stateFD, vmID+".json", &unix.OpenHow{
 		Flags:   instanceReadFlags | unix.O_NONBLOCK,
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
@@ -171,9 +199,19 @@ func readHostResetRecord(ctx context.Context, directories *instanceUIDDirectorie
 		return instanceRecord{}, instanceAtomicError("open reset instance record", err)
 	}
 	defer func() {
-		returnErr = appendInstanceOperationError(returnErr, "close reset instance record", directories.deps.close(context.WithoutCancel(ctx), fd))
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"close reset instance record",
+			directories.deps.close(context.WithoutCancel(ctx), fd),
+		)
 	}()
-	if err := verifyInstanceRegularFile(ctx, directories.deps, fd, "reset instance record", directories.policy); err != nil {
+	if err := verifyInstanceRegularFile(
+		ctx,
+		directories.deps,
+		fd,
+		"reset instance record",
+		directories.policy,
+	); err != nil {
 		return instanceRecord{}, err
 	}
 	var before, after, binding unix.Stat_t
@@ -197,7 +235,14 @@ func readHostResetRecord(ctx context.Context, directories *instanceUIDDirectorie
 	if err := unix.Fstatat(directories.stateFD, vmID+".json", &binding, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return instanceRecord{}, instanceAtomicError("recheck reset instance record name", err)
 	}
-	if before.Dev != after.Dev || before.Ino != after.Ino || before.Mode != after.Mode || before.Uid != after.Uid || before.Gid != after.Gid || before.Nlink != after.Nlink || before.Size != after.Size || before.Mtim != after.Mtim || before.Ctim != after.Ctim || binding.Dev != after.Dev || binding.Ino != after.Ino {
+	if before.Dev != after.Dev || before.Ino != after.Ino || before.Mode != after.Mode || before.Uid != after.Uid ||
+		before.Gid != after.Gid ||
+		before.Nlink != after.Nlink ||
+		before.Size != after.Size ||
+		before.Mtim != after.Mtim ||
+		before.Ctim != after.Ctim ||
+		binding.Dev != after.Dev ||
+		binding.Ino != after.Ino {
 		return instanceRecord{}, instanceAtomicError("reset instance record changed during admission", nil)
 	}
 	return record, nil
@@ -220,19 +265,40 @@ func (guard *HostResetGuard) Release(ctx context.Context) error {
 		cleanupCtx = context.WithoutCancel(ctx)
 	}
 	if state.roots != nil {
-		state.releaseErr = appendInstanceOperationError(state.releaseErr, "close host reset resource pins", closeInstanceFDs(cleanupCtx, state.roots.deps, state.retained))
+		state.releaseErr = appendInstanceOperationError(
+			state.releaseErr,
+			"close host reset resource pins",
+			closeInstanceFDs(cleanupCtx, state.roots.deps, state.retained),
+		)
 		state.retained = nil
 	}
 	if state.index != nil {
-		state.releaseErr = appendInstanceOperationError(state.releaseErr, "release host reset instance index", state.index.Release(cleanupCtx))
+		if state.executionIdentities != nil {
+			state.releaseErr = appendInstanceOperationError(state.releaseErr, "release host reset execution identities",
+				state.executionIdentities.Release(cleanupCtx))
+			state.executionIdentities = nil
+		}
+		state.releaseErr = appendInstanceOperationError(
+			state.releaseErr,
+			"release host reset instance index",
+			state.index.Release(cleanupCtx),
+		)
 		state.index = nil
 	}
 	if state.roots != nil {
 		// A rejected acquire may precede opening the authority lock tree.
 		if state.roots.authority == nil {
-			state.releaseErr = appendInstanceOperationError(state.releaseErr, "close host reset roots", closeInstanceFDs(cleanupCtx, state.roots.deps, state.roots.retained))
+			state.releaseErr = appendInstanceOperationError(
+				state.releaseErr,
+				"close host reset roots",
+				closeInstanceFDs(cleanupCtx, state.roots.deps, state.roots.retained),
+			)
 		} else {
-			state.releaseErr = appendInstanceOperationError(state.releaseErr, "release host reset roots", state.roots.Release(cleanupCtx))
+			state.releaseErr = appendInstanceOperationError(
+				state.releaseErr,
+				"release host reset roots",
+				state.roots.Release(cleanupCtx),
+			)
 		}
 		state.roots = nil
 	}

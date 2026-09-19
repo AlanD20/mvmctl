@@ -150,6 +150,16 @@ func requireExecutionIdentityAccount(ctx context.Context, record executionIdenti
 	if record.Phase != executionIdentityReady || *record.UID == caller.uid || *record.GID == caller.gid {
 		return instanceStateError(record.VMID, "execution credentials overlap operator credentials")
 	}
+	return requireExecutionIdentityAccountRecord(ctx, record)
+}
+
+func requireExecutionIdentityAccountRecord(ctx context.Context, record executionIdentityRecord) error {
+	if err := validateExecutionIdentityRecord(record); err != nil {
+		return err
+	}
+	if record.Phase != executionIdentityReady && record.Phase != executionIdentityRetiring {
+		return instanceStateError(record.VMID, "execution account reservation is not allocated")
+	}
 	for _, query := range []struct{ database, key string }{
 		{"passwd", record.Name}, {"passwd", strconv.FormatUint(uint64(*record.UID), 10)},
 		{"group", record.Name}, {"group", strconv.FormatUint(uint64(*record.GID), 10)},

@@ -48,19 +48,21 @@ type executionIdentityRecord struct {
 }
 
 const (
-	executionIdentityPending = "pending"
-	executionIdentityReady   = "ready"
+	executionIdentityPending  = "pending"
+	executionIdentityReady    = "ready"
+	executionIdentityRetiring = "retiring"
+	executionIdentityRetired  = "retired"
 )
 
 // prepareExecutionIdentity reserves a host-managed locked system account for this locked VM.
 // CRITICAL: The VM lock proves operator ownership. The allocator lock serializes durable intent
 // and account creation; the host account tools allocate their normal finite system-ID space.
-// Account deletion is intentionally absent: stopping a VM does not prove its persistent backing,
-// ACL grants or snapshots have disappeared. Release never returns these credentials to the pool.
+// Stopping a VM does not prove its persistent backing or ACL grants have disappeared. Only the
+// separate VM-removal proof admits retirement; Release never returns credentials to the pool.
 func (lease *vmAuthorityLease) prepareExecutionIdentity(
 	ctx context.Context, caller instanceCaller, vmID string,
 ) (*vmExecutionIdentityLease, error) {
-	return lease.admitExecutionIdentity(ctx, caller, vmID, nil)
+	return lease.admitExecutionIdentity(ctx, caller, vmID, nil, true)
 }
 
 // reopenExecutionIdentity admits only the already allocated credentials recorded for this VM.
@@ -71,11 +73,20 @@ func (lease *vmAuthorityLease) reopenExecutionIdentity(
 	if expected.uid == 0 || expected.gid == 0 {
 		return nil, instanceStateError(vmID, "recorded execution identity is absent")
 	}
-	return lease.admitExecutionIdentity(ctx, caller, vmID, &expected)
+	return lease.admitExecutionIdentity(ctx, caller, vmID, &expected, false)
+}
+
+// openExecutionIdentity returns only an existing reservation for VM removal. A retiring
+// reservation still returns its credentials so removal can repeat all absence proofs after a crash.
+// A fully retired same-owner tombstone or a never-allocated VM has no remaining account lease.
+func (lease *vmAuthorityLease) openExecutionIdentity(
+	ctx context.Context, caller instanceCaller, vmID string,
+) (*vmExecutionIdentityLease, error) {
+	return lease.admitExecutionIdentity(ctx, caller, vmID, nil, false)
 }
 
 func (lease *vmAuthorityLease) admitExecutionIdentity(
-	ctx context.Context, caller instanceCaller, vmID string, expected *vmExecutionIdentity,
+	ctx context.Context, caller instanceCaller, vmID string, expected *vmExecutionIdentity, create bool,
 ) (result *vmExecutionIdentityLease, returnErr error) {
 	if ctx == nil || os.Geteuid() != 0 || os.Getegid() != 0 || lease == nil || lease.state == nil {
 		return nil, instanceStateError(vmID, "execution identity requires root VM authority")
@@ -99,9 +110,15 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 	if state.released || !state.active || state.value == nil || state.ownerUID != caller.uid || state.key != key {
 		return nil, instanceStateError(vmID, "execution identity does not match held VM ownership")
 	}
-	store, err := openExecutionIdentityStore(ctx, expected == nil)
+	store, err := openExecutionIdentityStore(ctx, create)
 	if err != nil {
 		return nil, err
+	}
+	if store == nil {
+		if expected != nil {
+			return nil, instanceStateError(vmID, "recorded execution reservation store is missing")
+		}
+		return nil, nil
 	}
 	defer func() { returnErr = errors.Join(returnErr, store.close(context.WithoutCancel(ctx))) }()
 	record, found, err := store.read(ctx, vmID)
@@ -111,6 +128,18 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 	if found {
 		if record.OwnerUID != caller.uid || record.VMID != vmID {
 			return nil, unauthorizedInstanceError(vmID)
+		}
+		if !create && expected == nil {
+			if record.Phase == executionIdentityRetired {
+				return nil, nil
+			}
+			if record.Phase == executionIdentityRetiring {
+				fd, err := store.pin(ctx, record)
+				if err != nil {
+					return nil, err
+				}
+				return &vmExecutionIdentityLease{state: &vmExecutionIdentityLeaseState{fd: fd, record: record}}, nil
+			}
 		}
 		if record.Phase != executionIdentityReady {
 			return nil, instanceStateError(
@@ -127,6 +156,9 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 	} else {
 		if expected != nil {
 			return nil, instanceStateError(vmID, "recorded execution reservation is missing")
+		}
+		if !create {
+			return nil, nil
 		}
 		if err := requireExecutionIdentityHostTools(ctx); err != nil {
 			return nil, err
@@ -181,7 +213,8 @@ func (lease *vmExecutionIdentityLease) Identity(ctx context.Context) (vmExecutio
 	state := lease.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.released || state.fd < 0 || state.record.Phase != executionIdentityReady {
+	if state.released || state.fd < 0 ||
+		(state.record.Phase != executionIdentityReady && state.record.Phase != executionIdentityRetiring) {
 		return vmExecutionIdentity{}, instanceStateError(state.record.VMID, "execution identity lease is released")
 	}
 	if err := ctx.Err(); err != nil {
@@ -242,7 +275,7 @@ func validateExecutionIdentityRecord(record executionIdentityRecord) error {
 		if record.UID != nil || record.GID != nil {
 			return instanceAtomicError("pending execution identity claims allocated credentials", nil)
 		}
-	case executionIdentityReady:
+	case executionIdentityReady, executionIdentityRetiring, executionIdentityRetired:
 		if record.UID == nil || record.GID == nil || *record.UID == 0 || *record.GID == 0 ||
 			*record.UID == ^uint32(0) || *record.GID == ^uint32(0) || *record.UID == record.OwnerUID {
 			return instanceAtomicError("allocated execution identity is invalid", nil)
