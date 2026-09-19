@@ -42,6 +42,7 @@ func Run(ctx context.Context, args []string) error {
 	trustedRelease := jailer.NewTrustedReleaseServer()
 	runtimeStatus := jailer.NewRuntimeStatusServer()
 	loopMount := loopmount.NewProvisionInspectServer(systemLoopMountAgentBinary)
+	imageShrink := loopmount.NewImageShrinkServer()
 	vmExecSession, err := jailer.NewVMExecSessionServer()
 	if err != nil {
 		return err
@@ -60,8 +61,9 @@ func Run(ctx context.Context, args []string) error {
 			remove:  trustedRelease.Remove,
 		},
 		loopMount: loopMountHandlerEffects{
-			provisionVM:  loopMount.ProvisionVM,
-			inspectImage: loopMount.InspectImage,
+			provisionVM:   loopMount.ProvisionVM,
+			inspectImage:  loopMount.InspectImage,
+			optimizeImage: imageShrink.OptimizeImage,
 		},
 	})
 }
@@ -217,6 +219,14 @@ func dispatch(
 		)
 	case loopmount.ImageInspectAction:
 		return dispatchHandled, handleLoopMountInspectImage(
+			ctx,
+			endpoint,
+			loopmount.Caller{UID: caller.uid, GID: caller.gid},
+			deps.loopMount,
+			deps.control,
+		)
+	case loopmount.ImageOptimizeAction:
+		return dispatchHandled, handleLoopMountOptimizeImage(
 			ctx,
 			endpoint,
 			loopmount.Caller{UID: caller.uid, GID: caller.gid},
