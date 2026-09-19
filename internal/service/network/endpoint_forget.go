@@ -1,8 +1,10 @@
 package network
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"net/netip"
 
 	"golang.org/x/sys/unix"
 
@@ -38,24 +40,55 @@ func ForgetVMEndpoint(ctx context.Context, hold *authorityfs.TopologyHold, launc
 	if record.Lifecycle != topologyCleaned || record.LaunchGeneration != launchGeneration {
 		return networkAuthorityCorruptError("endpoint invalidation requires exact cleaned topology generation", nil)
 	}
+	admittedRaw := append([]byte(nil), journal.raw...)
 	key, err := newTopologyKey(owner, vm.String(), record.NetworkID)
 	if err != nil {
 		return err
 	}
-	locked, err := (managedNetworkLocker{cleanup: true}).LockNetwork(ctx, key.Network())
+	currentBoot, err := readCurrentBootID(ctx)
 	if err != nil {
 		return err
 	}
-	network := locked.(*managedNetworkLease)
+	var network *managedNetworkLease
+	if record.BootID != currentBoot {
+		// Only a cleaned historical journal may authorize logical invalidation. The current
+		// namespace and links must independently be absent; old kernel identities grant no effect.
+		network, err = lockPriorBootNetwork(ctx, key.Network(), record, currentBoot)
+	} else {
+		var locked NetworkLock
+		locked, err = (managedNetworkLocker{cleanup: true}).LockNetwork(ctx, key.Network())
+		if err == nil {
+			network = locked.(*managedNetworkLease)
+		}
+	}
+	if err != nil {
+		return err
+	}
 	defer func() {
 		returnErr = appendNetworkAuthorityError(returnErr, "release invalidated endpoint network", network.Release(context.WithoutCancel(ctx)))
 	}()
-	if network.record.bootID != record.BootID {
-		return networkAuthorityCorruptError("endpoint invalidation network boot identity changed", nil)
+	if network.record.configuration.l3.prefix.value.String() != record.Prefix ||
+		network.record.configuration.l3.gateway.value.String() != record.Gateway {
+		return networkAuthorityCorruptError("endpoint invalidation network logical identity changed", nil)
 	}
-	namespace := network.record.managedBridge.namespace
+	guest, err := netip.ParseAddr(record.GuestIPv4)
+	if err != nil {
+		return err
+	}
+	l3, err := deriveEndpointL3(key, network.record.configuration.l3,
+		endpointL3Input{guestAddress: guest, requestedMAC: &record.GuestMAC})
+	if err != nil {
+		return err
+	}
+	if err := requireFinalEndpointAbsent(ctx, hold, network, key); err != nil {
+		return err
+	}
+	_, namespace, err := network.host.descriptor()
+	if err != nil {
+		return err
+	}
 	mutation, err := firewall.BeginPolicyChange(ctx, network.mutation, firewall.PolicyBinding{
-		OwnerUID: owner, NetworkID: record.NetworkID, BootID: record.BootID,
+		OwnerUID: owner, NetworkID: record.NetworkID, BootID: currentBoot,
 		HostNamespace: firewall.NamespaceIdentity{Device: namespace.device, Inode: namespace.inode},
 	})
 	if err != nil {
@@ -64,5 +97,50 @@ func ForgetVMEndpoint(ctx context.Context, hold *authorityfs.TopologyHold, launc
 	defer func() {
 		returnErr = appendNetworkAuthorityError(returnErr, "release invalidated endpoint firewall", mutation.Release(context.WithoutCancel(ctx)))
 	}()
+	if err := mutation.VerifyRetiredEndpoint(ctx, firewall.EndpointReservation{
+		OwnerUID: owner, VMID: record.VMID, NetworkID: record.NetworkID,
+		Prefix: l3.network.prefix.value, Gateway: l3.network.gateway.value, IPv4: guest, MAC: [6]byte(l3.mac),
+	}); err != nil {
+		return err
+	}
+	if err := requireFinalEndpointAbsent(ctx, hold, network, key); err != nil {
+		return err
+	}
+	_, found, err = journal.read(ctx)
+	if err != nil || !found || !bytes.Equal(admittedRaw, journal.raw) {
+		return networkAuthorityCorruptError("cleaned endpoint journal changed before final invalidation", err)
+	}
+	observedBoot, err := readCurrentBootID(ctx)
+	if err != nil || observedBoot != currentBoot {
+		return networkAuthorityCorruptError("host boot changed before final endpoint invalidation", err)
+	}
 	return mutation.RemoveVMPolicies(ctx, record.VMID)
+}
+
+func requireFinalEndpointAbsent(
+	ctx context.Context, hold *authorityfs.TopologyHold, network *managedNetworkLease, key topologyKey,
+) error {
+	owner, ok := network.owner.(*systemNetworkLockUID)
+	if !ok || owner.value == nil {
+		return networkAuthorityCorruptError("final endpoint invalidation lacks concrete network owner", nil)
+	}
+	if err := owner.value.RequireNamespaceAbsent(ctx, hold); err != nil {
+		return err
+	}
+	fd, _, err := network.host.descriptor()
+	if err != nil {
+		return err
+	}
+	names := deriveTopologyNames(key)
+	route := newDirectRouteNetlink()
+	for _, name := range []linkName{names.hostVeth, names.namespaceVeth, names.localBridge, names.tap} {
+		link, err := route.inspectLink(ctx, fd, name)
+		if err != nil {
+			return networkAuthorityEffectError("inspect final VM endpoint link absence", err)
+		}
+		if link != nil {
+			return networkAuthorityCorruptError("final endpoint invalidation found an occupied VM link name", nil)
+		}
+	}
+	return nil
 }
