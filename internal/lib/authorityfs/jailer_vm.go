@@ -85,6 +85,43 @@ func (hold *TopologyHold) Binding() (uint32, VMKey, error) {
 	return state.ownerUID, state.key, nil
 }
 
+// Transfer consumes this hold and every copy into a new shared owner without releasing its
+// parent VM lock. Cancellation or admission failure leaves the original hold unchanged.
+func (hold *TopologyHold) Transfer(ctx context.Context) (*TopologyHold, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("authorityfs: topology transfer context is required")
+	}
+	if hold == nil || hold.state == nil {
+		return nil, fmt.Errorf("authorityfs: Jailer VM topology authority is not active")
+	}
+	state := hold.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.parent == nil {
+		return nil, fmt.Errorf("authorityfs: Jailer VM topology authority is not active")
+	}
+	parent := state.parent
+	parent.mu.Lock()
+	defer parent.mu.Unlock()
+	if parent.released || parent.lock == nil || parent.topologyBroken || parent.topologyHolds == 0 ||
+		parent.ownerUID != state.ownerUID || parent.key != state.key {
+		return nil, fmt.Errorf("authorityfs: Jailer VM topology authority parent is not active")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("authorityfs: transfer Jailer VM topology authority: %w", err)
+	}
+	target := &TopologyHold{state: &topologyHoldState{
+		parent: parent, ownerUID: state.ownerUID, key: state.key,
+	}}
+	// The same counted child moves between owners. Decrementing here would permit the VM
+	// authority to unlock while the consuming network transaction is still in progress.
+	state.parent = nil
+	state.ownerUID = 0
+	state.key = VMKey{}
+	state.released = true
+	return target, nil
+}
+
 // Release drops this topology hold exactly once across copies and concurrent callers.
 func (hold *TopologyHold) Release(ctx context.Context) error {
 	if hold == nil || hold.state == nil {
