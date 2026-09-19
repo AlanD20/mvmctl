@@ -66,12 +66,15 @@ func AdministratorInit(
 			return nil, administratorFailure("persist administrator pre-mutation state", err)
 		}
 	}
-	if journal.Operator != operator.name || journal.UID != operator.uid || journal.GID != operator.gid {
-		return nil, errs.New(errs.CodeHostInitFailed, "administrator journal belongs to a different operator")
-	}
 	result = &AdministratorInitResult{Changes: []*model.HostStateChangeItem{}}
 	if journal.Initialized {
-		return result, nil
+		return enrollAdministratorOperator(ctx, dir, operator, journal, result)
+	}
+	if journal.Operator != operator.name || journal.UID != operator.uid || journal.GID != operator.gid {
+		return nil, errs.New(
+			errs.CodeHostInitFailed,
+			"complete the interrupted global host initialization with its original operator before enrolling another account",
+		)
 	}
 	// A durable pending step survives command failure and interruption. Retrying
 	// converges through idempotent operations without replacing the original snapshot.
@@ -93,7 +96,7 @@ func AdministratorInit(
 		}
 	}
 	result.UserAddedToGroup = !journal.MemberExisted
-	return result, nil
+	return enrollAdministratorOperator(ctx, dir, operator, journal, result)
 }
 
 func prepareAdministratorJournal(ctx context.Context, operator AdministratorOperator) (*administratorJournal, error) {
