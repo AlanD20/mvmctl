@@ -36,16 +36,20 @@ func IsLaunchChildInvocation(args []string) bool {
 }
 
 type launchChildPlan struct {
-	Schema    uint32               `json:"schema"`
-	VMID      string               `json:"vm_id"`
-	UID       uint32               `json:"uid"`
-	GID       uint32               `json:"gid"`
-	Release   ReleaseSlot          `json:"release"`
-	Limits    model.VMCgroupLimits `json:"limits"`
-	CloudInit bool                 `json:"cloud_init"`
-	Metrics   bool                 `json:"metrics"`
-	Console   bool                 `json:"console"`
-	Volumes   []VMLaunchVolume     `json:"volumes,omitempty"`
+	Schema           uint32               `json:"schema"`
+	VMID             string               `json:"vm_id"`
+	UID              uint32               `json:"uid"`
+	GID              uint32               `json:"gid"`
+	Release          ReleaseSlot          `json:"release"`
+	Limits           model.VMCgroupLimits `json:"limits"`
+	CloudInit        bool                 `json:"cloud_init"`
+	Metrics          bool                 `json:"metrics"`
+	Console          bool                 `json:"console"`
+	Volumes          []VMLaunchVolume     `json:"volumes,omitempty"`
+	PCIEnabled       bool                 `json:"pci_enabled"`
+	NestedVirt       bool                 `json:"nested_virt"`
+	HostBootID       string               `json:"host_boot_id"`
+	LaunchGeneration uint64               `json:"launch_generation"`
 }
 
 // The descriptor ordering is fixed by the root-built launch plan; none is selected by caller argv.
@@ -217,8 +221,11 @@ func validateLaunchChildPlan(plan launchChildPlan, descriptors []int) error {
 	if len(plan.Volumes) > managedMMIOMaxInterruptSlots {
 		return instanceValidationError("launch child volume descriptor selection exceeds the MMIO pool")
 	}
-	if len(plan.Volumes) != 0 && plan.Release.Version != "1.16.1" {
+	if (len(plan.Volumes) != 0 || plan.PCIEnabled || plan.NestedVirt) && plan.Release.Version != "1.16.1" {
 		return instanceValidationError("launch child volume device release is unsupported")
+	}
+	if plan.NestedVirt && (!plan.PCIEnabled || plan.Release.Architecture != "x86_64") {
+		return instanceValidationError("launch child nested virtualization requires PCI")
 	}
 	volumes := make([]vmVolumeResourceSpec, 0, len(plan.Volumes))
 	for _, volume := range plan.Volumes {
@@ -230,7 +237,7 @@ func validateLaunchChildPlan(plan launchChildPlan, descriptors []int) error {
 	if err := validateVMVolumeResourceSelection(volumes); err != nil {
 		return err
 	}
-	if plan.Schema != 1 || !vmIDPattern.MatchString(plan.VMID) {
+	if plan.Schema != 1 || !vmIDPattern.MatchString(plan.VMID) || plan.HostBootID == "" || plan.LaunchGeneration == 0 {
 		return instanceValidationError("launch child setup identity is invalid")
 	}
 	if err := validateInstanceCaller(instanceCaller{uid: plan.UID, gid: plan.GID}); err != nil {
@@ -361,6 +368,15 @@ func prepareLaunchChildMounts(ctx context.Context, plan launchChildPlan, fds []i
 	if err := mountLaunchChildVolumes(ctx, plan, rootFD, fds[extra:extra+len(plan.Volumes)]); err != nil {
 		return err
 	}
+	if err := writeVMLaunchDeviceAuthority(
+		ctx,
+		plan,
+		rootFD,
+		fds[childConfig],
+		fds[extra:extra+len(plan.Volumes)],
+	); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -446,6 +462,9 @@ func execLaunchChildJailer(ctx context.Context, plan launchChildPlan, fds []int,
 		"--cgroup", fmt.Sprintf("pids.max=%d", limits.PIDsMax), "--",
 		"--api-sock", managedVMRuntimeMountPath + "/" + infra.VMFirecrackerAPISocketFilename,
 		"--config-file", managedVMPersistentMountPath + "/" + infra.VMFirecrackerConfigFilename}
+	if plan.PCIEnabled {
+		args = append(args, "--enable-pci")
+	}
 	return syscall.Exec(jailerPath, args, []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"})
 }
 

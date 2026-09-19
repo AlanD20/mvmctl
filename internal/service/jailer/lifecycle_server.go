@@ -62,7 +62,7 @@ func (server *VMLifecycleServer) Launch(
 		)
 	}()
 	var deviceProfile *vmFirecrackerDeviceProfile
-	if len(request.Volumes) != 0 {
+	if len(request.Volumes) != 0 || request.PCIEnabled || request.NestedVirt {
 		deviceProfile, err = prepared.deviceProfile()
 		if err != nil {
 			return VMLaunchResult{}, err

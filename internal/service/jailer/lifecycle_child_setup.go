@@ -33,8 +33,9 @@ func (lease *launchLease) sendChildSetup(
 		string(resources.vmID) != state.record.vmID || resources.preparedConfig == nil {
 		return instanceStateError(state.record.vmID, "launch child resources do not match durable authority")
 	}
-	if len(resources.volumes) != 0 && (resources.deviceProfile == nil ||
-		resources.deviceProfile.release != state.record.launch.release) {
+	if (len(resources.volumes) != 0 || resources.pciEnabled || resources.nestedVirt) &&
+		(resources.deviceProfile == nil ||
+			resources.deviceProfile.release != state.record.launch.release) {
 		return instanceStateError(state.record.vmID, "launch volume device budget differs from admitted release")
 	}
 	child := session.state
@@ -88,10 +89,14 @@ func (lease *launchLease) sendChildSetup(
 		return instanceStateError(state.record.vmID, "launch child fixed output descriptors are missing")
 	}
 	plan := launchChildPlan{
-		Schema: 1,
-		VMID:   state.record.vmID,
-		UID:    state.record.ownerUID,
-		GID:    state.record.launch.ownerGID,
+		HostBootID:       state.record.launch.hostBootID,
+		LaunchGeneration: state.record.launchGeneration,
+		PCIEnabled:       resources.pciEnabled,
+		NestedVirt:       resources.nestedVirt,
+		Schema:           1,
+		VMID:             state.record.vmID,
+		UID:              state.record.ownerUID,
+		GID:              state.record.launch.ownerGID,
 		Release: ReleaseSlot{
 			Version:      state.record.launch.release.version,
 			Architecture: state.record.launch.release.architecture,

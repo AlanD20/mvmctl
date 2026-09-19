@@ -54,6 +54,7 @@ type vmFirecrackerLaunchIntent struct {
 	volumes         []vmVolumeResourceSpec
 	deviceProfile   *vmFirecrackerDeviceProfile
 	pciEnabled      bool
+	nestedVirt      bool
 }
 
 // vmFirecrackerTapIdentity is deliberately not constructible from the wire. The root topology authority supplies
@@ -206,6 +207,29 @@ func marshalVMFirecrackerLaunchIntent(intent vmFirecrackerLaunchIntent) ([]byte,
 	}
 	if intent.cpuConfig != nil && intent.cpuConfig.KvmCapabilities == nil {
 		return nil, managedVMResourceValidationError("managed Firecracker CPU configuration is incomplete")
+	}
+	if intent.nestedVirt && (!intent.pciEnabled || intent.cpuConfig == nil) {
+		return nil, managedVMResourceValidationError(
+			"managed nested virtualization requires PCI and explicit CPU configuration",
+		)
+	}
+	if intent.nestedVirt && (intent.deviceProfile == nil || intent.deviceProfile.release.architecture != "x86_64") {
+		return nil, managedVMResourceValidationError(
+			"managed nested virtualization requires an admitted x86 CPU profile",
+		)
+	}
+	if intent.pciEnabled {
+		for argument := range strings.FieldsSeq(intent.bootArgs) {
+			if options, present := strings.CutPrefix(argument, "pci="); present {
+				for option := range strings.SplitSeq(options, ",") {
+					if option == "off" || option == "nomsi" {
+						return nil, managedVMResourceValidationError(
+							"managed PCI boot arguments disable the selected transport",
+						)
+					}
+				}
+			}
+		}
 	}
 	if err := validateVMFirecrackerDeviceBudget(intent); err != nil {
 		return nil, err

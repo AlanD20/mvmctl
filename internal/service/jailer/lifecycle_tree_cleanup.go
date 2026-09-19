@@ -166,7 +166,7 @@ func allowedJailCleanupEntry(kind jailCleanupDirectory, name string) (jailCleanu
 			return jailCleanupDevices, false, nil
 		case "volumes":
 			return jailCleanupVolumes, false, nil
-		case "firecracker", "rootfs", "kernel", infra.VMCloudInitISOFilename:
+		case "firecracker", "rootfs", "kernel", infra.VMCloudInitISOFilename, launchDeviceAuthorityLeaf:
 			return 0, true, nil
 		}
 	case jailCleanupRun:
@@ -225,6 +225,14 @@ func removeJailFixedLeaf(
 		original.Uid == record.ownerUID && original.Gid == record.launch.ownerGID
 	if !ownerAllowed || original.Nlink != 1 || original.Mode&0022 != 0 {
 		return processAuthorityError(record.vmID, "stopped jail leaf metadata is not admitted", nil)
+	}
+	// A failed publication may leave the exclusive root-owned staging mode. Only this
+	// fixed bounded metadata leaf, never an arbitrary caller file, is removed after exit.
+	if kind == jailCleanupRoot && name == launchDeviceAuthorityLeaf &&
+		(original.Uid != 0 || original.Gid != 0 || original.Size < 0 ||
+			original.Size > launchDeviceAuthorityMaxBytes ||
+			(original.Mode != unix.S_IFREG|0400 && original.Mode != unix.S_IFREG|0600)) {
+		return processAuthorityError(record.vmID, "stopped launch device authority metadata is not admitted", nil)
 	}
 	// Volume sources lived only in the departed private mount namespace. Cleanup may remove
 	// only the empty root-owned attachment placeholders, never caller data or a surviving mount.

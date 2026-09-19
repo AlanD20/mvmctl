@@ -1,0 +1,335 @@
+package jailer
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+
+	"golang.org/x/sys/unix"
+
+	"mvmctl/internal/infra"
+)
+
+const (
+	launchDeviceAuthorityLeaf     = ".mvm-device-authority.json"
+	launchDeviceAuthorityMaxBytes = 64 * 1024
+)
+
+// vmLaunchDeviceAuthority is written exclusively by the authenticated root child before exec.
+// CRITICAL: It describes admitted launch state, not the mutable Firecracker API or caller SQLite.
+type vmLaunchDeviceAuthority struct {
+	Schema           uint32               `json:"schema"`
+	VMID             string               `json:"vm_id"`
+	OwnerUID         uint32               `json:"owner_uid"`
+	HostBootID       string               `json:"host_boot_id"`
+	LaunchGeneration uint64               `json:"launch_generation"`
+	Release          ReleaseSlot          `json:"release"`
+	PCIEnabled       bool                 `json:"pci_enabled"`
+	NestedVirt       bool                 `json:"nested_virt"`
+	CloudInit        bool                 `json:"cloud_init"`
+	Vsock            bool                 `json:"vsock"`
+	BootArgs         string               `json:"boot_args"`
+	ConfigSHA256     string               `json:"config_sha256"`
+	Volumes          []launchDeviceVolume `json:"volumes"`
+}
+
+type launchDeviceVolume struct {
+	Selection   VMLaunchVolume `json:"selection"`
+	DeviceMajor uint32         `json:"device_major"`
+	DeviceMinor uint32         `json:"device_minor"`
+	Inode       uint64         `json:"inode"`
+	UID         uint32         `json:"uid"`
+	GID         uint32         `json:"gid"`
+	Mode        uint16         `json:"mode"`
+}
+
+func writeVMLaunchDeviceAuthority(
+	ctx context.Context,
+	plan launchChildPlan,
+	rootFD int,
+	configFD int,
+	volumeFDs []int,
+) (returnErr error) {
+	if plan.HostBootID == "" || plan.LaunchGeneration == 0 || len(volumeFDs) != len(plan.Volumes) {
+		return instanceValidationError("launch device authority generation is incomplete")
+	}
+	configBytes, err := readSealedLaunchDeviceConfig(ctx, configFD)
+	if err != nil {
+		return err
+	}
+	config, err := decodeManagedFirecrackerConfig(configBytes)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(configBytes)
+	metadata := vmLaunchDeviceAuthority{
+		Schema: 1, VMID: plan.VMID, OwnerUID: plan.UID, HostBootID: plan.HostBootID,
+		LaunchGeneration: plan.LaunchGeneration, Release: plan.Release, PCIEnabled: plan.PCIEnabled,
+		NestedVirt: plan.NestedVirt, CloudInit: plan.CloudInit, Vsock: config.Vsock != nil,
+		BootArgs: config.BootSource.BootArgs, ConfigSHA256: hex.EncodeToString(digest[:]),
+		Volumes: make([]launchDeviceVolume, 0, len(plan.Volumes)),
+	}
+	for index, selection := range plan.Volumes {
+		identity, err := stableManagedVMConfigStat(ctx, realManagedFirecrackerConfigDeps(), volumeFDs[index])
+		if err != nil {
+			return err
+		}
+		if identity.uid != plan.UID || identity.size != selection.ExpectedBytes || identity.nlink != 1 {
+			return instanceValidationError("launch volume source changed before device authority publication")
+		}
+		metadata.Volumes = append(metadata.Volumes, launchDeviceVolume{
+			Selection:   selection,
+			DeviceMajor: identity.deviceMajor,
+			DeviceMinor: identity.deviceMinor,
+			Inode:       identity.inode,
+			UID:         identity.uid,
+			GID:         identity.gid,
+			Mode:        identity.mode,
+		})
+	}
+	if err := metadata.validate(); err != nil {
+		return err
+	}
+	if err := metadata.matchesConfig(config); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return managedVMResourceAtomicError("encode launch device authority", err)
+	}
+	if len(encoded) > launchDeviceAuthorityMaxBytes {
+		return instanceValidationError("launch device authority exceeds its bounded record size")
+	}
+	fd, err := unix.Openat2(rootFD, launchDeviceAuthorityLeaf, &unix.OpenHow{
+		Flags: unix.O_WRONLY | unix.O_CREAT | unix.O_EXCL | unix.O_CLOEXEC | unix.O_NOFOLLOW,
+		Mode:  0600, Resolve: managedVMResourceResolveFlags,
+	})
+	if err != nil {
+		return processAuthorityError(plan.VMID, "create exclusive launch device authority", err)
+	}
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(fd)) }()
+	for offset := 0; offset < len(encoded); {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		count, err := unix.Write(fd, encoded[offset:])
+		if err != nil {
+			return processAuthorityError(plan.VMID, "write launch device authority", err)
+		}
+		if count <= 0 || count > len(encoded)-offset {
+			return processAuthorityError(plan.VMID, "write launch device authority", io.ErrNoProgress)
+		}
+		offset += count
+	}
+	if err := unix.Fchmod(fd, 0400); err != nil {
+		return err
+	}
+	if err := unix.Fsync(fd); err != nil {
+		return err
+	}
+	return unix.Fsync(rootFD)
+}
+
+// readVMLaunchDeviceAuthority requires the caller's retained VM lock and verified active root descriptor.
+// CRITICAL: The root inode and record owner/generation/release must match before any device decision.
+func readVMLaunchDeviceAuthority(
+	ctx context.Context,
+	record instanceRecord,
+	rootFD int,
+) (_ vmLaunchDeviceAuthority, returnErr error) {
+	if record.active == nil || record.launch == nil || record.lifecycle != instanceLifecycleActive {
+		return vmLaunchDeviceAuthority{}, instanceStateError(record.vmID, "active device authority is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return vmLaunchDeviceAuthority{}, err
+	}
+	var root unix.Stat_t
+	if err := unix.Fstat(rootFD, &root); err != nil {
+		return vmLaunchDeviceAuthority{}, err
+	}
+	if root.Mode != unix.S_IFDIR|0755 || root.Uid != 0 || root.Gid != 0 ||
+		uint64(root.Dev) != record.active.jailRoot.device || root.Ino != record.active.jailRoot.inode {
+		return vmLaunchDeviceAuthority{}, instanceStateError(
+			record.vmID,
+			"device authority root differs from active identity",
+		)
+	}
+	fd, err := unix.Openat2(rootFD, launchDeviceAuthorityLeaf, &unix.OpenHow{
+		Flags:   unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW,
+		Resolve: managedVMResourceResolveFlags,
+	})
+	if err != nil {
+		return vmLaunchDeviceAuthority{}, processAuthorityError(record.vmID, "open root launch device authority", err)
+	}
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(fd)) }()
+	deps := realManagedFirecrackerConfigDeps()
+	before, err := stableManagedVMConfigStat(ctx, deps, fd)
+	if err != nil {
+		return vmLaunchDeviceAuthority{}, err
+	}
+	if before.mode != unix.S_IFREG|0400 || before.uid != 0 || before.gid != 0 || before.nlink != 1 ||
+		before.size == 0 || before.size > launchDeviceAuthorityMaxBytes {
+		return vmLaunchDeviceAuthority{}, instanceStateError(
+			record.vmID,
+			"launch device authority file is not root protected",
+		)
+	}
+	data, err := readLaunchDeviceBytes(ctx, fd, int(before.size))
+	if err != nil {
+		return vmLaunchDeviceAuthority{}, err
+	}
+	after, err := stableManagedVMConfigStat(ctx, deps, fd)
+	if err != nil {
+		return vmLaunchDeviceAuthority{}, err
+	}
+	if before != after {
+		return vmLaunchDeviceAuthority{}, instanceStateError(record.vmID, "launch device authority changed during read")
+	}
+	var metadata vmLaunchDeviceAuthority
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&metadata); err != nil {
+		return vmLaunchDeviceAuthority{}, processAuthorityError(record.vmID, "decode launch device authority", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return vmLaunchDeviceAuthority{}, instanceValidationError("launch device authority contains trailing data")
+	}
+	if err := metadata.validate(); err != nil {
+		return vmLaunchDeviceAuthority{}, err
+	}
+	if metadata.VMID != record.vmID || metadata.OwnerUID != record.ownerUID ||
+		metadata.HostBootID != record.launch.hostBootID || metadata.LaunchGeneration != record.launchGeneration ||
+		metadata.Release.Version != record.launch.release.version ||
+		metadata.Release.Architecture != record.launch.release.architecture {
+		return vmLaunchDeviceAuthority{}, instanceStateError(record.vmID, "launch device authority binding differs")
+	}
+	return metadata, nil
+}
+
+func (metadata vmLaunchDeviceAuthority) validate() error {
+	if metadata.Schema != 1 || !vmIDPattern.MatchString(metadata.VMID) || metadata.OwnerUID == 0 ||
+		metadata.HostBootID == "" || metadata.LaunchGeneration == 0 ||
+		!isCanonicalManagedResourceID(metadata.ConfigSHA256, 64) {
+		return instanceValidationError("launch device authority identity is invalid")
+	}
+	if err := metadata.Release.Validate(); err != nil {
+		return err
+	}
+	if metadata.NestedVirt && (!metadata.PCIEnabled || metadata.Release.Architecture != "x86_64") {
+		return instanceValidationError("launch nested virtualization authority is unsupported")
+	}
+	if metadata.PCIEnabled {
+		if err := metadata.admitVolumeCount(len(metadata.Volumes)); err != nil {
+			return err
+		}
+	}
+	if len(metadata.Volumes) > managedMMIOMaxInterruptSlots || metadata.Volumes == nil {
+		return instanceValidationError("launch device authority volume inventory is invalid")
+	}
+	volumes := make([]vmVolumeResourceSpec, 0, len(metadata.Volumes))
+	for _, volume := range metadata.Volumes {
+		if err := volume.Selection.Validate(); err != nil {
+			return err
+		}
+		if volume.Inode == 0 || volume.DeviceMajor == 0 && volume.DeviceMinor == 0 {
+			return instanceValidationError("launch device authority volume source identity is incomplete")
+		}
+		if volume.Mode&unix.S_IFMT != unix.S_IFREG || volume.Mode&07022 != 0 {
+			return instanceValidationError("launch device authority volume source mode is not admitted")
+		}
+		volumes = append(volumes, volume.Selection.private())
+	}
+	return validateVMVolumeResourceSelection(volumes)
+}
+
+// admitVolumeCount admits the complete post-operation data-volume inventory, not a delta.
+// The retained root record supplies transport and fixed-device counts; the hotplug journal
+// must supply the authenticated current volume inventory before proposing its next count.
+func (metadata vmLaunchDeviceAuthority) admitVolumeCount(count int) error {
+	if !metadata.PCIEnabled || metadata.Release.Version != "1.16.1" {
+		return instanceValidationError("live device changes require the admitted Firecracker PCI release")
+	}
+	return validateManagedPCITopology(metadata.Release.Architecture, metadata.CloudInit, metadata.Vsock, count)
+}
+
+func (metadata vmLaunchDeviceAuthority) matchesConfig(config managedFirecrackerConfig) error {
+	want := 1 + len(metadata.Volumes)
+	if metadata.CloudInit {
+		want++
+	}
+	if len(config.Drives) != want || config.Drives[0].DriveID != "rootfs" ||
+		config.Drives[0].PathOnHost != "/rootfs" || !config.Drives[0].IsRootDevice ||
+		len(config.NetworkInterfaces) != 1 || (config.Vsock != nil) != metadata.Vsock ||
+		config.BootSource.BootArgs != metadata.BootArgs {
+		return instanceValidationError("launch device authority differs from sealed device topology")
+	}
+	start := 1
+	if metadata.CloudInit {
+		if config.Drives[1].DriveID != "cloud-init" || !config.Drives[1].IsReadOnly ||
+			config.Drives[1].IsRootDevice || config.Drives[1].PathOnHost != "/"+infra.VMCloudInitISOFilename {
+			return instanceValidationError("launch cloud-init authority differs from sealed configuration")
+		}
+		start++
+	}
+	for index, volume := range metadata.Volumes {
+		drive := config.Drives[start+index]
+		if drive.DriveID != volume.Selection.ID || drive.PathOnHost != volume.Selection.private().jailPath() ||
+			drive.IsRootDevice || drive.IsReadOnly != volume.Selection.ReadOnly ||
+			drive.CacheType != volume.Selection.CacheType || drive.IOEngine != "Sync" || drive.Partuuid != nil {
+			return instanceValidationError("launch volume authority differs from sealed configuration")
+		}
+	}
+	return nil
+}
+
+func readSealedLaunchDeviceConfig(ctx context.Context, fd int) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	seals, err := unix.FcntlInt(uintptr(fd), unix.F_GET_SEALS, 0)
+	if err != nil || seals&managedVMConfigRequiredSeals != managedVMConfigRequiredSeals {
+		return nil, managedVMResourceAtomicError("launch device configuration is not sealed", err)
+	}
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return nil, err
+	}
+	if stat.Mode != unix.S_IFREG|0444 || stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 0 ||
+		stat.Size < 1 || uint64(stat.Size) > managedVMConfigMaxBytes {
+		return nil, instanceValidationError("launch device configuration is not the protected canonical memfd")
+	}
+	return readLaunchDeviceBytes(ctx, fd, int(stat.Size))
+}
+
+func readLaunchDeviceBytes(ctx context.Context, fd, length int) ([]byte, error) {
+	data := make([]byte, length)
+	for offset := 0; offset < length; {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		count, err := unix.Pread(fd, data[offset:], int64(offset))
+		if err != nil {
+			return nil, managedVMResourceAtomicError("read launch device authority", err)
+		}
+		if count <= 0 || count > length-offset {
+			return nil, managedVMResourceAtomicError("read launch device authority", io.ErrUnexpectedEOF)
+		}
+		offset += count
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var probe [1]byte
+	count, err := unix.Pread(fd, probe[:], int64(length))
+	if err != nil {
+		return nil, managedVMResourceAtomicError("probe launch device authority", err)
+	}
+	if count != 0 {
+		return nil, instanceValidationError("launch device authority grew while reading")
+	}
+	return data, nil
+}

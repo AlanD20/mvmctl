@@ -79,6 +79,10 @@ func (s *FirecrackerSpawner) Generate() (*model.FirecrackerVMConfig, error) {
 	s.config.TapName = tapName
 	// Nested virt requires PCI — force it on
 	if s.config.NestedVirt {
+		if s.config.ReleaseArchitecture != "x86_64" {
+			return nil, errs.New(errs.CodeFirecrackerConfigError,
+				"nested virtualization requires an admitted architecture-specific CPU profile")
+		}
 		s.config.PCIEnabled = true
 	}
 

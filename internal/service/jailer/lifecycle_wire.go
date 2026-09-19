@@ -50,6 +50,8 @@ type VMLaunchRequest struct {
 	VsockCID        *uint32              `json:"vsock_cid,omitempty"`
 	CgroupLimits    model.VMCgroupLimits `json:"cgroup_limits"`
 	Volumes         []VMLaunchVolume     `json:"volumes,omitempty"`
+	PCIEnabled      bool                 `json:"pci_enabled"`
+	NestedVirt      bool                 `json:"nested_virt"`
 }
 
 // VMLaunchVolume selects one canonical raw file without granting pathname authority.
@@ -121,7 +123,7 @@ func (request *VMLaunchRequest) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
-	for _, name := range []string{"vm_id", "cache_root", "kernel_id", "rootfs_bytes", "release", "network_id", "guest_ipv4", "guest_mac", "boot_args", "vcpus", "memory_mib", "smt", "track_dirty_pages", "rootfs_cache_type", "cloud_init", "logging", "log_level", "metrics", "console", "cgroup_limits"} {
+	for _, name := range []string{"vm_id", "cache_root", "kernel_id", "rootfs_bytes", "release", "network_id", "guest_ipv4", "guest_mac", "boot_args", "vcpus", "memory_mib", "smt", "track_dirty_pages", "rootfs_cache_type", "cloud_init", "logging", "log_level", "metrics", "console", "cgroup_limits", "pci_enabled", "nested_virt"} {
 		field, ok := fields[name]
 		if !ok || bytes.Equal(bytes.TrimSpace(field), []byte("null")) {
 			return fmt.Errorf("launch request %s is required", name)
@@ -152,6 +154,12 @@ type VMCleanupResult struct {
 
 // Validate enforces receiver resource selection and guest intent without any effect.
 func (request VMLaunchRequest) Validate() error {
+	if request.NestedVirt && (!request.PCIEnabled || request.CPUConfig == nil) {
+		return instanceValidationError("nested virtualization requires PCI and explicit CPU configuration")
+	}
+	if request.NestedVirt && request.Release.Architecture != "x86_64" {
+		return instanceValidationError("nested virtualization requires an admitted architecture-specific CPU profile")
+	}
 	if len(request.Volumes) > managedMMIOMaxInterruptSlots {
 		return instanceValidationError("VM launch volume selection exceeds the MMIO allocator capacity")
 	}
@@ -212,6 +220,7 @@ func (request VMLaunchRequest) launchIntent(tap vmFirecrackerTapIdentity) vmFire
 		tapIdentity: tap, rootfsCacheType: request.RootfsCacheType, cloudInit: cloudInit,
 		enableLogging: request.Logging, logLevel: request.LogLevel, enableMetrics: request.Metrics,
 		cpuConfig: request.CPUConfig, vsockCID: request.VsockCID, volumes: volumes,
+		pciEnabled: request.PCIEnabled, nestedVirt: request.NestedVirt,
 	}
 }
 

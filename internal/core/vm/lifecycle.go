@@ -76,12 +76,6 @@ func (s *FirecrackerSpawner) lifecycleRequest() (jailersvc.VMLaunchRequest, erro
 			"snapshot launch requires admitted snapshot capture authority",
 		)
 	}
-	if s.config.PCIEnabled || s.config.NestedVirt {
-		return jailersvc.VMLaunchRequest{}, errs.New(
-			errs.CodeFirecrackerSpawnError,
-			"managed launch does not admit PCI devices",
-		)
-	}
 	config, err := s.Generate()
 	if err != nil {
 		return jailersvc.VMLaunchRequest{}, err
@@ -104,7 +98,10 @@ func (s *FirecrackerSpawner) lifecycleRequest() (jailersvc.VMLaunchRequest, erro
 		RootfsBytes: uint64(
 			rootfs.Size(),
 		),
-		Release:         jailersvc.ReleaseSlot{Version: s.config.BinaryVersion, Architecture: s.config.ReleaseArchitecture},
+		Release: jailersvc.ReleaseSlot{
+			Version:      s.config.BinaryVersion,
+			Architecture: s.config.ReleaseArchitecture,
+		},
 		NetworkID:       s.config.NetworkID,
 		GuestIPv4:       s.config.GuestIP,
 		GuestMAC:        s.config.GuestMAC,
@@ -122,6 +119,8 @@ func (s *FirecrackerSpawner) lifecycleRequest() (jailersvc.VMLaunchRequest, erro
 		CPUConfig:       config.CPUConfig,
 		CgroupLimits:    s.config.CgroupLimits,
 		Volumes:         volumes,
+		PCIEnabled:      s.config.PCIEnabled,
+		NestedVirt:      s.config.NestedVirt,
 	}
 	if s.config.VsockGuestCID != nil {
 		cid := uint32(*s.config.VsockGuestCID)

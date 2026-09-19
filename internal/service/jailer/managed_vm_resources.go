@@ -62,6 +62,8 @@ type vmLaunchResourceLease struct {
 	preparedConfig *preparedFirecrackerConfig
 	volumes        []pinnedVMVolumeResource
 	deviceProfile  *vmFirecrackerDeviceProfile
+	pciEnabled     bool
+	nestedVirt     bool
 	retained       []int
 }
 
@@ -301,6 +303,8 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 		preparedConfig: preparedConfig,
 		volumes:        volumes,
 		deviceProfile:  spec.firecracker.deviceProfile,
+		pciEnabled:     spec.firecracker.pciEnabled,
+		nestedVirt:     spec.firecracker.nestedVirt,
 		retained:       retained,
 	}
 	cache.retained = nil
@@ -539,6 +543,8 @@ func (lease *vmLaunchResourceLease) Release(ctx context.Context) error {
 	lease.preparedConfig = nil
 	lease.volumes = nil
 	lease.deviceProfile = nil
+	lease.pciEnabled = false
+	lease.nestedVirt = false
 	if result != nil {
 		return result
 	}
