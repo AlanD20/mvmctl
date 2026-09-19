@@ -1,3 +1,6 @@
+// Package loopmount provides closed managed-rootfs provisioning, inspection, and image optimization.
+// Its privileged receivers derive resource authority from authenticated callers and retained descriptors;
+// callers cannot supply executable commands, host effect paths, or mount targets.
 package loopmount
 
 import (
