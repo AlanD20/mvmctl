@@ -121,19 +121,16 @@ func RemoveUserFromGroup(ctx context.Context, username, groupName string) (bool,
 	return true, nil
 }
 
-// --- GenerateSudoersContent ---
-// Map iteration order is random; iterate over an ordered key slice instead.
+// GenerateSudoersContent restricts the canonical binary to its early privileged marker.
 func GenerateSudoersContent(groupName string) string {
-	// IMPORTANT: This wildcard and the raw tool entries remain transitional
-	// until Tasks 4-8 migrate their live callsites to typed privileged actions.
-	runCmd := infra.SystemBinaryPath + " *"
-	binaries := append(infra.PrivilegedBinariesOrdered[:], runCmd)
-	binariesStr := strings.Join(binaries, ", ")
+	// CRITICAL: only the suffix after the reserved marker may vary. Neither a
+	// public CLI command nor a standalone host tool can match this grant.
+	runCmd := infra.SystemBinaryPath + " " + infra.PrivilegedProtocolMarker + " *"
 	return fmt.Sprintf(
 		"# Managed by %s — do not edit manually.\n"+
-			"# To remove: %s host reset\n"+
+			"# To remove: sudo %s host reset --force\n"+
 			"%%%s ALL=(root) NOPASSWD: %s\n",
-		infra.ProjectName, infra.ProjectName, groupName, binariesStr,
+		infra.ProjectName, infra.SystemBinaryPath, groupName, runCmd,
 	)
 }
 

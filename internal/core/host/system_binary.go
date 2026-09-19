@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"slices"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -512,9 +511,9 @@ func guardSystemBinaryInstallSudoers(deps systemBinaryInstallDeps) error {
 }
 
 func validateSystemBinaryInstallSudoers(content string) error {
-	prefix := fmt.Sprintf("%%%s ALL=(root) NOPASSWD:", infra.MVMUnixGroup)
-	canonicalWildcard := infra.SystemBinaryPath + " *"
-	markerWildcard := infra.SystemBinaryPath + " " + infra.PrivilegedProtocolMarker + " *"
+	grant := fmt.Sprintf("%%%s ALL=(root) NOPASSWD: %s %s *",
+		infra.MVMUnixGroup, infra.SystemBinaryPath, infra.PrivilegedProtocolMarker)
+	found := false
 	for index, rawLine := range strings.Split(content, "\n") {
 		line := strings.TrimSpace(rawLine)
 		if line == "" {
@@ -525,21 +524,13 @@ func validateSystemBinaryInstallSudoers(content string) error {
 			!strings.HasPrefix(line, "#includedir") {
 			continue
 		}
-		if !strings.HasPrefix(line, prefix) {
+		if line != grant || found {
 			return unrecognizedSystemBinaryInstallSudoers(index+1, line)
 		}
-		commandList := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		if commandList == "" {
-			return unrecognizedSystemBinaryInstallSudoers(index+1, line)
-		}
-		for _, rawCommand := range strings.Split(commandList, ",") {
-			command := strings.TrimSpace(rawCommand)
-			if command == canonicalWildcard || command == markerWildcard ||
-				slices.Contains(infra.PrivilegedBinariesOrdered[:], command) {
-				continue
-			}
-			return unrecognizedSystemBinaryInstallSudoers(index+1, line)
-		}
+		found = true
+	}
+	if !found {
+		return unrecognizedSystemBinaryInstallSudoers(1, "missing marker-only grant")
 	}
 	return nil
 }

@@ -3,11 +3,9 @@ package host
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/user"
 	"slices"
-	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -39,10 +37,8 @@ func AdministratorInit(
 	if err := verifyCanonicalSystemBinaryForSudoers(); err != nil {
 		return nil, err
 	}
-	if operator.sudo {
-		if err := guardAdministratorSudo(ctx); err != nil {
-			return nil, err
-		}
+	if err := guardAdministratorSudo(ctx); err != nil {
+		return nil, err
 	}
 	admission, err := hostadmission.AcquireAdministrator(ctx)
 	if err != nil {
@@ -60,6 +56,12 @@ func AdministratorInit(
 	}
 	if journal != nil && journal.ResetState == "restoring" {
 		return nil, errs.New(errs.CodeHostInitFailed, "complete the interrupted host reset before initializing")
+	}
+	if journal != nil {
+		if err := validateSystemBinaryInstallSudoers(journal.AppliedSudoers); err != nil {
+			return nil, errs.WrapMsg(errs.CodeHostInitFailed,
+				"administrator journal records an incompatible sudoers policy; clean installation is required", err)
+		}
 	}
 	if journal == nil || journal.ResetState == "complete" {
 		journal, err = prepareAdministratorJournal(ctx, operator)
@@ -330,17 +332,7 @@ func guardAdministratorSudo(ctx context.Context) (returnErr error) {
 	if err != nil {
 		return err
 	}
-	allowed := fmt.Sprintf("%%%s ALL=(root) NOPASSWD: %s %s *",
-		infra.MVMUnixGroup, infra.SystemBinaryPath, infra.PrivilegedProtocolMarker)
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || (strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "#include")) || line == allowed {
-			continue
-		}
-		return errs.New(errs.CodePrivilegeRequired,
-			"managed sudoers may grant passwordless administrator access; use direct root with --operator")
-	}
-	return nil
+	return validateSystemBinaryInstallSudoers(string(data))
 }
 
 func administratorFailure(operation string, cause error) error {

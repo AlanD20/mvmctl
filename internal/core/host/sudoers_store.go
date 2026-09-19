@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"time"
@@ -144,6 +143,9 @@ func publishSudoers(ctx context.Context, deps sudoersStoreDeps, policy sudoersSt
 		}
 		content, err := readSudoersFile(ctx, deps, previousFD, previous)
 		if err != nil {
+			return false, err
+		}
+		if err := validateSystemBinaryInstallSudoers(string(content)); err != nil {
 			return false, err
 		}
 		if string(content) == want {
@@ -345,11 +347,8 @@ func verifySudoersLeaf(
 }
 
 func validateSudoersPolicy(ctx context.Context, deps sudoersStoreDeps, content string) error {
-	// Keep the transitional raw-tool preflight until those grants are removed.
-	for _, binary := range infra.PrivilegedBinariesOrdered {
-		if _, err := deps.stat(ctx, binary); err != nil {
-			return sudoersStoreError(fmt.Sprintf("inspect required sudoers binary %s", binary), err)
-		}
+	if err := validateSystemBinaryInstallSudoers(content); err != nil {
+		return err
 	}
 	result, err := deps.run(ctx, []string{"/usr/sbin/visudo", "-c", "-f", "-"}, system.RunCmdOpts{
 		Check: true, Capture: true, Input: content, Timeout: 15 * time.Second, ReplaceEnv: true,
