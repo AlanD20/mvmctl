@@ -32,6 +32,8 @@ type administratorJournal struct {
 	Completed       int     `json:"completed"`
 	Pending         bool    `json:"pending"`
 	Initialized     bool    `json:"initialized"`
+	ResetState      string  `json:"reset_state,omitempty"`
+	ResetStep       int     `json:"reset_step,omitempty"`
 }
 
 // openAdministratorDirectory only traverses compiled root-owned paths. It never
@@ -213,6 +215,12 @@ func loadAdministratorJournal(dir *os.File) (*administratorJournal, error) {
 		(journal.Initialized && (journal.Pending || journal.Completed != 6)) {
 		return nil, errors.New("invalid administrator journal")
 	}
+	if (journal.ResetState != "" && journal.ResetState != "restoring" && journal.ResetState != "complete") ||
+		journal.ResetStep < 0 || journal.ResetStep > 4 ||
+		(journal.ResetState == "" && journal.ResetStep != 0) ||
+		(journal.ResetState == "complete" && (journal.ResetStep != 4 || journal.Initialized)) {
+		return nil, errors.New("invalid administrator reset state")
+	}
 	return &journal, nil
 }
 
@@ -222,30 +230,4 @@ func saveAdministratorJournal(ctx context.Context, dir *os.File, journal *admini
 		return err
 	}
 	return writeAdministratorFile(ctx, dir, "journal.json", data, 0600)
-}
-
-func lockAdministratorJournal(dir *os.File) (*os.File, error) {
-	fd, err := unix.Openat(
-		int(dir.Fd()),
-		"lock",
-		unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_CREAT|unix.O_NONBLOCK,
-		0600,
-	)
-	if err != nil {
-		return nil, err
-	}
-	file := os.NewFile(uintptr(fd), "lock")
-	var stat unix.Stat_t
-	err = unix.Fstat(fd, &stat)
-	if err == nil && (stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Mode&07777 != 0600 ||
-		stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 || stat.Size != 0) {
-		err = errors.New("unsafe administrator lock")
-	}
-	if err == nil {
-		err = unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
-	}
-	if err != nil {
-		return nil, errors.Join(err, file.Close())
-	}
-	return file, nil
 }

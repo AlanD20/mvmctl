@@ -151,7 +151,7 @@ func run(
 		return deliverPreDispatchError(ctx, endpoint, request.action, err, deps.control)
 	}
 	defer func() {
-		returnErr = appendPrivilegedExecutableReleaseError(
+		returnErr = appendHostAdmissionReleaseError(
 			returnErr, admission.Release(context.WithoutCancel(ctx)),
 		)
 	}()

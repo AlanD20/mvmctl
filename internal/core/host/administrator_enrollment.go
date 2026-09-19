@@ -21,6 +21,7 @@ type administratorEnrollment struct {
 	GID           string `json:"gid"`
 	MemberExisted bool   `json:"member_existed"`
 	Completed     bool   `json:"completed"`
+	Reverted      bool   `json:"reverted,omitempty"`
 }
 
 // CALLER MUST HOLD: the global administrator journal lock, including during the
@@ -44,7 +45,7 @@ func enrollAdministratorOperator(
 		return result, errs.New(errs.CodeHostInitFailed,
 			"initialized operator group is missing; refusing to repeat global host mutations")
 	}
-	if record == nil {
+	if record == nil || record.Reverted {
 		priorMembership := memberExists
 		if journal.UID == operator.uid {
 			if journal.Operator != operator.name || journal.GID != operator.gid {
@@ -112,6 +113,7 @@ func loadAdministratorEnrollment(dir *os.File, operator AdministratorOperator) (
 		GID           string `json:"gid"`
 		MemberExisted *bool  `json:"member_existed"`
 		Completed     *bool  `json:"completed"`
+		Reverted      bool   `json:"reverted,omitempty"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
@@ -128,7 +130,7 @@ func loadAdministratorEnrollment(dir *os.File, operator AdministratorOperator) (
 	}
 	return &administratorEnrollment{
 		Version: wire.Version, Operator: wire.Operator, UID: wire.UID, GID: wire.GID,
-		MemberExisted: *wire.MemberExisted, Completed: *wire.Completed,
+		MemberExisted: *wire.MemberExisted, Completed: *wire.Completed, Reverted: wire.Reverted,
 	}, nil
 }
 

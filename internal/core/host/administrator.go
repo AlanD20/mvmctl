@@ -58,7 +58,10 @@ func AdministratorInit(
 	if err != nil {
 		return nil, administratorFailure("read administrator journal", err)
 	}
-	if journal == nil {
+	if journal != nil && journal.ResetState == "restoring" {
+		return nil, errs.New(errs.CodeHostInitFailed, "complete the interrupted host reset before initializing")
+	}
+	if journal == nil || journal.ResetState == "complete" {
 		journal, err = prepareAdministratorJournal(ctx, operator)
 		if err != nil {
 			return nil, administratorFailure("snapshot administrator state", err)
@@ -69,6 +72,10 @@ func AdministratorInit(
 	}
 	result = &AdministratorInitResult{Changes: []*model.HostStateChangeItem{}}
 	if journal.Initialized {
+		group, err := user.LookupGroup(infra.MVMUnixGroup)
+		if err != nil || journal.GroupGID == nil || group.Gid != *journal.GroupGID {
+			return result, administratorFailure("initialized operator group identity changed", err)
+		}
 		result, err = enrollAdministratorOperator(ctx, dir, operator, journal, result)
 		if err != nil {
 			return result, err
@@ -103,6 +110,12 @@ func AdministratorInit(
 			group, err := user.LookupGroup(infra.MVMUnixGroup)
 			if err != nil {
 				return result, administratorFailure("record initialized group identity", err)
+			}
+			if journal.GroupGID != nil && *journal.GroupGID != group.Gid {
+				return result, errs.New(
+					errs.CodeHostInitFailed,
+					"operator group identity changed during initialization",
+				)
 			}
 			gid := group.Gid
 			journal.GroupGID = &gid
@@ -328,19 +341,6 @@ func guardAdministratorSudo(ctx context.Context) (returnErr error) {
 			"managed sudoers may grant passwordless administrator access; use direct root with --operator")
 	}
 	return nil
-}
-
-// AdministratorReset refuses to treat a user database or unclassified root
-// records as proof that global VM/network teardown has completed.
-func AdministratorReset(ctx context.Context, operator AdministratorOperator) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if os.Geteuid() != 0 || operator.uid == "" {
-		return errs.New(errs.CodePrivilegeRequired, "administrator operator admission is required")
-	}
-	return errs.New(errs.CodeHostResetFailed,
-		"administrator reset requires trusted global VM and network cleanup authority; no host changes were reverted")
 }
 
 func administratorFailure(operation string, cause error) error {
