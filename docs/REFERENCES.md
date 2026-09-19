@@ -120,7 +120,7 @@ Host configuration commands for one-time, machine-global setup.
 | `mvm host status` | `--json` | Show current host configuration state vs expected |
 | `mvm host info` | `--refresh`, `--json` | Show host hardware, limits, and VM capacity projection |
 | `mvm host clean` | `-f, --force` | Currently refuses cleanup until trusted global VM/network cleanup authority is available. |
-| `mvm host reset` | `--force`, `--operator USER` (direct root only), `--json` | Early administrator route; currently refuses rollback until trusted global cleanup is available. |
+| `mvm host reset` | `--force`, `--operator USER` (direct root only), `--json` | Early administrator rollback under retained global quiescence. Requires marker-only sudoers and compatible journals; refuses live or ambiguous state rather than force-stopping VMs. Admission remains disabled afterward. |
 
 On a clean host, run `sudo /usr/local/bin/mvm host init`; sudo selects its invoking non-root account. In a direct-root
 session, use `/usr/local/bin/mvm host init --operator USER`. Sudo invocation rejects `--operator`. The early route runs
