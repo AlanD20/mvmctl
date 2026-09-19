@@ -240,6 +240,18 @@ func dispatch(
 		return dispatchHandled, handleVMVolumeAttach(ctx, endpoint, caller, deps.control)
 	case jailer.VMVolumeDetachAction:
 		return dispatchHandled, handleVMVolumeDetach(ctx, endpoint, caller, deps.control)
+	case jailer.ProtectedVolumeInspectAction:
+		return dispatchHandled, handleProtectedVolumeInspect(ctx, endpoint, caller, deps.control)
+	case jailer.ProtectedVolumeGrowAction:
+		return dispatchHandled, handleProtectedVolumeGrow(ctx, endpoint, caller, deps.control)
+	case jailer.ProtectedVolumeRemoveAction:
+		return dispatchHandled, handleProtectedVolumeRemove(ctx, endpoint, caller, deps.control)
+	case jailer.VMSnapshotCaptureAction:
+		return dispatchHandled, handleVMSnapshotCapture(ctx, endpoint, caller, deps.control)
+	case jailer.VMSnapshotInspectAction:
+		return dispatchHandled, handleVMSnapshotInspect(ctx, endpoint, caller, deps.control)
+	case jailer.VMSnapshotRemoveAction:
+		return dispatchHandled, handleVMSnapshotRemove(ctx, endpoint, caller, deps.control)
 	case jailer.VMPauseAction, jailer.VMResumeAction, jailer.VMStartInstanceAction:
 		return dispatchHandled, handleVMAPIBroker(ctx, endpoint, caller, request.action, deps.control)
 	case jailer.HostVsockOpenAction:
