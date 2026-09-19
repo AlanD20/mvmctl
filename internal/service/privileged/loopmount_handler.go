@@ -19,6 +19,54 @@ type loopMountHandlerEffects struct {
 		loopmount.Caller,
 		loopmount.ImageInspectRequest,
 	) (loopmount.ImageInspectResult, error)
+	optimizeImage func(
+		context.Context,
+		loopmount.Caller,
+		loopmount.ImageOptimizeRequest,
+	) (loopmount.ImageOptimizeResult, error)
+}
+
+func handleLoopMountOptimizeImage(
+	ctx context.Context,
+	endpoint controlEndpoint,
+	caller loopmount.Caller,
+	effects loopMountHandlerEffects,
+	deps controlDeps,
+) error {
+	headerDeadline := boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout)
+	headerReader := newRequestReader(ctx, int(endpoint.Fd()), headerDeadline, deps)
+	request, err := privilegedwire.DecodeRequest[loopmount.ImageOptimizeRequest](
+		ctx,
+		headerReader,
+		loopmount.ImageOptimizeAction,
+		0,
+	)
+	if err != nil {
+		return deliverOperationError(ctx, endpoint, loopmount.ImageOptimizeAction, err, deps)
+	}
+	if err := request.Body.Validate(); err != nil {
+		return deliverOperationError(ctx, endpoint, loopmount.ImageOptimizeAction, err, deps)
+	}
+	if err := requireRequestEOF(ctx, headerReader); err != nil {
+		return deliverOperationError(ctx, endpoint, loopmount.ImageOptimizeAction, err, deps)
+	}
+	if effects.optimizeImage == nil {
+		return deliverOperationError(
+			ctx,
+			endpoint,
+			loopmount.ImageOptimizeAction,
+			errs.New(errs.CodeInternal, "loopmount image optimization handler is not active"),
+			deps,
+		)
+	}
+	result, err := effects.optimizeImage(ctx, caller, request.Body)
+	if err != nil {
+		return deliverOperationError(ctx, endpoint, loopmount.ImageOptimizeAction, err, deps)
+	}
+	if err := result.Validate(request.Body); err != nil {
+		return deliverOperationError(ctx, endpoint, loopmount.ImageOptimizeAction, err, deps)
+	}
+	return deliverOperationSuccess(ctx, endpoint, loopmount.ImageOptimizeAction, result, deps)
 }
 
 func handleLoopMountProvisionVM(
