@@ -42,7 +42,7 @@ func ensureRootfsGuestAccount(
 		if err != nil {
 			return rootfsGuestAccount{}, 0, err
 		}
-		_, err = tree.ensureDirectory(ctx, "/"+account.home, 0755, account.uid, account.gid)
+		err = ensureRootfsExistingHome(ctx, tree, account)
 		return account, 0, err
 	}
 	if username == "root" {
@@ -136,6 +136,32 @@ func ensureRootfsGuestAccount(
 		}
 	}
 	return account, written, nil
+}
+
+func ensureRootfsExistingHome(ctx context.Context, tree rootfsGuestTree, account rootfsGuestAccount) (returnErr error) {
+	mode := uint32(0755)
+	if account.name == "root" {
+		mode = 0700
+	}
+	fd, err := tree.deps.openAt2(ctx, tree.rootFD, account.home, &unix.OpenHow{
+		Flags: rootfsGuestDirectoryFlags, Resolve: rootfsGuestResolveFlags,
+	})
+	if err != nil && !errors.Is(err, unix.ENOENT) {
+		return rootfsAtomicError("inspect existing guest account home", err)
+	}
+	if err == nil {
+		defer func() {
+			returnErr = appendRootfsCleanupError(returnErr, "close existing guest account home", tree.deps.close(context.WithoutCancel(ctx), fd))
+		}()
+		var stat unix.Stat_t
+		if err := tree.deps.fstat(ctx, fd, &stat); err != nil {
+			return rootfsAtomicError("read existing guest account home permissions", err)
+		}
+		// Ownership repair must not widen an existing account's home access.
+		mode = stat.Mode & 0777
+	}
+	_, err = tree.ensureDirectory(ctx, "/"+account.home, mode, account.uid, account.gid)
+	return err
 }
 
 func copyRootfsAccountSkeleton(
