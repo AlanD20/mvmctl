@@ -6,8 +6,8 @@ import (
 	"sort"
 	"sync"
 
+	"mvmctl/internal/lib/system"
 	"mvmctl/internal/service/network"
-
 	"mvmctl/pkg/errs"
 )
 
@@ -104,6 +104,7 @@ type cleanupLeaseState struct {
 	runtimeDirectory        *managedVMRuntimeLease
 	persistentOutputs       *managedVMPersistentOutputLease
 	runtimeRecovery         *managedVMRuntimeRecovery
+	priorBootAbsence        *system.PriorBootVMAbsence
 	freshRecoveryAdmission  *freshRecoveryAdmission
 	freshRecoveryAdmitting  bool
 	preparedManagedVMCgroup *preparedManagedVMCgroup

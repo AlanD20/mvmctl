@@ -1,6 +1,10 @@
 package jailer
 
-import "context"
+import (
+	"context"
+
+	"mvmctl/internal/lib/system"
+)
 
 type lifecycleRecoveryAdmission struct {
 	processDeps  processRecoveryDeps
@@ -80,19 +84,58 @@ func (lease *cleanupLease) admitLifecycleRecovery(ctx context.Context) error {
 	record := cloneInstanceRecord(state.record)
 	processes := state.recoveredProcesses
 	managed := state.managedVMCgroup
+	vmLock := state.vmLock
 	state.freshRecoveryAdmitting = true
 	state.mu.Unlock()
 
 	processes, managed, err := admission.admit(ctx, record, processes, managed)
+	var priorBootAbsence *system.PriorBootVMAbsence
+	if err == nil && admission.hostBootID != record.launch.hostBootID {
+		priorBootAbsence, err = proveLifecyclePriorBootAbsence(ctx, vmLock, record, admission.hostBootID)
+	}
 	state.mu.Lock()
 	state.recoveredProcesses = processes
 	state.managedVMCgroup = managed
 	state.freshRecoveryAdmitting = false
 	if err == nil {
+		state.priorBootAbsence = priorBootAbsence
 		state.freshRecoveryAdmission = nil
 	}
 	state.mu.Unlock()
 	return err
+}
+
+func proveLifecyclePriorBootAbsence(
+	ctx context.Context,
+	vmLock *vmAuthorityLease,
+	record instanceRecord,
+	currentBootID string,
+) (_ *system.PriorBootVMAbsence, returnErr error) {
+	retained, err := vmLock.retainTopologyAuthority(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hold, err := retained.transferProductionHold(ctx)
+	if err != nil {
+		return nil, appendInstanceOperationError(err, "release rejected prior-boot topology authority",
+			retained.Release(context.WithoutCancel(ctx)))
+	}
+	defer func() {
+		returnErr = appendInstanceOperationError(returnErr, "release prior-boot proof issuance hold",
+			hold.Release(context.WithoutCancel(ctx)))
+	}()
+	proof, err := hold.ProvePriorBootVMAbsence(ctx)
+	if err != nil {
+		return nil, instanceAtomicError("prove prior-boot VM absence through retained production authority", err)
+	}
+	bootID, err := proof.Verify(ctx, hold, record.launch.hostBootID, record.launchGeneration)
+	if err != nil {
+		return nil, instanceAtomicError("bind prior-boot absence to cleanup generation", err)
+	}
+	if bootID != currentBootID {
+		return nil, instanceStateError(record.vmID, "prior-boot absence was issued in another host boot")
+	}
+	return proof, nil
 }
 
 func (admission *lifecycleRecoveryAdmission) admit(
