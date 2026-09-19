@@ -26,8 +26,15 @@ func (op *Operation) reconcileVMRuntimeStatus(ctx context.Context, vms []*model.
 		observations = append(observations, result.VMs...)
 	}
 	updates := make([]model.VMRuntimeStatusUpdate, 0, len(vms))
+	statuses := make([]model.VMStatus, len(observations))
 	for index, observed := range observations {
 		status := model.VMStatus(observed.Status)
+		// Process liveness cannot establish whether the guest CPUs are paused.
+		// Preserve the recorded pause until a stopped observation or explicit resume.
+		if status == model.VMStatusRunning && vms[index].Status == model.VMStatusPaused {
+			status = model.VMStatusPaused
+		}
+		statuses[index] = status
 		if vms[index].Status != status {
 			updates = append(updates, model.VMRuntimeStatusUpdate{VMID: observed.VMID, Status: status})
 		}
@@ -35,8 +42,8 @@ func (op *Operation) reconcileVMRuntimeStatus(ctx context.Context, vms []*model.
 	if err := op.Repos.VM.UpdateRuntimeStatuses(ctx, updates); err != nil {
 		return err
 	}
-	for index, observed := range observations {
-		vms[index].Status = model.VMStatus(observed.Status)
+	for index, status := range statuses {
+		vms[index].Status = status
 	}
 	return nil
 }
