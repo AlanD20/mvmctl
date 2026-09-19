@@ -169,7 +169,14 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 	if err != nil {
 		return nil, err
 	}
-	diskInfo, _ := volume.GetDiskInfo(ctx, vol.Path)
+	diskInfo, err := op.Services.Volume.InspectDisk(ctx, vol)
+	if err != nil {
+		return nil, err
+	}
+	displayPath := vol.Path
+	if diskInfo.Protected {
+		displayPath = ""
+	}
 	vmName := ""
 	if vol.VMID != nil && *vol.VMID != "" {
 		vm, _ := op.Repos.VM.Get(ctx, *vol.VMID)
@@ -179,9 +186,9 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 	}
 	return &results.VolumeInspect{
 		Volume: results.VolumeItemInfo{
-			ID: vol.ID, Name: vol.Name, SizeBytes: vol.SizeBytes,
+			ID: vol.ID, Name: vol.Name, SizeBytes: int64(diskInfo.LogicalBytes),
 			Format: string(vol.Format), IsReadOnly: vol.IsReadOnly,
-			CacheType: vol.CacheType, Path: vol.Path, Status: string(vol.Status),
+			CacheType: vol.CacheType, Path: displayPath, Status: string(vol.Status),
 		},
 		Attachment: results.VolumeAttachmentInfo{
 			VMID: vol.VMID, VMName: vmName,
