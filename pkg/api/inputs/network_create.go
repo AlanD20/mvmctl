@@ -34,8 +34,12 @@ func (input *NetworkCreateInput) Validate() error {
 		return errs.Wrap(errs.CodeValidationFailed, err)
 	}
 	prefix, err := netip.ParsePrefix(input.Subnet)
-	if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.String() != input.Subnet || prefix.Bits() > 30 {
-		return errs.New(errs.CodeValidationFailed, "network subnet must be a canonical masked IPv4 prefix no longer than /30")
+	if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.String() != input.Subnet ||
+		prefix.Bits() > 30 {
+		return errs.New(
+			errs.CodeValidationFailed,
+			"network subnet must be a canonical masked IPv4 prefix no longer than /30",
+		)
 	}
 	private := false
 	for _, block := range []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12"), netip.MustParsePrefix("192.168.0.0/16")} {
@@ -54,14 +58,20 @@ func (input *NetworkCreateInput) Validate() error {
 		}
 		if err != nil || gateway.String() != *input.IPv4Gateway || !gateway.Is4() || !prefix.Contains(gateway) ||
 			gateway == prefix.Addr() || gateway == netip.AddrFrom4(last) {
-			return errs.New(errs.CodeValidationFailed, "network gateway must be a canonical usable address in the subnet")
+			return errs.New(
+				errs.CodeValidationFailed,
+				"network gateway must be a canonical usable address in the subnet",
+			)
 		}
 	}
 	return nil
 }
 
 // Resolve applies the fixed first-usable gateway default and checks desired-state conflicts.
-func (input *NetworkCreateInput) Resolve(ctx context.Context, repo network.Repository) (*ResolvedNetworkCreateRequest, error) {
+func (input *NetworkCreateInput) Resolve(
+	ctx context.Context,
+	repo network.Repository,
+) (*ResolvedNetworkCreateRequest, error) {
 	if err := input.Validate(); err != nil {
 		return nil, err
 	}
@@ -73,14 +83,20 @@ func (input *NetworkCreateInput) Resolve(ctx context.Context, repo network.Repos
 	if input.IPv4Gateway != nil {
 		gateway = *input.IPv4Gateway
 	}
-	result := &ResolvedNetworkCreateRequest{Name: input.Name, Subnet: input.Subnet, IPv4Gateway: gateway, NATEnabled: input.NATEnabled}
+	result := &ResolvedNetworkCreateRequest{
+		Name:        input.Name,
+		Subnet:      input.Subnet,
+		IPv4Gateway: gateway,
+		NATEnabled:  input.NATEnabled,
+	}
 	existing, err := repo.GetByName(ctx, input.Name, true)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeDatabaseError, "resolve existing network", err)
 	}
 	if existing != nil {
 		if existing.DeletedAt != nil || existing.IsPresent || existing.BridgeActive || existing.Subnet != input.Subnet ||
-			existing.IPv4Gateway != gateway || existing.NATEnabled != input.NATEnabled {
+			existing.IPv4Gateway != gateway ||
+			existing.NATEnabled != input.NATEnabled {
 			return nil, errs.AlreadyExists(errs.CodeNetworkAlreadyExists, input.Name)
 		}
 		result.Pending = existing
@@ -98,7 +114,11 @@ func (input *NetworkCreateInput) Resolve(ctx context.Context, repo network.Repos
 			return nil, errs.WrapMsg(errs.CodeValidationFailed, "existing network subnet is invalid", err)
 		}
 		if prefix.Overlaps(other) {
-			return nil, errs.New(errs.CodeNetworkSubnetOverlap, "network subnet overlaps an existing network", errs.WithClass(errs.ClassConflict))
+			return nil, errs.New(
+				errs.CodeNetworkSubnetOverlap,
+				"network subnet overlaps an existing network",
+				errs.WithClass(errs.ClassConflict),
+			)
 		}
 	}
 	return result, nil

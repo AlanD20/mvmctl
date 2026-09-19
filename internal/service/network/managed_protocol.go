@@ -33,8 +33,11 @@ func (request ManagedNetworkCreateRequest) Validate() error {
 func (request ManagedNetworkCreateRequest) configuration() (managedNetworkL3, error) {
 	prefix, prefixErr := netip.ParsePrefix(request.Prefix)
 	gateway, gatewayErr := netip.ParseAddr(request.Gateway)
-	if prefixErr != nil || gatewayErr != nil || prefix.String() != request.Prefix || gateway.String() != request.Gateway {
-		return managedNetworkL3{}, networkAuthorityValidationError("managed network prefix and gateway must be canonical IPv4 values")
+	if prefixErr != nil || gatewayErr != nil || prefix.String() != request.Prefix ||
+		gateway.String() != request.Gateway {
+		return managedNetworkL3{}, networkAuthorityValidationError(
+			"managed network prefix and gateway must be canonical IPv4 values",
+		)
 	}
 	return admitManagedNetworkL3(managedNetworkL3Input{prefix: prefix, gateway: &gateway})
 }

@@ -148,11 +148,18 @@ func (op *Operation) NetworkInspect(ctx context.Context, input inputs.NetworkInp
 		}
 		leaseList = append(leaseList, value)
 	}
-	return &results.NetworkInspect{Network: results.NetworkItemInfo{ID: item.ID, Name: item.Name, Subnet: item.Subnet,
-		Bridge: item.Bridge, IPv4Gateway: item.IPv4Gateway, IsDefault: item.IsDefault, IsPresent: item.IsPresent,
-		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt},
-		Status: results.NetworkStatusInfo{BridgeActive: item.BridgeActive, IsPresent: item.IsPresent, IsDefault: item.IsDefault},
-		NAT:    results.NetworkNATInfo{NATEnabled: item.NATEnabled}, Leases: leaseList}, nil
+	return &results.NetworkInspect{
+		Network: results.NetworkItemInfo{ID: item.ID, Name: item.Name, Subnet: item.Subnet,
+			Bridge: item.Bridge, IPv4Gateway: item.IPv4Gateway, IsDefault: item.IsDefault, IsPresent: item.IsPresent,
+			CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt},
+		Status: results.NetworkStatusInfo{
+			BridgeActive: item.BridgeActive,
+			IsPresent:    item.IsPresent,
+			IsDefault:    item.IsDefault,
+		},
+		NAT:    results.NetworkNATInfo{NATEnabled: item.NATEnabled},
+		Leases: leaseList,
+	}, nil
 }
 
 // NetworkSetDefault changes only desired default selection.
@@ -275,7 +282,11 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.Ne
 	}
 	if op.Repos.Host != nil {
 		if err := op.Repos.Host.UpdateComponent(ctx, "default_network_created", true); err != nil {
-			return selected, errs.WrapMsg(errs.CodeNetworkDefaultCreateFailed, fmt.Sprintf("network %s configured but host projection failed", selected.Name), err)
+			return selected, errs.WrapMsg(
+				errs.CodeNetworkDefaultCreateFailed,
+				fmt.Sprintf("network %s configured but host projection failed", selected.Name),
+				err,
+			)
 		}
 	}
 	return selected, nil

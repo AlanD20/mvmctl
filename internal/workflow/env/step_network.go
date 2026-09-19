@@ -203,6 +203,9 @@ func newNetworkStepFromSpec(
 	if op == nil {
 		return nil, errors.New("operation not initialized")
 	}
+	if _, exists := spec["nat_gateways"]; exists {
+		return nil, errors.New("network nat_gateways is unsupported; root selects the NAT uplink")
+	}
 
 	data, err := yaml.Marshal(spec)
 	if err != nil {

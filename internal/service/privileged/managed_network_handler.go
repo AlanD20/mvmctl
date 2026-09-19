@@ -11,7 +11,12 @@ func handleCreateManagedNetwork(
 	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
 ) error {
 	action := network.ManagedNetworkCreateAction
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
 	request, err := privilegedwire.DecodeRequest[network.ManagedNetworkCreateRequest](ctx, reader, action, 0)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)
@@ -36,7 +41,12 @@ func handleRemoveManagedNetwork(
 	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
 ) error {
 	action := network.ManagedNetworkRemoveAction
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
 	request, err := privilegedwire.DecodeRequest[network.ManagedNetworkRemoveRequest](ctx, reader, action, 0)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)

@@ -22,8 +22,17 @@ type Service struct {
 }
 
 // NewService binds desired-state repositories to the fixed privileged network client.
-func NewService(repo Repository, trafficRepo TrafficPolicyRepository, noCloudTracker *firewall.FirewallTracker) *Service {
-	return &Service{repo: repo, trafficRepo: trafficRepo, managed: networkservice.NewManagedNetworkClient(), noCloudTracker: noCloudTracker}
+func NewService(
+	repo Repository,
+	trafficRepo TrafficPolicyRepository,
+	noCloudTracker *firewall.FirewallTracker,
+) *Service {
+	return &Service{
+		repo:           repo,
+		trafficRepo:    trafficRepo,
+		managed:        networkservice.NewManagedNetworkClient(),
+		noCloudTracker: noCloudTracker,
+	}
 }
 
 // FirewallTracker supplies only the existing NoCloud provisioner during its separately owned cutover.
@@ -41,8 +50,12 @@ func (service *Service) EnsureManagedNetwork(ctx context.Context, network *model
 	network.Bridge, network.BridgeActive, network.IsPresent = result.Bridge, true, true
 	if err := service.repo.Upsert(ctx, network); err != nil {
 		slog.Error("failed to project configured managed network", "network_id", network.ID, "error", err)
-		return errs.WrapMsg(errs.CodeDatabaseError, "root network is configured but local projection failed; retry network sync", err,
-			errs.WithDetails(map[string]any{"network_id": network.ID, "root_applied": true}))
+		return errs.WrapMsg(
+			errs.CodeDatabaseError,
+			"root network is configured but local projection failed; retry network sync",
+			err,
+			errs.WithDetails(map[string]any{"network_id": network.ID, "root_applied": true}),
+		)
 	}
 	return nil
 }
@@ -77,15 +90,26 @@ func (service *Service) ListAll(ctx context.Context, verify bool) ([]*model.Netw
 func (service *Service) Remove(ctx context.Context, network *model.NetworkItem, force bool) error {
 	hasReferences := len(network.VMs) > 0 || len(network.Snapshots) > 0
 	if hasReferences && !force {
-		return errs.New(errs.CodeNetworkRemoveFailed, "network is referenced by VMs or snapshots", errs.WithClass(errs.ClassConflict))
+		return errs.New(
+			errs.CodeNetworkRemoveFailed,
+			"network is referenced by VMs or snapshots",
+			errs.WithClass(errs.ClassConflict),
+		)
 	}
-	if _, err := service.managed.RemoveManagedNetwork(ctx, networkservice.ManagedNetworkRemoveRequest{NetworkID: network.ID}); err != nil {
+	if _, err := service.managed.RemoveManagedNetwork(
+		ctx,
+		networkservice.ManagedNetworkRemoveRequest{NetworkID: network.ID},
+	); err != nil {
 		slog.Error("failed to remove root-owned network", "network_id", network.ID, "error", err)
 		return err
 	}
 	if err := service.trafficRepo.InvalidateByNetwork(ctx, network.ID); err != nil {
 		slog.Error("failed to invalidate removed network policy projection", "network_id", network.ID, "error", err)
-		return errs.WrapMsg(errs.CodePolicyRemoveFailed, "root network removed but policy projection cleanup failed", err)
+		return errs.WrapMsg(
+			errs.CodePolicyRemoveFailed,
+			"root network removed but policy projection cleanup failed",
+			err,
+		)
 	}
 	if hasReferences {
 		return service.repo.SoftDelete(ctx, network.ID)
@@ -104,7 +128,11 @@ func (service *Service) RemoveMany(ctx context.Context, networks []*model.Networ
 }
 
 // EnrichWithLeases batch-loads desired guest allocations for display.
-func (service *Service) EnrichWithLeases(ctx context.Context, networks []*model.NetworkItem, leaseRepo LeaseRepository) error {
+func (service *Service) EnrichWithLeases(
+	ctx context.Context,
+	networks []*model.NetworkItem,
+	leaseRepo LeaseRepository,
+) error {
 	ids := make([]string, len(networks))
 	for index, network := range networks {
 		ids[index] = network.ID
