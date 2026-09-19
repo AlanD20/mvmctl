@@ -250,12 +250,20 @@ func (s *Service) OptimizeImage(
 	if !skipOptimization {
 		p.Deblob()
 	}
-	if FSCanShrink[fsType] {
+	typedShrink := provisionerType == provisioner.ProvisionerLoopMount && FSCanShrink[fsType]
+	if FSCanShrink[fsType] && !typedShrink {
 		p.Shrink()
 	}
 	optimized, runErr := p.Run(ctx)
 	if runErr != nil {
 		return nil, warnings, runErr
+	}
+	if typedShrink {
+		if err := shrinkStagedImage(ctx, imagePath, imageID, fsType); err != nil {
+			slog.Error("managed image shrink failed", "image_id", imageID, "error", err)
+			return nil, warnings, err
+		}
+		optimized = true
 	}
 	if !optimized && warnings != nil {
 		warnings = append(warnings,

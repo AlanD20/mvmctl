@@ -32,6 +32,7 @@ type rootfsLease struct {
 	stagingFD     int
 	rootfsFD      int
 	retained      []int
+	imageShrink   *imageShrinkTransaction
 	released      bool
 	releaseErr    error
 }

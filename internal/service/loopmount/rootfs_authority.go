@@ -405,12 +405,17 @@ func rootfsPolicyForSelection(selection rootfsSelection) (rootfsPolicy, error) {
 			return rootfsPolicy{}, rootfsValidationError("managed image rootfs selection is invalid")
 		}
 		access := rootfsReadOnly
+		if selection.replayBytes != 0 && (selection.kind != rootfsImageOptimizeSelection ||
+			selection.replayBytes < minimumImageBytes || selection.replayBytes > selection.expectedBytes) {
+			return rootfsPolicy{}, rootfsValidationError("managed image shrink replay size is invalid")
+		}
 		if selection.kind == rootfsImageOptimizeSelection {
 			access = rootfsReadWrite
 		}
 		return rootfsPolicy{
 			directories:      []string{"images", "staging", selection.resourceID},
 			expectedBytes:    selection.expectedBytes,
+			replayBytes:      selection.replayBytes,
 			minimumBytes:     minimumImageBytes,
 			maximumBytes:     maximumImageBytes,
 			access:           access,

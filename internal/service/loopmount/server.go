@@ -11,13 +11,14 @@ import (
 const maxServerCleanupDetailBytes = 512
 
 // Server coordinates one admitted LoopMount operation without exposing effect or descriptor authority.
-// CRITICAL: Production construction activates only VM provisioning and read-only image inspection. Image optimization
-// has no production effect, construction, or privileged dispatch entry.
+// CRITICAL: Named constructors select only their implemented effects. Durable image shrink
+// authority is separate from VM provisioning and read-only image inspection.
 type Server struct {
-	rootfsAuthority rootfsAuthorityDeps
-	effects         rootfsEffects
-	optimizeEffects imageOptimizeEffects
-	locks           rootfsResourceLocks
+	rootfsAuthority    rootfsAuthorityDeps
+	effects            rootfsEffects
+	optimizeEffects    imageOptimizeEffects
+	locks              rootfsResourceLocks
+	durableImageShrink bool
 }
 
 type rootfsEffects interface {
@@ -338,7 +339,7 @@ func (server *Server) InspectImage(
 }
 
 // OptimizeImage executes one closed mutation plan against its admitted staging rootfs.
-// CRITICAL: OptimizeImage cannot be registered until durable replacement and shrink replay authority is implemented.
+// CRITICAL: The production shrink constructor binds replay to its root-owned durable journal.
 func (server *Server) OptimizeImage(
 	ctx context.Context,
 	caller Caller,
@@ -349,6 +350,11 @@ func (server *Server) OptimizeImage(
 	}
 	if err := request.Validate(); err != nil {
 		return ImageOptimizeResult{}, err
+	}
+	if server.durableImageShrink {
+		if err := validateImageShrinkPlan(request.Filesystem, request.Plan); err != nil {
+			return ImageOptimizeResult{}, err
+		}
 	}
 	if err := validateRootfsCaller(caller); err != nil {
 		return ImageOptimizeResult{}, err
@@ -383,7 +389,21 @@ func (server *Server) OptimizeImage(
 		return ImageOptimizeResult{}, rootfsAtomicError("managed image optimization lock authority is missing", nil)
 	}
 
-	rootfsLease, err := admitImageOptimizeRootfs(ctx, server.rootfsAuthority, caller, request)
+	var transaction *imageShrinkTransaction
+	if server.durableImageShrink {
+		var err error
+		transaction, err = openImageShrinkTransaction(ctx, caller, request)
+		if err != nil {
+			return ImageOptimizeResult{}, err
+		}
+		defer func() {
+			returnErr = appendRootfsCleanupError(returnErr, "release image shrink journal", transaction.close())
+		}()
+		if transaction.record != nil {
+			selection.replayBytes = transaction.record.TargetBytes
+		}
+	}
+	rootfsLease, err := admitRootfs(ctx, server.rootfsAuthority, caller, request.CacheLocator, selection)
 	if err != nil {
 		return ImageOptimizeResult{}, err
 	}
@@ -395,6 +415,11 @@ func (server *Server) OptimizeImage(
 			rootfsLease.Release(context.WithoutCancel(ctx)),
 		)
 	}()
+	if transaction != nil {
+		if err := transaction.bind(ctx, rootfsLease); err != nil {
+			return ImageOptimizeResult{}, err
+		}
+	}
 
 	outcome, effectErr := server.optimizeEffects.OptimizeImage(ctx, rootfsLease, request.Filesystem, request.Plan)
 	defer func() {
