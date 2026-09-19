@@ -374,7 +374,7 @@ retryable descriptor-relative removal and commits durable `cleaned` only afterwa
 after proven removal converges rather than retrying a reused descriptor. This authority adds no cgroup path to the
 schema and is now consumed by typed root launch/cleanup; live enforcement remains unqualified.
 
-Private launch cgroup control now accepts only a typed policy-v1 intent: CPU quota, period, and weight; memory high,
+Private launch cgroup control now accepts only a typed policy-v2 intent: CPU quota, period, and weight; memory high,
 maximum, and swap maximum; and an exact PID maximum. Preparation checks fixed `cpu`, `memory`, and `pids` controller
 readiness at the cgroup root and then the compiled parent, writes only missing enablement tokens additively, and reads
 back each result through retained descriptors. It repeats the complete readiness proof immediately before Jailer
@@ -384,6 +384,12 @@ proof. Every retry repeats limit readback and membership verification, and every
 cgroup authority. Recovery and launch without a cgroup policy never mutate controller state. Process handoff tracks
 relay and Firecracker release independently, so a retry after successful relay handoff but failed Firecracker handoff
 resumes only the remaining handoff on the same launch authority.
+
+[ADR-0019](docs/adr/0019-pressure-only-vm-memory-control.md) supersedes finite per-VM memory maxima. Policy v2 keeps
+guest RAM plus configured headroom as `memory.high`, carries explicit unlimited-max intent with a canonical zero byte
+field, and requires literal kernel `memory.max=max`. Swap, CPU, PID, and ancestor limits are unchanged. Configuration
+errors propagate; missing/v1 policy is not silently backfilled. Pressure may exceed the threshold, and host or ancestor
+OOM remains possible. This source implementation has not been run or qualified.
 
 Fresh private cleanup admission now reopens the record's exact pidfd/start-tick-bound processes and observes the
 Firecracker as either the committed active identity or the exact launching task before durably transferring authority

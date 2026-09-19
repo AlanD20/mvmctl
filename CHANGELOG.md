@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Implementation-only integration updates
 
+- Added pressure-only cgroup policy v2: `memory.high` remains guest RAM plus configurable VMM headroom,
+  `memory.max` is explicitly `max`, and swap/CPU/PID settings remain unchanged. Root admission and readback enforce
+  the versioned policy; old/missing policy cannot silently launch or migrate. VMs may exceed the pressure threshold.
+  Host/ancestor/userspace OOM risks remain; this does not diagnose or prove resolution of the reported saturation failure.
+- Cgroup configuration read failures now propagate instead of silently deriving zero headroom or other zero values.
+- Removed unused public Jailer launch/cleanup actions, old manifest serialization, and their raw launch/cleanup
+  implementation. Snapshot and volume exposure retirement still depends on replacement of their active consumers.
+
 - Raw volumes now join typed VM launch through ordered path-free selections, release-derived MMIO admission,
   exact pinned file identity and size, sealed configuration, and descriptor-only child mounts at `/volumes/<id>.raw`.
   Read-only/cache intent is retained; cleanup removes only admitted empty jail placeholders, not source data.
@@ -968,9 +976,10 @@ composition is described above; the current incomplete-work inventory is under *
 Current incomplete work includes root-controlled snapshot production/removal
 and immutable restore backing with consistent data-volume snapshots, remaining privilege integration, and qualification.
 Approval adds no new per-volume or aggregate quota caps. Existing
-unprivileged archive construction remains outside the root service. Memory policy stays unchanged pending diagnosis.
+unprivileged archive construction remains outside the root service. Pressure-only memory policy v2 is implemented
+without runtime qualification; attribution of the reported OOM incident remains unresolved.
 Snapshot and PCI launches still refuse unsupported selections; raw-volume launch is integrated but unverified.
-The user paused snapshot implementation for a separate design pass. A trusted capture contract must address the
+The user subsequently approved the isolated-execution prerequisite in ADR-0018. A trusted capture contract must address the
 operator-owned process, caller-accessible Firecracker API, active disk writers, and retained writable aliases.
 No exploit or impossibility of a narrower design has been demonstrated. Root-controlled storage and consistent
 data-volume capture remain approved requirements, not completed behavior.
@@ -983,8 +992,8 @@ retires topology only after namespace/link absence, and preserves firewall reser
 can rebootstrap exact logical intent using fresh kernel identities, without adopting a competing bridge. These paths
 are unverified. Surviving namespace placeholders and ambiguous ownership remain fail-closed. Old-boot network removal
 receipts and pending desired networks without root records now have absence-only retry/cancellation support, including
-durable tombstones and repeated bridge/topology/firewall checks. Memory policy is unchanged pending diagnosis;
-no replacement memory limit or reclaim policy is introduced by this pass.
+durable tombstones and repeated bridge/topology/firewall checks. Memory policy v2 removes the per-VM finite hard
+maximum; it does not modify ancestor limits or promise immunity from every OOM mechanism.
 
 The code changes in this implementation-only pass have not been built, tested, reviewed, or qualified. Adversarial
 coverage, CLI system tests, cleanup/leak evidence, full CI, and release signoff remain required in a later authorized
