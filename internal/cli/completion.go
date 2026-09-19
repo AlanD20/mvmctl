@@ -34,17 +34,27 @@ func completeNetworkNames(cmd *cobra.Command, args []string, toComplete string) 
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completePolicyIDs completes service-access policy IDs.
+// completePolicyIDs completes IDs from both traffic-policy families.
 func completePolicyIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	policies, err := opRef.PolicyList(cmd.Context())
+	networkPolicies, err := opRef.NetworkToVMTrafficPolicyList(cmd.Context())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	var results []string
-	for _, policy := range policies {
+	for _, policy := range networkPolicies {
+		short := crypto.Truncate(policy.ID, 12)
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
+			results = append(results, short)
+		}
+	}
+	vmPolicies, err := opRef.VMToVMTrafficPolicyList(cmd.Context())
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	for _, policy := range vmPolicies {
 		short := crypto.Truncate(policy.ID, 12)
 		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
 			results = append(results, short)
