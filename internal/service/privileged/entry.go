@@ -204,6 +204,10 @@ func dispatch(
 	deps runtimeDeps,
 ) (dispatchDisposition, error) {
 	switch request.action {
+	case jailer.VMLaunchAction:
+		return dispatchHandled, handleVMLaunch(ctx, endpoint, caller, deps.control)
+	case jailer.VMAbortAction, jailer.VMCleanupAction, jailer.VMRemoveAction:
+		return dispatchHandled, handleVMCleanup(ctx, endpoint, caller, request.action, deps.control)
 	case network.NetworkTrafficPolicyApplyAction:
 		return dispatchHandled, handleApplyNetworkTrafficPolicy(ctx, endpoint, caller, deps.control)
 	case network.VMTrafficPolicyApplyAction:
