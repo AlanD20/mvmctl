@@ -76,7 +76,6 @@ type Repos struct {
 	Config        config.SettingsRepository
 	Vsock         vsock.Repository
 	Snapshot      snapshot.Repository
-	Policy        network.ServiceAccessPolicyRepository
 	TrafficPolicy network.TrafficPolicyRepository
 	ExecPolicy    execpolicy.Repository
 }
@@ -118,19 +117,16 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Config:        config.NewRepository(sqlDB),
 		Vsock:         vsock.NewRepository(sqlDB),
 		Snapshot:      snapshot.NewRepository(sqlDB),
-		Policy:        network.NewServiceAccessPolicyRepository(sqlDB),
 		TrafficPolicy: network.NewTrafficPolicyRepository(sqlDB),
 		ExecPolicy:    execpolicy.NewRepository(sqlDB),
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
-	// Create a default firewall tracker (nftables, xtcomment enabled).
-	// HostInit will replace it with the properly configured tracker once
-	// firewall_backend and iptables_xtcomment settings are resolved.
+	// The existing NoCloud consumer retains the legacy tracker until its typed host-service cutover.
 	defaultFwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, sqlDB)
 
 	s := Services{
-		Network:       network.NewService(r.Network, defaultFwTracker, r.Policy),
+		Network:       network.NewService(r.Network, r.TrafficPolicy, defaultFwTracker),
 		Image:         image.NewService(r.Image),
 		Kernel:        kernel.NewService(r.Kernel, filepath.Join(cacheDir, "kernels")),
 		Binary:        binary.NewService(r.Binary, system.RuntimeArch()),
