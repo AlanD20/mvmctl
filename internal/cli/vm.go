@@ -93,7 +93,10 @@ func newVMListCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 }
 
 func runVMList(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonOutput, longOutput bool) error {
-	vms := vmAPI.VMList(cmd.Context())
+	vms, err := vmAPI.VMList(cmd.Context())
+	if err != nil {
+		return err
+	}
 
 	if common.RecordResult(vms) {
 		return nil
@@ -121,7 +124,10 @@ func newVMpsCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 
 func runVMps(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonOutput bool) error {
 	// Server-side filtering by status
-	vms := vmAPI.VMList(cmd.Context(), string(model.VMStatusStarting), string(model.VMStatusRunning))
+	vms, err := vmAPI.VMList(cmd.Context(), string(model.VMStatusStarting), string(model.VMStatusRunning))
+	if err != nil {
+		return err
+	}
 
 	if common.RecordResult(vms) {
 		return nil
