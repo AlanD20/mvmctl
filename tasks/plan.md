@@ -22,26 +22,25 @@ Integrated in this continuation: legacy launch/cleanup retirement `338f9539`, co
 propagation `cec0177b`, pressure-only policy v2 `dc5b04cb`, PCI/x86 nested launch and root device
 metadata `da923ace`. None is runtime-qualified. ARM nested launch remains rejected.
 
-Active isolated ownership: `impl03_console` writes execution identity authority;
-`impl03_deblob_typed` protected backing; `impl03_exec` named API broker plus host vsock transport;
-`impl03_lifecycle` schema/runtime/launch isolation composition; `impl03_runtime_recovery` typed
-hotplug and dispatcher registration. Worktrees use the corresponding `impl03-execution-identity`,
-`impl03-protected-backing`, `impl03-api-broker`, `impl03-isolated-launch`, and
-`impl03-volume-hotplug` branches under `.tmp/worktrees/`. Broker commit `ed2caacf` awaits its
-runtime producer; host-vsock consumer commit `39f0883f` is paired with it. Identity allocation
-is integrated as `a784d332`; retirement/reset commit `1c720199` awaits the lifecycle proof.
-Protected backing `9a989660` awaits its cache/launch consumers, and typed hotplug `6883cc78`
-awaits the same isolation/backing composition. These dependencies are source integration work,
-not QA. Snapshot capture/restore still needs the composed isolation prerequisite; do not label
-a store-only foundation or caller-controlled copy as completed capture.
+Isolation composition is integrated through `829c7720`: account allocation/retirement,
+protected backing foundation, API broker/ordinary host-vsock consumers, schema-4 isolated launch,
+exact output ACLs, protected provisioning, typed volume storage and hotplug, snapshot capture,
+and named capture/inspect/remove dispatcher routes. These are implementation checkpoints, not
+working-save-point or release sign-off: remaining producer helpers are still dependencies.
 
-Additional exclusive consumers now being written: `impl03_resources` in `impl03-snapshot-runtime`
-owns snapshot producer/store/restore and public snapshot/model changes; `impl03_host` in
-`impl03-volume-storage` owns typed storage inspect/grow/remove; `impl03_loopmount` in
-`impl03-protected-provision` owns the protected rootfs provisioning bridge; `impl03_console`
-in `impl03-output-access` owns exact execution-identity access to persistent log/metrics files.
-The latter two are separate from completed identity allocation. Preserve these file boundaries
-and finish actual consumers rather than spawning another audit or duplicating producer code.
+Current isolated owners under `.tmp/worktrees/`: `impl03_deblob_typed` on
+`impl03-protected-backing` finishes logical cache binding, grant inventory, snapshot/restore
+constructors, and initial-volume quarantine; `impl03_lifecycle` on `impl03-isolated-launch`
+finishes durable stopped-device archive and common prepared-restore launch composition;
+`impl03_resources` on `impl03-snapshot-runtime` finishes actual snapshot restore and public
+restore consumers. `impl03_loopmount` on `impl03-protected-provision` retires the superseded
+raw Jailer exposure routes. `impl03_runtime_recovery` owns final dispatcher edits but is stopped
+after its completed packet, awaiting a concrete Restore producer. Other consumers are committed
+and stopped. Do not reassign their files without an explicit bounded follow-up.
+
+Remaining work is concrete integration and production implementation, not QA. Finish the
+backing/archive/restore dependencies and final legacy deletion, update current docs, then stop.
+Do not restart audits, tests, builds, host installation, or qualification in this pass.
 
 ### Resumed after user policy decisions
 

@@ -39,6 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Implementation-only integration updates
 
+- Integrated schema-4 operator/execution identity separation, per-VM locked system accounts, private API/vsock runtime,
+  named root-brokered control, and exact execution-UID access to persistent outputs. Ordinary exec, shell, copy, and
+  agent upgrades use an authenticated connected-descriptor handoff rather than opening the private socket directly.
+- Integrated protected logical backing, typed volume inspect/grow/remove, protected rootfs provisioning, and root-owned
+  live-volume hotplug intent. Original caller files are staging inputs, not authoritative active disks after import.
+  Remaining backing helpers and restore composition are still being written; this is not a runnable sign-off.
+- Added the trusted snapshot capture/inspect/remove implementation, including exclusive protected data-volume capture,
+  root-owned immutable artifact metadata, and recorded uncertain/paused capture progress. Stopped-source archive and
+  immutable restore composition remain integration dependencies; snapshot restore is not yet complete.
+
 - Typed launch now admits PCI for the pinned Firecracker 1.16.1 profile, accounting for the usable PCI bus slots and
   MSI-X vectors of the complete generated device set. The authenticated child receives the transport choice and adds
   `--enable-pci`. x86 nested-virtualization configuration is carried through the sealed launch path; ARM nested launch

@@ -327,7 +327,8 @@ The VM resolver tries selectors in priority order:
 | `mvm vm ps` | `--json` | List running VMs (active processes) |
 | `mvm vm inspect` | `SELECTOR`, `--json` | Show detailed information about a VM |
 
-VM launch and process control use typed root lifecycle transactions and schema-3 instance records. PID values in
+VM launch and process control use typed root lifecycle transactions and schema-4 instance records separating operator
+ownership from per-VM execution credentials. PID values in
 output are display projections, never signaling authority. List observes its complete VM selection before filtering
 status and propagates observation failures; inspect/get also propagate them. Paused display state requires an observed
 live process. Stop preserves endpoint reservations and traffic grants for restart; remove invalidates them through
@@ -337,7 +338,8 @@ connection and waits on the exact process before authoritative cleanup.
 Typed launch now includes console relay composition and raw data volumes with release-derived device limits,
 descriptor-only mounts, and no new storage quotas. PCI launch and x86 nested configuration are implemented for the
 pinned release; ARM nested launch is rejected. This development implementation is unverified. Snapshot launch remains
-blocked, with no legacy fallback; live-volume and snapshot composition remain pending.
+blocked, with no legacy fallback. Typed live-volume operations and snapshot capture/inspect/remove are integrated;
+their remaining protected-backing dependencies and snapshot restore composition are not yet complete.
 
 **`vm create` flags:**
 
@@ -393,9 +395,10 @@ mvm vm create cluster-node --count 3
 ### `mvm snapshot` (alias: `ss`)
 
 The listed snapshot surface is not qualified support for trusted capture/restore in this development build. Restore
-remains blocked. Root-controlled snapshot storage, CLI removal, and consistent attached-volume capture are approved
-requirements, but the authoritative producer is not implemented. The user paused snapshot implementation for a
-separate design pass covering process/API isolation, active disk writers, and immutable backing.
+remains blocked. Capture/inspect/remove production code now uses root-controlled storage and exclusive protected
+rootfs/data-volume capture. The process/API/backing isolation prerequisite was approved in ADR-0018, superseding the
+earlier design pause. Remaining backing helpers, stopped-source archive, and immutable restore composition are still
+being implemented; no build, tests, or runtime qualification have been performed for this pass.
 
 Create, list, inspect, restore, and remove VM snapshots.
 

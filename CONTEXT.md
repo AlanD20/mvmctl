@@ -607,7 +607,8 @@ new per-volume or aggregate storage quota caps, subject to the approved device b
 identity checks. Typed launch now carries ordered path-free raw-volume selections through root descriptor admission,
 sealed configuration, and child mounts at `/volumes/<id>.raw`. Child handoff repeats pinned identity checks and
 retains read-only/cache intent; cleanup admits only exact empty jail placeholders, never source data. This unverified
-implementation does not reserve physical storage or implement live hotplug.
+implementation does not reserve physical storage. Typed live hotplug now has root-owned intent and exact mounted
+resource identity; its protected-backing dependencies remain under integration.
 
 Private Firecracker 1.16.1 MMIO admission accounts for the complete device budget: rootfs, network, VMGenID, VMClock,
 optional cloud-init and vsock, and ARM RTC/serial where applicable. The PCI profile uses the same exact release
@@ -619,12 +620,16 @@ Snapshot byte admission limits the complete `vmstate`, including its CRC, to 10,
 length to equal trusted captured RAM in MiB times 1,048,576. Captured rootfs length must match exactly; rootfs-only
 captures have neither memory nor vmstate. These private checks do not authenticate a capture, establish immutable
 memory backing, or grant restore authority. The user approved root-controlled snapshot storage with CLI removal and
-requires consistent snapshots of attached data volumes. The authoritative capture producer, immutable restore backing,
-data-volume consistency, and public snapshot capture/restore/removal composition remain pending. The user subsequently
-approved [ADR-0018](docs/adr/0018-isolated-vm-execution-and-snapshot-authority.md), resuming the execution/API/backing
-isolation prerequisite. The capture contract must address process/API access and all
-active disk writers; destination ownership alone is insufficient. No exploit or impossibility of a narrower design
-has been demonstrated. Typed launch rejects snapshot mode rather than falling back to the older path.
+requires consistent snapshots of attached data volumes. Capture/inspect/remove production code now acquires exclusive
+protected backing, pauses the isolated producer, and publishes root-controlled immutable artifact metadata. Uncertain
+capture progress retains explicit paused/unknown state rather than assuming a safe resume. Stopped-source archive,
+remaining backing helpers, and immutable restore composition are still being implemented. These source changes have
+not been built or tested. [ADR-0018](docs/adr/0018-isolated-vm-execution-and-snapshot-authority.md) supersedes the earlier
+snapshot pause: schema-4 records separate operator ownership from isolated per-VM system accounts; named root API
+operations and an authenticated host-vsock descriptor handoff replace operator access to private VMM sockets.
+Protected logical disks, typed volume storage operations, and protected rootfs provisioning replace mutation of
+caller staging files after import. This is not evidence of an exploited vulnerability or qualified isolation.
+Typed launch still rejects snapshot mode pending the restore composition, without falling back to the older path.
 
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An
