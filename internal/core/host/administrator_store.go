@@ -26,6 +26,8 @@ type administratorJournal struct {
 	OriginalSysctl  *string `json:"original_sysctl"`
 	OriginalSudoers *string `json:"original_sudoers"`
 	GroupExisted    bool    `json:"group_existed"`
+	GroupGID        *string `json:"group_gid"`
+	AppliedSudoers  string  `json:"applied_sudoers"`
 	MemberExisted   bool    `json:"member_existed"`
 	Completed       int     `json:"completed"`
 	Pending         bool    `json:"pending"`
@@ -205,7 +207,8 @@ func loadAdministratorJournal(dir *os.File) (*administratorJournal, error) {
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return nil, errors.New("trailing administrator journal data")
 	}
-	if journal.Version != 1 || journal.Completed < 0 || journal.Completed > 6 ||
+	if journal.Version != 2 || journal.Completed < 0 || journal.Completed > 6 ||
+		(journal.Completed > 0 && journal.GroupGID == nil) || journal.AppliedSudoers == "" ||
 		(journal.OriginalForward != "0" && journal.OriginalForward != "1") ||
 		(journal.Initialized && (journal.Pending || journal.Completed != 6)) {
 		return nil, errors.New("invalid administrator journal")

@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/hostadmission"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
@@ -43,16 +44,16 @@ func AdministratorInit(
 			return nil, err
 		}
 	}
-	dir, err := openAdministratorDirectory(ctx, []string{"var", "lib", "mvmctl", "host"}, 2)
+	admission, err := hostadmission.AcquireAdministrator(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { returnErr = administratorCloseError(returnErr, admission.Release(context.WithoutCancel(ctx))) }()
+	dir, err := openAdministratorDirectory(ctx, []string{"var", "lib", "mvmctl", "host"}, -1)
 	if err != nil {
 		return nil, administratorFailure("open root-owned administrator state", err)
 	}
 	defer func() { returnErr = administratorCloseError(returnErr, dir.Close()) }()
-	lock, err := lockAdministratorJournal(dir)
-	if err != nil {
-		return nil, administratorFailure("lock administrator state", err)
-	}
-	defer func() { returnErr = administratorCloseError(returnErr, lock.Close()) }()
 	journal, err := loadAdministratorJournal(dir)
 	if err != nil {
 		return nil, administratorFailure("read administrator journal", err)
@@ -68,7 +69,11 @@ func AdministratorInit(
 	}
 	result = &AdministratorInitResult{Changes: []*model.HostStateChangeItem{}}
 	if journal.Initialized {
-		return enrollAdministratorOperator(ctx, dir, operator, journal, result)
+		result, err = enrollAdministratorOperator(ctx, dir, operator, journal, result)
+		if err != nil {
+			return result, err
+		}
+		return result, admission.Enable(ctx)
 	}
 	if journal.Operator != operator.name || journal.UID != operator.uid || journal.GID != operator.gid {
 		return nil, errs.New(
@@ -79,6 +84,12 @@ func AdministratorInit(
 	// A durable pending step survives command failure and interruption. Retrying
 	// converges through idempotent operations without replacing the original snapshot.
 	for journal.Completed < 6 {
+		if journal.Completed == 0 && journal.Pending && journal.GroupGID == nil {
+			if _, err := user.LookupGroup(infra.MVMUnixGroup); err == nil {
+				return result, errs.New(errs.CodeHostInitFailed,
+					"interrupted group creation has no committed identity; refusing to adopt an existing group")
+			}
+		}
 		journal.Pending = true
 		if err := saveAdministratorJournal(ctx, dir, journal); err != nil {
 			return result, administratorFailure("persist administrator mutation intent", err)
@@ -88,6 +99,14 @@ func AdministratorInit(
 		if err != nil {
 			return result, administratorFailure("apply administrator mutation", err)
 		}
+		if journal.Completed == 0 {
+			group, err := user.LookupGroup(infra.MVMUnixGroup)
+			if err != nil {
+				return result, administratorFailure("record initialized group identity", err)
+			}
+			gid := group.Gid
+			journal.GroupGID = &gid
+		}
 		journal.Completed++
 		journal.Pending = false
 		journal.Initialized = journal.Completed == 6
@@ -96,7 +115,11 @@ func AdministratorInit(
 		}
 	}
 	result.UserAddedToGroup = !journal.MemberExisted
-	return enrollAdministratorOperator(ctx, dir, operator, journal, result)
+	result, err = enrollAdministratorOperator(ctx, dir, operator, journal, result)
+	if err != nil {
+		return result, err
+	}
+	return result, admission.Enable(ctx)
 }
 
 func prepareAdministratorJournal(ctx context.Context, operator AdministratorOperator) (*administratorJournal, error) {
@@ -145,10 +168,20 @@ func prepareAdministratorJournal(ctx context.Context, operator AdministratorOper
 	if err != nil {
 		return nil, err
 	}
+	var groupGID *string
+	if groupExisted {
+		group, err := user.LookupGroup(infra.MVMUnixGroup)
+		if err != nil {
+			return nil, err
+		}
+		gid := group.Gid
+		groupGID = &gid
+	}
 	return &administratorJournal{
-		Version: 1, Operator: operator.name, UID: operator.uid, GID: operator.gid,
+		Version: 2, Operator: operator.name, UID: operator.uid, GID: operator.gid,
 		OriginalForward: forward, OriginalSysctl: original, OriginalSudoers: originalSudoers,
-		GroupExisted: groupExisted, MemberExisted: memberExisted,
+		GroupExisted: groupExisted, MemberExisted: memberExisted, GroupGID: groupGID,
+		AppliedSudoers: GenerateSudoersContent(infra.MVMUnixGroup),
 	}, nil
 }
 
