@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -32,7 +33,8 @@ func NewController(vm *model.VMItem, repo Repository) *Controller {
 // Stop completes root-authoritative cleanup before projecting STOPPED locally.
 // Unavailable or ambiguous authority is an error, never permission to signal a PID mirror.
 func (c *Controller) Stop(ctx context.Context, force bool) error {
-	if _, err := jailersvc.NewVMLifecycleClient().Stop(ctx, jailersvc.VMStopRequest{VMID: c.vm.ID, Force: force}); err != nil {
+	if _, err := jailersvc.NewVMLifecycleClient().
+		Stop(ctx, jailersvc.VMStopRequest{VMID: c.vm.ID, Force: force}); err != nil {
 		return err
 	}
 	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
@@ -184,99 +186,40 @@ func (c *Controller) Reboot(ctx context.Context, force bool) error {
 // --- SnapshotCreate ---
 // Creates a Firecracker snapshot. If pauseOnly is true and the VM was running,
 // it stays paused after the snapshot. If pauseOnly is false, the VM is resumed.
-func (c *Controller) SnapshotCreate(ctx context.Context, cfg model.SnapshotCreateConfig) (err error) {
-	name := c.vm.Name
-	// Validate state — snapshot requires RUNNING or PAUSED
-	if c.vm.Status == model.VMStatusStarting {
-		return errs.New(errs.CodeVMStateInvalid,
-			fmt.Sprintf("VM '%s' is still starting — cannot snapshot (current state: %s)", name, c.vm.Status))
-	}
-	if c.vm.Status == model.VMStatusStopped {
-		return errs.New(errs.CodeVMStateInvalid,
-			fmt.Sprintf("VM '%s' is stopped — cannot snapshot (current state: %s)", name, c.vm.Status))
-	}
-	if c.vm.Status == model.VMStatusStopping {
-		return errs.New(errs.CodeVMStateInvalid,
-			fmt.Sprintf("VM '%s' is shutting down — cannot snapshot (current state: %s)", name, c.vm.Status))
-	}
-	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
-		return errs.New(errs.CodeVMStateInvalid,
-			fmt.Sprintf("VM '%s' is in %s state — cannot snapshot (current state: %s)", name, c.vm.Status, c.vm.Status))
-	}
-
-	if c.vm.APISocketPath == "" {
-		return errs.New(errs.CodeVMStateInvalid,
-			fmt.Sprintf("Socket not found for VM '%s'. Must be running with --enable-api-socket", name))
-	}
-	if cfg.SnapshotDir != "" {
-		if err := ExposeSnapshot(ctx, c.vm.ID, cfg.SnapshotDir); err != nil {
-			slog.Error("failed to expose snapshot directory inside VM jail", "vm", name, "error", err)
-			return errs.WrapMsg(errs.CodeSnapshotCreateFailed,
-				"failed to expose snapshot directory inside VM jail", err)
-		}
-	}
-
-	apiSocket := c.vm.APISocketPath
-	client := firecracker.NewClient(apiSocket)
-	wasRunning := c.vm.Status == model.VMStatusRunning
-
-	defer func() {
-		// Resume if we paused it and caller didn't want pause-only.
-		if wasRunning && !cfg.PauseOnly {
-			if resumeErr := client.ResumeVM(ctx); resumeErr != nil {
-				if _, ok := errs.AsType[*errs.DomainError](resumeErr); ok {
-					slog.Warn("Failed to resume VM after snapshot — leaving in paused state", "name", name)
-				} else {
-					err = resumeErr
-				}
-			} else if updateErr := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusRunning); updateErr != nil {
-				if _, ok := errs.AsType[*errs.DomainError](updateErr); ok {
-					slog.Warn("Failed to resume VM after snapshot — leaving in paused state", "name", name)
-				} else {
-					err = updateErr
-				}
-			} else {
-				c.vm.Status = model.VMStatusRunning
+func (c *Controller) SnapshotCreate(
+	ctx context.Context,
+	cfg model.SnapshotCreateConfig,
+) (model.SnapshotCaptureResult, error) {
+	result, err := jailersvc.NewVMSnapshotClient().Capture(ctx, jailersvc.VMSnapshotCaptureRequest{
+		CacheRoot: cfg.CacheRoot, SnapshotID: cfg.SnapshotID, VMID: c.vm.ID, PauseOnly: cfg.PauseOnly,
+	})
+	if err != nil {
+		slog.Error("failed to capture trusted VM snapshot", "vm", c.vm.ID, "error", err)
+		var domain *errs.DomainError
+		if errors.As(err, &domain) && domain.Details["vm_state"] == "paused" {
+			if updateErr := c.repo.UpdateStatus(
+				context.WithoutCancel(ctx),
+				c.vm.ID,
+				model.VMStatusPaused,
+			); updateErr != nil {
+				return result, errors.Join(err, updateErr)
 			}
+			c.vm.Status = model.VMStatusPaused
 		}
-		client.Close()
-	}()
-
-	// Pause before snapshotting (Firecracker requires VM to be paused)
-	if wasRunning {
-		if err := client.PauseVM(ctx); err != nil {
-			return err
-		}
-		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusPaused); err != nil {
-			return err
-		}
-		c.vm.Status = model.VMStatusPaused
+		return result, err
 	}
-
-	// PATCH drive to phantom path so the vmstate captures a snapshot-local
-	// path instead of the source VM's path.
-	if cfg.PhantomRootfsPath != "" {
-		if patchErr := client.UpdateDrivePath(ctx, "rootfs", cfg.PhantomRootfsPath); patchErr != nil {
-			return errs.WrapMsg(errs.CodeSnapshotCreateFailed,
-				fmt.Sprintf("failed to patch drive to phantom path: %v", patchErr), patchErr)
+	status := model.VMStatusStopped
+	if result.Mode == "full" {
+		status = model.VMStatusRunning
+		if result.Paused {
+			status = model.VMStatusPaused
 		}
 	}
-
-	// Defer: restore original drive path after snapshot (runs before resume defer).
-	if cfg.PhantomRootfsPath != "" {
-		defer func() {
-			if restoreErr := client.UpdateDrivePath(ctx, "rootfs", cfg.RootfsPath); restoreErr != nil {
-				slog.Warn("Failed to restore drive path after snapshot",
-					"vm", name, "error", restoreErr)
-			}
-		}()
+	if err := c.repo.UpdateStatus(ctx, c.vm.ID, status); err != nil {
+		return result, err
 	}
-
-	_, snapshotErr := client.CreateSnapshot(ctx, cfg.MemFile, cfg.StateFile)
-	if snapshotErr != nil {
-		return snapshotErr
-	}
-	return nil
+	c.vm.Status = status
+	return result, nil
 }
 
 // --- SnapshotRestore ---
@@ -284,47 +227,8 @@ func (c *Controller) SnapshotCreate(ctx context.Context, cfg model.SnapshotCreat
 // with a ready API socket). Handles: LoadSnapshot with network override,
 // vsock reconfiguration, and status update.
 func (c *Controller) SnapshotRestore(ctx context.Context, cfg model.SnapshotRestoreConfig) error {
-	if c.vm.APISocketPath == "" {
-		return errs.New(errs.CodeVMStateInvalid,
-			fmt.Sprintf("Socket not found for VM '%s'. Firecracker must be spawned before loading snapshot", c.vm.Name))
-	}
-
-	client := firecracker.NewClient(c.vm.APISocketPath)
-	defer client.Close()
-	vsockOverride := snapshotVsockOverride(cfg.VsockEnabled)
-
-	// Map the VM's TAP device to eth0 via network_overrides so Firecracker
-	// doesn't look for the original TAP name from the snapshot vmstate.
-	if _, err := client.LoadSnapshot(
-		ctx,
-		cfg.MemFile,
-		cfg.StateFile,
-		cfg.Resume,
-		cfg.NetworkOverrides,
-		vsockOverride,
-	); err != nil {
-		return err
-	}
-
-	// NOTE: No PutVsock call needed here. vsock_override in LoadSnapshot
-	// already sets the correct host-side UDS path. The guest CID is preserved
-	// from the vmstate and matches what the guest agent uses. PutVsock is
-	// pre-boot only — calling it on a resumed VM would fail or reset the
-	// vsock device, breaking the guest agent's existing connection.
-
-	// Update status
-	if cfg.Resume {
-		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusRunning); err != nil {
-			return err
-		}
-		c.vm.Status = model.VMStatusRunning
-	} else {
-		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusPaused); err != nil {
-			return err
-		}
-		c.vm.Status = model.VMStatusPaused
-	}
-	return nil
+	return errs.New(errs.CodeSnapshotRestoreFailed,
+		"snapshot restore requires the root-owned prepared restore transaction")
 }
 
 func snapshotVsockOverride(enabled bool) string {

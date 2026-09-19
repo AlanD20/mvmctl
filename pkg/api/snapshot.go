@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -14,7 +13,7 @@ import (
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/lib/system"
+	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
@@ -42,173 +41,49 @@ func (op *Operation) SnapshotCreate(
 	onProgress event.OnProgressCallback,
 ) (*model.SnapshotItem, error) {
 	if err := input.Validate(); err != nil {
-		return nil, errs.New(errs.CodeSnapshotCreateFailed, err.Error())
+		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed, "invalid snapshot create request", err)
 	}
-	if err := system.CheckPrivileges("/usr/sbin/ip", "create snapshot"); err != nil {
-		return nil, errs.WrapMsg(
-			errs.CodePrivilegeRequired,
-			fmt.Sprintf("privilege check failed: %v", err),
-			err,
-			errs.WithClass(errs.ClassNeedsInteraction),
-		)
-	}
-
-	// 1. Resolve VM
-	emitProgress(onProgress, "resolve", "running", "Resolving VM...")
 	vmItem, err := input.Resolve(ctx, op.Repos.VM)
 	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
-			fmt.Sprintf("vm not found: %s", input.Identifier), err)
+		return nil, err
 	}
-
-	// 2. Enrich VM with needed relations
-	emitProgress(onProgress, "enrich", "running", "Enriching VM info...")
-	if err := op.Enr.EnrichVM(
-		ctx,
-		[]*model.VMItem{vmItem},
-		"kernel",
-		"image",
-		"binary",
-		"network",
-		"vsock",
-	); err != nil {
-		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
-			"failed to enrich VM with relations", err)
-	}
-
-	// 3. Generate snapshot ID
 	createdAt := infra.Now()
-	snapID := crypto.SnapshotID(vmItem.ID, createdAt)
-
-	// 4. Create snapshot directory
-	snapDir := infra.GetSnapshotDir(snapID)
-	emitProgress(onProgress, "dir", "running", fmt.Sprintf("Creating snapshot directory: %s", snapDir))
-	if err := os.MkdirAll(snapDir, 0755); err != nil {
-		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
-			fmt.Sprintf("failed to create snapshot directory %s", snapDir), err)
+	snapshotID := crypto.SnapshotID(vmItem.ID, createdAt)
+	emitProgress(onProgress, "snapshot", "running", "Capturing trusted VM state and protected disks...")
+	capture, err := vm.NewController(vmItem, op.Repos.VM).SnapshotCreate(ctx, model.SnapshotCreateConfig{
+		CacheRoot: op.CacheDir, SnapshotID: snapshotID, PauseOnly: input.Pause,
+	})
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed, "trusted snapshot capture failed", err)
 	}
-
-	// Cleanup on any failure
-	var cleanup bool
-	defer func() {
-		if cleanup {
-			os.RemoveAll(snapDir)
-		}
-	}()
-
-	// 5. Copy rootfs
-	rootfsFile := filepath.Join(snapDir, infra.SnapshotRootfsFilename)
-	emitProgress(onProgress, "rootfs", "running", "Copying root filesystem...")
-	if err := infra.CopyFile(vmItem.RootfsPath, rootfsFile); err != nil {
-		cleanup = true
-		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
-			fmt.Sprintf("failed to copy rootfs from %s: %v", vmItem.RootfsPath, err), err)
-	}
-
-	// Create phantom symlink so the vmstate captures a snapshot-local path
-	// instead of the source VM's path. The symlink initially points to the
-	// snapshot's own rootfs copy.
-	phantomPath := filepath.Join(snapDir, "phantom-rootfs.img")
-	if err := os.Symlink(rootfsFile, phantomPath); err != nil {
-		cleanup = true
-		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
-			fmt.Sprintf("failed to create phantom symlink: %v", err), err)
-	}
-
-	// 6. Firecracker API operations (pause + snapshot + optionally resume)
-	memFile := filepath.Join(snapDir, infra.SnapshotMemoryFilename)
-	stateFile := filepath.Join(snapDir, infra.SnapshotStateFilename)
-
-	if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
-		emitProgress(onProgress, "snapshot", "running", "Creating Firecracker snapshot...")
-		ctrl := vm.NewController(vmItem, op.Repos.VM)
-		if err := ctrl.SnapshotCreate(ctx, model.SnapshotCreateConfig{
-			MemFile:           memFile,
-			StateFile:         stateFile,
-			PauseOnly:         input.Pause,
-			PhantomRootfsPath: phantomPath,
-			RootfsPath:        vmItem.RootfsPath,
-		}); err != nil {
-			cleanup = true
-			return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
-				fmt.Sprintf("failed to create snapshot for VM '%s': %v", vmItem.Name, err), err)
-		}
-	} else {
-		// No API socket — snapshot from stopped VM (just copy rootfs)
-		emitProgress(onProgress, "snapshot", "running", "No API socket — snapshot from stopped VM (rootfs only)...")
-		emitProgress(onProgress, "info", "running",
-			"Snapshot from stopped VM: no memory/state files captured")
-	}
-
-	// 7. Construct snapshot name (default: <vm>-<timestamp>)
-	snapName := vmItem.Name + "-" + createdAt
+	name := vmItem.Name + "-" + createdAt
 	if input.Name != nil && *input.Name != "" {
-		snapName = *input.Name
+		name = *input.Name
 	}
-
-	// 8. Build extra config from VM boot settings
-	extraConfig := &model.SnapshotExtraConfig{
-		BootArgs:      vmItem.BootArgs,
-		LSMFlags:      vmItem.LSMFlags,
-		PCIEnabled:    vmItem.PCIEnabled,
-		NestedVirt:    vmItem.NestedVirt,
-		Console:       vmItem.EnableConsole,
-		EnableLogging: vmItem.EnableLogging,
-		EnableMetrics: vmItem.EnableMetrics,
-		LogLevel:      vmItem.LogLevel,
-		CPUConfig:     vmItem.CPUConfig,
-		CgroupLimits:  vmItem.CgroupLimits,
+	directory := filepath.Join(op.CacheDir, ".mvm-protected", "snapshots", snapshotID)
+	item := &model.SnapshotItem{
+		ID: snapshotID, Name: name, SourceVMID: capture.SourceVMID, SourceVMName: vmItem.Name,
+		SnapshotDir: directory, RootfsFile: filepath.Join(directory, "rootfs.img"),
+		KernelID: vmItem.KernelID, ImageID: vmItem.ImageID, BinaryID: vmItem.BinaryID,
+		NetworkID: capture.NetworkID, VCPUCount: capture.VCPUCount, MemSizeMiB: capture.MemSizeMiB,
+		DiskSizeMiB: int(capture.RootfsBytes >> 20), SSHKeys: vmItem.SSHKeys, SSHUser: vmItem.SSHUser,
+		CreatedAt: createdAt, UpdatedAt: createdAt,
 	}
-	if vmItem.Vsock != nil {
-		extraConfig.VsockPort = vmItem.Vsock.Port
-		extraConfig.VsockCID = vmItem.Vsock.GuestCID
-		extraConfig.VsockToken = vmItem.Vsock.Token
+	if capture.Mode == "full" {
+		item.MemoryFile = filepath.Join(directory, "memory")
+		item.StateFile = filepath.Join(directory, "vmstate")
 	}
-
-	// 9. Build metadata from enriched VM
-	now := infra.Now()
-	snapshotItem := &model.SnapshotItem{
-		ID:           snapID,
-		Name:         snapName,
-		SourceVMID:   vmItem.ID,
-		SourceVMName: vmItem.Name,
-		SnapshotDir:  snapDir,
-		MemoryFile:   memFile,
-		StateFile:    stateFile,
-		RootfsFile:   rootfsFile,
-		ImageID:      vmItem.ImageID,
-		KernelID:     vmItem.KernelID,
-		NetworkID:    vmItem.NetworkID,
-		BinaryID:     vmItem.BinaryID,
-		VCPUCount:    vmItem.VCPUCount,
-		MemSizeMiB:   vmItem.MemSizeMiB,
-		DiskSizeMiB:  vmItem.DiskSizeMiB,
-		SSHKeys:      vmItem.SSHKeys,
-		SSHUser:      vmItem.SSHUser,
-		ExtraConfig:  extraConfig,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+	// Root publication is already committed. A local database failure must not destroy
+	// the only durable capture; the exact snapshot ID remains available for recovery.
+	if err := op.Repos.Snapshot.Upsert(ctx, item); err != nil {
+		return item, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
+			"snapshot "+snapshotID+" was captured but its local projection could not be stored", err)
 	}
-
-	// 9. Persist to DB
-	emitProgress(onProgress, "store", "running", "Persisting snapshot metadata...")
-	if err := op.Repos.Snapshot.Upsert(ctx, snapshotItem); err != nil {
-		cleanup = true
-		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
-			fmt.Sprintf("failed to persist snapshot record: %v", err), err)
-	}
-
-	// Cleanup is no longer needed on success
-	cleanup = false
-
 	op.AuditLog.LogOperation("snapshot.create", map[string]any{
-		"snapshot_id": snapID,
-		"source_vm":   vmItem.Name,
-		"name":        snapName,
+		"snapshot_id": snapshotID, "source_vm": vmItem.Name, "name": name,
 	}, "")
-
-	emitProgress(onProgress, "complete", "complete", fmt.Sprintf("Snapshot created: %s", snapID))
-	return snapshotItem, nil
+	emitProgress(onProgress, "complete", "complete", "Snapshot created: "+snapshotID)
+	return item, nil
 }
 
 // --- SnapshotRestore ---
@@ -286,7 +161,21 @@ func (op *Operation) SnapshotInspect(
 ) (*results.SnapshotInspect, error) {
 	snaps, err := input.Resolve(ctx, op.Repos.Snapshot)
 	if err != nil {
-		return nil, err
+		if len(input.Identifiers) != 1 {
+			return nil, err
+		}
+		if _, identityErr := resolveManagedSnapshotArtifacts(op.CacheDir, input.Identifiers[0]); identityErr != nil {
+			return nil, err
+		}
+		projection, rootErr := jailersvc.NewVMSnapshotClient().Inspect(ctx, jailersvc.VMSnapshotRequest{
+			CacheRoot: op.CacheDir, SnapshotID: input.Identifiers[0],
+		})
+		if rootErr != nil {
+			return nil, rootErr
+		}
+		snaps = []*model.SnapshotItem{{ID: projection.SnapshotID, Name: projection.SnapshotID,
+			SourceVMID: projection.SourceVMID, VCPUCount: projection.VCPUCount, MemSizeMiB: projection.MemSizeMiB,
+			DiskSizeMiB: int(projection.RootfsBytes >> 20), NetworkID: projection.NetworkID}}
 	}
 	if len(snaps) != 1 {
 		return nil, fmt.Errorf("expected exactly one snapshot identifier")
@@ -325,6 +214,23 @@ func (op *Operation) SnapshotInspect(
 // each resolved snapshot. Returns a BatchResult (matches VMRemove pattern).
 func (op *Operation) SnapshotRemove(ctx context.Context, input inputs.SnapshotInput) *errs.BatchResult {
 	snapshots, resolveErr := input.Resolve(ctx, op.Repos.Snapshot)
+	// Canonical IDs remain removable after root publication or staging succeeded but
+	// local bookkeeping failed. Root still authenticates the exact protected entry.
+	for _, identifier := range input.Identifiers {
+		if _, err := resolveManagedSnapshotArtifacts(op.CacheDir, identifier); err != nil {
+			continue
+		}
+		found := false
+		for _, snapshot := range snapshots {
+			if snapshot.ID == identifier {
+				found = true
+				break
+			}
+		}
+		if !found {
+			snapshots = append(snapshots, &model.SnapshotItem{ID: identifier, Name: identifier})
+		}
+	}
 
 	results := make([]errs.OperationResult, 0, len(input.Identifiers))
 
@@ -338,19 +244,14 @@ func (op *Operation) SnapshotRemove(ctx context.Context, input inputs.SnapshotIn
 	}
 
 	for _, snap := range snapshots {
-		paths, err := resolveManagedSnapshotArtifacts(op.CacheDir, snap.ID)
-		if err != nil {
+		if _, err := jailersvc.NewVMSnapshotClient().Remove(ctx, jailersvc.VMSnapshotRequest{
+			CacheRoot: op.CacheDir, SnapshotID: snap.ID,
+		}); err != nil {
 			results = append(results, errs.OperationResult{
-				Status: "error", Code: string(errs.CodeSnapshotRemoveFailed),
-				Item: snap, Message: fmt.Sprintf("invalid managed snapshot identity: %v", err),
+				Status: "error", Code: string(errs.CodeSnapshotRemoveFailed), Item: snap,
+				Message: "protected snapshot removal failed: " + err.Error(),
 			})
 			continue
-		}
-
-		// Remove only the ID-derived managed snapshot directory. Stored paths
-		// are display metadata and cannot select a deletion target.
-		if err := os.RemoveAll(paths.dir); err != nil {
-			slog.Warn("failed to remove snapshot directory", "dir", paths.dir, "error", err)
 		}
 
 		// Remove from DB

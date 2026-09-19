@@ -35,21 +35,32 @@ type SnapshotItem struct {
 // SnapshotCreateConfig collects all external parameters for creating a snapshot.
 // Passed from the API layer to the controller.
 type SnapshotCreateConfig struct {
-	SnapshotDir       string
-	MemFile           string
-	StateFile         string
-	PauseOnly         bool
-	PhantomRootfsPath string // empty = skip PATCH drive during snapshot
-	RootfsPath        string // original path to restore after snapshot
+	CacheRoot  string
+	SnapshotID string
+	PauseOnly  bool
 }
 
 // SnapshotRestoreConfig collects all external parameters for restoring a snapshot.
 // Passed from the API layer to the controller.
 type SnapshotRestoreConfig struct {
-	MemFile          string
-	StateFile        string
-	Resume           bool
-	NetworkOverrides map[string]string // iface_id → host_dev_name (TAP)
-	VsockEnabled     bool              // emit the fixed jail-visible vsock override
-	RootfsPath       string            // rootfs path for post-Load PATCH
+	CacheRoot  string
+	SnapshotID string
+	Resume     bool
+}
+
+// SnapshotCaptureResult is a display projection of the root-authenticated capture.
+// It is not a capability to reopen artifacts or choose restore configuration.
+type SnapshotCaptureResult struct {
+	SnapshotID          string `json:"snapshot_id"`
+	SourceVMID          string `json:"source_vm_id"`
+	Mode                string `json:"mode"`
+	Paused              bool   `json:"paused"`
+	VCPUCount           int    `json:"vcpu_count"`
+	MemSizeMiB          int    `json:"mem_size_mib"`
+	RootfsBytes         uint64 `json:"rootfs_bytes"`
+	NetworkID           string `json:"network_id"`
+	GuestIPv4           string `json:"guest_ipv4"`
+	GuestMAC            string `json:"guest_mac"`
+	ReleaseVersion      string `json:"release_version"`
+	ReleaseArchitecture string `json:"release_architecture"`
 }
