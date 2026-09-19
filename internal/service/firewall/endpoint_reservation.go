@@ -50,9 +50,10 @@ func (lease *MutationLease) RegisterStoppedEndpoint(ctx context.Context, reserva
 	return state.applyIntent(ctx, target)
 }
 
-// RegisterNetwork records the exact root-owned network projection before a stopped-VM policy change.
-// The concrete earlier mutation lock must name this network; the network service verifies its live bridge.
-func (lease *MutationLease) RegisterNetwork(ctx context.Context, network NetworkIntent) error {
+// ApplyNetwork installs the root-owned managed-network policy before bridge exposure and reads it back.
+// CRITICAL: The concrete earlier lock names this network. The network service retains this lease
+// through exact bridge activation and supplies only its admitted bridge and root-selected uplink.
+func (lease *MutationLease) ApplyNetwork(ctx context.Context, network NetworkIntent) error {
 	if lease == nil || lease.state == nil {
 		return generationAuthorityError("firewall network lease is unavailable", nil, nil)
 	}
@@ -77,6 +78,11 @@ func (lease *MutationLease) RegisterNetwork(ctx context.Context, network Network
 	}
 	target.Networks = append(target.Networks, network)
 	return state.applyIntent(ctx, target)
+}
+
+// RegisterNetwork admits the same network projection when recording a stopped-VM policy.
+func (lease *MutationLease) RegisterNetwork(ctx context.Context, network NetworkIntent) error {
+	return lease.ApplyNetwork(ctx, network)
 }
 
 // RemoveVMPolicies invalidates durable endpoint and source/destination grant ownership on final VM deletion.
