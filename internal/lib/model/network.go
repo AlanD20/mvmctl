@@ -98,7 +98,6 @@ type NetworkItem struct {
 	CreatedAt    string  `json:"created_at"             db:"created_at"`
 	UpdatedAt    string  `json:"updated_at"             db:"updated_at"`
 	DeletedAt    *string `json:"deleted_at,omitempty"   db:"deleted_at"`
-	NATGateways  *string `json:"nat_gateways,omitempty" db:"nat_gateways"`
 
 	// Resolved relations (not stored in DB directly)
 	Leases        []*NetworkLeaseItem `json:"leases,omitempty"`

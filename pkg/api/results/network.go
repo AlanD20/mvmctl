@@ -33,8 +33,7 @@ type NetworkStatusInfo struct {
 
 // NetworkNATInfo groups network NAT info in an inspect response.
 type NetworkNATInfo struct {
-	NATEnabled  bool     `json:"nat_enabled"`
-	NATGateways []string `json:"nat_gateways"`
+	NATEnabled bool `json:"nat_enabled"`
 }
 
 // NetworkInspect is the structured response for network inspection.

@@ -1,15 +1,12 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
-	libnet "mvmctl/internal/lib/network"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 
@@ -99,8 +96,6 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 	var subnet string
 	var ipv4Gateway string
 	var noNAT bool
-	var natGateways string
-	var nonInteractive bool
 	var setDefault bool
 
 	cmd := &cobra.Command{
@@ -124,24 +119,6 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 				return fmt.Errorf("Missing required option '--subnet'")
 			}
 
-			if natGateways == "" && !noNAT && !nonInteractive {
-				var err error
-				natGateways, err = resolveUserNATGateways(cmd.Context())
-				if err != nil {
-					return err
-				}
-			}
-
-			var natGatewaysList []string
-			if natGateways != "" {
-				for _, g := range strings.Split(natGateways, ",") {
-					g = strings.TrimSpace(g)
-					if g != "" {
-						natGatewaysList = append(natGatewaysList, g)
-					}
-				}
-			}
-
 			var gw *string
 			if ipv4Gateway != "" {
 				gw = &ipv4Gateway
@@ -151,7 +128,6 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 				Subnet:      subnet,
 				IPv4Gateway: gw,
 				NATEnabled:  !noNAT,
-				NATGateways: natGatewaysList,
 				SetDefault:  setDefault,
 			}
 
@@ -174,36 +150,8 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 	cmd.Flags().StringVar(&subnet, "subnet", "", "IP subnet in SUBNET notation (e.g. 192.168.100.0/24)")
 	cmd.Flags().StringVar(&ipv4Gateway, "ipv4-gateway", "", "Gateway IPv4 for the bridge")
 	cmd.Flags().BoolVar(&noNAT, "no-nat", false, "Disable NAT/masquerade")
-	cmd.Flags().
-		StringVar(&natGateways, "nat-gateways", "", "Physical interfaces for NAT (comma-separated, auto-detected if not provided)")
-	cmd.Flags().
-		BoolVar(&nonInteractive, "non-interactive", false, "Skip interactive prompts (auto-detect NAT interfaces)")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default network")
 	return cmd
-}
-
-// resolveUserNATGateways prompts the user to select NAT gateway interfaces.
-func resolveUserNATGateways(ctx context.Context) (string, error) {
-	interfaces, err := libnet.GetPhysicalInterfaces()
-	if err != nil {
-		return "", fmt.Errorf("failed to list network interfaces: %w", err)
-	}
-	if len(interfaces) == 0 {
-		return "", fmt.Errorf("no network interfaces found")
-	}
-	if len(interfaces) == 1 {
-		return interfaces[0], nil
-	}
-	selected, err := common.Cli.PromptMultiSelect(
-		ctx,
-		"Select interface(s) for NAT (internet access):",
-		interfaces,
-		nil,
-	)
-	if err != nil {
-		return "", err
-	}
-	return strings.Join(selected, ","), nil
 }
 
 func newNetworkRemoveCmd(networkAPI api.NetworkAPI) *cobra.Command {
