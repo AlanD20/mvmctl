@@ -12,6 +12,7 @@ import (
 )
 
 type entrypoints struct {
+	launchConsole     func(context.Context, []string) error
 	launchChild       func(context.Context, []string) error
 	privileged        func(context.Context, []string) error
 	systemInstall     func(context.Context, []string) error
@@ -21,6 +22,7 @@ type entrypoints struct {
 
 func main() {
 	os.Exit(run(context.Background(), os.Args[1:], entrypoints{
+		launchConsole:     jailer.RunLaunchConsole,
 		launchChild:       jailer.RunLaunchChild,
 		privileged:        privileged.Run,
 		systemInstall:     app.RunHostInstallSystemBinary,
@@ -30,6 +32,15 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, entries entrypoints) int {
+	if jailer.IsLaunchConsoleInvocation(args) {
+		// The console relay must never enter ordinary CLI initialization, even
+		// when its inherited setup channel rejects an unauthenticated invocation.
+		if err := entries.launchConsole(ctx, args); err != nil {
+			slog.Error("launch console failed", "error", err)
+			return 1
+		}
+		return 0
+	}
 	if jailer.IsLaunchChildInvocation(args) {
 		// The child owns a locked namespace thread. Every result returns directly
 		// to main's os.Exit; it must never enter ordinary application initialization.
