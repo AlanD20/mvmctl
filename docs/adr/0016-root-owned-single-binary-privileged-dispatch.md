@@ -73,6 +73,27 @@ environment, then publishes a descriptor-relative candidate by file fsync, atomi
 Failures preserve replacement, uncertain durability, and cleanup evidence. Existing transitional grants remain exact;
 this does not enable the marker-only policy or complete administrator init/reset.
 
+### Host administration admission and reset
+
+Administrator mutation and operator dispatch share the fixed root-owned host journal lock.
+Operator requests retain a shared admission lease, check the durable enabled state, and recheck
+operator authorization after acquiring that lease. The lease covers dispatch and cleanup, including
+retained sessions. Administrator init/reset takes the exclusive lease; acquisition is cancellable
+and bounded. Initialization enables admission only after completing the journaled setup.
+
+Reset must retain the Jailer global inventory guard, then the network/global firewall guard, and
+prove every owner's managed runtime state cleaned or absent before disabling admission and restoring
+the recorded host state. It does not force-stop VMs. Queued requests cannot proceed on their earlier
+authorization after reset; they must acquire shared admission and observe the disabled state.
+Incomplete rollback retains disabled admission and its journal for explicit administrator retry.
+
+Restoration compares exact recorded group identity, membership, applied sudoers bytes, and managed
+settings; it preserves administrator changes rather than treating the old snapshot as unconditional
+overwrite authority. Marker-only sudoers is a reset prerequisite: transitional raw-command grants
+can bypass dispatcher admission and therefore cannot establish global quiescence. Missing or
+malformed admission state refuses operator requests; only explicit administrator initialization can
+publish enabled state. This is an implementation contract, not a completed qualification claim.
+
 ### Early privileged dispatch
 
 `cmd/mvm/main.go` recognizes one reserved, versioned privileged marker before signal setup, `app.Initialize()`, Cobra,
