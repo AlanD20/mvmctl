@@ -134,8 +134,8 @@ consistency and capture scope must be resolved before extending today's rootfs-o
 | Policy decision | Approval status and evidence still needed |
 |---|---|
 | Maximum attached data volumes | Derived MMIO topology calculation approved on 2026-09-19. A uniform ceiling of 13 is not selected. Qualify limits before claiming support. |
-| Per-volume minimum/maximum capacity | Positive sector-aligned exact capacity is proposed; choose product minimum and maximum after filesystem, guest-tooling, and workload measurements. No new capacity number is selected. |
-| Aggregate storage and concurrency | Choose separate per-VM/user/host logical and physical budgets and concurrent snapshot/copy limits from deployment capacity and failure tests. |
+| Per-volume minimum/maximum capacity | Proceed without a new storage quota cap. Strict file identity and exact logical-length admission remain required; representability is not a qualified capacity claim. |
+| Aggregate storage and concurrency | Raw attachment may proceed without a new aggregate storage quota. Deployment capacity, copy concurrency, and disk-full behavior still require qualification; no space reservation is implied. |
 | `vmstate` file maximum | Exact upstream 10,000,000-byte loader ceiling approved on 2026-09-19. Any lower operational cap remains unmeasured. |
 | Memory artifact bound | Exact trusted captured RAM length approved on 2026-09-19 for today's RAM-only profile, deriving at most 64 GiB from the existing product RAM maximum. Trusted capture and immutable backing remain necessary. |
 | Snapshot modes and data-volume contents | Start with Full; define volume consistency/capture/restore semantics before adding data-volume snapshots or differential chains. |
@@ -152,8 +152,8 @@ Required gates for accepting and qualifying the implemented policy:
 4. Qualify proposed raw capacities on selected allowed host filesystems and guest filesystems: create, format, attach,
    last-sector I/O, growth, copy, cancellation, disk-full/quota failure, and recovery. Record logical and allocated bytes
    separately, including temporary peak usage. Sparse allocation alone does not qualify capacity or throughput.
-5. Define independent aggregate storage admission and snapshot consistency before wiring privileged volume/snapshot
-   operations. Run resulting system qualification only through the project's disposable-runner workflow.
+5. Preserve the approved no-new-storage-quota attachment policy, and define snapshot consistency before wiring
+   snapshot operations. Run resulting system qualification only through the project's disposable-runner workflow.
 
 This was one bounded source pass. No VM, host storage, throughput, deserializer allocation, or boundary measurements
 were run. PCI capacity, guest/host filesystem maxima, peak copy budgets, and data-volume snapshot consistency remain
