@@ -438,9 +438,14 @@ remove separately invalidates them and completes root removal before local delet
 launch remain blocked because the corresponding authority/policy is incomplete. Graceful stop preserves explicit
 `force=false`, admits the exact API peer, requests guest shutdown, waits on the retained pidfd, then completes cleanup.
 Console launch now includes its fixed root-spawned relay, caller UID/GID with empty supplementary groups, authenticated
-gate, root-created PTY, and pinned outputs. Prior-boot topology recovery and live L2/Tier 3/system qualification remain
-separate work. Firewall recovery has absence-only prior-boot rebinding that preserves durable grants; this does not
-authorize speculative deletion of surviving kernel objects.
+gate, root-created PTY, and pinned outputs. Prior-boot cleanup consumes a concrete retained VM-lock capability that
+proves the fixed cgroup absent and binds the root cleaning record across boot identities. Network retirement repeats
+namespace/link absence checks, preserves logical firewall grants, and never treats old kernel identities as current
+deletion authority. Managed-network rebootstrap retains exact logical intent while creating fresh bridge/uplink
+identity; a competing existing bridge is not adopted. Final VM removal invalidates exact retired reservations.
+Surviving placeholders or ambiguous evidence remain fail-closed. Old-boot network removal receipts and pending desired
+networks without root records still have cleanup retry limitations. Live L2/Tier 3/system qualification is deferred;
+none of these implementation-only changes is runtime evidence.
 
 The public relaunch path has a separate, private normal-process `vmRelaunchState`. Start,
 reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,

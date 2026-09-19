@@ -919,12 +919,15 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Security work still pending
 
-Current incomplete work includes full prior-boot topology recovery, per-volume/aggregate storage policy, trusted
+Current incomplete work includes per-volume/aggregate storage policy, trusted
 snapshot capture and immutable restore backing, NoCloud port ownership, host reset under a global retained
 quiescence/admission gate, remaining LoopMount account/deblob/conversion effects, memory policy, transitional
 privilege/backend removal, and qualification. Snapshot, extra-volume, and PCI launches refuse unsupported selections;
-host clean/reset remain blocked. Firewall prior-boot recovery now has absence-only rebinding that retains grants, but
-its complete network recovery composition remains separate work.
+host clean/reset remain blocked. Prior-boot cleanup now consumes a concrete retained VM/cgroup absence proof,
+retires topology only after namespace/link absence, and preserves firewall reservations/grants. Managed networks
+can rebootstrap exact logical intent using fresh kernel identities, without adopting a competing bridge. These paths
+are unverified. Surviving namespace placeholders and ambiguous ownership remain fail-closed; old-boot network
+removal receipts and pending desired networks without root records still lack complete cleanup retry support.
 
 The code changes in this implementation-only pass have not been built, tested, reviewed, or qualified. Adversarial
 coverage, CLI system tests, cleanup/leak evidence, full CI, and release signoff remain required in a later authorized
