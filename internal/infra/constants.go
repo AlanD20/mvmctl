@@ -185,10 +185,7 @@ var OverridableDefaults = map[string]map[string]any{
 		"cache_type": "Unsafe",
 	},
 	"defaults.cloudinit": {
-		"nocloud_port_range_start": 8000,
-		"nocloud_port_range_end":   9000,
-		"nocloud_max_port_retries": 100,
-		"nocloud_kill_after":       "5m",
+		"nocloud_kill_after": "5m",
 	},
 	"defaults.binary": {
 		"remote_version_limit": 5,
@@ -334,6 +331,9 @@ const DownloadRetryBackoff = 2.0
 // --- Cloud-init ---
 const RequiredISOTool = "cloud-localds"
 const NoCloudNetBindTimeoutS = 5.0
+
+// NoCloudNetPort is reserved for NoCloud on each managed network's gateway.
+const NoCloudNetPort = 8000
 
 // --- Console ---
 const ConsoleSocketTimeoutS = 2.0
