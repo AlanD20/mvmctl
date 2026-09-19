@@ -2,6 +2,9 @@ package network
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/netip"
 	"slices"
 
 	"mvmctl/internal/lib/authorityfs"
@@ -24,7 +27,7 @@ func (server *TrafficPolicyServer) ApplyNetworkTrafficPolicy(
 	if err := request.Validate(); err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
-	authority, err := acquireTrafficPolicyAuthority(ctx, ownerUID, []string{request.DestinationVMID}, true)
+	authority, err := acquireTrafficPolicyAuthority(ctx, ownerUID, []string{request.DestinationVMID})
 	if err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
@@ -58,7 +61,6 @@ func (server *TrafficPolicyServer) ApplyVMTrafficPolicy(
 		ctx,
 		ownerUID,
 		[]string{request.SourceVMID, request.DestinationVMID},
-		true,
 	)
 	if err != nil {
 		return TrafficPolicyMutationResult{}, err
@@ -89,7 +91,7 @@ func (server *TrafficPolicyServer) RemoveNetworkTrafficPolicy(
 	if err := request.Validate(); err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
-	authority, err := acquireTrafficPolicyAuthority(ctx, ownerUID, []string{request.DestinationVMID}, false)
+	authority, err := acquireTrafficPolicyAuthority(ctx, ownerUID, []string{request.DestinationVMID})
 	if err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
@@ -115,7 +117,6 @@ func (server *TrafficPolicyServer) RemoveVMTrafficPolicy(
 		ctx,
 		ownerUID,
 		[]string{request.SourceVMID, request.DestinationVMID},
-		false,
 	)
 	if err != nil {
 		return TrafficPolicyMutationResult{}, err
@@ -141,12 +142,12 @@ type trafficPolicyAuthority struct {
 	store      *networkStoreUID
 	journals   []*topologyJournal
 	topologies map[string]topologyJournalRecord
-	network    *managedNetworkLease
+	networks   []*managedNetworkLease
 	firewall   *firewall.MutationLease
 }
 
 func acquireTrafficPolicyAuthority(
-	ctx context.Context, ownerUID uint32, vmIDs []string, applying bool,
+	ctx context.Context, ownerUID uint32, vmIDs []string,
 ) (_ *trafficPolicyAuthority, returnErr error) {
 	if ctx == nil || ownerUID == 0 {
 		return nil, errs.New(errs.CodeValidationFailed, "authenticated non-root policy owner and context are required")
@@ -217,49 +218,151 @@ func acquireTrafficPolicyAuthority(
 		if !found {
 			return nil, errs.NotFound(
 				errs.CodePolicyEndpointInvalid,
-				"traffic policy requires an existing root-owned VM topology; stopped or unlaunched endpoint admission is unavailable",
+				"traffic policy requires an existing root-owned VM topology; unlaunched endpoint admission is unavailable",
 				errs.WithEntity(id),
 			)
 		}
-		if applying && (record.Lifecycle != topologyActive || record.BootID != boot) {
-			return nil, errs.New(
-				errs.CodePolicyEndpointInvalid,
-				"traffic policy installation currently requires an active root-owned endpoint; stopped-VM admission is unavailable",
-				errs.WithEntity(id),
-			)
+		if record.Lifecycle != topologyActive && record.Lifecycle != topologyCleaned {
+			return nil, errs.New(errs.CodePolicyEndpointInvalid,
+				"traffic policy endpoint requires completed topology cleanup or activation", errs.WithEntity(id))
 		}
-		if !applying && record.Lifecycle != topologyActive && record.Lifecycle != topologyCleaned {
-			return nil, errs.New(
-				errs.CodePolicyEndpointInvalid,
-				"traffic policy endpoint requires topology recovery before revocation",
-				errs.WithEntity(id),
-			)
+		if record.Lifecycle == topologyActive && record.BootID != boot {
+			return nil, errs.New(errs.CodePolicyEndpointInvalid,
+				"active traffic policy endpoint requires current-boot recovery", errs.WithEntity(id))
 		}
 		authority.topologies[id] = record
 	}
 	return authority, nil
 }
 
-func (authority *trafficPolicyAuthority) begin(ctx context.Context, networkID string) error {
-	lock, err := (managedNetworkLocker{}).LockNetwork(
-		ctx,
-		networkKey{ownerUID: OwnerUID(authority.ownerUID), networkID: NetworkID(networkID)},
-	)
-	if err != nil {
+func (authority *trafficPolicyAuthority) begin(ctx context.Context, sourceNetworkID string) error {
+	networkIDs := []string{sourceNetworkID}
+	for _, record := range authority.topologies {
+		networkIDs = append(networkIDs, record.NetworkID)
+	}
+	slices.Sort(networkIDs)
+	networkIDs = slices.Compact(networkIDs)
+	networks := make(map[string]*managedNetworkLease, len(networkIDs))
+	for _, id := range networkIDs {
+		lock, err := (managedNetworkLocker{}).LockNetwork(ctx,
+			networkKey{ownerUID: OwnerUID(authority.ownerUID), networkID: NetworkID(id)})
+		if err != nil {
+			return err
+		}
+		lease := lock.(*managedNetworkLease)
+		authority.networks = append(authority.networks, lease)
+		networks[id] = lease
+	}
+
+	// CRITICAL: Admit durable guest facts against the exact current network records while both VM and network
+	// locks are held. A cleaned journal provides no reusable kernel link or namespace authority.
+	reservations := make([]firewall.EndpointReservation, 0, len(authority.topologies))
+	vmIDs := make([]string, 0, len(authority.topologies))
+	for id := range authority.topologies {
+		vmIDs = append(vmIDs, id)
+	}
+	slices.Sort(vmIDs)
+	for _, id := range vmIDs {
+		record := authority.topologies[id]
+		network := networks[record.NetworkID].record
+		encoded, err := encodeNetworkAuthorityRecord(network)
+		if err != nil {
+			return err
+		}
+		digest := sha256.Sum256(encoded)
+		if record.OwnerUID != network.ownerUID || record.NetworkDigest != hex.EncodeToString(digest[:]) ||
+			record.Prefix != network.configuration.l3.prefix.value.String() ||
+			record.Gateway != network.configuration.l3.gateway.value.String() {
+			return networkAuthorityCorruptError("policy topology differs from its retained root network authority", nil)
+		}
+		if record.Lifecycle != topologyCleaned {
+			continue
+		}
+		key, err := newTopologyKey(record.OwnerUID, record.VMID, record.NetworkID)
+		if err != nil {
+			return err
+		}
+		address, err := netip.ParseAddr(record.GuestIPv4)
+		if err != nil {
+			return err
+		}
+		l3, err := deriveEndpointL3(key, network.configuration.l3, endpointL3Input{
+			guestAddress: address, requestedMAC: &record.GuestMAC,
+		})
+		if err != nil {
+			return err
+		}
+		reservations = append(reservations, firewall.EndpointReservation{
+			OwnerUID: record.OwnerUID, VMID: record.VMID, NetworkID: record.NetworkID,
+			Prefix: l3.network.prefix.value, Gateway: l3.network.gateway.value,
+			IPv4: l3.guestAddress.value, MAC: [6]byte(l3.mac),
+		})
+	}
+
+	// Each network registration consumes that network's concrete lock. All earlier network locks stay held;
+	// only the later firewall suffix is acquired and released between complete generation changes.
+	for _, lease := range authority.networks {
+		if err := authority.beginFirewall(ctx, lease); err != nil {
+			return err
+		}
+		err := authority.firewall.RegisterNetwork(ctx, trafficPolicyNetworkIntent(lease.record))
+		releaseErr := authority.firewall.Release(context.WithoutCancel(ctx))
+		authority.firewall = nil
+		if err = appendNetworkAuthorityError(
+			err,
+			"release registered policy network firewall",
+			releaseErr,
+		); err != nil {
+			return err
+		}
+	}
+	if err := authority.beginFirewall(ctx, networks[sourceNetworkID]); err != nil {
 		return err
 	}
-	authority.network = lock.(*managedNetworkLease)
-	record := authority.network.record
-	authority.firewall, err = firewall.BeginPolicyChange(ctx, authority.network.mutation, firewall.PolicyBinding{
-		OwnerUID:  authority.ownerUID,
-		NetworkID: string(record.networkID),
-		BootID:    record.bootID,
+	for _, reservation := range reservations {
+		if err := authority.firewall.RegisterStoppedEndpoint(ctx, reservation); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (authority *trafficPolicyAuthority) beginFirewall(ctx context.Context, network *managedNetworkLease) error {
+	if err := network.mutation.Verify(ctx); err != nil {
+		return err
+	}
+	fd, identity, err := network.host.descriptor()
+	if err != nil || identity != network.record.managedBridge.namespace {
+		return networkAuthorityCorruptError("policy network host namespace changed", err)
+	}
+	if err := inspectManagedBridgeL3(ctx, newDirectRouteNetlink(), fd, network.record); err != nil {
+		return err
+	}
+	if network.uplink != nil {
+		if err := network.uplink.revalidate(ctx); err != nil {
+			return err
+		}
+	}
+	record := network.record
+	authority.firewall, err = firewall.BeginPolicyChange(ctx, network.mutation, firewall.PolicyBinding{
+		OwnerUID: authority.ownerUID, NetworkID: string(record.networkID), BootID: record.bootID,
 		HostNamespace: firewall.NamespaceIdentity{
-			Device: record.managedBridge.namespace.device,
-			Inode:  record.managedBridge.namespace.inode,
+			Device: record.managedBridge.namespace.device, Inode: record.managedBridge.namespace.inode,
 		},
 	})
 	return err
+}
+
+func trafficPolicyNetworkIntent(record networkAuthorityRecord) firewall.NetworkIntent {
+	intent := firewall.NetworkIntent{
+		OwnerUID: record.ownerUID, NetworkID: string(record.networkID), HostBridge: record.managedBridge.name.String(),
+		Subnet: record.configuration.l3.prefix.value, HostIPv4: record.configuration.l3.gateway.value,
+		Masquerade: record.configuration.nat,
+	}
+	if record.configuration.uplink != nil {
+		intent.UplinkInterface = record.configuration.uplink.link.name.String()
+	}
+	return intent
 }
 
 func (authority *trafficPolicyAuthority) release(ctx context.Context, primary error) error {
@@ -271,11 +374,11 @@ func (authority *trafficPolicyAuthority) release(ctx context.Context, primary er
 			authority.firewall.Release(cleanup),
 		)
 	}
-	if authority.network != nil {
+	for index := len(authority.networks) - 1; index >= 0; index-- {
 		primary = appendNetworkAuthorityError(
 			primary,
-			"release policy source network",
-			authority.network.Release(cleanup),
+			"release policy network",
+			authority.networks[index].Release(cleanup),
 		)
 	}
 	for index := len(authority.journals) - 1; index >= 0; index-- {
