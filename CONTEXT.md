@@ -216,7 +216,9 @@ Tables include `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_
 `host_state_changes`, `service_access_policies`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`,
 `vm_vsock_config`, `snapshots`, and `db_migrations`. Read `internal/lib/db/migrations/` for the current schema.
 
-The fresh v0.3.0 schema is version 6 and has no VM-wide `remote_exec` column. Schema-version 3, 4, or 5 databases that
+The fresh v0.3.0 schema is version 7 and has no VM-wide `remote_exec` column. Migration `007` retires empty obsolete
+firewall tracking tables and selector settings, refusing populated tables rather than adopting their host state.
+Schema-version 3, 4, or 5 databases that
 still contain that removed column are legacy databases, even when every stored value is false. Both pending-migration
 inspection and migration application reject them with a validation-class `database.migration.failed` error before
 schema work, leaving their version and contents unchanged. v0.3.0 does not infer directional exec policies from that

@@ -947,8 +947,8 @@ composition is described above; the current incomplete-work inventory is under *
 ### Security work still pending
 
 Current incomplete work includes per-volume/aggregate storage policy, trusted snapshot capture and immutable restore
-backing, remaining image conversion/archive construction and staging recovery,
-effects, residual legacy privilege/backend removal, and qualification. Memory policy stays unchanged pending
+backing, remaining image conversion and staging recovery, residual legacy privilege entry points, and qualification.
+Existing unprivileged archive construction remains outside the root service. Memory policy stays unchanged pending
 diagnosis. Snapshot, extra-volume, and PCI launches refuse unsupported selections.
 Shared dispatcher admission and guarded administrator reset are composed. Reset requires marker-only sudoers and
 compatible root journals, rejects live or ambiguous managed state, and restores recorded settings through retryable
