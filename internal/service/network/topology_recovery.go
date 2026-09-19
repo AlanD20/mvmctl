@@ -11,12 +11,37 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/lib/authorityfs"
+	"mvmctl/internal/lib/system"
 )
 
 // Recover consumes the current VM hold and reopens only the same-boot topology in its root-owned journal.
 // The caller supplies the launch generation from its admitted root VM record. Recovery never adopts a path or link
 // discovered from user configuration and returns the retained lease with every post-consumption error.
 func Recover(ctx context.Context, hold *authorityfs.TopologyHold, launchGeneration uint64) (*VMTopologyLease, error) {
+	return recoverWithPriorBootProof(ctx, hold, launchGeneration, nil)
+}
+
+// RecoverWithPriorBootAbsence permits retirement, never adoption, of a prior-boot topology.
+// The proof is minted from retained root VM authority after fixed process/cgroup absence admission.
+// Hold consumption and post-consumption error ownership are identical to Recover.
+func RecoverWithPriorBootAbsence(
+	ctx context.Context,
+	hold *authorityfs.TopologyHold,
+	launchGeneration uint64,
+	proof *system.PriorBootVMAbsence,
+) (*VMTopologyLease, error) {
+	if proof == nil {
+		return nil, networkAuthorityValidationError("prior-boot recovery requires concrete VM absence proof")
+	}
+	return recoverWithPriorBootProof(ctx, hold, launchGeneration, proof)
+}
+
+func recoverWithPriorBootProof(
+	ctx context.Context,
+	hold *authorityfs.TopologyHold,
+	launchGeneration uint64,
+	proof *system.PriorBootVMAbsence,
+) (*VMTopologyLease, error) {
 	if ctx == nil || hold == nil || launchGeneration == 0 {
 		return nil, networkAuthorityValidationError("topology recovery requires VM hold and launch generation")
 	}
@@ -29,7 +54,7 @@ func Recover(ctx context.Context, hold *authorityfs.TopologyHold, launchGenerati
 		return nil, err
 	}
 	lease := &VMTopologyLease{hold: consumed, effects: newTopologyEffect(), recoveryPending: true}
-	if err := lease.recover(ctx, owner, VMID(vm.String()), launchGeneration); err != nil {
+	if err := lease.recover(ctx, owner, VMID(vm.String()), launchGeneration, proof); err != nil {
 		if errors.Is(err, errTopologyJournalAbsent) {
 			var closeErr error
 			if lease.journal != nil {
@@ -50,7 +75,9 @@ func Recover(ctx context.Context, hold *authorityfs.TopologyHold, launchGenerati
 
 var errTopologyJournalAbsent = errors.New("root topology journal is absent")
 
-func (lease *VMTopologyLease) recover(ctx context.Context, owner uint32, vmID VMID, generation uint64) error {
+func (lease *VMTopologyLease) recover(
+	ctx context.Context, owner uint32, vmID VMID, generation uint64, proof *system.PriorBootVMAbsence,
+) error {
 	journal, err := openOwnedTopologyJournal(ctx, owner, vmID)
 	if err != nil {
 		if errors.Is(err, unix.ENOENT) {
@@ -78,7 +105,10 @@ func (lease *VMTopologyLease) recover(ctx context.Context, owner uint32, vmID VM
 		return err
 	}
 	if record.BootID != bootID {
-		return networkAuthorityCorruptError("prior-boot topology requires process and namespace absence proof", nil)
+		if proof == nil {
+			return networkAuthorityCorruptError("prior-boot topology requires process and namespace absence proof", nil)
+		}
+		return lease.retirePriorBoot(ctx, record, bootID, proof)
 	}
 	if record.Lifecycle == topologyCleaned {
 		lease.reserved = true
