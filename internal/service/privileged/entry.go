@@ -204,6 +204,10 @@ func dispatch(
 	deps runtimeDeps,
 ) (dispatchDisposition, error) {
 	switch request.action {
+	case network.ManagedNetworkCreateAction:
+		return dispatchHandled, handleCreateManagedNetwork(ctx, endpoint, caller, deps.control)
+	case network.ManagedNetworkRemoveAction:
+		return dispatchHandled, handleRemoveManagedNetwork(ctx, endpoint, caller, deps.control)
 	case jailer.VMLaunchAction:
 		return dispatchHandled, handleVMLaunch(ctx, endpoint, caller, deps.control)
 	case jailer.VMAbortAction, jailer.VMCleanupAction, jailer.VMRemoveAction:
