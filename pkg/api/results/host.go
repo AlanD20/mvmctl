@@ -5,6 +5,13 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
+// HostInit reports the completed administrator setup changes.
+type HostInit struct {
+	Changes          []*model.HostStateChangeItem `json:"changes"`
+	UserAddedToGroup bool                         `json:"user_added_to_group"`
+	SessionHasGroup  bool                         `json:"session_has_group"`
+}
+
 // HostOSInfo groups OS-level host information.
 type HostOSInfo struct {
 	Kernel  string `json:"kernel"`

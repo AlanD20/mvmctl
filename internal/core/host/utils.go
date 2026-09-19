@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
@@ -190,8 +191,14 @@ func GetIPForwardStatus(ctx context.Context) (string, error) {
 
 	res, err := system.DefaultRunner.Run(
 		ctx,
-		[]string{"sysctl", "-n", sysctlKey},
-		system.RunCmdOpts{Check: true, Capture: true},
+		[]string{"/usr/sbin/sysctl", "-n", sysctlKey},
+		system.RunCmdOpts{
+			Check:          true,
+			Capture:        true,
+			Timeout:        5 * time.Second,
+			MaxStdoutBytes: 4096,
+			MaxStderrBytes: 4096,
+		},
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to read %s: %w", sysctlKey, err)

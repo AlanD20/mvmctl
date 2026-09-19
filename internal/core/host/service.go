@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -38,11 +39,7 @@ func EnableIPForward(ctx context.Context) (*model.HostStateChangeItem, error) {
 		slog.Debug("IP forwarding already enabled")
 		return nil, nil
 	}
-	_, err = system.DefaultRunner.Run(
-		ctx,
-		[]string{"sysctl", "-w", fmt.Sprintf("%s=1", sysctlKey)},
-		system.RunCmdOpts{Check: true, Capture: true},
-	)
+	err = runAdministratorCommand(ctx, []string{"/usr/sbin/sysctl", "-w", fmt.Sprintf("%s=1", sysctlKey)})
 	if err != nil {
 		return nil, fmt.Errorf("failed to enable IP forwarding: %w", err)
 	}
@@ -111,7 +108,10 @@ func (s *Service) loadModule(
 	changeOrder int,
 	initTimestamp, createdAt string,
 ) (*model.HostStateChangeItem, error) {
-	_, err := system.DefaultRunner.Run(ctx, []string{"modprobe", module}, system.RunCmdOpts{Check: true, Capture: true})
+	if module != "kvm" && module != "kvm_intel" && module != "kvm_amd" {
+		return nil, errs.New(errs.CodeValidationFailed, "unsupported KVM module")
+	}
+	err := runAdministratorCommand(ctx, []string{"/usr/sbin/modprobe", module})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load kernel module %s: %w", module, err)
 	}
@@ -150,9 +150,16 @@ func (s *Service) EnsureKVMModules(
 	// Detect available vendor modules: check lsmod first, then modprobe --dry-run
 	var vendorModules []string
 	for _, mod := range []string{"kvm_intel", "kvm_amd"} {
-		loaded := isModuleLoaded(ctx, mod)
-		dryRunResult, _ := system.DefaultRunner.Run(ctx, []string{"modprobe", "--dry-run", mod},
-			system.RunCmdOpts{Check: false})
+		loaded, err := administratorModuleLoaded(ctx, mod)
+		if err != nil {
+			return nil, nextOrder, err
+		}
+		dryRunResult, err := system.DefaultRunner.Run(ctx, []string{"/usr/sbin/modprobe", "--dry-run", mod},
+			system.RunCmdOpts{Check: false, Capture: true, Timeout: 30 * time.Second,
+				MaxStdoutBytes: 4096, MaxStderrBytes: 4096})
+		if err != nil || dryRunResult == nil {
+			return nil, nextOrder, errs.WrapMsg(errs.CodeHostInitFailed, "inspect KVM module availability", err)
+		}
 		if loaded || dryRunResult.Success() {
 			vendorModules = append(vendorModules, mod)
 		}
@@ -173,7 +180,11 @@ func (s *Service) EnsureKVMModules(
 
 	kvmModules := []string{"kvm"}
 	for _, module := range kvmModules {
-		if isModuleLoaded(ctx, module) {
+		loaded, err := administratorModuleLoaded(ctx, module)
+		if err != nil {
+			return changes, nextOrder, err
+		}
+		if loaded {
 			slog.Debug("Module already loaded", "module", module)
 			continue
 		}
@@ -187,24 +198,51 @@ func (s *Service) EnsureKVMModules(
 
 	vendorLoaded := false
 	for _, m := range vendorModules {
-		if isModuleLoaded(ctx, m) {
+		loaded, err := administratorModuleLoaded(ctx, m)
+		if err != nil {
+			return changes, nextOrder, err
+		}
+		if loaded {
 			vendorLoaded = true
 			break
 		}
 	}
 	if !vendorLoaded {
+		var loadErr error
 		for _, module := range vendorModules {
 			change, err := s.loadModule(ctx, module, sessionID, nextOrder, now, now)
 			if err != nil {
+				loadErr = errors.Join(loadErr, err)
 				continue
 			}
 			changes = append(changes, change)
 			nextOrder++
+			vendorLoaded = true
 			break
+		}
+		if !vendorLoaded {
+			return changes, nextOrder, errs.WrapMsg(errs.CodeHostInitFailed, "load KVM vendor module", loadErr)
 		}
 	}
 
 	return changes, nextOrder, nil
+}
+
+func administratorModuleLoaded(ctx context.Context, module string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	data, err := os.ReadFile("/proc/modules")
+	if err != nil {
+		return false, err
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == module {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // --- DetectAndSaveCapacity ---

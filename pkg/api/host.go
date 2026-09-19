@@ -6,28 +6,21 @@ import (
 	"fmt"
 	"log/slog"
 	"mvmctl/internal/core/host"
-	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/lib/crypto"
-	"mvmctl/internal/lib/firewall"
 	"mvmctl/internal/lib/model"
-	libnet "mvmctl/internal/lib/network"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 	"os"
 	"os/user"
-	"slices"
-	"strings"
-	"time"
 )
 
 // HostAPI defines the public interface for host operations.
 type HostAPI interface {
 	HostInstallSystemBinary(ctx context.Context) (bool, error)
-	HostInit(ctx context.Context, onProgress event.OnProgressCallback) (any, error)
+	HostInit(ctx context.Context, onProgress event.OnProgressCallback) (*results.HostInit, error)
 	HostGetState(ctx context.Context) (*model.HostStateItem, error)
 	HostDetectResources(ctx context.Context) (*model.HostResources, error)
 	HostNetworkSetup(ctx context.Context) error
@@ -50,223 +43,18 @@ func (op *Operation) HostInstallSystemBinary(ctx context.Context) (bool, error) 
 	return op.hostSystemBinaryInstaller.InstallSystemBinary(ctx)
 }
 
-// HostInit initializes host configuration.
-// returns NeedsInteraction directly
-// (not wrapped in OperationResult.Item) when elevated privileges are required.
-// Accepts optional onProgress callback.
-// Returns (any, error) where any is:
-// - *errs.NeedsInteraction when sudo required
-// - map[string]any with changes/user_added_to_group on success
-// - nil when skipped (no changes needed)
-func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCallback) (any, error) {
-	// Resolve the actual binary path so sudo invokes the correct binary.
-	mvmPath, _ := os.Executable()
-	if mvmPath == "" {
-		mvmPath = infra.CLIName
-	}
-	sudoCmd := fmt.Sprintf("sudo %s host init", mvmPath)
-	// Check for privileges — returns NeedsInteraction if not available
-	if err := system.CheckPrivileges("/usr/sbin/ip", "initialize host"); err != nil {
-		hasGroup := system.SessionHasGroup()
-		return &errs.NeedsInteraction{
-			Code:      "privilege.sudo_required",
-			Message:   "Elevated privileges required for host initialization",
-			InputType: "sudo",
-			Context: map[string]any{
-				"command":           sudoCmd,
-				"operation":         "initialize host",
-				"session_has_group": hasGroup,
-			},
-		}, nil
-	}
-	if !system.IsRoot() {
-		hasGroup := system.SessionHasGroup()
-		return &errs.NeedsInteraction{
-			Code:      "privilege.sudo_required",
-			Message:   "Root privileges required for host initialization",
-			InputType: "sudo",
-			Context: map[string]any{
-				"command":           sudoCmd,
-				"operation":         "initialize host",
-				"session_has_group": hasGroup,
-			},
-		}, nil
-	}
-	// Ensure DB schema exists before host-state writes. Sudoers is reconciled
-	// later, after fallible read-only probes and before host mutations.
-	if op.Connection != nil {
-		_, _ = op.Connection.RunMigrationsCtx(ctx)
-	}
-	// --- Pre-flight probes ---
-	// Run detection first, then probe against the detected state (verdict #53).
-	hardware, detErr := host.DetectHardware()
-	if detErr != nil {
-		return nil, errs.WrapMsg(errs.CodeHostInitFailed, fmt.Sprintf("Hardware detection failed: %v", detErr), detErr)
-	}
-	limits := host.DetectLimits()
-	resources, _ := host.DetectResources(ctx, hardware, limits, op.CacheDir)
-	probe := &host.Probe{}
-	probeResult := probe.RunAll(ctx, hardware, limits, resources)
-	if len(probeResult.Critical) > 0 {
-		criticalNames := make([]string, len(probeResult.Critical))
-		for i, c := range probeResult.Critical {
-			criticalNames[i] = c.Name
-		}
-		return nil, errs.New(
-			errs.CodeHostInitFailed,
-			fmt.Sprintf("Probe failures: %s", strings.Join(criticalNames, ", ")),
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	// Resolve firewall backend once (verdict #44).
-	fwBackend, _ := op.Services.Config.GetString(ctx, "settings", "firewall_backend")
-	// --- iptables comment module check ---
-	xtcommentAvail := true
-	if fwBackend == "iptables" {
-		if !libnet.CheckIPTablesCommentAvailable(ctx) {
-			slog.Info("iptables comment module (xt_comment) not available; rule comments will be skipped")
-			_ = op.Services.Config.Set(ctx, "settings.firewall", "iptables_xtcomment", false)
-			xtcommentAvail = false
-		}
-	}
-	// Replace the default firewall tracker with the configured one.
-	fwBackendType := model.FirewallBackendNFTables
-	if fwBackend == "iptables" {
-		fwBackendType = model.FirewallBackendIPTables
-	}
-	sqlDB := op.Connection.DB()
-	fwTracker := firewall.NewFirewallTracker(fwBackendType, xtcommentAvail, sqlDB)
-	op.Services.Network.SetFirewallTracker(fwTracker)
-	// --- Initialize host state ---
-	sessionID := crypto.UUIDV4()
-	hostCtrl := host.NewController(op.Repos.Host)
-	_, _ = op.Repos.Host.InitializeState(ctx)
-	// --- Setup host environment ---
-	allChanges, err := op.hostInitSetupEnvironment(ctx, sessionID, hostCtrl, fwBackend)
-	if err != nil {
-		if errs.AsDomainError(err) != nil {
-			return nil, err
-		}
-		return nil, errs.New(errs.CodeHostInitFailed, err.Error())
-	}
-	if err := op.reconcileServiceAccessPolicies(ctx); err != nil {
-		return nil, errs.WrapMsg(errs.CodeHostInitFailed,
-			"failed to replay service-access policies during host initialization", err)
-	}
-	// --- Finalize ---
-	now := time.Now().Format(time.RFC3339)
-	if err := hostCtrl.MarkInitialized(ctx, now); err != nil {
-		slog.Warn("Could not mark host as initialized", "error", err)
-	}
-	infra.ChownToRealUser(op.CacheDir)
-	// Audit log
-	op.AuditLog.LogOperation("host.init", map[string]any{"changes": len(allChanges)}, "")
-	wasUserAdded := false
-	for _, c := range allChanges {
-		if c.Mechanism == "usermod" {
-			wasUserAdded = true
-			break
-		}
-	}
-	if len(allChanges) == 0 {
-		return nil, nil
-	}
-	return map[string]any{
-		"changes":             allChanges,
-		"user_added_to_group": wasUserAdded,
-		"session_has_group":   system.SessionHasGroup(),
-	}, nil
-}
-func (op *Operation) hostInitSetupEnvironment(
-	ctx context.Context,
-	sessionID string,
-	hostCtrl *host.Controller,
-	fwBackend string,
-) ([]*model.HostStateChangeItem, error) {
-	username, err := system.CurrentUsername()
-	if err != nil {
+// HostInit requests the explicit administrator setup route. The normal API never
+// uses caller-owned configuration or SQLite as authority for host mutations.
+func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCallback) (*results.HostInit, error) {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	sudoersConfigured, err := op.hostSudoersConfigurer.ConfigureSudoers(ctx)
-	if err != nil {
-		return nil, err
+	return nil, &errs.NeedsInteraction{
+		Code:      "privilege.sudo_required",
+		Message:   "run sudo /usr/local/bin/mvm host init; direct root must specify --operator <non-root-user>",
+		InputType: "sudo",
+		Context:   map[string]any{"command": "sudo /usr/local/bin/mvm host init", "operation": "initialize host"},
 	}
-	initialChanges := make([]*model.HostStateChangeItem, 0, 1)
-	if sudoersConfigured {
-		initialChanges = append(initialChanges, &model.HostStateChangeItem{
-			SessionID:     "",
-			InitTimestamp: "",
-			Setting:       "sudoers_dropin",
-			Mechanism:     "file_create",
-			AppliedValue:  infra.SudoersDropInPath(),
-			Reverted:      false,
-			ChangeOrder:   0,
-			CreatedAt:     "",
-			OriginalValue: nil,
-		})
-	}
-	allChanges := append([]*model.HostStateChangeItem(nil), initialChanges...)
-	dbChanges := append([]*model.HostStateChangeItem(nil), initialChanges...)
-	// --- Group setup ---
-	groupCreated, _ := host.CreateGroup(ctx, infra.MVMUnixGroup)
-	if groupCreated {
-		change := &model.HostStateChangeItem{
-			SessionID: "", Setting: fmt.Sprintf("group:%s", infra.MVMUnixGroup),
-			Mechanism: "groupadd", AppliedValue: infra.MVMUnixGroup,
-			InitTimestamp: "", OriginalValue: nil, Reverted: false, ChangeOrder: 0, CreatedAt: "",
-		}
-		dbChanges = append(dbChanges, change)
-		allChanges = append(allChanges, change)
-	}
-	userAdded, _ := host.AddUserToGroup(ctx, username, infra.MVMUnixGroup)
-	if userAdded {
-		change := &model.HostStateChangeItem{
-			SessionID: "", Setting: fmt.Sprintf("group_member:%s", username),
-			Mechanism: "usermod", AppliedValue: fmt.Sprintf("%s:%s", username, infra.MVMUnixGroup),
-			InitTimestamp: "", OriginalValue: nil, Reverted: false, ChangeOrder: 0, CreatedAt: "",
-		}
-		dbChanges = append(dbChanges, change)
-		allChanges = append(allChanges, change)
-	}
-	// --- IP forwarding ---
-	fwdChange, _ := host.EnableIPForward(ctx)
-	if fwdChange != nil {
-		dbChanges = append(dbChanges, fwdChange)
-		allChanges = append(allChanges, fwdChange)
-	}
-	// --- Persist sysctl ---
-	sysctlChange, _ := host.PersistSysctl(ctx)
-	if sysctlChange != nil {
-		dbChanges = append(dbChanges, sysctlChange)
-		allChanges = append(allChanges, sysctlChange)
-	}
-	// --- KVM modules ---
-	moduleChanges, nextOrder, _ := op.Services.Host.EnsureKVMModules(ctx, sessionID, 0)
-	allChanges = append(allChanges, moduleChanges...)
-	// --- Firewall chains ---
-	_ = op.Services.Network.EnsureMVMChains(ctx)
-	chainChange := &model.HostStateChangeItem{
-		SessionID: "", Setting: fmt.Sprintf("%s_chains", fwBackend),
-		Mechanism: fwBackend, AppliedValue: "MVM chains ensured",
-		InitTimestamp: "", OriginalValue: nil, Reverted: false, ChangeOrder: 0, CreatedAt: "",
-	}
-	dbChanges = append(dbChanges, chainChange)
-	allChanges = append(allChanges, chainChange)
-	// --- Persist state ---
-	if _, err := hostCtrl.RecordChanges(ctx, dbChanges, &sessionID, nextOrder); err != nil {
-		slog.Warn("Could not record host changes to DB", "error", err)
-	}
-	if groupCreated {
-		if err := op.Repos.Host.UpdateComponent(ctx, "mvm_group_created", true); err != nil {
-			slog.Warn("Could not update host state", "error", err)
-		}
-	}
-	if sudoersConfigured {
-		if err := op.Repos.Host.UpdateComponent(ctx, "sudoers_configured", true); err != nil {
-			slog.Warn("Could not update host state", "error", err)
-		}
-	}
-	return allChanges, nil
 }
 
 // HostGetState returns the current host state snapshot.
@@ -316,7 +104,7 @@ func (op *Operation) HostNetworkSetup(ctx context.Context) error {
 			}
 		}
 	} else {
-		slog.Warn("Could not sync networks", "error", syncErr)
+		return syncErr
 	}
 	return nil
 }
@@ -454,179 +242,53 @@ func (op *Operation) HostStatusCheck(ctx context.Context) *results.HostStatusChe
 	}
 }
 
-// HostClean cleans host networking configuration.
-// wraps errors in HostError/NetworkError pattern.
+// HostClean removes the caller's registered networks through the named API.
 func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
-	if err := system.CheckPrivileges("/usr/sbin/ip", "clean host"); err != nil {
-		return nil, errs.WrapMsg(
-			errs.CodePrivilegeRequired,
-			fmt.Sprintf("Privilege check failed: %v", err),
-			err,
-			errs.WithClass(errs.ClassNeedsInteraction),
-		)
+	running, err := op.HostGetRunningVMs(ctx)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeHostCleanFailed, "discover running VMs before host cleanup", err)
 	}
-	var summary []string
-	// Remove TAP devices
-	tapNames := libnet.GetTunTapDevices(ctx)
-	var fallbackTaps []string
-	for _, tap := range tapNames {
-		if strings.HasPrefix(tap, fmt.Sprintf("%s-", infra.CLIName)) {
-			fallbackTaps = append(fallbackTaps, tap)
-		}
+	if len(running) != 0 {
+		return nil, errs.New(errs.CodeHostCleanFailed, "stop all running VMs before host cleanup")
 	}
-	slices.Sort(fallbackTaps)
-	for _, tapName := range fallbackTaps {
-		if err := op.Services.Network.RemoveRawTap(ctx, tapName); err != nil {
-			summary = append(summary, fmt.Sprintf("Warning: failed to remove TAP '%s': %v", tapName, err))
-		} else {
-			summary = append(summary, fmt.Sprintf("Removed TAP device '%s'", tapName))
-		}
+	networks, err := op.Repos.Network.ListAll(ctx)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeHostCleanFailed, "discover networks before host cleanup", err)
 	}
-	networks, _ := op.Repos.Network.ListAll(ctx)
-	staleSummary := op.Services.Network.RemoveStaleInterfaces(ctx, fmt.Sprintf("%s-", infra.CLIName))
-	summary = append(summary, staleSummary...)
-	metadataBridges := make(map[string]bool)
-	for _, net := range networks {
-		metadataBridges[net.Bridge] = true
-	}
-	for _, net := range networks {
-		if net.NATEnabled {
-			_ = op.Services.Network.RemoveNAT(ctx, net.Bridge, network.NatGatewaysList(net), net.Subnet, net.ID, false)
+	summary := make([]string, 0, len(networks))
+	for _, network := range networks {
+		if err := op.NetworkRemove(ctx, inputs.NetworkInput{Identifiers: []string{network.ID}}, false); err != nil {
+			return summary, errs.WrapMsg(errs.CodeHostCleanFailed, "remove registered network", err,
+				errs.WithDetails(map[string]any{"completed": summary, "network_id": network.ID}))
 		}
-		if err := op.Services.Network.RemoveBridge(ctx, net.Bridge, net.ID); err != nil {
-			summary = append(summary, fmt.Sprintf("Warning: failed to remove network '%s': %v", net.Name, err))
-		} else {
-			summary = append(summary, fmt.Sprintf("Removed network '%s' (bridge: %s)", net.Name, net.Bridge))
-		}
-	}
-	defaultNetNameStr, _ := op.Services.Config.GetString(ctx, "defaults.network", "name")
-	defaultBridge := libnet.ComputeBridgeName(infra.CLIName, defaultNetNameStr)
-	if libnet.DefaultNetOps.BridgeExists(ctx, defaultBridge) {
-		if err := op.Services.Network.RemoveRawBridge(ctx, defaultBridge); err != nil {
-			summary = append(
-				summary,
-				fmt.Sprintf("Warning: failed to remove orphan bridge '%s': %v", defaultBridge, err),
-			)
-		} else {
-			summary = append(summary, fmt.Sprintf("Removed orphan bridge '%s'", defaultBridge))
-		}
-	}
-	for _, bridge := range libnet.GetBridges(ctx) {
-		if !strings.HasPrefix(bridge, fmt.Sprintf("%s-", infra.CLIName)) {
-			continue
-		}
-		if bridge == defaultBridge || metadataBridges[bridge] {
-			continue
-		}
-		if err := op.Services.Network.RemoveRawBridge(ctx, bridge); err != nil {
-			summary = append(summary, fmt.Sprintf("Warning: failed to remove orphan bridge '%s': %v", bridge, err))
-		} else {
-			summary = append(summary, fmt.Sprintf("Removed orphan bridge '%s'", bridge))
-		}
-	}
-	// Remove default network from database
-	defaultNet := libnet.FindNetworkByName(networks, defaultNetNameStr)
-	if defaultNet != nil {
-		removeErr := op.NetworkRemove(ctx, inputs.NetworkInput{Identifiers: []string{defaultNetNameStr}}, true)
-		if removeErr != nil {
-			summary = append(
-				summary,
-				fmt.Sprintf("Warning: failed to remove default network: %s", removeErr.Error()),
-			)
-		} else {
-			summary = append(summary, fmt.Sprintf("Removed default network '%s'", defaultNetNameStr))
-		}
-	}
-	// Remove MVM chains
-	_ = op.Services.Network.Teardown(ctx)
-	summary = append(summary, "Removed MVM firewall chains")
-	if len(summary) == 0 {
-		summary = append(summary, "Warning: skipped host networking cleanup (already clean)")
+		summary = append(summary, fmt.Sprintf("Removed network '%s'", network.Name))
 	}
 	op.AuditLog.LogOperation("host.clean", map[string]any{"actions": len(summary)}, "")
 	return summary, nil
 }
 
-// HostReset resets host to pre-init state.
-// Reverts usermod changes in last-in-first-out order.
+// HostReset requests the administrator route; user SQLite is never rollback authority.
 func (op *Operation) HostReset(ctx context.Context) ([]string, error) {
-	if err := system.CheckPrivileges("/usr/sbin/ip", "reset host"); err != nil {
-		return nil, errs.WrapMsg(
-			errs.CodePrivilegeRequired,
-			fmt.Sprintf("Privilege check failed: %v", err),
-			err,
-			errs.WithClass(errs.ClassNeedsInteraction),
-		)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	cleanSummary, cleanErr := op.HostClean(ctx)
-	if cleanErr != nil {
-		return nil, cleanErr
+	return nil, &errs.NeedsInteraction{
+		Code:      "privilege.sudo_required",
+		Message:   "run sudo /usr/local/bin/mvm host reset --force; direct root must specify --operator <non-root-user>",
+		InputType: "sudo",
+		Context:   map[string]any{"command": "sudo /usr/local/bin/mvm host reset --force", "operation": "reset host"},
 	}
-	summary := cleanSummary
-	reverted, err := op.Services.Host.RestoreState(ctx)
-	if err != nil {
-		slog.Warn("No saved host state to restore", "error", err)
-	} else {
-		for _, change := range reverted {
-			summary = append(summary, fmt.Sprintf("Reverted %s", change.Setting))
-		}
-	}
-	// Single query for all host state changes (verdict #44).
-	allHostChanges, _ := op.Repos.Host.ListChanges(ctx, nil, false)
-	// Notify about kernel modules that were left loaded
-	var activeModules []string
-	for _, c := range allHostChanges {
-		if c.Setting == "kernel_module_load" {
-			activeModules = append(activeModules, c.AppliedValue)
-		}
-	}
-	if len(activeModules) > 0 {
-		summary = append(
-			summary,
-			fmt.Sprintf(
-				"Modules loaded by mvm: %s. These were left loaded. Unload manually with 'modprobe -r <module>' if desired.",
-				strings.Join(activeModules, ", "),
-			),
-		)
-	}
-	sudoersPath := infra.SudoersDropInPath()
-	if removed, err := host.RemoveSudoers(ctx, sudoersPath); err != nil {
-		summary = append(summary, fmt.Sprintf("Warning: %v", err))
-	} else if removed {
-		summary = append(summary, fmt.Sprintf("Removed sudoers file %s", sudoersPath))
-	}
-	// Only processes the LAST usermod change (usermod_changes[-1].applied_value).
-	var lastUsermod *model.HostStateChangeItem
-	for _, c := range allHostChanges {
-		if c.Mechanism == "usermod" {
-			lastUsermod = c
-		}
-	}
-	if lastUsermod != nil {
-		applied := lastUsermod.AppliedValue
-		username := applied
-		if u, _, found := strings.Cut(applied, ":"); found {
-			username = u
-		}
-		if removed, err := host.RemoveUserFromGroup(ctx, username, infra.MVMUnixGroup); err != nil {
-			summary = append(summary, fmt.Sprintf("Warning: %v", err))
-		} else if removed {
-			summary = append(summary, fmt.Sprintf("Removed user '%s' from group '%s'", username, infra.MVMUnixGroup))
-		}
-	}
-	if removed, err := host.RemoveGroup(ctx, infra.MVMUnixGroup); err != nil {
-		summary = append(summary, fmt.Sprintf("Warning: %v", err))
-	} else if removed {
-		summary = append(summary, fmt.Sprintf("Removed group '%s'", infra.MVMUnixGroup))
-	}
-	_ = op.Repos.Host.ResetState(ctx)
-	op.AuditLog.LogOperation("host.reset", map[string]any{"actions": len(summary)}, "")
-	return summary, nil
 }
 
 // HostGetRunningVMs returns running VMs.
 func (op *Operation) HostGetRunningVMs(ctx context.Context) ([]*model.VMItem, error) {
-	return op.Repos.VM.ListByStatus(ctx, string(model.VMStatusRunning), string(model.VMStatusStarting))
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Transitional launches do not write the authoritative schema-3 record;
+	// neither an empty user database nor an absent root record proves quiescence.
+	return nil, errs.New(errs.CodeHostCleanFailed,
+		"authoritative running-VM discovery requires the schema-3 lifecycle cutover")
 }
 
 // HostIsInitialized checks if host is initialized.
