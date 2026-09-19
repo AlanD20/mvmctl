@@ -100,8 +100,21 @@ Managed-network registration is a network-creation transaction under the ownersh
 launch does not re-enter registration after acquiring the VM lock. Instead, the real Jailer VM lease creates its
 opaque `authorityfs.TopologyHold`; topology preparation validates its owner/VM binding and atomically consumes it into
 one retained topology lease. After that consumption, every error returns the non-nil prepared or cleaning lease with
-the error. The hold and namespace pin remain owned through the VM lifetime, so the parent Jailer VM lock cannot release
-while live or retryable topology authority exists.
+the error. The hold and namespace descriptor remain owned through the launch or cleanup transaction,
+so the parent Jailer VM lock cannot release while that transaction has live or retryable topology
+authority. After both the instance and topology are durably active, a named close-only
+`DetachActive` transition transfers lifetime responsibility to the root-owned records and the
+root-owned nsfs mount. It releases operation-local descriptors and locks without lowering links,
+removing rules, unmounting the namespace, or performing cleanup. The synchronous dispatcher can
+then exit; v0.3.0 does not introduce a per-VM root supervisor.
+
+Later operations reacquire VM, network, and firewall locks in order and reopen the exact
+persisted namespace target, mount, links, endpoint, and process identities. Both exposed nsfs
+identity and hidden placeholder/directory identity must survive in the root topology record.
+Detach is unavailable until this identity-checked recovery path exists. Failure before durable
+activation retains rollback authority instead. This clarifies the daemonless lifetime model:
+an in-process flock cannot be retained for the entire VM lifetime while permitting later
+status, exec, and stop operations to acquire the same VM lock.
 
 All links are created and attached down. Firewall application then returns an opaque, non-zero
 `VerifiedVMEndpointLease` only after one complete generation is applied and freshly inspected in the pinned host

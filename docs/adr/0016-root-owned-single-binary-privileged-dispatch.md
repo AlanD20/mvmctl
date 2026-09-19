@@ -1498,6 +1498,22 @@ callers, ignores cancellation while preserving context values, and caches and re
 never retries an unlock or close against a descriptor number that the kernel may have reused. This matches the closed
 `authorityfs` capabilities and `verifiedProcessLease`; it does not add a generic callback, raw fd, or raw path seam.
 
+The ordinary privileged dispatcher remains synchronous and short-lived. Once both instance
+and topology are durably active and their recovery metadata is complete, a distinct successful
+detach closes operation-local descriptors and locks without stopping the VM or dismantling its
+resources. Root-owned records and the namespace's root-owned nsfs mount retain lifetime
+responsibility. Later status, exec, stop, and recovery calls reacquire the locks and re-admit
+exact persisted identities; no user SQLite value substitutes for those records. A failed or
+durability-uncertain activation cannot detach. The network capability must implement exact
+same-boot reopening before this path is enabled; see ADR-0017's retained activation authority.
+
+The private child transport adds two narrow subprocess-boundary exceptions: fixed-binary
+`os.StartProcess` in `lifecycle_child_spawn.go` creates the authenticated handshake-blocked child,
+and `syscall.Exec` in `lifecycle_child.go` performs the fixed admitted Jailer handoff after
+descriptor-only mount preparation. Neither accepts a caller-supplied executable or generic
+command. The reserved early child route exits the process on every outcome and never returns
+its namespace-bound thread to ordinary application initialization.
+
 `launchLease.Abort(ctx)` and `activeLease.BeginCleanup(ctx)` are consuming transitions. They atomically move the held
 release reference and slot lock, VM lock, pidfds, and every acquired output, mount, topology, and firewall endpoint
 resource lease, including the fixed-name cgroup authority, into one `cleanupLease`; the source lease becomes inert.

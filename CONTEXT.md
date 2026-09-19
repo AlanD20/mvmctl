@@ -1144,6 +1144,8 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 | Location | Why `DefaultRunner.Run()` doesn't work |
 |---|---|---|
 | `internal/service/jailer/entry.go` (Jailer exec) | Privileged chroot setup ends with `syscall.Exec` so Jailer inherits console stdin/stdout/stderr and becomes the managed Firecracker process |
+| `internal/service/jailer/lifecycle_child_spawn.go` | Fixed-binary `os.StartProcess` creates the authenticated handshake-blocked root child with its closed inherited channels |
+| `internal/service/jailer/lifecycle_child.go` | `syscall.Exec` preserves admitted child identity and descriptor-only mounts during the fixed Jailer handoff; the early route exits on every outcome |
 | `internal/core/ssh/utils.go` (SSH connectivity probe) | Uses `exec.CommandContext` with a short-lived probe context for SSH connectivity detection |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine running losetup/mount/umount/chroot in chained operations with precise error recovery |
 | `internal/service/agent/exec.go` (command execution) | Uses `exec.CommandContext` for `su` user switching and `sh -c` command execution inside the guest agent |
