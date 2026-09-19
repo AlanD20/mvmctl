@@ -21,6 +21,8 @@ type ExecInput struct {
 	Port       int               `json:"port"              yaml:"port"`
 	Env        map[string]string `json:"env,omitempty"     yaml:"env,omitempty"`
 	NoSync     bool              `json:"no_sync,omitempty" yaml:"no_sync,omitempty"`
+	// AllowVMExec opens one process-bound source session; directional policy still authorizes its request.
+	AllowVMExec bool `json:"allow_vm_exec,omitempty" yaml:"allow_vm_exec,omitempty"`
 }
 
 // ResolvedExecInput holds the resolved VM and vsock config for exec operations.
@@ -32,6 +34,9 @@ type ResolvedExecInput struct {
 
 // Validate checks that the exec input has a valid identifier.
 func (i *ExecInput) Validate() error {
+	if i.AllowVMExec && i.Command == "" {
+		return errs.New(errs.CodeValidationFailed, "VM-to-VM execution requires a non-interactive outer command")
+	}
 	if i.Identifier == "" {
 		return fmt.Errorf("VM identifier is required")
 	}

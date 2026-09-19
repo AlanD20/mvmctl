@@ -157,12 +157,27 @@ func (c *Client) exec(
 	noSync bool,
 	sourceSessionID string,
 ) (*ExecResult, error) {
-	conn, err := c.ensureAgent(ctx)
+	var conn net.Conn
+	var err error
+	if sourceSessionID != "" {
+		// The dedicated source bootstrap already proved protocol support. Upgrading here would
+		// destroy its process binding, so the explicit relay path never upgrades or downgrades.
+		conn, err = c.dialRaw(ctx)
+	} else {
+		conn, err = c.ensureAgent(ctx)
+	}
 	if err != nil {
 		slog.Error("vsock dial and handshake failed", "vm_id", c.item.VmID, "error", err)
 		return nil, err
 	}
 	defer conn.Close()
+	if sourceSessionID != "" {
+		stop := context.AfterFunc(ctx, func() {
+			// Closing interrupts the ordinary response read and cancels its guest process group.
+			_ = conn.Close()
+		})
+		defer stop()
+	}
 
 	// Apply overall deadline from context if set
 	if deadline, ok := ctx.Deadline(); ok {
