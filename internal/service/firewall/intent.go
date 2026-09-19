@@ -100,12 +100,13 @@ type HostServiceIntent struct {
 // Intent is the full host-global graph stored beside the authoritative generation record.
 // A graph is admitted only when its compiler-derived identity agrees with that record.
 type Intent struct {
-	Reservations  []EndpointReservation `json:"reservations"`
-	Endpoints     []EndpointBinding     `json:"endpoints"`
-	Networks      []NetworkIntent       `json:"networks"`
-	VMGrants      []VMTrafficGrant      `json:"vm_grants"`
-	NetworkGrants []NetworkTrafficGrant `json:"network_grants"`
-	HostServices  []HostServiceIntent   `json:"host_services"`
+	ActiveNetworks []string              `json:"active_networks"`
+	Reservations   []EndpointReservation `json:"reservations"`
+	Endpoints      []EndpointBinding     `json:"endpoints"`
+	Networks       []NetworkIntent       `json:"networks"`
+	VMGrants       []VMTrafficGrant      `json:"vm_grants"`
+	NetworkGrants  []NetworkTrafficGrant `json:"network_grants"`
+	HostServices   []HostServiceIntent   `json:"host_services"`
 }
 
 func (intent Intent) compile() (compiledGeneration, error) {
@@ -114,6 +115,10 @@ func (intent Intent) compile() (compiledGeneration, error) {
 	}
 	resolved := generationIntent{}
 	active := make(map[string]struct{}, len(intent.Endpoints))
+	activeNetworks := make(map[string]struct{}, len(intent.ActiveNetworks))
+	for _, id := range intent.ActiveNetworks {
+		activeNetworks[id] = struct{}{}
+	}
 	for _, endpoint := range intent.Endpoints {
 		if err := validateEndpointBinding(endpoint, false); err != nil {
 			return compiledGeneration{}, err
@@ -125,6 +130,9 @@ func (intent Intent) compile() (compiledGeneration, error) {
 		active[endpoint.VMID] = struct{}{}
 	}
 	for _, network := range intent.Networks {
+		if _, found := activeNetworks[network.NetworkID]; !found {
+			continue
+		}
 		resolved.networks = append(resolved.networks, networkIntent{
 			id: network.NetworkID, hostBridge: network.HostBridge, subnet: network.Subnet,
 			hostIPv4: network.HostIPv4, uplinkInterface: network.UplinkInterface, masquerade: network.Masquerade,
@@ -142,6 +150,9 @@ func (intent Intent) compile() (compiledGeneration, error) {
 		})
 	}
 	for _, grant := range intent.NetworkGrants {
+		if _, sourceActive := activeNetworks[grant.SourceNetworkID]; !sourceActive {
+			continue
+		}
 		if _, destinationActive := active[grant.DestinationVMID]; !destinationActive {
 			continue
 		}
@@ -151,6 +162,9 @@ func (intent Intent) compile() (compiledGeneration, error) {
 		})
 	}
 	for _, service := range intent.HostServices {
+		if _, sourceActive := activeNetworks[service.SourceNetworkID]; !sourceActive {
+			continue
+		}
 		resolved.hostServices = append(resolved.hostServices, hostServiceIntent{
 			id:              service.ID,
 			sourceNetworkID: service.SourceNetworkID,
@@ -185,7 +199,24 @@ func validateEndpointReservation(reservation EndpointReservation) error {
 func (intent Intent) validateDurablePolicies() error {
 	networks := make(map[string]NetworkIntent, len(intent.Networks))
 	for _, network := range intent.Networks {
+		if network.OwnerUID == 0 || !validResourceID(network.NetworkID) || !validIPv4Prefix(network.Subnet) ||
+			!usableIPv4Address(network.Subnet, network.HostIPv4) {
+			return invalidGeneration("durable network logical authority is invalid")
+		}
+		if _, found := networks[network.NetworkID]; found {
+			return invalidGeneration("duplicate durable network intent")
+		}
 		networks[network.NetworkID] = network
+	}
+	activeNetworks := make(map[string]struct{}, len(intent.ActiveNetworks))
+	for _, id := range intent.ActiveNetworks {
+		if _, found := networks[id]; !found {
+			return invalidGeneration("active network has no durable intent")
+		}
+		if _, found := activeNetworks[id]; found {
+			return invalidGeneration("duplicate active network identity")
+		}
+		activeNetworks[id] = struct{}{}
 	}
 	reservations := make(map[string]EndpointReservation, len(intent.Reservations))
 	addresses := make(map[string]string, len(intent.Reservations))
@@ -214,6 +245,9 @@ func (intent Intent) validateDurablePolicies() error {
 		macs[reservation.MAC] = reservation.VMID
 	}
 	for _, endpoint := range intent.Endpoints {
+		if _, found := activeNetworks[endpoint.NetworkID]; !found {
+			return invalidGeneration("active endpoint has no active network")
+		}
 		reservation, found := reservations[endpoint.VMID]
 		if !found || reservation != endpointReservation(endpoint) {
 			return invalidGeneration("active VM endpoint differs from durable reservation")

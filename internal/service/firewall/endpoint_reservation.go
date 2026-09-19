@@ -50,6 +50,60 @@ func (lease *MutationLease) RegisterStoppedEndpoint(ctx context.Context, reserva
 	return state.applyIntent(ctx, target)
 }
 
+// VerifyRetiredEndpoint proves no active projection remains and preserves any exact durable reservation.
+// A preparing topology may never have reached reservation publication; absence is accepted only when
+// no desired grant references the VM. This operation never creates or removes logical policy ownership.
+func (lease *MutationLease) VerifyRetiredEndpoint(ctx context.Context, reservation EndpointReservation) error {
+	if lease == nil || lease.state == nil {
+		return generationAuthorityError("firewall endpoint lease is unavailable", nil, nil)
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if err := state.ready(ctx); err != nil {
+		return err
+	}
+	if reservation.OwnerUID != state.binding.OwnerUID || reservation.NetworkID != state.binding.NetworkID {
+		return generationAuthorityError("stopped endpoint differs from retained owner/network authority", nil, nil)
+	}
+	found := false
+	for _, existing := range state.intent.Reservations {
+		if existing.VMID != reservation.VMID {
+			continue
+		}
+		if existing != reservation {
+			return generationAuthorityError("retired endpoint durable reservation differs", nil, nil)
+		}
+		found = true
+	}
+	if !found {
+		for _, grant := range state.intent.VMGrants {
+			if grant.SourceVMID == reservation.VMID || grant.DestinationVMID == reservation.VMID {
+				return generationAuthorityError(
+					"retired endpoint has a VM grant without reservation authority",
+					nil,
+					nil,
+				)
+			}
+		}
+		for _, grant := range state.intent.NetworkGrants {
+			if grant.DestinationVMID == reservation.VMID {
+				return generationAuthorityError(
+					"retired endpoint has a network grant without reservation authority",
+					nil,
+					nil,
+				)
+			}
+		}
+	}
+	for _, endpoint := range state.intent.Endpoints {
+		if endpoint.VMID == reservation.VMID {
+			return generationAuthorityError("stopped endpoint remains active in firewall intent", nil, nil)
+		}
+	}
+	return verifyExactCommittedGeneration(ctx, state.network.kernel, state.compiled)
+}
+
 // ApplyNetwork installs the root-owned managed-network policy before bridge exposure and reads it back.
 // CRITICAL: The concrete earlier lock names this network. The network service retains this lease
 // through exact bridge activation and supplies only its admitted bridge and root-selected uplink.
@@ -67,17 +121,37 @@ func (lease *MutationLease) ApplyNetwork(ctx context.Context, network NetworkInt
 		return generationAuthorityError("registered firewall network differs from retained authority", nil, nil)
 	}
 	target := cloneIntent(state.intent)
-	for _, existing := range target.Networks {
+	if err := target.activateNetwork(network); err != nil {
+		return err
+	}
+	return state.applyIntent(ctx, target)
+}
+
+func (intent *Intent) activateNetwork(network NetworkIntent) error {
+	active := slices.Contains(intent.ActiveNetworks, network.NetworkID)
+	found := false
+	for index, existing := range intent.Networks {
 		if existing.NetworkID != network.NetworkID {
 			continue
 		}
-		if existing != network {
-			return generationAuthorityError("registered firewall network was replaced", nil, nil)
+		if active && existing != network {
+			return generationAuthorityError("active firewall network was replaced", nil, nil)
 		}
-		return state.applyIntent(ctx, target)
+		if existing.OwnerUID != network.OwnerUID || existing.Subnet != network.Subnet ||
+			existing.HostIPv4 != network.HostIPv4 ||
+			existing.Masquerade != network.Masquerade {
+			return generationAuthorityError("dormant firewall network logical authority differs", nil, nil)
+		}
+		intent.Networks[index] = network
+		found = true
 	}
-	target.Networks = append(target.Networks, network)
-	return state.applyIntent(ctx, target)
+	if !found {
+		intent.Networks = append(intent.Networks, network)
+	}
+	if !active {
+		intent.ActiveNetworks = append(intent.ActiveNetworks, network.NetworkID)
+	}
+	return nil
 }
 
 // RegisterNetwork admits the same network projection when recording a stopped-VM policy.

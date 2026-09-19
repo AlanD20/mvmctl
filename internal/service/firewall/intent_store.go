@@ -22,6 +22,15 @@ type intentJournal struct {
 	HostNamespace NamespaceIdentity `json:"host_namespace"`
 	Before        Intent            `json:"before"`
 	Target        Intent            `json:"target"`
+	PriorBoot     *priorBootIntent  `json:"prior_boot"`
+}
+
+// priorBootIntent makes the intent-then-authority reset recoverable across either file's rename.
+// The old record is evidence for logical intent only and never permits a current kernel deletion.
+type priorBootIntent struct {
+	Record generationRecordWire `json:"record"`
+	Before Intent               `json:"before"`
+	Target Intent               `json:"target"`
 }
 
 func decodeIntentJournal(raw []byte) (intentJournal, error) {

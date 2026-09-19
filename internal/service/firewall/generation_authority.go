@@ -181,6 +181,16 @@ func (authority *persistentGenerationAuthority) acquireAfterNetwork(
 			return nil, err
 		}
 	}
+	if record.binding.bootID != binding.bootID {
+		production, productionOK := network.(*productionGenerationNetworkAuthority)
+		productionStore, storeOK := store.(*generationRecordStore)
+		if productionOK && storeOK {
+			record, evidence, err = production.retirePriorBootRecord(ctx, productionStore, binding, record, evidence)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	if err := admitGenerationRecord(record, binding); err != nil {
 		return nil, err
 	}

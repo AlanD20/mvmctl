@@ -319,17 +319,8 @@ func (lease *MutationLease) ApplyVMEndpoint(
 	if !found {
 		target.Endpoints = append(target.Endpoints, binding)
 	}
-	found = false
-	for _, existing := range target.Networks {
-		if existing.NetworkID == network.NetworkID {
-			if existing != network {
-				return nil, generationAuthorityError("existing firewall network intent differs", nil, nil)
-			}
-			found = true
-		}
-	}
-	if !found {
-		target.Networks = append(target.Networks, network)
+	if err := target.activateNetwork(network); err != nil {
+		return nil, err
 	}
 	if err := target.reserveEndpoint(endpointReservation(binding)); err != nil {
 		return nil, err
@@ -455,8 +446,9 @@ func (lease *MutationLease) Release(ctx context.Context) error {
 
 func cloneIntent(intent Intent) Intent {
 	return Intent{
-		Reservations: slices.Clone(intent.Reservations),
-		Endpoints:    slices.Clone(intent.Endpoints), Networks: slices.Clone(intent.Networks),
+		ActiveNetworks: slices.Clone(intent.ActiveNetworks),
+		Reservations:   slices.Clone(intent.Reservations),
+		Endpoints:      slices.Clone(intent.Endpoints), Networks: slices.Clone(intent.Networks),
 		VMGrants: slices.Clone(intent.VMGrants), NetworkGrants: slices.Clone(intent.NetworkGrants),
 		HostServices: slices.Clone(intent.HostServices),
 	}
