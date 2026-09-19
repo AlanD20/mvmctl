@@ -10,6 +10,7 @@ import (
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
@@ -280,15 +281,34 @@ func (op *Operation) HostReset(ctx context.Context) ([]string, error) {
 	}
 }
 
-// HostGetRunningVMs returns running VMs.
+// HostGetRunningVMs returns the caller's root-observed running VMs, including records absent from SQLite.
+// This preflight is not host-wide quiescence authority; each network removal independently checks root references.
 func (op *Operation) HostGetRunningVMs(ctx context.Context) ([]*model.VMItem, error) {
-	if err := ctx.Err(); err != nil {
+	inventory, err := jailer.NewRuntimeOwnerInventoryClient().Observe(ctx)
+	if err != nil {
 		return nil, err
 	}
-	// Transitional launches do not write the authoritative schema-3 record;
-	// neither an empty user database nor an absent root record proves quiescence.
-	return nil, errs.New(errs.CodeHostCleanFailed,
-		"authoritative running-VM discovery requires the schema-3 lifecycle cutover")
+	localVMs, err := op.Repos.VM.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*model.VMItem, len(localVMs))
+	for _, item := range localVMs {
+		byID[item.ID] = item
+	}
+	running := make([]*model.VMItem, 0)
+	for _, observed := range inventory.VMs {
+		if observed.Status != jailer.RuntimeStatusRunning {
+			continue
+		}
+		item := byID[observed.VMID]
+		if item == nil {
+			item = &model.VMItem{ID: observed.VMID, Name: observed.VMID}
+		}
+		item.Status = model.VMStatusRunning
+		running = append(running, item)
+	}
+	return running, nil
 }
 
 // HostIsInitialized checks if host is initialized.
