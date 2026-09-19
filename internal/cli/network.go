@@ -230,7 +230,7 @@ func newNetworkSyncCmd(networkAPI api.NetworkAPI) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:               "sync [selectors...]",
-		Short:             "Sync iptables rules between database and host.",
+		Short:             "Reconcile managed network authority and retry pending creation.",
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeNetworkNames,
 		RunE: func(cmd *cobra.Command, args []string) error {

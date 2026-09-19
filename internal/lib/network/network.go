@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -330,95 +329,6 @@ func EnsureInterfaceReady(ctx context.Context, iface string) error {
 	}
 
 	return nil
-}
-
-// --- Internal Helpers ---
-
-// StripTapRules strips TAP-related rules from iptables rules text.
-func StripTapRules(ctx context.Context, rulesText string) string {
-	tapNames := GetTunTapDevices(ctx)
-	if len(tapNames) == 0 {
-		return rulesText
-	}
-	lines := strings.SplitAfter(rulesText, "\n")
-	var filtered []string
-	for _, line := range lines {
-		skip := false
-		for _, tap := range tapNames {
-			if strings.Contains(line, tap) {
-				skip = true
-				break
-			}
-		}
-		if !skip {
-			filtered = append(filtered, line)
-		}
-	}
-	return strings.Join(filtered, "")
-}
-
-// DetectIPTablesBackendConflict detects mixed iptables backend conflict.
-type BackendConflictResult struct {
-	HasConflict bool
-	Diagnosis   string
-}
-
-func DetectIPTablesBackendConflict(ctx context.Context) BackendConflictResult {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	versionResult, _ := system.DefaultRunner.Run(
-		ctx,
-		[]string{"iptables", "--version"},
-		system.RunCmdOpts{Check: false, Capture: true},
-	)
-	currentBackend := "legacy"
-	if versionResult.Success() && strings.Contains(versionResult.Stderr, "nf_tables") {
-		currentBackend = "nft"
-	}
-
-	legacyActive := false
-	legacyResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables-legacy", "-L", "-n", "-v"}, system.RunCmdOpts{
-		Check:      false,
-		Capture:    true,
-		Privileged: true,
-	})
-	if legacyResult.Success() {
-		for line := range strings.SplitSeq(legacyResult.Stdout, "\n") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				if pkts, err := strconv.Atoi(parts[0]); err == nil && pkts > 0 {
-					legacyActive = true
-					break
-				}
-			}
-		}
-	}
-
-	nftActive := false
-	nftResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables", "-L", "-n", "-v"}, system.RunCmdOpts{
-		Check:      false,
-		Capture:    true,
-		Privileged: true,
-	})
-	if nftResult.Success() {
-		for line := range strings.SplitSeq(nftResult.Stdout, "\n") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				if pkts, err := strconv.Atoi(parts[0]); err == nil && pkts > 0 {
-					nftActive = true
-					break
-				}
-			}
-		}
-	}
-
-	hasConflict := legacyActive && nftActive
-	diagnosis := fmt.Sprintf(
-		"iptables backend: %s, legacy active: %v, nft active: %v",
-		currentBackend, legacyActive, nftActive,
-	)
-	return BackendConflictResult{HasConflict: hasConflict, Diagnosis: diagnosis}
 }
 
 // FlushARP flushes the ARP cache for a bridge interface.

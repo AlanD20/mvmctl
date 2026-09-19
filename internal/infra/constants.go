@@ -114,16 +114,6 @@ const (
 	SnapshotStateFilename = "vmstate"
 )
 
-const MVMForwardChain = "MVM-FORWARD"
-
-const MVMPostroutingChain = "MVM-POSTROUTING"
-
-const MVMNocloudNetInputChain = "MVM-NOCLOUDNET-INPUT"
-
-const MVMRoutedPolicyChain = "MVM-ROUTED-POLICY"
-
-const MVMHostInputChain = "MVM-HOST-INPUT"
-
 func SudoersDropInPath() string {
 	return fmt.Sprintf("/etc/sudoers.d/%s", CLIName)
 }
@@ -194,11 +184,7 @@ var OverridableDefaults = map[string]map[string]any{
 		"listing_style": "short",
 	},
 	"settings": {
-		"guestfs_enabled":  false,
-		"firewall_backend": "nftables",
-	},
-	"settings.firewall": {
-		"iptables_xtcomment": true,
+		"guestfs_enabled": false,
 	},
 }
 
@@ -408,13 +394,9 @@ const FirecrackerGitRepoURL = "https://github.com/firecracker-microvm/firecracke
 
 // --- Privileged system binaries ---
 var PrivilegedBinaries = map[string]string{
-	"/usr/sbin/ip":               "iproute2",
-	"/usr/sbin/iptables":         "iptables",
-	"/usr/sbin/iptables-restore": "iptables",
-	"/usr/sbin/iptables-save":    "iptables",
-	"/usr/sbin/nft":              "nftables",
-	"/usr/sbin/sysctl":           "procps",
-	"/usr/sbin/modprobe":         "kmod",
+	"/usr/sbin/ip":       "iproute2",
+	"/usr/sbin/sysctl":   "procps",
+	"/usr/sbin/modprobe": "kmod",
 }
 
 // PrivilegedBinariesOrdered returns the keys of PrivilegedBinaries in
@@ -422,10 +404,6 @@ var PrivilegedBinaries = map[string]string{
 // needed for deterministic sudoers content generation.
 var PrivilegedBinariesOrdered = [...]string{
 	"/usr/sbin/ip",
-	"/usr/sbin/iptables",
-	"/usr/sbin/iptables-restore",
-	"/usr/sbin/iptables-save",
-	"/usr/sbin/nft",
 	"/usr/sbin/sysctl",
 	"/usr/sbin/modprobe",
 }
@@ -457,7 +435,6 @@ var RequiredBinaries = []string{
 	"ip", "modprobe", "lsmod", "groupadd", "usermod",
 	"groupdel", "visudo", "ssh-keygen", "tar",
 	"qemu-img", "mkfs.ext4", "blkid", "sfdisk", "dumpe2fs",
-	"iptables", "nft",
 }
 
 // CloudInitMode type moved to mvmctl/internal/infra/model (model.CloudInitMode).

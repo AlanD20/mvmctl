@@ -1,87 +1,5 @@
 package model
 
-import "fmt"
-
-// --- Firewall enums ---
-
-// FirewallBackendType selects the firewall implementation.
-type FirewallBackendType string
-
-const (
-	FirewallBackendNFTables FirewallBackendType = "nftables"
-	FirewallBackendIPTables FirewallBackendType = "iptables"
-)
-
-// FirewallTable names.
-type FirewallTable string
-
-const (
-	FirewallTableFilter   FirewallTable = "filter"
-	FirewallTableNat      FirewallTable = "nat"
-	FirewallTableMangle   FirewallTable = "mangle"
-	FirewallTableRaw      FirewallTable = "raw"
-	FirewallTableSecurity FirewallTable = "security"
-)
-
-// FirewallChain names.
-type FirewallChain string
-
-const (
-	FirewallChainMVMForward      FirewallChain = "MVM-FORWARD"
-	FirewallChainMVMPostrouting  FirewallChain = "MVM-POSTROUTING"
-	FirewallChainMVMNocloudNetIn FirewallChain = "MVM-NOCLOUDNET-INPUT"
-	FirewallChainMVMRoutedPolicy FirewallChain = "MVM-ROUTED-POLICY"
-	FirewallChainMVMHostInput    FirewallChain = "MVM-HOST-INPUT"
-)
-
-// FirewallRuleType categorises firewall rules.
-type FirewallRuleType string
-
-const (
-	FirewallRuleTypeMasquerade      FirewallRuleType = "masquerade"
-	FirewallRuleTypeForwardIn       FirewallRuleType = "forward_in"
-	FirewallRuleTypeForwardOut      FirewallRuleType = "forward_out"
-	FirewallRuleTypeNocloudNetInput FirewallRuleType = "nocloudnet_input"
-	FirewallRuleTypePolicyAllow     FirewallRuleType = "service_access_allow"
-	FirewallRuleTypeRoutedDrop      FirewallRuleType = "routed_managed_drop"
-	FirewallRuleTypeHostInputDrop   FirewallRuleType = "host_managed_drop"
-)
-
-// FirewallProtocol specifies the IP protocol.
-type FirewallProtocol string
-
-const (
-	FirewallProtocolTCP  FirewallProtocol = "tcp"
-	FirewallProtocolUDP  FirewallProtocol = "udp"
-	FirewallProtocolICMP FirewallProtocol = "icmp"
-	FirewallProtocolAll  FirewallProtocol = "all"
-)
-
-// FirewallTarget specifies the firewall action.
-type FirewallTarget string
-
-const (
-	FirewallTargetMasquerade FirewallTarget = "MASQUERADE"
-	FirewallTargetAccept     FirewallTarget = "ACCEPT"
-	FirewallTargetDrop       FirewallTarget = "DROP"
-	FirewallTargetReject     FirewallTarget = "REJECT"
-	FirewallTargetLog        FirewallTarget = "LOG"
-	FirewallTargetMark       FirewallTarget = "MARK"
-)
-
-// FirewallWildcard constants.
-type FirewallWildcard string
-
-const (
-	FirewallWildcardAnyCIDR      FirewallWildcard = "0.0.0.0/0"
-	FirewallWildcardAnyInterface FirewallWildcard = "*"
-	// FirewallWildcardManagedInterface is an internal derived-rule marker expanded by firewall backends.
-	FirewallWildcardManagedInterface FirewallWildcard = "@mvmctl-managed"
-)
-
-// FirewallPortAny is the sentinel value meaning "any port".
-const FirewallPortAny = 0
-
 // --- Network ---
 
 // NetworkItem represents a VM network.
@@ -100,10 +18,9 @@ type NetworkItem struct {
 	DeletedAt    *string `json:"deleted_at,omitempty"   db:"deleted_at"`
 
 	// Resolved relations (not stored in DB directly)
-	Leases        []*NetworkLeaseItem `json:"leases,omitempty"`
-	IPTablesRules []*FirewallRule     `json:"iptables_rules,omitempty"`
-	VMs           []*VMItem           `json:"vms,omitempty"`
-	Snapshots     []*SnapshotItem     `json:"snapshots,omitempty"`
+	Leases    []*NetworkLeaseItem `json:"leases,omitempty"`
+	VMs       []*VMItem           `json:"vms,omitempty"`
+	Snapshots []*SnapshotItem     `json:"snapshots,omitempty"`
 }
 
 // --- NetworkLeaseItem ---
@@ -116,100 +33,4 @@ type NetworkLeaseItem struct {
 	ID        *int64  `json:"id,omitempty"         db:"id"`
 	VMID      *string `json:"vm_id,omitempty"      db:"vm_id"`
 	ExpiresAt *string `json:"expires_at,omitempty" db:"expires_at"`
-}
-
-// --- FirewallRule ---
-
-// FirewallRule represents a firewall rule.
-type FirewallRule struct {
-	TableName    FirewallTable    `json:"table_name"    db:"table_name"`
-	ChainName    FirewallChain    `json:"chain_name"    db:"chain_name"`
-	RuleType     FirewallRuleType `json:"rule_type"     db:"rule_type"`
-	Protocol     FirewallProtocol `json:"protocol"      db:"protocol"`
-	Source       string           `json:"source"        db:"source"`
-	Destination  string           `json:"destination"   db:"destination"`
-	InInterface  string           `json:"in_interface"  db:"in_interface"`
-	OutInterface string           `json:"out_interface" db:"out_interface"`
-	Target       FirewallTarget   `json:"target"        db:"target"`
-	SPort        int              `json:"sport"         db:"sport"`
-	DPort        int              `json:"dport"         db:"dport"`
-	DPortEnd     int              `json:"dport_end"     db:"dport_end"`
-	NetworkID    string           `json:"network_id"    db:"network_id"`
-	IsActive     bool             `json:"is_active"     db:"is_active"`
-
-	ID             *int64  `json:"id,omitempty"               db:"id"`
-	NetworkName    *string `json:"network_name,omitempty"`
-	CommentTag     *string `json:"comment_tag,omitempty"      db:"comment_tag"`
-	CommandString  *string `json:"command_string,omitempty"   db:"command_string"`
-	CreatedAt      *string `json:"created_at,omitempty"       db:"created_at"`
-	LastVerifiedAt *string `json:"last_verified_at,omitempty" db:"last_verified_at"`
-	PolicyID       *string `json:"policy_id,omitempty"        db:"service_access_policy_id"`
-}
-
-// Key builds a dedup key from a rule's identifying fields.
-func (r FirewallRule) Key() string {
-	policyID := ""
-	if r.PolicyID != nil {
-		policyID = *r.PolicyID
-	}
-	return fmt.Sprintf("%s:%s:%s:%s:%s:%s:%s:%s:%s:%d:%d:%d:%s:%s",
-		r.TableName, r.ChainName, r.RuleType, r.Protocol, r.Source, r.Destination,
-		r.InInterface, r.OutInterface, r.Target, r.SPort, r.DPort, r.DPortEnd,
-		r.NetworkID, policyID)
-}
-
-// NewTapForwardRules returns the two FORWARD rules needed for a TAP device:
-// bridge→tap (forward_out) and tap→bridge (forward_in).
-func NewTapForwardRules(tap, bridge, networkID, subnet string) []FirewallRule {
-	wildcard := string(FirewallWildcardAnyCIDR)
-
-	fwdBridgeToTap := FirewallRule{
-		TableName:    FirewallTableFilter,
-		ChainName:    FirewallChainMVMForward,
-		RuleType:     FirewallRuleTypeForwardOut,
-		Target:       FirewallTargetAccept,
-		NetworkID:    networkID,
-		Protocol:     FirewallProtocolAll,
-		Source:       wildcard,
-		Destination:  wildcard,
-		InInterface:  bridge,
-		OutInterface: tap,
-		SPort:        int(FirewallPortAny),
-		DPort:        int(FirewallPortAny),
-		IsActive:     true,
-		NetworkName:  &bridge,
-	}
-	fwdTapToBridge := FirewallRule{
-		TableName:    FirewallTableFilter,
-		ChainName:    FirewallChainMVMForward,
-		RuleType:     FirewallRuleTypeForwardIn,
-		Target:       FirewallTargetAccept,
-		NetworkID:    networkID,
-		Protocol:     FirewallProtocolAll,
-		Source:       wildcard,
-		Destination:  wildcard,
-		InInterface:  tap,
-		OutInterface: bridge,
-		SPort:        int(FirewallPortAny),
-		DPort:        int(FirewallPortAny),
-		IsActive:     true,
-		NetworkName:  &bridge,
-	}
-
-	if subnet != "" {
-		fwdBridgeToTap.Source = subnet
-		fwdTapToBridge.Destination = subnet
-	}
-
-	return []FirewallRule{fwdBridgeToTap, fwdTapToBridge}
-}
-
-// --- FirewallRuleResult ---
-
-// FirewallRuleResult holds the result of a rule operation.
-type FirewallRuleResult struct {
-	Success         bool          `json:"success"`
-	Rule            *FirewallRule `json:"rule,omitempty"`
-	ErrorMessage    *string       `json:"error_message,omitempty"`
-	CommandExecuted *string       `json:"command_executed,omitempty"`
 }

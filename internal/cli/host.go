@@ -18,8 +18,6 @@ import (
 // formatChange returns a concise one-line description of a host change.
 func formatChange(mechanism, setting, appliedValue, originalValue string) string {
 	switch mechanism {
-	case "iptables_save":
-		return fmt.Sprintf("iptables rules saved → %s", appliedValue)
 	case "file_create", "file_remove":
 		return fmt.Sprintf("%s: created %s", setting, appliedValue)
 	case "groupadd":
@@ -40,10 +38,6 @@ func formatChange(mechanism, setting, appliedValue, originalValue string) string
 			originalValue = "0"
 		}
 		return fmt.Sprintf("%s: %s → %s", setting, originalValue, appliedValue)
-	case "noop":
-		if setting == "iptables_chains" && appliedValue == "MVM chains already exist" {
-			return "iptables chains already exist — keeping existing chain state"
-		}
 	case "modprobe":
 		if setting == "kernel_module_load" {
 			return fmt.Sprintf("loaded kernel module '%s'", appliedValue)
@@ -293,10 +287,13 @@ func newHostCleanCmd(hostAPI api.HostAPI) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "clean",
-		Short: "Remove all VM networking config (bridges, TAPs, iptables)",
-		Long: fmt.Sprintf(`Remove all VM networking config (bridges, TAPs, iptables). Does not touch sysctl or group.
+		Short: "Remove all VM networking config (managed networks and firewall policy)",
+		Long: fmt.Sprintf(
+			`Remove all VM networking config (managed networks and firewall policy). Does not touch sysctl or group.
 
-Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUnixGroup),
+Sysctl settings, sudoers, and the '%s' group will NOT be affected.`,
+			infra.MVMUnixGroup,
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := abortIfVMsRunning(cmd.Context(), hostAPI); err != nil {
 				return err
@@ -304,7 +301,7 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 
 			if !force {
 				common.Cli.Warning(
-					"This will remove all VM networking: bridges, TAP devices, iptables rules, and the default network configuration.",
+					"This will remove all VM networking: managed networks, firewall policy, and the default network configuration.",
 				)
 				common.Cli.Info(
 					fmt.Sprintf(
@@ -360,7 +357,7 @@ func newHostResetCmd(hostAPI api.HostAPI) *cobra.Command {
 
 Reverts every change made by '%s host init':
 
-- Tears down all network bridges, TAP devices, and iptables rules.
+- Tears down managed network bridges, namespaces, and firewall policy.
 - Restores the original sysctl ip_forward value.
 - Removes the sudoers drop-in file.
 - Removes the '%s' system group.

@@ -24,13 +24,6 @@ const (
 	CloudInitStatusError   CloudInitStatus = "ERROR"
 )
 
-// --- Cloud-init lifecycle interfaces ---
-
-// CloudInitFirewallRule is a firewall rule created during cloud-init provisioning.
-type CloudInitFirewallRule interface {
-	Remove() error
-}
-
 // --- CloudInitResult ---
 
 // CloudInitResult holds the result of cloud-init provisioning.
