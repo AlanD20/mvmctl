@@ -610,14 +610,19 @@ retains read-only/cache intent; cleanup admits only exact empty jail placeholder
 implementation does not reserve physical storage or implement live hotplug.
 
 Private Firecracker 1.16.1 MMIO admission accounts for the complete device budget: rootfs, network, VMGenID, VMClock,
-optional cloud-init and vsock, and ARM RTC/serial where applicable. PCI and unapproved release profiles fail closed.
+optional cloud-init and vsock, and ARM RTC/serial where applicable. The PCI profile uses the same exact release
+authority with separate bus-slot and MSI-X accounting; it does not reuse the MMIO interrupt formula. The root child
+persists initial device/volume identity and a configuration digest bound to boot, generation, release, and jail root.
+The transport choice reaches child argv and the sealed configuration path. x86 nested-virtualization configuration
+is admitted; ARM nested and unapproved release profiles fail closed. These paths remain unverified.
 Snapshot byte admission limits the complete `vmstate`, including its CRC, to 10,000,000 bytes and requires memory
 length to equal trusted captured RAM in MiB times 1,048,576. Captured rootfs length must match exactly; rootfs-only
 captures have neither memory nor vmstate. These private checks do not authenticate a capture, establish immutable
 memory backing, or grant restore authority. The user approved root-controlled snapshot storage with CLI removal and
 requires consistent snapshots of attached data volumes. The authoritative capture producer, immutable restore backing,
-data-volume consistency, and public snapshot capture/restore/removal composition remain pending. The user paused
-snapshot implementation for a separate design pass. The capture contract must address process/API access and all
+data-volume consistency, and public snapshot capture/restore/removal composition remain pending. The user subsequently
+approved [ADR-0018](docs/adr/0018-isolated-vm-execution-and-snapshot-authority.md), resuming the execution/API/backing
+isolation prerequisite. The capture contract must address process/API access and all
 active disk writers; destination ownership alone is insufficient. No exploit or impossibility of a narrower design
 has been demonstrated. Typed launch rejects snapshot mode rather than falling back to the older path.
 

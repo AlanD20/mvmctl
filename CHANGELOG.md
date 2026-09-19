@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Implementation-only integration updates
 
+- Typed launch now admits PCI for the pinned Firecracker 1.16.1 profile, accounting for the usable PCI bus slots and
+  MSI-X vectors of the complete generated device set. The authenticated child receives the transport choice and adds
+  `--enable-pci`. x86 nested-virtualization configuration is carried through the sealed launch path; ARM nested launch
+  remains rejected. Root-produced device metadata binds transport, generation, release, configuration digest, and
+  initial volume identities for later live-volume admission. This implementation is not runtime-qualified.
+
 - Added pressure-only cgroup policy v2: `memory.high` remains guest RAM plus configurable VMM headroom,
   `memory.max` is explicitly `max`, and swap/CPU/PID settings remain unchanged. Root admission and readback enforce
   the versioned policy; old/missing policy cannot silently launch or migrate. VMs may exceed the pressure threshold.
@@ -978,7 +984,7 @@ and immutable restore backing with consistent data-volume snapshots, remaining p
 Approval adds no new per-volume or aggregate quota caps. Existing
 unprivileged archive construction remains outside the root service. Pressure-only memory policy v2 is implemented
 without runtime qualification; attribution of the reported OOM incident remains unresolved.
-Snapshot and PCI launches still refuse unsupported selections; raw-volume launch is integrated but unverified.
+Snapshot launch still refuses unsupported selections; raw-volume and PCI launch are integrated but unverified.
 The user subsequently approved the isolated-execution prerequisite in ADR-0018. A trusted capture contract must address the
 operator-owned process, caller-accessible Firecracker API, active disk writers, and retained writable aliases.
 No exploit or impossibility of a narrower design has been demonstrated. Root-controlled storage and consistent

@@ -335,9 +335,9 @@ root before local deletion. Without `--force`, stop requests guest shutdown thro
 connection and waits on the exact process before authoritative cleanup.
 
 Typed launch now includes console relay composition and raw data volumes with release-derived device limits,
-descriptor-only mounts, and no new storage quotas. This development implementation is unverified. Snapshot and PCI
-launches remain blocked, with no legacy fallback; live volume hotplug is not implemented. Snapshot design and release
-qualification remain pending.
+descriptor-only mounts, and no new storage quotas. PCI launch and x86 nested configuration are implemented for the
+pinned release; ARM nested launch is rejected. This development implementation is unverified. Snapshot launch remains
+blocked, with no legacy fallback; live-volume and snapshot composition remain pending.
 
 **`vm create` flags:**
 
