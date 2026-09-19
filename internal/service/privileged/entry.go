@@ -23,6 +23,7 @@ type runtimeDeps struct {
 	authorization          authorizationDeps
 	control                controlDeps
 	trustedRelease         trustedReleaseHandlerEffects
+	runtimeStatus          runtimeStatusObserve
 	loopMount              loopMountHandlerEffects
 	vmExecSession          vmExecSessionHandlerEffects
 	vmExecConnectionReader vmExecConnectionReaderDeps
@@ -39,6 +40,7 @@ const (
 // CRITICAL: This entry point accepts only the reserved versioned marker and fixed action switch.
 func Run(ctx context.Context, args []string) error {
 	trustedRelease := jailer.NewTrustedReleaseServer()
+	runtimeStatus := jailer.NewRuntimeStatusServer()
 	loopMount := loopmount.NewProvisionInspectServer(systemLoopMountAgentBinary)
 	vmExecSession, err := jailer.NewVMExecSessionServer()
 	if err != nil {
@@ -52,6 +54,7 @@ func Run(ctx context.Context, args []string) error {
 		control:                realControlDeps(),
 		vmExecSession:          newVMExecSessionHandlerEffects(vmExecSession),
 		vmExecConnectionReader: realVMExecConnectionReaderDeps(),
+		runtimeStatus:          runtimeStatus.Observe,
 		trustedRelease: trustedReleaseHandlerEffects{
 			install: trustedRelease.Install,
 			remove:  trustedRelease.Remove,
@@ -198,6 +201,8 @@ func dispatch(
 	deps runtimeDeps,
 ) (dispatchDisposition, error) {
 	switch request.action {
+	case jailer.RuntimeStatusAction:
+		return dispatchHandled, handleRuntimeStatus(ctx, endpoint, caller, deps.runtimeStatus, deps.control)
 	case jailer.TrustedReleaseInstallAction:
 		return dispatchHandled, handleTrustedReleaseInstall(ctx, endpoint, deps.trustedRelease, deps.control)
 	case jailer.TrustedReleaseRemoveAction:

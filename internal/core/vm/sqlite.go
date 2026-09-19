@@ -3,12 +3,14 @@ package vm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
 
 	"mvmctl/internal/lib/model"
+	"mvmctl/pkg/errs"
 )
 
 type sqliteRepo struct {
@@ -400,6 +402,45 @@ func (r *sqliteRepo) UpdateStatus(ctx context.Context, id string, status model.V
 		id,
 	)
 	return err
+}
+
+// UpdateRuntimeStatuses commits every changed observation together or leaves the projection untouched.
+func (r *sqliteRepo) UpdateRuntimeStatuses(
+	ctx context.Context,
+	updates []model.VMRuntimeStatusUpdate,
+) (returnErr error) {
+	if len(updates) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return errs.WrapMsg(errs.CodeDatabaseError, "begin VM runtime status projection", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			returnErr = errs.WrapMsg(errs.CodeDatabaseError, "roll back VM runtime status projection",
+				errors.Join(returnErr, err))
+		}
+	}()
+	for _, update := range updates {
+		result, err := tx.ExecContext(ctx,
+			"UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			update.Status, update.VMID)
+		if err != nil {
+			return errs.WrapMsg(errs.CodeDatabaseError, "project VM runtime status", err)
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return errs.WrapMsg(errs.CodeDatabaseError, "read VM runtime status projection count", err)
+		}
+		if count != 1 {
+			return errs.New(errs.CodeDatabaseError, "VM disappeared during runtime status projection")
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return errs.WrapMsg(errs.CodeDatabaseError, "commit VM runtime status projection", err)
+	}
+	return nil
 }
 
 func (r *sqliteRepo) UpdatePID(ctx context.Context, id string, pid *int) error {
