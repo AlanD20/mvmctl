@@ -39,22 +39,34 @@ type topologyProgress struct {
 }
 
 type topologyJournalRecord struct {
-	Schema           uint32            `json:"schema"`
-	Lifecycle        topologyLifecycle `json:"lifecycle"`
-	OwnerUID         uint32            `json:"owner_uid"`
-	NetworkID        string            `json:"network_id"`
-	VMID             string            `json:"vm_id"`
-	BootID           string            `json:"boot_id"`
-	LaunchGeneration uint64            `json:"launch_generation"`
-	NetworkDigest    string            `json:"network_digest"`
-	Prefix           string            `json:"prefix"`
-	Gateway          string            `json:"gateway"`
-	GuestIPv4        string            `json:"guest_ipv4"`
-	GuestMAC         string            `json:"guest_mac"`
-	EndpointID       string            `json:"endpoint_id"`
-	Pending          string            `json:"pending"`
-	Topology         TopologyRecord    `json:"topology"`
-	Progress         topologyProgress  `json:"progress"`
+	Schema           uint32                  `json:"schema"`
+	Lifecycle        topologyLifecycle       `json:"lifecycle"`
+	OwnerUID         uint32                  `json:"owner_uid"`
+	NetworkID        string                  `json:"network_id"`
+	VMID             string                  `json:"vm_id"`
+	BootID           string                  `json:"boot_id"`
+	LaunchGeneration uint64                  `json:"launch_generation"`
+	NetworkDigest    string                  `json:"network_digest"`
+	Prefix           string                  `json:"prefix"`
+	Gateway          string                  `json:"gateway"`
+	GuestIPv4        string                  `json:"guest_ipv4"`
+	GuestMAC         string                  `json:"guest_mac"`
+	EndpointID       string                  `json:"endpoint_id"`
+	Pending          string                  `json:"pending"`
+	Topology         TopologyRecord          `json:"topology"`
+	Progress         topologyProgress        `json:"progress"`
+	NamespaceTarget  topologyNamespaceTarget `json:"namespace_target"`
+}
+
+type topologyNamespaceTarget struct {
+	DirectoryDevice      uint64 `json:"directory_device"`
+	DirectoryInode       uint64 `json:"directory_inode"`
+	DirectoryMountKind   uint8  `json:"directory_mount_kind"`
+	DirectoryMount       uint64 `json:"directory_mount"`
+	PlaceholderDevice    uint64 `json:"placeholder_device"`
+	PlaceholderInode     uint64 `json:"placeholder_inode"`
+	PlaceholderMountKind uint8  `json:"placeholder_mount_kind"`
+	PlaceholderMount     uint64 `json:"placeholder_mount"`
 }
 
 // topologyJournal retains the last exact file evidence, including a visible replacement whose fsync failed.

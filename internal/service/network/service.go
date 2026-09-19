@@ -421,6 +421,17 @@ func (preparation *topologyPreparation) persistMutation(ctx context.Context, pen
 	record.Progress.LocalBridge = preparation.localBridgeMade
 	record.Progress.TAP = preparation.tapMade
 	record.Progress.Veth = preparation.vethMade
+	if pin, ok := preparation.pin.(*namespacePin); ok && pin.state != nil {
+		pin.state.mu.Lock()
+		target := pin.state.targetID
+		pin.state.mu.Unlock()
+		record.NamespaceTarget = topologyNamespaceTarget{
+			DirectoryDevice: target.directoryDevice, DirectoryInode: target.directoryInode,
+			DirectoryMountKind: uint8(target.directoryMount.kind), DirectoryMount: target.directoryMount.value,
+			PlaceholderDevice: target.placeholderDevice, PlaceholderInode: target.placeholderInode,
+			PlaceholderMountKind: uint8(target.placeholderMount.kind), PlaceholderMount: target.placeholderMount.value,
+		}
+	}
 	if preparation.state == topologyPreparationCleaning {
 		record.Lifecycle = topologyCleaning
 	}

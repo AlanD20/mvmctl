@@ -192,11 +192,13 @@ func (lease *VMTopologyLease) activate(ctx context.Context, link *linkEffect) er
 		if err := lease.persistStage(ctx, step.name, topologyActivating); err != nil {
 			return err
 		}
-		if err := step.raise(ctx, pin, topology); err != nil {
-			return err
-		}
+		mutationErr := step.raise(ctx, pin, topology)
 		*step.mark = true
-		if err := lease.persistStage(ctx, "", topologyActivating); err != nil {
+		if err := lease.verifyActivationLinks(context.WithoutCancel(ctx)); err != nil {
+			*step.mark = false
+			return errors.Join(mutationErr, err)
+		}
+		if err := errors.Join(mutationErr, lease.persistStage(context.WithoutCancel(ctx), "", topologyActivating)); err != nil {
 			return err
 		}
 	}
@@ -225,6 +227,9 @@ func (lease *VMTopologyLease) CompleteActivation(ctx context.Context) error {
 		return err
 	}
 	if err := lease.revalidateNetwork(ctx); err != nil {
+		return err
+	}
+	if err := lease.verifyActivationLinks(ctx); err != nil {
 		return err
 	}
 	mutationErr := lease.mutation.Release(ctx)
