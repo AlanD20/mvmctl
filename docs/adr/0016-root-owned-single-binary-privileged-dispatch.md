@@ -1222,8 +1222,11 @@ remaining qualification and snapshot-authority gaps.
 Snapshot storage decision (2026-09-19): captured artifacts may use root-controlled storage beneath the managed cache,
 with CLI-mediated removal rather than operator filesystem deletion. Root ownership alone is not provenance or
 immutability: capture must exclude untrusted writers and retained writable descriptors before authenticating output,
-and restore must retain immutable backing for its lifetime. This approval does not select data-volume snapshot
-consistency semantics or authorize caller-supplied capture metadata.
+and restore must retain immutable backing for its lifetime. The user also requires consistent data-volume capture
+and restore in 0.3.0; excluding VMs with attached data volumes is not the final release policy. Capture must bind one
+consistent guest state across memory, vmstate, rootfs, and attached disks, and restore must preserve their guest-visible
+device identities using independent backing. Caller-supplied capture metadata remains non-authoritative. Detailed
+producer isolation and consistency composition remain implementation dependencies, not completed guarantees.
 
 The caller-owned `firecracker.json` is admission evidence, not launch authority. Immediately before allocation or
 reading, root repeats synchronized metadata inspection and enforces the 1-byte-through-1-MiB bound. It uses positioned
