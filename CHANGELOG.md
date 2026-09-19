@@ -31,8 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > The late implementation pass also composes typed schema-3 launch/cleanup, per-VM topology, cgroup and descriptor-only
 > mounts, same-boot recovery, root traffic apply/revoke, managed-network transactions, and offline ext-image shrink.
 > This code is unverified: only formatting has been performed, with no build, tests, review, or system qualification.
-> Volume storage policy, trusted snapshot restore, complete host reset, remaining image effects,
-> and release qualification remain incomplete. Earlier slice evidence below does not qualify these later changes.
+> Approved raw-volume launch integration, trusted snapshot capture/restore with consistent data volumes, final privilege
+> entry-point retirement, and release qualification remain incomplete. Host clean/reset and typed image recovery are
+> implemented but unverified. Earlier slice evidence below does not qualify these later changes.
 
 ### Added
 
@@ -52,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   publishes an identity tombstone without deleting speculative kernel state; removed/cancelled IDs cannot be reused.
 - Added shared privileged-operation and exclusive administrator host-admission leases, durable enabled/disabled state,
   and schema-2 administrator journaling. Init enables admission last, after host setup and enrollment. Old schema-1
-  journals are incompatible clean-install state. Complete reset/dispatcher composition is tracked below.
+  journals are incompatible clean-install state. The dispatcher retains shared admission through each request and
+  cleanup; administrator reset retains exclusive admission and durable rollback receipts.
 - Added bounded descriptor-relative deblob cleanup and distribution configuration. Fixed guest-boot actions handle
   Arch package-key initialization and Btrfs balance; they are queued, never executed on the host or reported completed
   merely because provisioning wrote them.
@@ -83,9 +85,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   production path are removed. Removal requires exact root ownership and absence of references, with durable retry
   receipts. A pending desired network retries only with exact matching inputs; missing root authority fails closed.
   NoCloud now uses its own fixed typed host-service authority; it no longer consumes the legacy tracker.
-- Added staged offline ext2/ext3/ext4 image shrink with root-owned `prepared`/`sized`/`complete` replay journal. It binds
-  exact cache/image identity and request. This shrink-only receiver rejects conversion and combined plans; typed
-  provisioning supplies deblob, while image deblob/fstab composition and conversion remain separate work.
+- Typed image optimization now composes bounded deblob and fstab repair with offline ext2/ext3/ext4 shrink under a
+  root-owned `prepared`/`sized`/`complete` replay journal. Btrfs-to-ext4 conversion has a separate durable transaction,
+  retained source snapshot, exact candidate identity, and publication recovery; conversion and shrink are separate
+  requests rather than one ambiguous mutation.
+- Caller staging recovery retains exact operation intent and source/directory identities, reissues the typed request,
+  and publishes only a checked root result. Atomic exchange is required; the displaced original survives until
+  publication durability completes. Unknown or changed remnants are preserved rather than adopted or recursively
+  removed. The caller-owned recovery record is retry intent, never root authority.
+- XFS now supports typed inspection, provisioning without resize, deblob, and fstab repair. Resize and shrink are
+  refused before filesystem/backing mutation; XFS uses its existing capacity.
+- Removed public `mvm run provision` and raw provisioning fallback. Legacy cache cleanup no longer performs arbitrary
+  unmounts, and cleanup failures propagate to the CLI. Existing unprivileged archive construction remains separate.
+- Deleted the four obsolete raw LoopMount entry/spawn/wire/provisioner source files; their history remains in Git.
+- Sudoers generation now grants only `/usr/local/bin/mvm __mvm_privileged_v1 *`. Installation, publication, and init
+  reject transitional policies. This source change was not activated on the host.
 - Added global `--json` with one schema-1 success/error/partial envelope, typed result data, preserved structured
   errors, and per-item batch outcomes. Existing bare JSON reads now appear under `data`. Streaming/interactive exec,
   SSH, logs, completion, service `run`, init wizard, and console attachment reject this mode; console state/kill support
@@ -99,14 +113,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resumable compiled mutation steps, operator enrollment, and typed partial results. Fixed root-owned per-operator
   records preserve prior membership for multiple operators alongside the original global state; an interrupted initial
   global transaction requires its original operator to recover first. The early parser supports JSON boolean forms,
-  help, and argument boundaries. Sudo entry refuses transitional wildcard grants. Host clean/reset remain blocked on
-  trusted global cleanup.
-- Image OS inspection copies to exclusive `images/staging/<image-id>/rootfs.img` and invokes typed read-only
-  inspection. Existing staging IDs are not adopted or overwritten. General image optimization/conversion cutover
-  remains pending; managed VM provisioning uses the typed backend.
+  help, and argument boundaries. Sudo entry refuses transitional wildcard grants. Host clean uses caller root inventory;
+  reset rejects live/ambiguous state and requires marker-only sudoers, then restores recorded state under exclusive
+  admission. Admission remains disabled after reset or restoration failure.
+- Image OS inspection copies to `images/staging/<image-id>/rootfs.img` and invokes typed read-only inspection. Existing
+  staging work resumes only through its exact recovery intent and checked receiver result; unknown remnants are retained.
 - Added private raw-volume identity admission, Firecracker 1.16.1 MMIO accounting, a 10,000,000-byte complete vmstate
-  limit, and exact memory length from trusted captured RAM. Volume admission is identity-only while storage capacity
-  policy is unresolved; snapshot bounds do not grant trusted capture or restore authority.
+  limit, and exact memory length from trusted captured RAM. Raw-volume launch without new storage quota caps is approved
+  but its integration remains in progress. Snapshot bounds do not grant trusted capture or restore authority.
 - Added retained topology/firewall endpoint transfer and detach foundations; these do not establish completion of the
   public network/lifecycle transaction.
 
@@ -946,10 +960,14 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Security work still pending
 
-Current incomplete work includes per-volume/aggregate storage policy, trusted snapshot capture and immutable restore
-backing, remaining image conversion and staging recovery, residual legacy privilege entry points, and qualification.
-Existing unprivileged archive construction remains outside the root service. Memory policy stays unchanged pending
-diagnosis. Snapshot, extra-volume, and PCI launches refuse unsupported selections.
+Current incomplete work includes approved raw-volume launch integration, root-controlled snapshot production/removal
+and immutable restore backing with consistent data-volume snapshots, remaining privilege integration, and qualification.
+Approval adds no new per-volume or aggregate quota caps. Existing
+unprivileged archive construction remains outside the root service. Memory policy stays unchanged pending diagnosis.
+Snapshot, extra-volume, and PCI launches still refuse unsupported selections at this documentation snapshot.
+Trusted snapshot capture also requires an explicit isolation decision: a same-UID process, caller-accessible
+Firecracker API, and caller-writable active backing cannot establish an authoritative consistent capture. Approved
+root-controlled storage and consistent data-volume capture do not resolve that boundary by themselves.
 Shared dispatcher admission and guarded administrator reset are composed. Reset requires marker-only sudoers and
 compatible root journals, rejects live or ambiguous managed state, and restores recorded settings through retryable
 rollback receipts. It retains disabled admission after reset or restoration failure and preserves unrelated administrator

@@ -135,6 +135,12 @@ Host initialization uses a schema-2 administrator journal and enables privileged
 operator enrollment complete. Old schema-1 administrator journals require a clean installation; they are not adopted.
 Missing, disabled, or unsafe admission state blocks ordinary privileged requests.
 
+Generated sudoers permits only the fixed system binary's `__mvm_privileged_v1` marker. Install/init/publication reject
+older wildcard and raw-tool policies. No host policy activation or runtime qualification was performed in this pass.
+Administrator reset is implemented for compatible recorded state: it refuses live or ambiguous ownership, restores
+recorded settings through retryable receipts, and leaves admission disabled afterward or after a restoration error.
+It does not force-stop VMs, erase authority history, or turn old unowned state into managed state.
+
 The early parser supports JSON boolean forms, help, and argument boundaries. Host clean/reset are not a supported
 legacy-state removal procedure in this development build.
 
@@ -237,6 +243,15 @@ The image resolver tries selectors in priority order:
 | `--force, -f` | Overwrite existing | `false` |
 | `--skip-optimization` | Skip OS cache cleanup (deblob), keep plain ext4 | `true` |
 | `--disable-detector NAME` | Comma-separated detectors to disable: `type`, `label`, `size`, `filesystem`, `all` | — |
+
+Typed image optimization supports deblob and fstab repair, ext-family offline shrink, and durable Btrfs-to-ext4
+conversion as a separate transaction before shrink. XFS supports inspection, provisioning, deblob, and fstab repair
+at existing capacity; resize/shrink requests fail before mutation.
+
+Interrupted optimization can resume from exact retained staging intent and resource identities. A checked root result
+is required before publication, which requires atomic exchange and preserves the original until durable completion.
+Unknown or changed remnants remain for recovery rather than being adopted or recursively removed. These paths are
+implemented but unverified; unprivileged archive construction remains separate.
 
 ```
 # List available remote image types
@@ -375,6 +390,11 @@ mvm vm create cluster-node --count 3
 ---
 
 ### `mvm snapshot` (alias: `ss`)
+
+The listed snapshot surface is not qualified support for trusted capture/restore in this development build. Restore
+remains blocked. Root-controlled snapshot storage, CLI removal, and consistent attached-volume capture are approved
+requirements, but the authoritative producer is not implemented: same-UID process access, the Firecracker API, and
+caller-writable active disks require an explicit isolation decision first.
 
 Create, list, inspect, restore, and remove VM snapshots.
 
@@ -526,6 +546,9 @@ Cache management.
 | `--all, -a` | Remove ALL items including running VMs, default network, protected assets |
 | `--dry-run` | Show what would be removed without removing |
 | `--force, -f` | Skip confirmation prompts |
+
+Cache cleanup no longer performs arbitrary unmounts through the removed raw provisioner. Inspection and cleanup
+failures propagate instead of being reported as empty cache or successful cleanup. `mvm run provision` is removed.
 
 Omit `RESOURCE` to get an error unless `--all` is passed. Each per-resource prune subcommand (`vm`, `network`, `image`, `kernel`, `binary`, `misc`) prompts for confirmation unless `--force` is set.
 
@@ -788,7 +811,8 @@ existing accounts are retained. Injected seeds contain fixed `meta-data` and `us
 
 Some distro preparation is installed as fixed guest-boot work, including SSH setup, Arch package-key initialization,
 and Btrfs balance. Successful host provisioning means those actions were queued, not that the guest has run them.
-The implementation is unverified; image conversion/archive workflows remain separate incomplete work.
+The implementation is unverified. Typed image conversion/recovery is implemented; unprivileged archive construction
+remains separate.
 
 ### How Net Mode Works
 
