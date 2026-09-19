@@ -346,7 +346,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd.Flags().
 		StringVar(&cloudInitMode, "cloud-init-mode", "", "Cloud-init mode: 'inject' (direct injection), 'iso' (ISO mode), 'net' (HTTP), 'off' (default, no cloud-init)")
 	cmd.Flags().
-		IntVar(&nocloudNetPort, "nocloud-net-port", 0, "Port for nocloud-net HTTP server (0 for auto-assign, default: auto-assign)")
+		IntVar(&nocloudNetPort, "nocloud-net-port", 0, "Unsupported: omit this flag; NoCloud uses reserved gateway TCP port 8000")
 	cmd.Flags().StringVar(&user, "user", "", "Default SSH user for cloud-init (default: from user config)")
 	cmd.Flags().
 		BoolVar(&noPCI, "no-pci", false, "Disable PCI transport (default: enabled). Required for hotplug support.")

@@ -106,9 +106,6 @@ type ResolvedVMCreateInput struct {
 	// Firecracker
 	LogLevel string
 	// Cloud-init
-	NocloudPortRangeStart int
-	NocloudPortRangeEnd   int
-	NocloudMaxPortRetries int
 	RequestedGuestIP      *string
 	RequestedGuestMAC     *string
 	NocloudNetPort        *int
@@ -334,6 +331,10 @@ func (r *VMCreateRequest) resolveMemory(ctx context.Context, input *VMCreateInpu
 // Resolve resolves all inputs to explicit values and validates.
 func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, error) {
 	input := &r.input
+	if input.NocloudNetPort != nil {
+		return nil, errs.New(errs.CodeValidationFailed,
+			"custom NoCloud ports are unsupported; omit nocloud_net_port to use reserved gateway TCP 8000")
+	}
 	// Validate VM name early
 	if err := validators.VMName(input.Name); err != nil {
 		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid VM name: %s", err.Error()))
@@ -517,9 +518,6 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	userGID, _ := r.cfg.GetInt(ctx, "defaults.vm", "user_gid")
 	guestMACPrefix, _ := r.cfg.GetString(ctx, "defaults.vm", "guest_mac_prefix")
 	logLevel, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_level")
-	nocloudPortStart, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_start")
-	nocloudPortEnd, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_end")
-	nocloudMaxRetries, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_max_port_retries")
 	nocloudKillAfter, _ := r.cfg.GetDuration(ctx, "defaults.cloudinit", "nocloud_kill_after")
 	vsockPort := 0
 	if r.input.VsockPort != nil && *r.input.VsockPort > 0 {
@@ -573,13 +571,10 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		// Firecracker defaults
 		LogLevel: logLevel,
 		// Cloud-init defaults
-		NocloudPortRangeStart: nocloudPortStart,
-		NocloudPortRangeEnd:   nocloudPortEnd,
-		NocloudMaxPortRetries: nocloudMaxRetries,
-		NoCloudKillAfter:      nocloudKillAfter,
-		VsockPort:             vsockPort,
-		Writeback:             writeback,
-		CgroupLimits:          cgroupLimits,
+		NoCloudKillAfter: nocloudKillAfter,
+		VsockPort:        vsockPort,
+		Writeback:        writeback,
+		CgroupLimits:     cgroupLimits,
 	}
 	// Validate
 	if err := r.ensureValidate(ctx, result); err != nil {

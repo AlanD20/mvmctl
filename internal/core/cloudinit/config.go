@@ -15,7 +15,7 @@ type Config struct {
 	VMDir        string
 	CloudInitDir string
 
-	// Network identity fields for firewall rule creation.
+	// Network identity for the root-authorized NoCloud listener.
 	NetworkID   string
 	NetworkName string
 
@@ -29,10 +29,7 @@ type Config struct {
 	SSHPubkeys []string
 
 	// Resolved from defaults
-	UserPassword          string // from defaults.vm.user_password
-	NocloudPortRangeStart int    // from defaults.cloudinit.nocloud_port_range_start
-	NocloudPortRangeEnd   int    // from defaults.cloudinit.nocloud_port_range_end
-	NocloudMaxPortRetries int    // from defaults.cloudinit.nocloud_max_port_retries
+	UserPassword string // from defaults.vm.user_password
 
 	CustomCloudInitConfig *string
 

@@ -70,33 +70,6 @@ func (r *ConstraintRegistry) GetTransforms(category, key string) []TransformFunc
 
 // Built-in constraints
 
-// validateNoCloudPortRange ensures nocloud_port_range_end > nocloud_port_range_start.
-func validateNoCloudPortRange(key string, resolve ResolveFn) error {
-	startRaw, err := resolve("nocloud_port_range_start")
-	if err != nil {
-		return err
-	}
-	endRaw, err := resolve("nocloud_port_range_end")
-	if err != nil {
-		return err
-	}
-
-	start, err := validators.ToInt(startRaw)
-	if err != nil {
-		return err
-	}
-	end, err := validators.ToInt(endRaw)
-	if err != nil {
-		return err
-	}
-
-	if end <= start {
-		return errs.New(errs.CodeConfigError,
-			fmt.Sprintf("nocloud_port_range_end (%d) must be greater than nocloud_port_range_start (%d)", end, start))
-	}
-	return nil
-}
-
 // validateMACPrefix ensures guest_mac_prefix is a valid 2-byte hex MAC prefix.
 var macPrefixRE = regexp.MustCompile(`^[0-9a-fA-F]{2}:[0-9a-fA-F]{2}$`)
 
@@ -160,11 +133,6 @@ func NormalizeCacheType(key string, value any) (any, error) {
 // RegisterBuiltinConstraints registers all built-in constraints on the given registry.
 // Called during app initialization.
 func RegisterBuiltinConstraints(r *ConstraintRegistry) {
-	r.Register("defaults.cloudinit",
-		[]string{"nocloud_port_range_start", "nocloud_port_range_end"},
-		validateNoCloudPortRange,
-	)
-
 	r.Register("defaults.vm",
 		[]string{"guest_mac_prefix"},
 		validateMACPrefix,

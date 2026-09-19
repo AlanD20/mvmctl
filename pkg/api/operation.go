@@ -26,7 +26,6 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/db"
-	"mvmctl/internal/lib/firewall"
 	"mvmctl/internal/lib/logging"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/provisioner"
@@ -122,11 +121,8 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
-	// The existing NoCloud consumer retains the legacy tracker until its typed host-service cutover.
-	defaultFwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, sqlDB)
-
 	s := Services{
-		Network:       network.NewService(r.Network, r.TrafficPolicy, defaultFwTracker),
+		Network:       network.NewService(r.Network, r.TrafficPolicy),
 		Image:         image.NewService(r.Image),
 		Kernel:        kernel.NewService(r.Kernel, filepath.Join(cacheDir, "kernels")),
 		Binary:        binary.NewService(r.Binary, system.RuntimeArch()),

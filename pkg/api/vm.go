@@ -112,28 +112,11 @@ func (op *Operation) VMCreate(
 		if err := os.MkdirAll(nocloudDir, 0755); err != nil {
 			return nil, fmt.Errorf("create nocloud batch directory: %w", err)
 		}
-		// Find a free port for the nocloud server.
-		port := sharedResolved.NocloudNetPort
-		var freePort int
-		if port != nil && *port > 0 {
-			freePort = *port
-		} else {
-			p, err := infra.FindFreePort(
-				sharedResolved.Network.IPv4Gateway,
-				sharedResolved.NocloudPortRangeStart,
-				sharedResolved.NocloudPortRangeEnd,
-			)
-			if err != nil {
-				return nil, fmt.Errorf("find free port for nocloud server: %w", err)
-			}
-			freePort = p
-		}
 		// Spawn ONE nocloud server for the entire batch.
 		nocloudLog := infra.GetNoCloudNetLogPath(batchID)
 		result, err := nocloudnetsvc.Spawn(ctx, nocloudnetsvc.Config{
 			BaseDir:   nocloudDir,
-			Port:      freePort,
-			Host:      sharedResolved.Network.IPv4Gateway,
+			NetworkID: sharedResolved.Network.ID,
 			LogFile:   nocloudLog,
 			KillAfter: sharedResolved.NoCloudKillAfter,
 		})
@@ -449,11 +432,8 @@ func (op *Operation) vmBuilderExecute(
 				NocloudNetPort:        resolved.NocloudNetPort,
 				CloudInitISOPath:      resolved.CloudInitISOPath,
 				KeepCloudInitISO:      resolved.KeepCloudInitISO,
-				NocloudPortRangeStart: resolved.NocloudPortRangeStart,
-				NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
-				NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
 			}
-			ciProvisioner := cloudinit.NewProvisioner(ciConfig, op.Services.Network.FirewallTracker())
+			ciProvisioner := cloudinit.NewProvisioner(ciConfig)
 			ciResult, ciErr := ciProvisioner.Provision(ctx)
 			if ciErr != nil {
 				provisionErr = fmt.Errorf("cloud-init inject provisioning failed: %w", ciErr)
@@ -474,8 +454,7 @@ func (op *Operation) vmBuilderExecute(
 			nocloudURL := resolved.NoCloudURL
 			if resolved.CloudInitMode == model.CloudInitModeNET && resolved.NoCloudSharedDir != "" {
 				cloudInitDir = filepath.Join(resolved.NoCloudSharedDir, builder.guestIP)
-				nocloudURL = fmt.Sprintf("http://%s:%d/%s/",
-					resolved.Network.IPv4Gateway, resolved.NoCloudPort, builder.guestIP)
+				nocloudURL = resolved.NoCloudURL + builder.guestIP + "/"
 			}
 			ciConfig := &cloudinit.Config{
 				Mode:                  resolved.CloudInitMode,
@@ -497,16 +476,13 @@ func (op *Operation) vmBuilderExecute(
 				NocloudNetPort:        resolved.NocloudNetPort,
 				CloudInitISOPath:      resolved.CloudInitISOPath,
 				KeepCloudInitISO:      resolved.KeepCloudInitISO,
-				NocloudPortRangeStart: resolved.NocloudPortRangeStart,
-				NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
-				NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
 				// Pre-allocated server (shared port, per-VM URL)
 				NoCloudURL:  nocloudURL,
 				NoCloudPort: resolved.NoCloudPort,
 				NoCloudPID:  resolved.NoCloudPID,
 				KillAfter:   resolved.NoCloudKillAfter,
 			}
-			ciProvisioner := cloudinit.NewProvisioner(ciConfig, op.Services.Network.FirewallTracker())
+			ciProvisioner := cloudinit.NewProvisioner(ciConfig)
 			ciResult, ciErr := ciProvisioner.Provision(ctx)
 			if ciErr != nil {
 				provisionErr = fmt.Errorf("cloud-init provisioning failed: %w", ciErr)

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net"
 
-	"mvmctl/internal/lib/firewall"
 	"mvmctl/internal/lib/model"
 	networkservice "mvmctl/internal/service/network"
 	"mvmctl/pkg/errs"
@@ -17,26 +16,19 @@ type Service struct {
 	repo        Repository
 	trafficRepo TrafficPolicyRepository
 	managed     *networkservice.ManagedNetworkClient
-	// The existing NoCloud consumer retains this dependency until its typed host-service cutover.
-	noCloudTracker *firewall.FirewallTracker
 }
 
 // NewService binds desired-state repositories to the fixed privileged network client.
 func NewService(
 	repo Repository,
 	trafficRepo TrafficPolicyRepository,
-	noCloudTracker *firewall.FirewallTracker,
 ) *Service {
 	return &Service{
-		repo:           repo,
-		trafficRepo:    trafficRepo,
-		managed:        networkservice.NewManagedNetworkClient(),
-		noCloudTracker: noCloudTracker,
+		repo:        repo,
+		trafficRepo: trafficRepo,
+		managed:     networkservice.NewManagedNetworkClient(),
 	}
 }
-
-// FirewallTracker supplies only the existing NoCloud provisioner during its separately owned cutover.
-func (service *Service) FirewallTracker() *firewall.FirewallTracker { return service.noCloudTracker }
 
 // EnsureManagedNetwork applies canonical intent and updates observed state only after root acknowledgement.
 func (service *Service) EnsureManagedNetwork(ctx context.Context, network *model.NetworkItem) error {

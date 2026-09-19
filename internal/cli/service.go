@@ -85,20 +85,19 @@ func newNoCloudNetServeCmd() *cobra.Command {
 
 	cmd.Flags().String("cloud-init-dir", "", "Cloud-init seed directory (single-VM mode)")
 	cmd.Flags().String("base-dir", "", "Shared batch directory (multi-VM mode)")
-	cmd.Flags().Int("port", 0, "HTTP server port (required)")
-	cmd.Flags().String("host", "", "Bind address (required)")
+	cmd.Flags().String("network-id", "", "Managed network ID (root selects its gateway and fixed TCP port 8000)")
+	cmd.Flags().Bool("notify-ready", false, "Acknowledge startup through inherited descriptor 3")
 	cmd.Flags().String("log-file", "", "Log file path (required)")
 	cmd.Flags().Duration("kill-after", 0, "Auto-kill after duration (e.g. 5m)")
 	cmd.Flags().Bool("daemon", false, "Run as a background daemon process")
-	cmd.MarkFlagRequired("port")
-	cmd.MarkFlagRequired("host")
+	cmd.MarkFlagRequired("network-id")
 	cmd.MarkFlagRequired("log-file")
 
 	cmd.RunE = func(c *cobra.Command, _ []string) error {
 		cloudInitDir, _ := c.Flags().GetString("cloud-init-dir")
 		baseDir, _ := c.Flags().GetString("base-dir")
-		port, _ := c.Flags().GetInt("port")
-		host, _ := c.Flags().GetString("host")
+		networkID, _ := c.Flags().GetString("network-id")
+		notifyReady, _ := c.Flags().GetBool("notify-ready")
 		logFile, _ := c.Flags().GetString("log-file")
 		killAfter, _ := c.Flags().GetDuration("kill-after")
 		daemon, _ := c.Flags().GetBool("daemon")
@@ -106,8 +105,8 @@ func newNoCloudNetServeCmd() *cobra.Command {
 		cfg := nocloudnet.Config{
 			CloudInitDir: cloudInitDir,
 			BaseDir:      baseDir,
-			Port:         port,
-			Host:         host,
+			NetworkID:    networkID,
+			NotifyReady:  notifyReady,
 			LogFile:      logFile,
 			KillAfter:    killAfter,
 		}
