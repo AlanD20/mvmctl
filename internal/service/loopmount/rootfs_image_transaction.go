@@ -53,12 +53,26 @@ func openImageShrinkTransaction(
 	caller Caller,
 	request ImageOptimizeRequest,
 ) (_ *imageShrinkTransaction, returnErr error) {
+	fd, err := openImageTransactionDirectory(ctx, caller)
+	if err != nil {
+		return nil, err
+	}
+	transaction := &imageShrinkTransaction{
+		directoryFD: fd, leaf: request.ImageID + ".json", caller: caller, request: request,
+	}
+	if err := transaction.load(ctx); err != nil {
+		return nil, appendRootfsCleanupError(err, "close rejected image transaction", unix.Close(fd))
+	}
+	return transaction, nil
+}
+
+func openImageTransactionDirectory(ctx context.Context, caller Caller) (_ int, returnErr error) {
 	if err := ctx.Err(); err != nil {
-		return nil, rootfsAtomicError("image shrink transaction context ended", err)
+		return -1, rootfsAtomicError("image transaction context ended", err)
 	}
 	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
-		return nil, rootfsAtomicError("open image transaction filesystem root", err)
+		return -1, rootfsAtomicError("open image transaction filesystem root", err)
 	}
 	defer func() {
 		if fd >= 0 {
@@ -68,10 +82,10 @@ func openImageShrinkTransaction(
 	for index, component := range []string{"var", "lib", "mvmctl", "loopmount", strconv.FormatUint(uint64(caller.UID), 10)} {
 		if index >= 2 {
 			if err := unix.Mkdirat(fd, component, 0700); err != nil && !errors.Is(err, unix.EEXIST) {
-				return nil, rootfsAtomicError("create fixed image transaction directory", err)
+				return -1, rootfsAtomicError("create fixed image transaction directory", err)
 			}
 			if err := unix.Fsync(fd); err != nil {
-				return nil, rootfsCleanupError("sync image transaction directory parent", err)
+				return -1, rootfsCleanupError("sync image transaction directory parent", err)
 			}
 		}
 		next, err := unix.Openat2(fd, component, &unix.OpenHow{
@@ -79,30 +93,25 @@ func openImageShrinkTransaction(
 			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
 		})
 		if err != nil {
-			return nil, rootfsAtomicError("open fixed image transaction directory", err)
+			return -1, rootfsAtomicError("open fixed image transaction directory", err)
 		}
 		previous := fd
 		fd = next
 		if err := unix.Close(previous); err != nil {
-			return nil, rootfsCleanupError("close image transaction ancestor", err)
+			return -1, rootfsCleanupError("close image transaction ancestor", err)
 		}
 		var stat unix.Stat_t
 		if err := unix.Fstat(fd, &stat); err != nil {
-			return nil, rootfsAtomicError("inspect image transaction directory", err)
+			return -1, rootfsAtomicError("inspect image transaction directory", err)
 		}
 		if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != 0 || stat.Gid != 0 ||
 			stat.Mode&0022 != 0 || stat.Mode&07000 != 0 || index >= 3 && stat.Mode&0777 != 0700 {
-			return nil, rootfsAtomicError("image transaction directory has unsafe ownership or mode", nil)
+			return -1, rootfsAtomicError("image transaction directory has unsafe ownership or mode", nil)
 		}
 	}
-	transaction := &imageShrinkTransaction{
-		directoryFD: fd, leaf: request.ImageID + ".json", caller: caller, request: request,
-	}
-	if err := transaction.load(ctx); err != nil {
-		return nil, err
-	}
+	result := fd
 	fd = -1
-	return transaction, nil
+	return result, nil
 }
 
 func (transaction *imageShrinkTransaction) load(ctx context.Context) (returnErr error) {
@@ -199,19 +208,26 @@ func (transaction *imageShrinkTransaction) bind(ctx context.Context, lease *root
 }
 
 func (transaction *imageShrinkTransaction) persist(ctx context.Context) (returnErr error) {
+	data, err := json.Marshal(transaction.record)
+	if err != nil {
+		return rootfsAtomicError("encode image shrink record", err)
+	}
+	return persistImageTransaction(ctx, transaction.directoryFD, transaction.leaf, data)
+}
+
+func persistImageTransaction(ctx context.Context, directoryFD int, leaf string, data []byte) (returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return rootfsAtomicError("image shrink journal context ended", err)
 	}
-	data, err := json.Marshal(transaction.record)
-	if err != nil || len(data) > maxImageTransactionBytes {
-		return rootfsAtomicError("encode bounded image shrink record", err)
+	if len(data) == 0 || len(data) > maxImageTransactionBytes {
+		return rootfsAtomicError("encode bounded image transaction record", nil)
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return rootfsAtomicError("allocate image shrink journal temporary name", err)
 	}
 	name := ".image-shrink-" + hex.EncodeToString(nonce[:])
-	fd, err := unix.Openat(transaction.directoryFD, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
+	fd, err := unix.Openat(directoryFD, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
 	if err != nil {
 		return rootfsAtomicError("create image shrink journal temporary file", err)
 	}
@@ -219,7 +235,7 @@ func (transaction *imageShrinkTransaction) persist(ctx context.Context) (returnE
 	defer func() {
 		returnErr = appendRootfsCleanupError(returnErr, "close image shrink journal temporary file", unix.Close(fd))
 		if !renamed {
-			returnErr = appendRootfsCleanupError(returnErr, "remove unpublished image shrink journal", unix.Unlinkat(transaction.directoryFD, name, 0))
+			returnErr = appendRootfsCleanupError(returnErr, "remove unpublished image shrink journal", unix.Unlinkat(directoryFD, name, 0))
 		}
 	}()
 	if err := unix.Fchmod(fd, 0600); err != nil {
@@ -231,11 +247,11 @@ func (transaction *imageShrinkTransaction) persist(ctx context.Context) (returnE
 	if err := unix.Fsync(fd); err != nil {
 		return rootfsCleanupError("sync image shrink record", err)
 	}
-	if err := unix.Renameat(transaction.directoryFD, name, transaction.directoryFD, transaction.leaf); err != nil {
+	if err := unix.Renameat(directoryFD, name, directoryFD, leaf); err != nil {
 		return rootfsAtomicError("publish image shrink record", err)
 	}
 	renamed = true
-	if err := unix.Fsync(transaction.directoryFD); err != nil {
+	if err := unix.Fsync(directoryFD); err != nil {
 		return rootfsCleanupError("sync image shrink journal publication", err)
 	}
 	return nil

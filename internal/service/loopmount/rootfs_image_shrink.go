@@ -19,9 +19,9 @@ type completedImageShrinkCleanup struct{}
 
 func (completedImageShrinkCleanup) CleanupOptimizeImage(context.Context) error { return nil }
 
-// NewImageShrinkServer constructs durable image cleanup and offline ext-family shrink authority.
+// NewImageShrinkServer constructs durable image conversion, cleanup, and offline ext-family shrink authority.
 // CRITICAL: This one-request receiver permanently unshares its locked OS thread. Conversion
-// requires separate replacement authority and is rejected before journal or filesystem mutation.
+// has a distinct receipt and publishes only a completed candidate; shrink never authorizes growth.
 func NewImageShrinkServer() *Server {
 	return &Server{
 		rootfsAuthority:    systemRootfsAuthorityDeps(),
@@ -32,7 +32,14 @@ func NewImageShrinkServer() *Server {
 }
 
 func validateImageShrinkPlan(filesystem Filesystem, plan ImageOptimizePlan) error {
-	if plan.ConvertTo != nil || !plan.Shrink && plan.DeblobOS == nil && !plan.FixFstab {
+	if plan.ConvertTo != nil {
+		if filesystem != FilesystemBtrfs || *plan.ConvertTo != FilesystemExt4 || plan.Shrink ||
+			plan.DeblobOS != nil || plan.FixFstab {
+			return rootfsValidationError("image conversion requires a separate Btrfs-to-ext4-only request before cleanup or shrink")
+		}
+		return nil
+	}
+	if !plan.Shrink && plan.DeblobOS == nil && !plan.FixFstab {
 		return rootfsValidationError("managed image receiver requires named cleanup, fstab, or shrink intent")
 	}
 	if err := filesystem.Validate(); err != nil {
@@ -55,6 +62,9 @@ func (adapter *rootfsImageShrinkAdapter) OptimizeImage(
 	}
 	if err := validateImageShrinkPlan(filesystem, plan); err != nil {
 		return outcome, err
+	}
+	if plan.ConvertTo != nil {
+		return convertRootfsImage(ctx, adapter.deps, lease)
 	}
 	admittedBytes, err := inspectRootfsProvisionLease(ctx, adapter.deps, lease)
 	if err != nil {

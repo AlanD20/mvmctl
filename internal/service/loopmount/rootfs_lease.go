@@ -26,15 +26,16 @@ type rootfsLease struct {
 	cacheIdentity rootfsCacheIdentity
 	metadata      rootfsStableMetadata
 	// admittedBytes is the stable pre-effect size used to converge an interrupted grow replay.
-	admittedBytes uint64
-	access        rootfsAccess
-	parentFD      int
-	stagingFD     int
-	rootfsFD      int
-	retained      []int
-	imageShrink   *imageShrinkTransaction
-	released      bool
-	releaseErr    error
+	admittedBytes   uint64
+	access          rootfsAccess
+	parentFD        int
+	stagingFD       int
+	rootfsFD        int
+	retained        []int
+	imageShrink     *imageShrinkTransaction
+	imageConversion *imageConversionTransaction
+	released        bool
+	releaseErr      error
 }
 
 // Release closes the exact admitted descriptor chain in reverse order. Caller cancellation cannot retain authority.

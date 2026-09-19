@@ -104,16 +104,18 @@ const (
 )
 
 type rootfsSelection struct {
-	kind          rootfsSelectionKind
-	resourceID    string
-	expectedBytes uint64
-	replayBytes   uint64
+	kind             rootfsSelectionKind
+	resourceID       string
+	expectedBytes    uint64
+	replayBytes      uint64
+	replacementBytes uint64
 }
 
 type rootfsPolicy struct {
 	directories      []string
 	expectedBytes    uint64
 	replayBytes      uint64
+	replacementBytes uint64
 	minimumBytes     uint64
 	maximumBytes     uint64
 	access           rootfsAccess
@@ -412,10 +414,15 @@ func rootfsPolicyForSelection(selection rootfsSelection) (rootfsPolicy, error) {
 		if selection.kind == rootfsImageOptimizeSelection {
 			access = rootfsReadWrite
 		}
+		if selection.replacementBytes != 0 && (selection.kind != rootfsImageOptimizeSelection ||
+			selection.replacementBytes < minimumImageBytes || selection.replacementBytes > maximumImageBytes) {
+			return rootfsPolicy{}, rootfsValidationError("managed image replacement replay size is invalid")
+		}
 		return rootfsPolicy{
 			directories:      []string{"images", "staging", selection.resourceID},
 			expectedBytes:    selection.expectedBytes,
 			replayBytes:      selection.replayBytes,
+			replacementBytes: selection.replacementBytes,
 			minimumBytes:     minimumImageBytes,
 			maximumBytes:     maximumImageBytes,
 			access:           access,
@@ -588,7 +595,8 @@ func inspectRootfsFile(
 	if first.Size < policy.minimumBytes || first.Size > policy.maximumBytes {
 		return rootfsStableMetadata{}, rootfsValidationError("managed rootfs image size is outside the supported range")
 	}
-	if first.Size != policy.expectedBytes && (policy.replayBytes == 0 || first.Size != policy.replayBytes) {
+	if first.Size != policy.expectedBytes && (policy.replayBytes == 0 || first.Size != policy.replayBytes) &&
+		(policy.replacementBytes == 0 || first.Size != policy.replacementBytes) {
 		return rootfsStableMetadata{}, rootfsValidationError(
 			"managed rootfs image size does not match an admitted size",
 		)

@@ -390,7 +390,21 @@ func (server *Server) OptimizeImage(
 	}
 
 	var transaction *imageShrinkTransaction
-	if server.durableImageShrink {
+	var conversion *imageConversionTransaction
+	if server.durableImageShrink && request.Plan.ConvertTo != nil {
+		var err error
+		conversion, err = openImageConversionTransaction(ctx, caller, request)
+		if err != nil {
+			return ImageOptimizeResult{}, err
+		}
+		defer func() {
+			returnErr = appendRootfsCleanupError(returnErr, "release image conversion journal", conversion.close())
+		}()
+		if conversion.record != nil && (conversion.record.Phase == imageConversionReady ||
+			conversion.record.Phase == imageConversionComplete) {
+			selection.replacementBytes = uint64(conversion.record.Candidate.Size)
+		}
+	} else if server.durableImageShrink {
 		var err error
 		transaction, err = openImageShrinkTransaction(ctx, caller, request)
 		if err != nil {
@@ -419,6 +433,12 @@ func (server *Server) OptimizeImage(
 		if err := transaction.bind(ctx, rootfsLease); err != nil {
 			return ImageOptimizeResult{}, err
 		}
+	}
+	if conversion != nil {
+		if err := conversion.bind(ctx, rootfsLease); err != nil {
+			return ImageOptimizeResult{}, err
+		}
+		rootfsLease.imageConversion = conversion
 	}
 
 	outcome, effectErr := server.optimizeEffects.OptimizeImage(ctx, rootfsLease, request.Filesystem, request.Plan)
