@@ -32,6 +32,18 @@ type EndpointBinding struct {
 	HostVeth      LinkIdentity      `json:"host_veth"`
 }
 
+// EndpointReservation retains the immutable root-owned VM identity while its topology is stopped.
+// Kernel link and namespace observations deliberately do not survive here as activation authority.
+type EndpointReservation struct {
+	OwnerUID  uint32       `json:"owner_uid"`
+	VMID      string       `json:"vm_id"`
+	NetworkID string       `json:"network_id"`
+	Prefix    netip.Prefix `json:"prefix"`
+	Gateway   netip.Addr   `json:"gateway"`
+	IPv4      netip.Addr   `json:"ipv4"`
+	MAC       [6]byte      `json:"mac"`
+}
+
 // NetworkIntent is a complete root-resolved managed-network firewall projection.
 type NetworkIntent struct {
 	OwnerUID        uint32       `json:"owner_uid"`
@@ -88,6 +100,7 @@ type HostServiceIntent struct {
 // Intent is the full host-global graph stored beside the authoritative generation record.
 // A graph is admitted only when its compiler-derived identity agrees with that record.
 type Intent struct {
+	Reservations  []EndpointReservation `json:"reservations"`
 	Endpoints     []EndpointBinding     `json:"endpoints"`
 	Networks      []NetworkIntent       `json:"networks"`
 	VMGrants      []VMTrafficGrant      `json:"vm_grants"`
@@ -96,7 +109,11 @@ type Intent struct {
 }
 
 func (intent Intent) compile() (compiledGeneration, error) {
+	if err := intent.validateDurablePolicies(); err != nil {
+		return compiledGeneration{}, err
+	}
 	resolved := generationIntent{}
+	active := make(map[string]struct{}, len(intent.Endpoints))
 	for _, endpoint := range intent.Endpoints {
 		if err := validateEndpointBinding(endpoint, false); err != nil {
 			return compiledGeneration{}, err
@@ -105,6 +122,7 @@ func (intent Intent) compile() (compiledGeneration, error) {
 			id: endpoint.VMID, networkID: endpoint.NetworkID, hostVeth: endpoint.HostVeth.Name,
 			ipv4: endpoint.IPv4, mac: macAddress(endpoint.MAC),
 		})
+		active[endpoint.VMID] = struct{}{}
 	}
 	for _, network := range intent.Networks {
 		resolved.networks = append(resolved.networks, networkIntent{
@@ -113,12 +131,20 @@ func (intent Intent) compile() (compiledGeneration, error) {
 		})
 	}
 	for _, grant := range intent.VMGrants {
+		_, sourceActive := active[grant.SourceVMID]
+		_, destinationActive := active[grant.DestinationVMID]
+		if !sourceActive || !destinationActive {
+			continue
+		}
 		resolved.vmGrants = append(resolved.vmGrants, vmTrafficGrant{
 			id: grant.ID, sourceVMID: grant.SourceVMID, destinationVMID: grant.DestinationVMID,
 			protocol: protocol(grant.Protocol), ports: portInterval{first: grant.Ports.First, last: grant.Ports.Last},
 		})
 	}
 	for _, grant := range intent.NetworkGrants {
+		if _, destinationActive := active[grant.DestinationVMID]; !destinationActive {
+			continue
+		}
 		resolved.networkGrants = append(resolved.networkGrants, networkTrafficGrant{
 			id: grant.ID, sourceNetworkID: grant.SourceNetworkID, destinationVMID: grant.DestinationVMID,
 			protocol: protocol(grant.Protocol), ports: portInterval{first: grant.Ports.First, last: grant.Ports.Last},
@@ -135,6 +161,110 @@ func (intent Intent) compile() (compiledGeneration, error) {
 		})
 	}
 	return compileGeneration(resolved)
+}
+
+func endpointReservation(binding EndpointBinding) EndpointReservation {
+	return EndpointReservation{
+		OwnerUID: binding.OwnerUID, VMID: binding.VMID, NetworkID: binding.NetworkID,
+		Prefix: binding.Prefix, Gateway: binding.Gateway, IPv4: binding.IPv4, MAC: binding.MAC,
+	}
+}
+
+func validateEndpointReservation(reservation EndpointReservation) error {
+	if reservation.OwnerUID == 0 || !validResourceID(reservation.VMID) || !validResourceID(reservation.NetworkID) ||
+		!validIPv4Prefix(reservation.Prefix) || !usableIPv4Address(reservation.Prefix, reservation.Gateway) ||
+		!usableIPv4Address(reservation.Prefix, reservation.IPv4) || reservation.IPv4 == reservation.Gateway ||
+		reservation.MAC == [6]byte{} || reservation.MAC[0]&1 != 0 {
+		return generationAuthorityError("durable firewall endpoint reservation is invalid", nil, nil)
+	}
+	return nil
+}
+
+// validateDurablePolicies admits the complete desired inventory before compiling its active projection.
+// A stopped endpoint may suppress a rule, but never bypass policy grammar or ownership admission.
+func (intent Intent) validateDurablePolicies() error {
+	networks := make(map[string]NetworkIntent, len(intent.Networks))
+	for _, network := range intent.Networks {
+		networks[network.NetworkID] = network
+	}
+	reservations := make(map[string]EndpointReservation, len(intent.Reservations))
+	addresses := make(map[string]string, len(intent.Reservations))
+	macs := make(map[[6]byte]string, len(intent.Reservations))
+	for _, reservation := range intent.Reservations {
+		if err := validateEndpointReservation(reservation); err != nil {
+			return err
+		}
+		if _, found := reservations[reservation.VMID]; found {
+			return invalidGeneration("duplicate durable VM reservation")
+		}
+		network, found := networks[reservation.NetworkID]
+		if !found || network.OwnerUID != reservation.OwnerUID || network.Subnet != reservation.Prefix ||
+			network.HostIPv4 != reservation.Gateway {
+			return invalidGeneration("durable VM reservation differs from its network authority")
+		}
+		address := reservation.NetworkID + "/" + reservation.IPv4.String()
+		if _, found := addresses[address]; found {
+			return invalidGeneration("duplicate durable VM IPv4 reservation")
+		}
+		if _, found := macs[reservation.MAC]; found {
+			return invalidGeneration("duplicate durable VM MAC reservation")
+		}
+		reservations[reservation.VMID] = reservation
+		addresses[address] = reservation.VMID
+		macs[reservation.MAC] = reservation.VMID
+	}
+	for _, endpoint := range intent.Endpoints {
+		reservation, found := reservations[endpoint.VMID]
+		if !found || reservation != endpointReservation(endpoint) {
+			return invalidGeneration("active VM endpoint differs from durable reservation")
+		}
+	}
+	ids := make(map[string]struct{}, len(intent.VMGrants)+len(intent.NetworkGrants)+len(intent.HostServices))
+	for _, grant := range intent.VMGrants {
+		if err := validateGrantBase(
+			grant.ID,
+			protocol(grant.Protocol),
+			portInterval{first: grant.Ports.First, last: grant.Ports.Last},
+			ids,
+		); err != nil {
+			return err
+		}
+		source, sourceFound := reservations[grant.SourceVMID]
+		destination, destinationFound := reservations[grant.DestinationVMID]
+		if !sourceFound || !destinationFound || source.VMID == destination.VMID ||
+			source.OwnerUID != destination.OwnerUID {
+			return invalidGeneration("durable VM grant references an unowned endpoint pair")
+		}
+	}
+	for _, grant := range intent.NetworkGrants {
+		if err := validateGrantBase(
+			grant.ID,
+			protocol(grant.Protocol),
+			portInterval{first: grant.Ports.First, last: grant.Ports.Last},
+			ids,
+		); err != nil {
+			return err
+		}
+		source, sourceFound := networks[grant.SourceNetworkID]
+		destination, destinationFound := reservations[grant.DestinationVMID]
+		if !sourceFound || !destinationFound || source.OwnerUID != destination.OwnerUID {
+			return invalidGeneration("durable network grant references an unowned endpoint")
+		}
+	}
+	for _, service := range intent.HostServices {
+		if err := validateGrantBase(
+			service.ID,
+			protocol(service.Protocol),
+			portInterval{first: service.Ports.First, last: service.Ports.Last},
+			ids,
+		); err != nil {
+			return err
+		}
+		if _, found := networks[service.SourceNetworkID]; !found {
+			return invalidGeneration("host service references an absent network")
+		}
+	}
+	return nil
 }
 
 func validateEndpointBinding(binding EndpointBinding, preparing bool) error {

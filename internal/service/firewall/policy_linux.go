@@ -207,6 +207,11 @@ func (lease *MutationLease) RemoveNetwork(ctx context.Context, network NetworkIn
 			return generationAuthorityError("firewall network still has VM endpoints", nil, nil)
 		}
 	}
+	for _, reservation := range target.Reservations {
+		if reservation.NetworkID == network.NetworkID {
+			return generationAuthorityError("firewall network still has durable VM reservations", nil, nil)
+		}
+	}
 	for _, existing := range target.Networks {
 		if existing.NetworkID == network.NetworkID && existing != network {
 			return generationAuthorityError("firewall network intent was replaced", nil, nil)
@@ -228,19 +233,22 @@ func (lease *MutationLease) RemoveNetwork(ctx context.Context, network NetworkIn
 }
 
 // CALLER MUST HOLD: state.mu.
-func (state *mutationLeaseState) ownedEndpoint(vmID string) (EndpointBinding, error) {
-	for _, endpoint := range state.intent.Endpoints {
+func (state *mutationLeaseState) ownedEndpoint(vmID string) (EndpointReservation, error) {
+	for _, endpoint := range state.intent.Reservations {
 		if endpoint.VMID != vmID {
 			continue
 		}
-		if endpoint.OwnerUID != state.binding.OwnerUID || endpoint.BootID != state.binding.BootID ||
-			endpoint.HostNamespace != state.binding.HostNamespace {
-			return EndpointBinding{}, generationAuthorityError("traffic policy endpoint authority differs", nil, nil)
+		if endpoint.OwnerUID != state.binding.OwnerUID {
+			return EndpointReservation{}, generationAuthorityError(
+				"traffic policy endpoint authority differs",
+				nil,
+				nil,
+			)
 		}
 		return endpoint, nil
 	}
-	return EndpointBinding{}, generationAuthorityError(
-		"traffic policy endpoint is not registered in the root generation",
+	return EndpointReservation{}, generationAuthorityError(
+		"traffic policy endpoint has no root-owned durable reservation",
 		nil,
 		nil,
 	)

@@ -331,6 +331,9 @@ func (lease *MutationLease) ApplyVMEndpoint(
 	if !found {
 		target.Networks = append(target.Networks, network)
 	}
+	if err := target.reserveEndpoint(endpointReservation(binding)); err != nil {
+		return nil, err
+	}
 	state.binding = binding
 	if err := state.applyIntent(ctx, target); err != nil {
 		return nil, err
@@ -414,13 +417,6 @@ func (state *mutationLeaseState) removeEndpoint(ctx context.Context, binding End
 		target.Endpoints,
 		func(endpoint EndpointBinding) bool { return endpoint.VMID == binding.VMID },
 	)
-	target.VMGrants = slices.DeleteFunc(target.VMGrants, func(grant VMTrafficGrant) bool {
-		return grant.SourceVMID == binding.VMID || grant.DestinationVMID == binding.VMID
-	})
-	target.NetworkGrants = slices.DeleteFunc(
-		target.NetworkGrants,
-		func(grant NetworkTrafficGrant) bool { return grant.DestinationVMID == binding.VMID },
-	)
 	return state.applyIntent(ctx, target)
 }
 
@@ -459,7 +455,8 @@ func (lease *MutationLease) Release(ctx context.Context) error {
 
 func cloneIntent(intent Intent) Intent {
 	return Intent{
-		Endpoints: slices.Clone(intent.Endpoints), Networks: slices.Clone(intent.Networks),
+		Reservations: slices.Clone(intent.Reservations),
+		Endpoints:    slices.Clone(intent.Endpoints), Networks: slices.Clone(intent.Networks),
 		VMGrants: slices.Clone(intent.VMGrants), NetworkGrants: slices.Clone(intent.NetworkGrants),
 		HostServices: slices.Clone(intent.HostServices),
 	}
