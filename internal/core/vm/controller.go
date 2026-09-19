@@ -8,6 +8,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/model"
+	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
@@ -29,7 +30,7 @@ func NewController(vm *model.VMItem, repo Repository) *Controller {
 // Stop completes root-authoritative cleanup before projecting STOPPED locally.
 // Unavailable or ambiguous authority is an error, never permission to signal a PID mirror.
 func (c *Controller) Stop(ctx context.Context, force bool) error {
-	if err := CleanupJail(ctx, c.vm.ID); err != nil {
+	if _, err := jailersvc.NewVMLifecycleClient().Stop(ctx, jailersvc.VMStopRequest{VMID: c.vm.ID, Force: force}); err != nil {
 		return err
 	}
 	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
