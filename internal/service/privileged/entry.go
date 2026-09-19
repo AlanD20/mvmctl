@@ -210,6 +210,8 @@ func dispatch(
 		return dispatchHandled, handleRemoveManagedNetwork(ctx, endpoint, caller, deps.control)
 	case jailer.VMLaunchAction:
 		return dispatchHandled, handleVMLaunch(ctx, endpoint, caller, deps.control)
+	case jailer.VMStopAction:
+		return dispatchHandled, handleVMStop(ctx, endpoint, caller, deps.control)
 	case jailer.VMAbortAction, jailer.VMCleanupAction, jailer.VMRemoveAction:
 		return dispatchHandled, handleVMCleanup(ctx, endpoint, caller, request.action, deps.control)
 	case network.NetworkTrafficPolicyApplyAction:

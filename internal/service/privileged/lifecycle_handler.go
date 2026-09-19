@@ -31,6 +31,29 @@ func handleVMLaunch(ctx context.Context, endpoint controlEndpoint, caller caller
 	return deliverOperationSuccess(ctx, endpoint, jailer.VMLaunchAction, result, deps)
 }
 
+func handleVMStop(ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps) error {
+	deadline := boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout)
+	reader := newRequestReader(ctx, int(endpoint.Fd()), deadline, deps)
+	request, err := privilegedwire.DecodeRequest[jailer.VMStopRequest](ctx, reader, jailer.VMStopAction, 0)
+	if err != nil {
+		return deliverOperationError(ctx, endpoint, jailer.VMStopAction, err, deps)
+	}
+	if err := request.Body.Validate(); err != nil {
+		return deliverOperationError(ctx, endpoint, jailer.VMStopAction, err, deps)
+	}
+	if err := requireRequestEOF(ctx, reader); err != nil {
+		return deliverOperationError(ctx, endpoint, jailer.VMStopAction, err, deps)
+	}
+	result, err := jailer.NewVMLifecycleServer().Stop(ctx, caller.uid, caller.gid, request.Body)
+	if err != nil {
+		return deliverOperationError(ctx, endpoint, jailer.VMStopAction, err, deps)
+	}
+	if err := result.Validate(jailer.VMCleanupRequest{VMID: request.Body.VMID}); err != nil {
+		return deliverOperationError(ctx, endpoint, jailer.VMStopAction, err, deps)
+	}
+	return deliverOperationSuccess(ctx, endpoint, jailer.VMStopAction, result, deps)
+}
+
 // handleVMCleanup decodes the shared identity body for the three closed cleanup actions.
 // The action is supplied only by the authenticated receiver's fixed dispatch switch.
 func handleVMCleanup(
