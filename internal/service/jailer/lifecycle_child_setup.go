@@ -8,10 +8,16 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 )
 
-func (lease *launchLease) sendChildSetup(ctx context.Context, session *launchChildSession, resources *vmLaunchResourceLease, console *launchConsoleSession) error {
+func (lease *launchLease) sendChildSetup(
+	ctx context.Context,
+	session *launchChildSession,
+	resources *vmLaunchResourceLease,
+	console *launchConsoleSession,
+) error {
 	if lease == nil || lease.state == nil || session == nil || session.state == nil || resources == nil {
 		return instanceStateError("", "launch child setup capabilities are incomplete")
 	}
@@ -26,6 +32,10 @@ func (lease *launchLease) sendChildSetup(ctx context.Context, session *launchChi
 	if resources.ownerUID != state.record.ownerUID || resources.cacheIdentity != state.record.launch.cacheIdentity ||
 		string(resources.vmID) != state.record.vmID || resources.preparedConfig == nil {
 		return instanceStateError(state.record.vmID, "launch child resources do not match durable authority")
+	}
+	if len(resources.volumes) != 0 && (resources.deviceProfile == nil ||
+		resources.deviceProfile.release != state.record.launch.release) {
+		return instanceStateError(state.record.vmID, "launch volume device budget differs from admitted release")
 	}
 	child := session.state
 	child.mu.Lock()
@@ -78,9 +88,17 @@ func (lease *launchLease) sendChildSetup(ctx context.Context, session *launchChi
 		return instanceStateError(state.record.vmID, "launch child fixed output descriptors are missing")
 	}
 	plan := launchChildPlan{
-		Schema: 1, VMID: state.record.vmID, UID: state.record.ownerUID, GID: state.record.launch.ownerGID,
-		Release: ReleaseSlot{Version: state.record.launch.release.version, Architecture: state.record.launch.release.architecture},
-		Limits:  cgroup.limits, CloudInit: resources.cloudInitFD >= 0, Metrics: metricsFD >= 0,
+		Schema: 1,
+		VMID:   state.record.vmID,
+		UID:    state.record.ownerUID,
+		GID:    state.record.launch.ownerGID,
+		Release: ReleaseSlot{
+			Version:      state.record.launch.release.version,
+			Architecture: state.record.launch.release.architecture,
+		},
+		Limits:    cgroup.limits,
+		CloudInit: resources.cloudInitFD >= 0,
+		Metrics:   metricsFD >= 0,
 	}
 	fds := []int{destination.parent.fd, resources.rootfsFD, resources.kernelFD, config.fd,
 		runtime.vmDirectoryFD, logFD, consoleFD}
@@ -89,6 +107,20 @@ func (lease *launchLease) sendChildSetup(ctx context.Context, session *launchChi
 	}
 	if plan.Metrics {
 		fds = append(fds, metricsFD)
+	}
+	for _, volume := range resources.volumes {
+		identity, err := stableManagedVMConfigStat(ctx, realManagedFirecrackerConfigDeps(), volume.fd)
+		if err != nil {
+			return err
+		}
+		if identity != volume.identity {
+			return instanceStateError(state.record.vmID, "pinned volume changed before child handoff")
+		}
+		plan.Volumes = append(plan.Volumes, VMLaunchVolume{
+			ID: string(volume.spec.id), Format: model.VolumeFormatRaw, ExpectedBytes: volume.spec.expectedBytes,
+			ReadOnly: volume.spec.access == vmVolumeReadOnly, CacheType: volume.spec.cacheType,
+		})
+		fds = append(fds, volume.fd)
 	}
 	if console != nil {
 		if console.slave == nil || state.record.launch.relay.kind != instanceRelayPresent {
@@ -103,6 +135,9 @@ func (lease *launchLease) sendChildSetup(ctx context.Context, session *launchChi
 	packet, err := json.Marshal(plan)
 	if err != nil {
 		return err
+	}
+	if len(packet) > launchChildPacketLimit {
+		return instanceStateError(state.record.vmID, "launch child volume packet exceeds protocol bound")
 	}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -130,7 +165,10 @@ func (lease *launchLease) sendChildSetup(ctx context.Context, session *launchChi
 	}
 }
 
-func (lease *launchLease) childNamespaceTarget(ctx context.Context, session *launchChildSession) (_ *system.JailerChildNamespaceTarget, returnErr error) {
+func (lease *launchLease) childNamespaceTarget(
+	ctx context.Context,
+	session *launchChildSession,
+) (_ *system.JailerChildNamespaceTarget, returnErr error) {
 	if lease == nil || lease.state == nil || session == nil || session.state == nil {
 		return nil, instanceStateError("", "child namespace capabilities are incomplete")
 	}
@@ -143,7 +181,8 @@ func (lease *launchLease) childNamespaceTarget(ctx context.Context, session *lau
 	child := session.state
 	child.mu.Lock()
 	defer child.mu.Unlock()
-	if child.released || !child.sent || child.vmID != state.record.vmID || child.pid != state.record.launch.process.pid {
+	if child.released || !child.sent || child.vmID != state.record.vmID ||
+		child.pid != state.record.launch.process.pid {
 		return nil, instanceStateError(state.record.vmID, "child namespace setup phase is invalid")
 	}
 	processes := state.processes.state

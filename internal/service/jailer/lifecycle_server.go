@@ -23,7 +23,11 @@ func NewVMLifecycleServer() *VMLifecycleServer {
 
 // Launch registers the blocked child before any mutable launch effect, then admits
 // and commits the exact running instance before relinquishing descriptor ownership.
-func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID uint32, request VMLaunchRequest) (_ VMLaunchResult, returnErr error) {
+func (server *VMLifecycleServer) Launch(
+	ctx context.Context,
+	ownerUID, ownerGID uint32,
+	request VMLaunchRequest,
+) (_ VMLaunchResult, returnErr error) {
 	if err := request.Validate(); err != nil {
 		return VMLaunchResult{}, err
 	}
@@ -40,15 +44,35 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 		return VMLaunchResult{}, err
 	}
 	defer func() {
-		returnErr = appendInstanceOperationError(returnErr, "release launch cache", cache.Release(context.WithoutCancel(ctx)))
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"release launch cache",
+			cache.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	prepared, err := server.releases.prepareInstalled(ctx, request.Release.private())
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
 	defer func() {
-		returnErr = appendInstanceOperationError(returnErr, "release prepared launch release", prepared.Release(context.WithoutCancel(ctx)))
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"release prepared launch release",
+			prepared.Release(context.WithoutCancel(ctx)),
+		)
 	}()
+	var deviceProfile *vmFirecrackerDeviceProfile
+	if len(request.Volumes) != 0 {
+		deviceProfile, err = prepared.deviceProfile()
+		if err != nil {
+			return VMLaunchResult{}, err
+		}
+		intent := request.launchIntent(vmFirecrackerTapIdentity{})
+		intent.deviceProfile = deviceProfile
+		if err := validateVMFirecrackerDeviceBudget(intent); err != nil {
+			return VMLaunchResult{}, err
+		}
+	}
 	bootID, err := readCurrentProcessBootID(ctx)
 	if err != nil {
 		return VMLaunchResult{}, err
@@ -61,12 +85,24 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 	committed := false
 	defer func() {
 		cleanupCtx := context.WithoutCancel(ctx)
-		returnErr = appendInstanceOperationError(returnErr, "release unconsumed console source", releaseUnconsumedConsoleSource(cleanupCtx, consoleSource))
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"release unconsumed console source",
+			releaseUnconsumedConsoleSource(cleanupCtx, consoleSource),
+		)
 		if console != nil {
-			returnErr = appendInstanceOperationError(returnErr, "close parent console session", console.Release(cleanupCtx))
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"close parent console session",
+				console.Release(cleanupCtx),
+			)
 		}
 		if session != nil {
-			returnErr = appendInstanceOperationError(returnErr, "close child setup channel", session.Release(cleanupCtx))
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"close child setup channel",
+				session.Release(cleanupCtx),
+			)
 		}
 		if !committed {
 			var cleanup *cleanupLease
@@ -78,14 +114,26 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 			}
 			returnErr = appendInstanceOperationError(returnErr, "enter failed launch cleanup", cleanupErr)
 			if cleanup != nil && cleanupErr == nil {
-				returnErr = appendInstanceOperationError(returnErr, "clean failed launch", finishLifecycleCleanup(cleanupCtx, cleanup, false))
+				returnErr = appendInstanceOperationError(
+					returnErr,
+					"clean failed launch",
+					finishLifecycleCleanup(cleanupCtx, cleanup, false),
+				)
 			}
 			if launching == nil && active == nil && processes != nil {
-				returnErr = appendInstanceOperationError(returnErr, "terminate unregistered launch child", processes.terminateAndReap(cleanupCtx))
+				returnErr = appendInstanceOperationError(
+					returnErr,
+					"terminate unregistered launch child",
+					processes.terminateAndReap(cleanupCtx),
+				)
 			}
 		}
 		if processes != nil && launching == nil && active == nil {
-			returnErr = appendInstanceOperationError(returnErr, "release unregistered launch child", processes.Release(cleanupCtx))
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"release unregistered launch child",
+				processes.Release(cleanupCtx),
+			)
 		}
 	}()
 	if err != nil {
@@ -100,7 +148,12 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 			return VMLaunchResult{}, err
 		}
 	}
-	launching, err = prepared.registerLaunching(ctx, caller, launchIntent{vmID: request.VMID, hostBootID: bootID, cacheIdentity: cache.identity}, processes)
+	launching, err = prepared.registerLaunching(
+		ctx,
+		caller,
+		launchIntent{vmID: request.VMID, hostBootID: bootID, cacheIdentity: cache.identity},
+		processes,
+	)
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
@@ -110,7 +163,11 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 	if err := launching.prepareManagedVMCgroup(ctx, request.CgroupLimits); err != nil {
 		return VMLaunchResult{}, err
 	}
-	if err := launching.prepareRuntimeDirectory(ctx, realManagedVMRuntimeDeps(), productionManagedVMRuntimePolicy()); err != nil {
+	if err := launching.prepareRuntimeDirectory(
+		ctx,
+		realManagedVMRuntimeDeps(),
+		productionManagedVMRuntimePolicy(),
+	); err != nil {
 		return VMLaunchResult{}, err
 	}
 	outputCache, err := pinManagedCache(ctx, realManagedCacheDeps(), productionManagedCachePolicy(), caller, locator)
@@ -118,7 +175,11 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 		return VMLaunchResult{}, err
 	}
 	defer func() {
-		returnErr = appendInstanceOperationError(returnErr, "release output cache locator", outputCache.Release(context.WithoutCancel(ctx)))
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"release output cache locator",
+			outputCache.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	metrics := managedPersistentMetricsDisabled
 	if request.Metrics {
@@ -133,11 +194,16 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 		}
 	}
 	guestIP, _ := netip.ParseAddr(request.GuestIPv4)
-	topology, err := launching.prepareProductionTopology(ctx, network.VMIntent{NetworkID: request.NetworkID, GuestIPv4: guestIP, MAC: &request.GuestMAC})
+	topology, err := launching.prepareProductionTopology(
+		ctx,
+		network.VMIntent{NetworkID: request.NetworkID, GuestIPv4: guestIP, MAC: &request.GuestMAC},
+	)
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
-	spec, err := newVMLaunchResourceSpec(request.VMID, request.KernelID, request.RootfsBytes, request.launchIntent(vmFirecrackerTapIdentity{name: topology.TAPName}))
+	resourceIntent := request.launchIntent(vmFirecrackerTapIdentity{name: topology.TAPName})
+	resourceIntent.deviceProfile = deviceProfile
+	spec, err := newVMLaunchResourceSpec(request.VMID, request.KernelID, request.RootfsBytes, resourceIntent)
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
@@ -146,7 +212,11 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 		return VMLaunchResult{}, err
 	}
 	defer func() {
-		returnErr = appendInstanceOperationError(returnErr, "release launch resource pins", resources.Release(context.WithoutCancel(ctx)))
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"release launch resource pins",
+			resources.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	if err := launching.sendChildSetup(ctx, session, resources, console); err != nil {
 		return VMLaunchResult{}, err
@@ -178,7 +248,12 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 		return VMLaunchResult{}, err
 	}
 	record := active.state.record
-	result := VMLaunchResult{VMID: record.vmID, LaunchGeneration: record.launchGeneration, PID: record.launch.process.pid, StartTimeTicks: record.launch.process.startTimeTicks}
+	result := VMLaunchResult{
+		VMID:             record.vmID,
+		LaunchGeneration: record.launchGeneration,
+		PID:              record.launch.process.pid,
+		StartTimeTicks:   record.launch.process.startTimeTicks,
+	}
 	// A detach attempt never falls back to destructive rollback: close-only partial
 	// completion is recovered from the durable active identity on the next operation.
 	committed = true
@@ -189,16 +264,28 @@ func (server *VMLifecycleServer) Launch(ctx context.Context, ownerUID, ownerGID 
 }
 
 // Abort uses the same owner-bound recovered cleanup transaction as Stop.
-func (server *VMLifecycleServer) Abort(ctx context.Context, ownerUID, ownerGID uint32, request VMCleanupRequest) (VMCleanupResult, error) {
+func (server *VMLifecycleServer) Abort(
+	ctx context.Context,
+	ownerUID, ownerGID uint32,
+	request VMCleanupRequest,
+) (VMCleanupResult, error) {
 	return server.Cleanup(ctx, ownerUID, ownerGID, request)
 }
 
 // Cleanup is idempotent for an existing cleaned authority record and never signals a numeric PID.
-func (server *VMLifecycleServer) Cleanup(ctx context.Context, ownerUID, ownerGID uint32, request VMCleanupRequest) (VMCleanupResult, error) {
+func (server *VMLifecycleServer) Cleanup(
+	ctx context.Context,
+	ownerUID, ownerGID uint32,
+	request VMCleanupRequest,
+) (VMCleanupResult, error) {
 	if err := request.Validate(); err != nil {
 		return VMCleanupResult{}, err
 	}
-	cleanup, err := server.instances.beginLifecycleCleanup(ctx, instanceCaller{uid: ownerUID, gid: ownerGID}, request.VMID)
+	cleanup, err := server.instances.beginLifecycleCleanup(
+		ctx,
+		instanceCaller{uid: ownerUID, gid: ownerGID},
+		request.VMID,
+	)
 	if err != nil {
 		return VMCleanupResult{}, err
 	}
@@ -227,7 +314,11 @@ func finishLifecycleCleanup(ctx context.Context, cleanup *cleanupLease, recoverT
 
 // Remove completes Stop first, then invalidates the exact stopped endpoint's grants.
 // The cleaned instance tombstone remains available for idempotent retry.
-func (server *VMLifecycleServer) Remove(ctx context.Context, ownerUID, ownerGID uint32, request VMCleanupRequest) (_ VMCleanupResult, returnErr error) {
+func (server *VMLifecycleServer) Remove(
+	ctx context.Context,
+	ownerUID, ownerGID uint32,
+	request VMCleanupRequest,
+) (_ VMCleanupResult, returnErr error) {
 	result, err := server.Cleanup(ctx, ownerUID, ownerGID, request)
 	if err != nil {
 		return VMCleanupResult{}, err
@@ -237,7 +328,11 @@ func (server *VMLifecycleServer) Remove(ctx context.Context, ownerUID, ownerGID 
 		return VMCleanupResult{}, err
 	}
 	defer func() {
-		returnErr = appendInstanceOperationError(returnErr, "release final VM authority", locked.Release(context.WithoutCancel(ctx)))
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"release final VM authority",
+			locked.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	if locked.record.lifecycle != instanceLifecycleCleaned {
 		return VMCleanupResult{}, instanceStateError(request.VMID, "final VM removal requires cleaned authority")
@@ -251,7 +346,11 @@ func (server *VMLifecycleServer) Remove(ctx context.Context, ownerUID, ownerGID 
 		return VMCleanupResult{}, errors.Join(err, retained.Release(context.WithoutCancel(ctx)))
 	}
 	defer func() {
-		returnErr = appendInstanceOperationError(returnErr, "release final VM topology hold", hold.Release(context.WithoutCancel(ctx)))
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"release final VM topology hold",
+			hold.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	if err := network.ForgetVMEndpoint(ctx, hold, locked.record.launchGeneration); err != nil {
 		return VMCleanupResult{}, err

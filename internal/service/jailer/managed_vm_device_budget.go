@@ -2,6 +2,9 @@ package jailer
 
 import "strings"
 
+// The largest reviewed MMIO pool bounds protocol allocation; actual admission subtracts all devices.
+const managedMMIOMaxInterruptSlots = 96
+
 // vmFirecrackerDeviceProfile binds the reviewed allocator model to an admitted release.
 // CRITICAL: This is MMIO authority only. PCI needs its own reviewed device and lifecycle policy.
 type vmFirecrackerDeviceProfile struct {
@@ -56,7 +59,7 @@ func validateVMFirecrackerDeviceBudget(intent vmFirecrackerLaunchIntent) error {
 	case "x86_64":
 		available = 19
 	case "aarch64":
-		available = 96
+		available = managedMMIOMaxInterruptSlots
 		used++ // ARM RTC shares the allocator pool.
 		if strings.Contains(intent.bootArgs, "console=") {
 			used++ // Firecracker creates ARM serial when this substring is present.

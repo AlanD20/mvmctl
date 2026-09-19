@@ -26,7 +26,7 @@ const launchChildMarker = "__mvm_jailer_child_v1"
 const (
 	launchChildGateFD      = 3
 	launchChildSetupFD     = 4
-	launchChildPacketLimit = 16 * 1024
+	launchChildPacketLimit = 32 * 1024
 	launchChildSetupBudget = 30 * time.Second
 )
 
@@ -45,6 +45,7 @@ type launchChildPlan struct {
 	CloudInit bool                 `json:"cloud_init"`
 	Metrics   bool                 `json:"metrics"`
 	Console   bool                 `json:"console"`
+	Volumes   []VMLaunchVolume     `json:"volumes,omitempty"`
 }
 
 // The descriptor ordering is fixed by the root-built launch plan; none is selected by caller argv.
@@ -148,7 +149,7 @@ func authenticateLaunchChildParent(ctx context.Context) error {
 
 func receiveLaunchChildPlan(ctx context.Context) (_ launchChildPlan, descriptors []int, returnErr error) {
 	packet := make([]byte, launchChildPacketLimit+1)
-	control := make([]byte, unix.CmsgSpace((childBaseDescriptors+2)*4))
+	control := make([]byte, unix.CmsgSpace((childBaseDescriptors+3+managedMMIOMaxInterruptSlots)*4))
 	for {
 		if err := ctx.Err(); err != nil {
 			return launchChildPlan{}, nil, err
@@ -186,7 +187,11 @@ func receiveLaunchChildPlan(ctx context.Context) (_ launchChildPlan, descriptors
 		}()
 		if parseErr != nil || len(messages) != 1 || flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 ||
 			n == 0 || n > launchChildPacketLimit {
-			return launchChildPlan{}, descriptors, processAuthorityError("", "invalid launch child setup packet", parseErr)
+			return launchChildPlan{}, descriptors, processAuthorityError(
+				"",
+				"invalid launch child setup packet",
+				parseErr,
+			)
 		}
 		var plan launchChildPlan
 		decoder := json.NewDecoder(bytes.NewReader(packet[:n]))
@@ -195,7 +200,11 @@ func receiveLaunchChildPlan(ctx context.Context) (_ launchChildPlan, descriptors
 			return launchChildPlan{}, descriptors, processAuthorityError("", "decode launch child setup", err)
 		}
 		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-			return launchChildPlan{}, descriptors, processAuthorityError("", "launch child setup has trailing data", err)
+			return launchChildPlan{}, descriptors, processAuthorityError(
+				"",
+				"launch child setup has trailing data",
+				err,
+			)
 		}
 		if err := validateLaunchChildPlan(plan, descriptors); err != nil {
 			return launchChildPlan{}, descriptors, err
@@ -205,19 +214,37 @@ func receiveLaunchChildPlan(ctx context.Context) (_ launchChildPlan, descriptors
 }
 
 func validateLaunchChildPlan(plan launchChildPlan, descriptors []int) error {
+	if len(plan.Volumes) > managedMMIOMaxInterruptSlots {
+		return instanceValidationError("launch child volume descriptor selection exceeds the MMIO pool")
+	}
+	if len(plan.Volumes) != 0 && plan.Release.Version != "1.16.1" {
+		return instanceValidationError("launch child volume device release is unsupported")
+	}
+	volumes := make([]vmVolumeResourceSpec, 0, len(plan.Volumes))
+	for _, volume := range plan.Volumes {
+		if err := volume.Validate(); err != nil {
+			return err
+		}
+		volumes = append(volumes, volume.private())
+	}
+	if err := validateVMVolumeResourceSelection(volumes); err != nil {
+		return err
+	}
 	if plan.Schema != 1 || !vmIDPattern.MatchString(plan.VMID) {
 		return instanceValidationError("launch child setup identity is invalid")
 	}
 	if err := validateInstanceCaller(instanceCaller{uid: plan.UID, gid: plan.GID}); err != nil {
 		return err
 	}
-	if err := validateReleaseSlotValue(releaseSlot{version: plan.Release.Version, architecture: plan.Release.Architecture}); err != nil {
+	if err := validateReleaseSlotValue(
+		releaseSlot{version: plan.Release.Version, architecture: plan.Release.Architecture},
+	); err != nil {
 		return instanceValidationError(err.Error())
 	}
 	if err := validateManagedVMCgroupLimits(plan.Limits); err != nil {
 		return err
 	}
-	want := childBaseDescriptors
+	want := childBaseDescriptors + len(plan.Volumes)
 	if plan.CloudInit {
 		want++
 	}
@@ -255,7 +282,12 @@ func prepareLaunchChildMounts(ctx context.Context, plan launchChildPlan, fds []i
 	if err := unix.Mkdirat(fds[childJailParent], plan.VMID, 0700); err != nil {
 		return processAuthorityError(plan.VMID, "create exclusive jail VM directory", err)
 	}
-	vmFD, err := unix.Openat(fds[childJailParent], plan.VMID, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	vmFD, err := unix.Openat(
+		fds[childJailParent],
+		plan.VMID,
+		unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW,
+		0,
+	)
 	if err != nil {
 		return err
 	}
@@ -312,16 +344,32 @@ func prepareLaunchChildMounts(ctx context.Context, plan launchChildPlan, fds []i
 			readOnly, directory bool
 		}{
 			fds[extra], mvmFD, infra.VMFirecrackerMetricsFilename, false, false})
+		extra++
 	}
 	for _, mount := range mounts {
-		if err := mountLaunchChildResource(ctx, mount.source, mount.parent, mount.name, mount.readOnly, mount.directory); err != nil {
+		if err := mountLaunchChildResource(
+			ctx,
+			mount.source,
+			mount.parent,
+			mount.name,
+			mount.readOnly,
+			mount.directory,
+		); err != nil {
 			return processAuthorityError(plan.VMID, "mount fixed jail resource "+mount.name, err)
 		}
+	}
+	if err := mountLaunchChildVolumes(ctx, plan, rootFD, fds[extra:extra+len(plan.Volumes)]); err != nil {
+		return err
 	}
 	return nil
 }
 
-func mountLaunchChildResource(ctx context.Context, source, parent int, name string, readOnly, directory bool) (returnErr error) {
+func mountLaunchChildResource(
+	ctx context.Context,
+	source, parent int,
+	name string,
+	readOnly, directory bool,
+) (returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -333,7 +381,12 @@ func mountLaunchChildResource(ctx context.Context, source, parent int, name stri
 		}
 		target, err = unix.Openat(parent, name, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	} else {
-		target, err = unix.Openat(parent, name, unix.O_RDONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
+		target, err = unix.Openat(
+			parent,
+			name,
+			unix.O_RDONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW,
+			0600,
+		)
 	}
 	if err != nil {
 		return err

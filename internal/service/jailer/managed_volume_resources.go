@@ -113,8 +113,8 @@ func (spec vmVolumeResourceSpec) jailPath() string {
 }
 
 // pinVMVolumeResources consumes the cache lease only after successful descriptor admission.
-// CRITICAL: No production launch or live attachment consumes this identity-only lease while per-volume
-// and aggregate storage policy is unresolved. O_PATH admission neither reads nor copies volume contents.
+// CRITICAL: O_PATH admission neither reads nor copies volume contents. Launch consumes the same
+// descriptor admission through pinVMLaunchResources; this standalone lease grants no live attachment.
 func (cache *managedCacheLease) pinVMVolumeResources(
 	ctx context.Context,
 	intent vmFirecrackerLaunchIntent,
@@ -128,7 +128,32 @@ func (cache *managedCacheLease) pinVMVolumeResources(
 	if len(intent.volumes) == 0 {
 		return nil, managedVMResourceValidationError("managed volume selection is empty")
 	}
-	volumes := slices.Clone(intent.volumes)
+	pinned, opened, err := admitVMVolumeResourceFiles(ctx, cache, intent.volumes)
+	if err != nil {
+		return nil, err
+	}
+	retained := append(slices.Clone(cache.retained), opened...)
+	lease := &vmVolumeResourceLease{state: &vmVolumeResourceState{
+		deps: cache.deps, cacheIdentity: cache.identity, ownerUID: cache.ownerUID,
+		volumes: pinned, retained: retained,
+	}}
+	cache.retained = nil
+	cache.cacheFD = -1
+	cache.ownerUID = 0
+	cache.identity = managedCacheIdentity{}
+	cache.configDeps = managedFirecrackerConfigDeps{}
+	return lease, nil
+}
+
+// admitVMVolumeResourceFiles leaves cache ownership with the caller and transfers new pins on success.
+func admitVMVolumeResourceFiles(
+	ctx context.Context,
+	cache *managedCacheLease,
+	volumes []vmVolumeResourceSpec,
+) (_ []pinnedVMVolumeResource, _ []int, returnErr error) {
+	if len(volumes) == 0 {
+		return nil, nil, nil
+	}
 	opened := make([]int, 0, len(volumes)+1)
 	defer func() {
 		if returnErr != nil {
@@ -141,7 +166,7 @@ func (cache *managedCacheLease) pinVMVolumeResources(
 		ctx, cache.deps, cache.cacheFD, "volumes", "volume store", cache.ownerUID,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	opened = append(opened, storeFD)
 	pinned := make([]pinnedVMVolumeResource, 0, len(volumes))
@@ -157,37 +182,27 @@ func (cache *managedCacheLease) pinVMVolumeResources(
 			}, cache.ownerUID,
 		)
 		if openErr != nil {
-			return nil, openErr
+			return nil, nil, openErr
 		}
 		opened = append(opened, fd)
 		identity, statErr := stableManagedVMConfigStat(ctx, cache.configDeps, fd)
 		if statErr != nil {
-			return nil, statErr
+			return nil, nil, statErr
 		}
 		if identity.size != volume.expectedBytes || identity.uid != cache.ownerUID || identity.nlink != 1 ||
 			identity.mode&unix.S_IFMT != unix.S_IFREG || identity.mode&mode != mode || identity.mode&07133 != 0 {
-			return nil, managedVMResourceValidationError("managed raw volume metadata changed during admission")
+			return nil, nil, managedVMResourceValidationError("managed raw volume metadata changed during admission")
 		}
 		after, statErr := stableManagedVMConfigStat(ctx, cache.configDeps, fd)
 		if statErr != nil {
-			return nil, statErr
+			return nil, nil, statErr
 		}
 		if identity != after {
-			return nil, managedVMResourceValidationError("managed raw volume metadata changed during admission")
+			return nil, nil, managedVMResourceValidationError("managed raw volume metadata changed during admission")
 		}
 		pinned = append(pinned, pinnedVMVolumeResource{spec: volume, fd: fd, identity: identity})
 	}
-	retained := append(slices.Clone(cache.retained), opened...)
-	lease := &vmVolumeResourceLease{state: &vmVolumeResourceState{
-		deps: cache.deps, cacheIdentity: cache.identity, ownerUID: cache.ownerUID,
-		volumes: pinned, retained: retained,
-	}}
-	cache.retained = nil
-	cache.cacheFD = -1
-	cache.ownerUID = 0
-	cache.identity = managedCacheIdentity{}
-	cache.configDeps = managedFirecrackerConfigDeps{}
-	return lease, nil
+	return pinned, opened, nil
 }
 
 func (lease *vmVolumeResourceLease) Release(ctx context.Context) error {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -22,6 +23,7 @@ const (
 	jailCleanupRuntime
 	jailCleanupDevices
 	jailCleanupDeviceNet
+	jailCleanupVolumes
 )
 
 // removeStoppedJailTree runs only after the retained process authorities have proved exit.
@@ -71,7 +73,13 @@ func removeStoppedJailTree(ctx context.Context, record instanceRecord) (returnEr
 	return removeJailDirectory(ctx, fd, record.vmID, jailCleanupVM, record)
 }
 
-func removeJailDirectory(ctx context.Context, parent int, name string, kind jailCleanupDirectory, record instanceRecord) (returnErr error) {
+func removeJailDirectory(
+	ctx context.Context,
+	parent int,
+	name string,
+	kind jailCleanupDirectory,
+	record instanceRecord,
+) (returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -106,11 +114,15 @@ func removeJailDirectory(ctx context.Context, parent int, name string, kind jail
 		(uint64(original.Dev) != record.active.jailRoot.device || original.Ino != record.active.jailRoot.inode) {
 		return processAuthorityError(record.vmID, "stopped jail root differs from committed identity", nil)
 	}
-	names, err := file.Readdirnames(64)
+	entryLimit := 64
+	if kind == jailCleanupVolumes {
+		entryLimit = managedMMIOMaxInterruptSlots + 1
+	}
+	names, err := file.Readdirnames(entryLimit)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
-	if len(names) >= 64 {
+	if len(names) >= entryLimit {
 		return processAuthorityError(record.vmID, "stopped jail directory has unexpected entries", nil)
 	}
 	for _, child := range names {
@@ -152,6 +164,8 @@ func allowedJailCleanupEntry(kind jailCleanupDirectory, name string) (jailCleanu
 			return jailCleanupRun, false, nil
 		case "dev":
 			return jailCleanupDevices, false, nil
+		case "volumes":
+			return jailCleanupVolumes, false, nil
 		case "firecracker", "rootfs", "kernel", infra.VMCloudInitISOFilename:
 			return 0, true, nil
 		}
@@ -177,11 +191,21 @@ func allowedJailCleanupEntry(kind jailCleanupDirectory, name string) (jailCleanu
 		if name == "tun" {
 			return 0, true, nil
 		}
+	case jailCleanupVolumes:
+		if strings.HasSuffix(name, ".raw") && isCanonicalManagedResourceID(strings.TrimSuffix(name, ".raw"), 64) {
+			return 0, true, nil
+		}
 	}
 	return 0, false, fmt.Errorf("unexpected fixed jail entry %q", name)
 }
 
-func removeJailFixedLeaf(ctx context.Context, parent int, name string, kind jailCleanupDirectory, record instanceRecord) (returnErr error) {
+func removeJailFixedLeaf(
+	ctx context.Context,
+	parent int,
+	name string,
+	kind jailCleanupDirectory,
+	record instanceRecord,
+) (returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -202,6 +226,12 @@ func removeJailFixedLeaf(ctx context.Context, parent int, name string, kind jail
 	if !ownerAllowed || original.Nlink != 1 || original.Mode&0022 != 0 {
 		return processAuthorityError(record.vmID, "stopped jail leaf metadata is not admitted", nil)
 	}
+	// Volume sources lived only in the departed private mount namespace. Cleanup may remove
+	// only the empty root-owned attachment placeholders, never caller data or a surviving mount.
+	if kind == jailCleanupVolumes && (original.Uid != 0 || original.Gid != 0 ||
+		original.Mode != unix.S_IFREG|0600 || original.Size != 0) {
+		return processAuthorityError(record.vmID, "stopped jail volume is not an empty mount placeholder", nil)
+	}
 	if kind == jailCleanupDevices || kind == jailCleanupDeviceNet {
 		major, minor := uint32(10), uint32(232)
 		if name == "tun" {
@@ -210,7 +240,8 @@ func removeJailFixedLeaf(ctx context.Context, parent int, name string, kind jail
 		if name == "urandom" {
 			major, minor = 1, 9
 		}
-		if original.Mode&unix.S_IFMT != unix.S_IFCHR || unix.Major(uint64(original.Rdev)) != major || unix.Minor(uint64(original.Rdev)) != minor {
+		if original.Mode&unix.S_IFMT != unix.S_IFCHR || unix.Major(uint64(original.Rdev)) != major ||
+			unix.Minor(uint64(original.Rdev)) != minor {
 			return processAuthorityError(record.vmID, "stopped jail device is not admitted", nil)
 		}
 	} else if original.Mode&unix.S_IFMT != unix.S_IFREG {

@@ -63,7 +63,7 @@ func jailedRuntimePath(hostPath string) string {
 }
 
 func jailedVolumePath(driveID string) string {
-	return filepath.Join("/volumes", driveID)
+	return filepath.Join("/volumes", driveID+".raw")
 }
 
 func translateConfigForJail(config *model.FirecrackerVMConfig) *model.FirecrackerVMConfig {

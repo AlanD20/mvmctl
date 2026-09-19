@@ -49,6 +49,60 @@ type VMLaunchRequest struct {
 	CPUConfig       *model.CpuConfig     `json:"cpu_config,omitempty"`
 	VsockCID        *uint32              `json:"vsock_cid,omitempty"`
 	CgroupLimits    model.VMCgroupLimits `json:"cgroup_limits"`
+	Volumes         []VMLaunchVolume     `json:"volumes,omitempty"`
+}
+
+// VMLaunchVolume selects one canonical raw file without granting pathname authority.
+type VMLaunchVolume struct {
+	ID            string             `json:"id"`
+	Format        model.VolumeFormat `json:"format"`
+	ExpectedBytes uint64             `json:"expected_bytes"`
+	ReadOnly      bool               `json:"read_only"`
+	CacheType     string             `json:"cache_type"`
+}
+
+// UnmarshalJSON requires complete volume intent, including an explicit access selection.
+func (volume *VMLaunchVolume) UnmarshalJSON(raw []byte) error {
+	type launchVolume VMLaunchVolume
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var value launchVolume
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return fmt.Errorf("launch volume has trailing JSON")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	for _, name := range []string{"id", "format", "expected_bytes", "read_only", "cache_type"} {
+		field, exists := fields[name]
+		if !exists || bytes.Equal(bytes.TrimSpace(field), []byte("null")) {
+			return fmt.Errorf("launch volume %s is required", name)
+		}
+	}
+	*volume = VMLaunchVolume(value)
+	return volume.Validate()
+}
+
+// Validate rejects unsupported representations and incomplete volume intent.
+func (volume VMLaunchVolume) Validate() error {
+	_, err := newVMVolumeResourceSpec(volume.ID, volume.Format, volume.ExpectedBytes,
+		volume.private().access, volume.CacheType)
+	return err
+}
+
+func (volume VMLaunchVolume) private() vmVolumeResourceSpec {
+	access := vmVolumeReadWrite
+	if volume.ReadOnly {
+		access = vmVolumeReadOnly
+	}
+	return vmVolumeResourceSpec{
+		id: vmVolumeResourceID(volume.ID), expectedBytes: volume.ExpectedBytes,
+		access: access, cacheType: volume.CacheType,
+	}
 }
 
 // UnmarshalJSON rejects omitted/null intent rather than silently accepting zero-valued switches.
@@ -98,6 +152,19 @@ type VMCleanupResult struct {
 
 // Validate enforces receiver resource selection and guest intent without any effect.
 func (request VMLaunchRequest) Validate() error {
+	if len(request.Volumes) > managedMMIOMaxInterruptSlots {
+		return instanceValidationError("VM launch volume selection exceeds the MMIO allocator capacity")
+	}
+	volumes := make([]vmVolumeResourceSpec, 0, len(request.Volumes))
+	for _, volume := range request.Volumes {
+		if err := volume.Validate(); err != nil {
+			return err
+		}
+		volumes = append(volumes, volume.private())
+	}
+	if err := validateVMVolumeResourceSelection(volumes); err != nil {
+		return err
+	}
 	if !vmIDPattern.MatchString(request.VMID) || !driveIDPattern.MatchString(request.KernelID) ||
 		!driveIDPattern.MatchString(request.NetworkID) {
 		return instanceValidationError("VM launch canonical identities are invalid")
@@ -135,12 +202,16 @@ func (request VMLaunchRequest) launchIntent(tap vmFirecrackerTapIdentity) vmFire
 	if request.CloudInit {
 		cloudInit = cloudInitPresent
 	}
+	volumes := make([]vmVolumeResourceSpec, 0, len(request.Volumes))
+	for _, volume := range request.Volumes {
+		volumes = append(volumes, volume.private())
+	}
 	return vmFirecrackerLaunchIntent{
 		bootArgs: request.BootArgs, vcpuCount: request.VCPUs, memSizeMiB: request.MemoryMiB,
 		smt: request.SMT, trackDirtyPages: request.TrackDirtyPages, guestMAC: request.GuestMAC,
 		tapIdentity: tap, rootfsCacheType: request.RootfsCacheType, cloudInit: cloudInit,
 		enableLogging: request.Logging, logLevel: request.LogLevel, enableMetrics: request.Metrics,
-		cpuConfig: request.CPUConfig, vsockCID: request.VsockCID,
+		cpuConfig: request.CPUConfig, vsockCID: request.VsockCID, volumes: volumes,
 	}
 }
 
@@ -149,7 +220,9 @@ func (result VMLaunchResult) Validate(request VMLaunchRequest) error {
 	if result.VMID != request.VMID || result.LaunchGeneration == 0 {
 		return instanceValidationError("VM launch response binding is invalid")
 	}
-	return validateInstanceProcessLocator(instanceProcessLocator{pid: result.PID, startTimeTicks: result.StartTimeTicks})
+	return validateInstanceProcessLocator(
+		instanceProcessLocator{pid: result.PID, startTimeTicks: result.StartTimeTicks},
+	)
 }
 
 // Validate checks the closed cleanup identity.

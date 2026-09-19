@@ -60,6 +60,8 @@ type vmLaunchResourceLease struct {
 	kernelFD       int
 	cloudInitFD    int
 	preparedConfig *preparedFirecrackerConfig
+	volumes        []pinnedVMVolumeResource
+	deviceProfile  *vmFirecrackerDeviceProfile
 	retained       []int
 }
 
@@ -117,11 +119,6 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	}
 	if err := validateVMLaunchResourceSpec(spec); err != nil {
 		return nil, err
-	}
-	// CRITICAL: Descriptor identity and MMIO capacity do not establish storage admission.
-	// The volume/snapshot resource-limit decision must supply that policy before launch consumes volumes.
-	if len(spec.firecracker.volumes) != 0 {
-		return nil, managedVMResourceValidationError("managed volume launch storage policy is not approved")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, managedVMResourceAtomicError("pin managed VM launch resources", err)
@@ -271,6 +268,11 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 		return nil, err
 	}
 	openedAfterConfig = append(openedAfterConfig, kernelFD)
+	volumes, volumeFDs, err := admitVMVolumeResourceFiles(ctx, cache, spec.firecracker.volumes)
+	if err != nil {
+		return nil, err
+	}
+	openedAfterConfig = append(openedAfterConfig, volumeFDs...)
 
 	consumedConfigFD := configSourceFD
 	configSourceFD = -1
@@ -297,6 +299,8 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 		kernelFD:       kernelFD,
 		cloudInitFD:    cloudInitFD,
 		preparedConfig: preparedConfig,
+		volumes:        volumes,
+		deviceProfile:  spec.firecracker.deviceProfile,
 		retained:       retained,
 	}
 	cache.retained = nil
@@ -533,6 +537,8 @@ func (lease *vmLaunchResourceLease) Release(ctx context.Context) error {
 	lease.kernelFD = -1
 	lease.cloudInitFD = -1
 	lease.preparedConfig = nil
+	lease.volumes = nil
+	lease.deviceProfile = nil
 	if result != nil {
 		return result
 	}
