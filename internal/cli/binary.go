@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -56,7 +55,6 @@ func NewBinaryCmd(binaryAPI api.BinaryAPI, configAPI api.ConfigAPI) *cobra.Comma
 }
 
 func newBinaryListCmd(binaryAPI api.BinaryAPI, configAPI api.ConfigAPI) *cobra.Command {
-	var jsonOutput bool
 	var longOutput bool
 	var remote bool
 	var limit int
@@ -71,22 +69,20 @@ func newBinaryListCmd(binaryAPI api.BinaryAPI, configAPI api.ConfigAPI) *cobra.C
 				return err
 			}
 
-			if jsonOutput {
-				if local == nil {
-					local = []*model.BinaryItem{}
-				}
-				b, _ := json.MarshalIndent(local, "", "  ")
-				fmt.Println(string(b))
-				return nil
-			}
-
 			if remote {
 				fmt.Fprintf(os.Stderr, "Fetching remote versions...\n")
 				_, remoteVersions, err := binaryAPI.BinaryList(cmd.Context(), true, &limit, nil)
 				if err != nil {
 					return err
 				}
+				if common.RecordResult(remoteVersions) {
+					return nil
+				}
 				common.RenderVersionTree(remoteVersions)
+				return nil
+			}
+
+			if common.RecordResult(local) {
 				return nil
 			}
 
@@ -98,7 +94,6 @@ func newBinaryListCmd(binaryAPI api.BinaryAPI, configAPI api.ConfigAPI) *cobra.C
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&longOutput, "long", false, "Show full listing with all columns")
 	cmd.Flags().BoolVarP(&remote, "remote", "r", false, "Also show remote versions")
 	cmd.Flags().IntVar(&limit, "limit", 5, "Max remote versions to show")
@@ -122,6 +117,7 @@ func newBinaryPullCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 				SetDefault:       setDefault,
 				DownloadOverride: force,
 			}, nil)
+			common.RecordResult(binaries)
 			if err != nil {
 				return err
 			}
@@ -160,6 +156,9 @@ func newBinaryRemoveCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 				inputs.BinaryRemoveInput{Versions: args},
 				force,
 			)
+			if common.StructuredOutput() {
+				return common.RecordBatch(batchResult)
+			}
 			for _, r := range batchResult.Items {
 				for _, warning := range r.Warnings {
 					common.Cli.Warning(warning)
@@ -206,6 +205,7 @@ func newBinaryDefaultCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 				cmd.Context(),
 				inputs.BinaryInput{Identifiers: []string{identifier}},
 			)
+			common.RecordResult(item)
 			if err != nil {
 				return err
 			}

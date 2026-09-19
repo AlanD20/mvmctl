@@ -13,6 +13,7 @@ import (
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/errs"
 
 	"github.com/spf13/cobra"
 )
@@ -46,6 +47,7 @@ func newCacheInitCmd(cacheAPI api.CacheAPI) *cobra.Command {
 			})
 
 			prog.Stop()
+			common.RecordResult(item)
 
 			if err != nil {
 				return err
@@ -131,13 +133,21 @@ func pruneResource(
 	switch resource {
 	case "image":
 		ids, err := cacheAPI.CachePruneImages(cmd.Context(), dryRun, allResources)
+		common.RecordResult(ids)
 		if err != nil {
+			if len(ids) > 0 {
+				common.RecordPartialResult(ids)
+			}
 			return err
 		}
 		removed = ids
 	case "binary":
 		ids, err := cacheAPI.CachePruneBinaries(cmd.Context(), dryRun, allResources)
+		common.RecordResult(ids)
 		if err != nil {
+			if len(ids) > 0 {
+				common.RecordPartialResult(ids)
+			}
 			return err
 		}
 		removed = ids
@@ -148,6 +158,9 @@ func pruneResource(
 			if opResult == nil {
 				return nil
 			}
+			if common.StructuredOutput() {
+				return common.RecordBatch(&errs.BatchResult{Items: []errs.OperationResult{*opResult}})
+			}
 			if opResult.IsError() {
 				return opResult.ToError()
 			}
@@ -156,19 +169,30 @@ func pruneResource(
 			}
 		case "network":
 			ids, err := cacheAPI.CachePruneNetworks(cmd.Context(), dryRun, allResources)
+			common.RecordResult(ids)
 			if err != nil {
+				if len(ids) > 0 {
+					common.RecordPartialResult(ids)
+				}
 				return err
 			}
 			removed = ids
 		case "kernel":
 			ids, err := cacheAPI.CachePruneKernels(cmd.Context(), dryRun, allResources)
+			common.RecordResult(ids)
 			if err != nil {
+				if len(ids) > 0 {
+					common.RecordPartialResult(ids)
+				}
 				return err
 			}
 			removed = ids
 		}
 	}
 
+	if common.RecordResult(removed) {
+		return nil
+	}
 	if len(removed) > 0 {
 		if dryRun {
 			if resource == "binary" {
@@ -211,6 +235,7 @@ func pruneMisc(cacheAPI api.CacheAPI, cmd *cobra.Command, dryRun bool, force boo
 	}
 
 	miscMap, err := cacheAPI.CachePruneMisc(cmd.Context(), dryRun)
+	common.RecordResult(miscMap)
 	if err != nil {
 		return err
 	}
@@ -277,7 +302,11 @@ func pruneAll(cacheAPI api.CacheAPI, cmd *cobra.Command, dryRun bool, force bool
 	}
 
 	pruneItem, err := cacheAPI.CachePruneAll(cmd.Context(), dryRun, true)
+	common.RecordResult(pruneItem)
 	if err != nil {
+		if pruneItem != nil && len(pruneItem.PrunedIDs) > 0 {
+			common.RecordPartialResult(pruneItem)
+		}
 		return err
 	}
 	if pruneItem != nil {
@@ -427,6 +456,9 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check privileges early — before the destructive confirmation.
 			if err := cacheAPI.CacheCheckPrivileges("/usr/sbin/ip", "clean cache"); err != nil {
+				if common.StructuredOutput() {
+					return err
+				}
 				if cacheAPI.CacheSessionHasGroup() {
 					// Group is active but something else is wrong (missing binary, etc.)
 					// Return the original error — let Cobra's root error handler display it.
@@ -481,7 +513,11 @@ Examples:
 			}
 
 			cleanResult, err := cacheAPI.CacheClean(cmd.Context(), dryRun)
+			common.RecordResult(cleanResult)
 			if err != nil {
+				if cleanResult != nil && len(cleanResult.PruneResult.PrunedIDs) > 0 {
+					common.RecordPartialResult(cleanResult)
+				}
 				return err
 			}
 			if cleanResult != nil {

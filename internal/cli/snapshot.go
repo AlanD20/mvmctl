@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -83,6 +82,7 @@ func newSnapshotCreateCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 					prog.UpdateText(e.Message)
 				}
 			})
+			common.RecordResult(snapItem)
 			if err != nil {
 				return fmt.Errorf("snapshot create failed: %w", err)
 			}
@@ -102,7 +102,6 @@ func newSnapshotCreateCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 // --- ls (list all snapshots) ---
 
 func newSnapshotListCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:     "ls",
@@ -112,12 +111,7 @@ func newSnapshotListCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 			return common.HandleErrors(func() error {
 				snapshots := snapshotAPI.SnapshotList(cmd.Context())
 
-				if jsonOutput {
-					if snapshots == nil {
-						snapshots = []*model.SnapshotItem{}
-					}
-					b, _ := json.MarshalIndent(snapshots, "", "  ")
-					fmt.Println(string(b))
+				if common.RecordResult(snapshots) {
 					return nil
 				}
 
@@ -127,14 +121,12 @@ func newSnapshotListCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 
 // --- get ---
 
 func newSnapshotInspectCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:               "inspect [selector]",
@@ -149,9 +141,7 @@ func newSnapshotInspectCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 				return fmt.Errorf("get snapshot: %w", err)
 			}
 
-			if jsonOutput {
-				b, _ := json.MarshalIndent(snap, "", "  ")
-				fmt.Println(string(b))
+			if common.RecordResult(snap) {
 				return nil
 			}
 
@@ -160,7 +150,6 @@ func newSnapshotInspectCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 
@@ -206,6 +195,7 @@ func newSnapshotRestoreCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 			defer prog.Stop()
 
 			vms, err := snapshotAPI.SnapshotRestore(cmd.Context(), input)
+			common.RecordResult(vms)
 			if err != nil {
 				return fmt.Errorf("snapshot restore failed: %w", err)
 			}
@@ -243,6 +233,9 @@ func newSnapshotRemoveCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 				Force:       force,
 			}
 			result := snapshotAPI.SnapshotRemove(cmd.Context(), input)
+			if common.StructuredOutput() {
+				return common.RecordBatch(result)
+			}
 			if result.HasErrors() {
 				for _, r := range result.Items {
 					if r.IsOK() {

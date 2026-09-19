@@ -46,6 +46,9 @@ func NewProgress() *Progress {
 // Start begins the spinner animation. Pass an optional initial message.
 // When stderr is not a TTY, just prints the message once (no animation).
 func (p *Progress) Start(msg ...string) {
+	if StructuredOutput() {
+		return
+	}
 	if len(msg) > 0 {
 		p.text = msg[0]
 	}
@@ -77,6 +80,9 @@ func (p *Progress) Start(msg ...string) {
 
 // Stop stops the spinner and clears its line from stderr.
 func (p *Progress) Stop() {
+	if StructuredOutput() {
+		return
+	}
 	p.mu.Lock()
 	if p.stopped {
 		p.mu.Unlock()
@@ -95,6 +101,9 @@ func (p *Progress) Stop() {
 
 // UpdateText changes the message displayed next to the spinner.
 func (p *Progress) UpdateText(text string) {
+	if StructuredOutput() {
+		return
+	}
 	p.mu.Lock()
 	p.text = text
 	p.mu.Unlock()
@@ -193,6 +202,9 @@ func NewCli() *MVMCli { return Cli }
 // Error prints an error message to stderr in red.
 // All errors use the same format — no "Unexpected" distinction.
 func (c *MVMCli) Error(message string) {
+	if StructuredOutput() {
+		return
+	}
 	if isStderrTTY() {
 		fmt.Fprintf(os.Stderr, "%s✗ Error:%s %s\n", AnsiRed, AnsiReset, message)
 	} else {
@@ -203,6 +215,9 @@ func (c *MVMCli) Error(message string) {
 // Success prints a success message to stdout with a green checkmark.
 // TTY-aware: color is stripped when piped.
 func (c *MVMCli) Success(message string) {
+	if StructuredOutput() {
+		return
+	}
 	if isStdoutTTY() {
 		fmt.Printf("%s✓ %s%s\n", AnsiGreen, message, AnsiReset)
 	} else {
@@ -212,12 +227,18 @@ func (c *MVMCli) Success(message string) {
 
 // Text prints a plain indented message with no color or decoration.
 func (c *MVMCli) Text(message string) {
+	if StructuredOutput() {
+		return
+	}
 	fmt.Printf("  %s\n", message)
 }
 
 // Warning prints a warning message to stderr with a yellow indicator.
 // TTY-aware: color is stripped when piped.
 func (c *MVMCli) Warning(message string) {
+	if StructuredOutput() {
+		return
+	}
 	if isStderrTTY() {
 		fmt.Fprintf(os.Stderr, "%s! %s%s\n", AnsiYellow, message, AnsiReset)
 	} else {
@@ -228,6 +249,9 @@ func (c *MVMCli) Warning(message string) {
 // Info prints an info/dim message to stdout.
 // TTY-aware: dim style is stripped when piped.
 func (c *MVMCli) Info(message string) {
+	if StructuredOutput() {
+		return
+	}
 	if isStdoutTTY() {
 		fmt.Printf("%s  %s%s\n", AnsiDim, message, AnsiReset)
 	} else {
@@ -238,6 +262,9 @@ func (c *MVMCli) Info(message string) {
 // SectionHeader prints a bold section title.
 // TTY-aware: bold style is stripped when piped.
 func (c *MVMCli) SectionHeader(title string) {
+	if StructuredOutput() {
+		return
+	}
 	if isStdoutTTY() {
 		fmt.Printf("\n%s%s%s\n", AnsiBold, title, AnsiReset)
 	} else {
@@ -247,6 +274,9 @@ func (c *MVMCli) SectionHeader(title string) {
 
 // InspectHeader prints an inspect-style header with underline.
 func (c *MVMCli) InspectHeader(title, subtitle string) {
+	if StructuredOutput() {
+		return
+	}
 	tty := isStdoutTTY()
 	if subtitle != "" {
 		full := fmt.Sprintf("%s (%s)", title, subtitle)
@@ -268,6 +298,9 @@ func (c *MVMCli) InspectHeader(title, subtitle string) {
 
 // KeyValue prints a key-value pair with consistent padding.
 func (c *MVMCli) KeyValue(key, value string, indent int, keyWidth int) {
+	if StructuredOutput() {
+		return
+	}
 	if indent == 0 {
 		indent = 2
 	}
@@ -281,6 +314,9 @@ func (c *MVMCli) KeyValue(key, value string, indent int, keyWidth int) {
 // Table prints a table using go-pretty with SIMPLE box style.
 // Uses no borders, no column separators, with a simple header separator made of - characters.
 func (c *MVMCli) Table(columns []string, rows [][]string, title ...string) {
+	if StructuredOutput() {
+		return
+	}
 	tw := table.NewWriter()
 
 	// Configure style: no borders, no vertical separators, header separator only
@@ -324,6 +360,9 @@ func (c *MVMCli) Table(columns []string, rows [][]string, title ...string) {
 
 // PrintDictTree prints a nested map/slice as a tree.
 func (c *MVMCli) PrintDictTree(data any, title string) {
+	if StructuredOutput() {
+		return
+	}
 	if title != "" {
 		fmt.Println(title)
 	}
@@ -837,6 +876,9 @@ func (c *MVMCli) CheckArg(cmd *cobra.Command, value string) (string, error) {
 // Shows [Y/n]: when defaultYes=true, [y/N]: when defaultYes=false.
 // Loops on invalid input until y/yes, n/no, or empty (which returns default).
 func (c *MVMCli) PromptConfirm(ctx context.Context, prompt string, defaultYes bool) (bool, error) {
+	if StructuredOutput() {
+		return false, errs.New("cli.interaction.required", "structured output requires explicit noninteractive options", errs.WithClass(errs.ClassNeedsInteraction))
+	}
 	suffix := " [Y/n]: "
 	if !defaultYes {
 		suffix = " [y/N]: "
@@ -874,6 +916,9 @@ func (c *MVMCli) PromptConfirm(ctx context.Context, prompt string, defaultYes bo
 // PromptSelect shows a numbered list of options on stderr and returns the
 // selected value. Defaults to options[defaultIdx] on empty input.
 func (c *MVMCli) PromptSelect(ctx context.Context, title string, options []string, defaultIdx int) (string, error) {
+	if StructuredOutput() {
+		return "", errs.New("cli.interaction.required", "structured output requires explicit noninteractive options", errs.WithClass(errs.ClassNeedsInteraction))
+	}
 	c.Info(title)
 	for i, opt := range options {
 		c.Info(fmt.Sprintf("  %d. %s", i+1, opt))
@@ -913,6 +958,9 @@ func (c *MVMCli) PromptMultiSelect(
 	options []string,
 	defaultIndices []int,
 ) ([]string, error) {
+	if StructuredOutput() {
+		return nil, errs.New("cli.interaction.required", "structured output requires explicit noninteractive options", errs.WithClass(errs.ClassNeedsInteraction))
+	}
 	c.Info(title)
 	for i, opt := range options {
 		c.Info(fmt.Sprintf("  [%d] %s", i+1, opt))

@@ -41,6 +41,9 @@ import (
 func HandleErrors(fn func() error) func() error {
 	return func() (err error) {
 		err = fn()
+		if StructuredOutput() {
+			return err
+		}
 		if err == nil {
 			return nil
 		}

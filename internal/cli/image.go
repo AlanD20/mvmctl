@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -71,7 +70,6 @@ func NewImageCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Command 
 
 func newImageListCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var (
-		jsonOutput bool
 		remote     bool
 		noCache    bool
 		typeFilter string
@@ -89,19 +87,18 @@ func newImageListCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Comm
 				if err != nil {
 					return err
 				}
-				printRemoteImages(versions, jsonOutput)
+				printRemoteImages(versions, common.StructuredOutput())
 			} else {
 				images, _, err := imageAPI.ImageListAll(cmd.Context(), false, "", false, nil)
 				if err != nil {
 					return err
 				}
-				printLocalImages(images, jsonOutput, longOutput, cmd.Context(), configAPI)
+				printLocalImages(images, common.StructuredOutput(), longOutput, cmd.Context(), configAPI)
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().BoolVarP(&remote, "remote", "r", false, "Show available remote images")
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip cached version listing and fetch live from upstream")
 	cmd.Flags().StringVar(&typeFilter, "type", "", "Filter by image type (e.g. ubuntu, alpine)")
@@ -111,12 +108,7 @@ func newImageListCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Comm
 }
 
 func printRemoteImages(versions []model.VersionInfo, jsonOutput bool) {
-	if jsonOutput {
-		if versions == nil {
-			versions = []model.VersionInfo{}
-		}
-		b, _ := json.MarshalIndent(versions, "", "  ")
-		fmt.Println(string(b))
+	if common.RecordResult(versions) {
 		return
 	}
 
@@ -136,12 +128,7 @@ func printLocalImages(
 	ctx context.Context,
 	configAPI api.ConfigAPI,
 ) {
-	if jsonOutput {
-		if images == nil {
-			images = []*model.ImageItem{}
-		}
-		b, _ := json.MarshalIndent(images, "", "  ")
-		fmt.Println(string(b))
+	if common.RecordResult(images) {
 		return
 	}
 
@@ -217,6 +204,7 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 					prog.UpdateText(e.Message)
 				}
 			})
+			common.RecordResult(img)
 			prog.Stop()
 			if err != nil {
 				var ni *errs.NeedsInteraction
@@ -271,6 +259,9 @@ Examples:
 				inputs.ImageInput{Identifiers: args, IncludeDeleted: true},
 				force,
 			)
+			if common.StructuredOutput() {
+				return common.RecordBatch(result)
+			}
 			for _, r := range result.Items {
 				itemID := "unknown"
 				if r.Item != nil {
@@ -298,7 +289,6 @@ Examples:
 // --- inspect ---
 
 func newImageInspectCmd(imageAPI api.ImageAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:   "inspect [selector]",
@@ -322,9 +312,7 @@ Examples:
 				return fmt.Errorf("image not found: %s", prefix)
 			}
 
-			if jsonOutput {
-				b, _ := json.MarshalIndent(info, "", "  ")
-				fmt.Println(string(b))
+			if common.RecordResult(info) {
 				return nil
 			}
 
@@ -336,8 +324,6 @@ Examples:
 			return nil
 		},
 	}
-
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 
 	return cmd
 }
@@ -434,6 +420,7 @@ Examples:
 					prog.UpdateText(e.Message)
 				}
 			})
+			common.RecordResult(img)
 			prog.Stop()
 			if err != nil {
 				return err
@@ -521,6 +508,9 @@ Examples:
 			prog.Stop()
 			if warmErr != nil {
 				return warmErr
+			}
+			if common.RecordResult(paths) {
+				return nil
 			}
 
 			displayName := imageID

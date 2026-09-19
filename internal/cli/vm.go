@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -78,7 +77,6 @@ func NewVMCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 // --- ls (list all VMs) ---
 
 func newVMListCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
-	var jsonOutput bool
 	var longOutput bool
 
 	cmd := &cobra.Command{
@@ -86,11 +84,10 @@ func newVMListCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 		Aliases: []string{"list"},
 		Short:   "List all VMs.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVMList(vmAPI, configAPI, cmd, jsonOutput, longOutput)
+			return runVMList(vmAPI, configAPI, cmd, common.StructuredOutput(), longOutput)
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&longOutput, "long", false, "Show full listing with all columns")
 	return cmd
 }
@@ -98,12 +95,7 @@ func newVMListCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 func runVMList(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonOutput, longOutput bool) error {
 	vms := vmAPI.VMList(cmd.Context())
 
-	if jsonOutput {
-		if vms == nil {
-			vms = []*model.VMItem{}
-		}
-		b, _ := json.MarshalIndent(vms, "", "  ")
-		fmt.Println(string(b))
+	if common.RecordResult(vms) {
 		return nil
 	}
 
@@ -115,17 +107,15 @@ func runVMList(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jso
 // --- ps (list running VMs) ---
 
 func newVMpsCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:   "ps",
 		Short: "List running VMs (active processes).",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVMps(vmAPI, configAPI, cmd, jsonOutput)
+			return runVMps(vmAPI, configAPI, cmd, common.StructuredOutput())
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 
@@ -133,12 +123,7 @@ func runVMps(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonO
 	// Server-side filtering by status
 	vms := vmAPI.VMList(cmd.Context(), string(model.VMStatusStarting), string(model.VMStatusRunning))
 
-	if jsonOutput {
-		if vms == nil {
-			vms = []*model.VMItem{}
-		}
-		b, _ := json.MarshalIndent(vms, "", "  ")
-		fmt.Println(string(b))
+	if common.RecordResult(vms) {
 		return nil
 	}
 
@@ -319,6 +304,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 					prog.UpdateText(e.Message)
 				}
 			})
+			common.RecordResult(vms)
 			if err != nil {
 				return fmt.Errorf("create VMs: %w", err)
 			}
@@ -431,6 +417,9 @@ func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, forc
 
 	// Use batch API — pass all identifiers at once
 	removeResult := vmAPI.VMRemove(cmd.Context(), inputs.VMInput{Identifiers: identifiers, Force: force})
+	if common.StructuredOutput() {
+		return common.RecordBatch(removeResult)
+	}
 	if removeResult.HasErrors() {
 		for _, r := range removeResult.Items {
 			if r.IsOK() {
@@ -472,6 +461,9 @@ func newVMStartCmd(vmAPI api.VMAPI) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			startResult := vmAPI.VMStart(cmd.Context(), inputs.VMInput{Identifiers: args})
+			if common.StructuredOutput() {
+				return common.RecordBatch(startResult)
+			}
 			if startResult.HasErrors() {
 				for _, r := range startResult.Items {
 					if !r.IsOK() {
@@ -502,6 +494,9 @@ func newVMStopCmd(vmAPI api.VMAPI) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stopResult := vmAPI.VMStop(cmd.Context(), inputs.VMInput{Identifiers: args, Force: force})
+			if common.StructuredOutput() {
+				return common.RecordBatch(stopResult)
+			}
 			if stopResult.HasErrors() {
 				for _, r := range stopResult.Items {
 					if !r.IsOK() {
@@ -535,6 +530,9 @@ func newVMRebootCmd(vmAPI api.VMAPI) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rebootResult := vmAPI.VMReboot(cmd.Context(), inputs.VMInput{Identifiers: args, Force: force})
+			if common.StructuredOutput() {
+				return common.RecordBatch(rebootResult)
+			}
 			if rebootResult.HasErrors() {
 				for _, r := range rebootResult.Items {
 					if !r.IsOK() {
@@ -566,6 +564,9 @@ func newVMPauseCmd(vmAPI api.VMAPI) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pauseResult := vmAPI.VMPause(cmd.Context(), inputs.VMInput{Identifiers: args})
+			if common.StructuredOutput() {
+				return common.RecordBatch(pauseResult)
+			}
 			if pauseResult.HasErrors() {
 				for _, r := range pauseResult.Items {
 					if !r.IsOK() {
@@ -594,6 +595,9 @@ func newVMResumeCmd(vmAPI api.VMAPI) *cobra.Command {
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resumeResult := vmAPI.VMResume(cmd.Context(), inputs.VMInput{Identifiers: args})
+			if common.StructuredOutput() {
+				return common.RecordBatch(resumeResult)
+			}
 			if resumeResult.HasErrors() {
 				for _, r := range resumeResult.Items {
 					if !r.IsOK() {
@@ -615,7 +619,6 @@ func newVMResumeCmd(vmAPI api.VMAPI) *cobra.Command {
 // --- inspect ---
 
 func newVMInspectCmd(vmAPI api.VMAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:               "inspect [selector]",
@@ -630,9 +633,7 @@ func newVMInspectCmd(vmAPI api.VMAPI) *cobra.Command {
 				return err
 			}
 
-			if jsonOutput {
-				b, _ := json.MarshalIndent(info, "", "  ")
-				fmt.Println(string(b))
+			if common.RecordResult(info) {
 				return nil
 			}
 
@@ -645,6 +646,5 @@ func newVMInspectCmd(vmAPI api.VMAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }

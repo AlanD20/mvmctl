@@ -79,6 +79,7 @@ Multiple sources require a directory destination (trailing "/").`,
 			})
 
 			prog.Stop()
+			common.RecordResult(result)
 
 			// --- Result handling ---
 			if cpErr != nil {

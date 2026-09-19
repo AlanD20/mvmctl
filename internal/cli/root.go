@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -43,6 +44,7 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	cmd.PersistentFlags().SortFlags = false
 	cmd.PersistentFlags().Bool("verbose", false, "Enable verbose output")
 	cmd.PersistentFlags().Bool("debug", false, "Enable debug mode")
+	cmd.PersistentFlags().Bool("json", false, "Emit one structured JSON response")
 
 	// Version flag on root command only (not persistent).
 	// Handled in RunE: PersistentPreRunE short-circuits when --version is set,
@@ -52,6 +54,13 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	originalRunE := cmd.RunE
 	cmd.RunE = func(c *cobra.Command, args []string) error {
 		if showVersion {
+			if common.RecordResult(struct {
+				Version string `json:"version"`
+			}{
+				Version: libversion.FormatVersion(c.Context(), libversion.GetVersion(c.Context())),
+			}) {
+				return nil
+			}
 			fmt.Printf(
 				"%s %s\n",
 				infra.CLIName,
@@ -122,7 +131,45 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 		cmd.AddCommand(NewPolicyCmd(op))
 	}
 
+	configureStructuredCommands(cmd)
+	help := cmd.HelpFunc()
+	cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
+		if !common.StructuredOutput() {
+			help(c, args)
+			return
+		}
+		var text bytes.Buffer
+		previous := c.OutOrStdout()
+		c.SetOut(&text)
+		help(c, args)
+		c.SetOut(previous)
+		common.RecordResult(struct {
+			Text string `json:"text"`
+		}{Text: text.String()})
+	})
 	return cmd
+}
+
+func configureStructuredCommands(cmd *cobra.Command) {
+	if run := cmd.RunE; run != nil {
+		cmd.RunE = func(c *cobra.Command, args []string) error {
+			if common.StructuredOutput() {
+				for current := c; current != nil; current = current.Parent() {
+					if current.Parent() != c.Root() {
+						continue
+					}
+					switch current.Name() {
+					case "exec", "ssh", "logs", "completion", "run", "init":
+						return common.UnsupportedOutput(c.CommandPath())
+					}
+				}
+			}
+			return run(c, args)
+		}
+	}
+	for _, child := range cmd.Commands() {
+		configureStructuredCommands(child)
+	}
 }
 
 // --- PersistentPreRunE ---
@@ -202,6 +249,12 @@ func newVersionCmd() *cobra.Command {
 		RunE: func(c *cobra.Command, args []string) error {
 			fullVersion := libversion.FormatVersion(c.Context(), libversion.GetVersion(c.Context()))
 			gitInfo := libversion.GetGitVersionInfo(c.Context())
+			if common.RecordResult(struct {
+				Version string `json:"version"`
+				Git     string `json:"git"`
+			}{Version: fullVersion, Git: gitInfo}) {
+				return nil
+			}
 
 			fmt.Printf("%s %s\n", infra.CLIName, fullVersion)
 

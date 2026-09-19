@@ -2,7 +2,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"mvmctl/internal/cli/common"
@@ -54,7 +53,6 @@ func NewVolumeCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.Comma
 }
 
 func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.Command {
-	var jsonOutput bool
 	var longOutput bool
 
 	cmd := &cobra.Command{
@@ -65,12 +63,7 @@ func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.C
 		RunE: func(cmd *cobra.Command, args []string) error {
 			volumes := volumeAPI.VolumeListAll(cmd.Context())
 
-			if jsonOutput {
-				if volumes == nil {
-					volumes = []*model.VolumeItem{}
-				}
-				jsonBytes, _ := json.MarshalIndent(volumes, "", "  ")
-				fmt.Println(string(jsonBytes))
+			if common.RecordResult(volumes) {
 				return nil
 			}
 
@@ -81,7 +74,6 @@ func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.C
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&longOutput, "long", false, "Show full listing with all columns")
 	return cmd
 }
@@ -119,6 +111,7 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 				Writeback: writebackPtr,
 			}
 			vol, err := volumeAPI.VolumeCreate(cmd.Context(), input)
+			common.RecordResult(vol)
 			if err != nil {
 				return err
 			}
@@ -164,6 +157,9 @@ func newVolumeRemoveCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 		ValidArgsFunction: completeVolumeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			removeResult := volumeAPI.VolumeRemove(cmd.Context(), inputs.VolumeInput{Identifiers: args}, force)
+			if common.StructuredOutput() {
+				return common.RecordBatch(removeResult)
+			}
 			for _, r := range removeResult.Items {
 				itemName := "unknown"
 				if r.Item != nil {
@@ -193,7 +189,6 @@ func newVolumeRemoveCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 }
 
 func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:               "inspect [selector]",
@@ -208,8 +203,7 @@ func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 				return err
 			}
 
-			if jsonOutput {
-				fmt.Println(common.MarshalJSONDefaultStr(info))
+			if common.RecordResult(info) {
 				return nil
 			}
 
@@ -218,7 +212,6 @@ func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 

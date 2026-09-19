@@ -101,6 +101,9 @@ func newEnvApplyCmd(envAPI api.API) *cobra.Command {
 			}
 
 			onProgress := func(e event.Progress) {
+				if common.StructuredOutput() {
+					return
+				}
 				if strings.HasPrefix(e.Phase, "ssh:") {
 					// SSH output — print directly, no formatting.
 					fmt.Fprintln(os.Stderr, e.Message)
@@ -139,6 +142,7 @@ func newEnvListCmd(_ api.API) *cobra.Command {
 		Short:   "List all saved environments",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			summaries, err := env.List(cmd.Context())
+			common.RecordResult(summaries)
 			if err != nil {
 				return fmt.Errorf("list envs failed: %w", err)
 			}
@@ -179,6 +183,9 @@ This is a read-only operation — nothing is created or destroyed.`,
 			result, err := env.Diff(cmd.Context(), args[0])
 			if err != nil {
 				return fmt.Errorf("env diff failed: %w", err)
+			}
+			if common.RecordResult(result) {
+				return nil
 			}
 
 			if len(result.New) == 0 && len(result.Removed) == 0 && len(result.Drifted) == 0 {
@@ -254,6 +261,9 @@ apply (not created by the workflow) are left intact.`,
 			}
 
 			onProgress := func(e event.Progress) {
+				if common.StructuredOutput() {
+					return
+				}
 				if strings.HasPrefix(e.Phase, "ssh:") {
 					fmt.Fprintln(os.Stderr, e.Message)
 				} else if e.Message != "" {

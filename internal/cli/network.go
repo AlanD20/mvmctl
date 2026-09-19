@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -69,7 +68,6 @@ func NewNetworkCmd(networkAPI api.NetworkAPI, configAPI api.ConfigAPI) *cobra.Co
 }
 
 func newNetworkListCmd(networkAPI api.NetworkAPI, configAPI api.ConfigAPI) *cobra.Command {
-	var jsonOutput bool
 	var longOutput bool
 
 	cmd := &cobra.Command{
@@ -82,12 +80,7 @@ func newNetworkListCmd(networkAPI api.NetworkAPI, configAPI api.ConfigAPI) *cobr
 				return err
 			}
 
-			if jsonOutput {
-				if nets == nil {
-					nets = []*model.NetworkItem{}
-				}
-				data, _ := json.MarshalIndent(nets, "", "  ")
-				fmt.Println(string(data))
+			if common.RecordResult(nets) {
 				return nil
 			}
 
@@ -98,7 +91,6 @@ func newNetworkListCmd(networkAPI api.NetworkAPI, configAPI api.ConfigAPI) *cobr
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&longOutput, "long", false, "Show full listing with all columns")
 	return cmd
 }
@@ -164,6 +156,7 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 			}
 
 			net, err := networkAPI.NetworkCreate(cmd.Context(), input)
+			common.RecordResult(net)
 			if err != nil {
 				return fmt.Errorf("create network failed: %w", err)
 			}
@@ -249,7 +242,6 @@ func newNetworkRemoveCmd(networkAPI api.NetworkAPI) *cobra.Command {
 }
 
 func newNetworkInspectCmd(networkAPI api.NetworkAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:               "inspect [selector]",
@@ -271,11 +263,10 @@ func newNetworkInspectCmd(networkAPI api.NetworkAPI) *cobra.Command {
 
 			info, err := networkAPI.NetworkInspect(cmd.Context(), inputs.NetworkInput{Identifiers: []string{name}})
 			if err != nil {
-				return fmt.Errorf("network not found: %s", name)
+				return fmt.Errorf("network not found: %s: %w", name, err)
 			}
 
-			if jsonOutput {
-				fmt.Println(common.MarshalJSONDefaultStr(info))
+			if common.RecordResult(info) {
 				return nil
 			}
 
@@ -284,12 +275,10 @@ func newNetworkInspectCmd(networkAPI api.NetworkAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 
 func newNetworkSyncCmd(networkAPI api.NetworkAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:               "sync [selectors...]",
@@ -306,8 +295,7 @@ func newNetworkSyncCmd(networkAPI api.NetworkAPI) *cobra.Command {
 				return fmt.Errorf("sync failed: %w", err)
 			}
 
-			if jsonOutput {
-				fmt.Println(common.MarshalJSONDefaultStr(results))
+			if common.RecordResult(results) {
 				return nil
 			}
 
@@ -343,7 +331,6 @@ func newNetworkSyncCmd(networkAPI api.NetworkAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 
