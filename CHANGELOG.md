@@ -937,11 +937,14 @@ composition is described above; the current incomplete-work inventory is under *
 ### Security work still pending
 
 Current incomplete work includes per-volume/aggregate storage policy, trusted snapshot capture and immutable restore
-backing, final host reset/shared-dispatch admission composition, remaining image deblob/fstab/conversion/archive
+backing, remaining image conversion/archive construction and staging recovery,
 effects, residual legacy privilege/backend removal, and qualification. Memory policy stays unchanged pending
-diagnosis. Snapshot, extra-volume, and PCI launches refuse unsupported selections; host clean/reset remain blocked.
-Host admission, schema-2 init, and exact Jailer/network/firewall reset-absence guards are implemented, but those guards
-alone do not perform administrator rollback. Prior-boot cleanup consumes a concrete retained VM/cgroup absence proof,
+diagnosis. Snapshot, extra-volume, and PCI launches refuse unsupported selections; public host clean remains blocked.
+Shared dispatcher admission and guarded administrator reset are composed. Reset requires marker-only sudoers and
+compatible root journals, rejects live or ambiguous managed state, and restores recorded settings through retryable
+rollback receipts. It retains disabled admission after reset or restoration failure and preserves unrelated administrator
+changes and authority history. Typed image deblob/fstab operations now compose with the durable shrink journal.
+Prior-boot cleanup consumes a concrete retained VM/cgroup absence proof,
 retires topology only after namespace/link absence, and preserves firewall reservations/grants. Managed networks
 can rebootstrap exact logical intent using fresh kernel identities, without adopting a competing bridge. These paths
 are unverified. Surviving namespace placeholders and ambiguous ownership remain fail-closed. Old-boot network removal
