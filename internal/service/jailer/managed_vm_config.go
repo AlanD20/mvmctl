@@ -51,6 +51,9 @@ type vmFirecrackerLaunchIntent struct {
 	enableMetrics   bool
 	cpuConfig       *model.CpuConfig
 	vsockCID        *uint32
+	volumes         []vmVolumeResourceSpec
+	deviceProfile   *vmFirecrackerDeviceProfile
+	pciEnabled      bool
 }
 
 // vmFirecrackerTapIdentity is deliberately not constructible from the wire. The root topology authority supplies
@@ -204,6 +207,9 @@ func marshalVMFirecrackerLaunchIntent(intent vmFirecrackerLaunchIntent) ([]byte,
 	if intent.cpuConfig != nil && intent.cpuConfig.KvmCapabilities == nil {
 		return nil, managedVMResourceValidationError("managed Firecracker CPU configuration is incomplete")
 	}
+	if err := validateVMFirecrackerDeviceBudget(intent); err != nil {
+		return nil, err
+	}
 	canonical, err := json.Marshal(buildManagedFirecrackerConfig(intent))
 	if err != nil {
 		return nil, managedVMResourceAtomicError("encode managed Firecracker launch intent", err)
@@ -217,6 +223,11 @@ func marshalVMFirecrackerLaunchIntent(intent vmFirecrackerLaunchIntent) ([]byte,
 func cloneVMFirecrackerLaunchIntent(intent vmFirecrackerLaunchIntent) vmFirecrackerLaunchIntent {
 	cloned := intent
 	cloned.cpuConfig = cloneManagedCPUConfig(intent.cpuConfig)
+	cloned.volumes = slices.Clone(intent.volumes)
+	if intent.deviceProfile != nil {
+		profile := *intent.deviceProfile
+		cloned.deviceProfile = &profile
+	}
 	if intent.vsockCID != nil {
 		cid := *intent.vsockCID
 		cloned.vsockCID = &cid
@@ -249,6 +260,13 @@ func buildManagedFirecrackerConfig(intent vmFirecrackerLaunchIntent) managedFire
 		drives = append(drives, managedFirecrackerDrive{
 			DriveID: "cloud-init", PathOnHost: "/" + infra.VMCloudInitISOFilename,
 			IsRootDevice: false, IsReadOnly: true, CacheType: model.CacheTypeUnsafe, IOEngine: "Sync",
+		})
+	}
+	for _, volume := range intent.volumes {
+		drives = append(drives, managedFirecrackerDrive{
+			DriveID: string(volume.id), PathOnHost: volume.jailPath(),
+			IsReadOnly: volume.access == vmVolumeReadOnly,
+			CacheType:  volume.cacheType, IOEngine: "Sync",
 		})
 	}
 	config := managedFirecrackerConfig{

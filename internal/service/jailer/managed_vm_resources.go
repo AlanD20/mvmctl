@@ -117,6 +117,11 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	if err := validateVMLaunchResourceSpec(spec); err != nil {
 		return nil, err
 	}
+	// CRITICAL: Descriptor identity and MMIO capacity do not establish storage admission.
+	// The volume/snapshot resource-limit decision must supply that policy before launch consumes volumes.
+	if len(spec.firecracker.volumes) != 0 {
+		return nil, managedVMResourceValidationError("managed volume launch storage policy is not approved")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, managedVMResourceAtomicError("pin managed VM launch resources", err)
 	}
