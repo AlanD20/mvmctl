@@ -2,8 +2,6 @@ package loopmount
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,7 +9,6 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/provcontent"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
@@ -19,44 +16,13 @@ import (
 	loopmountsvc "mvmctl/internal/service/loopmount"
 )
 
-// runWireOp serializes a WireInput to JSON, pipes it to
-// "sudo env mvm run provision" via stdin, and returns the parsed WireOutput.
-func runWireOp(ctx context.Context, input *loopmountsvc.WireInput) (*loopmountsvc.WireOutput, error) {
-	data, err := json.Marshal(input)
-	if err != nil {
-		return nil, fmt.Errorf("marshal wire input: %w", err)
-	}
-
-	mvmPath, _ := os.Executable()
-	provisionArgs := []string{mvmPath, "run", "provision"}
-	if !system.IsRoot() {
-		provisionArgs = append([]string{"sudo"}, provisionArgs...)
-	}
-	result, err := system.DefaultRunner.Run(ctx, provisionArgs,
-		system.RunCmdOpts{Capture: true, Check: true, Input: string(data)})
-	if err != nil {
-		return nil, fmt.Errorf("provision subprocess failed: %s: %w", result.Stderr, err)
-	}
-
-	var output loopmountsvc.WireOutput
-	if err := json.Unmarshal([]byte(result.Stdout), &output); err != nil {
-		return nil, fmt.Errorf("parse wire output: %s: %w", result.Stdout, err)
-	}
-	if output.Status == "error" {
-		return &output, fmt.Errorf("provision failed: %s (step: %s)", output.Error, output.Step)
-	}
-	return &output, nil
-}
-
-var pc = provcontent.Builder{}
-
 // LoopMountBackend implements the Backend interface using loop-mount
-// (mounts the rootfs via loop device, operates directly with host tools).
+// authority for managed VMs. Image effects use the image domain's canonical staging producer;
+// partition extraction stays in the normal process and never creates a privileged raw-path request.
 type LoopMountBackend struct {
 	rootfsPath    string
 	fsType        string
 	cacheDir      string
-	ops           []provcontent.Operation
 	managedVM     bool
 	vmID          string
 	plan          loopmountsvc.VMProvisionPlan
@@ -81,55 +47,31 @@ func NewLoopMountBackend(ctx context.Context, rootfsPath string, fsType string, 
 // --- Builder methods -- queue provisioning operations ---
 
 func (b *LoopMountBackend) Resize(ctx context.Context, targetSizeBytes int64) error {
-	if b.managedVM {
-		if targetSizeBytes <= 0 {
-			return errs.New(errs.CodeValidationFailed, "managed VM resize requires a positive grow target")
-		}
-		b.plan.ResizeBytes, b.pending = uint64(targetSizeBytes), true
-		return nil
+	if targetSizeBytes <= 0 {
+		return errs.New(errs.CodeValidationFailed, "managed VM resize requires a positive grow target; image shrink requires managed image staging")
 	}
-	if targetSizeBytes == 0 {
-		b.ops = append(b.ops, pc.BuildShrinkOps(0)...)
-	} else {
-		b.ops = append(b.ops, pc.BuildResizeOps(targetSizeBytes)...)
-	}
+	b.plan.ResizeBytes, b.pending = uint64(targetSizeBytes), true
 	return nil
 }
 
 func (b *LoopMountBackend) SetHostname(ctx context.Context, hostname string) error {
-	if b.managedVM {
-		b.plan.Hostname, b.pending = &hostname, true
-		return nil
-	}
-	b.ops = append(b.ops, pc.BuildHostnameOps(hostname)...)
+	b.plan.Hostname, b.pending = &hostname, true
 	return nil
 }
 
 func (b *LoopMountBackend) InjectDNS(ctx context.Context, dnsServer string) error {
-	if b.managedVM {
-		b.plan.DNS, b.pending = &dnsServer, true
-		return nil
-	}
-	b.ops = append(b.ops, pc.BuildDNSOps(dnsServer)...)
+	b.plan.DNS, b.pending = &dnsServer, true
 	return nil
 }
 
 func (b *LoopMountBackend) SetupSSH(ctx context.Context, user string, sshPubkeys []string) error {
-	if b.managedVM {
-		b.plan.SSH = &loopmountsvc.SSHSetup{User: user, PublicKeys: append([]string(nil), sshPubkeys...)}
-		b.pending = true
-		return nil
-	}
-	b.ops = append(b.ops, pc.BuildSSHOps(user, sshPubkeys)...)
+	b.plan.SSH = &loopmountsvc.SSHSetup{User: user, PublicKeys: append([]string(nil), sshPubkeys...)}
+	b.pending = true
 	return nil
 }
 
 func (b *LoopMountBackend) SetupSudo(ctx context.Context, user string) error {
-	if b.managedVM {
-		b.plan.SudoUser, b.pending = &user, true
-		return nil
-	}
-	b.ops = append(b.ops, pc.SetupSudo(user)...)
+	b.plan.SudoUser, b.pending = &user, true
 	return nil
 }
 
@@ -138,64 +80,30 @@ func (b *LoopMountBackend) DisableCloudInit(ctx context.Context) error {
 }
 
 func (b *LoopMountBackend) InjectCloudInit(ctx context.Context, cloudInitDir string) error {
-	if b.managedVM {
-		if cloudInitDir != filepath.Join(b.cacheDir, "vms", b.vmID, "cloud-init") {
-			return errs.New(errs.CodeValidationFailed, "managed VM cloud-init must use its fixed seed directory")
-		}
-		b.plan.InjectCloudInit, b.pending = true, true
-		return nil
+	if !b.managedVM || cloudInitDir != filepath.Join(b.cacheDir, "vms", b.vmID, "cloud-init") {
+		return errs.New(errs.CodeValidationFailed, "managed VM cloud-init must use its fixed seed directory")
 	}
-	b.ops = append(b.ops, pc.BuildCloudInitInjectOps(cloudInitDir)...)
+	b.plan.InjectCloudInit, b.pending = true, true
 	return nil
 }
 
-// DetectOS detects OS type from the rootfs via the loopmount service subprocess.
+// DetectOS requires the image domain's canonical staging producer for LoopMount images.
 func (b *LoopMountBackend) DetectOS(ctx context.Context) (string, error) {
-	if b.managedVM {
-		return "", errs.New(errs.CodeValidationFailed, "managed VM provisioning requires its image OS metadata")
-	}
-	out, err := runWireOp(ctx, &loopmountsvc.WireInput{
-		Image:  b.rootfsPath,
-		Action: "detect_os",
-		FsType: b.fsType,
-	})
-	if err != nil {
-		slog.Warn("OS detection failed, falling back to 'linux'", "error", err)
-		return "linux", nil
-	}
-	if out.OsType == "" {
-		return "linux", nil
-	}
-	return out.OsType, nil
+	return "", errs.New(errs.CodeValidationFailed, "LoopMount OS inspection requires managed image staging; VM provisioning uses its image OS metadata")
 }
 
 // Deblob queues deblob (OS cache cleanup) operations.
 func (b *LoopMountBackend) Deblob(ctx context.Context, osType *string) error {
-	if b.managedVM {
-		if osType == nil || *osType == "" {
-			return errs.New(errs.CodeValidationFailed, "managed VM deblob requires its image OS metadata")
-		}
-		value := *osType
-		b.plan.DeblobOS, b.pending = &value, true
-		return nil
-	}
 	if osType == nil || *osType == "" {
-		detected, err := b.DetectOS(ctx)
-		if err != nil {
-			return fmt.Errorf("OS detection for deblob failed: %w", err)
-		}
-		osType = &detected
+		return errs.New(errs.CodeValidationFailed, "managed VM deblob requires its image OS metadata")
 	}
-	b.ops = append(b.ops, pc.BuildDeblobOps(*osType)...)
+	value := *osType
+	b.plan.DeblobOS, b.pending = &value, true
 	return nil
 }
 
 func (b *LoopMountBackend) FixFstab(ctx context.Context) error {
-	if b.managedVM {
-		b.plan.FixFstab, b.pending = true, true
-		return nil
-	}
-	b.ops = append(b.ops, pc.BuildFixFstabOps()...)
+	b.plan.FixFstab, b.pending = true, true
 	return nil
 }
 
@@ -205,60 +113,19 @@ func (b *LoopMountBackend) Shrink(ctx context.Context) error {
 
 // InjectAgent queues the vsock guest agent files into the rootfs.
 func (b *LoopMountBackend) InjectAgent(_ context.Context, agentBinary []byte, port int, token string) error {
-	if b.managedVM {
-		b.plan.Agent = &loopmountsvc.AgentSetup{Port: port, Token: token}
-		b.pending = true
-		return nil
-	}
-	ops := provcontent.Builder{}.BuildAgentOps(agentBinary, port, token)
-	b.ops = append(b.ops, ops...)
+	b.plan.Agent = &loopmountsvc.AgentSetup{Port: port, Token: token}
+	b.pending = true
 	return nil
 }
 
 // --- Execution ---
 
-// Run executes all queued operations via the loopmount service subprocess.
-// Clears queued ops after execution so subsequent calls only send new ops.
+// Run executes the exact queued managed-VM plan. An error retains the plan for replay.
 func (b *LoopMountBackend) Run(ctx context.Context) error {
-	if b.managedVM {
-		return b.runManagedVM(ctx)
+	if !b.managedVM {
+		return errs.New(errs.CodeValidationFailed, "LoopMount effects require a canonical managed VM or image staging resource")
 	}
-	winput := loopmountsvc.WireInput{
-		Image:  b.rootfsPath,
-		Action: "provision",
-		FsType: b.fsType,
-	}
-	for _, o := range b.ops {
-		switch o := o.(type) {
-		case provcontent.FileOp:
-			mode := o.Mode
-			if mode == 0 {
-				mode = infra.PublicKeyPerm
-			}
-			winput.Ops.Files = append(winput.Ops.Files, loopmountsvc.WireFileOp{
-				Path: o.Path,
-				Data: base64.StdEncoding.EncodeToString(o.Data),
-				Mode: mode,
-				UID:  o.UID,
-				GID:  o.GID,
-			})
-		case provcontent.ChrootOp:
-			winput.Ops.Commands = append(winput.Ops.Commands, o.Command)
-		case provcontent.CopyDirOp:
-			winput.Ops.CopyDirs = append(winput.Ops.CopyDirs, loopmountsvc.WireCopyDirOp{
-				Src: o.Src, Dst: o.Dst, Mode: infra.ExecutablePerm,
-			})
-		case provcontent.ResizeOp:
-			winput.Ops.Resize = &loopmountsvc.WireResizeOp{
-				Action: string(o.Action), Bytes: o.Bytes, Headroom: o.Headroom,
-			}
-		}
-	}
-
-	_, err := runWireOp(ctx, &winput)
-	// Clear queued ops so subsequent Run() calls don't re-execute stale ops.
-	b.ops = nil
-	return err
+	return b.runManagedVM(ctx)
 }
 
 func (b *LoopMountBackend) runManagedVM(ctx context.Context) error {
@@ -290,24 +157,9 @@ func (b *LoopMountBackend) runManagedVM(ctx context.Context) error {
 
 // --- Other Backend interface methods ---
 
-// ConvertTo converts the image filesystem to targetFS via loop-mount subprocess.
-// On success, updates b.fsType so subsequent operations (deblob, shrink) use
-// the correct filesystem type for mounting.
+// ConvertTo requires the image domain's durable staged replacement transaction.
 func (b *LoopMountBackend) ConvertTo(ctx context.Context, targetFS string) error {
-	if b.managedVM {
-		return errs.New(errs.CodeValidationFailed, "managed VM filesystem conversion must precede image cloning")
-	}
-	_, err := runWireOp(ctx, &loopmountsvc.WireInput{
-		Image:    b.rootfsPath,
-		Action:   "convert_fs",
-		FsType:   b.fsType,
-		TargetFS: targetFS,
-	})
-	if err != nil {
-		return err
-	}
-	b.fsType = targetFS
-	return nil
+	return errs.New(errs.CodeValidationFailed, "LoopMount filesystem conversion requires managed image staging before VM cloning")
 }
 
 // ExtractPartition extracts root partition from a raw disk image.

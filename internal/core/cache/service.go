@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	loopmountsvc "mvmctl/internal/service/loopmount"
+	"mvmctl/pkg/errs"
 )
 
 // Service provides stateless cache cleanup operations.
@@ -124,47 +124,29 @@ func (s *Service) PruneWarmImages(ctx context.Context, dryRun bool) bool {
 	return true
 }
 
-// CleanStaleProvisionMounts cleans stale provision mount directories in tempDir.
-func (s *Service) CleanStaleProvisionMounts(ctx context.Context, dryRun bool) bool {
-	cleaned := false
-
-	entries, err := os.ReadDir(s.tempDir)
-	if err != nil {
-		return false
+// CleanStaleProvisionMounts refuses legacy mount state without attempting adoption or path-based unmount.
+// Typed LoopMount operations retain private mount namespaces and do not create these legacy directories.
+func (s *Service) CleanStaleProvisionMounts(ctx context.Context, dryRun bool) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, errs.WrapMsg(errs.CodeCacheCleanFailed, "inspect legacy provision state", err)
 	}
-
+	entries, err := os.ReadDir(s.tempDir)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, errs.WrapMsg(errs.CodeCacheCleanFailed, "inspect legacy provision state", err)
+	}
 	for _, entry := range entries {
 		if !strings.HasPrefix(entry.Name(), infra.MVMProvisionPrefix) {
 			continue
 		}
-		if !entry.IsDir() {
-			continue
-		}
-
-		fullPath := filepath.Join(s.tempDir, entry.Name())
-
-		if !dryRun {
-			// Both are attempted; if either fails, a single warning is logged.
-			var hadError bool
-			if isMountPoint(fullPath) {
-				slog.Info("Unmounting stale provision mount", "path", fullPath)
-				if !loopmountsvc.CleanupMount(fullPath) {
-					hadError = true
-				}
-			}
-
-			slog.Info("Removing stale provision mount point", "path", fullPath)
-			if err := os.Remove(fullPath); err != nil {
-				hadError = true
-			}
-
-			if hadError {
-				slog.Warn("Failed to clean stale provision mount", "path", fullPath)
-			}
-		}
-
-		cleaned = true
+		// CRITICAL: A name, mountpoint observation, or process path is not root-owned authority.
+		// Even dry-run refuses this state instead of reporting it as safely reclaimable.
+		return false, errs.New(errs.CodeCacheCleanFailed,
+			"legacy LoopMount state cannot be adopted or automatically cleaned; an administrator must stop the old installation, remove its mounts and processes using independently established ownership, and perform a clean installation",
+			errs.WithClass(errs.ClassConflict),
+			errs.WithDetails(map[string]any{"legacy_provision_state": filepath.Join(s.tempDir, entry.Name()), "clean_install_required": true}))
 	}
-
-	return cleaned
+	return false, nil
 }

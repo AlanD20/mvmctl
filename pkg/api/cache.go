@@ -141,6 +141,10 @@ func (op *Operation) CachePruneBinaries(ctx context.Context, dryRun bool, includ
 
 // CachePruneMisc prunes miscellaneous cache items.
 func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[string]any, error) {
+	staleProvisionCleaned, err := op.Services.Cache.CleanStaleProvisionMounts(ctx, dryRun)
+	if err != nil {
+		return nil, err
+	}
 	binDir := infra.GetBinDir()
 	serviceBinariesCleaned := false
 	if _, err := os.Stat(binDir); err == nil && !dryRun {
@@ -150,7 +154,6 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[strin
 	appliancePruned := guestfs.PruneAppliance(op.CacheDir, dryRun)
 	warmPruned := op.Services.Cache.PruneWarmImages(ctx, dryRun)
 	guestfsStateCleaned := guestfs.CleanStaleState()
-	staleProvisionCleaned := op.Services.Cache.CleanStaleProvisionMounts(ctx, dryRun)
 	result := map[string]any{
 		"service_binaries":       serviceBinariesCleaned,
 		"appliance":              appliancePruned,

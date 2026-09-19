@@ -7,7 +7,6 @@ import (
 
 	"mvmctl/internal/service/console"
 	"mvmctl/internal/service/jailer"
-	"mvmctl/internal/service/loopmount"
 	"mvmctl/internal/service/nocloudnet"
 
 	"github.com/spf13/cobra"
@@ -30,7 +29,6 @@ func newRunCmd() *cobra.Command {
 
 	cmd.AddCommand(newNoCloudNetCmd())
 	cmd.AddCommand(newConsoleCmd())
-	cmd.AddCommand(newProvisionCmd())
 	cmd.AddCommand(newJailerServiceCmd())
 
 	return cmd
@@ -167,28 +165,6 @@ func newConsoleRelayCmd() *cobra.Command {
 			return err
 		}
 		return console.Run(c.Context(), cfg)
-	}
-
-	return cmd
-}
-
-func newProvisionCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "provision",
-		Short: "Run loopmount provision",
-	}
-
-	cmd.Flags().String("input-json", "", "Path to JSON input file (reads from stdin if omitted)")
-	cmd.Flags().String("umount", "", "Path to unmount (shortcut, skips JSON input)")
-
-	cmd.RunE = func(c *cobra.Command, _ []string) error {
-		inputJSON, _ := c.Flags().GetString("input-json")
-		umount, _ := c.Flags().GetString("umount")
-
-		return loopmount.Run(c.Context(), loopmount.Config{
-			InputJSON: inputJSON,
-			Umount:    umount,
-		})
 	}
 
 	return cmd

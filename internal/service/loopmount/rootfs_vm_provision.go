@@ -220,6 +220,9 @@ func (adapter *rootfsVMProvisionAdapter) ProvisionVM(
 	if err := filesystem.Validate(); err != nil {
 		return outcome, rootfsAtomicError("vm provisioning filesystem is invalid", err)
 	}
+	if filesystem == FilesystemXFS && plan.ResizeBytes != 0 {
+		return outcome, rootfsValidationError("managed XFS resize is unsupported; no backing or filesystem mutation was attempted")
+	}
 	admittedBytes, err := inspectRootfsProvisionLease(ctx, adapter.deps, lease)
 	if err != nil {
 		return outcome, err
@@ -364,7 +367,7 @@ func (adapter *rootfsVMProvisionAdapter) ProvisionVM(
 		rootfsInspectMountPath,
 		string(filesystem),
 		rootfsProvisionMountFlags,
-		"",
+		rootfsReadWriteMountOptions(filesystem),
 	); err != nil {
 		return outcome, rootfsAtomicError("mount selected rootfs read-write", err)
 	}
@@ -554,6 +557,13 @@ func pinRootfsProvisionMountedRoot(
 		)
 	}
 	return rootFD, nil
+}
+
+func rootfsReadWriteMountOptions(filesystem Filesystem) string {
+	if filesystem == FilesystemXFS {
+		return "nouuid"
+	}
+	return ""
 }
 
 func convergeRootfsProvisionGrow(

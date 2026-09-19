@@ -298,7 +298,7 @@ func (adapter *rootfsImageInspectAdapter) InspectImage(
 		rootfsInspectMountPath,
 		string(filesystem),
 		rootfsInspectMountFlags,
-		"",
+		rootfsReadOnlyMountOptions(filesystem),
 	); err != nil {
 		return outcome, rootfsAtomicError("mount selected rootfs read-only", err)
 	}
@@ -564,9 +564,20 @@ func rootfsInspectFilesystemMagicMatches(filesystem Filesystem, magic int64) boo
 		return magic == unix.EXT4_SUPER_MAGIC
 	case FilesystemBtrfs:
 		return magic == unix.BTRFS_SUPER_MAGIC
+	case FilesystemXFS:
+		return magic == unix.XFS_SUPER_MAGIC
 	default:
 		return false
 	}
+}
+
+func rootfsReadOnlyMountOptions(filesystem Filesystem) string {
+	if filesystem == FilesystemXFS {
+		// Image clones retain the source UUID. Inspection must neither reject an unrelated
+		// mounted clone nor replay a journal into a read-only admitted backing inode.
+		return "norecovery,nouuid"
+	}
+	return ""
 }
 
 func readRootfsOSRelease(ctx context.Context, deps rootfsImageInspectDeps, rootFD int) (string, error) {

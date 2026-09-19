@@ -211,8 +211,9 @@ func (s *Service) OptimizeImage(
 	}
 	fsUUID := system.DetectFilesystemUUID(ctx, imagePath)
 	tl.Stage("fs_detect")
-	typedOptimization := provisionerType == provisioner.ProvisionerLoopMount &&
-		(fsType == "ext2" || fsType == "ext3" || fsType == "ext4" || fsType == "btrfs")
+	// The selected LoopMount backend always uses its closed managed protocol. An unsupported
+	// filesystem fails admission; it cannot select the retired raw-path service or GuestFS.
+	typedOptimization := provisionerType == provisioner.ProvisionerLoopMount
 
 	// --- Single Provisioner reused across all phases ---
 	// Each method (DetectOS, Run) creates a fresh backend session internally,

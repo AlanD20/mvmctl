@@ -43,6 +43,8 @@ const (
 	FilesystemExt4 Filesystem = "ext4"
 	// FilesystemBtrfs selects a Btrfs root filesystem.
 	FilesystemBtrfs Filesystem = "btrfs"
+	// FilesystemXFS selects an XFS root filesystem; offline shrink is not supported.
+	FilesystemXFS Filesystem = "xfs"
 )
 
 // VMProvisionRequest is the complete intent for one managed VM rootfs.
@@ -142,6 +144,9 @@ func (request VMProvisionRequest) Validate() error {
 	}
 	if err := request.Filesystem.Validate(); err != nil {
 		return err
+	}
+	if request.Filesystem == FilesystemXFS && request.Plan.ResizeBytes != 0 {
+		return validationError("managed XFS resize is unsupported; use the existing filesystem capacity")
 	}
 	return request.Plan.Validate(request.ExpectedRootfsBytes)
 }
@@ -306,7 +311,7 @@ func (plan ImageOptimizePlan) Validate(current Filesystem) error {
 // Validate enforces the closed filesystem set.
 func (filesystem Filesystem) Validate() error {
 	switch filesystem {
-	case FilesystemExt2, FilesystemExt3, FilesystemExt4, FilesystemBtrfs:
+	case FilesystemExt2, FilesystemExt3, FilesystemExt4, FilesystemBtrfs, FilesystemXFS:
 		return nil
 	default:
 		return validationError("managed rootfs filesystem is unsupported")
