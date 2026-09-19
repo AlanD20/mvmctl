@@ -55,6 +55,12 @@ func BeginVMEndpoint(
 	if err := validateEndpointBinding(binding, true); err != nil {
 		return nil, err
 	}
+	return beginMutation(ctx, mutation, binding)
+}
+
+func beginMutation(
+	ctx context.Context, mutation *authorityfs.NetworkMutation, binding EndpointBinding,
+) (_ *MutationLease, returnErr error) {
 	if err := verifyNetworkMutation(ctx, mutation, binding); err != nil {
 		return nil, err
 	}
@@ -215,8 +221,29 @@ func (state *mutationLeaseState) ready(ctx context.Context) error {
 	if _, err := state.network.firewallGenerationNamespace(ctx); err != nil {
 		return err
 	}
+	if err := state.verifyRetainedRecord(ctx); err != nil {
+		return err
+	}
 	if state.uncertain {
 		return state.loadIntent(ctx)
+	}
+	return nil
+}
+
+// CALLER MUST HOLD: state.mu.
+func (state *mutationLeaseState) verifyRetainedRecord(ctx context.Context) error {
+	persistent := state.persistent.state
+	persistent.mu.Lock()
+	defer persistent.mu.Unlock()
+	if !persistent.active || persistent.mutationAmbiguous {
+		return generationAuthorityError("retained firewall record authority is unavailable", nil, nil)
+	}
+	current, evidence, found, err := state.store.read(ctx)
+	if err != nil {
+		return err
+	}
+	if !found || evidence != persistent.evidence || !generationRecordsEqual(current, persistent.record) {
+		return generationAuthorityError("retained firewall generation record changed", nil, nil)
 	}
 	return nil
 }
