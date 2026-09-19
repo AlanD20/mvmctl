@@ -28,6 +28,26 @@ aggregate-storage caps remain unresolved. The user also approved treating other 
 conflicts, and an authenticated root child preparing a fresh pinned jail tree after the
 absence proof and before Jailer execution. Existing caller-created jail trees remain rejected.
 
+Implementation checkpoint: typed launch/abort/cleanup/remove and graceful stop, console relay
+composition, public VM lifecycle and status reads, public managed-network transactions, root
+traffic grants for active/stopped endpoints, prior-boot firewall retirement, and global JSON
+output are committed. These are source integration claims only: no build or test evidence was
+produced in this pass. Existing test fakes and expectations have deliberately not been updated.
+
+Remaining implementation dependencies are explicit: prior-boot topology/process-absence proof
+and managed-network rebootstrap; global retained quiescence plus late admission protection for
+host reset; NoCloud listener ownership; remaining typed loopmount operations; approved memory
+pressure policy; volume storage policy and snapshot capture/backing authority. Console and
+graceful stop must retain their existing behavior. Root-observed process liveness preserves a
+recorded paused guest state because it does not prove guest CPU execution. Public snapshot
+restore and unsupported volume/PCI launches currently reject rather than use legacy authority.
+
+Pending user choices concern memory.high versus memory.max headroom, preserving closed typed
+account/deblob operations versus explicitly removing those features, and NoCloud dynamic-port
+listener proof versus a fixed gateway-bound port. Do not treat unanswered questions as approval.
+Network reboot recovery writers are completing their currently assigned packets. Keep their
+remaining work and any unresolved cleanup interruption windows separate from completed paths.
+
 ## Prepared integration checkpoint (2026-09-13)
 
 The user-authorized batch is complete. Network L3 identity and exact address/link
