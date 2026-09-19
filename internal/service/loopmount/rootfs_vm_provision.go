@@ -89,6 +89,7 @@ type rootfsVMProvisionDeps struct {
 	readlinkAt         func(context.Context, int, string, []byte) (int, error)
 	unlinkAt           func(context.Context, int, string, int) error
 	close              func(context.Context, int) error
+	readDirent         func(context.Context, int, []byte) (int, error)
 	deviceBytes        func(context.Context, int) (uint64, error)
 	tempName           func(context.Context) (string, error)
 	run                func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error)
@@ -164,6 +165,9 @@ func newSystemRootfsVMProvisionAdapter(
 			return unix.Unlinkat(fd, name, flags)
 		},
 		close: func(_ context.Context, fd int) error { return unix.Close(fd) },
+		readDirent: func(_ context.Context, fd int, buffer []byte) (int, error) {
+			return unix.ReadDirent(fd, buffer)
+		},
 		deviceBytes: func(_ context.Context, fd int) (uint64, error) {
 			size, err := unix.IoctlGetInt(fd, unix.BLKGETSIZE64)
 			if err != nil || size < 0 {
@@ -223,8 +227,15 @@ func (adapter *rootfsVMProvisionAdapter) ProvisionVM(
 	if err := plan.Validate(admittedBytes); err != nil {
 		return outcome, rootfsAtomicError("vm provisioning plan is invalid", err)
 	}
-	if plan.InjectCloudInit || plan.DeblobOS != nil {
-		return outcome, rootfsAtomicError("vm provisioning plan contains deliberately unsupported behavior", nil)
+	if plan.Agent != nil && adapter.deps.agentBinary == nil {
+		return outcome, rootfsAtomicError("VM embedded-agent source is unavailable", nil)
+	}
+	var cloudInitSeed *rootfsCloudInitSeed
+	if plan.InjectCloudInit {
+		cloudInitSeed, err = readRootfsCloudInitSeed(ctx, adapter.deps, lease)
+		if err != nil {
+			return outcome, err
+		}
 	}
 	if err := adapter.deps.lockOSThread(ctx); err != nil {
 		return outcome, rootfsAtomicError("lock VM provisioning OS thread", err)
@@ -381,7 +392,9 @@ func (adapter *rootfsVMProvisionAdapter) ProvisionVM(
 			return outcome, err
 		}
 	}
-	tree := rootfsGuestTree{deps: adapter.deps.guestTreeDeps(), rootFD: mountedRootFD, tracker: tracker}
+	tree := rootfsGuestTree{
+		deps: adapter.deps.guestTreeDeps(), rootFD: mountedRootFD, tracker: tracker, cloudInit: cloudInitSeed,
+	}
 	filesWritten, err := applyRootfsProvisionPlan(ctx, tree, adapter.deps, plan)
 	outcome.filesWritten = filesWritten
 	if err != nil {
@@ -397,7 +410,7 @@ func (adapter *rootfsVMProvisionAdapter) ProvisionVM(
 func validateRootfsVMProvisionDeps(deps rootfsVMProvisionDeps) error {
 	if deps.lockOSThread == nil || deps.unlockOSThread == nil || deps.unshare == nil || deps.mount == nil ||
 		deps.unmount == nil || deps.open == nil || deps.fstatfs == nil || deps.statx == nil || deps.ftruncate == nil ||
-		deps.syncfs == nil || deps.deviceBytes == nil || deps.run == nil || deps.agentBinary == nil ||
+		deps.syncfs == nil || deps.deviceBytes == nil || deps.run == nil ||
 		deps.attachLoop == nil || deps.discoverPartitions == nil || deps.probeFilesystem == nil {
 		return rootfsAtomicError("vm provisioning dependencies are incomplete", nil)
 	}
@@ -426,10 +439,10 @@ func (deps rootfsVMProvisionDeps) inspectDeps() rootfsImageInspectDeps {
 
 func (deps rootfsVMProvisionDeps) guestTreeDeps() rootfsGuestTreeDeps {
 	return rootfsGuestTreeDeps{
-		openAt2: deps.openAt2, mkdirAt: deps.mkdirAt, fstat: deps.fstat, fstatAt: deps.fstatAt,
+		openAt2: deps.openAt2, mkdirAt: deps.mkdirAt, fstat: deps.fstat, fstatAt: deps.fstatAt, fstatfs: deps.fstatfs,
 		pread: deps.pread, pwrite: deps.pwrite, fchown: deps.fchown, fchmod: deps.fchmod, fsync: deps.fsync,
 		renameAt: deps.renameAt, symlinkAt: deps.symlinkAt, readlinkAt: deps.readlinkAt,
-		unlinkAt: deps.unlinkAt, close: deps.close, tempName: deps.tempName,
+		unlinkAt: deps.unlinkAt, close: deps.close, tempName: deps.tempName, readDirent: deps.readDirent,
 	}
 }
 
@@ -730,6 +743,13 @@ func applyRootfsProvisionPlan(
 		}
 		return err
 	}
+	if plan.DeblobOS != nil {
+		written, err := applyRootfsDeblob(ctx, tree, *plan.DeblobOS)
+		filesWritten += written
+		if err != nil {
+			return filesWritten, err
+		}
+	}
 	if plan.Hostname != nil {
 		current, unavailable, err := tree.readOptional(ctx, rootfsHostsPath, rootfsProvisionReadBufferLimit)
 		if err != nil {
@@ -763,14 +783,8 @@ func applyRootfsProvisionPlan(
 		if existing, ok := accounts[username]; ok {
 			return existing, nil
 		}
-		passwd, unavailable, err := tree.readOptional(ctx, rootfsPasswdPath, maxRootfsPasswdBytes)
-		if err != nil {
-			return rootfsGuestAccount{}, err
-		}
-		if unavailable {
-			return rootfsGuestAccount{}, rootfsAtomicError("managed guest passwd file is missing", nil)
-		}
-		parsed, err := parseRootfsGuestAccount(passwd, username)
+		parsed, written, err := ensureRootfsGuestAccount(ctx, tree, username)
+		filesWritten += written
 		if err != nil {
 			return rootfsGuestAccount{}, err
 		}
@@ -783,6 +797,20 @@ func applyRootfsProvisionPlan(
 			return filesWritten, err
 		}
 		if len(plan.SSH.PublicKeys) > 0 {
+			if plan.SSH.User != "root" {
+				rootAccount, err := account("root")
+				if err != nil {
+					return filesWritten, err
+				}
+				if _, err := tree.ensureDirectory(ctx, "/root/.ssh", 0700, rootAccount.uid, rootAccount.gid); err != nil {
+					return filesWritten, err
+				}
+				if err := write(rootfsProvisionFile{
+					path: "/root/.ssh/authorized_keys", content: []byte(strings.Join(plan.SSH.PublicKeys, "\n") + "\n"), mode: 0600,
+				}); err != nil {
+					return filesWritten, err
+				}
+			}
 			if _, err := tree.ensureDirectory(
 				ctx,
 				"/"+sshAccount.home+"/.ssh",
@@ -808,6 +836,11 @@ func applyRootfsProvisionPlan(
 		}); err != nil {
 			return filesWritten, err
 		}
+		written, err := configureRootfsSSHBoot(ctx, tree)
+		filesWritten += written
+		if err != nil {
+			return filesWritten, err
+		}
 	}
 	if plan.SudoUser != nil {
 		if _, err := account(*plan.SudoUser); err != nil {
@@ -820,6 +853,9 @@ func applyRootfsProvisionPlan(
 			path:    rootfsSudoPolicyPath,
 			content: []byte(*plan.SudoUser + " ALL=(ALL) NOPASSWD: ALL\n"), mode: 0440,
 		}); err != nil {
+			return filesWritten, err
+		}
+		if err := repairRootfsSudoOwnership(ctx, tree); err != nil {
 			return filesWritten, err
 		}
 	}
@@ -890,6 +926,13 @@ func applyRootfsProvisionPlan(
 			if err := write(rootfsProvisionFile{path: rootfsFstabPath, content: content, mode: 0644}); err != nil {
 				return filesWritten, err
 			}
+		}
+	}
+	if plan.InjectCloudInit {
+		written, err := applyRootfsCloudInitSeed(ctx, tree)
+		filesWritten += written
+		if err != nil {
+			return filesWritten, err
 		}
 	}
 	return filesWritten, nil

@@ -25,6 +25,7 @@ type rootfsGuestTreeDeps struct {
 	openAt2    func(context.Context, int, string, *unix.OpenHow) (int, error)
 	mkdirAt    func(context.Context, int, string, uint32) error
 	fstat      func(context.Context, int, *unix.Stat_t) error
+	fstatfs    func(context.Context, int, *unix.Statfs_t) error
 	fstatAt    func(context.Context, int, string, *unix.Stat_t, int) error
 	pread      func(context.Context, int, []byte, int64) (int, error)
 	pwrite     func(context.Context, int, []byte, int64) (int, error)
@@ -36,13 +37,15 @@ type rootfsGuestTreeDeps struct {
 	readlinkAt func(context.Context, int, string, []byte) (int, error)
 	unlinkAt   func(context.Context, int, string, int) error
 	close      func(context.Context, int) error
+	readDirent func(context.Context, int, []byte) (int, error)
 	tempName   func(context.Context) (string, error)
 }
 
 type rootfsGuestTree struct {
-	deps    rootfsGuestTreeDeps
-	rootFD  int
-	tracker *rootfsProvisionTracker
+	deps      rootfsGuestTreeDeps
+	rootFD    int
+	tracker   *rootfsProvisionTracker
+	cloudInit *rootfsCloudInitSeed
 }
 
 func (tree rootfsGuestTree) readOptional(
@@ -327,13 +330,13 @@ func (tree rootfsGuestTree) replaceAgentEnablementLink(
 	}
 }
 
-// CRITICAL: Callers cannot choose a guest path or target; only the two fixed agent enablement links reach this helper.
+// CRITICAL: Callers cannot choose a guest path or target; only compiled agent and SSH links are admitted.
 func (tree rootfsGuestTree) replaceFixedSymlink(
 	ctx context.Context,
 	path string,
 	target string,
 ) (_ bool, returnErr error) {
-	if !validRootfsAgentEnablementLink(path, target) {
+	if !validRootfsAgentEnablementLink(path, target) && !validRootfsSSHEnablementLink(path, target) {
 		return false, rootfsAtomicError("managed guest agent enablement link is outside policy", nil)
 	}
 	parentFD, leaf, err := tree.openParent(ctx, path)
@@ -642,7 +645,7 @@ func validateRootfsGuestTreeDeps(deps rootfsGuestTreeDeps) error {
 	if deps.openAt2 == nil || deps.mkdirAt == nil || deps.fstat == nil || deps.fstatAt == nil || deps.pread == nil ||
 		deps.pwrite == nil || deps.fchown == nil || deps.fchmod == nil || deps.fsync == nil || deps.renameAt == nil ||
 		deps.symlinkAt == nil || deps.readlinkAt == nil || deps.unlinkAt == nil || deps.close == nil ||
-		deps.tempName == nil {
+		deps.tempName == nil || deps.readDirent == nil || deps.fstatfs == nil {
 		return rootfsAtomicError("managed guest tree dependencies are incomplete", nil)
 	}
 	return nil

@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/provcontent"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/system"
+	"mvmctl/pkg/errs"
 
 	loopmountsvc "mvmctl/internal/service/loopmount"
 )
@@ -51,20 +53,41 @@ var pc = provcontent.Builder{}
 // LoopMountBackend implements the Backend interface using loop-mount
 // (mounts the rootfs via loop device, operates directly with host tools).
 type LoopMountBackend struct {
-	rootfsPath string
-	fsType     string
-	cacheDir   string
-	ops        []provcontent.Operation
+	rootfsPath    string
+	fsType        string
+	cacheDir      string
+	ops           []provcontent.Operation
+	managedVM     bool
+	vmID          string
+	plan          loopmountsvc.VMProvisionPlan
+	pending       bool
+	expectedBytes uint64
 }
 
 // NewLoopMountBackend creates a new LoopMountBackend.
 func NewLoopMountBackend(ctx context.Context, rootfsPath string, fsType string, cacheDir string) *LoopMountBackend {
-	return &LoopMountBackend{rootfsPath: rootfsPath, fsType: fsType, cacheDir: cacheDir}
+	backend := &LoopMountBackend{rootfsPath: rootfsPath, fsType: fsType, cacheDir: cacheDir}
+	relative, err := filepath.Rel(cacheDir, rootfsPath)
+	if err == nil && strings.HasPrefix(relative, "vms"+string(filepath.Separator)) {
+		backend.managedVM = true
+		parts := strings.Split(relative, string(filepath.Separator))
+		if len(parts) == 3 && parts[0] == "vms" && parts[2] == "rootfs.img" {
+			backend.vmID = parts[1]
+		}
+	}
+	return backend
 }
 
 // --- Builder methods -- queue provisioning operations ---
 
 func (b *LoopMountBackend) Resize(ctx context.Context, targetSizeBytes int64) error {
+	if b.managedVM {
+		if targetSizeBytes <= 0 {
+			return errs.New(errs.CodeValidationFailed, "managed VM resize requires a positive grow target")
+		}
+		b.plan.ResizeBytes, b.pending = uint64(targetSizeBytes), true
+		return nil
+	}
 	if targetSizeBytes == 0 {
 		b.ops = append(b.ops, pc.BuildShrinkOps(0)...)
 	} else {
@@ -74,21 +97,38 @@ func (b *LoopMountBackend) Resize(ctx context.Context, targetSizeBytes int64) er
 }
 
 func (b *LoopMountBackend) SetHostname(ctx context.Context, hostname string) error {
+	if b.managedVM {
+		b.plan.Hostname, b.pending = &hostname, true
+		return nil
+	}
 	b.ops = append(b.ops, pc.BuildHostnameOps(hostname)...)
 	return nil
 }
 
 func (b *LoopMountBackend) InjectDNS(ctx context.Context, dnsServer string) error {
+	if b.managedVM {
+		b.plan.DNS, b.pending = &dnsServer, true
+		return nil
+	}
 	b.ops = append(b.ops, pc.BuildDNSOps(dnsServer)...)
 	return nil
 }
 
 func (b *LoopMountBackend) SetupSSH(ctx context.Context, user string, sshPubkeys []string) error {
+	if b.managedVM {
+		b.plan.SSH = &loopmountsvc.SSHSetup{User: user, PublicKeys: append([]string(nil), sshPubkeys...)}
+		b.pending = true
+		return nil
+	}
 	b.ops = append(b.ops, pc.BuildSSHOps(user, sshPubkeys)...)
 	return nil
 }
 
 func (b *LoopMountBackend) SetupSudo(ctx context.Context, user string) error {
+	if b.managedVM {
+		b.plan.SudoUser, b.pending = &user, true
+		return nil
+	}
 	b.ops = append(b.ops, pc.SetupSudo(user)...)
 	return nil
 }
@@ -98,12 +138,22 @@ func (b *LoopMountBackend) DisableCloudInit(ctx context.Context) error {
 }
 
 func (b *LoopMountBackend) InjectCloudInit(ctx context.Context, cloudInitDir string) error {
+	if b.managedVM {
+		if cloudInitDir != filepath.Join(b.cacheDir, "vms", b.vmID, "cloud-init") {
+			return errs.New(errs.CodeValidationFailed, "managed VM cloud-init must use its fixed seed directory")
+		}
+		b.plan.InjectCloudInit, b.pending = true, true
+		return nil
+	}
 	b.ops = append(b.ops, pc.BuildCloudInitInjectOps(cloudInitDir)...)
 	return nil
 }
 
 // DetectOS detects OS type from the rootfs via the loopmount service subprocess.
 func (b *LoopMountBackend) DetectOS(ctx context.Context) (string, error) {
+	if b.managedVM {
+		return "", errs.New(errs.CodeValidationFailed, "managed VM provisioning requires its image OS metadata")
+	}
 	out, err := runWireOp(ctx, &loopmountsvc.WireInput{
 		Image:  b.rootfsPath,
 		Action: "detect_os",
@@ -121,6 +171,14 @@ func (b *LoopMountBackend) DetectOS(ctx context.Context) (string, error) {
 
 // Deblob queues deblob (OS cache cleanup) operations.
 func (b *LoopMountBackend) Deblob(ctx context.Context, osType *string) error {
+	if b.managedVM {
+		if osType == nil || *osType == "" {
+			return errs.New(errs.CodeValidationFailed, "managed VM deblob requires its image OS metadata")
+		}
+		value := *osType
+		b.plan.DeblobOS, b.pending = &value, true
+		return nil
+	}
 	if osType == nil || *osType == "" {
 		detected, err := b.DetectOS(ctx)
 		if err != nil {
@@ -133,6 +191,10 @@ func (b *LoopMountBackend) Deblob(ctx context.Context, osType *string) error {
 }
 
 func (b *LoopMountBackend) FixFstab(ctx context.Context) error {
+	if b.managedVM {
+		b.plan.FixFstab, b.pending = true, true
+		return nil
+	}
 	b.ops = append(b.ops, pc.BuildFixFstabOps()...)
 	return nil
 }
@@ -143,6 +205,11 @@ func (b *LoopMountBackend) Shrink(ctx context.Context) error {
 
 // InjectAgent queues the vsock guest agent files into the rootfs.
 func (b *LoopMountBackend) InjectAgent(_ context.Context, agentBinary []byte, port int, token string) error {
+	if b.managedVM {
+		b.plan.Agent = &loopmountsvc.AgentSetup{Port: port, Token: token}
+		b.pending = true
+		return nil
+	}
 	ops := provcontent.Builder{}.BuildAgentOps(agentBinary, port, token)
 	b.ops = append(b.ops, ops...)
 	return nil
@@ -153,6 +220,9 @@ func (b *LoopMountBackend) InjectAgent(_ context.Context, agentBinary []byte, po
 // Run executes all queued operations via the loopmount service subprocess.
 // Clears queued ops after execution so subsequent calls only send new ops.
 func (b *LoopMountBackend) Run(ctx context.Context) error {
+	if b.managedVM {
+		return b.runManagedVM(ctx)
+	}
 	winput := loopmountsvc.WireInput{
 		Image:  b.rootfsPath,
 		Action: "provision",
@@ -191,12 +261,42 @@ func (b *LoopMountBackend) Run(ctx context.Context) error {
 	return err
 }
 
+func (b *LoopMountBackend) runManagedVM(ctx context.Context) error {
+	if !b.pending {
+		return nil
+	}
+	if b.expectedBytes == 0 {
+		info, err := os.Stat(b.rootfsPath)
+		if err != nil {
+			return errs.WrapMsg(errs.CodeLoopMountError, "inspect managed VM rootfs before provisioning", err)
+		}
+		if !info.Mode().IsRegular() || info.Size() <= 0 {
+			return errs.New(errs.CodeValidationFailed, "managed VM rootfs must be a nonempty regular file")
+		}
+		b.expectedBytes = uint64(info.Size())
+	}
+	request := loopmountsvc.VMProvisionRequest{
+		CacheLocator: b.cacheDir, VMID: b.vmID, ExpectedRootfsBytes: b.expectedBytes,
+		Filesystem: loopmountsvc.Filesystem(b.fsType), Plan: b.plan,
+	}
+	result, err := loopmountsvc.NewClient().ProvisionVM(ctx, request)
+	if err != nil {
+		return err // Keep the exact old-size intent for a convergent retry; never downgrade to raw sudo.
+	}
+	b.expectedBytes = result.RootfsBytes
+	b.plan, b.pending = loopmountsvc.VMProvisionPlan{}, false
+	return nil
+}
+
 // --- Other Backend interface methods ---
 
 // ConvertTo converts the image filesystem to targetFS via loop-mount subprocess.
 // On success, updates b.fsType so subsequent operations (deblob, shrink) use
 // the correct filesystem type for mounting.
 func (b *LoopMountBackend) ConvertTo(ctx context.Context, targetFS string) error {
+	if b.managedVM {
+		return errs.New(errs.CodeValidationFailed, "managed VM filesystem conversion must precede image cloning")
+	}
 	_, err := runWireOp(ctx, &loopmountsvc.WireInput{
 		Image:    b.rootfsPath,
 		Action:   "convert_fs",
