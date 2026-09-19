@@ -3,6 +3,7 @@ package network
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ type managedNetworkTransaction struct {
 	record    networkAuthorityRecord
 	found     bool
 	removed   bool
+	cancelled bool
 	priorBoot *networkAuthorityRecord
 }
 
@@ -52,7 +54,7 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 		return ManagedNetworkResult{}, err
 	}
 	defer func() { returnErr = tx.release(ctx, returnErr) }()
-	if tx.removed {
+	if tx.removed || tx.cancelled {
 		return ManagedNetworkResult{}, errs.New(
 			errs.CodeNetworkAlreadyExists,
 			"network identity has a durable removal receipt; create a new network identity",
@@ -230,8 +232,11 @@ func (server *ManagedNetworkServer) RemoveManagedNetwork(
 		return ManagedNetworkRemovalResult{}, err
 	}
 	defer func() { returnErr = tx.release(ctx, returnErr) }()
-	if !tx.found {
-		return ManagedNetworkRemovalResult{}, unavailableNetworkAuthorityError(tx.key.networkID)
+	if !tx.found || tx.removed {
+		if err := tx.completeAbsentRemoval(ctx); err != nil {
+			return ManagedNetworkRemovalResult{}, err
+		}
+		return ManagedNetworkRemovalResult{NetworkID: request.NetworkID}, nil
 	}
 	fd, _, err := tx.host.descriptor()
 	if err != nil {
@@ -336,13 +341,23 @@ func acquireManagedNetworkTransaction(
 		}
 		claim, tx.removed = removed, true
 	}
+	cancelledOwner, err := tx.findCancellationClaim(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cancelledOwner != 0 {
+		if claim != nil {
+			return nil, networkAuthorityCorruptError("network has conflicting cancellation and ownership records", nil)
+		}
+		if cancelledOwner != ownerUID {
+			return nil, unavailableNetworkAuthorityError(networkID)
+		}
+		tx.cancelled = true
+	}
 	if claim != nil && claim.ownerUID != ownerUID {
 		return nil, unavailableNetworkAuthorityError(networkID)
 	}
-	if claim == nil && !create {
-		return nil, unavailableNetworkAuthorityError(networkID)
-	}
-	tx.store, err = tx.storeRoot.openUID(ctx, ownerUID, create)
+	tx.store, err = tx.storeRoot.openUID(ctx, ownerUID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +398,7 @@ func acquireManagedNetworkTransaction(
 			return nil, err
 		}
 		if boot != tx.record.bootID {
-			if !create || tx.removed {
+			if !create && !tx.removed {
 				return nil, staleNetworkAuthorityError(networkID)
 			}
 			previous := tx.record
@@ -596,7 +611,7 @@ func (tx *managedNetworkTransaction) checkOwnerPrefixes(
 		return networkAuthorityEffectError("enumerate managed network records", err)
 	}
 	for _, name := range names {
-		if name == "topologies" || name == "removed" {
+		if name == "topologies" || name == "removed" || name == "cancelled" {
 			continue
 		}
 		id := strings.TrimSuffix(name, ".json")
@@ -944,6 +959,418 @@ func (tx *managedNetworkTransaction) findRemovalClaim(ctx context.Context) (*net
 		}
 	}
 	return found, nil
+}
+
+// managedNetworkCancellationReceipt is an identity tombstone, not kernel deletion authority.
+// It exists only after root proves no live network record, topology claim, bridge or firewall reference.
+type managedNetworkCancellationReceipt struct {
+	SchemaVersion uint32 `json:"schema_version"`
+	OwnerUID      uint32 `json:"owner_uid"`
+	NetworkID     string `json:"network_id"`
+}
+
+func (tx *managedNetworkTransaction) completeAbsentRemoval(ctx context.Context) error {
+	// CRITICAL: Missing authority never grants cleanup. This path makes no link, route or firewall deletion.
+	// An old removal receipt permits matching cleaned history; a cancellation claim permits no topology history.
+	boot, err := readCurrentBootID(ctx)
+	if err != nil {
+		return err
+	}
+	_, host, err := tx.host.descriptor()
+	if err != nil {
+		return err
+	}
+	if err := tx.requireAbsentBridge(ctx); err != nil {
+		return err
+	}
+	if err := tx.requireNoLiveTopologyClaims(ctx); err != nil {
+		return err
+	}
+	tx.firewall, err = firewall.BeginPolicyChange(ctx, tx.mutation, firewall.PolicyBinding{
+		OwnerUID: uint32(tx.key.ownerUID), NetworkID: string(tx.key.networkID), BootID: boot,
+		HostNamespace: firewall.NamespaceIdentity{Device: host.device, Inode: host.inode},
+	})
+	if err != nil {
+		return err
+	}
+	if err := tx.firewall.VerifyNetworkAbsent(ctx); err != nil {
+		return err
+	}
+	if err := tx.requireNoLiveTopologyClaims(ctx); err != nil {
+		return err
+	}
+	if err := tx.requireAbsentBridge(ctx); err != nil {
+		return err
+	}
+	if tx.removed {
+		receipt, found, err := readManagedRemovalReceipt(ctx, tx.store, tx.key.networkID)
+		if err != nil {
+			return err
+		}
+		actual, encodeErr := encodeNetworkAuthorityRecord(receipt)
+		expected, expectedErr := encodeNetworkAuthorityRecord(tx.record)
+		if !found || encodeErr != nil || expectedErr != nil || !bytes.Equal(actual, expected) {
+			return networkAuthorityCorruptError(
+				"network removal receipt changed during retry",
+				errors.Join(encodeErr, expectedErr),
+			)
+		}
+		if err := tx.removeRecord(ctx); err != nil {
+			return err
+		}
+	} else if err := tx.writeCancellationReceipt(ctx); err != nil {
+		return err
+	}
+	if err := tx.requireAbsentBridge(ctx); err != nil {
+		return err
+	}
+	if err := tx.firewall.VerifyNetworkAbsent(ctx); err != nil {
+		return err
+	}
+	currentBoot, err := readCurrentBootID(ctx)
+	if err != nil || currentBoot != boot {
+		return networkAuthorityCorruptError("host boot changed during network absence acknowledgement", err)
+	}
+	return nil
+}
+
+func (tx *managedNetworkTransaction) requireAbsentBridge(ctx context.Context) error {
+	fd, _, err := tx.host.descriptor()
+	if err != nil {
+		return err
+	}
+	name := deriveNetworkLinkName("mvb", tx.key, "managed-bridge")
+	link, err := tx.route.inspectLink(ctx, fd, name)
+	if err != nil {
+		return networkAuthorityEffectError("observe cancelled network bridge absence", err)
+	}
+	if link != nil {
+		return networkAuthorityCorruptError(
+			"network bridge name remains occupied; absence grants no deletion authority",
+			nil,
+		)
+	}
+	return nil
+}
+
+func (tx *managedNetworkTransaction) requireNoLiveTopologyClaims(ctx context.Context) error {
+	owners, err := tx.storeRoot.deps.readDirNames(ctx, tx.storeRoot.stateFD)
+	if err != nil {
+		return networkAuthorityEffectError("enumerate network topology claims", err)
+	}
+	for _, owner := range owners {
+		uid, err := strconv.ParseUint(owner, 10, 32)
+		if err != nil || uid == 0 || strconv.FormatUint(uid, 10) != owner {
+			return networkAuthorityCorruptError("network topology owner index is invalid", err)
+		}
+		store, err := tx.storeRoot.openUID(ctx, uint32(uid), false)
+		if err != nil {
+			return err
+		}
+		claimErr := tx.checkAbsentNetworkTopologyClaims(ctx, store)
+		claimErr = appendNetworkAuthorityError(
+			claimErr,
+			"close network topology claim owner",
+			store.Release(context.WithoutCancel(ctx)),
+		)
+		if claimErr != nil {
+			return claimErr
+		}
+	}
+	return nil
+}
+
+func (tx *managedNetworkTransaction) checkAbsentNetworkTopologyClaims(
+	ctx context.Context,
+	owner *networkStoreUID,
+) (returnErr error) {
+	fd, err := owner.deps.openAt2(
+		ctx,
+		owner.stateFD,
+		"topologies",
+		&unix.OpenHow{Flags: networkStoreDirectoryFlags, Resolve: networkStoreResolve},
+	)
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if err != nil {
+		return networkAuthorityEffectError("open network topology claims", err)
+	}
+	defer func() {
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close network topology claim directory",
+			owner.deps.close(context.WithoutCancel(ctx), fd),
+		)
+	}()
+	if err := verifyNetworkStoreDirectory(
+		ctx,
+		owner.deps,
+		fd,
+		"topologies",
+		owner.policy,
+		networkStoreDirectoryMode,
+		true,
+	); err != nil {
+		return err
+	}
+	names, err := owner.deps.readDirNames(ctx, fd)
+	if err != nil {
+		return networkAuthorityEffectError("read network topology claim inventory", err)
+	}
+	store := &networkStoreUID{deps: owner.deps, policy: owner.policy, uid: owner.uid, stateFD: fd}
+	for _, name := range names {
+		id := strings.TrimSuffix(name, ".json")
+		if name != id+".json" || !vmIDPattern.MatchString(id) {
+			return networkAuthorityCorruptError(
+				"network topology inventory contains incomplete or unknown authority",
+				nil,
+			)
+		}
+		journal := &topologyJournal{store: store, vmID: VMID(id)}
+		record, found, err := journal.read(ctx)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return networkAuthorityCorruptError("network topology inventory changed while reading", nil)
+		}
+		if record.NetworkID != string(tx.key.networkID) {
+			continue
+		}
+		if !tx.removed || record.OwnerUID != tx.record.ownerUID || record.Lifecycle != topologyCleaned ||
+			record.Prefix != tx.record.configuration.l3.prefix.value.String() || record.Gateway != tx.record.configuration.l3.gateway.value.String() {
+			return networkAuthorityCorruptError("network absence conflicts with root-owned topology authority", nil)
+		}
+	}
+	return nil
+}
+
+func readManagedCancellationReceipt(
+	ctx context.Context,
+	owner *networkStoreUID,
+	id NetworkID,
+) (found bool, returnErr error) {
+	fd, err := owner.deps.openAt2(
+		ctx,
+		owner.stateFD,
+		"cancelled",
+		&unix.OpenHow{Flags: networkStoreDirectoryFlags, Resolve: networkStoreResolve},
+	)
+	if errors.Is(err, unix.ENOENT) {
+		return false, nil
+	}
+	if err != nil {
+		return false, networkAuthorityEffectError("open network cancellation receipts", err)
+	}
+	defer func() {
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close network cancellation receipts",
+			owner.deps.close(context.WithoutCancel(ctx), fd),
+		)
+	}()
+	if err := verifyNetworkStoreDirectory(
+		ctx,
+		owner.deps,
+		fd,
+		"cancelled",
+		owner.policy,
+		networkStoreDirectoryMode,
+		true,
+	); err != nil {
+		return false, err
+	}
+	leaf, err := owner.deps.openAt2(
+		ctx,
+		fd,
+		string(id)+".json",
+		&unix.OpenHow{Flags: networkStoreReadFlags, Resolve: networkStoreResolve},
+	)
+	if errors.Is(err, unix.ENOENT) {
+		return false, nil
+	}
+	if err != nil {
+		return false, networkAuthorityEffectError("open network cancellation receipt", err)
+	}
+	defer func() {
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close network cancellation receipt",
+			owner.deps.close(context.WithoutCancel(ctx), leaf),
+		)
+	}()
+	before, err := inspectNetworkAuthorityRecordFile(ctx, owner.deps, leaf, owner.policy)
+	if err != nil {
+		return false, err
+	}
+	raw, err := readAllNetworkAuthorityRecord(ctx, owner.deps, leaf)
+	if err != nil {
+		return false, networkAuthorityEffectError("read network cancellation receipt", err)
+	}
+	after, err := inspectNetworkAuthorityRecordFile(ctx, owner.deps, leaf, owner.policy)
+	if err != nil || !sameNetworkAuthorityRecordStat(before, after) || after.Size != int64(len(raw)) {
+		return false, networkAuthorityCorruptError("network cancellation receipt changed while reading", err)
+	}
+	// Exact canonical bytes reject unknown, missing, repeated, case-colliding and trailing JSON fields.
+	expected, err := json.Marshal(
+		managedNetworkCancellationReceipt{SchemaVersion: 1, OwnerUID: owner.uid, NetworkID: string(id)},
+	)
+	if err != nil {
+		return false, networkAuthorityCorruptError("encode expected network cancellation receipt", err)
+	}
+	if !bytes.Equal(raw, expected) {
+		return false, networkAuthorityCorruptError("network cancellation receipt identity or schema differs", nil)
+	}
+	return true, nil
+}
+
+func (tx *managedNetworkTransaction) findCancellationClaim(ctx context.Context) (uint32, error) {
+	owners, err := tx.storeRoot.deps.readDirNames(ctx, tx.storeRoot.stateFD)
+	if err != nil {
+		return 0, networkAuthorityEffectError("enumerate network cancellation owners", err)
+	}
+	var found uint32
+	for _, owner := range owners {
+		uid, err := strconv.ParseUint(owner, 10, 32)
+		if err != nil || uid == 0 || strconv.FormatUint(uid, 10) != owner {
+			return 0, networkAuthorityCorruptError("network cancellation owner index is invalid", err)
+		}
+		store, err := tx.storeRoot.openUID(ctx, uint32(uid), false)
+		if err != nil {
+			return 0, err
+		}
+		present, receiptErr := readManagedCancellationReceipt(ctx, store, tx.key.networkID)
+		receiptErr = appendNetworkAuthorityError(
+			receiptErr,
+			"close network cancellation owner",
+			store.Release(context.WithoutCancel(ctx)),
+		)
+		if receiptErr != nil {
+			return 0, receiptErr
+		}
+		if present {
+			if found != 0 {
+				return 0, networkAuthorityCorruptError("duplicate network cancellation identity", nil)
+			}
+			found = uint32(uid)
+		}
+	}
+	return found, nil
+}
+
+func (tx *managedNetworkTransaction) writeCancellationReceipt(ctx context.Context) (returnErr error) {
+	defer func() {
+		if returnErr != nil && tx.cancelled {
+			returnErr = errs.WrapMsg(
+				errs.CodeNetworkRemoveFailed,
+				"network cancellation receipt retained for retry",
+				returnErr,
+				errs.WithDetails(map[string]any{"cancellation_record_created": true, "cleanup_required": true}),
+			)
+		}
+	}()
+	_, found, err := tx.store.readRecord(ctx, tx.key.networkID)
+	if err != nil {
+		return err
+	}
+	if found {
+		return networkAuthorityCorruptError("network ownership reappeared before cancellation receipt", nil)
+	}
+	_, found, err = readManagedRemovalReceipt(ctx, tx.store, tx.key.networkID)
+	if err != nil {
+		return err
+	}
+	if found {
+		return networkAuthorityCorruptError("network removal receipt appeared during cancellation", nil)
+	}
+	found, err = readManagedCancellationReceipt(ctx, tx.store, tx.key.networkID)
+	if err != nil {
+		return err
+	}
+	if found != tx.cancelled {
+		return networkAuthorityCorruptError("network cancellation receipt changed under ownership lock", nil)
+	}
+	fd, err := openNetworkStoreDirectory(ctx, tx.store.deps, tx.store.stateFD, "cancelled", true, tx.store.policy)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close published network cancellation receipts",
+			tx.store.deps.close(context.WithoutCancel(ctx), fd),
+		)
+	}()
+	store := &networkStoreUID{deps: tx.store.deps, policy: tx.store.policy, uid: tx.store.uid, stateFD: fd}
+	if !found {
+		raw, err := json.Marshal(
+			managedNetworkCancellationReceipt{
+				SchemaVersion: 1,
+				OwnerUID:      store.uid,
+				NetworkID:     string(tx.key.networkID),
+			},
+		)
+		if err != nil {
+			return networkAuthorityCorruptError("encode network cancellation receipt", err)
+		}
+		tempName, tempFD, err := createNetworkAuthorityTemp(ctx, store)
+		if err != nil {
+			return err
+		}
+		tempOpen := true
+		abort := func(cause error) error {
+			return abortNetworkAuthorityWrite(ctx, store, tempFD, tempName, tempOpen, cause)
+		}
+		if err := writeAllNetworkAuthorityRecord(ctx, store.deps, tempFD, raw); err != nil {
+			return abort(networkAuthorityEffectError("write network cancellation receipt", err))
+		}
+		if err := store.deps.fchown(
+			ctx,
+			tempFD,
+			int(store.policy.expectedUID),
+			int(store.policy.expectedGID),
+		); err != nil {
+			return abort(networkAuthorityEffectError("set network cancellation receipt owner", err))
+		}
+		if err := store.deps.fchmod(ctx, tempFD, networkStoreRecordMode); err != nil {
+			return abort(networkAuthorityEffectError("set network cancellation receipt mode", err))
+		}
+		before, err := inspectNetworkAuthorityRecordFile(ctx, store.deps, tempFD, store.policy)
+		if err != nil || before.Size != int64(len(raw)) {
+			return abort(networkAuthorityCorruptError("network cancellation receipt is incomplete", err))
+		}
+		if err := store.deps.fsync(ctx, tempFD); err != nil {
+			return abort(networkAuthorityEffectError("sync network cancellation receipt", err))
+		}
+		after, err := inspectNetworkAuthorityRecordFile(ctx, store.deps, tempFD, store.policy)
+		if err != nil || !sameNetworkAuthorityRecordStat(before, after) {
+			return abort(networkAuthorityCorruptError("network cancellation receipt changed during sync", err))
+		}
+		tempOpen = false
+		if err := store.deps.close(context.WithoutCancel(ctx), tempFD); err != nil {
+			return abort(networkAuthorityEffectError("close prepared network cancellation receipt", err))
+		}
+		if err := store.deps.renameNoReplace(ctx, fd, tempName, fd, string(tx.key.networkID)+".json"); err != nil {
+			return abort(networkAuthorityEffectError("publish exclusive network cancellation receipt", err))
+		}
+		tx.cancelled = true
+	}
+	if err := errors.Join(
+		store.deps.fsync(context.WithoutCancel(ctx), fd),
+		store.deps.fsync(context.WithoutCancel(ctx), tx.store.stateFD),
+	); err != nil {
+		return errs.WrapMsg(errs.CodeNetworkRemoveFailed, "sync network cancellation receipt directory", err,
+			errs.WithDetails(map[string]any{"cancellation_record_created": true, "durability_uncertain": true}))
+	}
+	present, err := readManagedCancellationReceipt(ctx, tx.store, tx.key.networkID)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return networkAuthorityCorruptError("published network cancellation receipt is missing", nil)
+	}
+	return nil
 }
 
 func (tx *managedNetworkTransaction) release(ctx context.Context, primary error) error {
