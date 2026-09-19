@@ -107,9 +107,18 @@ func (lease *JailerNamespaceLease) VerifyJailerNamespace(ctx context.Context, de
 }
 
 func (lease *VMTopologyLease) admitJailerHandoff(ctx context.Context) error {
-	if !lease.active || lease.cleaned || lease.completed || lease.mutation == nil || lease.network == nil ||
+	if !lease.active || lease.cleaned || lease.detached ||
 		lease.preparation == nil || lease.journal == nil || lease.journal.record.Lifecycle != topologyActive {
 		return networkAuthorityCorruptError("VM topology is not at the retained Jailer handoff checkpoint", nil)
+	}
+	if lease.completed {
+		if _, _, err := lease.hold.Binding(); err != nil {
+			return err
+		}
+		return lease.verifyActivationLinks(ctx)
+	}
+	if lease.mutation == nil || lease.network == nil {
+		return networkAuthorityCorruptError("Jailer handoff mutation authority is unavailable", nil)
 	}
 	if err := lease.revalidateNetwork(ctx); err != nil {
 		return err

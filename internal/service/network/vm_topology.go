@@ -28,6 +28,7 @@ type VMTopologyLease struct {
 	hold              *authorityfs.TopologyHold
 	key               topologyKey
 	network           *managedNetworkLease
+	networkRecord     networkAuthorityRecord
 	mutation          *firewall.MutationLease
 	endpoint          *firewall.VerifiedVMEndpointLease
 	binding           firewall.EndpointBinding
@@ -96,6 +97,7 @@ func (lease *VMTopologyLease) prepare(ctx context.Context, intent VMIntent) erro
 		return err
 	}
 	lease.network = network.(*managedNetworkLease)
+	lease.networkRecord = lease.network.record
 	lease.l3, err = deriveEndpointL3(lease.key, lease.network.record.configuration.l3, endpointL3Input{
 		guestAddress: intent.GuestIPv4, requestedMAC: intent.MAC,
 	})
@@ -341,15 +343,29 @@ func (lease *VMTopologyLease) Cleanup(ctx context.Context) error {
 
 func (lease *VMTopologyLease) lowerRemainingLinks(ctx context.Context) error {
 	link := lease.effects.link.(*linkEffect)
-	for _, lower := range []func(context.Context, NamespacePin, Topology) error{
-		link.LowerNamespaceVeth, link.LowerTAP, link.LowerLocalBridge, link.LowerLoopback,
+	progress := &lease.journal.record.Progress
+	for _, step := range []struct {
+		name  string
+		lower func(context.Context, NamespacePin, Topology) error
+		mark  *bool
+	}{
+		{"lower_namespace_veth", link.LowerNamespaceVeth, &progress.PeerUp},
+		{"lower_tap", link.LowerTAP, &progress.TAPUp},
+		{"lower_local_bridge", link.LowerLocalBridge, &progress.BridgeUp},
+		{"lower_loopback", link.LowerLoopback, &progress.LoopbackUp},
 	} {
-		if err := lower(ctx, lease.preparation.pin, lease.preparation.topology); err != nil {
+		if err := lease.persistStage(ctx, step.name, topologyCleaning); err != nil {
+			return err
+		}
+		if err := step.lower(ctx, lease.preparation.pin, lease.preparation.topology); err != nil {
+			return err
+		}
+		*step.mark = false
+		if err := lease.persistStage(ctx, "", topologyCleaning); err != nil {
 			return err
 		}
 	}
-	progress := &lease.journal.record.Progress
-	progress.LoopbackUp, progress.BridgeUp, progress.TAPUp, progress.PeerUp, progress.HostUp = false, false, false, false, false
+	progress.HostUp = false
 	return lease.persistStage(ctx, "", topologyCleaning)
 }
 

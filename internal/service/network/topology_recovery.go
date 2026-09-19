@@ -90,6 +90,7 @@ func (lease *VMTopologyLease) recover(ctx context.Context, owner uint32, vmID VM
 		return err
 	}
 	lease.network = network.(*managedNetworkLease)
+	lease.networkRecord = lease.network.record
 	rawNetwork, err := encodeNetworkAuthorityRecord(lease.network.record)
 	if err != nil {
 		return err

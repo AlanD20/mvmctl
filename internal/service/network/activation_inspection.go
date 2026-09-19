@@ -41,5 +41,5 @@ func (lease *VMTopologyLease) verifyActivationLinks(ctx context.Context) (return
 			return networkAuthorityCorruptError("activated fabric link acquired unexpected IPv4 authority", nil)
 		}
 	}
-	return inspectManagedBridgeL3(ctx, effect.route, retained.hostFD, lease.network.record)
+	return inspectManagedBridgeL3(ctx, effect.route, retained.hostFD, lease.networkRecord)
 }
