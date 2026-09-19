@@ -220,11 +220,21 @@ func (s *Service) OptimizeImage(
 
 	// --- Detect OS type from the image (always, even when skipping) ---
 	detectedOS := ""
-	osResult, osErr := p.DetectOS(ctx)
-	if osErr == nil {
-		detectedOS = osResult
+	if provisionerType == provisioner.ProvisionerLoopMount &&
+		(fsType == "ext2" || fsType == "ext3" || fsType == "ext4" || fsType == "btrfs") {
+		var inspectErr error
+		detectedOS, inspectErr = inspectStagedImage(ctx, imagePath, imageID, fsType)
+		if inspectErr != nil {
+			slog.Error("managed image inspection failed", "image_id", imageID, "error", inspectErr)
+			return nil, warnings, inspectErr
+		}
 	} else {
-		slog.Warn("OS detection failed, falling back to spec type", "image_id", imageID)
+		osResult, osErr := p.DetectOS(ctx)
+		if osErr == nil {
+			detectedOS = osResult
+		} else {
+			slog.Warn("OS detection failed, falling back to spec type", "image_id", imageID)
+		}
 	}
 
 	// --- Convert, deblob, shrink in a single backend session ---
