@@ -69,18 +69,7 @@ func (c *Controller) Pause(ctx context.Context) error {
 			fmt.Sprintf("VM '%s' is in %s state — cannot pause (current state: %s)", name, c.vm.Status, c.vm.Status))
 	}
 
-	// Valid transition — must be RUNNING
-	if c.vm.APISocketPath == "" {
-		return errs.New(errs.CodeVMStateInvalid,
-			fmt.Sprintf("VM '%s' has no API socket enabled", name))
-	}
-
-	// APISocketPath is already a full path from DB
-	apiSocket := c.vm.APISocketPath
-	client := firecracker.NewClient(apiSocket)
-	defer client.Close()
-
-	if err := client.PauseVM(ctx); err != nil {
+	if _, err := jailersvc.NewVMAPIBrokerClient().Pause(ctx, jailersvc.VMAPIRequest{VMID: c.vm.ID}); err != nil {
 		return err
 	}
 
@@ -125,18 +114,7 @@ func (c *Controller) Resume(ctx context.Context) error {
 			fmt.Sprintf("VM '%s' is shutting down — use start() after it stops (current state: %s)", name, c.vm.Status))
 	}
 
-	// Valid transition — must be PAUSED
-	if c.vm.APISocketPath == "" {
-		return errs.New(errs.CodeVMStateInvalid,
-			fmt.Sprintf("VM '%s' has no API socket enabled", name))
-	}
-
-	// APISocketPath is already a full path from DB
-	apiSocket := c.vm.APISocketPath
-	client := firecracker.NewClient(apiSocket)
-	defer client.Close()
-
-	if err := client.ResumeVM(ctx); err != nil {
+	if _, err := jailersvc.NewVMAPIBrokerClient().Resume(ctx, jailersvc.VMAPIRequest{VMID: c.vm.ID}); err != nil {
 		return err
 	}
 
@@ -182,18 +160,7 @@ func (c *Controller) Start(ctx context.Context) error {
 			fmt.Sprintf("VM '%s' is paused — use resume() instead (current state: %s)", name, c.vm.Status))
 	}
 
-	// Valid transition — must be STOPPED
-	if c.vm.APISocketPath == "" {
-		return errs.New(errs.CodeVMStateInvalid,
-			fmt.Sprintf("VM '%s' has no API socket enabled", name))
-	}
-
-	// APISocketPath is already a full path from DB
-	apiSocket := c.vm.APISocketPath
-	client := firecracker.NewClient(apiSocket)
-	defer client.Close()
-
-	if _, err := client.StartInstance(ctx); err != nil {
+	if _, err := jailersvc.NewVMAPIBrokerClient().StartInstance(ctx, jailersvc.VMAPIRequest{VMID: c.vm.ID}); err != nil {
 		return err
 	}
 
