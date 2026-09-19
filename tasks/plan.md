@@ -14,17 +14,22 @@ as `089d789c` and `3a7e3f9a`; marker-only sudoers as `cf48f066`. These are unver
 implementation commits, not working/release sign-off. The installed host remains untouched.
 
 Raw-volume launch may proceed without new per-volume or aggregate storage quota caps, with
-the approved device budget and strict file identity/ownership checks. Its isolated writer is
-finishing launch/mount/cleanup composition. Snapshot artifacts may use root-controlled storage
+the approved device budget and strict file identity/ownership checks. Launch/mount/cleanup
+composition is integrated as `c9b670fb`; this does not implement live hotplug. Snapshot artifacts may use root-controlled storage
 under the managed cache with CLI-mediated removal, and 0.3.0 must include consistent capture
 and restore of attached data volumes. Snapshot capture is not implemented: trusted producer
 isolation and consistency across disk writers remain dependencies; root-owned copied output
 alone does not establish trusted capture. Do not replace that requirement with silent volume
-exclusion or a metadata-only foundation. Memory policy remains unchanged pending diagnosis.
+exclusion or a metadata-only foundation. The user paused snapshot implementation for a separate
+design pass, and requires exclusive write ownership during capture, rejecting competing writable
+VM access. Do not change execution credentials, API ownership, or active backing under the earlier
+storage approval. Memory policy remains unchanged pending diagnosis.
 
-Only implementation and documentation are active. Do not start tests, validation, review,
-builds, installation, or qualification from this checkpoint. Earlier pending-choice and stopped
-paragraphs below describe the prior checkpoint and are superseded by these explicit decisions.
+This bounded implementation continuation is stopped; all assigned writers are finished. Docs are
+integrated through `8ce36b39`. Do not queue more implementation, tests, validation, review, builds,
+installation, or qualification without the next user instruction. Snapshot design and memory
+diagnosis remain deferred, and the release is not complete or qualified. Earlier pending-choice
+and stopped paragraphs below are superseded by this checkpoint and these explicit decisions.
 
 The user resumed implementation with these decisions: leave cgroup memory policy unchanged
 until diagnosis; preserve LoopMount features through closed typed implementations, including

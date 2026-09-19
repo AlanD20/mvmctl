@@ -1230,6 +1230,9 @@ producer isolation and consistency composition remain implementation dependencie
 The user subsequently paused snapshot implementation for a separate design pass; changing execution credentials,
 API ownership, or active backing is not authorized by the storage decision alone. No exploit or impossibility of a
 narrower design has been established in this implementation-only pass.
+For the future snapshot design, the user requires exclusive write ownership during capture and refusal when another
+VM has writable access to the same volume. This does not authorize coordinated multi-VM capture or resume the paused
+implementation. Host writers and retained writable aliases must also be addressed by the final isolation contract.
 
 The caller-owned `firecracker.json` is admission evidence, not launch authority. Immediately before allocation or
 reading, root repeats synchronized metadata inspection and enforces the 1-byte-through-1-MiB bound. It uses positioned
