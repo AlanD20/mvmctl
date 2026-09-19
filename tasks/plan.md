@@ -8,6 +8,24 @@
 
 ### Resumed after user policy decisions
 
+Current continuation checkpoint: typed image conversion and caller staging recovery are integrated
+as `662054c0`, `89009a57`, and `f5477ae2`; typed XFS routing and raw LoopMount retirement
+as `089d789c` and `3a7e3f9a`; marker-only sudoers as `cf48f066`. These are unverified
+implementation commits, not working/release sign-off. The installed host remains untouched.
+
+Raw-volume launch may proceed without new per-volume or aggregate storage quota caps, with
+the approved device budget and strict file identity/ownership checks. Its isolated writer is
+finishing launch/mount/cleanup composition. Snapshot artifacts may use root-controlled storage
+under the managed cache with CLI-mediated removal, and 0.3.0 must include consistent capture
+and restore of attached data volumes. Snapshot capture is not implemented: trusted producer
+isolation and consistency across disk writers remain dependencies; root-owned copied output
+alone does not establish trusted capture. Do not replace that requirement with silent volume
+exclusion or a metadata-only foundation. Memory policy remains unchanged pending diagnosis.
+
+Only implementation and documentation are active. Do not start tests, validation, review,
+builds, installation, or qualification from this checkpoint. Earlier pending-choice and stopped
+paragraphs below describe the prior checkpoint and are superseded by these explicit decisions.
+
 The user resumed implementation with these decisions: leave cgroup memory policy unchanged
 until diagnosis; preserve LoopMount features through closed typed implementations, including
 account creation and automatic deblob; use one fixed gateway-bound NoCloud port and explicitly
