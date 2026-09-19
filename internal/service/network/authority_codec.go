@@ -39,6 +39,9 @@ func encodeNetworkAuthorityRecord(record networkAuthorityRecord) ([]byte, error)
 	if err := validateNetworkAuthorityRecord(record); err != nil {
 		return nil, err
 	}
+	if record.schemaVersion == managedNetworkSchemaVersion {
+		return encodeManagedNetworkRecord(record)
+	}
 	raw, err := json.Marshal(networkAuthorityRecordWire{
 		SchemaVersion: record.schemaVersion,
 		OwnerUID:      record.ownerUID,
@@ -71,6 +74,12 @@ func decodeNetworkAuthorityRecord(raw []byte) (networkAuthorityRecord, error) {
 			"network authority record exceeds size limit",
 			nil,
 		)
+	}
+	var version struct {
+		SchemaVersion uint32 `json:"schema_version"`
+	}
+	if err := json.Unmarshal(raw, &version); err == nil && version.SchemaVersion == managedNetworkSchemaVersion {
+		return decodeManagedNetworkRecord(raw)
 	}
 	if err := validateNetworkAuthorityJSON(raw); err != nil {
 		return networkAuthorityRecord{}, err

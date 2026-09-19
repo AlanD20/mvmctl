@@ -28,6 +28,7 @@ type networkAuthorityRecord struct {
 	networkID     NetworkID
 	bootID        string
 	managedBridge linkIdentity
+	configuration *managedNetworkConfiguration
 }
 
 func newNetworkAuthorityRecord(
@@ -65,7 +66,7 @@ func validateNetworkRegistrationInput(caller networkCaller, networkID NetworkID,
 }
 
 func validateNetworkAuthorityRecord(record networkAuthorityRecord) error {
-	if record.schemaVersion != networkAuthorityRecordSchemaVersion {
+	if record.schemaVersion != networkAuthorityRecordSchemaVersion && record.schemaVersion != managedNetworkSchemaVersion {
 		return networkAuthorityCorruptError("unsupported network authority schema", nil)
 	}
 	key := networkKey{ownerUID: OwnerUID(record.ownerUID), networkID: record.networkID}
@@ -80,6 +81,12 @@ func validateNetworkAuthorityRecord(record networkAuthorityRecord) error {
 		record.managedBridge.ifIndex <= 0 ||
 		!validNamespaceIdentity(record.managedBridge.namespace) {
 		return networkAuthorityCorruptError("network authority managed bridge identity is invalid", nil)
+	}
+	if record.schemaVersion == managedNetworkSchemaVersion {
+		return validateManagedNetworkConfiguration(record)
+	}
+	if record.configuration != nil {
+		return networkAuthorityCorruptError("identity-only network record contains configuration", nil)
 	}
 	return nil
 }
