@@ -21,10 +21,20 @@ the isolation prerequisite after previously pausing it for a separate design dec
   operations through the authenticated dispatcher; no general API, command, or path forwarding is introduced.
 - Separate durable operator ownership from an isolated per-VM execution identity. The latter must not be the operator
   or a shared execution identity across VMs. Allocation, collision handling, retention, and release are root authority.
+  Use a root-generated, locked, non-login system account with no home creation, allocated through the host's existing
+  account allocator. Do not invent a numeric UID pool or require a new operator-authored range configuration. Root
+  intent precedes allocation; account identity and collisions are admitted before use. Accounts survive ordinary stop
+  while backing still needs them. Removal requires exact account identity plus process/artifact absence, without forced
+  account deletion or home removal. Ambiguous interrupted allocation is not automatically adopted.
 - Broker Firecracker control through named root-authorized operations. The operator cannot directly control its API
   socket. Process/peer checks must compare execution identity without confusing it with operator authorization.
 - Protect active writable backing before launch, without leaving caller-held writable aliases. Preserve explicit
   volume identity and sharing semantics rather than silently substituting disconnected copies for shared volumes.
+  The implementation uses a root-controlled protected store within the managed cache, bound by a small root-owned
+  anchor outside the caller's namespace. A missing or renamed store must not trigger silent reimport of stale source
+  data. Named execution-identity access grants must be exact; filesystem inability to enforce them is an error, not
+  permission to make the data generally accessible. Resize, removal, and guest provisioning must use authoritative
+  protected backing after import rather than modifying the original caller-owned staging files.
 - Require exclusive write ownership during capture. Refuse capture when another VM has writable access to any
   captured volume; coordinated multi-VM capture is not selected. Host writers and retained aliases must also be excluded.
 - Capture one consistent state across Full memory/vmstate, rootfs, and attached data disks. Root metadata binds the
