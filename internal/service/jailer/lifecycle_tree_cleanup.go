@@ -114,6 +114,11 @@ func removeJailDirectory(
 		(uint64(original.Dev) != record.active.jailRoot.device || original.Ino != record.active.jailRoot.inode) {
 		return processAuthorityError(record.vmID, "stopped jail root differs from committed identity", nil)
 	}
+	if kind == jailCleanupRoot {
+		if err := removeStoppedVolumeHotplugJournal(ctx, fd, record); err != nil {
+			return err
+		}
+	}
 	entryLimit := 64
 	if kind == jailCleanupVolumes {
 		entryLimit = managedMMIOMaxInterruptSlots + 1

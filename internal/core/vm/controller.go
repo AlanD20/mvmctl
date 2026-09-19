@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/firecracker"
@@ -336,66 +338,50 @@ func snapshotVsockOverride(enabled bool) string {
 // AttachVolume hotplugs a drive into the running Firecracker process and
 // persists the config so it survives reboot.
 func (c *Controller) AttachVolume(ctx context.Context, driveConfig model.DriveConfig) error {
-	apiSocket := c.vm.APISocketPath
-	configPath := c.vm.ConfigPath
-
-	if c.vm.JailerBinaryID != "" {
-		if err := exposeVolume(ctx, c.vm.ID, driveConfig); err != nil {
-			slog.Error("failed to expose volume inside VM jail", "vm", c.vm.Name, "error", err)
-			return err
-		}
-		driveConfig.PathOnHost = jailedVolumePath(driveConfig.DriveID)
+	cacheRoot := filepath.Dir(filepath.Dir(driveConfig.PathOnHost))
+	if driveConfig.PathOnHost != filepath.Join(cacheRoot, "volumes", driveConfig.DriveID+".raw") ||
+		driveConfig.IsRootDevice || driveConfig.Partuuid != nil || driveConfig.RateLimiter != nil || driveConfig.Socket != nil ||
+		driveConfig.IOEngine != "Sync" {
+		return errs.New(errs.CodeValidationFailed, "volume attach requires one canonical managed raw volume")
 	}
-	// Hotplug into the running Firecracker process
-	client := firecracker.NewClient(apiSocket)
-	err := client.PutDrive(ctx, driveConfig)
-	client.Close()
+	stat, err := os.Stat(driveConfig.PathOnHost)
 	if err != nil {
-		if c.vm.JailerBinaryID != "" {
-			if cleanupErr := removeVolume(context.Background(), c.vm.ID, driveConfig.DriveID); cleanupErr != nil {
-				slog.Warn("failed to remove volume mount after hotplug failure", "vm", c.vm.Name, "error", cleanupErr)
-			}
-		}
-		return err
+		return errs.WrapMsg(errs.CodeValidationFailed, "inspect managed volume size", err)
 	}
-
-	// Persist to the Firecracker config JSON so it survives reboot
-	configMgr := NewFirecrackerConfigManager(configPath)
-	if err := configMgr.AddDrive(driveConfig); err != nil {
-		return err
+	if !stat.Mode().IsRegular() || stat.Size() <= 0 {
+		return errs.New(errs.CodeValidationFailed, "volume attach requires a positive regular raw volume")
 	}
+	return c.AttachManagedVolume(ctx, cacheRoot, &model.VolumeItem{
+		ID: driveConfig.DriveID, Format: model.VolumeFormatRaw, SizeBytes: stat.Size(),
+		IsReadOnly: driveConfig.IsReadOnly, CacheType: driveConfig.CacheType,
+	})
+}
 
-	slog.Info("Attached volume", "drive_id", driveConfig.DriveID, "vm", c.vm.Name)
-	return nil
+// AttachManagedVolume selects the durable logical volume without requiring its
+// original caller-owned import file to remain present after first protection.
+func (c *Controller) AttachManagedVolume(ctx context.Context, cacheRoot string, volume *model.VolumeItem) error {
+	if volume == nil || volume.SizeBytes <= 0 {
+		return errs.New(errs.CodeValidationFailed, "managed volume selection is incomplete")
+	}
+	_, err := jailersvc.NewVMLifecycleClient().AttachVolume(ctx, jailersvc.VMVolumeAttachRequest{
+		VMID: c.vm.ID, CacheRoot: cacheRoot, Volume: jailersvc.VMLaunchVolume{
+			ID: volume.ID, Format: volume.Format, ExpectedBytes: uint64(volume.SizeBytes),
+			ReadOnly: volume.IsReadOnly, CacheType: volume.CacheType,
+		},
+	})
+	if err != nil {
+		slog.Error("failed to attach root-authorized volume", "vm", c.vm.Name, "volume", volume.ID, "error", err)
+	}
+	return err
 }
 
 // --- DetachVolume ---
 // DetachVolume hot-unplugs a drive from the running Firecracker process and
 // removes it from the persisted config.
 func (c *Controller) DetachVolume(ctx context.Context, driveID string) error {
-	apiSocket := c.vm.APISocketPath
-	configPath := c.vm.ConfigPath
-
-	// Call Firecracker API to delete the drive
-	client := firecracker.NewClient(apiSocket)
-	err := client.DeleteDrive(ctx, driveID)
-	client.Close()
+	_, err := jailersvc.NewVMLifecycleClient().DetachVolume(ctx, jailersvc.VMVolumeDetachRequest{VMID: c.vm.ID, VolumeID: driveID})
 	if err != nil {
-		return err
+		slog.Error("failed to detach root-authorized volume", "vm", c.vm.Name, "volume", driveID, "error", err)
 	}
-
-	// Update Firecracker config JSON on disk
-	configMgr := NewFirecrackerConfigManager(configPath)
-	if _, err := configMgr.RemoveDrive(driveID); err != nil {
-		return err
-	}
-	if c.vm.JailerBinaryID != "" {
-		if err := removeVolume(ctx, c.vm.ID, driveID); err != nil {
-			slog.Error("failed to remove volume from VM jail", "vm", c.vm.Name, "drive_id", driveID, "error", err)
-			return err
-		}
-	}
-
-	slog.Info("Detached volume", "drive_id", driveID, "vm", c.vm.Name)
-	return nil
+	return err
 }

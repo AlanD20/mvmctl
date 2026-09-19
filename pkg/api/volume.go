@@ -125,8 +125,25 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 		// When force-removing attached volume, clean up the VM's volume_ids reference,
 		// hot-unplug if running, and update config on disk.
 		if vol.Status == model.VolumeStatusAttached && force && vol.VMID != nil {
-			vmItem, _ := op.Repos.VM.Get(ctx, *vol.VMID)
+			vmItem, resolveErr := op.Repos.VM.Get(ctx, *vol.VMID)
+			if resolveErr != nil {
+				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+					Message: "failed to resolve attached VM", Item: vol, Exception: resolveErr})
+				continue
+			}
 			if vmItem != nil && vmItem.VolumeIDs != nil {
+				if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
+					results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+						Message: "failed to admit attached VM runtime", Item: vol, Exception: err})
+					continue
+				}
+				if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
+					if err := vm.NewController(vmItem, op.Repos.VM).DetachVolume(ctx, vol.ID); err != nil {
+						results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+							Message: "root-authoritative volume detach failed", Item: vol, Exception: err})
+						continue
+					}
+				}
 				// Remove this volume from VM's volume_ids
 				var newIDs []string
 				for _, vid := range vmItem.VolumeIDs {
@@ -135,9 +152,11 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 					}
 				}
 				vmItem.VolumeIDs = newIDs
-				_ = op.Repos.VM.Upsert(ctx, vmItem)
-				vmCtrl := vm.NewController(vmItem, op.Repos.VM)
-				_ = vmCtrl.DetachVolume(ctx, vol.ID)
+				if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
+					results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+						Message: "failed to persist detached VM volume list", Item: vol, Exception: err})
+					continue
+				}
 			}
 		}
 		if err := op.Services.Volume.Remove(ctx, vol); err != nil {
@@ -242,6 +261,9 @@ func (op *Operation) VolumeAttach(
 	if err != nil {
 		return err
 	}
+	if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
+		return err
+	}
 	volumes, resolveErr := input.ResolveRaw(ctx, op.Repos.Volume)
 	if resolveErr != nil {
 		return resolveErr
@@ -250,7 +272,8 @@ func (op *Operation) VolumeAttach(
 		return errs.NotFound(errs.CodeVolumeNotFound, "Expected exactly one volume identifier")
 	}
 	vol := volumes[0]
-	if vol.Status == model.VolumeStatusAttached {
+	alreadyAttachedHere := vol.Status == model.VolumeStatusAttached && vol.VMID != nil && *vol.VMID == vmItem.ID
+	if vol.Status == model.VolumeStatusAttached && !alreadyAttachedHere {
 		return errs.New(
 			errs.CodeVMCreateFailed,
 			fmt.Sprintf("Volume '%s' is already attached", vol.Name),
@@ -259,7 +282,7 @@ func (op *Operation) VolumeAttach(
 	}
 	// Check volume status.
 	// Shareable read-only volumes are always attachable regardless of status.
-	if vol.Status != model.VolumeStatusAvailable && !(vol.IsShareable && vol.IsReadOnly) {
+	if vol.Status != model.VolumeStatusAvailable && !alreadyAttachedHere && !(vol.IsShareable && vol.IsReadOnly) {
 		return errs.New(
 			errs.CodeVMCreateFailed,
 			fmt.Sprintf("Volume '%s' is not available", vol.Name),
@@ -267,7 +290,7 @@ func (op *Operation) VolumeAttach(
 		)
 	}
 	// Hotplug on running VM
-	if vmItem.Status == model.VMStatusRunning {
+	if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
 		if !vmItem.PCIEnabled {
 			return errs.New(
 				errs.CodeVMCreateFailed,
@@ -296,18 +319,8 @@ func (op *Operation) VolumeAttach(
 		}
 		// Attempt hotplug via Firecracker API.
 		controller := vm.NewController(vmItem, op.Repos.VM)
-		if err := controller.AttachVolume(ctx, model.DriveConfig{
-			DriveID:      vol.ID,
-			PathOnHost:   vol.Path,
-			IsRootDevice: false,
-			IsReadOnly:   vol.IsReadOnly,
-			CacheType:    vol.CacheType,
-			IOEngine:     "Sync",
-		}); err != nil {
-			return errs.New(
-				errs.CodeFirecrackerClientError,
-				fmt.Sprintf("Hotplug failed: %v", err),
-			)
+		if err := controller.AttachManagedVolume(ctx, op.CacheDir, vol); err != nil {
+			return err
 		}
 		client, err := op.vsockClient(ctx, vmItem)
 		if err != nil {
@@ -325,6 +338,7 @@ func (op *Operation) VolumeAttach(
 	volController := volume.NewController(vol, op.Repos.Volume)
 	if err := volController.Attach(ctx, vmItem.ID); err != nil {
 		slog.Warn("failed to attach volume to VM", "vm", vmItem.Name, "volume", vol.Name, "error", err)
+		return err
 	}
 	// Update VM's volume_ids
 	var vmVolumeIDs []string
@@ -344,6 +358,7 @@ func (op *Operation) VolumeAttach(
 	vmItem.VolumeIDs = vmVolumeIDs
 	if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
 		slog.Warn("failed to update VM volume IDs", "vm", vmItem.Name, "error", err)
+		return err
 	}
 	op.AuditLog.LogOperation("vm.attach_volume", map[string]any{
 		"vm": vmItem.Name, "volume": vol.Name,
@@ -360,6 +375,9 @@ func (op *Operation) VolumeDetach(
 	if err != nil {
 		return err
 	}
+	if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
+		return err
+	}
 	// Resolve volume using VolumeInput.Resolve (uses ResolveMany).
 	volumes, resolveErr := input.Resolve(ctx, op.Repos.Volume)
 	if resolveErr != nil {
@@ -369,8 +387,11 @@ func (op *Operation) VolumeDetach(
 		return errs.NotFound(errs.CodeVolumeNotFound, "Expected exactly one volume identifier")
 	}
 	vol := volumes[0]
+	if vol.VMID != nil && *vol.VMID != vmItem.ID {
+		return errs.New(errs.CodeValidationFailed, "volume belongs to a different VM")
+	}
 	// Hot-unplug if running
-	if vmItem.Status == model.VMStatusRunning {
+	if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
 		// Version gate: hot-unplug requires Firecracker v1.16+
 		if vmItem.BinaryID != "" {
 			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
@@ -392,17 +413,11 @@ func (op *Operation) VolumeDetach(
 			slog.Warn("vsock client not available for PCI device removal",
 				"vm", vmItem.Name, "volume", vol.Name, "error", err)
 		}
-		if client != nil {
-			if err := client.RemoveHotpluggedPCIDevice(ctx); err != nil {
-				slog.Warn("failed to remove PCI device from guest via sysfs",
-					"vm", vmItem.Name, "volume", vol.Name, "error", err)
-			}
-		}
-
 		// Attempt hot-unplug via Firecracker API.
 		ctrl := vm.NewController(vmItem, op.Repos.VM)
 		if err := ctrl.DetachVolume(ctx, vol.ID); err != nil {
 			slog.Warn("Hot-unplug failed for drive", "volume", vol.ID, "error", err)
+			return err
 		}
 
 		// Post-detach PCI rescan so the guest kernel reclaims the device slot.
@@ -417,6 +432,7 @@ func (op *Operation) VolumeDetach(
 	volController := volume.NewController(vol, op.Repos.Volume)
 	if err := volController.Detach(ctx); err != nil {
 		slog.Warn("failed to detach volume from VM", "vm", vmItem.Name, "volume", vol.Name, "error", err)
+		return err
 	}
 	// Update VM's volume_ids
 	var vmVolumeIDs []string
@@ -432,6 +448,7 @@ func (op *Operation) VolumeDetach(
 	vmItem.VolumeIDs = newIDs
 	if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
 		slog.Warn("failed to update VM volume IDs", "vm", vmItem.Name, "error", err)
+		return err
 	}
 	op.AuditLog.LogOperation("vm.detach_volume", map[string]any{
 		"vm": vmItem.Name, "volume": vol.Name,

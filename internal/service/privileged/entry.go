@@ -236,6 +236,14 @@ func dispatch(
 		return dispatchHandled, handleVMLaunch(ctx, endpoint, caller, deps.control)
 	case jailer.VMStopAction:
 		return dispatchHandled, handleVMStop(ctx, endpoint, caller, deps.control)
+	case jailer.VMVolumeAttachAction:
+		return dispatchHandled, handleVMVolumeAttach(ctx, endpoint, caller, deps.control)
+	case jailer.VMVolumeDetachAction:
+		return dispatchHandled, handleVMVolumeDetach(ctx, endpoint, caller, deps.control)
+	case jailer.VMPauseAction, jailer.VMResumeAction, jailer.VMStartInstanceAction:
+		return dispatchHandled, handleVMAPIBroker(ctx, endpoint, caller, request.action, deps.control)
+	case jailer.HostVsockOpenAction:
+		return dispatchHandled, handleHostVsockOpen(ctx, endpoint, caller, deps.control)
 	case jailer.VMAbortAction, jailer.VMCleanupAction, jailer.VMRemoveAction:
 		return dispatchHandled, handleVMCleanup(ctx, endpoint, caller, request.action, deps.control)
 	case network.NetworkTrafficPolicyApplyAction:
