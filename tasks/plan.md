@@ -6,6 +6,17 @@
 
 ## Implementation-only pass (2026-09-19)
 
+### Remaining production work resumed
+
+The user explicitly resumed the remaining production implementation after `4ff65536`.
+Independent isolated writers own PCI/nested launch, typed live-volume operations, and legacy
+Jailer retirement. Snapshot producer isolation and the memory-saturation cause receive bounded
+source-design checks before any policy change; the earlier unapproved credential/API redesign
+and memory headroom proposal are not silently adopted. No tests, test edits, builds, validation,
+reviews, installations, or live host/VM mutations are authorized. Formatting/linting and ordinary
+chunk commits only. Stop after implementation; report actual decision blockers instead of
+claiming that unimplemented work is merely awaiting QA.
+
 ### Resumed after user policy decisions
 
 Current continuation checkpoint: typed image conversion and caller staging recovery are integrated
