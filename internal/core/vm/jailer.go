@@ -60,23 +60,10 @@ func translateConfigForJail(config *model.FirecrackerVMConfig) *model.Firecracke
 	return &translated
 }
 
-// ExposeSnapshot exposes one managed snapshot directory inside an existing VM jail.
-func ExposeSnapshot(ctx context.Context, vmID, snapshotDir string) error {
-	return jailersvc.ExposeSnapshot(ctx, vmID, snapshotDir)
-}
-
 // CleanupJail removes all mounts and chroot state for one VM.
 func CleanupJail(ctx context.Context, vmID string) error {
 	_, err := jailersvc.NewVMLifecycleClient().Cleanup(ctx, jailersvc.VMCleanupRequest{VMID: vmID})
 	return err
-}
-
-func exposeVolume(ctx context.Context, vmID string, drive model.DriveConfig) error {
-	return jailersvc.ExposeVolume(ctx, vmID, drive.DriveID, drive.PathOnHost, drive.IsReadOnly)
-}
-
-func removeVolume(ctx context.Context, vmID, driveID string) error {
-	return jailersvc.RemoveVolume(ctx, vmID, driveID)
 }
 
 // CgroupPath returns the fixed cgroup-v2 path for one canonical Jailer launch.

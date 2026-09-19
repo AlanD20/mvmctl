@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"mvmctl/internal/service/console"
-	"mvmctl/internal/service/jailer"
 	"mvmctl/internal/service/nocloudnet"
 
 	"github.com/spf13/cobra"
@@ -29,38 +28,7 @@ func newRunCmd() *cobra.Command {
 
 	cmd.AddCommand(newNoCloudNetCmd())
 	cmd.AddCommand(newConsoleCmd())
-	cmd.AddCommand(newJailerServiceCmd())
 
-	return cmd
-}
-
-func newJailerServiceCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "jailer", Short: "Run the privileged Firecracker Jailer service"}
-	for _, action := range []string{
-		"expose-snapshot", "expose-volume", "remove-volume",
-	} {
-		action := action
-		sub := &cobra.Command{Use: action, Short: "Run the " + action + " Jailer operation"}
-		sub.Flags().String("vm-id", "", "VM ID")
-		sub.Flags().String("vm-dir", "", "Per-VM directory")
-		sub.Flags().String("snapshot-dir", "", "Snapshot directory")
-		sub.Flags().String("drive-id", "", "Firecracker drive ID")
-		sub.Flags().String("host-path", "", "Managed volume path")
-		sub.Flags().Bool("read-only", false, "Expose the managed volume read-only")
-		sub.RunE = func(c *cobra.Command, _ []string) error {
-			vmID, _ := c.Flags().GetString("vm-id")
-			vmDir, _ := c.Flags().GetString("vm-dir")
-			snapshotDir, _ := c.Flags().GetString("snapshot-dir")
-			driveID, _ := c.Flags().GetString("drive-id")
-			hostPath, _ := c.Flags().GetString("host-path")
-			readOnly, _ := c.Flags().GetBool("read-only")
-			return jailer.Run(c.Context(), jailer.Config{
-				Action: action, VMID: vmID, VMDir: vmDir, SnapshotDir: snapshotDir,
-				DriveID: driveID, HostPath: hostPath, ReadOnly: readOnly,
-			})
-		}
-		cmd.AddCommand(sub)
-	}
 	return cmd
 }
 
