@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
 
@@ -28,146 +26,16 @@ func NewController(vm *model.VMItem, repo Repository) *Controller {
 
 // --- Stop ---
 //
-// Stop is idempotent — never returns an error.
-// If the VM is already stopped or the underlying process is gone,
-// returns immediately. If the process exists but cannot be stopped,
-// the status is set to ERROR and the method returns cleanly so
-// that removal cleanup can still proceed.
-//
-// First two code paths (non-running, process-gone) let errors propagate.
+// Stop completes root-authoritative cleanup before projecting STOPPED locally.
+// Unavailable or ambiguous authority is an error, never permission to signal a PID mirror.
 func (c *Controller) Stop(ctx context.Context, force bool) error {
-	if c.vm.JailerBinaryID != "" {
-		defer func() {
-			if err := CleanupJail(context.Background(), c.vm.ID); err != nil {
-				slog.Warn("failed to clean VM jail after stop", "vm", c.vm.Name, "error", err)
-			}
-		}()
-	}
-	pid := c.vm.PID
-
-	// --- Non-running VMs: idempotent + orphan cleanup ---
-	// The DB status might be STOPPED/PAUSED/ERROR but the actual
-	// firecracker process could still be running (e.g., after a
-	// failed cleanup or orphaned process from a previous run).
-	//
-	// Errors must propagate to caller — NOT absorbed.
-	if c.vm.Status != model.VMStatusRunning && c.vm.Status != model.VMStatusStarting {
-		if pid > 0 && system.IsProcessAlive(pid, c.vm.ProcessStartTime) {
-			system.GracefulShutdown(system.ShutdownConfig{
-				Pid: pid, IsChild: false, GracefulTimeout: 100 * time.Millisecond,
-				KillTimeout: 100 * time.Millisecond, ExpectedStartTime: c.vm.ProcessStartTime,
-			})
-			if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
-				return err
-			}
-			c.vm.Status = model.VMStatusStopped
-		} else if pid > 0 {
-			// Process is a zombie or dead — reap exit code if child
-			system.CaptureExitCode(pid)
-		}
-		return nil
-	}
-
-	// --- RUNNING/STARTING but process is already gone ---
-	// Does NOT update in-memory status here (only DB).
-	if pid == 0 || !system.IsProcessAlive(pid, c.vm.ProcessStartTime) {
-		if pid > 0 {
-			// Process is a zombie or dead — reap exit code if child
-			system.CaptureExitCode(pid)
-		}
-		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// --- Normal stop: process is alive, VM is running ---
-	// Does NOT update in-memory status here (only DB).
-	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopping); err != nil {
+	if err := CleanupJail(ctx, c.vm.ID); err != nil {
 		return err
 	}
-
-	stopErr := c.shutdownProcess(ctx, force, pid)
-	if stopErr != nil {
-		// Set status to ERROR and absorb the error.
-		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusError); err != nil {
-			slog.Warn("Failed to update VM status to ERROR", "error", err)
-		}
-		slog.Warn("Failed to stop VM", "name", c.vm.Name, "error", stopErr)
-		return nil
-	}
-	return nil
-}
-
-// shutdownProcess handles the actual Firecracker process shutdown.
-// Any error returned causes Stop() to set DB status to ERROR.
-func (c *Controller) shutdownProcess(ctx context.Context, force bool, pid int) error {
-	var exitCode *int
-
-	if !force && c.vm.APISocketPath != "" {
-		apiSocket := c.vm.APISocketPath
-
-		// Try graceful shutdown via Firecracker API first
-		client := firecracker.NewClient(apiSocket)
-		wasCtrlAltDel, ctrlErr := client.SendCtrlAltDel(ctx)
-		client.Close()
-
-		// If Ctrl+Alt+Del was sent, use hook-based wait: the guest OS
-		// initiates shutdown, and the hook (returns false) tells the
-		// signal handler to wait rather than sending SIGTERM.
-		if ctrlErr == nil && wasCtrlAltDel {
-			exitCode = system.GracefulShutdown(system.ShutdownConfig{
-				Pid:               pid,
-				IsChild:           false,
-				PreSignalHook:     func() bool { return false },
-				GracefulTimeout:   2 * time.Second,
-				KillTimeout:       100 * time.Millisecond,
-				ExpectedStartTime: c.vm.ProcessStartTime,
-			})
-		}
-
-		// Fallback: signal-based shutdown (SIGTERM → wait → SIGKILL)
-		if exitCode == nil {
-			exitCode = system.GracefulShutdown(system.ShutdownConfig{
-				Pid:               pid,
-				IsChild:           false,
-				GracefulTimeout:   2 * time.Second,
-				KillTimeout:       1 * time.Millisecond,
-				ExpectedStartTime: c.vm.ProcessStartTime,
-			})
-		}
-	} else {
-		if force {
-			system.KillProcess(pid)
-		}
-		// Force path: SIGKILL already sent (or we skip SIGTERM for non-force
-		// if no API socket). Either way, use aggressive timeouts — the process
-		// should die within milliseconds.
-		exitCode = system.GracefulShutdown(system.ShutdownConfig{
-			Pid:               pid,
-			IsChild:           false,
-			GracefulTimeout:   100 * time.Millisecond,
-			KillTimeout:       100 * time.Millisecond,
-			ExpectedStartTime: c.vm.ProcessStartTime,
-		})
-	}
-
-	// Capture exit code if not already captured (non-blocking)
-	if exitCode == nil {
-		exitCode = system.CaptureExitCode(pid)
-	}
-
-	// Persist exit code to database
-	if exitCode != nil {
-		if err := c.repo.UpdateExitCode(ctx, c.vm.ID, *exitCode); err != nil {
-			return err
-		}
-	}
-
-	// Update status to STOPPED
 	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
 		return err
 	}
+	c.vm.Status = model.VMStatusStopped
 	return nil
 }
 

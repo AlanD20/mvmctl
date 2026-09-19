@@ -315,6 +315,11 @@ type InstanceDescription struct {
 
 // FirecrackerConfig holds all VM configuration for spawning Firecracker.
 type FirecrackerConfig struct {
+	// Canonical selections for the root-owned lifecycle receiver; paths are not authority.
+	CacheRoot           string `json:"cache_root"`
+	KernelID            string `json:"kernel_id"`
+	NetworkID           string `json:"network_id"`
+	ReleaseArchitecture string `json:"release_architecture"`
 	// Paths
 	VMDir      string `json:"vm_dir"`
 	RootfsPath string `json:"rootfs_path"`

@@ -94,7 +94,7 @@ func translateConfigForJail(config *model.FirecrackerVMConfig) *model.Firecracke
 	}
 	if config.Vsock != nil {
 		vsock := *config.Vsock
-		vsock.UDSPath = jailedRuntimePath(infra.VMVsockSocketFilename)
+		vsock.UDSPath = filepath.Join("/run/mvm/runtime", infra.VMVsockSocketFilename)
 		translated.Vsock = &vsock
 	}
 	return &translated
@@ -107,7 +107,8 @@ func ExposeSnapshot(ctx context.Context, vmID, snapshotDir string) error {
 
 // CleanupJail removes all mounts and chroot state for one VM.
 func CleanupJail(ctx context.Context, vmID string) error {
-	return jailersvc.Cleanup(ctx, vmID)
+	_, err := jailersvc.NewVMLifecycleClient().Cleanup(ctx, jailersvc.VMCleanupRequest{VMID: vmID})
+	return err
 }
 
 func exposeVolume(ctx context.Context, vmID string, drive model.DriveConfig) error {

@@ -3,21 +3,14 @@ package vm
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
-	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/lib/system"
-	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
@@ -62,248 +55,7 @@ func NewFirecrackerSpawner(config *model.FirecrackerConfig) *FirecrackerSpawner 
 
 // Spawn starts a Firecracker process.
 //
-// Polls for the API socket to become available for 150 bounded 100ms intervals and
-// exits early as soon as the socket appears. If the process dies before the
-// socket is created, raises immediately.
-func (s *FirecrackerSpawner) Spawn(ctx context.Context) (retErr error) {
-	// Cleanup any opened FDs on failure.
-	// On success, FDs are either closed explicitly (CloseFilePointers)
-	// or transferred to the child process via Stdin/Stdout.
-	var relayFile *os.File
-	var launchProcess *os.Process
-	started := false
-
-	defer func() {
-		if retErr != nil {
-			safeToCleanup := true
-			if started {
-				var terminateErr error
-				safeToCleanup, terminateErr = s.terminateFailedSpawn(launchProcess)
-				if terminateErr != nil {
-					retErr = errors.Join(retErr, terminateErr)
-				}
-			}
-			if relayFile != nil {
-				relayFile.Close()
-			}
-			if safeToCleanup {
-				s.Cleanup(context.Background())
-			} else {
-				s.CloseFilePointers()
-				slog.Error("preserving VM jail because failed process termination was not verified", "vm_id", s.vmID())
-			}
-		}
-	}()
-
-	// Remove stale API socket from previous run
-	if _, err := os.Stat(s.APISocketPath); err == nil {
-		if err := os.Remove(s.APISocketPath); err != nil {
-			return fmt.Errorf("remove stale api socket %s: %w", s.APISocketPath, err)
-		}
-	}
-	if err := os.Remove(s.pidPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove stale pid file %s: %w", s.pidPath, err)
-	}
-
-	var fcStdin *os.File
-	var fcStdout *os.File
-
-	if !s.config.SnapshotMode && s.config.RelayClientFD != nil {
-		if *s.config.RelayClientFD == 0 {
-			return errs.New(errs.CodeFirecrackerSpawnError,
-				"console enabled but PTY client FD is unavailable")
-		}
-		relayFile = os.NewFile(uintptr(*s.config.RelayClientFD), "relay-client")
-		fcStdin = relayFile
-		fcStdout = relayFile
-	} else {
-		var err error
-		s.serialOutputFP, err = os.OpenFile(s.serialOutputPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-		if err != nil {
-			return err
-		}
-		fcStdout = s.serialOutputFP
-	}
-
-	var err error
-	s.fcLogFP, err = os.OpenFile(s.logPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-
-	if err := s.writeJailerManifest(); err != nil {
-		return err
-	}
-	launchProcess, err = jailersvc.Launch(ctx, s.vmID(), s.config.VMDir, fcStdin, fcStdout, s.fcLogFP)
-	if err != nil {
-		return err
-	}
-	started = true
-
-	// After Start(), the relay FD was inherited by the child — close our copy.
-	if relayFile != nil {
-		relayFile.Close()
-		relayFile = nil
-	}
-
-	// Wait for Firecracker to initialize (150 bounded 100ms polls, approximately 15s total).
-	// Interleave liveness checks so a crashed process is caught early.
-	// CRITICAL: WaitForSocket only checks that the socket file exists (bind() completed).
-	// Firecracker may crash between bind() and listen(), leaving a zombie socket file
-	// that reports ECONNREFUSED on connect. We must Dial to verify it's actually listening.
-	// Nested KVM environments can consume most of this bounded readiness window.
-	for range 150 {
-		if infra.WaitForSocket(s.APISocketPath, 100*time.Millisecond) == nil {
-			// Socket file exists — verify it's accepting connections.
-			if conn, dialErr := net.DialTimeout("unix", s.APISocketPath, 50*time.Millisecond); dialErr == nil {
-				conn.Close()
-				break
-			}
-			// Socket file exists but nobody is listening (ECONNREFUSED likely).
-			// Fall through to liveness check.
-		}
-
-		if err := launchProcess.Signal(syscall.Signal(0)); err != nil {
-			return errs.New(errs.CodeFirecrackerSpawnError,
-				"jailer process exited before the Firecracker API became ready")
-		}
-	}
-
-	// Final verification: socket must exist AND accept connections.
-	if _, err := os.Stat(s.APISocketPath); os.IsNotExist(err) {
-		return errs.New(errs.CodeFirecrackerSpawnError,
-			"firecracker API socket not available after the bounded readiness wait")
-	}
-	if conn, dialErr := net.DialTimeout("unix", s.APISocketPath, 200*time.Millisecond); dialErr != nil {
-		return errs.New(
-			errs.CodeFirecrackerSpawnError,
-			fmt.Sprintf(
-				"firecracker API socket not accepting connections after the bounded readiness wait: %v",
-				dialErr,
-			),
-		)
-	} else {
-		conn.Close()
-	}
-
-	s.CloseFilePointers()
-
-	pidData, err := os.ReadFile(s.pidPath)
-	if err != nil {
-		return errs.WrapMsg(errs.CodeFirecrackerSpawnError, "jailed Firecracker PID was not recorded", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
-	if err != nil || pid <= 0 {
-		return errs.New(errs.CodeFirecrackerSpawnError, "jailed Firecracker PID is invalid")
-	}
-	s.PID = &pid
-	s.ProcessStartTime = system.GetProcessStartTime(pid)
-	if err := VerifyCgroup(ctx, s.vmID(), pid, s.config.CgroupLimits); err != nil {
-		slog.Error("failed to verify VM cgroup enforcement", "vm_id", s.vmID(), "pid", pid, "error", err)
-		return err
-	}
-
-	if err := infra.WritePIDFile(s.pidPath, pid); err != nil {
-		slog.Warn("Failed to write PID file", "path", s.pidPath, "error", err)
-	}
-
-	return nil
-}
-
-func (s *FirecrackerSpawner) terminateFailedSpawn(launcher *os.Process) (bool, error) {
-	actualPID, startTime, pidKnown, pidErr := s.failedSpawnProcessInfo()
-	var terminationErr error
-	if pidErr != nil {
-		terminationErr = pidErr
-	}
-	if pidKnown {
-		if err := terminateProcessWithStartTime(actualPID, startTime); err != nil {
-			terminationErr = errors.Join(terminationErr, err)
-		}
-	}
-
-	if killErr := launcher.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
-		terminationErr = errors.Join(terminationErr, fmt.Errorf("kill outer Jailer launcher: %w", killErr))
-	}
-	if err := waitForLauncher(launcher, 2*time.Second); err != nil {
-		terminationErr = errors.Join(terminationErr, err)
-	}
-
-	if pidKnown && system.IsProcessAlive(actualPID, startTime) {
-		terminationErr = errors.Join(terminationErr,
-			fmt.Errorf("jailed process %d remained alive after failed-spawn termination", actualPID))
-		return false, terminationErr
-	}
-	if pidErr != nil {
-		return false, terminationErr
-	}
-	return true, terminationErr
-}
-
-func (s *FirecrackerSpawner) failedSpawnProcessInfo() (int, *int64, bool, error) {
-	pidData, err := os.ReadFile(s.pidPath)
-	if os.IsNotExist(err) {
-		return 0, nil, false, nil
-	}
-	if err != nil {
-		return 0, nil, false, fmt.Errorf("read jailed process PID during failed spawn: %w", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
-	if err != nil || pid <= 0 {
-		return 0, nil, false, fmt.Errorf("jailed process PID is invalid during failed spawn")
-	}
-	return pid, system.GetProcessStartTime(pid), true, nil
-}
-
-func terminateProcessWithStartTime(pid int, startTime *int64) error {
-	if !system.IsProcessAlive(pid, startTime) {
-		return nil
-	}
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return fmt.Errorf("terminate jailed process %d: %w", pid, err)
-	}
-	if waitForProcessExit(pid, startTime, 2*time.Second) {
-		return nil
-	}
-	if !system.IsProcessAlive(pid, startTime) {
-		return nil
-	}
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return fmt.Errorf("kill jailed process %d: %w", pid, err)
-	}
-	if !waitForProcessExit(pid, startTime, time.Second) {
-		return fmt.Errorf("jailed process %d survived SIGKILL", pid)
-	}
-	return nil
-}
-
-func waitForProcessExit(pid int, startTime *int64, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if !system.IsProcessAlive(pid, startTime) {
-			return true
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return !system.IsProcessAlive(pid, startTime)
-}
-
-func waitForLauncher(launcher *os.Process, timeout time.Duration) error {
-	done := make(chan error, 1)
-	go func() {
-		_, err := launcher.Wait()
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("reap outer Jailer launcher: %w", err)
-		}
-		return nil
-	case <-time.After(timeout):
-		return fmt.Errorf("timed out reaping outer Jailer launcher")
-	}
-}
+// The typed implementation lives in lifecycle.go.
 
 // --- Cleanup ---
 
@@ -385,7 +137,7 @@ func (s *FirecrackerSpawner) WriteToFile() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.configPath, data, 0644)
+	return os.WriteFile(s.configPath, data, 0600)
 }
 
 // --- CloseFilePointers ---

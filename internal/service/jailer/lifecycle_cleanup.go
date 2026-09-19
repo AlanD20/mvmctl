@@ -28,8 +28,19 @@ func (lease *cleanupLease) removeLifecycleJailTree(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := removeStoppedJailTree(ctx, state.record); err != nil {
-		return err
+	// A failed absence admission must never authorize deleting a pre-existing tree.
+	// A retained handoff proves this operation passed the final fresh-tree check.
+	removeTree := state.jailDestination != nil || state.recoveredProcesses != nil || state.record.active != nil
+	if state.preparedJailDestination != nil {
+		prepared := state.preparedJailDestination.state
+		prepared.mu.Lock()
+		removeTree = prepared.status == preparedJailDestinationHandoff || prepared.status == preparedJailDestinationTransferred
+		prepared.mu.Unlock()
+	}
+	if removeTree {
+		if err := removeStoppedJailTree(ctx, state.record); err != nil {
+			return err
+		}
 	}
 	if state.topology != nil {
 		if err := state.topology.Cleanup(ctx); err != nil {
