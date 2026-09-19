@@ -32,6 +32,7 @@ import (
 	"mvmctl/internal/lib/provisioner"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/service/jailer"
+	networkservice "mvmctl/internal/service/network"
 	"mvmctl/pkg/errs"
 )
 
@@ -49,6 +50,7 @@ type Operation struct {
 	hostSystemBinaryInstaller hostSystemBinaryInstaller
 	hostSudoersConfigurer     hostSudoersConfigurer
 	trustedReleaseClient      trustedReleaseClient
+	trafficPolicyClient       *networkservice.TrafficPolicyClient
 	relaunchSpawn             func(context.Context, *vmRelaunchState, bool, string) error
 }
 
@@ -183,6 +185,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		hostSystemBinaryInstaller: s.Host,
 		hostSudoersConfigurer:     s.Host,
 		trustedReleaseClient:      jailer.NewTrustedReleaseClient(),
+		trafficPolicyClient:       networkservice.NewTrafficPolicyClient(),
 	}
 }
 

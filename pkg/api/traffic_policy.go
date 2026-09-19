@@ -6,13 +6,13 @@ import (
 
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
+	networkservice "mvmctl/internal/service/network"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
 
-// NetworkToVMTrafficPolicyCreate records a network-source allow intent, including same-network destinations.
-// Desired intent is not evidence of applied kernel enforcement.
+// NetworkToVMTrafficPolicyCreate applies a root-authorized grant before projecting its immutable identity locally.
 func (op *Operation) NetworkToVMTrafficPolicyCreate(
 	ctx context.Context, input inputs.NetworkToVMTrafficPolicyCreateInput,
 ) (*results.NetworkToVMTrafficPolicy, error) {
@@ -38,15 +38,28 @@ func (op *Operation) NetworkToVMTrafficPolicyCreate(
 		DestinationPortStart: start, DestinationPortEnd: end, CreatedAt: timestamp, UpdatedAt: timestamp,
 	}
 	intent.ID = crypto.NetworkToVMTrafficPolicyDigest(*intent)
-	if err := op.Services.TrafficPolicy.CreateNetworkToVM(ctx, intent); err != nil {
+	request := networkTrafficPolicyRequest(intent)
+	if _, err := op.trafficPolicyClient.ApplyNetworkTrafficPolicy(ctx, request); err != nil {
 		return nil, err
+	}
+	existing, err := op.Repos.TrafficPolicy.GetNetworkToVM(ctx, intent.ID)
+	if err != nil {
+		return nil, trafficPolicyProjectionError(intent.ID, false, err)
+	}
+	if existing != nil {
+		if crypto.NetworkToVMTrafficPolicyDigest(*existing) != intent.ID {
+			return nil, trafficPolicyProjectionError(intent.ID, false,
+				errs.New(errs.CodePolicyCreateFailed, "local traffic policy identity conflicts with root intent"))
+		}
+		intent = existing
+	} else if err := op.Services.TrafficPolicy.CreateNetworkToVM(ctx, intent); err != nil {
+		return nil, trafficPolicyProjectionError(intent.ID, false, err)
 	}
 	op.AuditLog.LogOperation("policy.traffic.network.create", map[string]any{"id": intent.ID}, "")
 	return networkTrafficPolicyResult(intent, source, destination, destinationNetwork), nil
 }
 
-// VMToVMTrafficPolicyCreate records an exact directional VM-source traffic allow intent.
-// Desired intent is not evidence of applied kernel enforcement.
+// VMToVMTrafficPolicyCreate applies an exact root-authorized VM grant before local projection.
 func (op *Operation) VMToVMTrafficPolicyCreate(
 	ctx context.Context, input inputs.VMToVMTrafficPolicyCreateInput,
 ) (*results.VMToVMTrafficPolicy, error) {
@@ -72,8 +85,22 @@ func (op *Operation) VMToVMTrafficPolicyCreate(
 		DestinationPortStart: start, DestinationPortEnd: end, CreatedAt: timestamp, UpdatedAt: timestamp,
 	}
 	intent.ID = crypto.VMToVMTrafficPolicyDigest(*intent)
-	if err := op.Services.TrafficPolicy.CreateVMToVM(ctx, intent); err != nil {
+	request := vmTrafficPolicyRequest(intent)
+	if _, err := op.trafficPolicyClient.ApplyVMTrafficPolicy(ctx, request); err != nil {
 		return nil, err
+	}
+	existing, err := op.Repos.TrafficPolicy.GetVMToVM(ctx, intent.ID)
+	if err != nil {
+		return nil, trafficPolicyProjectionError(intent.ID, false, err)
+	}
+	if existing != nil {
+		if crypto.VMToVMTrafficPolicyDigest(*existing) != intent.ID {
+			return nil, trafficPolicyProjectionError(intent.ID, false,
+				errs.New(errs.CodePolicyCreateFailed, "local traffic policy identity conflicts with root intent"))
+		}
+		intent = existing
+	} else if err := op.Services.TrafficPolicy.CreateVMToVM(ctx, intent); err != nil {
+		return nil, trafficPolicyProjectionError(intent.ID, false, err)
 	}
 	op.AuditLog.LogOperation("policy.traffic.vm.create", map[string]any{"id": intent.ID}, "")
 	return vmTrafficPolicyResult(intent, source, destination, sourceNetwork, destinationNetwork), nil
@@ -141,7 +168,7 @@ func (op *Operation) VMToVMTrafficPolicyInspect(
 	return op.vmTrafficPolicyResult(ctx, intents[0])
 }
 
-// NetworkToVMTrafficPolicyRemove resolves network-source grants and preserves them until safe revocation is available.
+// NetworkToVMTrafficPolicyRemove revokes each root grant before deleting its local projection.
 func (op *Operation) NetworkToVMTrafficPolicyRemove(
 	ctx context.Context,
 	input inputs.NetworkToVMTrafficPolicyInput,
@@ -150,20 +177,90 @@ func (op *Operation) NetworkToVMTrafficPolicyRemove(
 	if err != nil {
 		return err
 	}
-	return errs.New(errs.CodePolicyRemoveFailed,
-		"traffic policy removal requires authoritative firewall reconciliation; desired intent was retained",
-		errs.WithDetails(map[string]any{"policies": len(intents), "reconciliation_required": true}))
+	ids := make([]string, 0, len(intents))
+	for _, intent := range intents {
+		request := networkTrafficPolicyRequest(intent)
+		if request.PolicyID() != intent.ID {
+			return errs.New(
+				errs.CodePolicyRemoveFailed,
+				"local traffic policy identity is not canonical",
+				errs.WithEntity(intent.ID),
+			)
+		}
+		if _, err := op.trafficPolicyClient.RemoveNetworkTrafficPolicy(ctx, request); err != nil {
+			return err
+		}
+		ids = append(ids, intent.ID)
+	}
+	if err := op.Services.TrafficPolicy.RemoveNetworkToVM(ctx, ids); err != nil {
+		return trafficPolicyProjectionError("", true, err)
+	}
+	for _, id := range ids {
+		op.AuditLog.LogOperation("policy.traffic.network.remove", map[string]any{"id": id}, "")
+	}
+	return nil
 }
 
-// VMToVMTrafficPolicyRemove resolves VM-source grants and preserves them until safe revocation is available.
+// VMToVMTrafficPolicyRemove revokes each directional root grant before deleting its local projection.
 func (op *Operation) VMToVMTrafficPolicyRemove(ctx context.Context, input inputs.VMToVMTrafficPolicyInput) error {
 	intents, err := input.Resolve(ctx, op.Repos.TrafficPolicy)
 	if err != nil {
 		return err
 	}
-	return errs.New(errs.CodePolicyRemoveFailed,
-		"traffic policy removal requires authoritative firewall reconciliation; desired intent was retained",
-		errs.WithDetails(map[string]any{"policies": len(intents), "reconciliation_required": true}))
+	ids := make([]string, 0, len(intents))
+	for _, intent := range intents {
+		request := vmTrafficPolicyRequest(intent)
+		if request.PolicyID() != intent.ID {
+			return errs.New(
+				errs.CodePolicyRemoveFailed,
+				"local traffic policy identity is not canonical",
+				errs.WithEntity(intent.ID),
+			)
+		}
+		if _, err := op.trafficPolicyClient.RemoveVMTrafficPolicy(ctx, request); err != nil {
+			return err
+		}
+		ids = append(ids, intent.ID)
+	}
+	if err := op.Services.TrafficPolicy.RemoveVMToVM(ctx, ids); err != nil {
+		return trafficPolicyProjectionError("", true, err)
+	}
+	for _, id := range ids {
+		op.AuditLog.LogOperation("policy.traffic.vm.remove", map[string]any{"id": id}, "")
+	}
+	return nil
+}
+
+func networkTrafficPolicyRequest(
+	intent *model.NetworkToVMTrafficAllowIntent,
+) networkservice.NetworkTrafficPolicyRequest {
+	return networkservice.NetworkTrafficPolicyRequest{
+		SourceNetworkID: intent.SourceNetworkID,
+		DestinationVMID: intent.DestinationVMID,
+		Protocol:        intent.Protocol,
+		PortStart:       uint16(intent.DestinationPortStart),
+		PortEnd:         uint16(intent.DestinationPortEnd),
+	}
+}
+
+func vmTrafficPolicyRequest(intent *model.VMToVMTrafficAllowIntent) networkservice.VMTrafficPolicyRequest {
+	return networkservice.VMTrafficPolicyRequest{
+		SourceVMID:      intent.SourceVMID,
+		DestinationVMID: intent.DestinationVMID,
+		Protocol:        intent.Protocol,
+		PortStart:       uint16(intent.DestinationPortStart),
+		PortEnd:         uint16(intent.DestinationPortEnd),
+	}
+}
+
+func trafficPolicyProjectionError(id string, revoked bool, cause error) error {
+	return errs.WrapMsg(
+		errs.CodeDatabaseError,
+		"root traffic policy mutation completed but local projection failed; retry the same operation",
+		cause,
+		errs.WithEntity(id),
+		errs.WithDetails(map[string]any{"root_policy_mutated": true, "revoked": revoked, "projection_failed": true}),
+	)
 }
 
 func (op *Operation) trafficPolicyNetwork(ctx context.Context, id string) (*model.NetworkItem, error) {
