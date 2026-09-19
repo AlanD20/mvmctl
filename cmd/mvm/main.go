@@ -6,20 +6,23 @@ import (
 	"os"
 
 	"mvmctl/internal/app"
+	"mvmctl/internal/cli/common"
 	"mvmctl/internal/service/privileged"
 )
 
 type entrypoints struct {
-	privileged    func(context.Context, []string) error
-	systemInstall func(context.Context, []string) error
-	normal        func() int
+	privileged        func(context.Context, []string) error
+	systemInstall     func(context.Context, []string) error
+	hostAdministrator func(context.Context, []string) (*app.HostAdministratorResult, error)
+	normal            func() int
 }
 
 func main() {
 	os.Exit(run(context.Background(), os.Args[1:], entrypoints{
-		privileged:    privileged.Run,
-		systemInstall: app.RunHostInstallSystemBinary,
-		normal:        runCLI,
+		privileged:        privileged.Run,
+		systemInstall:     app.RunHostInstallSystemBinary,
+		hostAdministrator: app.RunHostAdministrator,
+		normal:            runCLI,
 	}))
 }
 
@@ -38,5 +41,39 @@ func run(ctx context.Context, args []string, entries entrypoints) int {
 		}
 		return 0
 	}
+	if app.IsHostAdministratorInvocation(args) {
+		return runHostAdministrator(ctx, args, entries.hostAdministrator)
+	}
 	return entries.normal()
+}
+
+func runHostAdministrator(
+	ctx context.Context,
+	args []string,
+	entry func(context.Context, []string) (*app.HostAdministratorResult, error),
+) int {
+	common.BeginOutput(args)
+	result, err := entry(ctx, args)
+	if common.StructuredOutput() {
+		if result != nil && err != nil {
+			common.RecordPartialResult(result)
+		} else {
+			common.RecordResult(result)
+		}
+		if common.FinishOutput(os.Stdout, err) != nil {
+			return 1
+		}
+		return 0
+	}
+	if err != nil {
+		if common.HandleErrors(func() error { return err })() != nil {
+			return 1
+		}
+		return 0
+	}
+	common.Cli.Success("host administration completed")
+	if result != nil && result.UserAddedToGroup {
+		common.Cli.Info("log out and back in to activate mvm group membership")
+	}
+	return 0
 }
