@@ -28,5 +28,15 @@ func (lease *cleanupLease) removeLifecycleJailTree(ctx context.Context) error {
 			return err
 		}
 	}
-	return removeStoppedJailTree(ctx, state.record)
+	if err := removeStoppedJailTree(ctx, state.record); err != nil {
+		return err
+	}
+	if state.topology != nil {
+		if err := state.topology.Cleanup(ctx); err != nil {
+			return err
+		}
+		state.topology = nil
+		state.networkNamespace = nil
+	}
+	return nil
 }

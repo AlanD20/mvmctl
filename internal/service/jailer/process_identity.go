@@ -120,6 +120,7 @@ func activateVerifiedProcessWithDeps(
 		processes:         state.processes,
 		jailDestination:   verified.destination,
 		networkNamespace:  state.networkNamespace,
+		topology:          state.topology,
 		runtimeDirectory:  state.runtimeDirectory,
 		persistentOutputs: state.persistentOutputs,
 		managedVMCgroup:   state.managedVMCgroup,
@@ -131,6 +132,7 @@ func activateVerifiedProcessWithDeps(
 	state.processes = nil
 	state.jailDestination = nil
 	state.networkNamespace = nil
+	state.topology = nil
 	state.runtimeDirectory = nil
 	state.persistentOutputs = nil
 	state.managedVMCgroup = nil
@@ -286,6 +288,12 @@ func verifyRetainedLaunchProcesses(
 			nil,
 		)
 	}
+	if networkNamespace.production != nil {
+		if err := networkNamespace.production.VerifyJailerNamespace(ctx,
+			preSealFirecracker.networkNamespace.device, preSealFirecracker.networkNamespace.inode); err != nil {
+			return verifiedLaunchIdentity{}, err
+		}
+	}
 	if !destinationSealed {
 		if err := destination.seal(ctx, record.ownerUID, record.launch.ownerGID); err != nil {
 			return verifiedLaunchIdentity{}, err
@@ -324,6 +332,12 @@ func verifyRetainedLaunchProcesses(
 			"Firecracker network namespace does not match the topology-selected network namespace",
 			nil,
 		)
+	}
+	if networkNamespace.production != nil {
+		if err := networkNamespace.production.VerifyJailerNamespace(ctx,
+			finalFirecracker.networkNamespace.device, finalFirecracker.networkNamespace.inode); err != nil {
+			return verifiedLaunchIdentity{}, err
+		}
 	}
 	reinspectedReceiver, err := deps.pinnedReinspect(ctx, processes.receiverExecutable)
 	if err != nil {

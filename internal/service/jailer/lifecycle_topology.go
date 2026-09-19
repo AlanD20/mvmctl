@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"mvmctl/internal/lib/authorityfs"
+	"mvmctl/internal/service/network"
 )
 
 // retainProductionTopologyHold transfers a real child hold to the network transaction. The
@@ -35,6 +36,79 @@ func (lease *launchLease) retainProductionTopologyHold(ctx context.Context) (*au
 			retained.Release(context.WithoutCancel(ctx)))
 	}
 	return hold, nil
+}
+
+func (lease *cleanupLease) recoverProductionTopology(ctx context.Context) error {
+	if lease == nil || lease.state == nil || ctx == nil {
+		return instanceStateError("", "cleanup topology authority and context are required")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.vmLock == nil || state.record.lifecycle != instanceLifecycleCleaning {
+		return instanceStateError(state.record.vmID, "cleanup topology authority is not active")
+	}
+	if state.topology != nil {
+		return nil
+	}
+	retained, err := state.vmLock.retainTopologyAuthority(ctx)
+	if err != nil {
+		return err
+	}
+	hold, err := retained.transferProductionHold(ctx)
+	if err != nil {
+		return appendInstanceOperationError(err, "release rejected recovery topology hold",
+			retained.Release(context.WithoutCancel(ctx)))
+	}
+	topology, err := network.Recover(ctx, hold, state.record.launchGeneration)
+	if topology != nil {
+		state.topology = topology
+	}
+	if err != nil {
+		return appendInstanceOperationError(err, "release unconsumed recovery topology hold",
+			hold.Release(context.WithoutCancel(ctx)))
+	}
+	return nil
+}
+
+func (lease *launchLease) prepareProductionTopology(ctx context.Context, intent network.VMIntent) (network.JailerNetworkConfig, error) {
+	hold, err := lease.retainProductionTopologyHold(ctx)
+	if err != nil {
+		return network.JailerNetworkConfig{}, err
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.topology != nil || state.record.lifecycle != instanceLifecycleLaunching {
+		return network.JailerNetworkConfig{}, appendInstanceOperationError(
+			instanceStateError(state.record.vmID, "launch topology preparation is not available"),
+			"release unused topology hold", hold.Release(context.WithoutCancel(ctx)))
+	}
+	intent.LaunchGeneration = state.record.launchGeneration
+	topology, err := network.Prepare(ctx, hold, intent)
+	if topology != nil {
+		state.topology = topology
+	}
+	if err != nil {
+		return network.JailerNetworkConfig{}, appendInstanceOperationError(err, "release unconsumed topology hold",
+			hold.Release(context.WithoutCancel(ctx)))
+	}
+	namespace, err := topology.JailerNamespace(ctx)
+	if err != nil {
+		return network.JailerNetworkConfig{}, err
+	}
+	projection, err := namespace.Binding(ctx)
+	if err != nil {
+		return network.JailerNetworkConfig{}, err
+	}
+	if projection.OwnerUID != state.record.ownerUID || projection.VMID != state.record.vmID {
+		return network.JailerNetworkConfig{}, instanceStateError(state.record.vmID, "topology namespace owner binding differs")
+	}
+	state.networkNamespace = &topologySelectedNetworkNamespace{
+		identity:   instanceObjectIdentity{device: projection.NamespaceDevice, inode: projection.NamespaceInode},
+		production: namespace,
+	}
+	return projection, nil
 }
 
 func (lease *topologyAuthorityLease) transferProductionHold(ctx context.Context) (*authorityfs.TopologyHold, error) {

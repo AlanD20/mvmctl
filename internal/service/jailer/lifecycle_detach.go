@@ -24,6 +24,12 @@ func (lease *activeLease) detachCommittedLaunch(ctx context.Context) error {
 	// directory sync sets activationComplete and permits relinquishing these live capabilities.
 	cleanupCtx := context.WithoutCancel(ctx)
 	state.detachStarted = true
+	if state.topology != nil {
+		if err := state.topology.DetachActive(cleanupCtx); err != nil {
+			return appendInstanceOperationError(state.releaseErr, "detach committed VM topology", err)
+		}
+		state.topology = nil
+	}
 	if state.managedVMCgroup != nil {
 		state.releaseErr = appendInstanceOperationError(state.releaseErr, "detach active cgroup descriptors",
 			state.managedVMCgroup.detachCommittedLaunch(cleanupCtx, state.record.vmID))

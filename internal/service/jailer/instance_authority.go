@@ -6,6 +6,8 @@ import (
 	"sort"
 	"sync"
 
+	"mvmctl/internal/service/network"
+
 	"mvmctl/pkg/errs"
 )
 
@@ -32,6 +34,7 @@ type launchLeaseState struct {
 	preparedJailDestination *preparedJailDestination
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
+	topology                *network.VMTopologyLease
 	runtimeDirectory        *managedVMRuntimeLease
 	persistentOutputs       *managedVMPersistentOutputLease
 	// A post-replacement error still returns abort authority but must not authorize new output effects.
@@ -71,6 +74,7 @@ type activeLeaseState struct {
 	processes          *blockedLaunchProcesses
 	jailDestination    *jailDestinationLease
 	networkNamespace   *topologySelectedNetworkNamespace
+	topology           *network.VMTopologyLease
 	runtimeDirectory   *managedVMRuntimeLease
 	persistentOutputs  *managedVMPersistentOutputLease
 	managedVMCgroup    *managedVMCgroupLease
@@ -96,6 +100,7 @@ type cleanupLeaseState struct {
 	preparedJailDestination *preparedJailDestination
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
+	topology                *network.VMTopologyLease
 	runtimeDirectory        *managedVMRuntimeLease
 	persistentOutputs       *managedVMPersistentOutputLease
 	runtimeRecovery         *managedVMRuntimeRecovery
@@ -746,6 +751,9 @@ func (lease *cleanupLease) Complete(ctx context.Context) error {
 }
 
 func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLeaseState) error {
+	if state.topology != nil {
+		return instanceStateError(state.record.vmID, "retained network topology must complete lifecycle cleanup")
+	}
 	if state.processes != nil {
 		if err := state.processes.terminateAndReap(ctx); err != nil {
 			return err
@@ -1006,6 +1014,7 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 		preparedJailDestination: state.preparedJailDestination,
 		jailDestination:         state.jailDestination,
 		networkNamespace:        state.networkNamespace,
+		topology:                state.topology,
 		runtimeDirectory:        state.runtimeDirectory,
 		persistentOutputs:       state.persistentOutputs,
 		preparedManagedVMCgroup: state.preparedManagedVMCgroup,
@@ -1019,6 +1028,7 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 	state.preparedJailDestination = nil
 	state.jailDestination = nil
 	state.networkNamespace = nil
+	state.topology = nil
 	state.runtimeDirectory = nil
 	state.persistentOutputs = nil
 	state.preparedManagedVMCgroup = nil
@@ -1047,7 +1057,8 @@ func (lease *launchLease) retainTopologyAuthority(
 }
 
 type topologySelectedNetworkNamespace struct {
-	identity instanceObjectIdentity
+	identity   instanceObjectIdentity
+	production *network.JailerNamespaceLease
 }
 
 func (lease *launchLease) retainTopologySelectedNetworkNamespace(
@@ -1158,6 +1169,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 		processes:         state.processes,
 		jailDestination:   state.jailDestination,
 		networkNamespace:  state.networkNamespace,
+		topology:          state.topology,
 		runtimeDirectory:  state.runtimeDirectory,
 		persistentOutputs: state.persistentOutputs,
 		managedVMCgroup:   state.managedVMCgroup,
@@ -1170,6 +1182,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 	state.processes = nil
 	state.jailDestination = nil
 	state.networkNamespace = nil
+	state.topology = nil
 	state.runtimeDirectory = nil
 	state.persistentOutputs = nil
 	state.managedVMCgroup = nil
@@ -1209,7 +1222,7 @@ func (lease *activeLease) Release(ctx context.Context) error {
 	if state.released {
 		return state.releaseErr
 	}
-	if state.prepared != nil || state.processes != nil || state.jailDestination != nil ||
+	if state.topology != nil || state.prepared != nil || state.processes != nil || state.jailDestination != nil ||
 		state.runtimeDirectory != nil || state.managedVMCgroup != nil || state.persistentOutputs != nil {
 		return instanceStateError(state.record.vmID, "live active authority must be consumed by BeginCleanup")
 	}
