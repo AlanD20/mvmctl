@@ -369,5 +369,8 @@ func (server *VMLifecycleServer) Remove(
 	if err := retireRemovedVMExecution(ctx, locked, instanceCaller{uid: ownerUID, gid: ownerGID}); err != nil {
 		return VMCleanupResult{}, err
 	}
+	if err := removeStoppedVMLaunchDeviceAuthority(ctx, locked.record); err != nil {
+		return VMCleanupResult{}, err
+	}
 	return result, nil
 }

@@ -162,7 +162,7 @@ func readVMLaunchDeviceAuthority(
 	record instanceRecord,
 	rootFD int,
 ) (_ vmLaunchDeviceAuthority, returnErr error) {
-	if record.active == nil || record.launch == nil || record.lifecycle != instanceLifecycleActive {
+	if record.active == nil || record.launch == nil || (record.lifecycle != instanceLifecycleActive && record.lifecycle != instanceLifecycleCleaning) {
 		return vmLaunchDeviceAuthority{}, instanceStateError(record.vmID, "active device authority is required")
 	}
 	if err := ctx.Err(); err != nil {
@@ -193,7 +193,7 @@ func readVMLaunchDeviceAuthority(
 		return vmLaunchDeviceAuthority{}, err
 	}
 	if before.mode != unix.S_IFREG|0400 || before.uid != 0 || before.gid != 0 || before.nlink != 1 ||
-		before.size == 0 || before.size > launchDeviceAuthorityMaxBytes {
+		before.size == 0 || before.size > uint64(launchDeviceAuthorityMaxBytes) {
 		return vmLaunchDeviceAuthority{}, instanceStateError(
 			record.vmID,
 			"launch device authority file is not root protected",
