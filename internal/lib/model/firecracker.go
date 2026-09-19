@@ -8,6 +8,9 @@ import (
 
 const cgroupCPUPeriodMicros int64 = 100000
 
+// VMCgroupPolicyVersion identifies pressure-only VM memory control.
+const VMCgroupPolicyVersion = 2
+
 // VMCgroupPolicy contains configurable inputs used to derive a VM resource envelope.
 type VMCgroupPolicy struct {
 	VMMHeadroomMiB int64 `json:"vmm_headroom_mib" db:"vmm_headroom_mib"`
@@ -24,22 +27,26 @@ type VMCgroupLimits struct {
 	CPUWeight       int64 `json:"cpu_weight"        db:"cpu_weight"`
 	MemoryHighBytes int64 `json:"memory_high_bytes" db:"memory_high_bytes"`
 	MemoryMaxBytes  int64 `json:"memory_max_bytes"  db:"memory_max_bytes"`
-	SwapMaxBytes    int64 `json:"swap_max_bytes"    db:"swap_max_bytes"`
-	PIDsMax         int64 `json:"pids_max"          db:"pids_max"`
+	// MemoryMaxUnlimited distinguishes the kernel's max value from a zero-byte limit.
+	// Policy v2 requires this flag and a canonical zero MemoryMaxBytes.
+	MemoryMaxUnlimited bool  `json:"memory_max_unlimited" db:"memory_max_unlimited"`
+	SwapMaxBytes       int64 `json:"swap_max_bytes"    db:"swap_max_bytes"`
+	PIDsMax            int64 `json:"pids_max"          db:"pids_max"`
 }
 
 // NewVMCgroupLimits derives one deterministic envelope from guest machine settings and policy.
 func NewVMCgroupLimits(vcpuCount, memoryMiB int, policy VMCgroupPolicy) VMCgroupLimits {
-	memoryMaxBytes := (int64(memoryMiB) + policy.VMMHeadroomMiB) * 1024 * 1024
+	memoryHighBytes := (int64(memoryMiB) + policy.VMMHeadroomMiB) * 1024 * 1024
 	return VMCgroupLimits{
-		PolicyVersion:   1,
-		CPUQuotaMicros:  int64(vcpuCount) * cgroupCPUPeriodMicros,
-		CPUPeriodMicros: cgroupCPUPeriodMicros,
-		CPUWeight:       policy.CPUWeight,
-		MemoryHighBytes: memoryMaxBytes,
-		MemoryMaxBytes:  memoryMaxBytes,
-		SwapMaxBytes:    policy.SwapMaxBytes,
-		PIDsMax:         policy.PIDsMax,
+		PolicyVersion:      VMCgroupPolicyVersion,
+		CPUQuotaMicros:     int64(vcpuCount) * cgroupCPUPeriodMicros,
+		CPUPeriodMicros:    cgroupCPUPeriodMicros,
+		CPUWeight:          policy.CPUWeight,
+		MemoryHighBytes:    memoryHighBytes,
+		MemoryMaxBytes:     0,
+		MemoryMaxUnlimited: true,
+		SwapMaxBytes:       policy.SwapMaxBytes,
+		PIDsMax:            policy.PIDsMax,
 	}
 }
 

@@ -104,20 +104,26 @@ func readManagedVMCgroupMemoryHigh(
 	)
 }
 
-func readManagedVMCgroupMemoryMax(
+func requireManagedVMCgroupMemoryMaxUnlimited(
 	ctx context.Context,
 	deps managedVMCgroupDeps,
 	directoryFD int,
 	directory managedVMCgroupIdentity,
-) (uint64, error) {
-	return readManagedVMCgroupFiniteControl(
+) error {
+	raw, err := readManagedVMCgroupControlBytes(
 		ctx,
 		deps,
 		directoryFD,
 		directory,
 		managedVMCgroupMemoryMaxControl,
-		"memory.max",
 	)
+	if err != nil {
+		return err
+	}
+	if string(raw) != "max\n" {
+		return managedVMCgroupLimitMismatch("memory.max")
+	}
+	return nil
 }
 
 func readManagedVMCgroupMemorySwapMax(

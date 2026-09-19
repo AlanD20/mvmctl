@@ -182,7 +182,7 @@ func readCgroupLimits(path string) (model.VMCgroupLimits, error) {
 	if err != nil {
 		return model.VMCgroupLimits{}, err
 	}
-	memoryMax, err := readCgroupInt(path, "memory.max")
+	memoryMax, memoryMaxUnlimited, err := readCgroupMemoryMax(path)
 	if err != nil {
 		return model.VMCgroupLimits{}, err
 	}
@@ -197,7 +197,8 @@ func readCgroupLimits(path string) (model.VMCgroupLimits, error) {
 	return model.VMCgroupLimits{
 		CPUQuotaMicros: quota, CPUPeriodMicros: period, CPUWeight: weight,
 		MemoryHighBytes: memoryHigh, MemoryMaxBytes: memoryMax,
-		SwapMaxBytes: swapMax, PIDsMax: pidsMax,
+		MemoryMaxUnlimited: memoryMaxUnlimited,
+		SwapMaxBytes:       swapMax, PIDsMax: pidsMax,
 	}, nil
 }
 
@@ -230,6 +231,18 @@ func readCgroupUsage(path string) (model.VMCgroupUsage, error) {
 		return model.VMCgroupUsage{}, err
 	}
 	return model.VMCgroupUsage{CPUUsageMicros: cpuUsage, MemoryBytes: memory, SwapBytes: swap, PIDsCurrent: pids}, nil
+}
+
+func readCgroupMemoryMax(path string) (int64, bool, error) {
+	data, err := os.ReadFile(filepath.Join(path, "memory.max"))
+	if err != nil {
+		return 0, false, err
+	}
+	if string(data) == "max\n" {
+		return 0, true, nil
+	}
+	value, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	return value, false, err
 }
 
 func readCgroupInt(path, name string) (int64, error) {
@@ -283,7 +296,7 @@ func cgroupLimitMismatches(requested, actual model.VMCgroupLimits) []string {
 	if requested.MemoryHighBytes != actual.MemoryHighBytes {
 		mismatches = append(mismatches, "memory high")
 	}
-	if requested.MemoryMaxBytes != actual.MemoryMaxBytes {
+	if requested.MemoryMaxUnlimited != actual.MemoryMaxUnlimited || requested.MemoryMaxBytes != actual.MemoryMaxBytes {
 		mismatches = append(mismatches, "memory maximum")
 	}
 	if requested.SwapMaxBytes != actual.SwapMaxBytes {

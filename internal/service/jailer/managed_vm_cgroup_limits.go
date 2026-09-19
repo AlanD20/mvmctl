@@ -8,8 +8,8 @@ import (
 )
 
 func validateManagedVMCgroupLimits(limits model.VMCgroupLimits) error {
-	if limits.PolicyVersion != 1 {
-		return instanceAtomicError("managed VM cgroup policy version is unsupported", nil)
+	if limits.PolicyVersion != model.VMCgroupPolicyVersion {
+		return instanceAtomicError("managed VM cgroup policy requires a clean pressure-only policy-v2 VM", nil)
 	}
 	if limits.CPUQuotaMicros <= 0 || limits.CPUPeriodMicros <= 0 {
 		return instanceAtomicError("managed VM CPU cgroup limit is invalid", nil)
@@ -17,8 +17,7 @@ func validateManagedVMCgroupLimits(limits model.VMCgroupLimits) error {
 	if limits.CPUWeight < 1 || limits.CPUWeight > 10000 {
 		return instanceAtomicError("managed VM CPU cgroup weight is invalid", nil)
 	}
-	if limits.MemoryHighBytes <= 0 || limits.MemoryMaxBytes <= 0 ||
-		limits.MemoryHighBytes > limits.MemoryMaxBytes {
+	if limits.MemoryHighBytes <= 0 || !limits.MemoryMaxUnlimited || limits.MemoryMaxBytes != 0 {
 		return instanceAtomicError("managed VM memory cgroup limit is invalid", nil)
 	}
 	if limits.SwapMaxBytes < 0 || limits.PIDsMax <= 0 {
@@ -59,12 +58,8 @@ func verifyManagedVMCgroupLimits(
 	if memoryHigh != uint64(want.MemoryHighBytes) {
 		return managedVMCgroupLimitMismatch("memory.high")
 	}
-	memoryMax, err := readManagedVMCgroupMemoryMax(ctx, deps, leafFD, leaf)
-	if err != nil {
+	if err := requireManagedVMCgroupMemoryMaxUnlimited(ctx, deps, leafFD, leaf); err != nil {
 		return err
-	}
-	if memoryMax != uint64(want.MemoryMaxBytes) {
-		return managedVMCgroupLimitMismatch("memory.max")
 	}
 	swapMax, err := readManagedVMCgroupMemorySwapMax(ctx, deps, leafFD, leaf)
 	if err != nil {
