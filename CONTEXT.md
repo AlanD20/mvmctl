@@ -286,7 +286,8 @@ environment, and runs before user configuration, cache, SQLite, or ordinary serv
 An interrupted initial global transaction requires its original operator to recover before another operator enrolls.
 Enrollment, typed partial results, JSON boolean forms, help, and argument boundaries are implemented. Sudo entry refuses a managed policy
 containing transitional wildcard grants because it cannot prove administrator authentication. `HostClean` and early
-`host reset --force` refuse effects until trusted global VM/network cleanup is composed. Full reset and the final marker
+`host reset --force` refuse effects until trusted global cleanup can retain quiescence and prevent new admissions
+throughout reset. Full reset and the final marker
 policy remain pending.
 
 The v0.3 privileged target splits state by authority and lifetime. Durable ownership and release records live beneath
@@ -310,8 +311,8 @@ retained directory descriptor. Missing leaves are already clean, symlinks are un
 directory, mount, or unexpected name remains untouched and blocks `cleaned`. Fresh cleanup after a controller restart
 reopens only the exact existing root-controlled hierarchy and caller-owned VM directory without creating or repairing
 any component. A missing hierarchy is already clean; unsafe state keeps the durable record and VM lock in retryable
-`cleaning`. The directory is not yet mounted inside the VM namespace or used by public lifecycle operations;
-socket/PID-leaf admission remains pending.
+`cleaning`. Typed launch now consumes this directory in the child-created jail mount tree. Host client connections use
+`/run/mvmctl/runtime/<uid>/<vm-id>`; the whole caller-owned VM cache directory is not mounted.
 
 The final Jailer instance record is strict schema 3 with
 `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
@@ -359,7 +360,7 @@ from launch to active to cleanup without path reconstruction. Abort first termin
 task, then causally binds the leaf for cleanup. Completion requires the exact unreplaced leaf to be empty before
 retryable descriptor-relative removal and commits durable `cleaned` only afterward. A terminal descriptor-close error
 after proven removal converges rather than retrying a reused descriptor. This authority adds no cgroup path to the
-schema and is not yet production host enforcement.
+schema and is now consumed by typed root launch/cleanup; live enforcement remains unqualified.
 
 Private launch cgroup control now accepts only a typed policy-v1 intent: CPU quota, period, and weight; memory high,
 maximum, and swap maximum; and an exact PID maximum. Preparation checks fixed `cpu`, `memory`, and `pids` controller
@@ -398,8 +399,9 @@ set at a time. It compares the recorded active credentials, mount namespace, roo
 cgroup path through pidfd-bound observations without rehashing executables. Network namespace identity must remain
 stable between its two observations, but is not checked against persisted topology authority: schema 3 stores no
 network namespace identity. Same-boot `launching` or `cleaning` records are unavailable; the observer never signals,
-repairs records, or returns a partial map. Public status cannot use it before public launches write schema 3, because
-transitional launches have no authoritative record and would appear stopped.
+repairs records, or returns a partial map. Public list/get now use root batch observation and return errors when it
+fails. List observes the complete selection before status filtering; paused display state is preserved only for an
+observed live process. Legacy launches have no schema-3 authority and are not adopted from SQLite or PID mirrors.
 
 Main also implements the private strict schema-3
 record/codec and the process-authority side of `launching -> active -> cleaning -> cleaned`. An already-created
@@ -422,24 +424,35 @@ state and cache their first cleanup result.
 
 Fresh cleanup now reopens the exact existing per-VM runtime directory through the root-controlled hierarchy before
 runtime cleanup. It creates or repairs nothing, treats an absent hierarchy as already clean, and preserves retryable
-`cleaning` on unsafe state. No production child launcher, privileged VM action, or public VM lifecycle constructs or
-consumes this private graph. Same-boot dead-process cgroup reconciliation, replacement of the path-based cgroup
-prepare/remove calls in `entry.go`, production topology/endpoint authority and mutation-lock composition, stale
-Jailer-tree reconciliation, mount cleanup and persistent-output consumption, public create/start/stop and other
-lifecycle wiring, public status composition and full reconciliation, and live L2, Tier 3, and system qualification
-remain pending.
+`cleaning` on unsafe state. `VMLifecycleClient` and the authenticated receiver now expose named launch, abort, cleanup,
+and remove transactions. Core VM spawning and process control use these requests; returned PID/start values are display
+projections only. Launch registers the handshake-blocked child before mutable effects, prepares cgroup/runtime and
+persistent-output authority, creates topology down, applies/verifies firewall state, and transfers pinned resources
+into a fresh child-created jail tree. It commits the observed schema-3 active identity before close-only detach; a
+detach failure does not destructively roll back an already committed active instance.
 
-The transitional public relaunch path now has a separate, private normal-process `vmRelaunchState` increment. Start,
+Cleanup re-admits exact root records and pidfd-bound processes, including same-boot dead-process recovery, then removes
+the exact stopped jail tree, topology, cgroup, and runtime resources before reporting cleaned. Same-boot topology
+recovery uses durable namespace/link evidence. Stop preserves endpoint reservations and traffic grants for restart;
+remove separately invalidates them and completes root removal before local deletion. Snapshot, extra-drive, and PCI
+launch remain blocked because the corresponding authority/policy is incomplete. Graceful stop preserves explicit
+`force=false`, admits the exact API peer, requests guest shutdown, waits on the retained pidfd, then completes cleanup.
+Console launch now includes its fixed root-spawned relay, caller UID/GID with empty supplementary groups, authenticated
+gate, root-created PTY, and pinned outputs. Prior-boot topology recovery and live L2/Tier 3/system qualification remain
+separate work. Firewall recovery has absence-only prior-boot rebinding that preserves durable grants; this does not
+authorize speculative deletion of surviving kernel objects.
+
+The public relaunch path has a separate, private normal-process `vmRelaunchState`. Start,
 reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,
 mismatched VM identity, or an out-of-range CID aborts before respawn. A present row is cloned, its host UDS metadata is
 normalized to the fixed managed `vsock.sock` leaf, and its CID, agent port, and token remain available to the normal
 process. Only the validated CID enters `model.FirecrackerConfig`; the VM/Jailer path derives the fixed host and
 `/run/mvm/vsock.sock` jail leaves. Snapshot restore preserves the CID stored in vmstate and sends the fixed jail-visible
 vsock UDS override. VM create still uses its existing builder state rather than this common relaunch state. The private
-host `/run/mvmctl/runtime` directory lease now transfers through the private launch/active/cleanup graph, but its
-launch-time `/run/mvm/runtime` mount, authority-verified stale-socket cleanup, public transactional lifecycle,
-host-reboot reconciliation, and L2 `mvm exec` relaunch qualification remain pending, so this increment is not evidence
-that the reported restart failure is fully resolved.
+host `/run/mvmctl/runtime` directory lease transfers through the launch/active/cleanup graph and typed public launch.
+Host-reboot reconciliation and L2 `mvm exec` relaunch qualification remain separate from this implementation; the
+reported restart failure is not declared resolved without that evidence. Snapshot restore remains blocked at typed
+launch until trusted capture authority exists.
 
 Snapshot restore must also obtain the captured network ID, guest IPv4, and MAC from trusted root snapshot metadata and
 reserve those exact values for the restored endpoint. It fails if the source still owns them, another endpoint
@@ -503,12 +516,13 @@ managed-bridge and down-loopback addresses, inspect kernel-created IPv4 routes, 
 methods. Address mutation re-admits the exact topology before and after the effect; loopback verification follows the
 requested `IFF_UP` state, and errors preserve partial/unknown-outcome and close evidence. The shared managed bridge
 must already be up during down-endpoint preparation. These low-level methods do not enforce the complete activation
-sequence or supply firewall authority. Neither `newService` nor the composed topology effect has a production caller;
-Jailer VM-lock transfer, firewall-gated activation, persistent VM-topology records, privileged/public composition, and
-live-kernel qualification remain pending. The `/run/mvmctl/runtime` tree remains uncomposed; only the separate private
-runtime-directory foundation described above can create and pin it.
+sequence or supply firewall authority themselves. The root lifecycle now composes Jailer VM-lock transfer,
+firewall-gated activation, persistent VM-topology records, runtime mounting, and same-boot recovery. Named managed
+network create/remove receiver actions consume logical identity and L3/NAT intent. Creation applies the complete
+network firewall generation before raising the managed bridge; removal requires exact root ownership and absence of
+references. Live-kernel qualification remains pending.
 
-ADR-0017 fixes the production L3 contract; its private foundations do not yet provide production behavior. The per-VM
+ADR-0017 fixes the L3 contract consumed by the typed root transactions. The per-VM
 namespace is an L2 extension of one managed bridge. A canonical RFC1918 IPv4 prefix is limited to `/30` or shorter;
 an omitted gateway resolves to
 the first usable address. Only the host managed bridge (`gateway/prefix`) and guest `eth0` (`guest/prefix`) are
@@ -521,8 +535,10 @@ Public NAT intent is only enabled or disabled; v0.3.0 removes the public/unprivi
 choice. For enabled NAT, root must discover exactly one eligible IPv4 main-table default-route uplink through typed
 rtnetlink pinned to the host network namespace, persist its exact ifindex/name/kind/namespace identity, and revalidate
 it before compile/apply/activation. Zero, multiple, multipath, replaced, or changed candidates fail closed; metrics do
-not select among several routes, and multi-uplink selection is unsupported. Actual input/model/compiler removal and
-its tests remain pending.
+not select among several routes, and multi-uplink selection is unsupported. The public NAT interface-name selectors
+are removed. Named root managed-network create/remove and exact removal receipts are implemented, and core/API
+network mutations now consume them. Retrying a pending desired network requires exactly matching inputs. Missing root
+authority does not authorize cleanup of an interrupted local projection. System qualification remains pending.
 
 Production topology preparation must consume the opaque child `TopologyHold` from the real Jailer VM lock and retain
 it, the namespace pin, and later firewall endpoint authority through active or retryable cleaning state. After all
@@ -533,16 +549,15 @@ boot-scoped identities, and lifecycle progress, while re-deriving names, paths, 
 lowers the host veth first, freshly removes/verifies firewall state, then removes exact topology in reverse dependency
 order without releasing retained authority on retryable failure. Incompatible `/31` or `/32`, non-private, legacy
 host-global, mutable-name, schema-1, or ambiguous state is a clean-break refusal, never adoption or automatic deletion.
-Production route/link activation, firewall capability/application, Jailer launch composition, public lifecycle use,
-reconciliation implementation, and system QA remain pending.
+These activation and same-boot recovery paths are now composed by typed launch and cleanup. Prior-boot recovery and
+system qualification remain separate completion gates; this implementation pass supplies no runtime evidence.
 
 The private Jailer resource foundation now treats caller-owned `firecracker.json` as admission evidence only. It
 rejects malformed UTF-8, requires complete semantic equality with root-built typed intent, closes the source, and
 retains a root-owned `0444` sealed memfd. Final admission requires exact `FD_CLOEXEC`, all required immutability seals
 while permitting kernel-added `F_SEAL_EXEC`, and cancellation-aware canonical readback. Copied private handles share
-one synchronized, cancellation-independent close and retain its first result, including cleanup errors. The typed
-privileged launch and descriptor-only mount consumer remain pending, so current public launches still use the
-transitional configuration path.
+one synchronized, cancellation-independent close and retain its first result, including cleanup errors. Typed
+privileged launch now consumes the sealed configuration in its descriptor-only child mount transaction.
 
 Persistent output preparation is also implemented privately. A successfully registered durable `launching` lease
 derives the owner, VM, and cache identity and retains the output capability before admission or mutation while both
@@ -550,8 +565,8 @@ children remain blocked. The fixed log and console leaves, plus metrics only whe
 one-link `0600` regular files. Existing admitted files are truncated once; missing files are prepared with
 `O_TMPFILE`, synced, and linked without replacing a competing name. Partial attempts retain cleanup and mutation/
 durability evidence and cannot be replayed. The capability transfers through abort, activation, and cleanup with
-shared close-once release; published files remain for inspection. Public launch and descriptor-only output mounts
-remain pending. The policy promises one-launch retention and bounded readers, with no hard live-size cap.
+shared close-once release; published files remain for inspection. Typed launch consumes these output descriptors.
+The policy promises one-launch retention and bounded readers, with no hard live-size cap.
 
 VM data volumes now use only raw backing files at `volumes/<volume-id>.raw`. The public create input and CLI no longer
 accept a format selection; even `--format raw` is rejected. Read-only, shareable, and writeback semantics are preserved,
@@ -570,7 +585,8 @@ Snapshot byte admission limits the complete `vmstate`, including its CRC, to 10,
 length to equal trusted captured RAM in MiB times 1,048,576. Captured rootfs length must match exactly; rootfs-only
 captures have neither memory nor vmstate. These private checks do not authenticate a capture, establish immutable
 memory backing, or grant restore authority. Data-volume snapshot semantics, trusted root capture metadata, public
-schema-3 lifecycle composition, and live qualification remain pending.
+snapshot capture/restore composition, and live qualification remain pending. Typed launch rejects extra drives and
+snapshot mode rather than falling back to the older path.
 
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An
@@ -773,7 +789,8 @@ bounded output and cancellation, and writes command-redacted audit records. Unre
 separate bounded audit form. `--allow-vm-exec` is required per source command; interactive execution cannot opt in.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
 environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
-Python L2 qualification remains pending, and eligible active identities depend on the schema-3 lifecycle cutover.
+Python L2 qualification remains pending. The typed lifecycle now produces eligible schema-3 active identities;
+legacy and incomplete records remain ineligible.
 No SQLite VM status,
 guest-supplied source ID, socket path, or process-local semaphore may substitute for root runtime authority.
 
@@ -860,10 +877,12 @@ only `OptimizeImage`. Provisioning and inspection validate `rootfsEffects`; opti
 validating the closed request and authenticated caller, the coordinator acquires a resource lease through the private
 `rootfsResourceLocks` seam, admits the fixed rootfs, invokes the corresponding effect, and validates the request-bound
 result. The lock seam has a private adapter over the implemented `authorityfs` LoopMount UID and canonical VM/image
-lock capabilities. The production composition root constructs only the provisioning/inspection server, binds the exact
-embedded-agent accessor, and registers only `loopmount-provision-vm` and `loopmount-inspect-image` in the early
-privileged switch. The optimize seam has no production implementation, construction, receiver handler, or dispatcher
-entry. Live-kernel qualification, public/backend cutover, and legacy-route removal remain pending.
+lock capabilities. The composition root binds the exact embedded-agent accessor for provisioning and inspection.
+A separate `NewImageShrinkServer` now supplies offline ext2/ext3/ext4 shrink with durable replay authority. Its fixed
+root-owned `/var/lib/mvmctl/loopmount/<uid>/<image-id>.json` journal records `prepared`, `sized`, and `complete`, bound to
+the admitted cache/image identity and exact request. The receiver accepts only raw extracted ext-family filesystems
+and the shrink-only plan; conversion, deblob, and combined fstab mutation are rejected before mutation. Live-kernel
+qualification, full backend/public cutover, and legacy-route removal remain pending.
 
 The coordinator requires an action-specific effect cleanup capability and unwinds effect cleanup, rootfs authority,
 then the resource lock, each with `context.WithoutCancel`. Effect outcomes use closed action-specific states to derive
@@ -873,15 +892,16 @@ invalid or missing state cannot authorize success. Cleanup failures add bounded 
 
 VM grow replay admission accepts only the stable pre-grow size or the exact requested target size, rejects any third
 size before an effect begins, and retains the actually admitted size on the rootfs lease handed to the narrow effect
-seam. Image optimization remains blocked from privileged registration until durable shrink and replacement replay
-authority exists. Provisioning and read-only inspection are reachable only through their exact internal privileged
+seam. Offline ext-image shrink now persists and consumes replay authority before sizing or truncation. The prepared
+phase retains original backing length; interrupted work must pass fsck, resize, fsck, and exact superblock admission
+before truncation. Provisioning and read-only inspection are reachable through their exact internal privileged
 actions. Image OS detection now stages a normal-process copy at exclusive
 `images/staging/<image-id>/rootfs.img` and invokes typed `InspectImage`. Reflink or sparse copying preserves logical
 length; the caller syncs the copy and detects source size/time changes before inspection. An existing staging ID is
 neither adopted nor overwritten, and cleanup removes only the staging resource created by this invocation. The
 privileged request contains canonical cache/image identity, expected bytes, and filesystem rather than the source
-path. This read-only inspection cutover does not enable privileged image optimization or complete the ordinary
-LoopMount provisioning backend. Live-kernel qualification, the remaining backend/public cutover,
+path. Staged-image handling now also supports the shrink transaction. Account creation, deblob, conversion, and the
+remaining LoopMount provisioning backend cutover are incomplete. Live-kernel qualification, the remaining backend/public cutover,
 and removal of `mvm run provision`, caller-shaped raw wire/sudo, and the legacy arbitrary cleanup/unmount surface remain
 pending. Task 13 is therefore incomplete.
 
@@ -891,14 +911,16 @@ pending. Task 13 is therefore incomplete.
 
 ### Firewall backend transition
 
-The public policy CLI now exposes only the typed `traffic` and `exec` families. Traffic create/list/inspect persist and
-display source-network or exact source-VM TCP/UDP intent. Removal fails closed until authoritative root firewall
-revocation is composed. A successful intent write is not evidence that a generation was applied. The infrastructure
-transition described below remains separate from this CLI change.
+The public policy CLI exposes the typed `traffic` and `exec` families. Traffic creation now applies a root-authorized
+grant before projecting its immutable identity into SQLite. Removal obtains root revocation or exact-absence proof
+before deleting that projection. Root admits exact active or cleaned endpoint topology; stopped reservations and grants
+survive stop and become effective again only with an admitted live endpoint. VM removal invalidates both. Root success
+followed by local projection failure remains a reported repair/retry condition. List and inspect show local projection,
+which is never authority for kernel mutation.
 
-The transitional implementation has two independent firewall backends -- **nftables** (default) and **iptables**
-(legacy) -- selected by the `firewall_backend` setting. Exactly one is active per session. This describes existing code,
-not the accepted v0.3.0 target.
+Managed network and traffic mutations now use the typed root nftables transactions. The old service-access production
+path is removed. The legacy tracker remains only for NoCloud until its port-ownership decision and cutover; its two
+backend implementations described below are not the authority for typed managed network or traffic mutations.
 
 - **nftables** (default): Uses `internal/lib/firewall/nftables.go` -- atomic `nft -f -` batch files.
 - **iptables** (legacy): Uses `internal/lib/firewall/iptables.go` -- per-rule `iptables` calls.
@@ -985,11 +1007,10 @@ observation without a mutation/`Flush` transaction; an exact admitted non-empty 
 its one replacement batch. Partial, foreign, mismatched, corrupt, wrong-boot, wrong-namespace, missing-record, or
 otherwise ambiguous state never grants deletion authority.
 
-This application and reconciliation path is private and has no production caller. Qualified initial
-inspection/adoption, the root/`CAP_NET_ADMIN` threat-model decision, privileged/public composition, link-activation and
-traffic-policy enforcement, legacy `nft` CLI and backend removal, direct capability probes, real-kernel/Tier evidence,
-and release qualification remain pending. Transitional firewall backends remain active internally; the flat public
-policy command family has been replaced by typed intent commands.
+The root managed-network, topology, and traffic-policy transactions now consume this application/reconciliation path.
+Exact host-service revocation is also implemented, but NoCloud port ownership remains an unresolved composition
+boundary and still uses the legacy tracker. Its remaining removal, direct capability probes, real-kernel/Tier evidence, and release
+qualification remain pending. The flat public policy family has been replaced by typed commands.
 
 ADR-0017 defines the remaining clean-break replacement. Before any fixed-name table can be replaced or removed, root
 must hold the never-unlinked global `/run/mvmctl/authority/firewall.lock` and bind the exact observed generation to the
@@ -1146,6 +1167,7 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 | `internal/service/jailer/entry.go` (Jailer exec) | Privileged chroot setup ends with `syscall.Exec` so Jailer inherits console stdin/stdout/stderr and becomes the managed Firecracker process |
 | `internal/service/jailer/lifecycle_child_spawn.go` | Fixed-binary `os.StartProcess` creates the authenticated handshake-blocked root child with its closed inherited channels |
 | `internal/service/jailer/lifecycle_child.go` | `syscall.Exec` preserves admitted child identity and descriptor-only mounts during the fixed Jailer handoff; the early route exits on every outcome |
+| `internal/service/jailer/lifecycle_console_spawn.go` | Root creates the exact PTY and authenticated gate, then `os.StartProcess` executes only the fixed system-binary console marker after dropping to the caller UID/GID with empty supplementary groups; pinned output descriptors are supplied through the closed setup channel |
 | `internal/core/ssh/utils.go` (SSH connectivity probe) | Uses `exec.CommandContext` with a short-lived probe context for SSH connectivity detection |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine running losetup/mount/umount/chroot in chained operations with precise error recovery |
 | `internal/service/agent/exec.go` (command execution) | Uses `exec.CommandContext` for `su` user switching and `sh -c` command execution inside the guest agent |

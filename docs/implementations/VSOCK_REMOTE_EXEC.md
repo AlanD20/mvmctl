@@ -18,7 +18,8 @@ following components:
 
 The relay performs directional policy enforcement, retained-sidecar admission, bounded payload forwarding,
 cancellation, and command-redacted audit finalization. It requires root-admitted active source and destination
-identities from the schema-3 lifecycle; a transitional launch or a SQLite status value cannot supply that authority.
+identities from the schema-3 lifecycle, now composed by typed root launch. A transitional launch or SQLite status
+value cannot supply that authority.
 The implementation-only update added no tests and ran no build, tests, or qualification. Positive end-to-end behavior
 is not qualified.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration, create path, results,
@@ -238,8 +239,8 @@ values. A wire or runtime limit is enforced independently at each boundary that 
 
 ## Composition and remaining qualification
 
-The implemented relay composes these boundaries; production lifecycle integration and system qualification remain
-separate work:
+The implemented relay composes these boundaries and typed launch now supplies schema-3 active records. Remaining
+lifecycle recovery work and system qualification are separate from the relay implementation:
 
 1. `pkg/api` owns the relay because it is the only layer allowed to coordinate VM, vsock, policy, and runtime domains.
 2. Root authority admits the exact active source connection/vsock identity and supplies the authority-owned source FD;

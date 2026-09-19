@@ -28,18 +28,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > wire/process/Jailer-client/registered-handler lifecycle, partial typed vsock-state preservation across start, reboot,
 > and snapshot restore, and clean-break removal of the VM-wide
 > remote-exec trust flag described below are implemented.
-> Production composition of the mandatory per-VM network namespace,
-> nftables-only `traffic` policy application, end-to-end VM-to-VM `exec` qualification, full LoopMount backend/public cutover, final
-> marker-only sudo policy, schema-3 Jailer launch and cgroup-control production composition, same-boot dead-process
-> cgroup reconciliation, final live topology verification and reconciliation, complete relaunch parity and
-> qualification, and remaining typed privileged operations are not
-> implemented yet; see
-> **Security work still pending** before treating this version as release-ready.
+> The late implementation pass also composes typed schema-3 launch/cleanup, per-VM topology, cgroup and descriptor-only
+> mounts, same-boot recovery, root traffic apply/revoke, managed-network transactions, and offline ext-image shrink.
+> This code is unverified: only formatting has been performed, with no build, tests, review, or system qualification.
+> Volume storage policy, trusted snapshot restore, NoCloud ownership, complete host reset, remaining LoopMount effects,
+> and release qualification remain incomplete. Earlier slice evidence below does not qualify these later changes.
 
 ### Added
 
 #### Implementation-only integration updates
 
+- Core VM launch and process control now use typed authenticated root lifecycle operations. Launch persists schema-3
+  intent before effects, consumes pinned config/runtime/output resources in a fresh child-created jail mount tree, and
+  commits exact active identity before close-only detach. Abort/cleanup/remove recover durable authority; same-boot
+  topology and dead-process cleanup are implemented. No legacy launch fallback is used for unsupported selections.
+- Typed graceful stop preserves `force=false`, requests shutdown only through an exact peer-bound Firecracker API,
+  waits on the retained pidfd, and finishes authoritative cleanup. Forced cleanup uses the same admitted identity.
+- The root-spawned console foundation uses a fixed system-binary marker, PTY, authenticated gate, and pinned output
+  descriptors; it drops to the caller UID/GID with empty supplementary groups. Typed launch now composes this relay.
+- VM list/get now propagate root observation errors; list observes the complete selection before applying a status
+  filter. Paused display state is preserved only for a root-observed live process. Final VM removal runs root cleanup
+  before local deletion, and public lifecycle no longer signals numeric PID projections.
+- Traffic create now applies its exact root grant before local projection; remove proves revocation or exact absence
+  before deleting the projection. Active and cleaned root endpoints are admitted. Stop preserves endpoint reservations
+  and grants for restart; VM removal invalidates them. Root success/local projection failure is reported explicitly.
+- Added typed managed-network create/remove receiver transactions. Creation applies the network firewall generation
+  before raising the bridge. Core/API mutations now consume them; NAT uplink selectors and the old service-access
+  production path are removed. Removal requires exact root ownership and absence of references, with durable retry
+  receipts. A pending desired network retries only with exact matching inputs; missing root authority fails closed.
+  The legacy tracker remains only for NoCloud pending its separate port-ownership decision.
+- Added staged offline ext2/ext3/ext4 image shrink with root-owned `prepared`/`sized`/`complete` replay journal. It binds
+  exact cache/image identity and request; conversion, deblob, and combined fstab plans remain unsupported.
 - Added global `--json` with one schema-1 success/error/partial envelope, typed result data, preserved structured
   errors, and per-item batch outcomes. Existing bare JSON reads now appear under `data`. Streaming/interactive exec,
   SSH, logs, completion, service `run`, init wizard, and console attachment reject this mode; console state/kill support
@@ -47,9 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `mvm exec --allow-vm-exec` and API-owned directional policy enforcement, retained root authority, bounded
   source/destination relay, cancellation, and command-redacted audit. It requires schema-3 active VM identities and
   has not been qualified end to end. Ordinary exec, shell, and copy do not enable the source session.
-- Replaced the flat policy CLI with `policy traffic` and `policy exec`. Traffic create/list/inspect expose typed
-  desired intent for a source network or exact source VM. Traffic removal fails closed pending authoritative firewall
-  revocation; recording intent does not claim live enforcement.
+- Replaced the flat policy CLI with `policy traffic` and `policy exec`. Traffic list/inspect expose typed local
+  projections for a source network or exact source VM; root records remain enforcement authority.
 - Added early administrator host init with sudo-invoker or direct-root `--operator` selection, root-owned journal,
   resumable compiled mutation steps, operator enrollment, and typed partial results. Fixed root-owned per-operator
   records preserve prior membership for multiple operators alongside the original global state; an interrupted initial
@@ -57,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   help, and argument boundaries. Sudo entry refuses transitional wildcard grants. Host clean/reset remain blocked on
   trusted global cleanup.
 - Image OS inspection now copies to exclusive `images/staging/<image-id>/rootfs.img` and invokes typed read-only
-  inspection. Existing staging IDs are not adopted or overwritten. Privileged optimization and the remaining
+  inspection. Existing staging IDs are not adopted or overwritten. General optimization and the remaining
   provisioning backend cutover remain pending.
 - Added private raw-volume identity admission, Firecracker 1.16.1 MMIO accounting, a 10,000,000-byte complete vmstate
   limit, and exact memory length from trusted captured RAM. Volume admission is identity-only while storage capacity
@@ -67,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 These integration changes were implemented without adding or changing tests, running builds or tests, or performing
 review or qualification. Earlier evidence below applies only to its stated earlier slices.
+
+The following foundation entries describe earlier increments and their then-current integration boundaries. Current
+composition is described above; the current incomplete-work inventory is under **Security work still pending**.
 
 #### Canonical Firecracker Jailer launch
 - VM create, start, reboot, and snapshot restore now require an exact Firecracker/Jailer release pair and run through a root-owned Jailer chroot with no direct-launch fallback.
@@ -898,7 +919,22 @@ review or qualification. Earlier evidence below applies only to its stated earli
 
 ### Security work still pending
 
-The following items are release blockers and are intentionally not described above as completed behavior:
+Current incomplete work includes full prior-boot topology recovery, per-volume/aggregate storage policy, trusted
+snapshot capture and immutable restore backing, NoCloud port ownership, host reset under a global retained
+quiescence/admission gate, remaining LoopMount account/deblob/conversion effects, memory policy, transitional
+privilege/backend removal, and qualification. Snapshot, extra-volume, and PCI launches refuse unsupported selections;
+host clean/reset remain blocked. Firewall prior-boot recovery now has absence-only rebinding that retains grants, but
+its complete network recovery composition remains separate work.
+
+The code changes in this implementation-only pass have not been built, tested, reviewed, or qualified. Adversarial
+coverage, CLI system tests, cleanup/leak evidence, full CI, and release signoff remain required in a later authorized
+verification pass.
+
+#### Earlier implementation checkpoints (historical)
+
+The list below records the earlier boundary checklist. Several composition items were subsequently implemented in
+the integration updates above; it is not the current incomplete-work inventory. Earlier test claims elsewhere in this
+changelog apply only to their original slices.
 
 - Activate the implemented strict schema-3 authority through the production VM lifecycle. Spawn and authenticate the
   blocked child/relay and persist the implemented owner/cache/release/boot and PID/start `launching` record before

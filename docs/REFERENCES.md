@@ -308,6 +308,17 @@ The VM resolver tries selectors in priority order:
 | `mvm vm ps` | `--json` | List running VMs (active processes) |
 | `mvm vm inspect` | `SELECTOR`, `--json` | Show detailed information about a VM |
 
+VM launch and process control use typed root lifecycle transactions and schema-3 instance records. PID values in
+output are display projections, never signaling authority. List observes its complete VM selection before filtering
+status and propagates observation failures; inspect/get also propagate them. Paused display state requires an observed
+live process. Stop preserves endpoint reservations and traffic grants for restart; remove invalidates them through
+root before local deletion. Without `--force`, stop requests guest shutdown through an identity-bound Firecracker API
+connection and waits on the exact process before authoritative cleanup.
+
+Typed launch now includes console relay composition. This development implementation is unverified: extra-volume,
+snapshot, and PCI launches are blocked, with no legacy launch fallback. Trusted capture/restore authority, storage
+capacity policy, full prior-boot topology recovery, and complete provisioning remain incomplete.
+
 **`vm create` flags:**
 
 | Flag | Description | Default |
@@ -412,12 +423,19 @@ The network resolver tries selectors in priority order:
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--no-nat`, `--nat-gateways`, `--non-interactive`, `--default, -d` | Create a named bridge network |
+| `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--no-nat`, `--non-interactive`, `--default, -d` | Create a named bridge network |
 | `mvm network rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more networks |
 | `mvm network ls` | `--json, --long` | List all networks |
 | `mvm network inspect` | `[SELECTOR]`, `--json` | Show network details, IP leases, and active firewall rules |
 | `mvm network default` | `[SELECTOR]` | Set a network as the default for VM creation |
 | `mvm network sync` | `[SELECTORS]...`, `--json` | Sync firewall rules between database and host |
+
+NAT intent is enabled or disabled; `--nat-gateways` and caller-selected uplink names are removed. Root selects the
+eligible host uplink. Typed root network creation applies its firewall generation before raising the bridge, and
+removal uses exact ownership and reference checks with a durable receipt. Core/API network mutations consume these
+transactions. A pending desired network can be retried only with matching inputs; missing root authority does not
+permit cleanup of an interrupted local projection. These paths have not been qualified. NoCloud still uses its legacy
+tracker pending the separate port-ownership decision.
 
 ---
 
@@ -428,16 +446,19 @@ Policy management separates TCP/UDP traffic intent from directional VM-to-VM exe
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm policy traffic create` | Exactly one of `--from-network NETWORK` or `--from-vm VM`; `--to-vm VM`, `--protocol tcp\|udp`, `--port PORT\|START-END` | Persist typed allow intent |
+| `mvm policy traffic create` | Exactly one of `--from-network NETWORK` or `--from-vm VM`; `--to-vm VM`, `--protocol tcp\|udp`, `--port PORT\|START-END` | Apply a root-authorized traffic grant, then project it locally |
 | `mvm policy traffic ls` | `--json` | List both source families with current resource names |
 | `mvm policy traffic inspect` | `POLICY_ID`, exactly one of `--from-network` or `--from-vm`, `--json` | Inspect intent in the selected family |
-| `mvm policy traffic rm` | `POLICY_IDS...`, exactly one of `--from-network` or `--from-vm`, `-f, --force` | Currently blocked until authoritative firewall revocation is composed |
+| `mvm policy traffic rm` | `POLICY_IDS...`, exactly one of `--from-network` or `--from-vm`, `-f, --force` | Revoke the root grant or prove its absence before deleting the local projection |
 | `mvm policy exec create` | `SOURCE_VM DESTINATION_VM TARGET_USER` | Persist one directional execution grant for an exact non-root destination user |
 | `mvm policy exec ls` | `--json` | List directional execution policies with current VM names |
 | `mvm policy exec rm` | `POLICY_IDS...`, `-f, --force` | Remove one or more execution policies by exact ID or unambiguous prefix |
 
-Traffic create/list/inspect describe desired state; they do not claim that a kernel firewall generation has been
-applied. Removal fails closed until root reconciliation can revoke enforcement before deleting intent.
+Traffic creation applies the grant through root before updating SQLite; removal requires root revocation or exact
+absence first. List and inspect show the local projection. Root success followed by a projection failure is reported
+for repair/retry and does not undo the root outcome. Policies may bind exact active or cleaned root endpoints. Stopping
+a VM preserves endpoint reservations and grants for restart; removing it invalidates them. A grant to a stopped
+endpoint does not create a live network interface.
 
 Execution grants are directional, independent of IP-network placement, and require an exact non-root target user.
 The opt-in API relay now reads and enforces them at runtime. It also requires root-admitted active VM identities;
@@ -830,13 +851,14 @@ The security model applies to the net cloud-init mode only:
 ```
 
 The VM and snapshot leaf names above are compiled and are not configurable. `MVM_CACHE_DIR` still selects the managed
-cache root. API/vsock/console sockets and PID mirrors remain in the VM cache directory in the transitional Jailer path;
-v0.3 release work will move them to `/run/mvmctl/runtime/<uid>/<vm-id>` and stop mounting the whole VM directory.
+cache root. Typed launch places API/vsock/console sockets and display-only PID mirrors beneath
+`/run/mvmctl/runtime/<uid>/<vm-id>`. The root transaction pins individual persistent resources and mounts the runtime
+directory in a fresh child-created jail tree; it does not mount the whole caller-owned VM directory.
 
 The v0.3 privileged path accepts a managed cache root on ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or ZFS.
 FUSE, remote, overlay/stacked, and automount cache roots are unsupported. The descriptor-pinned cache foundation is
 implemented. Its private base-resource preparation also replaces admitted caller configuration bytes with a root-built
-sealed memfd, but privileged launch and descriptor-only mount wiring remain release work tracked in `tasks/todo.md`.
+sealed memfd consumed by typed privileged launch and descriptor-only mounting. These paths have not been qualified.
 
 Canonical launch assets and jail state are outside the user cache:
 
