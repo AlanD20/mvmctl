@@ -6,6 +6,20 @@
 
 ## Implementation-only pass (2026-09-19)
 
+### Resumed after user policy decisions
+
+The user resumed implementation with these decisions: leave cgroup memory policy unchanged
+until diagnosis; preserve LoopMount features through closed typed implementations, including
+account creation and automatic deblob; use one fixed gateway-bound NoCloud port and explicitly
+reject custom ports. The former unanswered questions below are resolved by these decisions.
+This resume supersedes the stopped checkpoint below, but does not authorize tests, builds,
+validation, reviews, host installation, or runtime mutations. Stop again after implementation.
+
+Independent writers use fresh `.tmp/worktrees/impl03-*` worktrees for NoCloud, typed LoopMount
+provisioning, descriptor-confined deblob, network cleanup retries and their firewall absence
+proof, and host reset. Host reset must obtain retained global quiescence and prevent queued
+mutations after reset; it must not force-stop unrelated VMs. Storage caps remain unresolved.
+
 The user authorized implementation of the remaining release work, with an explicit temporary
 workflow override: do not write, edit, or run tests; do not run builds, typechecks, validation,
 verification, or review/audit passes. Only formatting and linting are permitted. Commits from
