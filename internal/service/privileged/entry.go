@@ -12,6 +12,7 @@ import (
 	"mvmctl/internal/lib/hostadmission"
 	"mvmctl/internal/lib/vmexecsessionwire"
 	"mvmctl/internal/service/agent"
+	"mvmctl/internal/service/firewall"
 	"mvmctl/internal/service/jailer"
 	"mvmctl/internal/service/loopmount"
 	"mvmctl/internal/service/network"
@@ -216,6 +217,8 @@ func dispatch(
 	deps runtimeDeps,
 ) (dispatchDisposition, error) {
 	switch request.action {
+	case firewall.ReadinessAction:
+		return dispatchHandled, handleFirewallReadiness(ctx, endpoint, deps.control)
 	case network.HostServiceInspectAction:
 		return dispatchHandled, handleInspectHostService(ctx, endpoint, caller, deps.control)
 	case network.HostServiceApplyAction:

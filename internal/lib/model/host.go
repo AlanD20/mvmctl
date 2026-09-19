@@ -115,7 +115,7 @@ type HostResources struct {
 	HugepagesFree2MB      int             `json:"hugepages_free_2mb"`
 	SMTActive             bool            `json:"smt_active"`
 	NftablesAvailable     bool            `json:"nftables_available"`
-	IptablesAvailable     bool            `json:"iptables_available"`
+	NftablesProbeError    string          `json:"nftables_probe_error,omitempty"`
 	CloudLocaldsAvailable bool            `json:"cloud_localds_available"`
 	DevKVMStatus          string          `json:"dev_kvm_status"`
 	UserInKVMGroup        bool            `json:"user_in_kvm_group"`

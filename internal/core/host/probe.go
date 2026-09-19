@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"os/exec"
 	"slices"
-	"strconv"
 	"strings"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/lib/system"
 )
 
 // --- Probe ---
@@ -48,9 +46,9 @@ func (p *Probe) RunAll(
 		}
 	}
 
-	for _, check := range p.checkFirewallReadiness(ctx, resources) {
+	for _, check := range p.checkFirewallReadiness(resources) {
 		if !check.Passed {
-			result.Warnings = append(result.Warnings, check)
+			result.Critical = append(result.Critical, check)
 		} else {
 			result.Info = append(result.Info, check)
 		}
@@ -238,47 +236,16 @@ func (p *Probe) checkInitBinaries() []model.ProbeCheck {
 	return checks
 }
 
-// checkFirewallReadiness checks firewall backend availability and detect conflicts.
-func (p *Probe) checkFirewallReadiness(ctx context.Context, resources *model.HostResources) []model.ProbeCheck {
-	var checks []model.ProbeCheck
-
-	nftAvailable := resources.NftablesAvailable
-	iptAvailable := resources.IptablesAvailable
-
-	msg := "nftables available"
-	if !nftAvailable {
-		msg = "nftables not available"
+// checkFirewallReadiness reports the fixed disposable-namespace probe result.
+func (p *Probe) checkFirewallReadiness(resources *model.HostResources) []model.ProbeCheck {
+	message := "Modeled bridge/inet nftables, connection tracking and NAT expressions are available"
+	if !resources.NftablesAvailable {
+		message = "Required nftables kernel expressions could not be verified"
 	}
-	checks = append(checks, model.ProbeCheck{
-		Name:    "nftables",
-		Passed:  nftAvailable,
-		Message: msg,
-	})
-
-	msg = "iptables available"
-	if !iptAvailable {
-		msg = "iptables not available"
-	}
-	checks = append(checks, model.ProbeCheck{
-		Name:    "iptables",
-		Passed:  iptAvailable,
-		Message: msg,
-	})
-
-	// Mixed backend detection
-	if nftAvailable && iptAvailable {
-		hasConflict := detectIPTablesBackendConflict(ctx)
-		if hasConflict {
-			checks = append(checks, model.ProbeCheck{
-				Name:    "firewall_conflict",
-				Passed:  false,
-				Message: "Mixed iptables backends detected",
-				Details: "Both legacy and nft iptables backends are active. This may cause networking issues.",
-			})
-		}
-	}
-
-	return checks
+	return []model.ProbeCheck{{
+		Name: "nftables", Passed: resources.NftablesAvailable,
+		Message: message, Details: resources.NftablesProbeError,
+	}}
 }
 
 // checkSystemResources checks system resource thresholds.
@@ -327,50 +294,4 @@ func (p *Probe) checkSystemResources(
 	}
 
 	return checks
-}
-
-// detectIPTablesBackendConflict checks if both iptables-legacy and iptables-nft have active rules.
-// including the initial iptables --version call.
-func detectIPTablesBackendConflict(ctx context.Context) bool {
-	// This determines the current iptables backend (nft vs legacy).
-	// The diagnosis string is computed but discarded by the probe caller
-	// (has_conflict, _ = ...); the call itself is preserved for completeness.
-	versionResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables", "--version"},
-		system.RunCmdOpts{Check: false})
-	_ = versionResult // result not used by probe, but the system call is made
-
-	legacyActive := false
-	nftActive := false
-
-	// Check legacy: iptables-legacy -L -n -v (with privileged=True)
-	legacyResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables-legacy", "-L", "-n", "-v"},
-		system.RunCmdOpts{Check: false, Capture: true, Privileged: true})
-	if legacyResult.Success() {
-		for line := range strings.SplitSeq(legacyResult.Stdout, "\n") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				if pkts, err := strconv.Atoi(parts[0]); err == nil && pkts > 0 {
-					legacyActive = true
-					break
-				}
-			}
-		}
-	}
-
-	// Check nft: iptables -L -n -v (with privileged=True)
-	nftResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables", "-L", "-n", "-v"},
-		system.RunCmdOpts{Check: false, Capture: true, Privileged: true})
-	if nftResult.Success() {
-		for line := range strings.SplitSeq(nftResult.Stdout, "\n") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				if pkts, err := strconv.Atoi(parts[0]); err == nil && pkts > 0 {
-					nftActive = true
-					break
-				}
-			}
-		}
-	}
-
-	return legacyActive && nftActive
 }

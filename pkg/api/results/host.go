@@ -45,10 +45,10 @@ type HostHugepagesInfo struct {
 
 // HostDepsInfo groups dependency availability information.
 type HostDepsInfo struct {
-	NftablesAvailable     bool `json:"nftables_available"`
-	IptablesAvailable     bool `json:"iptables_available"`
-	CloudLocaldsAvailable bool `json:"cloud_localds_available"`
-	DevNetTUNAccessible   bool `json:"dev_net_tun"`
+	NftablesAvailable     bool   `json:"nftables_available"`
+	NftablesProbeError    string `json:"nftables_probe_error,omitempty"`
+	CloudLocaldsAvailable bool   `json:"cloud_localds_available"`
+	DevNetTUNAccessible   bool   `json:"dev_net_tun"`
 }
 
 // HostSystemInfo groups system-level host information.
@@ -177,7 +177,7 @@ func BuildHostInfo(hi *model.HostInfo) *HostInfo {
 		},
 		Dependencies: HostDepsInfo{
 			NftablesAvailable:     hi.Resources.NftablesAvailable,
-			IptablesAvailable:     hi.Resources.IptablesAvailable,
+			NftablesProbeError:    hi.Resources.NftablesProbeError,
 			CloudLocaldsAvailable: hi.Resources.CloudLocaldsAvailable,
 			DevNetTUNAccessible:   hi.Resources.DevNetTUNAccessible,
 		},

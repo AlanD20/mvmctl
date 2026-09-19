@@ -18,6 +18,7 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/validators"
+	"mvmctl/internal/service/firewall"
 )
 
 // --- CPU vendor maps ---
@@ -515,11 +516,23 @@ func DetectResources(
 	// SMT (Hyper-Threading) — treats any non-zero as true
 	smtActive := infra.ReadInt("/sys/devices/system/cpu/smt/active", 0) != 0
 
-	// Binary availability
-	_, nftLookupErr := exec.LookPath("nft")
-	nftablesAvailable := nftLookupErr == nil
-	_, iptLookupErr := exec.LookPath("iptables")
-	iptablesAvailable := iptLookupErr == nil
+	// Firewall readiness uses the modeled kernel expressions, not CLI availability.
+	var firewallReadiness firewall.ReadinessResult
+	var firewallErr error
+	if os.Geteuid() == 0 {
+		// Administrator initialization may already hold exclusive host admission.
+		firewallReadiness, firewallErr = firewall.ProbeReadiness(ctx)
+	} else {
+		firewallReadiness, firewallErr = firewall.NewReadinessClient().Probe(ctx)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	firewallDiagnostic := ""
+	if firewallErr != nil {
+		firewallDiagnostic = firewallErr.Error()
+	}
+	// Remaining binary availability.
 	_, clLookupErr := exec.LookPath("cloud-localds")
 	cloudLocaldsAvailable := clLookupErr == nil
 
@@ -573,8 +586,8 @@ func DetectResources(
 		SwapUsedMiB:           swapUsedMiB,
 		HugepagesFree2MB:      hugepagesFree2MB,
 		SMTActive:             smtActive,
-		NftablesAvailable:     nftablesAvailable,
-		IptablesAvailable:     iptablesAvailable,
+		NftablesAvailable:     firewallErr == nil && firewallReadiness.Ready,
+		NftablesProbeError:    firewallDiagnostic,
 		CloudLocaldsAvailable: cloudLocaldsAvailable,
 		DevKVMStatus:          devKVMStatus,
 		UserInKVMGroup:        userInKVMGroup,
