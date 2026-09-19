@@ -1219,6 +1219,12 @@ accepted policy. Existing base rootfs and image policies are unchanged. The
 [resource-limit proposal](../improvements/volume-snapshot-resource-limits.md) records these decisions and the
 remaining qualification and snapshot-authority gaps.
 
+Snapshot storage decision (2026-09-19): captured artifacts may use root-controlled storage beneath the managed cache,
+with CLI-mediated removal rather than operator filesystem deletion. Root ownership alone is not provenance or
+immutability: capture must exclude untrusted writers and retained writable descriptors before authenticating output,
+and restore must retain immutable backing for its lifetime. This approval does not select data-volume snapshot
+consistency semantics or authorize caller-supplied capture metadata.
+
 The caller-owned `firecracker.json` is admission evidence, not launch authority. Immediately before allocation or
 reading, root repeats synchronized metadata inspection and enforces the 1-byte-through-1-MiB bound. It uses positioned
 reads, an EOF growth probe, cancellation checks, and pre/post device, inode, type, mode, owner, group, link, size,
