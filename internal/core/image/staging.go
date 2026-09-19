@@ -11,7 +11,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/lib/crypto"
 	loopmountsvc "mvmctl/internal/service/loopmount"
 	"mvmctl/pkg/errs"
 )
@@ -22,32 +21,63 @@ func inspectStagedImage(
 	ctx context.Context,
 	imagePath, imageID, fsType string,
 ) (osType string, err error) {
-	stage, err := prepareStagedImage(ctx, imagePath, imageID, fsType)
+	stage, err := openStagedImage(ctx, imagePath, imageID, fsType, true)
 	if err != nil {
 		return "", err
 	}
-	defer func() { err = errors.Join(err, stage.close(true)) }()
+	completed := false
+	defer func() { err = errors.Join(err, stage.close(completed)) }()
+	if stage.recovery != nil {
+		// This hint selects the same requested deblob policy on retry. It never establishes
+		// completion: optimization still replays the exact request against root's own receipt.
+		return stage.recovery.OSType, nil
+	}
+	stage.cleanupKnown = false
 	result, err := loopmountsvc.NewClient().InspectImage(ctx, stage.request)
 	if err != nil {
 		return "", err
 	}
+	stage.cleanupKnown = true
+	completed = true
 	return result.OSType, nil
 }
 
 type stagedImage struct {
-	request       loopmountsvc.ImageInspectRequest
-	source        *os.File
-	sourceInfo    os.FileInfo
-	sourcePath    string
-	cache         *os.Root
-	parent        *os.Root
-	root          *os.Root
-	directoryMade bool
-	rootfsMade    bool
+	request           loopmountsvc.ImageInspectRequest
+	source            *os.File
+	sourceInfo        os.FileInfo
+	sourcePath        string
+	cache             *os.Root
+	parent            *os.Root
+	root              *os.Root
+	publication       *os.Root
+	lock              *os.File
+	recovery          *stagedImageRecovery
+	cleanupKnown      bool
+	callerCleanupOnly bool
+	manifestMade      bool
+	lockMade          bool
+	rootfsIdentity    stagedImageIdentity
+	manifestIdentity  stagedImageIdentity
+	directoryIdentity stagedImageIdentity
+	directoryMade     bool
+	rootfsMade        bool
 }
 
 func prepareStagedImage(ctx context.Context, imagePath, imageID, fsType string) (_ *stagedImage, err error) {
-	stage := &stagedImage{sourcePath: imagePath}
+	return openStagedImage(ctx, imagePath, imageID, fsType, false)
+}
+
+func openStagedImage(
+	ctx context.Context,
+	imagePath, imageID, fsType string,
+	allowRecovery bool,
+) (_ *stagedImage, err error) {
+	canonical, err := filepath.Abs(imagePath)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeImageError, "resolve image staging source", err)
+	}
+	stage := &stagedImage{sourcePath: canonical, cleanupKnown: true}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, stage.close(true))
@@ -61,11 +91,15 @@ func prepareStagedImage(ctx context.Context, imagePath, imageID, fsType string) 
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageError, "resolve image staging cache", err)
 	}
-	sourceFD, err := unix.Open(imagePath, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	publication, err := os.OpenRoot(filepath.Dir(canonical))
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeImageError, "open original image directory", err)
+	}
+	stage.publication = publication
+	source, err := publication.OpenFile(filepath.Base(canonical), os.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageError, "open image for staging", err)
 	}
-	source := os.NewFile(uintptr(sourceFD), imagePath)
 	stage.source = source
 	info, err := source.Stat()
 	if err != nil {
@@ -98,23 +132,52 @@ func prepareStagedImage(ctx context.Context, imagePath, imageID, fsType string) 
 		return nil, errs.WrapMsg(errs.CodeImageError, "open image staging parent", err)
 	}
 	stage.parent = parent
-	// CRITICAL: Never adopt, replace, or recursively clean an existing staging resource.
-	// Exclusive creation keeps interrupted or concurrent work available for diagnosis.
 	if err := parent.Mkdir(imageID, 0700); err != nil {
-		return nil, errs.WrapMsg(errs.CodeImageError, "create exclusive image staging resource", err)
+		if !allowRecovery || !errors.Is(err, os.ErrExist) {
+			return nil, errs.WrapMsg(errs.CodeImageError, "create exclusive image staging resource", err)
+		}
+		stage.cleanupKnown = false
+	} else {
+		stage.directoryMade = true
 	}
-	stage.directoryMade = true
+	directoryInfo, err := parent.Lstat(imageID)
+	if err != nil || directoryInfo == nil || !directoryInfo.IsDir() || directoryInfo.Mode().Perm() != 0700 {
+		return nil, errs.WrapMsg(errs.CodeImageError, "image staging directory has unsafe metadata", err)
+	}
 	root, err := parent.OpenRoot(imageID)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageError, "open image staging resource", err)
 	}
 	stage.root = root
+	stage.directoryIdentity, err = stagedDirectoryIdentity(root)
+	if err != nil {
+		return nil, err
+	}
+	if stage.directoryIdentity.UID != uint32(os.Geteuid()) || stage.directoryIdentity.Mode&07777 != 0700 {
+		return nil, errs.New(errs.CodeImageError, "image staging directory is not caller-owned and private")
+	}
+	if err := stage.lockStaging(ctx, stage.directoryMade); err != nil {
+		return nil, err
+	}
+	if !stage.directoryMade {
+		if err := stage.loadRecovery(ctx); err != nil {
+			return nil, err
+		}
+		return stage, nil
+	}
 	target, err := root.OpenFile("rootfs.img", os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageError, "create image staging rootfs", err)
 	}
 	stage.rootfsMade = true
+	stage.rootfsIdentity, err = stagedFileIdentity(target)
+	if err != nil {
+		return nil, errors.Join(err, target.Close())
+	}
 	copyErr := copyInspectionImage(ctx, source, target, info.Size())
+	if copyErr == nil {
+		stage.rootfsIdentity, copyErr = stagedFileIdentity(target)
+	}
 	closeErr := target.Close()
 	if err := errors.Join(copyErr, closeErr); err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageError, "populate image staging rootfs", err)
@@ -123,23 +186,47 @@ func prepareStagedImage(ctx context.Context, imagePath, imageID, fsType string) 
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageError, "reinspect image staging source", err)
 	}
-	if after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) {
+	beforeIdentity, beforeErr := stagedInfoIdentity(info)
+	afterIdentity, afterErr := stagedInfoIdentity(after)
+	if beforeErr != nil || afterErr != nil || beforeIdentity != afterIdentity {
 		return nil, errs.New(errs.CodeImageError, "image changed while preparing staging inspection")
+	}
+	if err := syncStagedDirectory(ctx, root); err != nil {
+		return nil, err
+	}
+	if err := syncStagedDirectory(ctx, parent); err != nil {
+		return nil, err
 	}
 	return stage, nil
 }
 
 func (stage *stagedImage) close(remove bool) error {
 	var err error
+	remove = remove && (stage.cleanupKnown || stage.callerCleanupOnly)
+	if remove {
+		err = stage.removePublishedOriginal(context.Background())
+	}
 	if stage.root != nil {
-		if remove && stage.rootfsMade {
-			err = errors.Join(err, stage.root.Remove("rootfs.img"))
+		if remove && err == nil && stage.cleanupKnown && stage.rootfsMade {
+			err = errors.Join(err, stage.removeKnownLeaf(context.Background(), "rootfs.img", stage.rootfsIdentity))
+		}
+		if remove && err == nil && stage.manifestMade {
+			err = errors.Join(err, stage.removeRecoveryManifest(context.Background()))
+		}
+		if remove && err == nil && stage.lockMade {
+			err = errors.Join(err, stage.removeLock(context.Background()))
+		}
+		if remove {
+			err = errors.Join(err, syncStagedDirectory(context.Background(), stage.root))
 		}
 		err = errors.Join(err, stage.root.Close())
 	}
+	if stage.lock != nil {
+		err = errors.Join(err, stage.lock.Close())
+	}
 	if stage.parent != nil {
-		if remove && stage.directoryMade {
-			err = errors.Join(err, stage.parent.Remove(stage.request.ImageID))
+		if remove && err == nil && stage.directoryMade {
+			err = stage.removeKnownDirectory(context.Background())
 		}
 		err = errors.Join(err, stage.parent.Close())
 	}
@@ -148,6 +235,9 @@ func (stage *stagedImage) close(remove bool) error {
 	}
 	if stage.source != nil {
 		err = errors.Join(err, stage.source.Close())
+	}
+	if stage.publication != nil {
+		err = errors.Join(err, stage.publication.Close())
 	}
 	if err != nil {
 		return errs.WrapMsg(errs.CodeImageError, "close managed image staging resource", err)
@@ -160,7 +250,7 @@ func optimizeStagedImage(
 	imagePath, imageID, fsType, osType string,
 	deblob, shrink bool,
 ) (returnErr error) {
-	stage, err := prepareStagedImage(ctx, imagePath, imageID, fsType)
+	stage, err := openStagedImage(ctx, imagePath, imageID, fsType, true)
 	if err != nil {
 		return err
 	}
@@ -168,76 +258,21 @@ func optimizeStagedImage(
 	// The original extracted image is replaced only after an authoritative completed result.
 	completed := false
 	defer func() {
-		returnErr = errors.Join(returnErr, stage.close(completed))
+		cleanupErr := stage.close(completed)
+		returnErr = errors.Join(returnErr, cleanupErr)
 		if returnErr != nil {
 			returnErr = errors.Join(returnErr, errs.New(errs.CodeImageError, "managed image shrink staging disposition",
-				errs.WithDetails(map[string]any{"image_id": imageID, "staging_retained": !completed})))
+				errs.WithDetails(map[string]any{"image_id": imageID, "staging_retained": !completed || cleanupErr != nil})))
 		}
 	}()
-	plan := loopmountsvc.ImageOptimizePlan{Shrink: shrink}
-	if deblob {
-		plan.DeblobOS = &osType
-	}
-	result, err := loopmountsvc.NewClient().OptimizeImage(ctx, loopmountsvc.ImageOptimizeRequest{
-		CacheLocator: stage.request.CacheLocator, ImageID: imageID,
-		ExpectedImageBytes: stage.request.ExpectedImageBytes, Filesystem: stage.request.Filesystem,
-		Plan: plan,
-	})
-	if err != nil {
+	if err := stage.prepareRecovery(ctx, osType, deblob, shrink); err != nil {
 		return err
 	}
-	if err := stage.publishShrink(ctx, result.ImageBytes); err != nil {
+	if err := stage.resumeOptimization(ctx); err != nil {
 		return err
 	}
 	completed = true
 	return nil
-}
-
-func (stage *stagedImage) publishShrink(ctx context.Context, size uint64) (returnErr error) {
-	result, err := stage.root.Open("rootfs.img")
-	if err != nil {
-		return errs.WrapMsg(errs.CodeImageError, "open completed image shrink result", err)
-	}
-	defer func() { returnErr = errors.Join(returnErr, result.Close()) }()
-	info, err := result.Stat()
-	if err != nil || !info.Mode().IsRegular() || uint64(info.Size()) != size {
-		return errs.WrapMsg(errs.CodeImageError, "completed image shrink result metadata changed", err)
-	}
-	parent, err := os.OpenRoot(filepath.Dir(stage.sourcePath))
-	if err != nil {
-		return errs.WrapMsg(errs.CodeImageError, "open image publication directory", err)
-	}
-	defer func() { returnErr = errors.Join(returnErr, parent.Close()) }()
-	temporary := ".mvm-image-" + crypto.UUIDV4()
-	target, err := parent.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
-	if err != nil {
-		return errs.WrapMsg(errs.CodeImageError, "create image publication file", err)
-	}
-	published := false
-	defer func() {
-		if !published {
-			returnErr = errors.Join(returnErr, parent.Remove(temporary))
-		}
-	}()
-	copyErr := copyInspectionImage(ctx, result, target, int64(size))
-	if err := errors.Join(copyErr, target.Close()); err != nil {
-		return errs.WrapMsg(errs.CodeImageError, "copy completed image shrink result", err)
-	}
-	name := filepath.Base(stage.sourcePath)
-	current, err := parent.Stat(name)
-	if err != nil || !os.SameFile(current, stage.sourceInfo) || current.Size() != stage.sourceInfo.Size() ||
-		!current.ModTime().Equal(stage.sourceInfo.ModTime()) {
-		return errs.WrapMsg(errs.CodeImageError, "image publication source changed during shrink", err)
-	}
-	if err := parent.Rename(temporary, name); err != nil {
-		return errs.WrapMsg(errs.CodeImageError, "publish completed image shrink", err)
-	}
-	published = true
-	directory, err := parent.Open(".")
-	if err != nil {
-		return errs.WrapMsg(errs.CodeImageError, "open completed image publication directory", err)
-	}
-	return errors.Join(directory.Sync(), directory.Close())
 }
 
 func copyInspectionImage(ctx context.Context, source, target *os.File, size int64) error {
