@@ -246,7 +246,7 @@ func validateTopologyJournal(record topologyJournalRecord) error {
 	key, err := newTopologyKey(record.OwnerUID, record.VMID, record.NetworkID)
 	if err != nil || record.Schema != topologyJournalSchema || !bootIDPattern.MatchString(record.BootID) ||
 		record.LaunchGeneration == 0 || !networkIDPattern.MatchString(record.NetworkDigest) ||
-		record.EndpointID != string(deriveVMLinkName("mvh", key.ownerUID, key.vmID, "host-veth")) {
+		record.EndpointID != string(key.vmID) {
 		return networkAuthorityCorruptError("topology journal identity is invalid", err)
 	}
 	switch record.Lifecycle {

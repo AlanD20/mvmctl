@@ -134,7 +134,7 @@ func (lease *VMTopologyLease) prepare(ctx context.Context, intent VMIntent) erro
 		LaunchGeneration: intent.LaunchGeneration, NetworkDigest: hex.EncodeToString(digest[:]),
 		Prefix: lease.l3.network.prefix.value.String(), Gateway: lease.l3.network.gateway.value.String(),
 		GuestIPv4: lease.l3.guestAddress.value.String(), GuestMAC: lease.l3.mac.String(),
-		EndpointID: deriveTopologyNames(lease.key).hostVeth.String(),
+		EndpointID: string(lease.key.vmID),
 	}
 	persistErr := lease.journal.persist(ctx, record)
 	lease.reserved = lease.journal.raw != nil && lease.journal.record.LaunchGeneration == intent.LaunchGeneration
