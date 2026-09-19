@@ -338,6 +338,20 @@ inspection, production topology composition, privileged/public policy cutover, l
 qualification remain pending. Private implementation and L1 evidence do not establish live kernel enforcement,
 atomicity qualification, or release readiness.
 
+#### Fixed NoCloud host-service slot
+
+The user selected a fixed TCP port bound to each managed network's root-derived gateway for NoCloud.
+The implementation uses the existing default port, `8000`, and rejects custom ports. The privileged
+request selects only the owned network identity; it cannot select a host address, port, protocol,
+or arbitrary service. The resulting grant permits only this reserved gateway service slot.
+
+One live NoCloud batch occupies that gateway listener. A bind collision fails before granting access;
+it does not authorize adoption or termination of the existing listener. Normal shutdown revokes the
+grant while retaining the listener's socket, then releases the port. An interrupted process may leave
+the durable reserved-slot grant for a subsequent invocation or network teardown. This is a fixed-slot
+policy, not authenticated proof of the current listener process; that distinction must remain visible
+in operational documentation. Live-kernel qualification remains deferred.
+
 #### Firewall generation authority and inspection gates
 
 The implemented private authority foundation provides the never-unlinked root-owned

@@ -604,6 +604,16 @@ generation, arbitrary file/copy/command operations, custom shells, partition-tab
 replacement. These are public-cutover blockers, not permission to silently drop behavior. An explicit scope decision
 must either accept each user-visible reduction or defer cutover until a safe typed replacement exists.
 
+The user selected feature preservation for the resumed implementation pass: missing-account creation,
+cloud-init injection, and automatic deblob require closed typed replacements, not removal or an
+already-existing-account requirement. Guest account databases and bounded cleanup/configuration
+operations use the admitted root descriptor. Cloud-init seed input requires its own pinned fixed-leaf
+capability. Operations that inherently execute guest code, such as distribution key initialization,
+may be installed as fixed receiver-generated guest-boot actions; they never execute on the host.
+Queuing a guest-boot action is not evidence it has run. Arbitrary guest commands, caller scripts,
+unbounded recursive traversal, and host-path copy interfaces remain excluded. This decision does
+not claim the corresponding implementations have been verified.
+
 This section records the implemented authority, selection-policy, inspection, provisioning, and private receiver path,
 not public LoopMount backend behavior. The shared cycle-free authority module has separate Jailer and LoopMount
 capability families, the private LoopMount service adapter implements the coordinator's canonical resource-lock seam,
