@@ -101,6 +101,9 @@ func (op *Operation) VMCreate(
 	sharedResolved.Binary = pair.Firecracker
 	sharedResolved.Jailer = pair.Jailer
 	sharedResolved.Provisioner = model.ProvisionerType(op.ProvisionerType)
+	if err := op.Services.Network.EnsureManagedNetwork(ctx, sharedResolved.Network); err != nil {
+		return nil, fmt.Errorf("ensure managed network before VM creation: %w", err)
+	}
 	// Shared nocloudnet server for NET mode (across all VMs in the batch).
 	if sharedResolved.CloudInitMode == model.CloudInitModeNET {
 		// Create shared batch directory.
@@ -1155,6 +1158,11 @@ func (op *Operation) vmRespawnFirecracker(
 	}
 	if err := vm.CleanupJail(ctx, v.ID); err != nil {
 		return fmt.Errorf("clean VM before respawn: %w", err)
+	}
+	// Recover the network only after old VM authority has completed cleanup;
+	// network recovery must finish before Launch acquires the new VM lease.
+	if err := op.Services.Network.EnsureManagedNetwork(ctx, v.Network); err != nil {
+		return fmt.Errorf("ensure managed network before VM respawn: %w", err)
 	}
 	logLevel, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "log_level")
 	fcConfig := buildRespawnFirecrackerConfig(state, pair, vmDir, snapshotMode, snapshotDir, logLevel)
