@@ -20,6 +20,7 @@ type managedNetworkLease struct {
 	root       networkLockRoot
 	owner      networkLockUID
 	lock       networkAuthorityLock
+	mutation   *authorityfs.NetworkMutation
 	storeRoot  *networkStoreRoot
 	store      *networkStoreUID
 	host       *linkNamespaceLease
@@ -52,7 +53,12 @@ func (managedNetworkLocker) LockNetwork(ctx context.Context, key networkKey) (_ 
 	if err != nil {
 		return nil, networkAuthorityValidationError(err.Error())
 	}
-	lease.lock, err = lease.owner.acquireNetwork(ctx, lockKey)
+	owner, ok := lease.owner.(*systemNetworkLockUID)
+	if !ok || owner.value == nil {
+		return nil, networkAuthorityCorruptError("managed network has no concrete lock owner", nil)
+	}
+	lease.mutation, err = owner.value.AcquireMutation(ctx, lockKey)
+	lease.lock = lease.mutation
 	if err != nil {
 		return nil, err
 	}

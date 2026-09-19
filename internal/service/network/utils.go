@@ -16,6 +16,11 @@ func abortTopologyPrepare(
 	stage string,
 	cause error,
 ) (*topologyPreparation, error) {
+	if preparation.journal != nil {
+		preparation.state = topologyPreparationCleaning
+		persistErr := preparation.persistMutation(context.WithoutCancel(ctx), "prepare_failed")
+		return preparation, topologyPrepareError(stage, preparation.entity(), errors.Join(cause, persistErr), true)
+	}
 	// CRITICAL: Cancellation at the failure point must not suppress rollback. The retained typed lease and identities
 	// bound every cleanup effect; context.WithoutCancel does not broaden the cleanup target.
 	cleanupErr := preparation.Cleanup(context.WithoutCancel(ctx))
@@ -36,6 +41,11 @@ func abortTopologyPreparePreservingPrimary(
 	stage string,
 	primary error,
 ) (*topologyPreparation, error) {
+	if preparation.journal != nil {
+		preparation.state = topologyPreparationCleaning
+		persistErr := preparation.persistMutation(context.WithoutCancel(ctx), "prepare_failed")
+		return preparation, appendNetworkAuthorityError(primary, "persist failed topology preparation", persistErr)
+	}
 	// CRITICAL: A lock returned with an error remains authority owned by this transaction. Rollback is detached from
 	// caller cancellation, while an already-classified DomainError remains the authoritative failure returned upstream.
 	cleanupErr := preparation.Cleanup(context.WithoutCancel(ctx))

@@ -1,6 +1,10 @@
 package network
 
-import "context"
+import (
+	"context"
+
+	"mvmctl/internal/lib/authorityfs"
+)
 
 type namespaceIdentity struct {
 	device uint64
@@ -74,6 +78,7 @@ type vmLaunchLease struct {
 	ownerUID OwnerUID
 	vmID     VMID
 	lock     *vmLockCapability
+	hold     *authorityfs.TopologyHold
 }
 
 // NetworkLocker acquires the final lock class for one root-owned managed network. A non-nil lock returned with an

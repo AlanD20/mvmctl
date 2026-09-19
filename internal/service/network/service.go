@@ -11,6 +11,7 @@ import (
 type service struct {
 	locker  NetworkLocker
 	effects TopologyEffects
+	journal *topologyJournal
 }
 
 type topologyPreparationState uint8
@@ -37,6 +38,8 @@ type topologyPreparation struct {
 	tapMade          bool
 	vethMade         bool
 	state            topologyPreparationState
+	journal          *topologyJournal
+	keepNetworkLock  bool
 }
 
 // newService remains private until the complete launch transaction can provide a concrete held VM-lock capability.
@@ -69,7 +72,12 @@ func (service *service) prepare(
 			false,
 		)
 	}
-	if launch.lock == nil {
+	if launch.hold != nil {
+		owner, vm, err := launch.hold.Binding()
+		if err != nil || owner != uint32(launch.ownerUID) || vm.String() != string(launch.vmID) {
+			return nil, topologyPrepareError("admit retained VM topology hold", string(launch.vmID), err, false)
+		}
+	} else if launch.lock == nil {
 		return nil, topologyPrepareError(
 			"admit topology transaction",
 			string(launch.vmID),
@@ -96,7 +104,9 @@ func (service *service) prepare(
 		topology: Topology{
 			key: key,
 		},
-		state: topologyPreparationBuilding,
+		state:           topologyPreparationBuilding,
+		journal:         service.journal,
+		keepNetworkLock: service.journal != nil,
 	}
 	if err != nil {
 		return abortTopologyPreparePreservingPrimary(ctx, preparation, "acquire network topology lock", err)
@@ -114,6 +124,9 @@ func (service *service) prepare(
 		return abortTopologyPrepare(ctx, preparation, "verify network topology lock", err)
 	}
 	preparation.topology.managedBridge = managedBridge
+	if err := preparation.persistMutation(ctx, "create_namespace"); err != nil {
+		return preparation, err
+	}
 
 	pin, err := service.effects.CreateNamespace(ctx, namespaceCreateSpec{key: key})
 	if pin != nil {
@@ -121,6 +134,7 @@ func (service *service) prepare(
 		preparation.namespaceCreated = true
 		preparation.topology.handle = pin.Handle()
 	}
+	err = errors.Join(err, preparation.persistMutation(context.WithoutCancel(ctx), ""))
 	if err != nil {
 		return abortTopologyPreparePreservingPrimary(
 			ctx,
@@ -149,6 +163,9 @@ func (service *service) prepare(
 		)
 	}
 
+	if err := preparation.persistMutation(ctx, "create_local_bridge"); err != nil {
+		return preparation, err
+	}
 	localBridge, err := service.effects.CreateLocalBridgeDown(
 		ctx,
 		pin,
@@ -158,6 +175,7 @@ func (service *service) prepare(
 		preparation.localBridgeMade = true
 		preparation.topology.localBridge = *localBridge
 	}
+	err = errors.Join(err, preparation.persistMutation(context.WithoutCancel(ctx), ""))
 	if err != nil {
 		return abortTopologyPrepare(ctx, preparation, "create namespace-local bridge down", err)
 	}
@@ -178,6 +196,9 @@ func (service *service) prepare(
 		return abortTopologyPrepare(ctx, preparation, "verify namespace-local bridge", err)
 	}
 
+	if err := preparation.persistMutation(ctx, "create_tap"); err != nil {
+		return preparation, err
+	}
 	tap, err := service.effects.CreateTAPDown(
 		ctx,
 		pin,
@@ -187,6 +208,7 @@ func (service *service) prepare(
 		preparation.tapMade = true
 		preparation.topology.tap = *tap
 	}
+	err = errors.Join(err, preparation.persistMutation(context.WithoutCancel(ctx), ""))
 	if err != nil {
 		return abortTopologyPrepare(ctx, preparation, "create namespace-local TAP down", err)
 	}
@@ -215,6 +237,9 @@ func (service *service) prepare(
 		)
 	}
 
+	if err := preparation.persistMutation(ctx, "create_veth"); err != nil {
+		return preparation, err
+	}
 	veth, err := service.effects.CreateVethPairDown(
 		ctx,
 		pin,
@@ -224,6 +249,7 @@ func (service *service) prepare(
 		preparation.vethMade = true
 		preparation.topology.veth = *veth
 	}
+	err = errors.Join(err, preparation.persistMutation(context.WithoutCancel(ctx), ""))
 	if err != nil {
 		return abortTopologyPrepare(ctx, preparation, "create VM veth pair down", err)
 	}
@@ -252,11 +278,20 @@ func (service *service) prepare(
 		)
 	}
 
+	if err := preparation.persistMutation(ctx, "attach_namespace_veth"); err != nil {
+		return preparation, err
+	}
 	if err := service.effects.AttachNamespaceVethToLocalBridge(ctx, pin, *veth, *localBridge); err != nil {
 		return abortTopologyPrepare(ctx, preparation, "attach namespace veth to local bridge", err)
 	}
+	if err := preparation.persistMutation(ctx, "attach_tap"); err != nil {
+		return preparation, err
+	}
 	if err := service.effects.AttachTAPToLocalBridge(ctx, pin, *tap, *localBridge); err != nil {
 		return abortTopologyPrepare(ctx, preparation, "attach TAP to local bridge", err)
+	}
+	if err := preparation.persistMutation(ctx, "attach_host_veth"); err != nil {
+		return preparation, err
 	}
 	if err := service.effects.AttachHostVethToManagedBridge(
 		ctx,
@@ -267,6 +302,12 @@ func (service *service) prepare(
 	}
 
 	preparation.state = topologyPreparationCommitted
+	if preparation.journal != nil {
+		preparation.journal.record.Progress.Attached = true
+	}
+	if err := preparation.persistMutation(ctx, ""); err != nil {
+		return preparation, err
+	}
 	return preparation, nil
 }
 
@@ -296,7 +337,13 @@ func (preparation *topologyPreparation) Cleanup(ctx context.Context) error {
 		return nil
 	}
 	preparation.state = topologyPreparationCleaning
+	if err := preparation.persistMutation(ctx, "begin_cleanup"); err != nil {
+		return err
+	}
 	if preparation.vethMade {
+		if err := preparation.persistMutation(ctx, "delete_veth"); err != nil {
+			return err
+		}
 		if err := preparation.effects.DeleteVethPair(
 			ctx,
 			preparation.pin,
@@ -305,14 +352,26 @@ func (preparation *topologyPreparation) Cleanup(ctx context.Context) error {
 			return preparation.cleanupFailure("delete VM veth pair", err)
 		}
 		preparation.vethMade = false
+		if err := preparation.persistMutation(ctx, ""); err != nil {
+			return err
+		}
 	}
 	if preparation.tapMade {
+		if err := preparation.persistMutation(ctx, "delete_tap"); err != nil {
+			return err
+		}
 		if err := preparation.effects.DeleteTAP(ctx, preparation.pin, preparation.topology.tap); err != nil {
 			return preparation.cleanupFailure("delete namespace-local TAP", err)
 		}
 		preparation.tapMade = false
+		if err := preparation.persistMutation(ctx, ""); err != nil {
+			return err
+		}
 	}
 	if preparation.localBridgeMade {
+		if err := preparation.persistMutation(ctx, "delete_local_bridge"); err != nil {
+			return err
+		}
 		if err := preparation.effects.DeleteLocalBridge(
 			ctx,
 			preparation.pin,
@@ -321,18 +380,51 @@ func (preparation *topologyPreparation) Cleanup(ctx context.Context) error {
 			return preparation.cleanupFailure("delete namespace-local bridge", err)
 		}
 		preparation.localBridgeMade = false
+		if err := preparation.persistMutation(ctx, ""); err != nil {
+			return err
+		}
 	}
 	if preparation.namespaceCreated {
+		if err := preparation.persistMutation(ctx, "delete_namespace"); err != nil {
+			return err
+		}
 		if err := preparation.effects.DeleteNamespace(ctx, preparation.pin); err != nil {
 			return preparation.cleanupFailure("delete VM network namespace", err)
 		}
 		preparation.namespaceCreated = false
+		if err := preparation.persistMutation(ctx, ""); err != nil {
+			return err
+		}
+	}
+	if preparation.journal != nil {
+		record := preparation.journal.record
+		record.Lifecycle, record.Pending, record.Progress = topologyCleaned, "", topologyProgress{}
+		if err := preparation.journal.persist(ctx, record); err != nil {
+			return err
+		}
 	}
 	if err := preparation.releaseAuthorities(ctx); err != nil {
 		return err
 	}
 	preparation.state = topologyPreparationCleaned
 	return nil
+}
+
+func (preparation *topologyPreparation) persistMutation(ctx context.Context, pending string) error {
+	if preparation.journal == nil {
+		return nil
+	}
+	record := preparation.journal.record
+	record.Pending = pending
+	record.Topology = preparation.topology.Export()
+	record.Progress.Namespace = preparation.namespaceCreated
+	record.Progress.LocalBridge = preparation.localBridgeMade
+	record.Progress.TAP = preparation.tapMade
+	record.Progress.Veth = preparation.vethMade
+	if preparation.state == topologyPreparationCleaning {
+		record.Lifecycle = topologyCleaning
+	}
+	return preparation.journal.persist(ctx, record)
 }
 
 func (preparation *topologyPreparation) cleanupFailure(stage string, cause error) *errs.DomainError {
@@ -357,7 +449,7 @@ func (preparation *topologyPreparation) releaseAuthorities(ctx context.Context) 
 		}
 		preparation.pin = nil
 	}
-	if preparation.lock != nil {
+	if preparation.lock != nil && !preparation.keepNetworkLock {
 		if err := preparation.lock.Release(ctx); err != nil {
 			slog.Error(
 				"network topology lock release failed",
