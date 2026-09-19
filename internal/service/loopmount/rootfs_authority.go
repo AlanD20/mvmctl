@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
@@ -239,6 +240,17 @@ func admitRootfs(
 	caller Caller,
 	rawLocator string,
 	selection rootfsSelection,
+) (*rootfsLease, error) {
+	return admitProvisionSelectedRootfs(ctx, deps, caller, rawLocator, selection, nil)
+}
+
+func admitProvisionSelectedRootfs(
+	ctx context.Context,
+	deps rootfsAuthorityDeps,
+	caller Caller,
+	rawLocator string,
+	selection rootfsSelection,
+	provision *jailer.VMProvisionRootfsLease,
 ) (_ *rootfsLease, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, rootfsAtomicError("pin managed rootfs", err)
@@ -313,6 +325,16 @@ func admitRootfs(
 		parentFD = fd
 	}
 
+	if provision != nil {
+		if selection.kind != rootfsVMProvisionSelection {
+			return nil, rootfsAtomicError("VM provisioning authority cannot select an image", nil)
+		}
+		if err := provision.CheckCacheIdentity(ctx, cacheIdentity.deviceMajor, cacheIdentity.deviceMinor,
+			cacheIdentity.inode, cacheIdentity.mount.value, cacheIdentity.mount.kind == rootfsMountIdentityUnique); err != nil {
+			return nil, err
+		}
+	}
+
 	for _, directory := range policy.directories {
 		fd, openErr := openRootfsComponent(
 			ctx,
@@ -331,6 +353,26 @@ func admitRootfs(
 			return nil, err
 		}
 		parentFD = fd
+	}
+
+	if provision != nil {
+		file, err := provision.DuplicateRootfsForMount(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if file != nil {
+			metadata, err := inspectRootfsFile(ctx, deps, int(file.Fd()), 0, policy)
+			if err != nil {
+				return nil, appendRootfsCleanupError(err, "close rejected protected rootfs duplicate", file.Close())
+			}
+			lease := &rootfsLease{
+				deps: deps, caller: caller, cacheIdentity: cacheIdentity, metadata: metadata,
+				admittedBytes: metadata.size, access: policy.access, parentFD: parentFD, stagingFD: -1,
+				rootfsFD: int(file.Fd()), retained: retained, protectedFile: file, protectedVM: provision,
+			}
+			retained = nil
+			return lease, nil
+		}
 	}
 
 	leafFlags := rootfsReadOnlyOpenFlags

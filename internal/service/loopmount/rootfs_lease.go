@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"sync"
 
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
@@ -34,6 +36,8 @@ type rootfsLease struct {
 	retained        []int
 	imageShrink     *imageShrinkTransaction
 	imageConversion *imageConversionTransaction
+	protectedFile   *os.File
+	protectedVM     *jailer.VMProvisionRootfsLease
 	released        bool
 	releaseErr      error
 }
@@ -49,7 +53,13 @@ func (lease *rootfsLease) Release(ctx context.Context) error {
 		return lease.releaseErr
 	}
 
-	closeErr := closeRootfsDescriptors(context.WithoutCancel(ctx), lease.deps, lease.retained)
+	var closeErr error
+	if lease.protectedFile != nil {
+		closeErr = lease.protectedFile.Close()
+		lease.protectedFile = nil
+	}
+	closeErr = errors.Join(closeErr, closeRootfsDescriptors(context.WithoutCancel(ctx), lease.deps, lease.retained))
+	lease.protectedVM = nil
 	lease.caller = Caller{}
 	lease.cacheIdentity = rootfsCacheIdentity{}
 	lease.metadata = rootfsStableMetadata{}

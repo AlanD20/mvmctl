@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
@@ -14,11 +15,12 @@ const maxServerCleanupDetailBytes = 512
 // CRITICAL: Named constructors select only their implemented effects. Durable image shrink
 // authority is separate from VM provisioning and read-only image inspection.
 type Server struct {
-	rootfsAuthority    rootfsAuthorityDeps
-	effects            rootfsEffects
-	optimizeEffects    imageOptimizeEffects
-	locks              rootfsResourceLocks
-	durableImageShrink bool
+	rootfsAuthority         rootfsAuthorityDeps
+	effects                 rootfsEffects
+	optimizeEffects         imageOptimizeEffects
+	locks                   rootfsResourceLocks
+	durableImageShrink      bool
+	protectedVMProvisioning bool
 }
 
 type rootfsEffects interface {
@@ -134,7 +136,8 @@ func NewProvisionInspectServer(agentBinary func(context.Context) ([]byte, error)
 			provision: newSystemRootfsVMProvisionAdapter(agentBinary),
 			inspect:   newSystemRootfsImageInspectAdapter(),
 		},
-		locks: newSystemRootfsResourceLocks(),
+		locks:                   newSystemRootfsResourceLocks(),
+		protectedVMProvisioning: true,
 	}
 }
 
@@ -189,6 +192,20 @@ func (server *Server) ProvisionVM(
 		expectedBytes: request.ExpectedRootfsBytes,
 		replayBytes:   request.Plan.ResizeBytes,
 	}
+	var provisionAuthority *jailer.VMProvisionRootfsLease
+	if server.protectedVMProvisioning {
+		var err error
+		provisionAuthority, err = jailer.AcquireVMProvisionRootfs(
+			ctx, caller.UID, caller.GID, request.VMID, request.CacheLocator,
+		)
+		if err != nil {
+			return VMProvisionResult{}, err
+		}
+		defer func() {
+			returnErr = appendServerCleanupError(returnErr, "vm_provision_authority_release",
+				"release VM provisioning authority", provisionAuthority.Release(context.WithoutCancel(ctx)))
+		}()
+	}
 	lockLease, acquireErr := server.locks.Acquire(ctx, caller, selection)
 	if lockLease != nil {
 		defer func() {
@@ -207,7 +224,9 @@ func (server *Server) ProvisionVM(
 		return VMProvisionResult{}, rootfsAtomicError("managed VM rootfs lock authority is missing", nil)
 	}
 
-	rootfsLease, err := admitVMProvisionRootfs(ctx, server.rootfsAuthority, caller, request)
+	rootfsLease, err := admitProvisionSelectedRootfs(
+		ctx, server.rootfsAuthority, caller, request.CacheLocator, selection, provisionAuthority,
+	)
 	if err != nil {
 		return VMProvisionResult{}, err
 	}

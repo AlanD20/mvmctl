@@ -488,6 +488,15 @@ func growRootfsProvisionBacking(
 	if lease.released || lease.rootfsFD < 0 || lease.access != rootfsReadWrite || lease.admittedBytes >= target {
 		return rootfsAtomicError("managed VM backing rootfs is not eligible for grow", nil)
 	}
+	if lease.protectedVM != nil {
+		tracker.outcomeUnknown = true
+		if err := lease.protectedVM.GrowRootfs(ctx, target); err != nil {
+			return err
+		}
+		tracker.markModified()
+		tracker.completeMutation()
+		return nil
+	}
 	if err := deps.ftruncate(ctx, lease.rootfsFD, int64(target)); err != nil {
 		return rootfsAtomicError("grow managed VM backing rootfs", err)
 	}
