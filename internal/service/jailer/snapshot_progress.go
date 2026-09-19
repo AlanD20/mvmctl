@@ -91,13 +91,24 @@ func (entry *snapshotStoreEntry) readProgress(ctx context.Context) (_ snapshotCa
 }
 
 func snapshotCaptureOutcomeError(progress snapshotCaptureProgress, cause error) error {
+	publication := "unpublished"
+	if progress.Stage == "publishing" {
+		publication = "unknown"
+	}
+	if progress.Published {
+		publication = "published"
+	}
 	return errs.WrapMsg(
 		errs.CodeSnapshotCreateFailed,
 		"snapshot "+progress.SnapshotID+" capture did not complete; source VM state is "+progress.VMState+"; no automatic resume was attempted",
 		cause,
 		errs.WithDetails(map[string]any{
-			"snapshot_id": progress.SnapshotID, "source_vm_id": progress.SourceVMID, "snapshot_stage": progress.Stage,
-			"vm_state": progress.VMState, "snapshot_published": progress.Published,
+			"publication_state":  publication,
+			"snapshot_id":        progress.SnapshotID,
+			"source_vm_id":       progress.SourceVMID,
+			"snapshot_stage":     progress.Stage,
+			"vm_state":           progress.VMState,
+			"snapshot_published": progress.Published,
 		}),
 	)
 }

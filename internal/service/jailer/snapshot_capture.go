@@ -85,7 +85,7 @@ func (server *VMSnapshotServer) Capture(
 			return model.SnapshotCaptureResult{}, err
 		}
 	}
-	if cache.identity != source.Rootfs.cacheIdentity {
+	if protectedCacheIdentity(cache.identity) != protectedCacheIdentity(source.Rootfs.cacheIdentity) {
 		return model.SnapshotCaptureResult{}, instanceStateError(
 			request.VMID,
 			"snapshot cache differs from recorded source",
@@ -121,6 +121,7 @@ func (server *VMSnapshotServer) Capture(
 				"existing snapshot progress belongs to another source",
 			)
 		}
+		prior.VMState = "unknown" // A durable past observation is not current process state.
 		return model.SnapshotCaptureResult{}, snapshotCaptureOutcomeError(
 			prior,
 			instanceValidationError(
@@ -214,6 +215,10 @@ func (server *VMSnapshotServer) Capture(
 			capture.Artifacts = append(capture.Artifacts, artifact)
 		}
 	}
+	progress.Stage = "publishing"
+	if err := entry.writeProgress(ctx, progress); err != nil {
+		return model.SnapshotCaptureResult{}, err
+	}
 	if err := entry.publish(ctx, capture); err != nil {
 		return model.SnapshotCaptureResult{}, err
 	}
@@ -290,7 +295,11 @@ func lockSnapshotBackings(
 			return nil, instanceValidationError("snapshot device graph repeats a protected backing")
 		}
 		if items[i].binding.ownerUID != record.ownerUID ||
-			items[i].binding.cacheIdentity != source.Rootfs.cacheIdentity {
+			protectedCacheIdentity(
+				items[i].binding.cacheIdentity,
+			) != protectedCacheIdentity(
+				source.Rootfs.cacheIdentity,
+			) {
 			return nil, instanceValidationError("snapshot backing owner/cache differs from producer")
 		}
 		lease, err := reopenProtectedBacking(ctx, items[i].binding)
@@ -298,7 +307,11 @@ func lockSnapshotBackings(
 			return nil, err
 		}
 		items[i].lease = lease
-		if err := lease.RequireExclusiveCapture(ctx, record.vmID); err != nil {
+		if record.lifecycle == instanceLifecycleCleaned {
+			if err := lease.RequireStoppedCapture(ctx); err != nil {
+				return nil, err
+			}
+		} else if err := lease.RequireExclusiveCapture(ctx, record.vmID); err != nil {
 			return nil, err
 		}
 	}

@@ -59,6 +59,7 @@ func (server *VMSnapshotServer) Inspect(
 			if progress.OwnerUID != ownerUID {
 				return model.SnapshotCaptureResult{}, instanceValidationError("snapshot progress owner differs")
 			}
+			progress.VMState = "unknown" // A historical pause must not project current state.
 			return model.SnapshotCaptureResult{}, snapshotCaptureOutcomeError(progress, err)
 		}
 		return model.SnapshotCaptureResult{}, err
@@ -100,7 +101,7 @@ func (server *VMSnapshotServer) Remove(
 }
 
 func (record snapshotCaptureRecord) projection(paused bool) model.SnapshotCaptureResult {
-	return model.SnapshotCaptureResult{
+	projection := model.SnapshotCaptureResult{
 		SnapshotID:          record.SnapshotID,
 		SourceVMID:          record.Source.VMID,
 		Mode:                record.Mode,
@@ -113,5 +114,18 @@ func (record snapshotCaptureRecord) projection(paused bool) model.SnapshotCaptur
 		GuestMAC:            record.Source.GuestMAC,
 		ReleaseVersion:      record.Source.Release.Version,
 		ReleaseArchitecture: record.Source.Release.Architecture,
+		FirecrackerSHA256:   record.Source.FirecrackerSHA256, JailerSHA256: record.Source.JailerSHA256,
+		KernelID: record.Source.KernelID, PCIEnabled: record.Source.PCIEnabled, NestedVirt: record.Source.NestedVirt,
+		CloudInit: record.Source.CloudInit, BootArgs: record.Source.Config.BootSource.BootArgs,
+		CgroupLimits: record.Source.CgroupLimits, CPUConfig: record.Source.Config.CPUConfig,
+		Logging: record.Source.Config.Logger != nil, Metrics: record.Source.Config.Metrics != nil,
 	}
+	if record.Source.Config.Vsock != nil {
+		cid := record.Source.Config.Vsock.GuestCID
+		projection.VsockCID = &cid
+	}
+	if record.Source.Config.Logger != nil {
+		projection.LogLevel = record.Source.Config.Logger.Level
+	}
+	return projection
 }

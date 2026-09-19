@@ -226,9 +226,38 @@ func (c *Controller) SnapshotCreate(
 // Loads a snapshot into Firecracker (must already be spawned in snapshot mode
 // with a ready API socket). Handles: LoadSnapshot with network override,
 // vsock reconfiguration, and status update.
-func (c *Controller) SnapshotRestore(ctx context.Context, cfg model.SnapshotRestoreConfig) error {
-	return errs.New(errs.CodeSnapshotRestoreFailed,
-		"snapshot restore requires the root-owned prepared restore transaction")
+func (c *Controller) SnapshotRestore(
+	ctx context.Context,
+	cfg model.SnapshotRestoreConfig,
+) (model.SnapshotRestoreResult, error) {
+	result, err := jailersvc.NewVMSnapshotClient().Restore(ctx, jailersvc.VMSnapshotRestoreRequest{
+		CacheRoot: cfg.CacheRoot, SnapshotID: cfg.SnapshotID, VMID: c.vm.ID, Resume: cfg.Resume,
+	})
+	if err != nil {
+		slog.Error("failed to restore trusted VM snapshot", "vm", c.vm.ID, "error", err)
+		return result, err
+	}
+	c.vm.PID = result.PID
+	started := int64(result.StartTimeTicks)
+	c.vm.ProcessStartTime = &started
+	c.vm.Status = model.VMStatusPaused
+	if !result.Configuration.Paused {
+		c.vm.Status = model.VMStatusRunning
+	}
+	c.vm.IPv4, c.vm.MAC, c.vm.NetworkID = result.Configuration.GuestIPv4, result.Configuration.GuestMAC, result.Configuration.NetworkID
+	c.vm.VCPUCount, c.vm.MemSizeMiB = result.Configuration.VCPUCount, result.Configuration.MemSizeMiB
+	c.vm.CgroupLimits = result.Configuration.CgroupLimits
+	c.vm.KernelID = result.Configuration.KernelID
+	c.vm.PCIEnabled, c.vm.NestedVirt = result.Configuration.PCIEnabled, result.Configuration.NestedVirt
+	c.vm.CPUConfig = result.Configuration.CPUConfig
+	c.vm.VolumeIDs = nil
+	for _, volume := range result.Volumes {
+		c.vm.VolumeIDs = append(c.vm.VolumeIDs, volume.ID)
+	}
+	if err := c.repo.Upsert(ctx, c.vm); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func snapshotVsockOverride(enabled bool) string {

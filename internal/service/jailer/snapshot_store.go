@@ -314,7 +314,7 @@ func (entry *snapshotStoreEntry) copyArtifact(
 	if n != 0 {
 		return snapshotArtifact{}, instanceValidationError("snapshot source extent changed while copying")
 	}
-	if err := unix.Fchmod(fd, 0400); err != nil {
+	if err := unix.Fchmod(fd, snapshotArtifactMode(name)); err != nil {
 		return snapshotArtifact{}, err
 	}
 	if err := unix.Fsync(fd); err != nil {
@@ -324,7 +324,7 @@ func (entry *snapshotStoreEntry) copyArtifact(
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return snapshotArtifact{}, err
 	}
-	if stat.Uid != 0 || stat.Gid != 0 || stat.Mode != unix.S_IFREG|0400 || stat.Nlink != 1 ||
+	if stat.Uid != 0 || stat.Gid != 0 || stat.Mode != unix.S_IFREG|snapshotArtifactMode(name) || stat.Nlink != 1 ||
 		uint64(stat.Size) != length {
 		return snapshotArtifact{}, instanceValidationError("snapshot copy metadata is not immutable")
 	}
@@ -359,6 +359,14 @@ func (entry *snapshotStoreEntry) remove(ctx context.Context) (returnErr error) {
 		Flags:   unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW,
 		Resolve: managedVMResourceResolveFlags,
 	})
+	if errors.Is(err, unix.ENOENT) {
+		// Reconcile only the empty-parent suffix after refs removal. The kernel
+		// refuses AT_REMOVEDIR if an unexpected artifact or reference remains.
+		if err := unix.Unlinkat(entry.store.fd, entry.snapshotID, unix.AT_REMOVEDIR); err != nil {
+			return err
+		}
+		return unix.Fsync(entry.store.fd)
+	}
 	if err != nil {
 		return err
 	}
@@ -409,7 +417,7 @@ func (entry *snapshotStoreEntry) remove(ctx context.Context) (returnErr error) {
 			return err
 		}
 		if stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 ||
-			(stat.Mode != unix.S_IFREG|0400 && stat.Mode != unix.S_IFREG|0600) {
+			(stat.Mode != unix.S_IFREG|snapshotArtifactMode(name) && stat.Mode != unix.S_IFREG|0600) {
 			return instanceValidationError("snapshot removal leaf is not root protected")
 		}
 		if err := unix.Unlinkat(entry.directoryFD, name, 0); err != nil {

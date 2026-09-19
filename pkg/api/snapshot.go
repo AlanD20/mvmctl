@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -47,6 +48,10 @@ func (op *Operation) SnapshotCreate(
 	if err != nil {
 		return nil, err
 	}
+	sourceVsock, err := op.Repos.Vsock.GetByVMID(ctx, vmItem.ID)
+	if err != nil {
+		return nil, err
+	}
 	createdAt := infra.Now()
 	snapshotID := crypto.SnapshotID(vmItem.ID, createdAt)
 	emitProgress(onProgress, "snapshot", "running", "Capturing trusted VM state and protected disks...")
@@ -62,16 +67,40 @@ func (op *Operation) SnapshotCreate(
 	}
 	directory := filepath.Join(op.CacheDir, ".mvm-protected", "snapshots", snapshotID)
 	item := &model.SnapshotItem{
-		ID: snapshotID, Name: name, SourceVMID: capture.SourceVMID, SourceVMName: vmItem.Name,
-		SnapshotDir: directory, RootfsFile: filepath.Join(directory, "rootfs.img"),
-		KernelID: vmItem.KernelID, ImageID: vmItem.ImageID, BinaryID: vmItem.BinaryID,
-		NetworkID: capture.NetworkID, VCPUCount: capture.VCPUCount, MemSizeMiB: capture.MemSizeMiB,
-		DiskSizeMiB: int(capture.RootfsBytes >> 20), SSHKeys: vmItem.SSHKeys, SSHUser: vmItem.SSHUser,
-		CreatedAt: createdAt, UpdatedAt: createdAt,
+		ID:           snapshotID,
+		Name:         name,
+		SourceVMID:   capture.SourceVMID,
+		SourceVMName: vmItem.Name,
+		SnapshotDir:  directory,
+		RootfsFile:   filepath.Join(directory, "rootfs.img"),
+		KernelID:     capture.KernelID,
+		ImageID:      vmItem.ImageID,
+		BinaryID: crypto.BinaryReleaseID(
+			"firecracker",
+			capture.ReleaseArchitecture,
+			capture.ReleaseVersion,
+			capture.FirecrackerSHA256,
+		),
+		NetworkID:   capture.NetworkID,
+		VCPUCount:   capture.VCPUCount,
+		MemSizeMiB:  capture.MemSizeMiB,
+		DiskSizeMiB: int(capture.RootfsBytes >> 20),
+		SSHKeys:     vmItem.SSHKeys,
+		SSHUser:     vmItem.SSHUser,
+		CreatedAt:   createdAt,
+		UpdatedAt:   createdAt,
 	}
 	if capture.Mode == "full" {
 		item.MemoryFile = filepath.Join(directory, "memory")
 		item.StateFile = filepath.Join(directory, "vmstate")
+	}
+	item.ExtraConfig = &model.SnapshotExtraConfig{PCIEnabled: capture.PCIEnabled, NestedVirt: capture.NestedVirt,
+		BootArgs: capture.BootArgs, CPUConfig: capture.CPUConfig, CgroupLimits: capture.CgroupLimits,
+		EnableLogging: capture.Logging, EnableMetrics: capture.Metrics, LogLevel: capture.LogLevel}
+	if sourceVsock != nil && capture.VsockCID != nil && sourceVsock.GuestCID == int(*capture.VsockCID) {
+		item.ExtraConfig.VsockCID = sourceVsock.GuestCID
+		item.ExtraConfig.VsockPort = sourceVsock.Port
+		item.ExtraConfig.VsockToken = sourceVsock.Token
 	}
 	// Root publication is already committed. A local database failure must not destroy
 	// the only durable capture; the exact snapshot ID remains available for recovery.
@@ -96,10 +125,145 @@ func (op *Operation) SnapshotRestore(
 	if err := input.Validate(); err != nil {
 		return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed, "invalid snapshot restore request", err)
 	}
-	// Restore must reserve the captured endpoint and admit its backing files through
-	// root-owned snapshot authority before a lifecycle launch can be authorized.
-	return nil, errs.New(errs.CodeSnapshotRestoreFailed,
-		"snapshot restore is unavailable until root-owned snapshot capture and backing authority are implemented")
+	if input.Count != 1 {
+		return nil, errs.New(
+			errs.CodeSnapshotRestoreFailed,
+			"a snapshot preserves one exact guest IP/MAC endpoint; concurrent duplicate restores would conflict",
+		)
+	}
+	snapshot, err := input.ResolveSnapshot(ctx, op.Repos.Snapshot)
+	if err != nil {
+		return nil, err
+	}
+	projection, err := jailersvc.NewVMSnapshotClient().
+		Inspect(ctx, jailersvc.VMSnapshotRequest{CacheRoot: op.CacheDir, SnapshotID: snapshot.ID})
+	if err != nil {
+		return nil, err
+	}
+	if input.Network != nil && *input.Network != "" {
+		selected, err := input.ResolveNetwork(ctx, op.Repos.Network)
+		if err != nil {
+			return nil, err
+		}
+		if selected == nil || selected.ID != projection.NetworkID {
+			return nil, errs.New(
+				errs.CodeSnapshotRestoreFailed,
+				"snapshot restore cannot replace the captured network, IP, or MAC",
+			)
+		}
+	}
+	existing, err := op.Repos.VM.NamesExist(ctx, []string{input.Name})
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) != 0 {
+		return nil, errs.AlreadyExists(errs.CodeVMAlreadyExists, input.Name)
+	}
+	created := infra.Now()
+	vmID := crypto.VMID(input.Name, created)
+	directory := filepath.Join(op.CacheDir, "vms", vmID)
+	if err := os.Mkdir(directory, 0755); err != nil {
+		return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed, "create restored VM bookkeeping directory", err)
+	}
+	item := &model.VMItem{
+		ID:        vmID,
+		Name:      input.Name,
+		Status:    model.VMStatusStarting,
+		IPv4:      projection.GuestIPv4,
+		MAC:       projection.GuestMAC,
+		NetworkID: projection.NetworkID,
+		KernelID:  projection.KernelID,
+		ImageID:   snapshot.ImageID,
+		BinaryID: crypto.BinaryReleaseID(
+			"firecracker",
+			projection.ReleaseArchitecture,
+			projection.ReleaseVersion,
+			projection.FirecrackerSHA256,
+		),
+		JailerBinaryID: crypto.BinaryReleaseID(
+			"jailer",
+			projection.ReleaseArchitecture,
+			projection.ReleaseVersion,
+			projection.JailerSHA256,
+		),
+		VCPUCount:  projection.VCPUCount,
+		MemSizeMiB: projection.MemSizeMiB,
+		DiskSizeMiB: int(
+			projection.RootfsBytes >> 20,
+		),
+		RootfsPath:   filepath.Join(directory, "rootfs.img"),
+		RootfsSuffix: ".img",
+		ConfigPath: filepath.Join(
+			directory,
+			infra.VMFirecrackerConfigFilename,
+		),
+		PCIEnabled:    projection.PCIEnabled,
+		NestedVirt:    projection.NestedVirt,
+		CgroupLimits:  projection.CgroupLimits,
+		CPUConfig:     projection.CPUConfig,
+		BootArgs:      projection.BootArgs,
+		EnableLogging: projection.Logging,
+		EnableMetrics: projection.Metrics,
+		LogLevel:      projection.LogLevel,
+		SSHKeys:       snapshot.SSHKeys,
+		SSHUser:       snapshot.SSHUser,
+		CreatedAt:     created,
+		UpdatedAt:     created,
+	}
+	if projection.CloudInit {
+		item.CloudInitMode = string(model.CloudInitModeISO)
+	}
+	if err := op.Repos.VM.Upsert(ctx, item); err != nil {
+		return nil, err
+	}
+	if projection.VsockCID != nil && snapshot.ExtraConfig != nil &&
+		snapshot.ExtraConfig.VsockCID == int(*projection.VsockCID) {
+		if err := op.Repos.Vsock.Upsert(
+			ctx,
+			&model.VsockConfigItem{ID: crypto.UUIDV4(), VmID: vmID, GuestCID: int(*projection.VsockCID),
+				Port: snapshot.ExtraConfig.VsockPort, Token: snapshot.ExtraConfig.VsockToken},
+		); err != nil {
+			return []*model.VMItem{item}, err
+		}
+	}
+	restored, err := vm.NewController(item, op.Repos.VM).SnapshotRestore(ctx, model.SnapshotRestoreConfig{
+		CacheRoot: op.CacheDir, SnapshotID: snapshot.ID, Resume: input.Resume,
+	})
+	if err != nil {
+		// Preserve both local identity and root recovery evidence. A failed transport
+		// does not authorize deleting a VM that may already have consumed memory.
+		return []*model.VMItem{
+				item,
+			}, errs.WrapMsg(
+				errs.CodeSnapshotRestoreFailed,
+				"restore outcome requires inspection of VM "+vmID,
+				err,
+			)
+	}
+	for _, volume := range restored.Volumes {
+		if err := op.Repos.Volume.Upsert(
+			ctx,
+			&model.VolumeItem{
+				ID:   volume.ID,
+				Name: input.Name + "-" + volume.GuestDriveID,
+				SizeBytes: int64(
+					volume.Bytes,
+				),
+				Format:     model.VolumeFormatRaw,
+				Path:       filepath.Join(op.CacheDir, "volumes", volume.ID+".raw"),
+				Status:     model.VolumeStatusAttached,
+				VMID:       &item.ID,
+				IsReadOnly: volume.ReadOnly,
+				CacheType:  volume.CacheType,
+				CreatedAt:  created,
+				UpdatedAt:  created,
+			},
+		); err != nil {
+			return []*model.VMItem{item}, err
+		}
+	}
+	op.AuditLog.LogOperation("snapshot.restore", map[string]any{"snapshot_id": snapshot.ID, "vm_id": vmID}, "")
+	return []*model.VMItem{item}, nil
 }
 
 type managedSnapshotArtifacts struct {

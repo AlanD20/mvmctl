@@ -11,6 +11,8 @@ const (
 	VMSnapshotInspectAction = "jailer-snapshot-inspect"
 	// VMSnapshotRemoveAction removes an unreferenced exact immutable capture.
 	VMSnapshotRemoveAction = "jailer-snapshot-remove"
+	// VMSnapshotRestoreAction launches from one immutable root-authenticated capture.
+	VMSnapshotRestoreAction = "jailer-snapshot-restore"
 )
 
 // VMSnapshotRequest selects a root-controlled snapshot below one admitted cache.
@@ -48,6 +50,22 @@ func (request VMSnapshotCaptureRequest) Validate() error {
 type VMSnapshotRemoveResult struct {
 	SnapshotID string `json:"snapshot_id"`
 	Removed    bool   `json:"removed"`
+}
+
+// VMSnapshotRestoreRequest selects a target identity, never captured machine or network state.
+type VMSnapshotRestoreRequest struct {
+	CacheRoot  string `json:"cache_root"`
+	SnapshotID string `json:"snapshot_id"`
+	VMID       string `json:"vm_id"`
+	Resume     bool   `json:"resume"`
+}
+
+// Validate checks canonical identities before immutable capture admission.
+func (request VMSnapshotRestoreRequest) Validate() error {
+	if !vmIDPattern.MatchString(request.VMID) {
+		return instanceValidationError("restored VM identity is not canonical")
+	}
+	return (VMSnapshotRequest{CacheRoot: request.CacheRoot, SnapshotID: request.SnapshotID}).Validate()
 }
 
 // Validate binds the successful removal projection to its exact request.

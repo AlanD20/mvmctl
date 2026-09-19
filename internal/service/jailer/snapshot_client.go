@@ -14,6 +14,24 @@ func NewVMSnapshotClient() *VMSnapshotClient {
 	return &VMSnapshotClient{transport: NewTrustedReleaseClient()}
 }
 
+// Restore requests one target VM from immutable root-captured configuration.
+func (client *VMSnapshotClient) Restore(
+	ctx context.Context,
+	request VMSnapshotRestoreRequest,
+) (model.SnapshotRestoreResult, error) {
+	if err := request.Validate(); err != nil {
+		return model.SnapshotRestoreResult{}, err
+	}
+	return exchangeTrustedRelease(ctx, client.transport, VMSnapshotRestoreAction, request, nil, 0,
+		func(result model.SnapshotRestoreResult) error {
+			if result.VMID != request.VMID || result.PID < 1 || result.StartTimeTicks == 0 ||
+				result.LaunchGeneration == 0 {
+				return instanceValidationError("snapshot restore result differs from request")
+			}
+			return validateSnapshotProjection(result.Configuration, request.SnapshotID)
+		})
+}
+
 // Capture returns root-produced display metadata after immutable publication.
 func (client *VMSnapshotClient) Capture(
 	ctx context.Context,

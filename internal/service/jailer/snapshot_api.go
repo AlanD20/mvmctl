@@ -152,6 +152,16 @@ func (session *snapshotAPISession) apply(
 	default:
 		return nil, instanceValidationError("snapshot API operation is unsupported")
 	}
+	return session.exchange(ctx, method, path, body, expectedStatus)
+}
+
+// exchange is private framing shared by the closed snapshot operations, never a wire passthrough.
+func (session *snapshotAPISession) exchange(
+	ctx context.Context,
+	method, path string,
+	body []byte,
+	expectedStatus int,
+) (_ []byte, returnErr error) {
 	if err := verifyVMExecFirecrackerPeerIdentity(ctx, realVMExecPeerAuthorityDeps(), realProcessIdentityVerifierDeps(),
 		session.record, session.processes, session.peerPIDFD, "snapshot"); err != nil {
 		return nil, err
@@ -161,11 +171,17 @@ func (session *snapshotAPISession) apply(
 		return nil, err
 	}
 	connection := session.connection
+	interrupted := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
+		defer close(interrupted)
 		// Release owns the connection; a deadline interrupts in-flight I/O without reconnecting.
 		_ = connection.SetDeadline(time.Now())
 	})
-	defer stop()
+	defer func() {
+		if !stop() {
+			<-interrupted
+		}
+	}()
 	request, err := http.NewRequestWithContext(ctx, method, "http://firecracker"+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
