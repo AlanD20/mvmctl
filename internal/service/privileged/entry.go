@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/hostadmission"
 	"mvmctl/internal/lib/vmexecsessionwire"
 	"mvmctl/internal/service/agent"
 	"mvmctl/internal/service/jailer"
@@ -145,6 +146,17 @@ func run(
 			deps.executable.release(context.WithoutCancel(ctx), pinnedExecutable),
 		)
 	}()
+	admission, err := hostadmission.AcquireOperation(ctx)
+	if err != nil {
+		return deliverPreDispatchError(ctx, endpoint, request.action, err, deps.control)
+	}
+	defer func() {
+		returnErr = appendPrivilegedExecutableReleaseError(
+			returnErr, admission.Release(context.WithoutCancel(ctx)),
+		)
+	}()
+	// CRITICAL: queued requests must re-authorize after the admission lock.
+	// Reset retains exclusive admission and leaves its durable state disabled.
 	if err := authorizeCaller(caller, deps.authorization); err != nil {
 		return deliverPreDispatchError(ctx, endpoint, request.action, err, deps.control)
 	}
