@@ -37,7 +37,7 @@ func newRunCmd() *cobra.Command {
 func newJailerServiceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "jailer", Short: "Run the privileged Firecracker Jailer service"}
 	for _, action := range []string{
-		"launch", "cleanup", "expose-snapshot", "expose-volume", "remove-volume",
+		"expose-snapshot", "expose-volume", "remove-volume",
 	} {
 		action := action
 		sub := &cobra.Command{Use: action, Short: "Run the " + action + " Jailer operation"}

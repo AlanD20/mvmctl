@@ -2,7 +2,6 @@ package vm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,45 +13,6 @@ import (
 	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
-
-func (s *FirecrackerSpawner) writeJailerManifest() error {
-	volumes := make([]jailersvc.VolumeMount, 0, len(s.config.ExtraDrives))
-	for _, drive := range s.config.ExtraDrives {
-		volumes = append(volumes, jailersvc.VolumeMount{
-			DriveID: drive.DriveID, HostPath: drive.PathOnHost, ReadOnly: drive.IsReadOnly,
-		})
-	}
-	isoPath := ""
-	if s.config.CloudInitISOPath != nil {
-		isoPath = *s.config.CloudInitISOPath
-	}
-	var cgroupLimits *model.VMCgroupLimits
-	if s.config.CgroupLimits.CPUQuotaMicros > 0 {
-		cgroupLimits = &s.config.CgroupLimits
-	}
-	manifest := jailersvc.LaunchManifest{
-		VMID: s.vmID(), VMDir: s.config.VMDir, Version: s.config.BinaryVersion,
-		ConfigPath: s.config.ConfigPath, PIDPath: s.config.PIDPath,
-		KernelPath: s.config.KernelPath, RootfsPath: s.config.RootfsPath,
-		ISOPath: isoPath, SnapshotDir: s.config.SnapshotDir,
-		Volumes: volumes, APISocket: s.config.APISocketPath,
-		PCIEnabled: s.config.PCIEnabled, SnapshotMode: s.config.SnapshotMode,
-		CgroupLimits: cgroupLimits,
-	}
-	if s.config.VsockGuestCID != nil {
-		cid := *s.config.VsockGuestCID
-		manifest.VsockGuestCID = &cid
-	}
-	data, err := json.Marshal(manifest)
-	if err != nil {
-		return fmt.Errorf("marshal jailed launch manifest: %w", err)
-	}
-	path := filepath.Join(s.config.VMDir, infra.JailerManifestFilename)
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("write jailed launch manifest: %w", err)
-	}
-	return nil
-}
 
 func (s *FirecrackerSpawner) vmID() string {
 	return filepath.Base(filepath.Clean(s.config.VMDir))

@@ -2,20 +2,15 @@ package jailer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 )
 
@@ -29,14 +24,13 @@ var (
 type managedPaths struct {
 	cacheRoot     string
 	vmsRoot       string
-	kernelsRoot   string
 	volumesRoot   string
 	snapshotsRoot string
 	vmDir         string
 	uid           uint32
 }
 
-// Config selects one fixed-policy privileged Jailer operation.
+// Config selects one legacy resource-exposure operation still required by snapshot and volume consumers.
 type Config struct {
 	Action      string
 	VMID        string
@@ -47,17 +41,13 @@ type Config struct {
 	ReadOnly    bool
 }
 
-// Run executes one privileged Jailer operation.
-// CRITICAL: No raw executable, identity, chroot, mount target, or Jailer argument is accepted.
+// Run dispatches the remaining legacy resource-exposure operations.
+// Launch and cleanup exclusively use the typed private lifecycle receiver.
 func Run(ctx context.Context, cfg Config) error {
 	if !system.IsRoot() {
 		return fmt.Errorf("jailer service requires root")
 	}
 	switch cfg.Action {
-	case "launch":
-		return launch(cfg)
-	case "cleanup":
-		return cleanup(cfg.VMID)
 	case "expose-snapshot":
 		return exposeSnapshot(cfg.VMID, cfg.VMDir, cfg.SnapshotDir)
 	case "expose-volume":
@@ -67,247 +57,6 @@ func Run(ctx context.Context, cfg Config) error {
 	default:
 		return fmt.Errorf("unsupported jailer service action %q", cfg.Action)
 	}
-}
-
-func launch(cfg Config) error {
-	manifest, err := loadManifest(cfg.VMID, cfg.VMDir)
-	if err != nil {
-		return err
-	}
-	if manifest.CgroupLimits == nil {
-		return fmt.Errorf("cgroup limits are required for jailed launch")
-	}
-	if err := validateCgroupLimits(*manifest.CgroupLimits); err != nil {
-		return err
-	}
-	if err := ensureTrustedDirectoryChain(infra.JailerChrootBase); err != nil {
-		return fmt.Errorf("prepare Jailer chroot base: %w", err)
-	}
-	if err := cleanup(manifest.VMID); err != nil {
-		return err
-	}
-	if err := prepareCgroupV2(); err != nil {
-		return fmt.Errorf("prepare cgroup-v2 resource enforcement: %w", err)
-	}
-	jailRoot := jailRoot(manifest.VMID)
-	if err := ensureTrustedDirectoryChain(jailRoot); err != nil {
-		return fmt.Errorf("prepare jail root: %w", err)
-	}
-	if err := mountResource(manifest.VMDir, filepath.Join(jailRoot, "run", "mvm"), false, true); err != nil {
-		return err
-	}
-	if err := mountResource(manifest.KernelPath, filepath.Join(jailRoot, "kernel"), true, false); err != nil {
-		return err
-	}
-	if err := mountResource(manifest.RootfsPath, filepath.Join(jailRoot, "rootfs"), false, false); err != nil {
-		return err
-	}
-	if manifest.ISOPath != "" {
-		if err := mountResource(
-			manifest.ISOPath,
-			filepath.Join(jailRoot, infra.VMCloudInitISOFilename),
-			true,
-			false,
-		); err != nil {
-			return err
-		}
-	}
-	if manifest.SnapshotDir != "" {
-		if err := mountResource(manifest.SnapshotDir, filepath.Join(jailRoot, "snapshot"), false, true); err != nil {
-			return err
-		}
-	}
-	for _, volume := range manifest.Volumes {
-		if !driveIDPattern.MatchString(volume.DriveID) {
-			return fmt.Errorf("invalid volume drive ID")
-		}
-		target := filepath.Join(jailRoot, "volumes", volume.DriveID)
-		if err := mountResource(volume.HostPath, target, volume.ReadOnly, false); err != nil {
-			return err
-		}
-	}
-
-	uid, gid, err := invokingIdentity()
-	if err != nil {
-		return err
-	}
-	if err := writeProcessPID(manifest.PIDPath, os.Getpid(), uid, gid); err != nil {
-		return fmt.Errorf("write jailed process PID: %w", err)
-	}
-	jailerPath := filepath.Join(infra.TrustedBinaryRoot, manifest.Version, "jailer")
-	firecrackerPath := filepath.Join(infra.TrustedBinaryRoot, manifest.Version, "firecracker")
-	if err := validateTrustedExecutable(jailerPath); err != nil {
-		return err
-	}
-	if err := validateTrustedExecutable(firecrackerPath); err != nil {
-		return err
-	}
-	args := []string{
-		jailerPath,
-		"--id", manifest.VMID,
-		"--exec-file", firecrackerPath,
-		"--uid", strconv.Itoa(uid),
-		"--gid", strconv.Itoa(gid),
-		"--chroot-base-dir", infra.JailerChrootBase,
-		"--cgroup-version", "2",
-		"--parent-cgroup", infra.JailerCgroupParent,
-		"--cgroup", fmt.Sprintf("cpu.max=%d %d", manifest.CgroupLimits.CPUQuotaMicros,
-			manifest.CgroupLimits.CPUPeriodMicros),
-		"--cgroup", fmt.Sprintf("cpu.weight=%d", manifest.CgroupLimits.CPUWeight),
-		"--cgroup", fmt.Sprintf("memory.high=%d", manifest.CgroupLimits.MemoryHighBytes),
-		"--cgroup", fmt.Sprintf("memory.max=%d", manifest.CgroupLimits.MemoryMaxBytes),
-		"--cgroup", fmt.Sprintf("memory.swap.max=%d", manifest.CgroupLimits.SwapMaxBytes),
-		"--cgroup", fmt.Sprintf("pids.max=%d", manifest.CgroupLimits.PIDsMax),
-		"--",
-		"--api-sock", "/run/mvm/" + infra.VMFirecrackerAPISocketFilename,
-	}
-	if manifest.PCIEnabled {
-		args = append(args, "--enable-pci")
-	}
-	if !manifest.SnapshotMode {
-		args = append(args, "--config-file", "/run/mvm/"+infra.VMFirecrackerConfigFilename)
-	}
-	return syscall.Exec(jailerPath, args, os.Environ())
-}
-
-func writeProcessPID(path string, pid, uid, gid int) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err := file.Chown(uid, gid); err != nil {
-		return err
-	}
-	if _, err := file.WriteString(strconv.Itoa(pid)); err != nil {
-		return err
-	}
-	return file.Sync()
-}
-
-func loadManifest(vmID, vmDir string) (*LaunchManifest, error) {
-	paths, err := resolveManagedPaths(vmID, vmDir)
-	if err != nil {
-		return nil, err
-	}
-	manifestPath := filepath.Join(paths.vmDir, infra.JailerManifestFilename)
-	f, err := os.OpenFile(manifestPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return nil, fmt.Errorf("open jailed launch manifest: %w", err)
-	}
-	defer f.Close()
-	var manifest LaunchManifest
-	if err := json.NewDecoder(io.LimitReader(f, 1<<20)).Decode(&manifest); err != nil {
-		return nil, fmt.Errorf("decode jailed launch manifest: %w", err)
-	}
-	if manifest.VMID != vmID || filepath.Clean(manifest.VMDir) != paths.vmDir {
-		return nil, fmt.Errorf("jailed launch manifest identity mismatch")
-	}
-	if !versionPattern.MatchString(manifest.Version) {
-		return nil, fmt.Errorf("invalid jailed launch version")
-	}
-	if err := validateCanonicalManifestVMResources(&manifest, paths.vmDir); err != nil {
-		return nil, err
-	}
-	if err := validateManagedFile(manifestPath, paths.vmDir, paths.uid, true); err != nil {
-		return nil, fmt.Errorf("invalid managed launch manifest: %w", err)
-	}
-	for _, runtimePath := range []string{manifest.ConfigPath, manifest.RootfsPath} {
-		if err := validateManagedFile(runtimePath, paths.vmDir, paths.uid, true); err != nil {
-			return nil, fmt.Errorf("invalid managed VM runtime path: %w", err)
-		}
-	}
-	if err := validateManifestVsockConfig(&manifest); err != nil {
-		return nil, err
-	}
-	for _, runtimePath := range []string{manifest.PIDPath, manifest.APISocket} {
-		if err := validateManagedFile(runtimePath, paths.vmDir, paths.uid, false); err != nil {
-			return nil, fmt.Errorf("invalid managed VM runtime path: %w", err)
-		}
-	}
-	if manifest.ISOPath != "" {
-		if err := validateManagedFile(manifest.ISOPath, paths.vmDir, paths.uid, true); err != nil {
-			return nil, fmt.Errorf("invalid managed cloud-init ISO path: %w", err)
-		}
-	}
-	if err := validateManagedFile(manifest.KernelPath, paths.kernelsRoot, paths.uid, true); err != nil {
-		return nil, fmt.Errorf("invalid managed kernel path: %w", err)
-	}
-	if manifest.SnapshotDir != "" {
-		if err := validateManagedSnapshot(manifest.SnapshotDir, paths); err != nil {
-			return nil, err
-		}
-	}
-	for _, volume := range manifest.Volumes {
-		if !driveIDPattern.MatchString(volume.DriveID) {
-			return nil, fmt.Errorf("invalid managed volume drive ID")
-		}
-		if err := validateManagedFile(volume.HostPath, paths.volumesRoot, paths.uid, true); err != nil {
-			return nil, fmt.Errorf("invalid managed volume path: %w", err)
-		}
-	}
-	return &manifest, nil
-}
-
-func validateManifestVsockConfig(manifest *LaunchManifest) error {
-	if manifest.VsockGuestCID != nil && !model.IsValidVsockGuestCID(*manifest.VsockGuestCID) {
-		return fmt.Errorf("invalid managed VM vsock CID")
-	}
-	f, err := os.OpenFile(manifest.ConfigPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return fmt.Errorf("open managed Firecracker configuration: %w", err)
-	}
-	defer f.Close()
-	var config model.FirecrackerVMConfig
-	decoder := json.NewDecoder(io.LimitReader(f, 1<<20))
-	if err := decoder.Decode(&config); err != nil {
-		return fmt.Errorf("decode managed Firecracker configuration: %w", err)
-	}
-	if (manifest.VsockGuestCID == nil) != (config.Vsock == nil) {
-		return fmt.Errorf("managed VM vsock presence mismatch")
-	}
-	if config.Vsock == nil {
-		return nil
-	}
-	if config.Vsock.GuestCID != *manifest.VsockGuestCID {
-		return fmt.Errorf("managed VM vsock CID mismatch")
-	}
-	wantPath := managedVMPersistentMountPath + "/" + infra.VMVsockSocketFilename
-	if config.Vsock.UDSPath != wantPath {
-		return fmt.Errorf("non-canonical managed VM vsock path")
-	}
-	return nil
-}
-
-func validateCanonicalManifestVMResources(manifest *LaunchManifest, vmDir string) error {
-	type resourcePath struct {
-		name string
-		got  string
-		want string
-	}
-	resources := []resourcePath{
-		{
-			name: "configuration",
-			got:  manifest.ConfigPath,
-			want: filepath.Join(vmDir, infra.VMFirecrackerConfigFilename),
-		},
-		{name: "rootfs", got: manifest.RootfsPath, want: filepath.Join(vmDir, infra.VMRootfsFilename)},
-		{name: "PID", got: manifest.PIDPath, want: filepath.Join(vmDir, infra.VMFirecrackerPIDFilename)},
-		{name: "API socket", got: manifest.APISocket, want: filepath.Join(vmDir, infra.VMFirecrackerAPISocketFilename)},
-	}
-	if manifest.ISOPath != "" {
-		resources = append(resources, resourcePath{
-			name: "cloud-init ISO",
-			got:  manifest.ISOPath,
-			want: filepath.Join(vmDir, infra.VMCloudInitISOFilename),
-		})
-	}
-	for _, resource := range resources {
-		if resource.got != resource.want {
-			return fmt.Errorf("non-canonical managed VM resource path for %s", resource.name)
-		}
-	}
-	return nil
 }
 
 func resolveManagedPaths(vmID, vmDir string) (*managedPaths, error) {
@@ -329,7 +78,6 @@ func resolveManagedPaths(vmID, vmDir string) (*managedPaths, error) {
 	paths := &managedPaths{
 		cacheRoot:     cacheRoot,
 		vmsRoot:       filepath.Join(cacheRoot, "vms"),
-		kernelsRoot:   filepath.Join(cacheRoot, "kernels"),
 		volumesRoot:   filepath.Join(cacheRoot, "volumes"),
 		snapshotsRoot: filepath.Join(cacheRoot, "snapshots"),
 		vmDir:         cleanVMDir,
@@ -423,19 +171,6 @@ func canonicalExistingPath(path string) (string, error) {
 	return abs, nil
 }
 
-func pathWithin(path, base string) bool {
-	pathAbs, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	baseAbs, err := filepath.Abs(base)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(baseAbs, pathAbs)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
 func mountResource(source, target string, readOnly, directory bool) error {
 	sourceFile, err := os.OpenFile(source, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
@@ -527,132 +262,6 @@ func unmountIfMounted(target string) error {
 	return nil
 }
 
-func cleanup(vmID string) error {
-	if !vmIDPattern.MatchString(vmID) {
-		return fmt.Errorf("invalid VM ID for jail cleanup")
-	}
-	root := jailRoot(vmID)
-	if err := ensureCgroupEmpty(vmID); err != nil {
-		return err
-	}
-	if _, err := os.Lstat(infra.JailerChrootBase); err == nil {
-		if err := validateTrustedDirectoryChain(infra.JailerChrootBase); err != nil {
-			return fmt.Errorf("validate Jailer chroot base before cleanup: %w", err)
-		}
-		data, readErr := os.ReadFile("/proc/self/mountinfo")
-		if readErr == nil {
-			var targets []string
-			for line := range strings.SplitSeq(string(data), "\n") {
-				fields := strings.Fields(line)
-				if len(fields) > 4 && (fields[4] == root || strings.HasPrefix(fields[4], root+"/")) {
-					targets = append(targets, fields[4])
-				}
-			}
-			sort.Slice(targets, func(i, j int) bool { return len(targets[i]) > len(targets[j]) })
-			for _, target := range targets {
-				err := syscall.Unmount(target, syscall.MNT_DETACH)
-				if err != nil && err != syscall.EINVAL && err != syscall.ENOENT {
-					return fmt.Errorf("unmount jail resource %s: %w", target, err)
-				}
-			}
-		}
-		if err := os.RemoveAll(filepath.Dir(root)); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove jail: %w", err)
-		}
-	}
-	if err := removeCgroup(vmID); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateCgroupLimits(limits model.VMCgroupLimits) error {
-	if limits.CPUQuotaMicros <= 0 || limits.CPUPeriodMicros <= 0 {
-		return fmt.Errorf("invalid CPU cgroup limit")
-	}
-	if limits.CPUWeight < 1 || limits.CPUWeight > 10000 {
-		return fmt.Errorf("invalid CPU cgroup weight")
-	}
-	if limits.MemoryHighBytes <= 0 || limits.MemoryMaxBytes <= 0 ||
-		limits.MemoryHighBytes > limits.MemoryMaxBytes {
-		return fmt.Errorf("invalid memory cgroup limit")
-	}
-	if limits.SwapMaxBytes < 0 || limits.PIDsMax <= 0 {
-		return fmt.Errorf("invalid swap or PID cgroup limit")
-	}
-	return nil
-}
-
-func prepareCgroupV2() error {
-	controllersPath := filepath.Join(infra.CgroupV2Root, "cgroup.controllers")
-	controllers, err := os.ReadFile(controllersPath)
-	if err != nil {
-		return fmt.Errorf("unified cgroup v2 is required: %w", err)
-	}
-	required := []string{"cpu", "memory", "pids"}
-	available := strings.Fields(string(controllers))
-	for _, controller := range required {
-		if !slices.Contains(available, controller) {
-			return fmt.Errorf("required cgroup-v2 controller is unavailable: %s", controller)
-		}
-	}
-	if err := enableCgroupControllers(infra.CgroupV2Root, required); err != nil {
-		return err
-	}
-	parent := filepath.Join(infra.CgroupV2Root, infra.JailerCgroupParent)
-	if err := os.Mkdir(parent, 0755); err != nil && !os.IsExist(err) {
-		return fmt.Errorf("create fixed cgroup parent: %w", err)
-	}
-	if err := enableCgroupControllers(parent, required); err != nil {
-		return err
-	}
-	return nil
-}
-
-func enableCgroupControllers(path string, controllers []string) error {
-	controlPath := filepath.Join(path, "cgroup.subtree_control")
-	for _, controller := range controllers {
-		if err := os.WriteFile(controlPath, []byte("+"+controller), 0644); err != nil {
-			return fmt.Errorf("enable %s controller in %s: %w", controller, path, err)
-		}
-	}
-	return nil
-}
-
-func removeCgroup(vmID string) error {
-	path := cgroupPath(vmID)
-	if err := ensureCgroupEmpty(vmID); err != nil {
-		return err
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove empty VM cgroup: %w", err)
-	}
-	return nil
-}
-
-func ensureCgroupEmpty(vmID string) error {
-	path := cgroupPath(vmID)
-	procs, err := os.ReadFile(filepath.Join(path, "cgroup.procs"))
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read VM cgroup processes before cleanup: %w", err)
-	}
-	if strings.TrimSpace(string(procs)) != "" {
-		return fmt.Errorf("refusing to remove VM cgroup while it contains live processes")
-	}
-	return nil
-}
-
-func cgroupPath(vmID string) string {
-	return filepath.Join(
-		infra.CgroupV2Root,
-		infra.JailerCgroupParent,
-		vmID,
-	)
-}
-
 func jailRoot(vmID string) string {
 	return filepath.Join(infra.JailerChrootBase, "firecracker", vmID, "root")
 }
@@ -664,84 +273,4 @@ func invokingIdentity() (int, int, error) {
 		return 0, 0, fmt.Errorf("cannot determine non-root invoking identity")
 	}
 	return uid, gid, nil
-}
-
-func validateTrustedExecutable(path string) error {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil || resolved != path || !pathWithin(path, infra.TrustedBinaryRoot) {
-		return fmt.Errorf("trusted executable path is invalid: %s", path)
-	}
-	if err := validateTrustedDirectoryChain(filepath.Dir(path)); err != nil {
-		return fmt.Errorf("trusted executable parent validation failed: %w", err)
-	}
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || info.Mode().Perm()&0111 == 0 {
-		return fmt.Errorf("trusted executable is unusable: %s", path)
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != 0 {
-		return fmt.Errorf("trusted executable is not root-owned: %s", path)
-	}
-	return nil
-}
-
-func ensureTrustedDirectoryChain(path string) error {
-	abs, err := filepath.Abs(path)
-	if err != nil || abs != filepath.Clean(path) {
-		return fmt.Errorf("trusted directory path is not canonical: %s", path)
-	}
-	current := string(filepath.Separator)
-	if err := validateTrustedDirectory(current); err != nil {
-		return err
-	}
-	for _, component := range strings.Split(strings.TrimPrefix(abs, string(filepath.Separator)), string(filepath.Separator)) {
-		current = filepath.Join(current, component)
-		if _, err := os.Lstat(current); os.IsNotExist(err) {
-			if err := os.Mkdir(current, 0755); err != nil {
-				return fmt.Errorf("create trusted directory %s: %w", current, err)
-			}
-		} else if err != nil {
-			return fmt.Errorf("inspect trusted directory %s: %w", current, err)
-		}
-		if err := validateTrustedDirectory(current); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateTrustedDirectoryChain(path string) error {
-	abs, err := filepath.Abs(path)
-	if err != nil || abs != filepath.Clean(path) {
-		return fmt.Errorf("trusted directory path is not canonical: %s", path)
-	}
-	current := string(filepath.Separator)
-	if err := validateTrustedDirectory(current); err != nil {
-		return err
-	}
-	for _, component := range strings.Split(strings.TrimPrefix(abs, string(filepath.Separator)), string(filepath.Separator)) {
-		current = filepath.Join(current, component)
-		if err := validateTrustedDirectory(current); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateTrustedDirectory(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return fmt.Errorf("inspect trusted directory %s: %w", path, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("trusted path component is not a real directory: %s", path)
-	}
-	if info.Mode().Perm()&0022 != 0 {
-		return fmt.Errorf("trusted path component is writable by non-root users: %s", path)
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != 0 {
-		return fmt.Errorf("trusted path component is not root-owned: %s", path)
-	}
-	return nil
 }

@@ -4,42 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 
 	"mvmctl/internal/lib/system"
 )
-
-// Launch starts the privileged Jailer service for a validated per-VM manifest.
-func Launch(
-	ctx context.Context,
-	vmID, vmDir string,
-	stdin *os.File,
-	stdout, stderr *os.File,
-) (*os.Process, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	// The VM must outlive the foreground CLI command; lifecycle controllers own shutdown.
-	cmd, err := system.SpawnService(nil, system.SpawnConfig{
-		Name:       "jailer",
-		Privileged: true,
-		Stdin:      stdin,
-		Stdout:     stdout,
-		Stderr:     stderr,
-		Args:       []string{"launch", "--vm-id", vmID, "--vm-dir", vmDir},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return cmd.Process, nil
-}
-
-// Cleanup removes mounts and the chroot for one VM. It is idempotent.
-func Cleanup(ctx context.Context, vmID string) error {
-	return runAndWait(ctx, []string{"cleanup", "--vm-id", vmID})
-}
 
 // ExposeSnapshot bind-mounts one snapshot directory into an existing jail.
 func ExposeSnapshot(ctx context.Context, vmID, snapshotDir string) error {
