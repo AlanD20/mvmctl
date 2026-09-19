@@ -234,6 +234,23 @@ func recoverManagedVMCgroup(
 	observation processObservation,
 	verifier retainedCgroupProcessVerifier,
 ) (_ *managedVMCgroupLease, _ bool, returnErr error) {
+	if verifier == nil {
+		return nil, false, instanceAtomicError("retained cgroup process verifier is required", nil)
+	}
+	lease, present, err := reopenRecoveryManagedVMCgroup(ctx, deps, vmID)
+	if err != nil || !present {
+		return lease, present, err
+	}
+	return lease, true, lease.VerifyMembership(ctx, locator, observation, verifier)
+}
+
+// reopenRecoveryManagedVMCgroup only pins an existing fixed hierarchy. Its caller
+// must prove either exact live membership or stable emptiness before cleanup.
+func reopenRecoveryManagedVMCgroup(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	vmID string,
+) (_ *managedVMCgroupLease, _ bool, returnErr error) {
 	if ctx == nil {
 		return nil, false, instanceAtomicError("recover managed VM cgroup: context is required", nil)
 	}
@@ -246,9 +263,6 @@ func recoverManagedVMCgroup(
 	readDeps := managedVMCgroupReadDepsFrom(deps)
 	if !vmIDPattern.MatchString(vmID) {
 		return nil, false, instanceValidationError("managed VM cgroup VM ID is invalid")
-	}
-	if verifier == nil {
-		return nil, false, instanceAtomicError("retained cgroup process verifier is required", nil)
 	}
 
 	retained := make([]int, 0, 3)
@@ -327,5 +341,57 @@ func recoverManagedVMCgroup(
 		parent: parent, leaf: leaf, retained: retained,
 	}}
 	retained = nil
-	return lease, true, lease.VerifyMembership(ctx, locator, observation, verifier)
+	return lease, true, nil
+}
+
+// requireLifecycleRecoveryEmpty repeats membership and the complete hierarchy
+// binding while the VM lock excludes a new launch. It never removes or populates
+// the cgroup; the same pinned lease performs removal later.
+func (lease *managedVMCgroupLease) requireLifecycleRecoveryEmpty(ctx context.Context) error {
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.removed || state.verifying || len(state.retained) != 3 {
+		return instanceStateError(state.vmID, "recovered cgroup authority is not active")
+	}
+	for range 2 {
+		if err := requireLifecycleRecoveryCgroupBinding(ctx, state); err != nil {
+			return err
+		}
+		members, err := readManagedVMCgroupMembership(ctx, state)
+		if err != nil {
+			return err
+		}
+		if len(members) != 0 {
+			return instanceStateError(state.vmID, "stale managed VM cgroup contains unverified processes")
+		}
+	}
+	return requireLifecycleRecoveryCgroupBinding(ctx, state)
+}
+
+func requireLifecycleRecoveryCgroupBinding(ctx context.Context, state *managedVMCgroupLeaseState) (returnErr error) {
+	current, present, err := reopenRecoveryManagedVMCgroup(ctx, state.deps, state.vmID)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return instanceStateError(state.vmID, "recovered cgroup hierarchy disappeared")
+	}
+	defer func() {
+		returnErr = appendInstanceOperationError(returnErr, "close recovery cgroup binding descriptors",
+			closeManagedVMCgroupFDs(context.WithoutCancel(ctx), state.deps, current.state.retained))
+	}()
+	readDeps := managedVMCgroupReadDepsFrom(state.deps)
+	originalRoot, err := inspectManagedVMCgroupRoot(ctx, readDeps, state.rootFD, "retained recovery cgroup root")
+	if err != nil {
+		return err
+	}
+	currentRoot, err := inspectManagedVMCgroupRoot(ctx, readDeps, current.state.rootFD, "current recovery cgroup root")
+	if err != nil {
+		return err
+	}
+	if currentRoot != originalRoot || current.state.parent != state.parent || current.state.leaf != state.leaf {
+		return instanceStateError(state.vmID, "recovered cgroup hierarchy was replaced")
+	}
+	return nil
 }

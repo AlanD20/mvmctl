@@ -6,6 +6,7 @@ import (
 )
 
 type freshRecoveryAdmission struct {
+	lifecycle       *lifecycleRecoveryAdmission
 	sourceLifecycle instanceLifecycle
 	hostBootID      string
 	observation     processObservation
@@ -41,6 +42,10 @@ func (lease *cleanupLease) admitFreshRecovery(ctx context.Context) error {
 	if admission == nil {
 		state.mu.Unlock()
 		return nil
+	}
+	if admission.lifecycle != nil {
+		state.mu.Unlock()
+		return lease.admitLifecycleRecovery(ctx)
 	}
 	recovered := state.recoveredProcesses
 	if recovered == nil || admission.processVerifier.processes != recovered ||

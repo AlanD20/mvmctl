@@ -207,6 +207,9 @@ func (processes *reopenedRecordedProcesses) verifyLocators(ctx context.Context) 
 	defer verification.finish()
 	for index := range verification.retained {
 		process := &verification.retained[index]
+		if process.reaped {
+			continue
+		}
 		derived, err := verification.deps.deriveLocator(ctx, process.pidfd)
 		if err != nil {
 			return processVerificationError(verification.vmID, "rederive recovered "+process.role+" locator", err)
@@ -585,6 +588,9 @@ func (processes *reopenedRecordedProcesses) Release(ctx context.Context) error {
 	}
 	result := error(nil)
 	for index := len(state.retained) - 1; index >= 0; index-- {
+		if state.retained[index].pidfd < 0 {
+			continue
+		}
 		result = appendProcessVerificationError(
 			result,
 			"close recovered process pidfd",
