@@ -38,6 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Implementation-only integration updates
 
+- Removed the superseded production iptables/nft CLI backends, tracker repositories, and backend selectors after
+  their consumers moved to typed root services. Migration `007` refuses populated obsolete rule tables and retires
+  empty tables and selector settings; it is not an adoption path for legacy host firewall state. Existing tests are
+  intentionally untouched and need the later authorized verification/update pass.
+- Host firewall readiness now uses one fixed typed probe that applies and reads back the modeled bridge/inet,
+  connection-tracking, and NAT expressions inside a disposable network namespace. It does not test against live host
+  tables. Namespace restoration failures retire the worker thread. The implementation has not been executed here.
+- `host clean` discovery now observes the caller's root-owned VM inventory, including running records absent from
+  SQLite. Incomplete observation fails the command. Cleanup still removes only locally registered caller networks
+  through typed network removal; it neither force-stops VMs nor claims global administrator quiescence.
 - Added repeated whole-state absence checks for pending-network cancellation and old-boot removal receipts. Cancellation
   publishes an identity tombstone without deleting speculative kernel state; removed/cancelled IDs cannot be reused.
 - Added shared privileged-operation and exclusive administrator host-admission leases, durable enabled/disabled state,
@@ -939,7 +949,7 @@ composition is described above; the current incomplete-work inventory is under *
 Current incomplete work includes per-volume/aggregate storage policy, trusted snapshot capture and immutable restore
 backing, remaining image conversion/archive construction and staging recovery,
 effects, residual legacy privilege/backend removal, and qualification. Memory policy stays unchanged pending
-diagnosis. Snapshot, extra-volume, and PCI launches refuse unsupported selections; public host clean remains blocked.
+diagnosis. Snapshot, extra-volume, and PCI launches refuse unsupported selections.
 Shared dispatcher admission and guarded administrator reset are composed. Reset requires marker-only sudoers and
 compatible root journals, rejects live or ambiguous managed state, and restores recorded settings through retryable
 rollback receipts. It retains disabled admission after reset or restoration failure and preserves unrelated administrator

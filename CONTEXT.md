@@ -291,8 +291,10 @@ enables admission only after host steps and operator enrollment complete. Missin
 fails closed. The gate must be retained across each privileged request and cleanup, with authorization checked again
 after acquisition; reset requires exclusive admission rather than a momentary idle observation.
 Enrollment, typed partial results, JSON boolean forms, help, and argument boundaries are implemented. Sudo entry refuses a managed policy
-containing transitional wildcard grants because it cannot prove administrator authentication. `HostClean` remains
-blocked pending its typed public cleanup orchestration. The dispatcher now retains shared admission through requests
+containing transitional wildcard grants because it cannot prove administrator authentication. `HostClean` now obtains
+the caller's authoritative root VM inventory, including running records absent from SQLite, before removing locally
+registered caller networks through typed API operations. It refuses incomplete observation or running VMs and is not
+global quiescence authority. The dispatcher now retains shared admission through requests
 and cleanup and rechecks authorization after acquiring it. Administrator reset composes exact Jailer, network, and
 firewall guards under exclusive admission, requires marker-only sudoers, then disables admission and restores the
 recorded host settings through durable rollback receipts. Active, ambiguous, or administrator-modified state refuses
