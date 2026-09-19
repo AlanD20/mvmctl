@@ -118,7 +118,7 @@ func (lease *protectedBackingLease) copyAndPublish(ctx context.Context, source i
 		return err
 	}
 	var after unix.Stat_t
-	if err := unix.Fstat(source, &after); err != nil || before != after {
+	if err := unix.Fstat(source, &after); err != nil || !sameProtectedReadStat(before, after) {
 		return managedVMResourceAtomicError("operator source changed while protecting backing", err)
 	}
 	lease.record.Backing, err = protectedIdentity(pending)

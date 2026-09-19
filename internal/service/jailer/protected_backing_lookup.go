@@ -34,10 +34,11 @@ func lookupProtectedBacking(
 	if !isCanonicalManagedResourceID(id, length) {
 		return nil, false, managedVMResourceValidationError("protected backing lookup identity is invalid")
 	}
-	anchor, retained, err := openProtectedAnchor(ctx, cache.ownerUID, cache.identity, true)
+	anchor, retained, err := openProtectedLogical(ctx, cache.ownerUID, cache.identity, kind, id, true)
 	if err != nil {
 		return nil, false, err
 	}
+	logicalFD := retained[len(retained)-2]
 	defer func() {
 		if returnErr != nil {
 			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
@@ -79,6 +80,13 @@ func lookupProtectedBacking(
 	var record protectedBackingRecord
 	err = readProtectedRecord(ctx, metadata, "record.json", &record)
 	if errors.Is(err, unix.ENOENT) {
+		var logical protectedLogicalRecord
+		if err := readProtectedRecord(ctx, logicalFD, "logical.json", &logical); err != nil {
+			return nil, true, err
+		}
+		if logical.Initialized {
+			return nil, true, managedVMResourceValidationError("initialized protected backing record is missing")
+		}
 		if store >= 0 {
 			kindFD, openErr := openProtectedDirectory(ctx, store, kind, false, true)
 			if openErr == nil {
@@ -98,7 +106,7 @@ func lookupProtectedBacking(
 			Phase: "absent", References: []protectedBackingReference{},
 		}
 		return &protectedBackingLease{
-			fd: -1, ownerUID: cache.ownerUID, cacheIdentity: cache.identity, metadataFD: metadata,
+			fd: -1, ownerUID: cache.ownerUID, cacheIdentity: cache.identity, metadataFD: metadata, logicalFD: logicalFD,
 			directoryFD: -1, lockFD: lock, record: record, retained: retained,
 		}, false, nil
 	}
@@ -114,7 +122,7 @@ func lookupProtectedBacking(
 			return nil, true, managedVMResourceValidationError("protected removal tombstone retains references")
 		}
 		return &protectedBackingLease{
-			fd: -1, ownerUID: cache.ownerUID, cacheIdentity: cache.identity, metadataFD: metadata,
+			fd: -1, ownerUID: cache.ownerUID, cacheIdentity: cache.identity, metadataFD: metadata, logicalFD: logicalFD,
 			directoryFD: -1, lockFD: lock, record: record, retained: retained,
 		}, true, nil
 	}
@@ -155,6 +163,9 @@ func (lease *protectedBackingLease) CommitInitialVolumeRemoval(ctx context.Conte
 		return managedVMResourceValidationError("initial volume removal does not hold an absent protected import lease")
 	}
 	lease.record.Phase = "removed"
+	if err := markProtectedLogicalInitialized(ctx, lease.logicalFD); err != nil {
+		return err
+	}
 	return writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record)
 }
 
@@ -169,6 +180,9 @@ func (lease *protectedBackingLease) BeginInitialVolumeRemoval(ctx context.Contex
 		return managedVMResourceValidationError("initial volume removal does not hold an absent import lease")
 	}
 	lease.record.Phase = "initial-removing"
+	if err := markProtectedLogicalInitialized(ctx, lease.logicalFD); err != nil {
+		return err
+	}
 	return writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record)
 }
 

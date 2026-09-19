@@ -28,10 +28,11 @@ func protectBackingFromSource(
 	if !isCanonicalManagedResourceID(id, length) || (expectedBytes == 0 && create && !readOnlyArtifact) || expectedBytes > math.MaxInt64 {
 		return nil, managedVMResourceValidationError("protected backing identity or length is invalid")
 	}
-	anchorFD, retained, err := openProtectedAnchor(ctx, cache.ownerUID, cache.identity, create)
+	anchorFD, retained, err := openProtectedLogical(ctx, cache.ownerUID, cache.identity, kind, id, create)
 	if err != nil {
 		return nil, err
 	}
+	logicalFD := retained[len(retained)-2]
 	defer func() {
 		if returnErr != nil {
 			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
@@ -68,6 +69,15 @@ func protectBackingFromSource(
 	var record protectedBackingRecord
 	recordErr := readProtectedRecord(ctx, metadata, "record.json", &record)
 	newObject := errors.Is(recordErr, unix.ENOENT)
+	if newObject {
+		var logical protectedLogicalRecord
+		if err := readProtectedRecord(ctx, logicalFD, "logical.json", &logical); err != nil {
+			return nil, err
+		}
+		if logical.Initialized {
+			return nil, managedVMResourceValidationError("initialized protected backing record is missing")
+		}
+	}
 	if recordErr != nil && (!newObject || !create) {
 		return nil, recordErr
 	}
@@ -101,6 +111,9 @@ func protectBackingFromSource(
 		return nil, err
 	}
 	if newObject {
+		if err := markProtectedLogicalInitialized(ctx, logicalFD); err != nil {
+			return nil, err
+		}
 		record = protectedBackingRecord{
 			Version: 1, Kind: kind, ID: id, Owner: cache.ownerUID,
 			Cache: protectedCacheIdentity(cache.identity), Directory: directoryIdentity, Phase: "copying",
@@ -115,7 +128,7 @@ func protectBackingFromSource(
 	}
 	lease := &protectedBackingLease{
 		fd: -1, identity: managedVMConfigStat{}, ownerUID: cache.ownerUID, cacheIdentity: cache.identity,
-		metadataFD: metadata, directoryFD: directory, lockFD: lock, record: record,
+		metadataFD: metadata, logicalFD: logicalFD, directoryFD: directory, lockFD: lock, record: record,
 	}
 	if record.Phase == "removing" {
 		if err := lease.finishRemoval(ctx); err != nil {
@@ -126,6 +139,9 @@ func protectBackingFromSource(
 		return lease, nil
 	}
 	if record.Phase == "copying" || record.Phase == "copied" {
+		if snapshotFD >= 0 && !record.SnapshotSource {
+			return nil, managedVMResourceValidationError("snapshot restore cannot resume an operator-source import")
+		}
 		if !create {
 			return nil, managedVMResourceValidationError("protected backing initial import is incomplete")
 		}

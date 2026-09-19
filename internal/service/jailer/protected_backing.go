@@ -82,6 +82,7 @@ type protectedBackingLease struct {
 	ownerUID      uint32
 	cacheIdentity managedCacheIdentity
 	metadataFD    int
+	logicalFD     int
 	directoryFD   int
 	lockFD        int
 	retained      []int
@@ -175,6 +176,22 @@ func (lease *protectedBackingLease) RequireExclusiveCapture(ctx context.Context,
 	}
 	if !found {
 		return managedVMResourceValidationError("capture VM has no protected backing reference")
+	}
+	return nil
+}
+
+// RequireStoppedCapture is used only after lifecycle authority proves the source is cleaned.
+// The retained object lock excludes new writers throughout the stopped disk capture.
+func (lease *protectedBackingLease) RequireStoppedCapture(ctx context.Context) error {
+	lease.mu.Lock()
+	defer lease.mu.Unlock()
+	if err := lease.active(ctx); err != nil {
+		return err
+	}
+	for _, reference := range lease.record.References {
+		if reference.Writable {
+			return managedVMResourceValidationError("stopped capture backing retains a writable VM grant")
+		}
 	}
 	return nil
 }

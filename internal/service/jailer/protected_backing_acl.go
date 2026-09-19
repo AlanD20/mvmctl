@@ -181,6 +181,9 @@ func (lease *protectedBackingLease) finishACL(ctx context.Context) error {
 func (lease *protectedBackingLease) Grow(ctx context.Context, targetBytes uint64) error {
 	lease.mu.Lock()
 	defer lease.mu.Unlock()
+	if lease.record.Kind != protectedBackingRootfs && lease.record.Kind != protectedBackingVolume {
+		return managedVMResourceValidationError("immutable launch backing cannot grow")
+	}
 	if err := lease.active(ctx); err != nil {
 		return err
 	}

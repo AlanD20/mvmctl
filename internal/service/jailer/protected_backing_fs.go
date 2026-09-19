@@ -105,7 +105,7 @@ func sameProtectedNode(left, right protectedBackingIdentity) bool {
 	return left.Device == right.Device && left.Inode == right.Inode && left.Inode != 0
 }
 
-func readProtectedRecord[T protectedBackingAnchor | protectedBackingRecord](
+func readProtectedRecord[T protectedBackingAnchor | protectedBackingRecord | protectedLogicalRecord](
 	ctx context.Context, directory int, name string, record *T,
 ) (returnErr error) {
 	fd, err := openProtectedFile(ctx, directory, name, unix.O_RDONLY)
@@ -130,7 +130,7 @@ func readProtectedRecord[T protectedBackingAnchor | protectedBackingRecord](
 		offset += n
 	}
 	var after unix.Stat_t
-	if err := unix.Fstat(fd, &after); err != nil || before != after {
+	if err := unix.Fstat(fd, &after); err != nil || !sameProtectedReadStat(before, after) {
 		return managedVMResourceAtomicError("protected backing record changed during read", err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -145,7 +145,13 @@ func readProtectedRecord[T protectedBackingAnchor | protectedBackingRecord](
 	return nil
 }
 
-func writeProtectedRecord[T protectedBackingAnchor | protectedBackingRecord](
+func sameProtectedReadStat(before, after unix.Stat_t) bool {
+	// Reading may advance atime; changes to content, ownership, linkage or identity may not.
+	before.Atim = after.Atim
+	return before == after
+}
+
+func writeProtectedRecord[T protectedBackingAnchor | protectedBackingRecord | protectedLogicalRecord](
 	ctx context.Context, directory int, name string, record T,
 ) (returnErr error) {
 	if err := ctx.Err(); err != nil {
