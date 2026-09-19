@@ -13,6 +13,7 @@ import (
 	"mvmctl/internal/service/agent"
 	"mvmctl/internal/service/jailer"
 	"mvmctl/internal/service/loopmount"
+	"mvmctl/internal/service/network"
 	"mvmctl/pkg/errs"
 )
 
@@ -203,6 +204,14 @@ func dispatch(
 	deps runtimeDeps,
 ) (dispatchDisposition, error) {
 	switch request.action {
+	case network.NetworkTrafficPolicyApplyAction:
+		return dispatchHandled, handleApplyNetworkTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.VMTrafficPolicyApplyAction:
+		return dispatchHandled, handleApplyVMTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.NetworkTrafficPolicyRemoveAction:
+		return dispatchHandled, handleRemoveNetworkTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.VMTrafficPolicyRemoveAction:
+		return dispatchHandled, handleRemoveVMTrafficPolicy(ctx, endpoint, caller, deps.control)
 	case jailer.RuntimeStatusAction:
 		return dispatchHandled, handleRuntimeStatus(ctx, endpoint, caller, deps.runtimeStatus, deps.control)
 	case jailer.TrustedReleaseInstallAction:
