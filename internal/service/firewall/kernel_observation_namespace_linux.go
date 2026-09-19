@@ -122,9 +122,22 @@ func (authority *retainedKernelObservationNamespaceAuthority) retainAfterGenerat
 			nil,
 		)
 	}
+	return authority.retainExpectedNamespace(ctx, networkIdentity)
+}
+
+// retainExpectedNamespace pins the root service's exact host namespace for bootstrap inspection.
+// CRITICAL: The caller must hold real network mutation authority before invoking this method.
+func (authority *retainedKernelObservationNamespaceAuthority) retainExpectedNamespace(
+	ctx context.Context,
+	networkIdentity generationNamespaceIdentity,
+) (_ *kernelObservationNamespaceLease, returnErr error) {
+	if err := validateKernelObservationNamespaceDeps(authority.deps); err != nil {
+		return nil, err
+	}
 
 	openedFD := -1
 	retainedFD := -1
+	var err error
 	defer func() {
 		if returnErr == nil {
 			return

@@ -167,11 +167,19 @@ func (authority *persistentGenerationAuthority) acquireAfterNetwork(
 		return nil, preserveGenerationAuthorityError("read firewall generation authority record", err)
 	}
 	if !found {
-		return nil, generationAuthorityError(
-			"firewall generation authority record is missing; qualified kernel inspection is required",
-			nil,
-			nil,
-		)
+		// CRITICAL: Only the production concrete network hold can establish initial authority, and only
+		// after fresh strict kernel observation proves both reserved tables absent under the global lock.
+		production, productionOK := network.(*productionGenerationNetworkAuthority)
+		productionStore, storeOK := store.(*generationRecordStore)
+		if !productionOK || !storeOK {
+			return nil, generationAuthorityError(
+				"firewall generation authority record is missing; qualified kernel inspection is required", nil, nil,
+			)
+		}
+		record, evidence, err = production.createInitialRecord(ctx, productionStore, binding)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := admitGenerationRecord(record, binding); err != nil {
 		return nil, err

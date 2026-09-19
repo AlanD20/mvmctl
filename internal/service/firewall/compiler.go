@@ -166,6 +166,12 @@ func validateIntent(intent generationIntent) error {
 	interfaces := make(map[string]string, len(intent.networks)*2+len(intent.endpoints))
 	uplinks := make(map[string]struct{}, len(intent.networks))
 	for _, network := range intent.networks {
+		if !network.masquerade {
+			if network.uplinkInterface != "" {
+				return invalidGeneration("disabled NAT carries uplink authority")
+			}
+			continue
+		}
 		if !validInterfaceName(network.uplinkInterface) {
 			return invalidGeneration("invalid uplink interface")
 		}
