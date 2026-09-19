@@ -28,8 +28,20 @@ Active isolated ownership: `impl03_console` writes execution identity authority;
 hotplug and dispatcher registration. Worktrees use the corresponding `impl03-execution-identity`,
 `impl03-protected-backing`, `impl03-api-broker`, `impl03-isolated-launch`, and
 `impl03-volume-hotplug` branches under `.tmp/worktrees/`. Broker commit `ed2caacf` awaits its
-runtime producer. Snapshot capture/restore still needs the composed isolation prerequisite;
-do not label a store-only foundation or caller-controlled copy as completed capture.
+runtime producer; host-vsock consumer commit `39f0883f` is paired with it. Identity allocation
+is integrated as `a784d332`; retirement/reset commit `1c720199` awaits the lifecycle proof.
+Protected backing `9a989660` awaits its cache/launch consumers, and typed hotplug `6883cc78`
+awaits the same isolation/backing composition. These dependencies are source integration work,
+not QA. Snapshot capture/restore still needs the composed isolation prerequisite; do not label
+a store-only foundation or caller-controlled copy as completed capture.
+
+Additional exclusive consumers now being written: `impl03_resources` in `impl03-snapshot-runtime`
+owns snapshot producer/store/restore and public snapshot/model changes; `impl03_host` in
+`impl03-volume-storage` owns typed storage inspect/grow/remove; `impl03_loopmount` in
+`impl03-protected-provision` owns the protected rootfs provisioning bridge; `impl03_console`
+in `impl03-output-access` owns exact execution-identity access to persistent log/metrics files.
+The latter two are separate from completed identity allocation. Preserve these file boundaries
+and finish actual consumers rather than spawning another audit or duplicating producer code.
 
 ### Resumed after user policy decisions
 
