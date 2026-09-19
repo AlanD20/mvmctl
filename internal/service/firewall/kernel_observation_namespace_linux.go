@@ -126,7 +126,8 @@ func (authority *retainedKernelObservationNamespaceAuthority) retainAfterGenerat
 }
 
 // retainExpectedNamespace pins the root service's exact host namespace for bootstrap inspection.
-// CRITICAL: The caller must hold real network mutation authority before invoking this method.
+// CRITICAL: The caller must hold real network mutation authority, or the network index under
+// exclusive host admission for reset, before invoking this method.
 func (authority *retainedKernelObservationNamespaceAuthority) retainExpectedNamespace(
 	ctx context.Context,
 	networkIdentity generationNamespaceIdentity,
