@@ -36,6 +36,7 @@ type managedNetworkTransaction struct {
 	record    networkAuthorityRecord
 	found     bool
 	removed   bool
+	priorBoot *networkAuthorityRecord
 }
 
 // CreateManagedNetwork creates down, records exact identity, applies firewall state, then raises the bridge.
@@ -52,7 +53,10 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 	}
 	defer func() { returnErr = tx.release(ctx, returnErr) }()
 	if tx.removed {
-		return ManagedNetworkResult{}, errs.New(errs.CodeNetworkAlreadyExists, "network identity has a durable removal receipt; create a new network identity")
+		return ManagedNetworkResult{}, errs.New(
+			errs.CodeNetworkAlreadyExists,
+			"network identity has a durable removal receipt; create a new network identity",
+		)
 	}
 	l3, err := request.configuration()
 	if err != nil {
@@ -63,7 +67,10 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 	}
 	if tx.found {
 		if tx.record.configuration.l3 != l3 || tx.record.configuration.nat != request.NAT {
-			return ManagedNetworkResult{}, errs.New(errs.CodeNetworkAlreadyExists, "managed network intent differs from root authority")
+			return ManagedNetworkResult{}, errs.New(
+				errs.CodeNetworkAlreadyExists,
+				"managed network intent differs from root authority",
+			)
 		}
 	}
 	fd, host, err := tx.host.descriptor()
@@ -75,18 +82,42 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 		if err != nil {
 			return ManagedNetworkResult{}, err
 		}
-		if tx.found && tx.uplink.selected != *tx.record.configuration.uplink {
+		if tx.found && tx.priorBoot == nil && tx.uplink.selected != *tx.record.configuration.uplink {
 			return ManagedNetworkResult{}, networkAuthorityCorruptError("managed network NAT uplink changed", nil)
 		}
 	}
-	if !tx.found {
+	if !tx.found || tx.priorBoot != nil {
 		name := deriveNetworkLinkName("mvb", tx.key, "managed-bridge")
 		before, err := tx.route.inspectLink(ctx, fd, name)
 		if err != nil {
 			return ManagedNetworkResult{}, networkAuthorityEffectError("inspect new managed bridge", err)
 		}
 		if before != nil {
-			return ManagedNetworkResult{}, networkAuthorityCorruptError("derived bridge exists without root authority; clean installation is required", nil)
+			return ManagedNetworkResult{}, networkAuthorityCorruptError(
+				"derived bridge exists without root authority; clean installation is required",
+				nil,
+			)
+		}
+		if tx.priorBoot != nil {
+			boot, err := readCurrentBootID(ctx)
+			if err != nil {
+				return ManagedNetworkResult{}, err
+			}
+			// CRITICAL: Prior-boot firewall retirement must prove both managed tables absent before creating new links.
+			tx.firewall, err = firewall.BeginPolicyChange(ctx, tx.mutation, firewall.PolicyBinding{
+				OwnerUID: ownerUID, NetworkID: request.NetworkID, BootID: boot,
+				HostNamespace: firewall.NamespaceIdentity{Device: host.device, Inode: host.inode},
+			})
+			if err != nil {
+				return ManagedNetworkResult{}, err
+			}
+			before, err = tx.route.inspectLink(ctx, fd, name)
+			if err != nil || before != nil {
+				return ManagedNetworkResult{}, networkAuthorityCorruptError(
+					"prior-boot bridge absence changed before creation",
+					err,
+				)
+			}
 		}
 		createErr := tx.route.createBridgeDown(ctx, fd, name, managedBridgeAlias(name))
 		observed, inspectErr := tx.route.inspectLink(context.WithoutCancel(ctx), fd, name)
@@ -96,11 +127,24 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 				errs.WithDetails(map[string]any{"outcome_unknown": inspectErr != nil, "network_id": request.NetworkID}))
 		}
 		bridge := linkIdentity{name: name, ifIndex: observed.ifIndex, namespace: host}
-		if err := validateExactManagedLink(*observed, bridge, linkKindBridge, managedBridgeAlias(name), 0, 0); err != nil {
-			return ManagedNetworkResult{}, networkAuthorityCorruptError("created bridge identity differs", errors.Join(createErr, err))
+		if err := validateExactManagedLink(
+			*observed,
+			bridge,
+			linkKindBridge,
+			managedBridgeAlias(name),
+			0,
+			0,
+		); err != nil {
+			return ManagedNetworkResult{}, networkAuthorityCorruptError(
+				"created bridge identity differs",
+				errors.Join(createErr, err),
+			)
 		}
 		if observed.flags&unix.IFF_UP != 0 {
-			return ManagedNetworkResult{}, networkAuthorityCorruptError("new managed bridge is unexpectedly up", createErr)
+			return ManagedNetworkResult{}, networkAuthorityCorruptError(
+				"new managed bridge is unexpectedly up",
+				createErr,
+			)
 		}
 		boot, err := readCurrentBootID(ctx)
 		if err != nil {
@@ -114,15 +158,24 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 			tx.record.configuration.uplink = &selected
 		}
 		// CRITICAL: Publish exact down-link ownership before addressing or exposure. A later failure is retryable by ID.
-		writeErr := tx.store.writeRecord(context.WithoutCancel(ctx), tx.record)
+		var writeErr error
+		if tx.priorBoot != nil {
+			writeErr = tx.replacePriorBootRecord(context.WithoutCancel(ctx))
+		} else {
+			writeErr = tx.store.writeRecord(context.WithoutCancel(ctx), tx.record)
+		}
 		if writeErr != nil {
-			if de := errs.AsDomainError(writeErr); de != nil && de.Details["record_created"] == true {
+			if de := errs.AsDomainError(
+				writeErr,
+			); de != nil &&
+				(de.Details["record_created"] == true || de.Details["record_replaced"] == true) {
 				tx.found = true
 				return ManagedNetworkResult{}, writeErr
 			}
 			return ManagedNetworkResult{}, tx.removeUnpublishedBridge(ctx, bridge, errors.Join(createErr, writeErr))
 		}
 		tx.found = true
+		tx.priorBoot = nil
 		if createErr != nil {
 			return ManagedNetworkResult{}, networkAuthorityEffectError("create down managed bridge", createErr)
 		}
@@ -150,8 +203,11 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 		return ManagedNetworkResult{}, err
 	}
 	if err := inspectManagedBridgeL3(ctx, tx.route, fd, tx.record); err != nil {
-		return ManagedNetworkResult{}, appendNetworkAuthorityError(networkAuthorityEffectError("verify configured managed bridge", err),
-			"lower rejected managed bridge", tx.setBridgeState(context.WithoutCancel(ctx), false))
+		return ManagedNetworkResult{}, appendNetworkAuthorityError(
+			networkAuthorityEffectError("verify configured managed bridge", err),
+			"lower rejected managed bridge",
+			tx.setBridgeState(context.WithoutCancel(ctx), false),
+		)
 	}
 	return ManagedNetworkResult{NetworkID: request.NetworkID, Bridge: tx.record.managedBridge.name.String(),
 		Prefix: request.Prefix, Gateway: request.Gateway, NAT: request.NAT}, nil
@@ -182,7 +238,10 @@ func (server *ManagedNetworkServer) RemoveManagedNetwork(
 		return ManagedNetworkRemovalResult{}, err
 	}
 	if tx.removed && bridge != nil {
-		return ManagedNetworkRemovalResult{}, networkAuthorityCorruptError("removed network bridge name is occupied; refusing replacement cleanup", nil)
+		return ManagedNetworkRemovalResult{}, networkAuthorityCorruptError(
+			"removed network bridge name is occupied; refusing replacement cleanup",
+			nil,
+		)
 	}
 	if bridge != nil {
 		if err := tx.requireChildless(ctx, bridge.ifIndex); err != nil {
@@ -204,7 +263,10 @@ func (server *ManagedNetworkServer) RemoveManagedNetwork(
 	}
 	if bridge != nil {
 		if bridge.flags&unix.IFF_UP != 0 {
-			return ManagedNetworkRemovalResult{}, networkAuthorityCorruptError("managed bridge rose during removal", nil)
+			return ManagedNetworkRemovalResult{}, networkAuthorityCorruptError(
+				"managed bridge rose during removal",
+				nil,
+			)
 		}
 		if err := tx.requireChildless(ctx, bridge.ifIndex); err != nil {
 			return ManagedNetworkRemovalResult{}, err
@@ -212,8 +274,11 @@ func (server *ManagedNetworkServer) RemoveManagedNetwork(
 		deleteErr := tx.route.deleteLink(ctx, fd, bridge.ifIndex)
 		after, inspectErr := tx.route.inspectLink(context.WithoutCancel(ctx), fd, tx.record.managedBridge.name)
 		if after != nil || deleteErr != nil || inspectErr != nil {
-			return ManagedNetworkRemovalResult{}, networkAuthorityEffectError("remove exact managed bridge", errors.Join(deleteErr, inspectErr,
-				managedBridgeStillPresent(after)))
+			return ManagedNetworkRemovalResult{}, networkAuthorityEffectError(
+				"remove exact managed bridge",
+				errors.Join(deleteErr, inspectErr,
+					managedBridgeStillPresent(after)),
+			)
 		}
 	}
 	if err := tx.removeRecord(ctx); err != nil {
@@ -228,7 +293,10 @@ func acquireManagedNetworkTransaction(
 	if ctx == nil || ownerUID == 0 {
 		return nil, networkAuthorityValidationError("authenticated non-root network owner and context are required")
 	}
-	tx := &managedNetworkTransaction{key: networkKey{ownerUID: OwnerUID(ownerUID), networkID: networkID}, route: newDirectRouteNetlink()}
+	tx := &managedNetworkTransaction{
+		key:   networkKey{ownerUID: OwnerUID(ownerUID), networkID: networkID},
+		route: newDirectRouteNetlink(),
+	}
 	if err := validateNetworkKey(tx.key); err != nil {
 		return nil, err
 	}
@@ -311,7 +379,11 @@ func acquireManagedNetworkTransaction(
 			return nil, err
 		}
 		if boot != tx.record.bootID {
-			return nil, staleNetworkAuthorityError(networkID)
+			if !create || tx.removed {
+				return nil, staleNetworkAuthorityError(networkID)
+			}
+			previous := tx.record
+			tx.priorBoot = &previous
 		}
 	}
 	ns := newNamespaceEffect()
@@ -323,7 +395,7 @@ func acquireManagedNetworkTransaction(
 	if err != nil {
 		return nil, err
 	}
-	if tx.found && tx.record.managedBridge.namespace != identity {
+	if tx.found && tx.priorBoot == nil && tx.record.managedBridge.namespace != identity {
 		return nil, networkAuthorityCorruptError("managed bridge namespace changed", nil)
 	}
 	return tx, nil
@@ -446,17 +518,29 @@ func (tx *managedNetworkTransaction) requireChildless(ctx context.Context, ifInd
 	}
 	for _, link := range links {
 		if link.master == ifIndex {
-			return errs.New(errs.CodeNetworkError, "managed bridge still has attached endpoints", errs.WithClass(errs.ClassConflict))
+			return errs.New(
+				errs.CodeNetworkError,
+				"managed bridge still has attached endpoints",
+				errs.WithClass(errs.ClassConflict),
+			)
 		}
 	}
 	return nil
 }
 
 func (tx *managedNetworkTransaction) beginFirewall(ctx context.Context) error {
+	if tx.firewall != nil {
+		return nil
+	}
 	var err error
 	tx.firewall, err = firewall.BeginPolicyChange(ctx, tx.mutation, firewall.PolicyBinding{
-		OwnerUID: tx.record.ownerUID, NetworkID: string(tx.record.networkID), BootID: tx.record.bootID,
-		HostNamespace: firewall.NamespaceIdentity{Device: tx.record.managedBridge.namespace.device, Inode: tx.record.managedBridge.namespace.inode},
+		OwnerUID:  tx.record.ownerUID,
+		NetworkID: string(tx.record.networkID),
+		BootID:    tx.record.bootID,
+		HostNamespace: firewall.NamespaceIdentity{
+			Device: tx.record.managedBridge.namespace.device,
+			Inode:  tx.record.managedBridge.namespace.inode,
+		},
 	})
 	return err
 }
@@ -487,14 +571,22 @@ func (tx *managedNetworkTransaction) rejectPrefixOverlap(ctx context.Context, l3
 			return err
 		}
 		err = tx.checkOwnerPrefixes(ctx, store, l3)
-		if err = appendNetworkAuthorityError(err, "close indexed network owner", store.Release(context.WithoutCancel(ctx))); err != nil {
+		if err = appendNetworkAuthorityError(
+			err,
+			"close indexed network owner",
+			store.Release(context.WithoutCancel(ctx)),
+		); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (tx *managedNetworkTransaction) checkOwnerPrefixes(ctx context.Context, store *networkStoreUID, l3 managedNetworkL3) error {
+func (tx *managedNetworkTransaction) checkOwnerPrefixes(
+	ctx context.Context,
+	store *networkStoreUID,
+	l3 managedNetworkL3,
+) error {
 	names, err := store.deps.readDirNames(ctx, store.stateFD)
 	if err != nil {
 		return networkAuthorityEffectError("enumerate managed network records", err)
@@ -518,13 +610,21 @@ func (tx *managedNetworkTransaction) checkOwnerPrefixes(ctx context.Context, sto
 			continue
 		}
 		if record.configuration.l3.prefix.value.Overlaps(l3.prefix.value) {
-			return errs.New(errs.CodeNetworkSubnetOverlap, "managed network prefix overlaps root-owned network authority", errs.WithClass(errs.ClassConflict))
+			return errs.New(
+				errs.CodeNetworkSubnetOverlap,
+				"managed network prefix overlaps root-owned network authority",
+				errs.WithClass(errs.ClassConflict),
+			)
 		}
 	}
 	return nil
 }
 
-func (tx *managedNetworkTransaction) removeUnpublishedBridge(ctx context.Context, bridge linkIdentity, primary error) error {
+func (tx *managedNetworkTransaction) removeUnpublishedBridge(
+	ctx context.Context,
+	bridge linkIdentity,
+	primary error,
+) error {
 	cleanup := context.WithoutCancel(ctx)
 	tx.record.managedBridge = bridge
 	link, err := tx.inspectBridge(cleanup, true)
@@ -562,19 +662,32 @@ func (tx *managedNetworkTransaction) removeRecord(ctx context.Context) (returnEr
 		return err
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "close network removal receipts", tx.store.deps.close(context.WithoutCancel(ctx), receiptsFD))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close network removal receipts",
+			tx.store.deps.close(context.WithoutCancel(ctx), receiptsFD),
+		)
 	}()
 	if tx.removed {
 		return networkAuthorityEffectErrorIfPresent("sync retried network removal receipt",
 			errors.Join(tx.store.deps.fsync(ctx, receiptsFD), tx.store.deps.fsync(ctx, tx.store.stateFD)))
 	}
 	name := string(tx.record.networkID) + ".json"
-	fd, err := tx.store.deps.openAt2(ctx, tx.store.stateFD, name, &unix.OpenHow{Flags: networkStoreReadFlags, Resolve: networkStoreResolve})
+	fd, err := tx.store.deps.openAt2(
+		ctx,
+		tx.store.stateFD,
+		name,
+		&unix.OpenHow{Flags: networkStoreReadFlags, Resolve: networkStoreResolve},
+	)
 	if err != nil {
 		return networkAuthorityEffectError("open managed network removal record", err)
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "close removed network record", tx.store.deps.close(context.WithoutCancel(ctx), fd))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close removed network record",
+			tx.store.deps.close(context.WithoutCancel(ctx), fd),
+		)
 	}()
 	before, err := inspectNetworkAuthorityRecordFile(ctx, tx.store.deps, fd, tx.store.policy)
 	if err != nil {
@@ -595,7 +708,12 @@ func (tx *managedNetworkTransaction) removeRecord(ctx context.Context) (returnEr
 	if err != nil || !sameNetworkAuthorityRecordStat(before, current) {
 		return networkAuthorityCorruptError("managed network removal record is unstable", err)
 	}
-	checkFD, err := tx.store.deps.openAt2(ctx, tx.store.stateFD, name, &unix.OpenHow{Flags: networkStoreReadFlags, Resolve: networkStoreResolve})
+	checkFD, err := tx.store.deps.openAt2(
+		ctx,
+		tx.store.stateFD,
+		name,
+		&unix.OpenHow{Flags: networkStoreReadFlags, Resolve: networkStoreResolve},
+	)
 	if err != nil {
 		return networkAuthorityEffectError("readmit named network removal record", err)
 	}
@@ -625,10 +743,142 @@ func networkAuthorityEffectErrorIfPresent(message string, cause error) error {
 	return networkAuthorityEffectError(message, cause)
 }
 
+func (tx *managedNetworkTransaction) replacePriorBootRecord(ctx context.Context) (returnErr error) {
+	// CALLER MUST HOLD: ownership index, concrete network mutation and current-boot firewall authority.
+	// Only exact prior-boot logical intent is replaced after fresh bridge absence and exclusive down-link creation.
+	previous := tx.priorBoot
+	if previous == nil || tx.firewall == nil || previous.bootID == tx.record.bootID ||
+		previous.ownerUID != tx.record.ownerUID || previous.networkID != tx.record.networkID ||
+		previous.configuration.l3 != tx.record.configuration.l3 || previous.configuration.nat != tx.record.configuration.nat {
+		return networkAuthorityCorruptError("prior-boot network replacement authority is incomplete", nil)
+	}
+	raw, err := encodeNetworkAuthorityRecord(tx.record)
+	if err != nil {
+		return err
+	}
+	expected, err := encodeNetworkAuthorityRecord(*previous)
+	if err != nil {
+		return err
+	}
+	name := string(tx.record.networkID) + ".json"
+	priorFD, err := tx.store.deps.openAt2(
+		ctx,
+		tx.store.stateFD,
+		name,
+		&unix.OpenHow{Flags: networkStoreReadFlags, Resolve: networkStoreResolve},
+	)
+	if err != nil {
+		return networkAuthorityEffectError("pin prior-boot network record", err)
+	}
+	replaced := false
+	defer func() {
+		closeErr := tx.store.deps.close(context.WithoutCancel(ctx), priorFD)
+		returnErr = appendNetworkAuthorityError(returnErr, "close prior-boot network record", closeErr)
+		if returnErr != nil && replaced {
+			if domain := errs.AsDomainError(returnErr); domain != nil {
+				if domain.Details == nil {
+					domain.Details = make(map[string]any)
+				}
+				domain.Details["record_replaced"] = true
+			}
+		}
+	}()
+	before, err := inspectNetworkAuthorityRecordFile(ctx, tx.store.deps, priorFD, tx.store.policy)
+	if err != nil {
+		return err
+	}
+	old, err := readAllNetworkAuthorityRecord(ctx, tx.store.deps, priorFD)
+	if err != nil {
+		return networkAuthorityEffectError("read prior-boot network record", err)
+	}
+	if !bytes.Equal(old, expected) {
+		return networkAuthorityCorruptError("prior-boot network record changed", nil)
+	}
+	tempName, tempFD, err := createNetworkAuthorityTemp(ctx, tx.store)
+	if err != nil {
+		return err
+	}
+	tempOpen := true
+	abort := func(cause error) error {
+		return abortNetworkAuthorityWrite(ctx, tx.store, tempFD, tempName, tempOpen, cause)
+	}
+	if err := writeAllNetworkAuthorityRecord(ctx, tx.store.deps, tempFD, raw); err != nil {
+		return abort(networkAuthorityEffectError("write rebooted network authority", err))
+	}
+	if err := tx.store.deps.fchown(
+		ctx,
+		tempFD,
+		int(tx.store.policy.expectedUID),
+		int(tx.store.policy.expectedGID),
+	); err != nil {
+		return abort(networkAuthorityEffectError("set rebooted network record owner", err))
+	}
+	if err := tx.store.deps.fchmod(ctx, tempFD, networkStoreRecordMode); err != nil {
+		return abort(networkAuthorityEffectError("set rebooted network record mode", err))
+	}
+	if err := tx.store.deps.fsync(ctx, tempFD); err != nil {
+		return abort(networkAuthorityEffectError("sync rebooted network record", err))
+	}
+	prepared, err := inspectNetworkAuthorityRecordFile(ctx, tx.store.deps, tempFD, tx.store.policy)
+	if err != nil || prepared.Size != int64(len(raw)) {
+		return abort(networkAuthorityCorruptError("rebooted network record is incomplete", err))
+	}
+	tempOpen = false
+	if err := tx.store.deps.close(context.WithoutCancel(ctx), tempFD); err != nil {
+		return abort(networkAuthorityEffectError("close rebooted network record", err))
+	}
+	after, err := inspectNetworkAuthorityRecordFile(ctx, tx.store.deps, priorFD, tx.store.policy)
+	if err != nil || !sameNetworkAuthorityRecordStat(before, after) {
+		return abort(networkAuthorityCorruptError("prior-boot network record changed before replacement", err))
+	}
+	checkFD, err := tx.store.deps.openAt2(
+		ctx,
+		tx.store.stateFD,
+		name,
+		&unix.OpenHow{Flags: networkStoreReadFlags, Resolve: networkStoreResolve},
+	)
+	if err != nil {
+		return abort(networkAuthorityEffectError("readmit prior-boot network record", err))
+	}
+	named, statErr := inspectNetworkAuthorityRecordFile(ctx, tx.store.deps, checkFD, tx.store.policy)
+	closeErr := tx.store.deps.close(context.WithoutCancel(ctx), checkFD)
+	if err := errors.Join(statErr, closeErr); err != nil {
+		return abort(networkAuthorityEffectError("inspect named prior-boot network record", err))
+	}
+	if !sameNetworkAuthorityRecordStat(after, named) {
+		return abort(networkAuthorityCorruptError("prior-boot network record was replaced", nil))
+	}
+	if err := ctx.Err(); err != nil {
+		return abort(networkAuthorityEffectError("publish rebooted network authority", err))
+	}
+	if err := unix.Renameat2(tx.store.stateFD, tempName, tx.store.stateFD, name, 0); err != nil {
+		return abort(networkAuthorityEffectError("replace exact prior-boot network record", err))
+	}
+	replaced = true
+	if err := tx.store.deps.fsync(context.WithoutCancel(ctx), tx.store.stateFD); err != nil {
+		return errs.WrapMsg(errs.CodeNetworkError, "sync rebooted network authority directory", err,
+			errs.WithDetails(map[string]any{"record_replaced": true, "durability_uncertain": true}))
+	}
+	current, found, err := tx.store.readRecord(ctx, tx.record.networkID)
+	if err != nil {
+		return err
+	}
+	actual, err := encodeNetworkAuthorityRecord(current)
+	if err != nil || !found || !bytes.Equal(actual, raw) {
+		return networkAuthorityCorruptError("rebooted network authority readback differs", err)
+	}
+	return nil
+}
+
 func readManagedRemovalReceipt(ctx context.Context, store *networkStoreUID, id NetworkID) (
 	record networkAuthorityRecord, found bool, returnErr error,
 ) {
-	fd, err := store.deps.openAt2(ctx, store.stateFD, "removed", &unix.OpenHow{Flags: networkStoreDirectoryFlags, Resolve: networkStoreResolve})
+	fd, err := store.deps.openAt2(
+		ctx,
+		store.stateFD,
+		"removed",
+		&unix.OpenHow{Flags: networkStoreDirectoryFlags, Resolve: networkStoreResolve},
+	)
 	if errors.Is(err, unix.ENOENT) {
 		return networkAuthorityRecord{}, false, nil
 	}
@@ -636,9 +886,21 @@ func readManagedRemovalReceipt(ctx context.Context, store *networkStoreUID, id N
 		return networkAuthorityRecord{}, false, networkAuthorityEffectError("open network removal receipts", err)
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "close network removal receipts", store.deps.close(context.WithoutCancel(ctx), fd))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close network removal receipts",
+			store.deps.close(context.WithoutCancel(ctx), fd),
+		)
 	}()
-	if err := verifyNetworkStoreDirectory(ctx, store.deps, fd, "removed", store.policy, networkStoreDirectoryMode, true); err != nil {
+	if err := verifyNetworkStoreDirectory(
+		ctx,
+		store.deps,
+		fd,
+		"removed",
+		store.policy,
+		networkStoreDirectoryMode,
+		true,
+	); err != nil {
 		return networkAuthorityRecord{}, false, err
 	}
 	receipts := &networkStoreUID{deps: store.deps, policy: store.policy, uid: store.uid, stateFD: fd}
@@ -661,7 +923,11 @@ func (tx *managedNetworkTransaction) findRemovalClaim(ctx context.Context) (*net
 			return nil, err
 		}
 		record, present, readErr := readManagedRemovalReceipt(ctx, store, tx.key.networkID)
-		readErr = appendNetworkAuthorityError(readErr, "close network removal owner", store.Release(context.WithoutCancel(ctx)))
+		readErr = appendNetworkAuthorityError(
+			readErr,
+			"close network removal owner",
+			store.Release(context.WithoutCancel(ctx)),
+		)
 		if readErr != nil {
 			return nil, readErr
 		}
