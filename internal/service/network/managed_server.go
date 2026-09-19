@@ -35,6 +35,7 @@ type managedNetworkTransaction struct {
 	route     *directRouteNetlink
 	record    networkAuthorityRecord
 	found     bool
+	removed   bool
 }
 
 // CreateManagedNetwork creates down, records exact identity, applies firewall state, then raises the bridge.
@@ -50,6 +51,9 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 		return ManagedNetworkResult{}, err
 	}
 	defer func() { returnErr = tx.release(ctx, returnErr) }()
+	if tx.removed {
+		return ManagedNetworkResult{}, errs.New(errs.CodeNetworkAlreadyExists, "network identity has a durable removal receipt; create a new network identity")
+	}
 	l3, err := request.configuration()
 	if err != nil {
 		return ManagedNetworkResult{}, err
@@ -177,6 +181,9 @@ func (server *ManagedNetworkServer) RemoveManagedNetwork(
 	if err != nil {
 		return ManagedNetworkRemovalResult{}, err
 	}
+	if tx.removed && bridge != nil {
+		return ManagedNetworkRemovalResult{}, networkAuthorityCorruptError("removed network bridge name is occupied; refusing replacement cleanup", nil)
+	}
 	if bridge != nil {
 		if err := tx.requireChildless(ctx, bridge.ifIndex); err != nil {
 			return ManagedNetworkRemovalResult{}, err
@@ -247,6 +254,16 @@ func acquireManagedNetworkTransaction(
 	if err != nil {
 		return nil, err
 	}
+	removed, err := tx.findRemovalClaim(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if removed != nil {
+		if claim != nil {
+			return nil, networkAuthorityCorruptError("network has both live authority and a removal receipt", nil)
+		}
+		claim, tx.removed = removed, true
+	}
 	if claim != nil && claim.ownerUID != ownerUID {
 		return nil, unavailableNetworkAuthorityError(networkID)
 	}
@@ -272,6 +289,15 @@ func acquireManagedNetworkTransaction(
 	tx.record, tx.found, err = tx.store.readRecord(ctx, networkID)
 	if err != nil {
 		return nil, err
+	}
+	if tx.removed {
+		if tx.found {
+			return nil, networkAuthorityCorruptError("removed network live record reappeared", nil)
+		}
+		tx.record, tx.found, err = readManagedRemovalReceipt(ctx, tx.store, networkID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if (claim != nil) != tx.found {
 		return nil, networkAuthorityCorruptError("network claim changed under ownership index", nil)
@@ -474,7 +500,7 @@ func (tx *managedNetworkTransaction) checkOwnerPrefixes(ctx context.Context, sto
 		return networkAuthorityEffectError("enumerate managed network records", err)
 	}
 	for _, name := range names {
-		if name == "topologies" {
+		if name == "topologies" || name == "removed" {
 			continue
 		}
 		id := strings.TrimSuffix(name, ".json")
@@ -529,7 +555,19 @@ func managedBridgeStillPresent(link *routeLinkObservation) error {
 }
 
 func (tx *managedNetworkTransaction) removeRecord(ctx context.Context) (returnErr error) {
-	// CRITICAL: The exact record stays until both kernel bridge and firewall state are proven absent.
+	// CRITICAL: The exact record moves to a removal receipt only after kernel and firewall absence.
+	// Keeping the owner and identity claim makes lost acknowledgements retryable without authorizing recreation.
+	receiptsFD, err := openNetworkStoreDirectory(ctx, tx.store.deps, tx.store.stateFD, "removed", true, tx.store.policy)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		returnErr = appendNetworkAuthorityError(returnErr, "close network removal receipts", tx.store.deps.close(context.WithoutCancel(ctx), receiptsFD))
+	}()
+	if tx.removed {
+		return networkAuthorityEffectErrorIfPresent("sync retried network removal receipt",
+			errors.Join(tx.store.deps.fsync(ctx, receiptsFD), tx.store.deps.fsync(ctx, tx.store.stateFD)))
+	}
 	name := string(tx.record.networkID) + ".json"
 	fd, err := tx.store.deps.openAt2(ctx, tx.store.stateFD, name, &unix.OpenHow{Flags: networkStoreReadFlags, Resolve: networkStoreResolve})
 	if err != nil {
@@ -569,14 +607,73 @@ func (tx *managedNetworkTransaction) removeRecord(ctx context.Context) (returnEr
 	if !sameNetworkAuthorityRecordStat(current, named) {
 		return networkAuthorityCorruptError("managed network removal record was replaced", nil)
 	}
-	if err := tx.store.deps.unlinkAt(ctx, tx.store.stateFD, name, 0); err != nil {
-		return networkAuthorityEffectError("unlink exact managed network record", err)
+	if err := tx.store.deps.renameNoReplace(ctx, tx.store.stateFD, name, receiptsFD, name); err != nil {
+		return networkAuthorityEffectError("publish exact network removal receipt", err)
 	}
-	if err := tx.store.deps.fsync(context.WithoutCancel(ctx), tx.store.stateFD); err != nil {
+	if err := errors.Join(tx.store.deps.fsync(context.WithoutCancel(ctx), receiptsFD),
+		tx.store.deps.fsync(context.WithoutCancel(ctx), tx.store.stateFD)); err != nil {
 		return errs.WrapMsg(errs.CodeNetworkRemoveFailed, "sync managed network removal", err,
 			errs.WithDetails(map[string]any{"record_removed": true, "durability_uncertain": true}))
 	}
 	return nil
+}
+
+func networkAuthorityEffectErrorIfPresent(message string, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	return networkAuthorityEffectError(message, cause)
+}
+
+func readManagedRemovalReceipt(ctx context.Context, store *networkStoreUID, id NetworkID) (
+	record networkAuthorityRecord, found bool, returnErr error,
+) {
+	fd, err := store.deps.openAt2(ctx, store.stateFD, "removed", &unix.OpenHow{Flags: networkStoreDirectoryFlags, Resolve: networkStoreResolve})
+	if errors.Is(err, unix.ENOENT) {
+		return networkAuthorityRecord{}, false, nil
+	}
+	if err != nil {
+		return networkAuthorityRecord{}, false, networkAuthorityEffectError("open network removal receipts", err)
+	}
+	defer func() {
+		returnErr = appendNetworkAuthorityError(returnErr, "close network removal receipts", store.deps.close(context.WithoutCancel(ctx), fd))
+	}()
+	if err := verifyNetworkStoreDirectory(ctx, store.deps, fd, "removed", store.policy, networkStoreDirectoryMode, true); err != nil {
+		return networkAuthorityRecord{}, false, err
+	}
+	receipts := &networkStoreUID{deps: store.deps, policy: store.policy, uid: store.uid, stateFD: fd}
+	return receipts.readRecord(ctx, id)
+}
+
+func (tx *managedNetworkTransaction) findRemovalClaim(ctx context.Context) (*networkAuthorityRecord, error) {
+	owners, err := tx.storeRoot.deps.readDirNames(ctx, tx.storeRoot.stateFD)
+	if err != nil {
+		return nil, networkAuthorityEffectError("enumerate network removal owners", err)
+	}
+	var found *networkAuthorityRecord
+	for _, owner := range owners {
+		uid, err := strconv.ParseUint(owner, 10, 32)
+		if err != nil || uid == 0 || strconv.FormatUint(uid, 10) != owner {
+			return nil, networkAuthorityCorruptError("network removal owner index is invalid", err)
+		}
+		store, err := tx.storeRoot.openUID(ctx, uint32(uid), false)
+		if err != nil {
+			return nil, err
+		}
+		record, present, readErr := readManagedRemovalReceipt(ctx, store, tx.key.networkID)
+		readErr = appendNetworkAuthorityError(readErr, "close network removal owner", store.Release(context.WithoutCancel(ctx)))
+		if readErr != nil {
+			return nil, readErr
+		}
+		if present {
+			if found != nil {
+				return nil, networkAuthorityCorruptError("duplicate network removal identity", nil)
+			}
+			copy := record
+			found = &copy
+		}
+	}
+	return found, nil
 }
 
 func (tx *managedNetworkTransaction) release(ctx context.Context, primary error) error {
