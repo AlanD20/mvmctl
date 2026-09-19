@@ -289,6 +289,16 @@ func exchangePrivilegedControl(
 	deps privilegedControlDeps,
 	policy privilegedControlPolicy,
 ) PrivilegedControlOutcome {
+	return exchangePrivilegedControlWithHostVsock(ctx, request, deps, policy, nil)
+}
+
+func exchangePrivilegedControlWithHostVsock(
+	ctx context.Context,
+	request *PrivilegedControlRequest,
+	deps privilegedControlDeps,
+	policy privilegedControlPolicy,
+	hostVsock *privilegedHostVsockResponseOwner,
+) PrivilegedControlOutcome {
 	if ctx == nil {
 		return PrivilegedControlOutcome{diagnostic: errs.New(
 			errs.CodeValidationFailed,
@@ -375,7 +385,11 @@ func exchangePrivilegedControl(
 		uploads <- privilegedControlUploadResult{err: uploadErr}
 	}()
 	go func() {
-		responses <- readPrivilegedControlResponse(ctx, parent, policy.maxResponseBytes)
+		if hostVsock != nil {
+			responses <- hostVsock.read(ctx, parent, policy.maxResponseBytes)
+		} else {
+			responses <- readPrivilegedControlResponse(ctx, parent, policy.maxResponseBytes)
+		}
 	}()
 	go func() {
 		waits <- deps.wait(cleanupCtx, command)

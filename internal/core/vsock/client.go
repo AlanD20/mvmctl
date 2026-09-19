@@ -539,7 +539,9 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 		dialStart := time.Now()
 		dialFn := c.dialFn
 		if dialFn == nil {
-			dialFn = dialAndHandshake
+			dialFn = func(ctx context.Context, _ string, port, attempt int) (net.Conn, error) {
+				return dialAndHandshake(ctx, c.item.VmID, port, attempt)
+			}
 		}
 		conn, err := dialFn(ctx, c.item.UDSPath, c.item.Port, attempts)
 		dialElapsed := float64(time.Since(dialStart).Microseconds()) / 1000.0
@@ -780,7 +782,7 @@ func (c *Client) probeVersion(ctx context.Context, conn net.Conn) (string, error
 // No version probe or upgrade check. Used by upgradeAgent to avoid
 // circular calls back into ensureAgent.
 func (c *Client) dialRaw(ctx context.Context) (net.Conn, error) {
-	return dialAndHandshake(ctx, c.item.UDSPath, c.item.Port, 0)
+	return dialAndHandshake(ctx, c.item.VmID, c.item.Port, 0)
 }
 
 // upgradeAgent upgrades the guest agent inside the VM to the version

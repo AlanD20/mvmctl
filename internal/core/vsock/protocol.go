@@ -9,6 +9,7 @@ import (
 	"net"
 	"time"
 
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
@@ -59,22 +60,28 @@ type execResponse struct {
 
 // --- UDS dial and CONNECT handshake ---
 
-// dialAndHandshake connects to the Firecracker vsock UDS and performs the
-// CONNECT handshake. Returns an open connection on success.
-func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum int) (net.Conn, error) {
+// dialAndHandshake obtains the VM's authenticated private UDS connection and performs guest CONNECT.
+func dialAndHandshake(ctx context.Context, vmID string, port int, attemptNum int) (net.Conn, error) {
 	slog.Debug("vsock dial attempt",
-		"uds_path", udsPath,
+		"vm_id", vmID,
 		"port", port,
 		"attempt", attemptNum,
 	)
 
-	d := net.Dialer{Timeout: constConnectTimeout}
-	conn, err := d.DialContext(ctx, "unix", udsPath)
+	conn, err := jailer.NewHostVsockClient().Open(ctx, vmID)
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeVsockConnectionFailed, err)
 	}
 
-	// Send CONNECT <port>\n
+	deadline := time.Now().Add(constConnectTimeout)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		conn.Close()
+		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed, "set CONNECT deadline", err)
+	}
+	// The unprivileged caller alone selects the guest port and later supplies its agent token.
 	_, err = fmt.Fprintf(conn, "CONNECT %d\n", port)
 	if err != nil {
 		conn.Close()
@@ -84,7 +91,7 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 
 	// Set per-attempt read timeout to prevent blocking on a half-open
 	// connection (Firecracker accepts UDS connect but never responds).
-	if err := conn.SetReadDeadline(time.Now().Add(constConnectTimeout)); err != nil {
+	if err := conn.SetReadDeadline(deadline); err != nil {
 		conn.Close()
 		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed,
 			"failed to set read deadline", err)
@@ -107,7 +114,7 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 		if res.err != nil {
 			conn.Close()
 			slog.Debug("vsock handshake read failed",
-				"uds_path", udsPath,
+				"vm_id", vmID,
 				"port", port,
 				"attempt", attemptNum,
 				"error", res.err,
@@ -126,7 +133,7 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 				got = got[:len(got)-1]
 			}
 			slog.Debug("vsock handshake failed",
-				"uds_path", udsPath,
+				"vm_id", vmID,
 				"port", port,
 				"attempt", attemptNum,
 				"response", got,
@@ -135,9 +142,9 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 				fmt.Sprintf("handshake failed: got %q, expected \"OK ...\"", got))
 		}
 		// Clear read deadline so the caller's own deadline governs later reads.
-		_ = conn.SetReadDeadline(time.Time{})
+		_ = conn.SetDeadline(time.Time{}) // The ordinary command/copy context owns the later lifetime.
 		slog.Debug("vsock handshake succeeded",
-			"uds_path", udsPath,
+			"vm_id", vmID,
 			"port", port,
 			"attempt", attemptNum,
 			"response", trimTrailingNewline(res.resp),
@@ -186,8 +193,8 @@ func readFrameRaw(conn net.Conn, v any) error {
 	return json.NewDecoder(conn).Decode(v)
 }
 
-// DialVM connects to a VM's vsock via UDS + CONNECT handshake.
+// DialVM connects to an exact VM's private vsock through root peer admission and guest CONNECT.
 // Returns an open connection that is ready to send/receive JSON frames.
-func DialVM(ctx context.Context, udsPath string, port int) (net.Conn, error) {
-	return dialAndHandshake(ctx, udsPath, port, 1)
+func DialVM(ctx context.Context, vmID string, port int) (net.Conn, error) {
+	return dialAndHandshake(ctx, vmID, port, 1)
 }
