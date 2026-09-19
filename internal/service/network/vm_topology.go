@@ -123,6 +123,11 @@ func (lease *VMTopologyLease) prepare(ctx context.Context, intent VMIntent) erro
 	if found && (prior.Lifecycle != topologyCleaned || prior.LaunchGeneration >= intent.LaunchGeneration) {
 		return networkAuthorityCorruptError("existing VM topology requires ownership-bound reconciliation", nil)
 	}
+	if found && (prior.NetworkID != string(lease.key.networkID) ||
+		prior.Prefix != lease.l3.network.prefix.value.String() || prior.Gateway != lease.l3.network.gateway.value.String() ||
+		prior.GuestIPv4 != lease.l3.guestAddress.value.String() || prior.GuestMAC != lease.l3.mac.String()) {
+		return networkAuthorityCorruptError("VM restart cannot change its retained logical endpoint identity", nil)
+	}
 	rawNetwork, err := encodeNetworkAuthorityRecord(lease.network.record)
 	if err != nil {
 		return err
