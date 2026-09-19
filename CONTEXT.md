@@ -597,8 +597,10 @@ raw-volume selection before VM-specific or lifecycle effects. Relaunch resolves 
 than accepting a name/prefix substitute, and carries the verified selection through its normal-process relaunch state.
 These API input checks use the user database and do not establish root descriptor authority. The separate private raw
 volume lease now pins fixed ID-derived leaves and admits exact file identity, logical length, access, and cache mode.
-Its positive signed-file-offset size bound is representability only; per-volume and aggregate storage policy remain
-unresolved, so that lease grants neither storage allocation nor production mounting or live attachment.
+Its positive signed-file-offset size bound is representability only. The user approved raw-volume attachment without
+new per-volume or aggregate storage quota caps, subject to the approved device budget and strict file ownership and
+identity checks. This decision authorizes the launch integration work; the private lease alone does not establish
+production mounting or live attachment, and it does not reserve physical storage.
 
 Private Firecracker 1.16.1 MMIO admission accounts for the complete device budget: rootfs, network, VMGenID, VMClock,
 optional cloud-init and vsock, and ARM RTC/serial where applicable. PCI and unapproved release profiles fail closed.

@@ -1210,10 +1210,14 @@ image provisioning each require their own closed policy before their descriptors
 The data-volume producer/API/CLI now supports raw only, with no create-time format selection. QCOW2 remains supported
 for image import/conversion. Public use paths reject unsupported persisted volume formats and incomplete selections;
 relaunch requires exact persisted IDs. This is normal-process input validation, not privileged descriptor admission.
-Volume count/capacity and snapshot memory/state limits remain unapproved; the old draft's 16-volume, 16-TiB data-volume,
-and 1-GiB state limits are not accepted policy. Existing base rootfs and image policies are unchanged. The
-[resource-limit proposal](../improvements/volume-snapshot-resource-limits.md) records the analysis and open choices;
-its numerical recommendations remain unapproved.
+The user approved release-specific MMIO device-budget accounting, a 10,000,000-byte complete vmstate ceiling,
+and exact snapshot memory length derived from trusted captured RAM. Raw-volume attachment may proceed without
+new per-volume or aggregate storage quota caps, while enforcing the approved device budget and strict pinned-file
+ownership, identity, logical-length, and access checks. This is not a promise of available physical storage or
+support for arbitrary device counts. The old draft's 16-volume, 16-TiB data-volume, and 1-GiB state limits are not
+accepted policy. Existing base rootfs and image policies are unchanged. The
+[resource-limit proposal](../improvements/volume-snapshot-resource-limits.md) records these decisions and the
+remaining qualification and snapshot-authority gaps.
 
 The caller-owned `firecracker.json` is admission evidence, not launch authority. Immediately before allocation or
 reading, root repeats synchronized metadata inspection and enforces the 1-byte-through-1-MiB bound. It uses positioned

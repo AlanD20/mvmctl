@@ -15,8 +15,11 @@ The user approved the derived MMIO device-budget calculation, the 10,000,000-byt
 `vmstate` ceiling, and exact memory-file length derived from trusted captured RAM. The
 approval does not select a uniform 13-volume product limit, qualify PCI or aarch64, approve
 new per-volume or aggregate storage caps, or establish snapshot capture/immutability authority.
-Those remaining decisions and evidence gaps stay open. Approval records the intended
-implementation contract, not completed implementation or validation.
+The user subsequently approved proceeding with raw-volume attachment without new per-volume
+or aggregate storage quota caps, subject to the approved device budget and strict file
+ownership/identity checks. Absence of a new quota does not guarantee available physical space
+or arbitrary device-count support. Snapshot authority and qualification gaps stay open.
+Approval records the intended implementation contract, not completed implementation or validation.
 
 The current pass is implementation-only: no tests are written or run, and no validation or
 review passes are performed. Only formatting and linting are permitted. Runtime admission
