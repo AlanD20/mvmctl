@@ -62,35 +62,37 @@ type hostSudoersConfigurer interface {
 
 // Repos bundles all database repositories.
 type Repos struct {
-	VM         vm.Repository
-	Network    network.Repository
-	Lease      network.LeaseRepository
-	Image      image.Repository
-	Kernel     kernel.Repository
-	Binary     binary.Repository
-	Key        key.Repository
-	Volume     volume.Repository
-	Host       host.Repository
-	Config     config.SettingsRepository
-	Vsock      vsock.Repository
-	Snapshot   snapshot.Repository
-	Policy     network.ServiceAccessPolicyRepository
-	ExecPolicy execpolicy.Repository
+	VM            vm.Repository
+	Network       network.Repository
+	Lease         network.LeaseRepository
+	Image         image.Repository
+	Kernel        kernel.Repository
+	Binary        binary.Repository
+	Key           key.Repository
+	Volume        volume.Repository
+	Host          host.Repository
+	Config        config.SettingsRepository
+	Vsock         vsock.Repository
+	Snapshot      snapshot.Repository
+	Policy        network.ServiceAccessPolicyRepository
+	TrafficPolicy network.TrafficPolicyRepository
+	ExecPolicy    execpolicy.Repository
 }
 
 // Services bundles all domain services.
 type Services struct {
-	Binary     *binary.Service
-	Image      *image.Service
-	Kernel     *kernel.Service
-	Network    *network.Service
-	Host       *host.Service
-	Config     *config.Service
-	Key        *key.Service
-	Volume     *volume.Service
-	Cache      *cache.Service
-	Vsock      *vsock.Service
-	ExecPolicy *execpolicy.Service
+	Binary        *binary.Service
+	Image         *image.Service
+	Kernel        *kernel.Service
+	Network       *network.Service
+	Host          *host.Service
+	Config        *config.Service
+	Key           *key.Service
+	Volume        *volume.Service
+	Cache         *cache.Service
+	Vsock         *vsock.Service
+	ExecPolicy    *execpolicy.Service
+	TrafficPolicy *network.TrafficPolicyService
 }
 type RequiredService struct {
 	Name string
@@ -102,20 +104,21 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	sqlDB := conn.DB()
 
 	r := Repos{
-		VM:         vm.NewRepository(sqlDB),
-		Network:    network.NewRepository(sqlDB),
-		Lease:      network.NewLeaseRepository(sqlDB),
-		Image:      image.NewRepository(sqlDB),
-		Kernel:     kernel.NewRepository(sqlDB),
-		Binary:     binary.NewRepository(sqlDB),
-		Key:        key.NewRepository(sqlDB),
-		Volume:     volume.NewRepository(sqlDB),
-		Host:       host.NewRepository(sqlDB),
-		Config:     config.NewRepository(sqlDB),
-		Vsock:      vsock.NewRepository(sqlDB),
-		Snapshot:   snapshot.NewRepository(sqlDB),
-		Policy:     network.NewServiceAccessPolicyRepository(sqlDB),
-		ExecPolicy: execpolicy.NewRepository(sqlDB),
+		VM:            vm.NewRepository(sqlDB),
+		Network:       network.NewRepository(sqlDB),
+		Lease:         network.NewLeaseRepository(sqlDB),
+		Image:         image.NewRepository(sqlDB),
+		Kernel:        kernel.NewRepository(sqlDB),
+		Binary:        binary.NewRepository(sqlDB),
+		Key:           key.NewRepository(sqlDB),
+		Volume:        volume.NewRepository(sqlDB),
+		Host:          host.NewRepository(sqlDB),
+		Config:        config.NewRepository(sqlDB),
+		Vsock:         vsock.NewRepository(sqlDB),
+		Snapshot:      snapshot.NewRepository(sqlDB),
+		Policy:        network.NewServiceAccessPolicyRepository(sqlDB),
+		TrafficPolicy: network.NewTrafficPolicyRepository(sqlDB),
+		ExecPolicy:    execpolicy.NewRepository(sqlDB),
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
@@ -125,17 +128,18 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	defaultFwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, sqlDB)
 
 	s := Services{
-		Network:    network.NewService(r.Network, defaultFwTracker, r.Policy),
-		Image:      image.NewService(r.Image),
-		Kernel:     kernel.NewService(r.Kernel, filepath.Join(cacheDir, "kernels")),
-		Binary:     binary.NewService(r.Binary, system.RuntimeArch()),
-		Key:        key.NewService(r.Key, infra.GetKeysDir()),
-		Host:       host.NewService(r.Host),
-		Config:     config.NewService(r.Config, configReg),
-		Volume:     volume.NewService(r.Volume),
-		Cache:      cache.NewService(cacheDir, infra.GetTempDir()),
-		Vsock:      vsock.NewService(r.Vsock),
-		ExecPolicy: execpolicy.NewService(r.ExecPolicy),
+		Network:       network.NewService(r.Network, defaultFwTracker, r.Policy),
+		Image:         image.NewService(r.Image),
+		Kernel:        kernel.NewService(r.Kernel, filepath.Join(cacheDir, "kernels")),
+		Binary:        binary.NewService(r.Binary, system.RuntimeArch()),
+		Key:           key.NewService(r.Key, infra.GetKeysDir()),
+		Host:          host.NewService(r.Host),
+		Config:        config.NewService(r.Config, configReg),
+		Volume:        volume.NewService(r.Volume),
+		Cache:         cache.NewService(cacheDir, infra.GetTempDir()),
+		Vsock:         vsock.NewService(r.Vsock),
+		ExecPolicy:    execpolicy.NewService(r.ExecPolicy),
+		TrafficPolicy: network.NewTrafficPolicyService(r.TrafficPolicy),
 	}
 	// Enforce that all required services are non-nil — fail fast at startup.
 	required := []RequiredService{
@@ -143,6 +147,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		{"Binary", s.Binary}, {"Network", s.Network}, {"Host", s.Host},
 		{"Key", s.Key}, {"Volume", s.Volume}, {"Cache", s.Cache},
 		{"Vsock", s.Vsock}, {"ExecPolicy", s.ExecPolicy},
+		{"TrafficPolicy", s.TrafficPolicy},
 	}
 	for _, r := range required {
 		if r.Svc == nil {
