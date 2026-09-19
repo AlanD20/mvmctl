@@ -41,6 +41,8 @@ type VMTopologyLease struct {
 	firewallAttempted bool
 	activationStarted bool
 	cleaned           bool
+	detached          bool
+	recoveryPending   bool
 	closeErr          error
 }
 
@@ -258,6 +260,12 @@ func (lease *VMTopologyLease) Cleanup(ctx context.Context) error {
 	if lease.cleaned {
 		return lease.closeErr
 	}
+	if lease.detached {
+		return networkAuthorityCorruptError("detached active topology must be recovered before cleanup", nil)
+	}
+	if lease.recoveryPending {
+		return networkAuthorityCorruptError("topology recovery has not admitted exact cleanup authority", nil)
+	}
 	if ctx == nil {
 		return networkAuthorityValidationError("VM topology cleanup context is required")
 	}
@@ -272,7 +280,7 @@ func (lease *VMTopologyLease) Cleanup(ctx context.Context) error {
 		}
 	}
 	if lease.preparation != nil && lease.preparation.state != topologyPreparationCleaned {
-		if err := lease.reacquireCleanup(cleanup); err != nil {
+		if err := lease.reacquireNetwork(cleanup); err != nil {
 			return err
 		}
 		if lease.activationStarted {
@@ -288,6 +296,9 @@ func (lease *VMTopologyLease) Cleanup(ctx context.Context) error {
 			}
 		}
 		if lease.firewallAttempted {
+			if err := lease.acquireFirewall(cleanup); err != nil {
+				return err
+			}
 			if err := lease.mutation.RemoveEndpoint(cleanup, lease.binding); err != nil {
 				return err
 			}
@@ -343,14 +354,25 @@ func (lease *VMTopologyLease) lowerRemainingLinks(ctx context.Context) error {
 }
 
 func (lease *VMTopologyLease) reacquireCleanup(ctx context.Context) error {
+	if err := lease.reacquireNetwork(ctx); err != nil {
+		return err
+	}
+	return lease.acquireFirewall(ctx)
+}
+
+func (lease *VMTopologyLease) reacquireNetwork(ctx context.Context) error {
 	if lease.network == nil {
-		network, err := (managedNetworkLocker{}).LockNetwork(ctx, lease.key.Network())
+		network, err := (managedNetworkLocker{cleanup: true}).LockNetwork(ctx, lease.key.Network())
 		if err != nil {
 			return err
 		}
 		lease.network = network.(*managedNetworkLease)
 		lease.preparation.lock = lease.network
 	}
+	return nil
+}
+
+func (lease *VMTopologyLease) acquireFirewall(ctx context.Context) error {
 	if lease.mutation == nil {
 		mutation, err := firewall.BeginVMEndpoint(ctx, lease.network.mutation, lease.binding)
 		if err != nil {
@@ -381,6 +403,15 @@ func (lease *VMTopologyLease) revalidateNetwork(ctx context.Context) error {
 	if err := inspectManagedBridgeL3(ctx, newDirectRouteNetlink(), fd, lease.network.record); err != nil {
 		return err
 	}
+	if lease.network.record.configuration.nat && lease.network.uplink == nil {
+		lease.network.uplink, err = retainUplink(ctx, identity)
+		if err != nil {
+			return err
+		}
+		if lease.network.uplink.selected != *lease.network.record.configuration.uplink {
+			return networkAuthorityCorruptError("root-selected NAT uplink changed during topology lifetime", nil)
+		}
+	}
 	if lease.network.uplink != nil {
 		return lease.network.uplink.revalidate(ctx)
 	}
@@ -390,7 +421,7 @@ func (lease *VMTopologyLease) revalidateNetwork(ctx context.Context) error {
 func (lease *VMTopologyLease) endpointBinding() firewall.EndpointBinding {
 	record := lease.network.record
 	host := linkIdentity{name: deriveTopologyNames(lease.key).hostVeth, namespace: record.managedBridge.namespace}
-	if lease.preparation != nil {
+	if lease.preparation != nil && lease.preparation.topology.veth.host.name != "" {
 		host = lease.preparation.topology.veth.host
 	}
 	return firewall.EndpointBinding{OwnerUID: uint32(lease.key.ownerUID), VMID: string(lease.key.vmID),

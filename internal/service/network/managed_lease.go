@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/lib/authorityfs"
 )
 
-type managedNetworkLocker struct{}
+type managedNetworkLocker struct{ cleanup bool }
 
 type managedNetworkLease struct {
 	// mu guards retained capabilities and cached release state.
@@ -30,7 +30,7 @@ type managedNetworkLease struct {
 }
 
 // LockNetwork acquires only the network suffix; VM launch must never re-enter ownership registration.
-func (managedNetworkLocker) LockNetwork(ctx context.Context, key networkKey) (_ NetworkLock, returnErr error) {
+func (locker managedNetworkLocker) LockNetwork(ctx context.Context, key networkKey) (_ NetworkLock, returnErr error) {
 	if err := validateNetworkKey(key); err != nil {
 		return nil, err
 	}
@@ -98,10 +98,12 @@ func (managedNetworkLocker) LockNetwork(ctx context.Context, key networkKey) (_ 
 	if err != nil || identity != record.managedBridge.namespace {
 		return nil, networkAuthorityCorruptError("managed bridge host namespace changed", err)
 	}
-	if err := inspectManagedBridgeL3(ctx, newDirectRouteNetlink(), fd, record); err != nil {
-		return nil, networkAuthorityEffectError("admit managed bridge and L3 authority", err)
+	if !locker.cleanup {
+		if err := inspectManagedBridgeL3(ctx, newDirectRouteNetlink(), fd, record); err != nil {
+			return nil, networkAuthorityEffectError("admit managed bridge and L3 authority", err)
+		}
 	}
-	if record.configuration.nat {
+	if record.configuration.nat && !locker.cleanup {
 		lease.uplink, err = retainUplink(ctx, identity)
 		if err != nil {
 			return nil, err
