@@ -211,6 +211,8 @@ func (s *Service) OptimizeImage(
 	}
 	fsUUID := system.DetectFilesystemUUID(ctx, imagePath)
 	tl.Stage("fs_detect")
+	typedOptimization := provisionerType == provisioner.ProvisionerLoopMount &&
+		(fsType == "ext2" || fsType == "ext3" || fsType == "ext4" || fsType == "btrfs")
 
 	// --- Single Provisioner reused across all phases ---
 	// Each method (DetectOS, Run) creates a fresh backend session internally,
@@ -220,8 +222,7 @@ func (s *Service) OptimizeImage(
 
 	// --- Detect OS type from the image (always, even when skipping) ---
 	detectedOS := ""
-	if provisionerType == provisioner.ProvisionerLoopMount &&
-		(fsType == "ext2" || fsType == "ext3" || fsType == "ext4" || fsType == "btrfs") {
+	if typedOptimization {
 		var inspectErr error
 		detectedOS, inspectErr = inspectStagedImage(ctx, imagePath, imageID, fsType)
 		if inspectErr != nil {
@@ -238,7 +239,7 @@ func (s *Service) OptimizeImage(
 	}
 
 	// --- Convert, deblob, shrink in a single backend session ---
-	if fsType == "btrfs" {
+	if fsType == "btrfs" && !typedOptimization {
 		slog.Info("Converting filesystem from btrfs to ext4...")
 		p.ConvertTo("ext4")
 		fsType = "ext4"
@@ -247,24 +248,32 @@ func (s *Service) OptimizeImage(
 	preShrinkInfo, _ := os.Stat(imagePath)
 	preShrinkSize := preShrinkInfo.Size()
 
-	typedOptimization := provisionerType == provisioner.ProvisionerLoopMount &&
-		(fsType == "ext2" || fsType == "ext3" || fsType == "ext4" || fsType == "btrfs")
 	if !skipOptimization && !typedOptimization {
 		p.Deblob()
 	}
 	if FSCanShrink[fsType] && !typedOptimization {
 		p.Shrink()
 	}
-	optimized, runErr := p.Run(ctx)
-	if runErr != nil {
-		return nil, warnings, runErr
-	}
-	if typedOptimization && (!skipOptimization || FSCanShrink[fsType]) {
-		if err := optimizeStagedImage(ctx, imagePath, imageID, fsType, detectedOS, !skipOptimization, FSCanShrink[fsType]); err != nil {
+	optimized := false
+	if typedOptimization && (!skipOptimization || FSCanShrink[fsType] || fsType == "btrfs") {
+		// Conversion and shrink have separate durable intents. The staging consumer first
+		// converts Btrfs, then binds cleanup/shrink to the exact returned ext4 size.
+		shrink := FSCanShrink[fsType] || fsType == "btrfs"
+		if err := optimizeStagedImage(ctx, imagePath, imageID, fsType, detectedOS, !skipOptimization, shrink); err != nil {
 			slog.Error("managed image optimization failed", "image_id", imageID, "error", err)
 			return nil, warnings, err
 		}
+		if fsType == "btrfs" {
+			fsType = "ext4"
+			fsUUID = system.DetectFilesystemUUID(ctx, imagePath)
+		}
 		optimized = true
+	} else if !typedOptimization {
+		var runErr error
+		optimized, runErr = p.Run(ctx)
+		if runErr != nil {
+			return nil, warnings, runErr
+		}
 	}
 	if !optimized && warnings != nil {
 		warnings = append(warnings,
