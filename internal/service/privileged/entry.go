@@ -204,6 +204,12 @@ func dispatch(
 	deps runtimeDeps,
 ) (dispatchDisposition, error) {
 	switch request.action {
+	case network.HostServiceInspectAction:
+		return dispatchHandled, handleInspectHostService(ctx, endpoint, caller, deps.control)
+	case network.HostServiceApplyAction:
+		return dispatchHandled, handleApplyHostService(ctx, endpoint, caller, deps.control)
+	case network.HostServiceRemoveAction:
+		return dispatchHandled, handleRemoveHostService(ctx, endpoint, caller, deps.control)
 	case network.ManagedNetworkCreateAction:
 		return dispatchHandled, handleCreateManagedNetwork(ctx, endpoint, caller, deps.control)
 	case network.ManagedNetworkRemoveAction:
