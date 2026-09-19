@@ -53,6 +53,7 @@ type vmLaunchResourceSpec struct {
 
 type vmLaunchResourceLease struct {
 	deps           managedCacheDeps
+	vmID           vmResourceID
 	cacheIdentity  managedCacheIdentity
 	ownerUID       uint32
 	rootfsFD       int
@@ -288,6 +289,7 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	retained = append(retained, openedBeforeConfig...)
 	retained = append(retained, openedAfterConfig...)
 	lease := &vmLaunchResourceLease{
+		vmID:           spec.vmID,
 		deps:           cache.deps,
 		cacheIdentity:  cache.identity,
 		ownerUID:       cache.ownerUID,
