@@ -409,10 +409,22 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if input.VCPUCount != nil && *input.VCPUCount > 0 {
 		vcpuCount = *input.VCPUCount
 	}
-	cgroupHeadroomMiB, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_vmm_headroom_mib")
-	cgroupCPUWeight, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_cpu_weight")
-	cgroupPIDsMax, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_pids_max")
-	cgroupSwapMaxBytes, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_swap_max_bytes")
+	cgroupHeadroomMiB, err := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_vmm_headroom_mib")
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeConfigError, "resolve defaults.vm.cgroup_vmm_headroom_mib", err)
+	}
+	cgroupCPUWeight, err := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_cpu_weight")
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeConfigError, "resolve defaults.vm.cgroup_cpu_weight", err)
+	}
+	cgroupPIDsMax, err := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_pids_max")
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeConfigError, "resolve defaults.vm.cgroup_pids_max", err)
+	}
+	cgroupSwapMaxBytes, err := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_swap_max_bytes")
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeConfigError, "resolve defaults.vm.cgroup_swap_max_bytes", err)
+	}
 	cgroupLimits := model.NewVMCgroupLimits(vcpuCount, memMib, model.VMCgroupPolicy{
 		VMMHeadroomMiB: int64(cgroupHeadroomMiB),
 		CPUWeight:      int64(cgroupCPUWeight),

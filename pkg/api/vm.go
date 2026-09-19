@@ -837,7 +837,11 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 		configPath = nil
 	}
 	if vmItem.CgroupLimits.PolicyVersion == 0 {
-		vmItem.CgroupLimits = op.resolveVMCgroupLimits(ctx, vmItem.VCPUCount, vmItem.MemSizeMiB)
+		limits, err := op.resolveVMCgroupLimits(ctx, vmItem.VCPUCount, vmItem.MemSizeMiB)
+		if err != nil {
+			return nil, err
+		}
+		vmItem.CgroupLimits = limits
 	}
 	cgroupState := model.VMCgroupState{
 		Path: vm.CgroupPath(vmItem.ID), Requested: vmItem.CgroupLimits, Status: model.VMCgroupEnforcementInactive,
@@ -1101,7 +1105,11 @@ func (op *Operation) vmRespawnFirecracker(
 	}
 	v := state.vm
 	if v.CgroupLimits.PolicyVersion == 0 {
-		v.CgroupLimits = op.resolveVMCgroupLimits(ctx, v.VCPUCount, v.MemSizeMiB)
+		limits, err := op.resolveVMCgroupLimits(ctx, v.VCPUCount, v.MemSizeMiB)
+		if err != nil {
+			return err
+		}
+		v.CgroupLimits = limits
 		if err := op.Repos.VM.Upsert(ctx, v); err != nil {
 			return fmt.Errorf("persist migrated VM cgroup limits: %w", err)
 		}
@@ -1242,17 +1250,36 @@ func buildRespawnFirecrackerConfig(
 	return config
 }
 
-func (op *Operation) resolveVMCgroupLimits(ctx context.Context, vcpuCount, memoryMiB int) model.VMCgroupLimits {
-	headroomMiB, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_vmm_headroom_mib")
-	cpuWeight, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_cpu_weight")
-	pidsMax, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_pids_max")
-	swapMaxBytes, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_swap_max_bytes")
+func (op *Operation) resolveVMCgroupLimits(
+	ctx context.Context,
+	vcpuCount, memoryMiB int,
+) (model.VMCgroupLimits, error) {
+	headroomMiB, err := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_vmm_headroom_mib")
+	if err != nil {
+		return model.VMCgroupLimits{}, errs.WrapMsg(errs.CodeConfigError,
+			"resolve defaults.vm.cgroup_vmm_headroom_mib", err)
+	}
+	cpuWeight, err := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_cpu_weight")
+	if err != nil {
+		return model.VMCgroupLimits{}, errs.WrapMsg(errs.CodeConfigError,
+			"resolve defaults.vm.cgroup_cpu_weight", err)
+	}
+	pidsMax, err := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_pids_max")
+	if err != nil {
+		return model.VMCgroupLimits{}, errs.WrapMsg(errs.CodeConfigError,
+			"resolve defaults.vm.cgroup_pids_max", err)
+	}
+	swapMaxBytes, err := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_swap_max_bytes")
+	if err != nil {
+		return model.VMCgroupLimits{}, errs.WrapMsg(errs.CodeConfigError,
+			"resolve defaults.vm.cgroup_swap_max_bytes", err)
+	}
 	return model.NewVMCgroupLimits(vcpuCount, memoryMiB, model.VMCgroupPolicy{
 		VMMHeadroomMiB: int64(headroomMiB),
 		CPUWeight:      int64(cpuWeight),
 		PIDsMax:        int64(pidsMax),
 		SwapMaxBytes:   int64(swapMaxBytes),
-	})
+	}), nil
 }
 
 // --- Reboot / Pause / Resume ---
