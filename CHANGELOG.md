@@ -31,13 +31,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > The late implementation pass also composes typed schema-3 launch/cleanup, per-VM topology, cgroup and descriptor-only
 > mounts, same-boot recovery, root traffic apply/revoke, managed-network transactions, and offline ext-image shrink.
 > This code is unverified: only formatting has been performed, with no build, tests, review, or system qualification.
-> Volume storage policy, trusted snapshot restore, NoCloud ownership, complete host reset, remaining LoopMount effects,
+> Volume storage policy, trusted snapshot restore, complete host reset, remaining image effects,
 > and release qualification remain incomplete. Earlier slice evidence below does not qualify these later changes.
 
 ### Added
 
 #### Implementation-only integration updates
 
+- Added repeated whole-state absence checks for pending-network cancellation and old-boot removal receipts. Cancellation
+  publishes an identity tombstone without deleting speculative kernel state; removed/cancelled IDs cannot be reused.
+- Added shared privileged-operation and exclusive administrator host-admission leases, durable enabled/disabled state,
+  and schema-2 administrator journaling. Init enables admission last, after host setup and enrollment. Old schema-1
+  journals are incompatible clean-install state. Complete reset/dispatcher composition is tracked below.
+- Added bounded descriptor-relative deblob cleanup and distribution configuration. Fixed guest-boot actions handle
+  Arch package-key initialization and Btrfs balance; they are queued, never executed on the host or reported completed
+  merely because provisioning wrote them.
+- Managed VM LoopMount provisioning now uses typed requests while preserving missing-account creation, root/requested
+  account SSH keys, fixed seed injection, and automatic deblob. New non-root accounts use bounded UID/private-GID
+  allocation, locked passwords, fixed homes/shells, bounded skeleton copying, and passwd publication last. Required
+  guest-code execution is queued as fixed guest-boot work; typed failure never falls back to raw host provisioning.
+- NoCloud now uses typed host-service authority and its fixed gateway TCP `8000` contract. Custom ports are rejected;
+  each network supports one live batch listener. The grant represents a reserved service slot, not proof of listener
+  process identity. Bind precedes grant; normal shutdown revokes while retaining the socket, then releases the port.
+  Its last production legacy-tracker consumer is removed; residual legacy implementation retirement is separate work.
 - Core VM launch and process control now use typed authenticated root lifecycle operations. Launch persists schema-3
   intent before effects, consumes pinned config/runtime/output resources in a fresh child-created jail mount tree, and
   commits exact active identity before close-only detach. Abort/cleanup/remove recover durable authority; same-boot
@@ -56,9 +72,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before raising the bridge. Core/API mutations now consume them; NAT uplink selectors and the old service-access
   production path are removed. Removal requires exact root ownership and absence of references, with durable retry
   receipts. A pending desired network retries only with exact matching inputs; missing root authority fails closed.
-  The legacy tracker remains only for NoCloud pending its separate port-ownership decision.
+  NoCloud now uses its own fixed typed host-service authority; it no longer consumes the legacy tracker.
 - Added staged offline ext2/ext3/ext4 image shrink with root-owned `prepared`/`sized`/`complete` replay journal. It binds
-  exact cache/image identity and request; conversion, deblob, and combined fstab plans remain unsupported.
+  exact cache/image identity and request. This shrink-only receiver rejects conversion and combined plans; typed
+  provisioning supplies deblob, while image deblob/fstab composition and conversion remain separate work.
 - Added global `--json` with one schema-1 success/error/partial envelope, typed result data, preserved structured
   errors, and per-item batch outcomes. Existing bare JSON reads now appear under `data`. Streaming/interactive exec,
   SSH, logs, completion, service `run`, init wizard, and console attachment reject this mode; console state/kill support
@@ -74,9 +91,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   global transaction requires its original operator to recover first. The early parser supports JSON boolean forms,
   help, and argument boundaries. Sudo entry refuses transitional wildcard grants. Host clean/reset remain blocked on
   trusted global cleanup.
-- Image OS inspection now copies to exclusive `images/staging/<image-id>/rootfs.img` and invokes typed read-only
-  inspection. Existing staging IDs are not adopted or overwritten. General optimization and the remaining
-  provisioning backend cutover remain pending.
+- Image OS inspection copies to exclusive `images/staging/<image-id>/rootfs.img` and invokes typed read-only
+  inspection. Existing staging IDs are not adopted or overwritten. General image optimization/conversion cutover
+  remains pending; managed VM provisioning uses the typed backend.
 - Added private raw-volume identity admission, Firecracker 1.16.1 MMIO accounting, a 10,000,000-byte complete vmstate
   limit, and exact memory length from trusted captured RAM. Volume admission is identity-only while storage capacity
   policy is unresolved; snapshot bounds do not grant trusted capture or restore authority.
@@ -919,15 +936,18 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Security work still pending
 
-Current incomplete work includes per-volume/aggregate storage policy, trusted
-snapshot capture and immutable restore backing, NoCloud port ownership, host reset under a global retained
-quiescence/admission gate, remaining LoopMount account/deblob/conversion effects, memory policy, transitional
-privilege/backend removal, and qualification. Snapshot, extra-volume, and PCI launches refuse unsupported selections;
-host clean/reset remain blocked. Prior-boot cleanup now consumes a concrete retained VM/cgroup absence proof,
+Current incomplete work includes per-volume/aggregate storage policy, trusted snapshot capture and immutable restore
+backing, final host reset/shared-dispatch admission composition, remaining image deblob/fstab/conversion/archive
+effects, residual legacy privilege/backend removal, and qualification. Memory policy stays unchanged pending
+diagnosis. Snapshot, extra-volume, and PCI launches refuse unsupported selections; host clean/reset remain blocked.
+Host admission, schema-2 init, and exact Jailer/network/firewall reset-absence guards are implemented, but those guards
+alone do not perform administrator rollback. Prior-boot cleanup consumes a concrete retained VM/cgroup absence proof,
 retires topology only after namespace/link absence, and preserves firewall reservations/grants. Managed networks
 can rebootstrap exact logical intent using fresh kernel identities, without adopting a competing bridge. These paths
-are unverified. Surviving namespace placeholders and ambiguous ownership remain fail-closed; old-boot network
-removal receipts and pending desired networks without root records still lack complete cleanup retry support.
+are unverified. Surviving namespace placeholders and ambiguous ownership remain fail-closed. Old-boot network removal
+receipts and pending desired networks without root records now have absence-only retry/cancellation support, including
+durable tombstones and repeated bridge/topology/firewall checks. Memory policy is unchanged pending diagnosis;
+no replacement memory limit or reclaim policy is introduced by this pass.
 
 The code changes in this implementation-only pass have not been built, tested, reviewed, or qualified. Adversarial
 coverage, CLI system tests, cleanup/leak evidence, full CI, and release signoff remain required in a later authorized

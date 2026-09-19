@@ -284,11 +284,18 @@ environment, and runs before user configuration, cache, SQLite, or ordinary serv
 `/var/lib/mvmctl/host` preserves original global host state and mutation progress. Fixed root-owned
 `operator-<uid>.json` records preserve prior membership for each enrolled operator; multiple operators are supported.
 An interrupted initial global transaction requires its original operator to recover before another operator enrolls.
+The administrator journal is now schema 2 and records the exact initialized group identity. Schema-1 journals are
+incompatible clean-install state rather than migration input. The root-owned host admission gate has shared operation
+leases and an exclusive administrator lease; only the administrator route may create its fixed state. Initialization
+enables admission only after host steps and operator enrollment complete. Missing, disabled, or unsafe admission state
+fails closed. The gate must be retained across each privileged request and cleanup, with authorization checked again
+after acquisition; reset requires exclusive admission rather than a momentary idle observation.
 Enrollment, typed partial results, JSON boolean forms, help, and argument boundaries are implemented. Sudo entry refuses a managed policy
 containing transitional wildcard grants because it cannot prove administrator authentication. `HostClean` and early
-`host reset --force` refuse effects until trusted global cleanup can retain quiescence and prevent new admissions
-throughout reset. Full reset and the final marker
-policy remain pending.
+`host reset --force` still refuse effects until final reset orchestration retains quiescence and prevents new admissions
+throughout rollback. Exact Jailer, network, and firewall absence guards now require the exclusive administrator lease;
+they neither delete unknown state nor complete rollback themselves. Shared dispatcher lease integration, administrator
+reset orchestration, and the final marker policy remain pending in this documentation snapshot.
 
 The v0.3 privileged target splits state by authority and lifetime. Durable ownership and release records live beneath
 `/var/lib/mvmctl`; root-only locks and launch handshakes use `/run/mvmctl/authority/<uid>`. API, vsock, and console
@@ -443,8 +450,11 @@ proves the fixed cgroup absent and binds the root cleaning record across boot id
 namespace/link absence checks, preserves logical firewall grants, and never treats old kernel identities as current
 deletion authority. Managed-network rebootstrap retains exact logical intent while creating fresh bridge/uplink
 identity; a competing existing bridge is not adopted. Final VM removal invalidates exact retired reservations.
-Surviving placeholders or ambiguous evidence remain fail-closed. Old-boot network removal receipts and pending desired
-networks without root records still have cleanup retry limitations. Live L2/Tier 3/system qualification is deferred;
+Surviving placeholders or ambiguous evidence remain fail-closed. Root removal now supports old-boot removal receipts
+and pending desired networks with no root record only after repeated whole-state absence checks: no managed bridge,
+live topology claim, or firewall reference. Missing ownership never authorizes kernel deletion. Cancellation records
+are permanent identity tombstones; retry may acknowledge absence but cannot recreate the same network identity.
+Live L2/Tier 3/system qualification is deferred;
 none of these implementation-only changes is runtime evidence.
 
 The public relaunch path has a separate, private normal-process `vmRelaunchState`. Start,
@@ -803,7 +813,7 @@ guest-supplied source ID, socket path, or process-local semaphore may substitute
 
 Two independent rootfs provisioning backends. They are **mutually exclusive** -- a single VM or image operation uses exactly ONE backend, never a combination. The `guestfs_enabled` user setting is a **toggle selector**, not a preference.
 
-- **LoopMount** (default, `guestfs_enabled=false`): Uses the compiled `mvm run provision` subcommand via `losetup` + `mount` + `chroot`. No system package dependencies beyond the `mvm` binary itself.
+- **LoopMount** (default, `guestfs_enabled=false`): Managed VM provisioning uses typed `ProvisionVM` over the authenticated privileged receiver. The receiver pins the fixed rootfs/seed resources and performs closed filesystem operations; failed requests have no raw provisioning fallback. Legacy image workflows remain a separate incomplete cutover.
 - **GuestFS** (opt-in, `guestfs_enabled=true`): Uses `libguestfs` via `internal/lib/provisioner/guestfs/`. Requires `libguestfs` system packages installed on the host.
 
 Provisioner type resolved ONCE at startup in `api.NewOperation()` by reading `settings.guestfs_enabled`. All callers use `op.ProvisionerType` directly. Backend interface defined in `internal/lib/provisioner/backend.go`.
@@ -869,10 +879,16 @@ The private `ProvisionVM` adapter consumes the admitted rootfs capability direct
 grows the admitted ext-family filesystem through fixed `e2fsck`/`resize2fs` or Btrfs through fixed
 `btrfs filesystem resize`, with a five-minute tool cap and any earlier caller deadline, and has ext4/Btrfs convergence
 evidence from either the exact old or target backing size. Every guest read and write is descriptor-bound beneath the
-admitted mounted root. Its closed content set is hostname/hosts, DNS,
-existing-account SSH/sudo, fixed SSH service, embedded agent, fstab, a root-only persistent
+admitted mounted root. Its closed content set includes hostname/hosts, DNS, missing-account creation, SSH/sudo,
+fixed guest-boot SSH setup, embedded agent, fstab, a root-only persistent
 `/etc/mvmctl/agent.token`, and exactly one admitted init-system enablement: systemd `sysinit.target` or OpenRC default
-runlevel. Cleanup unwinds root, mount, source, partitions, loop, mountpoint, and backing authority in reverse and maps
+runlevel. Existing accounts are retained. A missing non-root account receives the first free UID/private GID in
+1000–60000, a locked shadow entry, `/home/<name>`, `/bin/sh`, and a bounded descriptor-pinned `/etc/skel` copy; passwd
+publication occurs last. Both root and the requested account receive selected SSH keys. SSH installation, host-key
+generation, and service activation that require guest execution are fixed guest-boot actions, never host execution.
+The receiver admits only the managed VM seed leaves `cloud-init/meta-data`, `cloud-init/user-data`, and optional
+`cloud-init/network-config`, then writes fixed guest destinations. No caller-selected source or destination path crosses
+the request. Cleanup unwinds root, mount, source, partitions, loop, mountpoint, and backing authority in reverse and maps
 mutation, durability uncertainty, and unknown outcomes without losing the primary error.
 
 The private `Server` coordinates each admitted operation through two action-specific effect seams.
@@ -905,8 +921,12 @@ actions. Image OS detection now stages a normal-process copy at exclusive
 length; the caller syncs the copy and detects source size/time changes before inspection. An existing staging ID is
 neither adopted nor overwritten, and cleanup removes only the staging resource created by this invocation. The
 privileged request contains canonical cache/image identity, expected bytes, and filesystem rather than the source
-path. Staged-image handling now also supports the shrink transaction. Account creation, deblob, conversion, and the
-remaining LoopMount provisioning backend cutover are incomplete. Live-kernel qualification, the remaining backend/public cutover,
+path. Staged-image handling also supports the shrink transaction. Managed VM provisioning now preserves account
+creation, cloud-init injection, and deblob through the typed backend. The descriptor-bound deblob implementation
+performs bounded fixed-directory cleanup and distribution-specific configuration without executing guest code on the
+host. Arch package-key initialization and Btrfs balance are fixed guest-boot actions; preparing those actions does not
+mean they have run. Failed typed provisioning retains the original size intent for retry and never invokes the raw
+fallback. Image conversion/archive workflows and remaining image backends still require cutover. Live-kernel qualification,
 and removal of `mvm run provision`, caller-shaped raw wire/sudo, and the legacy arbitrary cleanup/unmount surface remain
 pending. Task 13 is therefore incomplete.
 
@@ -923,9 +943,16 @@ survive stop and become effective again only with an admitted live endpoint. VM 
 followed by local projection failure remains a reported repair/retry condition. List and inspect show local projection,
 which is never authority for kernel mutation.
 
-Managed network and traffic mutations now use the typed root nftables transactions. The old service-access production
-path is removed. The legacy tracker remains only for NoCloud until its port-ownership decision and cutover; its two
-backend implementations described below are not the authority for typed managed network or traffic mutations.
+Managed network and traffic mutations use typed root nftables transactions. The old service-access production path
+and the last NoCloud legacy-tracker consumer are removed. The remaining legacy backend implementation below describes
+code awaiting retirement, not authority for current managed network, traffic, or NoCloud mutation.
+
+NoCloud now uses fixed gateway TCP `8000` through typed apply/revoke requests containing only the owned network ID.
+Root derives the gateway, protocol, and port. One live batch binds each network's listener before the grant is applied;
+a collision neither adopts nor terminates the existing listener. Normal shutdown revokes while retaining the listener
+socket and then releases it. The grant authorizes a reserved service slot, not the listener process: interruption can
+leave that durable slot grant for another invocation or network teardown. Custom ports are rejected. This implements
+the accepted fixed-slot contract without claiming live qualification.
 
 - **nftables** (default): Uses `internal/lib/firewall/nftables.go` -- atomic `nft -f -` batch files.
 - **iptables** (legacy): Uses `internal/lib/firewall/iptables.go` -- per-rule `iptables` calls.
@@ -1013,8 +1040,8 @@ its one replacement batch. Partial, foreign, mismatched, corrupt, wrong-boot, wr
 otherwise ambiguous state never grants deletion authority.
 
 The root managed-network, topology, and traffic-policy transactions now consume this application/reconciliation path.
-Exact host-service revocation is also implemented, but NoCloud port ownership remains an unresolved composition
-boundary and still uses the legacy tracker. Its remaining removal, direct capability probes, real-kernel/Tier evidence, and release
+Exact host-service apply/revoke and the NoCloud fixed-slot cutover are implemented. Residual legacy code removal,
+direct capability probes, real-kernel/Tier evidence, and release
 qualification remain pending. The flat public policy family has been replaced by typed commands.
 
 ADR-0017 defines the remaining clean-break replacement. Before any fixed-name table can be replaced or removed, root

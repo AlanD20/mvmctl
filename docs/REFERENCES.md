@@ -131,6 +131,10 @@ an interrupted initial global transaction must first be recovered by its origina
 wildcard sudo grants cannot establish administrator authentication: that sudo entry
 refuses them and directs the administrator to direct root with an explicit operator. Init does not install the binary.
 
+Host initialization uses a schema-2 administrator journal and enables privileged admission only after host setup and
+operator enrollment complete. Old schema-1 administrator journals require a clean installation; they are not adopted.
+Missing, disabled, or unsafe admission state blocks ordinary privileged requests.
+
 The early parser supports JSON boolean forms, help, and argument boundaries. Host clean/reset are not a supported
 legacy-state removal procedure in this development build.
 
@@ -337,7 +341,7 @@ capacity policy, full prior-boot topology recovery, and complete provisioning re
 | `--user USER` | Default SSH user | from config |
 | `--cloud-init-mode MODE` | Cloud-init mode: `inject`, `iso`, `net`, `off` | `off` (effective) |
 | `--writeback` | Use writeback cache mode for drives (guest fsync honored) | `false` |
-| `--nocloud-net-port N` | Port for nocloud-net HTTP server (0 = auto) | auto-assign |
+| `--nocloud-net-port N` | Reserved NoCloud TCP port; custom ports are rejected | `8000` |
 | `--cloudinit-config PATH` | Path to custom cloud-init config file | — |
 | `--no-pci` | Disable PCI device support | from config |
 | `--nested-virt` / `--disable-nested-virt` | Enable/disable nested virtualization (requires PCI) | from config |
@@ -433,9 +437,11 @@ The network resolver tries selectors in priority order:
 NAT intent is enabled or disabled; `--nat-gateways` and caller-selected uplink names are removed. Root selects the
 eligible host uplink. Typed root network creation applies its firewall generation before raising the bridge, and
 removal uses exact ownership and reference checks with a durable receipt. Core/API network mutations consume these
-transactions. A pending desired network can be retried only with matching inputs; missing root authority does not
-permit cleanup of an interrupted local projection. These paths have not been qualified. NoCloud still uses its legacy
-tracker pending the separate port-ownership decision.
+transactions. A pending desired network can be retried only with matching inputs. If no root network record exists,
+removal can acknowledge cancellation only after root proves the complete bridge/topology/firewall state absent; it
+performs no speculative kernel deletion. Cancellation tombstones prevent reuse of that network ID. Old-boot removal
+receipts also require fresh absence proofs. These paths have not been qualified. NoCloud now uses typed fixed-slot
+host-service grants and no longer uses the legacy tracker.
 
 ---
 
@@ -775,24 +781,33 @@ The effective default is `--cloud-init-mode off` (no cloud-init). When SSH keys 
 | **iso** | `--cloud-init-mode iso` | Generates a cloud-init ISO via `cloud-localds`, or uses a provided custom ISO path |
 | **off** | `--cloud-init-mode off` | Skips cloud-init entirely (default) |
 
+The typed LoopMount VM path preserves missing-account creation, selected SSH keys, cloud-init injection, and automatic
+deblob. A new non-root account uses a free UID/private GID in 1000–60000, a locked password, `/home/<name>`, and `/bin/sh`;
+existing accounts are retained. Injected seeds contain fixed `meta-data` and `user-data` leaves plus optional
+`network-config`. Requests cannot select arbitrary host paths or guest commands.
+
+Some distro preparation is installed as fixed guest-boot work, including SSH setup, Arch package-key initialization,
+and Btrfs balance. Successful host provisioning means those actions were queued, not that the guest has run them.
+The implementation is unverified; image conversion/archive workflows remain separate incomplete work.
+
 ### How Net Mode Works
 
 The net mode delivers cloud-init configuration via HTTP. Steps below apply to the net mode only.
 
-1. **HTTP Server**: A temporary HTTP server is started on the host (port range 8000-9000)
-2. **Firewall Rules**: Firewall rules allow the VM to reach the server (via the active `nftables` or `iptables` backend)
-3. **Kernel Command Line**: The VM boots with `ds=nocloud;seedfrom=http://GATEWAY_IP:PORT/`
+1. **HTTP Server**: A NoCloud batch binds the managed network gateway on fixed TCP port `8000`; custom ports are rejected.
+2. **Firewall Grant**: Root derives the owned gateway service slot from the network identity. Binding must succeed before access is granted.
+3. **Kernel Command Line**: The VM boots with `ds=nocloud;seedfrom=http://GATEWAY_IP:8000/`
 4. **Configuration Delivery**: cloud-init fetches `meta-data`, `user-data`, and `network-config` via HTTP
-5. **Automatic Cleanup**: The HTTP server stops when the VM is removed
+5. **Cleanup**: Normal shutdown revokes the grant while retaining the listener socket, then releases the port.
 
 ### Net Mode Security Architecture
 
 The security model applies to the net cloud-init mode only:
 
-- **Per-VM Isolation**: Each VM gets its own HTTP server on a unique port
-- **Source-Based Firewall**: Only the VM's IP can reach its nocloud server
-- **Gateway Binding**: HTTP servers bind to the bridge gateway IP, not `0.0.0.0`
-- **Rule Comments**: Firewall rules are tagged with `# nocloudnet:<vm_name>:<port>`
+- One live NoCloud batch occupies each network gateway listener. A bind collision fails; it neither adopts nor kills the existing listener.
+- The typed privileged request selects only the owned network, never a custom address, port, protocol, or service.
+- The firewall grant represents the fixed gateway TCP `8000` slot; it does not authenticate the current listener process.
+- An interrupted process can leave that reserved-slot grant for a subsequent invocation or network teardown. Live behavior remains unqualified.
 
 ---
 
