@@ -120,6 +120,10 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 			}
 		}
 		createErr := tx.route.createBridgeDown(ctx, fd, name, managedBridgeAlias(name))
+		if errors.Is(createErr, unix.EEXIST) {
+			return ManagedNetworkResult{}, networkAuthorityCorruptError(
+				"derived managed bridge appeared during exclusive creation; refusing adoption", createErr)
+		}
 		observed, inspectErr := tx.route.inspectLink(context.WithoutCancel(ctx), fd, name)
 		if inspectErr != nil || observed == nil {
 			return ManagedNetworkResult{}, errs.WrapMsg(errs.CodeNetworkBridgeFailed,
