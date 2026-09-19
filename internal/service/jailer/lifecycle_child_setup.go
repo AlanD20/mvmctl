@@ -107,18 +107,23 @@ func (lease *launchLease) sendChildSetup(
 		return err
 	}
 	plan := launchChildPlan{
-		FirecrackerSHA256: state.record.launch.release.firecrackerSHA256, JailerSHA256: state.record.launch.release.jailerSHA256,
-		RootfsBacking: rootfsBinding, KernelID: string(resources.kernelID), KernelBacking: kernelBinding,
-		NetworkID: topology.NetworkID, GuestIPv4: topology.GuestIPv4.String(), GuestMAC: topology.GuestMAC,
-		HostBootID:       state.record.launch.hostBootID,
-		LaunchGeneration: state.record.launchGeneration,
-		PCIEnabled:       resources.pciEnabled,
-		NestedVirt:       resources.nestedVirt,
-		Schema:           1,
-		VMID:             state.record.vmID,
-		OwnerUID:         state.record.ownerUID,
-		UID:              state.record.launch.executionIdentity.uid,
-		GID:              state.record.launch.executionIdentity.gid,
+		FirecrackerSHA256: state.record.launch.release.firecrackerSHA256,
+		JailerSHA256:      state.record.launch.release.jailerSHA256,
+		RootfsBacking:     rootfsBinding,
+		KernelID:          string(resources.kernelID),
+		KernelBacking:     kernelBinding,
+		NetworkID:         topology.NetworkID,
+		GuestIPv4:         topology.GuestIPv4.String(),
+		GuestMAC:          topology.GuestMAC,
+		HostBootID:        state.record.launch.hostBootID,
+		LaunchGeneration:  state.record.launchGeneration,
+		PCIEnabled:        resources.pciEnabled,
+		NestedVirt:        resources.nestedVirt,
+		Schema:            1,
+		VMID:              state.record.vmID,
+		OwnerUID:          state.record.ownerUID,
+		UID:               state.record.launch.executionIdentity.uid,
+		GID:               state.record.launch.executionIdentity.gid,
 		Release: ReleaseSlot{
 			Version:      state.record.launch.release.version,
 			Architecture: state.record.launch.release.architecture,
@@ -142,7 +147,12 @@ func (lease *launchLease) sendChildSetup(
 	if plan.Metrics {
 		fds = append(fds, metricsFD)
 	}
-	for _, volume := range resources.volumes {
+	for index, volume := range resources.volumes {
+		guestID := string(volume.spec.id)
+		if resources.restoredSnapshot != nil {
+			guestID = resources.restoredSnapshot.volumes[index].guestDriveID
+		}
+		plan.GuestDriveIDs = append(plan.GuestDriveIDs, guestID)
 		binding, err := resources.protectedBackings.volumes[volume.spec.id].Binding(ctx)
 		if err != nil {
 			return err
@@ -160,6 +170,15 @@ func (lease *launchLease) sendChildSetup(
 			ReadOnly: volume.spec.access == vmVolumeReadOnly, CacheType: volume.spec.cacheType,
 		})
 		fds = append(fds, volume.fd)
+	}
+	if resources.restoredSnapshot != nil && resources.restoredSnapshot.metadata.Mode == "full" {
+		if state.record.launch.snapshotID != resources.restoredSnapshot.snapshotID ||
+			resources.restoredSnapshot.stateFD < 0 ||
+			resources.restoredSnapshot.memoryFD < 0 {
+			return instanceStateError(state.record.vmID, "snapshot restore descriptor authority is incomplete")
+		}
+		plan.RestoreMemory = true
+		fds = append(fds, resources.restoredSnapshot.stateFD, resources.restoredSnapshot.memoryFD)
 	}
 	if console != nil {
 		if console.slave == nil || state.record.launch.relay.kind != instanceRelayPresent {

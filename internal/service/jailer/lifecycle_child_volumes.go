@@ -54,7 +54,7 @@ func mountLaunchChildVolumes(
 			ctx,
 			fd,
 			directory,
-			volume.private().basename(),
+			plan.GuestDriveIDs[index]+".raw",
 			volume.ReadOnly,
 			false,
 		); err != nil {

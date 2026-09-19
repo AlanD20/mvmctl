@@ -62,6 +62,7 @@ type vmLaunchResourceLease struct {
 	cloudInitFD       int
 	preparedConfig    *preparedFirecrackerConfig
 	protectedBackings *isolatedLaunchBackings
+	restoredSnapshot  *preparedSnapshotRestore
 	volumes           []pinnedVMVolumeResource
 	deviceProfile     *vmFirecrackerDeviceProfile
 	pciEnabled        bool
@@ -200,7 +201,10 @@ func (cache *managedCacheLease) pinIsolatedVMLaunchResources(
 	if err != nil {
 		return nil, err
 	}
-	if rootBinding.kind != protectedBackingRootfs || rootBinding.logicalID != string(spec.vmID) || rootBinding.bytes != spec.expectedRootfsBytes || rootBinding.ownerUID != cache.ownerUID || rootBinding.cacheIdentity != cache.identity {
+	if rootBinding.kind != protectedBackingRootfs || rootBinding.logicalID != string(spec.vmID) ||
+		rootBinding.bytes != spec.expectedRootfsBytes ||
+		rootBinding.ownerUID != cache.ownerUID ||
+		rootBinding.cacheIdentity != cache.identity {
 		return nil, managedVMResourceValidationError("protected rootfs does not match launch selection")
 	}
 	configFD, err := openManagedVMResourceFileWithFlags(
@@ -243,7 +247,10 @@ func (cache *managedCacheLease) pinIsolatedVMLaunchResources(
 		if err != nil {
 			return nil, err
 		}
-		if binding.kind != protectedBackingVolume || binding.logicalID != string(volume.id) || binding.bytes != volume.expectedBytes || binding.ownerUID != cache.ownerUID || binding.cacheIdentity != cache.identity {
+		if binding.kind != protectedBackingVolume || binding.logicalID != string(volume.id) ||
+			binding.bytes != volume.expectedBytes ||
+			binding.ownerUID != cache.ownerUID ||
+			binding.cacheIdentity != cache.identity {
 			return nil, managedVMResourceValidationError("protected volume binding differs from launch selection")
 		}
 		volumes = append(volumes, pinnedVMVolumeResource{spec: volume, fd: backing.fd, identity: binding.identity})

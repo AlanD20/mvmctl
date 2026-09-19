@@ -322,7 +322,11 @@ func (prepared *preparedRelease) registerLaunching(
 		return nil, err
 	}
 	defer func() {
-		returnErr = appendInstanceOperationError(returnErr, "release execution identity allocation", execution.Release(context.WithoutCancel(ctx)))
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"release execution identity allocation",
+			execution.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	intent.executionIdentity, err = execution.Identity(ctx)
 	if err != nil {
@@ -794,11 +798,21 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 	if err := releaseCleanupManagedVMCgroupLocked(cleanupCtx, state); err != nil {
 		return err
 	}
-	if err := revokeProtectedVMGrants(cleanupCtx, state.record.ownerUID, state.record.vmID, state.record.launch.executionIdentity.uid); err != nil {
+	if err := revokeProtectedVMGrants(
+		cleanupCtx,
+		state.record.ownerUID,
+		state.record.vmID,
+		state.record.launch.executionIdentity.uid,
+	); err != nil {
 		return err
 	}
 	if err := revokeIsolatedPersistentOutputs(cleanupCtx, state.record); err != nil {
 		return err
+	}
+	if state.record.launch.snapshotID != "" {
+		if err := releaseRestoredSnapshotReference(cleanupCtx, state.record); err != nil {
+			return err
+		}
 	}
 	if state.jailDestination != nil {
 		if err := state.jailDestination.Release(cleanupCtx); err != nil {

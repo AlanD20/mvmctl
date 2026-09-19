@@ -84,14 +84,32 @@ func writeVMLaunchDeviceAuthority(
 	}
 	digest := sha256.Sum256(configBytes)
 	metadata := vmLaunchDeviceAuthority{
-		FirecrackerSHA256: plan.FirecrackerSHA256, JailerSHA256: plan.JailerSHA256,
-		Rootfs: plan.RootfsBacking, KernelID: plan.KernelID, KernelBacking: plan.KernelBacking, CloudInitBacking: plan.CloudInitBacking, CgroupLimits: plan.Limits,
-		NetworkID: plan.NetworkID, GuestIPv4: plan.GuestIPv4, GuestMAC: plan.GuestMAC,
-		Schema: 2, VMID: plan.VMID, OwnerUID: plan.OwnerUID, ExecutionUID: plan.UID, ExecutionGID: plan.GID, Config: config, HostBootID: plan.HostBootID,
-		LaunchGeneration: plan.LaunchGeneration, Release: plan.Release, PCIEnabled: plan.PCIEnabled,
-		NestedVirt: plan.NestedVirt, CloudInit: plan.CloudInit, Vsock: config.Vsock != nil,
-		BootArgs: config.BootSource.BootArgs, ConfigSHA256: hex.EncodeToString(digest[:]),
-		Volumes: make([]launchDeviceVolume, 0, len(plan.Volumes)),
+		FirecrackerSHA256: plan.FirecrackerSHA256,
+		JailerSHA256:      plan.JailerSHA256,
+		Rootfs:            plan.RootfsBacking,
+		KernelID:          plan.KernelID,
+		KernelBacking:     plan.KernelBacking,
+		CloudInitBacking:  plan.CloudInitBacking,
+		CgroupLimits:      plan.Limits,
+		NetworkID:         plan.NetworkID,
+		GuestIPv4:         plan.GuestIPv4,
+		GuestMAC:          plan.GuestMAC,
+		Schema:            2,
+		VMID:              plan.VMID,
+		OwnerUID:          plan.OwnerUID,
+		ExecutionUID:      plan.UID,
+		ExecutionGID:      plan.GID,
+		Config:            config,
+		HostBootID:        plan.HostBootID,
+		LaunchGeneration:  plan.LaunchGeneration,
+		Release:           plan.Release,
+		PCIEnabled:        plan.PCIEnabled,
+		NestedVirt:        plan.NestedVirt,
+		CloudInit:         plan.CloudInit,
+		Vsock:             config.Vsock != nil,
+		BootArgs:          config.BootSource.BootArgs,
+		ConfigSHA256:      hex.EncodeToString(digest[:]),
+		Volumes:           make([]launchDeviceVolume, 0, len(plan.Volumes)),
 	}
 	for index, selection := range plan.Volumes {
 		identity, err := stableManagedVMConfigStat(ctx, realManagedFirecrackerConfigDeps(), volumeFDs[index])
@@ -102,14 +120,16 @@ func writeVMLaunchDeviceAuthority(
 			return instanceValidationError("launch volume source changed before device authority publication")
 		}
 		metadata.Volumes = append(metadata.Volumes, launchDeviceVolume{
-			GuestDriveID: selection.ID, Path: selection.private().jailPath(), Backing: plan.VolumeBackings[index],
-			Selection:   selection,
-			DeviceMajor: identity.deviceMajor,
-			DeviceMinor: identity.deviceMinor,
-			Inode:       identity.inode,
-			UID:         identity.uid,
-			GID:         identity.gid,
-			Mode:        identity.mode,
+			GuestDriveID: plan.GuestDriveIDs[index],
+			Path:         "/volumes/" + plan.GuestDriveIDs[index] + ".raw",
+			Backing:      plan.VolumeBackings[index],
+			Selection:    selection,
+			DeviceMajor:  identity.deviceMajor,
+			DeviceMinor:  identity.deviceMinor,
+			Inode:        identity.inode,
+			UID:          identity.uid,
+			GID:          identity.gid,
+			Mode:         identity.mode,
 		})
 	}
 	if err := metadata.validate(); err != nil {
@@ -162,7 +182,8 @@ func readVMLaunchDeviceAuthority(
 	record instanceRecord,
 	rootFD int,
 ) (_ vmLaunchDeviceAuthority, returnErr error) {
-	if record.active == nil || record.launch == nil || (record.lifecycle != instanceLifecycleActive && record.lifecycle != instanceLifecycleCleaning) {
+	if record.active == nil || record.launch == nil ||
+		(record.lifecycle != instanceLifecycleActive && record.lifecycle != instanceLifecycleCleaning) {
 		return vmLaunchDeviceAuthority{}, instanceStateError(record.vmID, "active device authority is required")
 	}
 	if err := ctx.Err(); err != nil {
@@ -233,16 +254,21 @@ func readVMLaunchDeviceAuthority(
 }
 
 func (metadata vmLaunchDeviceAuthority) validate() error {
-	if !authorityHashPattern.MatchString(metadata.FirecrackerSHA256) || !authorityHashPattern.MatchString(metadata.JailerSHA256) {
+	if !authorityHashPattern.MatchString(metadata.FirecrackerSHA256) ||
+		!authorityHashPattern.MatchString(metadata.JailerSHA256) {
 		return instanceValidationError("launch device release hashes are incomplete")
 	}
-	if metadata.Rootfs.kind != protectedBackingRootfs || metadata.Rootfs.logicalID != metadata.VMID || metadata.Rootfs.ownerUID != metadata.OwnerUID || metadata.Rootfs.bytes < managedVMRootfsMinBytes || metadata.Rootfs.bytes > managedVMRootfsMaxBytes {
+	if metadata.Rootfs.kind != protectedBackingRootfs || metadata.Rootfs.logicalID != metadata.VMID ||
+		metadata.Rootfs.ownerUID != metadata.OwnerUID ||
+		metadata.Rootfs.bytes < managedVMRootfsMinBytes ||
+		metadata.Rootfs.bytes > managedVMRootfsMaxBytes {
 		return instanceValidationError("launch protected rootfs metadata differs")
 	}
 	if metadata.CloudInit != (metadata.CloudInitBacking != nil) {
 		return instanceValidationError("launch protected seed metadata differs")
 	}
-	if metadata.KernelBacking.kind != "kernel" || metadata.KernelBacking.logicalID != metadata.KernelID || metadata.KernelBacking.ownerUID != metadata.OwnerUID {
+	if metadata.KernelBacking.kind != "kernel" || metadata.KernelBacking.logicalID != metadata.KernelID ||
+		metadata.KernelBacking.ownerUID != metadata.OwnerUID {
 		return instanceValidationError("launch protected kernel metadata differs")
 	}
 	if metadata.Schema != 2 || !vmIDPattern.MatchString(metadata.VMID) || metadata.OwnerUID == 0 ||
@@ -267,7 +293,12 @@ func (metadata vmLaunchDeviceAuthority) validate() error {
 	}
 	volumes := make([]vmVolumeResourceSpec, 0, len(metadata.Volumes))
 	for _, volume := range metadata.Volumes {
-		if !isCanonicalManagedResourceID(volume.GuestDriveID, 64) || volume.Path != "/volumes/"+volume.GuestDriveID+".raw" || volume.Backing.kind != protectedBackingVolume || volume.Backing.logicalID != volume.Selection.ID || volume.Backing.ownerUID != metadata.OwnerUID || volume.Backing.bytes != volume.Selection.ExpectedBytes {
+		if !isCanonicalManagedResourceID(volume.GuestDriveID, 64) ||
+			volume.Path != "/volumes/"+volume.GuestDriveID+".raw" ||
+			volume.Backing.kind != protectedBackingVolume ||
+			volume.Backing.logicalID != volume.Selection.ID ||
+			volume.Backing.ownerUID != metadata.OwnerUID ||
+			volume.Backing.bytes != volume.Selection.ExpectedBytes {
 			return instanceValidationError("launch protected volume metadata differs")
 		}
 		if err := volume.Selection.Validate(); err != nil {

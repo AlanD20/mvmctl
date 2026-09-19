@@ -28,10 +28,18 @@ func (server *VMLifecycleServer) Launch(
 	ownerUID, ownerGID uint32,
 	request VMLaunchRequest,
 ) (_ VMLaunchResult, returnErr error) {
+	return server.launch(ctx, instanceCaller{uid: ownerUID, gid: ownerGID}, request, nil)
+}
+
+func (server *VMLifecycleServer) launch(
+	ctx context.Context,
+	caller instanceCaller,
+	request VMLaunchRequest,
+	restore *preparedSnapshotRestore,
+) (_ VMLaunchResult, returnErr error) {
 	if err := request.Validate(); err != nil {
 		return VMLaunchResult{}, err
 	}
-	caller := instanceCaller{uid: ownerUID, gid: ownerGID}
 	if err := validateInstanceCaller(caller); err != nil {
 		return VMLaunchResult{}, err
 	}
@@ -50,9 +58,23 @@ func (server *VMLifecycleServer) Launch(
 			cache.Release(context.WithoutCancel(ctx)),
 		)
 	}()
+	if restore != nil &&
+		(restore.ownerUID != caller.uid || restore.targetVMID != request.VMID || restore.cacheIdentity != cache.identity || restore.released) {
+		return VMLaunchResult{}, instanceValidationError("snapshot restore authority does not match launch")
+	}
 	prepared, err := server.releases.prepareInstalled(ctx, request.Release.private())
 	if err != nil {
 		return VMLaunchResult{}, err
+	}
+	if restore != nil {
+		identity := prepared.snapshot().identity
+		if identity.firecrackerSHA256 != restore.metadata.Source.FirecrackerSHA256 ||
+			identity.jailerSHA256 != restore.metadata.Source.JailerSHA256 {
+			return VMLaunchResult{}, errors.Join(
+				instanceValidationError("restore release differs from captured binaries"),
+				prepared.Release(context.WithoutCancel(ctx)),
+			)
+		}
 	}
 	defer func() {
 		returnErr = appendInstanceOperationError(
@@ -148,10 +170,20 @@ func (server *VMLifecycleServer) Launch(
 			return VMLaunchResult{}, err
 		}
 	}
+	intent := launchIntent{
+		vmID:          request.VMID,
+		hostBootID:    bootID,
+		cacheIdentity: cache.identity,
+		cacheLocator:  cache.locator,
+	}
+	if restore != nil {
+		intent.snapshotID = restore.snapshotID
+		restore.registered = true
+	}
 	launching, err = prepared.registerLaunching(
 		ctx,
 		caller,
-		launchIntent{vmID: request.VMID, hostBootID: bootID, cacheIdentity: cache.identity, cacheLocator: cache.locator},
+		intent,
 		processes,
 	)
 	if err != nil {
@@ -213,12 +245,19 @@ func (server *VMLifecycleServer) Launch(
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
-	backings, err := prepareIsolatedLaunchBackings(ctx, cache, spec, launching.state.record)
-	if err != nil {
-		return VMLaunchResult{}, err
+	var resources *vmLaunchResourceLease
+	if restore != nil {
+		defer func() { returnErr = errors.Join(returnErr, restore.releaseDescriptors(context.WithoutCancel(ctx))) }()
+		resources, err = prepareRestoredVMLaunchResources(ctx, cache, spec, launching.state.record, restore)
+	} else {
+		var backings *isolatedLaunchBackings
+		backings, err = prepareIsolatedLaunchBackings(ctx, cache, spec, launching.state.record)
+		if err != nil {
+			return VMLaunchResult{}, err
+		}
+		defer func() { returnErr = errors.Join(returnErr, backings.Release(context.WithoutCancel(ctx))) }()
+		resources, err = cache.pinIsolatedVMLaunchResources(ctx, spec, backings)
 	}
-	defer func() { returnErr = errors.Join(returnErr, backings.Release(context.WithoutCancel(ctx))) }()
-	resources, err := cache.pinIsolatedVMLaunchResources(ctx, spec, backings)
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
@@ -257,6 +296,11 @@ func (server *VMLifecycleServer) Launch(
 	active, err = launching.activateVerifiedProcess(ctx)
 	if err != nil {
 		return VMLaunchResult{}, err
+	}
+	if restore != nil {
+		if err := restore.loadIntoActive(ctx, active, topology); err != nil {
+			return VMLaunchResult{}, err
+		}
 	}
 	record := active.state.record
 	result := VMLaunchResult{

@@ -24,6 +24,7 @@ const (
 	jailCleanupDevices
 	jailCleanupDeviceNet
 	jailCleanupVolumes
+	jailCleanupSnapshot
 )
 
 // removeStoppedJailTree runs only after the retained process authorities have proved exit.
@@ -105,7 +106,8 @@ func removeJailDirectory(
 	}
 	ownerAllowed := original.Uid == 0 && original.Gid == 0
 	if kind == jailCleanupDevices || kind == jailCleanupDeviceNet {
-		ownerAllowed = ownerAllowed || original.Uid == record.launch.executionIdentity.uid && original.Gid == record.launch.executionIdentity.gid
+		ownerAllowed = ownerAllowed ||
+			original.Uid == record.launch.executionIdentity.uid && original.Gid == record.launch.executionIdentity.gid
 	}
 	if original.Mode != unix.S_IFDIR|mode || !ownerAllowed {
 		return processAuthorityError(record.vmID, "stopped jail directory metadata is not admitted", nil)
@@ -168,6 +170,8 @@ func allowedJailCleanupEntry(kind jailCleanupDirectory, name string) (jailCleanu
 		}
 	case jailCleanupRoot:
 		switch name {
+		case "snapshot":
+			return jailCleanupSnapshot, false, nil
 		case "vmm-runtime":
 			return jailCleanupRuntime, false, nil
 		case "run":
@@ -203,6 +207,10 @@ func allowedJailCleanupEntry(kind jailCleanupDirectory, name string) (jailCleanu
 		}
 	case jailCleanupVolumes:
 		if strings.HasSuffix(name, ".raw") && isCanonicalManagedResourceID(strings.TrimSuffix(name, ".raw"), 64) {
+			return 0, true, nil
+		}
+	case jailCleanupSnapshot:
+		if name == "vmstate" || name == "memory" {
 			return 0, true, nil
 		}
 	}
@@ -246,7 +254,7 @@ func removeJailFixedLeaf(
 	}
 	// Volume sources lived only in the departed private mount namespace. Cleanup may remove
 	// only the empty root-owned attachment placeholders, never caller data or a surviving mount.
-	if kind == jailCleanupVolumes && (original.Uid != 0 || original.Gid != 0 ||
+	if (kind == jailCleanupVolumes || kind == jailCleanupSnapshot) && (original.Uid != 0 || original.Gid != 0 ||
 		original.Mode != unix.S_IFREG|0600 || original.Size != 0) {
 		return processAuthorityError(record.vmID, "stopped jail volume is not an empty mount placeholder", nil)
 	}
