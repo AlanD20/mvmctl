@@ -1427,13 +1427,17 @@ The activation order is fixed:
    `/var/lib/mvmctl/jailer/firecracker/<vm-id>`. Process absence must be proved before removing an exactly admitted,
    non-mounted stale fixed tree descriptor-relatively and bottom-up. Any unexpected entry, mount at or below the tree,
    replacement race, or incomplete admission returns `unavailable`; Jailer is not executed. Recheck the pinned parent
-   and destination absence immediately before handoff so every accepted destination is freshly created by this Jailer.
+   and destination absence immediately before handoff. The authenticated root launch child then
+   creates and pins the exclusive fresh VM/root tree before mounting resources and executing Jailer;
+   a caller-created or previously existing tree is never adopted. This ordering adjustment was
+   explicitly approved on 2026-09-19 because mounts require their fixed destination to exist.
    Prepare the separate fixed-name cgroup-v2 authority by descriptor-pinning `/sys/fs/cgroup`, its compiled `mvmctl`
    parent, and the `<vm-id>` leaf boundary with exact metadata and mount checks. The VM leaf must be freshly absent;
    an existing legacy leaf is never adopted. For a typed policy-v1 launch intent, require fixed `cpu`, `memory`, and
    `pids` controller readiness at the root and then the parent. Enable only missing controllers additively and verify
    each descriptor-relative readback; never disable an existing controller.
-5. Prepare fixed outputs, the runtime directory, initial private mount namespace, and named mounts. With the launch
+5. Prepare fixed outputs, the runtime directory, initial private mount namespace, and retained named mount sources.
+   Do not create the final jail destination before the absence checkpoint. With the launch
    lease's VM lock already retained, acquire the later network mutation lock, then the host-global firewall mutation
    lock; create namespace-local and host links down; apply the complete nftables generation atomically and verify it
    through a fresh inspection. Only after firewall success may the exact links be raised and reverified. Both mutation
@@ -1443,8 +1447,11 @@ The activation order is fixed:
 6. Release the relay, observe and record its exact caller credentials, empty supplementary groups, host mount
    namespace/root, root-owned `/usr/local/bin/mvm` executable metadata and digest, and verify readiness.
 7. Recheck the pinned release, fresh jail-destination absence, cgroup-leaf absence, and root-then-parent controller
-   readiness at the last handoff boundary, then release the Firecracker child to the exact Jailer with the pinned
-   network namespace. Record successful
+   readiness at the last handoff boundary, then release the authenticated Firecracker child. It creates
+   and descriptor-pins the exclusive fresh jail tree, installs only the admitted fixed-name mounts
+   from retained descriptors, and executes the exact Jailer with the pinned network namespace.
+   No existing tree, caller-supplied path, or generic command can substitute for this transition.
+   Record successful
    Jailer-handoff provenance in the retained cgroup authority before it may bind the resulting leaf. The prepared
    release supplies the fixed store paths; the caller supplies neither a hash nor path. This release occurs only after
    the complete firewall generation and links are verified.

@@ -375,8 +375,11 @@ chain values expose no userdata or equivalent provenance. Rule userdata is neces
 ownership of its containing table. Its structured `GetRules` path can also omit expression types the library does not
 understand, so re-marshalling parsed expressions cannot prove that no extra kernel expression exists. The inert raw
 collector and retained host-netns factory close the decoder and namespace-selection seams, but production activation
-still requires an accepted threat model for another root or `CAP_NET_ADMIN` actor, root-record-bound exact-state
-authority within that model, application composition, and live-kernel evidence. Ambiguity always blocks `DelTable`.
+requires root-record-bound exact-state authority, application composition, and live-kernel evidence.
+On 2026-09-19 the user accepted other root or `CAP_NET_ADMIN` programs as trusted administrators.
+mvmctl fails closed on detected foreign, replaced, or changed state; it does not promise isolation
+against an administrator deliberately changing kernel rules concurrently. Rule userdata and exact
+record-bound inspection remain necessary within this model. Ambiguity always blocks `DelTable`.
 
 Application writes a durable `applying` record before kernel mutation, queues the complete delete/create/chain/rule
 replacement on one fresh explicitly namespace-bound lasting connection, and calls `Flush` once. It then closes that
@@ -389,8 +392,10 @@ One `Flush` protocol batch is not yet proof that delete-and-recreate behaves ato
 disposable isolated-network-namespace compatibility gate must prove that a valid replacement changes both reserved
 tables together, a late invalid command leaves the exact prior generation, an empty target removes both or neither,
 explicit namespace selection affects only that namespace, and every emitted expression survives exact inspection.
-Until those gates pass, no adapter, privileged action, link activation, public cutover, or legacy-backend removal may
-use the compiler foundation.
+The user authorized writing the remaining adapter, privileged action, link-activation, public-cutover,
+and legacy-removal implementation on 2026-09-19 without running validation or writing/running tests.
+That implementation-only exception changes the work order, not the runtime ownership checks or
+the release gate: live activation is not qualified until the isolated-kernel evidence above exists.
 
 ### Two public policy families
 

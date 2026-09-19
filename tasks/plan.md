@@ -4,6 +4,30 @@
 **Branch:** `0.3.0-release`
 **Release gate:** Draft only until every CI and Python system-test requirement below passes
 
+## Implementation-only pass (2026-09-19)
+
+The user authorized implementation of the remaining release work, with an explicit temporary
+workflow override: do not write, edit, or run tests; do not run builds, typechecks, validation,
+verification, or review/audit passes. Only formatting and linting are permitted. Commits from
+this pass are implementation checkpoints, not verified working or release-ready checkpoints.
+Runtime validation and authorization checks in the product must remain intact. Full CI, Python
+system QA, and release sign-off remain deferred gates, not waived requirements.
+
+Work is split into isolated repository-local `.tmp/worktrees/impl03-*` worktrees for lifecycle,
+resources, network/firewall, host administration, loopmount, exec relay, typed traffic policies,
+and JSON output. No candidate installation, live VM mutation, asset download, or host effect is
+authorized. Preserve the user's dirty root-worktree files. Integrate scoped implementation
+commits without invoking test hooks, and report unresolved decisions without manufacturing
+authority or replacing required behavior with an undocumented fallback. Stop after the
+implementation pass; do not automatically start testing, reviews, or release qualification.
+
+The user approved the derived MMIO device budget, the complete 10,000,000-byte vmstate ceiling,
+and exact snapshot memory length derived from trusted captured RAM. New data-volume and
+aggregate-storage caps remain unresolved. The user also approved treating other root or
+`CAP_NET_ADMIN` programs as trusted administrators while failing closed on detected firewall
+conflicts, and an authenticated root child preparing a fresh pinned jail tree after the
+absence proof and before Jailer execution. Existing caller-created jail trees remain rejected.
+
 ## Prepared integration checkpoint (2026-09-13)
 
 The user-authorized batch is complete. Network L3 identity and exact address/link

@@ -1,6 +1,6 @@
 # Volume and snapshot resource-limit proposal
 
-**Status:** Proposal; numeric admission policies are not approved or implemented by this document.
+**Status:** Partially approved for implementation on 2026-09-19; qualification remains pending.
 **Evidence checked:** 2026-09-13, Firecracker `v1.16.1`, commit
 [`2038188f145fb81b8d098147a10e9d9f392fd22f`][release].
 
@@ -8,6 +8,19 @@ The user has approved raw-only VM data volumes while retaining QCOW2 image impor
 suggestions of 16 data volumes, 16 TiB of data-volume capacity, and 1 GiB of `vmstate` were not approved. This proposal
 replaces those unsupported numbers with a device-budget calculation and the upstream state-loader ceiling, and leaves
 storage safety budgets open where measurements and a product decision are still needed.
+
+## Approved implementation scope (2026-09-19)
+
+The user approved the derived MMIO device-budget calculation, the 10,000,000-byte complete
+`vmstate` ceiling, and exact memory-file length derived from trusted captured RAM. The
+approval does not select a uniform 13-volume product limit, qualify PCI or aarch64, approve
+new per-volume or aggregate storage caps, or establish snapshot capture/immutability authority.
+Those remaining decisions and evidence gaps stay open. Approval records the intended
+implementation contract, not completed implementation or validation.
+
+The current pass is implementation-only: no tests are written or run, and no validation or
+review passes are performed. Only formatting and linting are permitted. Runtime admission
+checks remain part of the production implementation; qualification is deferred, not waived.
 
 ## Existing local contract and implementation gaps
 
@@ -115,13 +128,13 @@ consistency and capture scope must be resolved before extending today's rootfs-o
 
 ## Decisions and verification gates
 
-| Decision awaiting approval | Recommendation or evidence still needed |
+| Policy decision | Approval status and evidence still needed |
 |---|---|
-| Maximum attached data volumes | Adopt the MMIO topology calculation; optionally choose a uniform ceiling of 13 for the current profile. Qualify limits before claiming support. |
+| Maximum attached data volumes | Derived MMIO topology calculation approved on 2026-09-19. A uniform ceiling of 13 is not selected. Qualify limits before claiming support. |
 | Per-volume minimum/maximum capacity | Positive sector-aligned exact capacity is proposed; choose product minimum and maximum after filesystem, guest-tooling, and workload measurements. No new capacity number is selected. |
 | Aggregate storage and concurrency | Choose separate per-VM/user/host logical and physical budgets and concurrent snapshot/copy limits from deployment capacity and failure tests. |
-| `vmstate` file maximum | Mirror the exact upstream 10,000,000-byte loader ceiling. Any lower operational cap remains unmeasured. |
-| Memory artifact bound | Require exact trusted captured RAM length for today's RAM-only profile, deriving at most 64 GiB from the existing product RAM maximum. |
+| `vmstate` file maximum | Exact upstream 10,000,000-byte loader ceiling approved on 2026-09-19. Any lower operational cap remains unmeasured. |
+| Memory artifact bound | Exact trusted captured RAM length approved on 2026-09-19 for today's RAM-only profile, deriving at most 64 GiB from the existing product RAM maximum. Trusted capture and immutable backing remain necessary. |
 | Snapshot modes and data-volume contents | Start with Full; define volume consistency/capture/restore semantics before adding data-volume snapshots or differential chains. |
 
 Required gates for accepting and qualifying the implemented policy:
