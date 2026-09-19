@@ -31,13 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > The late implementation pass also composes typed schema-3 launch/cleanup, per-VM topology, cgroup and descriptor-only
 > mounts, same-boot recovery, root traffic apply/revoke, managed-network transactions, and offline ext-image shrink.
 > This code is unverified: only formatting has been performed, with no build, tests, review, or system qualification.
-> Approved raw-volume launch integration, trusted snapshot capture/restore with consistent data volumes, final privilege
-> entry-point retirement, and release qualification remain incomplete. Host clean/reset and typed image recovery are
+> Trusted snapshot capture/restore with consistent data volumes, remaining privilege integration, and release
+> qualification remain incomplete. Raw-volume launch, host clean/reset, and typed image recovery are
 > implemented but unverified. Earlier slice evidence below does not qualify these later changes.
 
 ### Added
 
 #### Implementation-only integration updates
+
+- Raw volumes now join typed VM launch through ordered path-free selections, release-derived MMIO admission,
+  exact pinned file identity and size, sealed configuration, and descriptor-only child mounts at `/volumes/<id>.raw`.
+  Read-only/cache intent is retained; cleanup removes only admitted empty jail placeholders, not source data.
+  No new per-volume or aggregate storage quotas are added. This does not implement live hotplug or snapshots.
 
 - Removed the superseded production iptables/nft CLI backends, tracker repositories, and backend selectors after
   their consumers moved to typed root services. Migration `007` refuses populated obsolete rule tables and retires
@@ -960,14 +965,15 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Security work still pending
 
-Current incomplete work includes approved raw-volume launch integration, root-controlled snapshot production/removal
+Current incomplete work includes root-controlled snapshot production/removal
 and immutable restore backing with consistent data-volume snapshots, remaining privilege integration, and qualification.
 Approval adds no new per-volume or aggregate quota caps. Existing
 unprivileged archive construction remains outside the root service. Memory policy stays unchanged pending diagnosis.
-Snapshot, extra-volume, and PCI launches still refuse unsupported selections at this documentation snapshot.
-Trusted snapshot capture also requires an explicit isolation decision: a same-UID process, caller-accessible
-Firecracker API, and caller-writable active backing cannot establish an authoritative consistent capture. Approved
-root-controlled storage and consistent data-volume capture do not resolve that boundary by themselves.
+Snapshot and PCI launches still refuse unsupported selections; raw-volume launch is integrated but unverified.
+The user paused snapshot implementation for a separate design pass. A trusted capture contract must address the
+operator-owned process, caller-accessible Firecracker API, active disk writers, and retained writable aliases.
+No exploit or impossibility of a narrower design has been demonstrated. Root-controlled storage and consistent
+data-volume capture remain approved requirements, not completed behavior.
 Shared dispatcher admission and guarded administrator reset are composed. Reset requires marker-only sudoers and
 compatible root journals, rejects live or ambiguous managed state, and restores recorded settings through retryable
 rollback receipts. It retains disabled admission after reset or restoration failure and preserves unrelated administrator

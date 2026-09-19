@@ -334,9 +334,10 @@ live process. Stop preserves endpoint reservations and traffic grants for restar
 root before local deletion. Without `--force`, stop requests guest shutdown through an identity-bound Firecracker API
 connection and waits on the exact process before authoritative cleanup.
 
-Typed launch now includes console relay composition. This development implementation is unverified: extra-volume,
-snapshot, and PCI launches are blocked, with no legacy launch fallback. Trusted capture/restore authority, storage
-capacity policy, full prior-boot topology recovery, and complete provisioning remain incomplete.
+Typed launch now includes console relay composition and raw data volumes with release-derived device limits,
+descriptor-only mounts, and no new storage quotas. This development implementation is unverified. Snapshot and PCI
+launches remain blocked, with no legacy fallback; live volume hotplug is not implemented. Snapshot design and release
+qualification remain pending.
 
 **`vm create` flags:**
 
@@ -393,8 +394,8 @@ mvm vm create cluster-node --count 3
 
 The listed snapshot surface is not qualified support for trusted capture/restore in this development build. Restore
 remains blocked. Root-controlled snapshot storage, CLI removal, and consistent attached-volume capture are approved
-requirements, but the authoritative producer is not implemented: same-UID process access, the Firecracker API, and
-caller-writable active disks require an explicit isolation decision first.
+requirements, but the authoritative producer is not implemented. The user paused snapshot implementation for a
+separate design pass covering process/API isolation, active disk writers, and immutable backing.
 
 Create, list, inspect, restore, and remove VM snapshots.
 

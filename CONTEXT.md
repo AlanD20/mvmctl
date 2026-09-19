@@ -598,8 +598,10 @@ These API input checks use the user database and do not establish root descripto
 volume lease now pins fixed ID-derived leaves and admits exact file identity, logical length, access, and cache mode.
 Its positive signed-file-offset size bound is representability only. The user approved raw-volume attachment without
 new per-volume or aggregate storage quota caps, subject to the approved device budget and strict file ownership and
-identity checks. This decision authorizes the launch integration work; the private lease alone does not establish
-production mounting or live attachment, and it does not reserve physical storage.
+identity checks. Typed launch now carries ordered path-free raw-volume selections through root descriptor admission,
+sealed configuration, and child mounts at `/volumes/<id>.raw`. Child handoff repeats pinned identity checks and
+retains read-only/cache intent; cleanup admits only exact empty jail placeholders, never source data. This unverified
+implementation does not reserve physical storage or implement live hotplug.
 
 Private Firecracker 1.16.1 MMIO admission accounts for the complete device budget: rootfs, network, VMGenID, VMClock,
 optional cloud-init and vsock, and ARM RTC/serial where applicable. PCI and unapproved release profiles fail closed.
@@ -608,11 +610,10 @@ length to equal trusted captured RAM in MiB times 1,048,576. Captured rootfs len
 captures have neither memory nor vmstate. These private checks do not authenticate a capture, establish immutable
 memory backing, or grant restore authority. The user approved root-controlled snapshot storage with CLI removal and
 requires consistent snapshots of attached data volumes. The authoritative capture producer, immutable restore backing,
-data-volume consistency, and public snapshot capture/restore/removal composition remain pending. Trusted capture is
-blocked on an explicit isolation decision for same-UID processes, the caller-accessible Firecracker API, and
-caller-writable active backing; root-controlled destination storage alone cannot make that capture authoritative.
-Typed launch rejects extra drives and
-snapshot mode rather than falling back to the older path.
+data-volume consistency, and public snapshot capture/restore/removal composition remain pending. The user paused
+snapshot implementation for a separate design pass. The capture contract must address process/API access and all
+active disk writers; destination ownership alone is insufficient. No exploit or impossibility of a narrower design
+has been demonstrated. Typed launch rejects snapshot mode rather than falling back to the older path.
 
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An

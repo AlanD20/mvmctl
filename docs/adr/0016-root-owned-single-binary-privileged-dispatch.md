@@ -1227,6 +1227,9 @@ and restore in 0.3.0; excluding VMs with attached data volumes is not the final 
 consistent guest state across memory, vmstate, rootfs, and attached disks, and restore must preserve their guest-visible
 device identities using independent backing. Caller-supplied capture metadata remains non-authoritative. Detailed
 producer isolation and consistency composition remain implementation dependencies, not completed guarantees.
+The user subsequently paused snapshot implementation for a separate design pass; changing execution credentials,
+API ownership, or active backing is not authorized by the storage decision alone. No exploit or impossibility of a
+narrower design has been established in this implementation-only pass.
 
 The caller-owned `firecracker.json` is admission evidence, not launch authority. Immediately before allocation or
 reading, root repeats synchronized metadata inspection and enforces the 1-byte-through-1-MiB bound. It uses positioned
