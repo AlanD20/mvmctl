@@ -1,9 +1,9 @@
-# VM-to-VM Exec: Source, Destination, Authority, and Audit Foundations
+# VM-to-VM Exec: Opt-In Relay, Authority, and Audit
 
 ## Current status
 
-VM-to-VM command execution is intentionally unavailable while the v0.3.0 authority path is completed. The following
-foundations are implemented and covered by Go L0/L1 tests:
+The API-owned VM-to-VM relay is implemented behind an explicit `mvm exec --allow-vm-exec` opt-in. It composes the
+following components:
 
 - directional `mvm policy exec` desired-state CRUD;
 - the closed, bounded `MVMEXEC1` request and response protocol;
@@ -11,30 +11,34 @@ foundations are implemented and covered by Go L0/L1 tests:
 - a dedicated, one-request source session between the host and source guest;
 - a closed, one-request destination session over an already selected connection;
 - a process-bound local source broker and `mvm-agent remote` client in the source guest;
-- strict separation between ordinary host-to-VM exec/copy and the dormant VM-to-VM path;
+- separate ordinary host-to-VM exec/copy and opt-in VM-to-VM paths;
 - a production-composed root-owned capacity, active-pair, peer-binding, and absolute-stop authority behind the retained
   sidecar; and
 - a typed fixed-schema command-redacted audit sink.
 
-There is no production API-owned relay listener, runtime exec-policy enforcement, relay payload forwarding, or audit
-integration yet, and no positive Python L2 system test has qualified the end-to-end behavior. The retained sidecar
-authority performs no relay effect without its pending API caller. The audit sink is dormant: no production path
-constructs or invokes it, so there are no VM-to-VM runtime audit records yet.
+The relay performs directional policy enforcement, retained-sidecar admission, bounded payload forwarding,
+cancellation, and command-redacted audit finalization. It requires root-admitted active source and destination
+identities from the schema-3 lifecycle; a transitional launch or a SQLite status value cannot supply that authority.
+The implementation-only update added no tests and ran no build, tests, or qualification. Positive end-to-end behavior
+is not qualified.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration, create path, results,
-persistence, and environment specifications; it is not converted into a directional policy. No current host path
-opens the source or destination session or constructs an authorized destination request.
+persistence, and environment specifications; it is not converted into a directional policy.
 
 ## Required user flow
 
-Once the remaining host relay is implemented, an authorized source command will use this guest-side shape:
+An authorized non-interactive source command uses this shape:
 
 ```text
-mvm exec source-vm -- mvm-agent remote --user app destination-vm -- command arg
+mvm policy exec create source-vm destination-vm app
+mvm exec source-vm --allow-vm-exec -- mvm-agent remote --user app destination-vm -- command arg
 ```
 
 The outer `mvm exec` command may run in the source guest as root or as a non-root account. The destination target passed
-to `--user` is mandatory and must be non-root. Network placement is irrelevant: the final directional exec policy is
+to `--user` is mandatory and must be non-root. Network placement is irrelevant: the directional exec policy is
 required for same-network, cross-network, and no-IP-network VM pairs.
+
+The opt-in outer command and its one remote request share a five-minute absolute lifetime. The ordinary `--timeout`
+flag remains a connection/probe timeout and cannot extend that bound.
 
 ## Architecture
 
@@ -42,7 +46,7 @@ The design uses two independent host-to-source connections. It never multiplexes
 exec response stream.
 
 ```text
-host API relay (pending)
+host API relay (explicit --allow-vm-exec)
   |
   | dedicated source transport: MVMSRC01 bootstrap, then one MVMEXEC1 request/response
   v
@@ -84,12 +88,11 @@ only a read deadline while concurrent response operations set only write deadlin
 A terminal `result` or `error` closes the physical transport so the guest must observe EOF. Session and per-operation
 contexts retain their effective deadlines, and `Close` is idempotent and repeats its first cleanup result.
 
-This type is deliberately dormant until `pkg/api` receives a root-admitted active source identity and constructs the
-relay.
+The opt-in `pkg/api` relay consumes this primitive together with the retained root authority.
 
 ### 2. Binding the source command
 
-After the dedicated transport is ready, the future host relay starts one ordinary non-TTY source command with
+After the dedicated transport is ready, the host relay starts one ordinary non-TTY source command with
 `ExecWithSourceSession`. That exec frame contains only the session ID. A normal `Exec` leaves the field empty and stays
 on the existing behavior.
 
@@ -138,7 +141,7 @@ command, or internal process cause in an error.
 
 ### 5. Destination execution
 
-The future host relay must resolve and authorize the source request, build a separate `DestinationRequest`, and open a
+The host relay resolves and authorizes the source request, builds a separate `DestinationRequest`, and opens a
 new connection to the destination guest. Only this host-built request contains the destination agent token.
 
 The destination agent accepts only exact `MVMEXEC1` magic on its existing vsock port, authenticates the token before an
@@ -161,8 +164,8 @@ absolute lifetime timer closes even an idle session. Operation-context cancellat
 partial reads and writes. Protocol or transport failure closes the connection; cleanup is close-once and repeats its
 cached first result.
 
-This is a dormant relay primitive. It performs no destination dialing, path selection, VM or policy lookup, root
-effect, audit, API relay, or payload-forwarding effect and creates no positive VM-to-VM behavior.
+The API relay owns destination dialing, policy lookup, root admission, payload forwarding, and audit. The destination
+session owns only its bounded one-request transport.
 
 ### 7. Root-owned capacity and active-pair authorities
 
@@ -193,8 +196,8 @@ and fixed relay-stop deadline.
 
 The lease releases exactly once in reverse authority order: capacity, destination/source process capabilities, active
 leases in descending lexical VM-ID order, then the pair roots. The retained sidecar consumes these authorities under a
-fixed host-global ceiling of eight and admits its exact source and destination connection descriptors, but no API relay
-calls the sidecar or performs a policy, payload, or audit effect.
+fixed host-global ceiling of eight and admits its exact source and destination connection descriptors. The API relay
+calls the sidecar while retaining ownership of its original connections.
 
 ### 8. Typed command-redacted audit sink
 
@@ -210,10 +213,10 @@ typed and returned. Construction rejects an effective-root caller because the us
 descriptor-relatively. The file remains user-modifiable and therefore is observability, not tamper-proof root
 authority.
 
-The sink is not wired to `pkg/api` and produces no runtime record by itself. `Record` deliberately observes the context
-it receives. A future relay handling terminal cancellation or timeout after its operation context is cancelled must
-derive a fresh bounded context through `context.WithoutCancel` before calling `Record`, and it must surface or join an
-audit failure with its relay result rather than discard it.
+The API relay constructs the sink and records terminal outcomes. `Record` deliberately observes the context it
+receives; the relay derives a fresh bounded context through `context.WithoutCancel` for terminal audit finalization
+and surfaces audit failure with the relay result. An unresolved destination denial uses a separate bounded,
+command-redacted audit shape because it cannot claim a resolved destination VM identity.
 
 ## Wire contracts and limits
 
@@ -233,9 +236,10 @@ audit failure with its relay result rather than discard it.
 Strict JSON decoding rejects missing, unknown, duplicate, case-colliding, trailing, incorrectly typed, and invalid
 values. A wire or runtime limit is enforced independently at each boundary that consumes it.
 
-## Remaining host authority
+## Composition and remaining qualification
 
-The positive path must not be enabled until all of these release blockers are complete:
+The implemented relay composes these boundaries; production lifecycle integration and system qualification remain
+separate work:
 
 1. `pkg/api` owns the relay because it is the only layer allowed to coordinate VM, vsock, policy, and runtime domains.
 2. Root authority admits the exact active source connection/vsock identity and supplies the authority-owned source FD;
@@ -254,8 +258,8 @@ The positive path must not be enabled until all of these release blockers are co
 7. Python L2 tests prove positive same-network, cross-network, and no-IP-network execution plus missing/reverse policy,
    foreign owner, stale identity, root target, malformed wire, limit, cancellation, and cleanup denials.
 
-Until these gates land, the source-session components remain a fail-closed foundation and VM-to-VM execution remains
-unavailable.
+No successful end-to-end execution or release-readiness claim follows from the relay implementation alone. In
+particular, root active identity cannot be inferred from user state or bypassed to exercise an older launch path.
 
 ## Removed legacy design
 

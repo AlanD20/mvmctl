@@ -44,7 +44,18 @@ This document provides detailed reference for all `mvm` commands, configuration 
 |------|------|-------------|
 | `--verbose` | persistent | Enable verbose output |
 | `--debug` | persistent | Enable debug mode |
+| `--json` | persistent | Emit one schema-versioned response for a supported finite command |
 | `--version` | root | Show version and exit |
+
+`--json` applies to reads and mutations. The response has `schema_version: 1`, `status` (`success`, `error`, or
+`partial`), command-specific `data`, and `error`. An error preserves its code, class, message, optional operation and
+entity, and details. Batch data preserves each result and its structured error. A partial response retains completed
+work and exits unsuccessfully; callers must inspect both status and data before retrying. Read results now live under
+`data`, so scripts consuming the old bare list or object must be updated.
+
+Streaming and interactive commands reject structured output with `cli.output.unsupported`: `exec`, `ssh`, `logs`,
+completion, `run`, the `init` wizard, and console attachment. Finite console state and kill commands support it.
+Arguments after `--` belong to the guest command and do not select host JSON output.
 
 ### Selectors
 
@@ -105,11 +116,23 @@ Host configuration commands for one-time, machine-global setup.
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm host install-system` | — | Administrator-only early bootstrap. Atomically installs the running trusted artifact as root-owned `/usr/local/bin/mvm` without loading user cache, configuration, database, or Cobra state. |
-| `mvm host init` | — | Apply host configuration changes. Idempotent. Creates the `mvm` group, sudoers drop-in, enables IP forwarding, creates firewall chains, and snapshots initial state for rollback. |
+| `mvm host init` | `--operator USER` (direct root only), `--json` | Early administrator setup with a root-owned journal, operator enrollment, and compiled host changes. |
 | `mvm host status` | `--json` | Show current host configuration state vs expected |
 | `mvm host info` | `--refresh`, `--json` | Show host hardware, limits, and VM capacity projection |
-| `mvm host clean` | `-f, --force` | Remove all VM networking config (bridges, TAPs, iptables). Does not touch sysctl or mvm group. |
-| `mvm host reset` | `-f, --force` | Full rollback: remove networking, revert sysctl, remove sudoers and mvm group |
+| `mvm host clean` | `-f, --force` | Currently refuses cleanup until trusted global VM/network cleanup authority is available. |
+| `mvm host reset` | `--force`, `--operator USER` (direct root only), `--json` | Early administrator route; currently refuses rollback until trusted global cleanup is available. |
+
+On a clean host, run `sudo /usr/local/bin/mvm host init`; sudo selects its invoking non-root account. In a direct-root
+session, use `/usr/local/bin/mvm host init --operator USER`. Sudo invocation rejects `--operator`. The early route runs
+before user configuration, cache, SQLite, and ordinary service initialization. Its journal beneath
+`/var/lib/mvmctl/host` preserves original global state and mutation progress. Separate root-owned
+`operator-<uid>.json` records preserve each enrolled operator's prior membership. Multiple operators are supported;
+an interrupted initial global transaction must first be recovered by its original operator. Existing transitional
+wildcard sudo grants cannot establish administrator authentication: that sudo entry
+refuses them and directs the administrator to direct root with an explicit operator. Init does not install the binary.
+
+The early parser supports JSON boolean forms, help, and argument boundaries. Host clean/reset are not a supported
+legacy-state removal procedure in this development build.
 
 ---
 
@@ -400,27 +423,25 @@ The network resolver tries selectors in priority order:
 
 ### `mvm policy`
 
-Policy management currently exposes the transitional routed service-access family and directional VM-to-VM execution
-desired state. Same-network service-access policies are rejected because same-bridge filtering is not implemented;
-execution-policy identity is independent of IP-network placement.
+Policy management separates TCP/UDP traffic intent from directional VM-to-VM execution grants. The former flat
+`mvm policy create/ls/inspect/rm/sync` commands are replaced by the typed families below.
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm policy create` | `SOURCE_NETWORK DESTINATION_VM tcp\|udp PORT\|START-END` | Allow one routed destination service or bounded port range |
-| `mvm policy ls` | `--json` | List policies with current resource names |
-| `mvm policy inspect` | `POLICY_ID`, `--json` | Inspect one policy by exact ID or unambiguous prefix |
-| `mvm policy rm` | `POLICY_IDS...`, `-f, --force` | Remove one or more policies and reconcile immediately |
-| `mvm policy sync` | `--json` | Resolve current identities and atomically reconcile policy rules |
+| `mvm policy traffic create` | Exactly one of `--from-network NETWORK` or `--from-vm VM`; `--to-vm VM`, `--protocol tcp\|udp`, `--port PORT\|START-END` | Persist typed allow intent |
+| `mvm policy traffic ls` | `--json` | List both source families with current resource names |
+| `mvm policy traffic inspect` | `POLICY_ID`, exactly one of `--from-network` or `--from-vm`, `--json` | Inspect intent in the selected family |
+| `mvm policy traffic rm` | `POLICY_IDS...`, exactly one of `--from-network` or `--from-vm`, `-f, --force` | Currently blocked until authoritative firewall revocation is composed |
 | `mvm policy exec create` | `SOURCE_VM DESTINATION_VM TARGET_USER` | Persist one directional execution grant for an exact non-root destination user |
 | `mvm policy exec ls` | `--json` | List directional execution policies with current VM names |
 | `mvm policy exec rm` | `POLICY_IDS...`, `-f, --force` | Remove one or more execution policies by exact ID or unambiguous prefix |
 
-Policies default-deny other routed traffic between managed networks. NoCloud and established replies precede managed VM-to-host default deny; internet egress remains available.
+Traffic create/list/inspect describe desired state; they do not claim that a kernel firewall generation has been
+applied. Removal fails closed until root reconciliation can revoke enforcement before deleting intent.
 
-Execution policies are desired-state records only in the current v0.3.0 development build. They do not activate
-VM-to-VM execution: the API-owned relay, root active-source/capacity admission, runtime enforcement/audit, and positive
-system qualification remain pending. Execution grants are directional, independent of IP-network placement, and
-require a non-root target user.
+Execution grants are directional, independent of IP-network placement, and require an exact non-root target user.
+The opt-in API relay now reads and enforces them at runtime. It also requires root-admitted active VM identities;
+creating a grant alone cannot make a transitional VM launch eligible. End-to-end qualification remains pending.
 
 ---
 
@@ -524,6 +545,7 @@ mvm exec [VM_SELECTOR] [-- <command>...] [flags]
 | `--user, -u TEXT` | User to run the command as | `root` |
 | `--timeout, -t N` | Vsock agent connect/probe timeout in seconds | `0` (no timeout) |
 | `--no-sync` | Skip final `sync()` after command | `false` |
+| `--allow-vm-exec` | Permit this non-interactive source command to request policy-authorized VM-to-VM execution | `false` |
 | `--port, -p N` | Vsock port for the guest agent | `1024` |
 
 **Examples:**
@@ -541,6 +563,20 @@ mvm exec my-vm --timeout 30 -- apt-get update
 # As a different user
 mvm exec my-vm --user ubuntu
 ```
+
+An explicit source command can request execution on another VM with:
+
+```bash
+mvm policy exec create source-vm destination-vm app
+mvm exec source-vm --allow-vm-exec -- mvm-agent remote --user app destination-vm -- command arg
+```
+
+The outer source command may run as root or a non-root account; the destination user must be non-root. The relay
+requires the exact directional grant and root-admitted active source/destination identities, applies bounded wire and
+capacity limits, and writes command-redacted audit records in the user cache. The opt-in outer command and its one
+remote request share an absolute five-minute lifetime; `--timeout` still controls connection/probe time. Ordinary
+exec, shell, and copy do not
+enable this source session. This implementation has not been qualified end to end.
 
 ---
 

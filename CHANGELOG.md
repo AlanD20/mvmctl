@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > and snapshot restore, and clean-break removal of the VM-wide
 > remote-exec trust flag described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
-> nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
+> nftables-only `traffic` policy application, end-to-end VM-to-VM `exec` qualification, full LoopMount backend/public cutover, final
 > marker-only sudo policy, schema-3 Jailer launch and cgroup-control production composition, same-boot dead-process
 > cgroup reconciliation, final live topology verification and reconciliation, complete relaunch parity and
 > qualification, and remaining typed privileged operations are not
@@ -37,6 +37,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Security work still pending** before treating this version as release-ready.
 
 ### Added
+
+#### Implementation-only integration updates
+
+- Added global `--json` with one schema-1 success/error/partial envelope, typed result data, preserved structured
+  errors, and per-item batch outcomes. Existing bare JSON reads now appear under `data`. Streaming/interactive exec,
+  SSH, logs, completion, service `run`, init wizard, and console attachment reject this mode; console state/kill support
+  it. Cache errors now propagate instead of becoming empty or successful results.
+- Added `mvm exec --allow-vm-exec` and API-owned directional policy enforcement, retained root authority, bounded
+  source/destination relay, cancellation, and command-redacted audit. It requires schema-3 active VM identities and
+  has not been qualified end to end. Ordinary exec, shell, and copy do not enable the source session.
+- Replaced the flat policy CLI with `policy traffic` and `policy exec`. Traffic create/list/inspect expose typed
+  desired intent for a source network or exact source VM. Traffic removal fails closed pending authoritative firewall
+  revocation; recording intent does not claim live enforcement.
+- Added early administrator host init with sudo-invoker or direct-root `--operator` selection, root-owned journal,
+  resumable compiled mutation steps, operator enrollment, and typed partial results. Fixed root-owned per-operator
+  records preserve prior membership for multiple operators alongside the original global state; an interrupted initial
+  global transaction requires its original operator to recover first. The early parser supports JSON boolean forms,
+  help, and argument boundaries. Sudo entry refuses transitional wildcard grants. Host clean/reset remain blocked on
+  trusted global cleanup.
+- Image OS inspection now copies to exclusive `images/staging/<image-id>/rootfs.img` and invokes typed read-only
+  inspection. Existing staging IDs are not adopted or overwritten. Privileged optimization and the remaining
+  provisioning backend cutover remain pending.
+- Added private raw-volume identity admission, Firecracker 1.16.1 MMIO accounting, a 10,000,000-byte complete vmstate
+  limit, and exact memory length from trusted captured RAM. Volume admission is identity-only while storage capacity
+  policy is unresolved; snapshot bounds do not grant trusted capture or restore authority.
+- Added retained topology/firewall endpoint transfer and detach foundations; these do not establish completion of the
+  public network/lifecycle transaction.
+
+These integration changes were implemented without adding or changing tests, running builds or tests, or performing
+review or qualification. Earlier evidence below applies only to its stated earlier slices.
 
 #### Canonical Firecracker Jailer launch
 - VM create, start, reboot, and snapshot restore now require an exact Firecracker/Jailer release pair and run through a root-owned Jailer chroot with no direct-launch fallback.
@@ -107,8 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directional exact-user VM-to-VM execution grants. Schema constraints bind immutable identities, TCP/UDP port ranges,
   non-root target users, duplicate rejection, and foreign-key cleanup.
 - VM invalidation removes both typed traffic families in one transaction, and execution authorization failures use a
-  dedicated structured error code. Typed traffic intent is not yet exposed through the final public policy commands or
-  connected to nftables enforcement; the transitional routed policy remains active until that atomic cutover.
+  dedicated structured error code. Typed traffic create/list/inspect now expose desired intent through `policy traffic`;
+  complete root nftables enforcement and revocation remain pending.
 - Added public directional execution-policy CRUD through
   `mvm policy exec create <source-vm> <destination-vm> <target-user>`, `mvm policy exec ls [--json]`, and
   `mvm policy exec rm <policy...> [--force]`. Creation resolves exact VM identities, rejects the same VM and root
@@ -173,11 +203,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pathname is not retained descriptor-relatively; the user can modify the file, so it is observability rather than
   tamper-proof root authority. Writes and close are serialized across copied sink values, incomplete or failed writes
   poison later records, and validation, write, and cleanup failures remain typed and visible.
-- Public execution-policy CRUD, the wire, source and destination sessions, destination process side, and registered
-  root authority sidecar still do not activate VM-to-VM execution. The audit sink is not wired into `pkg/api`, and no
-  runtime audit record or positive VM-to-VM execution path exists. The API-owned relay listener/consumer, runtime
-  directional-policy resolution and enforcement, relay payload forwarding, audit integration, and Python L2
-  qualification remain pending. The implemented cancellation boundaries are
+- The API-owned opt-in relay now composes execution-policy CRUD, source/destination sessions, destination execution,
+  retained root authority, directional policy enforcement, payload forwarding, and audit. It requires eligible
+  schema-3 active identities; Python L2 qualification remains pending. The implemented cancellation boundaries are
   process-group
   guarantees, not per-command cgroup authority, and do not claim cleanup of descendants that deliberately leave their
   group.
@@ -490,7 +518,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sudoers reconciliation now pins the fixed root-owned directory chain and one-link `0440` policy, validates the
   generated content through bounded absolute `visudo` on stdin with a fixed environment, and publishes by file fsync,
   atomic rename, and directory fsync. Failures retain replacement/durability evidence. The transitional grants are
-  unchanged; administrator enrollment, full init/reset hardening, and marker-only policy activation remain pending.
+  unchanged; early administrator enrollment and root journaling are now implemented, while trusted reset cleanup and
+  marker-only policy activation remain pending.
 
 #### Privileged-dispatch foundation
 - Added the reserved, versioned privileged entry point to the root-owned `mvm` binary. Selection occurs before Cobra or
@@ -863,10 +892,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stop and remove now clean the VM's actual leaf cgroup instead of leaving stale ones behind.
 
 #### Privileged initialization ownership
-- `sudo mvm host init` now resolves a complete, internally consistent sudo identity before creating invoking-user cache
-  or configuration directories. It rejects partial/spoofed identity and sudo-time path overrides before mutation.
-- Invoking-user directories are created component by component with descriptor-relative no-follow operations; only
-  newly created directories receive the invoking UID/GID, while unsafe existing paths and replacement races fail closed.
+- `sudo /usr/local/bin/mvm host init` resolves a complete, internally consistent sudo identity before compiled host
+  setup. Direct root requires an explicit non-root operator. The early administrator route does not create or load the
+  invoking user's cache, configuration, or SQLite database.
 
 ### Security work still pending
 
@@ -901,10 +929,10 @@ The following items are release blockers and are intentionally not described abo
   process, mount, cgroup, or admission decisions.
 - Carry the managed-cache locator and base launch selection through the privileged protocol, consume the private
   schema-3 cache-identity binding, and create/consume the implemented descriptor lease inside the root process and
-  private mount-namespace launch path. Add separate closed descriptor policies for snapshots, raw-only data volumes,
-  and image provisioning, then compose the implemented persistent-output preparation. Snapshot-state and data-volume
-  count/capacity bounds have a recorded resource-limit proposal, but numerical policy remains unapproved; QCOW2 image
-  import/conversion remains supported.
+  private mount-namespace launch path. Compose persistent-output preparation and complete snapshot capture/restore
+  authority. Raw-volume identity admission, release-bound MMIO counts, and snapshot byte bounds are implemented
+  privately; per-volume and aggregate storage capacity policy remain unresolved. QCOW2 image import/conversion remains
+  supported.
 - Keep the implemented closed Firewall capability, evidence-bound generation record replacement, retained host-netns
   snapshot factory, raw collector, and application/reconciliation coordinator private until qualified initial kernel
   inspection/adoption follows network authority; do not add generic paths, descriptors, or lock names.
@@ -934,20 +962,15 @@ The following items are release blockers and are intentionally not described abo
   empty removal, cancellation/close behavior, and runtime scale against supported kernels before a privileged
   `Conn.Flush` application can make links usable. Only then remove the iptables backend and selector plus the
   production `nft` CLI subprocess/parser; the canonical compiler digest alone is not kernel authority.
-- Complete typed traffic API/CLI and nftables application plus the API-owned vsock relay over the implemented isolated
-  source-session, typed policy, and destination-agent foundations. Directional exec-policy CRUD is public but does not
-  activate the relay. Add the relay listener/consumer, enforce the exact runtime directional policy, forward only the
-  bounded relay payload, invoke the typed audit sink, and complete positive L2 qualification before claiming the
-  destination path end to end. Terminal cancellation and timeout paths must call `Record` with a fresh bounded context
-  derived through `context.WithoutCancel`; every audit failure must be surfaced or joined with the relay failure rather
-  than discarded. The registered retained sidecar already composes exact process/VM-bound
-  active-pair/capacity authority, the fixed global ceiling, peer binding, and absolute-boottime stop. The
+- Complete root nftables application and revocation for the public typed traffic intent. Qualify the implemented
+  API-owned opt-in exec relay, runtime directional policy enforcement, bounded payload forwarding, cancellation,
+  audit, and retained root active-pair/capacity authority end to end after lifecycle cutover. The
   legacy guest relay, generic host-frame callback, shared guest connection, and VM-wide remote-exec field/flags are
   removed; the routed `ServiceAccessPolicy` and other transitional surfaces still require atomic removal.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the
   root-owned system binary.
-- Separate administrator host state from invoking-user initialization, replace the generic `HostInit` result with a
-  typed contract, and propagate every host mutation/state-write failure instead of reporting partial setup as success.
+- Complete trusted global cleanup before enabling host clean/reset, and qualify the early administrator journal,
+  operator enrollment, typed results, and mutation/state-write failure handling.
 - Make launch, abort, cleanup, reconciliation, snapshots, live volumes, cgroups, and firewall policy crash-consistent and
   fail closed under ownership, PID-reuse, path-race, and partial-failure conditions.
 - Reconcile `mvm vm ls`, `mvm vm ps`, and `mvm vm inspect` against root-owned process identity after host reboot instead
