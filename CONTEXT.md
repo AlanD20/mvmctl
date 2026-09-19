@@ -949,9 +949,9 @@ survive stop and become effective again only with an admitted live endpoint. VM 
 followed by local projection failure remains a reported repair/retry condition. List and inspect show local projection,
 which is never authority for kernel mutation.
 
-Managed network and traffic mutations use typed root nftables transactions. The old service-access production path
-and the last NoCloud legacy-tracker consumer are removed. The remaining legacy backend implementation below describes
-code awaiting retirement, not authority for current managed network, traffic, or NoCloud mutation.
+Managed network and traffic mutations use typed root nftables transactions. The old service-access production path,
+NoCloud legacy-tracker consumer, CLI nftables/iptables implementations, tracker repositories, and backend selectors
+are removed. The production adapter uses `google/nftables`; no CLI backend or fallback is available.
 
 NoCloud now uses fixed gateway TCP `8000` through typed apply/revoke requests containing only the owned network ID.
 Root derives the gateway, protocol, and port. One live batch binds each network's listener before the grant is applied;
@@ -960,16 +960,13 @@ socket and then releases it. The grant authorizes a reserved service slot, not t
 leave that durable slot grant for another invocation or network teardown. Custom ports are rejected. This implements
 the accepted fixed-slot contract without claiming live qualification.
 
-- **nftables** (default): Uses `internal/lib/firewall/nftables.go` -- atomic `nft -f -` batch files.
-- **iptables** (legacy): Uses `internal/lib/firewall/iptables.go` -- per-rule `iptables` calls.
+Host readiness executes the fixed typed compiler/application/readback probe only in a disposable network namespace.
+It proves the modeled bridge/inet, connection-tracking, and NAT operations available for that probe; it does not mutate
+host tables or establish release qualification. Operator invocation uses the authenticated dispatcher; administrator
+setup calls the same root-side probe directly to avoid reacquiring its own exclusive admission lock.
 
-Selection logic in `firewall.NewFirewallTracker(backend, xtcommentAvail, db)`. Both DB tables persist independently; only the active backend's table is queried.
-
-**Why nftables is default:** nftables is the modern replacement for iptables and is the default firewall on RHEL 9+, Debian 11+, Ubuntu 22.04+, and Arch Linux. It provides atomic batch operations via `nft -f -` (all rules applied or none), cleaner rule management (no separate save/restore workflow), and better performance for large rule sets.
-
-**UFW compatibility:** The nftables backend uses non-hook chains inside the system `ip filter` and `ip nat` tables, with jump rules inserted at position 0 of built-in chains (FORWARD, POSTROUTING, INPUT). This ensures MVM rules evaluate before UFW's. When UFW reloads (`ufw reload`), it flushes built-in chains and removes MVM's jump rules -- these are re-created lazily on the next `mvm network` or `mvm vm create` operation. The iptables backend has the same limitation.
-
-The `FirewallTracker` also reads an `iptables_xtcomment` user setting that adds comment tags to iptables rules for easier identification.
+Other root or `CAP_NET_ADMIN` tools are trusted administrators, but detected changes to managed firewall authority
+fail closed. The former UFW jump-rule recreation behavior and `iptables_xtcomment` setting no longer apply.
 
 The private v0.3.0 compiler foundation under `internal/service/firewall/` pins `github.com/google/nftables v0.3.0` and
 accepts only fully resolved mvmctl-owned intent. It emits fixed `mvmctl_bridge` and `mvmctl_inet` tables and fixed hook
@@ -1066,8 +1063,9 @@ The raw collector and retained host-netns factory close the expression-decoder a
 The private application coordinator composes them only for an
 already admitted record; root-record-bound initial live inspection within an accepted threat model for another root or
 `CAP_NET_ADMIN` actor and real-kernel delete/recreate batch atomicity remain explicit activation gates. After those
-gates, production composition must remove iptables, the backend selector, backend-specific repositories, and the
-production `nft` CLI path. Library and netlink types stay private to the adapter; there is no final CLI fallback.
+gates, production composition uses only typed transactions. The iptables/backend selectors, backend-specific
+repositories, and production `nft` CLI path are now removed. Library and netlink types stay private to the adapter;
+there is no CLI fallback.
 Kernel nftables, bridge-family, connection-tracking, NAT, and privilege capabilities remain host requirements. A
 disposable QA runner may use the `nft` CLI only as an independent read-only oracle.
 
