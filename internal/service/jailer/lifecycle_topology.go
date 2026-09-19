@@ -60,7 +60,14 @@ func (lease *cleanupLease) recoverProductionTopology(ctx context.Context) error 
 		return appendInstanceOperationError(err, "release rejected recovery topology hold",
 			retained.Release(context.WithoutCancel(ctx)))
 	}
-	topology, err := network.Recover(ctx, hold, state.record.launchGeneration)
+	var topology *network.VMTopologyLease
+	if state.priorBootAbsence != nil {
+		topology, err = network.RecoverWithPriorBootAbsence(
+			ctx, hold, state.record.launchGeneration, state.priorBootAbsence,
+		)
+	} else {
+		topology, err = network.Recover(ctx, hold, state.record.launchGeneration)
+	}
 	if topology != nil {
 		state.topology = topology
 	}
