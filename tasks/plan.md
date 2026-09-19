@@ -10,12 +10,26 @@
 
 The user explicitly resumed the remaining production implementation after `4ff65536`.
 Independent isolated writers own PCI/nested launch, typed live-volume operations, and legacy
-Jailer retirement. Snapshot producer isolation and the memory-saturation cause receive bounded
-source-design checks before any policy change; the earlier unapproved credential/API redesign
-and memory headroom proposal are not silently adopted. No tests, test edits, builds, validation,
+Jailer retirement. The user subsequently approved isolated VM identities, root-brokered API,
+and protected active backing (ADR-0018), plus pressure-only memory control permitting the
+envelope to be exceeded (ADR-0019). The snapshot pause and finite-memory-policy hold are
+superseded by these explicit decisions, not by an inferred approval. No tests, test edits, builds, validation,
 reviews, installations, or live host/VM mutations are authorized. Formatting/linting and ordinary
 chunk commits only. Stop after implementation; report actual decision blockers instead of
 claiming that unimplemented work is merely awaiting QA.
+
+Integrated in this continuation: legacy launch/cleanup retirement `338f9539`, configuration-error
+propagation `cec0177b`, pressure-only policy v2 `dc5b04cb`, PCI/x86 nested launch and root device
+metadata `da923ace`. None is runtime-qualified. ARM nested launch remains rejected.
+
+Active isolated ownership: `impl03_console` writes execution identity authority;
+`impl03_deblob_typed` protected backing; `impl03_exec` named API broker plus host vsock transport;
+`impl03_lifecycle` schema/runtime/launch isolation composition; `impl03_runtime_recovery` typed
+hotplug and dispatcher registration. Worktrees use the corresponding `impl03-execution-identity`,
+`impl03-protected-backing`, `impl03-api-broker`, `impl03-isolated-launch`, and
+`impl03-volume-hotplug` branches under `.tmp/worktrees/`. Broker commit `ed2caacf` awaits its
+runtime producer. Snapshot capture/restore still needs the composed isolation prerequisite;
+do not label a store-only foundation or caller-controlled copy as completed capture.
 
 ### Resumed after user policy decisions
 
