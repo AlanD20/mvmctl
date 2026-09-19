@@ -34,8 +34,9 @@ traffic grants for active/stopped endpoints, prior-boot firewall retirement, and
 output are committed. These are source integration claims only: no build or test evidence was
 produced in this pass. Existing test fakes and expectations have deliberately not been updated.
 
-Remaining implementation dependencies are explicit: prior-boot topology/process-absence proof
-and managed-network rebootstrap; global retained quiescence plus late admission protection for
+Prior-boot topology/process-absence proof, managed-network rebootstrap, and public create/respawn
+ordering are now integrated as unverified implementation. Remaining dependencies include
+global retained quiescence plus late admission protection for
 host reset; NoCloud listener ownership; remaining typed loopmount operations; approved memory
 pressure policy; volume storage policy and snapshot capture/backing authority. Console and
 graceful stop must retain their existing behavior. Root-observed process liveness preserves a
@@ -45,8 +46,11 @@ restore and unsupported volume/PCI launches currently reject rather than use leg
 Pending user choices concern memory.high versus memory.max headroom, preserving closed typed
 account/deblob operations versus explicitly removing those features, and NoCloud dynamic-port
 listener proof versus a fixed gateway-bound port. Do not treat unanswered questions as approval.
-Network reboot recovery writers are completing their currently assigned packets. Keep their
-remaining work and any unresolved cleanup interruption windows separate from completed paths.
+All current writer packets have finished. Stop here: do not queue more implementation or begin
+tests, reviews, builds, or qualification without the next user instruction. Remaining cleanup
+limitations include surviving namespace placeholders, ambiguous interrupted ownership, old-boot
+network removal receipts, and pending desired networks lacking a root record. Existing tests
+and test helpers require a later authorized update for the changed interfaces.
 
 ## Prepared integration checkpoint (2026-09-13)
 
