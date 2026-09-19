@@ -29,19 +29,22 @@ const managedPersistentOutputRequiredStat = unix.STATX_TYPE | unix.STATX_MODE | 
 	unix.STATX_UID | unix.STATX_GID | unix.STATX_INO | unix.STATX_SIZE | unix.STATX_MTIME | unix.STATX_CTIME
 
 type managedPersistentOutputDeps struct {
-	openAt2   func(context.Context, int, string, *unix.OpenHow) (int, error)
-	statx     func(context.Context, int, int, int, *unix.Statx_t) error
-	fchown    func(context.Context, int, int, int) error
-	fchmod    func(context.Context, int, uint32) error
-	ftruncate func(context.Context, int, int64) error
-	fsync     func(context.Context, int) error
-	publish   func(context.Context, int, int, managedPersistentOutputName) error
-	close     func(context.Context, int) error
+	openAt2      func(context.Context, int, string, *unix.OpenHow) (int, error)
+	statx        func(context.Context, int, int, int, *unix.Statx_t) error
+	fchown       func(context.Context, int, int, int) error
+	fchmod       func(context.Context, int, uint32) error
+	ftruncate    func(context.Context, int, int64) error
+	fsync        func(context.Context, int) error
+	publish      func(context.Context, int, int, managedPersistentOutputName) error
+	close        func(context.Context, int) error
+	getAccessACL func(context.Context, int, []byte) (int, error)
+	setAccessACL func(context.Context, int, []byte, int) error
 }
 
 type managedPersistentOutput struct {
-	name managedPersistentOutputName
-	fd   int
+	name          managedPersistentOutputName
+	fd            int
+	isolatedGrant bool
 }
 
 // managedVMPersistentOutputLease owns only individually admitted persistent files and their directory chain.
@@ -52,10 +55,12 @@ type managedVMPersistentOutputLease struct {
 
 type managedVMPersistentOutputState struct {
 	// mu serializes preparation, readiness, descriptor ownership, and release across copied capabilities.
-	mu                  sync.Mutex
-	deps                managedPersistentOutputDeps
-	cache               *managedCacheLease
-	owner               instanceCaller
+	mu    sync.Mutex
+	deps  managedPersistentOutputDeps
+	cache *managedCacheLease
+	owner instanceCaller
+	// executionUID derives only from this VM's durable launch record, never a requested ACL.
+	executionUID        uint32
 	vmDirectoryFD       int
 	retained            []int
 	outputs             []managedPersistentOutput
@@ -72,7 +77,8 @@ type managedVMPersistentOutputState struct {
 
 func validateManagedPersistentOutputDeps(deps managedPersistentOutputDeps) error {
 	if deps.openAt2 == nil || deps.statx == nil || deps.fchown == nil || deps.fchmod == nil ||
-		deps.ftruncate == nil || deps.fsync == nil || deps.publish == nil || deps.close == nil {
+		deps.ftruncate == nil || deps.fsync == nil || deps.publish == nil || deps.close == nil ||
+		deps.getAccessACL == nil || deps.setAccessACL == nil {
 		return managedVMResourceAtomicError("persistent output effects are incomplete", nil)
 	}
 	return nil
@@ -140,9 +146,11 @@ func admitManagedPersistentOutputs(ctx context.Context, state *managedVMPersiste
 		}
 		state.retained = append(state.retained, fd)
 		output.fd = fd
-		if _, err := inspectManagedPersistentOutputObject(ctx, state, fd, false, 1); err != nil {
+		stat, err := inspectManagedPersistentOutputObject(ctx, state, fd, false, 1)
+		if err != nil {
 			return err
 		}
+		output.isolatedGrant = stat.Mode == unix.S_IFREG|0660
 	}
 	return nil
 }
@@ -182,10 +190,15 @@ func inspectManagedPersistentOutputObject(
 					"persistent output directory type or mode is unsafe",
 				)
 			}
-		} else if current.Mode != unix.S_IFREG|0600 || current.Gid != state.owner.gid || current.Nlink != links {
-			return unix.Statx_t{}, managedVMResourceValidationError(
-				"persistent output must be a private caller-owned regular file",
-			)
+		} else {
+			if current.Mode&unix.S_IFMT != unix.S_IFREG || current.Gid != state.owner.gid || current.Nlink != links {
+				return unix.Statx_t{}, managedVMResourceValidationError(
+					"persistent output must be an individually pinned caller-owned regular file",
+				)
+			}
+			if _, err := inspectIsolatedPersistentOutputACL(ctx, state, fd, current.Mode); err != nil {
+				return unix.Statx_t{}, err
+			}
 		}
 		if pass == 1 && !sameManagedPersistentOutputStat(before, current) {
 			return unix.Statx_t{}, managedVMResourceValidationError(
@@ -279,5 +292,11 @@ func realManagedPersistentOutputDeps() managedPersistentOutputDeps {
 			return unix.Linkat(fd, "", parentFD, basename, unix.AT_EMPTY_PATH)
 		},
 		close: func(_ context.Context, fd int) error { return unix.Close(fd) },
+		getAccessACL: func(_ context.Context, fd int, target []byte) (int, error) {
+			return unix.Fgetxattr(fd, isolatedOutputAccessACLName, target)
+		},
+		setAccessACL: func(_ context.Context, fd int, value []byte, flags int) error {
+			return unix.Fsetxattr(fd, isolatedOutputAccessACLName, value, flags)
+		},
 	}
 }

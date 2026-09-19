@@ -3,7 +3,7 @@ package jailer
 import "context"
 
 // preparePersistentOutputs consumes a dedicated pinned cache lease after successful durable launch registration.
-// CRITICAL: VM identity, owner, and cache authority derive from schema 3; output paths and registration claims do not
+// CRITICAL: VM identity, operator, execution UID and cache authority derive from the durable record; paths do not
 // cross this seam. The base launch resource lease independently owns its cache pin.
 func (lease *launchLease) preparePersistentOutputs(
 	ctx context.Context,
@@ -83,6 +83,7 @@ func preparePersistentOutputsWithDeps(
 		deps:          deps,
 		cache:         &ownedCache,
 		owner:         instanceCaller{uid: state.record.ownerUID, gid: state.record.launch.ownerGID},
+		executionUID:  state.record.launch.executionIdentity.uid,
 		vmDirectoryFD: -1,
 		outputs:       outputs,
 	}
@@ -101,6 +102,9 @@ func releaseCleanupPersistentOutputsLocked(ctx context.Context, state *cleanupLe
 		return nil
 	}
 	outputs := state.persistentOutputs
+	if err := revokeIsolatedPersistentOutputLease(ctx, outputs); err != nil {
+		return err
+	}
 	state.persistentOutputs = nil
 	// A terminal close error must surface once without retrying a descriptor that the OS may already have reused.
 	return outputs.Release(context.WithoutCancel(ctx))
