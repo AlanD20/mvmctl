@@ -155,7 +155,11 @@ func (stage *stagedImage) close(remove bool) error {
 	return nil
 }
 
-func shrinkStagedImage(ctx context.Context, imagePath, imageID, fsType string) (returnErr error) {
+func optimizeStagedImage(
+	ctx context.Context,
+	imagePath, imageID, fsType, osType string,
+	deblob, shrink bool,
+) (returnErr error) {
 	stage, err := prepareStagedImage(ctx, imagePath, imageID, fsType)
 	if err != nil {
 		return err
@@ -170,10 +174,14 @@ func shrinkStagedImage(ctx context.Context, imagePath, imageID, fsType string) (
 				errs.WithDetails(map[string]any{"image_id": imageID, "staging_retained": !completed})))
 		}
 	}()
+	plan := loopmountsvc.ImageOptimizePlan{Shrink: shrink}
+	if deblob {
+		plan.DeblobOS = &osType
+	}
 	result, err := loopmountsvc.NewClient().OptimizeImage(ctx, loopmountsvc.ImageOptimizeRequest{
 		CacheLocator: stage.request.CacheLocator, ImageID: imageID,
 		ExpectedImageBytes: stage.request.ExpectedImageBytes, Filesystem: stage.request.Filesystem,
-		Plan: loopmountsvc.ImageOptimizePlan{Shrink: true},
+		Plan: plan,
 	})
 	if err != nil {
 		return err

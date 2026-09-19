@@ -247,20 +247,21 @@ func (s *Service) OptimizeImage(
 	preShrinkInfo, _ := os.Stat(imagePath)
 	preShrinkSize := preShrinkInfo.Size()
 
-	if !skipOptimization {
+	typedOptimization := provisionerType == provisioner.ProvisionerLoopMount &&
+		(fsType == "ext2" || fsType == "ext3" || fsType == "ext4" || fsType == "btrfs")
+	if !skipOptimization && !typedOptimization {
 		p.Deblob()
 	}
-	typedShrink := provisionerType == provisioner.ProvisionerLoopMount && FSCanShrink[fsType]
-	if FSCanShrink[fsType] && !typedShrink {
+	if FSCanShrink[fsType] && !typedOptimization {
 		p.Shrink()
 	}
 	optimized, runErr := p.Run(ctx)
 	if runErr != nil {
 		return nil, warnings, runErr
 	}
-	if typedShrink {
-		if err := shrinkStagedImage(ctx, imagePath, imageID, fsType); err != nil {
-			slog.Error("managed image shrink failed", "image_id", imageID, "error", err)
+	if typedOptimization && (!skipOptimization || FSCanShrink[fsType]) {
+		if err := optimizeStagedImage(ctx, imagePath, imageID, fsType, detectedOS, !skipOptimization, FSCanShrink[fsType]); err != nil {
+			slog.Error("managed image optimization failed", "image_id", imageID, "error", err)
 			return nil, warnings, err
 		}
 		optimized = true

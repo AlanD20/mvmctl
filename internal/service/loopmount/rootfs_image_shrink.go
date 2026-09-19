@@ -19,9 +19,9 @@ type completedImageShrinkCleanup struct{}
 
 func (completedImageShrinkCleanup) CleanupOptimizeImage(context.Context) error { return nil }
 
-// NewImageShrinkServer constructs durable offline ext-family image shrink authority.
+// NewImageShrinkServer constructs durable image cleanup and offline ext-family shrink authority.
 // CRITICAL: This one-request receiver permanently unshares its locked OS thread. Conversion
-// and deblob remain separate pending effects and are rejected before journal or filesystem mutation.
+// requires separate replacement authority and is rejected before journal or filesystem mutation.
 func NewImageShrinkServer() *Server {
 	return &Server{
 		rootfsAuthority:    systemRootfsAuthorityDeps(),
@@ -32,10 +32,13 @@ func NewImageShrinkServer() *Server {
 }
 
 func validateImageShrinkPlan(filesystem Filesystem, plan ImageOptimizePlan) error {
-	if !plan.Shrink || plan.ConvertTo != nil || plan.DeblobOS != nil || plan.FixFstab {
-		return rootfsValidationError("image shrink receiver requires exactly the named shrink operation")
+	if plan.ConvertTo != nil || !plan.Shrink && plan.DeblobOS == nil && !plan.FixFstab {
+		return rootfsValidationError("managed image receiver requires named cleanup, fstab, or shrink intent")
 	}
-	if filesystem != FilesystemExt2 && filesystem != FilesystemExt3 && filesystem != FilesystemExt4 {
+	if err := filesystem.Validate(); err != nil {
+		return err
+	}
+	if plan.Shrink && filesystem != FilesystemExt2 && filesystem != FilesystemExt3 && filesystem != FilesystemExt4 {
 		return rootfsValidationError("offline image shrink requires an ext-family filesystem")
 	}
 	return nil
@@ -61,6 +64,39 @@ func (adapter *rootfsImageShrinkAdapter) OptimizeImage(
 	if transaction == nil || transaction.record == nil {
 		return outcome, rootfsAtomicError("image shrink durable authority is missing", nil)
 	}
+	if transaction.record.Phase == imageShrinkPrepared && (plan.DeblobOS != nil || plan.FixFstab) {
+		content, contentErr := (&rootfsVMProvisionAdapter{deps: adapter.deps}).ProvisionVM(ctx, lease, filesystem,
+			VMProvisionPlan{DeblobOS: plan.DeblobOS, FixFstab: plan.FixFstab})
+		contentErr = appendRootfsCleanupError(contentErr, "release image content effects", content.cleanup(context.WithoutCancel(ctx)))
+		switch content.state {
+		case vmProvisionEffectStateUnchanged:
+			outcome.state = imageOptimizeEffectStateUnchanged
+		case vmProvisionEffectStateModified:
+			outcome.state = imageOptimizeEffectStateModified
+		case vmProvisionEffectStateModifiedDurabilityUncertain:
+			outcome.state = imageOptimizeEffectStateModifiedDurabilityUncertain
+		default:
+			outcome.state = imageOptimizeEffectStateOutcomeUnknown
+		}
+		if contentErr != nil {
+			return outcome, contentErr
+		}
+		if !content.state.allowsSuccess() {
+			return outcome, rootfsAtomicError("managed image content did not produce a durable result", nil)
+		}
+	}
+	if !plan.Shrink {
+		if err := finalizeRootfsProvisionBacking(ctx, adapter.deps, lease, admittedBytes); err != nil {
+			return outcome, err
+		}
+		transaction.record.TargetBytes = admittedBytes
+		transaction.record.Phase = imageShrinkComplete
+		if err := transaction.persist(ctx); err != nil {
+			return outcome, err
+		}
+		outcome.imageBytes = admittedBytes
+		return outcome, nil
+	}
 	if err := adapter.deps.lockOSThread(ctx); err != nil {
 		return outcome, rootfsAtomicError("lock image shrink OS thread", err)
 	}
@@ -73,7 +109,10 @@ func (adapter *rootfsImageShrinkAdapter) OptimizeImage(
 			"unlock image shrink OS thread", adapter.deps.unlockOSThread(context.WithoutCancel(ctx)))
 	}
 	cleanupCtx := context.WithoutCancel(ctx)
-	tracker := &rootfsProvisionTracker{}
+	tracker := &rootfsProvisionTracker{
+		modified: outcome.state == imageOptimizeEffectStateModified,
+		durable:  outcome.state == imageOptimizeEffectStateModified,
+	}
 	var loop *rootfsLoopDevice
 	var partitions *rootfsPartitionSet
 	var source *rootfsSelectedSource
