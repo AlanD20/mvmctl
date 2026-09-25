@@ -172,7 +172,7 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 			// Migration failed — restore the snapshot taken before it so the
 			// database is left in a clean pre-migration state rather than broken.
 			if snapshotPath != "" {
-				if restoreErr := d.RestoreFromSnapshot(snapshotPath); restoreErr != nil {
+				if restoreErr := d.RestoreFromSnapshot(context.WithoutCancel(ctx), snapshotPath); restoreErr != nil {
 					slog.Error("failed to restore snapshot after migration failure",
 						"version", f.version, "snapshot", snapshotPath, "error", restoreErr)
 				}
