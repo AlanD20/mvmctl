@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os/user"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -95,8 +96,21 @@ func TestRunReleasesPinnedExecutableAndPreservesDeliveryFailure(t *testing.T) {
 		live = true
 		return system.PinnedExecutableIdentity{SHA256: "test-authority"}, nil
 	}
+	admissionLive := false
+	admissionReleaseCalls := 0
+	runtime.admission.acquire = func(context.Context) (operationAdmissionLease, error) {
+		assert.True(t, live)
+		admissionLive = true
+		return &fakeOperationAdmissionLease{release: func(cleanupCtx context.Context) error {
+			admissionReleaseCalls++
+			assert.NoError(t, cleanupCtx.Err())
+			admissionLive = false
+			return nil
+		}}, nil
+	}
 	endpoint.writeFunc = func([]byte) (int, error) {
 		assert.True(t, live)
+		assert.True(t, admissionLive)
 		cancel()
 		return 0, primaryCause
 	}
@@ -104,6 +118,7 @@ func TestRunReleasesPinnedExecutableAndPreservesDeliveryFailure(t *testing.T) {
 	runtime.executable.release = func(cleanupCtx context.Context, _ *system.PinnedExecutable) error {
 		releaseCalls++
 		assert.NoError(t, cleanupCtx.Err())
+		assert.False(t, admissionLive)
 		live = false
 		return cleanupCause
 	}
@@ -111,9 +126,71 @@ func TestRunReleasesPinnedExecutableAndPreservesDeliveryFailure(t *testing.T) {
 	err := run(ctx, []string{Marker, "unknown"}, endpoint, runtime)
 	require.Error(t, err)
 	assert.Equal(t, 1, releaseCalls)
+	assert.Equal(t, 1, admissionReleaseCalls)
 	assert.False(t, live)
 	assert.ErrorIs(t, err, primaryCause)
 	assert.ErrorIs(t, err, cleanupCause)
+}
+
+func TestRun_AdmissionFailureBlocksAuthorizationAndDispatch(t *testing.T) {
+	tests := map[string]struct {
+		admission admissionDeps
+		wantCode  errs.Code
+		wantError string
+	}{
+		"missing dependency": {
+			wantCode:  errs.CodeInternal,
+			wantError: "host admission acquisition is unavailable",
+		},
+		"missing lease": {
+			admission: admissionDeps{acquire: func(context.Context) (operationAdmissionLease, error) {
+				return nil, nil
+			}},
+			wantCode:  errs.CodeInternal,
+			wantError: "host admission lease is missing",
+		},
+		"acquisition denied": {
+			admission: admissionDeps{acquire: func(context.Context) (operationAdmissionLease, error) {
+				return nil, errs.New(errs.CodePrivilegeRequired, "host admission is disabled")
+			}},
+			wantCode:  errs.CodePrivilegeRequired,
+			wantError: "host admission is disabled",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			endpoint := newReceiverEndpoint()
+			runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
+			runtime.control = validControlDeps(endpoint, nil)
+			runtime.admission = tc.admission
+			authorized := false
+			authorization := runtime.authorization
+			authorization.lookupUserID = func(string) (*user.User, error) {
+				authorized = true
+				return nil, errors.New("authorization must not run")
+			}
+			runtime.authorization = authorization
+
+			err := run(t.Context(), []string{Marker, "unknown"}, endpoint, runtime)
+			require.NoError(t, err)
+			operationErr := decodeReceiverError(t, endpoint.output.Bytes(), "unknown")
+			assert.Equal(t, tc.wantCode, operationErr.Code)
+			assert.ErrorContains(t, operationErr, tc.wantError)
+			assert.False(t, authorized)
+			assert.NotContains(t, operationErr.Error(), "unknown privileged action")
+		})
+	}
+}
+
+type fakeOperationAdmissionLease struct {
+	release func(context.Context) error
+}
+
+func (lease *fakeOperationAdmissionLease) Release(ctx context.Context) error {
+	if lease.release != nil {
+		return lease.release(ctx)
+	}
+	return nil
 }
 
 func TestRun_FailsClosedBeforeDispatch(t *testing.T) {
@@ -174,8 +251,11 @@ func testRuntimeDeps(effectiveUID int, identityEnvironment map[string]string) ru
 			effectiveUID: func() int { return effectiveUID },
 			lookupEnv:    mapLookup(identityEnvironment),
 		},
-		environment:   newEnvironmentStore(nil).deps(),
-		executable:    trustedExecutableDeps(),
+		environment: newEnvironmentStore(nil).deps(),
+		executable:  trustedExecutableDeps(),
+		admission: admissionDeps{acquire: func(context.Context) (operationAdmissionLease, error) {
+			return &fakeOperationAdmissionLease{}, nil
+		}},
 		authorization: memberAuthorizationDeps(),
 	}
 }

@@ -36,6 +36,13 @@ func TestRun_SanitizesBeforeExecutableAndUIDBoundAuthorization(t *testing.T) {
 		calls = append(calls, "authorization.lookup_user")
 		return originalLookupUser(uid)
 	}
+	admission := admissionDeps{acquire: func(context.Context) (operationAdmissionLease, error) {
+		calls = append(calls, "admission.acquire")
+		return &fakeOperationAdmissionLease{release: func(context.Context) error {
+			calls = append(calls, "admission.release")
+			return nil
+		}}, nil
+	}}
 
 	endpoint := newReceiverEndpoint()
 	err := run(context.Background(), []string{Marker, "unknown"}, endpoint, runtimeDeps{
@@ -51,6 +58,7 @@ func TestRun_SanitizesBeforeExecutableAndUIDBoundAuthorization(t *testing.T) {
 		},
 		environment:   environment.deps(),
 		executable:    executable,
+		admission:     admission,
 		authorization: authorization,
 		control:       validControlDeps(endpoint, &calls),
 	})
@@ -61,15 +69,20 @@ func TestRun_SanitizesBeforeExecutableAndUIDBoundAuthorization(t *testing.T) {
 	sanitizeStartIndex := callIndex(calls, "environment.clear")
 	sanitizeEndIndex := callIndex(calls, "environment.set.LC_ALL")
 	executableIndex := callIndex(calls, "executable.pin")
+	admissionIndex := callIndex(calls, "admission.acquire")
 	authorizationIndex := callIndex(calls, "authorization.lookup_user")
+	releaseIndex := callIndex(calls, "admission.release")
 	for _, index := range []int{
-		identityIndex, sanitizeStartIndex, sanitizeEndIndex, executableIndex, authorizationIndex,
+		identityIndex, sanitizeStartIndex, sanitizeEndIndex, executableIndex, admissionIndex, authorizationIndex,
+		releaseIndex,
 	} {
 		require.GreaterOrEqual(t, index, 0)
 	}
 	assert.Less(t, identityIndex, sanitizeStartIndex)
 	assert.Less(t, sanitizeEndIndex, executableIndex)
-	assert.Less(t, executableIndex, authorizationIndex)
+	assert.Less(t, executableIndex, admissionIndex)
+	assert.Less(t, admissionIndex, authorizationIndex)
+	assert.Less(t, authorizationIndex, releaseIndex)
 	assert.Equal(t, map[string]string{
 		"PATH":   "/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME":   privilegedHOME,
@@ -82,7 +95,11 @@ func TestRun_SanitizesBeforeExecutableAndUIDBoundAuthorization(t *testing.T) {
 // current membership in the mvm authorization group.
 func TestRun_RejectsNonMemberBeforeActionDispatch(t *testing.T) {
 	authorization := memberAuthorizationDeps()
-	authorization.groupIDs = func(*user.User) ([]string, error) { return []string{"1000"}, nil }
+	admissionHeld := false
+	authorization.groupIDs = func(*user.User) ([]string, error) {
+		assert.True(t, admissionHeld)
+		return []string{"1000"}, nil
+	}
 
 	endpoint := newReceiverEndpoint()
 	err := run(context.Background(), []string{Marker, "unknown"}, endpoint, runtimeDeps{
@@ -90,8 +107,15 @@ func TestRun_RejectsNonMemberBeforeActionDispatch(t *testing.T) {
 			effectiveUID: func() int { return 0 },
 			lookupEnv:    mapLookup(map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"}),
 		},
-		environment:   newEnvironmentStore(nil).deps(),
-		executable:    trustedExecutableDeps(),
+		environment: newEnvironmentStore(nil).deps(),
+		executable:  trustedExecutableDeps(),
+		admission: admissionDeps{acquire: func(context.Context) (operationAdmissionLease, error) {
+			admissionHeld = true
+			return &fakeOperationAdmissionLease{release: func(context.Context) error {
+				admissionHeld = false
+				return nil
+			}}, nil
+		}},
 		authorization: authorization,
 		control:       validControlDeps(endpoint, nil),
 	})
@@ -99,6 +123,7 @@ func TestRun_RejectsNonMemberBeforeActionDispatch(t *testing.T) {
 	operationErr := decodeReceiverError(t, endpoint.output.Bytes(), "unknown")
 	assert.ErrorContains(t, operationErr, "is not a current member of the "+infra.MVMUnixGroup+" group")
 	assert.NotContains(t, operationErr.Error(), "unknown privileged action")
+	assert.False(t, admissionHeld)
 }
 
 func callIndex(calls []string, target string) int {

@@ -481,9 +481,8 @@ func TestRunRoutesExactLoopMountActionsWithAuthenticatedCaller(t *testing.T) {
 	})
 }
 
-// Rationale: Retaining protocol types and a named normal-user client does not authorize root-side optimization. The
-// central switch must reject OptimizeImage without consuming a byte from its request body.
-func TestRunLeavesLoopMountOptimizeImageUnhandledAndUnread(t *testing.T) {
+// Rationale: The registered optimization action must fail closed when its production effect is unavailable.
+func TestRunLoopMountOptimizeImageRequiresActiveHandler(t *testing.T) {
 	request := loopmount.ImageOptimizeRequest{
 		CacheLocator:       "/home/alice/.cache/mvmctl",
 		ImageID:            strings.Repeat("c", 64),
@@ -518,11 +517,10 @@ func TestRunLeavesLoopMountOptimizeImageUnhandledAndUnread(t *testing.T) {
 	err := run(t.Context(), []string{Marker, loopmount.ImageOptimizeAction}, endpoint, runtime)
 
 	require.NoError(t, err)
-	assert.Zero(t, endpoint.readCalls)
 	assert.Zero(t, effectCalls)
 	operationErr := decodeReceiverError(t, endpoint.output.Bytes(), loopmount.ImageOptimizeAction)
-	assert.Equal(t, errs.CodeValidationFailed, operationErr.Code)
-	assert.ErrorContains(t, operationErr, `unknown privileged action "`+loopmount.ImageOptimizeAction+`"`)
+	assert.Equal(t, errs.CodeInternal, operationErr.Code)
+	assert.ErrorContains(t, operationErr, "loopmount image optimization handler is not active")
 }
 
 // Rationale: Exact LoopMount dispatch transfers response ownership to the selected handler. An outer second frame

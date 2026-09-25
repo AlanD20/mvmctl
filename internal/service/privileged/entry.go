@@ -23,6 +23,7 @@ type runtimeDeps struct {
 	identity               identityDeps
 	environment            environmentDeps
 	executable             executableDeps
+	admission              admissionDeps
 	authorization          authorizationDeps
 	control                controlDeps
 	trustedRelease         trustedReleaseHandlerEffects
@@ -31,6 +32,44 @@ type runtimeDeps struct {
 	loopMount              loopMountHandlerEffects
 	vmExecSession          vmExecSessionHandlerEffects
 	vmExecConnectionReader vmExecConnectionReaderDeps
+}
+
+type operationAdmissionLease interface {
+	Release(context.Context) error
+}
+
+type admissionDeps struct {
+	acquire func(context.Context) (operationAdmissionLease, error)
+}
+
+func realAdmissionDeps() admissionDeps {
+	return admissionDeps{acquire: func(ctx context.Context) (operationAdmissionLease, error) {
+		lease, err := hostadmission.AcquireOperation(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if lease == nil {
+			return nil, errs.New(errs.CodeInternal, "host admission lease is missing")
+		}
+		return lease, nil
+	}}
+}
+
+func acquireOperationAdmission(ctx context.Context, deps admissionDeps) (operationAdmissionLease, error) {
+	if deps.acquire == nil {
+		return nil, errs.New(errs.CodeInternal, "host admission acquisition is unavailable")
+	}
+	lease, err := deps.acquire(ctx)
+	if err != nil {
+		if lease != nil {
+			err = appendHostAdmissionReleaseError(err, lease.Release(context.WithoutCancel(ctx)))
+		}
+		return nil, err
+	}
+	if lease == nil {
+		return nil, errs.New(errs.CodeInternal, "host admission lease is missing")
+	}
+	return lease, nil
 }
 
 type dispatchDisposition uint8
@@ -56,6 +95,7 @@ func Run(ctx context.Context, args []string) error {
 		identity:               realIdentityDeps(),
 		environment:            realEnvironmentDeps(),
 		executable:             realExecutableDeps(),
+		admission:              realAdmissionDeps(),
 		authorization:          realAuthorizationDeps(),
 		control:                realControlDeps(),
 		vmExecSession:          newVMExecSessionHandlerEffects(vmExecSession),
@@ -150,7 +190,7 @@ func run(
 			deps.executable.release(context.WithoutCancel(ctx), pinnedExecutable),
 		)
 	}()
-	admission, err := hostadmission.AcquireOperation(ctx)
+	admission, err := acquireOperationAdmission(ctx, deps.admission)
 	if err != nil {
 		return deliverPreDispatchError(ctx, endpoint, request.action, err, deps.control)
 	}
