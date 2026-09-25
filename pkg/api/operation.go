@@ -50,7 +50,6 @@ type Operation struct {
 	hostSudoersConfigurer     hostSudoersConfigurer
 	trustedReleaseClient      trustedReleaseClient
 	trafficPolicyClient       *networkservice.TrafficPolicyClient
-	relaunchSpawn             func(context.Context, *vmRelaunchState, bool, string) error
 }
 
 type hostSystemBinaryInstaller interface {

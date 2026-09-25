@@ -972,9 +972,6 @@ func (op *Operation) relaunchVM(
 ) error {
 	state.vm.Vsock = state.vsock
 	state.vm.Volumes = state.volumes
-	if op.relaunchSpawn != nil {
-		return op.relaunchSpawn(ctx, state, snapshotMode, snapshotDir)
-	}
 	return op.vmRespawnFirecracker(ctx, state, snapshotMode, snapshotDir)
 }
 
