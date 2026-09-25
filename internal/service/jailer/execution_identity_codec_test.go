@@ -74,7 +74,7 @@ func TestDecodeExecutionIdentityRecordEnforcesReservationContract(t *testing.T) 
 
 	vmID := strings.Repeat("0", 32)
 	accountName := "mvm-" + strings.Repeat("a", 26)
-	nonce := strings.Repeat("0", 32)
+	nonce := strings.Repeat("b", 32)
 	pendingJSON := fmt.Sprintf(
 		`{"schema":1,"owner_uid":1000,"vm_id":"%s","account_name":"%s","nonce":"%s","phase":"pending"}`,
 		vmID, accountName, nonce,
@@ -117,14 +117,18 @@ func TestDecodeExecutionIdentityRecordEnforcesReservationContract(t *testing.T) 
 		"null_field":         strings.Replace(pendingJSON, `"owner_uid":1000`, `"owner_uid":null`, 1),
 		"trailing_object":    pendingJSON + `{}`,
 		"wrong_account_name": strings.Replace(pendingJSON, accountName, accountName+"x", 1),
-		"uppercase_nonce":    strings.Replace(pendingJSON, nonce, strings.Repeat("A", 32), 1),
+		"uppercase_nonce": strings.Replace(
+			pendingJSON, `"nonce":"`+nonce+`"`, `"nonce":"`+strings.Repeat("B", 32)+`"`, 1,
+		),
 		"pending_with_uid": strings.Replace(
 			pendingJSON, `"phase":"pending"`, `"phase":"pending","execution_uid":2000`, 1,
 		),
 		"ready_without_gid":    strings.Replace(readyJSON, `,"execution_gid":2001`, "", 1),
 		"operator_as_executor": strings.Replace(readyJSON, `"execution_uid":2000`, `"execution_uid":1000`, 1),
 		"unknown_phase":        strings.Replace(pendingJSON, `"phase":"pending"`, `"phase":"unknown"`, 1),
-		"oversized_record":     strings.Repeat(" ", executionIdentityRecordLimit+1),
+		"oversized_record": pendingJSON + strings.Repeat(
+			" ", executionIdentityRecordLimit-len(pendingJSON)+1,
+		),
 	}
 	for name, raw := range invalid {
 		t.Run(name, func(t *testing.T) {
