@@ -31,8 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > The late implementation pass also composes typed schema-4 launch/cleanup, per-VM topology, cgroup and descriptor-only
 > mounts, same-boot recovery, root traffic apply/revoke, managed-network transactions, and offline ext-image shrink.
 > This code is unverified: only formatting has been performed, with no build, tests, review, or system qualification.
-> Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation;
-> remaining privilege integration and release qualification remain incomplete. Raw-volume launch,
+> Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation.
+> The mapped production integration gaps are committed; release qualification remains incomplete. Raw-volume launch,
 > host clean/reset, and typed image recovery are
 > implemented but unverified. Earlier slice evidence below does not qualify these later changes.
 
@@ -1002,9 +1002,10 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Security work still pending
 
-Current incomplete work includes remaining privilege integration and qualification. Root-controlled snapshot
-capture/removal, the named privileged restore route, and immutable restore backing with consistent data-volume
-snapshots have source implementations, without build or system qualification.
+The bounded production gap map is closed in source, including root-controlled snapshot capture/removal, the named
+privileged restore route, immutable backing with consistent data-volume snapshots, cache cleanup, typed policies,
+and structured partial results. This has no build or system qualification; additional implementation defects may
+still emerge when those gates run.
 Approval adds no new per-volume or aggregate quota caps. Existing
 unprivileged archive construction remains outside the root service. Pressure-only memory policy v2 is implemented
 without runtime qualification; attribution of the reported OOM incident remains unresolved.
