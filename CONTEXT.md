@@ -448,14 +448,14 @@ runtime cleanup. It creates or repairs nothing, treats an absent hierarchy as al
 and remove transactions. Core VM spawning and process control use these requests; returned PID/start values are display
 projections only. Launch registers the handshake-blocked child before mutable effects, prepares cgroup/runtime and
 persistent-output authority, creates topology down, applies/verifies firewall state, and transfers pinned resources
-into a fresh child-created jail tree. It commits the observed schema-3 active identity before close-only detach; a
+into a fresh child-created jail tree. It commits the observed schema-4 active identity before close-only detach; a
 detach failure does not destructively roll back an already committed active instance.
 
 Cleanup re-admits exact root records and pidfd-bound processes, including same-boot dead-process recovery, then removes
 the exact stopped jail tree, topology, cgroup, and runtime resources before reporting cleaned. Same-boot topology
 recovery uses durable namespace/link evidence. Stop preserves endpoint reservations and traffic grants for restart;
-remove separately invalidates them and completes root removal before local deletion. Snapshot, extra-drive, and PCI
-launch remain blocked because the corresponding authority/policy is incomplete. Graceful stop preserves explicit
+remove separately invalidates them and completes root removal before local deletion. Snapshot restore, raw volumes,
+and PCI have typed production paths; release qualification remains pending. Graceful stop preserves explicit
 `force=false`, admits the exact API peer, requests guest shutdown, waits on the retained pidfd, then completes cleanup.
 Console launch now includes its fixed root-spawned relay, caller UID/GID with empty supplementary groups, authenticated
 gate, root-created PTY, and pinned outputs. Prior-boot cleanup consumes a concrete retained VM-lock capability that
@@ -479,8 +479,8 @@ process. Only the validated CID enters `model.FirecrackerConfig`; the VM/Jailer 
 vsock UDS override. VM create still uses its existing builder state rather than this common relaunch state. The private
 host `/run/mvmctl/runtime` directory lease transfers through the launch/active/cleanup graph and typed public launch.
 Host-reboot reconciliation and L2 `mvm exec` relaunch qualification remain separate from this implementation; the
-reported restart failure is not declared resolved without that evidence. Snapshot restore remains blocked at typed
-launch until trusted capture authority exists.
+reported restart failure is not declared resolved without that evidence. Snapshot restore now consumes a prepared
+root-owned capture, with independent protected disks and immutable memory backing for full restores.
 
 Snapshot restore must also obtain the captured network ID, guest IPv4, and MAC from trusted root snapshot metadata and
 reserve those exact values for the restored endpoint. It fails if the source still owns them, another endpoint
@@ -839,7 +839,7 @@ bounded output and cancellation, and writes command-redacted audit records. Unre
 separate bounded audit form. `--allow-vm-exec` is required per source command; interactive execution cannot opt in.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
 environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
-Python L2 qualification remains pending. The typed lifecycle now produces eligible schema-3 active identities;
+Python L2 qualification remains pending. The typed lifecycle now produces eligible schema-4 active identities;
 legacy and incomplete records remain ineligible.
 No SQLite VM status,
 guest-supplied source ID, socket path, or process-local semaphore may substitute for root runtime authority.
@@ -848,7 +848,7 @@ guest-supplied source ID, socket path, or process-local semaphore may substitute
 
 Two independent rootfs provisioning backends. They are **mutually exclusive** -- a single VM or image operation uses exactly ONE backend, never a combination. The `guestfs_enabled` user setting is a **toggle selector**, not a preference.
 
-- **LoopMount** (default, `guestfs_enabled=false`): Managed VM provisioning uses typed `ProvisionVM` over the authenticated privileged receiver. The receiver pins the fixed rootfs/seed resources and performs closed filesystem operations; failed requests have no raw provisioning fallback. Legacy image workflows remain a separate incomplete cutover.
+- **LoopMount** (default, `guestfs_enabled=false`): Managed VM provisioning uses typed `ProvisionVM` over the authenticated privileged receiver. The receiver pins the fixed rootfs/seed resources and performs closed filesystem operations; failed requests have no raw provisioning fallback. Image inspection and optimization use their own typed LoopMount operations.
 - **GuestFS** (opt-in, `guestfs_enabled=true`): Uses `libguestfs` via `internal/lib/provisioner/guestfs/`. Requires `libguestfs` system packages installed on the host.
 
 Provisioner type resolved ONCE at startup in `api.NewOperation()` by reading `settings.guestfs_enabled`. All callers use `op.ProvisionerType` directly. Backend interface defined in `internal/lib/provisioner/backend.go`.
