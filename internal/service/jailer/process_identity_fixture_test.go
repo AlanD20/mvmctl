@@ -71,6 +71,7 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 		processes,
 	)
 	require.NoError(t, err)
+	execution := launch.snapshot().record.launch.executionIdentity
 
 	relayContent := []byte("exact pinned receiver executable")
 	relayDigest := sha256.Sum256(relayContent)
@@ -109,9 +110,9 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 				[]byte(testProcessStat(processTestFirecrackerPID, processTestFirecrackerTicks, "S")),
 			},
 			{processTestFirecrackerDirFD, processStatusMetadata}: {
-				[]byte(testProcessStatus(testAuthorityUID, testAuthorityGID, "")),
-				[]byte(testProcessStatus(testAuthorityUID, testAuthorityGID, "")),
-				[]byte(testProcessStatus(testAuthorityUID, testAuthorityGID, "")),
+				[]byte(testProcessStatus(execution.uid, execution.gid, "")),
+				[]byte(testProcessStatus(execution.uid, execution.gid, "")),
+				[]byte(testProcessStatus(execution.uid, execution.gid, "")),
 			},
 			{processTestFirecrackerDirFD, processCgroupMetadata}: {
 				[]byte("0::/" + infra.JailerCgroupParent + "/" + testVMID + "\n"),
@@ -154,8 +155,8 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 		clock:                time.Now(),
 	}
 	preSealExecutable := firecrackerStat
-	preSealExecutable.Uid = testAuthorityUID
-	preSealExecutable.Gid = testAuthorityGID
+	preSealExecutable.Uid = execution.uid
+	preSealExecutable.Gid = execution.gid
 	fake.stats[111] = []unix.Stat_t{objectStat(firecrackerNamespace, unix.S_IFREG|0444)}
 	fake.stats[141] = []unix.Stat_t{objectStat(firecrackerNetworkNamespace, unix.S_IFREG|0444)}
 	fake.stats[112] = []unix.Stat_t{objectStat(jailRoot, unix.S_IFDIR|0755)}
