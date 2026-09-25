@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/cli"
+	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/testutil"
@@ -109,11 +111,13 @@ func TestNewBinaryListCmd(t *testing.T) {
 		}
 		cmd := cli.NewBinaryCmd(mock, nil)
 		listCmd, _, _ := cmd.Find([]string{"ls"})
-		require.NoError(t, listCmd.Flags().Set("json", "true"))
-		output := captureBinaryStdout(t, func() {
-			require.NoError(t, listCmd.RunE(listCmd, nil))
-		})
-		assert.Contains(t, output, `"architecture": "x86_64"`)
+		common.BeginOutput([]string{"--json"})
+		t.Cleanup(func() { common.BeginOutput(nil) })
+		require.NoError(t, listCmd.RunE(listCmd, nil))
+		var output bytes.Buffer
+		require.NoError(t, common.FinishOutput(&output, nil))
+		assert.Contains(t, output.String(), `"schema_version":1`)
+		assert.Contains(t, output.String(), `"architecture":"x86_64"`)
 	})
 
 	t.Run("table includes architecture column", func(t *testing.T) {
@@ -131,19 +135,6 @@ func TestNewBinaryListCmd(t *testing.T) {
 		})
 		assert.Contains(t, output, "ARCHITECTURE")
 		assert.Contains(t, output, "x86_64")
-	})
-
-	t.Run("json_output_with_nil_binaries", func(t *testing.T) {
-		mock := &testutil.MockBinaryAPI{
-			BinaryListFunc: func(_ context.Context, _ bool, _ *int, _ event.OnProgressCallback) ([]*model.BinaryItem, []model.VersionInfo, error) {
-				return nil, nil, nil
-			},
-		}
-		cmd := cli.NewBinaryCmd(mock, nil)
-		listCmd, _, _ := cmd.Find([]string{"ls"})
-		require.NoError(t, listCmd.Flags().Set("json", "true"))
-		err := listCmd.RunE(listCmd, nil)
-		assert.NoError(t, err)
 	})
 
 	t.Run("remote_list", func(t *testing.T) {

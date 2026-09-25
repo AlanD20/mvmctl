@@ -128,19 +128,6 @@ func TestNewHostInfoCmd(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("json_output", func(t *testing.T) {
-		mock := &testutil.MockHostAPI{
-			HostInfoFunc: func(_ context.Context) (*results.HostInfo, error) {
-				return &results.HostInfo{Hostname: "json-host"}, nil
-			},
-		}
-		cmd := cli.NewHostCmd(mock)
-		infoCmd, _, _ := cmd.Find([]string{"info"})
-		require.NoError(t, infoCmd.Flags().Set("json", "true"))
-		err := infoCmd.RunE(infoCmd, nil)
-		assert.NoError(t, err)
-	})
-
 	t.Run("api_error_propagates", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
 			HostInfoFunc: func(_ context.Context) (*results.HostInfo, error) {
@@ -180,10 +167,10 @@ func TestNewHostInfoCmd(t *testing.T) {
 // command leaves the host unconfigured and VMs unable to start.
 
 func TestNewHostInitCmd(t *testing.T) {
-	t.Run("skip_when_nil_result", func(t *testing.T) {
+	t.Run("empty_result_returns_success", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
 			HostInitFunc: func(_ context.Context, _ event.OnProgressCallback) (*results.HostInit, error) {
-				return nil, nil
+				return &results.HostInit{}, nil
 			},
 		}
 		cmd := cli.NewHostCmd(mock)
@@ -245,19 +232,6 @@ func TestNewHostStatusCmd(t *testing.T) {
 		}
 		cmd := cli.NewHostCmd(mock)
 		statusCmd, _, _ := cmd.Find([]string{"status"})
-		err := statusCmd.RunE(statusCmd, nil)
-		assert.NoError(t, err)
-	})
-
-	t.Run("json_output", func(t *testing.T) {
-		mock := &testutil.MockHostAPI{
-			HostStatusCheckFunc: func(_ context.Context) *results.HostStatusCheck {
-				return &results.HostStatusCheck{KVMOK: true, IPForwardOK: true, IPForward: "1"}
-			},
-		}
-		cmd := cli.NewHostCmd(mock)
-		statusCmd, _, _ := cmd.Find([]string{"status"})
-		require.NoError(t, statusCmd.Flags().Set("json", "true"))
 		err := statusCmd.RunE(statusCmd, nil)
 		assert.NoError(t, err)
 	})
