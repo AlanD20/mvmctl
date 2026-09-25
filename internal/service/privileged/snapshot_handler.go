@@ -83,6 +83,31 @@ func handleVMSnapshotRemove(
 	return deliverOperationSuccess(ctx, endpoint, action, result, deps)
 }
 
+func handleVMSnapshotRestore(
+	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
+) error {
+	const action = jailer.VMSnapshotRestoreAction
+	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
+	request, err := privilegedwire.DecodeRequest[jailer.VMSnapshotRestoreRequest](ctx, reader, action, 0)
+	if err != nil {
+		return deliverOperationError(ctx, endpoint, action, err, deps)
+	}
+	if err := request.Body.Validate(); err != nil {
+		return deliverOperationError(ctx, endpoint, action, err, deps)
+	}
+	if err := requireRequestEOF(ctx, reader); err != nil {
+		return deliverOperationError(ctx, endpoint, action, err, deps)
+	}
+	result, err := jailer.NewVMSnapshotServer().Restore(ctx, caller.uid, caller.gid, request.Body)
+	if err != nil {
+		return deliverOperationError(ctx, endpoint, action, err, deps)
+	}
+	if result.VMID != request.Body.VMID || result.Configuration.SnapshotID != request.Body.SnapshotID {
+		return deliverOperationError(ctx, endpoint, action, snapshotResultSelectionError(), deps)
+	}
+	return deliverOperationSuccess(ctx, endpoint, action, result, deps)
+}
+
 func snapshotResultSelectionError() error {
 	return errs.New(errs.CodeInternal, "snapshot result differs from requested selection", errs.WithClass(errs.ClassInternal))
 }
