@@ -182,7 +182,7 @@ func TestNewHostInfoCmd(t *testing.T) {
 func TestNewHostInitCmd(t *testing.T) {
 	t.Run("skip_when_nil_result", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostInitFunc: func(_ context.Context, _ event.OnProgressCallback) (any, error) {
+			HostInitFunc: func(_ context.Context, _ event.OnProgressCallback) (*results.HostInit, error) {
 				return nil, nil
 			},
 		}
@@ -194,7 +194,7 @@ func TestNewHostInitCmd(t *testing.T) {
 
 	t.Run("error_propagates", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostInitFunc: func(_ context.Context, _ event.OnProgressCallback) (any, error) {
+			HostInitFunc: func(_ context.Context, _ event.OnProgressCallback) (*results.HostInit, error) {
 				return nil, errors.New("privilege check failed")
 			},
 		}
@@ -207,9 +207,9 @@ func TestNewHostInitCmd(t *testing.T) {
 
 	t.Run("with_changes_returns_success", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostInitFunc: func(_ context.Context, _ event.OnProgressCallback) (any, error) {
-				return map[string]any{
-					"changes": []*model.HostStateChangeItem{
+			HostInitFunc: func(_ context.Context, _ event.OnProgressCallback) (*results.HostInit, error) {
+				return &results.HostInit{
+					Changes: []*model.HostStateChangeItem{
 						{
 							Setting:       "ip_forward",
 							Mechanism:     "sysctl",
@@ -217,7 +217,7 @@ func TestNewHostInitCmd(t *testing.T) {
 							OriginalValue: strPtr("0"),
 						},
 					},
-					"user_added_to_group": false,
+					UserAddedToGroup: false,
 				}, nil
 			},
 		}
