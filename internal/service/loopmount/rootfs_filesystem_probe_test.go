@@ -194,7 +194,7 @@ func TestParseRootfsFilesystemProbeResultRejectsUntrustedOutput(t *testing.T) {
 			wantErr: "result is missing",
 		},
 		"unsupported filesystem": {
-			result: &system.RunResult{ExitCode: 0, Stdout: "xfs\n"}, wantErr: "unsupported",
+			result: &system.RunResult{ExitCode: 0, Stdout: "zfs\n"}, wantErr: "unsupported",
 		},
 		"missing canonical newline": {
 			result: &system.RunResult{ExitCode: 0, Stdout: "ext4"}, wantErr: "malformed",
@@ -247,6 +247,7 @@ func TestParseRootfsFilesystemProbeResultRejectsUntrustedOutput(t *testing.T) {
 		"ext3":  {result: &system.RunResult{ExitCode: 0, Stdout: "ext3\n"}, want: FilesystemExt3},
 		"ext4":  {result: &system.RunResult{ExitCode: 0, Stdout: "ext4\n"}, want: FilesystemExt4},
 		"btrfs": {result: &system.RunResult{ExitCode: 0, Stdout: "btrfs\n"}, want: FilesystemBtrfs},
+		"xfs":   {result: &system.RunResult{ExitCode: 0, Stdout: "xfs\n"}, want: FilesystemXFS},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {

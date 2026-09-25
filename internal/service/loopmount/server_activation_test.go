@@ -38,3 +38,16 @@ func TestNewProvisionInspectServerConstructsOnlyAuthorizedEffects(t *testing.T) 
 	}
 	assert.Equal(t, 1, accessorCalls)
 }
+
+// Rationale: Image optimization is a distinct production receiver with durable shrink authority.
+func TestNewImageShrinkServerConstructsDurableOptimizeEffect(t *testing.T) {
+	server := NewImageShrinkServer()
+	require.NotNil(t, server)
+	require.NoError(t, server.validateImageOptimizeDependencies())
+	assert.Nil(t, server.effects)
+	assert.True(t, server.durableImageShrink)
+	adapter, ok := server.optimizeEffects.(*rootfsImageShrinkAdapter)
+	require.True(t, ok)
+	require.NotNil(t, adapter)
+	require.NoError(t, validateRootfsVMProvisionDeps(adapter.deps))
+}

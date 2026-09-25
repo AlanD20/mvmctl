@@ -378,21 +378,42 @@ func TestRootfsVMProvisionAdapterCleanupIgnoresCancellation(t *testing.T) {
 	assert.True(t, fixture.base.loop.state.released)
 }
 
-func TestRootfsVMProvisionAdapterRejectsDeferredLegacyBehaviorBeforeEffects(t *testing.T) {
+// Rationale: An unsafe VM seed must be rejected before the adapter creates a private mount namespace
+// or writes rootfs data.
+func TestRootfsVMProvisionAdapterRejectsUnsafeCloudInitSeedBeforeEffects(t *testing.T) {
 	t.Parallel()
 
 	fixture := newTestRootfsVMProvisionFixture(t)
-	outcome, err := fixture.adapter().ProvisionVM(
+	fixture.base.lease.parentFD = 20
+	fixture.base.lease.caller = Caller{UID: 1000, GID: 1000}
+	adapter := fixture.adapter()
+	baseOpenAt2 := adapter.deps.openAt2
+	adapter.deps.openAt2 = func(ctx context.Context, fd int, path string, how *unix.OpenHow) (int, error) {
+		if fd == 20 && path == "cloud-init" {
+			return 60, nil
+		}
+		return baseOpenAt2(ctx, fd, path, how)
+	}
+	baseFstat := adapter.deps.fstat
+	adapter.deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
+		if fd == 60 {
+			*stat = unix.Stat_t{Mode: unix.S_IFDIR | 0700, Uid: 0}
+			return nil
+		}
+		return baseFstat(ctx, fd, stat)
+	}
+	outcome, err := adapter.ProvisionVM(
 		t.Context(),
 		fixture.base.lease,
 		FilesystemExt4,
 		VMProvisionPlan{InjectCloudInit: true},
 	)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported")
+	assert.ErrorContains(t, err, "seed directory has unsafe ownership or mode")
 	assert.Equal(t, vmProvisionEffectStateUnchanged, outcome.state)
 	assert.Empty(t, fixture.base.mounts)
 	assert.NotContains(t, fixture.base.events, "lock-thread")
+	assert.Contains(t, fixture.base.events, "close:60")
 }
 
 func TestRunRootfsGrowToolUsesExactCommandAndClassifiesCompletion(t *testing.T) {
@@ -744,9 +765,9 @@ func TestApplyRootfsProvisionPlanRejectsUnprovedAgentInitLayoutBeforeWrites(t *t
 	}
 }
 
-// Rationale: One complete plan exercises the adapter's ordered content contract across account-scoped SSH, sudo,
-// persistent agent authentication, fixed boot enablement, and the bounded hosts and fstab rewrites.
-func TestApplyRootfsProvisionPlanPublishesEverySupportedContentEffect(t *testing.T) {
+// Rationale: One combined plan must publish account-scoped SSH, sudo, agent authentication, boot enablement,
+// and bounded hosts and fstab rewrites into the mounted guest tree.
+func TestApplyRootfsProvisionPlanPublishesRequestedContentAndBootEffects(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -793,7 +814,6 @@ func TestApplyRootfsProvisionPlanPublishesEverySupportedContentEffect(t *testing
 		agentBinary: func(context.Context) ([]byte, error) { return []byte("agent-binary"), nil },
 	}, plan)
 	require.NoError(t, err)
-	assert.Equal(t, uint32(11), filesWritten)
 
 	expectedFiles := []struct {
 		path    string
@@ -803,6 +823,7 @@ func TestApplyRootfsProvisionPlanPublishesEverySupportedContentEffect(t *testing
 		{rootfsHostnamePath, []byte("vm-a\n"), 0644},
 		{rootfsHostsPath, []byte("127.0.0.1\tlocalhost\n127.0.1.1\tvm-a\n"), 0644},
 		{rootfsDNSPath, []byte("nameserver 192.0.2.53\n"), 0644},
+		{"/root/.ssh/authorized_keys", []byte(strings.Join(keys, "\n") + "\n"), 0600},
 		{"/home/alice/.ssh/authorized_keys", []byte(strings.Join(keys, "\n") + "\n"), 0600},
 		{rootfsSSHConfigPath, rootfsSSHDConfig(user), 0644},
 		{rootfsSudoPolicyPath, []byte("alice ALL=(ALL) NOPASSWD: ALL\n"), 0440},
@@ -818,7 +839,46 @@ func TestApplyRootfsProvisionPlanPublishesEverySupportedContentEffect(t *testing
 	for _, expected := range expectedFiles {
 		assertRootfsProvisionedFile(t, root, expected.path, expected.content, expected.mode)
 	}
-	assertRootfsProvisionedSymlink(t, root, rootfsAgentSystemdWantsLink, rootfsAgentSystemdWantsTarget)
+	expectedBootFiles := []struct {
+		path     string
+		mode     os.FileMode
+		contains []string
+	}{
+		{"/usr/local/bin/first-boot-ssh-installer.sh", 0755, []string{"ssh-keygen -A", "ssh-ready"}},
+		{
+			"/etc/systemd/system/first-boot-ssh-installer.service",
+			0644,
+			[]string{
+				"ExecStart=/usr/local/bin/first-boot-ssh-installer.sh",
+				"ConditionPathExists=!/var/lib/mvmctl/ssh-ready",
+			},
+		},
+	}
+	for _, expected := range expectedBootFiles {
+		path := filepath.Join(root, strings.TrimPrefix(expected.path, "/"))
+		content, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		for _, text := range expected.contains {
+			assert.Contains(t, string(content), text)
+		}
+		info, statErr := os.Stat(path)
+		require.NoError(t, statErr)
+		assert.Equal(t, expected.mode, info.Mode().Perm())
+	}
+	expectedLinks := []struct {
+		path   string
+		target string
+	}{
+		{rootfsAgentSystemdWantsLink, rootfsAgentSystemdWantsTarget},
+		{
+			"/etc/systemd/system/multi-user.target.wants/first-boot-ssh-installer.service",
+			"../first-boot-ssh-installer.service",
+		},
+	}
+	for _, expected := range expectedLinks {
+		assertRootfsProvisionedSymlink(t, root, expected.path, expected.target)
+	}
+	assert.Equal(t, uint32(len(expectedFiles)+len(expectedBootFiles)+len(expectedLinks)), filesWritten)
 }
 
 func TestRootfsGuestTreeAtomicallyReplacesAndReplaysWithoutFollowingSymlinks(t *testing.T) {
@@ -1393,11 +1453,15 @@ func (fixture *testRootfsVMProvisionFixture) adapter() *rootfsVMProvisionAdapter
 			}
 			return fixture.syncfsErr
 		},
-		renameAt:    func(context.Context, int, string, int, string) error { return nil },
-		symlinkAt:   func(context.Context, string, int, string) error { return nil },
-		readlinkAt:  func(context.Context, int, string, []byte) (int, error) { return 0, nil },
-		unlinkAt:    func(context.Context, int, string, int) error { return nil },
-		close:       baseDeps.close,
+		renameAt:   func(context.Context, int, string, int, string) error { return nil },
+		symlinkAt:  func(context.Context, string, int, string) error { return nil },
+		readlinkAt: func(context.Context, int, string, []byte) (int, error) { return 0, nil },
+		unlinkAt:   func(context.Context, int, string, int) error { return nil },
+		close:      baseDeps.close,
+		readDirent: func(context.Context, int, []byte) (int, error) {
+			fixture.t.Error("unexpected directory read")
+			return 0, errors.New("unexpected directory read")
+		},
 		deviceBytes: func(context.Context, int) (uint64, error) { return fixture.target, nil },
 		tempName: func(context.Context) (string, error) {
 			return ".mvmctl-provision-00000000000000000000000000000001", nil

@@ -215,7 +215,7 @@ func TestSelectRootfsMountSource(t *testing.T) {
 			wantErr: "partition block-device identity matches the raw device",
 		},
 		"invalid expected filesystem": {
-			expected: Filesystem("xfs"), raw: rawExt4, wantErr: "requested rootfs filesystem is invalid",
+			expected: Filesystem("zfs"), raw: rawExt4, wantErr: "requested rootfs filesystem is invalid",
 		},
 		"empty expected filesystem": {
 			raw: rawExt4, wantErr: "requested rootfs filesystem is invalid",
@@ -223,7 +223,7 @@ func TestSelectRootfsMountSource(t *testing.T) {
 		"invalid raw probed filesystem": {
 			expected: FilesystemExt4,
 			raw: rootfsFilesystemProbe{
-				identity: rawExt4.identity, filesystem: Filesystem("xfs"),
+				identity: rawExt4.identity, filesystem: Filesystem("zfs"),
 			},
 			wantErr: "raw probed filesystem is invalid",
 		},
@@ -231,7 +231,7 @@ func TestSelectRootfsMountSource(t *testing.T) {
 			expected: FilesystemExt4,
 			raw:      rootfsFilesystemProbe{identity: rawExt4.identity},
 			partitions: []rootfsFilesystemProbe{
-				{identity: partitionTwoExt4.identity, partition: 2, filesystem: Filesystem("xfs")},
+				{identity: partitionTwoExt4.identity, partition: 2, filesystem: Filesystem("zfs")},
 			},
 			wantErr: "partition probed filesystem is invalid",
 		},
