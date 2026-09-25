@@ -19,14 +19,15 @@ func TestNewVMCgroupLimits_DerivesDeterministicEnvelope(t *testing.T) {
 		SwapMaxBytes:   0,
 	})
 	want := model.VMCgroupLimits{
-		PolicyVersion:   1,
-		CPUQuotaMicros:  200000,
-		CPUPeriodMicros: 100000,
-		CPUWeight:       100,
-		MemoryHighBytes: 640 * 1024 * 1024,
-		MemoryMaxBytes:  640 * 1024 * 1024,
-		SwapMaxBytes:    0,
-		PIDsMax:         256,
+		PolicyVersion:      2,
+		CPUQuotaMicros:     200000,
+		CPUPeriodMicros:    100000,
+		CPUWeight:          100,
+		MemoryHighBytes:    640 * 1024 * 1024,
+		MemoryMaxBytes:     0,
+		MemoryMaxUnlimited: true,
+		SwapMaxBytes:       0,
+		PIDsMax:            256,
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("derived cgroup limits mismatch (-want +got):\n%s", diff)

@@ -32,12 +32,15 @@ type MockOperation struct {
 
 // MockPolicyAPI implements api.PolicyAPI for composite-interface compatibility.
 type MockPolicyAPI struct {
-	PolicyCreateFunc     func(context.Context, inputs.PolicyCreateInput) (*results.Policy, error)
-	PolicyListFunc       func(context.Context) ([]*results.Policy, error)
-	PolicyInspectFunc    func(context.Context, inputs.PolicyInput) (*results.Policy, error)
-	PolicyRemoveFunc     func(context.Context, inputs.PolicyInput) error
-	PolicySyncFunc       func(context.Context) (*results.PolicySync, error)
-	ExecPolicyCreateFunc func(
+	NetworkToVMTrafficPolicyCreateFunc  func(context.Context, inputs.NetworkToVMTrafficPolicyCreateInput) (*results.NetworkToVMTrafficPolicy, error)
+	NetworkToVMTrafficPolicyListFunc    func(context.Context) ([]*results.NetworkToVMTrafficPolicy, error)
+	NetworkToVMTrafficPolicyInspectFunc func(context.Context, inputs.NetworkToVMTrafficPolicyInput) (*results.NetworkToVMTrafficPolicy, error)
+	NetworkToVMTrafficPolicyRemoveFunc  func(context.Context, inputs.NetworkToVMTrafficPolicyInput) error
+	VMToVMTrafficPolicyCreateFunc       func(context.Context, inputs.VMToVMTrafficPolicyCreateInput) (*results.VMToVMTrafficPolicy, error)
+	VMToVMTrafficPolicyListFunc         func(context.Context) ([]*results.VMToVMTrafficPolicy, error)
+	VMToVMTrafficPolicyInspectFunc      func(context.Context, inputs.VMToVMTrafficPolicyInput) (*results.VMToVMTrafficPolicy, error)
+	VMToVMTrafficPolicyRemoveFunc       func(context.Context, inputs.VMToVMTrafficPolicyInput) error
+	ExecPolicyCreateFunc                func(
 		context.Context,
 		inputs.VMToVMExecPolicyCreateInput,
 	) (*results.VMToVMExecPolicy, error)
@@ -45,39 +48,72 @@ type MockPolicyAPI struct {
 	ExecPolicyRemoveFunc func(context.Context, inputs.VMToVMExecPolicyInput) error
 }
 
-func (m *MockPolicyAPI) PolicyCreate(ctx context.Context, input inputs.PolicyCreateInput) (*results.Policy, error) {
-	if m.PolicyCreateFunc != nil {
-		return m.PolicyCreateFunc(ctx, input)
+func (m *MockPolicyAPI) NetworkToVMTrafficPolicyCreate(
+	ctx context.Context, input inputs.NetworkToVMTrafficPolicyCreateInput,
+) (*results.NetworkToVMTrafficPolicy, error) {
+	if m.NetworkToVMTrafficPolicyCreateFunc != nil {
+		return m.NetworkToVMTrafficPolicyCreateFunc(ctx, input)
 	}
 	return nil, nil
 }
 
-func (m *MockPolicyAPI) PolicyList(ctx context.Context) ([]*results.Policy, error) {
-	if m.PolicyListFunc != nil {
-		return m.PolicyListFunc(ctx)
+func (m *MockPolicyAPI) NetworkToVMTrafficPolicyList(ctx context.Context) ([]*results.NetworkToVMTrafficPolicy, error) {
+	if m.NetworkToVMTrafficPolicyListFunc != nil {
+		return m.NetworkToVMTrafficPolicyListFunc(ctx)
 	}
 	return nil, nil
 }
 
-func (m *MockPolicyAPI) PolicyInspect(ctx context.Context, input inputs.PolicyInput) (*results.Policy, error) {
-	if m.PolicyInspectFunc != nil {
-		return m.PolicyInspectFunc(ctx, input)
+func (m *MockPolicyAPI) NetworkToVMTrafficPolicyInspect(
+	ctx context.Context, input inputs.NetworkToVMTrafficPolicyInput,
+) (*results.NetworkToVMTrafficPolicy, error) {
+	if m.NetworkToVMTrafficPolicyInspectFunc != nil {
+		return m.NetworkToVMTrafficPolicyInspectFunc(ctx, input)
 	}
 	return nil, nil
 }
 
-func (m *MockPolicyAPI) PolicyRemove(ctx context.Context, input inputs.PolicyInput) error {
-	if m.PolicyRemoveFunc != nil {
-		return m.PolicyRemoveFunc(ctx, input)
+func (m *MockPolicyAPI) NetworkToVMTrafficPolicyRemove(
+	ctx context.Context, input inputs.NetworkToVMTrafficPolicyInput,
+) error {
+	if m.NetworkToVMTrafficPolicyRemoveFunc != nil {
+		return m.NetworkToVMTrafficPolicyRemoveFunc(ctx, input)
 	}
 	return nil
 }
 
-func (m *MockPolicyAPI) PolicySync(ctx context.Context) (*results.PolicySync, error) {
-	if m.PolicySyncFunc != nil {
-		return m.PolicySyncFunc(ctx)
+func (m *MockPolicyAPI) VMToVMTrafficPolicyCreate(
+	ctx context.Context, input inputs.VMToVMTrafficPolicyCreateInput,
+) (*results.VMToVMTrafficPolicy, error) {
+	if m.VMToVMTrafficPolicyCreateFunc != nil {
+		return m.VMToVMTrafficPolicyCreateFunc(ctx, input)
 	}
 	return nil, nil
+}
+
+func (m *MockPolicyAPI) VMToVMTrafficPolicyList(ctx context.Context) ([]*results.VMToVMTrafficPolicy, error) {
+	if m.VMToVMTrafficPolicyListFunc != nil {
+		return m.VMToVMTrafficPolicyListFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *MockPolicyAPI) VMToVMTrafficPolicyInspect(
+	ctx context.Context, input inputs.VMToVMTrafficPolicyInput,
+) (*results.VMToVMTrafficPolicy, error) {
+	if m.VMToVMTrafficPolicyInspectFunc != nil {
+		return m.VMToVMTrafficPolicyInspectFunc(ctx, input)
+	}
+	return nil, nil
+}
+
+func (m *MockPolicyAPI) VMToVMTrafficPolicyRemove(
+	ctx context.Context, input inputs.VMToVMTrafficPolicyInput,
+) error {
+	if m.VMToVMTrafficPolicyRemoveFunc != nil {
+		return m.VMToVMTrafficPolicyRemoveFunc(ctx, input)
+	}
+	return nil
 }
 
 func (m *MockPolicyAPI) ExecPolicyCreate(
