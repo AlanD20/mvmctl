@@ -8,13 +8,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Rationale: these fixtures are written directly from ADR-0016's accepted schema rather than produced by the
-// transition functions. Exact bytes make field renames, omissions, additions, and lifecycle-shape drift visible.
-func TestInstanceSchemaThreeCanonicalJSON(t *testing.T) {
+// Rationale: these fixtures are independent of the transition functions. Exact schema-four bytes make field renames,
+// omissions, additions, and lifecycle-shape drift visible.
+func TestInstanceSchemaFourCanonicalJSON(t *testing.T) {
 	t.Parallel()
 
-	records := schemaThreeProofRecords()
-	for name, want := range schemaThreeCanonicalJSON() {
+	records := schemaFourProofRecords()
+	for name, want := range schemaFourCanonicalJSON() {
 		name, want := name, want
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -32,23 +32,23 @@ func TestInstanceSchemaThreeCanonicalJSON(t *testing.T) {
 
 // Rationale: complete independently constructed records prove each pure transition, including retained authority and
 // generation changes. Field-by-field assertions alone could miss an accidentally added or copied authority claim.
-func TestInstanceSchemaThreeTransitionsMatchIndependentRecords(t *testing.T) {
+func TestInstanceSchemaFourTransitionsMatchIndependentRecords(t *testing.T) {
 	t.Parallel()
 
-	want := schemaThreeProofRecords()
+	want := schemaFourProofRecords()
 	launching, err := registerLaunchingInstanceRecord(
 		testInstanceCaller(), testLaunchIntent(false), testLaunchProcessLocators(false), testReleaseIdentity(), nil,
 	)
 	require.NoError(t, err)
 	assertInstanceRecordEqual(t, want["launching"], launching)
 
-	launchPresent := schemaThreeProofLaunch(instanceLaunchRelay{
+	launchPresent := schemaFourProofLaunch(instanceLaunchRelay{
 		kind:    instanceRelayPresent,
 		locator: instanceProcessLocator{pid: 4343, startTimeTicks: 876543},
 	})
 	launchingPresent := want["launching"]
 	launchingPresent.launch = &launchPresent
-	active, err := activateInstanceRecord(launchingPresent, schemaThreeProofActive())
+	active, err := activateInstanceRecord(launchingPresent, schemaFourProofActive())
 	require.NoError(t, err)
 	assertInstanceRecordEqual(t, want["active"], active)
 
@@ -88,86 +88,94 @@ func assertInstanceRecordEqual(t *testing.T, want, got instanceRecord) {
 	}
 }
 
-func schemaThreeCanonicalJSON() map[string]string {
-	const launchAbsent = `{"owner_gid":1001,"host_boot_id":"123e4567-e89b-42d3-a456-426614174000",` +
+func schemaFourCanonicalJSON() map[string]string {
+	const launchAbsent = `{"owner_gid":1001,"execution_identity":{"uid":2000,"gid":2001},` +
+		`"snapshot_id":"","cache_locator":"/home/caller/mvmctl",` +
+		`"host_boot_id":"123e4567-e89b-42d3-a456-426614174000",` +
 		`"pid":4242,"start_time_ticks":987654,"relay":{"kind":"absent"},` +
 		`"managed_cache":{"device_major":8,"device_minor":1,"inode":12345,` +
 		`"mount_identity":{"kind":"unique","id":67890}},` +
 		`"release":{"version":"1.16.0","architecture":"x86_64",` +
 		`"firecracker_sha256":"` + testReleaseHash + `","jailer_sha256":"` + testJailerHash + `"}}`
-	const launchPresent = `{"owner_gid":1001,"host_boot_id":"123e4567-e89b-42d3-a456-426614174000",` +
+	const launchPresent = `{"owner_gid":1001,"execution_identity":{"uid":2000,"gid":2001},` +
+		`"snapshot_id":"","cache_locator":"/home/caller/mvmctl",` +
+		`"host_boot_id":"123e4567-e89b-42d3-a456-426614174000",` +
 		`"pid":4242,"start_time_ticks":987654,` +
 		`"relay":{"kind":"present","pid":4343,"start_time_ticks":876543},` +
 		`"managed_cache":{"device_major":8,"device_minor":1,"inode":12345,` +
 		`"mount_identity":{"kind":"unique","id":67890}},` +
 		`"release":{"version":"1.16.0","architecture":"x86_64",` +
 		`"firecracker_sha256":"` + testReleaseHash + `","jailer_sha256":"` + testJailerHash + `"}}`
-	const credentialsUID = `{"real":1000,"effective":1000,"saved":1000,"filesystem":1000}`
-	const credentialsGID = `{"real":1001,"effective":1001,"saved":1001,"filesystem":1001}`
+	const credentialsUID = `{"real":2000,"effective":2000,"saved":2000,"filesystem":2000}`
+	const credentialsGID = `{"real":2001,"effective":2001,"saved":2001,"filesystem":2001}`
+	const relayCredentialsUID = `{"real":1000,"effective":1000,"saved":1000,"filesystem":1000}`
+	const relayCredentialsGID = `{"real":1001,"effective":1001,"saved":1001,"filesystem":1001}`
 	const active = `{"user_ids":` + credentialsUID + `,"group_ids":` + credentialsGID +
 		`,"supplementary_groups":[],"mount_namespace":{"device":41,"inode":42},` +
 		`"jail_root":{"device":43,"inode":44},` +
 		`"executable":{"device":45,"inode":46,"size_bytes":120,"mode":33261,"uid":0,"gid":0,"links":1,` +
 		`"manifest_sha256":"` + testReleaseHash + `"},` +
-		`"relay":{"kind":"present","user_ids":` + credentialsUID + `,"group_ids":` + credentialsGID +
+		`"relay":{"kind":"present","user_ids":` + relayCredentialsUID + `,"group_ids":` + relayCredentialsGID +
 		`,"supplementary_groups":[],"mount_namespace":{"device":51,"inode":52},` +
 		`"root":{"device":53,"inode":54},` +
 		`"executable":{"device":55,"inode":56,"size_bytes":120,"mode":33261,"uid":0,"gid":0,"links":1,` +
 		`"sha256":"` + testRelayHash + `"}}}`
 
 	return map[string]string{
-		"launching": `{"schema_version":3,"owner_uid":1000,"vm_id":"` + testVMID +
+		"launching": `{"schema_version":4,"owner_uid":1000,"vm_id":"` + testVMID +
 			`","lifecycle":"launching","launch_generation":1,"cleanup_generation":0,"launch":` + launchAbsent + `}`,
-		"active": `{"schema_version":3,"owner_uid":1000,"vm_id":"` + testVMID +
+		"active": `{"schema_version":4,"owner_uid":1000,"vm_id":"` + testVMID +
 			`","lifecycle":"active","launch_generation":1,"cleanup_generation":0,"launch":` + launchPresent +
 			`,"active":` + active + `}`,
-		"cleaning_from_launching": `{"schema_version":3,"owner_uid":1000,"vm_id":"` + testVMID +
+		"cleaning_from_launching": `{"schema_version":4,"owner_uid":1000,"vm_id":"` + testVMID +
 			`","lifecycle":"cleaning","launch_generation":1,"cleanup_generation":1,"launch":` + launchAbsent + `}`,
-		"cleaning_from_active": `{"schema_version":3,"owner_uid":1000,"vm_id":"` + testVMID +
+		"cleaning_from_active": `{"schema_version":4,"owner_uid":1000,"vm_id":"` + testVMID +
 			`","lifecycle":"cleaning","launch_generation":1,"cleanup_generation":1,"launch":` + launchPresent +
 			`,"active":` + active + `}`,
-		"cleaned": `{"schema_version":3,"owner_uid":1000,"vm_id":"` + testVMID +
+		"cleaned": `{"schema_version":4,"owner_uid":1000,"vm_id":"` + testVMID +
 			`","lifecycle":"cleaned","launch_generation":1,"cleanup_generation":1}`,
 	}
 }
 
-func schemaThreeProofRecords() map[string]instanceRecord {
-	launchAbsent := schemaThreeProofLaunch(instanceLaunchRelay{kind: instanceRelayAbsent})
-	launchPresent := schemaThreeProofLaunch(instanceLaunchRelay{
+func schemaFourProofRecords() map[string]instanceRecord {
+	launchAbsent := schemaFourProofLaunch(instanceLaunchRelay{kind: instanceRelayAbsent})
+	launchPresent := schemaFourProofLaunch(instanceLaunchRelay{
 		kind:    instanceRelayPresent,
 		locator: instanceProcessLocator{pid: 4343, startTimeTicks: 876543},
 	})
-	active := schemaThreeProofActive()
+	active := schemaFourProofActive()
 	return map[string]instanceRecord{
 		"launching": {
-			schemaVersion: 3, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleLaunching,
+			schemaVersion: 4, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleLaunching,
 			launchGeneration: 1, cleanupGeneration: 0, launch: &launchAbsent,
 		},
 		"active": {
-			schemaVersion: 3, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleActive,
+			schemaVersion: 4, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleActive,
 			launchGeneration: 1, cleanupGeneration: 0, launch: &launchPresent, active: &active,
 		},
 		"cleaning_from_launching": {
-			schemaVersion: 3, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaning,
+			schemaVersion: 4, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaning,
 			launchGeneration: 1, cleanupGeneration: 1, launch: &launchAbsent,
 		},
 		"cleaning_from_active": {
-			schemaVersion: 3, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaning,
+			schemaVersion: 4, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaning,
 			launchGeneration: 1, cleanupGeneration: 1, launch: &launchPresent, active: &active,
 		},
 		"cleaned": {
-			schemaVersion: 3, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaned,
+			schemaVersion: 4, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaned,
 			launchGeneration: 1, cleanupGeneration: 1,
 		},
 	}
 }
 
-func schemaThreeProofLaunch(relay instanceLaunchRelay) instanceLaunchRecord {
+func schemaFourProofLaunch(relay instanceLaunchRelay) instanceLaunchRecord {
 	return instanceLaunchRecord{
-		ownerGID:   1001,
-		hostBootID: "123e4567-e89b-42d3-a456-426614174000",
-		process:    instanceProcessLocator{pid: 4242, startTimeTicks: 987654},
-		relay:      relay,
+		ownerGID:          1001,
+		executionIdentity: vmExecutionIdentity{uid: 2000, gid: 2001},
+		cacheLocator:      managedCacheLocator{components: []string{"home", "caller", "mvmctl"}},
+		hostBootID:        "123e4567-e89b-42d3-a456-426614174000",
+		process:           instanceProcessLocator{pid: 4242, startTimeTicks: 987654},
+		relay:             relay,
 		cacheIdentity: managedCacheIdentity{
 			deviceMajor: 8, deviceMinor: 1, inode: 12345, mountID: 67890,
 			mountIDKind: managedCacheMountIdentityUnique,
@@ -179,9 +187,11 @@ func schemaThreeProofLaunch(relay instanceLaunchRelay) instanceLaunchRecord {
 	}
 }
 
-func schemaThreeProofActive() instanceActiveIdentity {
-	userIDs := processCredentialIdentity{real: 1000, effective: 1000, saved: 1000, filesystem: 1000}
-	groupIDs := processCredentialIdentity{real: 1001, effective: 1001, saved: 1001, filesystem: 1001}
+func schemaFourProofActive() instanceActiveIdentity {
+	userIDs := processCredentialIdentity{real: 2000, effective: 2000, saved: 2000, filesystem: 2000}
+	groupIDs := processCredentialIdentity{real: 2001, effective: 2001, saved: 2001, filesystem: 2001}
+	relayUserIDs := processCredentialIdentity{real: 1000, effective: 1000, saved: 1000, filesystem: 1000}
+	relayGroupIDs := processCredentialIdentity{real: 1001, effective: 1001, saved: 1001, filesystem: 1001}
 	return instanceActiveIdentity{
 		userIDs: userIDs, groupIDs: groupIDs, supplementaryGroups: []uint32{},
 		mountNamespace: instanceObjectIdentity{device: 41, inode: 42},
@@ -192,7 +202,7 @@ func schemaThreeProofActive() instanceActiveIdentity {
 			uid:  0, gid: 0, links: 1, manifestSHA256: testReleaseHash,
 		},
 		relay: instanceActiveRelay{
-			kind: instanceRelayPresent, userIDs: userIDs, groupIDs: groupIDs, supplementaryGroups: []uint32{},
+			kind: instanceRelayPresent, userIDs: relayUserIDs, groupIDs: relayGroupIDs, supplementaryGroups: []uint32{},
 			mountNamespace: instanceObjectIdentity{device: 51, inode: 52},
 			root:           instanceObjectIdentity{device: 53, inode: 54},
 			executable: instanceRelayExecutableIdentity{

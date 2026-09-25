@@ -101,14 +101,14 @@ func TestInstanceRecordCodecOmitsWrongLifecycleObjects(t *testing.T) {
 
 // Rationale: the durable root is attacker-controlled input after host storage tampering. Each malformed case pins one
 // strict-schema boundary and must fail closed as an internal atomic-authority error rather than being defaulted.
-func TestDecodeInstanceRecordRejectsMalformedSchemaThree(t *testing.T) {
+func TestDecodeInstanceRecordRejectsMalformedSchemaFour(t *testing.T) {
 	t.Parallel()
 
 	valid, err := encodeInstanceRecord(testActiveInstanceRecord(true))
 	require.NoError(t, err)
 	validText := string(valid)
-	validLaunching := schemaThreeCanonicalJSON()["launching"]
-	validCleaned := schemaThreeCanonicalJSON()["cleaned"]
+	validLaunching := schemaFourCanonicalJSON()["launching"]
+	validCleaned := schemaFourCanonicalJSON()["cleaned"]
 	launchOffset := strings.LastIndex(validLaunching, `,"launch":`)
 	require.Positive(t, launchOffset)
 	activeOffset := strings.LastIndex(validText, `,"active":`)
@@ -153,9 +153,10 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaThree(t *testing.T) {
 			`"relay":{"kind":"present","pid":4343}`,
 			1,
 		),
-		"old_schema_one":         strings.Replace(validText, `"schema_version":3`, `"schema_version":1`, 1),
-		"old_schema_two":         strings.Replace(validText, `"schema_version":3`, `"schema_version":2`, 1),
-		"unknown_schema":         strings.Replace(validText, `"schema_version":3`, `"schema_version":4`, 1),
+		"old_schema_one":         strings.Replace(validText, `"schema_version":4`, `"schema_version":1`, 1),
+		"old_schema_two":         strings.Replace(validText, `"schema_version":4`, `"schema_version":2`, 1),
+		"old_schema_three":       strings.Replace(validText, `"schema_version":4`, `"schema_version":3`, 1),
+		"unknown_schema":         strings.Replace(validText, `"schema_version":4`, `"schema_version":5`, 1),
 		"owner_uid_string":       strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":"1000"`, 1),
 		"owner_uid_negative":     strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":-1`, 1),
 		"owner_uid_fractional":   strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":1000.5`, 1),

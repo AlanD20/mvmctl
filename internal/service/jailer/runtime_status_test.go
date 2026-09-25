@@ -36,7 +36,7 @@ type runtimeStatusFixture struct {
 	processMetadataReads  int
 }
 
-// newRuntimeStatusFixture uses real schema-3 files and existing lock fakes. Only proc/pidfd reads are substituted;
+// newRuntimeStatusFixture uses real schema-4 files and existing lock fakes. Only proc/pidfd reads are substituted;
 // unavailable mutation and hash callbacks ensure observations cannot silently grow cleanup or executable I/O effects.
 func newRuntimeStatusFixture(t testing.TB, records ...instanceRecord) *runtimeStatusFixture {
 	t.Helper()
@@ -552,7 +552,7 @@ func TestRuntimeStatusRejectsOldSchema(t *testing.T) {
 	path := filepath.Join(f.root, "var/lib/mvmctl/instances/1000", record.vmID+".json")
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
-	raw = []byte(strings.Replace(string(raw), `"schema_version":3`, `"schema_version":2`, 1))
+	raw = []byte(strings.Replace(string(raw), `"schema_version":4`, `"schema_version":3`, 1))
 	require.NoError(t, os.WriteFile(path, raw, 0600))
 	got, err := f.observe(t.Context(), record.vmID)
 	require.Error(t, err)
