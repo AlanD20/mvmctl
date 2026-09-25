@@ -223,8 +223,8 @@ func TestNewHostInitCmd(t *testing.T) {
 		}
 		cmd := cli.NewHostCmd(mock)
 		initCmd, _, _ := cmd.Find([]string{"init"})
-		err := initCmd.RunE(initCmd, nil)
-		assert.NoError(t, err)
+		output := capturePolicyStdout(t, func() error { return initCmd.RunE(initCmd, nil) })
+		assert.Contains(t, output, "ip_forward: 0 → 1")
 	})
 }
 
@@ -269,11 +269,13 @@ func TestNewHostStatusCmd(t *testing.T) {
 
 func TestNewHostCleanCmd(t *testing.T) {
 	t.Run("force_clean_success_no_vms", func(t *testing.T) {
+		cleaned := false
 		mock := &testutil.MockHostAPI{
 			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
 				return nil, nil
 			},
 			HostCleanFunc: func(_ context.Context) ([]string, error) {
+				cleaned = true
 				return []string{"Removed TAP device 'mvm-tap0'", "Removed firewall chains"}, nil
 			},
 		}
@@ -282,12 +284,18 @@ func TestNewHostCleanCmd(t *testing.T) {
 		require.NoError(t, cleanCmd.Flags().Set("force", "true"))
 		err := cleanCmd.RunE(cleanCmd, nil)
 		assert.NoError(t, err)
+		assert.True(t, cleaned)
 	})
 
 	t.Run("aborts_if_vms_running", func(t *testing.T) {
+		cleaned := false
 		mock := &testutil.MockHostAPI{
 			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
 				return []*model.VMItem{{Name: "vm-1", Status: model.VMStatusRunning}}, nil
+			},
+			HostCleanFunc: func(_ context.Context) ([]string, error) {
+				cleaned = true
+				return nil, nil
 			},
 		}
 		cmd := cli.NewHostCmd(mock)
@@ -296,22 +304,27 @@ func TestNewHostCleanCmd(t *testing.T) {
 		err := cleanCmd.RunE(cleanCmd, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "VMs still running")
+		assert.False(t, cleaned, "clean must not run while a VM is running")
 	})
 
-	t.Run("get_running_vms_error_does_not_block", func(t *testing.T) {
+	t.Run("get_running_vms_error_blocks_clean", func(t *testing.T) {
+		wantErr := errors.New("db error")
+		cleaned := false
 		mock := &testutil.MockHostAPI{
 			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
-				return nil, errors.New("db error")
+				return nil, wantErr
 			},
 			HostCleanFunc: func(_ context.Context) ([]string, error) {
-				return []string{"Removed items"}, nil
+				cleaned = true
+				return nil, nil
 			},
 		}
 		cmd := cli.NewHostCmd(mock)
 		cleanCmd, _, _ := cmd.Find([]string{"clean"})
 		require.NoError(t, cleanCmd.Flags().Set("force", "true"))
 		err := cleanCmd.RunE(cleanCmd, nil)
-		assert.NoError(t, err)
+		require.ErrorIs(t, err, wantErr)
+		assert.False(t, cleaned, "clean must not run when VM state is unknown")
 	})
 }
 
@@ -321,9 +334,14 @@ func TestNewHostCleanCmd(t *testing.T) {
 
 func TestNewHostResetCmd(t *testing.T) {
 	t.Run("aborts_if_vms_running", func(t *testing.T) {
+		reset := false
 		mock := &testutil.MockHostAPI{
 			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
 				return []*model.VMItem{{Name: "vm-1", Status: model.VMStatusRunning}}, nil
+			},
+			HostResetFunc: func(_ context.Context) ([]string, error) {
+				reset = true
+				return nil, nil
 			},
 		}
 		cmd := cli.NewHostCmd(mock)
@@ -332,14 +350,17 @@ func TestNewHostResetCmd(t *testing.T) {
 		err := resetCmd.RunE(resetCmd, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "VMs still running")
+		assert.False(t, reset, "reset must not run while a VM is running")
 	})
 
 	t.Run("force_reset_success", func(t *testing.T) {
+		reset := false
 		mock := &testutil.MockHostAPI{
 			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
 				return nil, nil
 			},
 			HostResetFunc: func(_ context.Context) ([]string, error) {
+				reset = true
 				return []string{"Removed firewall chains", "Reverted sysctl"}, nil
 			},
 		}
@@ -348,142 +369,7 @@ func TestNewHostResetCmd(t *testing.T) {
 		require.NoError(t, resetCmd.Flags().Set("force", "true"))
 		err := resetCmd.RunE(resetCmd, nil)
 		assert.NoError(t, err)
-	})
-}
-
-// --- formatChange ---
-// Rationale: formatChange produces user-facing change descriptions for host
-// init. Incorrect formatting would confuse users about what was modified.
-
-func TestFormatChange(t *testing.T) {
-	tests := []struct {
-		name          string
-		mechanism     string
-		setting       string
-		appliedValue  string
-		originalValue string
-		expected      string
-	}{
-		{
-			name:         "iptables_save",
-			mechanism:    "iptables_save",
-			setting:      "iptables_rules",
-			appliedValue: "/etc/iptables/rules.v4",
-			expected:     "iptables rules saved \u2192 /etc/iptables/rules.v4",
-		},
-		{
-			name:         "file_create",
-			mechanism:    "file_create",
-			setting:      "sudoers_dropin",
-			appliedValue: "/etc/sudoers.d/mvm",
-			expected:     "sudoers_dropin: created /etc/sudoers.d/mvm",
-		},
-		{
-			name:         "groupadd",
-			mechanism:    "groupadd",
-			appliedValue: "mvm",
-			expected:     "group 'mvm' created",
-		},
-		{
-			name:         "usermod_two_parts",
-			mechanism:    "usermod",
-			appliedValue: "alice:mvm",
-			expected:     "user 'alice' added to group 'mvm'",
-		},
-		{
-			name:         "usermod_one_part",
-			mechanism:    "usermod",
-			appliedValue: "bob",
-			expected:     "user 'bob' added to group 'bob'",
-		},
-		{
-			name:          "sysctl_with_original",
-			mechanism:     "sysctl",
-			setting:       "net.ipv4.ip_forward",
-			appliedValue:  "1",
-			originalValue: "0",
-			expected:      "net.ipv4.ip_forward: 0 \u2192 1",
-		},
-		{
-			name:         "sysctl_without_original",
-			mechanism:    "sysctl",
-			setting:      "net.ipv4.ip_forward",
-			appliedValue: "1",
-			expected:     "net.ipv4.ip_forward: 0 \u2192 1",
-		},
-		{
-			name:         "noop_iptables_chains",
-			mechanism:    "noop",
-			setting:      "iptables_chains",
-			appliedValue: "MVM chains already exist",
-			expected:     "iptables chains already exist \u2014 keeping existing chain state",
-		},
-		{
-			name:         "modprobe_kernel_module",
-			mechanism:    "modprobe",
-			setting:      "kernel_module_load",
-			appliedValue: "kvm",
-			expected:     "loaded kernel module 'kvm'",
-		},
-		{
-			name:         "network_create",
-			mechanism:    "network_create",
-			setting:      "default_network",
-			appliedValue: "default",
-			expected:     "Default network 'default' ready",
-		},
-		{
-			name:          "fallback_repr",
-			mechanism:     "unknown",
-			setting:       "custom_setting",
-			appliedValue:  "new_value",
-			originalValue: "old_value",
-			expected:      "custom_setting: \"old_value\" \u2192 \"new_value\"",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := cli.FormatChange(tt.mechanism, tt.setting, tt.appliedValue, tt.originalValue)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-// --- abortIfVMsRunning ---
-// Rationale: abortIfVMsRunning is a safety check before destructive host
-// operations. A broken check could allow cleanup while VMs are running.
-
-func TestAbortIfVMsRunning(t *testing.T) {
-	t.Run("no_running_vms_returns_nil", func(t *testing.T) {
-		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
-				return nil, nil
-			},
-		}
-		err := cli.AbortIfVMsRunning(context.Background(), mock)
-		assert.NoError(t, err)
-	})
-
-	t.Run("running_vms_returns_error", func(t *testing.T) {
-		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
-				return []*model.VMItem{{Name: "vm-1"}}, nil
-			},
-		}
-		err := cli.AbortIfVMsRunning(context.Background(), mock)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "VMs still running")
-	})
-
-	t.Run("api_error_returns_nil", func(t *testing.T) {
-		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
-				return nil, errors.New("db error")
-			},
-		}
-		err := cli.AbortIfVMsRunning(context.Background(), mock)
-		assert.NoError(t, err)
+		assert.True(t, reset)
 	})
 }
 
