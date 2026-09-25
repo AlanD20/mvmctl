@@ -173,7 +173,7 @@ func TestRunMigrationsRestoresSnapshotAfterPartialFailure(t *testing.T) {
 	require.Error(t, err)
 	assert.Zero(t, applied)
 
-	// Reopen through Handle: recovery replaces the database file and closes its old connection.
+	// The restored database must be visible through the same Handle used for migration.
 	var version, partialTableCount int
 	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
 	assert.Equal(t, 3, version)
