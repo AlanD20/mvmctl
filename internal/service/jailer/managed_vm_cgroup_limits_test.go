@@ -22,7 +22,7 @@ func TestPrepareManagedVMCgroupForLaunchRejectsInvalidLimitsBeforeEffects(t *tes
 	valid := testManagedVMCgroupLimits()
 	tests := map[string]func(*model.VMCgroupLimits){
 		"policy zero":      func(limits *model.VMCgroupLimits) { limits.PolicyVersion = 0 },
-		"policy two":       func(limits *model.VMCgroupLimits) { limits.PolicyVersion = 2 },
+		"policy one":       func(limits *model.VMCgroupLimits) { limits.PolicyVersion = 1 },
 		"quota negative":   func(limits *model.VMCgroupLimits) { limits.CPUQuotaMicros = -1 },
 		"quota zero":       func(limits *model.VMCgroupLimits) { limits.CPUQuotaMicros = 0 },
 		"period negative":  func(limits *model.VMCgroupLimits) { limits.CPUPeriodMicros = -1 },
@@ -33,10 +33,12 @@ func TestPrepareManagedVMCgroupForLaunchRejectsInvalidLimitsBeforeEffects(t *tes
 		"memory high negative": func(limits *model.VMCgroupLimits) {
 			limits.MemoryHighBytes = -1
 		},
-		"memory high zero": func(limits *model.VMCgroupLimits) { limits.MemoryHighBytes = 0 },
-		"memory max zero":  func(limits *model.VMCgroupLimits) { limits.MemoryMaxBytes = 0 },
-		"high above max":   func(limits *model.VMCgroupLimits) { limits.MemoryHighBytes = limits.MemoryMaxBytes + 1 },
-		"negative swap":    func(limits *model.VMCgroupLimits) { limits.SwapMaxBytes = -1 },
+		"memory high zero":  func(limits *model.VMCgroupLimits) { limits.MemoryHighBytes = 0 },
+		"finite memory max": func(limits *model.VMCgroupLimits) { limits.MemoryMaxBytes = 1 },
+		"memory max not unlimited": func(limits *model.VMCgroupLimits) {
+			limits.MemoryMaxUnlimited = false
+		},
+		"negative swap": func(limits *model.VMCgroupLimits) { limits.SwapMaxBytes = -1 },
 		"process limit negative": func(limits *model.VMCgroupLimits) {
 			limits.PIDsMax = -1
 		},
@@ -421,8 +423,8 @@ func TestFreshRecoveryCleanupManagedVMCgroupCarriesNoLimitIntent(t *testing.T) {
 
 func testManagedVMCgroupLimits() model.VMCgroupLimits {
 	return model.VMCgroupLimits{
-		PolicyVersion: 1, CPUQuotaMicros: 200000, CPUPeriodMicros: 100000, CPUWeight: 100,
-		MemoryHighBytes: 512 << 20, MemoryMaxBytes: 640 << 20, SwapMaxBytes: 0, PIDsMax: 128,
+		PolicyVersion: model.VMCgroupPolicyVersion, CPUQuotaMicros: 200000, CPUPeriodMicros: 100000, CPUWeight: 100,
+		MemoryHighBytes: 512 << 20, MemoryMaxUnlimited: true, SwapMaxBytes: 0, PIDsMax: 128,
 	}
 }
 
@@ -434,7 +436,7 @@ func (fixture *managedVMCgroupTestFixture) addVMLeafWithLimits(vmID string, limi
 		"cpu.max":         encodeManagedVMCgroupTestCPUMax(limits.CPUQuotaMicros, limits.CPUPeriodMicros),
 		"cpu.weight":      encodeManagedVMCgroupTestFiniteUint(limits.CPUWeight),
 		"memory.high":     encodeManagedVMCgroupTestFiniteUint(limits.MemoryHighBytes),
-		"memory.max":      encodeManagedVMCgroupTestFiniteUint(limits.MemoryMaxBytes),
+		"memory.max":      []byte("max\n"),
 		"memory.swap.max": encodeManagedVMCgroupTestFiniteUint(limits.SwapMaxBytes),
 		"pids.max":        encodeManagedVMCgroupTestFiniteUint(limits.PIDsMax),
 	}
