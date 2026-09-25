@@ -14,7 +14,11 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-const testDriveID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+const (
+	testJailerVMID      = "0123456789abcdef0123456789abcdef"
+	testJailerNetworkID = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	testDriveID         = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+)
 
 // Rationale: the unprivileged producer must use the compiled jail-visible
 // endpoint even if a caller manages to supply another host-side basename.
@@ -112,7 +116,7 @@ func TestProcessCgroupMembershipRequiresExactUnifiedPath(t *testing.T) {
 }
 
 func TestFirecrackerSpawner_WriteToFileUsesJailedPathsWithoutMutatingHostConfig(t *testing.T) {
-	vmDir := t.TempDir()
+	vmDir := filepath.Join(t.TempDir(), testJailerVMID)
 	config := jailerTestConfig(vmDir)
 	config.SnapshotMode = false
 	spawner := NewFirecrackerSpawner(config)
@@ -130,7 +134,7 @@ func TestFirecrackerSpawner_WriteToFileUsesJailedPathsWithoutMutatingHostConfig(
 	require.Len(t, hostConfig.Drives, 3)
 	require.Len(t, jailed.Drives, 3)
 	wantHostPaths := []string{config.RootfsPath, *config.CloudInitISOPath, config.ExtraDrives[0].PathOnHost}
-	wantJailedPaths := []string{"/rootfs", "/cloud-init.iso", "/volumes/" + testDriveID}
+	wantJailedPaths := []string{"/rootfs", "/cloud-init.iso", "/volumes/" + testDriveID + ".raw"}
 	for i := range hostConfig.Drives {
 		assert.Equal(t, wantHostPaths[i], hostConfig.Drives[i].PathOnHost)
 		assert.Equal(t, wantJailedPaths[i], jailed.Drives[i].PathOnHost)
@@ -160,7 +164,7 @@ func TestJailedPathCalculation(t *testing.T) {
 		"runtime_cleans_parent_segments": {
 			got: jailedRuntimePath("/host/vms/id/../metrics.fifo"), want: "/run/mvm/metrics.fifo",
 		},
-		"volume_uses_validated_id": {got: jailedVolumePath(testDriveID), want: "/volumes/" + testDriveID},
+		"volume_uses_validated_id": {got: jailedVolumePath(testDriveID), want: "/volumes/" + testDriveID + ".raw"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -175,7 +179,7 @@ func jailerTestConfig(vmDir string) *model.FirecrackerConfig {
 	isoPath := filepath.Join(vmDir, infra.VMCloudInitISOFilename)
 	cid := 42
 	return &model.FirecrackerConfig{
-		VMDir: vmDir, RootfsPath: filepath.Join(vmDir, infra.VMRootfsFilename),
+		VMDir: vmDir, NetworkID: testJailerNetworkID, RootfsPath: filepath.Join(vmDir, infra.VMRootfsFilename),
 		BinaryPath: "/var/lib/mvmctl/binaries/1.16.0/firecracker",
 		JailerPath: "/var/lib/mvmctl/binaries/1.16.0/jailer", BinaryVersion: "1.16.0",
 		KernelPath: filepath.Join(filepath.Dir(vmDir), "kernels", "vmlinux"),
@@ -194,7 +198,7 @@ func jailerTestConfig(vmDir string) *model.FirecrackerConfig {
 		ConfigPath:       filepath.Join(vmDir, infra.VMFirecrackerConfigFilename), CloudInitMode: &cloudInitMode,
 		CloudInitISOPath: &isoPath,
 		ExtraDrives: []model.DriveConfig{{
-			DriveID: testDriveID, PathOnHost: filepath.Join(filepath.Dir(vmDir), "volumes", "selected.raw"),
+			DriveID: testDriveID, PathOnHost: filepath.Join(filepath.Dir(vmDir), "volumes", testDriveID+".raw"),
 			IsReadOnly: true, CacheType: model.CacheTypeUnsafe, IOEngine: "Sync",
 		}},
 		SnapshotMode: true, SnapshotDir: filepath.Join(filepath.Dir(vmDir), "snapshots", testDriveID),
