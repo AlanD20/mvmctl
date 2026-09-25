@@ -75,7 +75,7 @@ func createExecutionIdentityAccount(
 	result, err := system.DefaultRunner.Run(ctx, []string{
 		"/usr/sbin/useradd", "--system", "--user-group", "--no-create-home", "--no-log-init",
 		"--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", "--password", "!",
-		"--comment", record.comment(), "--key", "CREATE_MAIL_SPOOL=no", "--", record.Name,
+		"--comment", record.comment(), "--", record.Name,
 	}, executionIdentityCommandOptions())
 	if err != nil || result == nil || !result.Success() {
 		return vmExecutionIdentity{}, instanceAtomicError(
