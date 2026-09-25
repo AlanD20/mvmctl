@@ -18,11 +18,14 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// CONTRACT: Existing transitional grants remain until the final dispatcher-only policy is activated.
-const expectedTransitionalSudoers = "# Managed by mvmctl — do not edit manually.\n" +
-	"# To remove: mvmctl host reset\n" +
-	"%mvm ALL=(root) NOPASSWD: /usr/sbin/ip, /usr/sbin/iptables, /usr/sbin/iptables-restore, " +
-	"/usr/sbin/iptables-save, /usr/sbin/nft, /usr/sbin/sysctl, /usr/sbin/modprobe, /usr/local/bin/mvm *\n"
+// CONTRACT: The sole passwordless grant reaches only the early privileged dispatcher.
+const expectedMarkerOnlySudoers = "# Managed by mvmctl — do not edit manually.\n" +
+	"# To remove: sudo /usr/local/bin/mvm host reset --force\n" +
+	"%mvm ALL=(root) NOPASSWD: /usr/local/bin/mvm __mvm_privileged_v1 *\n"
+
+// A valid but noncanonical prior policy lets publication and failure tests reach the effect boundary.
+const previousMarkerOnlySudoers = "# Previous managed policy\n" +
+	"%mvm ALL=(root) NOPASSWD: /usr/local/bin/mvm __mvm_privileged_v1 *\n"
 
 type sudoersFixture struct {
 	root   string
@@ -42,7 +45,6 @@ func newSudoersFixture(t *testing.T) *sudoersFixture {
 		policy: sudoersStorePolicy{rootPath: root, uid: uint32(os.Getuid()), gid: uint32(os.Getgid())},
 	}
 	f.deps.effectiveUID = func() int { return 0 }
-	f.deps.stat = func(context.Context, string) (os.FileInfo, error) { return nil, nil }
 	f.deps.run = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
 		return &system.RunResult{ExitCode: 0}, nil
 	}
@@ -166,7 +168,7 @@ func TestSudoersPublisherRejectsUnsafeExistingObjectsEvenWithMatchingContent(t *
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newSudoersFixture(t)
-			f.seed(t, expectedTransitionalSudoers)
+			f.seed(t, expectedMarkerOnlySudoers)
 			tt.mutate(t, f)
 			before, content := snapshotSudoersObject(t, f.target)
 			f.deps.run = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
@@ -186,7 +188,7 @@ func TestSudoersPublisherRejectsTargetUIDAndGIDWithoutChangingPolicy(t *testing.
 	for _, field := range []string{"uid", "gid"} {
 		t.Run(field, func(t *testing.T) {
 			f := newSudoersFixture(t)
-			f.seed(t, expectedTransitionalSudoers)
+			f.seed(t, expectedMarkerOnlySudoers)
 			before, content := snapshotSudoersObject(t, f.target)
 			fstat := f.deps.fstat
 			injected := false
@@ -214,22 +216,25 @@ func TestSudoersPublisherRejectsTargetUIDAndGIDWithoutChangingPolicy(t *testing.
 			assert.False(t, changed)
 			assert.True(t, injected, "valid ancestors must allow inspection to reach the target inode")
 			assertSudoersObjectUnchanged(t, f.target, before, content)
-			assertSudoersFiles(t, f, expectedTransitionalSudoers)
+			assertSudoersFiles(t, f, expectedMarkerOnlySudoers)
 		})
 	}
 }
 
 func TestSudoersPublisherPublishesExactPolicyAndIsIdempotent(t *testing.T) {
-	for _, initial := range []string{"", "# previous valid policy\n"} {
-		t.Run(initial, func(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		initial string
+	}{{name: "absent"}, {name: "prior marker policy", initial: previousMarkerOnlySudoers}} {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newSudoersFixture(t)
-			if initial != "" {
-				f.seed(t, initial)
+			if tc.initial != "" {
+				f.seed(t, tc.initial)
 			}
 			changed, err := f.publish(context.Background())
 			require.NoError(t, err)
 			assert.True(t, changed)
-			assertSudoersFiles(t, f, expectedTransitionalSudoers)
+			assertSudoersFiles(t, f, expectedMarkerOnlySudoers)
 			var stat unix.Stat_t
 			require.NoError(t, unix.Stat(f.target, &stat))
 			assert.Equal(t, uint32(0440), stat.Mode&07777)
@@ -259,7 +264,7 @@ func TestSudoersPublisherUsesClosedValidationEnvironment(t *testing.T) {
 		if diff := cmp.Diff([]string{"/usr/sbin/visudo", "-c", "-f", "-"}, args); diff != "" {
 			t.Errorf("validation argv (-want +got):\n%s", diff)
 		}
-		assert.Equal(t, expectedTransitionalSudoers, opts.Input)
+		assert.Equal(t, expectedMarkerOnlySudoers, opts.Input)
 		assert.True(t, opts.ReplaceEnv)
 		assert.False(t, opts.Privileged)
 		if diff := cmp.Diff(
@@ -276,7 +281,7 @@ func TestSudoersPublisherUsesClosedValidationEnvironment(t *testing.T) {
 	changed, err := f.publish(context.Background())
 	require.NoError(t, err)
 	assert.True(t, changed)
-	assertSudoersFiles(t, f, expectedTransitionalSudoers)
+	assertSudoersFiles(t, f, expectedMarkerOnlySudoers)
 }
 
 func TestSudoersPublisherPreservesPolicyBeforeCommit(t *testing.T) {
@@ -329,56 +334,30 @@ func TestSudoersPublisherPreservesPolicyBeforeCommit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newSudoersFixture(t)
-			f.seed(t, "# previous policy\n")
+			f.seed(t, previousMarkerOnlySudoers)
 			tt.fault(f)
 			changed, err := f.publish(context.Background())
 			require.Error(t, err)
 			assert.False(t, changed)
-			assertSudoersFiles(t, f, "# previous policy\n")
+			assertSudoersFiles(t, f, previousMarkerOnlySudoers)
 		})
 	}
 }
 
-func TestSudoersPublisherChecksEveryGrantedToolBeforeVisudo(t *testing.T) {
-	// Independent contract list: do not derive expectations from the production allowlist.
-	grantedTools := []string{
-		"/usr/sbin/ip", "/usr/sbin/iptables", "/usr/sbin/iptables-restore", "/usr/sbin/iptables-save",
-		"/usr/sbin/nft", "/usr/sbin/sysctl", "/usr/sbin/modprobe",
+// Rationale: Existing raw-tool grants cannot be silently replaced under a possibly passwordless administrator session.
+func TestSudoersPublisherRejectsLegacyPolicyBeforeVisudo(t *testing.T) {
+	f := newSudoersFixture(t)
+	const legacyPolicy = "%mvm ALL=(root) NOPASSWD: /usr/sbin/ip, /usr/local/bin/mvm *\n"
+	f.seed(t, legacyPolicy)
+	before, content := snapshotSudoersObject(t, f.target)
+	f.deps.run = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
+		t.Fatal("legacy policy must fail before visudo validation")
+		return nil, nil
 	}
-	for index, binary := range grantedTools {
-		for _, failure := range []struct {
-			name string
-			err  error
-		}{
-			{"missing", os.ErrNotExist}, {"unreadable", os.ErrPermission},
-		} {
-			t.Run(binary+"/"+failure.name, func(t *testing.T) {
-				f := newSudoersFixture(t)
-				f.seed(t, "# previous policy\n")
-				before, content := snapshotSudoersObject(t, f.target)
-				var inspected []string
-				f.deps.stat = func(_ context.Context, path string) (os.FileInfo, error) {
-					inspected = append(inspected, path)
-					if path == binary {
-						return nil, failure.err
-					}
-					return nil, nil
-				}
-				f.deps.run = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
-					t.Fatal("a failed granted-tool preflight must not invoke visudo")
-					return nil, nil
-				}
-				changed, err := f.publish(context.Background())
-				require.ErrorIs(t, err, failure.err)
-				assert.False(t, changed)
-				if diff := cmp.Diff(grantedTools[:index+1], inspected); diff != "" {
-					t.Errorf("preflight must progress to the failing tool and stop (-want +got):\n%s", diff)
-				}
-				assertSudoersObjectUnchanged(t, f.target, before, content)
-				assertSudoersFiles(t, f, "# previous policy\n")
-			})
-		}
-	}
+	changed, err := f.publish(context.Background())
+	require.Error(t, err)
+	assert.False(t, changed)
+	assertSudoersObjectUnchanged(t, f.target, before, content)
 }
 
 func TestSudoersPublisherHandlesShortWrites(t *testing.T) {
@@ -390,7 +369,7 @@ func TestSudoersPublisherHandlesShortWrites(t *testing.T) {
 	changed, err := f.publish(context.Background())
 	require.NoError(t, err)
 	assert.True(t, changed)
-	assertSudoersFiles(t, f, expectedTransitionalSudoers)
+	assertSudoersFiles(t, f, expectedMarkerOnlySudoers)
 }
 
 func TestSudoersPublisherDetectsTargetReplacementBeforeCommit(t *testing.T) {
@@ -398,7 +377,7 @@ func TestSudoersPublisherDetectsTargetReplacementBeforeCommit(t *testing.T) {
 		t.Run(fmt.Sprint(found), func(t *testing.T) {
 			f := newSudoersFixture(t)
 			if found {
-				f.seed(t, "# old policy\n")
+				f.seed(t, previousMarkerOnlySudoers)
 			}
 			f.deps.run = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
 				replacement := filepath.Join(f.dir, ".replacement")
@@ -416,7 +395,7 @@ func TestSudoersPublisherDetectsTargetReplacementBeforeCommit(t *testing.T) {
 
 func TestSudoersPublisherDetectsReadMutation(t *testing.T) {
 	f := newSudoersFixture(t)
-	f.seed(t, expectedTransitionalSudoers)
+	f.seed(t, expectedMarkerOnlySudoers)
 	read := f.deps.read
 	mutated := false
 	f.deps.read = func(ctx context.Context, fd int, buffer []byte) (int, error) {
@@ -430,23 +409,23 @@ func TestSudoersPublisherDetectsReadMutation(t *testing.T) {
 	changed, err := f.publish(context.Background())
 	require.Error(t, err)
 	assert.False(t, changed)
-	assertSudoersFiles(t, f, expectedTransitionalSudoers)
+	assertSudoersFiles(t, f, expectedMarkerOnlySudoers)
 }
 
 func TestSudoersPublisherRejectsFailedPolicyRead(t *testing.T) {
 	f := newSudoersFixture(t)
-	f.seed(t, "# previous policy\n")
+	f.seed(t, previousMarkerOnlySudoers)
 	failure := errors.New("read failure")
 	f.deps.read = func(context.Context, int, []byte) (int, error) { return 0, failure }
 	changed, err := f.publish(context.Background())
 	require.ErrorIs(t, err, failure)
 	assert.False(t, changed)
-	assertSudoersFiles(t, f, "# previous policy\n")
+	assertSudoersFiles(t, f, previousMarkerOnlySudoers)
 }
 
 func TestSudoersPublisherDetectsReplacementOfMatchingPolicy(t *testing.T) {
 	f := newSudoersFixture(t)
-	f.seed(t, expectedTransitionalSudoers)
+	f.seed(t, expectedMarkerOnlySudoers)
 	read := f.deps.read
 	replaced := false
 	f.deps.read = func(ctx context.Context, fd int, buffer []byte) (int, error) {
@@ -467,7 +446,7 @@ func TestSudoersPublisherDetectsReplacementOfMatchingPolicy(t *testing.T) {
 
 func TestSudoersPublisherNeverDeletesReplacedCandidateDuringCleanup(t *testing.T) {
 	f := newSudoersFixture(t)
-	f.seed(t, "# previous policy\n")
+	f.seed(t, previousMarkerOnlySudoers)
 	failure := errors.New("write failure after replacement")
 	candidate := ""
 	f.deps.write = func(context.Context, int, []byte) (int, error) {
@@ -494,7 +473,7 @@ func TestSudoersPublisherNeverDeletesReplacedCandidateDuringCleanup(t *testing.T
 	assert.Equal(t, "replacement belongs to another writer", string(data))
 	data, err = os.ReadFile(f.target)
 	require.NoError(t, err)
-	assert.Equal(t, "# previous policy\n", string(data))
+	assert.Equal(t, previousMarkerOnlySudoers, string(data))
 }
 
 func TestSudoersPublisherReportsCloseFailureAfterCommit(t *testing.T) {
@@ -518,12 +497,12 @@ func TestSudoersPublisherReportsCloseFailureAfterCommit(t *testing.T) {
 	assert.Equal(t, true, de.Details["sudoers_replaced"])
 	assert.Equal(t, true, de.Details["cleanup_failed"])
 	assert.NotContains(t, de.Details, "durability_uncertain")
-	assertSudoersFiles(t, f, expectedTransitionalSudoers)
+	assertSudoersFiles(t, f, expectedMarkerOnlySudoers)
 }
 
 func TestSudoersPublisherPreservesPrimaryFailureWhenCleanupFails(t *testing.T) {
 	f := newSudoersFixture(t)
-	f.seed(t, "# previous policy\n")
+	f.seed(t, previousMarkerOnlySudoers)
 	primary, cleanup := errors.New("write failure"), errors.New("unlink failure")
 	f.deps.write = func(context.Context, int, []byte) (int, error) { return 0, primary }
 	f.deps.unlinkAt = func(context.Context, int, string, int) error { return cleanup }
@@ -536,7 +515,7 @@ func TestSudoersPublisherPreservesPrimaryFailureWhenCleanupFails(t *testing.T) {
 	assert.Equal(t, true, de.Details["cleanup_failed"])
 	data, err := os.ReadFile(f.target)
 	require.NoError(t, err)
-	assert.Equal(t, "# previous policy\n", string(data))
+	assert.Equal(t, previousMarkerOnlySudoers, string(data))
 	entries, err := os.ReadDir(f.dir)
 	require.NoError(t, err)
 	assert.Len(t, entries, 2, "failed cleanup retains the harmless hidden candidate for diagnosis")
@@ -544,18 +523,18 @@ func TestSudoersPublisherPreservesPrimaryFailureWhenCleanupFails(t *testing.T) {
 
 func TestSudoersPublisherRejectsCancellationBeforeEffects(t *testing.T) {
 	f := newSudoersFixture(t)
-	f.seed(t, "# previous policy\n")
+	f.seed(t, previousMarkerOnlySudoers)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	changed, err := f.publish(ctx)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.False(t, changed)
-	assertSudoersFiles(t, f, "# previous policy\n")
+	assertSudoersFiles(t, f, previousMarkerOnlySudoers)
 }
 
 func TestSudoersPublisherReportsPostCommitDurabilityFailure(t *testing.T) {
 	f := newSudoersFixture(t)
-	f.seed(t, "# previous policy\n")
+	f.seed(t, previousMarkerOnlySudoers)
 	failure := errors.New("directory sync failure")
 	original := f.deps.fsync
 	f.deps.fsync = func(ctx context.Context, fd int) error {
@@ -575,12 +554,12 @@ func TestSudoersPublisherReportsPostCommitDurabilityFailure(t *testing.T) {
 	require.NotNil(t, de)
 	assert.Equal(t, true, de.Details["sudoers_replaced"])
 	assert.Equal(t, true, de.Details["durability_uncertain"])
-	assertSudoersFiles(t, f, expectedTransitionalSudoers)
+	assertSudoersFiles(t, f, expectedMarkerOnlySudoers)
 }
 
 func TestSudoersPublisherCancellationCleansWithBoundedIndependentContext(t *testing.T) {
 	f := newSudoersFixture(t)
-	f.seed(t, "# previous policy\n")
+	f.seed(t, previousMarkerOnlySudoers)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	originalWrite := f.deps.write
@@ -600,5 +579,5 @@ func TestSudoersPublisherCancellationCleansWithBoundedIndependentContext(t *test
 	changed, err := f.publish(ctx)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.False(t, changed)
-	assertSudoersFiles(t, f, "# previous policy\n")
+	assertSudoersFiles(t, f, previousMarkerOnlySudoers)
 }
