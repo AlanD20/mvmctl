@@ -17,6 +17,8 @@ import (
 const (
 	testAuthorityUID = uint32(1000)
 	testAuthorityGID = uint32(1001)
+	testExecutionUID = uint32(2000)
+	testExecutionGID = uint32(2001)
 	testReleaseHash  = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	testJailerHash   = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 	testRelayHash    = "1111111111111111111111111111111111111111111111111111111111111111"
@@ -544,9 +546,11 @@ func testInstanceCaller() instanceCaller {
 
 func testLaunchIntent(_ bool) launchIntent {
 	return launchIntent{
-		vmID:          testVMID,
-		hostBootID:    "123e4567-e89b-42d3-a456-426614174000",
-		cacheIdentity: testManagedCacheIdentity(),
+		vmID:              testVMID,
+		hostBootID:        "123e4567-e89b-42d3-a456-426614174000",
+		cacheIdentity:     testManagedCacheIdentity(),
+		cacheLocator:      managedCacheLocator{components: []string{"home", "caller", "mvmctl"}},
+		executionIdentity: vmExecutionIdentity{uid: testExecutionUID, gid: testExecutionGID},
 	}
 }
 
@@ -575,12 +579,12 @@ func testReleaseIdentity() releaseIdentity {
 
 func testActiveIdentity(relayPresent bool) instanceActiveIdentity {
 	userIDs := processCredentialIdentity{
-		real: testAuthorityUID, effective: testAuthorityUID,
-		saved: testAuthorityUID, filesystem: testAuthorityUID,
+		real: testExecutionUID, effective: testExecutionUID,
+		saved: testExecutionUID, filesystem: testExecutionUID,
 	}
 	groupIDs := processCredentialIdentity{
-		real: testAuthorityGID, effective: testAuthorityGID,
-		saved: testAuthorityGID, filesystem: testAuthorityGID,
+		real: testExecutionGID, effective: testExecutionGID,
+		saved: testExecutionGID, filesystem: testExecutionGID,
 	}
 	identity := instanceActiveIdentity{
 		userIDs:             userIDs,
@@ -596,10 +600,18 @@ func testActiveIdentity(relayPresent bool) instanceActiveIdentity {
 		relay: instanceActiveRelay{kind: instanceRelayAbsent},
 	}
 	if relayPresent {
+		relayUserIDs := processCredentialIdentity{
+			real: testAuthorityUID, effective: testAuthorityUID,
+			saved: testAuthorityUID, filesystem: testAuthorityUID,
+		}
+		relayGroupIDs := processCredentialIdentity{
+			real: testAuthorityGID, effective: testAuthorityGID,
+			saved: testAuthorityGID, filesystem: testAuthorityGID,
+		}
 		identity.relay = instanceActiveRelay{
 			kind:                instanceRelayPresent,
-			userIDs:             userIDs,
-			groupIDs:            groupIDs,
+			userIDs:             relayUserIDs,
+			groupIDs:            relayGroupIDs,
 			supplementaryGroups: []uint32{},
 			mountNamespace:      instanceObjectIdentity{device: 51, inode: 52},
 			root:                instanceObjectIdentity{device: 53, inode: 54},
@@ -665,6 +677,8 @@ func diffInstanceRecord(want, got instanceRecord) string {
 			instanceFirecrackerExecutableIdentity{},
 			instanceRelayExecutableIdentity{},
 			managedCacheIdentity{},
+			managedCacheLocator{},
+			vmExecutionIdentity{},
 			releaseIdentity{},
 		),
 	)

@@ -768,7 +768,7 @@ func TestBuildManagedFirecrackerConfigDerivesCompleteClosedConfiguration(t *test
 		},
 		Metrics:   &managedFirecrackerMetrics{MetricsPath: "/run/mvm/firecracker.metrics"},
 		CPUConfig: &model.CpuConfig{KvmCapabilities: []string{"KVM_CAP_ONE_REG"}},
-		Vsock:     &managedFirecrackerVsock{GuestCID: 42, UDSPath: "/run/mvm/runtime/vsock.sock"},
+		Vsock:     &managedFirecrackerVsock{GuestCID: 42, UDSPath: "/vmm-runtime/vsock.sock"},
 	}
 
 	if diff := cmp.Diff(want, buildManagedFirecrackerConfig(intent)); diff != "" {
@@ -777,7 +777,7 @@ func TestBuildManagedFirecrackerConfigDerivesCompleteClosedConfiguration(t *test
 }
 
 // Rationale: Persistent output leaves are mounted directly below /run/mvm, while mutable runtime sockets belong to
-// the separately pinned ephemeral directory mounted at /run/mvm/runtime. Collapsing those paths breaks that boundary.
+// the separately pinned ephemeral directory mounted at /vmm-runtime. Collapsing those paths breaks that boundary.
 func TestBuildManagedFirecrackerConfigSeparatesPersistentOutputsFromRuntimeSockets(t *testing.T) {
 	config := buildManagedFirecrackerConfig(testVMFirecrackerLaunchIntent(cloudInitAbsent))
 
@@ -788,7 +788,7 @@ func TestBuildManagedFirecrackerConfigSeparatesPersistentOutputsFromRuntimeSocke
 	}{
 		Log:     "/run/mvm/firecracker.log",
 		Metrics: "/run/mvm/firecracker.metrics",
-		Vsock:   "/run/mvm/runtime/vsock.sock",
+		Vsock:   "/vmm-runtime/vsock.sock",
 	}
 	got := struct {
 		Log     string
