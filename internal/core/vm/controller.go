@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/model"
 	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
