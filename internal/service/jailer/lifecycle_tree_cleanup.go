@@ -248,7 +248,7 @@ func removeJailFixedLeaf(
 	// fixed bounded metadata leaf, never an arbitrary caller file, is removed after exit.
 	if kind == jailCleanupRoot && name == launchDeviceAuthorityLeaf &&
 		(original.Uid != 0 || original.Gid != 0 || original.Size < 0 ||
-			original.Size > launchDeviceAuthorityMaxBytes ||
+			original.Size > int64(launchDeviceAuthorityMaxBytes) ||
 			(original.Mode != unix.S_IFREG|0400 && original.Mode != unix.S_IFREG|0600)) {
 		return processAuthorityError(record.vmID, "stopped launch device authority metadata is not admitted", nil)
 	}
