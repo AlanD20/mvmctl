@@ -122,101 +122,6 @@ func TestConstraintRegistry(t *testing.T) {
 	})
 }
 
-// --- validateNoCloudPortRange ---
-// Rationale: end > start is valid. Any other relationship (end == start,
-// end < start) must error with a specific message.
-
-func TestValidateNoCloudPortRange(t *testing.T) {
-	t.Run("valid_range", func(t *testing.T) {
-		r := config.NewConstraintRegistry()
-		config.RegisterBuiltinConstraints(r)
-		constraints := r.Get("defaults.cloudinit", "nocloud_port_range_end")
-
-		resolve := resolveMap(map[string]any{
-			"nocloud_port_range_start": 32768,
-			"nocloud_port_range_end":   33768,
-		})
-		err := constraints[0]("nocloud_port_range_end", resolve)
-		assert.NoError(t, err)
-	})
-
-	t.Run("end_equals_start_errors", func(t *testing.T) {
-		r := config.NewConstraintRegistry()
-		config.RegisterBuiltinConstraints(r)
-		constraints := r.Get("defaults.cloudinit", "nocloud_port_range_end")
-
-		resolve := resolveMap(map[string]any{
-			"nocloud_port_range_start": 32768,
-			"nocloud_port_range_end":   32768,
-		})
-		err := constraints[0]("nocloud_port_range_end", resolve)
-		assertConfigError(t, err)
-		assert.Contains(t, err.Error(), "must be greater than")
-	})
-
-	t.Run("end_less_than_start_errors", func(t *testing.T) {
-		r := config.NewConstraintRegistry()
-		config.RegisterBuiltinConstraints(r)
-		constraints := r.Get("defaults.cloudinit", "nocloud_port_range_end")
-
-		resolve := resolveMap(map[string]any{
-			"nocloud_port_range_start": 32768,
-			"nocloud_port_range_end":   31768,
-		})
-		err := constraints[0]("nocloud_port_range_end", resolve)
-		assertConfigError(t, err)
-		assert.Contains(t, err.Error(), "must be greater than")
-	})
-
-	t.Run("resolve_error_for_start_propagated", func(t *testing.T) {
-		r := config.NewConstraintRegistry()
-		config.RegisterBuiltinConstraints(r)
-		constraints := r.Get("defaults.cloudinit", "nocloud_port_range_end")
-
-		err := constraints[0]("nocloud_port_range_end", resolveErr("nocloud_port_range_start"))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "resolve error for nocloud_port_range_start")
-	})
-
-	t.Run("resolve_error_for_end_propagated", func(t *testing.T) {
-		r := config.NewConstraintRegistry()
-		config.RegisterBuiltinConstraints(r)
-		constraints := r.Get("defaults.cloudinit", "nocloud_port_range_end")
-
-		err := constraints[0]("nocloud_port_range_end", resolveErr("nocloud_port_range_end"))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "resolve error for nocloud_port_range_end")
-	})
-
-	t.Run("start_is_not_numeric", func(t *testing.T) {
-		r := config.NewConstraintRegistry()
-		config.RegisterBuiltinConstraints(r)
-		constraints := r.Get("defaults.cloudinit", "nocloud_port_range_end")
-
-		resolve := resolveMap(map[string]any{
-			"nocloud_port_range_start": "not-a-number",
-			"nocloud_port_range_end":   33768,
-		})
-		err := constraints[0]("nocloud_port_range_end", resolve)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "expected numeric value")
-	})
-
-	t.Run("end_is_not_numeric", func(t *testing.T) {
-		r := config.NewConstraintRegistry()
-		config.RegisterBuiltinConstraints(r)
-		constraints := r.Get("defaults.cloudinit", "nocloud_port_range_end")
-
-		resolve := resolveMap(map[string]any{
-			"nocloud_port_range_start": 32768,
-			"nocloud_port_range_end":   "not-a-number",
-		})
-		err := constraints[0]("nocloud_port_range_end", resolve)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "expected numeric value")
-	})
-}
-
 // --- validateMACPrefix ---
 // Rationale: Must accept exactly two hex bytes separated by a colon.
 // Reject anything else — wrong length, wrong separator, extra characters.
@@ -361,23 +266,9 @@ func TestValidateCgroupDefaults_Boundaries(t *testing.T) {
 }
 
 // --- RegisterBuiltinConstraints ---
-// Rationale: Must register both constraints in the correct categories and keys.
+// Rationale: Must register VM constraints in the correct category and keys.
 
 func TestRegisterBuiltinConstraints(t *testing.T) {
-	t.Run("registers_nocloud_port_range", func(t *testing.T) {
-		r := config.NewConstraintRegistry()
-		config.RegisterBuiltinConstraints(r)
-
-		startConstraints := r.Get("defaults.cloudinit", "nocloud_port_range_start")
-		endConstraints := r.Get("defaults.cloudinit", "nocloud_port_range_end")
-		assert.Len(t, startConstraints, 1, "nocloud_port_range_start should have 1 constraint")
-		assert.Len(t, endConstraints, 1, "nocloud_port_range_end should have 1 constraint")
-
-		// They should be the same constraint function (same pointer)
-		assert.Equal(t, fmt.Sprintf("%p", startConstraints[0]), fmt.Sprintf("%p", endConstraints[0]),
-			"both keys should share the same constraint function")
-	})
-
 	t.Run("registers_guest_mac_prefix", func(t *testing.T) {
 		r := config.NewConstraintRegistry()
 		config.RegisterBuiltinConstraints(r)
