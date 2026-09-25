@@ -18,7 +18,8 @@ import (
 // --- Controller: Pause state machine ---
 // Rationale: Pause must reject invalid transitions with specific error messages
 // and be idempotent when already paused. Error paths cover starting, stopped,
-// stopping, error, and crashed states.
+// stopping, error, and crashed states. Active-VM API socket admission belongs
+// to the root broker and requires runner-VM qualification.
 
 func TestController_Pause_stateTransitions(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -63,13 +64,6 @@ func TestController_Pause_stateTransitions(t *testing.T) {
 		err := ctrl.Pause(context.Background())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "crashed")
-	})
-
-	t.Run("running_no_socket_rejected", func(t *testing.T) {
-		ctrl := ctrlFor(model.VMStatusRunning)
-		err := ctrl.Pause(context.Background())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no API socket")
 	})
 }
 
