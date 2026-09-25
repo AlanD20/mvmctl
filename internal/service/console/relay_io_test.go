@@ -3,6 +3,7 @@ package console
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,12 +20,9 @@ func TestRelayIOForwardsVMOutputToClient(t *testing.T) {
 	defer vmW.Close()
 
 	tmpDir := t.TempDir()
-	// Unix socket paths are short; keep this path independent of the checkout and TMPDIR length.
-	socketDir, err := os.MkdirTemp("/tmp", "mvm-console-")
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
-	sockPath := filepath.Join(socketDir, "console.sock")
-	listener, err := net.Listen("unix", sockPath)
+	// An abstract AF_UNIX address avoids filesystem paths and their length limit.
+	socketName := fmt.Sprintf("@mvm-console-%d-%d", os.Getpid(), time.Now().UnixNano())
+	listener, err := net.Listen("unix", socketName)
 	require.NoError(t, err)
 	unixListener := listener.(*net.UnixListener)
 	defer unixListener.Close()
@@ -50,7 +48,7 @@ func TestRelayIOForwardsVMOutputToClient(t *testing.T) {
 	default:
 	}
 
-	client, err := net.Dial("unix", sockPath)
+	client, err := net.Dial("unix", socketName)
 	if err != nil {
 		t.Fatal(err)
 	}
