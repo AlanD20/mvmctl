@@ -159,97 +159,36 @@ func TestController_Start_stateTransitions(t *testing.T) {
 	})
 }
 
-// --- Controller: Stop idempotency ---
-// Rationale: Stop on non-running VMs (pid=0) must return nil immediately
-// without touching the repo. This is the most common error path.
-
-func TestController_Stop_idempotent(t *testing.T) {
+// A local stopped projection requires root cleanup authority even when the
+// caller's PID mirror is zero. Invalid selection fails before any root effect.
+func TestService_StopRejectsInvalidSelectionWithoutLocalProjection(t *testing.T) {
 	ctx := context.Background()
+	repo := testutil.NewVMRepo()
+	vmItem := &model.VMItem{ID: "invalid-vm-id", Name: "test", Status: model.VMStatusRunning, PID: 0}
+	require.NoError(t, repo.Upsert(ctx, vmItem))
 
-	for _, status := range []model.VMStatus{
-		model.VMStatusStopped,
-		model.VMStatusPaused,
-		model.VMStatusError,
-		model.VMStatusCrashed,
-	} {
-		t.Run(string(status)+"_noop", func(t *testing.T) {
-			repo := testutil.NewVMRepo()
-			m := &model.VMItem{ID: "vm-1", Name: "test", Status: status, PID: 0}
-			require.NoError(t, repo.Upsert(ctx, m))
-
-			ctrl := vm.NewController(m, repo)
-			assert.NoError(t, ctrl.Stop(ctx, false))
-
-			// Verify DB state unchanged
-			got, err := repo.Get(ctx, m.ID)
-			require.NoError(t, err)
-			require.NotNil(t, got)
-			assert.Equal(t, status, got.Status)
-		})
-	}
-}
-
-// --- Service: Single-VM delegation ---
-// Rationale: Service.Stop/Start/Pause/Resume delegate to Controller.
-// Verified by checking state machine rules through Service.
-
-func TestService_Stop(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("stopped_vm_is_noop", func(t *testing.T) {
-		repo := testutil.NewVMRepo()
-		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusStopped, PID: 0}
-		require.NoError(t, repo.Upsert(ctx, m))
-
-		svc := vm.NewService(repo)
-		assert.NoError(t, svc.Stop(ctx, m, false))
-
-		got, _ := repo.Get(ctx, m.ID)
-		assert.Equal(t, model.VMStatusStopped, got.Status)
-	})
-
-	t.Run("running_pid_zero_is_gone_path", func(t *testing.T) {
-		repo := testutil.NewVMRepo()
-		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusRunning, PID: 0, APISocketPath: ""}
-		require.NoError(t, repo.Upsert(ctx, m))
-
-		svc := vm.NewService(repo)
-		assert.NoError(t, svc.Stop(ctx, m, false))
-
-		got, err := repo.Get(ctx, m.ID)
-		require.NoError(t, err)
-		require.NotNil(t, got)
-		assert.Equal(t, model.VMStatusStopped, got.Status)
-	})
-
-	t.Run("context_cancelled_before_call", func(t *testing.T) {
-		repo := testutil.NewVMRepo()
-		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusStopped, PID: 0}
-		require.NoError(t, repo.Upsert(ctx, m))
-
-		cancelCtx, cancel := context.WithCancel(ctx)
-		cancel()
-
-		svc := vm.NewService(repo)
-		err := svc.Stop(cancelCtx, m, false)
-		// Stop on non-running VM returns nil even with cancelled context
-		// (the early return path checks status, not context)
-		assert.NoError(t, err)
-	})
+	err := vm.NewService(repo).Stop(ctx, vmItem, false)
+	require.Error(t, err)
+	assertCode(t, err, errs.CodeValidationFailed)
+	assert.Equal(t, model.VMStatusRunning, vmItem.Status)
+	got, getErr := repo.Get(ctx, vmItem.ID)
+	require.NoError(t, getErr)
+	require.NotNil(t, got)
+	assert.Equal(t, model.VMStatusRunning, got.Status)
 }
 
 // --- Service: Bulk operations ---
-// Rationale: StopMany must process all VMs and collect errors.
+// Rationale: Bulk stop preserves item identity and reports validation rejection
+// without projecting local success or invoking root effects.
 
 func TestService_StopMany(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("all_already_stopped", func(t *testing.T) {
+	t.Run("serial_stops_after_first_rejection", func(t *testing.T) {
 		repo := testutil.NewVMRepo()
 		vms := []*model.VMItem{
-			{ID: "vm-1", Name: "a", Status: model.VMStatusStopped, PID: 0},
-			{ID: "vm-2", Name: "b", Status: model.VMStatusPaused, PID: 0},
-			{ID: "vm-3", Name: "c", Status: model.VMStatusError, PID: 0},
+			{ID: "invalid-vm-a", Name: "a", Status: model.VMStatusRunning, PID: 0},
+			{ID: "invalid-vm-b", Name: "b", Status: model.VMStatusPaused, PID: 0},
 		}
 		for _, v := range vms {
 			require.NoError(t, repo.Upsert(ctx, v))
@@ -258,9 +197,19 @@ func TestService_StopMany(t *testing.T) {
 		svc := vm.NewService(repo)
 		result := svc.StopMany(ctx, vms, false, false, 0)
 
-		assert.Equal(t, 3, len(result.Items))
-		for _, item := range result.Items {
-			assert.NoError(t, item.Error)
+		require.Len(t, result.Items, len(vms))
+		assert.Same(t, vms[0], result.Items[0].Item)
+		require.Error(t, result.Items[0].Error)
+		assertCode(t, result.Items[0].Error, errs.CodeValidationFailed)
+		assert.Nil(t, result.Items[1].Item)
+		assert.NoError(t, result.Items[1].Error)
+		assert.Equal(t, model.VMStatusRunning, vms[0].Status)
+		assert.Equal(t, model.VMStatusPaused, vms[1].Status)
+		for index, wantStatus := range []model.VMStatus{model.VMStatusRunning, model.VMStatusPaused} {
+			got, getErr := repo.Get(ctx, vms[index].ID)
+			require.NoError(t, getErr)
+			require.NotNil(t, got)
+			assert.Equal(t, wantStatus, got.Status)
 		}
 	})
 
@@ -271,11 +220,11 @@ func TestService_StopMany(t *testing.T) {
 		assert.Empty(t, result.Items)
 	})
 
-	t.Run("with_parallelism", func(t *testing.T) {
+	t.Run("parallel_collects_each_rejection", func(t *testing.T) {
 		repo := testutil.NewVMRepo()
 		vms := []*model.VMItem{
-			{ID: "vm-1", Name: "a", Status: model.VMStatusStopped, PID: 0},
-			{ID: "vm-2", Name: "b", Status: model.VMStatusStopped, PID: 0},
+			{ID: "invalid-vm-a", Name: "a", Status: model.VMStatusRunning, PID: 0},
+			{ID: "invalid-vm-b", Name: "b", Status: model.VMStatusPaused, PID: 0},
 		}
 		for _, v := range vms {
 			require.NoError(t, repo.Upsert(ctx, v))
@@ -283,9 +232,16 @@ func TestService_StopMany(t *testing.T) {
 
 		svc := vm.NewService(repo)
 		result := svc.StopMany(ctx, vms, false, true, 4)
-		assert.Equal(t, 2, len(result.Items))
-		for _, item := range result.Items {
-			assert.NoError(t, item.Error)
+		require.Len(t, result.Items, len(vms))
+		for index, item := range result.Items {
+			assert.Same(t, vms[index], item.Item)
+			require.Error(t, item.Error)
+			assertCode(t, item.Error, errs.CodeValidationFailed)
+			got, getErr := repo.Get(ctx, vms[index].ID)
+			require.NoError(t, getErr)
+			require.NotNil(t, got)
+			wantStatus := []model.VMStatus{model.VMStatusRunning, model.VMStatusPaused}[index]
+			assert.Equal(t, wantStatus, got.Status)
 		}
 	})
 }
