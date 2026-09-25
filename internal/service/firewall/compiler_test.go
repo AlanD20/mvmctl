@@ -150,6 +150,7 @@ func TestCompileGenerationSeparatesIngressGuardsFromForwardPolicy(t *testing.T) 
 func TestCompileGenerationBindsInternetEgressToMasqueradeCapability(t *testing.T) {
 	intent := compatibilityIntent()
 	intent.networks[0].masquerade = false
+	intent.networks[0].uplinkInterface = ""
 
 	compiled, err := compileGeneration(intent)
 	require.NoError(t, err)
@@ -169,6 +170,9 @@ func TestCompileGenerationRejectsInvalidResolvedIntent(t *testing.T) {
 		},
 		"interface name exceeds kernel limit": func(intent *generationIntent) {
 			intent.endpoints[0].hostVeth = "interface-name-too-long"
+		},
+		"disabled NAT carries uplink authority": func(intent *generationIntent) {
+			intent.networks[0].masquerade = false
 		},
 		"IPv6 endpoint": func(intent *generationIntent) {
 			intent.endpoints[0].ipv4 = netip.MustParseAddr("2001:db8::1")
@@ -420,6 +424,7 @@ func TestCompileGenerationDigestCoversSemanticIntentAndOutputOrder(t *testing.T)
 		},
 		"network masquerade": func(intent *generationIntent) {
 			intent.networks[0].masquerade = false
+			intent.networks[0].uplinkInterface = ""
 		},
 		"VM grant protocol": func(intent *generationIntent) {
 			intent.vmGrants[0].protocol = protocolUDP

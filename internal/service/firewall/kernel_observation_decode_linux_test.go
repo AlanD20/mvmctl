@@ -24,7 +24,7 @@ const (
 	testNFTAChainFlags         = uint16(10)
 	testNFTChainBase           = uint32(1)
 	testNFTBaseSequence        = uint16(0x1234)
-	testKernelGenerationID     = "9b602b8d7f3eb3178650b1e0d0080bcc4179543c02a9f5e7ea93091900a6e9b4"
+	testKernelGenerationID     = "55003fdd06928dc2be2e8af48d62bd2f179f0f5add30987dc9b45c261a54d65c"
 )
 
 // Rationale: A hand-built dump fixture is independent of google/nftables marshaling and locks the Linux reply shape
@@ -1221,11 +1221,10 @@ func testKernelMessage(
 // exercising multi-rule and multi-chain ordering.
 func kernelFixtureIntent() generationIntent {
 	return generationIntent{networks: []networkIntent{{
-		id:              strings.Repeat("b", 64),
-		hostBridge:      "mvmbr0",
-		subnet:          netip.MustParsePrefix("10.0.0.0/24"),
-		hostIPv4:        netip.MustParseAddr("10.0.0.1"),
-		uplinkInterface: "eth0",
+		id:         strings.Repeat("b", 64),
+		hostBridge: "mvmbr0",
+		subnet:     netip.MustParsePrefix("10.0.0.0/24"),
+		hostIPv4:   netip.MustParseAddr("10.0.0.1"),
 	}}}
 }
 
