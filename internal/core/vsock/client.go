@@ -778,10 +778,13 @@ func (c *Client) probeVersion(ctx context.Context, conn net.Conn) (string, error
 	return data.AgentVersion, nil
 }
 
-// dialRaw dials the UDS socket and performs the CONNECT handshake only.
+// dialRaw opens a guest connection and performs the CONNECT handshake only.
 // No version probe or upgrade check. Used by upgradeAgent to avoid
 // circular calls back into ensureAgent.
 func (c *Client) dialRaw(ctx context.Context) (net.Conn, error) {
+	if c.dialFn != nil {
+		return c.dialFn(ctx, c.item.UDSPath, c.item.Port, 0)
+	}
 	return dialAndHandshake(ctx, c.item.VmID, c.item.Port, 0)
 }
 

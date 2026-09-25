@@ -471,6 +471,7 @@ func TestExecWithSourceSessionCarriesOnlySessionID(t *testing.T) {
 	}()
 
 	var req execRequest
+	require.NoError(t, agentConn.SetReadDeadline(time.Now().Add(5*time.Second)))
 	require.NoError(t, readFrameRaw(agentConn, &req))
 	assert.Equal(t, "00112233445566778899aabbccddeeff", req.SourceSessionID)
 	require.NoError(t, SendFrame(agentConn, execResponse{Type: "result", Status: 0}))
