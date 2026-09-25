@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -121,7 +122,7 @@ func (op *Operation) SnapshotCreate(
 func (op *Operation) SnapshotRestore(
 	ctx context.Context,
 	input inputs.SnapshotRestoreInput,
-) ([]*model.VMItem, error) {
+) (items []*model.VMItem, restoreErr error) {
 	if err := input.Validate(); err != nil {
 		return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed, "invalid snapshot restore request", err)
 	}
@@ -160,12 +161,60 @@ func (op *Operation) SnapshotRestore(
 		return nil, errs.AlreadyExists(errs.CodeVMAlreadyExists, input.Name)
 	}
 	created := infra.Now()
-	vmID := crypto.VMID(input.Name, created)
+	// A fresh attempt must never share an ID with a restore that may already
+	// have committed at root, even when both start within the same second.
+	vmID := crypto.VMID(input.Name, created+":"+crypto.UUIDV4())
 	directory := filepath.Join(op.CacheDir, "vms", vmID)
+	// CRITICAL: A restored guest keeps its captured endpoint. Reserve that exact
+	// address before publishing a VM record or asking root to restore it.
+	lease, err := op.Repos.Lease.Acquire(ctx, projection.NetworkID, projection.GuestIPv4, &vmID)
+	if err != nil {
+		// Acquire may have inserted the row before its readback failed. Root has
+		// not been called, so releasing only this new VM's lease is safe.
+		cleanupErr := op.Repos.Lease.ReleaseByVM(context.WithoutCancel(ctx), vmID)
+		return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
+			"reserve captured IP for restored VM "+vmID, errors.Join(err, cleanupErr))
+	}
+	if lease == nil || lease.VMID == nil || *lease.VMID != vmID {
+		return nil, errs.New(errs.CodeSnapshotRestoreFailed,
+			"captured IP "+projection.GuestIPv4+" is already leased on network "+projection.NetworkID)
+	}
+	var item *model.VMItem
+	var directoryCreated, vmRecordAttempted, vsockRecordAttempted, rootAttempted bool
+	defer func() {
+		if restoreErr == nil || rootAttempted {
+			return
+		}
+		// CRITICAL: Once root restore is attempted its outcome can be unknown.
+		// This cleanup runs only while root cannot own the captured endpoint.
+		cleanupCtx := context.WithoutCancel(ctx)
+		var cleanupErr error
+		if vsockRecordAttempted {
+			cleanupErr = op.Repos.Vsock.DeleteByVMID(cleanupCtx, vmID)
+		}
+		if cleanupErr == nil && vmRecordAttempted {
+			cleanupErr = op.Repos.VM.Delete(cleanupCtx, vmID)
+		}
+		if cleanupErr == nil {
+			cleanupErr = op.Repos.Lease.ReleaseByVM(cleanupCtx, vmID)
+		}
+		if cleanupErr == nil && directoryCreated {
+			cleanupErr = os.Remove(directory)
+		}
+		if cleanupErr != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("clean up restored VM %s: %w", vmID, cleanupErr))
+			if vmRecordAttempted {
+				items = []*model.VMItem{item}
+			}
+			return
+		}
+		items = nil
+	}()
 	if err := os.Mkdir(directory, 0755); err != nil {
 		return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed, "create restored VM bookkeeping directory", err)
 	}
-	item := &model.VMItem{
+	directoryCreated = true
+	item = &model.VMItem{
 		ID:        vmID,
 		Name:      input.Name,
 		Status:    model.VMStatusStarting,
@@ -213,32 +262,30 @@ func (op *Operation) SnapshotRestore(
 	if projection.CloudInit {
 		item.CloudInitMode = string(model.CloudInitModeISO)
 	}
+	vmRecordAttempted = true
 	if err := op.Repos.VM.Upsert(ctx, item); err != nil {
 		return nil, err
 	}
 	if projection.VsockCID != nil && snapshot.ExtraConfig != nil &&
 		snapshot.ExtraConfig.VsockCID == int(*projection.VsockCID) {
+		vsockRecordAttempted = true
 		if err := op.Repos.Vsock.Upsert(
 			ctx,
 			&model.VsockConfigItem{ID: crypto.UUIDV4(), VmID: vmID, GuestCID: int(*projection.VsockCID),
 				Port: snapshot.ExtraConfig.VsockPort, Token: snapshot.ExtraConfig.VsockToken},
 		); err != nil {
-			return []*model.VMItem{item}, err
+			return nil, err
 		}
 	}
+	rootAttempted = true
 	restored, err := vm.NewController(item, op.Repos.VM).SnapshotRestore(ctx, model.SnapshotRestoreConfig{
 		CacheRoot: op.CacheDir, SnapshotID: snapshot.ID, Resume: input.Resume,
 	})
 	if err != nil {
 		// Preserve both local identity and root recovery evidence. A failed transport
 		// does not authorize deleting a VM that may already have consumed memory.
-		return []*model.VMItem{
-				item,
-			}, errs.WrapMsg(
-				errs.CodeSnapshotRestoreFailed,
-				"restore outcome requires inspection of VM "+vmID,
-				err,
-			)
+		return []*model.VMItem{item}, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
+			"restore outcome requires inspection of VM "+vmID, err)
 	}
 	for _, volume := range restored.Volumes {
 		if err := op.Repos.Volume.Upsert(

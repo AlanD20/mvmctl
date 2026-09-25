@@ -82,10 +82,13 @@ func newSnapshotCreateCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 					prog.UpdateText(e.Message)
 				}
 			})
-			common.RecordResult(snapItem)
 			if err != nil {
+				if snapItem != nil {
+					common.RecordPartialResult(snapItem)
+				}
 				return fmt.Errorf("snapshot create failed: %w", err)
 			}
+			common.RecordResult(snapItem)
 
 			common.Cli.Success(
 				fmt.Sprintf("Snapshot created: %s (ID: %s)", snapItem.Name, common.Cli.FormatID(snapItem.ID)),
@@ -195,10 +198,13 @@ func newSnapshotRestoreCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 			defer prog.Stop()
 
 			vms, err := snapshotAPI.SnapshotRestore(cmd.Context(), input)
-			common.RecordResult(vms)
 			if err != nil {
+				if vms != nil {
+					common.RecordPartialResult(vms)
+				}
 				return fmt.Errorf("snapshot restore failed: %w", err)
 			}
+			common.RecordResult(vms)
 
 			names := make([]string, len(vms))
 			for i, v := range vms {
