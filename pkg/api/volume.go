@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mvmctl/internal/core/vm"
@@ -78,37 +79,59 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 // VolumeRemove removes volumes by name or ID.
 // Handles partial-match error reporting, VM volume_ids cleanup, and hot-unplug.
 func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput, force bool) *errs.BatchResult {
-	volumes, err := input.Resolve(ctx, op.Repos.Volume)
-	if err != nil && len(volumes) == 0 {
+	if err := input.Validate(); err != nil {
+		inputErr := errs.WrapMsg(errs.CodeVolumeNotFound, err.Error(), err, errs.WithClass(errs.ClassValidation))
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
 				{
 					Status:    "error",
-					Code:      "volume.not_found",
-					Message:   err.Error(),
-					Exception: err,
+					Code:      string(errs.CodeVolumeNotFound),
+					Message:   inputErr.Error(),
+					Exception: inputErr,
 				},
 			},
 		}
 	}
-	// Log partial failures but continue with resolved volumes
-	if err != nil && len(volumes) > 0 {
-		slog.Warn("volume remove: partial resolve failures", "error", err)
-	}
-	results := make([]errs.OperationResult, 0)
-	if len(volumes) == 0 && len(results) == 0 {
-		return &errs.BatchResult{
-			Items: []errs.OperationResult{
-				{
-					Status:  "error",
-					Code:    "volume.not_found",
-					Message: "No volumes found matching the given identifiers",
-				},
-			},
+	selectorResults := make([]errs.OperationResult, len(input.Identifiers))
+	selectorVolumeIndexes := make([]int, len(input.Identifiers))
+	volumes := make([]*model.VolumeItem, 0, len(input.Identifiers))
+	volumeIndexes := make(map[string]int, len(input.Identifiers))
+	resolver := volume.NewResolver(op.Repos.Volume)
+	for i, identifier := range input.Identifiers {
+		vol, resolveErr := resolver.Resolve(ctx, identifier)
+		if resolveErr != nil {
+			slog.Warn("volume remove: failed to resolve selector", "identifier", identifier, "error", resolveErr)
+			code := errs.CodeVolumeError
+			var domainErr *errs.DomainError
+			failureOptions := []errs.ErrorOption{errs.WithEntity(identifier), errs.WithClass(errs.ClassInternal)}
+			if errors.As(resolveErr, &domainErr) {
+				code = domainErr.Code
+				failureOptions = []errs.ErrorOption{errs.WithEntity(identifier)}
+			}
+			failure := errs.WrapMsg(code,
+				fmt.Sprintf("Failed to resolve volume '%s': %v", identifier, resolveErr), resolveErr, failureOptions...)
+			selectorResults[i] = errs.OperationResult{
+				Status:    "error",
+				Code:      string(code),
+				Message:   failure.Error(),
+				Item:      identifier,
+				Exception: failure,
+			}
+			continue
 		}
+		index, found := volumeIndexes[vol.ID]
+		if !found {
+			index = len(volumes)
+			volumeIndexes[vol.ID] = index
+			volumes = append(volumes, vol)
+		}
+		selectorVolumeIndexes[i] = index
 	}
+	results := make([]errs.OperationResult, 0, len(volumes))
 	// Batch-enrich with VM references for VM attachment check
-	op.Enr.EnrichVolume(ctx, volumes, "vm")
+	if len(volumes) > 0 {
+		op.Enr.EnrichVolume(ctx, volumes, "vm")
+	}
 	for _, vol := range volumes {
 		// Shareable read-only volumes are treated as not attached
 		// since we can't track individual VM attachments for them.
@@ -177,7 +200,13 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			Message: fmt.Sprintf("Volume '%s' removed", vol.Name),
 		})
 	}
-	return &errs.BatchResult{Items: results}
+	for i := range selectorResults {
+		if selectorResults[i].IsError() {
+			continue
+		}
+		selectorResults[i] = results[selectorVolumeIndexes[i]]
+	}
+	return &errs.BatchResult{Items: selectorResults}
 }
 
 // VolumeInspect returns detailed volume info as a raw dictionary.
