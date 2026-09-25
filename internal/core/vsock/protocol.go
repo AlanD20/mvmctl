@@ -72,7 +72,11 @@ func dialAndHandshake(ctx context.Context, vmID string, port int, attemptNum int
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeVsockConnectionFailed, err)
 	}
+	return connectGuest(ctx, conn, vmID, port, attemptNum)
+}
 
+// connectGuest performs the guest CONNECT protocol on an admitted host-vsock connection.
+func connectGuest(ctx context.Context, conn net.Conn, vmID string, port int, attemptNum int) (net.Conn, error) {
 	deadline := time.Now().Add(constConnectTimeout)
 	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
 		deadline = callerDeadline
@@ -82,7 +86,7 @@ func dialAndHandshake(ctx context.Context, vmID string, port int, attemptNum int
 		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed, "set CONNECT deadline", err)
 	}
 	// The unprivileged caller alone selects the guest port and later supplies its agent token.
-	_, err = fmt.Fprintf(conn, "CONNECT %d\n", port)
+	_, err := fmt.Fprintf(conn, "CONNECT %d\n", port)
 	if err != nil {
 		conn.Close()
 		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed,
