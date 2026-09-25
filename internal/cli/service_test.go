@@ -1,25 +1,24 @@
-package cli
+package cli_test
 
 import (
-	"sort"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"mvmctl/internal/cli"
 )
 
-func TestJailerServiceCommandExposesOnlyVMLifecycleActions(t *testing.T) {
-	cmd := newJailerServiceCmd()
-	actions := make([]string, 0, len(cmd.Commands()))
-	for _, child := range cmd.Commands() {
-		actions = append(actions, child.Name())
-		for _, obsoleteFlag := range []string{"version", "arch", "sha256"} {
-			assert.Nilf(t, child.Flags().Lookup(obsoleteFlag), "%s must not expose --%s", child.Name(), obsoleteFlag)
-		}
-	}
-	sort.Strings(actions)
-	want := []string{"cleanup", "expose-snapshot", "expose-volume", "launch", "remove-volume"}
-	if diff := cmp.Diff(want, actions); diff != "" {
-		t.Errorf("Jailer service actions mismatch (-want +got):\n%s", diff)
+// Rationale: privileged Jailer operations use the authenticated root receiver;
+// the public run command must not expose a second Jailer entry point.
+func TestRunCommandDoesNotExposeJailerService(t *testing.T) {
+	root := cli.NewRootCmd(nil)
+	run, _, err := root.Find([]string{"run"})
+	require.NoError(t, err)
+	require.Equal(t, "run", run.Name())
+
+	for _, child := range run.Commands() {
+		assert.NotEqual(t, "jailer", child.Name())
+		assert.NotContains(t, child.Aliases, "jailer")
 	}
 }
