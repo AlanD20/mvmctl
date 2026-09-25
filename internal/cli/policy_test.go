@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/cli"
+	"mvmctl/internal/cli/common"
 	"mvmctl/internal/testutil"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
@@ -66,14 +68,26 @@ func TestExecPolicyCommandsPassFamilySpecificInputs(t *testing.T) {
 
 func TestExecPolicyListJSONUsesArrayForNoPolicies(t *testing.T) {
 	mock := &testutil.MockPolicyAPI{
-		ExecPolicyListFunc: func(context.Context) ([]*results.VMToVMExecPolicy, error) { return nil, nil },
+		ExecPolicyListFunc: func(context.Context) ([]*results.VMToVMExecPolicy, error) {
+			return []*results.VMToVMExecPolicy{}, nil
+		},
 	}
 	cmd := cli.NewPolicyCmd(mock)
 	list, _, err := cmd.Find([]string{"exec", "ls"})
 	require.NoError(t, err)
-	require.NoError(t, list.Flags().Set("json", "true"))
-	output := capturePolicyStdout(t, func() error { return list.RunE(list, nil) })
-	var decoded []any
-	require.NoError(t, json.Unmarshal([]byte(output), &decoded))
-	assert.Empty(t, decoded)
+	common.BeginOutput([]string{"--json"})
+	t.Cleanup(func() { common.BeginOutput(nil) })
+	require.NoError(t, list.RunE(list, nil))
+	var output bytes.Buffer
+	require.NoError(t, common.FinishOutput(&output, nil))
+	var envelope struct {
+		SchemaVersion int    `json:"schema_version"`
+		Status        string `json:"status"`
+		Data          []any  `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(output.Bytes(), &envelope))
+	assert.Equal(t, 1, envelope.SchemaVersion)
+	assert.Equal(t, "success", envelope.Status)
+	assert.NotNil(t, envelope.Data)
+	assert.Empty(t, envelope.Data)
 }
