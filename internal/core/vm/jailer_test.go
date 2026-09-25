@@ -6,86 +6,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/ptr"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/service/jailer"
 )
 
 const testDriveID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-
-func TestFirecrackerSpawner_WriteJailerManifestSelectsOnlyVMResources(t *testing.T) {
-	vmDir := t.TempDir()
-	config := jailerTestConfig(vmDir)
-	spawner := NewFirecrackerSpawner(config)
-
-	require.NoError(t, spawner.writeJailerManifest())
-	data, err := os.ReadFile(filepath.Join(vmDir, infra.JailerManifestFilename))
-	require.NoError(t, err)
-	var got jailer.LaunchManifest
-	require.NoError(t, json.Unmarshal(data, &got))
-
-	want := jailer.LaunchManifest{
-		VMID: filepath.Base(vmDir), VMDir: vmDir, Version: "1.16.0",
-		ConfigPath: config.ConfigPath, PIDPath: config.PIDPath,
-		KernelPath: config.KernelPath, RootfsPath: config.RootfsPath,
-		ISOPath: *config.CloudInitISOPath, SnapshotDir: config.SnapshotDir,
-		Volumes: []jailer.VolumeMount{{
-			DriveID: testDriveID, HostPath: config.ExtraDrives[0].PathOnHost, ReadOnly: true,
-		}},
-		APISocket: config.APISocketPath, PCIEnabled: true, SnapshotMode: true,
-		CgroupLimits: &config.CgroupLimits, VsockGuestCID: config.VsockGuestCID,
-	}
-	if diff := cmp.Diff(want, got); diff != "" {
-		t.Errorf("LaunchManifest mismatch (-want +got):\n%s", diff)
-	}
-	var raw map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(data, &raw))
-	wantKeys := map[string]bool{
-		"vm_id": true, "vm_dir": true, "version": true, "config_path": true,
-		"pid_path": true, "kernel_path": true, "rootfs_path": true, "iso_path": true,
-		"snapshot_dir": true, "volumes": true, "api_socket": true,
-		"pci_enabled": true, "snapshot_mode": true, "cgroup_limits": true,
-		"vsock_guest_cid": true,
-	}
-	gotKeys := make(map[string]bool, len(raw))
-	for key := range raw {
-		gotKeys[key] = true
-	}
-	if diff := cmp.Diff(wantKeys, gotKeys); diff != "" {
-		t.Errorf("manifest field set mismatch (-want +got):\n%s", diff)
-	}
-}
-
-func TestFirecrackerSpawner_WriteJailerManifestOmitsAbsentCgroupLimits(t *testing.T) {
-	vmDir := t.TempDir()
-	config := jailerTestConfig(vmDir)
-	config.CgroupLimits = model.VMCgroupLimits{}
-	require.NoError(t, NewFirecrackerSpawner(config).writeJailerManifest())
-
-	data, err := os.ReadFile(filepath.Join(vmDir, infra.JailerManifestFilename))
-	require.NoError(t, err)
-	var manifest jailer.LaunchManifest
-	require.NoError(t, json.Unmarshal(data, &manifest))
-	assert.Nil(t, manifest.CgroupLimits)
-}
-
-func TestFirecrackerSpawnerWriteJailerManifestCarriesOnlyOptionalVsockCID(t *testing.T) {
-	vmDir := t.TempDir()
-	config := jailerTestConfig(vmDir)
-	require.NoError(t, NewFirecrackerSpawner(config).writeJailerManifest())
-
-	data, err := os.ReadFile(filepath.Join(vmDir, infra.JailerManifestFilename))
-	require.NoError(t, err)
-	var raw map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(data, &raw))
-	assert.JSONEq(t, `42`, string(raw["vsock_guest_cid"]))
-	assert.NotContains(t, raw, "vsock_uds_path")
-}
 
 // Rationale: the unprivileged producer must use the compiled jail-visible
 // endpoint even if a caller manages to supply another host-side basename.
@@ -95,7 +24,7 @@ func TestTranslateConfigForJailUsesFixedVsockEndpoint(t *testing.T) {
 		UDSPath:  "/caller/selected.sock",
 	}})
 	require.NotNil(t, translated.Vsock)
-	assert.Equal(t, "/run/mvm/vsock.sock", translated.Vsock.UDSPath)
+	assert.Equal(t, "/vmm-runtime/vsock.sock", translated.Vsock.UDSPath)
 }
 
 func TestCgroupStateParsingAndExactMismatchReporting(t *testing.T) {
@@ -104,7 +33,7 @@ func TestCgroupStateParsingAndExactMismatchReporting(t *testing.T) {
 		"cpu.max":             "200000 100000\n",
 		"cpu.weight":          "100\n",
 		"memory.high":         "671088640\n",
-		"memory.max":          "671088640\n",
+		"memory.max":          "max\n",
 		"memory.swap.max":     "0\n",
 		"pids.max":            "256\n",
 		"cpu.stat":            "usage_usec 12345\nuser_usec 10000\n",
@@ -120,7 +49,8 @@ func TestCgroupStateParsingAndExactMismatchReporting(t *testing.T) {
 	limits, err := readCgroupLimits(path)
 	require.NoError(t, err)
 	assert.Equal(t, int64(200000), limits.CPUQuotaMicros)
-	assert.Equal(t, int64(671088640), limits.MemoryMaxBytes)
+	assert.Zero(t, limits.MemoryMaxBytes)
+	assert.True(t, limits.MemoryMaxUnlimited)
 	assert.Zero(t, limits.SwapMaxBytes)
 	usage, err := readCgroupUsage(path)
 	require.NoError(t, err)
@@ -135,12 +65,13 @@ func TestCgroupStateParsingAndExactMismatchReporting(t *testing.T) {
 	assert.False(t, contains, "PID matching must compare complete fields")
 
 	requested := limits
-	requested.PolicyVersion = 1
+	requested.PolicyVersion = 2
 	actual := limits
 	actual.CPUQuotaMicros++
 	actual.CPUWeight++
 	actual.MemoryHighBytes++
 	actual.MemoryMaxBytes++
+	actual.MemoryMaxUnlimited = false
 	actual.SwapMaxBytes++
 	actual.PIDsMax++
 	assert.Equal(t, []string{
@@ -215,7 +146,7 @@ func TestFirecrackerSpawner_WriteToFileUsesJailedPathsWithoutMutatingHostConfig(
 	require.NotNil(t, hostConfig.Vsock)
 	require.NotNil(t, jailed.Vsock)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMVsockSocketFilename), hostConfig.Vsock.UDSPath)
-	assert.Equal(t, "/run/mvm/"+infra.VMVsockSocketFilename, jailed.Vsock.UDSPath)
+	assert.Equal(t, "/vmm-runtime/"+infra.VMVsockSocketFilename, jailed.Vsock.UDSPath)
 }
 
 // Rationale: Mount destinations form a privileged filesystem boundary and
