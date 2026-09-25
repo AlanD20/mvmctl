@@ -25,6 +25,11 @@ import (
 	"mvmctl/pkg/errs"
 )
 
+const (
+	volumeTestVMID     = "33333333333333333333333333333333"
+	volumeTestVolumeID = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+)
+
 func TestVolumeCreateUsesImmutableIDForManagedPath(t *testing.T) {
 	cacheDir := t.TempDir()
 	t.Setenv("MVM_CACHE_DIR", cacheDir)
@@ -139,12 +144,12 @@ func TestVolumeOperationsRejectUnsupportedOrMissingBeforeEffects(t *testing.T) {
 				path := filepath.Join(t.TempDir(), "data.disk")
 				require.NoError(t, os.WriteFile(path, []byte("preserve data"), 0600))
 				originalVolume := model.VolumeItem{
-					ID: "volume-1", Name: "data", Format: tc.format, Path: path,
+					ID: volumeTestVolumeID, Name: "data", Format: tc.format, Path: path,
 					SizeBytes: 13, Status: model.VolumeStatusAvailable,
 				}
 				vol := originalVolume
 				require.NoError(t, repo.Upsert(t.Context(), &vol))
-				originalVM := model.VMItem{ID: "vm-1", Name: "vm-test", Status: model.VMStatusStopped}
+				originalVM := model.VMItem{ID: volumeTestVMID, Name: "vm-test", Status: model.VMStatusStopped}
 				if operation == "hotplug" {
 					originalVM.Status = model.VMStatusRunning
 					originalVM.PCIEnabled = true
@@ -194,13 +199,13 @@ func TestRawVolumeAttachPreservesOptions(t *testing.T) {
 			repo := testutil.NewVolumeRepo()
 			vmRepo := testutil.NewVMRepo()
 			vol := &model.VolumeItem{
-				ID: "raw-1", Name: "raw-data", Format: model.VolumeFormatRaw,
+				ID: volumeTestVolumeID, Name: "raw-data", Format: model.VolumeFormatRaw,
 				Status: model.VolumeStatusAvailable, IsReadOnly: true,
 				IsShareable: shareable, CacheType: model.CacheTypeWriteback,
 			}
 			require.NoError(t, repo.Upsert(t.Context(), vol))
 			require.NoError(t, vmRepo.Upsert(t.Context(), &model.VMItem{
-				ID: "vm-1", Name: "vm-test", Status: model.VMStatusStopped,
+				ID: volumeTestVMID, Name: "vm-test", Status: model.VMStatusStopped,
 			}))
 			op := &api.Operation{Repos: api.Repos{Volume: repo, VM: vmRepo}, AuditLog: &logging.AuditLog{}}
 			require.NoError(t, op.VolumeAttach(t.Context(), inputs.VolumeInput{
@@ -211,9 +216,9 @@ func TestRawVolumeAttachPreservesOptions(t *testing.T) {
 			assert.True(t, stored.IsReadOnly)
 			assert.Equal(t, shareable, stored.IsShareable)
 			assert.Equal(t, model.CacheTypeWriteback, stored.CacheType)
-			vmItem, err := vmRepo.Get(t.Context(), "vm-1")
+			vmItem, err := vmRepo.Get(t.Context(), volumeTestVMID)
 			require.NoError(t, err)
-			if diff := cmp.Diff([]string{"raw-1"}, []string(vmItem.VolumeIDs)); diff != "" {
+			if diff := cmp.Diff([]string{volumeTestVolumeID}, []string(vmItem.VolumeIDs)); diff != "" {
 				t.Errorf("attached volume IDs (-want +got):\n%s", diff)
 			}
 		})
@@ -256,7 +261,7 @@ func TestVMCreateRejectsUnsupportedOrMissingVolumesBeforeEffects(t *testing.T) {
 				ID: "binary-1", Type: "firecracker", Architecture: system.RuntimeArch(), IsPresent: true,
 			}))
 			originalVolume := model.VolumeItem{
-				ID: "volume-1", Name: "data", Format: tc.format, Status: model.VolumeStatusAvailable,
+				ID: volumeTestVolumeID, Name: "data", Format: tc.format, Status: model.VolumeStatusAvailable,
 			}
 			vol := originalVolume
 			require.NoError(t, volumeRepo.Upsert(t.Context(), &vol))
@@ -293,7 +298,8 @@ func TestUnsupportedVolumeCanBeInspectedAndRemoved(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "old-volume.disk")
 			require.NoError(t, os.WriteFile(path, []byte("old volume"), 0600))
 			require.NoError(t, repo.Upsert(t.Context(), &model.VolumeItem{
-				ID: "old-id", Name: "old-volume", Format: format, Path: path, Status: model.VolumeStatusAvailable,
+				ID: volumeTestVolumeID, Name: "old-volume", Format: format, Path: path,
+				Status: model.VolumeStatusAvailable,
 			}))
 			old := system.DefaultRunner
 			system.DefaultRunner = &testutil.FakeRunner{}
@@ -313,7 +319,7 @@ func TestUnsupportedVolumeCanBeInspectedAndRemoved(t *testing.T) {
 			require.Len(t, removed.Items, 1)
 			require.NoError(t, removed.Items[0].Exception)
 			assert.Equal(t, "success", removed.Items[0].Status)
-			stored, err := repo.Get(t.Context(), "old-id")
+			stored, err := repo.Get(t.Context(), volumeTestVolumeID)
 			require.NoError(t, err)
 			assert.Nil(t, stored)
 			assert.NoFileExists(t, path)

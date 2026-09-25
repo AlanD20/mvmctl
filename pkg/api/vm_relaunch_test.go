@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -28,6 +30,12 @@ type relaunchVsockRepo struct {
 	getCalls int
 }
 
+const (
+	relaunchTestVMID     = "11111111111111111111111111111111"
+	relaunchTestVolumeID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	relaunchMissingID    = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
+
 // Rationale: successful start and reboot must deliver the same complete typed
 // relaunch state to their single spawn seam, including normal-process-only
 // agent credentials that are absent from the privileged launch request.
@@ -39,13 +47,13 @@ func TestVMLifecycleCarriesTypedRelaunchStateToSpawner(t *testing.T) {
 		"start": {
 			status: model.VMStatusStopped,
 			run: func(op *Operation, ctx context.Context) *errs.BatchResult {
-				return op.VMStart(ctx, inputs.VMInput{Identifiers: []string{"vm-success"}})
+				return op.VMStart(ctx, inputs.VMInput{Identifiers: []string{relaunchTestVMID}})
 			},
 		},
 		"reboot": {
 			status: model.VMStatusRunning,
 			run: func(op *Operation, ctx context.Context) *errs.BatchResult {
-				return op.VMReboot(ctx, inputs.VMInput{Identifiers: []string{"vm-success"}})
+				return op.VMReboot(ctx, inputs.VMInput{Identifiers: []string{relaunchTestVMID}})
 			},
 		},
 	}
@@ -53,13 +61,13 @@ func TestVMLifecycleCarriesTypedRelaunchStateToSpawner(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			vmRepo := testutil.NewVMRepo()
 			require.NoError(t, vmRepo.Upsert(t.Context(), &model.VMItem{
-				ID: "vm-success", Name: "vm-success", Status: tc.status,
+				ID: relaunchTestVMID, Name: "vm-success", Status: tc.status,
 				CgroupLimits: model.VMCgroupLimits{PolicyVersion: 1},
 			}))
 			vsockRepo := &relaunchVsockRepo{
 				Repository: testutil.NewVsockRepo(),
 				item: &model.VsockConfigItem{
-					VmID: "vm-success", GuestCID: 42, UDSPath: "/persisted.sock",
+					VmID: relaunchTestVMID, GuestCID: 42, UDSPath: "/persisted.sock",
 					Port: 1024, Token: "secret",
 				},
 			}
@@ -86,7 +94,8 @@ func TestVMLifecycleCarriesTypedRelaunchStateToSpawner(t *testing.T) {
 			assert.Equal(t, 42, captured.vsock.GuestCID)
 			assert.Equal(t, 1024, captured.vsock.Port)
 			assert.Equal(t, "secret", captured.vsock.Token)
-			assert.Equal(t, filepath.Join(op.CacheDir, "vms", "vm-success", infra.VMVsockSocketFilename),
+			assert.Equal(t, filepath.Join("/run/mvmctl/runtime", strconv.Itoa(os.Geteuid()),
+				relaunchTestVMID, infra.VMVsockSocketFilename),
 				captured.vsock.UDSPath)
 			assert.Same(t, captured.vsock, captured.vm.Vsock)
 		})
@@ -102,21 +111,22 @@ func TestLoadVMRelaunchState(t *testing.T) {
 	t.Run("row is cloned and normalized", func(t *testing.T) {
 		started := time.Unix(123, 0)
 		row := &model.VsockConfigItem{
-			ID: "vsock-1", VmID: "vm-1", GuestCID: model.MinVsockGuestCID,
+			ID: "vsock-1", VmID: relaunchTestVMID, GuestCID: model.MinVsockGuestCID,
 			UDSPath: "/database-selected.sock", Port: 1024, Token: "secret",
 			AgentVersion: "1.2.3", Upgrading: true, UpgradeStartedAt: &started,
 		}
 		repo := &relaunchVsockRepo{Repository: testutil.NewVsockRepo(), item: row}
 		cacheDir := t.TempDir()
 		op := &Operation{CacheDir: cacheDir, Repos: Repos{Vsock: repo}}
-		vmItem := &model.VMItem{ID: "vm-1", Name: "example"}
+		vmItem := &model.VMItem{ID: relaunchTestVMID, Name: "example"}
 
 		state, err := op.loadVMRelaunchState(t.Context(), vmItem)
 		require.NoError(t, err)
 		require.NotNil(t, state)
 		assert.Same(t, vmItem, state.vm)
 		want := *row
-		want.UDSPath = filepath.Join(cacheDir, "vms", vmItem.ID, infra.VMVsockSocketFilename)
+		want.UDSPath = filepath.Join("/run/mvmctl/runtime", strconv.Itoa(os.Geteuid()),
+			vmItem.ID, infra.VMVsockSocketFilename)
 		if diff := cmp.Diff(&want, state.vsock); diff != "" {
 			t.Errorf("relaunch vsock state mismatch (-want +got):\n%s", diff)
 		}
@@ -195,13 +205,13 @@ func TestVMLifecycleLoadsRelaunchStateBeforeSpawner(t *testing.T) {
 		"start": {
 			status: model.VMStatusStopped,
 			run: func(op *Operation, ctx context.Context) *errs.BatchResult {
-				return op.VMStart(ctx, inputs.VMInput{Identifiers: []string{"vm-relaunch"}})
+				return op.VMStart(ctx, inputs.VMInput{Identifiers: []string{relaunchTestVMID}})
 			},
 		},
 		"reboot": {
 			status: model.VMStatusRunning,
 			run: func(op *Operation, ctx context.Context) *errs.BatchResult {
-				return op.VMReboot(ctx, inputs.VMInput{Identifiers: []string{"vm-relaunch"}})
+				return op.VMReboot(ctx, inputs.VMInput{Identifiers: []string{relaunchTestVMID}})
 			},
 		},
 	}
@@ -209,7 +219,7 @@ func TestVMLifecycleLoadsRelaunchStateBeforeSpawner(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			vmRepo := testutil.NewVMRepo()
 			require.NoError(t, vmRepo.Upsert(t.Context(), &model.VMItem{
-				ID: "vm-relaunch", Name: "vm-relaunch", Status: tc.status,
+				ID: relaunchTestVMID, Name: "vm-relaunch", Status: tc.status,
 				CgroupLimits: model.VMCgroupLimits{PolicyVersion: 1},
 			}))
 			cause := errors.New("vsock lookup failed")
@@ -222,7 +232,7 @@ func TestVMLifecycleLoadsRelaunchStateBeforeSpawner(t *testing.T) {
 			assert.ErrorIs(t, result.Items[0].Exception, cause)
 			assert.Equal(t, errs.CodeDatabaseError, errs.AsDomainError(result.Items[0].Exception).Code)
 			assert.Equal(t, 1, vsockRepo.getCalls)
-			persisted, getErr := vmRepo.Get(t.Context(), "vm-relaunch")
+			persisted, getErr := vmRepo.Get(t.Context(), relaunchTestVMID)
 			require.NoError(t, getErr)
 			require.NotNil(t, persisted)
 			assert.Equal(t, tc.status, persisted.Status)
@@ -240,13 +250,13 @@ func TestVMLifecycleRejectsCorruptRelaunchCIDBeforeSpawner(t *testing.T) {
 		"start": {
 			status: model.VMStatusStopped,
 			run: func(op *Operation, ctx context.Context) *errs.BatchResult {
-				return op.VMStart(ctx, inputs.VMInput{Identifiers: []string{"vm-corrupt"}})
+				return op.VMStart(ctx, inputs.VMInput{Identifiers: []string{relaunchTestVMID}})
 			},
 		},
 		"reboot": {
 			status: model.VMStatusRunning,
 			run: func(op *Operation, ctx context.Context) *errs.BatchResult {
-				return op.VMReboot(ctx, inputs.VMInput{Identifiers: []string{"vm-corrupt"}})
+				return op.VMReboot(ctx, inputs.VMInput{Identifiers: []string{relaunchTestVMID}})
 			},
 		},
 	}
@@ -254,13 +264,13 @@ func TestVMLifecycleRejectsCorruptRelaunchCIDBeforeSpawner(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			vmRepo := testutil.NewVMRepo()
 			require.NoError(t, vmRepo.Upsert(t.Context(), &model.VMItem{
-				ID: "vm-corrupt", Name: "vm-corrupt", Status: tc.status,
+				ID: relaunchTestVMID, Name: "vm-corrupt", Status: tc.status,
 				CgroupLimits: model.VMCgroupLimits{PolicyVersion: 1},
 			}))
 			vsockRepo := &relaunchVsockRepo{
 				Repository: testutil.NewVsockRepo(),
 				item: &model.VsockConfigItem{
-					VmID: "vm-corrupt", GuestCID: model.MinVsockGuestCID - 1,
+					VmID: relaunchTestVMID, GuestCID: model.MinVsockGuestCID - 1,
 				},
 			}
 			op := &Operation{CacheDir: t.TempDir(), Repos: Repos{VM: vmRepo, Vsock: vsockRepo}}
@@ -270,7 +280,7 @@ func TestVMLifecycleRejectsCorruptRelaunchCIDBeforeSpawner(t *testing.T) {
 			require.Error(t, result.Items[0].Exception)
 			assert.Equal(t, errs.CodeDatabaseError, errs.AsDomainError(result.Items[0].Exception).Code)
 			assert.Equal(t, 1, vsockRepo.getCalls)
-			persisted, getErr := vmRepo.Get(t.Context(), "vm-corrupt")
+			persisted, getErr := vmRepo.Get(t.Context(), relaunchTestVMID)
 			require.NoError(t, getErr)
 			require.NotNil(t, persisted)
 			assert.Equal(t, tc.status, persisted.Status)
@@ -287,25 +297,25 @@ func TestVMLifecycleRejectsUnsupportedOrMissingVolumesBeforeEffects(t *testing.T
 			ids    []string
 			code   errs.Code
 		}{
-			"qcow2":            {model.VolumeFormatQCOW2, []string{"volume-1"}, errs.CodeValidationFailed},
-			"unknown":          {"unknown", []string{"volume-1"}, errs.CodeValidationFailed},
-			"empty format":     {"", []string{"volume-1"}, errs.CodeValidationFailed},
-			"missing":          {model.VolumeFormatRaw, []string{"missing"}, errs.CodeVolumeNotFound},
-			"partial":          {model.VolumeFormatRaw, []string{"volume-1", "missing"}, errs.CodeVolumeNotFound},
+			"qcow2":            {model.VolumeFormatQCOW2, []string{relaunchTestVolumeID}, errs.CodeValidationFailed},
+			"unknown":          {"unknown", []string{relaunchTestVolumeID}, errs.CodeValidationFailed},
+			"empty format":     {"", []string{relaunchTestVolumeID}, errs.CodeValidationFailed},
+			"missing":          {model.VolumeFormatRaw, []string{relaunchMissingID}, errs.CodeVolumeNotFound},
+			"partial":          {model.VolumeFormatRaw, []string{relaunchTestVolumeID, relaunchMissingID}, errs.CodeVolumeNotFound},
 			"name collision":   {model.VolumeFormatRaw, []string{"data"}, errs.CodeVolumeNotFound},
-			"prefix collision": {model.VolumeFormatRaw, []string{"volume-"}, errs.CodeVolumeNotFound},
+			"prefix collision": {model.VolumeFormatRaw, []string{"aaaaaaaa"}, errs.CodeVolumeNotFound},
 		} {
 			t.Run(operation+"/"+name, func(t *testing.T) {
 				volumeRepo := testutil.NewVolumeRepo()
 				require.NoError(t, volumeRepo.Upsert(t.Context(), &model.VolumeItem{
-					ID: "volume-1", Name: "data", Format: tc.format,
+					ID: relaunchTestVolumeID, Name: "data", Format: tc.format,
 				}))
 				status := model.VMStatusRunning
 				if operation == "stopped start" {
 					status = model.VMStatusStopped
 				}
 				original := model.VMItem{
-					ID: "vm-volumes", Name: "vm-volumes", Status: status,
+					ID: relaunchTestVMID, Name: "vm-volumes", Status: status,
 					VolumeIDs: tc.ids, CgroupLimits: model.VMCgroupLimits{PolicyVersion: 1},
 					Volumes: []*model.VolumeItem{{ID: "stale", Format: model.VolumeFormatRaw}},
 				}
@@ -325,7 +335,7 @@ func TestVMLifecycleRejectsUnsupportedOrMissingVolumesBeforeEffects(t *testing.T
 						return nil
 					},
 				}
-				input := inputs.VMInput{Identifiers: []string{"vm-volumes"}}
+				input := inputs.VMInput{Identifiers: []string{relaunchTestVMID}}
 				var result *errs.BatchResult
 				if operation == "reboot" {
 					result = op.VMReboot(t.Context(), input)
@@ -351,7 +361,8 @@ func TestVMLifecycleCarriesResolvedRawVolumesToSpawner(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			volumeRepo := testutil.NewVolumeRepo()
 			raw := &model.VolumeItem{
-				ID: "raw-id", Name: "data", Format: model.VolumeFormatRaw, Path: "/managed/raw-id.raw",
+				ID: relaunchTestVolumeID, Name: "data", Format: model.VolumeFormatRaw,
+				Path:       "/managed/" + relaunchTestVolumeID + ".raw",
 				IsReadOnly: true, IsShareable: true, CacheType: model.CacheTypeWriteback,
 			}
 			require.NoError(t, volumeRepo.Upsert(t.Context(), raw))
@@ -361,7 +372,7 @@ func TestVMLifecycleCarriesResolvedRawVolumesToSpawner(t *testing.T) {
 				status = model.VMStatusRunning
 			}
 			require.NoError(t, vmRepo.Upsert(t.Context(), &model.VMItem{
-				ID: "vm-raw", Name: "vm-raw", Status: status, VolumeIDs: []string{"raw-id"},
+				ID: relaunchTestVMID, Name: "vm-raw", Status: status, VolumeIDs: []string{relaunchTestVolumeID},
 				Volumes: []*model.VolumeItem{{ID: "stale", Format: model.VolumeFormatQCOW2}},
 				Image:   &model.ImageItem{}, Kernel: &model.KernelItem{}, Binary: &model.BinaryItem{},
 				Network: &model.NetworkItem{}, CgroupLimits: model.VMCgroupLimits{PolicyVersion: 1},
@@ -379,13 +390,14 @@ func TestVMLifecycleCarriesResolvedRawVolumesToSpawner(t *testing.T) {
 						Firecracker: &model.BinaryItem{}, Jailer: &model.BinaryItem{},
 					}, t.TempDir(), false, "", "Info")
 					testutil.AssertDiff(t, []model.DriveConfig{{
-						DriveID: "raw-id", PathOnHost: "/managed/raw-id.raw", IsReadOnly: true,
-						CacheType: model.CacheTypeWriteback, IOEngine: "Sync",
+						DriveID: relaunchTestVolumeID, PathOnHost: "/managed/" + relaunchTestVolumeID + ".raw",
+						IsReadOnly: true,
+						CacheType:  model.CacheTypeWriteback, IOEngine: "Sync",
 					}}, config.ExtraDrives)
 					return nil
 				},
 			}
-			input := inputs.VMInput{Identifiers: []string{"vm-raw"}}
+			input := inputs.VMInput{Identifiers: []string{relaunchTestVMID}}
 			var result *errs.BatchResult
 			if operation == "reboot" {
 				result = op.VMReboot(t.Context(), input)

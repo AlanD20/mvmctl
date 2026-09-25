@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,8 @@ import (
 	"mvmctl/internal/testutil"
 	"mvmctl/pkg/api/inputs"
 )
+
+const resourcePathsTestVMID = "22222222222222222222222222222222"
 
 // Rationale: the managed rootfs leaf is part of the privileged resource
 // contract. The producer must not derive it from the image filesystem type.
@@ -50,6 +53,7 @@ func TestVMCreateBuilderUsesFixedFirecrackerLeaves(t *testing.T) {
 	vmDir := t.TempDir()
 	builder := &VMCreateBuilder{
 		vmDir: vmDir,
+		vmID:  resourcePathsTestVMID,
 		resolved: &inputs.ResolvedVMCreateInput{
 			Binary:  &model.BinaryItem{},
 			Jailer:  &model.BinaryItem{},
@@ -63,11 +67,13 @@ func TestVMCreateBuilderUsesFixedFirecrackerLeaves(t *testing.T) {
 	require.NotNil(t, config)
 
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerConfigFilename), config.ConfigPath)
-	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerAPISocketFilename), config.APISocketPath)
+	assert.Equal(t, filepath.Join("/run/mvmctl/runtime", strconv.Itoa(os.Geteuid()),
+		resourcePathsTestVMID, infra.VMFirecrackerAPISocketFilename), config.APISocketPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerLogFilename), config.LogPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename), config.SerialOutputPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename), config.MetricsPath)
-	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerPIDFilename), config.PIDPath)
+	assert.Equal(t, filepath.Join("/run/mvmctl/runtime", strconv.Itoa(os.Geteuid()),
+		resourcePathsTestVMID, infra.VMFirecrackerPIDFilename), config.PIDPath)
 }
 
 // Rationale: persisted path columns are display metadata, not launch
@@ -77,6 +83,7 @@ func TestBuildRespawnFirecrackerConfigIgnoresPersistedPaths(t *testing.T) {
 	logPath := "/user-selected/firecracker.log"
 	serialPath := "/user-selected/console.log"
 	vmItem := &model.VMItem{
+		ID:               resourcePathsTestVMID,
 		RootfsPath:       "/user-selected/rootfs.img",
 		ConfigPath:       "/user-selected/config.json",
 		APISocketPath:    "/user-selected/api.socket",
@@ -103,11 +110,13 @@ func TestBuildRespawnFirecrackerConfigIgnoresPersistedPaths(t *testing.T) {
 
 	assert.Equal(t, filepath.Join(vmDir, infra.VMRootfsFilename), config.RootfsPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerConfigFilename), config.ConfigPath)
-	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerAPISocketFilename), config.APISocketPath)
+	assert.Equal(t, filepath.Join("/run/mvmctl/runtime", strconv.Itoa(os.Geteuid()),
+		resourcePathsTestVMID, infra.VMFirecrackerAPISocketFilename), config.APISocketPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerLogFilename), config.LogPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename), config.SerialOutputPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename), config.MetricsPath)
-	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerPIDFilename), config.PIDPath)
+	assert.Equal(t, filepath.Join("/run/mvmctl/runtime", strconv.Itoa(os.Geteuid()),
+		resourcePathsTestVMID, infra.VMFirecrackerPIDFilename), config.PIDPath)
 	require.NotNil(t, config.VsockGuestCID)
 	assert.Equal(t, 42, *config.VsockGuestCID)
 }
@@ -116,9 +125,10 @@ func TestBuildRespawnFirecrackerConfigIgnoresPersistedPaths(t *testing.T) {
 // API relaunch config construction into the jailed Firecracker config.
 func TestLoadedRelaunchStateProducesJailedVsockConfig(t *testing.T) {
 	cacheDir := t.TempDir()
+	networkID := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	vmItem := &model.VMItem{
-		ID: "vm-relaunch", Image: &model.ImageItem{}, Binary: &model.BinaryItem{},
-		Kernel: &model.KernelItem{}, Network: &model.NetworkItem{},
+		ID: resourcePathsTestVMID, Image: &model.ImageItem{}, Binary: &model.BinaryItem{},
+		Kernel: &model.KernelItem{}, NetworkID: networkID, Network: &model.NetworkItem{ID: networkID},
 	}
 	repo := testutil.NewVsockRepo()
 	require.NoError(t, repo.Upsert(t.Context(), &model.VsockConfigItem{
@@ -141,7 +151,7 @@ func TestLoadedRelaunchStateProducesJailedVsockConfig(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &firecrackerConfig))
 	require.NotNil(t, firecrackerConfig.Vsock)
 	assert.Equal(t, 42, firecrackerConfig.Vsock.GuestCID)
-	assert.Equal(t, "/run/mvm/vsock.sock", firecrackerConfig.Vsock.UDSPath)
+	assert.Equal(t, "/vmm-runtime/vsock.sock", firecrackerConfig.Vsock.UDSPath)
 }
 
 // Rationale: user-owned snapshot metadata must not select an artifact path;
