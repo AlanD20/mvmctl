@@ -48,12 +48,13 @@ func (fakeRepo) UpdateManyIsPresent(_ context.Context, _ []string, _ bool) error
 
 func ptr(s string) *string { return &s }
 
-// setupHermeticCache points the warm-image cache and image directory at a
-// per-test temporary directory so EnsureCached never touches the host cache.
+// setupHermeticCache keeps the warm-image cache, image directory, and fakeroot
+// scratch files under a per-test directory instead of host cache or temp paths.
 func setupHermeticCache(t *testing.T) string {
 	t.Helper()
 	cacheDir := t.TempDir()
 	t.Setenv(infra.EnvKey("CACHE_DIR"), cacheDir)
+	t.Setenv(infra.EnvKey("TEMP_DIR"), cacheDir)
 	t.Setenv(infra.EnvKey("WARM_POOL"), "disk")
 	return cacheDir
 }
