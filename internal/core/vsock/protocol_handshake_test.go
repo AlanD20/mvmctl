@@ -22,6 +22,7 @@ func TestConnectGuestHandshake(t *testing.T) {
 		host, guest := net.Pipe()
 		t.Cleanup(func() { _ = host.Close() })
 		t.Cleanup(func() { _ = guest.Close() })
+		require.NoError(t, guest.SetDeadline(time.Now().Add(5*time.Second)))
 		peerDone := make(chan error, 1)
 		go func() {
 			line, err := bufio.NewReader(guest).ReadString('\n')
@@ -29,7 +30,7 @@ func TestConnectGuestHandshake(t *testing.T) {
 				err = fmt.Errorf("unexpected CONNECT request %q", line)
 			}
 			if err == nil {
-				_, err = io.WriteString(guest, "OK 24576\n")
+				_, err = io.WriteString(guest, "OK 1073741824\nY")
 			}
 			if err == nil {
 				var probe [1]byte
@@ -46,49 +47,68 @@ func TestConnectGuestHandshake(t *testing.T) {
 		conn, err := connectGuest(ctx, host, "00112233445566778899aabbccddeeff", 1024, 1)
 		require.NoError(t, err)
 		require.NotNil(t, conn)
+		require.NoError(t, conn.SetDeadline(time.Now().Add(time.Second)))
+		var immediate [1]byte
+		_, err = io.ReadFull(conn, immediate[:])
+		require.NoError(t, err)
+		assert.Equal(t, byte('Y'), immediate[0])
 		_, err = conn.Write([]byte{'x'})
 		require.NoError(t, err)
 		assert.NoError(t, <-peerDone)
 	})
 
-	t.Run("rejects bad response and closes transport", func(t *testing.T) {
-		host, guest := net.Pipe()
-		t.Cleanup(func() { _ = host.Close() })
-		t.Cleanup(func() { _ = guest.Close() })
-		peerDone := make(chan error, 1)
-		go func() {
-			line, err := bufio.NewReader(guest).ReadString('\n')
-			if err == nil && line != "CONNECT 1024\n" {
-				err = fmt.Errorf("unexpected CONNECT request %q", line)
-			}
-			if err == nil {
-				_, err = io.WriteString(guest, "ERR\n")
-			}
-			if err == nil {
-				var data [1]byte
-				_, err = guest.Read(data[:])
-				if errors.Is(err, io.EOF) {
-					err = nil
+	for _, tc := range []struct {
+		name     string
+		response string
+	}{
+		{name: "error", response: "ERR\n"},
+		{name: "missing host port", response: "OK \n"},
+		{name: "nonnumeric host port", response: "OK nonsense\n"},
+		{name: "out of range host port", response: "OK 4294967296\n"},
+		{name: "signed host port", response: "OK +1\n"},
+		{name: "overlong response", response: "OK 12345678901"},
+	} {
+		t.Run("rejects "+tc.name+" and closes transport", func(t *testing.T) {
+			host, guest := net.Pipe()
+			t.Cleanup(func() { _ = host.Close() })
+			t.Cleanup(func() { _ = guest.Close() })
+			require.NoError(t, guest.SetDeadline(time.Now().Add(5*time.Second)))
+			peerDone := make(chan error, 1)
+			go func() {
+				line, err := bufio.NewReader(guest).ReadString('\n')
+				if err == nil && line != "CONNECT 1024\n" {
+					err = fmt.Errorf("unexpected CONNECT request %q", line)
 				}
-			}
-			peerDone <- err
-		}()
+				if err == nil {
+					_, err = io.WriteString(guest, tc.response)
+				}
+				if err == nil {
+					var data [1]byte
+					_, err = guest.Read(data[:])
+					if errors.Is(err, io.EOF) {
+						err = nil
+					}
+				}
+				peerDone <- err
+			}()
 
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-		defer cancel()
-		conn, err := connectGuest(ctx, host, "00112233445566778899aabbccddeeff", 1024, 1)
-		require.Error(t, err)
-		assert.Nil(t, conn)
-		var domainErr *errs.DomainError
-		require.ErrorAs(t, err, &domainErr)
-		assert.Equal(t, errs.CodeVsockHandshakeFailed, domainErr.Code)
-		assert.NoError(t, <-peerDone)
-	})
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			conn, err := connectGuest(ctx, host, "00112233445566778899aabbccddeeff", 1024, 1)
+			require.Error(t, err)
+			assert.Nil(t, conn)
+			var domainErr *errs.DomainError
+			require.ErrorAs(t, err, &domainErr)
+			assert.Equal(t, errs.CodeVsockHandshakeFailed, domainErr.Code)
+			assert.NoError(t, <-peerDone)
+		})
+	}
 
 	t.Run("cancellation closes a silent transport", func(t *testing.T) {
 		host, guest := net.Pipe()
 		t.Cleanup(func() { _ = host.Close() })
 		t.Cleanup(func() { _ = guest.Close() })
+		require.NoError(t, guest.SetDeadline(time.Now().Add(5*time.Second)))
 		ready := make(chan struct{})
 		peerDone := make(chan error, 1)
 		go func() {

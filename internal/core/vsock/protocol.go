@@ -1,12 +1,13 @@
 package vsock
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"strconv"
 	"time"
 
 	"mvmctl/internal/service/jailer"
@@ -16,7 +17,8 @@ import (
 // --- Constants ---
 
 const (
-	constConnectTimeout = 5 * time.Second
+	constConnectTimeout         = 5 * time.Second
+	maxConnectResponseLineBytes = 14 // "OK " + ten decimal uint32 digits + newline.
 )
 
 // --- File transfer protocol constants ---
@@ -109,7 +111,7 @@ func connectGuest(ctx context.Context, conn net.Conn, vmID string, port int, att
 	}
 	resCh := make(chan readResult, 1)
 	go func() {
-		resp, err := bufio.NewReader(conn).ReadString('\n')
+		resp, err := readConnectResponseLine(conn)
 		resCh <- readResult{resp, err}
 	}()
 
@@ -129,7 +131,7 @@ func connectGuest(ctx context.Context, conn net.Conn, vmID string, port int, att
 		// Firecracker acknowledges with "OK <assigned_hostside_port>\n" where
 		// the host-side port is dynamically assigned, NOT the requested port.
 		// See https://github.com/firecracker-microvm/firecracker/blob/main/docs/vsock.md
-		if len(res.resp) < 3 || res.resp[:3] != "OK " {
+		if !validConnectResponse(res.resp) {
 			conn.Close()
 			// Build safe error message (avoid panic on empty/short response).
 			got := res.resp
@@ -160,6 +162,35 @@ func connectGuest(ctx context.Context, conn net.Conn, vmID string, port int, att
 		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed,
 			"handshake cancelled by context", ctx.Err())
 	}
+}
+
+// readConnectResponseLine reads only the ACK bytes, preserving any immediately following guest data.
+func readConnectResponseLine(conn net.Conn) (string, error) {
+	var response [maxConnectResponseLineBytes]byte
+	for i := range response {
+		if _, err := io.ReadFull(conn, response[i:i+1]); err != nil {
+			return "", err
+		}
+		if response[i] == '\n' {
+			return string(response[:i+1]), nil
+		}
+	}
+	return "", fmt.Errorf("CONNECT response exceeds %d bytes", maxConnectResponseLineBytes)
+}
+
+func validConnectResponse(response string) bool {
+	if len(response) < 5 || len(response) > maxConnectResponseLineBytes ||
+		response[:3] != "OK " || response[len(response)-1] != '\n' {
+		return false
+	}
+	port := response[3 : len(response)-1]
+	for i := range port {
+		if port[i] < '0' || port[i] > '9' {
+			return false
+		}
+	}
+	_, err := strconv.ParseUint(port, 10, 32)
+	return err == nil
 }
 
 // trimTrailingNewline removes a single trailing newline from s.
