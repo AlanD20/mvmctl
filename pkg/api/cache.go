@@ -167,14 +167,6 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[strin
 // CachePruneAll performs complete cache prune across all resource types.
 // Returns *model.PruneAllResult
 func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll bool) (*model.PruneAllResult, error) {
-	if err := system.CheckPrivileges("/usr/sbin/ip", "prune all cache resources"); err != nil {
-		return nil, errs.WrapMsg(
-			errs.CodePrivilegeRequired,
-			fmt.Sprintf("Privilege check failed: %v", err),
-			err,
-			errs.WithClass(errs.ClassNeedsInteraction),
-		)
-	}
 	// Detect running VMs (list all then check status)
 	hadRunningVMs := false
 	if op.Repos.VM != nil {

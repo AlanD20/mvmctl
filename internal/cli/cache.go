@@ -2,16 +2,11 @@
 package cli
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 
 	"mvmctl/internal/cli/common"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/errs"
 
@@ -413,28 +408,6 @@ Examples:
 	return cmd
 }
 
-// runCacheCleanWithSudo re-invokes "mvm cache clean" with sudo.
-func runCacheCleanWithSudo(ctx context.Context) error {
-	mvmBin, err := exec.LookPath(infra.CLIName)
-	if err != nil {
-		mvmBin, err = os.Executable()
-		if err != nil {
-			mvmBin = infra.CLIName
-		}
-	}
-
-	common.Cli.Info("")
-	common.Cli.Info("Running cache clean with sudo...")
-	result, err := system.DefaultRunner.Run(ctx, []string{"sudo", mvmBin, "cache", "clean"}, system.RunCmdOpts{
-		Capture: false,
-		Check:   false,
-	})
-	if err != nil || !result.Success() {
-		return fmt.Errorf("cache clean with sudo failed (exit %d)", result.ExitCode)
-	}
-	return nil
-}
-
 func newCacheCleanCmd(cacheAPI api.CacheAPI) *cobra.Command {
 	var dryRun bool
 	var force bool
@@ -452,34 +425,8 @@ This is the "nuclear option" for cache cleanup. It:
 Examples:
   mvm cache clean                # Clean all cache (with confirmation)
   mvm cache clean --dry-run      # Preview what would be removed
-  mvm cache clean --force        # Clean without confirmation`,
+	  mvm cache clean --force        # Clean without confirmation`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check privileges early — before the destructive confirmation.
-			if err := cacheAPI.CacheCheckPrivileges("/usr/sbin/ip", "clean cache"); err != nil {
-				if common.StructuredOutput() {
-					return err
-				}
-				if cacheAPI.CacheSessionHasGroup() {
-					// Group is active but something else is wrong (missing binary, etc.)
-					// Return the original error — let Cobra's root error handler display it.
-					return err
-				}
-				// Session doesn't have the group — offer sudo
-				sudoConfirmed, pErr := common.Cli.PromptConfirm(
-					cmd.Context(),
-					"Elevated privileges required. Run with sudo instead?",
-					true,
-				)
-				if pErr != nil {
-					return pErr
-				}
-				if !sudoConfirmed {
-					common.Cli.Info("Aborted")
-					return nil
-				}
-				return runCacheCleanWithSudo(cmd.Context())
-			}
-
 			if dryRun {
 				common.Cli.Info("[DRY RUN] The following would be removed:")
 				common.Cli.Info("  - ALL VMs (including RUNNING and STARTING)")
