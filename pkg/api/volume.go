@@ -290,15 +290,15 @@ func (op *Operation) VolumeAttach(
 	if err != nil {
 		return err
 	}
-	if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
-		return err
-	}
 	volumes, resolveErr := input.ResolveRaw(ctx, op.Repos.Volume)
 	if resolveErr != nil {
 		return resolveErr
 	}
 	if len(volumes) != 1 {
 		return errs.NotFound(errs.CodeVolumeNotFound, "Expected exactly one volume identifier")
+	}
+	if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
+		return err
 	}
 	vol := volumes[0]
 	alreadyAttachedHere := vol.Status == model.VolumeStatusAttached && vol.VMID != nil && *vol.VMID == vmItem.ID
