@@ -203,9 +203,8 @@ func TestActiveCleanupNonemptyManagedVMCgroupRetainsLeaseForRetry(t *testing.T) 
 func TestBoundJailDestinationUsesOperableRootDescriptor(t *testing.T) {
 	t.Parallel()
 
-	fixture := newProcessIdentityFixture(t, false)
-	fixture.fake.destinationAbsentChecks = 2
-	destination, err := fixture.fake.destination.bindAfterHandoff(
+	fake := newPostHandoffJailDestinationFixture()
+	destination, err := fake.destination.bindAfterHandoff(
 		t.Context(),
 		testAuthorityUID,
 		testAuthorityGID,
@@ -214,32 +213,32 @@ func TestBoundJailDestinationUsesOperableRootDescriptor(t *testing.T) {
 	assert.Equal(
 		t,
 		unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW,
-		fixture.fake.destinationOpenFlags[202],
+		fake.destinationOpenFlags[202],
 	)
-	assert.Zero(t, fixture.fake.destinationOpenFlags[202]&unix.O_PATH)
+	assert.Zero(t, fake.destinationOpenFlags[202]&unix.O_PATH)
 	require.NoError(t, destination.Release(t.Context()))
 }
 
 func TestBindAfterHandoffTransfersParentCloseOnceOnFailure(t *testing.T) {
 	t.Parallel()
 
-	fixture := newProcessIdentityFixture(t, false)
-	fixture.fake.destinationAbsentChecks = 2
-	invalid := fixture.fake.stats[203][0]
+	fake := newPostHandoffJailDestinationFixture()
+	invalid := fake.stats[203][0]
 	invalid.Nlink = 2
-	fixture.fake.stats[203][0] = invalid
+	fake.stats[203][0] = invalid
 
-	destination, err := fixture.fake.destination.bindAfterHandoff(
+	destination, err := fake.destination.bindAfterHandoff(
 		t.Context(),
 		testAuthorityUID,
 		testAuthorityGID,
 	)
 	assert.Nil(t, destination)
 	require.Error(t, err)
-	require.NoError(t, fixture.fake.destination.Release(t.Context()))
+	assert.Contains(t, err.Error(), "pre-seal metadata")
+	require.NoError(t, fake.destination.Release(t.Context()))
 
 	counts := make(map[int]int)
-	for _, fd := range fixture.fake.destinationCloseOrder() {
+	for _, fd := range fake.destinationCloseOrder() {
 		counts[fd]++
 	}
 	assert.Equal(t, 1, counts[200])

@@ -388,6 +388,28 @@ func (fake *fakeProcessIdentityDeps) retainPostExecFirecracker() {
 	fake.postExecStable = true
 }
 
+func newPostHandoffJailDestinationFixture() *fakeProcessIdentityDeps {
+	parent := objectStat(instanceObjectIdentity{device: 259, inode: 200}, unix.S_IFDIR|0700)
+	vm := objectStat(instanceObjectIdentity{device: 259, inode: 201}, unix.S_IFDIR|0700)
+	root := objectStat(instanceObjectIdentity{device: 259, inode: 202}, unix.S_IFDIR|0755)
+	executable := executableStat(259, 203, []byte("copied Firecracker executable"))
+	executable.Uid = testAuthorityUID
+	executable.Gid = testAuthorityGID
+	fake := &fakeProcessIdentityDeps{
+		stats: map[int][]unix.Stat_t{
+			200: {parent}, 201: {vm}, 202: {root}, 203: {executable},
+		},
+		statIndex:               make(map[int]int),
+		closeErrors:             make(map[int]error),
+		destinationOpenFlags:    make(map[int]int),
+		destinationAbsentChecks: 2,
+	}
+	fake.destination = fake.newPreparedDestination()
+	// Binding consumes a completed handoff; root-only launch proves that transition elsewhere.
+	fake.destination.state.status = preparedJailDestinationHandoff
+	return fake
+}
+
 func (fake *fakeProcessIdentityDeps) newPreparedDestination() *preparedJailDestination {
 	parent := fake.stats[200][0]
 	deps := jailDestinationDeps{
