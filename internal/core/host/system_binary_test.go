@@ -59,13 +59,14 @@ func TestValidateSystemBinaryInstallSudoers(t *testing.T) {
 		content string
 		wantErr bool
 	}{
-		{name: "empty", content: ""},
-		{name: "comments only", content: "# Managed by mvmctl\n# no active policy\n"},
-		{name: "generated transitional policy", content: GenerateSudoersContent(infra.MVMUnixGroup)},
+		{name: "empty has no marker grant", content: "", wantErr: true},
+		{name: "comments only have no marker grant", content: "# Managed by mvmctl\n# no active policy\n", wantErr: true},
+		{name: "generated marker-only policy", content: GenerateSudoersContent(infra.MVMUnixGroup)},
 		{
-			name: "current canonical wildcard",
+			name: "legacy raw-tool and unscoped binary wildcard",
 			content: "%mvm ALL=(root) NOPASSWD: " + infra.PrivilegedBinariesOrdered[0] +
 				", " + infra.SystemBinaryPath + " *\n",
+			wantErr: true,
 		},
 		{
 			name: "recognized marker wildcard",
@@ -73,8 +74,9 @@ func TestValidateSystemBinaryInstallSudoers(t *testing.T) {
 				" " + infra.PrivilegedProtocolMarker + " *\n",
 		},
 		{
-			name:    "comment containing old example is inert",
-			content: "# old example: /home/operator/mvm *\n",
+			name: "comment containing old example is inert",
+			content: "# old example: /home/operator/mvm *\n" +
+				"%mvm ALL=(root) NOPASSWD: /usr/local/bin/mvm __mvm_privileged_v1 *\n",
 		},
 		{
 			name:    "user executable wildcard",
@@ -143,8 +145,9 @@ func TestValidateSystemBinaryInstallSudoers(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "canonical command granted to wrong group",
-			content: "%wheel ALL=(root) NOPASSWD: " + infra.SystemBinaryPath + " *\n",
+			name: "canonical command granted to wrong group",
+			content: "%wheel ALL=(root) NOPASSWD: " + infra.SystemBinaryPath + " " +
+				infra.PrivilegedProtocolMarker + " *\n",
 			wantErr: true,
 		},
 		{
