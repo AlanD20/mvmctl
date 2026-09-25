@@ -21,6 +21,7 @@ func TestActivateVerifiedProcessUsesRetainedPIDFDsAndPinnedExecutable(t *testing
 	t.Parallel()
 
 	fixture := newProcessIdentityFixture(t, true)
+	execution := fixture.launch.snapshot().record.launch.executionIdentity
 	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
 	require.NoError(t, err)
 	require.NotNil(t, active)
@@ -28,8 +29,8 @@ func TestActivateVerifiedProcessUsesRetainedPIDFDsAndPinnedExecutable(t *testing
 	assert.Equal(t, instanceLifecycleActive, activeRecord.lifecycle)
 	require.NotNil(t, activeRecord.active)
 	want := instanceActiveIdentity{
-		userIDs:             repeatedProcessCredentials(testAuthorityUID),
-		groupIDs:            repeatedProcessCredentials(testAuthorityGID),
+		userIDs:             repeatedProcessCredentials(execution.uid),
+		groupIDs:            repeatedProcessCredentials(execution.gid),
 		supplementaryGroups: []uint32{},
 		mountNamespace:      fixture.firecrackerNamespace,
 		jailRoot:            fixture.jailRoot,
@@ -405,10 +406,11 @@ func TestActivateVerifiedProcessFailsClosedAtEveryRecheckBoundary(t *testing.T) 
 		},
 		"supplementary groups": {
 			mutate: func(fixture *processIdentityFixture) {
+				execution := fixture.launch.snapshot().record.launch.executionIdentity
 				fixture.fake.replaceProcessStatus(
 					processTestFirecrackerDirFD,
-					testAuthorityUID,
-					testAuthorityGID,
+					execution.uid,
+					execution.gid,
 					"2000",
 				)
 			},
