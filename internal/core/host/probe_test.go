@@ -43,7 +43,6 @@ func defaultResources() model.HostResources {
 		DevNetTUNAccessible:   true,
 		CloudLocaldsAvailable: true,
 		NftablesAvailable:     true,
-		IptablesAvailable:     true,
 	}
 }
 
@@ -462,7 +461,7 @@ func TestProbe_checkSystemResources(t *testing.T) {
 
 // --- RunAll categorisation ---
 // Rationale: RunAll routes checks to Critical/Warnings/Info based on Passed
-// and source function. VM host failures are Critical, swap/firewall are Warnings.
+// and source function. VM host and nftables readiness failures are Critical; swap is a Warning.
 
 func TestProbe_RunAll_categorisation(t *testing.T) {
 	t.Run("all_green_goes_to_info", func(t *testing.T) {
@@ -491,6 +490,22 @@ func TestProbe_RunAll_categorisation(t *testing.T) {
 			}
 			return false
 		}, "cpu_virtualization should be in Critical (not passed)")
+	})
+
+	t.Run("nftables_readiness_failure_goes_to_critical", func(t *testing.T) {
+		resources := defaultResources()
+		resources.NftablesAvailable = false
+		resources.NftablesProbeError = "kernel rejected modeled NAT expression"
+
+		result := host.NewProbe().RunAll(t.Context(), ptr(defaultHardware()), ptr(defaultLimits()), &resources)
+		for _, check := range result.Critical {
+			if check.Name == "nftables" {
+				assert.False(t, check.Passed)
+				assert.Equal(t, resources.NftablesProbeError, check.Details)
+				return
+			}
+		}
+		t.Fatal("failed nftables readiness must be reported as critical")
 	})
 
 	t.Run("system_resource_failures_go_to_warnings", func(t *testing.T) {
