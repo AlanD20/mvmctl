@@ -40,6 +40,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Implementation-only integration updates
 
+- Removed the obsolete routed service-access policy input, model, and result types. Migration `007` refuses populated
+  legacy policy rows before dropping that transitional table; typed traffic and exec policies remain the public model.
+- `cache clean` now uses the existing typed cleanup operations without checking for a raw `ip` tool or offering to
+  rerun the ordinary command under sudo. Cleanup failures continue to propagate.
+- Volume removal now reports one outcome per requested selector, including unresolved selectors and duplicates,
+  so a mixed batch retains its partial failures in structured output.
+- Snapshot restore now reserves the captured IPv4 address in the local lease repository before publishing its VM
+  projection. A conflicting lease fails; an uncertain root restore keeps the reservation for recovery. Snapshot
+  create/restore errors with a returned item now appear as partial structured output.
+
 - Integrated schema-4 operator/execution identity separation, per-VM locked system accounts, private API/vsock runtime,
   named root-brokered control, and exact execution-UID access to persistent outputs. Ordinary exec, shell, copy, and
   agent upgrades use an authenticated connected-descriptor handoff rather than opening the private socket directly.

@@ -6,6 +6,24 @@
 
 ## Implementation-only pass (2026-09-19)
 
+### Resumed production closure (2026-09-25)
+
+The user explicitly resumed all remaining 0.3.0 production implementation. The prior
+snapshot-only stopping point was too narrow. A bounded source inventory found four concrete
+gaps beyond the integrated restore: obsolete routed service-access policy input/schema,
+cache-clean ordinary-root escalation, missing local snapshot-restore IP reservation, and
+incomplete structured partial results for snapshot and volume batches. The old unchecked
+checklist is historical where current source already composes the network, firewall, traffic,
+exec, lifecycle status, host administrator, and typed LoopMount paths.
+
+The four mapped production gaps are integrated as `28543f8b` (legacy policy), `380d2d16`
+(cache cleanup), `8666d801` (volume partial batches), and `d158f24c` (snapshot endpoint and
+partial output). Preserve the implementation-only boundary: no test writing,
+tests, builds, vet, typechecks, runtime validation, host installation, or system qualification.
+Old Go tests and test helpers referencing removed policy types remain a later QA update, not a
+reason to retain the obsolete production interface. This checkpoint cannot be called release
+ready until full CI, Python system QA, and documentation qualification run later.
+
 ### Remaining production work resumed
 
 The user explicitly resumed the remaining production implementation after `4ff65536`.

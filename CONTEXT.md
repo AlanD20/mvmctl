@@ -90,13 +90,13 @@ A struct bound to a single entity instance. Manages lifecycle state transitions 
 
 Constructed with the entity + its Repository: `vm.NewController(vm *model.VMItem, repo Repository)`. NOT wired at startup -- created per-operation in the Service layer.
 
-*Example: `vm.NewController(vmItem, repo).Snapshot(ctx)` -- snapshots this specific VM. `network.NewService(repo, tracker, policyRepo).RemoveBridge(ctx, bridge)` -- removes a bridge, no single network entity needed.*
+*Example: a VM Controller snapshots its bound VM. `network.NewService(repo, trafficRepo).EnsureManagedNetwork(ctx, networkItem)` coordinates one managed network, with no Controller bound to an individual network.*
 
 ### Service (stateless, intra-domain)
 
 A struct for stateless intra-domain operations. Handles infrastructure operations (bridges, TAPs, NAT, subprocesses, file/disk operations). Performs state detection (checking current system state as part of an operation -- "does this bridge exist?" to branch execution). Guards invariants that protect against system damage. Does NOT validate caller input. Does NOT manage state for a single entity -- Service operates on infrastructure, not on a bound instance.
 
-Constructed with repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker, policyRepo ServiceAccessPolicyRepository)`. Wired once at startup in `app.Initialize()`.
+Constructed with repos/options only: `network.NewService(repo Repository, trafficRepo TrafficPolicyRepository)`. Wired once at startup in `app.Initialize()`.
 
 *Litmus test: if the operation would work the same way without a specific entity instance, it's Service. If it needs to communicate with a running entity's Firecracker API socket, it belongs in Controller. If it sequences multiple infrastructure steps (teardown NAT -> remove bridge -> delete DB record), it's intra-domain orchestration in Service.*
 
@@ -212,12 +212,14 @@ net, _ := input.ResolveNetwork(ctx, op.Repos.Network)
 
 Defined in `internal/lib/db/migrations/*.sql`. Accessed via `github.com/jmoiron/sqlx` with `modernc.org/sqlite` driver. PRAGMAs (foreign_keys=ON, journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, wal_autocheckpoint=1000, cache_size=-64000) set via DSN parameters in `db.Handle.openLazy()`. Connection pool has `SetMaxOpenConns(1)` and `SetMaxIdleConns(1)` for SQLite's single-writer semantics.
 
-Tables include `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`,
-`host_state_changes`, `service_access_policies`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`,
-`vm_vsock_config`, `snapshots`, and `db_migrations`. Read `internal/lib/db/migrations/` for the current schema.
+The final schema includes `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`,
+`host_state`, `host_state_changes`, `network_traffic_policies`, `vm_traffic_policies`, `exec_policies`, `ssh_keys`,
+`user_settings`, `vm_vsock_config`, `snapshots`, and `db_migrations`. Migrations may create transitional tables and
+then retire them before version 7. Read `internal/lib/db/migrations/` for the exact schema.
 
 The fresh v0.3.0 schema is version 7 and has no VM-wide `remote_exec` column. Migration `007` retires empty obsolete
-firewall tracking tables and selector settings, refusing populated tables rather than adopting their host state.
+firewall tracking and routed service-access policy tables and selector settings, refusing populated tables rather than
+adopting their state.
 Schema-version 3, 4, or 5 databases that
 still contain that removed column are legacy databases, even when every stored value is false. Both pending-migration
 inspection and migration application reject them with a validation-class `database.migration.failed` error before
@@ -484,8 +486,10 @@ Snapshot restore must also obtain the captured network ID, guest IPv4, and MAC f
 reserve those exact values for the restored endpoint. It fails if the source still owns them, another endpoint
 conflicts, or a different network is requested. v0.3.0 performs no fresh IP/MAC allocation, cross-network restore, or
 simultaneous endpoint clone. A new host TAP name may be derived, but the anti-spoof endpoint must match the embedded
-guest address and MAC. Root snapshot metadata, restore composition, conflict coverage, and live qualification remain
-pending; user SQLite state is not restore authority.
+guest address and MAC. The public restore path now reserves the exact captured IP in the local lease repository before
+calling the root restore. It releases that lease only before a root attempt; an uncertain root outcome retains it for
+recovery. Root metadata and the root endpoint guard remain authoritative for the captured topology. Live qualification
+and conflict coverage remain pending; user SQLite state is not restore authority.
 
 SQLite binary rows are an untrusted display projection of the root release store. The implemented projection schema
 now includes architecture and scopes list, prefix, type/version, latest, and default resolution to the runtime

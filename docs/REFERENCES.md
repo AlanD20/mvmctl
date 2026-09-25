@@ -398,7 +398,8 @@ The listed snapshot surface is not qualified support for trusted capture/restore
 Capture/inspect/remove production code uses root-controlled storage and exclusive protected rootfs/data-volume
 capture. Restore source composition copies disks into independent protected backing and retains immutable memory
 backing for full restores. It preserves captured guest drive IDs and network identity. The named privileged restore
-route is integrated. ADR-0018 approved the process/API/backing isolation prerequisite and superseded the
+route is integrated. The public API reserves the exact captured IP locally before root restore; conflicts fail, and an
+uncertain root outcome keeps the reservation for recovery. ADR-0018 approved the process/API/backing isolation prerequisite and superseded the
 earlier design pause. No build, tests, or runtime qualification have been performed for this pass.
 
 Create, list, inspect, restore, and remove VM snapshots.
@@ -552,8 +553,10 @@ Cache management.
 | `--dry-run` | Show what would be removed without removing |
 | `--force, -f` | Skip confirmation prompts |
 
-Cache cleanup no longer performs arbitrary unmounts through the removed raw provisioner. Inspection and cleanup
-failures propagate instead of being reported as empty cache or successful cleanup. `mvm run provision` is removed.
+Cache cleanup uses typed VM/network operations and no longer offers to rerun the ordinary CLI through sudo or
+checks for a raw `ip` executable. It no longer performs arbitrary unmounts through the removed raw provisioner.
+Inspection and cleanup failures propagate instead of being reported as empty cache or successful cleanup.
+`mvm run provision` is removed.
 
 Omit `RESOURCE` to get an error unless `--all` is passed. Each per-resource prune subcommand (`vm`, `network`, `image`, `kernel`, `binary`, `misc`) prompts for confirmation unless `--force` is set.
 
