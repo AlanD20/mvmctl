@@ -269,7 +269,7 @@ func TestDestinationSessionLifetimeDeadlineClosesIdleTransport(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = session.Close() })
 	t.Cleanup(func() { _ = agentConn.Close() })
-	fixedNow := time.Date(2026, time.September, 4, 10, 0, 0, 0, time.UTC)
+	fixedNow := time.Now()
 	expired := make(chan time.Time)
 	deadlineSeen := make(chan time.Time, 1)
 	timerStopped := make(chan struct{})
