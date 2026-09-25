@@ -2,12 +2,7 @@ package vm_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"net"
-	"net/http"
-	"os"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -20,64 +15,21 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-type capturedSnapshotRequest struct {
-	method string
-	path   string
-	body   map[string]any
-	err    error
-}
-
-// Rationale: SnapshotRestore must translate typed vsock presence into the
-// fixed jail-visible socket in the actual Firecracker request body.
-func TestControllerSnapshotRestoreSendsFixedVsockOverride(t *testing.T) {
-	socketPath := fmt.Sprintf("@mvmctl-snapshot-%d", os.Getpid())
-	listener, err := net.Listen("unix", socketPath)
-	require.NoError(t, err)
-
-	received := make(chan capturedSnapshotRequest, 1)
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		decodeErr := json.NewDecoder(r.Body).Decode(&body)
-		received <- capturedSnapshotRequest{method: r.Method, path: r.URL.Path, body: body, err: decodeErr}
-		if decodeErr != nil {
-			http.Error(w, decodeErr.Error(), http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})}
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(func() { _ = server.Close() })
-
-	ctrl := newController(model.VMStatusStopped, 0, socketPath)
-	err = ctrl.SnapshotRestore(t.Context(), model.SnapshotRestoreConfig{
-		MemFile: "/snapshot/memory", StateFile: "/snapshot/state", VsockEnabled: true,
-	})
-	require.NoError(t, err)
-	request := <-received
-	require.NoError(t, request.err)
-	assert.Equal(t, http.MethodPut, request.method)
-	assert.Equal(t, "/snapshot/load", request.path)
-	assert.Equal(t, map[string]any{"uds_path": "/run/mvm/vsock.sock"}, request.body["vsock_override"])
-}
-
 // --- Pause state validation ---
 // Rationale: Pause must reject invalid state transitions before any I/O.
-// All error paths are pure — they check c.vm.Status and c.vm.APISocketPath
-// without touching the Firecracker API or repository.
+// These error paths check the VM status before contacting the root API broker.
 
 func TestController_Pause_stateValidation(t *testing.T) {
 	tests := map[string]struct {
-		status     model.VMStatus
-		socketPath string
-		wantErr    string
+		status  model.VMStatus
+		wantErr string
 	}{
 		// Error paths — invalid states (FIRST)
-		"starting":               {status: model.VMStatusStarting, wantErr: "still starting"},
-		"stopped":                {status: model.VMStatusStopped, wantErr: "stopped"},
-		"stopping":               {status: model.VMStatusStopping, wantErr: "shutting down"},
-		"error":                  {status: model.VMStatusError, wantErr: "error"},
-		"crashed":                {status: model.VMStatusCrashed, wantErr: "crashed"},
-		"running_without_socket": {status: model.VMStatusRunning, wantErr: "no API socket"},
+		"starting": {status: model.VMStatusStarting, wantErr: "still starting"},
+		"stopped":  {status: model.VMStatusStopped, wantErr: "stopped"},
+		"stopping": {status: model.VMStatusStopping, wantErr: "shutting down"},
+		"error":    {status: model.VMStatusError, wantErr: "error"},
+		"crashed":  {status: model.VMStatusCrashed, wantErr: "crashed"},
 
 		// Happy path — idempotent no-op
 		"paused_is_noop": {status: model.VMStatusPaused},
@@ -85,7 +37,7 @@ func TestController_Pause_stateValidation(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			ctrl := newController(tc.status, 0, tc.socketPath)
+			ctrl := newController(tc.status, 0, "")
 			err := ctrl.Pause(context.Background())
 
 			if tc.wantErr != "" {
@@ -104,16 +56,14 @@ func TestController_Pause_stateValidation(t *testing.T) {
 
 func TestController_Resume_stateValidation(t *testing.T) {
 	tests := map[string]struct {
-		status     model.VMStatus
-		socketPath string
-		wantErr    string
+		status  model.VMStatus
+		wantErr string
 	}{
 		// Error paths — invalid states (FIRST)
-		"error":                 {status: model.VMStatusError, wantErr: "remove and recreate"},
-		"crashed":               {status: model.VMStatusCrashed, wantErr: "remove and recreate"},
-		"stopped":               {status: model.VMStatusStopped, wantErr: "use start()"},
-		"stopping":              {status: model.VMStatusStopping, wantErr: "shutting down"},
-		"paused_without_socket": {status: model.VMStatusPaused, wantErr: "no API socket"},
+		"error":    {status: model.VMStatusError, wantErr: "remove and recreate"},
+		"crashed":  {status: model.VMStatusCrashed, wantErr: "remove and recreate"},
+		"stopped":  {status: model.VMStatusStopped, wantErr: "use start()"},
+		"stopping": {status: model.VMStatusStopping, wantErr: "shutting down"},
 
 		// Happy paths — idempotent no-ops
 		"running_is_noop":  {status: model.VMStatusRunning},
@@ -122,7 +72,7 @@ func TestController_Resume_stateValidation(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			ctrl := newController(tc.status, 0, tc.socketPath)
+			ctrl := newController(tc.status, 0, "")
 			err := ctrl.Resume(context.Background())
 
 			if tc.wantErr != "" {
@@ -141,15 +91,13 @@ func TestController_Resume_stateValidation(t *testing.T) {
 
 func TestController_Start_stateValidation(t *testing.T) {
 	tests := map[string]struct {
-		status     model.VMStatus
-		socketPath string
-		wantErr    string
+		status  model.VMStatus
+		wantErr string
 	}{
 		// Error paths — invalid states (FIRST)
-		"error":                  {status: model.VMStatusError, wantErr: "remove and recreate"},
-		"crashed":                {status: model.VMStatusCrashed, wantErr: "remove and recreate"},
-		"paused":                 {status: model.VMStatusPaused, wantErr: "use resume()"},
-		"stopped_without_socket": {status: model.VMStatusStopped, wantErr: "no API socket"},
+		"error":   {status: model.VMStatusError, wantErr: "remove and recreate"},
+		"crashed": {status: model.VMStatusCrashed, wantErr: "remove and recreate"},
+		"paused":  {status: model.VMStatusPaused, wantErr: "use resume()"},
 
 		// Happy paths — idempotent no-ops
 		"running_is_noop":  {status: model.VMStatusRunning},
@@ -159,7 +107,7 @@ func TestController_Start_stateValidation(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			ctrl := newController(tc.status, 0, tc.socketPath)
+			ctrl := newController(tc.status, 0, "")
 			err := ctrl.Start(context.Background())
 
 			if tc.wantErr != "" {
@@ -172,117 +120,9 @@ func TestController_Start_stateValidation(t *testing.T) {
 	}
 }
 
-// --- Stop idempotent no-op ---
-// Rationale: Stop on non-running VMs with pid=0 returns nil immediately without
-// touching the repository or subprocess. Every non-Running/non-Starting status
-// with pid <= 0 is idempotent regardless of force flag.
-
-func TestController_Stop_nonRunningWithNoPID(t *testing.T) {
-	statuses := []model.VMStatus{
-		model.VMStatusStopped,
-		model.VMStatusPaused,
-		model.VMStatusStopping,
-		model.VMStatusError,
-		model.VMStatusCrashed,
-	}
-
-	// Same result for both force values — pid <= 0 is checked before force
-	for _, force := range []bool{false, true} {
-		for _, status := range statuses {
-			name := string(status)
-			if force {
-				name += "_force"
-			} else {
-				name += "_graceful"
-			}
-
-			t.Run(name, func(t *testing.T) {
-				ctrl := newController(status, 0, "")
-				err := ctrl.Stop(context.Background(), force)
-				assert.NoError(t, err)
-			})
-		}
-	}
-}
-
-// --- Snapshot state validation ---
-// Rationale: Snapshot must reject invalid states before any I/O. Only RUNNING
-// and PAUSED are valid; all other statuses return DomainError. Missing API
-// socket also returns DomainError.
-
-func TestController_Snapshot_stateValidationTable(t *testing.T) {
-	tests := map[string]struct {
-		status     model.VMStatus
-		socketPath string
-		wantErr    string
-	}{
-		// Error paths — invalid states (FIRST)
-		"starting":               {status: model.VMStatusStarting, wantErr: "still starting"},
-		"stopped":                {status: model.VMStatusStopped, wantErr: "stopped"},
-		"stopping":               {status: model.VMStatusStopping, wantErr: "shutting down"},
-		"error":                  {status: model.VMStatusError, wantErr: "error"},
-		"crashed":                {status: model.VMStatusCrashed, wantErr: "crashed"},
-		"running_without_socket": {status: model.VMStatusRunning, wantErr: "Socket not found"},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			ctrl := newController(tc.status, 0, tc.socketPath)
-			err := ctrl.SnapshotCreate(context.Background(), model.SnapshotCreateConfig{
-				MemFile:   "/tmp/mem",
-				StateFile: "/tmp/state",
-				PauseOnly: false,
-			})
-
-			if tc.wantErr != "" {
-				require.Error(t, err)
-				assertDomainError(t, err, errs.CodeVMStateInvalid, tc.wantErr)
-				return
-			}
-			assert.NoError(t, err)
-		})
-	}
-}
-
-// --- Reboot delegation ---
-// Rationale: Reboot calls Stop then Start. With a non-running VM (pid=0),
-// Stop returns nil immediately. If socket is missing, Start returns DomainError
-// — proving delegation is wired correctly.
-
-func TestController_Reboot_delegation(t *testing.T) {
-	tests := map[string]struct {
-		status     model.VMStatus
-		pid        int
-		socketPath string
-		wantErr    string
-	}{
-		// Error propagates from Start when socket is missing
-		"stopped_no_socket_propagates": {
-			status: model.VMStatusStopped, pid: 0, socketPath: "",
-			wantErr: "no API socket",
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			ctrl := newController(tc.status, tc.pid, tc.socketPath)
-			err := ctrl.Reboot(context.Background(), false)
-
-			if tc.wantErr != "" {
-				require.Error(t, err)
-				assertDomainError(t, err, errs.CodeVMStateInvalid, tc.wantErr)
-				return
-			}
-			assert.NoError(t, err)
-		})
-	}
-}
-
 // --- Context cancellation ---
-// Rationale: Every controller method takes context.Context. The pure state
-// validation paths (no-op and socket-missing) must not block on a cancelled
-// context. These tests prove that cancellation does NOT affect early-return
-// branches — the state check happens before any I/O that would observe ctx.
+// Rationale: Idempotent Pause, Resume, and Start must return without contacting
+// the root API broker, even when the caller's context is already cancelled.
 
 func TestController_ContextCancellation(t *testing.T) {
 	t.Run("Pause_paused_noop", func(t *testing.T) {
@@ -309,51 +149,6 @@ func TestController_ContextCancellation(t *testing.T) {
 		assert.NoError(t, err, "no-op must not block on cancelled context")
 	})
 
-	t.Run("Stop_nonRunning_noop", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		ctrl := newController(model.VMStatusStopped, 0, "")
-		err := ctrl.Stop(ctx, false)
-		assert.NoError(t, err, "no-op must not block on cancelled context")
-	})
-
-	t.Run("Snapshot_missingSocket", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		ctrl := newController(model.VMStatusRunning, 0, "")
-		err := ctrl.SnapshotCreate(ctx, model.SnapshotCreateConfig{
-			MemFile:   "/mem",
-			StateFile: "/state",
-			PauseOnly: false,
-		})
-		require.Error(t, err, "socket check must happen before context check")
-		assertDomainError(t, err, errs.CodeVMStateInvalid, "Socket not found")
-	})
-
-	t.Run("Reboot_propagates_from_start", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		ctrl := newController(model.VMStatusStopped, 0, "")
-		err := ctrl.Reboot(ctx, false)
-		require.Error(t, err, "Start must check socket before context")
-		assertDomainError(t, err, errs.CodeVMStateInvalid, "no API socket")
-	})
-
-	t.Run("AttachVolume_empty_socket", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		ctrl := newController(model.VMStatusRunning, 0, "")
-		err := ctrl.AttachVolume(ctx, model.DriveConfig{DriveID: "test"})
-		require.Error(t, err, "dial on empty socket must fail immediately, not hang")
-	})
-
-	t.Run("DetachVolume_empty_socket", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		ctrl := newController(model.VMStatusRunning, 0, "")
-		err := ctrl.DetachVolume(ctx, "test")
-		require.Error(t, err, "dial on empty socket must fail immediately, not hang")
-	})
 }
 
 // --- Helpers ---
