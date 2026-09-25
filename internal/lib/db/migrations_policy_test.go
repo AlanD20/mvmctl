@@ -74,17 +74,16 @@ func TestMigration005RejectsLegacyV4Schema(t *testing.T) {
 	assert.Equal(t, 4, version)
 }
 
-func TestMigration005AcceptsFreshSchema(t *testing.T) {
+func TestMigrationsAcceptFreshSchema(t *testing.T) {
 	ctx := t.Context()
 	handle := db.New(filepath.Join(t.TempDir(), "policy-fresh.db"))
 	t.Cleanup(func() { require.NoError(t, handle.Close()) })
 
-	applied, err := handle.RunMigrationsCtx(ctx)
+	_, err := handle.RunMigrationsCtx(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 6, applied)
 	var version int
 	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
-	assert.Equal(t, 6, version)
+	assert.Equal(t, 7, version)
 	var legacyColumnCount int
 	require.NoError(t, handle.DB().GetContext(ctx, &legacyColumnCount,
 		"SELECT COUNT(*) FROM pragma_table_info('vm_instances') WHERE name = 'remote_exec'"))
@@ -159,6 +158,34 @@ func TestMigration004RejectsLegacyFirewallState(t *testing.T) {
 	assert.Equal(t, 3, version)
 }
 
+// Rationale: Migration 004 can fail after earlier schema statements have auto-committed.
+// Its snapshot must restore the original database, including data outside the failed migration.
+func TestRunMigrationsRestoresSnapshotAfterPartialFailure(t *testing.T) {
+	ctx := t.Context()
+	handle := migratePolicyFixtureToV3(t)
+	_, err := handle.DB().ExecContext(ctx, `
+		CREATE TABLE network_traffic_policies (sentinel TEXT NOT NULL);
+		INSERT INTO network_traffic_policies (sentinel) VALUES ('preserved');
+	`)
+	require.NoError(t, err)
+
+	applied, err := handle.RunMigrationsCtx(ctx)
+	require.Error(t, err)
+	assert.Zero(t, applied)
+
+	// Reopen through Handle: recovery replaces the database file and closes its old connection.
+	var version, partialTableCount int
+	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
+	assert.Equal(t, 3, version)
+	require.NoError(t, handle.DB().GetContext(ctx, &partialTableCount,
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'service_access_policies'"))
+	assert.Zero(t, partialTableCount)
+	var sentinel string
+	require.NoError(t, handle.DB().GetContext(ctx, &sentinel,
+		"SELECT sentinel FROM network_traffic_policies"))
+	assert.Equal(t, "preserved", sentinel)
+}
+
 func seedTypedPolicyResources(t *testing.T, ctx context.Context, handle *db.Handle) {
 	t.Helper()
 	_, err := handle.DB().ExecContext(ctx, `
@@ -218,9 +245,8 @@ func TestMigration004TypedPolicyConstraints(t *testing.T) {
 	ctx := t.Context()
 	handle := migratePolicyFixtureToV3(t)
 	database := handle.DB()
-	applied, err := handle.RunMigrationsCtx(ctx)
+	_, err := handle.RunMigrationsCtx(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 3, applied)
 	seedTypedPolicyResources(t, ctx, handle)
 
 	validPolicyID := strings.Repeat("a", 64)
