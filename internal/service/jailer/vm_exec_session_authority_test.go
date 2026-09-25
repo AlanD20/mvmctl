@@ -632,8 +632,6 @@ func TestVMExecSessionAuthoritySecondIdentityFailuresUnwindEarlierAuthority(t *t
 				foreign := cloneInstanceRecord(fixture.destinationRecord)
 				foreign.ownerUID = testAuthorityUID + 1
 				foreign.launch.ownerGID = testAuthorityGID + 1
-				foreign.active.userIDs = uniformProcessCredentials(testAuthorityUID + 1)
-				foreign.active.groupIDs = uniformProcessCredentials(testAuthorityGID + 1)
 				writeTestAuthorityRecord(t, fixture.root, foreign)
 			},
 			wantCode:       string(errs.CodeUnauthorized),

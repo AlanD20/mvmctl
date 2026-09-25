@@ -432,31 +432,7 @@ func activeRecoveryTestRecordWithRelay(
 	relayPresent bool,
 ) (instanceRecord, *fakeProcessIdentityDeps) {
 	t.Helper()
-	fixture := newProcessIdentityFixture(t, relayPresent)
-	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
-	require.NoError(t, err)
-	record := active.snapshot()
-	cleanup, err := active.BeginCleanup(t.Context())
-	require.NoError(t, err)
-	require.NoError(t, cleanup.Complete(t.Context()))
-	require.NoError(t, cleanup.Release(t.Context()))
-
-	fake := fixture.fake
-	fake.bootIndex = 0
-	fake.bootIDs = []string{processTestHostBootID, processTestHostBootID}
-	fake.stats[113] = repeatProcessStat(executableStat(
-		int32(record.active.executable.device),
-		record.active.executable.inode,
-		fake.contents[203],
-	), 2)
-	fake.stats[116] = repeatProcessStat(fake.stats[113][0], 3)
-	fake.contents[116] = append([]byte{}, fake.contents[203]...)
-	if relayPresent {
-		relayExecutable := fake.stats[126][0]
-		fake.stats[126] = repeatProcessStat(relayExecutable, 3)
-		fake.contents[126] = []byte("exact pinned receiver executable")
-	}
-	return record, fake
+	return newActiveRecoveryIdentityFixture(t, relayPresent)
 }
 
 func newActiveRecoveryTestAuthority(
