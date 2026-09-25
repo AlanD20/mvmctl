@@ -54,6 +54,9 @@ func NewVMKey(value string) (VMKey, error) {
 	return VMKey{value: value}, nil
 }
 
+// String returns the canonical VM identity carried by this key.
+func (key VMKey) String() string { return key.value }
+
 // ReleaseKey identifies one canonical Jailer release lock.
 type ReleaseKey struct {
 	value string

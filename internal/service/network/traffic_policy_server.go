@@ -142,6 +142,7 @@ type trafficPolicyAuthority struct {
 	store      *networkStoreUID
 	journals   []*topologyJournal
 	topologies map[string]topologyJournalRecord
+	network    *managedNetworkLease
 	networks   []*managedNetworkLease
 	firewall   *firewall.MutationLease
 }
@@ -373,6 +374,9 @@ func (authority *trafficPolicyAuthority) release(ctx context.Context, primary er
 			"release policy firewall mutation",
 			authority.firewall.Release(cleanup),
 		)
+	}
+	if authority.network != nil {
+		primary = appendNetworkAuthorityError(primary, "release NoCloud network", authority.network.Release(cleanup))
 	}
 	for index := len(authority.networks) - 1; index >= 0; index-- {
 		primary = appendNetworkAuthorityError(
