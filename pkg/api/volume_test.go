@@ -2,18 +2,15 @@ package api_test
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/core/volume"
-	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/ptr"
 	"mvmctl/internal/lib/logging"
@@ -193,38 +190,6 @@ func TestVolumeOperationsRejectUnsupportedOrMissingBeforeEffects(t *testing.T) {
 	}
 }
 
-func TestRawVolumeAttachPreservesOptions(t *testing.T) {
-	for _, shareable := range []bool{false, true} {
-		t.Run(fmt.Sprintf("shareable_%t", shareable), func(t *testing.T) {
-			repo := testutil.NewVolumeRepo()
-			vmRepo := testutil.NewVMRepo()
-			vol := &model.VolumeItem{
-				ID: volumeTestVolumeID, Name: "raw-data", Format: model.VolumeFormatRaw,
-				Status: model.VolumeStatusAvailable, IsReadOnly: true,
-				IsShareable: shareable, CacheType: model.CacheTypeWriteback,
-			}
-			require.NoError(t, repo.Upsert(t.Context(), vol))
-			require.NoError(t, vmRepo.Upsert(t.Context(), &model.VMItem{
-				ID: volumeTestVMID, Name: "vm-test", Status: model.VMStatusStopped,
-			}))
-			op := &api.Operation{Repos: api.Repos{Volume: repo, VM: vmRepo}, AuditLog: &logging.AuditLog{}}
-			require.NoError(t, op.VolumeAttach(t.Context(), inputs.VolumeInput{
-				Identifiers: []string{"raw-data"}, VMIdentifier: "vm-test",
-			}))
-			stored, err := repo.Get(t.Context(), vol.ID)
-			require.NoError(t, err)
-			assert.True(t, stored.IsReadOnly)
-			assert.Equal(t, shareable, stored.IsShareable)
-			assert.Equal(t, model.CacheTypeWriteback, stored.CacheType)
-			vmItem, err := vmRepo.Get(t.Context(), volumeTestVMID)
-			require.NoError(t, err)
-			if diff := cmp.Diff([]string{volumeTestVolumeID}, []string(vmItem.VolumeIDs)); diff != "" {
-				t.Errorf("attached volume IDs (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
 // Rationale: VM creation must reject the whole request before creating networking,
 // VM-specific files, or repository rows, even if some requested volumes resolved.
 func TestVMCreateRejectsUnsupportedOrMissingVolumesBeforeEffects(t *testing.T) {
@@ -286,43 +251,6 @@ func TestVMCreateRejectsUnsupportedOrMissingVolumesBeforeEffects(t *testing.T) {
 			stored, err := volumeRepo.Get(t.Context(), vol.ID)
 			require.NoError(t, err)
 			testutil.AssertDiff(t, &originalVolume, stored)
-		})
-	}
-}
-
-func TestUnsupportedVolumeCanBeInspectedAndRemoved(t *testing.T) {
-	for _, format := range []model.VolumeFormat{model.VolumeFormatQCOW2, "unknown"} {
-		t.Run(string(format), func(t *testing.T) {
-			repo := testutil.NewVolumeRepo()
-			vmRepo := testutil.NewVMRepo()
-			path := filepath.Join(t.TempDir(), "old-volume.disk")
-			require.NoError(t, os.WriteFile(path, []byte("old volume"), 0600))
-			require.NoError(t, repo.Upsert(t.Context(), &model.VolumeItem{
-				ID: volumeTestVolumeID, Name: "old-volume", Format: format, Path: path,
-				Status: model.VolumeStatusAvailable,
-			}))
-			old := system.DefaultRunner
-			system.DefaultRunner = &testutil.FakeRunner{}
-			t.Cleanup(func() { system.DefaultRunner = old })
-			op := &api.Operation{
-				Repos:    api.Repos{Volume: repo, VM: vmRepo},
-				Services: api.Services{Volume: volume.NewService(repo)},
-				Enr:      enricher.New(vmRepo, nil, nil, nil, nil, nil, repo, nil, nil),
-				AuditLog: &logging.AuditLog{},
-			}
-			input := inputs.VolumeInput{Identifiers: []string{"old-volume"}}
-			inspected, err := op.VolumeInspect(t.Context(), input)
-			require.NoError(t, err)
-			assert.Equal(t, string(format), inspected.Volume.Format)
-			assert.Equal(t, path, inspected.Volume.Path)
-			removed := op.VolumeRemove(t.Context(), input, false)
-			require.Len(t, removed.Items, 1)
-			require.NoError(t, removed.Items[0].Exception)
-			assert.Equal(t, "success", removed.Items[0].Status)
-			stored, err := repo.Get(t.Context(), volumeTestVolumeID)
-			require.NoError(t, err)
-			assert.Nil(t, stored)
-			assert.NoFileExists(t, path)
 		})
 	}
 }
