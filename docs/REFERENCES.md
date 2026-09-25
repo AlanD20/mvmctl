@@ -337,9 +337,9 @@ connection and waits on the exact process before authoritative cleanup.
 
 Typed launch now includes console relay composition and raw data volumes with release-derived device limits,
 descriptor-only mounts, and no new storage quotas. PCI launch and x86 nested configuration are implemented for the
-pinned release; ARM nested launch is rejected. This development implementation is unverified. Snapshot launch remains
-blocked, with no legacy fallback. Typed live-volume operations and snapshot capture/inspect/remove are integrated;
-their remaining protected-backing dependencies and snapshot restore composition are not yet complete.
+pinned release; ARM nested launch is rejected. This development implementation is unverified. Typed live-volume
+operations and snapshot capture/inspect/remove are integrated. Snapshot restore source composition now uses the
+captured topology and independent protected disks; the named privileged route is integrated. Release qualification remains pending.
 
 **`vm create` flags:**
 
@@ -394,11 +394,12 @@ mvm vm create cluster-node --count 3
 
 ### `mvm snapshot` (alias: `ss`)
 
-The listed snapshot surface is not qualified support for trusted capture/restore in this development build. Restore
-remains blocked. Capture/inspect/remove production code now uses root-controlled storage and exclusive protected
-rootfs/data-volume capture. The process/API/backing isolation prerequisite was approved in ADR-0018, superseding the
-earlier design pause. Remaining backing helpers, stopped-source archive, and immutable restore composition are still
-being implemented; no build, tests, or runtime qualification have been performed for this pass.
+The listed snapshot surface is not qualified support for trusted capture/restore in this development build.
+Capture/inspect/remove production code uses root-controlled storage and exclusive protected rootfs/data-volume
+capture. Restore source composition copies disks into independent protected backing and retains immutable memory
+backing for full restores. It preserves captured guest drive IDs and network identity. The named privileged restore
+route is integrated. ADR-0018 approved the process/API/backing isolation prerequisite and superseded the
+earlier design pause. No build, tests, or runtime qualification have been performed for this pass.
 
 Create, list, inspect, restore, and remove VM snapshots.
 

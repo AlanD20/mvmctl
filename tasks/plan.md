@@ -28,19 +28,13 @@ exact output ACLs, protected provisioning, typed volume storage and hotplug, sna
 and named capture/inspect/remove dispatcher routes. These are implementation checkpoints, not
 working-save-point or release sign-off: remaining producer helpers are still dependencies.
 
-Current isolated owners under `.tmp/worktrees/`: `impl03_deblob_typed` on
-`impl03-protected-backing` finishes logical cache binding, grant inventory, snapshot/restore
-constructors, and initial-volume quarantine; `impl03_lifecycle` on `impl03-isolated-launch`
-finishes durable stopped-device archive and common prepared-restore launch composition;
-`impl03_resources` on `impl03-snapshot-runtime` finishes actual snapshot restore and public
-restore consumers. `impl03_loopmount` on `impl03-protected-provision` retires the superseded
-raw Jailer exposure routes. `impl03_runtime_recovery` owns final dispatcher edits but is stopped
-after its completed packet, awaiting a concrete Restore producer. Other consumers are committed
-and stopped. Do not reassign their files without an explicit bounded follow-up.
-
-Remaining work is concrete integration and production implementation, not QA. Finish the
-backing/archive/restore dependencies and final legacy deletion, update current docs, then stop.
-Do not restart audits, tests, builds, host installation, or qualification in this pass.
+The resumed integration checkpoint on 2026-09-25 includes protected backing recovery `d66a534b`,
+trusted stopped-device archive `494a46b5`, common isolated restore launch `27f3c1ae`, public
+snapshot restore source `b9bdda42`, and raw Jailer exposure retirement `83eba1f6`. The named
+privileged snapshot Restore dispatcher route is integrated as `018601d1`. The scoped production
+implementation list from this checkpoint is complete; stop after the documentation commit.
+These are unverified implementation chunks. Tests, builds, host installation, and qualification
+remain outside this pass.
 
 ### Resumed after user policy decisions
 

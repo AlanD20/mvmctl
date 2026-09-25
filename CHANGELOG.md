@@ -28,11 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > wire/process/Jailer-client/registered-handler lifecycle, partial typed vsock-state preservation across start, reboot,
 > and snapshot restore, and clean-break removal of the VM-wide
 > remote-exec trust flag described below are implemented.
-> The late implementation pass also composes typed schema-3 launch/cleanup, per-VM topology, cgroup and descriptor-only
+> The late implementation pass also composes typed schema-4 launch/cleanup, per-VM topology, cgroup and descriptor-only
 > mounts, same-boot recovery, root traffic apply/revoke, managed-network transactions, and offline ext-image shrink.
 > This code is unverified: only formatting has been performed, with no build, tests, review, or system qualification.
-> Trusted snapshot capture/restore with consistent data volumes, remaining privilege integration, and release
-> qualification remain incomplete. Raw-volume launch, host clean/reset, and typed image recovery are
+> Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation;
+> remaining privilege integration and release qualification remain incomplete. Raw-volume launch,
+> host clean/reset, and typed image recovery are
 > implemented but unverified. Earlier slice evidence below does not qualify these later changes.
 
 ### Added
@@ -44,10 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent upgrades use an authenticated connected-descriptor handoff rather than opening the private socket directly.
 - Integrated protected logical backing, typed volume inspect/grow/remove, protected rootfs provisioning, and root-owned
   live-volume hotplug intent. Original caller files are staging inputs, not authoritative active disks after import.
-  Remaining backing helpers and restore composition are still being written; this is not a runnable sign-off.
+  Recovery helpers bind logical cache identity and track access grants. This is not a runnable sign-off.
 - Added the trusted snapshot capture/inspect/remove implementation, including exclusive protected data-volume capture,
   root-owned immutable artifact metadata, and recorded uncertain/paused capture progress. Stopped-source archive and
-  immutable restore composition remain integration dependencies; snapshot restore is not yet complete.
+  immutable restore composition are now integrated. Restore prepares independent protected disk copies, retains
+  immutable memory backing for a full restore, and keeps captured guest drive IDs and network identity. The named
+  privileged restore route validates one typed request before invoking the root receiver. None of this has been qualified.
 
 - Typed launch now admits PCI for the pinned Firecracker 1.16.1 profile, accounting for the usable PCI bus slots and
   MSI-X vectors of the complete generated device set. The authenticated child receives the transport choice and adds
@@ -60,8 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the versioned policy; old/missing policy cannot silently launch or migrate. VMs may exceed the pressure threshold.
   Host/ancestor/userspace OOM risks remain; this does not diagnose or prove resolution of the reported saturation failure.
 - Cgroup configuration read failures now propagate instead of silently deriving zero headroom or other zero values.
-- Removed unused public Jailer launch/cleanup actions, old manifest serialization, and their raw launch/cleanup
-  implementation. Snapshot and volume exposure retirement still depends on replacement of their active consumers.
+- Removed unused public Jailer launch/cleanup actions, old manifest serialization, and raw snapshot/volume exposure
+  operations after their typed consumers were introduced.
 
 - Raw volumes now join typed VM launch through ordered path-free selections, release-derived MMIO admission,
   exact pinned file identity and size, sealed configuration, and descriptor-only child mounts at `/volumes/<id>.raw`.
@@ -989,8 +992,9 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Security work still pending
 
-Current incomplete work includes root-controlled snapshot production/removal
-and immutable restore backing with consistent data-volume snapshots, remaining privilege integration, and qualification.
+Current incomplete work includes remaining privilege integration and qualification. Root-controlled snapshot
+capture/removal, the named privileged restore route, and immutable restore backing with consistent data-volume
+snapshots have source implementations, without build or system qualification.
 Approval adds no new per-volume or aggregate quota caps. Existing
 unprivileged archive construction remains outside the root service. Pressure-only memory policy v2 is implemented
 without runtime qualification; attribution of the reported OOM incident remains unresolved.
@@ -998,7 +1002,7 @@ Snapshot launch still refuses unsupported selections; raw-volume and PCI launch 
 The user subsequently approved the isolated-execution prerequisite in ADR-0018. A trusted capture contract must address the
 operator-owned process, caller-accessible Firecracker API, active disk writers, and retained writable aliases.
 No exploit or impossibility of a narrower design has been demonstrated. Root-controlled storage and consistent
-data-volume capture remain approved requirements, not completed behavior.
+data-volume capture have source implementations that remain unqualified.
 Shared dispatcher admission and guarded administrator reset are composed. Reset requires marker-only sudoers and
 compatible root journals, rejects live or ambiguous managed state, and restores recorded settings through retryable
 rollback receipts. It retains disabled admission after reset or restoration failure and preserves unrelated administrator

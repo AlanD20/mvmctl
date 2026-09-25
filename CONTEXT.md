@@ -618,18 +618,21 @@ The transport choice reaches child argv and the sealed configuration path. x86 n
 is admitted; ARM nested and unapproved release profiles fail closed. These paths remain unverified.
 Snapshot byte admission limits the complete `vmstate`, including its CRC, to 10,000,000 bytes and requires memory
 length to equal trusted captured RAM in MiB times 1,048,576. Captured rootfs length must match exactly; rootfs-only
-captures have neither memory nor vmstate. These private checks do not authenticate a capture, establish immutable
+captures have neither memory nor vmstate. These private byte checks alone do not authenticate a capture, establish immutable
 memory backing, or grant restore authority. The user approved root-controlled snapshot storage with CLI removal and
 requires consistent snapshots of attached data volumes. Capture/inspect/remove production code now acquires exclusive
 protected backing, pauses the isolated producer, and publishes root-controlled immutable artifact metadata. Uncertain
-capture progress retains explicit paused/unknown state rather than assuming a safe resume. Stopped-source archive,
-remaining backing helpers, and immutable restore composition are still being implemented. These source changes have
+capture progress retains explicit paused/unknown state rather than assuming a safe resume. Stopped-source device
+archives and immutable restore composition now exist in source. Full restore holds memory/vmstate through the restored
+VM lifetime; restored disks have independent protected backing while guest drive IDs remain captured IDs. The named
+privileged Restore dispatcher route is now integrated. These source changes have
 not been built or tested. [ADR-0018](docs/adr/0018-isolated-vm-execution-and-snapshot-authority.md) supersedes the earlier
 snapshot pause: schema-4 records separate operator ownership from isolated per-VM system accounts; named root API
 operations and an authenticated host-vsock descriptor handoff replace operator access to private VMM sockets.
 Protected logical disks, typed volume storage operations, and protected rootfs provisioning replace mutation of
 caller staging files after import. This is not evidence of an exploited vulnerability or qualified isolation.
-Typed launch still rejects snapshot mode pending the restore composition, without falling back to the older path.
+Typed launch accepts the prepared root-owned restore capability; the caller cannot submit snapshot paths, machine
+configuration, or alternate network identity. The public restore path is implemented in source but unqualified.
 
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An
