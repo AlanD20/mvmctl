@@ -30,12 +30,12 @@ VM_TMP_DIR = "/tmp"
 
 
 def _parse_json_output(output: str) -> Any:
-    """Parse mvm JSON output, stripping trailing non-JSON lines (warnings)."""
-    for end_char in ("]", "}"):
-        last_idx = output.rfind(end_char)
-        if last_idx != -1:
-            return json.loads(output[:last_idx + 1])
-    return json.loads(output)
+    """Require one successful schema-1 response from the installed CLI."""
+    envelope = json.loads(output)
+    assert envelope["schema_version"] == 1
+    assert envelope["status"] == "success"
+    assert envelope["error"] is None
+    return envelope["data"]
 
 
 def _vm_mktemp(runner_vm: str, suffix: str = "") -> str:
@@ -164,7 +164,7 @@ def _create_qcow2_from_raw_in_vm(
 
 @pytest.fixture(scope="module", autouse=True)
 def _ensure_alpine_available(runner_vm: str) -> None:
-    """Ensure alpine-3.21 image is cached before any test in this module."""
+    """Ensure Alpine 3.23 is cached before any test in this module."""
     _ensure_image(runner_vm, "alpine:3.23")
 
 
@@ -206,51 +206,45 @@ class TestImageList:
         result = _run_mvm(runner_vm, "image", "ls", "--json")
         data = _parse_json_output(result.stdout)
         assert isinstance(data, list)
-        if data:
-            entry = data[0]
-            assert "id" in entry, f"Expected 'id' field in image entry: {entry}"
-            assert isinstance(entry.get("type"), str) and entry["type"], (
-                f"Expected non-empty type: {entry}"
-            )
+        alpine = [
+            i for i in data if i.get("type") == "alpine" and i.get("version") == "3.23"
+        ]
+        assert alpine, "the module's pre-seeded Alpine 3.23 image is missing"
+        entry = alpine[0]
+        assert isinstance(entry.get("id"), str) and entry["id"], entry
+        assert entry.get("is_present") is True, entry
 
     def test_image_list_table(self, runner_vm):
         """List images in table format."""
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        data = _parse_json_output(result.stdout)
-        assert isinstance(data, list)
-        if data:
-            entry = data[0]
-            assert entry.get("is_present") is True, (
-                f"Expected image to be present: {entry}"
-            )
-            assert isinstance(entry.get("type"), str) and entry["type"], (
-                f"Expected non-empty type: {entry}"
-            )
+        images = _parse_json_output(
+            _run_mvm(runner_vm, "image", "ls", "--json").stdout
+        )
+        matches = [
+            i for i in images if i.get("type") == "alpine" and i.get("version") == "3.23"
+        ]
+        assert matches, "the module's pre-seeded Alpine 3.23 image is missing"
+        alpine = matches[0]
+        result = _run_mvm(runner_vm, "image", "ls")
+        header = result.stdout.splitlines()[0]
+        assert all(field in header for field in ("ID", "NAME", "VERSION", "TYPE"))
+        assert alpine["id"][:6] in result.stdout
+        assert alpine["name"] in result.stdout
 
-    def test_image_list_no_cache(self, runner_vm):
-        """List cached images with --no-cache flag."""
-        result = _run_mvm(runner_vm, "image", "ls", "--no-cache", check=False)
-        assert result.returncode == 0, (
-            f"image ls --no-cache failed: {result.stderr}"
+    def test_image_inspect_human(self, runner_vm):
+        """Inspect the pre-seeded image through the human renderer."""
+        _ensure_image(runner_vm, "alpine:3.23")
+        images = _parse_json_output(
+            _run_mvm(runner_vm, "image", "ls", "--json").stdout
         )
-
-    def test_image_list_type_filter(self, runner_vm):
-        """List cached images filtered by --type alpine."""
-        result = _run_mvm(
-            runner_vm, "image", "ls", "--type", "alpine", check=False
-        )
-        assert result.returncode == 0, (
-            f"image ls --type alpine failed: {result.stderr}"
-        )
-        if result.stdout.strip():
-            try:
-                data = _parse_json_output(result.stdout)
-                for entry in data:
-                    assert "alpine" in entry.get("type", "").lower(), (
-                        f"Expected alpine type, got: {entry}"
-                    )
-            except (json.JSONDecodeError, ValueError, TypeError):
-                pass
+        matches = [
+            i for i in images if i.get("type") == "alpine" and i.get("version") == "3.23"
+        ]
+        assert matches, "the module's pre-seeded Alpine 3.23 image is missing"
+        image = matches[0]
+        result = _run_mvm(runner_vm, "image", "inspect", image["id"][:6])
+        assert f"Image: {image['name']}" in result.stdout
+        assert f"ID: {image['id']}" in result.stdout
+        assert f"Path: {image['path']}" in result.stdout
 
     def test_image_list_remote(self, runner_vm):
         """List images available from the remote registry."""
@@ -293,43 +287,29 @@ class TestImageList:
             pytest.fail(f"Remote listing returned non-JSON output: {e}")
         assert len(data) > 0, "Expected at least one remote image"
 
-    def test_image_inspect(self, runner_vm):
-        """Inspect a cached image by ID prefix."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = [i for i in _parse_json_output(result.stdout) if i.get("is_present")]
-        assert images, (
-            "No present cached images to inspect — _ensure_image should "
-            "have pulled alpine:3.23"
-        )
-        prefix = images[0]["id"][:6]
-        result = _run_mvm(runner_vm, "image", "inspect", prefix, "--json")
-        assert result.returncode == 0
-        data = _parse_json_output(result.stdout)
-        img_data = data.get("image", data)
-        assert img_data.get("id", "").startswith(prefix), (
-            f"Expected image id to start with prefix '{prefix}', "
-            f"got: {img_data.get('id', 'N/A')}"
-        )
-
     def test_image_inspect_json(self, runner_vm):
         """Inspect an image with --json output."""
         _ensure_image(runner_vm, "alpine:3.23")
         result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = [i for i in _parse_json_output(result.stdout) if i.get("is_present")]
+        images = [
+            i
+            for i in _parse_json_output(result.stdout)
+            if i.get("type") == "alpine"
+            and i.get("version") == "3.23"
+            and i.get("is_present")
+        ]
         assert images, (
             "No present cached images to inspect — _ensure_image should "
             "have pulled alpine:3.23"
         )
-        prefix = images[0]["id"][:6]
+        image = images[0]
+        prefix = image["id"][:6]
         result = _run_mvm(runner_vm, "image", "inspect", prefix, "--json")
-        assert result.returncode == 0
         data = _parse_json_output(result.stdout)
-        img_data = data.get("image", data)
-        assert "id" in img_data, (
-            f"Expected 'id' in image inspect output, got keys: {list(data.keys())}"
-        )
-        assert "name" in img_data or "base_name" in img_data
+        assert isinstance(data, dict), data
+        assert data["image"]["id"] == image["id"]
+        assert data["image"]["name"] == image["name"]
+        assert data["storage"]["path"] == image["path"]
 
 
 class TestImageDefaults:
@@ -441,29 +421,6 @@ class TestImageWarm:
             "warmed" in result.stdout.lower()
             or "ready" in result.stdout.lower()
         )
-
-
-class TestImageInspectJson:
-    """Test image inspect JSON output."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.domain_image]
-
-    def test_image_inspect_json_output(self, runner_vm):
-        """Inspect an image with --json output."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = [i for i in _parse_json_output(result.stdout) if i.get("is_present")]
-        assert images, "No present cached images to inspect"
-        prefix = images[0]["id"][:6]
-
-        result = _run_mvm(runner_vm, "image", "inspect", prefix, "--json")
-        assert result.returncode == 0
-        data = _parse_json_output(result.stdout)
-        img_data = data.get("image", data)
-        assert "id" in img_data, (
-            f"Expected 'id' in image inspect --json output, got keys: {list(img_data.keys())}"
-        )
-        assert "name" in img_data or "base_name" in img_data
 
 
 class TestImageImport:

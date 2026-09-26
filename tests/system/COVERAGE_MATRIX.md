@@ -401,13 +401,13 @@ Specific legacy conflicts that must be rewritten before release:
 | `image pull` arch auto-detection | ⏭️ Skip | `images/test_images.py` | `TestImagePullArchFlag` | Network-dependent. L1: success message. No `--arch` flag — arch is auto-detected by Go CLI. |
 | `image pull --no-cache` | ⏭️ Skip | `images/test_images.py` | `TestImagePullNoCache` | Network-dependent. L1: success message |
 | `image pull --type <type>` (explicit) | ⚡ Shallow | `images/test_images.py` | `TestImagePullAdvancedFlags` | Explicit type flag |
-| `image ls` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | L1 |
-| `image ls --json` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | L2 |
-| `image ls --no-cache` (local) | ⚡ Shallow | `images/test_images.py` | `TestImageList` | L1 — exit 0 |
-| `image ls --type` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | L2 — filtered output matches type |
+| `image ls` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | Installed rc.7 human table: headers plus the seeded Alpine ID and name. |
+| `image ls --json` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | Installed rc.7 schema-1 array and seeded Alpine identity/presence. |
+| `image ls --remote --no-cache` | 🔴 Missing | — | — | The former local `--no-cache` test asserted only exit 0; this flag affects remote resolution only. |
+| `image ls --remote --type` | 🔴 Missing | — | — | The former local filter test swallowed parse failures; type filtering applies only to remote resolution. |
 | `image ls --remote` | ⏭️ Skip | `images/test_images.py` | `TestImageList` | L1 — skips on network |
-| `image inspect` | ⏭️ Skip | `images/test_images.py` | `TestImageList` | L1 — skips if no images |
-| `image inspect --json` | ⏭️ Skip | `images/test_images.py` | `TestImageList`, `TestImageInspectJson` | L2 — skips if no images |
+| `image inspect` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | Installed rc.7 human renderer shows exact seeded Alpine ID, name, and path. |
+| `image inspect --json` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | Installed rc.7 grouped image/storage data matches the list record. |
 | `image inspect --tree` | 🔴 Missing | — | — | Tree-view inspect subcommand does not exist in CLI. Not a valid test target. |
 | `image default` | ⏭️ Skip | `images/test_images.py` | `TestImageDefaults` | L2 — may skip |
 | `image default` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageDefaults` | L1 |
@@ -677,7 +677,7 @@ Specific legacy conflicts that must be rewritten before release:
 | snapshot | 13 | 1 | 12 | 0 | 0 | 0 |
 | volume | 35 | 4 | 29 | 2 | 0 | 0 |
 | key | 28 | 3 | 25 | 0 | 0 | 0 |
-| image | 41 | 0 | 11 | 3 | 1 | 26 |
+| image | 41 | 0 | 11 | 3 | 3 | 24 |
 | kernel | 30 | 2 | 15 | 6 | 0 | 7 |
 | bin | 17 | 2 | 6 | 1 | 0 | 8 |
 | ssh | 6 | 4 | 1 | 1 | 0 | 0 |
@@ -689,15 +689,15 @@ Specific legacy conflicts that must be rewritten before release:
 | env | 22 | 9 | 13 | 0 | 0 | 0 |
 | run | 4 | 1 | 3 | 0 | 0 | 0 |
 | full-journeys | 15 | 7 | 8 | 0 | 0 | 0 |
-| **Total** | **431** | **83** | **280** | **21** | **4** | **43** |
+| **Total** | **431** | **83** | **280** | **21** | **6** | **41** |
 
 **Current-row coverage health:**
 - ✅ Deep (L3): 83/431 = 19.3%
 - ⚡ Shallow (L0-L2): 280/431 = 65.0%
 - 🟡 Partial: 21/431 = 4.9%
-- 🔴 Missing: **4/431 = 0.9%** — three user-owned `self-update` success/check paths plus the phantom
-  `image inspect --tree` entry
-- ⏭️ Skip-prone: 43/431 = 10.0%
+- 🔴 Missing: **6/431 = 1.4%** — three user-owned `self-update` success/check paths, two remote image-list
+  flag cases, and the phantom `image inspect --tree` entry
+- ⏭️ Skip-prone: 41/431 = 9.5%
 
 These counts inventory rows for the transitional CLI only. They do not include the separate v0.3.0 security blockers in
 the qualification overlay. Successful user-owned `self-update` check/apply behavior remains unqualified at L2. The
