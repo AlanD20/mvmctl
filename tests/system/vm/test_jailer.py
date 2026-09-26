@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import socket
 import time
 import uuid
 from typing import Any, Generator
@@ -326,6 +327,25 @@ def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
 
 
 class TestNetworklessJailerLifecycle:
+    def test_operator_cannot_connect_to_firecracker_api(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """The public VM lifecycle works without exposing direct Firecracker control."""
+        ensure_vm_deps(runner_vm)
+        name = networkless_vm_name
+        _run_mvm(
+            runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
+            "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+            timeout=180,
+        )
+        vm = _vm_entry(runner_vm, name)
+        assert vm["status"] == "running"
+        assert vm["api_socket_path"]
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            assert client.connect_ex(vm["api_socket_path"]) != 0
+        _run_mvm(runner_vm, "vm", "stop", name, timeout=120)
+        assert _vm_entry(runner_vm, name)["status"] == "stopped"
+
     def test_firecracker_uses_isolated_execution_uid(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:

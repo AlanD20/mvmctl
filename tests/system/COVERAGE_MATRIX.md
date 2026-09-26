@@ -26,7 +26,8 @@ unprivileged CI selection with both coverage profiles and the separate full root
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
 9 JSON/flag-invariant, 26 non-VM key, and 5 internal-service entry-point Python cases (98 total); the focused
 networkless create/stop/start/reboot/vsock case, five focused raw-volume/removed-format cases, a networkless
-raw-volume guest-attachment/restart case, and an isolated non-root Firecracker UID check also passed. The
+raw-volume guest-attachment/restart case, an isolated non-root Firecracker UID check, and a direct-API-denial with
+authorized CLI stop check also passed. The
 installed binary predates `8e0be4fe`, but the intervening source change under `internal/`, `pkg/`, and `cmd/` was
 test-only.
 These are scoped results, **not** a full Python matrix or release sign-off. The current runner kernel still rejects
@@ -38,7 +39,7 @@ qualification.
 |---|---|---|
 | Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
 | fd-0 privileged control transport | 🔴 Missing | Go L1 framing/EOF/peer/cancellation abuse coverage plus installed-CLI lifecycle integration. |
-| Root VM authority and cross-UID denial | 🔴 Missing | Root-record/process/cache identity checks, constrained two-user denial, tombstone and zero-leak assertions. |
+| Root VM authority and cross-UID denial | 🟡 Partial | A focused installed-candidate networkless case denies operator direct connection to the reported Firecracker API socket while `vm stop` succeeds; root-record/process/cache identity checks, constrained two-user denial, tombstone, and zero-leak assertions remain missing. |
 | Independent trusted Firecracker/Jailer releases | 🔴 Missing | Root manifest/ELF/hash authority, atomic failure injection, and installed-CLI release lifecycle. |
 | Descriptor-pinned resources and private mount namespace | 🔴 Missing | Type/owner/mode/link checks, replacement races, namespace mounts, cleanup, restart, and restore. |
 | Mandatory per-VM network namespace | 🔴 Missing | Distinct namespace inodes/topology, root-record binding, rollback, reconciliation, and zero leaked links/TAPs. |
