@@ -438,8 +438,8 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `kernel ls --json` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | L2 |
-| `kernel ls --json` empty | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | L2 — valid empty list |
+| `kernel ls --json` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | Installed rc.7: strict schema-1 list with a present registered kernel. |
+| `kernel ls --json` empty | 🔴 Missing | — | — | Former test allowed a non-empty list and did not prove empty-cache behavior. |
 | `kernel ls --remote` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1: exit 0, non-empty JSON list |
 | `kernel pull --type firecracker` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1 |
 | `kernel pull --type official` | ⏭️ Skip | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1 — marked kernel_build (can skip) |
@@ -452,10 +452,9 @@ Specific legacy conflicts that must be rewritten before release:
 | `kernel pull --config` | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelBuild` | L2 — kernel_build marker, may skip |
 | `kernel pull --features` | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelBuild` | L1 — kernel_build marker, may skip |
 | `kernel ls --no-cache` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1 — exit 0 |
-| `kernel inspect` | ⏭️ Skip | `kernel/test_kernel.py` | `TestKernelInspect` | L1 — skips if no kernel |
-| `kernel inspect --json` | ⏭️ Skip | `kernel/test_kernel.py` | `TestKernelInspect` | L2 — skips if no kernel |
-| `kernel inspect --tree` | ⏭️ Skip | `kernel/test_kernel.py` | `TestKernelInspect` | L1 — skips if no kernel |
-| `kernel default` | ⏭️ Skip | `kernel/test_kernel.py` | `TestKernelLifecycle` | L2 — skips if no kernel |
+| `kernel inspect` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelInspect` | Installed rc.7: human output names the selected present kernel and version. |
+| `kernel inspect --json` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelInspect` | Installed rc.7: schema-1 inspect identity and storage path match the listed kernel. |
+| `kernel default` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | Installed rc.7: transfer to a test-owned import, then restore prior default and remove only that import. |
 | `kernel rm <id>` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemove` | L2 — JSON listing after rm |
 | `kernel rm --force` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemoveForce` | L2 — removed from listing after --force |
 | `kernel rm <nonexistent>` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemove` | L1 — non-zero exit, error message |
@@ -678,7 +677,7 @@ Specific legacy conflicts that must be rewritten before release:
 | volume | 35 | 4 | 29 | 2 | 0 | 0 |
 | key | 28 | 3 | 25 | 0 | 0 | 0 |
 | image | 41 | 0 | 16 | 3 | 3 | 19 |
-| kernel | 30 | 1 | 17 | 6 | 0 | 6 |
+| kernel | 29 | 1 | 19 | 6 | 1 | 2 |
 | bin | 17 | 2 | 6 | 1 | 0 | 8 |
 | ssh | 6 | 4 | 1 | 1 | 0 | 0 |
 | console | 6 | 0 | 6 | 0 | 0 | 0 |
@@ -689,15 +688,15 @@ Specific legacy conflicts that must be rewritten before release:
 | env | 22 | 9 | 13 | 0 | 0 | 0 |
 | run | 4 | 1 | 3 | 0 | 0 | 0 |
 | full-journeys | 15 | 7 | 8 | 0 | 0 | 0 |
-| **Total** | **431** | **82** | **287** | **21** | **6** | **35** |
+| **Total** | **430** | **82** | **289** | **21** | **7** | **31** |
 
 **Current-row coverage health:**
-- ✅ Deep (L3): 82/431 = 19.0%
-- ⚡ Shallow (L0-L2): 287/431 = 66.6%
-- 🟡 Partial: 21/431 = 4.9%
-- 🔴 Missing: **6/431 = 1.4%** — three user-owned `self-update` success/check paths, two remote image-list
-  flag cases, and the phantom `image inspect --tree` entry
-- ⏭️ Skip-prone: 35/431 = 8.1%
+- ✅ Deep (L3): 82/430 = 19.1%
+- ⚡ Shallow (L0-L2): 289/430 = 67.2%
+- 🟡 Partial: 21/430 = 4.9%
+- 🔴 Missing: **7/430 = 1.6%** — three user-owned `self-update` success/check paths, two remote image-list
+  flag cases, the phantom `image inspect --tree` entry, and kernel empty-list coverage
+- ⏭️ Skip-prone: 31/430 = 7.2%
 
 These counts inventory rows for the transitional CLI only. They do not include the separate v0.3.0 security blockers in
 the qualification overlay. Successful user-owned `self-update` check/apply behavior remains unqualified at L2. The
@@ -736,5 +735,5 @@ To run the full system test suite with zero skips, the dedicated test machine mu
 - **Developer machine:** a focused run may fail prerequisite admission when dependencies are absent. Such a run is useful
   for diagnosis but cannot serve as release evidence.
 
-**431 transitional CLI scenarios are documented. Six rows are marked missing; the v0.3.0 qualification overlay lists
+**430 transitional CLI scenarios are documented. Seven rows are marked missing; the v0.3.0 qualification overlay lists
 additional release-security gaps that must close before signoff.**

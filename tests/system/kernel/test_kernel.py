@@ -9,30 +9,13 @@ from typing import Any
 
 import pytest
 
-from tests.system.conftest import _ensure_kernel, _guest_run, _run_mvm
+from tests.system.conftest import _ensure_kernel, _guest_run, _json_success_data, _run_mvm
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_kernel]
 
 
 class TestKernelLifecycle:
     """Test kernel CRUD operations."""
-
-    def test_kernel_list_empty(self, runner_vm):
-        """List kernels when none are cached."""
-        result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert isinstance(data, list)
-        if data:
-            entry = data[0]
-            assert isinstance(entry.get("id"), str) and entry["id"], (
-                f"Expected non-empty id: {entry}"
-            )
-            assert isinstance(entry.get("name"), str) and entry["name"], (
-                f"Expected non-empty name: {entry}"
-            )
-            assert isinstance(entry.get("version"), str) and entry["version"], (
-                f"Expected non-empty version: {entry}"
-            )
 
     @pytest.mark.slow
     @pytest.mark.kernel_build
@@ -98,79 +81,84 @@ class TestKernelLifecycle:
         )
 
     def test_kernel_list_json(self, runner_vm):
-        """List kernels in JSON format."""
-        result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert isinstance(data, list)
-        if data:
-            for entry in data:
-                assert isinstance(entry.get("id"), str) and entry["id"], (
-                    f"Expected non-empty id: {entry}"
-                )
-                assert isinstance(entry.get("name"), str) and entry["name"], (
-                    f"Expected non-empty name: {entry}"
-                )
-                assert (
-                    isinstance(entry.get("version"), str) and entry["version"]
-                ), f"Expected non-empty version: {entry}"
-                if entry.get("is_present"):
-                    assert entry.get("type") in ("firecracker", "official"), (
-                        f"Unexpected type for present entry: {entry}"
-                    )
-
-    def test_kernel_set_default(self, runner_vm):
-        """Set kernel as default."""
+        """List the registered kernel through the structured CLI contract."""
         _ensure_kernel(runner_vm)
         result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        kernels: list[dict[str, Any]] = json.loads(result.stdout)
-        present = [k for k in kernels if k.get("is_present")]
-        assert present, (
-            "No present kernel to set as default — _ensure_kernel "
-            "should have pulled one"
+        data = _json_success_data(result.stdout, list)
+        assert data
+        for entry in data:
+            assert isinstance(entry.get("id"), str) and entry["id"]
+            assert isinstance(entry.get("name"), str) and entry["name"]
+            assert isinstance(entry.get("version"), str) and entry["version"]
+            assert entry.get("type") in ("custom", "firecracker", "official")
+        assert any(entry["is_present"] for entry in data)
+
+    def test_kernel_set_default(self, runner_vm):
+        """Transfer the default to a test-owned import, then restore it."""
+        _ensure_kernel(runner_vm)
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
-        kernel_id = present[0]["id"]
-        result = _run_mvm(
-            runner_vm, "kernel", "default", kernel_id[:6], check=False,
+        previous_default = next(kernel for kernel in kernels if kernel["is_default"])
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "inspect", previous_default["id"], "--json").stdout,
+            dict,
         )
-        assert result.returncode == 0, (
-            f"Failed to set kernel default: {result.stderr}"
-        )
-        kernels_after = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
-        )
-        default = [k for k in kernels_after if k.get("is_default")]
-        assert any(k["id"] == kernel_id for k in default), (
-            f"Kernel {kernel_id[:6]} not marked as default after set_default"
-        )
+        import_name = f"sys-test-kernel-default-{uuid.uuid4().hex[:8]}"
+        import_version = f"qa-{uuid.uuid4().hex[:8]}"
+        imported_id = None
+        try:
+            imported = _json_success_data(
+                _run_mvm(
+                    runner_vm,
+                    "kernel", "import", import_name, inspected["storage"]["path"],
+                    "--version", import_version, "--json",
+                ).stdout,
+                dict,
+            )
+            imported_id = imported["id"]
+            assert imported_id != previous_default["id"]
+            _run_mvm(runner_vm, "kernel", "default", imported_id)
+            kernels_after = _json_success_data(
+                _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
+            )
+            assert [kernel["id"] for kernel in kernels_after if kernel["is_default"]] == [imported_id]
+        finally:
+            if imported_id is not None:
+                _run_mvm(runner_vm, "kernel", "default", previous_default["id"])
+                _run_mvm(runner_vm, "kernel", "rm", imported_id, "--force")
+                kernels_after = _json_success_data(
+                    _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
+                )
+                assert [kernel["id"] for kernel in kernels_after if kernel["is_default"]] == [
+                    previous_default["id"]
+                ]
+                assert all(kernel["id"] != imported_id for kernel in kernels_after)
 
 
 class TestKernelInspect:
-    """Test kernel inspect operations (table, json, tree)."""
+    """Test kernel inspect human and structured output."""
 
     def test_kernel_inspect_table(self, runner_vm):
-        """Inspect a kernel in table format."""
+        """Inspect a present kernel in the default human format."""
         _ensure_kernel(runner_vm)
-        kernels: list[dict[str, Any]] = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
         present = [k for k in kernels if k.get("is_present")]
         assert present, (
             "No present kernel to inspect — _ensure_kernel should have pulled one"
         )
         prefix = present[0]["id"][:6]
-        result = _run_mvm(runner_vm, "kernel", "inspect", prefix, "--json")
-        assert result.returncode == 0
-        data: dict[str, Any] = json.loads(result.stdout)
-        kdata = data.get("kernel", data)
-        assert kdata.get("name") == present[0]["name"], (
-            f"Expected kernel name '{present[0]['name']}', got '{kdata.get('name')}'"
-        )
+        result = _run_mvm(runner_vm, "kernel", "inspect", prefix)
+        assert present[0]["name"] in result.stdout
+        assert present[0]["version"] in result.stdout
 
     def test_kernel_inspect_json(self, runner_vm):
         """Inspect a kernel with --json output."""
         _ensure_kernel(runner_vm)
-        kernels: list[dict[str, Any]] = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
         present = [k for k in kernels if k.get("is_present")]
         assert present, (
@@ -179,41 +167,11 @@ class TestKernelInspect:
         prefix = present[0]["id"][:6]
         result = _run_mvm(runner_vm, "kernel", "inspect", prefix, "--json")
         assert result.returncode == 0
-        data: dict[str, Any] = json.loads(result.stdout)
-        assert isinstance(data, dict)
-        assert "id" in data or "kernel" in data, (
-            f"Expected top-level 'id' or 'kernel' key, got: {list(data.keys())}"
-        )
-        if "kernel" in data:
-            kdata = data["kernel"]
-            assert "id" in kdata, (
-                f"kernel nested object missing 'id': {list(kdata.keys())}"
-            )
-            assert "name" in kdata or "base_name" in kdata
-            assert "version" in kdata
-            assert "type" in kdata
-
-    def test_kernel_inspect_default_format(self, runner_vm):
-        """Inspect a kernel with default (non-JSON) output — verify via --json."""
-        _ensure_kernel(runner_vm)
-        kernels: list[dict[str, Any]] = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
-        )
-        present = [k for k in kernels if k.get("is_present")]
-        assert present, (
-            "No present kernel to inspect — _ensure_kernel should have pulled one"
-        )
-        prefix = present[0]["id"][:6]
-        result = _run_mvm(runner_vm, "kernel", "inspect", prefix, "--json")
-        assert result.returncode == 0
-        data: dict[str, Any] = json.loads(result.stdout)
-        kdata = data.get("kernel", data)
-        expected_name = present[0].get("name") or present[0].get("base_name", "")
-        actual_name = kdata.get("name") or kdata.get("base_name", "")
-        assert expected_name == actual_name or expected_name in actual_name, (
-            f"Expected kernel name '{expected_name}' in inspect --json, "
-            f"got name='{kdata.get('name')}', base_name='{kdata.get('base_name')}'"
-        )
+        data = _json_success_data(result.stdout, dict)
+        assert data["kernel"]["id"] == present[0]["id"]
+        assert data["kernel"]["name"] == present[0]["name"]
+        assert data["kernel"]["version"] == present[0]["version"]
+        assert data["storage"]["path"] == present[0]["path"]
 
     def test_kernel_inspect_nonexistent_fails(self, runner_vm):
         """Inspecting a nonexistent kernel should fail."""
