@@ -261,7 +261,8 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | canonical Jailer launch, cgroup enforcement, and cleanup | **L2** | Real chroot, trusted pair, cgroup membership and values, lifecycle, volume, and snapshot behavior |
 | `vm create --enable-logging` / `--enable-metrics` | **L2** | Verify files on disk |
 | `vm create --cloud-init-mode <mode>` | **L2** | Real Firecracker + cloud-init |
-| `vm create --nocloud-net-port` | **L2** | Real Firecracker + network |
+| `vm create --nocloud-net-port` (rejected) | **L2** | Custom ports must fail before effects; NoCloud uses fixed gateway TCP 8000 |
+| `vm create --no-network` | **L2** | Real isolated VM with no guest NIC, restart/reboot, and vsock agent |
 | `vm create --count N` | **L2** | Multiple Firecracker spawns |
 | `vm create --volume` | **L2** | Real volume attach |
 | `vm create --ssh-key` | **L2** | Real SSH key injection |
@@ -305,9 +306,9 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `network create --non-interactive` | **L2** | Real bridge |
 | `network create` invalid CIDR | L1 | Cobra validation |
 | `network create` duplicate name/subnet | **L2** | Real DB constraint |
-| `network create --no-nat` | **L2** | Verify no MASQUERADE rule |
+| `network create --no-nat` | **L2** | Verify no managed nftables NAT rule |
 | `network create --ipv4-gateway` | **L2** | Real bridge IP config |
-| `network create --nat-gateways` | **L2** | Real NAT config |
+| `network create --nat-gateways` (removed) | **L2** | Reject the caller-selected uplink flag before effects |
 | `network ls` / `network ls --json` | L1 | DB query + JSON |
 | `network inspect` / `--json` / `--tree` | L1 | DB query + JSON |
 | `network rm` / `network rm --force` | **L2** | Real bridge + firewall cleanup |
@@ -315,29 +316,29 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `network rm <name1> <name2>` | **L2** | Multiple bridge cleanup |
 | `network default` / `network default <nonexistent>` | L1 | DB update |
 | `network sync` / `network sync --json` | **L2** | Real bridge + firewall recreation |
-| `policy create/ls/inspect/rm/sync` | **L2** | Cross-network connectivity, exact destination/port allow, host/default deny, backend parity |
+| `policy traffic create/ls/inspect/rm` | **L2** | Exact source, protocol, and port allows; same/cross-network default deny and replies |
+| `policy exec create/ls/rm` | **L2** | Directional non-root VM-to-VM execution without granting TCP/UDP traffic |
 | Sync after bridge deletion | **L2** | Real bridge deletion + recovery |
 
 ### `mvm volume`
 
 | Scenario | Verdict | Why |
 |----------|---------|-----|
-| `volume create <name> <size>` | **L2** | Real file creation (truncate/qemu-img) |
-| `volume create --format qcow2` | **L2** | Real qemu-img |
-| `volume create --format raw` | **L2** | Real file creation |
+| `volume create <name> <size>` | **L2** | Real raw backing creation and authoritative inspection |
+| `volume create --format` (removed) | **L2** | Reject raw/QCOW2/VMDK flag variants without a record or backing file; QCOW2 image import remains supported |
 | `volume create <invalid>` | L1 | Cobra validation |
 | `volume create` duplicate name | L1 | DB constraint |
 | `volume create --read-only` | **L2** | Real file permissions |
 | `volume ls` / `volume ls --json` | L1 | DB query + JSON |
 | `volume ls` empty | L1 | DB query |
-| `volume inspect` / `--json` | L1 | DB query + JSON |
+| `volume inspect` / `--json` | **L2** | Root-brokered backing inspection and versioned JSON |
 | `volume inspect` nonexistent | L1 | Error handling |
 | `volume rm` / `--force` | **L2** | Real file deletion |
 | `volume rm` nonexistent | L1 | Error handling |
 | `volume rm <name1> <name2>` | **L2** | Real file deletion |
 | `volume rm` partial failure | **L2** | Real file deletion |
 | `volume resize` | **L2** | Real file resize |
-| `volume resize` shrink | **L2** | Real file resize |
+| `volume resize` shrink | **L2** | Reject shrink and prove backing identity/size unchanged |
 | `volume attach` / `volume detach` | **L2** | Real Firecracker API + VM lifecycle |
 | Invariants: available→attached→available | **L2** | Real VM attach/detach |
 | Volume hotplug / hotunplug | **L2** | Real Firecracker PCI hotplug |
@@ -515,7 +516,7 @@ Runner VMs are created fresh per test session, not restored from snapshots. See 
 The runner VM is created ONCE per test session (session-scoped pytest fixture). All tests in the session share the same VM. This is safe because:
 
 - The VM is **ephemeral** — created at session start, destroyed at session end. No state leaks between sessions.
-- Within a session, tests are ORDERED by dependency (create → read → update → delete), not by "safe vs destructive." A test that runs `cache clean --force` may break subsequent tests in the same session — but that's a test ordering bug, not a global state corruption. The NEXT session starts clean.
+- Within a session, mutating tests use unique names and function-scoped resources with checked teardown. Do not depend on another test's creation or cleanup order. Run runner-wide destructive cases in a dedicated disposable runner.
 - For PARALLEL execution, each worker gets its OWN runner VM. No state sharing across workers.
 - The `zzz_destructive/` pattern is replaced by explicit markers. The runner VM makes ordering a convenience concern, not a correctness requirement.
 
@@ -603,39 +604,10 @@ Individual slow operations use explicit higher timeouts:
 
 ### Test File Pattern
 
-```python
-"""Volume CRUD system tests — runs inside runner VM."""
-
-from __future__ import annotations
-
-import json
-import pytest
-
-from tests.system.conftest import _run_mvm
-
-pytestmark = [pytest.mark.system, pytest.mark.domain_volume]
-
-
-class TestVolumeLifecycle:
-    def test_volume_create(self, runner_vm):
-        """Create a volume and verify size via --json."""
-        result = _run_mvm(
-            runner_vm, "volume", "create", "myvol", "1G", "--json", timeout=30
-        )
-        data = json.loads(result.stdout)
-        assert data["name"] == "myvol"
-        assert data["size_bytes"] == 1073741824
-        assert data["status"] == "available"
-    
-    def test_volume_rm(self, runner_vm):
-        """Remove a volume and verify it is gone from listing."""
-        _run_mvm(runner_vm, "volume", "create", "myvol2", "512M", "--json")
-        _run_mvm(runner_vm, "volume", "rm", "myvol2", "--force")
-        
-        result = _run_mvm(runner_vm, "volume", "ls", "--json")
-        volumes = json.loads(result.stdout)
-        assert not any(v["name"] == "myvol2" for v in volumes)
-```
+Use [the current raw-volume system case](../../tests/system/volume/test_volume.py) as the file pattern:
+`TestRawVolumeAuthoritativeStorage` invokes the installed CLI, decodes the versioned JSON envelope with
+`_json_success_data`, uses a unique small volume, and checks removal in `finally`. For VM-mutating tests, use a
+function-scoped fixture and assert that its VM and dependent resources are absent after teardown.
 
 ### What L2 Tests Assert
 
@@ -643,7 +615,7 @@ L2 tests assert on **real side effects** — what the user sees and what the sys
 
 - CLI output (JSON fields, return codes, error messages)
 - Files on disk (key files, volume files, log files, config files)
-- System state (bridges, iptables rules, processes)
+- System state (managed namespaces and links, nftables rules, processes)
 - Guest state (SSH connectivity, block devices, CPU features)
 
 L2 tests do NOT mock anything. The binary is real. The subprocesses are real. The infrastructure is real (inside the VM).
