@@ -9,11 +9,12 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
 
 const (
-	instanceRecordSchemaVersion = uint32(4)
+	instanceRecordSchemaVersion = uint32(5)
 	maxInstanceRecordBytes      = 16 * 1024
 )
 
@@ -69,6 +70,7 @@ type instanceLaunchRelay struct {
 
 type launchIntent struct {
 	vmID              string
+	networkPlacement  model.VMNetworkPlacement
 	hostBootID        string
 	cacheIdentity     managedCacheIdentity
 	cacheLocator      managedCacheLocator
@@ -78,6 +80,7 @@ type launchIntent struct {
 
 type instanceLaunchRecord struct {
 	ownerGID          uint32
+	networkPlacement  model.VMNetworkPlacement
 	executionIdentity vmExecutionIdentity
 	snapshotID        string
 	outputIdentity    *instanceOutputIdentities
@@ -205,6 +208,7 @@ func registerLaunchingInstanceRecord(
 	}
 	launch := &instanceLaunchRecord{
 		ownerGID:          caller.gid,
+		networkPlacement:  intent.networkPlacement,
 		executionIdentity: intent.executionIdentity,
 		snapshotID:        intent.snapshotID,
 		hostBootID:        intent.hostBootID,
@@ -317,6 +321,9 @@ func validateLaunchIntent(intent launchIntent) error {
 	if !vmIDPattern.MatchString(intent.vmID) {
 		return instanceValidationError("vm ID is invalid")
 	}
+	if intent.networkPlacement != model.VMNetworkPlacementManaged {
+		return instanceValidationError("instance launch network placement is not an admitted managed variant")
+	}
 	if !hostBootIDPattern.MatchString(intent.hostBootID) {
 		return instanceValidationError("instance authority host boot ID is invalid")
 	}
@@ -395,6 +402,9 @@ func validateInstanceRecord(record instanceRecord) error {
 }
 
 func validateInstanceLaunchRecord(launch instanceLaunchRecord) error {
+	if launch.networkPlacement != model.VMNetworkPlacementManaged {
+		return fmt.Errorf("instance launch network placement is not an admitted managed variant")
+	}
 	if launch.outputIdentity != nil {
 		if launch.outputIdentity.log.device == 0 || launch.outputIdentity.log.inode == 0 {
 			return fmt.Errorf("instance log identity is invalid")

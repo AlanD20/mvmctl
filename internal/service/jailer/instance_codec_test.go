@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
 
@@ -30,7 +31,7 @@ func TestInstanceAuthorityDurableRootConstant(t *testing.T) {
 	assert.Equal(t, "/var/lib/mvmctl/instances", infra.JailerInstanceRoot)
 }
 
-func TestInstanceRecordCodecRoundTripsEverySchemaThreeShape(t *testing.T) {
+func TestInstanceRecordCodecRoundTripsEverySchemaFiveShape(t *testing.T) {
 	t.Parallel()
 
 	launching := testLaunchingInstanceRecord()
@@ -94,6 +95,7 @@ func TestInstanceRecordCodecOmitsWrongLifecycleObjects(t *testing.T) {
 	assert.NotContains(t, string(cleanedRaw), `"launch":`)
 	assert.NotContains(t, string(cleanedRaw), `"active":`)
 	assert.NotContains(t, string(cleanedRaw), `"owner_gid":`)
+	assert.NotContains(t, string(cleanedRaw), `"network_placement":`)
 	assert.NotContains(t, string(cleanedRaw), `"managed_cache":`)
 	assert.NotContains(t, string(cleanedRaw), `"release":`)
 	assert.NotContains(t, string(cleanedRaw), `"pid":`)
@@ -101,14 +103,14 @@ func TestInstanceRecordCodecOmitsWrongLifecycleObjects(t *testing.T) {
 
 // Rationale: the durable root is attacker-controlled input after host storage tampering. Each malformed case pins one
 // strict-schema boundary and must fail closed as an internal atomic-authority error rather than being defaulted.
-func TestDecodeInstanceRecordRejectsMalformedSchemaFour(t *testing.T) {
+func TestDecodeInstanceRecordRejectsMalformedSchemaFive(t *testing.T) {
 	t.Parallel()
 
 	valid, err := encodeInstanceRecord(testActiveInstanceRecord(true))
 	require.NoError(t, err)
 	validText := string(valid)
-	validLaunching := schemaFourCanonicalJSON()["launching"]
-	validCleaned := schemaFourCanonicalJSON()["cleaned"]
+	validLaunching := schemaFiveCanonicalJSON()["launching"]
+	validCleaned := schemaFiveCanonicalJSON()["cleaned"]
 	launchOffset := strings.LastIndex(validLaunching, `,"launch":`)
 	require.Positive(t, launchOffset)
 	activeOffset := strings.LastIndex(validText, `,"active":`)
@@ -124,6 +126,8 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaFour(t *testing.T) {
 		1,
 	)
 	cleanedWithActive := validCleaned[:len(validCleaned)-1] + validText[activeOffset:]
+	oldSchemaFour := strings.Replace(validText, `"schema_version":5`, `"schema_version":4`, 1)
+	oldSchemaFour = strings.Replace(oldSchemaFour, `"network_placement":"managed",`, "", 1)
 
 	tests := map[string]string{
 		"empty":                 "",
@@ -144,8 +148,18 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaFour(t *testing.T) {
 			`"host_boot_id":"123e4567-e89b-42d3-a456-426614174000","host_boot_id":`,
 			1,
 		),
-		"missing_common_field": strings.Replace(validText, `"cleanup_generation":0,`, "", 1),
-		"missing_launch_field": strings.Replace(validText, `"owner_gid":1001,`, "", 1),
+		"missing_common_field":      strings.Replace(validText, `"cleanup_generation":0,`, "", 1),
+		"missing_launch_field":      strings.Replace(validText, `"owner_gid":1001,`, "", 1),
+		"missing_network_placement": strings.Replace(validText, `"network_placement":"managed",`, "", 1),
+		"null_network_placement": strings.Replace(
+			validText, `"network_placement":"managed"`, `"network_placement":null`, 1,
+		),
+		"networkless_placement": strings.Replace(
+			validText, `"network_placement":"managed"`, `"network_placement":"networkless"`, 1,
+		),
+		"unknown_network_placement": strings.Replace(
+			validText, `"network_placement":"managed"`, `"network_placement":"unknown"`, 1,
+		),
 		"missing_active_field": strings.Replace(validText, `"supplementary_groups":[],`, "", 1),
 		"missing_present_relay_locator": strings.Replace(
 			validText,
@@ -153,18 +167,20 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaFour(t *testing.T) {
 			`"relay":{"kind":"present","pid":4343}`,
 			1,
 		),
-		"old_schema_one":         strings.Replace(validText, `"schema_version":4`, `"schema_version":1`, 1),
-		"old_schema_two":         strings.Replace(validText, `"schema_version":4`, `"schema_version":2`, 1),
-		"old_schema_three":       strings.Replace(validText, `"schema_version":4`, `"schema_version":3`, 1),
-		"unknown_schema":         strings.Replace(validText, `"schema_version":4`, `"schema_version":5`, 1),
-		"owner_uid_string":       strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":"1000"`, 1),
-		"owner_uid_negative":     strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":-1`, 1),
-		"owner_uid_fractional":   strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":1000.5`, 1),
-		"owner_uid_overflow":     strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":4294967296`, 1),
-		"lifecycle_number":       strings.Replace(validText, `"lifecycle":"active"`, `"lifecycle":1`, 1),
-		"launch_array":           launchArray,
-		"active_array":           activeArray,
-		"launch_generation_zero": strings.Replace(validText, `"launch_generation":1`, `"launch_generation":0`, 1),
+		"old_schema_one":          strings.Replace(validText, `"schema_version":5`, `"schema_version":1`, 1),
+		"old_schema_two":          strings.Replace(validText, `"schema_version":5`, `"schema_version":2`, 1),
+		"old_schema_three":        strings.Replace(validText, `"schema_version":5`, `"schema_version":3`, 1),
+		"old_schema_four":         oldSchemaFour,
+		"old_cleaned_schema_four": strings.Replace(validCleaned, `"schema_version":5`, `"schema_version":4`, 1),
+		"unknown_schema":          strings.Replace(validText, `"schema_version":5`, `"schema_version":6`, 1),
+		"owner_uid_string":        strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":"1000"`, 1),
+		"owner_uid_negative":      strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":-1`, 1),
+		"owner_uid_fractional":    strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":1000.5`, 1),
+		"owner_uid_overflow":      strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":4294967296`, 1),
+		"lifecycle_number":        strings.Replace(validText, `"lifecycle":"active"`, `"lifecycle":1`, 1),
+		"launch_array":            launchArray,
+		"active_array":            activeArray,
+		"launch_generation_zero":  strings.Replace(validText, `"launch_generation":1`, `"launch_generation":0`, 1),
 		"cleanup_generation_mismatch": strings.Replace(
 			validText,
 			`"cleanup_generation":0`,
@@ -313,6 +329,39 @@ func TestDecodeInstanceRecordRejectsOversizedInput(t *testing.T) {
 	assert.Equal(t, errs.CodeVMAtomicFailed, domainErr.Code)
 	assert.Equal(t, errs.ClassInternal, domainErr.Class)
 	assert.Empty(t, domainErr.Entity)
+}
+
+func TestLaunchingTransitionRequiresManagedNetworkPlacement(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]model.VMNetworkPlacement{
+		"missing":     "",
+		"networkless": model.VMNetworkPlacementNetworkless,
+		"unknown":     "other",
+	}
+	for name, placement := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			intent := testLaunchIntent(false)
+			intent.networkPlacement = placement
+			_, err := registerLaunchingInstanceRecord(
+				testInstanceCaller(), intent, testLaunchProcessLocators(false), testReleaseIdentity(), nil,
+			)
+			require.Error(t, err)
+			assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		})
+	}
+}
+
+func TestEncodeInstanceRecordRejectsMissingManagedPlacement(t *testing.T) {
+	t.Parallel()
+
+	record := testLaunchingInstanceRecord()
+	record.launch.networkPlacement = ""
+	_, err := encodeInstanceRecord(record)
+	require.Error(t, err)
+	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 }
 
 func TestInstanceLifecycleTransitionsPreserveOnlyStateAuthority(t *testing.T) {
@@ -548,6 +597,7 @@ func testInstanceCaller() instanceCaller {
 func testLaunchIntent(_ bool) launchIntent {
 	return launchIntent{
 		vmID:              testVMID,
+		networkPlacement:  model.VMNetworkPlacementManaged,
 		hostBootID:        "123e4567-e89b-42d3-a456-426614174000",
 		cacheIdentity:     testManagedCacheIdentity(),
 		cacheLocator:      managedCacheLocator{components: []string{"home", "caller", "mvmctl"}},

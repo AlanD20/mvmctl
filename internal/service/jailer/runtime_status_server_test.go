@@ -69,7 +69,7 @@ func runtimeStatusCleaningRecord() instanceRecord {
 }
 
 func runtimeStatusCleanedRecord() instanceRecord {
-	return instanceRecord{schemaVersion: 4, ownerUID: testAuthorityUID, vmID: testVMID,
+	return instanceRecord{schemaVersion: 5, ownerUID: testAuthorityUID, vmID: testVMID,
 		lifecycle: instanceLifecycleCleaned, launchGeneration: 1, cleanupGeneration: 1}
 }
 

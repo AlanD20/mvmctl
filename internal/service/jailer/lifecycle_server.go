@@ -171,10 +171,11 @@ func (server *VMLifecycleServer) launch(
 		}
 	}
 	intent := launchIntent{
-		vmID:          request.VMID,
-		hostBootID:    bootID,
-		cacheIdentity: cache.identity,
-		cacheLocator:  cache.locator,
+		vmID:             request.VMID,
+		networkPlacement: request.NetworkPlacement,
+		hostBootID:       bootID,
+		cacheIdentity:    cache.identity,
+		cacheLocator:     cache.locator,
 	}
 	if restore != nil {
 		intent.snapshotID = restore.snapshotID

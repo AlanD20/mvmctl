@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"mvmctl/internal/lib/model"
 )
 
 const maxInstanceJSONDepth = 4
@@ -23,6 +25,7 @@ type instanceRecordWire struct {
 
 type instanceLaunchWire struct {
 	OwnerGID          uint32                        `json:"owner_gid"`
+	NetworkPlacement  model.VMNetworkPlacement      `json:"network_placement"`
 	ExecutionIdentity instanceExecutionIdentityWire `json:"execution_identity"`
 	SnapshotID        string                        `json:"snapshot_id"`
 	CacheLocator      string                        `json:"cache_locator"`
@@ -353,7 +356,15 @@ func instanceRecordJSONFields(wire instanceRecordWire) map[string]instanceJSONFi
 
 func instanceLaunchJSONFields() map[string]instanceJSONField {
 	return instanceObjectJSONFields(
-		[]string{"owner_gid", "host_boot_id", "pid", "start_time_ticks", "snapshot_id", "cache_locator"},
+		[]string{
+			"owner_gid",
+			"network_placement",
+			"host_boot_id",
+			"pid",
+			"start_time_ticks",
+			"snapshot_id",
+			"cache_locator",
+		},
 		map[string]string{
 			"execution_identity": "execution_identity",
 			"relay":              "launch_relay",
@@ -498,7 +509,8 @@ func instanceRecordToWire(record instanceRecord) instanceRecordWire {
 
 func instanceLaunchToWire(launch instanceLaunchRecord) *instanceLaunchWire {
 	wire := &instanceLaunchWire{
-		OwnerGID: launch.ownerGID,
+		OwnerGID:         launch.ownerGID,
+		NetworkPlacement: launch.networkPlacement,
 		ExecutionIdentity: instanceExecutionIdentityWire{
 			UID: launch.executionIdentity.uid,
 			GID: launch.executionIdentity.gid,
@@ -647,6 +659,7 @@ func instanceLaunchFromWire(wire instanceLaunchWire) (instanceLaunchRecord, erro
 	}
 	launch := instanceLaunchRecord{
 		ownerGID:          wire.OwnerGID,
+		networkPlacement:  wire.NetworkPlacement,
 		executionIdentity: vmExecutionIdentity{uid: wire.ExecutionIdentity.UID, gid: wire.ExecutionIdentity.GID},
 		snapshotID:        wire.SnapshotID,
 		cacheLocator:      locator,

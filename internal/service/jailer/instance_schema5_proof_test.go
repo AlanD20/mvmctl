@@ -6,15 +6,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	"mvmctl/internal/lib/model"
 )
 
-// Rationale: these fixtures are independent of the transition functions. Exact schema-four bytes make field renames,
+// Rationale: these fixtures are independent of the transition functions. Exact schema-five bytes make field renames,
 // omissions, additions, and lifecycle-shape drift visible.
-func TestInstanceSchemaFourCanonicalJSON(t *testing.T) {
+func TestInstanceSchemaFiveCanonicalJSON(t *testing.T) {
 	t.Parallel()
 
-	records := schemaFourProofRecords()
-	for name, want := range schemaFourCanonicalJSON() {
+	records := schemaFiveProofRecords()
+	for name, want := range schemaFiveCanonicalJSON() {
 		name, want := name, want
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -32,23 +34,23 @@ func TestInstanceSchemaFourCanonicalJSON(t *testing.T) {
 
 // Rationale: complete independently constructed records prove each pure transition, including retained authority and
 // generation changes. Field-by-field assertions alone could miss an accidentally added or copied authority claim.
-func TestInstanceSchemaFourTransitionsMatchIndependentRecords(t *testing.T) {
+func TestInstanceSchemaFiveTransitionsMatchIndependentRecords(t *testing.T) {
 	t.Parallel()
 
-	want := schemaFourProofRecords()
+	want := schemaFiveProofRecords()
 	launching, err := registerLaunchingInstanceRecord(
 		testInstanceCaller(), testLaunchIntent(false), testLaunchProcessLocators(false), testReleaseIdentity(), nil,
 	)
 	require.NoError(t, err)
 	assertInstanceRecordEqual(t, want["launching"], launching)
 
-	launchPresent := schemaFourProofLaunch(instanceLaunchRelay{
+	launchPresent := schemaFiveProofLaunch(instanceLaunchRelay{
 		kind:    instanceRelayPresent,
 		locator: instanceProcessLocator{pid: 4343, startTimeTicks: 876543},
 	})
 	launchingPresent := want["launching"]
 	launchingPresent.launch = &launchPresent
-	active, err := activateInstanceRecord(launchingPresent, schemaFourProofActive())
+	active, err := activateInstanceRecord(launchingPresent, schemaFiveProofActive())
 	require.NoError(t, err)
 	assertInstanceRecordEqual(t, want["active"], active)
 
@@ -88,8 +90,8 @@ func assertInstanceRecordEqual(t *testing.T, want, got instanceRecord) {
 	}
 }
 
-func schemaFourCanonicalJSON() map[string]string {
-	const launchAbsent = `{"owner_gid":1001,"execution_identity":{"uid":2000,"gid":2001},` +
+func schemaFiveCanonicalJSON() map[string]string {
+	const launchAbsent = `{"owner_gid":1001,"network_placement":"managed","execution_identity":{"uid":2000,"gid":2001},` +
 		`"snapshot_id":"","cache_locator":"/home/caller/mvmctl",` +
 		`"host_boot_id":"123e4567-e89b-42d3-a456-426614174000",` +
 		`"pid":4242,"start_time_ticks":987654,"relay":{"kind":"absent"},` +
@@ -97,7 +99,7 @@ func schemaFourCanonicalJSON() map[string]string {
 		`"mount_identity":{"kind":"unique","id":67890}},` +
 		`"release":{"version":"1.16.0","architecture":"x86_64",` +
 		`"firecracker_sha256":"` + testReleaseHash + `","jailer_sha256":"` + testJailerHash + `"}}`
-	const launchPresent = `{"owner_gid":1001,"execution_identity":{"uid":2000,"gid":2001},` +
+	const launchPresent = `{"owner_gid":1001,"network_placement":"managed","execution_identity":{"uid":2000,"gid":2001},` +
 		`"snapshot_id":"","cache_locator":"/home/caller/mvmctl",` +
 		`"host_boot_id":"123e4567-e89b-42d3-a456-426614174000",` +
 		`"pid":4242,"start_time_ticks":987654,` +
@@ -122,55 +124,56 @@ func schemaFourCanonicalJSON() map[string]string {
 		`"sha256":"` + testRelayHash + `"}}}`
 
 	return map[string]string{
-		"launching": `{"schema_version":4,"owner_uid":1000,"vm_id":"` + testVMID +
+		"launching": `{"schema_version":5,"owner_uid":1000,"vm_id":"` + testVMID +
 			`","lifecycle":"launching","launch_generation":1,"cleanup_generation":0,"launch":` + launchAbsent + `}`,
-		"active": `{"schema_version":4,"owner_uid":1000,"vm_id":"` + testVMID +
+		"active": `{"schema_version":5,"owner_uid":1000,"vm_id":"` + testVMID +
 			`","lifecycle":"active","launch_generation":1,"cleanup_generation":0,"launch":` + launchPresent +
 			`,"active":` + active + `}`,
-		"cleaning_from_launching": `{"schema_version":4,"owner_uid":1000,"vm_id":"` + testVMID +
+		"cleaning_from_launching": `{"schema_version":5,"owner_uid":1000,"vm_id":"` + testVMID +
 			`","lifecycle":"cleaning","launch_generation":1,"cleanup_generation":1,"launch":` + launchAbsent + `}`,
-		"cleaning_from_active": `{"schema_version":4,"owner_uid":1000,"vm_id":"` + testVMID +
+		"cleaning_from_active": `{"schema_version":5,"owner_uid":1000,"vm_id":"` + testVMID +
 			`","lifecycle":"cleaning","launch_generation":1,"cleanup_generation":1,"launch":` + launchPresent +
 			`,"active":` + active + `}`,
-		"cleaned": `{"schema_version":4,"owner_uid":1000,"vm_id":"` + testVMID +
+		"cleaned": `{"schema_version":5,"owner_uid":1000,"vm_id":"` + testVMID +
 			`","lifecycle":"cleaned","launch_generation":1,"cleanup_generation":1}`,
 	}
 }
 
-func schemaFourProofRecords() map[string]instanceRecord {
-	launchAbsent := schemaFourProofLaunch(instanceLaunchRelay{kind: instanceRelayAbsent})
-	launchPresent := schemaFourProofLaunch(instanceLaunchRelay{
+func schemaFiveProofRecords() map[string]instanceRecord {
+	launchAbsent := schemaFiveProofLaunch(instanceLaunchRelay{kind: instanceRelayAbsent})
+	launchPresent := schemaFiveProofLaunch(instanceLaunchRelay{
 		kind:    instanceRelayPresent,
 		locator: instanceProcessLocator{pid: 4343, startTimeTicks: 876543},
 	})
-	active := schemaFourProofActive()
+	active := schemaFiveProofActive()
 	return map[string]instanceRecord{
 		"launching": {
-			schemaVersion: 4, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleLaunching,
+			schemaVersion: 5, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleLaunching,
 			launchGeneration: 1, cleanupGeneration: 0, launch: &launchAbsent,
 		},
 		"active": {
-			schemaVersion: 4, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleActive,
+			schemaVersion: 5, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleActive,
 			launchGeneration: 1, cleanupGeneration: 0, launch: &launchPresent, active: &active,
 		},
 		"cleaning_from_launching": {
-			schemaVersion: 4, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaning,
+			schemaVersion: 5, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaning,
 			launchGeneration: 1, cleanupGeneration: 1, launch: &launchAbsent,
 		},
 		"cleaning_from_active": {
-			schemaVersion: 4, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaning,
+			schemaVersion: 5, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaning,
 			launchGeneration: 1, cleanupGeneration: 1, launch: &launchPresent, active: &active,
 		},
 		"cleaned": {
-			schemaVersion: 4, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaned,
+			schemaVersion: 5, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaned,
 			launchGeneration: 1, cleanupGeneration: 1,
 		},
 	}
 }
 
-func schemaFourProofLaunch(relay instanceLaunchRelay) instanceLaunchRecord {
+func schemaFiveProofLaunch(relay instanceLaunchRelay) instanceLaunchRecord {
 	return instanceLaunchRecord{
 		ownerGID:          1001,
+		networkPlacement:  model.VMNetworkPlacementManaged,
 		executionIdentity: vmExecutionIdentity{uid: 2000, gid: 2001},
 		cacheLocator:      managedCacheLocator{components: []string{"home", "caller", "mvmctl"}},
 		hostBootID:        "123e4567-e89b-42d3-a456-426614174000",
@@ -187,7 +190,7 @@ func schemaFourProofLaunch(relay instanceLaunchRelay) instanceLaunchRecord {
 	}
 }
 
-func schemaFourProofActive() instanceActiveIdentity {
+func schemaFiveProofActive() instanceActiveIdentity {
 	userIDs := processCredentialIdentity{real: 2000, effective: 2000, saved: 2000, filesystem: 2000}
 	groupIDs := processCredentialIdentity{real: 2001, effective: 2001, saved: 2001, filesystem: 2001}
 	relayUserIDs := processCredentialIdentity{real: 1000, effective: 1000, saved: 1000, filesystem: 1000}

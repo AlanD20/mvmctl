@@ -553,7 +553,7 @@ func TestRuntimeStatusRejectsOldSchema(t *testing.T) {
 	path := filepath.Join(f.root, "var/lib/mvmctl/instances/1000", record.vmID+".json")
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
-	raw = []byte(strings.Replace(string(raw), `"schema_version":4`, `"schema_version":3`, 1))
+	raw = []byte(strings.Replace(string(raw), `"schema_version":5`, `"schema_version":4`, 1))
 	require.NoError(t, os.WriteFile(path, raw, 0600))
 	got, err := f.observe(t.Context(), record.vmID)
 	require.Error(t, err)
