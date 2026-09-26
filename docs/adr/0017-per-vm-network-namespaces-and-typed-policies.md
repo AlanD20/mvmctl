@@ -5,6 +5,8 @@
 **Last Updated:** 2026-09-13 (supported ARP grammar and private application status)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
+**No-IP placement:** [ADR-0020: Networkless VM Placement](0020-networkless-vm-placement.md) specifies the separate
+loopback-only namespace variant required for the no-IP exec case; it is not implemented or qualified yet.
 
 ## Context
 
