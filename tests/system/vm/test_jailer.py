@@ -31,7 +31,7 @@ pytestmark = [
 
 def _vm_entry(runner_vm: str, vm_name: str) -> dict[str, Any]:
     result = _run_mvm(runner_vm, "vm", "ls", "--json")
-    vms: list[dict[str, Any]] = json.loads(result.stdout)
+    vms = _parse_vm_list(result.stdout)
     entry = next((vm for vm in vms if vm.get("name") == vm_name), None)
     assert entry is not None, f"VM {vm_name!r} is absent from vm ls --json"
     return entry
@@ -57,7 +57,7 @@ class TestCanonicalJailerLaunch:
     def test_process_is_non_root_inside_expected_jail(
         self, runner_vm: str, jailed_vm: dict[str, Any]
     ) -> None:
-        """Prove the VM process is chrooted and runs as the invoking identity."""
+        """Prove the VM process is chrooted under an isolated non-root identity."""
         vm = _vm_entry(runner_vm, jailed_vm["name"])
         pid = int(vm["pid"])
         invoking_uid = int(_guest_run(runner_vm, "id -u").stdout.strip())
@@ -65,7 +65,7 @@ class TestCanonicalJailerLaunch:
         status = _guest_run(runner_vm, f"cat /proc/{pid}/status").stdout
         uid_line = next(line for line in status.splitlines() if line.startswith("Uid:"))
         process_uid = int(uid_line.split()[1])
-        assert process_uid == invoking_uid
+        assert process_uid != invoking_uid
         assert process_uid != 0
 
         process_root = _guest_run(
@@ -326,6 +326,29 @@ def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
 
 
 class TestNetworklessJailerLifecycle:
+    def test_firecracker_uses_isolated_execution_uid(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """The guest VMM must not inherit either root or the operator's UID."""
+        ensure_vm_deps(runner_vm)
+        name = networkless_vm_name
+        created = _json_success_data(
+            _run_mvm(
+                runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
+                "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                "--json", timeout=180,
+            ).stdout,
+            list,
+        )
+        assert len(created) == 1
+        vm = _vm_entry(runner_vm, name)
+        assert vm["status"] == "running"
+        status = _guest_run(runner_vm, f"cat /proc/{int(vm['pid'])}/status").stdout
+        process_uid = int(next(line for line in status.splitlines() if line.startswith("Uid:")).split()[1])
+        operator_uid = int(_guest_run(runner_vm, "id -u").stdout.strip())
+        assert operator_uid != 0
+        assert process_uid not in (0, operator_uid)
+
     def test_raw_volume_is_attached_at_launch_and_after_restart(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:

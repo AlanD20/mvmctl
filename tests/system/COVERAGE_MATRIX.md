@@ -25,8 +25,8 @@ architecture is release-qualified. The authoritative release gate is `tasks/todo
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
 9 JSON/flag-invariant, 26 non-VM key, and 5 internal-service entry-point Python cases (98 total); the focused
-networkless create/stop/start/reboot/vsock case, five focused raw-volume/removed-format cases, and a networkless
-raw-volume guest-attachment/restart case also passed. The
+networkless create/stop/start/reboot/vsock case, five focused raw-volume/removed-format cases, a networkless
+raw-volume guest-attachment/restart case, and an isolated non-root Firecracker UID check also passed. The
 installed binary predates `8e0be4fe`, but the intervening source change under `internal/`, `pkg/`, and `cmd/` was
 test-only.
 These are scoped results, **not** a full Python matrix or release sign-off. The current runner kernel still rejects
@@ -45,7 +45,7 @@ qualification.
 | nftables-only engine | 🔴 Missing | Atomic bridge-family generation and removal of iptables/backend-selection tests and product paths. |
 | Typed `traffic` policy | 🔴 Missing | Same/cross-network default deny and exact source/protocol/port allows plus spoof/reverse/IP-reuse denials. |
 | Typed VM-to-VM `exec` policy | 🔴 Missing | Directional non-root authorization for same/cross/no-IP networks plus identity, bounds, and redaction denials. |
-| Cgroup/process identity lifecycle | 🟡 Partial | Existing L2 tests cover cgroup limits; root-record, pidfd, mount/cgroup cleanup, and reconciliation binding remain missing. |
+| Cgroup/process identity lifecycle | 🟡 Partial | A focused installed-candidate networkless case proves the Firecracker process UID differs from root and the operator; per-VM uniqueness, root-record, pidfd, mount/cgroup cleanup, and reconciliation binding remain missing. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
 Specific legacy conflicts that must be rewritten before release:
