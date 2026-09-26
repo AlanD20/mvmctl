@@ -57,6 +57,7 @@ type namespacePinState struct {
 	key                    namespaceKey
 	handlePath             namespaceHandlePath
 	namespaceID            namespaceIdentity
+	networklessMountID     uint64
 	handle                 namespaceHandle
 	parentFD               int
 	targetFD               int
@@ -120,6 +121,22 @@ func (effect *namespaceEffect) CreateNamespace(
 	ctx context.Context,
 	spec namespaceCreateSpec,
 ) (NamespacePin, error) {
+	return effect.createNamespace(ctx, spec, nil)
+}
+
+func (effect *namespaceEffect) CreateNetworklessNamespace(
+	ctx context.Context, spec namespaceCreateSpec, publication *networklessPublication,
+) (NamespacePin, error) {
+	if publication == nil || publication.target == nil {
+		return nil, namespaceEffectCreateError(spec.key, "create networkless namespace",
+			errors.New("staged publication authority is unavailable"), namespaceCreateOutcome{})
+	}
+	return effect.createNamespace(ctx, spec, publication)
+}
+
+func (effect *namespaceEffect) createNamespace(
+	ctx context.Context, spec namespaceCreateSpec, publication *networklessPublication,
+) (NamespacePin, error) {
 	if ctx == nil {
 		return nil, namespaceEffectCreateError(
 			spec.key,
@@ -147,7 +164,7 @@ func (effect *namespaceEffect) CreateNamespace(
 	var pin NamespacePin
 	err := effect.deps.runWorker(ctx, func(workerCtx context.Context) error {
 		var workerErr error
-		pin, workerErr = effect.createNamespaceOnWorker(workerCtx, spec)
+		pin, workerErr = effect.createNamespaceOnWorker(workerCtx, spec, publication)
 		return workerErr
 	})
 	if err != nil {
@@ -191,6 +208,7 @@ func (effect *namespaceEffect) CreateNamespace(
 func (effect *namespaceEffect) createNamespaceOnWorker(
 	ctx context.Context,
 	spec namespaceCreateSpec,
+	publication *networklessPublication,
 ) (_ NamespacePin, returnErr error) {
 	if ctx == nil {
 		return nil, namespaceEffectCreateError(
@@ -217,7 +235,16 @@ func (effect *namespaceEffect) createNamespaceOnWorker(
 		)
 	}
 
-	target, err := effect.authority.create(ctx, spec.key)
+	var target namespaceTargetLease
+	var err error
+	if publication != nil {
+		target = publication.target
+		if target == nil {
+			err = errors.New("networkless namespace target is unavailable")
+		}
+	} else {
+		target, err = effect.authority.create(ctx, spec.key)
+	}
 	if target == nil {
 		if err == nil {
 			err = errors.New("namespace authority returned no cleanup capability")
@@ -515,6 +542,18 @@ func (effect *namespaceEffect) createNamespaceOnWorker(
 			err,
 			state.createOutcome(),
 		)
+	}
+	if publication != nil {
+		mountIdentity, mountErr := inspectNamespaceTargetMountIdentity(ctx, effect.deps, mountFD)
+		if mountErr != nil || mountIdentity.kind != namespaceTargetMountIdentityUnique {
+			return pin, namespaceEffectCreateError(spec.key, "inspect detached namespace unique mount identity",
+				errors.Join(mountErr, errors.New("unique detached mount ID is unavailable")), state.createOutcome())
+		}
+		if err := publication.recordDetachedMount(ctx, createdIdentity, mountIdentity.value); err != nil {
+			return pin, namespaceEffectCreateError(spec.key, "record detached networkless namespace", err,
+				state.createOutcome())
+		}
+		state.networklessMountID = mountIdentity.value
 	}
 	if err := effect.deps.moveMount(
 		ctx,
@@ -928,6 +967,37 @@ func (pin *namespacePin) Release(ctx context.Context) error {
 	return state.releaseErr
 }
 
+// detachNetworklessActive closes only the staged target and effect descriptors after the journal is active.
+func (pin *namespacePin) detachNetworklessActive(ctx context.Context) error {
+	if ctx == nil || pin == nil || pin.state == nil {
+		return networkAuthorityCorruptError("networkless namespace detach authority is unavailable", nil)
+	}
+	state := pin.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	target, ok := state.target.(*networklessTargetLease)
+	if !ok || target == nil || target.value == nil || state.released || state.removed || !state.admitted ||
+		!state.mounted || !state.verified || state.unmountOutcomeUnknown {
+		return networkAuthorityCorruptError("networkless namespace is not active for detach", nil)
+	}
+	if err := verifyPublishedNamespace(ctx, state); err != nil {
+		return err
+	}
+	cleanup := context.WithoutCancel(ctx)
+	result := errors.Join(target.value.DetachActive(cleanup),
+		closeConsumedNamespaceFD(cleanup, state.deps, &state.publishFD),
+		closeConsumedNamespaceFD(cleanup, state.deps, &state.netnsFD),
+		closeConsumedNamespaceFD(cleanup, state.deps, &state.targetFD),
+		closeConsumedNamespaceFD(cleanup, state.deps, &state.parentFD))
+	state.target = nil
+	state.namespaceID = namespaceIdentity{}
+	state.handle = namespaceHandle{}
+	state.admitted = false
+	state.released = true
+	state.releaseErr = result
+	return result
+}
+
 func (state *namespacePinState) createOutcome() namespaceCreateOutcome {
 	if state == nil {
 		return namespaceCreateOutcome{}
@@ -1007,6 +1077,9 @@ func verifyPublishedNamespace(ctx context.Context, state *namespacePinState) err
 		if published != state.namespaceID {
 			return errors.New("retained published namespace descriptor changed")
 		}
+		if err := verifyNetworklessMountID(ctx, state, state.publishFD); err != nil {
+			return err
+		}
 	}
 	currentFD, err := state.deps.openAt2(ctx, state.parentFD, string(state.key.vmID), &unix.OpenHow{
 		Flags: namespaceLeafInspectFlags, Resolve: namespaceResolveBeneath,
@@ -1015,12 +1088,24 @@ func verifyPublishedNamespace(ctx context.Context, state *namespacePinState) err
 		return err
 	}
 	current, inspectErr := inspectNetworkNamespaceFD(ctx, state.deps, state.owner.policy, currentFD)
+	mountErr := verifyNetworklessMountID(ctx, state, currentFD)
 	closeErr := closeConsumedNamespaceFD(ctx, state.deps, &currentFD)
-	if inspectErr != nil || closeErr != nil {
-		return errors.Join(inspectErr, closeErr)
+	if inspectErr != nil || mountErr != nil || closeErr != nil {
+		return errors.Join(inspectErr, mountErr, closeErr)
 	}
 	if current != state.namespaceID {
 		return errors.New("published namespace identity changed")
+	}
+	return nil
+}
+
+func verifyNetworklessMountID(ctx context.Context, state *namespacePinState, fd int) error {
+	if state.networklessMountID == 0 {
+		return nil
+	}
+	mount, err := inspectNamespaceTargetMountIdentity(ctx, state.deps, fd)
+	if err != nil || mount.kind != namespaceTargetMountIdentityUnique || mount.value != state.networklessMountID {
+		return errors.Join(errors.New("networkless namespace mount identity changed"), err)
 	}
 	return nil
 }

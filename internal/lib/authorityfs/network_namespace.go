@@ -79,6 +79,8 @@ type networkNamespaceHandleState struct {
 	admitted          bool
 	leafCreated       bool
 	parentSyncPending bool
+	networklessToken  [32]byte
+	networkless       bool
 	removed           bool
 	released          bool
 	releaseErr        error
@@ -275,6 +277,11 @@ func (handle *NetworkNamespaceHandle) Remove(ctx context.Context) error {
 		if validNetworkNamespaceIdentity(state.targetIdentity) && retainedIdentity != state.targetIdentity {
 			return errors.New("authorityfs: retained network namespace placeholder identity changed")
 		}
+		if state.networkless {
+			if err := verifyNetworklessPlaceholderToken(state.placeholderFD, state.networklessToken); err != nil {
+				return err
+			}
+		}
 		state.targetIdentity = retainedIdentity
 
 		currentFD, err := state.deps.openAt2(cleanupCtx, state.directoryFD, state.key.value, &unix.OpenHow{
@@ -291,10 +298,18 @@ func (handle *NetworkNamespaceHandle) Remove(ctx context.Context) error {
 			state.policy,
 			state.metadataPrepared,
 		)
+		var tokenErr error
+		if state.networkless && inspectErr == nil {
+			tokenErr = verifyNetworklessPlaceholderToken(currentFD, state.networklessToken)
+		}
 		closeErr := closeNetworkNamespaceFD(cleanupCtx, state.deps, currentFD)
-		if inspectErr != nil {
+		if inspectErr != nil || tokenErr != nil {
+			if inspectErr != nil {
+				inspectErr = fmt.Errorf("authorityfs: inspect reopened network namespace placeholder: %w", inspectErr)
+			}
 			return errors.Join(
-				fmt.Errorf("authorityfs: inspect reopened network namespace placeholder: %w", inspectErr),
+				inspectErr,
+				tokenErr,
 				closeErr,
 			)
 		}
@@ -312,6 +327,18 @@ func (handle *NetworkNamespaceHandle) Remove(ctx context.Context) error {
 			return unlinkErr
 		}
 		markNetworkNamespaceUnlinked(state)
+	}
+	if state.networkless && !state.leafCreated {
+		fd, err := state.deps.openAt2(cleanupCtx, state.directoryFD, state.key.value, &unix.OpenHow{
+			Flags: networkNamespaceInspectFlags, Resolve: resolveBeneath,
+		})
+		if err == nil {
+			return errors.Join(errors.New("authorityfs: unlinked networkless target unexpectedly exists"),
+				closeNetworkNamespaceFD(cleanupCtx, state.deps, fd))
+		}
+		if !errors.Is(err, unix.ENOENT) {
+			return err
+		}
 	}
 	if state.parentSyncPending {
 		if err := state.deps.fsync(cleanupCtx, state.directoryFD); err != nil {
@@ -362,6 +389,8 @@ func (handle *NetworkNamespaceHandle) Release(ctx context.Context) error {
 	state.admitted = false
 	state.leafCreated = false
 	state.parentSyncPending = false
+	state.networklessToken = [32]byte{}
+	state.networkless = false
 	state.released = true
 	state.releaseErr = result
 	return state.releaseErr
