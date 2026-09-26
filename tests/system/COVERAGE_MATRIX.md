@@ -26,8 +26,8 @@ unprivileged CI selection with both coverage profiles and the separate full root
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
 9 JSON/flag-invariant, 26 non-VM key, and 5 internal-service entry-point Python cases (98 total); the focused
 networkless create/stop/start/reboot/vsock case, five focused raw-volume/removed-format cases, a networkless
-raw-volume guest-attachment/restart case, an isolated non-root Firecracker UID check, and a direct-API-denial with
-authorized CLI stop check also passed. The
+raw-volume guest-attachment/restart case, an isolated non-root Firecracker UID check, a direct-API-denial with
+authorized CLI stop check, and a `vm ps`/inspect stop-start projection case also passed. The
 installed binary predates `8e0be4fe`, but the intervening source change under `internal/`, `pkg/`, and `cmd/` was
 test-only.
 These are scoped results, **not** a full Python matrix or release sign-off. The current runner kernel still rejects
@@ -243,9 +243,9 @@ Specific legacy conflicts that must be rewritten before release:
 | `vm ls --json` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L2 — checks many fields |
 | `vm ls --json` empty | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListEmpty` | L2 — empty list. Clears VMs first. |
 | `vm ps` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_ps_lists_running, test_ps_shows_running_vm_details` | L2 — name and column headers in table output |
-| `vm ps --json` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L2 — JSON list with name, status, pid, ipv4, vcpu_count, mem_size_mib |
+| `vm ps --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless case proved inclusion while running, exclusion after CLI stop, and inclusion after restart. Guest-initiated exit and host-reboot reconciliation remain unqualified. |
 | `vm inspect <name>` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L1 |
-| `vm inspect <name> --json` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L2 — checks many fields |
+| `vm inspect <name> --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless case proved running/stopped/running status projection. Running cgroup details still report `unavailable` to the unprivileged operator; guest-initiated exit and host-reboot reconciliation remain unqualified. |
 | `vm inspect` by IP | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L2 — stop by IP test covers resolution |
 | `vm start` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L3 — PID alive in /proc after start |
 | `vm start` on running | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitionErrors` | L1 — exit 0 |

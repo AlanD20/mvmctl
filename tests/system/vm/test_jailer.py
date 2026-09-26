@@ -327,6 +327,40 @@ def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
 
 
 class TestNetworklessJailerLifecycle:
+    def test_ps_and_inspect_follow_stop_and_start(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """The public process list and inspection follow the VM lifecycle."""
+        ensure_vm_deps(runner_vm)
+        name = networkless_vm_name
+        _run_mvm(
+            runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
+            "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+            timeout=180,
+        )
+        running = _parse_vm_list(_run_mvm(runner_vm, "vm", "ps", "--json").stdout)
+        assert any(vm["name"] == name for vm in running)
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", name, "--json").stdout, dict,
+        )
+        assert inspected["vm"]["status"] == "running"
+
+        _run_mvm(runner_vm, "vm", "stop", name, timeout=120)
+        running = _parse_vm_list(_run_mvm(runner_vm, "vm", "ps", "--json").stdout)
+        assert all(vm["name"] != name for vm in running)
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", name, "--json").stdout, dict,
+        )
+        assert inspected["vm"]["status"] == "stopped"
+
+        _run_mvm(runner_vm, "vm", "start", name, timeout=120)
+        running = _parse_vm_list(_run_mvm(runner_vm, "vm", "ps", "--json").stdout)
+        assert any(vm["name"] == name for vm in running)
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", name, "--json").stdout, dict,
+        )
+        assert inspected["vm"]["status"] == "running"
+
     def test_operator_cannot_connect_to_firecracker_api(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
