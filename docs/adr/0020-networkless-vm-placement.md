@@ -74,7 +74,9 @@ version-8 user VM schema now persists explicit placement, retains the managed ne
 `NULL` rather than a fabricated network ID for networkless rows. Production create and respawn callers still select
 managed placement explicitly. The root launch wire now requires that managed placement tag and rejects omitted,
 unknown, or networkless tags before the managed topology path; this is an admission guard, not networkless launch
-support. Public input, a distinct root-owned networkless namespace/lifecycle lease, and snapshot integration remain
+support. The private namespace pin/recovery effect now has a validated owner-and-VM key independent of the managed
+network ID; the managed topology journal and lock order are unchanged. This key is only a prerequisite, not a
+networkless namespace/lifecycle lease. Public input, that distinct root-owned lease, and snapshot integration remain
 pending. The existing `resolveNetwork` call and root `VMLaunchRequest` validation must not be relaxed alone.
 Preserve current networked behavior until both branches have complete lifecycle ownership.
 

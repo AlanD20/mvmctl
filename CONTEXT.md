@@ -564,9 +564,11 @@ ADR-0020 defines a distinct, explicitly selected networkless VM placement for th
 It still requires a root-pinned per-VM namespace and Jailer membership, but has only loopback and no managed-network
 endpoint, TAP, or guest IP/MAC. The user VM row can now persist the placement variant and a genuinely absent network
 foreign key, and the Firecracker config generator supports the explicit networkless no-NIC/no-`ip=` shape. Public
-create, root launch, restart, and snapshot paths still require a managed network ID; the complete networkless VM
-lifecycle is not active. Omitting `--network` still selects the default managed network and must never become an
-implicit networkless fallback.
+create, root launch, restart, and snapshot paths still require a managed network ID. The root launch wire now requires
+an explicit managed tag, and the private namespace pin/recovery effect is keyed by owner and VM independently of a
+managed network ID; neither change creates a networkless lifecycle lease. The complete networkless VM lifecycle is
+not active. Omitting `--network` still selects the default managed network and must never become an implicit
+networkless fallback.
 
 ADR-0017 fixes the L3 contract consumed by the typed root transactions. The per-VM
 namespace is an L2 extension of one managed bridge. A canonical RFC1918 IPv4 prefix is limited to `/30` or shorter;
