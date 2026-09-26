@@ -102,8 +102,18 @@ func releaseCleanupPersistentOutputsLocked(ctx context.Context, state *cleanupLe
 		return nil
 	}
 	outputs := state.persistentOutputs
-	if err := revokeIsolatedPersistentOutputLease(ctx, outputs); err != nil {
-		return err
+	if outputs.state == nil {
+		return instanceStateError(state.record.vmID, "persistent output cleanup authority is incomplete")
+	}
+	outputs.state.mu.Lock()
+	released := outputs.state.released
+	outputs.state.mu.Unlock()
+	// The durable record's exact-inode revocation has already succeeded. A copied lease may have
+	// closed its descriptors earlier; those descriptors cannot be safely reused or revoked again.
+	if !released {
+		if err := revokeIsolatedPersistentOutputLease(ctx, outputs); err != nil {
+			return err
+		}
 	}
 	state.persistentOutputs = nil
 	// A terminal close error must surface once without retrying a descriptor that the OS may already have reused.
