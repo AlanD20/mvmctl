@@ -560,8 +560,9 @@ references. Live-kernel qualification remains pending.
 ADR-0020 defines a distinct, explicitly selected networkless VM placement for the required no-IP VM-to-VM exec case.
 It still requires a root-pinned per-VM namespace and Jailer membership, but has only loopback and no managed-network
 endpoint, TAP, or guest IP/MAC. The current public create, root launch, restart, and snapshot paths require a managed
-network ID; they do not implement that variant yet. Omitting `--network` still selects the default managed network and
-must never become an implicit networkless fallback.
+network ID; they do not implement that variant yet. Only the Firecracker config generator now supports an explicit
+networkless no-NIC/no-`ip=` shape; the complete VM lifecycle does not. Omitting `--network` still selects the default
+managed network and must never become an implicit networkless fallback.
 
 ADR-0017 fixes the L3 contract consumed by the typed root transactions. The per-VM
 namespace is an L2 extension of one managed bridge. A canonical RFC1918 IPv4 prefix is limited to `/30` or shorter;

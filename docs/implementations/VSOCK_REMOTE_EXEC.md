@@ -27,7 +27,8 @@ in `pkg/api/inputs/vm_create.go` requires a managed network, and `vm create` has
 does not look up network placement, but that is not evidence that a no-IP VM can be launched. Add an admitted
 networkless VM lifecycle before claiming the no-IP case or its Python L2 test complete. The closed placement and
 root-owned loopback-only namespace contract is [ADR-0020](../adr/0020-networkless-vm-placement.md); the ADR does not
-claim implementation or qualification.
+claim a runnable VM or runtime qualification. The Firecracker config generator has only the no-NIC/no-`ip=` primitive;
+public placement, root namespace lifecycle, restart, and snapshot wiring remain missing.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration, create path, results,
 persistence, and environment specifications; it is not converted into a directional policy.
 

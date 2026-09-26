@@ -1,6 +1,6 @@
 # Networkless VM Placement with Isolated Namespace
 
-**Status:** Accepted for v0.3.0; implementation pending, not qualified
+**Status:** Accepted for v0.3.0; partially implemented, not qualified
 **Date:** 2026-09-26
 **Extends:** [ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md) and [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -67,13 +67,18 @@ placement, and a missing default network cannot trigger networkless placement.
 ## Implementation and qualification boundary
 
 Implement this as a coordinated typed cutover across public input/CLI, user VM persistence, Firecracker configuration,
-the root launch/namespace protocol, start/reboot/recovery, and snapshot capture/restore. The current code has none of
-that placement variant. The existing `resolveNetwork` call and root `VMLaunchRequest` validation must not be relaxed
-alone. Preserve the current networked behavior until both branches have complete lifecycle ownership.
+the root launch/namespace protocol, start/reboot/recovery, and snapshot capture/restore. The Firecracker config module
+now accepts an explicit networkless placement and emits no NIC or kernel `ip=` argument, while retaining vsock and
+rejecting managed endpoint fields, NoCloud NET mode, and caller-supplied `ip=` or `ds=` boot arguments. Production
+create and respawn callers still select managed placement explicitly. Public input, durable placement, root-owned
+namespace/lifecycle authority, and snapshot integration remain pending. The existing `resolveNetwork` call and root
+`VMLaunchRequest` validation must not be relaxed alone. Preserve current networked behavior until both branches have
+complete lifecycle ownership.
 
 Go tests should prove closed input combinations, exact wire-shape rejection, no-NIC Firecracker config, placement
 round-trip, and fail-closed root effects. Installed-candidate Python tests in the approved runner must prove creation,
 namespace isolation, absent IP/TAP/host exposure, host-to-VM vsock exec, same-/cross-/no-network directional VM-to-VM
 exec authorization, stop/start/reboot/recovery, and snapshot restore. The runner kernel's missing bridge-family
 nftables capability still blocks networked comparisons; a passing isolated networkless case alone cannot qualify the
-whole placement and policy matrix. No implementation or runtime pass is claimed by this ADR.
+whole placement and policy matrix. Focused Go config tests passed in the named runner; no networkless VM runtime pass
+or release qualification is claimed by this ADR.
