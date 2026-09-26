@@ -122,6 +122,25 @@ func TestRecoverManagedVMCgroupPinsExistingLeafAndVerifiesMembership(t *testing.
 	assert.False(t, fixture.vmLeafPresent(testVMID))
 }
 
+// Jailer creates its cgroup-v2 VM leaf root-owned at 0700. Recovery must admit
+// that exact leaf without weakening the fixed parent or mount-root policies.
+func TestRecoverManagedVMCgroupAdmitsJailerCreatedPrivateLeaf(t *testing.T) {
+	fixture := newManagedVMCgroupTestFixture(t)
+	fixture.addVMLeaf(testVMID)
+	require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0700))
+	deps := (&managedVMCgroupRecoveryMutationProbe{}).deps(fixture)
+	lease, present, err := recoverManagedVMCgroup(
+		t.Context(), deps, testVMID, processTestLocator(), processTestCgroupObservation(),
+		&managedVMCgroupTestProcessVerifier{},
+	)
+	require.NoError(t, err)
+	require.True(t, present)
+	require.NotNil(t, lease)
+	fixture.setMembership(testVMID, "")
+	require.NoError(t, lease.Remove(t.Context()))
+	require.NoError(t, lease.Release(t.Context()))
+}
+
 func TestRecoverManagedVMCgroupRejectsUnsafeExistingHierarchyWithoutMutation(t *testing.T) {
 	t.Parallel()
 
@@ -133,7 +152,7 @@ func TestRecoverManagedVMCgroupRejectsUnsafeExistingHierarchyWithoutMutation(t *
 			require.NoError(t, os.Chmod(filepath.Join(fixture.root, infra.JailerCgroupParent), 0o700))
 		}},
 		"leaf metadata": {makeUnsafe: func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupDeps) {
-			require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0o700))
+			require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0o755))
 		}},
 		"cgroup2 mount": {makeUnsafe: func(_ *managedVMCgroupTestFixture, deps *managedVMCgroupDeps) {
 			deps.statfs = func(context.Context, int, *unix.Statfs_t) error { return nil }

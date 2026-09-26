@@ -325,7 +325,7 @@ func verifyRetainedLaunchProcesses(
 		return verifiedLaunchIdentity{}, err
 	}
 	if sealedDestination.root != preSealDestination.root ||
-		!sameExecutableObject(sealedDestination.executable, preSealDestination.executable) {
+		!sameExecutableBacking(sealedDestination.executable, preSealDestination.executable) {
 		return verifiedLaunchIdentity{}, processVerificationError(
 			vmID,
 			"jail destination changed while sealing",
@@ -340,7 +340,7 @@ func verifyRetainedLaunchProcesses(
 		preSealFirecracker.mountNamespace != finalFirecracker.mountNamespace ||
 		preSealFirecracker.networkNamespace != finalFirecracker.networkNamespace ||
 		preSealFirecracker.root != finalFirecracker.root ||
-		!sameExecutableObject(preSealFirecracker.executable, finalFirecracker.executable) {
+		!sameExecutableBacking(preSealFirecracker.executable, finalFirecracker.executable) {
 		return verifiedLaunchIdentity{}, processVerificationError(
 			vmID,
 			"Firecracker identity changed while sealing",
@@ -588,6 +588,13 @@ func sameExecutableObject(left, right processExecutableDescriptorIdentity) bool 
 		left.mode == right.mode && left.links == right.links
 }
 
+// Sealing deliberately changes mode and ownership on the same copied inode.
+// Each side independently proves its exact pre/post-seal metadata policy.
+func sameExecutableBacking(left, right processExecutableDescriptorIdentity) bool {
+	return left.device == right.device && left.inode == right.inode && left.sizeBytes == right.sizeBytes &&
+		left.links == right.links
+}
+
 func verifyFirecrackerObservation(
 	ctx context.Context,
 	deps processIdentityVerifierDeps,
@@ -737,7 +744,7 @@ func inspectPreSealJailDestination(
 				)
 			}
 		case jailDestinationRoot:
-			if stat.Mode != unix.S_IFDIR|0755 || stat.Uid != 0 || stat.Gid != 0 {
+			if stat.Mode != unix.S_IFDIR|0700 || stat.Uid != ownerUID || stat.Gid != ownerGID {
 				return observedJailDestination{}, processVerificationError(
 					state.vmID,
 					"pre-seal jail root metadata changed",

@@ -165,7 +165,7 @@ func retainJailDestination(
 		}
 		return nil, processAuthorityError(vmID, "open Jailer base authority", errors.Join(err, closeAncestorErr))
 	}
-	if err := lease.addBinding(ctx, jailDestinationBase, baseFD, unix.S_IFDIR|0700, true); err != nil {
+	if err := lease.addBinding(ctx, jailDestinationBase, baseFD, unix.S_IFDIR|0700, 0, 0, true); err != nil {
 		return nil, err
 	}
 	if lease.state.bindings[0].mount != managedMount {
@@ -196,7 +196,7 @@ func retainJailDestination(
 	if err != nil {
 		return nil, processAuthorityError(vmID, "open copied Firecracker authority", err)
 	}
-	if err := lease.addBinding(ctx, jailDestinationExecutable, executableFD, unix.S_IFREG|0755, false); err != nil {
+	if err := lease.addBinding(ctx, jailDestinationExecutable, executableFD, unix.S_IFREG|0755, 0, 0, false); err != nil {
 		return nil, err
 	}
 	committed = true
@@ -221,6 +221,8 @@ func (lease *jailDestinationLease) openDirectoryBinding(
 		kind,
 		leaf,
 		expectedMode,
+		0,
+		0,
 		unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW,
 	)
 }
@@ -230,6 +232,7 @@ func (lease *jailDestinationLease) openDirectoryBindingWithFlags(
 	kind jailDestinationBindingKind,
 	leaf string,
 	expectedMode uint32,
+	expectedUID, expectedGID uint32,
 	flags int,
 ) error {
 	parentFD := lease.state.bindings[len(lease.state.bindings)-1].fd
@@ -237,7 +240,7 @@ func (lease *jailDestinationLease) openDirectoryBindingWithFlags(
 	if err != nil {
 		return processAuthorityError(lease.state.vmID, "open jail destination binding "+leaf, err)
 	}
-	return lease.addBinding(ctx, kind, fd, expectedMode, true)
+	return lease.addBinding(ctx, kind, fd, expectedMode, expectedUID, expectedGID, true)
 }
 
 func (lease *jailDestinationLease) addBinding(
@@ -245,6 +248,7 @@ func (lease *jailDestinationLease) addBinding(
 	kind jailDestinationBindingKind,
 	fd int,
 	expectedMode uint32,
+	expectedUID, expectedGID uint32,
 	requireDirectory bool,
 ) error {
 	lease.state.bindings = append(lease.state.bindings, jailDestinationBinding{kind: kind, fd: fd})
@@ -252,7 +256,8 @@ func (lease *jailDestinationLease) addBinding(
 	if err := lease.state.deps.fstat(ctx, fd, &stat); err != nil {
 		return processAuthorityError(lease.state.vmID, "inspect jail destination binding", err)
 	}
-	if stat.Dev == 0 || stat.Ino == 0 || stat.Mode != expectedMode || stat.Uid != 0 || stat.Gid != 0 {
+	if stat.Dev == 0 || stat.Ino == 0 || stat.Mode != expectedMode ||
+		stat.Uid != expectedUID || stat.Gid != expectedGID {
 		return processAuthorityError(lease.state.vmID, "jail destination binding metadata is invalid", nil)
 	}
 	if requireDirectory && stat.Mode&unix.S_IFMT != unix.S_IFDIR {

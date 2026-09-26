@@ -92,5 +92,5 @@ func copiedLaunchExecutableReady(
 	if err := state.deps.fstat(ctx, parent, &stat); err != nil {
 		return false, err
 	}
-	return stat.Mode == unix.S_IFREG|0755 && stat.Uid == uid && stat.Gid == gid && stat.Nlink == 1 && stat.Size > 0, nil
+	return stat.Mode == unix.S_IFREG|0700 && stat.Uid == uid && stat.Gid == gid && stat.Nlink == 1 && stat.Size > 0, nil
 }

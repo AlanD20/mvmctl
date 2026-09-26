@@ -144,7 +144,7 @@ func TestActivateVerifiedProcessPreAdmissionCgroupFailureRetainsPreparation(t *t
 
 	fixture := newProcessIdentityFixture(t, false)
 	prepared := fixture.launch.state.preparedManagedVMCgroup
-	require.NoError(t, unix.Chmod(fixture.cgroup.vmLeafPath(testVMID), 0o700))
+	require.NoError(t, unix.Chmod(fixture.cgroup.vmLeafPath(testVMID), 0o755))
 
 	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
 	assert.Nil(t, active)
@@ -218,6 +218,15 @@ func TestBoundJailDestinationUsesOperableRootDescriptor(t *testing.T) {
 	)
 	assert.Zero(t, fake.destinationOpenFlags[202]&unix.O_PATH)
 	require.NoError(t, destination.Release(t.Context()))
+}
+
+func TestCopiedLaunchExecutableReadyAdmitsJailerPrivateCopy(t *testing.T) {
+	fake := newPostHandoffJailDestinationFixture()
+	ready, err := copiedLaunchExecutableReady(
+		t.Context(), fake.destination.state, testAuthorityGID, testAuthorityUID,
+	)
+	require.NoError(t, err)
+	assert.True(t, ready, "Jailer-owned 0700 copy must be ready for root sealing")
 }
 
 func TestBindAfterHandoffTransfersParentCloseOnceOnFailure(t *testing.T) {
@@ -343,13 +352,16 @@ func TestActivateVerifiedProcessRejectsTopologyNamespaceMismatch(t *testing.T) {
 }
 
 func makeFirecrackerObservationTransient(fixture *processIdentityFixture, rootFD, executableFD int) {
+	if executableFD == 113 {
+		// A second pre-seal poll still observes Jailer's private 0700 copy;
+		// the third observation follows the controller's sealing mutation.
+		fixture.fake.stats[116][0] = fixture.fake.stats[203][0]
+	}
 	root := fixture.fake.stats[rootFD][0]
 	root.Ino++
 	fixture.fake.stats[rootFD][0] = root
 	executable := fixture.fake.stats[executableFD][0]
 	executable.Ino++
-	executable.Uid = 0
-	executable.Gid = 0
 	fixture.fake.stats[executableFD][0] = executable
 }
 

@@ -16,7 +16,7 @@ const (
 		unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV
 	managedVMCgroupRootMode   = uint32(0o555)
 	managedVMCgroupParentMode = uint32(0o755)
-	managedVMCgroupLeafMode   = uint32(0o755)
+	managedVMCgroupLeafMode   = uint32(0o700)
 	managedVMCgroupProcsMode  = uint32(0o644)
 	managedVMCgroupMaxProcs   = 64 * 1024
 	managedVMCgroupStatxMask  = unix.STATX_BASIC_STATS | unix.STATX_MNT_ID | unix.STATX_MNT_ID_UNIQUE

@@ -14,11 +14,12 @@ func mountLaunchChildVolumes(
 	plan launchChildPlan,
 	rootFD int,
 	descriptors []int,
+	mountDescriptors []int,
 ) (returnErr error) {
 	if len(plan.Volumes) == 0 {
 		return nil
 	}
-	if len(descriptors) != len(plan.Volumes) {
+	if len(descriptors) != len(plan.Volumes) || len(mountDescriptors) != len(plan.Volumes) {
 		return instanceValidationError("launch child volume descriptor count differs from ordered intent")
 	}
 	if err := ctx.Err(); err != nil {
@@ -52,10 +53,10 @@ func mountLaunchChildVolumes(
 		}
 		if err := mountLaunchChildResource(
 			ctx,
-			fd,
+			mountDescriptors[index],
 			directory,
 			plan.GuestDriveIDs[index]+".raw",
-			volume.ReadOnly,
+			false,
 			false,
 		); err != nil {
 			return processAuthorityError(plan.VMID, "mount admitted raw volume", err)

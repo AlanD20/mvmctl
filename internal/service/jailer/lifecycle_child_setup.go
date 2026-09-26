@@ -217,6 +217,16 @@ func (lease *launchLease) sendChildSetup(
 		plan.Console = true
 		fds = append(fds, int(console.slave.Fd()))
 	}
+	mounts, err := prepareLaunchChildMountDescriptors(ctx, plan, fds, outputs.vmDirectoryFD)
+	if err != nil {
+		return processAuthorityError(plan.VMID, "prepare pinned child resource mounts", err)
+	}
+	defer func() {
+		for _, fd := range mounts {
+			_ = unix.Close(fd)
+		}
+	}()
+	fds = append(fds, mounts...)
 	if err := validateLaunchChildPlan(plan, fds); err != nil {
 		return err
 	}

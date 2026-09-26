@@ -155,6 +155,7 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 		clock:                time.Now(),
 	}
 	preSealExecutable := firecrackerStat
+	preSealExecutable.Mode = unix.S_IFREG | 0700
 	preSealExecutable.Uid = execution.uid
 	preSealExecutable.Gid = execution.gid
 	fake.stats[111] = []unix.Stat_t{objectStat(firecrackerNamespace, unix.S_IFREG|0444)}
@@ -189,8 +190,11 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 		objectStat(instanceObjectIdentity{device: 259, inode: 201}, unix.S_IFDIR|0700),
 		24,
 	)
-	fake.stats[202] = repeatProcessStat(objectStat(jailRoot, unix.S_IFDIR|0755), 24)
-	fake.stats[203] = append([]unix.Stat_t{preSealExecutable}, repeatProcessStat(firecrackerStat, 23)...)
+	preSealRoot := objectStat(jailRoot, unix.S_IFDIR|0700)
+	preSealRoot.Uid = execution.uid
+	preSealRoot.Gid = execution.gid
+	fake.stats[202] = repeatProcessStat(preSealRoot, 24)
+	fake.stats[203] = repeatProcessStat(preSealExecutable, 24)
 	fake.destination = fake.newPreparedDestination()
 	launch.state.preparedJailDestination = fake.destination
 	topology, err := launch.retainTopologyAuthority(t.Context())
@@ -392,8 +396,11 @@ func (fake *fakeProcessIdentityDeps) retainPostExecFirecracker() {
 func newPostHandoffJailDestinationFixture() *fakeProcessIdentityDeps {
 	parent := objectStat(instanceObjectIdentity{device: 259, inode: 200}, unix.S_IFDIR|0700)
 	vm := objectStat(instanceObjectIdentity{device: 259, inode: 201}, unix.S_IFDIR|0700)
-	root := objectStat(instanceObjectIdentity{device: 259, inode: 202}, unix.S_IFDIR|0755)
+	root := objectStat(instanceObjectIdentity{device: 259, inode: 202}, unix.S_IFDIR|0700)
+	root.Uid = testAuthorityUID
+	root.Gid = testAuthorityGID
 	executable := executableStat(259, 203, []byte("copied Firecracker executable"))
+	executable.Mode = unix.S_IFREG | 0700
 	executable.Uid = testAuthorityUID
 	executable.Gid = testAuthorityGID
 	fake := &fakeProcessIdentityDeps{

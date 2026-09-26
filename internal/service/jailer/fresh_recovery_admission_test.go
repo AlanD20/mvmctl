@@ -353,7 +353,7 @@ func TestFreshRecoverySameBootRejectsUnsafeForeignOrReplacementLeafBeforeEffects
 	}{
 		"unsafe": {
 			configure: func(t *testing.T, fixture *freshRecoveryAdmissionTestFixture, _ *managedVMCgroupDeps) {
-				require.NoError(t, os.Chmod(fixture.cgroup.vmLeafPath(testVMID), 0o700))
+				require.NoError(t, os.Chmod(fixture.cgroup.vmLeafPath(testVMID), 0o755))
 			},
 			repair: func(t *testing.T, fixture *freshRecoveryAdmissionTestFixture) {
 				require.NoError(t, os.Chmod(

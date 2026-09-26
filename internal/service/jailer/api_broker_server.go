@@ -23,6 +23,7 @@ const (
 	vmAPIPause vmAPIOperation = iota + 1
 	vmAPIResume
 	vmAPIStartInstance
+	vmAPIReady
 )
 
 // VMAPIBrokerServer authorizes named control operations under the instance lock.
@@ -32,6 +33,17 @@ type VMAPIBrokerServer struct{ instances *instanceAuthority }
 // NewVMAPIBrokerServer constructs the root-owned instance authority.
 func NewVMAPIBrokerServer() *VMAPIBrokerServer {
 	return &VMAPIBrokerServer{instances: newInstanceAuthority()}
+}
+
+// WaitReady waits only for the authenticated protected API socket. It does not
+// make an HTTP request or change the VM's state.
+func (server *VMAPIBrokerServer) WaitReady(
+	ctx context.Context, ownerUID, ownerGID uint32, request VMAPIRequest,
+) (VMAPIReadyResult, error) {
+	if _, err := server.apply(ctx, ownerUID, ownerGID, request, vmAPIReady); err != nil {
+		return VMAPIReadyResult{}, err
+	}
+	return VMAPIReadyResult{VMID: request.VMID, Ready: true}, nil
 }
 
 // Pause applies only the fixed pause request to an authenticated Firecracker peer.
@@ -102,18 +114,13 @@ func (server *VMAPIBrokerServer) apply(
 	if err := processes.verifyLocators(ctx); err != nil {
 		return VMAPIResult{}, err
 	}
-	directory, err := pinVMAPIPrivateDirectory(ctx, record)
+	directory, connection, err := openVMAPIConnection(ctx, record, operation == vmAPIReady)
 	if err != nil {
 		return VMAPIResult{}, err
 	}
 	defer func() {
 		returnErr = appendInstanceOperationError(returnErr, "close VM API runtime directory", unix.Close(directory))
 	}()
-	path := fmt.Sprintf("/proc/self/fd/%d/%s", directory, infra.VMFirecrackerAPISocketFilename)
-	connection, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", path)
-	if err != nil {
-		return VMAPIResult{}, vmAPIBrokerError("connect protected VM API", err)
-	}
 	defer func() {
 		returnErr = appendInstanceOperationError(returnErr, "close VM API connection", connection.Close())
 	}()
@@ -124,14 +131,51 @@ func (server *VMAPIBrokerServer) apply(
 	defer func() {
 		returnErr = appendInstanceOperationError(returnErr, "close VM API peer pidfd", unix.Close(peerPIDFD))
 	}()
-	if err := sendVMAPIOperation(ctx, connection, operation); err != nil {
-		return VMAPIResult{}, err
+	if operation != vmAPIReady {
+		if err := sendVMAPIOperation(ctx, connection, operation); err != nil {
+			return VMAPIResult{}, err
+		}
 	}
 	if err := verifyVMExecFirecrackerPeerIdentity(ctx, realVMExecPeerAuthorityDeps(), identity,
 		record, processes, peerPIDFD, "API"); err != nil {
 		return VMAPIResult{}, err
 	}
 	return VMAPIResult{VMID: request.VMID, Applied: true}, nil
+}
+
+// The launch-only readiness path retries only a socket not yet published or
+// listening. An identity, ownership, or authority failure is never retried.
+func openVMAPIConnection(ctx context.Context, record instanceRecord, waitReady bool) (int, net.Conn, error) {
+	if waitReady {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+	}
+	for {
+		directory, err := pinVMAPIPrivateDirectory(ctx, record)
+		if err == nil {
+			path := fmt.Sprintf("/proc/self/fd/%d/%s", directory, infra.VMFirecrackerAPISocketFilename)
+			connection, dialErr := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", path)
+			if dialErr == nil {
+				return directory, connection, nil
+			}
+			if closeErr := unix.Close(directory); closeErr != nil {
+				return -1, nil, vmAPIBrokerError("close protected VM API directory after failed connection",
+					errors.Join(dialErr, closeErr))
+			}
+			err = vmAPIBrokerError("connect protected VM API", dialErr)
+			if !waitReady || (!errors.Is(dialErr, unix.ENOENT) && !errors.Is(dialErr, unix.ECONNREFUSED)) {
+				return -1, nil, err
+			}
+		} else if !waitReady || !errors.Is(err, unix.ENOENT) {
+			return -1, nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return -1, nil, vmAPIBrokerError("protected VM API did not become ready", errors.Join(err, ctx.Err()))
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // CRITICAL: The observed jail root is pinned before traversing only compiled, no-follow runtime names.
@@ -185,7 +229,9 @@ func pinVMAPIPrivateDirectory(ctx context.Context, record instanceRecord) (direc
 		return -1, instanceStateError(record.vmID, "VM API runtime is not private to the execution identity")
 	}
 	var socket unix.Stat_t
-	if err := unix.Fstatat(directory, infra.VMFirecrackerAPISocketFilename, &socket, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+	if err := unix.Fstatat(
+		directory, infra.VMFirecrackerAPISocketFilename, &socket, unix.AT_SYMLINK_NOFOLLOW,
+	); err != nil {
 		return -1, vmAPIBrokerError("inspect protected VM API socket", err)
 	}
 	if socket.Mode&unix.S_IFMT != unix.S_IFSOCK || socket.Uid != record.active.userIDs.effective ||

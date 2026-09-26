@@ -100,16 +100,7 @@ func removeJailDirectory(
 	if err := unix.Fstat(fd, &original); err != nil {
 		return err
 	}
-	mode := uint32(0755)
-	if kind == jailCleanupVM || kind == jailCleanupRuntime {
-		mode = 0700
-	}
-	ownerAllowed := original.Uid == 0 && original.Gid == 0
-	if kind == jailCleanupDevices || kind == jailCleanupDeviceNet {
-		ownerAllowed = ownerAllowed ||
-			original.Uid == record.launch.executionIdentity.uid && original.Gid == record.launch.executionIdentity.gid
-	}
-	if original.Mode != unix.S_IFDIR|mode || !ownerAllowed {
+	if !stoppedJailDirectoryAdmitted(kind, original, record) {
 		return processAuthorityError(record.vmID, "stopped jail directory metadata is not admitted", nil)
 	}
 	if kind == jailCleanupRoot && record.active != nil &&
@@ -162,6 +153,33 @@ func removeJailDirectory(
 	return unix.Fsync(parent)
 }
 
+func stoppedJailDirectoryAdmitted(kind jailCleanupDirectory, stat unix.Stat_t, record instanceRecord) bool {
+	rootOwned := stat.Uid == 0 && stat.Gid == 0
+	isolatedOwned := record.launch != nil && stat.Uid == record.launch.executionIdentity.uid &&
+		stat.Gid == record.launch.executionIdentity.gid
+	mode := uint32(0755)
+	if kind == jailCleanupVM || kind == jailCleanupRuntime {
+		mode = 0700
+	}
+	if stat.Mode == unix.S_IFDIR|mode && rootOwned {
+		return true
+	}
+	// Jailer 1.16.1 owns these private directories at 0700 before the
+	// controller seals the jail root. The VM root itself may retain that
+	// shape only when no active identity was committed.
+	if stat.Mode != unix.S_IFDIR|0700 || !isolatedOwned {
+		return false
+	}
+	switch kind {
+	case jailCleanupRoot:
+		return record.active == nil
+	case jailCleanupRun, jailCleanupDevices, jailCleanupDeviceNet:
+		return true
+	default:
+		return false
+	}
+}
+
 func allowedJailCleanupEntry(kind jailCleanupDirectory, name string) (jailCleanupDirectory, bool, error) {
 	switch kind {
 	case jailCleanupVM:
@@ -180,7 +198,8 @@ func allowedJailCleanupEntry(kind jailCleanupDirectory, name string) (jailCleanu
 			return jailCleanupDevices, false, nil
 		case "volumes":
 			return jailCleanupVolumes, false, nil
-		case "firecracker", "rootfs", "kernel", infra.VMCloudInitISOFilename, launchDeviceAuthorityLeaf:
+		case "firecracker", "rootfs", "kernel", infra.VMFirecrackerPIDFilename,
+			infra.VMCloudInitISOFilename, launchDeviceAuthorityLeaf:
 			return 0, true, nil
 		}
 	case jailCleanupRun:
@@ -198,7 +217,7 @@ func allowedJailCleanupEntry(kind jailCleanupDirectory, name string) (jailCleanu
 		switch name {
 		case "net":
 			return jailCleanupDeviceNet, false, nil
-		case "kvm", "urandom":
+		case "kvm", "urandom", "userfaultfd":
 			return 0, true, nil
 		}
 	case jailCleanupDeviceNet:
@@ -252,6 +271,12 @@ func removeJailFixedLeaf(
 			(original.Mode != unix.S_IFREG|0400 && original.Mode != unix.S_IFREG|0600)) {
 		return processAuthorityError(record.vmID, "stopped launch device authority metadata is not admitted", nil)
 	}
+	// Jailer's fixed PID leaf is display-only. Never read it as process authority.
+	if kind == jailCleanupRoot && name == infra.VMFirecrackerPIDFilename &&
+		(original.Mode != unix.S_IFREG|0600 || original.Uid != 0 || original.Gid != 0 ||
+			original.Size < 0 || original.Size > 20) {
+		return processAuthorityError(record.vmID, "stopped Jailer PID leaf metadata is not admitted", nil)
+	}
 	// Volume sources lived only in the departed private mount namespace. Cleanup may remove
 	// only the empty root-owned attachment placeholders, never caller data or a surviving mount.
 	if (kind == jailCleanupVolumes || kind == jailCleanupSnapshot) && (original.Uid != 0 || original.Gid != 0 ||
@@ -262,6 +287,9 @@ func removeJailFixedLeaf(
 		major, minor := uint32(10), uint32(232)
 		if name == "tun" {
 			minor = 200
+		}
+		if name == "userfaultfd" {
+			minor = 257
 		}
 		if name == "urandom" {
 			major, minor = 1, 9

@@ -308,7 +308,7 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentRejectsUnsafeHierarchyWithoutM
 		"leaf mode": {
 			addLeaf: true,
 			configure: func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupAbsenceProbe) {
-				require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0o700))
+				require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0o755))
 			},
 		},
 		"leaf type": {
@@ -422,7 +422,7 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentRejectsSecondObservationUnsafe
 		}},
 		"leaf mode": {addLeaf: true, configure: func(probe *managedVMCgroupAbsenceProbe) {
 			probe.rewriteStatxCall("leaf", 2, func(stat *unix.Statx_t) {
-				stat.Mode = stat.Mode&^0o7777 | 0o700
+				stat.Mode = stat.Mode&^0o7777 | 0o755
 			})
 		}},
 		"leaf type": {addLeaf: true, configure: func(probe *managedVMCgroupAbsenceProbe) {

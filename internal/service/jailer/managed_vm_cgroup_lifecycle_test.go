@@ -228,7 +228,7 @@ func TestPreparedManagedVMCgroupBindForCleanupRejectsUnsafeLeafWithoutTransfer(t
 	require.NoError(t, err)
 	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeaf(testVMID)
-	require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0o700))
+	require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0o755))
 
 	lease, present, err := prepared.BindForCleanup(t.Context())
 	require.Error(t, err)

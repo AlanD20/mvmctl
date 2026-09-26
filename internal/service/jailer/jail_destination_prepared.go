@@ -259,7 +259,9 @@ func (prepared *preparedJailDestination) bindAfterHandoff(
 		ctx,
 		jailDestinationRoot,
 		"root",
-		unix.S_IFDIR|0755,
+		unix.S_IFDIR|0700,
+		ownerUID,
+		ownerGID,
 		unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW,
 	); err != nil {
 		return nil, err
@@ -283,7 +285,7 @@ func (prepared *preparedJailDestination) bindAfterHandoff(
 	if err := state.deps.fstat(ctx, executableFD, &executableStat); err != nil {
 		return nil, processAuthorityError(state.vmID, "inspect copied Firecracker before sealing", err)
 	}
-	if executableStat.Dev == 0 || executableStat.Ino == 0 || executableStat.Mode != unix.S_IFREG|0755 ||
+	if executableStat.Dev == 0 || executableStat.Ino == 0 || executableStat.Mode != unix.S_IFREG|0700 ||
 		executableStat.Uid != ownerUID || executableStat.Gid != ownerGID || executableStat.Nlink != 1 ||
 		executableStat.Size <= 0 || uint64(executableStat.Size) > maxProcessSystemExecutableBytes {
 		return nil, processAuthorityError(state.vmID, "copied Firecracker pre-seal metadata is invalid", nil)
@@ -315,18 +317,19 @@ func (lease *jailDestinationLease) seal(ctx context.Context, ownerUID, ownerGID 
 	}
 	root := state.bindings[2]
 	executable := state.bindings[3]
-	if err := requireJailDestinationBinding(ctx, state, root, unix.S_IFDIR|0755, 0, 0, false, false); err != nil {
+	if err := requireJailDestinationBinding(ctx, state, root, unix.S_IFDIR|0700,
+		ownerUID, ownerGID, false, false); err != nil {
 		return err
 	}
 	if err := requireJailDestinationBinding(
 		ctx,
 		state,
 		executable,
-		unix.S_IFREG|0755,
+		unix.S_IFREG|0700,
 		ownerUID,
 		ownerGID,
 		true,
-		true,
+		false,
 	); err != nil {
 		return err
 	}

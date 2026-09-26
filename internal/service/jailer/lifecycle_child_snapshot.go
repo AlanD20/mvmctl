@@ -10,7 +10,10 @@ import (
 // The authenticated root producer sends exactly two immutable capture FDs.
 // 0444 grants the isolated VMM read access only through its private mount tree;
 // the host capture directory remains root-only and no writable aliases exist.
-func mountLaunchChildSnapshot(ctx context.Context, rootFD, configFD, stateFD, memoryFD int) (returnErr error) {
+func mountLaunchChildSnapshot(
+	ctx context.Context,
+	rootFD, configFD, stateFD, memoryFD, stateMountFD, memoryMountFD int,
+) (returnErr error) {
 	encoded, err := readSealedLaunchDeviceConfig(ctx, configFD)
 	if err != nil {
 		return err
@@ -36,9 +39,10 @@ func mountLaunchChildSnapshot(ctx context.Context, rootFD, configFD, stateFD, me
 	}
 	defer func() { returnErr = errors.Join(returnErr, unix.Close(directory)) }()
 	for _, source := range []struct {
-		name string
-		fd   int
-	}{{"vmstate", stateFD}, {"memory", memoryFD}} {
+		name    string
+		fd      int
+		mountFD int
+	}{{"vmstate", stateFD, stateMountFD}, {"memory", memoryFD, memoryMountFD}} {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -56,7 +60,7 @@ func mountLaunchChildSnapshot(ctx context.Context, rootFD, configFD, stateFD, me
 		if source.name == "memory" && before.size != memoryBytes {
 			return instanceValidationError("snapshot memory length differs from captured RAM")
 		}
-		if err := mountLaunchChildResource(ctx, source.fd, directory, source.name, true, false); err != nil {
+		if err := mountLaunchChildResource(ctx, source.mountFD, directory, source.name, false, false); err != nil {
 			return err
 		}
 		after, err := stableManagedVMConfigStat(ctx, realManagedFirecrackerConfigDeps(), source.fd)

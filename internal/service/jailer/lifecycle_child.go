@@ -167,7 +167,8 @@ func authenticateLaunchChildParent(ctx context.Context) error {
 
 func receiveLaunchChildPlan(ctx context.Context) (_ launchChildPlan, descriptors []int, returnErr error) {
 	packet := make([]byte, launchChildPacketLimit+1)
-	control := make([]byte, unix.CmsgSpace((childBaseDescriptors+5+managedMMIOMaxInterruptSlots)*4))
+	control := make([]byte, unix.CmsgSpace((childBaseDescriptors+5+managedMMIOMaxInterruptSlots+
+		5+4+managedMMIOMaxInterruptSlots)*4))
 	for {
 		if err := ctx.Err(); err != nil {
 			return launchChildPlan{}, nil, err
@@ -296,19 +297,7 @@ func validateLaunchChildPlan(plan launchChildPlan, descriptors []int) error {
 	if err := validateManagedVMCgroupLimits(plan.Limits); err != nil {
 		return err
 	}
-	want := childBaseDescriptors + len(plan.Volumes)
-	if plan.RestoreMemory {
-		want += 2
-	}
-	if plan.CloudInit {
-		want++
-	}
-	if plan.Metrics {
-		want++
-	}
-	if plan.Console {
-		want++
-	}
+	want := launchChildSourceDescriptorCount(plan) + launchChildMountDescriptorCount(plan)
 	if len(descriptors) != want {
 		return instanceValidationError("launch child setup has unexpected descriptor count")
 	}
@@ -325,20 +314,18 @@ func prepareLaunchChildMounts(ctx context.Context, plan launchChildPlan, fds []i
 		return processAuthorityError(plan.VMID, "make launch mount propagation private", err)
 	}
 	unix.Umask(0)
-	var parent unix.Stat_t
-	if err := unix.Fstat(fds[childJailParent], &parent); err != nil {
-		return err
+	jailParentFD, err := reopenLaunchChildJailParent(ctx, fds[childJailParent])
+	if err != nil {
+		return processAuthorityError(plan.VMID, "reopen fixed jail parent in private mount namespace", err)
 	}
-	if parent.Mode != unix.S_IFDIR|0700 || parent.Uid != 0 || parent.Gid != 0 {
-		return processAuthorityError(plan.VMID, "invalid retained jail parent", nil)
-	}
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(jailParentFD)) }()
 	// CRITICAL: The root child alone creates the fresh VM tree after the parent's final
 	// absence check. EEXIST is never adopted, even when an existing tree appears correctly owned.
-	if err := unix.Mkdirat(fds[childJailParent], plan.VMID, 0700); err != nil {
+	if err := unix.Mkdirat(jailParentFD, plan.VMID, 0700); err != nil {
 		return processAuthorityError(plan.VMID, "create exclusive jail VM directory", err)
 	}
 	vmFD, err := unix.Openat(
-		fds[childJailParent],
+		jailParentFD,
 		plan.VMID,
 		unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW,
 		0,
@@ -363,59 +350,77 @@ func prepareLaunchChildMounts(ctx context.Context, plan launchChildPlan, fds []i
 		return err
 	}
 	defer func() { returnErr = errors.Join(returnErr, unix.Close(runFD)) }()
+	mountFDs := fds[launchChildSourceDescriptorCount(plan):]
 	if err := unix.Mkdirat(runFD, "mvm", 0755); err != nil {
-		return err
+		return processAuthorityError(plan.VMID, "create sealed launch configuration mountpoint", err)
+	}
+	if err := mountLaunchChildResource(ctx, mountFDs[2], runFD, "mvm", true, true); err != nil {
+		return processAuthorityError(plan.VMID, "mount sealed launch configuration directory", err)
 	}
 	mvmFD, err := unix.Openat(runFD, "mvm", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}
 	defer func() { returnErr = errors.Join(returnErr, unix.Close(mvmFD)) }()
+	var configRoot unix.Stat_t
+	if err := unix.Fstat(mvmFD, &configRoot); err != nil {
+		return err
+	}
+	if configRoot.Mode != unix.S_IFDIR|0755 || configRoot.Uid != 0 || configRoot.Gid != 0 {
+		return processAuthorityError(plan.VMID, "mounted launch configuration directory has unsafe metadata", nil)
+	}
 	mounts := []struct {
-		source, parent      int
-		name                string
-		readOnly, directory bool
+		mount, parent int
+		name          string
+		directory     bool
+		existing      bool
 	}{
-		{fds[childRootfs], rootFD, "rootfs", false, false},
-		{fds[childKernel], rootFD, "kernel", true, false},
-		{fds[childConfig], mvmFD, infra.VMFirecrackerConfigFilename, true, false},
-		{fds[childRuntime], rootFD, "vmm-runtime", false, true},
-		{fds[childLog], mvmFD, infra.VMFirecrackerLogFilename, false, false},
+		{mountFDs[0], rootFD, "rootfs", false, false},
+		{mountFDs[1], rootFD, "kernel", false, false},
+		{mountFDs[3], rootFD, "vmm-runtime", true, false},
+		{mountFDs[4], mvmFD, infra.VMFirecrackerLogFilename, false, true},
 	}
 	extra := childBaseDescriptors
+	mountExtra := 5
 	if plan.CloudInit {
 		mounts = append(mounts, struct {
-			source, parent      int
-			name                string
-			readOnly, directory bool
+			mount, parent int
+			name          string
+			directory     bool
+			existing      bool
 		}{
-			fds[extra], rootFD, infra.VMCloudInitISOFilename, true, false})
+			mountFDs[mountExtra], rootFD, infra.VMCloudInitISOFilename, false, false})
 		extra++
+		mountExtra++
 	}
 	if plan.Metrics {
 		mounts = append(mounts, struct {
-			source, parent      int
-			name                string
-			readOnly, directory bool
+			mount, parent int
+			name          string
+			directory     bool
+			existing      bool
 		}{
-			fds[extra], mvmFD, infra.VMFirecrackerMetricsFilename, false, false})
+			mountFDs[mountExtra], mvmFD, infra.VMFirecrackerMetricsFilename, false, true})
 		extra++
+		mountExtra++
 	}
 	for _, mount := range mounts {
 		if err := mountLaunchChildResource(
 			ctx,
-			mount.source,
+			mount.mount,
 			mount.parent,
 			mount.name,
-			mount.readOnly,
 			mount.directory,
+			mount.existing,
 		); err != nil {
 			return processAuthorityError(plan.VMID, "mount fixed jail resource "+mount.name, err)
 		}
 	}
-	if err := mountLaunchChildVolumes(ctx, plan, rootFD, fds[extra:extra+len(plan.Volumes)]); err != nil {
+	if err := mountLaunchChildVolumes(ctx, plan, rootFD, fds[extra:extra+len(plan.Volumes)],
+		mountFDs[mountExtra:mountExtra+len(plan.Volumes)]); err != nil {
 		return err
 	}
+	mountExtra += len(plan.Volumes)
 	if plan.RestoreMemory {
 		if err := mountLaunchChildSnapshot(
 			ctx,
@@ -423,6 +428,8 @@ func prepareLaunchChildMounts(ctx context.Context, plan launchChildPlan, fds []i
 			fds[childConfig],
 			fds[extra+len(plan.Volumes)],
 			fds[extra+len(plan.Volumes)+1],
+			mountFDs[mountExtra],
+			mountFDs[mountExtra+1],
 		); err != nil {
 			return err
 		}
@@ -441,9 +448,9 @@ func prepareLaunchChildMounts(ctx context.Context, plan launchChildPlan, fds []i
 
 func mountLaunchChildResource(
 	ctx context.Context,
-	source, parent int,
+	mountFD, parent int,
 	name string,
-	readOnly, directory bool,
+	directory, existing bool,
 ) (returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -451,10 +458,14 @@ func mountLaunchChildResource(
 	var target int
 	var err error
 	if directory {
-		if err := unix.Mkdirat(parent, name, 0700); err != nil {
-			return err
+		if !existing {
+			if err := unix.Mkdirat(parent, name, 0700); err != nil {
+				return fmt.Errorf("create jail mount directory: %w", err)
+			}
 		}
 		target, err = unix.Openat(parent, name, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	} else if existing {
+		target, err = unix.Openat(parent, name, unix.O_PATH|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	} else {
 		target, err = unix.Openat(
 			parent,
@@ -464,22 +475,29 @@ func mountLaunchChildResource(
 		)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("open jail mount target: %w", err)
 	}
 	defer func() { returnErr = errors.Join(returnErr, unix.Close(target)) }()
-	mountFD, err := unix.OpenTree(source, "", uint(unix.OPEN_TREE_CLONE|unix.OPEN_TREE_CLOEXEC|unix.AT_EMPTY_PATH))
-	if err != nil {
-		return err
+	if existing {
+		var placeholder unix.Stat_t
+		if err := unix.Fstat(target, &placeholder); err != nil {
+			return err
+		}
+		wantMode := uint32(unix.S_IFREG | 0600)
+		if directory {
+			wantMode = unix.S_IFDIR | 0755
+		}
+		if placeholder.Mode != wantMode || placeholder.Uid != 0 || placeholder.Gid != 0 ||
+			(!directory && (placeholder.Nlink != 1 || placeholder.Size != 0)) {
+			return instanceValidationError("launch config mount placeholder has unsafe metadata")
+		}
 	}
-	defer func() { returnErr = errors.Join(returnErr, unix.Close(mountFD)) }()
-	attributes := uint64(unix.MOUNT_ATTR_NOSUID | unix.MOUNT_ATTR_NODEV | unix.MOUNT_ATTR_NOEXEC)
-	if readOnly {
-		attributes |= unix.MOUNT_ATTR_RDONLY
+	if err := unix.MoveMount(
+		mountFD, "", target, "", unix.MOVE_MOUNT_F_EMPTY_PATH|unix.MOVE_MOUNT_T_EMPTY_PATH,
+	); err != nil {
+		return fmt.Errorf("attach jail resource mount: %w", err)
 	}
-	if err := unix.MountSetattr(mountFD, "", unix.AT_EMPTY_PATH, &unix.MountAttr{Attr_set: attributes}); err != nil {
-		return err
-	}
-	return unix.MoveMount(mountFD, "", target, "", unix.MOVE_MOUNT_F_EMPTY_PATH|unix.MOVE_MOUNT_T_EMPTY_PATH)
+	return nil
 }
 
 func execLaunchChildJailer(ctx context.Context, plan launchChildPlan, fds []int, namespaceFD int) error {
@@ -493,7 +511,7 @@ func execLaunchChildJailer(ctx context.Context, plan launchChildPlan, fds []int,
 	}
 	output := fds[childConsoleLog]
 	if plan.Console {
-		output = fds[len(fds)-1]
+		output = fds[launchChildSourceDescriptorCount(plan)-1]
 	}
 	for _, target := range []int{1, 2} {
 		if err := unix.Dup3(output, target, 0); err != nil {

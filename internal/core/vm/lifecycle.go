@@ -5,12 +5,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
@@ -46,27 +44,10 @@ func (s *FirecrackerSpawner) Spawn(ctx context.Context) (returnErr error) {
 			returnErr = errors.Join(returnErr, abortErr)
 		}
 	}()
-	deadline := time.NewTimer(15 * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		connection, dialErr := (&net.Dialer{Timeout: 200 * time.Millisecond}).DialContext(ctx, "unix", s.APISocketPath)
-		if dialErr == nil {
-			return connection.Close()
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline.C:
-			return errs.WrapMsg(
-				errs.CodeFirecrackerSpawnError,
-				"committed Firecracker API did not become ready",
-				dialErr,
-			)
-		case <-ticker.C:
-		}
+	if _, err := jailersvc.NewVMAPIBrokerClient().WaitReady(ctx, jailersvc.VMAPIRequest{VMID: s.vmID()}); err != nil {
+		return errs.WrapMsg(errs.CodeFirecrackerSpawnError, "committed Firecracker API did not become ready", err)
 	}
+	return nil
 }
 
 func (s *FirecrackerSpawner) lifecycleRequest() (jailersvc.VMLaunchRequest, error) {

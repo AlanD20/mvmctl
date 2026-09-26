@@ -294,7 +294,7 @@ func dispatch(
 		return dispatchHandled, handleVMSnapshotRemove(ctx, endpoint, caller, deps.control)
 	case jailer.VMSnapshotRestoreAction:
 		return dispatchHandled, handleVMSnapshotRestore(ctx, endpoint, caller, deps.control)
-	case jailer.VMPauseAction, jailer.VMResumeAction, jailer.VMStartInstanceAction:
+	case jailer.VMAPIReadyAction, jailer.VMPauseAction, jailer.VMResumeAction, jailer.VMStartInstanceAction:
 		return dispatchHandled, handleVMAPIBroker(ctx, endpoint, caller, request.action, deps.control)
 	case jailer.HostVsockOpenAction:
 		return dispatchHandled, handleHostVsockOpen(ctx, endpoint, caller, deps.control)

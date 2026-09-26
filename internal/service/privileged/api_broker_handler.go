@@ -17,7 +17,7 @@ func handleVMAPIBroker(
 	deps controlDeps,
 ) error {
 	switch action {
-	case jailer.VMPauseAction, jailer.VMResumeAction, jailer.VMStartInstanceAction:
+	case jailer.VMAPIReadyAction, jailer.VMPauseAction, jailer.VMResumeAction, jailer.VMStartInstanceAction:
 	default:
 		return deliverOperationError(ctx, endpoint, action,
 			errs.New(errs.CodeInternal, "unsupported named VM API action"), deps)
@@ -35,6 +35,16 @@ func handleVMAPIBroker(
 		return deliverOperationError(ctx, endpoint, action, err, deps)
 	}
 	server := jailer.NewVMAPIBrokerServer()
+	if action == jailer.VMAPIReadyAction {
+		result, err := server.WaitReady(ctx, caller.uid, caller.gid, request.Body)
+		if err != nil {
+			return deliverOperationError(ctx, endpoint, action, err, deps)
+		}
+		if err := result.Validate(request.Body); err != nil {
+			return deliverOperationError(ctx, endpoint, action, err, deps)
+		}
+		return deliverOperationSuccess(ctx, endpoint, action, result, deps)
+	}
 	var result jailer.VMAPIResult
 	switch action {
 	case jailer.VMPauseAction:

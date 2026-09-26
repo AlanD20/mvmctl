@@ -886,7 +886,7 @@ func TestPreparedManagedVMCgroupRejectsUnsafeJailerLeaf(t *testing.T) {
 	tests := map[string]func(*managedVMCgroupTestFixture, *managedVMCgroupDeps){
 		"mode": func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupDeps) {
 			fixture.addVMLeaf(testVMID)
-			require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0o700))
+			require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0o755))
 		},
 		"symlink": func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupDeps) {
 			require.NoError(t, os.Symlink("elsewhere", fixture.vmLeafPath(testVMID)))

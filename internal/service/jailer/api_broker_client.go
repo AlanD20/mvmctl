@@ -10,6 +10,15 @@ func NewVMAPIBrokerClient() *VMAPIBrokerClient {
 	return &VMAPIBrokerClient{transport: NewTrustedReleaseClient()}
 }
 
+// WaitReady confirms the isolated Firecracker API peer without exposing its socket.
+func (client *VMAPIBrokerClient) WaitReady(ctx context.Context, request VMAPIRequest) (VMAPIReadyResult, error) {
+	if err := request.Validate(); err != nil {
+		return VMAPIReadyResult{}, err
+	}
+	return exchangeTrustedRelease(ctx, client.transport, VMAPIReadyAction, request, nil, 0,
+		func(result VMAPIReadyResult) error { return result.Validate(request) })
+}
+
 // Pause asks the root broker to pause one exact active VM.
 func (client *VMAPIBrokerClient) Pause(ctx context.Context, request VMAPIRequest) (VMAPIResult, error) {
 	if err := request.Validate(); err != nil {

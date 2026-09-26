@@ -7,6 +7,8 @@ import (
 )
 
 const (
+	// VMAPIReadyAction checks the protected API peer without changing VM state.
+	VMAPIReadyAction = "jailer-vm-api-ready"
 	// VMPauseAction selects the fixed Firecracker pause operation.
 	VMPauseAction = "jailer-vm-pause"
 	// VMResumeAction selects the fixed Firecracker resume operation.
@@ -18,6 +20,24 @@ const (
 // VMAPIRequest selects an owned VM without accepting any API path, method, body, or socket.
 type VMAPIRequest struct {
 	VMID string `json:"vm_id"`
+}
+
+// VMAPIReadyResult confirms that the protected socket accepted a connection
+// from the admitted Firecracker process. It does not assert guest readiness.
+type VMAPIReadyResult struct {
+	VMID  string `json:"vm_id"`
+	Ready bool   `json:"ready"`
+}
+
+// Validate rejects an unconfirmed or mismatched readiness observation.
+func (result VMAPIReadyResult) Validate(request VMAPIRequest) error {
+	if err := request.Validate(); err != nil {
+		return err
+	}
+	if result.VMID != request.VMID || !result.Ready {
+		return instanceValidationError("VM API readiness returned an unconfirmed result")
+	}
+	return nil
 }
 
 // Validate requires one canonical VM identity.

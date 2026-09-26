@@ -242,8 +242,12 @@ func processExecutableIdentityFromStat(
 	if allowRoot && stat.Uid == 0 && stat.Gid == 0 {
 		ownerMatches = true
 	}
+	wantMode := uint32(unix.S_IFREG | 0755)
+	if allowRoot && stat.Uid == ownerUID && stat.Gid == ownerGID && ownerUID != 0 {
+		wantMode = unix.S_IFREG | 0700
+	}
 	if stat.Dev == 0 || stat.Ino == 0 || stat.Size <= 0 || uint64(stat.Size) > maxProcessSystemExecutableBytes ||
-		stat.Mode != unix.S_IFREG|0755 || !ownerMatches || stat.Nlink != 1 {
+		stat.Mode != wantMode || !ownerMatches || stat.Nlink != 1 {
 		return processExecutableDescriptorIdentity{}, fmt.Errorf("executable metadata does not match trusted policy")
 	}
 	return processExecutableDescriptorIdentity{
