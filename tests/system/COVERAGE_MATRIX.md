@@ -46,7 +46,7 @@ qualification.
 | nftables-only engine | 🔴 Missing | Atomic bridge-family generation and removal of iptables/backend-selection tests and product paths. |
 | Typed `traffic` policy | 🔴 Missing | Same/cross-network default deny and exact source/protocol/port allows plus spoof/reverse/IP-reuse denials. |
 | Typed VM-to-VM `exec` policy | 🔴 Missing | Directional non-root authorization for same/cross/no-IP networks plus identity, bounds, and redaction denials. |
-| Cgroup/process identity lifecycle | 🟡 Partial | A focused installed-candidate networkless case proves the Firecracker process UID differs from root and the operator; per-VM uniqueness, root-record, pidfd, mount/cgroup cleanup, and reconciliation binding remain missing. |
+| Cgroup/process identity lifecycle | 🟡 Partial | A focused installed-candidate networkless case proves the Firecracker process UID differs from root and the operator. Blocker: unprivileged `vm inspect --json` reports cgroup `unavailable` with `failed to read VM cgroup limits` while direct `cpu.max` read gets permission denied; accurate root-brokered inspection is missing. Per-VM uniqueness, root-record, pidfd, mount/cgroup cleanup, and reconciliation binding also remain unqualified. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
 Specific legacy conflicts that must be rewritten before release:
