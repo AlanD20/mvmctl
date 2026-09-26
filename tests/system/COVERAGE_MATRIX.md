@@ -539,12 +539,12 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `host info` | ⚡ Shallow | `host/test_host.py` | `TestHostInfo` | L1 — section headers (Host:, CPU:, Memory:, Limits:, Capacity:) in human output |
-| `host info --json` | ✅ Deep | `host/test_host.py` | `TestHostInfo`, `TestHostStatusEnhanced` | L3 — verifies `virtualization` (cpu_has_vmx, nested_virt_available, ept_available, hypervisor, smt_active, modules), `hugepages` (count_2mb, free_2mb), `dependencies` (nftables, iptables, cloud_localds, dev_net_tun), `system` (cgroup_version, ksm_disabled, dev_kvm_status, user_in_kvm_group), extended `memory` (swap_total_mib, swap_used_mib), extended `kernel` (minimum_version_met) |
-| `host info --refresh` | ⚡ Shallow | `host/test_host.py` | `TestHostInfo` | L1 — re-detection produces output |
-| `host info --refresh --json` | ✅ Deep | `host/test_host.py` | `TestHostInfo`, `TestHostStatusEnhanced` | L3 — detected_at present plus all new sections (virtualization, hugepages, dependencies, system, memory swap, kernel minimum_version_met) |
-| `host status` | ⚡ Shallow | `host/test_host.py` | `TestHostStatusEnhanced` | L1 — human-readable table with Check, Status, Detail columns |
-| `host status --json` | ✅ Deep | `host/test_host.py` | `TestHostStatus`, `TestHostStatusEnhanced` | L3 — kvm_accessible (bool), required_binaries (dict), ip_forward, state_snapshot, plus `virtualization` section (modules_loaded, nested_virt, dev_net_tun, user_in_kvm_group) |
+| `host info` | ⚡ Shallow | `host/test_host.py` | `TestHostInfo` | L2 — human-readable sections plus a separate fresh-cache first-read capacity scenario |
+| `host info --json` | ✅ Deep | `host/test_host.py` | `TestHostInfo`, `TestHostStatusEnhanced` | L2 — schema-1 success envelope; CPU, virtualization, hugepages, dependencies (nftables, cloud-localds, TUN), system, memory, storage, limits, and capacity; no caller-cache-derived `setup` verdict |
+| `host info --refresh` | ⚡ Shallow | `host/test_host.py` | `TestHostInfo` | L2 — explicit re-detection through the installed candidate |
+| `host info --refresh --json` | ✅ Deep | `host/test_host.py` | `TestHostInfo`, `TestHostStatusEnhanced` | L2 — timestamp and typed nested sections through the schema-1 success envelope |
+| `host status` | ⚡ Shallow | `host/test_host.py` | `TestHostStatus` | L2 — human-readable KVM and forwarding checks |
+| `host status --json` | ✅ Deep | `host/test_host.py` | `TestHostStatus`, `TestHostStatusEnhanced` | L2 — schema-1 success envelope; `kvm_accessible`, `missing_binaries`, forwarding, live `resources`, and null `state` rather than a user-SQLite setup claim |
 | `host clean --force` | ⏭️ Skip | `host/test_host.py` | `TestHostCleanDestructive` | L1 — marked host_reset, excluded from default runs |
 | `host clean` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostCleanSafety` | L1 |
 | `host reset --force` | ⚡ Shallow | `host/test_host.py` | `TestHostCleanDestructive` | L1 — exit 0, non-empty stdout. Marked host_reset (excluded from default runs) |

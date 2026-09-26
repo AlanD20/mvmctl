@@ -217,6 +217,11 @@ The final schema includes `images`, `kernels`, `binaries`, `volumes`, `networks`
 `user_settings`, `vm_vsock_config`, `snapshots`, and `db_migrations`. Migrations may create transitional tables and
 then retire them before version 7. Read `internal/lib/db/migrations/` for the exact schema.
 
+`host_state` is a caller-owned capacity cache, not administrator setup authority. The first `mvm host info` read
+creates its row if needed; `--refresh` re-detects and updates it. Root-owned host admission and its journal remain
+under `/var/lib/mvmctl/host`. Accordingly, `host info --json` does not report a setup verdict, and the `state` field
+of `host status --json` is null rather than projecting the cache's legacy `initialized` bit as root truth.
+
 The fresh v0.3.0 schema is version 7 and has no VM-wide `remote_exec` column. Migration `007` retires empty obsolete
 firewall tracking and routed service-access policy tables and selector settings, refusing populated tables rather than
 adopting their state.

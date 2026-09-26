@@ -30,7 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > remote-exec trust flag described below are implemented.
 > The late implementation pass also composes typed schema-4 launch/cleanup, per-VM topology, cgroup and descriptor-only
 > mounts, same-boot recovery, root traffic apply/revoke, managed-network transactions, and offline ext-image shrink.
-> This code is unverified: only formatting has been performed, with no build, tests, review, or system qualification.
+> A clean checkout at `101b7c64` passed the pinned Go CI sequence and full root-effect Jailer Go package inside the
+> named `mvmctl-030-test` runner. Later host-capacity changes at `66580a71` passed focused pinned Go checks and
+> installed-candidate host Python cases there; the complete current-source CI and Python release matrix have not run.
 > Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation.
 > The mapped production integration gaps are committed; release qualification remains incomplete. Raw-volume launch,
 > host clean/reset, and typed image recovery are
@@ -979,6 +981,13 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+#### Host capacity reporting
+
+- `mvm host info` now detects and caches capacity on the first read after a clean installation; `--refresh` no longer
+  fails because administrator setup intentionally left the caller's SQLite `host_state` row absent. Host info omits a
+  setup verdict, and host status does not treat the caller-owned row as root-owned admission evidence. The 0.3 JSON
+  envelope and first-read path are covered by installed-candidate Python checks in the named runner.
+
 #### Trusted release checksum authority
 
 - Disabled HTTP/2 for the private checksum client and retained its no-reuse policy, so each sidecar request uses a fresh
@@ -1004,8 +1013,9 @@ composition is described above; the current incomplete-work inventory is under *
 
 The bounded production gap map is closed in source, including root-controlled snapshot capture/removal, the named
 privileged restore route, immutable backing with consistent data-volume snapshots, cache cleanup, typed policies,
-and structured partial results. This has no build or system qualification; additional implementation defects may
-still emerge when those gates run.
+and structured partial results. Pinned Go CI passed at `101b7c64`, but that is not current-source or full installed-
+candidate qualification. Broader Python T1/T2 journeys, GitHub CI, and the bridge-capable runner-kernel gate remain;
+additional implementation defects may still emerge.
 Approval adds no new per-volume or aggregate quota caps. Existing
 unprivileged archive construction remains outside the root service. Pressure-only memory policy v2 is implemented
 without runtime qualification; attribution of the reported OOM incident remains unresolved.
