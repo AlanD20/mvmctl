@@ -88,6 +88,13 @@ func copiedLaunchExecutableReady(
 		opened = append(opened, fd)
 		parent = fd
 	}
+	var root unix.Stat_t
+	if err := state.deps.fstat(ctx, opened[1], &root); err != nil {
+		return false, err
+	}
+	if root.Mode != unix.S_IFDIR|0700 || root.Uid != uid || root.Gid != gid {
+		return false, nil
+	}
 	var stat unix.Stat_t
 	if err := state.deps.fstat(ctx, parent, &stat); err != nil {
 		return false, err

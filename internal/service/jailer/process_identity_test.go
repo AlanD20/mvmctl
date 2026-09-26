@@ -229,6 +229,21 @@ func TestCopiedLaunchExecutableReadyAdmitsJailerPrivateCopy(t *testing.T) {
 	assert.True(t, ready, "Jailer-owned 0700 copy must be ready for root sealing")
 }
 
+func TestCopiedLaunchExecutableReadyWaitsForPrivateJailRoot(t *testing.T) {
+	fake := newPostHandoffJailDestinationFixture()
+	root := fake.stats[202][0]
+	root.Mode = unix.S_IFDIR | 0755
+	root.Uid = 0
+	root.Gid = 0
+	fake.stats[202][0] = root
+
+	ready, err := copiedLaunchExecutableReady(
+		t.Context(), fake.destination.state, testAuthorityGID, testAuthorityUID,
+	)
+	require.NoError(t, err)
+	assert.False(t, ready, "a copied executable alone must not race Jailer's private-root transition")
+}
+
 func TestBindAfterHandoffTransfersParentCloseOnceOnFailure(t *testing.T) {
 	t.Parallel()
 
