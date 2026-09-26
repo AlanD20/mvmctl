@@ -25,11 +25,11 @@ architecture is release-qualified. The authoritative release gate is `tasks/todo
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
 9 JSON/flag-invariant, 26 non-VM key, and 5 internal-service entry-point Python cases (98 total); the focused
-networkless create/stop/start/reboot/vsock case also passed. The installed binary predates `8e0be4fe`, but the
-intervening source change under `internal/`, `pkg/`, and `cmd/` was test-only. These are scoped results, **not** a
-full Python matrix or release sign-off. The current runner kernel still rejects bridge-family nftables tables, which
-blocks network/policy qualification there. Volume/snapshot consistency, host-reboot, and full Jailer system journeys
-also remain unqualified.
+networkless create/stop/start/reboot/vsock case and two raw-volume lifecycle/shrink cases also passed. The installed
+binary predates `8e0be4fe`, but the intervening source change under `internal/`, `pkg/`, and `cmd/` was test-only.
+These are scoped results, **not** a full Python matrix or release sign-off. The current runner kernel still rejects
+bridge-family nftables tables, blocking network/policy qualification there. Volume/snapshot consistency, host-reboot,
+and full Jailer system journeys also remain unqualified.
 
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
@@ -324,11 +324,9 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `volume create <size>` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — size_bytes, status=available |
-| `volume create --format qcow2` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 |
-| `volume create --format raw` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 |
+| `volume create <size>` (raw-only) | 🟡 Partial | `volume/test_volume.py` | `TestRawVolumeAuthoritativeStorage`, `TestVolumeLifecycle` | Focused installed-candidate 16 MiB create, inspect, 32 MiB grow, checked remove, and backing-file absence passed in the named runner; broader options and VM attachment remain unqualified. |
+| `volume create --format` (removed) | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_create_removed_format_flag_rejected_without_side_effects` | 0.3.0 rejects the former flag; the existing negative case still needs versioned-JSON reconciliation and execution. QCOW2 **image import** remains supported. |
 | `volume create` invalid size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
-| `volume create` invalid format | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` duplicate name | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` negative size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` zero size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
@@ -347,7 +345,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `volume rm` partial failure | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — one exists, one doesn't |
 | `volume resize` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — size_bytes matches |
 | `volume resize` nonexistent | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
-| `volume resize` shrink | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — documents behavior |
+| `volume resize` shrink | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_resize_rejects_shrink_without_changing_backing` | Focused installed-candidate 16→8 MiB rejection, successful same-size control, and unchanged authoritative size passed in the named runner. |
 | Volume invariants (available→attached→available) | ✅ Deep | `volume/test_volume.py` | `TestVolumeLifecycle` | L3 — vm_id transitions, path exists on disk |
 | Cross-VM attach rejection | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeCrossVM` | L2 — attached volume rejects second VM |
 | Volume rm with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L1 |

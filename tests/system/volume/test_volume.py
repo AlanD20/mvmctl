@@ -21,6 +21,7 @@ import pytest
 
 from tests.system.conftest import (
     _guest_run,
+    _json_success_data,
     _run_mvm,
     _unique_subnet,
     ensure_vm_deps,
@@ -514,55 +515,40 @@ class TestVolumeLifecycle:
         finally:
             _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
 
-    def test_volume_resize_shrink_documents_behavior(
+    def test_volume_resize_rejects_shrink_without_changing_backing(
         self, runner_vm: str, unique_key_name: str
     ) -> None:
-        # Rationale: Only needs a volume (1-3s). Documents whether shrink
-        # is accepted or rejected — volume-level resize behavior is
-        # independent of attachment state.
-        """Resize a volume down — documents whether shrink is accepted or rejected.
-
-        Rationale: Only needs a volume (cheap, 1-3s). No VM required since
-        volume-level resize behavior is independent of attachment state.
-        """
+        """A rejected shrink must leave the authoritative raw backing unchanged."""
         vol_name = f"sys-vol-shrink-{unique_key_name}"
+        created = False
         try:
-            _run_mvm(runner_vm, "volume", "create", vol_name, "1G")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
+            created = True
 
-            inspect = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
-            data = json.loads(inspect.stdout)
-            assert data["volume"]["size_bytes"] == 1024 * 1024 * 1024
-            assert data["volume"]["status"] == "available"
+            before = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json").stdout,
+                dict,
+            )["volume"]
+            assert before["size_bytes"] == 16 * 1024 * 1024
 
             result = _run_mvm(
-                runner_vm,
-                "volume",
-                "resize",
-                vol_name,
-                "512M",
-                check=False,
+                runner_vm, "volume", "resize", vol_name, "8M", check=False,
             )
+            assert result.returncode != 0
+            _run_mvm(runner_vm, "volume", "resize", vol_name, "16M")
 
-            inspect_after = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
-            data_after = json.loads(inspect_after.stdout)
-
-            if result.returncode == 0:
-                # Backend allowed shrink — verify size matches target
-                assert data_after["volume"]["size_bytes"] == 512 * 1024 * 1024
-            else:
-                # Backend rejected shrink — verify size unchanged
-                assert (
-                    data_after["volume"]["size_bytes"]
-                    == 1024 * 1024 * 1024
-                )
+            after = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json").stdout,
+                dict,
+            )["volume"]
+            assert after["id"] == before["id"]
+            assert after["size_bytes"] == before["size_bytes"]
         finally:
-            _run_mvm(
-                runner_vm, "volume", "rm", vol_name, "--force", check=False
-            )
+            if created:
+                removed = _run_mvm(
+                    runner_vm, "volume", "rm", vol_name, "--force", check=False,
+                )
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
 
     # ── 5. Remove / destructive operations ──────────────────────────────
 
@@ -787,6 +773,51 @@ class TestVolumeLifecycle:
                 runner_vm, "volume", "rm", vol_name, "--force", check=False
             )
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+
+
+class TestRawVolumeAuthoritativeStorage:
+    def test_create_grow_inspect_and_remove(self, runner_vm: str) -> None:
+        """The installed CLI keeps raw backing and reported size in sync across operations."""
+        name = f"sys-raw-volume-{uuid.uuid4().hex[:8]}"
+        try:
+            created = _json_success_data(
+                _run_mvm(runner_vm, "volume", "create", name, "16M", "--json").stdout,
+                dict,
+            )
+            assert created["name"] == name
+            assert created["format"] == "raw"
+            assert created["size_bytes"] == 16 * 1024 * 1024
+
+            inspected = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", name, "--json").stdout,
+                dict,
+            )["volume"]
+            assert inspected["id"] == created["id"]
+            assert inspected["size_bytes"] == created["size_bytes"]
+
+            _run_mvm(runner_vm, "volume", "resize", name, "32M")
+            grown = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", name, "--json").stdout,
+                dict,
+            )["volume"]
+            assert grown["id"] == created["id"]
+            assert grown["size_bytes"] == 32 * 1024 * 1024
+
+            _run_mvm(runner_vm, "volume", "rm", name, "--force")
+            assert _guest_run(
+                runner_vm, f"test ! -e {shlex.quote(created['path'])}", check=False,
+            ).returncode == 0
+        finally:
+            listed = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            if any(volume["name"] == name for volume in listed):
+                removed = _run_mvm(runner_vm, "volume", "rm", name, "--force", check=False)
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            listed = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            assert all(volume["name"] != name for volume in listed)
 
 
 class TestVolumeAttachDetach:
