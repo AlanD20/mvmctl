@@ -82,6 +82,9 @@ func AdministratorInit(
 		if err != nil {
 			return result, err
 		}
+		if err := ensureAdministratorJailerTree(ctx); err != nil {
+			return result, administratorFailure("prepare fixed Jailer host tree", err)
+		}
 		return result, admission.Enable(ctx)
 	}
 	if journal.Operator != operator.name || journal.UID != operator.uid || journal.GID != operator.gid {
@@ -133,6 +136,9 @@ func AdministratorInit(
 	result, err = enrollAdministratorOperator(ctx, dir, operator, journal, result)
 	if err != nil {
 		return result, err
+	}
+	if err := ensureAdministratorJailerTree(ctx); err != nil {
+		return result, administratorFailure("prepare fixed Jailer host tree", err)
 	}
 	return result, admission.Enable(ctx)
 }
