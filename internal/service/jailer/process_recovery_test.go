@@ -314,6 +314,8 @@ func TestBeginFreshRecoveryCleanupVerifiesFullIdentityAndTerminatesThroughPIDFDs
 	t.Parallel()
 
 	record, fake := activeRecoveryTestRecord(t)
+	// A real launch creates this root-owned inventory before publishing the active record.
+	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), record.ownerUID))
 	authority, recoveryDeps, identityDeps, events := newActiveRecoveryTestAuthority(t, record, fake)
 	cgroup := newManagedVMCgroupTestFixture(t)
 	cgroup.addVMLeaf(testVMID)
@@ -393,6 +395,8 @@ func TestBeginFreshRecoveryCleanupBootMismatchCleansWithoutOpeningOrSignalingPID
 	t.Parallel()
 
 	record, fake := activeRecoveryTestRecord(t)
+	// This synthetic active record needs the launch-time inventory before cleanup can complete.
+	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), record.ownerUID))
 	authority, recoveryDeps, identityDeps, events := newActiveRecoveryTestAuthority(t, record, fake)
 	identityDeps.readBootID = func(context.Context) (string, error) { return processOtherBootID, nil }
 	cgroup := newManagedVMCgroupTestFixture(t)
@@ -442,9 +446,6 @@ func newActiveRecoveryTestAuthority(
 ) (*instanceAuthority, processRecoveryDeps, processIdentityVerifierDeps, *recoveryEventLog) {
 	t.Helper()
 
-	// A real launch creates this root-owned inventory before publishing an active record.
-	// Synthetic recovery records need the same prerequisite, independent of test order.
-	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), record.ownerUID))
 	root := prepareInstanceAuthorityTestRoot(t)
 	writeTestAuthorityRecord(t, root, record)
 	authority := newInstanceAuthorityWithPolicy(
