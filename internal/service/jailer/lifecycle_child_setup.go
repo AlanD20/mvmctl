@@ -112,6 +112,7 @@ func (lease *launchLease) sendChildSetup(
 		RootfsBacking:     rootfsBinding,
 		KernelID:          string(resources.kernelID),
 		KernelBacking:     kernelBinding,
+		NetworkPlacement:  state.record.launch.networkPlacement,
 		NetworkID:         topology.NetworkID,
 		GuestIPv4:         topology.GuestIPv4.String(),
 		GuestMAC:          topology.GuestMAC,

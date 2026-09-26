@@ -219,7 +219,8 @@ func (request VMLaunchRequest) launchIntent(tap vmFirecrackerTapIdentity) vmFire
 		volumes = append(volumes, volume.private())
 	}
 	return vmFirecrackerLaunchIntent{
-		bootArgs: request.BootArgs, vcpuCount: request.VCPUs, memSizeMiB: request.MemoryMiB,
+		networkPlacement: request.NetworkPlacement,
+		bootArgs:         request.BootArgs, vcpuCount: request.VCPUs, memSizeMiB: request.MemoryMiB,
 		smt: request.SMT, trackDirtyPages: request.TrackDirtyPages, guestMAC: request.GuestMAC,
 		tapIdentity: tap, rootfsCacheType: request.RootfsCacheType, cloudInit: cloudInit,
 		enableLogging: request.Logging, logLevel: request.LogLevel, enableMetrics: request.Metrics,

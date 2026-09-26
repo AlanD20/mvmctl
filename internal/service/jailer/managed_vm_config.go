@@ -37,24 +37,25 @@ var managedVMHostDevicePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
 // vmFirecrackerLaunchIntent is the complete private authority for the Firecracker JSON currently emitted by mvmctl.
 // CRITICAL: Paths are deliberately absent. Root derives every path and admits only the exact resulting configuration.
 type vmFirecrackerLaunchIntent struct {
-	bootArgs        string
-	vcpuCount       int
-	memSizeMiB      int
-	smt             bool
-	trackDirtyPages bool
-	guestMAC        string
-	tapIdentity     vmFirecrackerTapIdentity
-	rootfsCacheType string
-	cloudInit       cloudInitPresence
-	enableLogging   bool
-	logLevel        string
-	enableMetrics   bool
-	cpuConfig       *model.CpuConfig
-	vsockCID        *uint32
-	volumes         []vmVolumeResourceSpec
-	deviceProfile   *vmFirecrackerDeviceProfile
-	pciEnabled      bool
-	nestedVirt      bool
+	networkPlacement model.VMNetworkPlacement
+	bootArgs         string
+	vcpuCount        int
+	memSizeMiB       int
+	smt              bool
+	trackDirtyPages  bool
+	guestMAC         string
+	tapIdentity      vmFirecrackerTapIdentity
+	rootfsCacheType  string
+	cloudInit        cloudInitPresence
+	enableLogging    bool
+	logLevel         string
+	enableMetrics    bool
+	cpuConfig        *model.CpuConfig
+	vsockCID         *uint32
+	volumes          []vmVolumeResourceSpec
+	deviceProfile    *vmFirecrackerDeviceProfile
+	pciEnabled       bool
+	nestedVirt       bool
 }
 
 // vmFirecrackerTapIdentity is deliberately not constructible from the wire. The root topology authority supplies
@@ -180,12 +181,28 @@ func marshalVMFirecrackerLaunchIntent(intent vmFirecrackerLaunchIntent) ([]byte,
 	if intent.memSizeMiB < infra.MemMinMB || intent.memSizeMiB > infra.MemMaxMB {
 		return nil, managedVMResourceValidationError("managed Firecracker memory is outside the supported range")
 	}
-	mac, err := net.ParseMAC(intent.guestMAC)
-	if err != nil || len(mac) != 6 || mac.String() != intent.guestMAC {
-		return nil, managedVMResourceValidationError("managed Firecracker guest MAC is not canonical")
-	}
-	if !managedVMHostDevicePattern.MatchString(intent.tapIdentity.name) {
-		return nil, managedVMResourceValidationError("managed Firecracker TAP identity is invalid")
+	switch intent.networkPlacement {
+	case model.VMNetworkPlacementManaged:
+		mac, err := net.ParseMAC(intent.guestMAC)
+		if err != nil || len(mac) != 6 || mac.String() != intent.guestMAC {
+			return nil, managedVMResourceValidationError("managed Firecracker guest MAC is not canonical")
+		}
+		if !managedVMHostDevicePattern.MatchString(intent.tapIdentity.name) {
+			return nil, managedVMResourceValidationError("managed Firecracker TAP identity is invalid")
+		}
+	case model.VMNetworkPlacementNetworkless:
+		if intent.guestMAC != "" || intent.tapIdentity.name != "" {
+			return nil, managedVMResourceValidationError("networkless Firecracker intent contains a managed endpoint")
+		}
+		for argument := range strings.FieldsSeq(intent.bootArgs) {
+			if strings.HasPrefix(argument, "ip=") || strings.HasPrefix(argument, "ds=") {
+				return nil, managedVMResourceValidationError(
+					"networkless Firecracker boot arguments configure networking",
+				)
+			}
+		}
+	default:
+		return nil, managedVMResourceValidationError("Firecracker network placement is invalid")
 	}
 	if intent.rootfsCacheType != model.CacheTypeUnsafe && intent.rootfsCacheType != model.CacheTypeWriteback {
 		return nil, managedVMResourceValidationError("managed Firecracker rootfs cache type is invalid")
@@ -294,16 +311,19 @@ func buildManagedFirecrackerConfig(intent vmFirecrackerLaunchIntent) managedFire
 		})
 	}
 	config := managedFirecrackerConfig{
-		BootSource: managedFirecrackerBootSource{BootArgs: intent.bootArgs, KernelImagePath: "/kernel"},
-		Drives:     drives,
-		NetworkInterfaces: []managedFirecrackerNetworkInterface{{
-			IfaceID: "eth0", GuestMAC: intent.guestMAC, HostDevName: intent.tapIdentity.name,
-		}},
+		BootSource:        managedFirecrackerBootSource{BootArgs: intent.bootArgs, KernelImagePath: "/kernel"},
+		Drives:            drives,
+		NetworkInterfaces: []managedFirecrackerNetworkInterface{},
 		MachineConfig: managedFirecrackerMachineConfig{
 			VCPUCount: intent.vcpuCount, MemSizeMiB: intent.memSizeMiB,
 			SMT: intent.smt, TrackDirtyPages: intent.trackDirtyPages,
 		},
 		CPUConfig: cloneManagedCPUConfig(intent.cpuConfig),
+	}
+	if intent.networkPlacement == model.VMNetworkPlacementManaged {
+		config.NetworkInterfaces = append(config.NetworkInterfaces, managedFirecrackerNetworkInterface{
+			IfaceID: "eth0", GuestMAC: intent.guestMAC, HostDevName: intent.tapIdentity.name,
+		})
 	}
 	if intent.enableLogging {
 		config.Logger = &managedFirecrackerLogger{

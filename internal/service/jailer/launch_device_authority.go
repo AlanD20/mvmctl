@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
+	"net/netip"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -34,6 +37,7 @@ type vmLaunchDeviceAuthority struct {
 	KernelBacking     protectedBackingBinding  `json:"kernel_backing"`
 	CloudInitBacking  *protectedBackingBinding `json:"cloud_init_backing,omitempty"`
 	CgroupLimits      model.VMCgroupLimits     `json:"cgroup_limits"`
+	NetworkPlacement  model.VMNetworkPlacement `json:"network_placement"`
 	NetworkID         string                   `json:"network_id"`
 	GuestIPv4         string                   `json:"guest_ipv4"`
 	GuestMAC          string                   `json:"guest_mac"`
@@ -91,10 +95,11 @@ func writeVMLaunchDeviceAuthority(
 		KernelBacking:     plan.KernelBacking,
 		CloudInitBacking:  plan.CloudInitBacking,
 		CgroupLimits:      plan.Limits,
+		NetworkPlacement:  plan.NetworkPlacement,
 		NetworkID:         plan.NetworkID,
 		GuestIPv4:         plan.GuestIPv4,
 		GuestMAC:          plan.GuestMAC,
-		Schema:            2,
+		Schema:            3,
 		VMID:              plan.VMID,
 		OwnerUID:          plan.OwnerUID,
 		ExecutionUID:      plan.UID,
@@ -244,6 +249,7 @@ func readVMLaunchDeviceAuthority(
 		return vmLaunchDeviceAuthority{}, err
 	}
 	if metadata.VMID != record.vmID || metadata.OwnerUID != record.ownerUID ||
+		metadata.NetworkPlacement != record.launch.networkPlacement ||
 		metadata.ExecutionUID != record.launch.executionIdentity.uid || metadata.ExecutionGID != record.launch.executionIdentity.gid ||
 		metadata.HostBootID != record.launch.hostBootID || metadata.LaunchGeneration != record.launchGeneration ||
 		metadata.Release.Version != record.launch.release.version ||
@@ -254,6 +260,11 @@ func readVMLaunchDeviceAuthority(
 }
 
 func (metadata vmLaunchDeviceAuthority) validate() error {
+	if err := validateLaunchDevicePlacement(
+		metadata.NetworkPlacement, metadata.NetworkID, metadata.GuestIPv4, metadata.GuestMAC,
+	); err != nil {
+		return err
+	}
 	if !authorityHashPattern.MatchString(metadata.FirecrackerSHA256) ||
 		!authorityHashPattern.MatchString(metadata.JailerSHA256) {
 		return instanceValidationError("launch device release hashes are incomplete")
@@ -271,7 +282,7 @@ func (metadata vmLaunchDeviceAuthority) validate() error {
 		metadata.KernelBacking.ownerUID != metadata.OwnerUID {
 		return instanceValidationError("launch protected kernel metadata differs")
 	}
-	if metadata.Schema != 2 || !vmIDPattern.MatchString(metadata.VMID) || metadata.OwnerUID == 0 ||
+	if metadata.Schema != 3 || !vmIDPattern.MatchString(metadata.VMID) || metadata.OwnerUID == 0 ||
 		metadata.ExecutionUID == 0 || metadata.ExecutionUID == metadata.OwnerUID || metadata.ExecutionGID == 0 ||
 		metadata.HostBootID == "" || metadata.LaunchGeneration == 0 ||
 		!isCanonicalManagedResourceID(metadata.ConfigSHA256, 64) {
@@ -335,9 +346,29 @@ func (metadata vmLaunchDeviceAuthority) matchesConfig(config managedFirecrackerC
 	}
 	if len(config.Drives) != want || config.Drives[0].DriveID != "rootfs" ||
 		config.Drives[0].PathOnHost != "/rootfs" || !config.Drives[0].IsRootDevice ||
-		len(config.NetworkInterfaces) != 1 || (config.Vsock != nil) != metadata.Vsock ||
+		(config.Vsock != nil) != metadata.Vsock ||
 		config.BootSource.BootArgs != metadata.BootArgs {
 		return instanceValidationError("launch device authority differs from sealed device topology")
+	}
+	switch metadata.NetworkPlacement {
+	case model.VMNetworkPlacementManaged:
+		if len(config.NetworkInterfaces) != 1 ||
+			config.NetworkInterfaces[0].IfaceID != "eth0" ||
+			config.NetworkInterfaces[0].GuestMAC != metadata.GuestMAC ||
+			!managedVMHostDevicePattern.MatchString(config.NetworkInterfaces[0].HostDevName) {
+			return instanceValidationError("launch managed endpoint differs from sealed configuration")
+		}
+	case model.VMNetworkPlacementNetworkless:
+		if len(config.NetworkInterfaces) != 0 || config.NetworkInterfaces == nil {
+			return instanceValidationError("launch networkless configuration contains a guest NIC")
+		}
+		for argument := range strings.FieldsSeq(config.BootSource.BootArgs) {
+			if strings.HasPrefix(argument, "ip=") || strings.HasPrefix(argument, "ds=") {
+				return instanceValidationError("launch networkless configuration contains network boot arguments")
+			}
+		}
+	default:
+		return instanceValidationError("launch device network placement is invalid")
 	}
 	start := 1
 	if metadata.CloudInit {
@@ -354,6 +385,33 @@ func (metadata vmLaunchDeviceAuthority) matchesConfig(config managedFirecrackerC
 			drive.CacheType != volume.Selection.CacheType || drive.IOEngine != "Sync" || drive.Partuuid != nil {
 			return instanceValidationError("launch volume authority differs from sealed configuration")
 		}
+	}
+	return nil
+}
+
+func validateLaunchDevicePlacement(
+	placement model.VMNetworkPlacement,
+	networkID, guestIPv4, guestMAC string,
+) error {
+	switch placement {
+	case model.VMNetworkPlacementManaged:
+		if !driveIDPattern.MatchString(networkID) {
+			return instanceValidationError("launch managed network identity is invalid")
+		}
+		ip, err := netip.ParseAddr(guestIPv4)
+		if err != nil || !ip.Is4() || ip.String() != guestIPv4 {
+			return instanceValidationError("launch managed guest IPv4 is not canonical")
+		}
+		mac, err := net.ParseMAC(guestMAC)
+		if err != nil || len(mac) != 6 || mac.String() != guestMAC {
+			return instanceValidationError("launch managed guest MAC is not canonical")
+		}
+	case model.VMNetworkPlacementNetworkless:
+		if networkID != "" || guestIPv4 != "" || guestMAC != "" {
+			return instanceValidationError("launch networkless placement contains a managed endpoint")
+		}
+	default:
+		return instanceValidationError("launch device network placement is invalid")
 	}
 	return nil
 }

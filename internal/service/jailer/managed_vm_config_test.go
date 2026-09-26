@@ -724,18 +724,19 @@ func TestValidateVMFirecrackerLaunchIntentRejectsForgedValues(t *testing.T) {
 func TestBuildManagedFirecrackerConfigDerivesCompleteClosedConfiguration(t *testing.T) {
 	vsockCID := uint32(42)
 	intent := vmFirecrackerLaunchIntent{
-		bootArgs:        "console=ttyS0 reboot=k panic=1",
-		vcpuCount:       2,
-		memSizeMiB:      512,
-		smt:             true,
-		trackDirtyPages: true,
-		guestMAC:        "06:00:00:00:00:01",
-		tapIdentity:     vmFirecrackerTapIdentity{name: "mvtap012345678"},
-		rootfsCacheType: model.CacheTypeWriteback,
-		cloudInit:       cloudInitPresent,
-		enableLogging:   true,
-		logLevel:        "Info",
-		enableMetrics:   true,
+		networkPlacement: model.VMNetworkPlacementManaged,
+		bootArgs:         "console=ttyS0 reboot=k panic=1",
+		vcpuCount:        2,
+		memSizeMiB:       512,
+		smt:              true,
+		trackDirtyPages:  true,
+		guestMAC:         "06:00:00:00:00:01",
+		tapIdentity:      vmFirecrackerTapIdentity{name: "mvtap012345678"},
+		rootfsCacheType:  model.CacheTypeWriteback,
+		cloudInit:        cloudInitPresent,
+		enableLogging:    true,
+		logLevel:         "Info",
+		enableMetrics:    true,
 		cpuConfig: &model.CpuConfig{
 			KvmCapabilities: []string{"KVM_CAP_ONE_REG"},
 		},
@@ -773,6 +774,54 @@ func TestBuildManagedFirecrackerConfigDerivesCompleteClosedConfiguration(t *test
 
 	if diff := cmp.Diff(want, buildManagedFirecrackerConfig(intent)); diff != "" {
 		t.Errorf("closed Firecracker configuration mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestNetworklessFirecrackerConfigRetainsVsockWithoutNIC(t *testing.T) {
+	intent := testVMFirecrackerLaunchIntent(cloudInitAbsent)
+	intent.networkPlacement = model.VMNetworkPlacementNetworkless
+	intent.guestMAC = ""
+	intent.tapIdentity = vmFirecrackerTapIdentity{}
+
+	raw, err := marshalVMFirecrackerLaunchIntent(intent)
+	require.NoError(t, err)
+	config, err := decodeManagedFirecrackerConfig(raw)
+	require.NoError(t, err)
+	if diff := cmp.Diff([]managedFirecrackerNetworkInterface{}, config.NetworkInterfaces); diff != "" {
+		t.Errorf("networkless NIC inventory mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(
+		&managedFirecrackerVsock{GuestCID: 42, UDSPath: "/vmm-runtime/vsock.sock"},
+		config.Vsock,
+	); diff != "" {
+		t.Errorf("networkless vsock mismatch (-want +got):\n%s", diff)
+	}
+	assert.Equal(t, "console=ttyS0 reboot=k panic=1", config.BootSource.BootArgs)
+}
+
+func TestNetworklessFirecrackerIntentRejectsManagedEndpointAndBootArgs(t *testing.T) {
+	tests := map[string]func(*vmFirecrackerLaunchIntent){
+		"guest MAC": func(intent *vmFirecrackerLaunchIntent) { intent.guestMAC = "06:00:00:00:00:01" },
+		"TAP": func(intent *vmFirecrackerLaunchIntent) {
+			intent.tapIdentity = vmFirecrackerTapIdentity{name: "mvtap012345678"}
+		},
+		"IP boot argument": func(intent *vmFirecrackerLaunchIntent) { intent.bootArgs += " ip=dhcp" },
+		"NoCloud NET boot argument": func(intent *vmFirecrackerLaunchIntent) {
+			intent.bootArgs += " ds=nocloud-net;s=http://169.254.0.1/"
+		},
+		"omitted placement": func(intent *vmFirecrackerLaunchIntent) { intent.networkPlacement = "" },
+		"unknown placement": func(intent *vmFirecrackerLaunchIntent) { intent.networkPlacement = "untrusted" },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			intent := testVMFirecrackerLaunchIntent(cloudInitAbsent)
+			intent.networkPlacement = model.VMNetworkPlacementNetworkless
+			intent.guestMAC = ""
+			intent.tapIdentity = vmFirecrackerTapIdentity{}
+			mutate(&intent)
+			_, err := marshalVMFirecrackerLaunchIntent(intent)
+			requireManagedVMResourceDomainErrorCode(t, err, errs.CodeValidationFailed)
+		})
 	}
 }
 
@@ -1324,16 +1373,17 @@ func TestPrepareManagedFirecrackerConfigStopsBeforeMemfdWhenSourceCloseFails(t *
 func testVMFirecrackerLaunchIntent(cloudInit cloudInitPresence) vmFirecrackerLaunchIntent {
 	vsockCID := uint32(42)
 	return vmFirecrackerLaunchIntent{
-		bootArgs:        "console=ttyS0 reboot=k panic=1",
-		vcpuCount:       2,
-		memSizeMiB:      512,
-		guestMAC:        "06:00:00:00:00:01",
-		tapIdentity:     vmFirecrackerTapIdentity{name: "mvtap012345678"},
-		rootfsCacheType: model.CacheTypeWriteback,
-		cloudInit:       cloudInit,
-		enableLogging:   true,
-		logLevel:        "Info",
-		enableMetrics:   true,
+		networkPlacement: model.VMNetworkPlacementManaged,
+		bootArgs:         "console=ttyS0 reboot=k panic=1",
+		vcpuCount:        2,
+		memSizeMiB:       512,
+		guestMAC:         "06:00:00:00:00:01",
+		tapIdentity:      vmFirecrackerTapIdentity{name: "mvtap012345678"},
+		rootfsCacheType:  model.CacheTypeWriteback,
+		cloudInit:        cloudInit,
+		enableLogging:    true,
+		logLevel:         "Info",
+		enableMetrics:    true,
 		cpuConfig: &model.CpuConfig{
 			KvmCapabilities: []string{"KVM_CAP_ONE_REG"},
 			CpuidModifiers: []model.CpuidLeafModifier{{

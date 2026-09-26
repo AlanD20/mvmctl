@@ -44,6 +44,7 @@ type launchChildPlan struct {
 	KernelBacking     protectedBackingBinding   `json:"kernel_backing"`
 	CloudInitBacking  *protectedBackingBinding  `json:"cloud_init_backing,omitempty"`
 	VolumeBackings    []protectedBackingBinding `json:"volume_backings"`
+	NetworkPlacement  model.VMNetworkPlacement  `json:"network_placement"`
 	NetworkID         string                    `json:"network_id"`
 	GuestIPv4         string                    `json:"guest_ipv4"`
 	GuestMAC          string                    `json:"guest_mac"`
@@ -278,6 +279,11 @@ func validateLaunchChildPlan(plan launchChildPlan, descriptors []int) error {
 		plan.OwnerUID == 0 ||
 		plan.OwnerUID == plan.UID {
 		return instanceValidationError("launch child setup identity is invalid")
+	}
+	if err := validateLaunchDevicePlacement(
+		plan.NetworkPlacement, plan.NetworkID, plan.GuestIPv4, plan.GuestMAC,
+	); err != nil {
+		return err
 	}
 	if err := validateInstanceCaller(instanceCaller{uid: plan.UID, gid: plan.GID}); err != nil {
 		return err
