@@ -30,9 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > remote-exec trust flag described below are implemented.
 > The late implementation pass also composes typed schema-4 launch/cleanup, per-VM topology, cgroup and descriptor-only
 > mounts, same-boot recovery, root traffic apply/revoke, managed-network transactions, and offline ext-image shrink.
-> A clean checkout at `101b7c64` passed the pinned Go CI sequence and full root-effect Jailer Go package inside the
-> named `mvmctl-030-test` runner. Later host-capacity changes at `66580a71` passed focused pinned Go checks and
-> installed-candidate host Python cases there; the complete current-source CI and Python release matrix have not run.
+> A clean checkout at `3cef1c41` passed the pinned Go 1.26.3 CI checks and full root-effect Jailer Go package inside
+> the named `mvmctl-030-test` runner, using a previously installed, verified golines v0.13.0 binary because the runner
+> is offline. The host-capacity fix at `66580a71` also passed focused pinned Go checks and installed-candidate host
+> Python cases there. The broader installed-candidate Python release matrix has not run.
 > Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation.
 > The mapped production integration gaps are committed; release qualification remains incomplete. Raw-volume launch,
 > host clean/reset, and typed image recovery are
@@ -1013,8 +1014,9 @@ composition is described above; the current incomplete-work inventory is under *
 
 The bounded production gap map is closed in source, including root-controlled snapshot capture/removal, the named
 privileged restore route, immutable backing with consistent data-volume snapshots, cache cleanup, typed policies,
-and structured partial results. Pinned Go CI passed at `101b7c64`, but that is not current-source or full installed-
-candidate qualification. Broader Python T1/T2 journeys, GitHub CI, and the bridge-capable runner-kernel gate remain;
+and structured partial results. Pinned Go CI and the full root-effect Jailer package passed at `3cef1c41`, but that is
+not full installed-candidate qualification. Broader Python T1/T2 journeys, GitHub CI, and the bridge-capable runner-
+kernel gate remain;
 additional implementation defects may still emerge.
 Approval adds no new per-volume or aggregate quota caps. Existing
 unprivileged archive construction remains outside the root service. Pressure-only memory policy v2 is implemented
