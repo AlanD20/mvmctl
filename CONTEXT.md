@@ -215,18 +215,21 @@ Defined in `internal/lib/db/migrations/*.sql`. Accessed via `github.com/jmoiron/
 The final schema includes `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`,
 `host_state`, `host_state_changes`, `network_traffic_policies`, `vm_traffic_policies`, `exec_policies`, `ssh_keys`,
 `user_settings`, `vm_vsock_config`, `snapshots`, and `db_migrations`. Migrations may create transitional tables and
-then retire them before version 7. Read `internal/lib/db/migrations/` for the exact schema.
+then retire them before version 7. Read `internal/lib/db/migrations/` for the exact schema. The fresh version-8
+`vm_instances` row records `managed` or `networkless` placement explicitly. A managed row retains a real network
+foreign key, IPv4, and MAC; a networkless row stores a SQL `NULL` network ID and empty endpoint fields.
 
 `host_state` is a caller-owned capacity cache, not administrator setup authority. The first `mvm host info` read
 creates its row if needed; `--refresh` re-detects and updates it. Root-owned host admission and its journal remain
 under `/var/lib/mvmctl/host`. Accordingly, `host info --json` does not report a setup verdict, and the `state` field
 of `host status --json` is null rather than projecting the cache's legacy `initialized` bit as root truth.
 
-The fresh v0.3.0 schema is version 7 and has no VM-wide `remote_exec` column. Migration `007` retires empty obsolete
+The fresh v0.3.0 schema is version 8 and has no VM-wide `remote_exec` column. Migration `007` retires empty obsolete
 firewall tracking and routed service-access policy tables and selector settings, refusing populated tables rather than
-adopting their state.
-Schema-version 3, 4, or 5 databases that
-still contain that removed column are legacy databases, even when every stored value is false. Both pending-migration
+adopting their state. Pending-migration inspection and migration execution reject an older VM table without the
+placement column with clean-install guidance; migration `008` also verifies that column before recording version 8.
+It does not convert an older version-7 VM table. Schema-version 3, 4, or 5 databases that still contain the removed
+`remote_exec` column are also legacy databases, even when every stored value is false. Both pending-migration
 inspection and migration application reject them with a validation-class `database.migration.failed` error before
 schema work, leaving their version and contents unchanged. v0.3.0 does not infer directional exec policies from that
 legacy bit. After stopping the old VMs and preserving desired artifacts, remove the old mvm state directory selected
@@ -559,10 +562,11 @@ references. Live-kernel qualification remains pending.
 
 ADR-0020 defines a distinct, explicitly selected networkless VM placement for the required no-IP VM-to-VM exec case.
 It still requires a root-pinned per-VM namespace and Jailer membership, but has only loopback and no managed-network
-endpoint, TAP, or guest IP/MAC. The current public create, root launch, restart, and snapshot paths require a managed
-network ID; they do not implement that variant yet. Only the Firecracker config generator now supports an explicit
-networkless no-NIC/no-`ip=` shape; the complete VM lifecycle does not. Omitting `--network` still selects the default
-managed network and must never become an implicit networkless fallback.
+endpoint, TAP, or guest IP/MAC. The user VM row can now persist the placement variant and a genuinely absent network
+foreign key, and the Firecracker config generator supports the explicit networkless no-NIC/no-`ip=` shape. Public
+create, root launch, restart, and snapshot paths still require a managed network ID; the complete networkless VM
+lifecycle is not active. Omitting `--network` still selects the default managed network and must never become an
+implicit networkless fallback.
 
 ADR-0017 fixes the L3 contract consumed by the typed root transactions. The per-VM
 namespace is an L2 extension of one managed bridge. A canonical RFC1918 IPv4 prefix is limited to `/30` or shorter;
