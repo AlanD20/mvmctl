@@ -314,7 +314,11 @@ func (prepared *preparedRelease) registerLaunching(
 			return nil, err
 		}
 		if existing.lifecycle != instanceLifecycleCleaned {
-			return nil, instanceStateError(intent.vmID, "execution identity allocation requires a cleaned instance")
+			return nil, errs.AlreadyExists(
+				errs.CodeVMAlreadyExists,
+				"vm already has live privileged authority",
+				errs.WithEntity(intent.vmID),
+			)
 		}
 	}
 	execution, err := vmLock.prepareExecutionIdentity(ctx, caller, intent.vmID)

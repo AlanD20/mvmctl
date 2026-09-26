@@ -1195,6 +1195,13 @@ func prepareTestRelease(t *testing.T, authority *instanceAuthority) *preparedRel
 
 func testActiveIdentityForLaunch(record instanceRecord, relayPresent bool) instanceActiveIdentity {
 	identity := testActiveIdentity(relayPresent)
+	execution := record.launch.executionIdentity
+	identity.userIDs = processCredentialIdentity{
+		real: execution.uid, effective: execution.uid, saved: execution.uid, filesystem: execution.uid,
+	}
+	identity.groupIDs = processCredentialIdentity{
+		real: execution.gid, effective: execution.gid, saved: execution.gid, filesystem: execution.gid,
+	}
 	identity.executable.manifestSHA256 = record.launch.release.firecrackerSHA256
 	return identity
 }
