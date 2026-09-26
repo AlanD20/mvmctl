@@ -61,6 +61,18 @@ def _remove_test_kernel_if_present(runner_vm: str, kernel_id: str) -> None:
 class TestKernelLifecycle:
     """Test kernel CRUD operations."""
 
+    def test_kernel_list_empty(self, runner_vm, tmp_path, monkeypatch):
+        """A fresh private cache returns a structured empty kernel list."""
+        tmp_path.chmod(0o700)
+        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+        _run_mvm(
+            runner_vm,
+            "init", "--non-interactive", "--skip-host", "--skip-network",
+            "--binary-version", "1.16.0", timeout=180,
+        )
+        result = _run_mvm(runner_vm, "kernel", "ls", "--json")
+        assert _json_success_data(result.stdout, list) == []
+
     @pytest.mark.slow
     @pytest.mark.kernel_build
     def test_kernel_pull(self, runner_vm):
