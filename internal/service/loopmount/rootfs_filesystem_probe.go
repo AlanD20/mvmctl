@@ -2,7 +2,9 @@ package loopmount
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 
 const (
 	rootfsBlkidPath                = "/usr/bin/blkid"
+	rootfsBlkidFallbackPath        = "/usr/sbin/blkid"
 	rootfsBlkidNoSignatureExitCode = 2
 	rootfsBlkidFailureExitCode     = 4
 	rootfsBlkidAmbivalentExitCode  = 8
@@ -231,11 +234,15 @@ func probeRootfsDeviceFilesystem(
 	if err := inspectRootfsProbeIdentity(ctx, deps, target.fd, target.identity, "before"); err != nil {
 		return "", err
 	}
+	blkidPath, err := rootfsBlkidExecutablePath()
+	if err != nil {
+		return "", err
+	}
 
 	// util-linux blkid low-level probing opens the fixed device read-only and returns 2 for no detected signature.
 	// See https://github.com/util-linux/util-linux/blob/master/misc-utils/blkid.c
 	result, runErr := deps.run(ctx, []string{
-		rootfsBlkidPath,
+		blkidPath,
 		"--probe",
 		"--no-part-details",
 		"--usages", "filesystem",
@@ -262,6 +269,35 @@ func probeRootfsDeviceFilesystem(
 		return "", rootfsAtomicError("execute filesystem probe", runErr)
 	}
 	return parseRootfsFilesystemProbeResult(result)
+}
+
+// rootfsBlkidExecutablePath admits only the two distribution-owned util-linux locations.
+// A present but invalid primary cannot fall through to another executable.
+func rootfsBlkidExecutablePath() (string, error) {
+	return selectRootfsBlkidExecutable(func(path string) (os.FileMode, error) {
+		info, err := os.Stat(path)
+		if err != nil {
+			return 0, err
+		}
+		return info.Mode(), nil
+	})
+}
+
+func selectRootfsBlkidExecutable(statMode func(string) (os.FileMode, error)) (string, error) {
+	for _, path := range [...]string{rootfsBlkidPath, rootfsBlkidFallbackPath} {
+		mode, err := statMode(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", rootfsAtomicError("inspect filesystem probe executable", err)
+		}
+		if !mode.IsRegular() || mode&0111 == 0 {
+			return "", rootfsAtomicError("filesystem probe executable is invalid", nil)
+		}
+		return path, nil
+	}
+	return "", rootfsAtomicError("filesystem probe executable is unavailable", nil)
 }
 
 func rootfsProbeTargetPath(target rootfsProbeTarget) (string, error) {

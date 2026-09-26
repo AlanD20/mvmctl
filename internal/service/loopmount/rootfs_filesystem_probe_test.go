@@ -3,6 +3,7 @@ package loopmount
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -574,10 +575,83 @@ func testRootfsProbePartitionSet(
 	}}
 }
 
+func TestSelectRootfsBlkidExecutableUsesOnlyFixedPaths(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		modes     map[string]os.FileMode
+		errors    map[string]error
+		wantPath  string
+		wantErr   string
+		wantCalls []string
+	}{
+		"primary executable wins": {
+			modes:    map[string]os.FileMode{rootfsBlkidPath: 0755, rootfsBlkidFallbackPath: 0755},
+			wantPath: rootfsBlkidPath, wantCalls: []string{rootfsBlkidPath},
+		},
+		"missing primary uses fixed fallback": {
+			modes:     map[string]os.FileMode{rootfsBlkidFallbackPath: 0755},
+			wantPath:  rootfsBlkidFallbackPath,
+			wantCalls: []string{rootfsBlkidPath, rootfsBlkidFallbackPath},
+		},
+		"present nonexecutable primary fails closed": {
+			modes:   map[string]os.FileMode{rootfsBlkidPath: 0644, rootfsBlkidFallbackPath: 0755},
+			wantErr: "filesystem probe executable is invalid", wantCalls: []string{rootfsBlkidPath},
+		},
+		"present directory primary fails closed": {
+			modes:   map[string]os.FileMode{rootfsBlkidPath: os.ModeDir | 0755, rootfsBlkidFallbackPath: 0755},
+			wantErr: "filesystem probe executable is invalid", wantCalls: []string{rootfsBlkidPath},
+		},
+		"primary stat error fails closed": {
+			errors:  map[string]error{rootfsBlkidPath: errors.New("stat failed")},
+			modes:   map[string]os.FileMode{rootfsBlkidFallbackPath: 0755},
+			wantErr: "inspect filesystem probe executable", wantCalls: []string{rootfsBlkidPath},
+		},
+		"missing both fails": {
+			wantErr:   "filesystem probe executable is unavailable",
+			wantCalls: []string{rootfsBlkidPath, rootfsBlkidFallbackPath},
+		},
+		"invalid fallback fails": {
+			modes:     map[string]os.FileMode{rootfsBlkidFallbackPath: 0644},
+			wantErr:   "filesystem probe executable is invalid",
+			wantCalls: []string{rootfsBlkidPath, rootfsBlkidFallbackPath},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var calls []string
+			got, err := selectRootfsBlkidExecutable(func(path string) (os.FileMode, error) {
+				calls = append(calls, path)
+				if statErr, ok := tc.errors[path]; ok {
+					return 0, statErr
+				}
+				if mode, ok := tc.modes[path]; ok {
+					return mode, nil
+				}
+				return 0, os.ErrNotExist
+			})
+			if diff := cmp.Diff(tc.wantCalls, calls); diff != "" {
+				t.Errorf("fixed executable path probes mismatch (-want +got):\n%s", diff)
+			}
+			if tc.wantErr != "" {
+				requireRootfsFilesystemProbeError(t, err, tc.wantErr)
+				assert.Empty(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantPath, got)
+		})
+	}
+}
+
 func assertRootfsBlkidCall(t *testing.T, call testRootfsFilesystemProbeCall, path string) {
 	t.Helper()
+	blkidPath := rootfsBlkidPath
+	if _, err := os.Stat(blkidPath); errors.Is(err, os.ErrNotExist) {
+		blkidPath = rootfsBlkidFallbackPath
+	}
 	wantArgs := []string{
-		rootfsBlkidPath,
+		blkidPath,
 		"--probe",
 		"--no-part-details",
 		"--usages", "filesystem",
