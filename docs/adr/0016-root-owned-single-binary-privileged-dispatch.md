@@ -560,10 +560,11 @@ raw-plus-partition ambiguity, and missing or multiple matches fail closed.
 
 The implemented receiver derives partition candidates only from fixed `/sys/class/block`, bounds directory admission
 to 65,536 entries and 16 partitions, retains exact device capabilities, and proves stable partition membership before
-selection. Filesystem probing invokes only fixed `/usr/bin/blkid` with a fixed argv/environment, a five-second cap with
-any earlier caller deadline winning, 32-byte stdout and 512-byte stderr ceilings, exact accepted exit states, and
-pre/post block-identity revalidation. The selected source is pointer-bound to that exact probe and exposes no path or
-descriptor accessor.
+selection. Filesystem probing invokes only fixed `/usr/bin/blkid`, or fixed `/usr/sbin/blkid` when the first path is
+absent, with a fixed argv/environment, a five-second cap with any earlier caller deadline winning, 32-byte stdout and
+512-byte stderr ceilings, exact accepted exit states, and pre/post block-identity revalidation. A present but invalid
+primary executable fails closed; neither `PATH` lookup nor a caller-selected executable is admitted. The selected
+source is pointer-bound to that exact probe and exposes no path or descriptor accessor.
 
 The private loop-device kernel contract admits only the fixed `/dev/loop-control` path with exact character-device
 major `10` and minor `237`. It derives `/dev/loop<N>` only when `N` is a 20-bit index from `0` through `2^20-1`, then
@@ -586,7 +587,9 @@ configured lease and the close error so the caller retains cleanup authority.
 
 The implemented read-only image-inspection adapter locks its OS thread, unshares a private mount namespace,
 makes propagation private, and mounts only the exact selected source at fixed `/run/mvmctl/rootfs` with
-`ro,nosuid,nodev,noexec`. It revalidates source, mountpoint, filesystem, mount table, and backing-image identity; reads
+`ro,nosuid,nodev,noexec`. The inspection-only backing descriptor also uses `O_NOATIME` so loop reads do not invalidate
+the before/after statx comparison merely by recording access. It revalidates source, mountpoint, filesystem, mount
+table, and backing-image identity; reads
 only bounded no-symlink/no-cross-mount `etc/os-release` or `usr/lib/os-release`; and unwinds root, mount, source,
 partitions, loop, mountpoint, and image authority in reverse. `unchanged` requires the final admitted/statx snapshot to
 remain stable and cleanup to succeed; uncertainty is `outcome_unknown`, with the primary `DomainError` preserved and

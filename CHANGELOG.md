@@ -985,6 +985,13 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+#### LoopMount image inspection
+
+- The fixed filesystem probe now accepts `/usr/sbin/blkid` only when `/usr/bin/blkid` is absent, without consulting
+  `PATH`. Read-only inspection opens its backing image with `O_NOATIME`, avoiding access-time drift that made strict
+  post-inspection revalidation reject an otherwise unchanged image. The named runner's installed rc.7 candidate pulled
+  and optimized mirrored Alpine 3.23 after both fixes; broader image and VM lifecycle QA remains pending.
+
 #### Host capacity reporting
 
 - `mvm host info` now detects and caches capacity on the first read after a clean installation; `--refresh` no longer

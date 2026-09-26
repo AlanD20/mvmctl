@@ -884,7 +884,8 @@ filesystem exactly matches the request; a partitioned source is valid only when 
 Malformed probes, reused or duplicate block identities, duplicate partition numbers, raw-plus-partition ambiguity, and
 missing or multiple matches fail closed. Receiver discovery now enumerates fixed `/sys/class/block` with bounded entry
 and partition counts, proves stable membership and exact block identities through retained descriptors, probes only
-through fixed `/usr/bin/blkid` with bounded output and exit policy, a five-second cap, and any earlier caller deadline,
+through fixed `/usr/bin/blkid` (or `/usr/sbin/blkid` only when the first path is absent) with bounded output and exit
+policy, a five-second cap, and any earlier caller deadline,
 then returns a pathless source capability bound to the exact probe. No caller-selected tool, path, or device name
 crosses the seam.
 
@@ -908,7 +909,8 @@ the caller can still release it.
 
 The read-only image-inspection adapter locks its OS thread, enters a private mount
 namespace, makes propagation private, mounts only the admitted source at fixed `/run/mvmctl/rootfs` with
-`ro,nosuid,nodev,noexec`, and revalidates the exact source, mountpoint, filesystem, and backing-image identity. It reads
+`ro,nosuid,nodev,noexec`, and opens the inspection-only backing descriptor with `O_NOATIME` before revalidating the exact
+source, mountpoint, filesystem, and backing-image identity. It reads
 only bounded fixed `etc/os-release` or `usr/lib/os-release` leaves through no-symlink/no-cross-mount traversal, then
 releases root, mount, source, partition, loop, mountpoint, and image authority in checked reverse order. `unchanged`
 requires complete admitted/statx stability and successful cleanup; otherwise the closed result is `outcome_unknown`,
