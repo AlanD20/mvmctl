@@ -285,7 +285,8 @@ func (stage *stagedImage) admitRecovery(record stagedImageRecovery) error {
 	}
 	switch record.Phase {
 	case stagedPhaseOperation:
-		if record.Result != nil || record.ResultRootfs != nil || record.Publication != nil || record.PublicationLeaf != "" {
+		if record.Result != nil || record.ResultRootfs != nil || record.Publication != nil ||
+			record.PublicationLeaf != "" {
 			return errs.New(errs.CodeImageError, "pending image recovery record contains completion state")
 		}
 	case stagedPhaseReady, stagedPhasePublishing, stagedPhasePublished:
@@ -327,7 +328,10 @@ func (stage *stagedImage) saveRecovery(ctx context.Context) (returnErr error) {
 	defer func() {
 		if temporary != "" {
 			if initialErr == nil {
-				returnErr = errors.Join(returnErr, stage.removeKnownLeaf(context.WithoutCancel(ctx), temporary, initial))
+				returnErr = errors.Join(
+					returnErr,
+					stage.removeKnownLeaf(context.WithoutCancel(ctx), temporary, initial),
+				)
 			}
 		}
 	}()

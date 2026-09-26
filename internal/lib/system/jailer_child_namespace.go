@@ -39,7 +39,11 @@ type jailerChildNamespaceTargetState struct {
 // phase using kernel-supplied sender credentials matched to the retained child pidfd.
 // CRITICAL: SO_PASSCRED must have been enabled before spawning the child. A root UID alone is
 // insufficient: the acknowledgement must come from the exact live pidfd-bound child.
-func NewJailerChildNamespaceTarget(ctx context.Context, channel *os.File, childPIDFD int) (_ *JailerChildNamespaceTarget, returnErr error) {
+func NewJailerChildNamespaceTarget(
+	ctx context.Context,
+	channel *os.File,
+	childPIDFD int,
+) (_ *JailerChildNamespaceTarget, returnErr error) {
 	if ctx == nil || channel == nil || os.Geteuid() != 0 || os.Getegid() != 0 || childPIDFD < 0 {
 		return nil, fmt.Errorf("invalid Jailer child namespace target")
 	}
@@ -111,7 +115,8 @@ func NewJailerChildNamespaceTarget(ctx context.Context, channel *os.File, childP
 			return nil, fmt.Errorf("invalid Jailer resource-ready acknowledgement")
 		}
 		credentials, err := unix.ParseUnixCredentials(&messages[0])
-		if err != nil || credentials == nil || credentials.Uid != 0 || credentials.Gid != 0 || int(credentials.Pid) != expectedPID {
+		if err != nil || credentials == nil || credentials.Uid != 0 || credentials.Gid != 0 ||
+			int(credentials.Pid) != expectedPID {
 			return nil, fmt.Errorf("Jailer resource-ready sender does not match the retained child")
 		}
 		if err := unix.PidfdSendSignal(pidfd, 0, nil, 0); err != nil {

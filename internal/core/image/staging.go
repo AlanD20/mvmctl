@@ -261,8 +261,13 @@ func optimizeStagedImage(
 		cleanupErr := stage.close(completed)
 		returnErr = errors.Join(returnErr, cleanupErr)
 		if returnErr != nil {
-			returnErr = errors.Join(returnErr, errs.New(errs.CodeImageError, "managed image shrink staging disposition",
-				errs.WithDetails(map[string]any{"image_id": imageID, "staging_retained": !completed || cleanupErr != nil})))
+			returnErr = errors.Join(returnErr, errs.New(
+				errs.CodeImageError,
+				"managed image shrink staging disposition",
+				errs.WithDetails(
+					map[string]any{"image_id": imageID, "staging_retained": !completed || cleanupErr != nil},
+				),
+			))
 		}
 	}()
 	if err := stage.prepareRecovery(ctx, osType, deblob, shrink); err != nil {

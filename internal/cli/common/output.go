@@ -877,7 +877,11 @@ func (c *MVMCli) CheckArg(cmd *cobra.Command, value string) (string, error) {
 // Loops on invalid input until y/yes, n/no, or empty (which returns default).
 func (c *MVMCli) PromptConfirm(ctx context.Context, prompt string, defaultYes bool) (bool, error) {
 	if StructuredOutput() {
-		return false, errs.New("cli.interaction.required", "structured output requires explicit noninteractive options", errs.WithClass(errs.ClassNeedsInteraction))
+		return false, errs.New(
+			"cli.interaction.required",
+			"structured output requires explicit noninteractive options",
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 	suffix := " [Y/n]: "
 	if !defaultYes {
@@ -917,7 +921,11 @@ func (c *MVMCli) PromptConfirm(ctx context.Context, prompt string, defaultYes bo
 // selected value. Defaults to options[defaultIdx] on empty input.
 func (c *MVMCli) PromptSelect(ctx context.Context, title string, options []string, defaultIdx int) (string, error) {
 	if StructuredOutput() {
-		return "", errs.New("cli.interaction.required", "structured output requires explicit noninteractive options", errs.WithClass(errs.ClassNeedsInteraction))
+		return "", errs.New(
+			"cli.interaction.required",
+			"structured output requires explicit noninteractive options",
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 	c.Info(title)
 	for i, opt := range options {
@@ -959,7 +967,11 @@ func (c *MVMCli) PromptMultiSelect(
 	defaultIndices []int,
 ) ([]string, error) {
 	if StructuredOutput() {
-		return nil, errs.New("cli.interaction.required", "structured output requires explicit noninteractive options", errs.WithClass(errs.ClassNeedsInteraction))
+		return nil, errs.New(
+			"cli.interaction.required",
+			"structured output requires explicit noninteractive options",
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 	c.Info(title)
 	for i, opt := range options {

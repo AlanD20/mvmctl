@@ -193,7 +193,8 @@ func readPriorBootRecord(ctx context.Context, owner uint32, key VMKey) (_ priorB
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return priorBootRecord{}, err
 	}
-	if stat.Mode != unix.S_IFREG|0600 || stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 || stat.Size <= 0 || stat.Size > 16*1024 {
+	if stat.Mode != unix.S_IFREG|0600 || stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 || stat.Size <= 0 ||
+		stat.Size > 16*1024 {
 		return priorBootRecord{}, fmt.Errorf("authorityfs: prior-boot root record metadata is not admitted")
 	}
 	raw, err := readPriorBootBytes(ctx, fd, 16*1024)
@@ -212,10 +213,13 @@ func readPriorBootRecord(ctx context.Context, owner uint32, key VMKey) (_ priorB
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return priorBootRecord{}, fmt.Errorf("authorityfs: prior-boot record contains trailing data")
 	}
-	if record.SchemaVersion != 3 || record.OwnerUID != owner || record.VMID != key.value || record.Lifecycle != "cleaning" ||
+	if record.SchemaVersion != 3 || record.OwnerUID != owner || record.VMID != key.value ||
+		record.Lifecycle != "cleaning" ||
 		record.LaunchGeneration == 0 || record.CleanupGeneration == 0 || record.Launch.OwnerGID == 0 ||
-		record.Launch.PID <= 0 || record.Launch.StartTimeTicks == 0 || !priorBootIDPattern.MatchString(record.Launch.HostBootID) ||
-		len(record.Launch.Relay) == 0 || len(record.Launch.ManagedCache) == 0 || len(record.Launch.Release) == 0 {
+		record.Launch.PID <= 0 || record.Launch.StartTimeTicks == 0 ||
+		!priorBootIDPattern.MatchString(record.Launch.HostBootID) ||
+		len(record.Launch.Relay) == 0 || len(record.Launch.ManagedCache) == 0 ||
+		len(record.Launch.Release) == 0 {
 		return priorBootRecord{}, fmt.Errorf("authorityfs: prior-boot root record binding is invalid")
 	}
 	var after, entry unix.Stat_t

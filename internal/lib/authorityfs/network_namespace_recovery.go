@@ -82,12 +82,25 @@ func (uid *NetworkUID) OpenNamespaceRecovery(
 	if err != nil {
 		return nil, fmt.Errorf("authorityfs: open published namespace for recovery: %w", err)
 	}
-	inspectErr := inspectRecoveryNamespace(ctx, source.deps, source.policy, namespaceFD, namespaceDevice, namespaceInode)
+	inspectErr := inspectRecoveryNamespace(
+		ctx,
+		source.deps,
+		source.policy,
+		namespaceFD,
+		namespaceDevice,
+		namespaceInode,
+	)
 	mounted := inspectErr == nil
 	if inspectErr != nil {
 		// An interrupted exact unmount exposes the original placeholder. It grants only cleanup
 		// authority; it can never admit links or a Jailer handoff as a live namespace.
-		unmounted, placeholderErr := inspectOwnedNetworkNamespacePlaceholder(ctx, source.deps, namespaceFD, source.policy, true)
+		unmounted, placeholderErr := inspectOwnedNetworkNamespacePlaceholder(
+			ctx,
+			source.deps,
+			namespaceFD,
+			source.policy,
+			true,
+		)
 		if placeholderErr == nil && unmounted == placeholder {
 			inspectErr = nil
 		} else {
@@ -101,11 +114,14 @@ func (uid *NetworkUID) OpenNamespaceRecovery(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &NetworkNamespaceRecovery{mounted: mounted, handle: &NetworkNamespaceHandle{state: &networkNamespaceHandleState{
-		deps: source.deps, policy: source.policy, ownerUID: owner, key: key,
-		directoryFD: fd, placeholderFD: -1, directoryIdentity: directory, targetIdentity: placeholder,
-		metadataPrepared: true, admitted: true, leafCreated: true,
-	}}}, nil
+	return &NetworkNamespaceRecovery{
+		mounted: mounted,
+		handle: &NetworkNamespaceHandle{state: &networkNamespaceHandleState{
+			deps: source.deps, policy: source.policy, ownerUID: owner, key: key,
+			directoryFD: fd, placeholderFD: -1, directoryIdentity: directory, targetIdentity: placeholder,
+			metadataPrepared: true, admitted: true, leafCreated: true,
+		}},
+	}, nil
 }
 
 // NamespaceMounted reports whether recovery admitted a published namespace. False means the

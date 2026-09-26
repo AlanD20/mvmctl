@@ -99,7 +99,10 @@ func OpenPrivilegedHostVsock(ctx context.Context, vmID string) (_ *net.UnixConn,
 	}
 	unixConnection, ok := connection.(*net.UnixConn)
 	if !ok {
-		return nil, errors.Join(hostVsockTransportError("host vsock connection is not AF_UNIX", nil), connection.Close())
+		return nil, errors.Join(
+			hostVsockTransportError("host vsock connection is not AF_UNIX", nil),
+			connection.Close(),
+		)
 	}
 	return unixConnection, nil
 }

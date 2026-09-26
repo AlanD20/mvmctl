@@ -311,7 +311,8 @@ func (c *Controller) AttachManagedVolume(ctx context.Context, cacheRoot string, 
 // DetachVolume hot-unplugs a drive from the running Firecracker process and
 // removes it from the persisted config.
 func (c *Controller) DetachVolume(ctx context.Context, driveID string) error {
-	_, err := jailersvc.NewVMLifecycleClient().DetachVolume(ctx, jailersvc.VMVolumeDetachRequest{VMID: c.vm.ID, VolumeID: driveID})
+	_, err := jailersvc.NewVMLifecycleClient().
+		DetachVolume(ctx, jailersvc.VMVolumeDetachRequest{VMID: c.vm.ID, VolumeID: driveID})
 	if err != nil {
 		slog.Error("failed to detach root-authorized volume", "vm", c.vm.Name, "volume", driveID, "error", err)
 	}

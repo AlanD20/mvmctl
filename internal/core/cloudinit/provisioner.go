@@ -69,7 +69,10 @@ func (p *Provisioner) provisionOff(_ context.Context) *model.CloudInitResult {
 // provisionNet consumes a batch listener or starts an independently owned NoCloud listener.
 func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult, error) {
 	if p.config.NocloudNetPort != nil {
-		return nil, errs.New(errs.CodeCloudInitNetModeFailed, "custom NoCloud ports are unsupported; the managed gateway reserves TCP 8000")
+		return nil, errs.New(
+			errs.CodeCloudInitNetModeFailed,
+			"custom NoCloud ports are unsupported; the managed gateway reserves TCP 8000",
+		)
 	}
 	if p.config.NoCloudURL == "" {
 		killAfter := p.config.KillAfter

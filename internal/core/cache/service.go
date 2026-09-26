@@ -143,10 +143,17 @@ func (s *Service) CleanStaleProvisionMounts(ctx context.Context, dryRun bool) (b
 		}
 		// CRITICAL: A name, mountpoint observation, or process path is not root-owned authority.
 		// Even dry-run refuses this state instead of reporting it as safely reclaimable.
-		return false, errs.New(errs.CodeCacheCleanFailed,
+		return false, errs.New(
+			errs.CodeCacheCleanFailed,
 			"legacy LoopMount state cannot be adopted or automatically cleaned; an administrator must stop the old installation, remove its mounts and processes using independently established ownership, and perform a clean installation",
 			errs.WithClass(errs.ClassConflict),
-			errs.WithDetails(map[string]any{"legacy_provision_state": filepath.Join(s.tempDir, entry.Name()), "clean_install_required": true}))
+			errs.WithDetails(
+				map[string]any{
+					"legacy_provision_state": filepath.Join(s.tempDir, entry.Name()),
+					"clean_install_required": true,
+				},
+			),
+		)
 	}
 	return false, nil
 }

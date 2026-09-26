@@ -48,7 +48,10 @@ func NewLoopMountBackend(ctx context.Context, rootfsPath string, fsType string, 
 
 func (b *LoopMountBackend) Resize(ctx context.Context, targetSizeBytes int64) error {
 	if targetSizeBytes <= 0 {
-		return errs.New(errs.CodeValidationFailed, "managed VM resize requires a positive grow target; image shrink requires managed image staging")
+		return errs.New(
+			errs.CodeValidationFailed,
+			"managed VM resize requires a positive grow target; image shrink requires managed image staging",
+		)
 	}
 	b.plan.ResizeBytes, b.pending = uint64(targetSizeBytes), true
 	return nil
@@ -89,7 +92,10 @@ func (b *LoopMountBackend) InjectCloudInit(ctx context.Context, cloudInitDir str
 
 // DetectOS requires the image domain's canonical staging producer for LoopMount images.
 func (b *LoopMountBackend) DetectOS(ctx context.Context) (string, error) {
-	return "", errs.New(errs.CodeValidationFailed, "LoopMount OS inspection requires managed image staging; VM provisioning uses its image OS metadata")
+	return "", errs.New(
+		errs.CodeValidationFailed,
+		"LoopMount OS inspection requires managed image staging; VM provisioning uses its image OS metadata",
+	)
 }
 
 // Deblob queues deblob (OS cache cleanup) operations.
@@ -123,7 +129,10 @@ func (b *LoopMountBackend) InjectAgent(_ context.Context, agentBinary []byte, po
 // Run executes the exact queued managed-VM plan. An error retains the plan for replay.
 func (b *LoopMountBackend) Run(ctx context.Context) error {
 	if !b.managedVM {
-		return errs.New(errs.CodeValidationFailed, "LoopMount effects require a canonical managed VM or image staging resource")
+		return errs.New(
+			errs.CodeValidationFailed,
+			"LoopMount effects require a canonical managed VM or image staging resource",
+		)
 	}
 	return b.runManagedVM(ctx)
 }
@@ -159,7 +168,10 @@ func (b *LoopMountBackend) runManagedVM(ctx context.Context) error {
 
 // ConvertTo requires the image domain's durable staged replacement transaction.
 func (b *LoopMountBackend) ConvertTo(ctx context.Context, targetFS string) error {
-	return errs.New(errs.CodeValidationFailed, "LoopMount filesystem conversion requires managed image staging before VM cloning")
+	return errs.New(
+		errs.CodeValidationFailed,
+		"LoopMount filesystem conversion requires managed image staging before VM cloning",
+	)
 }
 
 // ExtractPartition extracts root partition from a raw disk image.

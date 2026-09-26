@@ -60,7 +60,11 @@ func TestValidateSystemBinaryInstallSudoers(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "empty has no marker grant", content: "", wantErr: true},
-		{name: "comments only have no marker grant", content: "# Managed by mvmctl\n# no active policy\n", wantErr: true},
+		{
+			name:    "comments only have no marker grant",
+			content: "# Managed by mvmctl\n# no active policy\n",
+			wantErr: true,
+		},
 		{name: "generated marker-only policy", content: GenerateSudoersContent(infra.MVMUnixGroup)},
 		{
 			name: "legacy raw-tool and unscoped binary wildcard",

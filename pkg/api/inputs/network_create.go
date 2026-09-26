@@ -94,7 +94,8 @@ func (input *NetworkCreateInput) Resolve(
 		return nil, errs.WrapMsg(errs.CodeDatabaseError, "resolve existing network", err)
 	}
 	if existing != nil {
-		if existing.DeletedAt != nil || existing.IsPresent || existing.BridgeActive || existing.Subnet != input.Subnet ||
+		if existing.DeletedAt != nil || existing.IsPresent || existing.BridgeActive ||
+			existing.Subnet != input.Subnet ||
 			existing.IPv4Gateway != gateway ||
 			existing.NATEnabled != input.NATEnabled {
 			return nil, errs.AlreadyExists(errs.CodeNetworkAlreadyExists, input.Name)

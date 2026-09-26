@@ -105,7 +105,8 @@ func inspectPriorBootCgroup(fd int) (priorBootCgroupIdentity, error) {
 		return priorBootCgroupIdentity{}, err
 	}
 	required := uint32(unix.STATX_TYPE | unix.STATX_MODE | unix.STATX_UID | unix.STATX_GID | unix.STATX_INO)
-	if stat.Mask&required != required || stat.Mode != unix.S_IFDIR|0755 || stat.Uid != 0 || stat.Gid != 0 || stat.Ino == 0 {
+	if stat.Mask&required != required || stat.Mode != unix.S_IFDIR|0755 || stat.Uid != 0 || stat.Gid != 0 ||
+		stat.Ino == 0 {
 		return priorBootCgroupIdentity{}, fmt.Errorf("authorityfs: prior-boot cgroup metadata is not admitted")
 	}
 	kind := stat.Mask & unix.STATX_MNT_ID_UNIQUE

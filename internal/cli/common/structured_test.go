@@ -19,7 +19,11 @@ func TestFinishOutputDistinguishesPartialResultFromFailedResult(t *testing.T) {
 		wantStatus string
 	}{
 		{name: "completed work with error", record: common.RecordPartialResult, wantStatus: "partial"},
-		{name: "ordinary result with error", record: func(value any) { common.RecordResult(value) }, wantStatus: "error"},
+		{
+			name:       "ordinary result with error",
+			record:     func(value any) { common.RecordResult(value) },
+			wantStatus: "error",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

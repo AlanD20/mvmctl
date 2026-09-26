@@ -275,7 +275,9 @@ func (op *Operation) vmBuilderExecute(
 		return fmt.Errorf("failed to resolve necessary dependencies")
 	}
 	// Validate socket path before any expensive operations (cloud-init, resize, etc.).
-	if apiSocketPath := vm.RuntimePath(os.Geteuid(), builder.vmID, infra.VMFirecrackerAPISocketFilename); len(apiSocketPath) >= 108 {
+	if apiSocketPath := vm.RuntimePath(os.Geteuid(), builder.vmID, infra.VMFirecrackerAPISocketFilename); len(
+		apiSocketPath,
+	) >= 108 {
 		return fmt.Errorf(
 			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). "+
 				"This is a system limit for Unix domain sockets. Path: %s",
