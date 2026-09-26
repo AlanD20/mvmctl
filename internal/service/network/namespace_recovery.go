@@ -119,6 +119,22 @@ func (effect *namespaceEffect) recoverNamespace(
 	if err := verifyPublishedNamespace(ctx, state); err != nil {
 		return nil, topologyRemoveError(string(key.vmID), "verify recovered namespace", err)
 	}
+	independentFD, err := openRecoveryNamespacePin(ctx, effect.deps, effect.policy, state.netnsFD, handle.identity)
+	if err != nil {
+		return nil, topologyRemoveError(
+			string(key.vmID),
+			"pin recovered namespace independently of published mount",
+			err,
+		)
+	}
+	if err := closeConsumedNamespaceFD(context.WithoutCancel(ctx), effect.deps, &state.netnsFD); err != nil {
+		return nil, topologyRemoveError(string(key.vmID), "close mounted namespace recovery descriptor",
+			errors.Join(err, closeConsumedNamespaceFD(context.WithoutCancel(ctx), effect.deps, &independentFD)))
+	}
+	state.netnsFD = independentFD
+	if err := verifyPublishedNamespace(ctx, state); err != nil {
+		return nil, topologyRemoveError(string(key.vmID), "verify independent recovered namespace pin", err)
+	}
 	state.verified = true
 	state.admitted = true
 	return &namespacePin{state: state}, nil
@@ -137,7 +153,14 @@ func openNamespaceRecoveryDirectory(
 	defer func() {
 		returnErr = errors.Join(returnErr, closeConsumedNamespaceFD(context.WithoutCancel(ctx), effect.deps, &rootFD))
 	}()
-	if err := verifyNamespaceDirectory(ctx, effect.deps, rootFD, effect.policy, false, namespaceTargetIdentity{}); err != nil {
+	if err := verifyNamespaceDirectory(
+		ctx,
+		effect.deps,
+		rootFD,
+		effect.policy,
+		false,
+		namespaceTargetIdentity{},
+	); err != nil {
 		return -1, err
 	}
 	parentName := "run/mvmctl/authority/" + strconv.FormatUint(uint64(key.ownerUID), 10) + "/netns"

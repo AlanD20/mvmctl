@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 
@@ -61,6 +62,73 @@ func TestNetworklessRejectedRecoveryReleasesHoldWithoutDeletingForeignLeaf(t *te
 	_, err = foreign.TargetIdentity(ctx)
 	require.NoError(t, err, "recovery must not remove the foreign leaf")
 	require.NoError(t, vm.Release(ctx), "rejected recovery must release the VM topology hold")
+}
+
+// A recovered namespace must retain its identity without keeping its own
+// published mount busy. This uses the real nsfs mount rather than a fake
+// unmount callback, which cannot reproduce EBUSY from a retained mount FD.
+func TestNetworklessRecoveredNamespaceCanUnmountItsPublishedMount(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("root namespace authority is required")
+	}
+	ctx := t.Context()
+	var randomKey [16]byte
+	_, err := rand.Read(randomKey[:])
+	require.NoError(t, err)
+	vmID := hex.EncodeToString(randomKey[:])
+	vmKey, err := authorityfs.NewVMKey(vmID)
+	require.NoError(t, err)
+
+	jailer, err := authorityfs.OpenJailer(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, jailer.Release(context.Background())) })
+	owner, err := jailer.OpenUID(ctx, 1000)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, owner.Release(context.Background())) })
+	vm, err := owner.AcquireVM(ctx, vmKey)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, vm.Release(context.Background())) })
+	hold, err := vm.RetainTopology(ctx)
+	require.NoError(t, err)
+	lease, err := PrepareNetworkless(ctx, hold, 1)
+	require.NoError(t, err)
+	var recovered *NetworklessNamespaceLease
+	cleaned := false
+	t.Cleanup(func() {
+		if cleaned {
+			return
+		}
+		cleanup := context.Background()
+		if recovered != nil {
+			if recovered.Cleanup(cleanup) == nil {
+				return
+			}
+			require.NoError(t, recovered.discardRejectedRecovery(cleanup))
+		} else if lease.Cleanup(cleanup) == nil {
+			return
+		}
+		// The test owns this random VM ID. Drop the rejected recovery pin so
+		// the mount can be unmounted, then re-admit and retire its authority.
+		path := string(deriveNamespaceHandle(namespaceKey{ownerUID: 1000, vmID: VMID(vmID)}))
+		unmountErr := unix.Unmount(path, 0)
+		if unmountErr != nil && !errors.Is(unmountErr, unix.EINVAL) {
+			require.NoError(t, unmountErr)
+		}
+		retryHold, retryErr := vm.RetainTopology(cleanup)
+		require.NoError(t, retryErr)
+		retry, retryErr := RecoverNetworkless(cleanup, retryHold, 1)
+		require.NoError(t, retryErr)
+		if retry != nil {
+			require.NoError(t, retry.Cleanup(cleanup))
+		}
+	})
+	require.NoError(t, lease.DetachActive(ctx))
+	newHold, err := vm.RetainTopology(ctx)
+	require.NoError(t, err)
+	recovered, err = RecoverNetworkless(ctx, newHold, 1)
+	require.NoError(t, err)
+	require.NoError(t, recovered.Cleanup(ctx))
+	cleaned = true
 }
 
 func TestNetworklessJournalRejectsAmbiguousAuthority(t *testing.T) {
