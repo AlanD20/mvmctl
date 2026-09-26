@@ -275,7 +275,10 @@ func TestPrivilegedControlTransportPreservesEarlyEOFResponseAndProcessDiagnostic
 	assert.True(t, outcome.ProcessStarted())
 	assert.True(t, outcome.ResponseEOF())
 	assert.Equal(t, []byte("response:early"), outcome.Response())
-	assert.NotNil(t, outcome.Diagnostic())
+	require.NotNil(t, outcome.Diagnostic())
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, outcome.Diagnostic(), &exitErr)
+	assert.Equal(t, 17, exitErr.ExitCode())
 	assert.Equal(t, true, outcome.Diagnostic().Details["outcome_unknown"])
 	assert.Equal(t, int32(1), payload.CloseCount())
 }
