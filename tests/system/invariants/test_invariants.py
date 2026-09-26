@@ -38,38 +38,35 @@ pytestmark = [pytest.mark.system]
 # ============================================================================
 
 
-def _ls_json(vm_name: str, resource: str) -> list[dict[str, Any]]:
-    """Run ``<resource> ls --json`` and return parsed list.
+def _success_data(result: Any, expected_type: type) -> Any:
+    """Require a successful, versioned response from the installed CLI."""
+    assert result.returncode == 0, result.stderr or result.stdout
+    envelope = json.loads(result.stdout)
+    assert envelope["schema_version"] == 1
+    assert envelope["status"] == "success"
+    assert envelope["error"] is None
+    data = envelope["data"]
+    assert isinstance(data, expected_type), envelope
+    return data
 
-    Returns an empty list on any failure so callers can skip gracefully.
-    """
-    result = _run_mvm(vm_name, resource, "ls", "--json", check=False)
-    if result.returncode != 0 or not result.stdout.strip():
-        return []
-    try:
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        return data if isinstance(data, list) else []
-    except (json.JSONDecodeError, ValueError, TypeError):
-        return []
+
+def _ls_json(vm_name: str, resource: str) -> list[dict[str, Any]]:
+    """Run ``<resource> ls --json`` and require a list result."""
+    items = _success_data(
+        _run_mvm(vm_name, resource, "ls", "--json", check=False), list
+    )
+    assert all(isinstance(item, dict) for item in items), items
+    return items
 
 
 def _inspect_json(
     vm_name: str, resource: str, identifier: str
-) -> dict[str, Any] | None:
-    """Run ``<resource> inspect <id> --json`` and return dict.
-
-    Returns None on any failure so callers can skip gracefully.
-    """
-    result = _run_mvm(
-        vm_name, resource, "inspect", identifier, "--json", check=False
+) -> dict[str, Any]:
+    """Run ``<resource> inspect <id> --json`` and require an object result."""
+    return _success_data(
+        _run_mvm(vm_name, resource, "inspect", identifier, "--json", check=False),
+        dict,
     )
-    if result.returncode != 0 or not result.stdout.strip():
-        return None
-    try:
-        data: dict[str, Any] = json.loads(result.stdout)
-        return data if isinstance(data, dict) else None
-    except (json.JSONDecodeError, ValueError, TypeError):
-        return None
 
 
 def _present_images(vm_name: str) -> list[dict[str, Any]]:
@@ -475,7 +472,7 @@ RESOURCE_TYPES: list[dict[str, str]] = [
     {"cmd": "network", "name_field": "name"},
     {"cmd": "key", "name_field": "name"},
     {"cmd": "volume", "name_field": "name"},
-    {"cmd": "bin", "name_field": "name"},
+    {"cmd": "bin", "name_field": "version"},
 ]
 
 RESOURCES_WITH_STATUS: list[str] = ["vm", "volume"]
@@ -499,9 +496,16 @@ class TestJsonConsistency:
             item = items[0]
 
             assert "id" in item, f"{resource} ls --json missing 'id'"
+            assert rt["name_field"] in item, (
+                f"{resource} ls --json missing '{rt['name_field']}'"
+            )
             assert "created_at" in item, (
                 f"{resource} ls --json missing 'created_at'"
             )
+            if resource in RESOURCES_WITH_STATUS:
+                assert "status" in item, f"{resource} ls --json missing 'status'"
+            if resource == "volume":
+                assert "size_bytes" in item, "volume ls --json missing 'size_bytes'"
             for key in item:
                 assert key[0].islower(), (
                     f"{resource} ls --json has uppercase key: '{key}'"
@@ -514,29 +518,18 @@ class TestJsonConsistency:
         matching the resource type (e.g. ``data["vm"]``, ``data["network"]``).
         Common fields like ``id`` and ``created_at`` live inside that group.
         """
-        INSPECT_GROUP_KEYS: dict[str, str] = {
-            "vm": "vm",
-            "image": "image",
-            "kernel": "kernel",
-            "network": "network",
-            "key": "key",
-            "volume": "volume",
-            "bin": "bin",
-        }
-
         for rt in RESOURCE_TYPES:
             resource = rt["cmd"]
-            group_key = INSPECT_GROUP_KEYS.get(resource, resource)
+            if resource == "bin":
+                continue  # bin has no inspect subcommand
+            group_key = resource
             items = _ls_json(runner_vm, resource)
             if not items:
                 continue
             first_id = items[0].get("id", "")
-            if not first_id:
-                continue
+            assert first_id, f"{resource} ls --json has an empty 'id'"
 
             item = _inspect_json(runner_vm, resource, first_id)
-            if item is None:
-                continue
 
             for key in item:
                 assert key[0].islower(), (
@@ -687,77 +680,6 @@ class TestFlagNaming:
         """``key create`` uses ``--default``."""
         result = _run_mvm(runner_vm, "key", "create", "--help")
         assert "--default" in result.stdout
-
-
-class TestJsonOutputConsistency:
-    """Verify JSON output uses consistent field naming across resources."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.domain_invariant]
-
-    def test_common_field_names_across_resources(self, runner_vm) -> None:
-        """Field names like ``id``, ``name``, ``created_at`` should be consistent."""
-        result = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-        if result.returncode == 0:
-            vms = json.loads(result.stdout)
-            if vms:
-                item = vms[0]
-                assert "id" in item, "vm ls --json missing 'id'"
-                assert "name" in item, "vm ls --json missing 'name'"
-                assert "status" in item, "vm ls --json missing 'status'"
-                assert "created_at" in item, (
-                    "vm ls --json missing 'created_at'"
-                )
-                assert "ID" not in item, (
-                    "vm ls --json uses 'ID' (should be 'id')"
-                )
-                assert "Name" not in item, (
-                    "vm ls --json uses 'Name' (should be 'name')"
-                )
-
-        result = _run_mvm(runner_vm, "image", "ls", "--json", check=False)
-        if result.returncode == 0:
-            images = json.loads(result.stdout)
-            if images:
-                item = images[0]
-                assert "id" in item, "image ls --json missing 'id'"
-                assert "name" in item, "image ls --json missing 'name'"
-                assert "created_at" in item, (
-                    "image ls --json missing 'created_at'"
-                )
-                assert "ID" not in item, (
-                    "image ls --json uses 'ID' (should be 'id')"
-                )
-
-        result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
-        if result.returncode == 0:
-            networks = json.loads(result.stdout)
-            if networks:
-                item = networks[0]
-                assert "id" in item, "network ls --json missing 'id'"
-                assert "name" in item, "network ls --json missing 'name'"
-                assert "created_at" in item, (
-                    "network ls --json missing 'created_at'"
-                )
-
-        result = _run_mvm(runner_vm, "key", "ls", "--json", check=False)
-        if result.returncode == 0:
-            keys = json.loads(result.stdout)
-            if keys:
-                item = keys[0]
-                assert "id" in item, "key ls --json missing 'id'"
-                assert "name" in item, "key ls --json missing 'name'"
-
-        result = _run_mvm(runner_vm, "volume", "ls", "--json", check=False)
-        if result.returncode == 0:
-            volumes = json.loads(result.stdout)
-            if volumes:
-                item = volumes[0]
-                assert "id" in item, "volume ls --json missing 'id'"
-                assert "name" in item, "volume ls --json missing 'name'"
-                assert "status" in item, "volume ls --json missing 'status'"
-                assert "size_bytes" in item, (
-                    "volume ls --json missing 'size_bytes'"
-                )
 
 
 # ============================================================================
