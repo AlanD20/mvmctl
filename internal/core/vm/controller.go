@@ -243,7 +243,8 @@ func (c *Controller) SnapshotRestore(
 	if !result.Configuration.Paused {
 		c.vm.Status = model.VMStatusRunning
 	}
-	c.vm.IPv4, c.vm.MAC, c.vm.NetworkID = result.Configuration.GuestIPv4, result.Configuration.GuestMAC, result.Configuration.NetworkID
+	c.vm.IPv4, c.vm.MAC, c.vm.NetworkID = result.Configuration.GuestIPv4, result.Configuration.GuestMAC,
+		model.VMNetworkID(result.Configuration.NetworkID)
 	c.vm.VCPUCount, c.vm.MemSizeMiB = result.Configuration.VCPUCount, result.Configuration.MemSizeMiB
 	c.vm.CgroupLimits = result.Configuration.CgroupLimits
 	c.vm.KernelID = result.Configuration.KernelID

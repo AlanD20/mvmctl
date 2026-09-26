@@ -2,7 +2,12 @@
 // a single shared package. No domain imports anything outside the model package.
 package model
 
-import "mvmctl/internal/lib/db"
+import (
+	"database/sql"
+	"database/sql/driver"
+
+	"mvmctl/internal/lib/db"
+)
 
 // --- Status (VM lifecycle) ---
 
@@ -29,36 +34,56 @@ const (
 	VMNetworkPlacementNetworkless VMNetworkPlacement = "networkless"
 )
 
+// VMNetworkID stores absent placement as SQL NULL without inventing a network row.
+type VMNetworkID string
+
+func (id *VMNetworkID) Scan(value any) error {
+	var nullable sql.NullString
+	if err := nullable.Scan(value); err != nil {
+		return err
+	}
+	*id = VMNetworkID(nullable.String)
+	return nil
+}
+
+func (id VMNetworkID) Value() (driver.Value, error) {
+	if id == "" {
+		return nil, nil
+	}
+	return string(id), nil
+}
+
 // VMItem represents a microVM instance.
 type VMItem struct {
-	ID             string         `json:"id"              db:"id"`
-	Name           string         `json:"name"            db:"name"`
-	Status         VMStatus       `json:"status"          db:"status"`
-	PID            int            `json:"pid"             db:"pid"`
-	IPv4           string         `json:"ipv4"            db:"ipv4"`
-	MAC            string         `json:"mac"             db:"mac"`
-	NetworkID      string         `json:"network_id"      db:"network_id"`
-	TapDevice      string         `json:"tap_device"      db:"tap_device"`
-	ImageID        string         `json:"image_id"        db:"image_id"`
-	KernelID       string         `json:"kernel_id"       db:"kernel_id"`
-	BinaryID       string         `json:"binary_id"       db:"binary_id"`
-	JailerBinaryID string         `json:"jailer_binary_id" db:"jailer_binary_id"`
-	APISocketPath  string         `json:"api_socket_path" db:"api_socket_path"`
-	ConfigPath     string         `json:"config_path"     db:"config_path"`
-	CloudInitMode  string         `json:"cloud_init_mode" db:"cloud_init_mode"`
-	VCPUCount      int            `json:"vcpu_count"      db:"vcpu_count"`
-	MemSizeMiB     int            `json:"mem_size_mib"    db:"mem_size_mib"`
-	CgroupLimits   VMCgroupLimits `json:"cgroup_limits" db:"cgroup_limits"`
-	DiskSizeMiB    int            `json:"disk_size_mib"   db:"disk_size_mib"`
-	RootfsPath     string         `json:"rootfs_path"     db:"rootfs_path"`
-	RootfsSuffix   string         `json:"rootfs_suffix"   db:"rootfs_suffix"`
-	PCIEnabled     bool           `json:"pci_enabled"     db:"pci_enabled"`
-	NestedVirt     bool           `json:"nested_virt"     db:"nested_virt"`
-	EnableLogging  bool           `json:"enable_logging"  db:"enable_logging"`
-	EnableMetrics  bool           `json:"enable_metrics"  db:"enable_metrics"`
-	EnableConsole  bool           `json:"enable_console"  db:"enable_console"`
-	CreatedAt      string         `json:"created_at"      db:"created_at"`
-	UpdatedAt      string         `json:"updated_at"      db:"updated_at"`
+	ID               string             `json:"id"              db:"id"`
+	Name             string             `json:"name"            db:"name"`
+	Status           VMStatus           `json:"status"          db:"status"`
+	PID              int                `json:"pid"             db:"pid"`
+	IPv4             string             `json:"ipv4"            db:"ipv4"`
+	MAC              string             `json:"mac"             db:"mac"`
+	NetworkPlacement VMNetworkPlacement `json:"network_placement" db:"network_placement"`
+	NetworkID        VMNetworkID        `json:"network_id"      db:"network_id"`
+	TapDevice        string             `json:"tap_device"      db:"tap_device"`
+	ImageID          string             `json:"image_id"        db:"image_id"`
+	KernelID         string             `json:"kernel_id"       db:"kernel_id"`
+	BinaryID         string             `json:"binary_id"       db:"binary_id"`
+	JailerBinaryID   string             `json:"jailer_binary_id" db:"jailer_binary_id"`
+	APISocketPath    string             `json:"api_socket_path" db:"api_socket_path"`
+	ConfigPath       string             `json:"config_path"     db:"config_path"`
+	CloudInitMode    string             `json:"cloud_init_mode" db:"cloud_init_mode"`
+	VCPUCount        int                `json:"vcpu_count"      db:"vcpu_count"`
+	MemSizeMiB       int                `json:"mem_size_mib"    db:"mem_size_mib"`
+	CgroupLimits     VMCgroupLimits     `json:"cgroup_limits" db:"cgroup_limits"`
+	DiskSizeMiB      int                `json:"disk_size_mib"   db:"disk_size_mib"`
+	RootfsPath       string             `json:"rootfs_path"     db:"rootfs_path"`
+	RootfsSuffix     string             `json:"rootfs_suffix"   db:"rootfs_suffix"`
+	PCIEnabled       bool               `json:"pci_enabled"     db:"pci_enabled"`
+	NestedVirt       bool               `json:"nested_virt"     db:"nested_virt"`
+	EnableLogging    bool               `json:"enable_logging"  db:"enable_logging"`
+	EnableMetrics    bool               `json:"enable_metrics"  db:"enable_metrics"`
+	EnableConsole    bool               `json:"enable_console"  db:"enable_console"`
+	CreatedAt        string             `json:"created_at"      db:"created_at"`
+	UpdatedAt        string             `json:"updated_at"      db:"updated_at"`
 
 	// Optional fields
 	RelaySocketPath  *string `json:"relay_socket_path,omitempty"  db:"relay_socket_path"`

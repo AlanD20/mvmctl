@@ -83,11 +83,31 @@ func TestMigrationsAcceptFreshSchema(t *testing.T) {
 	require.NoError(t, err)
 	var version int
 	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
-	assert.Equal(t, 7, version)
+	assert.Equal(t, 8, version)
 	var legacyColumnCount int
 	require.NoError(t, handle.DB().GetContext(ctx, &legacyColumnCount,
 		"SELECT COUNT(*) FROM pragma_table_info('vm_instances') WHERE name = 'remote_exec'"))
 	assert.Zero(t, legacyColumnCount)
+}
+
+// The clean-break schema must reject an older version-7 VM table before adopting its state.
+func TestMigration008RejectsOlderVMPlacementSchema(t *testing.T) {
+	ctx := t.Context()
+	handle := db.New(filepath.Join(t.TempDir(), "old-v7.db"))
+	t.Cleanup(func() { require.NoError(t, handle.Close()) })
+	_, err := handle.DB().ExecContext(ctx, `
+		CREATE TABLE vm_instances (id TEXT PRIMARY KEY, network_id TEXT NOT NULL);
+		PRAGMA user_version = 7;
+	`)
+	require.NoError(t, err)
+
+	applied, err := handle.RunMigrationsCtx(ctx)
+	require.Error(t, err)
+	assert.Zero(t, applied)
+	assert.Contains(t, err.Error(), "network_placement")
+	var version int
+	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
+	assert.Equal(t, 7, version)
 }
 
 // Rationale: Schema presence, even with every legacy bit false, marks unsupported

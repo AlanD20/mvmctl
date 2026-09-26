@@ -128,7 +128,7 @@ func TestLoadedRelaunchStateProducesJailedVsockConfig(t *testing.T) {
 	networkID := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	vmItem := &model.VMItem{
 		ID: resourcePathsTestVMID, Image: &model.ImageItem{}, Binary: &model.BinaryItem{},
-		Kernel: &model.KernelItem{}, NetworkID: networkID, Network: &model.NetworkItem{ID: networkID},
+		Kernel: &model.KernelItem{}, NetworkID: model.VMNetworkID(networkID), Network: &model.NetworkItem{ID: networkID},
 	}
 	repo := testutil.NewVsockRepo()
 	require.NoError(t, repo.Upsert(t.Context(), &model.VsockConfigItem{

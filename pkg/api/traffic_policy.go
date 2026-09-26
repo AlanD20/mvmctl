@@ -24,7 +24,7 @@ func (op *Operation) NetworkToVMTrafficPolicyCreate(
 	if err != nil {
 		return nil, err
 	}
-	destinationNetwork, err := op.trafficPolicyNetwork(ctx, destination.NetworkID)
+	destinationNetwork, err := op.trafficPolicyNetwork(ctx, string(destination.NetworkID))
 	if err != nil {
 		return nil, err
 	}
@@ -67,11 +67,11 @@ func (op *Operation) VMToVMTrafficPolicyCreate(
 	if err != nil {
 		return nil, err
 	}
-	sourceNetwork, err := op.trafficPolicyNetwork(ctx, source.NetworkID)
+	sourceNetwork, err := op.trafficPolicyNetwork(ctx, string(source.NetworkID))
 	if err != nil {
 		return nil, err
 	}
-	destinationNetwork, err := op.trafficPolicyNetwork(ctx, destination.NetworkID)
+	destinationNetwork, err := op.trafficPolicyNetwork(ctx, string(destination.NetworkID))
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +303,7 @@ func (op *Operation) networkTrafficPolicyResult(
 	if err != nil {
 		return nil, err
 	}
-	destinationNetwork, err := op.trafficPolicyNetwork(ctx, destination.NetworkID)
+	destinationNetwork, err := op.trafficPolicyNetwork(ctx, string(destination.NetworkID))
 	if err != nil {
 		return nil, err
 	}
@@ -321,11 +321,11 @@ func (op *Operation) vmTrafficPolicyResult(
 	if err != nil {
 		return nil, err
 	}
-	sourceNetwork, err := op.trafficPolicyNetwork(ctx, source.NetworkID)
+	sourceNetwork, err := op.trafficPolicyNetwork(ctx, string(source.NetworkID))
 	if err != nil {
 		return nil, err
 	}
-	destinationNetwork, err := op.trafficPolicyNetwork(ctx, destination.NetworkID)
+	destinationNetwork, err := op.trafficPolicyNetwork(ctx, string(destination.NetworkID))
 	if err != nil {
 		return nil, err
 	}

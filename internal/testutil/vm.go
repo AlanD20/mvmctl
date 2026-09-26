@@ -119,7 +119,7 @@ func (r *VMRepo) FindByNetworkID(_ context.Context, networkID string) ([]*model.
 	defer r.mu.RUnlock()
 	var result []*model.VMItem
 	for _, v := range r.vms {
-		if v.NetworkID == networkID {
+		if string(v.NetworkID) == networkID {
 			result = append(result, v)
 		}
 	}
@@ -135,7 +135,7 @@ func (r *VMRepo) GetByNetworkIDs(_ context.Context, networkIDs []string) ([]*mod
 	}
 	var result []*model.VMItem
 	for _, v := range r.vms {
-		if set[v.NetworkID] {
+		if set[string(v.NetworkID)] {
 			result = append(result, v)
 		}
 	}

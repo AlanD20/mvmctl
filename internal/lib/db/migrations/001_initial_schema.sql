@@ -135,17 +135,27 @@ CREATE TABLE vm_instances (
     status TEXT NOT NULL,
     pid INTEGER NOT NULL,
     process_start_time INTEGER NULL,
-    ipv4 TEXT NOT NULL CHECK(ipv4 IS NULL OR ipv4 GLOB '[0-9]*.[0-9]*.[0-9]*.[0-9]*'),
-    mac TEXT NOT NULL CHECK(mac IS NULL OR mac GLOB '[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]'),
-    network_id TEXT NOT NULL,
-    tap_device TEXT NOT NULL,
+    network_placement TEXT NOT NULL DEFAULT 'managed' CHECK(network_placement IN ('managed', 'networkless')),
+    ipv4 TEXT NOT NULL CHECK(
+        (network_placement = 'managed' AND ipv4 GLOB '[0-9]*.[0-9]*.[0-9]*.[0-9]*') OR
+        (network_placement = 'networkless' AND ipv4 = '')
+    ),
+    mac TEXT NOT NULL CHECK(
+        (network_placement = 'managed' AND mac GLOB '[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]') OR
+        (network_placement = 'networkless' AND mac = '')
+    ),
+    network_id TEXT CHECK(
+        (network_placement = 'managed' AND network_id IS NOT NULL AND network_id != '') OR
+        (network_placement = 'networkless' AND network_id IS NULL)
+    ),
+    tap_device TEXT NOT NULL CHECK(network_placement = 'managed' OR tap_device = ''),
     image_id TEXT NOT NULL,
     kernel_id TEXT NOT NULL,
     binary_id TEXT NOT NULL,
     api_socket_path TEXT NOT NULL,
     relay_socket_path TEXT NULL,
     config_path TEXT NOT NULL,
-    cloud_init_mode TEXT NOT NULL,
+    cloud_init_mode TEXT NOT NULL CHECK(network_placement = 'managed' OR cloud_init_mode != 'net'),
     nocloud_net_port INTEGER NULL,
     nocloud_net_pid INTEGER NULL,
     relay_pid INTEGER NULL,

@@ -1138,7 +1138,7 @@ func (op *Operation) vmRespawnFirecracker(
 	logLevel, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "log_level")
 	fcConfig := buildRespawnFirecrackerConfig(state, pair, vmDir, snapshotMode, snapshotDir, logLevel)
 	fcConfig.CacheRoot = op.CacheDir
-	tapName, err := networkservice.VMTAPName(uint32(os.Geteuid()), v.NetworkID, v.ID)
+	tapName, err := networkservice.VMTAPName(uint32(os.Geteuid()), string(v.NetworkID), v.ID)
 	if err != nil {
 		return err
 	}
@@ -1185,7 +1185,7 @@ func buildRespawnFirecrackerConfig(
 		NetworkPlacement:    model.VMNetworkPlacementManaged,
 		CacheRoot:           filepath.Dir(filepath.Dir(vmDir)),
 		KernelID:            v.KernelID,
-		NetworkID:           v.NetworkID,
+		NetworkID:           string(v.NetworkID),
 		ReleaseArchitecture: pair.Firecracker.Architecture,
 		VMDir:               vmDir,
 		RootfsPath:          filepath.Join(vmDir, infra.VMRootfsFilename),
@@ -1537,7 +1537,8 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		Status:           model.VMStatusRunning,
 		IPv4:             c.guestIP,
 		MAC:              c.guestMAC,
-		NetworkID:        c.resolved.Network.ID,
+		NetworkPlacement: model.VMNetworkPlacementManaged,
+		NetworkID:        model.VMNetworkID(c.resolved.Network.ID),
 		TapDevice:        c.tapName,
 		ImageID:          c.resolved.Image.ID,
 		KernelID:         c.resolved.Kernel.ID,

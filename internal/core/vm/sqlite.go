@@ -295,7 +295,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 	var err error
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO vm_instances (
-			id, name, status, pid, process_start_time, ipv4, mac, network_id, tap_device,
+			id, name, status, pid, process_start_time, network_placement, ipv4, mac, network_id, tap_device,
 			image_id, kernel_id, binary_id, jailer_binary_id, api_socket_path,
 			relay_socket_path, config_path, cloud_init_mode,
 			nocloud_net_port, nocloud_net_pid, relay_pid,
@@ -305,12 +305,13 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 			ssh_keys, ssh_user,
 			created_at, updated_at,
 			log_path, serial_output_path, lsm_flags, boot_args, volume_ids, cpu_config
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			status = excluded.status,
 			pid = excluded.pid,
 			process_start_time = excluded.process_start_time,
+			network_placement = excluded.network_placement,
 			ipv4 = excluded.ipv4,
 			mac = excluded.mac,
 			network_id = excluded.network_id,
@@ -353,6 +354,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 		vm.Status,
 		vm.PID,
 		vm.ProcessStartTime,
+		vm.NetworkPlacement,
 		vm.IPv4,
 		vm.MAC,
 		vm.NetworkID,

@@ -215,14 +215,15 @@ func (op *Operation) SnapshotRestore(
 	}
 	directoryCreated = true
 	item = &model.VMItem{
-		ID:        vmID,
-		Name:      input.Name,
-		Status:    model.VMStatusStarting,
-		IPv4:      projection.GuestIPv4,
-		MAC:       projection.GuestMAC,
-		NetworkID: projection.NetworkID,
-		KernelID:  projection.KernelID,
-		ImageID:   snapshot.ImageID,
+		ID:               vmID,
+		Name:             input.Name,
+		Status:           model.VMStatusStarting,
+		IPv4:             projection.GuestIPv4,
+		MAC:              projection.GuestMAC,
+		NetworkPlacement: model.VMNetworkPlacementManaged,
+		NetworkID:        model.VMNetworkID(projection.NetworkID),
+		KernelID:         projection.KernelID,
+		ImageID:          snapshot.ImageID,
 		BinaryID: crypto.BinaryReleaseID(
 			"firecracker",
 			projection.ReleaseArchitecture,
