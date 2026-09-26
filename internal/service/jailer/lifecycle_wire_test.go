@@ -57,6 +57,16 @@ func TestVMLaunchRequestRequiresAdmittedNetworkPlacement(t *testing.T) {
 	if err := json.Unmarshal(encoded, &fields); err != nil {
 		t.Fatal(err)
 	}
+	if got := string(fields["network_placement"]); got != `"managed"` {
+		t.Fatalf("managed launch wire placement = %s, want explicit managed variant", got)
+	}
+	var roundTrip VMLaunchRequest
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("valid managed launch did not decode: %v", err)
+	}
+	if err := roundTrip.Validate(); err != nil {
+		t.Fatalf("decoded managed launch was rejected: %v", err)
+	}
 	delete(fields, "network_placement")
 	encoded, err = json.Marshal(fields)
 	if err != nil {
