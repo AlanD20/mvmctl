@@ -33,7 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > A clean checkout at `3cef1c41` passed the pinned Go 1.26.3 CI checks and full root-effect Jailer Go package inside
 > the named `mvmctl-030-test` runner, using a previously installed, verified golines v0.13.0 binary because the runner
 > is offline. The host-capacity fix at `66580a71` also passed focused pinned Go checks and installed-candidate host
-> Python cases there. The broader installed-candidate Python release matrix has not run.
+> Python cases there. At `5ccd7d55`, focused CLI Go tests, vet, and formatting passed, and 26 selected SSH-key Python
+> cases passed against the installed `0.3.0-rc.5` candidate in that runner; two bridge-dependent cases were deselected.
+> Full Go CI has not been rerun for this latest source, and the broader installed-candidate Python release matrix has
+> not run.
 > Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation.
 > The mapped production integration gaps are committed; release qualification remains incomplete. Raw-volume launch,
 > host clean/reset, and typed image recovery are
@@ -148,7 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added global `--json` with one schema-1 success/error/partial envelope, typed result data, preserved structured
   errors, and per-item batch outcomes. Existing bare JSON reads now appear under `data`. Streaming/interactive exec,
   SSH, logs, completion, service `run`, init wizard, and console attachment reject this mode; console state/kill support
-  it. Cache errors now propagate instead of becoming empty or successful results.
+  it. Cache errors now propagate instead of becoming empty or successful results. Array-valued listings preserve `[]`
+  under `data` when empty, and `env ls --json` no longer mixes human-readable output with its envelope.
 - Added `mvm exec --allow-vm-exec` and API-owned directional policy enforcement, retained root authority, bounded
   source/destination relay, cancellation, and command-redacted audit. It requires schema-3 active VM identities and
   has not been qualified end to end. Ordinary exec, shell, and copy do not enable the source session.

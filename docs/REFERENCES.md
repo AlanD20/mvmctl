@@ -51,7 +51,8 @@ This document provides detailed reference for all `mvm` commands, configuration 
 `partial`), command-specific `data`, and `error`. An error preserves its code, class, message, optional operation and
 entity, and details. Batch data preserves each result and its structured error. A partial response retains completed
 work and exits unsuccessfully; callers must inspect both status and data before retrying. Read results now live under
-`data`, so scripts consuming the old bare list or object must be updated.
+`data`, so scripts consuming the old bare list or object must be updated. Array-valued resource listings, such as
+`key ls`, `vm ls`, and `vm ps`, remain arrays under `data`; an empty result is `[]`, not `null`.
 
 Streaming and interactive commands reject structured output with `cli.output.unsupported`: `exec`, `ssh`, `logs`,
 completion, `run`, the `init` wizard, and console attachment. Finite console state and kill commands support it.
