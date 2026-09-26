@@ -237,7 +237,18 @@ def _unique_subnet(network_name: str) -> str:
 
 
 def _parse_vm_list(json_output: str) -> list[dict[str, Any]]:
-    return json.loads(json_output) if json_output else []
+    return _json_success_data(json_output, list)
+
+
+def _json_success_data(json_output: str, expected_type: type) -> Any:
+    """Decode the installed CLI's versioned success response."""
+    envelope = json.loads(json_output)
+    assert envelope["schema_version"] == 1
+    assert envelope["status"] == "success"
+    assert envelope["error"] is None
+    data = envelope["data"]
+    assert isinstance(data, expected_type), envelope
+    return data
 
 
 # ============================================================================
@@ -251,12 +262,8 @@ def _print_prep(msg: str) -> None:
 
 def _ensure_kernel(vm_name: str) -> None:
     """Ensure default kernel is registered."""
-    r = _run_mvm(vm_name, "kernel", "ls", "--json", timeout=30, check=False)
-    if r.returncode != 0 or not r.stdout.strip():
-        _run_mvm(vm_name, "kernel", "pull", "--type", "firecracker",
-                 "--version", "v1.15", "--default", timeout=300)
-        return
-    kernels = json.loads(r.stdout)
+    r = _run_mvm(vm_name, "kernel", "ls", "--json", timeout=30)
+    kernels = _json_success_data(r.stdout, list)
     if not any(k.get("is_default") and k.get("is_present") for k in kernels):
         present = [k for k in kernels if k.get("is_present")]
         if present:
@@ -269,17 +276,14 @@ def _ensure_kernel(vm_name: str) -> None:
 def _ensure_image(vm_name: str, image: str = "alpine:3.23") -> None:
     """Ensure an image is registered."""
     img_type = image.split(":")[0] if ":" in image else image
-    r = _run_mvm(vm_name, "image", "ls", "--json", timeout=30, check=False)
-    if r.returncode != 0 or not r.stdout.strip():
-        pull_args = ["image", "pull", img_type]
-        if ":" in image:
-            pull_args.extend(["--version", image.split(":")[1]])
-        _run_mvm(vm_name, *pull_args, timeout=300)
-        return
-    cached = json.loads(r.stdout) if r.stdout else []
+    r = _run_mvm(vm_name, "image", "ls", "--json", timeout=30)
+    cached = _json_success_data(r.stdout, list)
+    img_version = image.split(":", 1)[1] if ":" in image else None
     matching = [
         i for i in cached
-        if i.get("type", "").startswith(img_type) and i.get("is_present")
+        if i.get("type") == img_type
+        and (img_version is None or i.get("version") == img_version)
+        and i.get("is_present")
     ]
     if not matching:
         pull_args = ["image", "pull", img_type]
@@ -291,16 +295,14 @@ def _ensure_image(vm_name: str, image: str = "alpine:3.23") -> None:
 
 def _ensure_binary(vm_name: str) -> None:
     """Ensure firecracker binary is registered."""
-    r = _run_mvm(vm_name, "bin", "ls", "--json", timeout=30, check=False)
-    has = False
-    if r.returncode == 0 and r.stdout.strip():
-        has = any(
-            b.get("type") == "firecracker" and b.get("is_present")
-            for b in json.loads(r.stdout)
-        )
+    r = _run_mvm(vm_name, "bin", "ls", "--json", timeout=30)
+    binaries = _json_success_data(r.stdout, list)
+    has = any(
+        b.get("type") == "firecracker" and b.get("is_present")
+        for b in binaries
+    )
     if not has:
-        _run_mvm(vm_name, "bin", "pull", "firecracker", "--version", "1.15.0",
-                 "--default", timeout=300)
+        _run_mvm(vm_name, "bin", "pull", "1.16.0", "--default", timeout=300)
 
 
 def ensure_vm_deps(vm_name: str) -> None:
@@ -369,7 +371,7 @@ def create_vm_core(
     _run_mvm(rv, *cmd_args, timeout=180)
 
     ls_result = _run_mvm(rv, "vm", "ls", "--json", timeout=30)
-    vms: list[dict[str, Any]] = json.loads(ls_result.stdout)
+    vms: list[dict[str, Any]] = _parse_vm_list(ls_result.stdout)
     vm_info = next((v for v in vms if v["name"] == vm_name), None)
     if not vm_info:
         raise RuntimeError(f"Failed to find created VM: {vm_name}")

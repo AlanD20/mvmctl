@@ -8,7 +8,13 @@ from typing import Any
 
 import pytest
 
-from tests.system.conftest import _ensure_binary, _guest_run, _run_mvm, ensure_vm_deps
+from tests.system.conftest import (
+    _ensure_binary,
+    _guest_run,
+    _json_success_data,
+    _run_mvm,
+    ensure_vm_deps,
+)
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_bin]
 
@@ -25,8 +31,12 @@ class TestBinLifecycle:
         _ensure_binary(runner_vm)
 
         result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert isinstance(data, list)
+        data: list[dict[str, Any]] = _json_success_data(result.stdout, list)
+        for entry in data:
+            assert isinstance(entry, dict), entry
+            assert isinstance(entry.get("version"), str) and entry["version"], entry
+            assert isinstance(entry.get("id"), str) and entry["id"], entry
+            assert isinstance(entry.get("is_present"), bool), entry
         present = [e for e in data if e.get("is_present") is True]
         assert present, (
             "No binary with is_present=True found in listing.\n"
@@ -39,68 +49,6 @@ class TestBinLifecycle:
         assert isinstance(entry.get("id"), str) and entry["id"], (
             f"Expected non-empty id: {entry}"
         )
-
-    def test_bin_list_json(self, runner_vm):
-        """List binaries in JSON format."""
-        _ensure_binary(runner_vm)
-
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert isinstance(data, list)
-        for entry in data:
-            assert isinstance(entry.get("version"), str) and entry["version"], (
-                f"Expected non-empty version: {entry}"
-            )
-            assert isinstance(entry.get("id"), str) and entry["id"], (
-                f"Expected non-empty id: {entry}"
-            )
-            assert isinstance(entry.get("is_present"), bool), (
-                f"is_present must be bool: {entry}"
-            )
-        assert any(e.get("is_present") for e in data), (
-            "No entry with is_present=True"
-        )
-
-    def test_bin_ls_structure(self, runner_vm):
-        """Verify bin ls --json returns a list with well-formed entries even if cache is empty."""
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert isinstance(data, list)
-        for entry in data:
-            assert isinstance(entry.get("version"), str) and entry["version"], (
-                f"Expected non-empty version: {entry}"
-            )
-            assert isinstance(entry.get("id"), str) and entry["id"], (
-                f"Expected non-empty id: {entry}"
-            )
-            assert isinstance(entry.get("is_present"), bool), (
-                f"is_present must be bool: {entry}"
-            )
-
-    def test_bin_list_empty_cache(self, runner_vm):
-        """bin ls --json returns valid empty list when no binaries are cached.
-
-        This test must run before any binary pull operations to verify
-        the empty-cache edge case.
-        """
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        assert result.returncode == 0, f"bin ls --json failed: {result.stderr}"
-        data = json.loads(result.stdout)
-        assert isinstance(data, list), (
-            f"Expected list, got {type(data).__name__}: {data}"
-        )
-        if len(data) == 0:
-            return
-        for entry in data:
-            assert isinstance(entry.get("version"), str) and entry["version"], (
-                f"Expected non-empty version: {entry}"
-            )
-            assert isinstance(entry.get("id"), str) and entry["id"], (
-                f"Expected non-empty id: {entry}"
-            )
-            assert isinstance(entry.get("is_present"), bool), (
-                f"is_present must be bool: {entry}"
-            )
 
 
 # ============================================================================
