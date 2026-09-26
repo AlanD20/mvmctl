@@ -6,7 +6,7 @@ Thanks for wanting to contribute. This guide covers everything you need to get s
 
 - **Go 1.26.3+** — check with `go version`
 - **Linux** (x86_64 or aarch64) — Firecracker only runs on Linux with KVM
-- **System packages** — see [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) for distro-specific lists
+- **System packages** — see [docs/DEPENDENCIES.md](../docs/DEPENDENCIES.md) for distro-specific lists
 - **git**
 
 ## Development Setup
@@ -47,10 +47,11 @@ Three-tier architecture: **CLI → API → Core**. CLI stays thin (arg parsing +
 
 | Layer | Command | What it covers |
 |-------|---------|---------------|
-| L0/L1 unit | `go test ./... -count=1` | Pure functions, in-memory repos, hermetic tests |
+| CI Go tests | `bash scripts/run-go-ci-tests.sh` | Unprivileged L0/L1 selection, including Jailer contracts |
+| Local Jailer tests | Full package test binary as root in a disposable VM | Root-owned lifecycle effects |
 | L2 system | See full guide below | End-to-end with real Firecracker VMs (requires KVM) |
 
-For L2 system tests — running specific tiers, domains, preparing assets, interpreting results, and troubleshooting — follow [docs/development/HOW_TO_RUN_SYSTEM_TESTS.md](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md). That doc covers the orchestrator script, prerequisite checks, the `--prepare` / `--rebuild` / `--tier` / `--push` flags, and common failure patterns.
+For L2 system tests — running specific tiers, domains, preparing assets, interpreting results, and troubleshooting — follow [docs/development/HOW_TO_RUN_SYSTEM_TESTS.md](../docs/development/HOW_TO_RUN_SYSTEM_TESTS.md). That doc covers the orchestrator script, prerequisite checks, the `--prepare` / `--rebuild` / `--tier` / `--push` flags, and common failure patterns.
 
 ## Code Style
 
@@ -70,7 +71,7 @@ go vet ./...
 go mod tidy && git diff --exit-code
 ```
 
-See [docs/STANDARDS.md](docs/STANDARDS.md) for the full coding standards reference.
+See [docs/STANDARDS.md](../docs/STANDARDS.md) for the full coding standards reference.
 
 ## Commit Conventions
 
@@ -95,10 +96,10 @@ Keep the subject under 72 characters. Add a body if the change needs explanation
    ```bash
    go mod tidy && git diff --exit-code
    go vet ./...
-   go test ./... -count=1
+   bash scripts/run-go-ci-tests.sh
    golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/
    ```
-4. **Layering check** — read [CONTEXT.md](CONTEXT.md) for architecture rules:
+4. **Layering check** — read [CONTEXT.md](../CONTEXT.md) for architecture rules:
    - Core domains never import other core packages
    - Validation lives in `pkg/api/inputs/`, not in Service/Controller
    - ALL subprocess calls through `system.DefaultRunner.Run()` / `system.DefaultRunner.Stream()`
@@ -109,7 +110,7 @@ Keep the subject under 72 characters. Add a body if the change needs explanation
 
 ## Design Decisions
 
-When proposing a change that touches architecture boundaries, review the relevant ADRs in [docs/adr/](docs/adr/). Hard-to-reverse decisions (three-tier architecture, error handling model, test strategy) are documented there with trade-offs.
+When proposing a change that touches architecture boundaries, review the relevant ADRs in [docs/adr/](../docs/adr/). Hard-to-reverse decisions (three-tier architecture, error handling model, test strategy) are documented there with trade-offs.
 
 Key constraints:
 - **No `reflect`**, no `goto` — banned unless approved via ADR.

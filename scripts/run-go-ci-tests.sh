@@ -12,6 +12,21 @@ if ((${#packages[@]} == 0)); then
 fi
 
 go test "${packages[@]}" -count=1 -coverprofile=coverage.out -covermode=atomic
+
+# Route only the named root-owned lifecycle families to the local full-package run.
+# New Jailer tests run in CI by default, so an unclassified root effect fails visibly.
+local_jailer_tests='^Test('
+local_jailer_tests+='FreshRecovery(Active|Launching|Missing|Membership|Final|Same|Admission|Cleaning|'
+local_jailer_tests+='Cleanup(Reopens|Absent|Rejects))|'
+local_jailer_tests+='Launch(Abort|Managed|Release|Relay|Final|Lease)|AbortCleanup|'
+local_jailer_tests+='InstanceAuthority(ReleaseSlotRegisters|CleanupAndSameOwner|RejectsForeign|CrossUID|'
+local_jailer_tests+='ReleaseSlotReferenceCheckTracks|RegisterLockOrder|UsesOnlyFixedRootPathOpen|IndexReleaseAfter|'
+local_jailer_tests+='PostRename)|'
+local_jailer_tests+='Cleanup(LeaseCopies|WaitFailure|CompleteNilContext|LeaseDoesNotCommit)|'
+local_jailer_tests+='PreparedRelease(TransfersToSuccessfulLaunch|SerializesReleaseAgainstLaunchingTransfer|'
+local_jailer_tests+='RegistrationFailuresBeforeRenameRetainAuthority)|'
+local_jailer_tests+='PersistentOutput|BeginFreshRecoveryCleanup(Verifies|BootMismatch)|'
+local_jailer_tests+='ActivateVerifiedProcess|ActiveCleanup)'
 go test ./internal/service/jailer \
-  -skip '^Test(FreshRecovery|Launch|AbortCleanup|InstanceAuthority|Cleanup|PreparedRelease|PersistentOutput|BeginFreshRecovery|ActivateVerifiedProcess|ActiveCleanup)' \
+  -skip "$local_jailer_tests" \
   -count=1 -coverprofile=coverage-jailer.out -covermode=atomic
