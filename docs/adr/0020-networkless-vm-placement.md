@@ -72,14 +72,14 @@ now accepts an explicit networkless placement and emits no NIC or kernel `ip=` a
 rejecting managed endpoint fields, NoCloud NET mode, and caller-supplied `ip=` or `ds=` boot arguments. The fresh
 version-8 user VM schema now persists explicit placement, retains the managed network foreign key, and stores SQL
 `NULL` rather than a fabricated network ID for networkless rows. Production create and respawn callers still select
-managed placement explicitly. The root launch wire now requires the managed placement tag and rejects omitted,
-unknown, or networkless variants before the managed topology path. The strict schema-5 instance codec also rejects
-older-schema records, including cleaned tombstones. This is an admission guard, not networkless launch support. The
-private namespace pin/recovery effect now has a
-validated owner-and-VM key independent of the managed network ID; the managed topology journal and lock order are
-unchanged. This key is only a prerequisite, not a networkless namespace/lifecycle lease. Public input, that distinct
-root-owned lease, and snapshot integration remain pending. The existing `resolveNetwork` call and root
-`VMLaunchRequest` validation must not be relaxed alone.
+managed placement explicitly. The closed public create input admits `NoNetwork` and rejects conflicting endpoint and
+NoCloud NET fields, but its resolver still rejects networkless before dependent effects, and the CLI exposes no flag.
+The public root launch wire requires the managed placement tag and rejects omitted, unknown, or networkless variants.
+The strict schema-5 instance codec rejects older-schema records, including cleaned tombstones. Separately, the private
+root path now carries a typed networkless namespace lease through Jailer launch, activation, cleanup, and same-/prior-
+boot recovery. Placement is sealed in the protected device and instance records; the managed topology journal and
+lock order are unchanged. Public create/start/reboot, root-wire admission, and snapshot integration remain pending.
+The existing `resolveNetwork` call and root `VMLaunchRequest` validation must not be relaxed alone.
 Preserve current networked behavior until both branches have complete lifecycle ownership.
 
 Go tests should prove closed input combinations, exact wire-shape rejection, no-NIC Firecracker config, placement
@@ -87,5 +87,5 @@ round-trip, and fail-closed root effects. Installed-candidate Python tests in th
 namespace isolation, absent IP/TAP/host exposure, host-to-VM vsock exec, same-/cross-/no-network directional VM-to-VM
 exec authorization, stop/start/reboot/recovery, and snapshot restore. The runner kernel's missing bridge-family
 nftables capability still blocks networked comparisons; a passing isolated networkless case alone cannot qualify the
-whole placement and policy matrix. Focused Go config and persistence tests passed in the named runner; no networkless
-VM runtime pass or release qualification is claimed by this ADR.
+whole placement and policy matrix. Focused Go config, persistence, input, namespace, and Jailer package tests passed
+in the named runner; they do not prove an installed-candidate networkless VM runtime pass or release qualification.

@@ -339,7 +339,7 @@ any component. A missing hierarchy is already clean; unsafe state keeps the dura
 The current Jailer instance record is strict schema 5 with
 `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
 `launching` is durable pre-effect intent: owner UID/GID, VM ID, managed-cache identity, exact Firecracker/Jailer release
-identity, explicit managed network placement, isolated execution UID/GID, host boot ID, launch/cleanup generations,
+identity, explicit managed or networkless placement, isolated execution UID/GID, host boot ID, launch/cleanup generations,
 the handshake-blocked child's PID/start locator, and an explicit absent relay or handshake-blocked relay PID/start
 locator. It does not claim observed final credentials, cgroup membership, final mount namespace, jail root, or
 executable identity. `active` records
@@ -564,12 +564,13 @@ references. Live-kernel qualification remains pending.
 ADR-0020 defines a distinct, explicitly selected networkless VM placement for the required no-IP VM-to-VM exec case.
 It still requires a root-pinned per-VM namespace and Jailer membership, but has only loopback and no managed-network
 endpoint, TAP, or guest IP/MAC. The user VM row can now persist the placement variant and a genuinely absent network
-foreign key, and the Firecracker config generator supports the explicit networkless no-NIC/no-`ip=` shape. Public
-create, root launch, restart, and snapshot paths still require a managed network ID. The root launch wire now requires
-an explicit managed tag, and the private namespace pin/recovery effect is keyed by owner and VM independently of a
-managed network ID; neither change creates a networkless lifecycle lease. The complete networkless VM lifecycle is
-not active. Omitting `--network` still selects the default managed network and must never become an implicit
-networkless fallback.
+foreign key, and the Firecracker config generator supports the explicit networkless no-NIC/no-`ip=` shape. The closed
+public create input rejects conflicting network fields, but resolution still rejects networkless before dependent
+effects; no `--no-network` flag is exposed. The private root path now carries a typed networkless namespace lease
+through Jailer launch, activation, cleanup, and same-/prior-boot recovery, with placement sealed in the protected
+device and instance records. The public root launch wire, create, start/reboot, and snapshot paths remain managed-only.
+The complete networkless VM lifecycle is not publicly active or runtime-qualified. Omitting `--network` still selects
+the default managed network and must never become an implicit networkless fallback.
 
 ADR-0017 fixes the L3 contract consumed by the typed root transactions. The per-VM
 namespace is an L2 extension of one managed bridge. A canonical RFC1918 IPv4 prefix is limited to `/30` or shorter;
