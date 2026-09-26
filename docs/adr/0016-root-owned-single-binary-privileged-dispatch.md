@@ -1448,8 +1448,9 @@ root-owned `/usr/local/bin/mvm` content. The record stores no socket path, PID-f
 `active` retains that intent and adds receiver-observed final identity: every real/effective/saved/filesystem UID and
 GID, the exact empty supplementary-group set, final mount-namespace device/inode, final
 process-root/jail-root device/inode and fixed metadata, and the copied Firecracker's device/inode, exact size, mode,
-owner, link count, and manifest digest. Every Firecracker UID and GID field must equal the respective recorded
-`launch.execution_identity` field, not the operator UID/GID. Rust's Unix
+owner, link count, and manifest digest. Every Firecracker process credential in `active.user_ids` and
+`active.group_ids` must equal the respective recorded `launch.execution_identity` field, not the operator UID/GID.
+The copied executable itself remains root-owned (`active.executable.uid` and `.gid` are zero). Rust's Unix
 [`Command::uid`](https://doc.rust-lang.org/stable/std/os/unix/process/trait.CommandExt.html#tymethod.uid) calls
 `setgroups(0, NULL)` when no groups are specified, and Jailer specifies none; v0.3 therefore requires an empty set
 rather than accepting an arbitrary sorted set. Activation also requires exact membership in the derived cgroup.
