@@ -22,6 +22,10 @@ identities from the schema-3 lifecycle, now composed by typed root launch. A tra
 value cannot supply that authority.
 The implementation-only update added no tests and ran no build, tests, or qualification. Positive end-to-end behavior
 is not qualified.
+The required no-IP-network case is not yet representable through public VM creation: `VMCreateRequest.resolveNetwork`
+in `pkg/api/inputs/vm_create.go` requires a managed network, and `vm create` has no network-omission mode. The exec grant
+does not look up network placement, but that is not evidence that a no-IP VM can be launched. Add an admitted
+networkless VM lifecycle before claiming the no-IP case or its Python L2 test complete.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration, create path, results,
 persistence, and environment specifications; it is not converted into a directional policy.
 
