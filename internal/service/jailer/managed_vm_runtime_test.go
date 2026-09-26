@@ -426,5 +426,8 @@ func managedVMRuntimeTestPolicy(root string) managedVMRuntimePolicy {
 }
 
 func managedVMRuntimeTestCaller() instanceCaller {
+	if os.Geteuid() == 0 {
+		return testInstanceCaller()
+	}
 	return instanceCaller{uid: uint32(os.Geteuid()), gid: uint32(os.Getegid())}
 }
