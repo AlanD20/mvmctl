@@ -22,7 +22,6 @@ import (
 type HostAPI interface {
 	HostInstallSystemBinary(ctx context.Context) (bool, error)
 	HostInit(ctx context.Context, onProgress event.OnProgressCallback) (*results.HostInit, error)
-	HostGetState(ctx context.Context) (*model.HostStateItem, error)
 	HostDetectResources(ctx context.Context) (*model.HostResources, error)
 	HostNetworkSetup(ctx context.Context) error
 	HostInfo(ctx context.Context) (*results.HostInfo, error)
@@ -34,7 +33,6 @@ type HostAPI interface {
 	HostClean(ctx context.Context) ([]string, error)
 	HostReset(ctx context.Context) ([]string, error)
 	HostGetRunningVMs(ctx context.Context) ([]*model.VMItem, error)
-	HostIsInitialized(ctx context.Context) bool
 	HostCheckReadiness(ctx context.Context) *model.ProbeResult
 }
 
@@ -56,11 +54,6 @@ func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCa
 		InputType: "sudo",
 		Context:   map[string]any{"command": "sudo /usr/local/bin/mvm host init", "operation": "initialize host"},
 	}
-}
-
-// HostGetState returns the current host state snapshot.
-func (op *Operation) HostGetState(ctx context.Context) (*model.HostStateItem, error) {
-	return op.Repos.Host.GetState(ctx)
 }
 
 // HostDetectResources detects live host resources.
@@ -117,17 +110,14 @@ func (op *Operation) HostInfo(ctx context.Context) (*results.HostInfo, error) {
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeHostInfoFailed, fmt.Sprintf("Failed to get host state: %v", err), err)
 	}
-	if state == nil {
-		return nil, errs.New(
-			errs.CodeHostInfoFailed,
-			"Host not yet detected. Run 'mvm host init' first.",
-			errs.WithClass(errs.ClassValidation),
-		)
+	var hardware *model.HostHardware
+	var limits *model.HostLimits
+	if state != nil {
+		hardware = host.HardwareFromState(state)
+		limits = host.LimitsFromState(state)
 	}
-	hardware := host.HardwareFromState(state)
-	limits := host.LimitsFromState(state)
 	if hardware == nil || limits == nil {
-		// Auto-detect if this is the first time
+		// Capacity is caller-owned cache data, not a prerequisite for reading host information.
 		hardware, limits, err = op.Services.Host.DetectAndSaveCapacity(ctx)
 		if err != nil {
 			return nil, errs.WrapMsg(
@@ -213,14 +203,6 @@ func (op *Operation) HostStatusCheck(ctx context.Context) *results.HostStatusChe
 	missing := op.HostCheckRequiredBinaries()
 	ipFwd, _ := op.HostGetIPForwardStatus(ctx)
 	fwdOK := ipFwd == "1"
-	var setup *results.HostSetupInfo
-	state, _ := op.HostGetState(ctx)
-	if state != nil {
-		setup = &results.HostSetupInfo{
-			Initialized:   state.Initialized,
-			InitializedAt: state.InitializedAt,
-		}
-	}
 	resources, _ := op.HostDetectResources(ctx)
 	// Check group and sudoers state from live system
 	groupExists := system.GroupExists(infra.MVMUnixGroup)
@@ -230,6 +212,7 @@ func (op *Operation) HostStatusCheck(ctx context.Context) *results.HostStatusChe
 	if _, err := os.Stat(fmt.Sprintf("/etc/sudoers.d/%s", infra.MVMUnixGroup)); err == nil {
 		sudoersExists = true
 	}
+	// User-owned SQLite cannot attest to root administrator admission.
 	return &results.HostStatusCheck{
 		KVMOK:           kvmOK,
 		MissingBinaries: missing,
@@ -238,7 +221,6 @@ func (op *Operation) HostStatusCheck(ctx context.Context) *results.HostStatusChe
 		GroupExists:     groupExists,
 		SudoersExists:   sudoersExists,
 		UserInGroup:     userInGroup,
-		State:           setup,
 		Resources:       resources,
 	}
 }
@@ -309,12 +291,6 @@ func (op *Operation) HostGetRunningVMs(ctx context.Context) ([]*model.VMItem, er
 		running = append(running, item)
 	}
 	return running, nil
-}
-
-// HostIsInitialized checks if host is initialized.
-func (op *Operation) HostIsInitialized(ctx context.Context) bool {
-	state, err := op.Repos.Host.GetState(ctx)
-	return err == nil && state != nil && state.Initialized
 }
 
 // HostCheckReadiness runs pre-flight checks.

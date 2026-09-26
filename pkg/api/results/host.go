@@ -139,7 +139,6 @@ type HostInfo struct {
 	Kernel         HostKernelInfo    `json:"kernel"`
 	Limits         HostLimitsInfo    `json:"limits"`
 	Capacity       HostCapacityInfo  `json:"capacity"`
-	Setup          HostSetupInfo     `json:"setup"`
 }
 
 // BuildHostInfo builds a HostInfoResponse from model data.
@@ -218,10 +217,6 @@ func BuildHostInfo(hi *model.HostInfo) *HostInfo {
 			},
 			RecommendedMaxVMs: hi.Resources.RecommendedMaxVMs,
 			LimitingResource:  hi.Resources.LimitingResource,
-		},
-		Setup: HostSetupInfo{
-			Initialized:   hi.State.Initialized,
-			InitializedAt: hi.State.InitializedAt,
 		},
 	}
 }

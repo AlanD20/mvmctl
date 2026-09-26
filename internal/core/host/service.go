@@ -253,6 +253,11 @@ func (s *Service) DetectAndSaveCapacity(ctx context.Context) (*model.HostHardwar
 	}
 	limits := DetectLimits()
 	detectedAt := time.Now().Format(time.RFC3339)
+	// Administrator host init deliberately does not touch the caller's SQLite database.
+	// This row caches capacity only; it is never host-admission authority.
+	if _, err := s.repo.InitializeState(ctx); err != nil {
+		return nil, nil, err
+	}
 
 	err = s.repo.SaveCapacity(ctx,
 		hardware.Hostname,

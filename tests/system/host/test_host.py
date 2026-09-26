@@ -1,38 +1,68 @@
 """Host configuration system tests.
 
 Migrated from tests/e2e/host/test_host.py.
-Violations removed:
-- NO pytest.skip() — preconditions are fixed; uninitialized host is handled via JSON checks
-- NO subprocess.run with sudo on host — all commands through _run_mvm() inside the test VM
-- NO Path.exists for mvm binary location — binary is available inside the test VM
-- NO os.path.exists on host paths — all checks done inside the VM
+The read-only cases require a provisioned runner and exercise the installed
+candidate through the 0.3 structured JSON envelope.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import tempfile
 
 import pytest
 
-from tests.system.conftest import _run_mvm
+from tests.system.conftest import _guest_run, _run_mvm
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_host]
+
+
+def _success_data(result):
+    assert result.returncode == 0, result.stderr or result.stdout
+    envelope = json.loads(result.stdout)
+    assert envelope["schema_version"] == 1
+    assert envelope["status"] == "success"
+    assert envelope["error"] is None
+    data = envelope["data"]
+    assert isinstance(data, dict)
+    return data
 
 
 class TestHostInfo:
     """Test host info command (read-only, non-destructive)."""
 
+    def test_host_info_detects_first_capacity_snapshot(self, runner_vm):
+        """A fresh operator cache must not need a prior refresh to show host info."""
+        mirror = os.environ.get("MVM_ASSET_MIRROR")
+        assert mirror, "the runner must provide its pre-cached asset mirror"
+        with tempfile.TemporaryDirectory(
+            prefix="mvm-host-info-", dir="/home/runner/.cache"
+        ) as cache_dir:
+            env = (
+                f"MVM_CACHE_DIR={shlex.quote(cache_dir)} "
+                f"MVM_ASSET_MIRROR={shlex.quote(mirror)}"
+            )
+            _guest_run(
+                runner_vm,
+                f"{env} /usr/local/bin/mvm init --non-interactive "
+                "--skip-host --skip-network --binary-version 1.16.0",
+                timeout=180,
+            )
+            first = _guest_run(
+                runner_vm,
+                f"MVM_CACHE_DIR={shlex.quote(cache_dir)} "
+                "/usr/local/bin/mvm host info --json",
+            )
+            data = _success_data(first)
+            assert data["hostname"]
+            assert data["memory"]["total_mib"] > 0
+            assert data["detected_at"]
+
     def test_host_info_basic(self, runner_vm):
         """Show host info in human-readable format."""
-        # L1 verification: the command always runs (host info does not require
-        # prior initialization — it detects on the fly).
-        result = _run_mvm(runner_vm, "host", "info", check=False)
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected output for uninitialized host: {combined}"
-            )
-            return
+        result = _run_mvm(runner_vm, "host", "info")
         stdout = result.stdout
         assert "Host Info" in stdout, (
             f"host info missing title 'Host Info':\n{stdout}"
@@ -54,13 +84,7 @@ class TestHostInfo:
     def test_host_info_json(self, runner_vm):
         """Show host info in JSON format with expected structure."""
         result = _run_mvm(runner_vm, "host", "info", "--json", check=False)
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected output for uninitialized host: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         assert "hostname" in data, (
             f"host info --json missing 'hostname': {list(data.keys())}"
         )
@@ -81,9 +105,6 @@ class TestHostInfo:
         )
         assert "capacity" in data, (
             f"host info --json missing 'capacity': {list(data.keys())}"
-        )
-        assert "setup" in data, (
-            f"host info --json missing 'setup': {list(data.keys())}"
         )
         cpu = data["cpu"]
         assert "model" in cpu, f"cpu missing 'model': {list(cpu.keys())}"
@@ -121,13 +142,7 @@ class TestHostInfo:
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected output for uninitialized host: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         assert isinstance(data.get("cpu", {}).get("model"), str), (
             f"cpu.model must be a string: {data.get('cpu', {})}"
         )
@@ -151,13 +166,7 @@ class TestHostInfo:
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected output for uninitialized host: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         assert isinstance(data["cpu"]["cores"], int), (
             f"cpu.cores must be int: {type(data['cpu']['cores'])}"
         )
@@ -180,11 +189,6 @@ class TestHostInfo:
             f"capacity.recommended_max_vms must be int: "
             f"{type(data['capacity']['recommended_max_vms'])}"
         )
-        setup = data.get("setup", {})
-        if "initialized" in setup:
-            assert isinstance(setup["initialized"], bool), (
-                f"setup.initialized must be bool: {type(setup['initialized'])}"
-            )
 
 
 class TestHostStatus:
@@ -192,13 +196,7 @@ class TestHostStatus:
 
     def test_host_status_basic(self, runner_vm):
         """Show current host configuration state."""
-        result = _run_mvm(runner_vm, "host", "status", check=False)
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not initialized" in combined, (
-                f"Unexpected output for uninitialized host: {combined}"
-            )
-            return
+        result = _run_mvm(runner_vm, "host", "status")
         stdout = result.stdout
         assert "/dev/kvm" in stdout, (
             f"host status missing '/dev/kvm' check:\n{stdout}"
@@ -210,13 +208,7 @@ class TestHostStatus:
     def test_host_status_json(self, runner_vm):
         """Show current host configuration state in JSON format."""
         result = _run_mvm(runner_vm, "host", "status", "--json", check=False)
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not initialized" in combined, (
-                f"Unexpected output for uninitialized host: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         assert "kvm_accessible" in data, (
             f"host status --json missing 'kvm_accessible': {list(data.keys())}"
         )
@@ -232,76 +224,27 @@ class TestHostStatus:
         assert "state" in data, (
             f"host status --json missing 'state': {list(data.keys())}"
         )
+        assert data["state"] is None, (
+            "caller-owned SQLite must not claim root administrator admission"
+        )
 
     def test_host_status_json_virtualization(self, runner_vm):
         """host status --json includes virtualization section with all expected fields."""
         result = _run_mvm(runner_vm, "host", "status", "--json", check=False)
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not initialized" in combined, (
-                f"Unexpected output for uninitialized host: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
-        virt = data.get("virtualization")
-        if virt is None:
-            resources = data.get("resources", {})
-            modules = resources.get("modules_loaded", {})
-            dev_kvm = data.get("kvm_accessible", False)
-            kvm_status = resources.get("dev_kvm_status", "unknown")
-            user_kvm = resources.get("user_in_kvm_group", False)
-            assert isinstance(modules, dict)
-            assert isinstance(dev_kvm, bool)
-            if kvm_status:
-                assert isinstance(kvm_status, str)
-            if user_kvm is not None:
-                assert isinstance(user_kvm, bool)
-            return
+        data = _success_data(result)
+        resources = data["resources"]
+        assert isinstance(resources["modules_loaded"], dict)
+        assert isinstance(resources["dev_kvm_status"], str)
+        assert isinstance(resources["user_in_kvm_group"], bool)
+        assert isinstance(resources["dev_net_tun_accessible"], bool)
 
-        assert "modules_loaded" in virt, (
-            f"virtualization missing 'modules_loaded': {list(virt.keys())}"
-        )
-        assert isinstance(virt["modules_loaded"], dict), (
-            f"modules_loaded must be dict: {type(virt['modules_loaded'])}"
-        )
-        assert "nested_virt" in virt, (
-            f"virtualization missing 'nested_virt': {list(virt.keys())}"
-        )
-        assert isinstance(virt["nested_virt"], bool), (
-            f"nested_virt must be bool: {type(virt['nested_virt'])}"
-        )
-        assert "dev_net_tun" in virt, (
-            f"virtualization missing 'dev_net_tun': {list(virt.keys())}"
-        )
-        assert isinstance(virt["dev_net_tun"], bool), (
-            f"dev_net_tun must be bool: {type(virt['dev_net_tun'])}"
-        )
-        assert "user_in_kvm_group" in virt, (
-            f"virtualization missing 'user_in_kvm_group': {list(virt.keys())}"
-        )
-        assert isinstance(virt["user_in_kvm_group"], bool), (
-            f"user_in_kvm_group must be bool: {type(virt['user_in_kvm_group'])}"
-        )
-
-    def test_host_status_initialized_or_uninitialized(self, runner_vm):
-        """host status --json returns valid data or clear error depending on state."""
+    def test_host_status_json_payload_types(self, runner_vm):
+        """The provisioned runner returns typed live-status fields."""
         result = _run_mvm(runner_vm, "host", "status", "--json", check=False)
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            assert isinstance(data.get("kvm_accessible"), bool), (
-                f"kvm_accessible must be bool: {data}"
-            )
-            assert isinstance(data.get("missing_binaries"), (dict, list, type(None))), (
-                f"missing_binaries must be a dict, list, or None: {data}"
-            )
-            assert "ip_forward" in data, (
-                f"host status --json missing ip_forward: {data}"
-            )
-        else:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not initialized" in combined, (
-                f"Unexpected output for uninitialized host: {combined}"
-            )
+        data = _success_data(result)
+        assert isinstance(data["kvm_accessible"], bool)
+        assert isinstance(data["missing_binaries"], (list, type(None)))
+        assert isinstance(data["ip_forward"], str)
 
 
 class TestHostStatusEnhanced:
@@ -310,69 +253,30 @@ class TestHostStatusEnhanced:
     def test_host_status_json_structure(self, runner_vm):
         """host status --json returns all expected nested fields."""
         result = _run_mvm(runner_vm, "host", "status", "--json", check=False)
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not initialized" in combined, (
-                f"Unexpected output for uninitialized host: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         assert isinstance(data["kvm_accessible"], bool)
         assert data.get("missing_binaries") is None or isinstance(
-            data["missing_binaries"], (dict, list)
+            data["missing_binaries"], list
         )
         assert isinstance(data["ip_forward"], str)
-        assert data.get("state") is None or isinstance(data["state"], dict)
+        assert data["state"] is None
 
     def test_host_status_json_virtualization_nested(self, runner_vm):
         """host status --json virtualization section has correct types."""
         result = _run_mvm(runner_vm, "host", "status", "--json", check=False)
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not initialized" in combined, (
-                f"Unexpected output for uninitialized host: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
-        virt = data.get("virtualization")
-        if virt is None:
-            resources = data.get("resources", {})
-            modules = resources.get("modules_loaded", {})
-            dev_kvm = data.get("kvm_accessible", False)
-            kvm_status = resources.get("dev_kvm_status", "unknown")
-            user_kvm = resources.get("user_in_kvm_group", False)
-            assert isinstance(modules, dict), (
-                f"modules_loaded must be a dict: {modules}"
-            )
-            assert isinstance(dev_kvm, bool), (
-                f"kvm_accessible must be bool: {dev_kvm}"
-            )
-            if kvm_status:
-                assert isinstance(kvm_status, str), (
-                    f"dev_kvm_status must be str: {kvm_status}"
-                )
-            if user_kvm is not None:
-                assert isinstance(user_kvm, bool), (
-                    f"user_in_kvm_group must be bool: {user_kvm}"
-                )
-        else:
-            assert isinstance(virt["modules_loaded"], dict)
-            assert isinstance(virt["nested_virt"], bool)
-            assert isinstance(virt["dev_net_tun"], bool)
-            assert isinstance(virt["user_in_kvm_group"], bool)
+        data = _success_data(result)
+        resources = data["resources"]
+        assert isinstance(resources["modules_loaded"], dict)
+        assert isinstance(resources["dev_kvm_status"], str)
+        assert isinstance(resources["user_in_kvm_group"], bool)
+        assert isinstance(resources["dev_net_tun_accessible"], bool)
 
     def test_host_info_json_os_section(self, runner_vm):
         """host info --json os section contains kernel and release."""
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         os_section = data.get("os", {})
         assert "kernel" in os_section, (
             f"os missing 'kernel': {list(os_section.keys())}"
@@ -388,13 +292,7 @@ class TestHostStatusEnhanced:
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         storage = data.get("storage", {})
         assert "total_bytes" in storage, (
             f"storage missing 'total_bytes': {list(storage.keys())}"
@@ -405,39 +303,20 @@ class TestHostStatusEnhanced:
         assert isinstance(storage["total_bytes"], int)
         assert isinstance(storage["free_bytes"], int)
 
-    def test_host_info_json_setup_section(self, runner_vm):
-        """host info --json setup section contains initialized and initialized_at."""
+    def test_host_info_json_omits_untrusted_setup_state(self, runner_vm):
+        """Capacity data must not present caller-owned SQLite as root setup authority."""
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
-        setup = data.get("setup", {})
-        assert "initialized" in setup, (
-            f"setup missing 'initialized': {list(setup.keys())}"
-        )
-        assert "initialized_at" in setup, (
-            f"setup missing 'initialized_at': {list(setup.keys())}"
-        )
-        assert isinstance(setup["initialized"], bool)
+        data = _success_data(result)
+        assert "setup" not in data
 
     def test_host_info_json_capacity_current(self, runner_vm):
         """host info --json capacity.current section contains usage fields."""
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         cap = data.get("capacity", {})
         current = cap.get("current", {})
         assert "pids" in current, (
@@ -463,13 +342,7 @@ class TestHostStatusEnhanced:
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         limits = data.get("limits", {})
         assert "ip_local_port_range" in limits
         port_range = limits["ip_local_port_range"]
@@ -482,13 +355,7 @@ class TestHostStatusEnhanced:
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         virt = data.get("virtualization")
         assert virt is not None, (
             f"host info --json missing 'virtualization' section: {list(data.keys())}"
@@ -523,13 +390,7 @@ class TestHostStatusEnhanced:
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         hp = data.get("hugepages")
         assert hp is not None, (
             f"host info --json missing 'hugepages' section: {list(data.keys())}"
@@ -548,21 +409,16 @@ class TestHostStatusEnhanced:
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         deps = data.get("dependencies")
         assert deps is not None, (
             f"host info --json missing 'dependencies' section: {list(data.keys())}"
         )
         assert "nftables_available" in deps
         assert isinstance(deps["nftables_available"], bool)
-        assert "iptables_available" in deps
-        assert isinstance(deps["iptables_available"], bool)
+        if not deps["nftables_available"]:
+            assert isinstance(deps["nftables_probe_error"], str)
+            assert deps["nftables_probe_error"]
         assert "cloud_localds_available" in deps
         assert isinstance(deps["cloud_localds_available"], bool)
         assert "dev_net_tun" in deps
@@ -573,13 +429,7 @@ class TestHostStatusEnhanced:
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         sys_sec = data.get("system")
         assert sys_sec is not None, (
             f"host info --json missing 'system' section: {list(data.keys())}"
@@ -598,13 +448,7 @@ class TestHostStatusEnhanced:
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         mem = data.get("memory")
         assert mem is not None, (
             f"host info --json missing 'memory' section: {list(data.keys())}"
@@ -623,13 +467,7 @@ class TestHostStatusEnhanced:
         result = _run_mvm(
             runner_vm, "host", "info", "--refresh", "--json", check=False
         )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).lower()
-            assert "not yet detected" in combined or "init" in combined, (
-                f"Unexpected: {combined}"
-            )
-            return
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         kernel = data.get("kernel")
         assert kernel is not None, (
             f"host info --json missing 'kernel' section: {list(data.keys())}"
