@@ -43,7 +43,8 @@ Specific legacy conflicts that must be rewritten before release:
 - `vm/test_jailer.py` observes process/chroot outcomes through user-visible state but does not qualify root authority or
   the fd-0 transport.
 - Shared cleanup and several test-local teardowns still suppress errors or mutate host state with broad raw sudo.
-- `run provision` and `run jailer` coverage names public routes that the final release must remove.
+- The old `run provision` help case was a false positive: Cobra displayed parent help for the removed route. The current
+  entry-point test checks the public command listing for its absence and verifies active services reject missing identity.
 
 ## Table of Contents
 
@@ -631,10 +632,10 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `run nocloudnet serve --help` | ⚡ Shallow | `run/test_run.py` | `TestRunHelp` | L1 — help output |
-| `run console relay --help` | ⚡ Shallow | `run/test_run.py` | `TestRunHelp` | L1 — help output |
-| `run provision --help` | ⚡ Shallow | `run/test_run.py` | `TestRunHelp` | L1 — help output |
-| `run jailer` | ✅ Deep | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestJailerFailClosed` | L2 — indirectly verifies privileged install, launch, cleanup, and no fallback |
+| `run nocloudnet serve --help` and missing required flags | ⚡ Shallow | `run/test_run.py` | `TestRunEntryPoints` | L2 — installed CLI help and required-identity rejection |
+| `run console relay --help` and missing required flags | ⚡ Shallow | `run/test_run.py` | `TestRunEntryPoints` | L2 — installed CLI help and required-identity rejection |
+| Retired `run provision` absent | ⚡ Shallow | `run/test_run.py` | `TestRunEntryPoints::test_run_help` | L2 — public command listing omits the removed route |
+| Jailer launch/cleanup through public VM lifecycle | ✅ Deep | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestJailerFailClosed` | L2 — indirect runtime behavior; private dispatch authority needs separate proof |
 
 > Internal service subprocesses are tested indirectly through VM operations (console relay, nocloudnet HTTP, volume provisioning).
 

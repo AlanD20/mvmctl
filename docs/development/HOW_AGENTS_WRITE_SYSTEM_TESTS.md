@@ -453,9 +453,9 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 
 | Scenario | Verdict | Why |
 |----------|---------|-----|
-| `run nocloudnet serve --help` | L1 | Cobra output |
-| `run console relay --help` | L1 | Cobra output |
-| `run provision --help` | L1 | Cobra output |
+| `run nocloudnet serve --help` and missing identity | L2 | Installed CLI help and required-flag rejection |
+| `run console relay --help` and missing identity | L2 | Installed CLI help and required-flag rejection |
+| removed `run provision` absent from `run --help` | L2 | Installed CLI command-list regression guard |
 
 ### Invariants, Cross-Resource, and Consistency
 

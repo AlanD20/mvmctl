@@ -30,13 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > remote-exec trust flag described below are implemented.
 > The late implementation pass also composes typed schema-4 launch/cleanup, per-VM topology, cgroup and descriptor-only
 > mounts, same-boot recovery, root traffic apply/revoke, managed-network transactions, and offline ext-image shrink.
-> A clean checkout at `3cef1c41` passed the pinned Go 1.26.3 CI checks and full root-effect Jailer Go package inside
+> A clean checkout at `bdc7b70b` passed the pinned Go 1.26.3 CI checks and full root-effect Jailer Go package inside
 > the named `mvmctl-030-test` runner, using a previously installed, verified golines v0.13.0 binary because the runner
 > is offline. The host-capacity fix at `66580a71` also passed focused pinned Go checks and installed-candidate host
-> Python cases there. At `5ccd7d55`, focused CLI Go tests, vet, and formatting passed, and 26 selected SSH-key Python
-> cases passed against the installed `0.3.0-rc.5` candidate in that runner; two bridge-dependent cases were deselected.
-> Full Go CI has not been rerun for this latest source, and the broader installed-candidate Python release matrix has
-> not run.
+> Python cases there. Against the installed `0.3.0-rc.5` candidate, 26 selected SSH-key cases and all five internal
+> service entry-point cases passed there; two bridge-dependent key cases were deselected. The broader installed-candidate
+> Python release matrix has not run.
 > Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation.
 > The mapped production integration gaps are committed; release qualification remains incomplete. Raw-volume launch,
 > host clean/reset, and typed image recovery are
