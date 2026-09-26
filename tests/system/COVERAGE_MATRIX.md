@@ -418,7 +418,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `image warm --all` | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: warmed/ready message for cached image. |
 | `image warm` by ID prefix | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: prefix resolves and reports warmed/ready. |
 | `image warm` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: command rejects missing image. |
-| `image import` | ⏭️ Skip | `images/test_images.py` | `TestImageImport` | L2 — often skips on zstd/mkfs |
+| `image import` | ⚡ Shallow | `images/test_images.py` | `TestImageImport` | Installed rc.7: cached Alpine raw import, exact ext4/Alpine record, checked removal; VM boot remains unproved. |
 | `image import --format qcow2` | ⚡ Shallow | `images/test_images.py` | `TestImageImportAdvanced` | Installed rc.7: cached Alpine raw→QCOW2→ext4 import, detected distro, present record, checked removal; VM boot remains unproved. |
 | `image import --root-partition` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — skips on qemu-img |
 | `image import --force` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — may skip |
@@ -428,7 +428,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `image import --skip-optimization` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced` | L2 — imported with skip-optimization flag, may skip |
 | `image import --disable-detector` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced` | L2 — imported with --disable-detector arch, may skip on missing cached image |
 | `image import --version` | ⚡ Shallow | `images/test_images.py` | `TestImageImportAdvanced::test_image_import_with_version` | L2 — version field matches in ls --json |
-| `image import` nonexistent path | ⚡ Shallow | `images/test_images.py` | `TestImageImport` | L1 |
+| `image import` nonexistent path | ⚡ Shallow | `images/test_images.py` | `TestImageImport` | Installed rc.7: structured `image.import.failed`, no image record. |
 | Full import→VM-create end-to-end | ⏭️ Skip | `images/test_images.py` | `TestImageImportCreateVM` | L2 — many skip points |
 | Default migrates on force re-pull | ⏭️ Skip | `images/test_images.py` | `TestImageDefaultMigration` | L2 — many skip points |
 
@@ -677,7 +677,7 @@ Specific legacy conflicts that must be rewritten before release:
 | snapshot | 13 | 1 | 12 | 0 | 0 | 0 |
 | volume | 35 | 4 | 29 | 2 | 0 | 0 |
 | key | 28 | 3 | 25 | 0 | 0 | 0 |
-| image | 41 | 0 | 15 | 3 | 3 | 20 |
+| image | 41 | 0 | 16 | 3 | 3 | 19 |
 | kernel | 30 | 2 | 15 | 6 | 0 | 7 |
 | bin | 17 | 2 | 6 | 1 | 0 | 8 |
 | ssh | 6 | 4 | 1 | 1 | 0 | 0 |
@@ -689,15 +689,15 @@ Specific legacy conflicts that must be rewritten before release:
 | env | 22 | 9 | 13 | 0 | 0 | 0 |
 | run | 4 | 1 | 3 | 0 | 0 | 0 |
 | full-journeys | 15 | 7 | 8 | 0 | 0 | 0 |
-| **Total** | **431** | **83** | **284** | **21** | **6** | **37** |
+| **Total** | **431** | **83** | **285** | **21** | **6** | **36** |
 
 **Current-row coverage health:**
 - ✅ Deep (L3): 83/431 = 19.3%
-- ⚡ Shallow (L0-L2): 284/431 = 65.9%
+- ⚡ Shallow (L0-L2): 285/431 = 66.1%
 - 🟡 Partial: 21/431 = 4.9%
 - 🔴 Missing: **6/431 = 1.4%** — three user-owned `self-update` success/check paths, two remote image-list
   flag cases, and the phantom `image inspect --tree` entry
-- ⏭️ Skip-prone: 37/431 = 8.6%
+- ⏭️ Skip-prone: 36/431 = 8.4%
 
 These counts inventory rows for the transitional CLI only. They do not include the separate v0.3.0 security blockers in
 the qualification overlay. Successful user-owned `self-update` check/apply behavior remains unqualified at L2. The

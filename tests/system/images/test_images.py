@@ -454,57 +454,76 @@ class TestImageImport:
     ]
 
     def test_image_import_local_file(self, runner_vm):
-        """Import a local image file (inside the test VM)."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        cached_path = _get_cached_alpine_path_in_vm(
-            runner_vm, "alpine-import.raw"
-        )
-        assert cached_path is not None, (
-            "No cached alpine image available to extract and re-import"
-        )
-
-        imported_prefix = None
+        """Import the pre-seeded Alpine rootfs through the raw-image path."""
+        suffix = uuid.uuid4().hex
+        raw_name = f"alpine-import-{suffix}.raw"
+        raw_path = f"{VM_TMP_DIR}/{raw_name}"
+        name = f"imported-alpine-{suffix}"
+        imported_id = None
         try:
+            extracted_path = _get_cached_alpine_path_in_vm(runner_vm, raw_name)
+            assert extracted_path is not None, (
+                "the module's pre-seeded Alpine rootfs could not be extracted"
+            )
             result = _run_mvm(
                 runner_vm,
                 "image",
                 "import",
-                "imported-alpine",
-                cached_path,
+                name,
+                raw_path,
                 "--format",
                 "raw",
+                "--json",
                 check=False,
             )
-            assert result.returncode == 0
+            assert result.returncode == 0, result.stderr
+            imported_item = _parse_json_output(result.stdout)
+            imported_id = imported_item["id"]
 
             result = _run_mvm(runner_vm, "image", "ls", "--json")
             images = _parse_json_output(result.stdout)
-            imported = [
-                i for i in images
-                if "imported" in i.get("name", "").lower()
-                and "alpine" in i.get("type", "").lower()
-            ]
-            assert imported, "Imported image not found in listing"
-            imported_prefix = imported[0]["id"][:6]
+            imported = [i for i in images if i.get("id") == imported_id]
+            assert len(imported) == 1, "Imported raw image not found in listing"
+            assert imported[0]["name"] == name
+            assert imported[0]["is_imported"] is True
+            assert imported[0]["is_present"] is True
+            assert imported[0]["fs_type"] == "ext4"
+            assert imported[0]["distro"] == "alpine"
         finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
+            try:
+                if imported_id:
+                    _run_mvm(runner_vm, "image", "rm", imported_id)
+                    after = _parse_json_output(
+                        _run_mvm(runner_vm, "image", "ls", "--json").stdout
+                    )
+                    assert all(i["id"] != imported_id for i in after)
+            finally:
+                Path(raw_path).unlink(missing_ok=True)
 
     def test_import_from_nonexistent_path_fails(self, runner_vm):
-        """Import from a path that does not exist should fail with clear error."""
+        """Reject a missing source before creating an image record."""
+        suffix = uuid.uuid4().hex
+        name = f"test-fail-{suffix}"
         result = _run_mvm(
             runner_vm,
             "image",
             "import",
-            "test-fail-name",
-            "/tmp/nonexistent-path-that-does-not-exist.qcow2",
+            name,
+            f"/tmp/nonexistent-{suffix}.qcow2",
+            "--json",
             check=False,
         )
         assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "not found" in combined or "does not exist" in combined, (
-            f"Expected error about nonexistent path, got: {result.stderr}"
+        response = json.loads(result.stdout)
+        assert response["schema_version"] == 1
+        assert response["status"] == "error"
+        assert response["data"] is None
+        assert response["error"]["code"] == "image.import.failed"
+        assert "source not found" in response["error"]["message"]
+        images = _parse_json_output(
+            _run_mvm(runner_vm, "image", "ls", "--json").stdout
         )
+        assert all(i.get("name") != name for i in images)
 
 
 class TestImagePullAdvanced:
