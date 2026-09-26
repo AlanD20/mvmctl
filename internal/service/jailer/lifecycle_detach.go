@@ -30,6 +30,12 @@ func (lease *activeLease) detachCommittedLaunch(ctx context.Context) error {
 		}
 		state.topology = nil
 	}
+	if state.networkless != nil {
+		if err := state.networkless.DetachActive(cleanupCtx); err != nil {
+			return appendInstanceOperationError(state.releaseErr, "detach committed networkless namespace", err)
+		}
+		state.networkless = nil
+	}
 	if state.managedVMCgroup != nil {
 		state.releaseErr = appendInstanceOperationError(state.releaseErr, "detach active cgroup descriptors",
 			state.managedVMCgroup.detachCommittedLaunch(cleanupCtx, state.record.vmID))

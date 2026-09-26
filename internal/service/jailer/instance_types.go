@@ -155,6 +155,7 @@ type instanceRecord struct {
 	schemaVersion     uint32
 	ownerUID          uint32
 	vmID              string
+	networkPlacement  model.VMNetworkPlacement
 	lifecycle         instanceLifecycle
 	launchGeneration  uint64
 	cleanupGeneration uint64
@@ -200,6 +201,9 @@ func registerLaunchingInstanceRecord(
 				errs.WithEntity(intent.vmID),
 			)
 		}
+		if existing.networkPlacement != intent.networkPlacement {
+			return instanceRecord{}, instanceValidationError("launch network placement differs from cleaned authority")
+		}
 		if existing.launchGeneration == math.MaxUint64 {
 			return instanceRecord{}, instanceStateError(intent.vmID, "launch generation is exhausted")
 		}
@@ -222,6 +226,7 @@ func registerLaunchingInstanceRecord(
 		schemaVersion:     instanceRecordSchemaVersion,
 		ownerUID:          caller.uid,
 		vmID:              intent.vmID,
+		networkPlacement:  intent.networkPlacement,
 		lifecycle:         instanceLifecycleLaunching,
 		launchGeneration:  launchGeneration,
 		cleanupGeneration: cleanupGeneration,
@@ -321,8 +326,12 @@ func validateLaunchIntent(intent launchIntent) error {
 	if !vmIDPattern.MatchString(intent.vmID) {
 		return instanceValidationError("vm ID is invalid")
 	}
-	if intent.networkPlacement != model.VMNetworkPlacementManaged {
-		return instanceValidationError("instance launch network placement is not an admitted managed variant")
+	if intent.networkPlacement != model.VMNetworkPlacementManaged &&
+		intent.networkPlacement != model.VMNetworkPlacementNetworkless {
+		return instanceValidationError("instance launch network placement is invalid")
+	}
+	if intent.networkPlacement == model.VMNetworkPlacementNetworkless && intent.snapshotID != "" {
+		return instanceValidationError("networkless snapshot restore is not admitted")
 	}
 	if !hostBootIDPattern.MatchString(intent.hostBootID) {
 		return instanceValidationError("instance authority host boot ID is invalid")
@@ -356,6 +365,10 @@ func validateInstanceRecord(record instanceRecord) error {
 	if !vmIDPattern.MatchString(record.vmID) {
 		return instanceAtomicError("instance authority VM ID is invalid", nil)
 	}
+	if record.networkPlacement != model.VMNetworkPlacementManaged &&
+		record.networkPlacement != model.VMNetworkPlacementNetworkless {
+		return instanceAtomicError("instance authority network placement is invalid", nil)
+	}
 	if record.launchGeneration == 0 {
 		return instanceAtomicError("instance authority launch generation is invalid", nil)
 	}
@@ -386,6 +399,9 @@ func validateInstanceRecord(record instanceRecord) error {
 		return instanceAtomicError("instance authority lifecycle is invalid", nil)
 	}
 	if record.launch != nil {
+		if record.launch.networkPlacement != record.networkPlacement {
+			return instanceAtomicError("instance authority network placement differs from launch", nil)
+		}
 		if record.launch.executionIdentity.uid == record.ownerUID {
 			return instanceAtomicError("execution identity must be isolated from the operator", nil)
 		}
@@ -402,8 +418,12 @@ func validateInstanceRecord(record instanceRecord) error {
 }
 
 func validateInstanceLaunchRecord(launch instanceLaunchRecord) error {
-	if launch.networkPlacement != model.VMNetworkPlacementManaged {
-		return fmt.Errorf("instance launch network placement is not an admitted managed variant")
+	if launch.networkPlacement != model.VMNetworkPlacementManaged &&
+		launch.networkPlacement != model.VMNetworkPlacementNetworkless {
+		return fmt.Errorf("instance launch network placement is invalid")
+	}
+	if launch.networkPlacement == model.VMNetworkPlacementNetworkless && launch.snapshotID != "" {
+		return fmt.Errorf("networkless snapshot restore is not admitted")
 	}
 	if launch.outputIdentity != nil {
 		if launch.outputIdentity.log.device == 0 || launch.outputIdentity.log.inode == 0 {
@@ -420,7 +440,9 @@ func validateInstanceLaunchRecord(launch instanceLaunchRecord) error {
 	if launch.snapshotID != "" && !isCanonicalManagedResourceID(launch.snapshotID, 64) {
 		return fmt.Errorf("instance snapshot binding is invalid")
 	}
-	if err := validateInstanceCaller(instanceCaller{uid: launch.executionIdentity.uid, gid: launch.executionIdentity.gid}); err != nil {
+	if err := validateInstanceCaller(
+		instanceCaller{uid: launch.executionIdentity.uid, gid: launch.executionIdentity.gid},
+	); err != nil {
 		return fmt.Errorf("instance authority execution identity is invalid: %w", err)
 	}
 	if launch.ownerGID == 0 || launch.ownerGID == math.MaxUint32 {

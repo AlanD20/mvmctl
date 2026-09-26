@@ -9,6 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 )
 
@@ -68,6 +69,13 @@ func activateVerifiedProcessWithDeps(
 	if record.lifecycle != instanceLifecycleLaunching || record.launch == nil {
 		return nil, processVerificationError(vmID, "launch process authority is not awaiting activation", nil)
 	}
+	if (record.launch.networkPlacement == model.VMNetworkPlacementManaged &&
+		(state.networkless != nil || state.networkNamespace.networkless != nil)) ||
+		(record.launch.networkPlacement == model.VMNetworkPlacementNetworkless &&
+			(state.networkless == nil || state.topology != nil || state.networkNamespace.networkless == nil ||
+				state.networkNamespace.production != nil)) {
+		return nil, processVerificationError(vmID, "launch network placement authority is inconsistent", nil)
+	}
 	manifest, err := snapshotLaunchManifest(state)
 	if err != nil {
 		return nil, err
@@ -121,6 +129,7 @@ func activateVerifiedProcessWithDeps(
 		jailDestination:         verified.destination,
 		networkNamespace:        state.networkNamespace,
 		topology:                state.topology,
+		networkless:             state.networkless,
 		runtimeDirectory:        state.runtimeDirectory,
 		privateRuntimeDirectory: state.privateRuntimeDirectory,
 		persistentOutputs:       state.persistentOutputs,
@@ -134,6 +143,7 @@ func activateVerifiedProcessWithDeps(
 	state.jailDestination = nil
 	state.networkNamespace = nil
 	state.topology = nil
+	state.networkless = nil
 	state.runtimeDirectory = nil
 	state.privateRuntimeDirectory = nil
 	state.persistentOutputs = nil
@@ -295,9 +305,18 @@ func verifyRetainedLaunchProcesses(
 			preSealFirecracker.networkNamespace.device, preSealFirecracker.networkNamespace.inode); err != nil {
 			return verifiedLaunchIdentity{}, err
 		}
+	} else if networkNamespace.networkless != nil {
+		if err := networkNamespace.networkless.VerifyJailerNamespace(ctx,
+			preSealFirecracker.networkNamespace.device, preSealFirecracker.networkNamespace.inode); err != nil {
+			return verifiedLaunchIdentity{}, err
+		}
 	}
 	if !destinationSealed {
-		if err := destination.seal(ctx, record.launch.executionIdentity.uid, record.launch.executionIdentity.gid); err != nil {
+		if err := destination.seal(
+			ctx,
+			record.launch.executionIdentity.uid,
+			record.launch.executionIdentity.gid,
+		); err != nil {
 			return verifiedLaunchIdentity{}, err
 		}
 	}
@@ -337,6 +356,11 @@ func verifyRetainedLaunchProcesses(
 	}
 	if networkNamespace.production != nil {
 		if err := networkNamespace.production.VerifyJailerNamespace(ctx,
+			finalFirecracker.networkNamespace.device, finalFirecracker.networkNamespace.inode); err != nil {
+			return verifiedLaunchIdentity{}, err
+		}
+	} else if networkNamespace.networkless != nil {
+		if err := networkNamespace.networkless.VerifyJailerNamespace(ctx,
 			finalFirecracker.networkNamespace.device, finalFirecracker.networkNamespace.inode); err != nil {
 			return verifiedLaunchIdentity{}, err
 		}

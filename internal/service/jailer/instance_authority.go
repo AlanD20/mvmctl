@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/service/network"
 	"mvmctl/pkg/errs"
@@ -35,6 +36,7 @@ type launchLeaseState struct {
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
 	topology                *network.VMTopologyLease
+	networkless             *network.NetworklessNamespaceLease
 	runtimeDirectory        *managedVMRuntimeLease
 	privateRuntimeDirectory *managedVMRuntimeLease
 	persistentOutputs       *managedVMPersistentOutputLease
@@ -76,6 +78,7 @@ type activeLeaseState struct {
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
 	topology                *network.VMTopologyLease
+	networkless             *network.NetworklessNamespaceLease
 	runtimeDirectory        *managedVMRuntimeLease
 	privateRuntimeDirectory *managedVMRuntimeLease
 	persistentOutputs       *managedVMPersistentOutputLease
@@ -103,6 +106,8 @@ type cleanupLeaseState struct {
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
 	topology                *network.VMTopologyLease
+	networkless             *network.NetworklessNamespaceLease
+	networklessCleaned      bool
 	runtimeDirectory        *managedVMRuntimeLease
 	privateRuntimeDirectory *managedVMRuntimeLease
 	persistentOutputs       *managedVMPersistentOutputLease
@@ -768,6 +773,14 @@ func (lease *cleanupLease) Complete(ctx context.Context) error {
 	if err := releaseCleanupRuntimeResourcesLocked(ctx, state); err != nil {
 		return err
 	}
+	if state.networkless != nil {
+		if err := state.networkless.Cleanup(ctx); err != nil {
+			return err
+		}
+		state.networkless = nil
+		state.networklessCleaned = true
+		state.networkNamespace = nil
+	}
 	updated, err := completeInstanceCleanup(state.record)
 	if err != nil {
 		return err
@@ -994,6 +1007,14 @@ func (lease *launchLease) releaseToJailer(ctx context.Context) error {
 		state.preparedManagedVMCgroup == nil || state.managedVMCgroup != nil {
 		return instanceStateError(state.record.vmID, "launch lease is not ready for Jailer handoff")
 	}
+	if state.record.launch == nil ||
+		(state.record.networkPlacement == model.VMNetworkPlacementManaged &&
+			(state.networkless != nil || state.networkNamespace.networkless != nil)) ||
+		(state.record.networkPlacement == model.VMNetworkPlacementNetworkless &&
+			(state.networkless == nil || state.topology != nil || state.networkNamespace.networkless == nil ||
+				state.networkNamespace.production != nil)) {
+		return instanceStateError(state.record.vmID, "launch network placement authority is inconsistent")
+	}
 	if err := state.persistentOutputs.requireReady(); err != nil {
 		return err
 	}
@@ -1077,6 +1098,7 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 		jailDestination:         state.jailDestination,
 		networkNamespace:        state.networkNamespace,
 		topology:                state.topology,
+		networkless:             state.networkless,
 		runtimeDirectory:        state.runtimeDirectory,
 		privateRuntimeDirectory: state.privateRuntimeDirectory,
 		persistentOutputs:       state.persistentOutputs,
@@ -1092,6 +1114,7 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 	state.jailDestination = nil
 	state.networkNamespace = nil
 	state.topology = nil
+	state.networkless = nil
 	state.runtimeDirectory = nil
 	state.privateRuntimeDirectory = nil
 	state.persistentOutputs = nil
@@ -1121,8 +1144,9 @@ func (lease *launchLease) retainTopologyAuthority(
 }
 
 type topologySelectedNetworkNamespace struct {
-	identity   instanceObjectIdentity
-	production *network.JailerNamespaceLease
+	identity    instanceObjectIdentity
+	production  *network.JailerNamespaceLease
+	networkless *network.NetworklessJailerNamespaceLease
 }
 
 func (lease *launchLease) retainTopologySelectedNetworkNamespace(
@@ -1243,6 +1267,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 		jailDestination:         state.jailDestination,
 		networkNamespace:        state.networkNamespace,
 		topology:                state.topology,
+		networkless:             state.networkless,
 		runtimeDirectory:        state.runtimeDirectory,
 		privateRuntimeDirectory: state.privateRuntimeDirectory,
 		persistentOutputs:       state.persistentOutputs,
@@ -1257,6 +1282,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 	state.jailDestination = nil
 	state.networkNamespace = nil
 	state.topology = nil
+	state.networkless = nil
 	state.runtimeDirectory = nil
 	state.privateRuntimeDirectory = nil
 	state.persistentOutputs = nil
@@ -1297,8 +1323,9 @@ func (lease *activeLease) Release(ctx context.Context) error {
 	if state.released {
 		return state.releaseErr
 	}
-	if state.topology != nil || state.prepared != nil || state.processes != nil || state.jailDestination != nil ||
-		state.runtimeDirectory != nil || state.privateRuntimeDirectory != nil || state.managedVMCgroup != nil || state.persistentOutputs != nil {
+	if state.topology != nil || state.networkless != nil || state.prepared != nil || state.processes != nil ||
+		state.jailDestination != nil || state.runtimeDirectory != nil || state.privateRuntimeDirectory != nil ||
+		state.managedVMCgroup != nil || state.persistentOutputs != nil {
 		return instanceStateError(state.record.vmID, "live active authority must be consumed by BeginCleanup")
 	}
 	state.releaseErr = releaseInstanceOperationResources(
@@ -1340,7 +1367,7 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 		state.runtimeRecovery != nil ||
 		state.freshRecoveryAdmission != nil ||
 		state.preparedManagedVMCgroup != nil ||
-		state.managedVMCgroup != nil {
+		state.managedVMCgroup != nil || state.topology != nil || state.networkless != nil {
 		return instanceStateError(state.record.vmID, "cleanup must complete before releasing retained authority")
 	}
 	result := error(nil)

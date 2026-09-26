@@ -18,7 +18,7 @@ func RecoverNetworkless(
 	hold *authorityfs.TopologyHold,
 	generation uint64,
 ) (*NetworklessNamespaceLease, error) {
-	return recoverNetworkless(ctx, hold, generation, nil)
+	return recoverNetworkless(ctx, hold, generation, nil, nil)
 }
 
 // RecoverNetworklessWithPriorBootAbsence retires old durable authority after root proves the VM and namespace absent.
@@ -28,11 +28,33 @@ func RecoverNetworklessWithPriorBootAbsence(
 	if proof == nil {
 		return nil, networkAuthorityValidationError("prior-boot networkless recovery requires VM absence proof")
 	}
-	return recoverNetworkless(ctx, hold, generation, proof)
+	return recoverNetworkless(ctx, hold, generation, proof, nil)
+}
+
+// NetworklessRecoveryOutcome distinguishes a durable cleaned journal from an absent or incomplete one.
+type NetworklessRecoveryOutcome uint8
+
+const (
+	NetworklessRecoveryAbsent NetworklessRecoveryOutcome = iota
+	NetworklessRecoveryActive
+	NetworklessRecoveryCleaned
+)
+
+// RecoverNetworklessForJailer reports the exact root-owned journal disposition while retaining normal lease semantics.
+func RecoverNetworklessForJailer(
+	ctx context.Context,
+	hold *authorityfs.TopologyHold,
+	generation uint64,
+	proof *system.PriorBootVMAbsence,
+) (*NetworklessNamespaceLease, NetworklessRecoveryOutcome, error) {
+	var outcome NetworklessRecoveryOutcome
+	lease, err := recoverNetworkless(ctx, hold, generation, proof, &outcome)
+	return lease, outcome, err
 }
 
 func recoverNetworkless(
 	ctx context.Context, hold *authorityfs.TopologyHold, generation uint64, proof *system.PriorBootVMAbsence,
+	outcome *NetworklessRecoveryOutcome,
 ) (result *NetworklessNamespaceLease, returnErr error) {
 	if ctx == nil || hold == nil || generation == 0 {
 		return nil, networkAuthorityValidationError("networkless recovery requires VM hold and launch generation")
@@ -53,6 +75,9 @@ func recoverNetworkless(
 		effect: newNamespaceEffect(), recoveryPending: true}
 	defer func() {
 		if returnErr != nil {
+			if outcome != nil {
+				*outcome = NetworklessRecoveryAbsent
+			}
 			returnErr = errors.Join(returnErr, lease.discardRejectedRecovery(context.WithoutCancel(ctx)))
 			result = nil
 		}
@@ -85,9 +110,15 @@ func recoverNetworkless(
 		if err := lease.retirePriorBoot(ctx, record, bootID, proof); err != nil {
 			return lease, err
 		}
+		if outcome != nil {
+			*outcome = NetworklessRecoveryCleaned
+		}
 		return lease.finishAbsentRecovery(ctx)
 	}
 	if record.Lifecycle == networklessCleaned {
+		if outcome != nil {
+			*outcome = NetworklessRecoveryCleaned
+		}
 		return lease.finishAbsentRecovery(ctx)
 	}
 	var token [32]byte
@@ -159,6 +190,9 @@ func recoverNetworkless(
 	}
 	lease.active = record.Lifecycle == networklessActive
 	lease.recoveryPending = false
+	if outcome != nil {
+		*outcome = NetworklessRecoveryActive
+	}
 	return lease, nil
 }
 

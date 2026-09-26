@@ -95,7 +95,7 @@ func TestInstanceRecordCodecOmitsWrongLifecycleObjects(t *testing.T) {
 	assert.NotContains(t, string(cleanedRaw), `"launch":`)
 	assert.NotContains(t, string(cleanedRaw), `"active":`)
 	assert.NotContains(t, string(cleanedRaw), `"owner_gid":`)
-	assert.NotContains(t, string(cleanedRaw), `"network_placement":`)
+	assert.Contains(t, string(cleanedRaw), `"network_placement":"managed"`)
 	assert.NotContains(t, string(cleanedRaw), `"managed_cache":`)
 	assert.NotContains(t, string(cleanedRaw), `"release":`)
 	assert.NotContains(t, string(cleanedRaw), `"pid":`)
@@ -154,11 +154,12 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaFive(t *testing.T) {
 		"null_network_placement": strings.Replace(
 			validText, `"network_placement":"managed"`, `"network_placement":null`, 1,
 		),
-		"networkless_placement": strings.Replace(
-			validText, `"network_placement":"managed"`, `"network_placement":"networkless"`, 1,
-		),
 		"unknown_network_placement": strings.Replace(
 			validText, `"network_placement":"managed"`, `"network_placement":"unknown"`, 1,
+		),
+		"mismatched_launch_placement": strings.Replace(
+			validText, `"owner_gid":1001,"network_placement":"managed"`,
+			`"owner_gid":1001,"network_placement":"networkless"`, 1,
 		),
 		"missing_active_field": strings.Replace(validText, `"supplementary_groups":[],`, "", 1),
 		"missing_present_relay_locator": strings.Replace(
@@ -331,13 +332,12 @@ func TestDecodeInstanceRecordRejectsOversizedInput(t *testing.T) {
 	assert.Empty(t, domainErr.Entity)
 }
 
-func TestLaunchingTransitionRequiresManagedNetworkPlacement(t *testing.T) {
+func TestLaunchingTransitionRequiresExplicitNetworkPlacement(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]model.VMNetworkPlacement{
-		"missing":     "",
-		"networkless": model.VMNetworkPlacementNetworkless,
-		"unknown":     "other",
+		"missing": "",
+		"unknown": "other",
 	}
 	for name, placement := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -350,6 +350,42 @@ func TestLaunchingTransitionRequiresManagedNetworkPlacement(t *testing.T) {
 			)
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		})
+	}
+}
+
+func TestNetworklessInstanceRecordRetainsExactPlacement(t *testing.T) {
+	t.Parallel()
+
+	intent := testLaunchIntent(false)
+	intent.networkPlacement = model.VMNetworkPlacementNetworkless
+	launching, err := registerLaunchingInstanceRecord(
+		testInstanceCaller(), intent, testLaunchProcessLocators(false), testReleaseIdentity(), nil,
+	)
+	require.NoError(t, err)
+	cleaning, err := beginInstanceCleanup(testInstanceCaller(), launching)
+	require.NoError(t, err)
+	cleaned, err := completeInstanceCleanup(cleaning)
+	require.NoError(t, err)
+	managedIntent := testLaunchIntent(false)
+	_, err = registerLaunchingInstanceRecord(
+		testInstanceCaller(), managedIntent, testLaunchProcessLocators(false), testReleaseIdentity(), &cleaned,
+	)
+	require.Error(t, err)
+	assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+	for name, record := range map[string]instanceRecord{
+		"launching": launching,
+		"cleaning":  cleaning,
+		"cleaned":   cleaned,
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, encodeErr := encodeInstanceRecord(record)
+			require.NoError(t, encodeErr)
+			decoded, decodeErr := decodeInstanceRecord(raw)
+			require.NoError(t, decodeErr)
+			if diff := diffInstanceRecord(record, decoded); diff != "" {
+				t.Errorf("networkless authority round trip mismatch (-want +got):\n%s", diff)
+			}
 		})
 	}
 }
@@ -574,6 +610,7 @@ func TestInstanceRelaunchRejectsExhaustedGeneration(t *testing.T) {
 		schemaVersion:     instanceRecordSchemaVersion,
 		ownerUID:          testAuthorityUID,
 		vmID:              testVMID,
+		networkPlacement:  model.VMNetworkPlacementManaged,
 		lifecycle:         instanceLifecycleCleaned,
 		launchGeneration:  math.MaxUint64,
 		cleanupGeneration: math.MaxUint64,

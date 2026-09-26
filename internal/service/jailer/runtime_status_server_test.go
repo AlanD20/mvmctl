@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/lib/authorityfs"
+	"mvmctl/internal/lib/model"
 )
 
 func TestRuntimeStatusLifecycleClassification(t *testing.T) {
@@ -70,7 +71,8 @@ func runtimeStatusCleaningRecord() instanceRecord {
 
 func runtimeStatusCleanedRecord() instanceRecord {
 	return instanceRecord{schemaVersion: 5, ownerUID: testAuthorityUID, vmID: testVMID,
-		lifecycle: instanceLifecycleCleaned, launchGeneration: 1, cleanupGeneration: 1}
+		networkPlacement: model.VMNetworkPlacementManaged,
+		lifecycle:        instanceLifecycleCleaned, launchGeneration: 1, cleanupGeneration: 1}
 }
 
 func TestRuntimeStatusAbsentAuthorityDoesNotCreateDurableState(t *testing.T) {

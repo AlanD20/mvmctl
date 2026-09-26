@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/service/network"
 )
 
@@ -232,11 +233,22 @@ func (server *VMLifecycleServer) launch(
 			return VMLaunchResult{}, err
 		}
 	}
-	guestIP, _ := netip.ParseAddr(request.GuestIPv4)
-	topology, err := launching.prepareProductionTopology(
-		ctx,
-		network.VMIntent{NetworkID: request.NetworkID, GuestIPv4: guestIP, MAC: &request.GuestMAC},
-	)
+	var topology network.JailerNetworkConfig
+	switch request.NetworkPlacement {
+	case model.VMNetworkPlacementManaged:
+		guestIP, _ := netip.ParseAddr(request.GuestIPv4)
+		topology, err = launching.prepareProductionTopology(
+			ctx,
+			network.VMIntent{NetworkID: request.NetworkID, GuestIPv4: guestIP, MAC: &request.GuestMAC},
+		)
+	case model.VMNetworkPlacementNetworkless:
+		if restore != nil {
+			return VMLaunchResult{}, instanceValidationError("networkless snapshot restore is not admitted")
+		}
+		err = launching.prepareProductionNetworkless(ctx)
+	default:
+		return VMLaunchResult{}, instanceValidationError("VM launch network placement is invalid")
+	}
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
@@ -279,10 +291,16 @@ func (server *VMLifecycleServer) launch(
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
-	if err := launching.state.topology.CompleteActivation(ctx); err != nil {
-		return VMLaunchResult{}, errors.Join(err, target.Release(context.WithoutCancel(ctx)))
+	var sendErr error
+	switch request.NetworkPlacement {
+	case model.VMNetworkPlacementManaged:
+		if err := launching.state.topology.CompleteActivation(ctx); err != nil {
+			return VMLaunchResult{}, errors.Join(err, target.Release(context.WithoutCancel(ctx)))
+		}
+		sendErr = launching.state.networkNamespace.production.SendToJailer(ctx, target)
+	case model.VMNetworkPlacementNetworkless:
+		sendErr = launching.state.networkNamespace.networkless.SendToJailer(ctx, target)
 	}
-	sendErr := launching.state.networkNamespace.production.SendToJailer(ctx, target)
 	if err := errors.Join(sendErr, target.Release(context.WithoutCancel(ctx))); err != nil {
 		return VMLaunchResult{}, err
 	}
@@ -408,8 +426,10 @@ func (server *VMLifecycleServer) Remove(
 			hold.Release(context.WithoutCancel(ctx)),
 		)
 	}()
-	if err := network.ForgetVMEndpoint(ctx, hold, locked.record.launchGeneration); err != nil {
-		return VMCleanupResult{}, err
+	if locked.record.networkPlacement == model.VMNetworkPlacementManaged {
+		if err := network.ForgetVMEndpoint(ctx, hold, locked.record.launchGeneration); err != nil {
+			return VMCleanupResult{}, err
+		}
 	}
 	if err := retireRemovedVMExecution(ctx, locked, instanceCaller{uid: ownerUID, gid: ownerGID}); err != nil {
 		return VMCleanupResult{}, err

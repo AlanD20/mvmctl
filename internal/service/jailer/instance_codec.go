@@ -13,14 +13,15 @@ import (
 const maxInstanceJSONDepth = 4
 
 type instanceRecordWire struct {
-	SchemaVersion     uint32              `json:"schema_version"`
-	OwnerUID          uint32              `json:"owner_uid"`
-	VMID              string              `json:"vm_id"`
-	Lifecycle         instanceLifecycle   `json:"lifecycle"`
-	LaunchGeneration  uint64              `json:"launch_generation"`
-	CleanupGeneration uint64              `json:"cleanup_generation"`
-	Launch            *instanceLaunchWire `json:"launch,omitempty"`
-	Active            *instanceActiveWire `json:"active,omitempty"`
+	SchemaVersion     uint32                   `json:"schema_version"`
+	OwnerUID          uint32                   `json:"owner_uid"`
+	VMID              string                   `json:"vm_id"`
+	NetworkPlacement  model.VMNetworkPlacement `json:"network_placement"`
+	Lifecycle         instanceLifecycle        `json:"lifecycle"`
+	LaunchGeneration  uint64                   `json:"launch_generation"`
+	CleanupGeneration uint64                   `json:"cleanup_generation"`
+	Launch            *instanceLaunchWire      `json:"launch,omitempty"`
+	Active            *instanceActiveWire      `json:"active,omitempty"`
 }
 
 type instanceLaunchWire struct {
@@ -334,6 +335,7 @@ func instanceRecordJSONFields(wire instanceRecordWire) map[string]instanceJSONFi
 		"schema_version",
 		"owner_uid",
 		"vm_id",
+		"network_placement",
 		"lifecycle",
 		"launch_generation",
 		"cleanup_generation",
@@ -494,6 +496,7 @@ func instanceRecordToWire(record instanceRecord) instanceRecordWire {
 		SchemaVersion:     record.schemaVersion,
 		OwnerUID:          record.ownerUID,
 		VMID:              record.vmID,
+		NetworkPlacement:  record.networkPlacement,
 		Lifecycle:         record.lifecycle,
 		LaunchGeneration:  record.launchGeneration,
 		CleanupGeneration: record.cleanupGeneration,
@@ -620,6 +623,7 @@ func instanceRecordFromWire(wire instanceRecordWire) (instanceRecord, error) {
 		schemaVersion:     wire.SchemaVersion,
 		ownerUID:          wire.OwnerUID,
 		vmID:              wire.VMID,
+		networkPlacement:  wire.NetworkPlacement,
 		lifecycle:         wire.Lifecycle,
 		launchGeneration:  wire.LaunchGeneration,
 		cleanupGeneration: wire.CleanupGeneration,

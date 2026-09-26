@@ -125,17 +125,17 @@ func schemaFiveCanonicalJSON() map[string]string {
 
 	return map[string]string{
 		"launching": `{"schema_version":5,"owner_uid":1000,"vm_id":"` + testVMID +
-			`","lifecycle":"launching","launch_generation":1,"cleanup_generation":0,"launch":` + launchAbsent + `}`,
+			`","network_placement":"managed","lifecycle":"launching","launch_generation":1,"cleanup_generation":0,"launch":` + launchAbsent + `}`,
 		"active": `{"schema_version":5,"owner_uid":1000,"vm_id":"` + testVMID +
-			`","lifecycle":"active","launch_generation":1,"cleanup_generation":0,"launch":` + launchPresent +
+			`","network_placement":"managed","lifecycle":"active","launch_generation":1,"cleanup_generation":0,"launch":` + launchPresent +
 			`,"active":` + active + `}`,
 		"cleaning_from_launching": `{"schema_version":5,"owner_uid":1000,"vm_id":"` + testVMID +
-			`","lifecycle":"cleaning","launch_generation":1,"cleanup_generation":1,"launch":` + launchAbsent + `}`,
+			`","network_placement":"managed","lifecycle":"cleaning","launch_generation":1,"cleanup_generation":1,"launch":` + launchAbsent + `}`,
 		"cleaning_from_active": `{"schema_version":5,"owner_uid":1000,"vm_id":"` + testVMID +
-			`","lifecycle":"cleaning","launch_generation":1,"cleanup_generation":1,"launch":` + launchPresent +
+			`","network_placement":"managed","lifecycle":"cleaning","launch_generation":1,"cleanup_generation":1,"launch":` + launchPresent +
 			`,"active":` + active + `}`,
 		"cleaned": `{"schema_version":5,"owner_uid":1000,"vm_id":"` + testVMID +
-			`","lifecycle":"cleaned","launch_generation":1,"cleanup_generation":1}`,
+			`","network_placement":"managed","lifecycle":"cleaned","launch_generation":1,"cleanup_generation":1}`,
 	}
 }
 
@@ -148,23 +148,28 @@ func schemaFiveProofRecords() map[string]instanceRecord {
 	active := schemaFiveProofActive()
 	return map[string]instanceRecord{
 		"launching": {
-			schemaVersion: 5, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleLaunching,
+			schemaVersion: 5, ownerUID: 1000, vmID: testVMID,
+			networkPlacement: model.VMNetworkPlacementManaged, lifecycle: instanceLifecycleLaunching,
 			launchGeneration: 1, cleanupGeneration: 0, launch: &launchAbsent,
 		},
 		"active": {
-			schemaVersion: 5, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleActive,
+			schemaVersion: 5, ownerUID: 1000, vmID: testVMID,
+			networkPlacement: model.VMNetworkPlacementManaged, lifecycle: instanceLifecycleActive,
 			launchGeneration: 1, cleanupGeneration: 0, launch: &launchPresent, active: &active,
 		},
 		"cleaning_from_launching": {
-			schemaVersion: 5, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaning,
+			schemaVersion: 5, ownerUID: 1000, vmID: testVMID,
+			networkPlacement: model.VMNetworkPlacementManaged, lifecycle: instanceLifecycleCleaning,
 			launchGeneration: 1, cleanupGeneration: 1, launch: &launchAbsent,
 		},
 		"cleaning_from_active": {
-			schemaVersion: 5, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaning,
+			schemaVersion: 5, ownerUID: 1000, vmID: testVMID,
+			networkPlacement: model.VMNetworkPlacementManaged, lifecycle: instanceLifecycleCleaning,
 			launchGeneration: 1, cleanupGeneration: 1, launch: &launchPresent, active: &active,
 		},
 		"cleaned": {
-			schemaVersion: 5, ownerUID: 1000, vmID: testVMID, lifecycle: instanceLifecycleCleaned,
+			schemaVersion: 5, ownerUID: 1000, vmID: testVMID,
+			networkPlacement: model.VMNetworkPlacementManaged, lifecycle: instanceLifecycleCleaned,
 			launchGeneration: 1, cleanupGeneration: 1,
 		},
 	}

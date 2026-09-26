@@ -26,7 +26,8 @@ func (lease *launchLease) sendChildSetup(
 	defer state.mu.Unlock()
 	if !state.registrationComplete || state.released || state.record.launch == nil ||
 		state.record.lifecycle != instanceLifecycleLaunching || state.preparedJailDestination == nil ||
-		state.preparedManagedVMCgroup == nil || state.runtimeDirectory == nil || state.persistentOutputs == nil {
+		state.preparedManagedVMCgroup == nil || state.runtimeDirectory == nil || state.persistentOutputs == nil ||
+		state.networkNamespace == nil {
 		return instanceStateError(state.record.vmID, "launch is not ready for child resource setup")
 	}
 	if resources.ownerUID != state.record.ownerUID || resources.cacheIdentity != state.record.launch.cacheIdentity ||
@@ -102,10 +103,6 @@ func (lease *launchLease) sendChildSetup(
 	if err != nil {
 		return err
 	}
-	topology, err := state.networkNamespace.production.Binding(ctx)
-	if err != nil {
-		return err
-	}
 	plan := launchChildPlan{
 		FirecrackerSHA256: state.record.launch.release.firecrackerSHA256,
 		JailerSHA256:      state.record.launch.release.jailerSHA256,
@@ -113,9 +110,6 @@ func (lease *launchLease) sendChildSetup(
 		KernelID:          string(resources.kernelID),
 		KernelBacking:     kernelBinding,
 		NetworkPlacement:  state.record.launch.networkPlacement,
-		NetworkID:         topology.NetworkID,
-		GuestIPv4:         topology.GuestIPv4.String(),
-		GuestMAC:          topology.GuestMAC,
 		HostBootID:        state.record.launch.hostBootID,
 		LaunchGeneration:  state.record.launchGeneration,
 		PCIEnabled:        resources.pciEnabled,
@@ -132,6 +126,41 @@ func (lease *launchLease) sendChildSetup(
 		Limits:    cgroup.limits,
 		CloudInit: resources.cloudInitFD >= 0,
 		Metrics:   metricsFD >= 0,
+	}
+	switch state.record.networkPlacement {
+	case model.VMNetworkPlacementManaged:
+		if state.topology == nil || state.networkNamespace.production == nil ||
+			state.networkNamespace.networkless != nil || state.networkless != nil {
+			return instanceStateError(state.record.vmID, "managed child namespace authority is inconsistent")
+		}
+		topology, err := state.networkNamespace.production.Binding(ctx)
+		if err != nil {
+			return err
+		}
+		if topology.OwnerUID != state.record.ownerUID || topology.VMID != state.record.vmID ||
+			(instanceObjectIdentity{device: topology.NamespaceDevice, inode: topology.NamespaceInode}) !=
+				state.networkNamespace.identity {
+			return instanceStateError(state.record.vmID, "managed child namespace binding differs")
+		}
+		plan.NetworkID = topology.NetworkID
+		plan.GuestIPv4 = topology.GuestIPv4.String()
+		plan.GuestMAC = topology.GuestMAC
+	case model.VMNetworkPlacementNetworkless:
+		if state.networkNamespace.networkless == nil || state.networkNamespace.production != nil ||
+			state.networkless == nil || state.topology != nil {
+			return instanceStateError(state.record.vmID, "networkless child namespace authority is inconsistent")
+		}
+		binding, err := state.networkNamespace.networkless.Binding(ctx)
+		if err != nil {
+			return err
+		}
+		if binding.OwnerUID != state.record.ownerUID || binding.VMID != state.record.vmID ||
+			(instanceObjectIdentity{device: binding.NamespaceDevice, inode: binding.NamespaceInode}) !=
+				state.networkNamespace.identity {
+			return instanceStateError(state.record.vmID, "networkless child namespace binding differs")
+		}
+	default:
+		return instanceStateError(state.record.vmID, "child network placement is invalid")
 	}
 	if resources.protectedBackings.cloudInit != nil {
 		binding, err := resources.protectedBackings.cloudInit.Binding(ctx)
