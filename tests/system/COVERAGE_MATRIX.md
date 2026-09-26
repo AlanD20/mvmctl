@@ -39,11 +39,16 @@ qualification.
 reader with an authenticated, fixed-path, descriptor-pinned root observation and removes the obsolete reader. Pinned
 Go 1.26.3 affected-package tests, full root Jailer tests, vet, formatting, and one-pass read-only security review
 passed in `mvmctl-030-test`. The runner-only installed `0.3.0-rc.cgroup-observe` candidate returned `enforced` with
-matching policy-v2 limits and usage for a running networkless VM, and the updated `vm/test_cgroup.py` case passed 1/1 across create,
-operator-denied direct leaf read, root-brokered inspection, stop, restart, and checked removal. The first test attempt
-failed on runner disk exhaustion during restart; clearing only its rebuildable Go build cache raised free space from
-419 MiB to 4.0 GiB, and the unchanged case then passed. This does not qualify memory saturation survival, full Jailer
-system journeys, or the bridge-dependent network/policy matrix.
+matching policy-v2 limits and usage for a running networkless VM, and the updated `vm/test_cgroup.py` case passed 1/1
+across create, operator-denied direct leaf read, root-brokered inspection, stop, restart, and checked removal. The first
+test attempt failed on runner disk exhaustion during restart; clearing only its rebuildable Go build cache raised free
+space from 419 MiB to 4.0 GiB, and the unchanged case then passed. This does not qualify memory saturation survival,
+full Jailer system journeys, or the bridge-dependent network/policy matrix.
+
+The quick candidate omitted the guest-agent embed. It was replaced inside only the runner through `host install-system`
+with `0.3.0-rc.cgroup-full`, built by the repository release script under pinned Go 1.26.3. Against that full candidate,
+the cgroup case and the existing networkless create/restart/reboot/vsock-exec case each passed 1/1, with no nested VM
+left in the isolated cache. The outer controller was unchanged.
 
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
