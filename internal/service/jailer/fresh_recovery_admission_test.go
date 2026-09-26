@@ -168,7 +168,8 @@ func TestFreshRecoveryBootMismatchRejectsPresentOrUnstableCgroupWithoutEffects(t
 	}
 	for name, configure := range tests {
 		t.Run(name, func(t *testing.T) {
-			fixture := newFreshRecoveryAdmissionTestFixture(t, instanceLifecycleActive, false)
+			// This unprivileged rejection path stops before protected-backing cleanup.
+			fixture := newFreshRecoveryAdmissionWithoutInventoryFixture(t, instanceLifecycleActive, false)
 			fixture.identityDeps.readBootID = func(context.Context) (string, error) {
 				return processOtherBootID, nil
 			}
@@ -646,6 +647,18 @@ func newFreshRecoveryAdmissionTestFixture(
 	cgroupPresent bool,
 ) *freshRecoveryAdmissionTestFixture {
 	t.Helper()
+	// A real launch prepares the root-owned grant inventory before publishing its record.
+	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), testInstanceCaller().uid))
+	return newFreshRecoveryAdmissionWithoutInventoryFixture(t, lifecycle, cgroupPresent)
+}
+
+func newFreshRecoveryAdmissionWithoutInventoryFixture(
+	t *testing.T,
+	lifecycle instanceLifecycle,
+	cgroupPresent bool,
+) *freshRecoveryAdmissionTestFixture {
+	t.Helper()
+
 	record, identity := activeRecoveryTestRecord(t)
 	switch lifecycle {
 	case instanceLifecycleLaunching:
