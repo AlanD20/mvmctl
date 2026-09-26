@@ -21,6 +21,16 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Runner evidence (2026-09-27):** In the named `mvmctl-030-test` runner, pinned Go 1.26.3 passed the complete
+unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
+source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
+9 JSON/flag-invariant, 26 non-VM key, and 5 internal-service entry-point Python cases (98 total); the focused
+networkless create/stop/start/reboot/vsock case also passed. The installed binary predates `8e0be4fe`, but the
+intervening source change under `internal/`, `pkg/`, and `cmd/` was test-only. These are scoped results, **not** a
+full Python matrix or release sign-off. The current runner kernel still rejects bridge-family nftables tables, which
+blocks network/policy qualification there. Volume/snapshot consistency, host-reboot, and full Jailer system journeys
+also remain unqualified.
+
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
 | Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
