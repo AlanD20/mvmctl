@@ -1395,7 +1395,7 @@ without `--daemonize` and without `--new-pid-ns`, so the receiver-owned PID, sta
 one task while it changes from the blocked mvmctl child, to Jailer, to the copied Firecracker. Jailer's PID file and all
 user-visible PID mirrors remain display evidence only.
 
-The strict instance-record schema version is therefore 3, with this lifecycle:
+The current strict instance-record schema version is 5, with this lifecycle:
 
 ```text
 absent  ── registerLaunching ──> launching ── activateVerifiedProcess ──> active
@@ -1411,7 +1411,9 @@ The strict on-disk shape has these fixed fields; state-specific objects are omit
 | Scope | Exact fields | Present in |
 |---|---|---|
 | Record | `schema_version`, `owner_uid`, `vm_id`, `lifecycle`, `launch_generation`, `cleanup_generation` | Every state |
-| `launch` | `owner_gid`, `host_boot_id`, `pid`, `start_time_ticks`, `relay`, `managed_cache`, `release` | `launching`, `active`, `cleaning` |
+| `launch` | `owner_gid`, `network_placement`, `execution_identity`, `snapshot_id`, `cache_locator`, optional `output_identity`, `host_boot_id`, `pid`, `start_time_ticks`, `relay`, `managed_cache`, `release` | `launching`, `active`, `cleaning` |
+| `launch.execution_identity` | `uid`, `gid` for the isolated execution account, distinct from the operator | Nested under `launch` |
+| `launch.output_identity` | `log`, optional `metrics`, each with `device` and `inode` | Nested under `launch` when present |
 | `launch.relay` | `kind`; when `present`, also `pid`, `start_time_ticks` | Nested under `launch` |
 | `managed_cache` | `device_major`, `device_minor`, `inode`, `mount_identity.kind`, `mount_identity.id` | Nested under `launch` |
 | `release` | `version`, `architecture`, `firecracker_sha256`, `jailer_sha256` | Nested under `launch` |
@@ -1422,8 +1424,11 @@ The strict on-disk shape has these fixed fields; state-specific objects are omit
 | `active.executable` | `device`, `inode`, `size_bytes`, `mode`, `uid`, `gid`, `links`, `manifest_sha256` | Nested under `active` |
 | `active.relay.executable` | `device`, `inode`, `size_bytes`, `mode`, `uid`, `gid`, `links`, `sha256` | Nested under `active.relay` when present |
 
-The strict codec rejects schema 1 and 2, unknown or duplicate fields, missing required fields, and a state-specific
+The strict codec rejects schemas 1 through 4, unknown or duplicate fields, missing required fields, and a state-specific
 object that is present or absent in the wrong lifecycle. v0.3 performs no record migration or adoption.
+Current launch admission requires the explicit `managed` network placement; omitted, unknown, and `networkless`
+placements are rejected until the separate networkless root lifecycle is implemented. This applies to durable records,
+including recovery; older cleaned tombstones are not adopted.
 
 `launching` is durable pre-effect intent, not a process-health claim. Fixed cgroup and jail paths are derived from the
 VM ID and compiled constants; the exact cgroup membership and fixed jail metadata are verified rather than duplicated
@@ -1443,13 +1448,13 @@ root-owned `/usr/local/bin/mvm` content. The record stores no socket path, PID-f
 `active` retains that intent and adds receiver-observed final identity: every real/effective/saved/filesystem UID and
 GID, the exact empty supplementary-group set, final mount-namespace device/inode, final
 process-root/jail-root device/inode and fixed metadata, and the copied Firecracker's device/inode, exact size, mode,
-owner, link count, and manifest digest. Every Firecracker UID field must equal `owner_uid`, and every GID field must
-equal `launch.owner_gid`. Rust's Unix
+owner, link count, and manifest digest. Every Firecracker UID and GID field must equal the respective recorded
+`launch.execution_identity` field, not the operator UID/GID. Rust's Unix
 [`Command::uid`](https://doc.rust-lang.org/stable/std/os/unix/process/trait.CommandExt.html#tymethod.uid) calls
 `setgroups(0, NULL)` when no groups are specified, and Jailer specifies none; v0.3 therefore requires an empty set
 rather than accepting an arbitrary sorted set. Activation also requires exact membership in the derived cgroup.
-Network namespace identity remains owned by the closed network topology capability and is compared during activation
-without importing a raw path or descriptor into the record interface.
+For current managed launches, network namespace identity remains owned by the closed network topology capability and
+is compared during activation without importing a raw path or descriptor into the record interface.
 
 After dispatcher exit or crash, fresh recovery may re-admit a present relay only by opening a pidfd, matching boot ID,
 PID, start ticks, every final credential, host namespace/root identity, and exact executable metadata and digest. A

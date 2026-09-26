@@ -332,7 +332,7 @@ The VM resolver tries selectors in priority order:
 | `mvm vm ps` | `--json` | List running VMs (active processes) |
 | `mvm vm inspect` | `SELECTOR`, `--json` | Show detailed information about a VM |
 
-VM launch and process control use typed root lifecycle transactions and schema-4 instance records separating operator
+VM launch and process control use typed root lifecycle transactions and schema-5 instance records separating operator
 ownership from per-VM execution credentials. PID values in
 output are display projections, never signaling authority. List observes its complete VM selection before filtering
 status and propagates observation failures; inspect/get also propagate them. Paused display state requires an observed

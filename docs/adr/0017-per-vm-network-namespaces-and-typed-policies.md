@@ -205,7 +205,7 @@ The privileged launch transaction must:
    the VM active.
 
 The complete lock order is `release -> global index -> VM -> network -> firewall`. An operation may acquire a suffix or
-subset but must never acquire an earlier class while holding a later one. The schema-3 launch lease is the durable
+subset but must never acquire an earlier class while holding a later one. The schema-5 launch lease is the durable
 two-phase ownership claim and retains the VM lock, topology lease, and endpoint cleanup authority across application,
 activation, rollback, and cleanup without unlocking and reacquiring the VM. The per-network and host-global firewall
 mutation locks remain held through their application/activation checkpoint, then release; active lifetime authority

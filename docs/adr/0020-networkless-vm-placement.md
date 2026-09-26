@@ -72,12 +72,14 @@ now accepts an explicit networkless placement and emits no NIC or kernel `ip=` a
 rejecting managed endpoint fields, NoCloud NET mode, and caller-supplied `ip=` or `ds=` boot arguments. The fresh
 version-8 user VM schema now persists explicit placement, retains the managed network foreign key, and stores SQL
 `NULL` rather than a fabricated network ID for networkless rows. Production create and respawn callers still select
-managed placement explicitly. The root launch wire now requires that managed placement tag and rejects omitted,
-unknown, or networkless tags before the managed topology path; this is an admission guard, not networkless launch
-support. The private namespace pin/recovery effect now has a validated owner-and-VM key independent of the managed
-network ID; the managed topology journal and lock order are unchanged. This key is only a prerequisite, not a
-networkless namespace/lifecycle lease. Public input, that distinct root-owned lease, and snapshot integration remain
-pending. The existing `resolveNetwork` call and root `VMLaunchRequest` validation must not be relaxed alone.
+managed placement explicitly. The root launch wire now requires the managed placement tag and rejects omitted,
+unknown, or networkless variants before the managed topology path. The strict schema-5 instance codec also rejects
+older-schema records, including cleaned tombstones. This is an admission guard, not networkless launch support. The
+private namespace pin/recovery effect now has a
+validated owner-and-VM key independent of the managed network ID; the managed topology journal and lock order are
+unchanged. This key is only a prerequisite, not a networkless namespace/lifecycle lease. Public input, that distinct
+root-owned lease, and snapshot integration remain pending. The existing `resolveNetwork` call and root
+`VMLaunchRequest` validation must not be relaxed alone.
 Preserve current networked behavior until both branches have complete lifecycle ownership.
 
 Go tests should prove closed input combinations, exact wire-shape rejection, no-NIC Firecracker config, placement
