@@ -13,13 +13,22 @@ func finishImageConversion(ctx context.Context, lease *rootfsLease, transaction 
 	outcome = imageOptimizeEffectOutcome{state: imageOptimizeEffectStateUnchanged,
 		filesystem: FilesystemExt4, lease: completedImageShrinkCleanup{}}
 	record := transaction.record
-	current, err := inspectImageConversionFile(ctx, lease.rootfsFD, transaction.caller.UID, transaction.caller.GID, maximumImageBytes)
+	current, err := inspectImageConversionFile(
+		ctx,
+		lease.rootfsFD,
+		transaction.caller.UID,
+		transaction.caller.GID,
+		maximumImageBytes,
+	)
 	if err != nil {
 		return outcome, err
 	}
 	if sameImageConversionInode(current, record.Original) {
 		if record.Phase != imageConversionReady || current != record.Original || transaction.workspaceFD < 0 {
-			return outcome, rootfsAtomicError("conversion publication original no longer matches prepared authority", nil)
+			return outcome, rootfsAtomicError(
+				"conversion publication original no longer matches prepared authority",
+				nil,
+			)
 		}
 		if transaction.candidateFD < 0 {
 			transaction.candidateFD, err = unix.Openat2(transaction.workspaceFD, "candidate.img", &unix.OpenHow{
@@ -38,8 +47,15 @@ func finishImageConversion(ctx context.Context, lease *rootfsLease, transaction 
 			candidateStat.Uid == transaction.caller.UID && candidateStat.Gid != transaction.caller.GID {
 			return outcome, rootfsAtomicError("prepared conversion candidate ownership changed", nil)
 		}
-		candidate, err := inspectImageConversionFile(ctx, transaction.candidateFD, candidateStat.Uid, candidateStat.Gid, maximumImageBytes)
-		if err != nil || !sameImageConversionInode(candidate, record.Candidate) || candidate.Size != record.Candidate.Size {
+		candidate, err := inspectImageConversionFile(
+			ctx,
+			transaction.candidateFD,
+			candidateStat.Uid,
+			candidateStat.Gid,
+			maximumImageBytes,
+		)
+		if err != nil || !sameImageConversionInode(candidate, record.Candidate) ||
+			candidate.Size != record.Candidate.Size {
 			return outcome, rootfsAtomicError("prepared conversion candidate identity changed", err)
 		}
 		digest, err := imageConversionDigest(ctx, transaction.candidateFD, candidate.Size)
@@ -83,7 +99,13 @@ func finishImageConversion(ctx context.Context, lease *rootfsLease, transaction 
 	defer func() {
 		returnErr = appendRootfsCleanupError(returnErr, "close published conversion result", unix.Close(resultFD))
 	}()
-	result, err := inspectImageConversionFile(ctx, resultFD, transaction.caller.UID, transaction.caller.GID, maximumImageBytes)
+	result, err := inspectImageConversionFile(
+		ctx,
+		resultFD,
+		transaction.caller.UID,
+		transaction.caller.GID,
+		maximumImageBytes,
+	)
 	if err != nil || !sameImageConversionInode(result, record.Candidate) || result.Size != record.Candidate.Size {
 		return outcome, rootfsAtomicError("published conversion result identity changed", err)
 	}
@@ -91,7 +113,13 @@ func finishImageConversion(ctx context.Context, lease *rootfsLease, transaction 
 	if err != nil || digest != record.ResultDigest {
 		return outcome, rootfsAtomicError("published conversion result digest changed", err)
 	}
-	after, err := inspectImageConversionFile(ctx, resultFD, transaction.caller.UID, transaction.caller.GID, maximumImageBytes)
+	after, err := inspectImageConversionFile(
+		ctx,
+		resultFD,
+		transaction.caller.UID,
+		transaction.caller.GID,
+		maximumImageBytes,
+	)
 	if err != nil || after != result {
 		return outcome, rootfsAtomicError("published conversion result changed during admission", err)
 	}
@@ -118,7 +146,13 @@ func finishImageConversion(ctx context.Context, lease *rootfsLease, transaction 
 	return outcome, nil
 }
 
-func revalidateImageConversionLeaf(ctx context.Context, parentFD int, name string, expected imageConversionIdentity, timestamps bool) (
+func revalidateImageConversionLeaf(
+	ctx context.Context,
+	parentFD int,
+	name string,
+	expected imageConversionIdentity,
+	timestamps bool,
+) (
 	returnErr error,
 ) {
 	if err := ctx.Err(); err != nil {

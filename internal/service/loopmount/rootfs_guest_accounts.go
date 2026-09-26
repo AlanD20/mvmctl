@@ -151,7 +151,11 @@ func ensureRootfsExistingHome(ctx context.Context, tree rootfsGuestTree, account
 	}
 	if err == nil {
 		defer func() {
-			returnErr = appendRootfsCleanupError(returnErr, "close existing guest account home", tree.deps.close(context.WithoutCancel(ctx), fd))
+			returnErr = appendRootfsCleanupError(
+				returnErr,
+				"close existing guest account home",
+				tree.deps.close(context.WithoutCancel(ctx), fd),
+			)
 		}()
 		var stat unix.Stat_t
 		if err := tree.deps.fstat(ctx, fd, &stat); err != nil {
@@ -179,7 +183,11 @@ func copyRootfsAccountSkeleton(
 		return 0, rootfsAtomicError("open fixed guest account skeleton", err)
 	}
 	defer func() {
-		returnErr = appendRootfsCleanupError(returnErr, "close guest account skeleton", tree.deps.close(context.WithoutCancel(ctx), fd))
+		returnErr = appendRootfsCleanupError(
+			returnErr,
+			"close guest account skeleton",
+			tree.deps.close(context.WithoutCancel(ctx), fd),
+		)
 	}()
 	remaining := int(maxResultCount)
 	return copyRootfsSkeletonDirectory(ctx, tree, account, fd, "/"+account.home, 0, &remaining)
@@ -216,10 +224,22 @@ func copyRootfsSkeletonDirectory(
 		}
 		for _, name := range names {
 			if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\x00") || *remaining <= 0 {
-				return written, rootfsAtomicError("guest account skeleton entry exceeds the closed traversal bound", nil)
+				return written, rootfsAtomicError(
+					"guest account skeleton entry exceeds the closed traversal bound",
+					nil,
+				)
 			}
 			*remaining = *remaining - 1
-			count, err := copyRootfsSkeletonEntry(ctx, tree, account, source, name, destination+"/"+name, depth, remaining)
+			count, err := copyRootfsSkeletonEntry(
+				ctx,
+				tree,
+				account,
+				source,
+				name,
+				destination+"/"+name,
+				depth,
+				remaining,
+			)
 			written += count
 			if err != nil {
 				return written, err
@@ -249,7 +269,11 @@ func copyRootfsSkeletonEntry(
 			return 0, rootfsAtomicError("pin guest skeleton directory", err)
 		}
 		defer func() {
-			returnErr = appendRootfsCleanupError(returnErr, "close guest skeleton directory", tree.deps.close(context.WithoutCancel(ctx), fd))
+			returnErr = appendRootfsCleanupError(
+				returnErr,
+				"close guest skeleton directory",
+				tree.deps.close(context.WithoutCancel(ctx), fd),
+			)
 		}()
 		if _, err := tree.ensureDirectory(ctx, destination, stat.Mode&0777, account.uid, account.gid); err != nil {
 			return 0, err
@@ -261,7 +285,11 @@ func copyRootfsSkeletonEntry(
 		return 0, err
 	}
 	defer func() {
-		returnErr = appendRootfsCleanupError(returnErr, "close guest skeleton destination parent", tree.deps.close(context.WithoutCancel(ctx), parent))
+		returnErr = appendRootfsCleanupError(
+			returnErr,
+			"close guest skeleton destination parent",
+			tree.deps.close(context.WithoutCancel(ctx), parent),
+		)
 	}()
 	var existing unix.Stat_t
 	if err := tree.deps.fstatAt(ctx, parent, leaf, &existing, unix.AT_SYMLINK_NOFOLLOW); err == nil {
@@ -278,7 +306,11 @@ func copyRootfsSkeletonEntry(
 			return 0, rootfsAtomicError("pin guest skeleton file", err)
 		}
 		defer func() {
-			returnErr = appendRootfsCleanupError(returnErr, "close guest skeleton file", tree.deps.close(context.WithoutCancel(ctx), fd))
+			returnErr = appendRootfsCleanupError(
+				returnErr,
+				"close guest skeleton file",
+				tree.deps.close(context.WithoutCancel(ctx), fd),
+			)
 		}()
 		content, err := readStableRootfsGuestFile(ctx, tree.deps, fd, maxRootfsAgentBytes)
 		if err != nil {

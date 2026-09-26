@@ -12,7 +12,12 @@ func handleVMSnapshotCapture(
 	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
 ) error {
 	const action = jailer.VMSnapshotCaptureAction
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
 	request, err := privilegedwire.DecodeRequest[jailer.VMSnapshotCaptureRequest](ctx, reader, action, 0)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)
@@ -37,7 +42,12 @@ func handleVMSnapshotInspect(
 	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
 ) error {
 	const action = jailer.VMSnapshotInspectAction
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
 	request, err := privilegedwire.DecodeRequest[jailer.VMSnapshotRequest](ctx, reader, action, 0)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)
@@ -62,7 +72,12 @@ func handleVMSnapshotRemove(
 	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
 ) error {
 	const action = jailer.VMSnapshotRemoveAction
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
 	request, err := privilegedwire.DecodeRequest[jailer.VMSnapshotRequest](ctx, reader, action, 0)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)
@@ -87,7 +102,12 @@ func handleVMSnapshotRestore(
 	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
 ) error {
 	const action = jailer.VMSnapshotRestoreAction
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
 	request, err := privilegedwire.DecodeRequest[jailer.VMSnapshotRestoreRequest](ctx, reader, action, 0)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)
@@ -109,5 +129,9 @@ func handleVMSnapshotRestore(
 }
 
 func snapshotResultSelectionError() error {
-	return errs.New(errs.CodeInternal, "snapshot result differs from requested selection", errs.WithClass(errs.ClassInternal))
+	return errs.New(
+		errs.CodeInternal,
+		"snapshot result differs from requested selection",
+		errs.WithClass(errs.ClassInternal),
+	)
 }

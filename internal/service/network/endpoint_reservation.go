@@ -55,7 +55,11 @@ func inspectOwnerEndpointReservations(
 		return networkAuthorityEffectError("open endpoint reservation directory", err)
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "close endpoint reservations", uid.deps.close(context.WithoutCancel(ctx), fd))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close endpoint reservations",
+			uid.deps.close(context.WithoutCancel(ctx), fd),
+		)
 	}()
 	if err := verifyNetworkStoreDirectory(ctx, uid.deps, fd, "topologies", uid.policy, networkStoreDirectoryMode, true); err != nil {
 		return err

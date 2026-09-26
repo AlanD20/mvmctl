@@ -7,9 +7,24 @@ import (
 	"mvmctl/internal/service/jailer"
 )
 
-func handleVMVolumeAttach(ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps) error {
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
-	request, err := privilegedwire.DecodeRequest[jailer.VMVolumeAttachRequest](ctx, reader, jailer.VMVolumeAttachAction, 0)
+func handleVMVolumeAttach(
+	ctx context.Context,
+	endpoint controlEndpoint,
+	caller callerIdentity,
+	deps controlDeps,
+) error {
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
+	request, err := privilegedwire.DecodeRequest[jailer.VMVolumeAttachRequest](
+		ctx,
+		reader,
+		jailer.VMVolumeAttachAction,
+		0,
+	)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, jailer.VMVolumeAttachAction, err, deps)
 	}
@@ -29,9 +44,24 @@ func handleVMVolumeAttach(ctx context.Context, endpoint controlEndpoint, caller 
 	return deliverOperationSuccess(ctx, endpoint, jailer.VMVolumeAttachAction, result, deps)
 }
 
-func handleVMVolumeDetach(ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps) error {
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
-	request, err := privilegedwire.DecodeRequest[jailer.VMVolumeDetachRequest](ctx, reader, jailer.VMVolumeDetachAction, 0)
+func handleVMVolumeDetach(
+	ctx context.Context,
+	endpoint controlEndpoint,
+	caller callerIdentity,
+	deps controlDeps,
+) error {
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
+	request, err := privilegedwire.DecodeRequest[jailer.VMVolumeDetachRequest](
+		ctx,
+		reader,
+		jailer.VMVolumeDetachAction,
+		0,
+	)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, jailer.VMVolumeDetachAction, err, deps)
 	}

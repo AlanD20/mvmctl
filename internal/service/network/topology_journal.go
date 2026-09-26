@@ -105,7 +105,10 @@ func (journal *topologyJournal) read(ctx context.Context) (topologyJournalRecord
 		return topologyJournalRecord{}, false, err
 	}
 	if record.OwnerUID != journal.store.uid || record.VMID != string(journal.vmID) {
-		return topologyJournalRecord{}, false, networkAuthorityCorruptError("topology journal owner binding changed", nil)
+		return topologyJournalRecord{}, false, networkAuthorityCorruptError(
+			"topology journal owner binding changed",
+			nil,
+		)
 	}
 	journal.raw, journal.evidence, journal.record = raw, evidence, record
 	return record, true, nil
@@ -126,7 +129,11 @@ func readTopologyJournal(
 		return nil, unix.Stat_t{}, false, networkAuthorityEffectError("open topology journal", err)
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "close topology journal", store.deps.close(context.WithoutCancel(ctx), fd))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close topology journal",
+			store.deps.close(context.WithoutCancel(ctx), fd),
+		)
 	}()
 	before, err := inspectNetworkAuthorityRecordFile(ctx, store.deps, fd, store.policy)
 	if err != nil {
@@ -211,7 +218,10 @@ func (journal *topologyJournal) persist(ctx context.Context, record topologyJour
 	observed, observedEvidence, observedFound, observeErr := readTopologyJournal(cleanup, store, journal.vmID)
 	if observeErr != nil || !observedFound || !bytes.Equal(observed, raw) {
 		journal.ambiguous = true
-		return networkAuthorityCorruptError("topology journal publication outcome is unknown", errors.Join(syncErr, observeErr))
+		return networkAuthorityCorruptError(
+			"topology journal publication outcome is unknown",
+			errors.Join(syncErr, observeErr),
+		)
 	}
 	journal.raw, journal.evidence, journal.record = observed, observedEvidence, record
 	if syncErr != nil {

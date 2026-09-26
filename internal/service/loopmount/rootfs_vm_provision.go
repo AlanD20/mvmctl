@@ -221,7 +221,9 @@ func (adapter *rootfsVMProvisionAdapter) ProvisionVM(
 		return outcome, rootfsAtomicError("vm provisioning filesystem is invalid", err)
 	}
 	if filesystem == FilesystemXFS && plan.ResizeBytes != 0 {
-		return outcome, rootfsValidationError("managed XFS resize is unsupported; no backing or filesystem mutation was attempted")
+		return outcome, rootfsValidationError(
+			"managed XFS resize is unsupported; no backing or filesystem mutation was attempted",
+		)
 	}
 	admittedBytes, err := inspectRootfsProvisionLease(ctx, adapter.deps, lease)
 	if err != nil {

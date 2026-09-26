@@ -36,7 +36,11 @@ func AcquireHostResetGuard(ctx context.Context) (_ *HostResetGuard, returnErr er
 	state := guard.state
 	defer func() {
 		if returnErr != nil {
-			returnErr = appendNetworkAuthorityError(returnErr, "release rejected host reset network guard", guard.Release(ctx))
+			returnErr = appendNetworkAuthorityError(
+				returnErr,
+				"release rejected host reset network guard",
+				guard.Release(ctx),
+			)
 		}
 	}()
 	var err error

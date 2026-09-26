@@ -192,7 +192,8 @@ func (transaction *imageConversionTransaction) bind(ctx context.Context, lease *
 	}
 	if workspace.Mode != unix.S_IFDIR|0700 || workspace.Uid != 0 || workspace.Gid != 0 ||
 		uint64(workspace.Dev) != transaction.record.Directory.Device ||
-		transaction.record.Workspace.Inode != 0 && !sameImageConversionInode(transaction.record.Workspace, imageConversionStatIdentity(workspace)) {
+		transaction.record.Workspace.Inode != 0 &&
+			!sameImageConversionInode(transaction.record.Workspace, imageConversionStatIdentity(workspace)) {
 		return rootfsAtomicError("conversion workspace authority changed", nil)
 	}
 	if transaction.record.Workspace.Inode == 0 {
@@ -203,7 +204,12 @@ func (transaction *imageConversionTransaction) bind(ctx context.Context, lease *
 			identity *imageConversionIdentity
 		}{{"source.img", &transaction.snapshotFD, &transaction.record.Snapshot},
 			{"candidate.img", &transaction.candidateFD, &transaction.record.Candidate}} {
-			created, err := unix.Openat(fd, item.name, unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
+			created, err := unix.Openat(
+				fd,
+				item.name,
+				unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW,
+				0600,
+			)
 			if err != nil {
 				return rootfsAtomicError("create exclusive conversion backing inode", err)
 			}
@@ -229,14 +235,25 @@ func (transaction *imageConversionTransaction) bind(ctx context.Context, lease *
 }
 
 func imageConversionStatIdentity(stat unix.Stat_t) imageConversionIdentity {
-	return imageConversionIdentity{Device: uint64(stat.Dev), Inode: stat.Ino, Size: stat.Size, Mtime: stat.Mtim, Ctime: stat.Ctim}
+	return imageConversionIdentity{
+		Device: uint64(stat.Dev),
+		Inode:  stat.Ino,
+		Size:   stat.Size,
+		Mtime:  stat.Mtim,
+		Ctime:  stat.Ctim,
+	}
 }
 
 func sameImageConversionInode(first, second imageConversionIdentity) bool {
 	return first.Device == second.Device && first.Inode == second.Inode
 }
 
-func inspectImageConversionFile(ctx context.Context, fd int, uid, gid uint32, limit uint64) (imageConversionIdentity, error) {
+func inspectImageConversionFile(
+	ctx context.Context,
+	fd int,
+	uid, gid uint32,
+	limit uint64,
+) (imageConversionIdentity, error) {
 	if err := ctx.Err(); err != nil {
 		return imageConversionIdentity{}, rootfsAtomicError("image conversion context ended", err)
 	}

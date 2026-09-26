@@ -516,7 +516,11 @@ func decodeKernelObservationError(message netlink.Message, request netlink.Messa
 			if message.Header.Flags&netlink.Capped != 0 {
 				return kernelObservationTransportError("capped kernel observation error retained payload", nil, true)
 			}
-			return kernelObservationTransportError("kernel observation error request payload length is invalid", nil, true)
+			return kernelObservationTransportError(
+				"kernel observation error request payload length is invalid",
+				nil,
+				true,
+			)
 		}
 	} else if !validKernelObservationExtendedAck(message.Data[payloadEnd:]) {
 		return kernelObservationTransportError("kernel observation extended acknowledgement is invalid", nil, true)

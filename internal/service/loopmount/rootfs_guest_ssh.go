@@ -65,7 +65,9 @@ func configureRootfsSSHBoot(ctx context.Context, tree rootfsGuestTree) (uint32, 
 		}
 		changed, err := tree.replaceFile(ctx, rootfsProvisionFile{
 			path: rootfsSSHBootstrapUnit, mode: 0644,
-			content: []byte("[Unit]\nDescription=MVM guest SSH setup\nAfter=network-online.target\nWants=network-online.target\nConditionPathExists=!/var/lib/mvmctl/ssh-ready\n\n[Service]\nType=oneshot\nExecStart=" + rootfsSSHBootstrapPath + "\n\n[Install]\nWantedBy=multi-user.target\n"),
+			content: []byte(
+				"[Unit]\nDescription=MVM guest SSH setup\nAfter=network-online.target\nWants=network-online.target\nConditionPathExists=!/var/lib/mvmctl/ssh-ready\n\n[Service]\nType=oneshot\nExecStart=" + rootfsSSHBootstrapPath + "\n\n[Install]\nWantedBy=multi-user.target\n",
+			),
 		})
 		if changed {
 			written++
@@ -90,7 +92,9 @@ func configureRootfsSSHBoot(ctx context.Context, tree rootfsGuestTree) (uint32, 
 	}
 	changed, err = tree.replaceFile(ctx, rootfsProvisionFile{
 		path: rootfsSSHOpenRCPath, mode: 0755,
-		content: []byte("#!/sbin/openrc-run\ndescription=\"MVM guest SSH setup\"\ndepend() { need net; }\nstart() { [ -e /var/lib/mvmctl/ssh-ready ] || " + rootfsSSHBootstrapPath + "; }\n"),
+		content: []byte(
+			"#!/sbin/openrc-run\ndescription=\"MVM guest SSH setup\"\ndepend() { need net; }\nstart() { [ -e /var/lib/mvmctl/ssh-ready ] || " + rootfsSSHBootstrapPath + "; }\n",
+		),
 	})
 	if changed {
 		written++
@@ -136,7 +140,11 @@ func repairRootfsSudoFile(ctx context.Context, tree rootfsGuestTree, path string
 		return err
 	}
 	defer func() {
-		returnErr = appendRootfsCleanupError(returnErr, "close fixed sudo parent", tree.deps.close(context.WithoutCancel(ctx), parent))
+		returnErr = appendRootfsCleanupError(
+			returnErr,
+			"close fixed sudo parent",
+			tree.deps.close(context.WithoutCancel(ctx), parent),
+		)
 	}()
 	fd, err := tree.deps.openAt2(ctx, parent, leaf, &unix.OpenHow{
 		Flags: rootfsGuestReadFlags, Resolve: rootfsGuestResolveFlags,
@@ -148,7 +156,11 @@ func repairRootfsSudoFile(ctx context.Context, tree rootfsGuestTree, path string
 		return rootfsAtomicError("open fixed guest sudo file", err)
 	}
 	defer func() {
-		returnErr = appendRootfsCleanupError(returnErr, "close fixed sudo file", tree.deps.close(context.WithoutCancel(ctx), fd))
+		returnErr = appendRootfsCleanupError(
+			returnErr,
+			"close fixed sudo file",
+			tree.deps.close(context.WithoutCancel(ctx), fd),
+		)
 	}()
 	var stat unix.Stat_t
 	if err := tree.deps.fstat(ctx, fd, &stat); err != nil {

@@ -6,10 +6,20 @@ import (
 	"mvmctl/internal/service/network"
 )
 
-func handleInspectHostService(ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps) error {
+func handleInspectHostService(
+	ctx context.Context,
+	endpoint controlEndpoint,
+	caller callerIdentity,
+	deps controlDeps,
+) error {
 	deadline := boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout)
 	reader := newRequestReader(ctx, int(endpoint.Fd()), deadline, deps)
-	request, err := privilegedwire.DecodeRequest[network.HostServiceRequest](ctx, reader, network.HostServiceInspectAction, 0)
+	request, err := privilegedwire.DecodeRequest[network.HostServiceRequest](
+		ctx,
+		reader,
+		network.HostServiceInspectAction,
+		0,
+	)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, network.HostServiceInspectAction, err, deps)
 	}
@@ -29,10 +39,20 @@ func handleInspectHostService(ctx context.Context, endpoint controlEndpoint, cal
 	return deliverOperationSuccess(ctx, endpoint, network.HostServiceInspectAction, result, deps)
 }
 
-func handleApplyHostService(ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps) error {
+func handleApplyHostService(
+	ctx context.Context,
+	endpoint controlEndpoint,
+	caller callerIdentity,
+	deps controlDeps,
+) error {
 	deadline := boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout)
 	reader := newRequestReader(ctx, int(endpoint.Fd()), deadline, deps)
-	request, err := privilegedwire.DecodeRequest[network.HostServiceRequest](ctx, reader, network.HostServiceApplyAction, 0)
+	request, err := privilegedwire.DecodeRequest[network.HostServiceRequest](
+		ctx,
+		reader,
+		network.HostServiceApplyAction,
+		0,
+	)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, network.HostServiceApplyAction, err, deps)
 	}
@@ -52,10 +72,20 @@ func handleApplyHostService(ctx context.Context, endpoint controlEndpoint, calle
 	return deliverOperationSuccess(ctx, endpoint, network.HostServiceApplyAction, result, deps)
 }
 
-func handleRemoveHostService(ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps) error {
+func handleRemoveHostService(
+	ctx context.Context,
+	endpoint controlEndpoint,
+	caller callerIdentity,
+	deps controlDeps,
+) error {
 	deadline := boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout)
 	reader := newRequestReader(ctx, int(endpoint.Fd()), deadline, deps)
-	request, err := privilegedwire.DecodeRequest[network.HostServiceRequest](ctx, reader, network.HostServiceRemoveAction, 0)
+	request, err := privilegedwire.DecodeRequest[network.HostServiceRequest](
+		ctx,
+		reader,
+		network.HostServiceRemoveAction,
+		0,
+	)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, network.HostServiceRemoveAction, err, deps)
 	}

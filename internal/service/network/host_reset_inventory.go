@@ -106,7 +106,11 @@ func readHostResetNetworkInventory(ctx context.Context, root *networkStoreRoot) 
 			return inventory, err
 		}
 		err = inventory.readOwner(ctx, owner)
-		err = appendNetworkAuthorityError(err, "close host reset network owner", owner.Release(context.WithoutCancel(ctx)))
+		err = appendNetworkAuthorityError(
+			err,
+			"close host reset network owner",
+			owner.Release(context.WithoutCancel(ctx)),
+		)
 		if err != nil {
 			return inventory, err
 		}
@@ -139,7 +143,10 @@ func (inventory *hostResetNetworkInventory) readOwner(ctx context.Context, owner
 		default:
 			id := strings.TrimSuffix(name, ".json")
 			if name != id+".json" || !networkIDPattern.MatchString(id) {
-				return networkAuthorityCorruptError("host reset network inventory contains pending or unknown state", nil)
+				return networkAuthorityCorruptError(
+					"host reset network inventory contains pending or unknown state",
+					nil,
+				)
 			}
 			_, found, err := owner.readRecord(ctx, NetworkID(id))
 			if err != nil || !found {

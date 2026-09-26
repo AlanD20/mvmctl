@@ -33,7 +33,11 @@ func readRootfsCloudInitSeed(
 		return nil, rootfsAtomicError("open fixed VM cloud-init seed directory", err)
 	}
 	defer func() {
-		returnErr = appendRootfsCleanupError(returnErr, "close VM cloud-init seed directory", deps.close(context.WithoutCancel(ctx), directory))
+		returnErr = appendRootfsCleanupError(
+			returnErr,
+			"close VM cloud-init seed directory",
+			deps.close(context.WithoutCancel(ctx), directory),
+		)
 	}()
 	var directoryStat unix.Stat_t
 	if err := deps.fstat(ctx, directory, &directoryStat); err != nil {
@@ -84,7 +88,11 @@ func readRootfsCloudInitLeaf(
 		return nil, false, rootfsAtomicError("open fixed VM cloud-init seed leaf", err)
 	}
 	defer func() {
-		returnErr = appendRootfsCleanupError(returnErr, "close VM cloud-init seed leaf", deps.close(context.WithoutCancel(ctx), fd))
+		returnErr = appendRootfsCleanupError(
+			returnErr,
+			"close VM cloud-init seed leaf",
+			deps.close(context.WithoutCancel(ctx), fd),
+		)
 	}()
 	var stat unix.Stat_t
 	if err := deps.fstat(ctx, fd, &stat); err != nil {

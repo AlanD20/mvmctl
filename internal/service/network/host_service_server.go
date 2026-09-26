@@ -15,20 +15,32 @@ type HostServiceServer struct{}
 func NewHostServiceServer() *HostServiceServer { return &HostServiceServer{} }
 
 // InspectHostService resolves network facts without granting service access.
-func (server *HostServiceServer) InspectHostService(ctx context.Context, ownerUID uint32, request HostServiceRequest) (_ HostServiceResult, returnErr error) {
+func (server *HostServiceServer) InspectHostService(
+	ctx context.Context,
+	ownerUID uint32,
+	request HostServiceRequest,
+) (_ HostServiceResult, returnErr error) {
 	lease, err := acquireHostServiceNetwork(ctx, ownerUID, request)
 	if err != nil {
 		return HostServiceResult{}, err
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "release NoCloud network", lease.Release(context.WithoutCancel(ctx)))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"release NoCloud network",
+			lease.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	return hostServiceResult(lease), nil
 }
 
 // ApplyHostService derives the fixed grant exclusively from root-owned network authority.
 // CRITICAL: ownerUID comes from the authenticated dispatcher, never caller-supplied SQL or JSON.
-func (server *HostServiceServer) ApplyHostService(ctx context.Context, ownerUID uint32, request HostServiceRequest) (_ HostServiceResult, returnErr error) {
+func (server *HostServiceServer) ApplyHostService(
+	ctx context.Context,
+	ownerUID uint32,
+	request HostServiceRequest,
+) (_ HostServiceResult, returnErr error) {
 	authority, err := beginHostServiceChange(ctx, ownerUID, request)
 	if err != nil {
 		return HostServiceResult{}, err
@@ -41,7 +53,11 @@ func (server *HostServiceServer) ApplyHostService(ctx context.Context, ownerUID 
 }
 
 // RemoveHostService proves exact revocation or absence in the root generation.
-func (server *HostServiceServer) RemoveHostService(ctx context.Context, ownerUID uint32, request HostServiceRequest) (_ HostServiceResult, returnErr error) {
+func (server *HostServiceServer) RemoveHostService(
+	ctx context.Context,
+	ownerUID uint32,
+	request HostServiceRequest,
+) (_ HostServiceResult, returnErr error) {
 	authority, err := beginHostServiceChange(ctx, ownerUID, request)
 	if err != nil {
 		return HostServiceResult{}, err
@@ -53,7 +69,11 @@ func (server *HostServiceServer) RemoveHostService(ctx context.Context, ownerUID
 	return hostServiceResult(authority.network), nil
 }
 
-func acquireHostServiceNetwork(ctx context.Context, ownerUID uint32, request HostServiceRequest) (*managedNetworkLease, error) {
+func acquireHostServiceNetwork(
+	ctx context.Context,
+	ownerUID uint32,
+	request HostServiceRequest,
+) (*managedNetworkLease, error) {
 	if ctx == nil || ownerUID == 0 {
 		return nil, errs.New(errs.CodeValidationFailed, "authenticated non-root NoCloud owner and context are required")
 	}
@@ -68,7 +88,11 @@ func acquireHostServiceNetwork(ctx context.Context, ownerUID uint32, request Hos
 	return lease.(*managedNetworkLease), nil
 }
 
-func beginHostServiceChange(ctx context.Context, ownerUID uint32, request HostServiceRequest) (*trafficPolicyAuthority, error) {
+func beginHostServiceChange(
+	ctx context.Context,
+	ownerUID uint32,
+	request HostServiceRequest,
+) (*trafficPolicyAuthority, error) {
 	lease, err := acquireHostServiceNetwork(ctx, ownerUID, request)
 	if err != nil {
 		return nil, err
@@ -77,7 +101,10 @@ func beginHostServiceChange(ctx context.Context, ownerUID uint32, request HostSe
 	record := lease.record
 	authority.firewall, err = firewall.BeginPolicyChange(ctx, lease.mutation, firewall.PolicyBinding{
 		OwnerUID: ownerUID, NetworkID: string(record.networkID), BootID: record.bootID,
-		HostNamespace: firewall.NamespaceIdentity{Device: record.managedBridge.namespace.device, Inode: record.managedBridge.namespace.inode},
+		HostNamespace: firewall.NamespaceIdentity{
+			Device: record.managedBridge.namespace.device,
+			Inode:  record.managedBridge.namespace.inode,
+		},
 	})
 	if err != nil {
 		return nil, authority.release(ctx, err)

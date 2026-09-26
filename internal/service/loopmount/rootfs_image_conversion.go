@@ -32,7 +32,13 @@ func convertRootfsImage(ctx context.Context, deps rootfsVMProvisionDeps, lease *
 	if record.Phase == imageConversionReady || record.Phase == imageConversionComplete {
 		return finishImageConversion(ctx, lease, transaction)
 	}
-	original, err := inspectImageConversionFile(ctx, lease.rootfsFD, transaction.caller.UID, transaction.caller.GID, maximumImageBytes)
+	original, err := inspectImageConversionFile(
+		ctx,
+		lease.rootfsFD,
+		transaction.caller.UID,
+		transaction.caller.GID,
+		maximumImageBytes,
+	)
 	if err != nil || original != record.Original {
 		return outcome, rootfsAtomicError("image conversion original changed before snapshot", err)
 	}
@@ -43,7 +49,13 @@ func convertRootfsImage(ctx context.Context, deps rootfsVMProvisionDeps, lease *
 		if err := copyImageConversionSnapshot(ctx, lease.rootfsFD, transaction.snapshotFD, record.Original.Size); err != nil {
 			return outcome, err
 		}
-		after, err := inspectImageConversionFile(ctx, lease.rootfsFD, transaction.caller.UID, transaction.caller.GID, maximumImageBytes)
+		after, err := inspectImageConversionFile(
+			ctx,
+			lease.rootfsFD,
+			transaction.caller.UID,
+			transaction.caller.GID,
+			maximumImageBytes,
+		)
 		if err != nil || after != record.Original {
 			return outcome, rootfsAtomicError("image conversion source changed while snapshotting", err)
 		}
@@ -103,7 +115,8 @@ func (transaction *imageConversionTransaction) openWorkingFiles(ctx context.Cont
 		if err != nil || !sameImageConversionInode(identity, item.identity) {
 			return rootfsAtomicError("conversion backing inode no longer matches its receipt", err)
 		}
-		if item.name == "source.img" && transaction.record.Phase == imageConversionSnapshot && identity != item.identity {
+		if item.name == "source.img" && transaction.record.Phase == imageConversionSnapshot &&
+			identity != item.identity {
 			return rootfsAtomicError("immutable conversion snapshot metadata changed", nil)
 		}
 	}
@@ -146,19 +159,29 @@ func copyImageConversionSnapshot(ctx context.Context, sourceFD, targetFD int, si
 	return rootfsCleanupErrorIfAny("sync conversion snapshot", unix.Fsync(targetFD))
 }
 
-func constructImageConversionCandidate(ctx context.Context, deps rootfsVMProvisionDeps, transaction *imageConversionTransaction) (
+func constructImageConversionCandidate(
+	ctx context.Context,
+	deps rootfsVMProvisionDeps,
+	transaction *imageConversionTransaction,
+) (
 	returnErr error,
 ) {
 	if err := deps.lockOSThread(ctx); err != nil {
 		return rootfsAtomicError("lock image conversion OS thread", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return appendRootfsCleanupError(rootfsAtomicError("conversion context ended", err), "unlock image conversion thread",
-			deps.unlockOSThread(context.WithoutCancel(ctx)))
+		return appendRootfsCleanupError(
+			rootfsAtomicError("conversion context ended", err),
+			"unlock image conversion thread",
+			deps.unlockOSThread(context.WithoutCancel(ctx)),
+		)
 	}
 	if err := deps.unshare(ctx, unix.CLONE_NEWNS); err != nil {
-		return appendRootfsCleanupError(rootfsAtomicError("create conversion mount namespace", err), "unlock image conversion thread",
-			deps.unlockOSThread(context.WithoutCancel(ctx)))
+		return appendRootfsCleanupError(
+			rootfsAtomicError("create conversion mount namespace", err),
+			"unlock image conversion thread",
+			deps.unlockOSThread(context.WithoutCancel(ctx)),
+		)
 	}
 	// CRITICAL: The namespace is permanently confined to this receiver's locked thread.
 	// Source bytes are an immutable root-owned snapshot; no caller-writable image is mounted.
@@ -171,13 +194,29 @@ func constructImageConversionCandidate(ctx context.Context, deps rootfsVMProvisi
 	rootFD := -1
 	defer func() {
 		if rootFD >= 0 {
-			returnErr = appendRootfsCleanupError(returnErr, "close conversion mounted root", deps.close(cleanupCtx, rootFD))
+			returnErr = appendRootfsCleanupError(
+				returnErr,
+				"close conversion mounted root",
+				deps.close(cleanupCtx, rootFD),
+			)
 		}
 		if mounted {
-			returnErr = appendRootfsCleanupError(returnErr, "unmount conversion snapshot", deps.unmount(cleanupCtx, rootfsInspectMountPath, 0))
+			returnErr = appendRootfsCleanupError(
+				returnErr,
+				"unmount conversion snapshot",
+				deps.unmount(cleanupCtx, rootfsInspectMountPath, 0),
+			)
 		}
-		returnErr = appendRootfsCleanupError(returnErr, "release conversion block devices",
-			errors.Join(source.Release(cleanupCtx), partitions.Release(cleanupCtx), targetLoop.Release(cleanupCtx), sourceLoop.Release(cleanupCtx)))
+		returnErr = appendRootfsCleanupError(
+			returnErr,
+			"release conversion block devices",
+			errors.Join(
+				source.Release(cleanupCtx),
+				partitions.Release(cleanupCtx),
+				targetLoop.Release(cleanupCtx),
+				sourceLoop.Release(cleanupCtx),
+			),
+		)
 		if mountpoint != nil {
 			returnErr = appendRootfsCleanupError(returnErr, "close conversion mountpoint",
 				errors.Join(deps.close(cleanupCtx, mountpoint.rootFD), deps.close(cleanupCtx, mountpoint.parentFD)))
@@ -263,7 +302,8 @@ func runImageConversionTool(ctx context.Context, deps rootfsVMProvisionDeps, arg
 		Env: map[string]string{"LANG": "C", "LC_ALL": "C"}, ReplaceEnv: true,
 		MaxStdoutBytes: maxRootfsGrowToolStdoutBytes, MaxStderrBytes: maxRootfsGrowToolStderrBytes,
 	})
-	if err != nil || result == nil || result.ExitCode != 0 && !(fsck && (result.ExitCode == 1 || result.ExitCode == 2)) {
+	if err != nil || result == nil ||
+		result.ExitCode != 0 && !(fsck && (result.ExitCode == 1 || result.ExitCode == 2)) {
 		return rootfsAtomicError("fixed image conversion tool did not complete successfully", err)
 	}
 	return nil

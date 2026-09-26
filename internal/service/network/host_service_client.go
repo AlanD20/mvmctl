@@ -17,21 +17,34 @@ type HostServiceClient struct{}
 func NewHostServiceClient() *HostServiceClient { return &HostServiceClient{} }
 
 // InspectHostService resolves the root-owned gateway before attempting the exclusive bind.
-func (client *HostServiceClient) InspectHostService(ctx context.Context, request HostServiceRequest) (HostServiceResult, error) {
+func (client *HostServiceClient) InspectHostService(
+	ctx context.Context,
+	request HostServiceRequest,
+) (HostServiceResult, error) {
 	return client.exchange(ctx, HostServiceInspectAction, request)
 }
 
 // ApplyHostService installs the fixed NoCloud grant in the durable root generation.
-func (client *HostServiceClient) ApplyHostService(ctx context.Context, request HostServiceRequest) (HostServiceResult, error) {
+func (client *HostServiceClient) ApplyHostService(
+	ctx context.Context,
+	request HostServiceRequest,
+) (HostServiceResult, error) {
 	return client.exchange(ctx, HostServiceApplyAction, request)
 }
 
 // RemoveHostService revokes the exact NoCloud grant before releasing the listener reservation.
-func (client *HostServiceClient) RemoveHostService(ctx context.Context, request HostServiceRequest) (HostServiceResult, error) {
+func (client *HostServiceClient) RemoveHostService(
+	ctx context.Context,
+	request HostServiceRequest,
+) (HostServiceResult, error) {
 	return client.exchange(ctx, HostServiceRemoveAction, request)
 }
 
-func (client *HostServiceClient) exchange(ctx context.Context, action string, request HostServiceRequest) (HostServiceResult, error) {
+func (client *HostServiceClient) exchange(
+	ctx context.Context,
+	action string,
+	request HostServiceRequest,
+) (HostServiceResult, error) {
 	if ctx == nil || client == nil {
 		return HostServiceResult{}, errs.New(errs.CodeValidationFailed, "NoCloud client and context are required")
 	}

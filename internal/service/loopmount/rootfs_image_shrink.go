@@ -35,7 +35,9 @@ func validateImageShrinkPlan(filesystem Filesystem, plan ImageOptimizePlan) erro
 	if plan.ConvertTo != nil {
 		if filesystem != FilesystemBtrfs || *plan.ConvertTo != FilesystemExt4 || plan.Shrink ||
 			plan.DeblobOS != nil || plan.FixFstab {
-			return rootfsValidationError("image conversion requires a separate Btrfs-to-ext4-only request before cleanup or shrink")
+			return rootfsValidationError(
+				"image conversion requires a separate Btrfs-to-ext4-only request before cleanup or shrink",
+			)
 		}
 		return nil
 	}
@@ -77,7 +79,11 @@ func (adapter *rootfsImageShrinkAdapter) OptimizeImage(
 	if transaction.record.Phase == imageShrinkPrepared && (plan.DeblobOS != nil || plan.FixFstab) {
 		content, contentErr := (&rootfsVMProvisionAdapter{deps: adapter.deps}).ProvisionVM(ctx, lease, filesystem,
 			VMProvisionPlan{DeblobOS: plan.DeblobOS, FixFstab: plan.FixFstab})
-		contentErr = appendRootfsCleanupError(contentErr, "release image content effects", content.cleanup(context.WithoutCancel(ctx)))
+		contentErr = appendRootfsCleanupError(
+			contentErr,
+			"release image content effects",
+			content.cleanup(context.WithoutCancel(ctx)),
+		)
 		switch content.state {
 		case vmProvisionEffectStateUnchanged:
 			outcome.state = imageOptimizeEffectStateUnchanged
@@ -157,7 +163,9 @@ func (adapter *rootfsImageShrinkAdapter) OptimizeImage(
 	raw := source.state.kind == rootfsMountSourceRaw
 	source.state.mu.Unlock()
 	if !raw {
-		return outcome, rootfsValidationError("image shrink requires the extracted raw filesystem, not a partition table")
+		return outcome, rootfsValidationError(
+			"image shrink requires the extracted raw filesystem, not a partition table",
+		)
 	}
 	sourcePath, _, err := activeRootfsProvisionSource(ctx, adapter.deps, source, filesystem)
 	if err != nil {
@@ -237,7 +245,8 @@ func runImageShrinkTool(
 		Env: map[string]string{"LANG": "C", "LC_ALL": "C"}, ReplaceEnv: true,
 		MaxStdoutBytes: maxRootfsGrowToolStdoutBytes, MaxStderrBytes: maxRootfsGrowToolStderrBytes,
 	})
-	if err != nil || result == nil || result.ExitCode != 0 && !(fsck && (result.ExitCode == 1 || result.ExitCode == 2)) {
+	if err != nil || result == nil ||
+		result.ExitCode != 0 && !(fsck && (result.ExitCode == 1 || result.ExitCode == 2)) {
 		return rootfsAtomicError("fixed offline image shrink tool did not complete successfully", err)
 	}
 	tracker.completeMutation()

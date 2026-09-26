@@ -227,7 +227,12 @@ func persistImageTransaction(ctx context.Context, directoryFD int, leaf string, 
 		return rootfsAtomicError("allocate image shrink journal temporary name", err)
 	}
 	name := ".image-shrink-" + hex.EncodeToString(nonce[:])
-	fd, err := unix.Openat(directoryFD, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
+	fd, err := unix.Openat(
+		directoryFD,
+		name,
+		unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW,
+		0600,
+	)
 	if err != nil {
 		return rootfsAtomicError("create image shrink journal temporary file", err)
 	}
@@ -235,7 +240,11 @@ func persistImageTransaction(ctx context.Context, directoryFD int, leaf string, 
 	defer func() {
 		returnErr = appendRootfsCleanupError(returnErr, "close image shrink journal temporary file", unix.Close(fd))
 		if !renamed {
-			returnErr = appendRootfsCleanupError(returnErr, "remove unpublished image shrink journal", unix.Unlinkat(directoryFD, name, 0))
+			returnErr = appendRootfsCleanupError(
+				returnErr,
+				"remove unpublished image shrink journal",
+				unix.Unlinkat(directoryFD, name, 0),
+			)
 		}
 	}()
 	if err := unix.Fchmod(fd, 0600); err != nil {

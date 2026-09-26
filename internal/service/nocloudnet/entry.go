@@ -55,7 +55,10 @@ func Run(ctx context.Context, cfg Config) (returnErr error) {
 		}()
 	}
 	if ctx == nil || cfg.NetworkID == "" || cfg.KillAfter < 0 || (cfg.BaseDir == "") == (cfg.CloudInitDir == "") {
-		return errs.New(errs.CodeValidationFailed, "NoCloud requires one metadata directory, a managed network and nonnegative lifetime")
+		return errs.New(
+			errs.CodeValidationFailed,
+			"NoCloud requires one metadata directory, a managed network and nonnegative lifetime",
+		)
 	}
 	directory := cfg.CloudInitDir
 	if cfg.BaseDir != "" {

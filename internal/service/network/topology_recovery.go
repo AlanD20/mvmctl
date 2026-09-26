@@ -161,8 +161,10 @@ func (lease *VMTopologyLease) recover(
 	preparation.pin = pin
 	if pin.Handle() != topology.handle && (current.Lifecycle != topologyCleaning ||
 		current.Progress.LocalBridge || current.Progress.TAP || current.Progress.Veth) {
-		return errors.Join(networkAuthorityCorruptError("missing namespace cannot authorize live-link topology recovery", nil),
-			pin.discardRecovery(context.WithoutCancel(ctx)))
+		return errors.Join(
+			networkAuthorityCorruptError("missing namespace cannot authorize live-link topology recovery", nil),
+			pin.discardRecovery(context.WithoutCancel(ctx)),
+		)
 	}
 	preparation.namespaceCreated = current.Progress.Namespace
 	preparation.localBridgeMade = current.Progress.LocalBridge
@@ -181,29 +183,44 @@ func openOwnedTopologyJournal(ctx context.Context, owner uint32, vmID VMID) (_ *
 		return nil, err
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "close topology recovery root", root.Release(context.WithoutCancel(ctx)))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close topology recovery root",
+			root.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	uid, err := root.openUID(ctx, owner, false)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "close topology recovery owner", uid.Release(context.WithoutCancel(ctx)))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close topology recovery owner",
+			uid.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	return openTopologyJournal(ctx, uid, vmID)
 }
 
 func recoverTopologyValue(key topologyKey, record TopologyRecord, progress topologyProgress) (Topology, error) {
-	if record.OwnerUID != uint32(key.ownerUID) || record.VMID != string(key.vmID) || record.NetworkID != string(key.networkID) {
+	if record.OwnerUID != uint32(key.ownerUID) || record.VMID != string(key.vmID) ||
+		record.NetworkID != string(key.networkID) {
 		return Topology{}, networkAuthorityCorruptError("persisted topology identity differs from VM authority", nil)
 	}
 	topology := Topology{key: key,
 		handle: namespaceHandle{path: namespaceHandlePath(record.Namespace.Path),
-			identity: namespaceIdentity{device: record.Namespace.Identity.Device, inode: record.Namespace.Identity.Inode},
+			identity: namespaceIdentity{
+				device: record.Namespace.Identity.Device,
+				inode:  record.Namespace.Identity.Inode,
+			},
 			ownerUID: record.Namespace.OwnerUID, ownerGID: record.Namespace.OwnerGID, mode: record.Namespace.Mode},
 		managedBridge: importLinkIdentity(record.ManagedBridge), localBridge: importLinkIdentity(record.LocalBridge),
-		tap:  importLinkIdentity(record.TAP),
-		veth: vethPairIdentity{host: importLinkIdentity(record.VethPair.Host), peer: importLinkIdentity(record.VethPair.Peer)}}
+		tap: importLinkIdentity(record.TAP),
+		veth: vethPairIdentity{
+			host: importLinkIdentity(record.VethPair.Host),
+			peer: importLinkIdentity(record.VethPair.Peer),
+		}}
 	names := deriveTopologyNames(key)
 	if err := validateNetworkLock(key.Network(), topology.managedBridge, key.Network(), names.managedBridge); err != nil {
 		return Topology{}, err
@@ -238,9 +255,15 @@ func importLinkIdentity(link LinkIdentity) linkIdentity {
 
 func namespaceTargetFromJournal(target topologyNamespaceTarget) namespaceTargetIdentity {
 	return namespaceTargetIdentity{directoryDevice: target.DirectoryDevice, directoryInode: target.DirectoryInode,
-		directoryMount:    namespaceTargetMountIdentity{kind: namespaceTargetMountIdentityKind(target.DirectoryMountKind), value: target.DirectoryMount},
+		directoryMount: namespaceTargetMountIdentity{
+			kind:  namespaceTargetMountIdentityKind(target.DirectoryMountKind),
+			value: target.DirectoryMount,
+		},
 		placeholderDevice: target.PlaceholderDevice, placeholderInode: target.PlaceholderInode,
-		placeholderMount: namespaceTargetMountIdentity{kind: namespaceTargetMountIdentityKind(target.PlaceholderMountKind), value: target.PlaceholderMount}}
+		placeholderMount: namespaceTargetMountIdentity{
+			kind:  namespaceTargetMountIdentityKind(target.PlaceholderMountKind),
+			value: target.PlaceholderMount,
+		}}
 }
 
 // DetachActive closes operation-local authority after durable active handoff and successful exact reopen.
@@ -271,7 +294,8 @@ func (lease *VMTopologyLease) DetachActive(ctx context.Context) error {
 	}
 	expected := append([]byte(nil), lease.journal.raw...)
 	record, found, err := lease.journal.read(ctx)
-	if err != nil || !found || !bytes.Equal(expected, lease.journal.raw) || record.Lifecycle != topologyActive || record.Pending != "" {
+	if err != nil || !found || !bytes.Equal(expected, lease.journal.raw) || record.Lifecycle != topologyActive ||
+		record.Pending != "" {
 		return networkAuthorityCorruptError("active topology journal changed before detach", err)
 	}
 	effect := lease.effects.namespace.(*namespaceEffect)

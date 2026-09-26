@@ -150,7 +150,9 @@ func decodeManagedNetworkRecord(raw []byte) (networkAuthorityRecord, error) {
 		return networkAuthorityRecord{}, err
 	}
 	record := networkAuthorityRecord{schemaVersion: wire.SchemaVersion, ownerUID: wire.OwnerUID,
-		networkID: NetworkID(wire.NetworkID), bootID: wire.BootID, managedBridge: networkLinkFromWire(wire.ManagedBridge),
+		networkID: NetworkID(
+			wire.NetworkID,
+		), bootID: wire.BootID, managedBridge: networkLinkFromWire(wire.ManagedBridge),
 		configuration: &managedNetworkConfiguration{l3: l3, nat: wire.NAT}}
 	if source := wire.Uplink; source != nil {
 		uplink := &selectedUplink{link: networkLinkFromWire(source.Link), kind: source.Kind,

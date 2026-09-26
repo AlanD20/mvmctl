@@ -82,7 +82,11 @@ func Prepare(ctx context.Context, hold *authorityfs.TopologyHold, intent VMInten
 	if err := lease.prepare(ctx, intent); err != nil {
 		if lease.activationStarted && lease.preparation != nil {
 			cleanup := context.WithoutCancel(ctx)
-			lowerErr := lease.effects.link.(*linkEffect).LowerHostVeth(cleanup, lease.preparation.pin, lease.preparation.topology)
+			lowerErr := lease.effects.link.(*linkEffect).LowerHostVeth(
+				cleanup,
+				lease.preparation.pin,
+				lease.preparation.topology,
+			)
 			persistErr := lease.persistStage(cleanup, "activation_failed", topologyCleaning)
 			return lease, errors.Join(err, lowerErr, persistErr)
 		}
@@ -279,7 +283,10 @@ func (lease *VMTopologyLease) Cleanup(ctx context.Context) error {
 	cleanup := context.WithoutCancel(ctx)
 	lease.active = false
 	if lease.journal != nil && lease.journal.ambiguous {
-		return networkAuthorityCorruptError("topology publication is ambiguous; retained authority requires reconciliation", nil)
+		return networkAuthorityCorruptError(
+			"topology publication is ambiguous; retained authority requires reconciliation",
+			nil,
+		)
 	}
 	if lease.reserved {
 		if err := lease.persistStage(cleanup, "begin_cleanup", topologyCleaning); err != nil {
@@ -447,8 +454,11 @@ func (lease *VMTopologyLease) endpointBinding() firewall.EndpointBinding {
 	}
 	return firewall.EndpointBinding{OwnerUID: uint32(lease.key.ownerUID), VMID: string(lease.key.vmID),
 		NetworkID: string(lease.key.networkID), BootID: record.bootID,
-		HostNamespace: firewall.NamespaceIdentity{Device: record.managedBridge.namespace.device, Inode: record.managedBridge.namespace.inode},
-		Prefix:        lease.l3.network.prefix.value, Gateway: lease.l3.network.gateway.value,
+		HostNamespace: firewall.NamespaceIdentity{
+			Device: record.managedBridge.namespace.device,
+			Inode:  record.managedBridge.namespace.inode,
+		},
+		Prefix: lease.l3.network.prefix.value, Gateway: lease.l3.network.gateway.value,
 		IPv4: lease.l3.guestAddress.value, MAC: [6]byte(lease.l3.mac),
 		ManagedBridge: firewallLinkIdentity(record.managedBridge), HostVeth: firewallLinkIdentity(host)}
 }

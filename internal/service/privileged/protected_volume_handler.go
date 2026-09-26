@@ -12,7 +12,12 @@ func handleProtectedVolumeInspect(
 	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
 ) error {
 	const action = jailer.ProtectedVolumeInspectAction
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
 	request, err := privilegedwire.DecodeRequest[jailer.ProtectedVolumeInspectRequest](ctx, reader, action, 0)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)
@@ -37,7 +42,12 @@ func handleProtectedVolumeGrow(
 	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
 ) error {
 	const action = jailer.ProtectedVolumeGrowAction
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
 	request, err := privilegedwire.DecodeRequest[jailer.ProtectedVolumeGrowRequest](ctx, reader, action, 0)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)
@@ -68,7 +78,12 @@ func handleProtectedVolumeRemove(
 	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
 ) error {
 	const action = jailer.ProtectedVolumeRemoveAction
-	reader := newRequestReader(ctx, int(endpoint.Fd()), boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout), deps)
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
 	request, err := privilegedwire.DecodeRequest[jailer.ProtectedVolumeRemoveRequest](ctx, reader, action, 0)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)

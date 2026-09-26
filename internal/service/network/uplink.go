@@ -156,7 +156,13 @@ func (adapter *directRouteNetlink) listDefaultIPv4Routes(
 	ctx context.Context,
 	fd int,
 ) ([]routeIPv4Observation, error) {
-	data, err := marshalRouteMessage(0, unix.RT_TABLE_MAIN, unix.RTPROT_UNSPEC, unix.RT_SCOPE_UNIVERSE, unix.RTN_UNICAST)
+	data, err := marshalRouteMessage(
+		0,
+		unix.RT_TABLE_MAIN,
+		unix.RTPROT_UNSPEC,
+		unix.RT_SCOPE_UNIVERSE,
+		unix.RTN_UNICAST,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -115,7 +115,10 @@ func (lease *VMTopologyLease) requirePriorBootTopologyAbsent(ctx context.Context
 			return networkAuthorityEffectError("inspect prior-boot VM link absence", err)
 		}
 		if link != nil {
-			return networkAuthorityCorruptError("prior-boot VM link name is occupied; refusing adoption or deletion", nil)
+			return networkAuthorityCorruptError(
+				"prior-boot VM link name is occupied; refusing adoption or deletion",
+				nil,
+			)
 		}
 	}
 	return nil
@@ -129,7 +132,11 @@ func lockPriorBootNetwork(
 	lease := &managedNetworkLease{key: key}
 	defer func() {
 		if returnErr != nil {
-			returnErr = appendNetworkAuthorityError(returnErr, "release rejected prior-boot network", lease.Release(ctx))
+			returnErr = appendNetworkAuthorityError(
+				returnErr,
+				"release rejected prior-boot network",
+				lease.Release(ctx),
+			)
 		}
 	}()
 	var err error

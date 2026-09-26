@@ -66,7 +66,8 @@ func validateNetworkRegistrationInput(caller networkCaller, networkID NetworkID,
 }
 
 func validateNetworkAuthorityRecord(record networkAuthorityRecord) error {
-	if record.schemaVersion != networkAuthorityRecordSchemaVersion && record.schemaVersion != managedNetworkSchemaVersion {
+	if record.schemaVersion != networkAuthorityRecordSchemaVersion &&
+		record.schemaVersion != managedNetworkSchemaVersion {
 		return networkAuthorityCorruptError("unsupported network authority schema", nil)
 	}
 	key := networkKey{ownerUID: OwnerUID(record.ownerUID), networkID: record.networkID}

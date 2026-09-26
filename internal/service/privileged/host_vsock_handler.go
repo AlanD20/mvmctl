@@ -13,7 +13,12 @@ func handleHostVsockOpen(
 ) (returnErr error) {
 	deadline := boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout)
 	reader := newRequestReader(ctx, int(endpoint.Fd()), deadline, deps)
-	request, err := privilegedwire.DecodeRequest[jailer.HostVsockOpenRequest](ctx, reader, jailer.HostVsockOpenAction, 0)
+	request, err := privilegedwire.DecodeRequest[jailer.HostVsockOpenRequest](
+		ctx,
+		reader,
+		jailer.HostVsockOpenAction,
+		0,
+	)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, jailer.HostVsockOpenAction, err, deps)
 	}

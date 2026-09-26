@@ -31,7 +31,11 @@ func ForgetVMEndpoint(ctx context.Context, hold *authorityfs.TopologyHold, launc
 		return err
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "close invalidated endpoint journal", journal.store.Release(context.WithoutCancel(ctx)))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"close invalidated endpoint journal",
+			journal.store.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	record, found, err := journal.read(ctx)
 	if err != nil || !found {
@@ -65,7 +69,11 @@ func ForgetVMEndpoint(ctx context.Context, hold *authorityfs.TopologyHold, launc
 		return err
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "release invalidated endpoint network", network.Release(context.WithoutCancel(ctx)))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"release invalidated endpoint network",
+			network.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	if network.record.configuration.l3.prefix.value.String() != record.Prefix ||
 		network.record.configuration.l3.gateway.value.String() != record.Gateway {
@@ -95,7 +103,11 @@ func ForgetVMEndpoint(ctx context.Context, hold *authorityfs.TopologyHold, launc
 		return err
 	}
 	defer func() {
-		returnErr = appendNetworkAuthorityError(returnErr, "release invalidated endpoint firewall", mutation.Release(context.WithoutCancel(ctx)))
+		returnErr = appendNetworkAuthorityError(
+			returnErr,
+			"release invalidated endpoint firewall",
+			mutation.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	if err := mutation.VerifyRetiredEndpoint(ctx, firewall.EndpointReservation{
 		OwnerUID: owner, VMID: record.VMID, NetworkID: record.NetworkID,
