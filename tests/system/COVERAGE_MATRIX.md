@@ -419,7 +419,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `image warm` by ID prefix | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: prefix resolves and reports warmed/ready. |
 | `image warm` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: command rejects missing image. |
 | `image import` | ⏭️ Skip | `images/test_images.py` | `TestImageImport` | L2 — often skips on zstd/mkfs |
-| `image import --format qcow2` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — skips on qemu-img |
+| `image import --format qcow2` | ⚡ Shallow | `images/test_images.py` | `TestImageImportAdvanced` | Installed rc.7: cached Alpine raw→QCOW2→ext4 import, detected distro, present record, checked removal; VM boot remains unproved. |
 | `image import --root-partition` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — skips on qemu-img |
 | `image import --force` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — may skip |
 | `image import --default` | ⏭️ Skip | `images/test_images.py` | `TestImageImportSetDefault` | L2 — may skip |
@@ -677,7 +677,7 @@ Specific legacy conflicts that must be rewritten before release:
 | snapshot | 13 | 1 | 12 | 0 | 0 | 0 |
 | volume | 35 | 4 | 29 | 2 | 0 | 0 |
 | key | 28 | 3 | 25 | 0 | 0 | 0 |
-| image | 41 | 0 | 14 | 3 | 3 | 21 |
+| image | 41 | 0 | 15 | 3 | 3 | 20 |
 | kernel | 30 | 2 | 15 | 6 | 0 | 7 |
 | bin | 17 | 2 | 6 | 1 | 0 | 8 |
 | ssh | 6 | 4 | 1 | 1 | 0 | 0 |
@@ -689,15 +689,15 @@ Specific legacy conflicts that must be rewritten before release:
 | env | 22 | 9 | 13 | 0 | 0 | 0 |
 | run | 4 | 1 | 3 | 0 | 0 | 0 |
 | full-journeys | 15 | 7 | 8 | 0 | 0 | 0 |
-| **Total** | **431** | **83** | **283** | **21** | **6** | **38** |
+| **Total** | **431** | **83** | **284** | **21** | **6** | **37** |
 
 **Current-row coverage health:**
 - ✅ Deep (L3): 83/431 = 19.3%
-- ⚡ Shallow (L0-L2): 283/431 = 65.7%
+- ⚡ Shallow (L0-L2): 284/431 = 65.9%
 - 🟡 Partial: 21/431 = 4.9%
 - 🔴 Missing: **6/431 = 1.4%** — three user-owned `self-update` success/check paths, two remote image-list
   flag cases, and the phantom `image inspect --tree` entry
-- ⏭️ Skip-prone: 38/431 = 8.8%
+- ⏭️ Skip-prone: 37/431 = 8.6%
 
 These counts inventory rows for the transitional CLI only. They do not include the separate v0.3.0 security blockers in
 the qualification overlay. Successful user-owned `self-update` check/apply behavior remains unqualified at L2. The

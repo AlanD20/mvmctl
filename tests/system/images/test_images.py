@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -682,49 +683,64 @@ class TestImageImportAdvanced:
     ]
 
     def test_image_import_with_format_qcow2(self, runner_vm):
-        """Import a qcow2 image using --format qcow2 (inside the VM)."""
+        """Convert and import a QCOW2 image containing a real Alpine rootfs."""
         # Check qemu-img availability inside the VM
-        check = _guest_run(runner_vm,
-            "which qemu-img && echo found || echo not-found",
-            check=False,
-        )
-        assert "found" in check.stdout, "qemu-img not available inside the test VM"
-
-        raw_path = _create_ext4_raw_in_vm(runner_vm, "test-image.raw")
-        assert raw_path is not None, (
-            "mkfs.ext4 or truncate not available inside the test VM"
+        check = _guest_run(runner_vm, "command -v qemu-img", check=False)
+        assert check.returncode == 0 and check.stdout.strip(), (
+            "qemu-img not available inside the test VM"
         )
 
-        qcow2_path = f"{VM_TMP_DIR}/test-image.qcow2"
-        assert _create_qcow2_from_raw_in_vm(runner_vm, raw_path, qcow2_path), (
-            "qemu-img convert failed inside the VM"
-        )
-
-        imported_prefix = None
+        suffix = uuid.uuid4().hex
+        raw_name = f"test-qcow2-{suffix}.raw"
+        raw_path = f"{VM_TMP_DIR}/{raw_name}"
+        qcow2_path = f"{VM_TMP_DIR}/test-qcow2-{suffix}.qcow2"
+        imported_id = None
         try:
+            extracted_path = _get_cached_alpine_path_in_vm(runner_vm, raw_name)
+            assert extracted_path is not None, (
+                "the module's pre-seeded Alpine rootfs could not be extracted"
+            )
+            assert _create_qcow2_from_raw_in_vm(runner_vm, raw_path, qcow2_path), (
+                "qemu-img convert failed inside the VM"
+            )
+            name = f"test-qcow2-{suffix}"
             result = _run_mvm(
                 runner_vm,
                 "image",
                 "import",
-                "test-qcow2",
+                name,
                 qcow2_path,
                 "--format",
                 "qcow2",
                 "--skip-optimization",
+                "--json",
                 check=False,
             )
             assert result.returncode == 0, (
                 f"Import qcow2 failed: {result.stderr.strip()}"
             )
-
+            imported_item = _parse_json_output(result.stdout)
+            imported_id = imported_item["id"]
             result = _run_mvm(runner_vm, "image", "ls", "--json")
             images = _parse_json_output(result.stdout)
-            imported = [i for i in images if i.get("name") == "test-qcow2"]
-            assert imported, "Imported qcow2 image not found in listing"
-            imported_prefix = imported[0]["id"][:6]
+            imported = [i for i in images if i.get("id") == imported_id]
+            assert len(imported) == 1, "Imported QCOW2 image not found in listing"
+            assert imported[0]["name"] == name
+            assert imported[0]["is_imported"] is True
+            assert imported[0]["is_present"] is True
+            assert imported[0]["fs_type"] == "ext4"
+            assert imported[0]["distro"] == "alpine"
         finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
+            try:
+                if imported_id:
+                    _run_mvm(runner_vm, "image", "rm", imported_id)
+                    after = _parse_json_output(
+                        _run_mvm(runner_vm, "image", "ls", "--json").stdout
+                    )
+                    assert all(i["id"] != imported_id for i in after)
+            finally:
+                Path(qcow2_path).unlink(missing_ok=True)
+                Path(raw_path).unlink(missing_ok=True)
 
     def test_image_import_force_overwrite(self, runner_vm):
         """Import the same image twice, verify --force suppresses the error."""
