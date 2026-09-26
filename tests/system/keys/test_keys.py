@@ -20,6 +20,18 @@ from tests.system.conftest import _guest_run, _run_mvm, ensure_vm_deps
 pytestmark = [pytest.mark.system, pytest.mark.domain_keys]
 
 
+def _success_data(result, expected_type=list):
+    """Read the installed CLI's versioned success response for key commands."""
+    assert result.returncode == 0, result.stderr or result.stdout
+    envelope = json.loads(result.stdout)
+    assert envelope["schema_version"] == 1
+    assert envelope["status"] == "success"
+    assert envelope["error"] is None
+    data = envelope["data"]
+    assert isinstance(data, expected_type), envelope
+    return data
+
+
 # ============================================================================
 # Read-only classes (no resources created within tests)
 # ============================================================================
@@ -96,7 +108,7 @@ class TestKeyLifecycle:
         """List keys and verify created key appears (via --json)."""
         result = _run_mvm(runner_vm, "key", "ls", "--json")
         assert result.returncode == 0
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         assert any(k["name"] == created_key for k in data)
 
     def test_duplicate_key_rejection(self, runner_vm, created_key):
@@ -117,7 +129,7 @@ class TestKeyLifecycle:
         """Inspect key details (verify via --json)."""
         result = _run_mvm(runner_vm, "key", "inspect", created_key, "--json")
         assert result.returncode == 0
-        data = json.loads(result.stdout)
+        data = _success_data(result, dict)
         assert data.get("key", {}).get("name") == created_key
 
     def test_key_remove_nonexistent(self, runner_vm):
@@ -128,16 +140,15 @@ class TestKeyLifecycle:
         assert result.returncode != 0
         assert "not found" in (result.stdout + result.stderr).lower()
 
-        result = _run_mvm(runner_vm, "key", "ls", "--json", check=False)
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            assert not any(k["name"] == "nonexistent-key-name-xyz" for k in data)
+        result = _run_mvm(runner_vm, "key", "ls", "--json")
+        data = _success_data(result)
+        assert not any(k["name"] == "nonexistent-key-name-xyz" for k in data)
 
     def test_key_inspect_json(self, runner_vm, created_key):
         """Inspect key with JSON output."""
         result = _run_mvm(runner_vm, "key", "inspect", created_key, "--json")
         assert result.returncode == 0
-        data = json.loads(result.stdout)
+        data = _success_data(result, dict)
         assert "name" in data.get("key", {})
 
     def test_key_export(self, runner_vm, created_key):
@@ -158,7 +169,7 @@ class TestKeyLifecycle:
         """List keys in JSON format."""
         result = _run_mvm(runner_vm, "key", "ls", "--json")
         assert result.returncode == 0
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         assert isinstance(data, list)
         assert any(k["name"] == created_key for k in data)
 
@@ -172,7 +183,7 @@ class TestKeyLifecycle:
         assert result.returncode == 0
 
         result = _run_mvm(runner_vm, "key", "ls", "--json")
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         key_entry = next((k for k in data if k["name"] == created_key), None)
         assert key_entry is not None
         assert key_entry.get("is_default")
@@ -183,7 +194,7 @@ class TestKeyLifecycle:
         _run_mvm(runner_vm, "key", "default", "--clear")
 
         result = _run_mvm(runner_vm, "key", "ls", "--json")
-        data = json.loads(result.stdout)
+        data = _success_data(result)
         key_entry = next((k for k in data if k["name"] == created_key), None)
         assert key_entry is not None
         assert not key_entry.get("is_default")
@@ -206,7 +217,7 @@ class TestKeyLifecycle:
             assert result.returncode == 0
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             assert any(k["name"] == unique_key_name for k in data)
         finally:
             _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
@@ -225,7 +236,7 @@ class TestKeyLifecycle:
             assert result.returncode == 0
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             assert any(k["name"] == unique_key_name for k in data)
         finally:
             _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
@@ -244,7 +255,7 @@ class TestKeyLifecycle:
             assert result.returncode == 0
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             assert any(k["name"] == unique_key_name for k in data)
         finally:
             _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
@@ -271,7 +282,7 @@ class TestKeyLifecycle:
             assert result.returncode == 0
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             assert any(k["name"] == unique_key_name for k in data)
         finally:
             _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
@@ -299,7 +310,7 @@ class TestKeyLifecycle:
             assert result.returncode == 0
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             key_entry = next(
                 (k for k in data if k["name"] == unique_key_name), None
             )
@@ -332,7 +343,7 @@ class TestKeyLifecycle:
             assert result.returncode == 0
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             assert not any(k["name"] == unique_key_name for k in data)
         finally:
             _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
@@ -353,7 +364,7 @@ class TestKeyLifecycle:
             _run_mvm(runner_vm, "key", "rm", unique_key_name)
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             names = [k["name"] for k in data]
             assert unique_key_name not in names
         finally:
@@ -375,7 +386,7 @@ class TestKeyLifecycle:
             assert result.returncode == 0
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             assert not any(k["name"] == key1 for k in data)
             assert not any(k["name"] == key2 for k in data)
         finally:
@@ -407,7 +418,7 @@ class TestKeyCreateAdvanced:
             assert result.returncode == 0
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             assert any(k["name"] == unique_key_name for k in data)
         finally:
             _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
@@ -435,7 +446,7 @@ class TestKeyCreateAdvanced:
                 unique_key_name,
                 "--json",
             )
-            data = json.loads(result.stdout)
+            data = _success_data(result, dict)
             assert data.get("key", {}).get("comment") == comment
         finally:
             _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
@@ -493,7 +504,7 @@ class TestKeyCreateAdvanced:
 
         try:
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             key_entry = next(
                 (k for k in data if k["name"] == unique_key_name), None
             )
@@ -528,7 +539,7 @@ class TestKeyCreateAdvanced:
             assert result.returncode == 0
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             assert any(k["name"] == unique_key_name for k in data)
         finally:
             _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
@@ -551,38 +562,39 @@ class TestKeyImportOverwrite:
         pub_key_path = f"{key_path}.pub"
         key_name = f"test-add-overwrite-{unique_key_name}"
 
-        result = _run_mvm(runner_vm, "key", "import", key_name, pub_key_path)
-        assert result.returncode == 0
+        try:
+            result = _run_mvm(runner_vm, "key", "import", key_name, pub_key_path)
+            assert result.returncode == 0
 
-        ls_result = _run_mvm(runner_vm, "key", "ls", "--json")
-        data = json.loads(ls_result.stdout)
-        assert any(k["name"] == key_name for k in data), (
-            f"Key '{key_name}' not found in ls --json after import"
-        )
+            ls_result = _run_mvm(runner_vm, "key", "ls", "--json")
+            data = _success_data(ls_result)
+            assert any(k["name"] == key_name for k in data), (
+                f"Key '{key_name}' not found in ls --json after import"
+            )
 
-        result = _run_mvm(
-            runner_vm, "key", "import", key_name, pub_key_path, check=False
-        )
-        assert result.returncode != 0
-        assert "already exists" in (result.stdout + result.stderr).lower()
+            result = _run_mvm(
+                runner_vm, "key", "import", key_name, pub_key_path, check=False
+            )
+            assert result.returncode != 0
+            assert "already exists" in (result.stdout + result.stderr).lower()
 
-        result = _run_mvm(
-            runner_vm,
-            "key",
-            "import",
-            key_name,
-            pub_key_path,
-            "--force",
-        )
-        assert result.returncode == 0
+            result = _run_mvm(
+                runner_vm,
+                "key",
+                "import",
+                key_name,
+                pub_key_path,
+                "--force",
+            )
+            assert result.returncode == 0
 
-        ls_result = _run_mvm(runner_vm, "key", "ls", "--json")
-        data = json.loads(ls_result.stdout)
-        assert any(k["name"] == key_name for k in data), (
-            "Key should still be listed after --force overwrite"
-        )
-
-        _run_mvm(runner_vm, "key", "rm", key_name, check=False)
+            ls_result = _run_mvm(runner_vm, "key", "ls", "--json")
+            data = _success_data(ls_result)
+            assert any(k["name"] == key_name for k in data), (
+                "Key should still be listed after --force overwrite"
+            )
+        finally:
+            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
 
 
 class TestKeyRunningVMDependency:
@@ -631,7 +643,7 @@ class TestKeyRunningVMDependency:
             assert result.returncode == 0
 
             key_ls = _run_mvm(runner_vm, "key", "ls", "--json")
-            keys_after = json.loads(key_ls.stdout)
+            keys_after = _success_data(key_ls)
             key_names = [k.get("name") for k in keys_after]
             assert key_name not in key_names, (
                 "Key should be removed after rm"
@@ -681,7 +693,7 @@ class TestKeyDefaults:
             _run_mvm(runner_vm, "key", "default", key1, key2)
 
             result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result)
             k1 = next(k for k in data if k["name"] == key1)
             k2 = next(k for k in data if k["name"] == key2)
             assert k1.get("is_default"), f"'{key1}' should be default"
@@ -702,7 +714,7 @@ class TestKeyDefaults:
             )
 
             result = _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json")
-            data = json.loads(result.stdout)
+            data = _success_data(result, dict)
             ssh_keys = data.get("vm", {}).get("ssh_keys")
             assert ssh_keys is not None
             for key_name in [key1, key2]:
