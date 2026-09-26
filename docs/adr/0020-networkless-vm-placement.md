@@ -74,17 +74,18 @@ offline NoCloud arguments are limited to the fixed local ISO or injected-seed fo
 argument was corrected. Offline cloud-init seed generation no longer requires a fabricated IP/gateway or writes a
 network configuration. The fresh version-8 user VM schema persists explicit placement, retains the managed network
 foreign key, and stores SQL
-`NULL` rather than a fabricated network ID for networkless rows. Production create still selects managed placement
-explicitly; relaunch now reconstructs and retains the persisted variant, rejecting malformed networkless state before
-reboot stops the VM. The closed public create input admits `NoNetwork` and rejects conflicting endpoint and
-NoCloud NET fields, but its resolver still rejects networkless before dependent effects, and the CLI exposes no flag.
+`NULL` rather than a fabricated network ID for networkless rows. Public create now selects networkless placement only
+with explicit `--no-network`; omission continues to select the managed default. Its resolver rejects conflicting
+endpoint and NoCloud NET fields, avoids default-network lookup for the explicit variant, and does not allocate a
+TAP, MAC, or IP lease. Relaunch reconstructs and retains the persisted variant, rejecting malformed networkless state
+before reboot stops the VM. Public SSH rejects networkless placement with a vsock-exec direction.
 The public root launch wire requires an explicit managed or networkless tag and rejects omitted, unknown, or mixed
 endpoint variants before effects.
 The strict schema-5 instance codec rejects older-schema records, including cleaned tombstones. Separately, the private
 root path now carries a typed networkless namespace lease through Jailer launch, activation, cleanup, and same-/prior-
 boot recovery. Placement is sealed in the protected device and instance records; the managed topology journal and
-lock order are unchanged. Public create admission and snapshot integration remain pending; start/reboot have no
-publicly creatable networkless row yet.
+lock order are unchanged. Snapshot capture currently rejects networkless placement before effects; consistent capture
+and restore remain pending. Public create and relaunch are source-wired but not installed-candidate runtime-qualified.
 Preserve current networked behavior until both branches have complete lifecycle ownership.
 
 Go tests should prove closed input combinations, exact wire-shape rejection, no-NIC Firecracker config, placement

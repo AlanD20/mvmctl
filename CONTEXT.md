@@ -565,15 +565,17 @@ ADR-0020 defines a distinct, explicitly selected networkless VM placement for th
 It still requires a root-pinned per-VM namespace and Jailer membership, but has only loopback and no managed-network
 endpoint, TAP, or guest IP/MAC. The user VM row can now persist the placement variant and a genuinely absent network
 foreign key, and the Firecracker config generator supports the explicit networkless no-NIC/no-`ip=` shape. The closed
-public create input rejects conflicting network fields, but resolution still rejects networkless before dependent
-effects; no `--no-network` flag is exposed. The private root path now carries a typed networkless namespace lease
-through Jailer launch, activation, cleanup, and same-/prior-boot recovery, with placement sealed in the protected
-device and instance records. The root launch wire now admits only complete managed or endpoint-free networkless shapes;
+public create input rejects conflicting network fields, and explicit `--no-network` now resolves without a managed
+default network, TAP, MAC, or IP lease. Omission still selects the default managed network. The private root path
+now carries a typed networkless namespace lease through Jailer launch, activation, cleanup, and same-/prior-boot
+recovery, with placement sealed in the protected device and instance records. The root launch wire now admits only
+complete managed or endpoint-free networkless shapes;
 its offline NoCloud allowance is limited to fixed local ISO/injected-seed arguments. Relaunch reconstruction retains
 the stored placement and rejects malformed networkless state before reboot stops a VM. Offline cloud-init seeds can
-omit network configuration. Public create and snapshot remain managed-only, so the complete networkless VM lifecycle
-is not publicly active or runtime-qualified. Omitting `--network` still selects the default managed network and must
-never become an implicit networkless fallback.
+omit network configuration. Public SSH rejects networkless placement in favor of vsock exec. Snapshot capture
+rejects networkless placement until consistent capture and restore are implemented. The newly wired public create
+path has passed focused Go package tests, but no installed-candidate networkless lifecycle is runtime-qualified.
+Omitting `--network` must never become an implicit networkless fallback.
 
 ADR-0017 fixes the L3 contract consumed by the typed root transactions. The per-VM
 namespace is an L2 extension of one managed bridge. A canonical RFC1918 IPv4 prefix is limited to `/30` or shorter;
