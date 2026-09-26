@@ -9,17 +9,16 @@ Also tests auto-detected version from filename and error paths.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
+import shutil
+import tempfile
 import uuid
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from tests.system.conftest import (
     _ensure_kernel,
-    _guest_run,
     _json_success_data,
     _run_mvm,
     ensure_vm_deps,
@@ -27,7 +26,6 @@ from tests.system.conftest import (
 
 VM_CACHE_DIR = "/root/.cache/mvmctl"
 VM_KERNEL_DIR = f"{VM_CACHE_DIR}/kernels"
-VM_TMP_DIR = "/tmp"
 
 pytestmark = [
     pytest.mark.system,
@@ -71,14 +69,21 @@ def _get_present_kernel_path(runner_vm: str) -> str:
 
 def _get_vm_status(runner_vm: str, vm_name: str) -> str | None:
     """Return the status of a VM by name, or None if not found."""
-    result = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-    if result.returncode != 0 or not result.stdout.strip():
-        return None
-    vms = json.loads(result.stdout)
+    vms = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
     for vm in vms:
         if vm.get("name") == vm_name:
             return vm.get("status")
     return None
+
+
+def _remove_imported_kernel(runner_vm: str, kernel_id: str) -> None:
+    """Remove only the imported record owned by the calling test."""
+    result = _run_mvm(runner_vm, "kernel", "rm", kernel_id, "--force", check=False)
+    assert result.returncode == 0, f"kernel removal failed: {result.stderr}"
+    kernels = _json_success_data(
+        _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
+    )
+    assert all(kernel["id"] != kernel_id for kernel in kernels)
 
 
 # ============================================================================
@@ -243,8 +248,8 @@ class TestKernelImportLifecycle:
         # ------------------------------------------------------------------
         # Option C verification: vm ls --json
         # ------------------------------------------------------------------
-        vms = json.loads(
-            _run_mvm(runner_vm, "vm", "ls", "--json").stdout
+        vms = _json_success_data(
+            _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
         )
         vm_entry = next(
             (v for v in vms if v.get("name") == vm_name), None
@@ -270,7 +275,7 @@ class TestKernelImportLifecycle:
             runner_vm, "vm", "inspect", vm_name, "--json",
         )
         assert inspect_result.returncode == 0
-        vm_inspect = json.loads(inspect_result.stdout)
+        vm_inspect = _json_success_data(inspect_result.stdout, dict)
         vm_data = vm_inspect.get("vm", {})
         assert vm_data.get("name") == vm_name
         kernel_id = (
@@ -314,8 +319,8 @@ class TestKernelImportLifecycle:
         # ------------------------------------------------------------------
         # Option C: verify kernel_id is still our imported kernel
         # ------------------------------------------------------------------
-        vms = json.loads(
-            _run_mvm(runner_vm, "vm", "ls", "--json").stdout
+        vms = _json_success_data(
+            _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
         )
         vm_entry = next(
             (v for v in vms if v.get("name") == vm_name), None
@@ -352,11 +357,10 @@ class TestKernelImportLifecycle:
                 failures.append(f"network removal: {result.stderr}")
 
         if cls._import_kernel_id:
-            result = _run_mvm(
-                cls._binary, "kernel", "rm", cls._import_kernel_id, "--force", check=False,
-            )
-            if result.returncode != 0:
-                failures.append(f"kernel removal: {result.stderr}")
+            try:
+                _remove_imported_kernel(cls._binary, cls._import_kernel_id)
+            except AssertionError as err:
+                failures.append(f"kernel removal: {err}")
         if failures:
             pytest.fail("; ".join(failures))
 
@@ -383,90 +387,44 @@ class TestKernelImportAutoVersion:
         _ensure_kernel(runner_vm)
         source_path = _get_present_kernel_path(runner_vm)
 
-        # Copy to a temp path with version info in the filename (inside VM)
-        temp_kernel = f"{VM_TMP_DIR}/vmlinux-6.1-x86_64-{uuid.uuid4().hex[:6]}"
-        _guest_run(
-            runner_vm,
-            f"cp {source_path} {temp_kernel}",
-        )
-
-        # Verify the temp file is non-empty inside the VM
-        size_check = _guest_run(
-            runner_vm,
-            f"stat -c%s {temp_kernel}",
-        )
-        assert int(size_check.stdout.strip()) > 0
-
         import_name = f"sys-test-auto-{uuid.uuid4().hex[:6]}"
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "kernel",
-                "import",
-                import_name,
-                temp_kernel,
-            )
-            assert result.returncode == 0, (
-                f"kernel import (auto-version) failed: {result.stderr}"
-            )
+        with tempfile.TemporaryDirectory(prefix="sys-test-kernel-") as temp_dir:
+            temp_kernel = Path(temp_dir) / "vmlinux-6.1-x86_64"
+            shutil.copyfile(source_path, temp_kernel)
+            assert temp_kernel.stat().st_size > 0
 
-            # ------------------------------------------------------------------
-            # Option C: verify via ls --json
-            # ------------------------------------------------------------------
-            kernels = json.loads(
-                _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
-            )
-            imported = [
-                k for k in kernels if k.get("base_name") == import_name
-            ]
-            assert len(imported) == 1, (
-                f"Expected 1 kernel with base_name='{import_name}', "
-                f"found {len(imported)}"
-            )
-            assert imported[0]["version"] == "6.1", (
-                f"Expected auto-detected version '6.1', "
-                f"got '{imported[0]['version']}'"
-            )
-            assert imported[0]["type"] == "custom"
-            assert imported[0].get("arch") and len(imported[0]["arch"]) > 0, (
-                f"Expected non-empty arch, got '{imported[0].get('arch')}'"
-            )
-            assert imported[0]["is_present"] is True
+            imported_id = None
+            try:
+                result = _run_mvm(
+                    runner_vm, "kernel", "import", import_name, str(temp_kernel), "--json"
+                )
+                imported = _json_success_data(result.stdout, dict)
+                imported_id = imported["id"]
+                assert imported["version"] == "6.1"
 
-            # ------------------------------------------------------------------
-            # Option C: verify via inspect --json
-            # ------------------------------------------------------------------
-            short_id = imported[0]["id"][:6]
-            inspect_result = _run_mvm(
-                runner_vm, "kernel", "inspect", short_id, "--json",
-            )
-            assert inspect_result.returncode == 0
-            inspect_data = json.loads(inspect_result.stdout)
-            assert inspect_data.get("kernel", {}).get("version") == "6.1"
+                kernels = _json_success_data(
+                    _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
+                )
+                matching = [kernel for kernel in kernels if kernel["id"] == imported_id]
+                assert len(matching) == 1
+                assert matching[0]["base_name"] == import_name
+                assert matching[0]["version"] == "6.1"
+                assert matching[0]["type"] == "custom"
+                assert matching[0]["is_present"] is True
 
-            # ------------------------------------------------------------------
-            # Option C: verify file exists on disk (inside VM)
-            # ------------------------------------------------------------------
-            kernel_path_rel = imported[0].get("path", "")
-            assert kernel_path_rel, "path field is empty"
-            full_path = kernel_path_rel if os.path.isabs(kernel_path_rel) else f"{VM_KERNEL_DIR}/{kernel_path_rel}"
-            check = _guest_run(
-                runner_vm,
-                f"test -f {full_path} && echo exists || echo not-found",
-                check=False,
-            )
-            assert "exists" in check.stdout, (
-                f"Imported kernel file not found inside VM: {full_path}"
-            )
-            size_check = _guest_run(
-                runner_vm,
-                f"stat -c%s {full_path}",
-            )
-            assert int(size_check.stdout.strip()) > 0
-        finally:
-            _run_mvm(
-                runner_vm, "kernel", "rm", import_name, "--force", check=False,
-            )
+                inspected = _json_success_data(
+                    _run_mvm(runner_vm, "kernel", "inspect", imported_id, "--json").stdout,
+                    dict,
+                )
+                assert inspected["kernel"]["id"] == imported_id
+                assert inspected["kernel"]["version"] == "6.1"
+                assert (
+                    Path(inspected["storage"]["path"]).stat().st_size
+                    == temp_kernel.stat().st_size
+                )
+            finally:
+                if imported_id is not None:
+                    _remove_imported_kernel(runner_vm, imported_id)
 
 
 # ============================================================================
@@ -490,7 +448,13 @@ class TestKernelImportDefault:
         source_path = _get_present_kernel_path(runner_vm)
 
         import_name = f"sys-test-default-{uuid.uuid4().hex[:6]}"
-        imported_prefix = None
+        kernels_before = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
+        )
+        previous_default = next(
+            kernel["id"] for kernel in kernels_before if kernel["is_default"]
+        )
+        imported_id = None
         try:
             result = _run_mvm(
                 runner_vm,
@@ -501,30 +465,28 @@ class TestKernelImportDefault:
                 "--version",
                 "6.1",
                 "--default",
+                "--json",
             )
-            assert result.returncode == 0, (
-                f"kernel import --default failed: {result.stderr}"
+            imported_id = _json_success_data(result.stdout, dict)["id"]
+            assert imported_id != previous_default
+            kernels = _json_success_data(
+                _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
             )
-
-            kernels = json.loads(
-                _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
-            )
-            imported = [
-                k for k in kernels if k.get("base_name") == import_name
+            assert [kernel["id"] for kernel in kernels if kernel["is_default"]] == [
+                imported_id
             ]
-            assert len(imported) == 1, (
-                f"Expected 1 imported kernel with base_name='{import_name}', "
-                f"found {len(imported)}"
-            )
-            assert imported[0].get("is_default") is True, (
-                "Imported kernel with --default should have is_default=True"
-            )
-            imported_prefix = imported[0]["id"][:6]
+            imported = next(kernel for kernel in kernels if kernel["id"] == imported_id)
+            assert imported["base_name"] == import_name
         finally:
-            if imported_prefix:
-                _run_mvm(
-                    runner_vm, "kernel", "rm", imported_prefix, "--force", check=False,
+            if imported_id is not None:
+                _remove_imported_kernel(runner_vm, imported_id)
+                _run_mvm(runner_vm, "kernel", "default", previous_default)
+                kernels = _json_success_data(
+                    _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
                 )
+                assert [kernel["id"] for kernel in kernels if kernel["is_default"]] == [
+                    previous_default
+                ]
 
 
 # ============================================================================
@@ -533,7 +495,7 @@ class TestKernelImportDefault:
 
 
 class TestKernelImportError:
-    """Error path tests — no state modification, no serial marker needed."""
+    """Rejected inputs and repeated content-addressed import."""
 
     pytestmark = [
         pytest.mark.system,
@@ -579,34 +541,14 @@ class TestKernelImportError:
             "Expected kernel import with empty name to fail"
         )
 
-    def test_import_basic_succeeds(self, runner_vm: str) -> None:
-        """Import a kernel with valid args (arch is auto-detected in Go CLI)."""
-        _ensure_kernel(runner_vm)
-        source_path = _get_present_kernel_path(runner_vm)
-
-        result = _run_mvm(
-            runner_vm,
-            "kernel",
-            "import",
-            f"sys-test-basic-{uuid.uuid4().hex[:4]}",
-            source_path,
-            "--version",
-            "6.1",
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Kernel import with valid args failed: {result.stderr}"
-        )
-
-    def test_import_duplicate_name_succeeds(self, runner_vm: str) -> None:
-        """Importing a kernel with the same name+version+arch creates
-        a new entry (different content-addressed ID). Type should be 'custom'."""
+    def test_import_same_bytes_reuses_content_id(self, runner_vm: str) -> None:
+        """Re-importing identical bytes and version keeps one content-addressed record."""
         _ensure_kernel(runner_vm)
         source_path = _get_present_kernel_path(runner_vm)
 
         import_name = f"sys-test-dup-{uuid.uuid4().hex[:6]}"
         import_version = "6.1"
-
+        imported_id = None
         try:
             result1 = _run_mvm(
                 runner_vm,
@@ -616,8 +558,9 @@ class TestKernelImportError:
                 source_path,
                 "--version",
                 import_version,
+                "--json",
             )
-            assert result1.returncode == 0
+            imported_id = _json_success_data(result1.stdout, dict)["id"]
 
             result2 = _run_mvm(
                 runner_vm,
@@ -627,90 +570,17 @@ class TestKernelImportError:
                 source_path,
                 "--version",
                 import_version,
+                "--json",
             )
-            assert result2.returncode == 0
+            assert _json_success_data(result2.stdout, dict)["id"] == imported_id
 
-            kernels = json.loads(
-                _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+            kernels = _json_success_data(
+                _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
             )
-            matching = [
-                k for k in kernels if k.get("base_name") == import_name
-            ]
-            assert len(matching) >= 1, (
-                f"Expected at least 1 entry with base_name='{import_name}', "
-                f"found {len(matching)}"
-            )
-            for entry in matching:
-                assert entry["type"] == "custom"
+            matching = [kernel for kernel in kernels if kernel["id"] == imported_id]
+            assert len(matching) == 1
+            assert matching[0]["base_name"] == import_name
+            assert matching[0]["type"] == "custom"
         finally:
-            _run_mvm(
-                runner_vm, "kernel", "rm", import_name, "--force", check=False,
-            )
-
-
-# ============================================================================
-# Destructive cleanup — remove all imported kernels and VMs
-# ============================================================================
-
-
-class TestKernelImportCleanup:
-    """Remove all custom (imported) kernels that may remain from
-    previous test runs and any VMs referencing them.
-
-    This runs last in the file and is explicitly destructive.
-    """
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.domain_kernel,
-    ]
-
-    def test_remove_all_custom_kernels(self, runner_vm: str) -> None:
-        """Remove every kernel with type=custom and cleanup any
-        VMs that reference them."""
-        result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        assert result.returncode == 0
-        all_kernels = json.loads(result.stdout) if result.stdout else []
-        custom = [k for k in all_kernels if k.get("type") == "custom"]
-
-        if not custom:
-            return  # Nothing to clean up — test passes
-
-        # Remove VMs referencing custom kernels
-        custom_ids = {k["id"] for k in custom}
-        vm_result = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-        if vm_result.returncode == 0 and vm_result.stdout.strip():
-            vms = json.loads(vm_result.stdout)
-            for vm in vms:
-                vm_kid = vm.get("kernel_id", "")
-                if vm_kid in custom_ids:
-                    _run_mvm(
-                        runner_vm, "vm", "rm", vm["name"], "--force", check=False,
-                    )
-
-        # Remove each custom kernel
-        for kernel in custom:
-            kid = kernel["id"][:6]
-            _run_mvm(runner_vm, "kernel", "rm", kid, "--force", check=False)
-
-        # Retry until no custom kernels remain
-        for _retry in range(3):
-            result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-            remaining = json.loads(result.stdout) if result.stdout else []
-            custom_remaining = [
-                k for k in remaining if k.get("type") == "custom"
-            ]
-            if not custom_remaining:
-                break
-            for k in custom_remaining:
-                _run_mvm(
-                    runner_vm, "kernel", "rm", k["id"][:6], "--force", check=False,
-                )
-
-        # Verify no custom kernels remain
-        result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        remaining = json.loads(result.stdout) if result.stdout else []
-        custom_remaining = [k for k in remaining if k.get("type") == "custom"]
-        assert not custom_remaining, (
-            f"Custom kernels still remain after cleanup: {custom_remaining}"
-        )
+            if imported_id is not None:
+                _remove_imported_kernel(runner_vm, imported_id)

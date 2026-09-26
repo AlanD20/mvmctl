@@ -464,10 +464,10 @@ Specific legacy conflicts that must be rewritten before release:
 | `kernel import` | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportLifecycle` | Installed rc.7: mirrored vmlinux import, exact copied bytes, schema-1 list/inspect, checked test-owned removal; VM boot remains unproved. |
 | `kernel import --version` | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportLifecycle` | Installed rc.7: explicit version matches list and inspect. |
 | `kernel import` arch in listing | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportLifecycle` | Installed rc.7: imported arch appears in list and inspect; no `--arch` flag. |
-| `kernel import` version auto-detect | ✅ Deep | `kernel/test_kernel_import.py` | `TestKernelImportAutoVersion` | L3: import without --version, auto-detect version from filename, verify in ls + inspect + file exists on disk |
-| `kernel import` error paths | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportError` | L2: nonexistent path fails, empty name fails, duplicate name+version+arch creates new entry |
-| `kernel import` cleanup | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportCleanup` | L2: remove all custom imported kernels, retry up to 3 times |
-| `kernel import --default` | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportDefault` | L2 — is_default=true |
+| `kernel import` version auto-detect | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportAutoVersion` | Installed rc.7: version from exact `vmlinux-6.1-x86_64` filename matches import/list/inspect; copied file exists; no VM boot. |
+| `kernel import` error and repeat paths | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportError` | Installed rc.7: nonexistent path and empty name reject; same bytes/version re-import resolves to one content ID. |
+| `kernel rm` test-owned imported ID | ⚡ Shallow | `kernel/test_kernel_import.py` | Import cases | Installed rc.7: each focused import removes only its returned ID and checks absence; pre-seeded source remains. Broad all-custom-kernel cleanup removed. |
+| `kernel import --default` | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportDefault` | Installed rc.7: sole default transfers to imported ID and is restored to the previous ID after checked removal. |
 
 ---
 
@@ -678,7 +678,7 @@ Specific legacy conflicts that must be rewritten before release:
 | volume | 35 | 4 | 29 | 2 | 0 | 0 |
 | key | 28 | 3 | 25 | 0 | 0 | 0 |
 | image | 41 | 0 | 16 | 3 | 3 | 19 |
-| kernel | 30 | 2 | 16 | 6 | 0 | 6 |
+| kernel | 30 | 1 | 17 | 6 | 0 | 6 |
 | bin | 17 | 2 | 6 | 1 | 0 | 8 |
 | ssh | 6 | 4 | 1 | 1 | 0 | 0 |
 | console | 6 | 0 | 6 | 0 | 0 | 0 |
@@ -689,11 +689,11 @@ Specific legacy conflicts that must be rewritten before release:
 | env | 22 | 9 | 13 | 0 | 0 | 0 |
 | run | 4 | 1 | 3 | 0 | 0 | 0 |
 | full-journeys | 15 | 7 | 8 | 0 | 0 | 0 |
-| **Total** | **431** | **83** | **286** | **21** | **6** | **35** |
+| **Total** | **431** | **82** | **287** | **21** | **6** | **35** |
 
 **Current-row coverage health:**
-- ✅ Deep (L3): 83/431 = 19.3%
-- ⚡ Shallow (L0-L2): 286/431 = 66.4%
+- ✅ Deep (L3): 82/431 = 19.0%
+- ⚡ Shallow (L0-L2): 287/431 = 66.6%
 - 🟡 Partial: 21/431 = 4.9%
 - 🔴 Missing: **6/431 = 1.4%** — three user-owned `self-update` success/check paths, two remote image-list
   flag cases, and the phantom `image inspect --tree` entry
