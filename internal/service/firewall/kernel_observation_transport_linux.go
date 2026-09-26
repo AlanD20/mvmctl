@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"syscall"
 
@@ -464,8 +465,11 @@ func (transport *kernelObservationTransport) parseDatagram(
 // Keep this decoder aligned with the pinned UAPI definition:
 // https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/include/uapi/linux/netlink.h?h=v6.19.9
 func decodeKernelObservationError(message netlink.Message, request netlink.Message) error {
-	if message.Header.Flags != 0 && message.Header.Flags != netlink.Capped {
-		return kernelObservationTransportError("kernel observation error flags are invalid", nil, true)
+	if message.Header.Flags & ^(netlink.Capped|netlink.AcknowledgeTLVs) != 0 {
+		return kernelObservationTransportError(fmt.Sprintf(
+			"kernel observation error flags are invalid (flags=%#x request_type=%#x)",
+			uint16(message.Header.Flags), uint16(request.Header.Type),
+		), nil, true)
 	}
 	if len(message.Data) < 4+netlinkHeaderBytes {
 		return kernelObservationTransportError("kernel observation nlmsgerr is truncated", nil, true)
@@ -490,30 +494,63 @@ func decodeKernelObservationError(message netlink.Message, request netlink.Messa
 		return kernelObservationTransportError("kernel observation error request header is invalid", nil, true)
 	}
 
-	if message.Header.Flags == netlink.Capped {
-		if len(message.Data) != 4+netlinkHeaderBytes {
-			return kernelObservationTransportError("capped kernel observation error retained payload", nil, true)
-		}
-	} else {
+	payloadEnd := 4 + netlinkHeaderBytes
+	if message.Header.Flags&netlink.Capped == 0 {
 		requestPayloadBytes := int(request.Header.Length) - netlinkHeaderBytes
-		if requestPayloadBytes < len(request.Data) || len(message.Data) != 4+int(request.Header.Length) {
+		payloadEnd = 4 + int(request.Header.Length)
+		if requestPayloadBytes < len(request.Data) || len(message.Data) < payloadEnd {
 			return kernelObservationTransportError(
 				"kernel observation error request payload length is invalid",
 				nil,
 				true,
 			)
 		}
-		embeddedPayload := message.Data[4+netlinkHeaderBytes:]
+		embeddedPayload := message.Data[4+netlinkHeaderBytes : payloadEnd]
 		if !bytes.Equal(embeddedPayload[:len(request.Data)], request.Data) ||
 			!bytes.Equal(embeddedPayload[len(request.Data):], make([]byte, requestPayloadBytes-len(request.Data))) {
 			return kernelObservationTransportError("kernel observation error request payload is invalid", nil, true)
 		}
+	}
+	if message.Header.Flags&netlink.AcknowledgeTLVs == 0 {
+		if len(message.Data) != payloadEnd {
+			if message.Header.Flags&netlink.Capped != 0 {
+				return kernelObservationTransportError("capped kernel observation error retained payload", nil, true)
+			}
+			return kernelObservationTransportError("kernel observation error request payload length is invalid", nil, true)
+		}
+	} else if !validKernelObservationExtendedAck(message.Data[payloadEnd:]) {
+		return kernelObservationTransportError("kernel observation extended acknowledgement is invalid", nil, true)
 	}
 	return kernelObservationTransportError(
 		kernelObservationRejectedRequestMessage,
 		syscall.Errno(-int64(errno)),
 		true,
 	)
+}
+
+// Extended acknowledgement attributes are diagnostics only. Their bytes cannot change the admitted errno or request.
+func validKernelObservationExtendedAck(attributes []byte) bool {
+	if len(attributes) == 0 {
+		return false
+	}
+	for len(attributes) > 0 {
+		if len(attributes) < 4 {
+			return false
+		}
+		attributeBytes := int(binary.NativeEndian.Uint16(attributes[0:2]))
+		attributeType := binary.NativeEndian.Uint16(attributes[2:4]) & 0x3fff
+		alignedBytes := (attributeBytes + 3) &^ 3
+		if attributeBytes < 4 || attributeType == 0 || alignedBytes > len(attributes) {
+			return false
+		}
+		for _, padding := range attributes[attributeBytes:alignedBytes] {
+			if padding != 0 {
+				return false
+			}
+		}
+		attributes = attributes[alignedBytes:]
+	}
+	return true
 }
 
 func validateKernelObservationDone(message netlink.Message, mode kernelObservationReplyMode) error {

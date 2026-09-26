@@ -516,13 +516,26 @@ func TestKernelObservationTransportRejectsReplyContractDrift(t *testing.T) {
 	}
 }
 
-// Rationale: Linux NLMSG_ERROR contains errno plus the original request header and, unless CAPPED, its payload. Only a
-// bounded exact negative errno reply for the sent request may surface its syscall cause; zero ACK is never expected.
+// Rationale: Linux NLMSG_ERROR contains errno plus the original request header and, unless CAPPED, its payload.
+// Strict sockets can append ACK_TLVS; a valid extended acknowledgement must preserve the exact errno, while malformed
+// extensions must never turn a reply into trusted absence. Zero ACK is never expected.
 func TestKernelObservationTransportValidatesLinuxErrorEnvelope(t *testing.T) {
 	request := testKernelTransportRequest(kernelObservationReplySingular)
 	request.Data = append(request.Data, 1)
 	sent := testKernelTransportSentRequest(request)
 	valid := testKernelTransportErrorReply(sent, -int32(unix.EPERM), false)
+	// Linux netlink.h defines NLMSGERR_ATTR_OFFS as type 2 with a native-endian u32 offset.
+	extAckOffset := make([]byte, 8)
+	binary.NativeEndian.PutUint16(extAckOffset[0:2], 8)
+	binary.NativeEndian.PutUint16(extAckOffset[2:4], 2)
+	binary.NativeEndian.PutUint32(extAckOffset[4:8], 20)
+	// NLMSGERR_ATTR_MSG may have a non-word-sized payload and zero alignment padding.
+	extAckMessage := make([]byte, 8)
+	binary.NativeEndian.PutUint16(extAckMessage[0:2], 5)
+	binary.NativeEndian.PutUint16(extAckMessage[2:4], 1)
+	extAckMessage[4] = 'x'
+	extAckMessageBadPadding := append([]byte(nil), extAckMessage...)
+	extAckMessageBadPadding[5] = 1
 	tests := map[string]struct {
 		message netlink.Message
 		cause   error
@@ -545,8 +558,44 @@ func TestKernelObservationTransportValidatesLinuxErrorEnvelope(t *testing.T) {
 		"errno out of range": {
 			message: testKernelTransportErrorReply(sent, -4096, false),
 		},
-		"acknowledgement TLVs": {
+		"uncapped extended acknowledgement": {
+			message: testKernelTransportWithFlags(
+				testKernelTransportErrorReplyWithExtra(sent, -int32(unix.ENOENT), false, extAckOffset),
+				netlink.AcknowledgeTLVs,
+			),
+			cause: unix.ENOENT,
+		},
+		"capped extended acknowledgement": {
+			message: testKernelTransportWithFlags(
+				testKernelTransportErrorReplyWithExtra(sent, -int32(unix.EBUSY), true, extAckOffset),
+				netlink.Capped|netlink.AcknowledgeTLVs,
+			),
+			cause: unix.EBUSY,
+		},
+		"extended acknowledgement with aligned message": {
+			message: testKernelTransportWithFlags(
+				testKernelTransportErrorReplyWithExtra(sent, -int32(unix.ENOENT), false, extAckMessage),
+				netlink.AcknowledgeTLVs,
+			),
+			cause: unix.ENOENT,
+		},
+		"extended acknowledgement with nonzero padding": {
+			message: testKernelTransportWithFlags(
+				testKernelTransportErrorReplyWithExtra(sent, -int32(unix.EPERM), false, extAckMessageBadPadding),
+				netlink.AcknowledgeTLVs,
+			),
+		},
+		"extended acknowledgement without attributes": {
 			message: testKernelTransportWithFlags(valid, netlink.AcknowledgeTLVs),
+		},
+		"extended acknowledgement with short attribute": {
+			message: testKernelTransportWithFlags(
+				testKernelTransportErrorReplyWithExtra(sent, -int32(unix.EPERM), false, []byte{3, 0, 2, 0}),
+				netlink.AcknowledgeTLVs,
+			),
+		},
+		"extended acknowledgement with unflagged attribute": {
+			message: testKernelTransportErrorReplyWithExtra(sent, -int32(unix.EPERM), false, extAckOffset),
 		},
 		"capped payload retained": {
 			message: testKernelTransportErrorReplyWithExtra(sent, -int32(unix.EPERM), true, []byte{1}),
