@@ -47,12 +47,14 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test
-        run: go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
+      - name: Test unprivileged Go packages and Jailer contracts
+        run: bash scripts/run-go-ci-tests.sh
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
-          path: coverage.out
+          path: |
+            coverage.out
+            coverage-jailer.out
           retention-days: 3

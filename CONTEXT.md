@@ -1312,16 +1312,15 @@ authoring guidance.
 Table-driven tests with `map[string]struct{...}` and `t.Run()`. No I/O, no DB, no subprocess. Pure input → output assertions. Runs in microseconds.
 
 ```bash
-go test ./...
 go test ./internal/core/vm/...
 ```
 
 ### L1: Hermetic Integration Tests (Go `*_test.go`)
 
-Uses real I/O in controlled environments: in-memory SQLite (`:memory:` via `testutil.NewInMemoryDB`), `t.TempDir()` for filesystem, `FakeRunner` for subprocess calls that can't run in CI. No networking, no KVM, no sudo. Catches bugs earlier during `go test ./...`.
+Uses real I/O in controlled environments: in-memory SQLite (`:memory:` via `testutil.NewInMemoryDB`), `t.TempDir()` for filesystem, `FakeRunner` for subprocess calls that can't run in CI. No KVM or sudo. `scripts/run-go-ci-tests.sh` runs every non-Jailer Go package and a selected unprivileged Jailer subset in CI and tag release. The complete Jailer package exercises fixed root-owned authority and runs locally inside a disposable root-test VM.
 
 ```bash
-go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
+go test ./internal/core/vm/... -count=1 -coverprofile=coverage.out -covermode=atomic
 ```
 
 ### L2: Runner VM System Tests (Python `tests/system/`)

@@ -801,6 +801,11 @@ files when they implement one package-level behavior.
 
 ## 10. Verification checklist
 
+CI test selection lives in `scripts/run-go-ci-tests.sh`: all non-Jailer Go packages run unprivileged, while a selected
+Jailer subset runs without root-owned lifecycle effects. The complete Jailer package is a separate local root-test
+run inside a disposable VM. When adding or renaming a Jailer test, check which side owns its effects and update the
+CI selection if needed. A green CI subset does not prove the full Jailer lifecycle.
+
 Before submitting a Go test change, verify the applicable items:
 
 ```text

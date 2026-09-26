@@ -61,8 +61,8 @@ Agents do NOT invent test architecture. They translate the scenario catalog (the
   │  └─────────────────────────────────────────┘ │
   └─────────────────────────────────────────────┘
 
-Critical: L2 is the ground truth. L0 and L1 catch bugs earlier during
-`go test ./...` but NEVER replace L2 coverage. A feature is not considered
+Critical: L2 is the ground truth. L0 and L1 catch bugs earlier during the
+unprivileged Go selection in `scripts/run-go-ci-tests.sh` but NEVER replace L2 coverage. A feature is not considered
 tested until it has an L2 test. Passing L0/L1 alone means nothing — the
 feature could be completely broken at the subprocess level.
 ```

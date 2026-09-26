@@ -40,7 +40,10 @@ test -z "$(golines --max-len=120 --no-reformat-tags --list-files \
 go generate ./internal/service/agent/...
 git diff --exit-code
 go vet ./...
-go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
+bash scripts/run-go-ci-tests.sh
+
+# Separately run the complete Jailer Go test binary as root inside an approved
+# disposable local VM and retain its result before creating the release tag.
 
 # Build the release candidate with an explicit identity
 ./scripts/build.sh release --version X.Y.Z --output dist/mvm
@@ -144,7 +147,7 @@ git push origin vX.Y.Z
 
 The `release.yml` workflow runs on tag push (`v*.*.*`). It's a single pipeline:
 
-1. **Test** — `go mod tidy`, `go vet ./...`, `go test ./...` with coverage
+1. **Test** — `go mod tidy`, `go vet ./...`, and the unprivileged Go selection in `scripts/run-go-ci-tests.sh` with coverage. The complete Jailer root-test result is a local pre-tag release gate, not a CI job.
 2. **Build all packages** — runs `scripts/build-packages.sh --build-binaries --version X.Y.Z`
 
 The `build-packages.sh` script produces everything in `dist/packages/`:

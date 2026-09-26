@@ -26,7 +26,8 @@ A release is **blocked** until ALL of the following pass:
 | Line length | `golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/` | No listed files |
 | Generate | `go generate ./internal/service/agent/...` | Generated assets current |
 | Vet | `go vet ./...` | Zero warnings |
-| Go tests | `go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic` | All pass |
+| CI Go tests | `bash scripts/run-go-ci-tests.sh` | Unprivileged selection passes |
+| Local Jailer Go tests | Full Jailer test binary run as root inside a disposable VM | Entire package passes |
 | System install | `sudo ./dist/mvm host install-system && sudo /usr/local/bin/mvm host init` | Canonical root-owned install succeeds |
 | System tests | `MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm python3 scripts/run-system-tests.py --release-qualification --host-direct --rebuild --candidate-version X.Y.Z --all` | Identity-qualified T1/T2 runners and clean-host T3 all pass |
 | Version check | `/usr/local/bin/mvm --version` | Returns correct version (not `0.0.0-dev`) |
@@ -150,7 +151,8 @@ For every release, collect and archive:
 | Format output | `test -z "$(gofmt -l .)"` | Entire Go tree formatted |
 | Generate output | `go generate ./internal/service/agent/...` | Generated assets current |
 | Go vet output | `go vet ./... 2>&1` | Zero static analysis warnings |
-| Go test output | `go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic` | All Go tests pass |
+| CI Go test output | `bash scripts/run-go-ci-tests.sh` | Unprivileged selection passes |
+| Local Jailer output | Full Jailer test binary run as root inside a disposable VM | Entire package passes |
 | System test results | `MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm python3 scripts/run-system-tests.py --release-qualification --host-direct --rebuild --candidate-version X.Y.Z --all` | Identity-qualified full matrix passes on the clean host |
 | Version output | `/usr/local/bin/mvm --version` | Correct version string |
 | Help output | `/usr/local/bin/mvm --help` | All commands listed |
@@ -177,8 +179,11 @@ test -z "$(golines --max-len=120 --no-reformat-tags --list-files \
 go generate ./internal/service/agent/...
 git diff --exit-code
 go vet ./... > "$evidence_dir/vet.log" 2>&1
-go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic \
+bash scripts/run-go-ci-tests.sh \
   > "$evidence_dir/test.log" 2>&1
+
+# Archive the separate full-Jailer root-test result from a disposable local VM
+# before release sign-off. Do not run that binary as root on this host.
 
 # The following gates mutate the outer host. Run them only on the dedicated
 # clean qualification host or disposable outer VM.
@@ -250,7 +255,8 @@ A regression is **any** of the following:
 - [ ] `golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/` — no files listed
 - [ ] `go generate ./internal/service/agent/... && git diff --exit-code` — generated assets current
 - [ ] `go vet ./...` — zero warnings
-- [ ] `go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic` — all pass
+- [ ] `bash scripts/run-go-ci-tests.sh` — unprivileged Go selection passes
+- [ ] Full Jailer Go test binary — passes as root in a disposable local VM
 - [ ] `./scripts/build.sh release --version X.Y.Z --output dist/mvm` — exact candidate built
 - [ ] Dedicated clean qualification host/outer VM — candidate installed at exact `/usr/local/bin/mvm`
 - [ ] System tests — every required T1/T2/T3 domain passes strict machine outcome validation

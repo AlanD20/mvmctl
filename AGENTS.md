@@ -24,7 +24,7 @@ code and never override this file for active work.
 ## Roles and ownership
 
 - **`engineer`** owns production Go code, L0 and L1 Go tests, and production or build tooling. L0 and L1 tests include
-  table-driven tests, in-memory repositories, `FakeRunner`, and `go test ./...`.
+  table-driven tests, in-memory repositories, `FakeRunner`, and scoped `go test` commands.
 - **`qa-engineer`** owns Python system tests, `scripts/run-system-tests.py`, its Python tests, coverage audits, and
   release verification. The OpenCode configuration key for this role is `qa`. QA may run and diagnose Go tests but
   does not write production Go code.
@@ -74,7 +74,9 @@ changes require targeted searches, link and path checks, and a diff review.
 The integration owner runs the complete CI sequence on a clean integration worktree before declaring the PR or release
 ready. An agent working beside unrelated changes must not alter those changes to make `git diff --exit-code` pass.
 
-The CI sequence mirrors `.github/workflows/ci.yml`:
+The non-test CI gates below mirror `.github/workflows/ci.yml`. `scripts/run-go-ci-tests.sh` owns the selection used by
+CI and tag release: every non-Jailer package plus a selected unprivileged Jailer subset. Run the complete Jailer package
+locally as root inside an approved disposable runner VM; a green CI job does not prove root-owned lifecycle behavior.
 
 ```bash
 go mod tidy && git diff --exit-code
@@ -82,7 +84,7 @@ test -z "$(gofmt -l .)"
 golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/ 2>&1 | grep . && echo "violations found" && exit 1 || true
 go generate ./internal/service/agent/...
 go vet ./...
-go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
+bash scripts/run-go-ci-tests.sh
 ```
 
 ## Plan approval protocol

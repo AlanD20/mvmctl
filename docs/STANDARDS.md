@@ -269,9 +269,10 @@ Read `docs/system-test-architecture.md` for the test architecture and
 
 ### L1: Hermetic Integration Tests (Go)
 - Uses real I/O in controlled environments: file-based SQLite, `t.TempDir()`, `FakeRunner` for subprocess calls that can't run in CI.
-- No networking, no KVM, no sudo.
+- Local loopback fixtures are allowed; no external network, KVM, or sudo.
 - Example: seed DB → call handler → verify JSON output via `cmp.Diff`.
-- Run via `go test ./...`.
+- Run the unprivileged CI selection in `scripts/run-go-ci-tests.sh`. The complete Jailer package includes root-owned
+  lifecycle effects and runs locally in a disposable root-test VM; CI exercises a selected unprivileged subset.
 
 ### L2: Real-binary system tests (Python in `tests/system/`)
 - Real binary, real subprocess, and real infrastructure. T1 and T2 run inside disposable Firecracker VMs. T3 runs only

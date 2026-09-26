@@ -26,7 +26,7 @@ jobs:
         run: |
           go mod tidy && git diff --exit-code
           go vet ./...
-          go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
+          bash scripts/run-go-ci-tests.sh
 
       - name: Install package build tools
         run: |
