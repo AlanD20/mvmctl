@@ -568,9 +568,12 @@ foreign key, and the Firecracker config generator supports the explicit networkl
 public create input rejects conflicting network fields, but resolution still rejects networkless before dependent
 effects; no `--no-network` flag is exposed. The private root path now carries a typed networkless namespace lease
 through Jailer launch, activation, cleanup, and same-/prior-boot recovery, with placement sealed in the protected
-device and instance records. The public root launch wire, create, start/reboot, and snapshot paths remain managed-only.
-The complete networkless VM lifecycle is not publicly active or runtime-qualified. Omitting `--network` still selects
-the default managed network and must never become an implicit networkless fallback.
+device and instance records. The root launch wire now admits only complete managed or endpoint-free networkless shapes;
+its offline NoCloud allowance is limited to fixed local ISO/injected-seed arguments. Relaunch reconstruction retains
+the stored placement and rejects malformed networkless state before reboot stops a VM. Offline cloud-init seeds can
+omit network configuration. Public create and snapshot remain managed-only, so the complete networkless VM lifecycle
+is not publicly active or runtime-qualified. Omitting `--network` still selects the default managed network and must
+never become an implicit networkless fallback.
 
 ADR-0017 fixes the L3 contract consumed by the typed root transactions. The per-VM
 namespace is an L2 extension of one managed bridge. A canonical RFC1918 IPv4 prefix is limited to `/30` or shorter;

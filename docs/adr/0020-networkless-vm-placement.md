@@ -69,17 +69,22 @@ placement, and a missing default network cannot trigger networkless placement.
 Implement this as a coordinated typed cutover across public input/CLI, user VM persistence, Firecracker configuration,
 the root launch/namespace protocol, start/reboot/recovery, and snapshot capture/restore. The Firecracker config module
 now accepts an explicit networkless placement and emits no NIC or kernel `ip=` argument, while retaining vsock and
-rejecting managed endpoint fields, NoCloud NET mode, and caller-supplied `ip=` or `ds=` boot arguments. The fresh
-version-8 user VM schema now persists explicit placement, retains the managed network foreign key, and stores SQL
-`NULL` rather than a fabricated network ID for networkless rows. Production create and respawn callers still select
-managed placement explicitly. The closed public create input admits `NoNetwork` and rejects conflicting endpoint and
+rejecting managed endpoint fields, NoCloud NET mode, and caller-supplied `ip=` or `ds=` boot arguments. Generated
+offline NoCloud arguments are limited to the fixed local ISO or injected-seed form; the old duplicated `ds=ds=` inject
+argument was corrected. Offline cloud-init seed generation no longer requires a fabricated IP/gateway or writes a
+network configuration. The fresh version-8 user VM schema persists explicit placement, retains the managed network
+foreign key, and stores SQL
+`NULL` rather than a fabricated network ID for networkless rows. Production create still selects managed placement
+explicitly; relaunch now reconstructs and retains the persisted variant, rejecting malformed networkless state before
+reboot stops the VM. The closed public create input admits `NoNetwork` and rejects conflicting endpoint and
 NoCloud NET fields, but its resolver still rejects networkless before dependent effects, and the CLI exposes no flag.
-The public root launch wire requires the managed placement tag and rejects omitted, unknown, or networkless variants.
+The public root launch wire requires an explicit managed or networkless tag and rejects omitted, unknown, or mixed
+endpoint variants before effects.
 The strict schema-5 instance codec rejects older-schema records, including cleaned tombstones. Separately, the private
 root path now carries a typed networkless namespace lease through Jailer launch, activation, cleanup, and same-/prior-
 boot recovery. Placement is sealed in the protected device and instance records; the managed topology journal and
-lock order are unchanged. Public create/start/reboot, root-wire admission, and snapshot integration remain pending.
-The existing `resolveNetwork` call and root `VMLaunchRequest` validation must not be relaxed alone.
+lock order are unchanged. Public create admission and snapshot integration remain pending; start/reboot have no
+publicly creatable networkless row yet.
 Preserve current networked behavior until both branches have complete lifecycle ownership.
 
 Go tests should prove closed input combinations, exact wire-shape rejection, no-NIC Firecracker config, placement
