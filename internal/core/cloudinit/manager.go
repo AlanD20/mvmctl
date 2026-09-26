@@ -366,8 +366,8 @@ func (m *Manager) renderCloudInitTemplate() (map[string]string, error) {
 		PasswordHash:     passwordHash,
 	}
 
-	// Validate all required fields are non-empty
-	if err := validateTemplateData(data); err != nil {
+	// Offline placement has no guest endpoint to render into network-config.
+	if err := validateTemplateData(data, !m.config.SkipNetworkConfig); err != nil {
 		return nil, errs.New(errs.CodeCloudInitProvisionFailed,
 			err.Error(),
 			errs.WithClass(errs.ClassValidation),
@@ -375,7 +375,10 @@ func (m *Manager) renderCloudInitTemplate() (map[string]string, error) {
 	}
 
 	// Render each named section independently — no YAML parsing hack needed.
-	sectionNames := []string{"user_data", "meta_data", "network_config", "nocloud_cfg"}
+	sectionNames := []string{"user_data", "meta_data", "nocloud_cfg"}
+	if !m.config.SkipNetworkConfig {
+		sectionNames = append(sectionNames, "network_config")
+	}
 	result := make(map[string]string, len(sectionNames))
 	for _, name := range sectionNames {
 		var buf bytes.Buffer
