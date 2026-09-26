@@ -174,8 +174,11 @@ func inspectNetworklessIPv6Address(message netlink.Message) error {
 
 func inspectNetworklessIPv6Route(message netlink.Message, ifIndex int) error {
 	data := message.Data
+	// Linux may report the kernel's ::1 local route with universe scope. The
+	// local table and RTN_LOCAL type remain mandatory in either scope.
 	if data[1] != 128 || data[2] != 0 || data[3] != 0 || data[4] != unix.RT_TABLE_LOCAL ||
-		data[5] != unix.RTPROT_KERNEL || data[6] != unix.RT_SCOPE_HOST || data[7] != unix.RTN_LOCAL ||
+		data[5] != unix.RTPROT_KERNEL ||
+		(data[6] != unix.RT_SCOPE_HOST && data[6] != unix.RT_SCOPE_UNIVERSE) || data[7] != unix.RTN_LOCAL ||
 		binary.NativeEndian.Uint32(data[8:12]) != 0 {
 		return errors.New("networkless IPv6 route is not canonical local loopback")
 	}

@@ -119,18 +119,25 @@ func TestNetworklessJournalRejectsAmbiguousAuthority(t *testing.T) {
 
 func TestNetworklessIPv6RouteRejectsForeignGateway(t *testing.T) {
 	const loIndex = 1
-	for name, foreignGateway := range map[string]bool{"loopback_only": false, "foreign_gateway": true} {
+	for name, tc := range map[string]struct {
+		scope          uint8
+		foreignGateway bool
+	}{
+		"host_scope_loopback":   {scope: unix.RT_SCOPE_HOST},
+		"kernel_scope_loopback": {scope: unix.RT_SCOPE_UNIVERSE},
+		"foreign_gateway":       {scope: unix.RT_SCOPE_UNIVERSE, foreignGateway: true},
+	} {
 		t.Run(name, func(t *testing.T) {
 			data := make([]byte, unix.SizeofRtMsg)
 			data[0], data[1], data[4] = unix.AF_INET6, 128, unix.RT_TABLE_LOCAL
-			data[5], data[6], data[7] = unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL
+			data[5], data[6], data[7] = unix.RTPROT_KERNEL, tc.scope, unix.RTN_LOCAL
 			loopback := make([]byte, 16)
 			loopback[15] = 1
 			var err error
 			data, err = appendRouteAttributes(data, func(encoder *netlink.AttributeEncoder) error {
 				encoder.Bytes(unix.RTA_DST, loopback)
 				encoder.Uint32(unix.RTA_OIF, loIndex)
-				if foreignGateway {
+				if tc.foreignGateway {
 					encoder.Bytes(unix.RTA_GATEWAY, loopback)
 				}
 				return nil
@@ -138,7 +145,7 @@ func TestNetworklessIPv6RouteRejectsForeignGateway(t *testing.T) {
 			require.NoError(t, err)
 			message := netlink.Message{Header: netlink.Header{Type: netlink.HeaderType(unix.RTM_NEWROUTE)}, Data: data}
 			err = inspectNetworklessIPv6Route(message, loIndex)
-			if foreignGateway {
+			if tc.foreignGateway {
 				assert.Error(t, err)
 				return
 			}
