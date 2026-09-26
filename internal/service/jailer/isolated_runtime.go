@@ -15,7 +15,8 @@ func (lease *launchLease) preparePrivateRuntimeDirectory(ctx context.Context) er
 	state := lease.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.released || !state.registrationComplete || state.record.lifecycle != instanceLifecycleLaunching || state.privateRuntimeDirectory != nil {
+	if state.released || !state.registrationComplete || state.record.lifecycle != instanceLifecycleLaunching ||
+		state.privateRuntimeDirectory != nil {
 		return instanceStateError(state.record.vmID, "private runtime requires durable launching authority")
 	}
 	runtime, err := openPrivateVMRuntime(ctx, state.record, true)
@@ -25,7 +26,11 @@ func (lease *launchLease) preparePrivateRuntimeDirectory(ctx context.Context) er
 
 // openPrivateVMRuntime admits only the fixed root-controlled hierarchy. Existing-only
 // recovery never creates or repairs an entry; root-controlled absence is explicit.
-func openPrivateVMRuntime(ctx context.Context, record instanceRecord, create bool) (_ *managedVMRuntimeLease, returnErr error) {
+func openPrivateVMRuntime(
+	ctx context.Context,
+	record instanceRecord,
+	create bool,
+) (_ *managedVMRuntimeLease, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -40,7 +45,11 @@ func openPrivateVMRuntime(ctx context.Context, record instanceRecord, create boo
 	retained := []int{}
 	defer func() {
 		if retained != nil {
-			returnErr = appendInstanceOperationError(returnErr, "close rejected private runtime", closeManagedVMRuntimeFDs(context.WithoutCancel(ctx), deps, retained))
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"close rejected private runtime",
+				closeManagedVMRuntimeFDs(context.WithoutCancel(ctx), deps, retained),
+			)
 		}
 	}()
 	rootFD, err := deps.open(ctx, policy.rootPath, managedVMRuntimeDirectoryFlags, 0)
@@ -84,7 +93,12 @@ func openPrivateVMRuntime(ctx context.Context, record instanceRecord, create boo
 			return nil, instanceAtomicError("create exclusive private VM runtime", err)
 		}
 	}
-	fd, err := deps.openAt2(ctx, parent, record.vmID, &unix.OpenHow{Flags: uint64(managedVMRuntimeDirectoryFlags), Resolve: uint64(managedVMRuntimeResolveManaged)})
+	fd, err := deps.openAt2(
+		ctx,
+		parent,
+		record.vmID,
+		&unix.OpenHow{Flags: uint64(managedVMRuntimeDirectoryFlags), Resolve: uint64(managedVMRuntimeResolveManaged)},
+	)
 	if err != nil {
 		if !create && errors.Is(err, unix.ENOENT) {
 			return nil, nil
@@ -97,8 +111,17 @@ func openPrivateVMRuntime(ctx context.Context, record instanceRecord, create boo
 		return nil, err
 	}
 	execution := record.launch.executionIdentity
-	state := &managedVMRuntimeLeaseState{deps: deps, caller: instanceCaller{uid: execution.uid, gid: execution.gid}, vmID: record.vmID,
-		uidDirectoryFD: parent, vmDirectoryFD: fd, identity: identity, retained: retained, leafCreated: true, private: true}
+	state := &managedVMRuntimeLeaseState{
+		deps:           deps,
+		caller:         instanceCaller{uid: execution.uid, gid: execution.gid},
+		vmID:           record.vmID,
+		uidDirectoryFD: parent,
+		vmDirectoryFD:  fd,
+		identity:       identity,
+		retained:       retained,
+		leafCreated:    true,
+		private:        true,
+	}
 	lease := &managedVMRuntimeLease{state: state}
 	retained = nil
 	if create {
@@ -113,7 +136,13 @@ func openPrivateVMRuntime(ctx context.Context, record instanceRecord, create boo
 	return lease, nil
 }
 
-func openPrivateVMRuntimeParent(ctx context.Context, deps managedVMRuntimeDeps, parent int, name string, create bool) (int, bool, error) {
+func openPrivateVMRuntimeParent(
+	ctx context.Context,
+	deps managedVMRuntimeDeps,
+	parent int,
+	name string,
+	create bool,
+) (int, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return -1, false, err
 	}
@@ -125,7 +154,12 @@ func openPrivateVMRuntimeParent(ctx context.Context, deps managedVMRuntimeDeps, 
 		}
 		created = err == nil
 	}
-	fd, err := deps.openAt2(ctx, parent, name, &unix.OpenHow{Flags: uint64(managedVMRuntimeDirectoryFlags), Resolve: uint64(managedVMRuntimeResolveManaged)})
+	fd, err := deps.openAt2(
+		ctx,
+		parent,
+		name,
+		&unix.OpenHow{Flags: uint64(managedVMRuntimeDirectoryFlags), Resolve: uint64(managedVMRuntimeResolveManaged)},
+	)
 	if errors.Is(err, unix.ENOENT) && !create {
 		return -1, false, nil
 	}
@@ -133,7 +167,11 @@ func openPrivateVMRuntimeParent(ctx context.Context, deps managedVMRuntimeDeps, 
 		return -1, false, instanceAtomicError("open private runtime parent", err)
 	}
 	if _, err := inspectManagedVMRuntimeDirectory(ctx, deps, fd, name, 0, 0, 0700, true); err != nil {
-		return -1, false, appendInstanceOperationError(err, "close rejected private runtime parent", deps.close(context.WithoutCancel(ctx), fd))
+		return -1, false, appendInstanceOperationError(
+			err,
+			"close rejected private runtime parent",
+			deps.close(context.WithoutCancel(ctx), fd),
+		)
 	}
 	if created {
 		if err := deps.fsync(ctx, parent); err != nil {

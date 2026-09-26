@@ -37,7 +37,10 @@ func (server *VMLifecycleServer) AttachVolume(
 	}
 	defer func() { returnErr = errors.Join(returnErr, cache.Release(context.WithoutCancel(ctx))) }()
 	if cache.identity != authority.locked.record.launch.cacheIdentity {
-		return VMVolumeResult{}, instanceStateError(request.VMID, "volume cache differs from committed launch authority")
+		return VMVolumeResult{}, instanceStateError(
+			request.VMID,
+			"volume cache differs from committed launch authority",
+		)
 	}
 	transaction, records, inventory, err := authority.openVolumeTransaction(ctx, request.Volume.ID)
 	if err != nil {
@@ -48,7 +51,10 @@ func (server *VMLifecycleServer) AttachVolume(
 		return VMVolumeResult{}, err
 	}
 	if transaction.record.Schema != 0 && transaction.record.Volume != request.Volume {
-		return VMVolumeResult{}, instanceStateError(request.VMID, "volume retry differs from root-owned attachment intent")
+		return VMVolumeResult{}, instanceStateError(
+			request.VMID,
+			"volume retry differs from root-owned attachment intent",
+		)
 	}
 	if transaction.record.State == "detaching" {
 		return VMVolumeResult{}, instanceStateError(request.VMID, "pending volume detach must finish before attach")
@@ -74,7 +80,10 @@ func (server *VMLifecycleServer) AttachVolume(
 	if transaction.record.SourceInode != 0 && (transaction.record.SourceMajor != source.Dev_major ||
 		transaction.record.SourceMinor != source.Dev_minor || transaction.record.SourceInode != source.Ino ||
 		transaction.record.Volume.ExpectedBytes != source.Size) {
-		return VMVolumeResult{}, instanceStateError(request.VMID, "protected backing differs from retained attachment identity")
+		return VMVolumeResult{}, instanceStateError(
+			request.VMID,
+			"protected backing differs from retained attachment identity",
+		)
 	}
 	transaction.record.SourceMajor, transaction.record.SourceMinor = source.Dev_major, source.Dev_minor
 	transaction.record.SourceInode = source.Ino
@@ -137,7 +146,11 @@ func (server *VMLifecycleServer) DetachVolume(
 	if err := request.Validate(); err != nil {
 		return VMVolumeResult{}, err
 	}
-	authority, err := server.instances.lockVolumeHotplug(ctx, instanceCaller{uid: ownerUID, gid: ownerGID}, request.VMID)
+	authority, err := server.instances.lockVolumeHotplug(
+		ctx,
+		instanceCaller{uid: ownerUID, gid: ownerGID},
+		request.VMID,
+	)
 	if err != nil {
 		return VMVolumeResult{}, err
 	}
@@ -153,11 +166,17 @@ func (server *VMLifecycleServer) DetachVolume(
 	}
 	if transaction.record.Schema == 0 {
 		if observed != nil {
-			return VMVolumeResult{}, instanceStateError(request.VMID, "volume drive has no root-owned attachment intent")
+			return VMVolumeResult{}, instanceStateError(
+				request.VMID,
+				"volume drive has no root-owned attachment intent",
+			)
 		}
 		fd, _, err := transaction.inspectTarget(ctx)
 		if err == nil {
-			return VMVolumeResult{}, errors.Join(instanceStateError(request.VMID, "unknown volume mount is retained"), unix.Close(fd))
+			return VMVolumeResult{}, errors.Join(
+				instanceStateError(request.VMID, "unknown volume mount is retained"),
+				unix.Close(fd),
+			)
 		}
 		if !errors.Is(err, unix.ENOENT) {
 			return VMVolumeResult{}, err
@@ -168,7 +187,10 @@ func (server *VMLifecycleServer) DetachVolume(
 	if transaction.record.State == "detached" && observed == nil {
 		fd, _, err := transaction.inspectTarget(ctx)
 		if err == nil {
-			return VMVolumeResult{}, errors.Join(instanceStateError(request.VMID, "detached volume target reappeared"), unix.Close(fd))
+			return VMVolumeResult{}, errors.Join(
+				instanceStateError(request.VMID, "detached volume target reappeared"),
+				unix.Close(fd),
+			)
 		}
 		if !errors.Is(err, unix.ENOENT) {
 			return VMVolumeResult{}, err
@@ -186,7 +208,10 @@ func (server *VMLifecycleServer) DetachVolume(
 	}
 	if identity.Dev_major != transaction.record.SourceMajor || identity.Dev_minor != transaction.record.SourceMinor ||
 		identity.Ino != transaction.record.SourceInode || identity.Size != transaction.record.Volume.ExpectedBytes {
-		return VMVolumeResult{}, instanceStateError(request.VMID, "detach backing differs from root-owned attachment identity")
+		return VMVolumeResult{}, instanceStateError(
+			request.VMID,
+			"detach backing differs from root-owned attachment identity",
+		)
 	}
 	if observed != nil && !volumeDriveMatches(*observed, transaction.record.Volume) {
 		return VMVolumeResult{}, instanceStateError(request.VMID, "detach API drive differs from root-owned intent")

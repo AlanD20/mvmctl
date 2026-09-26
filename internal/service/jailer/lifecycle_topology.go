@@ -78,7 +78,10 @@ func (lease *cleanupLease) recoverProductionTopology(ctx context.Context) error 
 	return nil
 }
 
-func (lease *launchLease) prepareProductionTopology(ctx context.Context, intent network.VMIntent) (network.JailerNetworkConfig, error) {
+func (lease *launchLease) prepareProductionTopology(
+	ctx context.Context,
+	intent network.VMIntent,
+) (network.JailerNetworkConfig, error) {
 	hold, err := lease.retainProductionTopologyHold(ctx)
 	if err != nil {
 		return network.JailerNetworkConfig{}, err
@@ -109,7 +112,10 @@ func (lease *launchLease) prepareProductionTopology(ctx context.Context, intent 
 		return network.JailerNetworkConfig{}, err
 	}
 	if projection.OwnerUID != state.record.ownerUID || projection.VMID != state.record.vmID {
-		return network.JailerNetworkConfig{}, instanceStateError(state.record.vmID, "topology namespace owner binding differs")
+		return network.JailerNetworkConfig{}, instanceStateError(
+			state.record.vmID,
+			"topology namespace owner binding differs",
+		)
 	}
 	state.networkNamespace = &topologySelectedNetworkNamespace{
 		identity:   instanceObjectIdentity{device: projection.NamespaceDevice, inode: projection.NamespaceInode},

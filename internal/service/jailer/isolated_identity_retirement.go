@@ -22,7 +22,9 @@ type vmExecutionRetirementProofState struct {
 }
 
 func retireRemovedVMExecution(ctx context.Context, locked *lockedInstance, caller instanceCaller) (returnErr error) {
-	if locked == nil || locked.vmLock == nil || !locked.vmLock.isActive() || locked.record.lifecycle != instanceLifecycleCleaned || locked.record.ownerUID != caller.uid {
+	if locked == nil || locked.vmLock == nil || !locked.vmLock.isActive() ||
+		locked.record.lifecycle != instanceLifecycleCleaned ||
+		locked.record.ownerUID != caller.uid {
 		return instanceStateError("", "execution retirement requires retained cleaned owner authority")
 	}
 	lease, err := locked.vmLock.openExecutionIdentity(ctx, caller, locked.record.vmID)
@@ -79,7 +81,14 @@ func requireExecutionRetirementTreeAbsent(ctx context.Context, components []stri
 			return err
 		}
 		if component != "" {
-			next, err := unix.Openat2(fd, component, &unix.OpenHow{Flags: instanceDirectoryFlags, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS})
+			next, err := unix.Openat2(
+				fd,
+				component,
+				&unix.OpenHow{
+					Flags:   instanceDirectoryFlags,
+					Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+				},
+			)
 			if errors.Is(err, unix.ENOENT) {
 				return nil
 			}

@@ -110,7 +110,11 @@ func (processes *reopenedRecordedProcesses) observeLifecycleProcesses(
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.released || state.verifying {
-		return processObservation{}, false, processVerificationError(record.vmID, "lifecycle process authority is busy", nil)
+		return processObservation{}, false, processVerificationError(
+			record.vmID,
+			"lifecycle process authority is busy",
+			nil,
+		)
 	}
 	var observation processObservation
 	var firecrackerLive bool

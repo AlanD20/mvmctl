@@ -46,7 +46,11 @@ func AcquireVMProvisionRootfs(
 	lease := &VMProvisionRootfsLease{vmProvisionRootfsLeaseState: &vmProvisionRootfsLeaseState{}}
 	defer func() {
 		if returnErr != nil {
-			returnErr = appendInstanceOperationError(returnErr, "release rejected provisioning authority", lease.Release(ctx))
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"release rejected provisioning authority",
+				lease.Release(ctx),
+			)
 		}
 	}()
 	authority := newInstanceAuthority()

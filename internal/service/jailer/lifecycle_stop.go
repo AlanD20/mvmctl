@@ -54,11 +54,19 @@ func (request *VMStopRequest) UnmarshalJSON(raw []byte) error {
 
 // Stop retains the recovered instance lock while asking the admitted API peer to
 // shut down, waiting only on the exact Firecracker pidfd, and finishing cleanup.
-func (server *VMLifecycleServer) Stop(ctx context.Context, ownerUID, ownerGID uint32, request VMStopRequest) (VMCleanupResult, error) {
+func (server *VMLifecycleServer) Stop(
+	ctx context.Context,
+	ownerUID, ownerGID uint32,
+	request VMStopRequest,
+) (VMCleanupResult, error) {
 	if err := request.Validate(); err != nil {
 		return VMCleanupResult{}, err
 	}
-	cleanup, err := server.instances.beginLifecycleCleanup(ctx, instanceCaller{uid: ownerUID, gid: ownerGID}, request.VMID)
+	cleanup, err := server.instances.beginLifecycleCleanup(
+		ctx,
+		instanceCaller{uid: ownerUID, gid: ownerGID},
+		request.VMID,
+	)
 	if err != nil {
 		return VMCleanupResult{}, err
 	}
@@ -149,7 +157,12 @@ func (lease *cleanupLease) requestGracefulStop(ctx context.Context) error {
 		return err
 	}
 	body := `{"action_type":"SendCtrlAltDel"}`
-	request, err := http.NewRequestWithContext(ctx, http.MethodPut, "http://firecracker/actions", bytes.NewBufferString(body))
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPut,
+		"http://firecracker/actions",
+		bytes.NewBufferString(body),
+	)
 	if err != nil {
 		return err
 	}
@@ -189,7 +202,9 @@ func admitStopAPIPeer(ctx context.Context, fd int, record instanceRecord, retain
 		return err
 	}
 	defer func() { returnErr = errors.Join(returnErr, unix.Close(peerPIDFD)) }()
-	if credentials == nil || int(credentials.Pid) != record.launch.process.pid || credentials.Uid != record.launch.executionIdentity.uid || credentials.Gid != record.launch.executionIdentity.gid {
+	if credentials == nil || int(credentials.Pid) != record.launch.process.pid ||
+		credentials.Uid != record.launch.executionIdentity.uid ||
+		credentials.Gid != record.launch.executionIdentity.gid {
 		return processVerificationError(record.vmID, "graceful API peer differs from admitted Firecracker", nil)
 	}
 	identity := realProcessIdentityVerifierDeps()

@@ -51,7 +51,8 @@ func (lease *vmAuthorityLease) retireExecutionIdentity(
 	if err != nil || !found {
 		return instanceAtomicError("execution retirement reservation is missing", err)
 	}
-	if record.OwnerUID != retirement.ownerUID || record.VMID != retirement.vmID || record.UID == nil || record.GID == nil ||
+	if record.OwnerUID != retirement.ownerUID || record.VMID != retirement.vmID || record.UID == nil ||
+		record.GID == nil ||
 		*record.UID != retirement.identity.uid ||
 		*record.GID != retirement.identity.gid {
 		return instanceStateError(retirement.vmID, "execution retirement proof does not match its reservation")

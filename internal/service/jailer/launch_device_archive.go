@@ -58,11 +58,19 @@ func openStoppedVMDeviceDirectory(ctx context.Context, ownerUID uint32, create b
 	return fd, nil
 }
 
-func readStoppedVMDeviceRecord(ctx context.Context, directory int, record instanceRecord) (_ *stoppedVMLaunchDevices, returnErr error) {
+func readStoppedVMDeviceRecord(
+	ctx context.Context,
+	directory int,
+	record instanceRecord,
+) (_ *stoppedVMLaunchDevices, returnErr error) {
 	if !vmIDPattern.MatchString(record.vmID) {
 		return nil, instanceValidationError("stopped device VM is invalid")
 	}
-	fd, err := unix.Openat2(directory, record.vmID+".json", &unix.OpenHow{Flags: instanceReadFlags | unix.O_NONBLOCK, Resolve: managedVMResourceResolveFlags})
+	fd, err := unix.Openat2(
+		directory,
+		record.vmID+".json",
+		&unix.OpenHow{Flags: instanceReadFlags | unix.O_NONBLOCK, Resolve: managedVMResourceResolveFlags},
+	)
 	if errors.Is(err, unix.ENOENT) {
 		return nil, nil
 	}
@@ -75,7 +83,9 @@ func readStoppedVMDeviceRecord(ctx context.Context, directory int, record instan
 	if err != nil {
 		return nil, err
 	}
-	if before.mode != unix.S_IFREG|0600 || before.uid != 0 || before.gid != 0 || before.nlink != 1 || before.size == 0 || before.size > uint64(launchDeviceAuthorityMaxBytes+1024) {
+	if before.mode != unix.S_IFREG|0600 || before.uid != 0 || before.gid != 0 || before.nlink != 1 ||
+		before.size == 0 ||
+		before.size > uint64(launchDeviceAuthorityMaxBytes+1024) {
 		return nil, instanceStateError(record.vmID, "stopped device archive metadata is not admitted")
 	}
 	raw, err := readLaunchDeviceBytes(ctx, fd, int(before.size))
@@ -99,23 +109,33 @@ func readStoppedVMDeviceRecord(ctx context.Context, directory int, record instan
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(raw, canonical) || archive.Schema != 1 || archive.OwnerUID != record.ownerUID || archive.VMID != record.vmID || archive.LaunchGeneration == 0 || archive.LaunchGeneration > record.launchGeneration {
+	if !bytes.Equal(raw, canonical) || archive.Schema != 1 || archive.OwnerUID != record.ownerUID ||
+		archive.VMID != record.vmID ||
+		archive.LaunchGeneration == 0 ||
+		archive.LaunchGeneration > record.launchGeneration {
 		return nil, instanceStateError(record.vmID, "stopped device archive binding is not admitted")
 	}
 	if archive.Source != nil {
 		if err := archive.Source.validate(); err != nil {
 			return nil, err
 		}
-		if archive.Source.OwnerUID != archive.OwnerUID || archive.Source.VMID != archive.VMID || archive.Source.LaunchGeneration != archive.LaunchGeneration {
+		if archive.Source.OwnerUID != archive.OwnerUID || archive.Source.VMID != archive.VMID ||
+			archive.Source.LaunchGeneration != archive.LaunchGeneration {
 			return nil, instanceStateError(record.vmID, "stopped device source differs from archive binding")
 		}
 	}
 	return &archive, nil
 }
 
-func readStoppedVMLaunchDeviceAuthority(ctx context.Context, record instanceRecord) (_ vmLaunchDeviceAuthority, returnErr error) {
+func readStoppedVMLaunchDeviceAuthority(
+	ctx context.Context,
+	record instanceRecord,
+) (_ vmLaunchDeviceAuthority, returnErr error) {
 	if record.lifecycle != instanceLifecycleCleaned {
-		return vmLaunchDeviceAuthority{}, instanceStateError(record.vmID, "stopped capture requires cleaned instance authority")
+		return vmLaunchDeviceAuthority{}, instanceStateError(
+			record.vmID,
+			"stopped capture requires cleaned instance authority",
+		)
 	}
 	fd, err := openStoppedVMDeviceDirectory(ctx, record.ownerUID, false)
 	if err != nil {
@@ -127,7 +147,10 @@ func readStoppedVMLaunchDeviceAuthority(ctx context.Context, record instanceReco
 		return vmLaunchDeviceAuthority{}, err
 	}
 	if archive == nil || archive.LaunchGeneration != record.launchGeneration || archive.Source == nil {
-		return vmLaunchDeviceAuthority{}, instanceStateError(record.vmID, "stopped device inventory is unavailable for this launch")
+		return vmLaunchDeviceAuthority{}, instanceStateError(
+			record.vmID,
+			"stopped device inventory is unavailable for this launch",
+		)
 	}
 	return *archive.Source, nil
 }
@@ -150,7 +173,12 @@ func archiveStoppedVMLaunchDevices(ctx context.Context, record instanceRecord, r
 	if existing != nil && existing.LaunchGeneration == record.launchGeneration {
 		return nil
 	}
-	archive := stoppedVMLaunchDevices{Schema: 1, OwnerUID: record.ownerUID, VMID: record.vmID, LaunchGeneration: record.launchGeneration}
+	archive := stoppedVMLaunchDevices{
+		Schema:           1,
+		OwnerUID:         record.ownerUID,
+		VMID:             record.vmID,
+		LaunchGeneration: record.launchGeneration,
+	}
 	metadata, sourceErr := readVMLaunchDeviceAuthority(ctx, record, rootFD)
 	if sourceErr == nil {
 		metadata, sourceErr = mergeStoppedVMDeviceInventory(ctx, record, rootFD, metadata)
@@ -171,7 +199,12 @@ func archiveStoppedVMLaunchDevices(ctx context.Context, record instanceRecord, r
 	if len(raw) > launchDeviceAuthorityMaxBytes+1024 {
 		return instanceValidationError("stopped device archive exceeds its record bound")
 	}
-	dirs := &instanceUIDDirectories{deps: realInstanceAuthorityDeps(), policy: productionInstanceAuthorityPolicy(), uid: record.ownerUID, stateFD: directory}
+	dirs := &instanceUIDDirectories{
+		deps:    realInstanceAuthorityDeps(),
+		policy:  productionInstanceAuthorityPolicy(),
+		uid:     record.ownerUID,
+		stateFD: directory,
+	}
 	name, temp, err := createInstanceRecordTemp(ctx, dirs)
 	if err != nil {
 		return err
@@ -208,7 +241,12 @@ func archiveStoppedVMLaunchDevices(ctx context.Context, record instanceRecord, r
 	return unix.Fsync(directory)
 }
 
-func mergeStoppedVMDeviceInventory(ctx context.Context, record instanceRecord, rootFD int, initial vmLaunchDeviceAuthority) (_ vmLaunchDeviceAuthority, returnErr error) {
+func mergeStoppedVMDeviceInventory(
+	ctx context.Context,
+	record instanceRecord,
+	rootFD int,
+	initial vmLaunchDeviceAuthority,
+) (_ vmLaunchDeviceAuthority, returnErr error) {
 	volumes, err := openVolumeHotplugDirectory(ctx, rootFD, "volumes", 0755, false)
 	if errors.Is(err, unix.ENOENT) {
 		return initial, nil

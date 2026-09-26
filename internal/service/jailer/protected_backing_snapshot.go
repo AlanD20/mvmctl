@@ -101,7 +101,8 @@ func reopenProtectedCache(
 	if err := readProtectedRecord(ctx, anchor, "store.json", &record); err != nil {
 		return nil, err
 	}
-	if record.Version != 1 || record.Owner != ownerUID || record.OwnerGID == 0 || record.Cache != protectedCacheIdentity(expected) {
+	if record.Version != 1 || record.Owner != ownerUID || record.OwnerGID == 0 ||
+		record.Cache != protectedCacheIdentity(expected) {
 		return nil, managedVMResourceValidationError("protected store anchor differs from recorded ownership")
 	}
 	locator, err := parseManagedCacheLocator(record.Locator)
@@ -114,7 +115,10 @@ func reopenProtectedCache(
 		return nil, err
 	}
 	if protectedCacheIdentity(cache.identity) != record.Cache {
-		return nil, errors.Join(managedVMResourceValidationError("protected store cache identity changed"), cache.Release(ctx))
+		return nil, errors.Join(
+			managedVMResourceValidationError("protected store cache identity changed"),
+			cache.Release(ctx),
+		)
 	}
 	return cache, nil
 }
@@ -210,8 +214,10 @@ func restoreProtectedBacking(
 			return nil, errors.Join(err, lease.Release(context.WithoutCancel(ctx)))
 		}
 	}
-	return nil, errors.Join(managedVMResourceValidationError("restore cannot replace an unrelated existing protected backing"),
-		lease.Release(context.WithoutCancel(ctx)))
+	return nil, errors.Join(
+		managedVMResourceValidationError("restore cannot replace an unrelated existing protected backing"),
+		lease.Release(context.WithoutCancel(ctx)),
+	)
 }
 
 func compareProtectedKernel(ctx context.Context, source, existing int, size int64) error {
@@ -224,7 +230,10 @@ func compareProtectedKernel(ctx context.Context, source, existing int, size int6
 		n, leftErr := unix.Pread(source, left[:length], offset)
 		m, rightErr := unix.Pread(existing, right[:length], offset)
 		if leftErr != nil || rightErr != nil || n != int(length) || m != n || !bytes.Equal(left[:n], right[:m]) {
-			return managedVMResourceAtomicError("existing protected kernel differs from captured snapshot", errors.Join(leftErr, rightErr))
+			return managedVMResourceAtomicError(
+				"existing protected kernel differs from captured snapshot",
+				errors.Join(leftErr, rightErr),
+			)
 		}
 		offset += length
 	}

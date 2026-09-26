@@ -23,10 +23,14 @@ func (prepared *preparedSnapshotRestore) loadIntoActive(
 	}
 	record := active.snapshot()
 	source := prepared.metadata.Source
-	if record.launch == nil || record.active == nil || record.vmID != prepared.targetVMID || record.ownerUID != prepared.ownerUID ||
+	if record.launch == nil || record.active == nil || record.vmID != prepared.targetVMID ||
+		record.ownerUID != prepared.ownerUID ||
 		record.launch.snapshotID != prepared.snapshotID || record.launch.release.version != source.Release.Version ||
-		record.launch.release.architecture != source.Release.Architecture || record.launch.release.firecrackerSHA256 != source.FirecrackerSHA256 ||
-		record.launch.release.jailerSHA256 != source.JailerSHA256 || topology.OwnerUID != prepared.ownerUID || topology.VMID != prepared.targetVMID ||
+		record.launch.release.architecture != source.Release.Architecture ||
+		record.launch.release.firecrackerSHA256 != source.FirecrackerSHA256 ||
+		record.launch.release.jailerSHA256 != source.JailerSHA256 ||
+		topology.OwnerUID != prepared.ownerUID ||
+		topology.VMID != prepared.targetVMID ||
 		topology.NetworkID != source.NetworkID ||
 		topology.GuestIPv4.String() != source.GuestIPv4 ||
 		topology.GuestMAC != source.GuestMAC ||

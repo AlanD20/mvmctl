@@ -60,7 +60,8 @@ func removeStoppedVolumeHotplugJournal(ctx context.Context, root int, instance i
 	if err := unix.Fstatat(volumes, volumeHotplugJournalDirectory, &entry, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return err
 	}
-	if entry.Dev != retained.Dev || entry.Ino != retained.Ino || entry.Mode != retained.Mode || entry.Uid != 0 || entry.Gid != 0 {
+	if entry.Dev != retained.Dev || entry.Ino != retained.Ino || entry.Mode != retained.Mode || entry.Uid != 0 ||
+		entry.Gid != 0 {
 		return instanceStateError(instance.vmID, "stopped volume journal directory was replaced")
 	}
 	if err := unix.Unlinkat(volumes, volumeHotplugJournalDirectory, unix.AT_REMOVEDIR); err != nil {

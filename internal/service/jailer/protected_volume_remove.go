@@ -98,7 +98,8 @@ func (storage *protectedVolumeStorage) removeInitialRaw(ctx context.Context, id 
 	if err != nil {
 		return err
 	}
-	if directoryStat.deviceMajor != receipt.DirectoryDeviceMajor || directoryStat.deviceMinor != receipt.DirectoryDeviceMinor ||
+	if directoryStat.deviceMajor != receipt.DirectoryDeviceMajor ||
+		directoryStat.deviceMinor != receipt.DirectoryDeviceMinor ||
 		directoryStat.inode != receipt.DirectoryInode ||
 		directoryMount != receipt.DirectoryMountID {
 		return managedVMResourceValidationError("initial volume source directory changed during removal")
@@ -201,9 +202,17 @@ func readInitialVolumeRemovalReceipt(
 	if _, err := decoder.Token(); err != io.EOF {
 		return receipt, managedVMResourceValidationError("initial volume removal receipt has trailing content")
 	}
-	if receipt.Schema != 1 || receipt.VolumeID != id || receipt.UID != uid || receipt.Inode == 0 || receipt.MountID == 0 ||
-		receipt.DirectoryInode == 0 || receipt.DirectoryMountID == 0 || receipt.Size == 0 || receipt.Size > math.MaxInt64 ||
-		receipt.Mode&unix.S_IFMT != unix.S_IFREG || receipt.Mode&0600 != 0600 ||
+	if receipt.Schema != 1 ||
+		receipt.VolumeID != id ||
+		receipt.UID != uid ||
+		receipt.Inode == 0 ||
+		receipt.MountID == 0 ||
+		receipt.DirectoryInode == 0 ||
+		receipt.DirectoryMountID == 0 ||
+		receipt.Size == 0 ||
+		receipt.Size > math.MaxInt64 ||
+		receipt.Mode&unix.S_IFMT != unix.S_IFREG ||
+		receipt.Mode&0600 != 0600 ||
 		receipt.Mode&07133 != 0 {
 		return receipt, managedVMResourceValidationError("initial volume removal receipt is invalid")
 	}

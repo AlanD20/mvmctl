@@ -28,7 +28,11 @@ func (client *RuntimeOwnerInventoryClient) Observe(ctx context.Context) (Runtime
 		return RuntimeOwnerInventoryResult{}, runtimeStatusUnavailableError("", "runtime inventory context ended", err)
 	}
 	if client == nil {
-		return RuntimeOwnerInventoryResult{}, runtimeStatusUnavailableError("", "runtime inventory client is inactive", nil)
+		return RuntimeOwnerInventoryResult{}, runtimeStatusUnavailableError(
+			"",
+			"runtime inventory client is inactive",
+			nil,
+		)
 	}
 	var frame bytes.Buffer
 	if err := privilegedwire.EncodeRequest(ctx, &frame, RuntimeOwnerInventoryAction,

@@ -44,8 +44,10 @@ func openProtectedDirectory(ctx context.Context, parent int, name string, create
 	}
 	if stat.Uid != 0 || stat.Gid != 0 || stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Mode&07022 != 0 ||
 		(private && stat.Mode&07777 != 0700) {
-		return -1, errors.Join(managedVMResourceValidationError("protected backing directory has unsafe ownership or mode"),
-			unix.Close(fd))
+		return -1, errors.Join(
+			managedVMResourceValidationError("protected backing directory has unsafe ownership or mode"),
+			unix.Close(fd),
+		)
 	}
 	return fd, nil
 }
@@ -71,7 +73,10 @@ func openProtectedFile(ctx context.Context, directory int, name string, flags in
 	}
 	if stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 || stat.Mode&unix.S_IFMT != unix.S_IFREG ||
 		stat.Mode&07007 != 0 || stat.Mode&0600 != 0600 {
-		return -1, errors.Join(managedVMResourceValidationError("protected backing file has unsafe metadata"), unix.Close(fd))
+		return -1, errors.Join(
+			managedVMResourceValidationError("protected backing file has unsafe metadata"),
+			unix.Close(fd),
+		)
 	}
 	return fd, nil
 }

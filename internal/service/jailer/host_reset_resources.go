@@ -11,7 +11,12 @@ import (
 
 // openResetDirectory never creates a resource hierarchy. A missing child is proved
 // relative to its retained root-owned parent; other errors never mean absence.
-func (guard *HostResetGuard) openResetDirectory(ctx context.Context, parent int, name string, mode uint32) (int, error) {
+func (guard *HostResetGuard) openResetDirectory(
+	ctx context.Context,
+	parent int,
+	name string,
+	mode uint32,
+) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return -1, instanceAtomicError("open host reset resource directory", err)
 	}
@@ -30,7 +35,9 @@ func (guard *HostResetGuard) openResetDirectory(ctx context.Context, parent int,
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return -1, instanceAtomicError("inspect host reset resource directory", err)
 	}
-	if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != 0 || stat.Gid != 0 || stat.Mode&0o022 != 0 || stat.Ino == 0 || stat.Nlink == 0 {
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != 0 || stat.Gid != 0 || stat.Mode&0o022 != 0 ||
+		stat.Ino == 0 ||
+		stat.Nlink == 0 {
 		return -1, instanceAtomicError("host reset resource directory metadata is unsafe", nil)
 	}
 	if mode != 0 && stat.Mode&0o7777 != mode {
@@ -191,7 +198,14 @@ func (guard *HostResetGuard) requireNoCgroupResources(ctx context.Context) error
 		return instanceAtomicError("open reset managed cgroup parent", err)
 	}
 	guard.state.retained = append(guard.state.retained, parentFD)
-	parent, err := inspectManagedVMCgroupChild(ctx, readDeps, parentFD, "reset managed cgroup parent", managedVMCgroupParentMode, root)
+	parent, err := inspectManagedVMCgroupChild(
+		ctx,
+		readDeps,
+		parentFD,
+		"reset managed cgroup parent",
+		managedVMCgroupParentMode,
+		root,
+	)
 	if err != nil {
 		return err
 	}
@@ -228,11 +242,18 @@ func (guard *HostResetGuard) requireNoCgroupResources(ctx context.Context) error
 		return instanceAtomicError("open reset parent process membership", err)
 	}
 	guard.state.retained = append(guard.state.retained, procsFD)
-	procs, err := inspectManagedVMCgroupRegularFile(ctx, deps, procsFD, "reset parent process membership", managedVMCgroupProcsMode)
+	procs, err := inspectManagedVMCgroupRegularFile(
+		ctx,
+		deps,
+		procsFD,
+		"reset parent process membership",
+		managedVMCgroupProcsMode,
+	)
 	if err != nil {
 		return err
 	}
-	if procs.mount != parent.mount || procs.deviceMajor != parent.deviceMajor || procs.deviceMinor != parent.deviceMinor {
+	if procs.mount != parent.mount || procs.deviceMajor != parent.deviceMajor ||
+		procs.deviceMinor != parent.deviceMinor {
 		return instanceAtomicError("reset parent process membership is a substituted object", nil)
 	}
 	var one [1]byte

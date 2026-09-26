@@ -74,7 +74,11 @@ func openVolumeHotplugDirectory(ctx context.Context, parent int, name string, mo
 	return fd, nil
 }
 
-func readVolumeHotplugRecord(ctx context.Context, directory int, name string) (_ volumeHotplugRecord, _ bool, returnErr error) {
+func readVolumeHotplugRecord(
+	ctx context.Context,
+	directory int,
+	name string,
+) (_ volumeHotplugRecord, _ bool, returnErr error) {
 	fd, err := unix.Openat2(directory, name, &unix.OpenHow{
 		Flags:   unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK,
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
@@ -90,7 +94,9 @@ func readVolumeHotplugRecord(ctx context.Context, directory int, name string) (_
 	if err := unix.Fstat(fd, &before); err != nil {
 		return volumeHotplugRecord{}, false, err
 	}
-	if before.Mode != unix.S_IFREG|0600 || before.Uid != 0 || before.Gid != 0 || before.Nlink != 1 || before.Size <= 0 || before.Size > 16*1024 {
+	if before.Mode != unix.S_IFREG|0600 || before.Uid != 0 || before.Gid != 0 || before.Nlink != 1 ||
+		before.Size <= 0 ||
+		before.Size > 16*1024 {
 		return volumeHotplugRecord{}, false, instanceAtomicError("volume journal record metadata is not admitted", nil)
 	}
 	raw, err := readBoundedProcessDescriptor(ctx, fd, 16*1024)
@@ -182,7 +188,11 @@ func removeVolumeHotplugPending(ctx context.Context, directory int, name string)
 	return unix.Unlinkat(directory, name, 0)
 }
 
-func listVolumeHotplugRecords(ctx context.Context, directory int, instance instanceRecord) (_ []volumeHotplugRecord, returnErr error) {
+func listVolumeHotplugRecords(
+	ctx context.Context,
+	directory int,
+	instance instanceRecord,
+) (_ []volumeHotplugRecord, returnErr error) {
 	fd, err := unix.Openat(directory, ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
@@ -213,8 +223,10 @@ func listVolumeHotplugRecords(ctx context.Context, directory int, instance insta
 			if err != nil {
 				return nil, err
 			}
-			if !present || record.Volume.ID != id || record.VMID != instance.vmID || record.OwnerUID != instance.ownerUID ||
-				record.LaunchGeneration != instance.launchGeneration || record.BootID != instance.launch.hostBootID {
+			if !present || record.Volume.ID != id || record.VMID != instance.vmID ||
+				record.OwnerUID != instance.ownerUID ||
+				record.LaunchGeneration != instance.launchGeneration ||
+				record.BootID != instance.launch.hostBootID {
 				return nil, instanceAtomicError("volume journal differs from the retained VM generation", nil)
 			}
 			records = append(records, record)

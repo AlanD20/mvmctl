@@ -103,7 +103,8 @@ func (lease *protectedBackingLease) Grant(
 		(lease.record.Kind == protectedBackingRootfs && lease.record.ID != vmID) {
 		return managedVMResourceValidationError("protected backing grant is not an isolated VM identity")
 	}
-	if (lease.record.Kind == protectedBackingKernel || lease.record.Kind == protectedBackingCloudInit) && access != vmVolumeReadOnly {
+	if (lease.record.Kind == protectedBackingKernel || lease.record.Kind == protectedBackingCloudInit) &&
+		access != vmVolumeReadOnly {
 		return managedVMResourceValidationError("protected boot artifacts permit read-only VM access")
 	}
 	references := slices.Clone(lease.record.References)
@@ -248,7 +249,8 @@ func (lease *protectedBackingLease) finishRemoval(ctx context.Context) error {
 	err := unix.Fstatat(lease.directoryFD, "disk", &stat, unix.AT_SYMLINK_NOFOLLOW)
 	if err == nil {
 		identity := protectedBackingIdentity{Device: uint64(stat.Dev), Inode: stat.Ino, Size: stat.Size}
-		if identity != lease.record.Backing || stat.Uid != 0 || stat.Nlink != 1 || stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		if identity != lease.record.Backing || stat.Uid != 0 || stat.Nlink != 1 ||
+			stat.Mode&unix.S_IFMT != unix.S_IFREG {
 			return managedVMResourceValidationError("protected removal target identity changed")
 		}
 		if err := unix.Unlinkat(lease.directoryFD, "disk", 0); err != nil {

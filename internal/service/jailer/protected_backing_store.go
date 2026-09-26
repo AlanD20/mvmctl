@@ -25,7 +25,8 @@ func protectBackingFromSource(
 		return nil, managedVMResourceValidationError("protected backing kind is invalid")
 	}
 	readOnlyArtifact := kind == protectedBackingKernel || kind == protectedBackingCloudInit
-	if !isCanonicalManagedResourceID(id, length) || (expectedBytes == 0 && create && !readOnlyArtifact) || expectedBytes > math.MaxInt64 {
+	if !isCanonicalManagedResourceID(id, length) || (expectedBytes == 0 && create && !readOnlyArtifact) ||
+		expectedBytes > math.MaxInt64 {
 		return nil, managedVMResourceValidationError("protected backing identity or length is invalid")
 	}
 	anchorFD, retained, err := openProtectedLogical(ctx, cache.ownerUID, cache.identity, kind, id, create)
@@ -83,7 +84,9 @@ func protectBackingFromSource(
 	}
 	if !newObject {
 		if record.Version != 1 || record.Kind != kind || record.ID != id || record.Owner != cache.ownerUID ||
-			record.Cache != protectedCacheIdentity(cache.identity) || record.Phase == "removed" || record.Phase == "initial-removing" {
+			record.Cache != protectedCacheIdentity(
+				cache.identity,
+			) || record.Phase == "removed" || record.Phase == "initial-removing" {
 			return nil, managedVMResourceValidationError("protected backing record conflicts with requested identity")
 		}
 	}
@@ -147,7 +150,9 @@ func protectBackingFromSource(
 		}
 		if lease.record.SnapshotSource {
 			if snapshotFD < 0 {
-				return nil, managedVMResourceValidationError("snapshot backing import requires its original trusted source")
+				return nil, managedVMResourceValidationError(
+					"snapshot backing import requires its original trusted source",
+				)
 			}
 			if lease.record.Phase == "copied" {
 				err = lease.publishImport(ctx)
@@ -228,8 +233,10 @@ func pinProtectedStore(
 	if err != nil {
 		return -1, err
 	}
-	if anchor.Version != 1 || anchor.Owner != cache.ownerUID || anchor.Cache != protectedCacheIdentity(cache.identity) ||
-		anchor.OwnerGID == 0 || anchor.Locator == "" {
+	if anchor.Version != 1 || anchor.Owner != cache.ownerUID ||
+		anchor.Cache != protectedCacheIdentity(cache.identity) ||
+		anchor.OwnerGID == 0 ||
+		anchor.Locator == "" {
 		return -1, managedVMResourceValidationError("protected backing anchor conflicts with admitted cache")
 	}
 	store, err := openProtectedDirectory(ctx, cache.cacheFD, protectedBackingDirectory, false, true)
@@ -238,7 +245,10 @@ func pinProtectedStore(
 	}
 	identity, err := protectedIdentity(store)
 	if err != nil || !sameProtectedNode(anchor.Store, identity) {
-		return -1, errors.Join(managedVMResourceAtomicError("protected backing store identity changed", err), unix.Close(store))
+		return -1, errors.Join(
+			managedVMResourceAtomicError("protected backing store identity changed", err),
+			unix.Close(store),
+		)
 	}
 	return store, nil
 }

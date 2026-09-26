@@ -30,7 +30,10 @@ type launchChildSessionState struct {
 
 // spawnBlockedLaunchChild creates only the fixed root child. All externally mutable effects
 // remain behind the challenge/release gate consumed by registerLaunching.
-func spawnBlockedLaunchChild(ctx context.Context, vmID string) (_ *blockedLaunchProcesses, _ *launchChildSession, returnErr error) {
+func spawnBlockedLaunchChild(
+	ctx context.Context,
+	vmID string,
+) (_ *blockedLaunchProcesses, _ *launchChildSession, returnErr error) {
 	if ctx == nil || os.Geteuid() != 0 || os.Getegid() != 0 || !vmIDPattern.MatchString(vmID) {
 		return nil, nil, processAuthorityError(vmID, "invalid blocked launch child admission", nil)
 	}
@@ -86,11 +89,15 @@ func spawnBlockedLaunchChild(ctx context.Context, vmID string) (_ *blockedLaunch
 	pidfd := -1
 	// This is the fixed Jailer child spawn boundary. No user executable, argument, environment,
 	// working directory or inherited stdio enters os.StartProcess.
-	process, err := os.StartProcess(infra.SystemBinaryPath, []string{infra.SystemBinaryPath, launchChildMarker}, &os.ProcAttr{
-		Dir: "/", Env: []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"},
-		Files: []*os.File{null, null, null, gateChild, setupChild},
-		Sys:   &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWNS, Setsid: true, PidFD: &pidfd},
-	})
+	process, err := os.StartProcess(
+		infra.SystemBinaryPath,
+		[]string{infra.SystemBinaryPath, launchChildMarker},
+		&os.ProcAttr{
+			Dir: "/", Env: []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"},
+			Files: []*os.File{null, null, null, gateChild, setupChild},
+			Sys:   &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWNS, Setsid: true, PidFD: &pidfd},
+		},
+	)
 	if err != nil {
 		return nil, nil, processAuthorityError(vmID, "spawn fixed Jailer child", err)
 	}
@@ -164,7 +171,10 @@ func (session *launchChildSession) Release(ctx context.Context) error {
 }
 
 // attachBlockedLaunchConsole consumes the root-spawned relay before registration.
-func (processes *blockedLaunchProcesses) attachBlockedLaunchConsole(ctx context.Context, source *blockedLaunchProcessSource) error {
+func (processes *blockedLaunchProcesses) attachBlockedLaunchConsole(
+	ctx context.Context,
+	source *blockedLaunchProcessSource,
+) error {
 	if processes == nil || processes.state == nil || source == nil || source.pidfd < 0 || source.gate == nil {
 		return processAuthorityError("", "blocked console source is unavailable", nil)
 	}
@@ -178,12 +188,20 @@ func (processes *blockedLaunchProcesses) attachBlockedLaunchConsole(ctx context.
 	if err != nil {
 		return err
 	}
-	relay, err := admitBlockedProcess(ctx, state.deps, blockedLaunchProcessSource{pidfd: duplicate, gate: source.gate}, "relay")
+	relay, err := admitBlockedProcess(
+		ctx,
+		state.deps,
+		blockedLaunchProcessSource{pidfd: duplicate, gate: source.gate},
+		"relay",
+	)
 	if err != nil {
 		return processAuthorityError(state.vmID, "admit blocked console relay", err)
 	}
 	if relay.locator.pid == state.firecracker.locator.pid {
-		return errors.Join(processAuthorityError(state.vmID, "console relay matches Firecracker process", nil), unix.Close(duplicate))
+		return errors.Join(
+			processAuthorityError(state.vmID, "console relay matches Firecracker process", nil),
+			unix.Close(duplicate),
+		)
 	}
 	state.relay = &relay
 	err = unix.Close(source.pidfd)
@@ -198,7 +216,11 @@ func releaseUnconsumedConsoleSource(ctx context.Context, source *blockedLaunchPr
 	}
 	var result error
 	if source.pidfd >= 0 {
-		result = errors.Join(terminateProcessThroughPIDFD(ctx, source.pidfd), waitAndReapProcessThroughPIDFD(ctx, source.pidfd), unix.Close(source.pidfd))
+		result = errors.Join(
+			terminateProcessThroughPIDFD(ctx, source.pidfd),
+			waitAndReapProcessThroughPIDFD(ctx, source.pidfd),
+			unix.Close(source.pidfd),
+		)
 		source.pidfd = -1
 	}
 	if source.gate != nil {

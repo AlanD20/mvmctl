@@ -52,8 +52,14 @@ func lookupProtectedBacking(
 			return nil, false, managedVMResourceAtomicError("recorded protected store is missing", err)
 		}
 		var stat unix.Stat_t
-		if statErr := unix.Fstatat(cache.cacheFD, protectedBackingDirectory, &stat, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(statErr, unix.ENOENT) {
-			return nil, false, managedVMResourceAtomicError("unanchored protected store prevents initial-file fallback", statErr)
+		if statErr := unix.Fstatat(cache.cacheFD, protectedBackingDirectory, &stat, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(
+			statErr,
+			unix.ENOENT,
+		) {
+			return nil, false, managedVMResourceAtomicError(
+				"unanchored protected store prevents initial-file fallback",
+				statErr,
+			)
 		}
 		store = -1
 	} else if err != nil {
@@ -94,8 +100,10 @@ func lookupProtectedBacking(
 				statErr := unix.Fstatat(kindFD, id, &stat, unix.AT_SYMLINK_NOFOLLOW)
 				closeErr := unix.Close(kindFD)
 				if !errors.Is(statErr, unix.ENOENT) || closeErr != nil {
-					return nil, false, managedVMResourceAtomicError("unrecorded protected object prevents source fallback",
-						errors.Join(statErr, closeErr))
+					return nil, false, managedVMResourceAtomicError(
+						"unrecorded protected object prevents source fallback",
+						errors.Join(statErr, closeErr),
+					)
 				}
 			} else if !errors.Is(openErr, unix.ENOENT) {
 				return nil, false, openErr
@@ -127,7 +135,9 @@ func lookupProtectedBacking(
 		}, true, nil
 	}
 	if record.Phase == "copying" || record.Phase == "copied" || store < 0 {
-		return nil, true, managedVMResourceValidationError("protected import is incomplete; initial-source fallback is forbidden")
+		return nil, true, managedVMResourceValidationError(
+			"protected import is incomplete; initial-source fallback is forbidden",
+		)
 	}
 	if err := closeProtectedFDs(retained); err != nil {
 		retained = nil

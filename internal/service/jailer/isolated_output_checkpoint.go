@@ -12,7 +12,8 @@ func (lease *launchLease) grantExecutionOutputAccess(ctx context.Context) error 
 	state := lease.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.released || !state.registrationComplete || state.record.lifecycle != instanceLifecycleLaunching || state.persistentOutputs == nil {
+	if state.released || !state.registrationComplete || state.record.lifecycle != instanceLifecycleLaunching ||
+		state.persistentOutputs == nil {
 		return instanceStateError(state.record.vmID, "execution output access requires durable launching authority")
 	}
 	outputs := state.persistentOutputs.state

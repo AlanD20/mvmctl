@@ -73,7 +73,12 @@ type protectedInventoryEntry struct {
 // inventoryProtectedVMBackings reads fixed root metadata only. The lifecycle VM lock excludes
 // new grants for this VM while stop/removal runs. Other VMs may update shared objects; every
 // effect reacquires the object's lock and admits its current record before mutation.
-func inventoryProtectedVMBackings(ctx context.Context, ownerUID uint32, vmID string, executionUID uint32) (_ []protectedInventoryEntry, returnErr error) {
+func inventoryProtectedVMBackings(
+	ctx context.Context,
+	ownerUID uint32,
+	vmID string,
+	executionUID uint32,
+) (_ []protectedInventoryEntry, returnErr error) {
 	if !isCanonicalManagedResourceID(vmID, 32) {
 		return nil, managedVMResourceValidationError("protected inventory VM identity is invalid")
 	}
@@ -104,7 +109,13 @@ func inventoryProtectedVMBackings(ctx context.Context, ownerUID uint32, vmID str
 	return entries, nil
 }
 
-func inventoryProtectedVMKind(ctx context.Context, owner, logical int, ownerUID uint32, kind, vmID string, executionUID uint32) (_ []protectedInventoryEntry, returnErr error) {
+func inventoryProtectedVMKind(
+	ctx context.Context,
+	owner, logical int,
+	ownerUID uint32,
+	kind, vmID string,
+	executionUID uint32,
+) (_ []protectedInventoryEntry, returnErr error) {
 	fd, err := openProtectedDirectory(ctx, logical, kind, false, true)
 	if err != nil {
 		return nil, err
@@ -131,7 +142,8 @@ func inventoryProtectedVMKind(ctx context.Context, owner, logical int, ownerUID 
 			wanted := id == vmID && (kind == protectedBackingRootfs || kind == protectedBackingCloudInit)
 			for _, references := range [][]protectedBackingReference{entry.record.References, entry.record.NextReferences} {
 				for _, reference := range references {
-					wanted = wanted || reference.VMID == vmID || (executionUID != 0 && reference.ExecutionUID == executionUID)
+					wanted = wanted || reference.VMID == vmID ||
+						(executionUID != 0 && reference.ExecutionUID == executionUID)
 				}
 			}
 			if wanted {
@@ -147,7 +159,12 @@ func inventoryProtectedVMKind(ctx context.Context, owner, logical int, ownerUID 
 	}
 }
 
-func readProtectedInventoryEntry(ctx context.Context, owner, kindFD int, ownerUID uint32, kind, id string) (_ protectedInventoryEntry, _ bool, returnErr error) {
+func readProtectedInventoryEntry(
+	ctx context.Context,
+	owner, kindFD int,
+	ownerUID uint32,
+	kind, id string,
+) (_ protectedInventoryEntry, _ bool, returnErr error) {
 	var result protectedInventoryEntry
 	logical, err := openProtectedDirectory(ctx, kindFD, id, false, true)
 	if err != nil {
@@ -159,13 +176,18 @@ func readProtectedInventoryEntry(ctx context.Context, owner, kindFD int, ownerUI
 	if err := readProtectedRecord(ctx, logical, "logical.json", &selector); err != nil {
 		return result, false, err
 	}
-	if selector.Version != 1 || selector.Owner != ownerUID || selector.Kind != kind || selector.ID != id || selector.Cache.Inode == 0 {
+	if selector.Version != 1 || selector.Owner != ownerUID || selector.Kind != kind || selector.ID != id ||
+		selector.Cache.Inode == 0 {
 		return result, false, managedVMResourceValidationError("protected logical inventory selector conflicts")
 	}
 	if !selector.Initialized {
 		return result, false, nil
 	}
-	cache := managedCacheIdentity{deviceMajor: selector.Cache.Major, deviceMinor: selector.Cache.Minor, inode: selector.Cache.Inode}
+	cache := managedCacheIdentity{
+		deviceMajor: selector.Cache.Major,
+		deviceMinor: selector.Cache.Minor,
+		inode:       selector.Cache.Inode,
+	}
 	parent := owner
 	for _, component := range []string{protectedCacheKey(cache), kind, id} {
 		fd, err := openProtectedDirectory(ctx, parent, component, false, true)
@@ -179,8 +201,11 @@ func readProtectedInventoryEntry(ctx context.Context, owner, kindFD int, ownerUI
 		return result, false, err
 	}
 	record := result.record
-	if record.Version != 1 || record.Owner != ownerUID || record.Kind != kind || record.ID != id || record.Cache != selector.Cache {
-		return result, false, managedVMResourceValidationError("protected inventory record conflicts with logical identity")
+	if record.Version != 1 || record.Owner != ownerUID || record.Kind != kind || record.ID != id ||
+		record.Cache != selector.Cache {
+		return result, false, managedVMResourceValidationError(
+			"protected inventory record conflicts with logical identity",
+		)
 	}
 	switch record.Phase {
 	case "copying", "copied", "initial-removing", "removed", "removing":
@@ -196,8 +221,16 @@ func readProtectedInventoryEntry(ctx context.Context, owner, kindFD int, ownerUI
 	}
 	result.binding = protectedBackingBinding{
 		kind: kind, logicalID: id, ownerUID: ownerUID, cacheIdentity: cache, bytes: uint64(record.Backing.Size),
-		identity: managedVMConfigStat{deviceMajor: unix.Major(record.Backing.Device), deviceMinor: unix.Minor(record.Backing.Device),
-			inode: record.Backing.Inode, uid: 0, gid: 0, mode: unix.S_IFREG | 0600, nlink: 1, size: uint64(record.Backing.Size)},
+		identity: managedVMConfigStat{
+			deviceMajor: unix.Major(record.Backing.Device),
+			deviceMinor: unix.Minor(record.Backing.Device),
+			inode:       record.Backing.Inode,
+			uid:         0,
+			gid:         0,
+			mode:        unix.S_IFREG | 0600,
+			nlink:       1,
+			size:        uint64(record.Backing.Size),
+		},
 	}
 	return result, true, nil
 }
@@ -276,7 +309,10 @@ func removeProtectedVMBackingArtifacts(ctx context.Context, ownerUID uint32, vmI
 			return errors.Join(lookupErr, closeErr)
 		}
 		if !found {
-			return errors.Join(managedVMResourceValidationError("initialized VM backing disappeared"), lease.Release(context.WithoutCancel(ctx)))
+			return errors.Join(
+				managedVMResourceValidationError("initialized VM backing disappeared"),
+				lease.Release(context.WithoutCancel(ctx)),
+			)
 		}
 		if err := errors.Join(lease.Remove(ctx), lease.Release(context.WithoutCancel(ctx))); err != nil {
 			return err

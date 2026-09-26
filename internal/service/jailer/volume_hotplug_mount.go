@@ -20,18 +20,26 @@ func volumeHotplugMountIdentity(ctx context.Context, fd int) (unix.Statx_t, erro
 	required := uint32(unix.STATX_TYPE | unix.STATX_MODE | unix.STATX_UID | unix.STATX_GID | unix.STATX_INO |
 		unix.STATX_SIZE | unix.STATX_NLINK | unix.STATX_MNT_ID_UNIQUE)
 	if stat.Mask&required != required || stat.Mnt_id == 0 || stat.Ino == 0 {
-		return unix.Statx_t{}, instanceAtomicError("volume hotplug requires complete metadata and unique mount IDs", nil)
+		return unix.Statx_t{}, instanceAtomicError(
+			"volume hotplug requires complete metadata and unique mount IDs",
+			nil,
+		)
 	}
 	return stat, nil
 }
 
 func (record volumeHotplugRecord) matchesSource(stat unix.Statx_t) bool {
-	return stat.Dev_major == record.SourceMajor && stat.Dev_minor == record.SourceMinor && stat.Ino == record.SourceInode &&
+	return stat.Dev_major == record.SourceMajor && stat.Dev_minor == record.SourceMinor &&
+		stat.Ino == record.SourceInode &&
 		stat.Uid == record.SourceUID && stat.Gid == record.SourceGID && stat.Mode == record.SourceMode &&
-		stat.Nlink == 1 && stat.Mode&unix.S_IFMT == unix.S_IFREG && stat.Size == record.Volume.ExpectedBytes
+		stat.Nlink == 1 &&
+		stat.Mode&unix.S_IFMT == unix.S_IFREG &&
+		stat.Size == record.Volume.ExpectedBytes
 }
 
-func (transaction *volumeHotplugTransaction) inspectTarget(ctx context.Context) (_ int, _ unix.Statx_t, returnErr error) {
+func (transaction *volumeHotplugTransaction) inspectTarget(
+	ctx context.Context,
+) (_ int, _ unix.Statx_t, returnErr error) {
 	fd, err := unix.Openat2(transaction.directory, transaction.record.Volume.private().basename(), &unix.OpenHow{
 		Flags:   unix.O_PATH | unix.O_CLOEXEC | unix.O_NOFOLLOW,
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
@@ -104,7 +112,11 @@ func (transaction *volumeHotplugTransaction) attachMount(ctx context.Context) (r
 	if !record.matchesSource(source) {
 		return instanceStateError(record.VMID, "volume source changed after root descriptor admission")
 	}
-	mount, err := unix.OpenTree(transaction.source, "", uint(unix.OPEN_TREE_CLONE|unix.OPEN_TREE_CLOEXEC|unix.AT_EMPTY_PATH))
+	mount, err := unix.OpenTree(
+		transaction.source,
+		"",
+		uint(unix.OPEN_TREE_CLONE|unix.OPEN_TREE_CLOEXEC|unix.AT_EMPTY_PATH),
+	)
 	if err != nil {
 		return err
 	}
@@ -124,7 +136,13 @@ func (transaction *volumeHotplugTransaction) attachMount(ctx context.Context) (r
 	if err := transaction.write(ctx); err != nil {
 		return err
 	}
-	if err := unix.MoveMount(mount, "", target, "", unix.MOVE_MOUNT_F_EMPTY_PATH|unix.MOVE_MOUNT_T_EMPTY_PATH); err != nil {
+	if err := unix.MoveMount(
+		mount,
+		"",
+		target,
+		"",
+		unix.MOVE_MOUNT_F_EMPTY_PATH|unix.MOVE_MOUNT_T_EMPTY_PATH,
+	); err != nil {
 		return err
 	}
 	current, mounted, err := transaction.inspectTarget(ctx)
@@ -133,7 +151,10 @@ func (transaction *volumeHotplugTransaction) attachMount(ctx context.Context) (r
 	}
 	closeErr := unix.Close(current)
 	if mounted.Mnt_id != record.MountID || !record.matchesSource(mounted) {
-		return errors.Join(instanceStateError(record.VMID, "published volume mount differs from retained intent"), closeErr)
+		return errors.Join(
+			instanceStateError(record.VMID, "published volume mount differs from retained intent"),
+			closeErr,
+		)
 	}
 	return closeErr
 }

@@ -70,7 +70,8 @@ type VMVolumeResult struct {
 }
 
 func (result VMVolumeResult) Validate(vmID, volumeID string, attached bool) error {
-	if result.VMID != vmID || result.VolumeID != volumeID || result.Attached != attached || result.LaunchGeneration == 0 {
+	if result.VMID != vmID || result.VolumeID != volumeID || result.Attached != attached ||
+		result.LaunchGeneration == 0 {
 		return instanceValidationError("volume response does not match its requested VM, volume, and outcome")
 	}
 	return nil

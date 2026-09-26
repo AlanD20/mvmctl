@@ -498,14 +498,17 @@ func instanceRecordToWire(record instanceRecord) instanceRecordWire {
 
 func instanceLaunchToWire(launch instanceLaunchRecord) *instanceLaunchWire {
 	wire := &instanceLaunchWire{
-		OwnerGID:          launch.ownerGID,
-		ExecutionIdentity: instanceExecutionIdentityWire{UID: launch.executionIdentity.uid, GID: launch.executionIdentity.gid},
-		SnapshotID:        launch.snapshotID,
-		CacheLocator:      "/" + strings.Join(launch.cacheLocator.components, "/"),
-		HostBootID:        launch.hostBootID,
-		PID:               launch.process.pid,
-		StartTimeTicks:    launch.process.startTimeTicks,
-		Relay:             instanceLaunchRelayToWire(launch.relay),
+		OwnerGID: launch.ownerGID,
+		ExecutionIdentity: instanceExecutionIdentityWire{
+			UID: launch.executionIdentity.uid,
+			GID: launch.executionIdentity.gid,
+		},
+		SnapshotID:     launch.snapshotID,
+		CacheLocator:   "/" + strings.Join(launch.cacheLocator.components, "/"),
+		HostBootID:     launch.hostBootID,
+		PID:            launch.process.pid,
+		StartTimeTicks: launch.process.startTimeTicks,
+		Relay:          instanceLaunchRelayToWire(launch.relay),
 		ManagedCache: managedCacheIdentityWire{
 			DeviceMajor: launch.cacheIdentity.deviceMajor,
 			DeviceMinor: launch.cacheIdentity.deviceMinor,
@@ -523,9 +526,17 @@ func instanceLaunchToWire(launch instanceLaunchRecord) *instanceLaunchWire {
 		},
 	}
 	if launch.outputIdentity != nil {
-		wire.OutputIdentity = &instanceOutputIdentitiesWire{Log: instanceObjectIdentityWire{Device: launch.outputIdentity.log.device, Inode: launch.outputIdentity.log.inode}}
+		wire.OutputIdentity = &instanceOutputIdentitiesWire{
+			Log: instanceObjectIdentityWire{
+				Device: launch.outputIdentity.log.device,
+				Inode:  launch.outputIdentity.log.inode,
+			},
+		}
 		if launch.outputIdentity.metrics != nil {
-			wire.OutputIdentity.Metrics = &instanceObjectIdentityWire{Device: launch.outputIdentity.metrics.device, Inode: launch.outputIdentity.metrics.inode}
+			wire.OutputIdentity.Metrics = &instanceObjectIdentityWire{
+				Device: launch.outputIdentity.metrics.device,
+				Inode:  launch.outputIdentity.metrics.inode,
+			}
 		}
 	}
 	return wire
@@ -651,9 +662,14 @@ func instanceLaunchFromWire(wire instanceLaunchWire) (instanceLaunchRecord, erro
 		},
 	}
 	if wire.OutputIdentity != nil {
-		launch.outputIdentity = &instanceOutputIdentities{log: instanceObjectIdentity{device: wire.OutputIdentity.Log.Device, inode: wire.OutputIdentity.Log.Inode}}
+		launch.outputIdentity = &instanceOutputIdentities{
+			log: instanceObjectIdentity{device: wire.OutputIdentity.Log.Device, inode: wire.OutputIdentity.Log.Inode},
+		}
 		if wire.OutputIdentity.Metrics != nil {
-			launch.outputIdentity.metrics = &instanceObjectIdentity{device: wire.OutputIdentity.Metrics.Device, inode: wire.OutputIdentity.Metrics.Inode}
+			launch.outputIdentity.metrics = &instanceObjectIdentity{
+				device: wire.OutputIdentity.Metrics.Device,
+				inode:  wire.OutputIdentity.Metrics.Inode,
+			}
 		}
 	}
 	return launch, nil

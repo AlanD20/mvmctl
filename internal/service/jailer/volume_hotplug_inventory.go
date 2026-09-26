@@ -160,7 +160,10 @@ func mergeVolumeHotplugDeviceAuthority(
 				Inode: record.SourceInode, UID: record.SourceUID, GID: record.SourceGID, Mode: record.SourceMode,
 			}
 		default:
-			return vmLaunchDeviceAuthority{}, instanceStateError(instance.vmID, "volume inventory has an incomplete hotplug transition")
+			return vmLaunchDeviceAuthority{}, instanceStateError(
+				instance.vmID,
+				"volume inventory has an incomplete hotplug transition",
+			)
 		}
 	}
 	ids := make([]string, 0, len(byID))

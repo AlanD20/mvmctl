@@ -37,7 +37,12 @@ func (lease *launchLease) awaitCopiedLaunchExecutable(ctx context.Context) error
 		if err := requireExactPIDFDLocator(ctx, deps, processes.firecracker.pidfd, state.record.launch.process, state.record.vmID, "Firecracker"); err != nil {
 			return err
 		}
-		ready, err := copiedLaunchExecutableReady(ctx, prepared, state.record.launch.executionIdentity.gid, state.record.launch.executionIdentity.uid)
+		ready, err := copiedLaunchExecutableReady(
+			ctx,
+			prepared,
+			state.record.launch.executionIdentity.gid,
+			state.record.launch.executionIdentity.uid,
+		)
 		if err != nil {
 			return err
 		}
@@ -51,12 +56,21 @@ func (lease *launchLease) awaitCopiedLaunchExecutable(ctx context.Context) error
 	return processVerificationError(state.record.vmID, "Jailer copied executable readiness deadline exceeded", nil)
 }
 
-func copiedLaunchExecutableReady(ctx context.Context, state *preparedJailDestinationState, gid, uid uint32) (ready bool, returnErr error) {
+func copiedLaunchExecutableReady(
+	ctx context.Context,
+	state *preparedJailDestinationState,
+	gid, uid uint32,
+) (ready bool, returnErr error) {
 	parent := state.parent.fd
 	opened := make([]int, 0, 3)
 	defer func() {
 		for i := len(opened) - 1; i >= 0; i-- {
-			returnErr = appendJailDestinationCleanupError(returnErr, "close copied executable readiness descriptor", state.deps.close(context.WithoutCancel(ctx), opened[i]), state.vmID)
+			returnErr = appendJailDestinationCleanupError(
+				returnErr,
+				"close copied executable readiness descriptor",
+				state.deps.close(context.WithoutCancel(ctx), opened[i]),
+				state.vmID,
+			)
 		}
 	}()
 	for _, leaf := range []string{state.vmID, "root", "firecracker"} {

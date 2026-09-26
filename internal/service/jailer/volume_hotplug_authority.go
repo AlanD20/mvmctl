@@ -28,7 +28,11 @@ func (authority *instanceAuthority) lockVolumeHotplug(
 	result := &volumeHotplugAuthority{locked: locked, pidfd: -1, root: -1, namespace: -1}
 	defer func() {
 		if returnErr != nil {
-			returnErr = appendInstanceOperationError(returnErr, "release rejected hotplug authority", result.release(ctx))
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"release rejected hotplug authority",
+				result.release(ctx),
+			)
 		}
 	}()
 	record := locked.record
@@ -99,7 +103,11 @@ func (authority *volumeHotplugAuthority) verify(ctx context.Context) error {
 		return err
 	}
 	if namespace != record.active.mountNamespace || root != record.active.jailRoot {
-		return processVerificationError(record.vmID, "volume hotplug namespace or root differs from active authority", nil)
+		return processVerificationError(
+			record.vmID,
+			"volume hotplug namespace or root differs from active authority",
+			nil,
+		)
 	}
 	return nil
 }

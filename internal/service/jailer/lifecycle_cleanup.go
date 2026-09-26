@@ -34,7 +34,8 @@ func (lease *cleanupLease) removeLifecycleJailTree(ctx context.Context) error {
 	if state.preparedJailDestination != nil {
 		prepared := state.preparedJailDestination.state
 		prepared.mu.Lock()
-		removeTree = prepared.status == preparedJailDestinationHandoff || prepared.status == preparedJailDestinationTransferred
+		removeTree = prepared.status == preparedJailDestinationHandoff ||
+			prepared.status == preparedJailDestinationTransferred
 		prepared.mu.Unlock()
 	}
 	if removeTree {

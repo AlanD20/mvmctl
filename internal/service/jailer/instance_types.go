@@ -399,7 +399,8 @@ func validateInstanceLaunchRecord(launch instanceLaunchRecord) error {
 		if launch.outputIdentity.log.device == 0 || launch.outputIdentity.log.inode == 0 {
 			return fmt.Errorf("instance log identity is invalid")
 		}
-		if launch.outputIdentity.metrics != nil && (launch.outputIdentity.metrics.device == 0 || launch.outputIdentity.metrics.inode == 0) {
+		if launch.outputIdentity.metrics != nil &&
+			(launch.outputIdentity.metrics.device == 0 || launch.outputIdentity.metrics.inode == 0) {
 			return fmt.Errorf("instance metrics identity is invalid")
 		}
 	}

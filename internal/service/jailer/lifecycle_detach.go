@@ -56,7 +56,11 @@ func (lease *activeLease) detachCommittedLaunch(ctx context.Context) error {
 		state.persistentOutputs = nil
 	}
 	if state.privateRuntimeDirectory != nil {
-		state.releaseErr = appendInstanceOperationError(state.releaseErr, "detach private VMM runtime", state.privateRuntimeDirectory.detachCommittedLaunch(cleanupCtx, state.record))
+		state.releaseErr = appendInstanceOperationError(
+			state.releaseErr,
+			"detach private VMM runtime",
+			state.privateRuntimeDirectory.detachCommittedLaunch(cleanupCtx, state.record),
+		)
 		state.privateRuntimeDirectory.state.mu.Lock()
 		released := state.privateRuntimeDirectory.state.released
 		state.privateRuntimeDirectory.state.mu.Unlock()
@@ -143,7 +147,8 @@ func (lease *managedVMRuntimeLease) detachCommittedLaunch(ctx context.Context, r
 	if state.private {
 		expected = instanceCaller{uid: record.launch.executionIdentity.uid, gid: record.launch.executionIdentity.gid}
 	}
-	if state.vmID != record.vmID || state.caller != expected || state.removed || !state.leafCreated || state.parentSyncPending {
+	if state.vmID != record.vmID || state.caller != expected || state.removed || !state.leafCreated ||
+		state.parentSyncPending {
 		return instanceStateError(record.vmID, "active runtime authority cannot detach")
 	}
 	state.releaseErr = closeManagedVMRuntimeFDs(ctx, state.deps, state.retained)

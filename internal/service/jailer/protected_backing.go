@@ -110,11 +110,17 @@ func (cache *managedCacheLease) protectVMVolume(
 	return protectBacking(ctx, cache, protectedBackingVolume, string(spec.id), spec.expectedBytes, true)
 }
 
-func (cache *managedCacheLease) protectVMKernel(ctx context.Context, kernelID kernelResourceID) (*protectedBackingLease, error) {
+func (cache *managedCacheLease) protectVMKernel(
+	ctx context.Context,
+	kernelID kernelResourceID,
+) (*protectedBackingLease, error) {
 	return protectBacking(ctx, cache, protectedBackingKernel, string(kernelID), 0, true)
 }
 
-func (cache *managedCacheLease) protectVMCloudInit(ctx context.Context, vmID vmResourceID) (*protectedBackingLease, error) {
+func (cache *managedCacheLease) protectVMCloudInit(
+	ctx context.Context,
+	vmID vmResourceID,
+) (*protectedBackingLease, error) {
 	return protectBacking(ctx, cache, protectedBackingCloudInit, string(vmID), 0, true)
 }
 
@@ -220,7 +226,10 @@ func (lease *protectedBackingLease) Release(ctx context.Context) error {
 
 // reopenProtectedBacking accepts only the binding retained in root's lifecycle record. It never
 // imports an operator file and never initializes a missing store or object.
-func reopenProtectedBacking(ctx context.Context, binding protectedBackingBinding) (_ *protectedBackingLease, returnErr error) {
+func reopenProtectedBacking(
+	ctx context.Context,
+	binding protectedBackingBinding,
+) (_ *protectedBackingLease, returnErr error) {
 	if binding.ownerUID == 0 || binding.bytes == 0 || binding.bytes > math.MaxInt64 {
 		return nil, managedVMResourceValidationError("protected backing binding is incomplete")
 	}
@@ -253,10 +262,14 @@ func reopenProtectedBacking(ctx context.Context, binding protectedBackingBinding
 	if err != nil {
 		return nil, err
 	}
-	if lease.identity.deviceMajor != binding.identity.deviceMajor || lease.identity.deviceMinor != binding.identity.deviceMinor ||
-		lease.identity.inode != binding.identity.inode || lease.identity.size != binding.bytes {
-		return nil, errors.Join(managedVMResourceValidationError("protected backing inode differs from lifecycle authority"),
-			lease.Release(context.WithoutCancel(ctx)))
+	if lease.identity.deviceMajor != binding.identity.deviceMajor ||
+		lease.identity.deviceMinor != binding.identity.deviceMinor ||
+		lease.identity.inode != binding.identity.inode ||
+		lease.identity.size != binding.bytes {
+		return nil, errors.Join(
+			managedVMResourceValidationError("protected backing inode differs from lifecycle authority"),
+			lease.Release(context.WithoutCancel(ctx)),
+		)
 	}
 	return lease, nil
 }

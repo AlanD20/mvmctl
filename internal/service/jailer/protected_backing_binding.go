@@ -41,8 +41,23 @@ func (binding protectedBackingBinding) MarshalJSON() ([]byte, error) {
 	cache, stat := binding.cacheIdentity, binding.identity
 	return json.Marshal(protectedBindingWire{
 		Kind: binding.kind, LogicalID: binding.logicalID, OwnerUID: binding.ownerUID, Bytes: binding.bytes,
-		Cache:    protectedBindingCacheWire{cache.deviceMajor, cache.deviceMinor, cache.inode, cache.mountID, cache.mountIDKind},
-		Identity: protectedBindingStatWire{stat.deviceMajor, stat.deviceMinor, stat.inode, stat.uid, stat.gid, stat.mode, stat.nlink, stat.size},
+		Cache: protectedBindingCacheWire{
+			cache.deviceMajor,
+			cache.deviceMinor,
+			cache.inode,
+			cache.mountID,
+			cache.mountIDKind,
+		},
+		Identity: protectedBindingStatWire{
+			stat.deviceMajor,
+			stat.deviceMinor,
+			stat.inode,
+			stat.uid,
+			stat.gid,
+			stat.mode,
+			stat.nlink,
+			stat.size,
+		},
 	})
 }
 
@@ -67,11 +82,14 @@ func (binding *protectedBackingBinding) UnmarshalJSON(data []byte) error {
 	if err != nil || json.Compact(&compact, data) != nil || !bytes.Equal(canonical, compact.Bytes()) {
 		return managedVMResourceValidationError("protected backing binding is not canonical")
 	}
-	if protectedKindIDLength(wire.Kind) == 0 || !isCanonicalManagedResourceID(wire.LogicalID, protectedKindIDLength(wire.Kind)) ||
+	if protectedKindIDLength(wire.Kind) == 0 ||
+		!isCanonicalManagedResourceID(wire.LogicalID, protectedKindIDLength(wire.Kind)) ||
 		wire.OwnerUID == 0 || wire.OwnerUID == math.MaxUint32 || wire.Cache.Inode == 0 || wire.Identity.Inode == 0 ||
 		wire.Identity.UID != 0 || wire.Identity.GID != 0 || wire.Identity.Nlink != 1 ||
 		wire.Identity.Mode&unix.S_IFMT != unix.S_IFREG || wire.Identity.Mode&07007 != 0 ||
-		wire.Bytes == 0 || wire.Bytes > math.MaxInt64 || wire.Identity.Size != wire.Bytes {
+		wire.Bytes == 0 ||
+		wire.Bytes > math.MaxInt64 ||
+		wire.Identity.Size != wire.Bytes {
 		return managedVMResourceValidationError("protected backing binding identity is invalid")
 	}
 	*binding = protectedBackingBinding{

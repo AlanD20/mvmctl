@@ -30,7 +30,11 @@ func (authority *instanceAuthority) beginLifecycleCleanup(
 	}
 	defer func() {
 		if locked != nil {
-			returnErr = appendInstanceOperationError(returnErr, "release lifecycle recovery authority", locked.Release(ctx))
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"release lifecycle recovery authority",
+				locked.Release(ctx),
+			)
 		}
 	}()
 	if locked.record.lifecycle == instanceLifecycleCleaned {
@@ -149,15 +153,26 @@ func (admission *lifecycleRecoveryAdmission) admit(
 		return processes, managed, processVerificationError(record.vmID, "read lifecycle recovery host boot ID", err)
 	}
 	if admission.hostBootID != "" && admission.hostBootID != bootID {
-		return processes, managed, processVerificationError(record.vmID, "host boot changed during lifecycle recovery", nil)
+		return processes, managed, processVerificationError(
+			record.vmID,
+			"host boot changed during lifecycle recovery",
+			nil,
+		)
 	}
 	admission.hostBootID = bootID
 	if bootID != record.launch.hostBootID {
 		// A prior-boot PID is never opened, even to check whether it exists.
 		if processes != nil || managed != nil {
-			return processes, managed, instanceStateError(record.vmID, "prior-boot cleanup retained current process authority")
+			return processes, managed, instanceStateError(
+				record.vmID,
+				"prior-boot cleanup retained current process authority",
+			)
 		}
-		err = requireFreshRecoveryManagedVMCgroupAbsent(ctx, managedVMCgroupReadDepsFrom(admission.cgroupDeps), record.vmID)
+		err = requireFreshRecoveryManagedVMCgroupAbsent(
+			ctx,
+			managedVMCgroupReadDepsFrom(admission.cgroupDeps),
+			record.vmID,
+		)
 		if err == nil {
 			err = admission.recheckBoot(ctx, record.vmID)
 		}

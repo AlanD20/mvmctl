@@ -16,8 +16,15 @@ type isolatedLaunchBackings struct {
 
 // prepareIsolatedLaunchBackings runs under the VM lock after durable registration.
 // Object locks are acquired by logical identity, never caller guest-drive order.
-func prepareIsolatedLaunchBackings(ctx context.Context, cache *managedCacheLease, spec vmLaunchResourceSpec, record instanceRecord) (_ *isolatedLaunchBackings, returnErr error) {
-	if record.launch == nil || record.lifecycle != instanceLifecycleLaunching || record.vmID != string(spec.vmID) || record.ownerUID != cache.ownerUID || record.launch.cacheIdentity != cache.identity {
+func prepareIsolatedLaunchBackings(
+	ctx context.Context,
+	cache *managedCacheLease,
+	spec vmLaunchResourceSpec,
+	record instanceRecord,
+) (_ *isolatedLaunchBackings, returnErr error) {
+	if record.launch == nil || record.lifecycle != instanceLifecycleLaunching || record.vmID != string(spec.vmID) ||
+		record.ownerUID != cache.ownerUID ||
+		record.launch.cacheIdentity != cache.identity {
 		return nil, instanceStateError(record.vmID, "protected backing launch binding is inconsistent")
 	}
 	result := &isolatedLaunchBackings{volumes: make(map[vmVolumeResourceID]*protectedBackingLease)}

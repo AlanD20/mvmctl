@@ -27,7 +27,12 @@ func (authority *volumeHotplugAuthority) volumeHotplugAPI(
 	if err := authority.verify(ctx); err != nil {
 		return nil, err
 	}
-	path := fmt.Sprintf("/proc/self/fd/%d%s/%s", authority.root, managedVMPrivateRuntimeMountPath, infra.VMFirecrackerAPISocketFilename)
+	path := fmt.Sprintf(
+		"/proc/self/fd/%d%s/%s",
+		authority.root,
+		managedVMPrivateRuntimeMountPath,
+		infra.VMFirecrackerAPISocketFilename,
+	)
 	connection, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "unix", path)
 	if err != nil {
 		return nil, err
@@ -86,7 +91,10 @@ func (authority *volumeHotplugAuthority) volumeHotplugAPI(
 	return payload, nil
 }
 
-func (authority *volumeHotplugAuthority) observeVolumeDrive(ctx context.Context, id string) (*model.DriveConfig, error) {
+func (authority *volumeHotplugAuthority) observeVolumeDrive(
+	ctx context.Context,
+	id string,
+) (*model.DriveConfig, error) {
 	raw, err := authority.volumeHotplugAPI(ctx, http.MethodGet, "/vm/config", nil)
 	if err != nil {
 		return nil, err
@@ -101,7 +109,10 @@ func (authority *volumeHotplugAuthority) observeVolumeDrive(ctx context.Context,
 	for index := range config.Drives {
 		if config.Drives[index].DriveID == id {
 			if found != nil {
-				return nil, instanceStateError(authority.locked.record.vmID, "volume API inventory contains duplicate drive IDs")
+				return nil, instanceStateError(
+					authority.locked.record.vmID,
+					"volume API inventory contains duplicate drive IDs",
+				)
 			}
 			found = &config.Drives[index]
 		}
@@ -110,6 +121,13 @@ func (authority *volumeHotplugAuthority) observeVolumeDrive(ctx context.Context,
 }
 
 func volumeHotplugUnknown(vmID string, cause error) error {
-	return errs.WrapMsg(errs.CodeVMStateInvalid, "volume effect outcome is unknown; retry the same operation", cause,
-		errs.WithEntity(vmID), errs.WithDetails(map[string]any{"outcome_unknown": true, "volume_cleanup_pending": true}))
+	return errs.WrapMsg(
+		errs.CodeVMStateInvalid,
+		"volume effect outcome is unknown; retry the same operation",
+		cause,
+		errs.WithEntity(
+			vmID,
+		),
+		errs.WithDetails(map[string]any{"outcome_unknown": true, "volume_cleanup_pending": true}),
+	)
 }

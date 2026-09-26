@@ -48,7 +48,14 @@ func openProtectedImportSource(
 		}
 	}()
 	for _, component := range components[:len(components)-1] {
-		fd, err := openManagedVMResourceDirectory(ctx, cache.deps, parent, component, "initial backing source", cache.ownerUID)
+		fd, err := openManagedVMResourceDirectory(
+			ctx,
+			cache.deps,
+			parent,
+			component,
+			"initial backing source",
+			cache.ownerUID,
+		)
 		if err != nil {
 			return -1, nil, err
 		}
@@ -72,7 +79,11 @@ func openProtectedImportSource(
 	return fd, append(retained, fd), nil
 }
 
-func (lease *protectedBackingLease) copyAndPublish(ctx context.Context, source int, expectedBytes uint64) (returnErr error) {
+func (lease *protectedBackingLease) copyAndPublish(
+	ctx context.Context,
+	source int,
+	expectedBytes uint64,
+) (returnErr error) {
 	var before unix.Stat_t
 	if err := unix.Fstat(source, &before); err != nil || before.Size != int64(expectedBytes) ||
 		before.Mode&unix.S_IFMT != unix.S_IFREG || before.Nlink != 1 {
@@ -207,7 +218,10 @@ func copyProtectedBytes(ctx context.Context, source, target int, size int64) err
 		for written := 0; written < n; {
 			count, err := unix.Pwrite(target, buffer[written:n], offset+int64(written))
 			if err != nil || count == 0 {
-				return managedVMResourceAtomicError("write independent protected backing", errors.Join(err, io.ErrNoProgress))
+				return managedVMResourceAtomicError(
+					"write independent protected backing",
+					errors.Join(err, io.ErrNoProgress),
+				)
 			}
 			written += count
 		}
