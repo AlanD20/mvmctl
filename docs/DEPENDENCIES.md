@@ -5,7 +5,7 @@ All external binary and system-level dependencies required for mvmctl to functio
 ## Table of Contents
 
 - [A. Required (Every Install)](#a-required-every-install)
-- [B. Firewall Backend (Choose One)](#b-firewall-backend-choose-one)
+- [B. Firewall Kernel Support](#b-firewall-kernel-support)
 - [C. Image & Storage](#c-image-storage)
 - [D. Cloud-Init](#d-cloud-init)
 - [E. Image Provisioning Backend (Choose One)](#e-image-provisioning-backend-choose-one)
@@ -21,7 +21,7 @@ All external binary and system-level dependencies required for mvmctl to functio
 
 ## A. Required (Every Install)
 
-These binaries must be present on the host for basic mvmctl operation. The `mvm init` wizard checks for them automatically.
+These binaries support administrator setup and selected VM workflows; not every ordinary command invokes every tool.
 
 | Binary | Purpose | Debian/Ubuntu | Arch |
 |--------|---------|---------------|------|
@@ -30,33 +30,23 @@ These binaries must be present on the host for basic mvmctl operation. The `mvm 
 | `usermod` | Adding users to the `mvm` group | `passwd` | `shadow` |
 | `groupdel` | Removing the `mvm` group on `mvm host reset` | `passwd` | `shadow` |
 | `visudo` | Validating sudoers drop-in files | `sudo` | `sudo` |
-| `ip` | Bridge and TAP interface management | `iproute2` | `iproute2` |
 | `modprobe` | Loading KVM and networking kernel modules | `kmod` | `kmod` |
 | `lsmod` | Checking KVM module status | `kmod` | `kmod` |
 | `sysctl` | Enabling IP forwarding | `procps` | `procps-ng` |
 | `ssh-keygen` | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
 | `tar` | Extracting rootfs from tarballs | `tar` | `tar` |
-| `iptables` or `nft` | Firewall rule management | `iptables` or `nftables` | `iptables` or `nftables` |
 
 **Go toolchain:** The `mvm` binary is a single compiled Go binary. No runtime dependencies beyond the system packages listed.
 
 ---
 
-## B. Firewall Backend (Choose One)
+## B. Firewall Kernel Support
 
-mvmctl supports two firewall backends for NAT and forwarding rules. **nftables is the default** (`settings.firewall_backend: "nftables"`). Only one backend needs to be installed.
-
-| Backend | Binary | Debian/Ubuntu | Arch |
-|---------|--------|---------------|------|
-| **nftables** (default) | `nft` | `nftables` | `nftables` |
-| **iptables** | `iptables` | `iptables` | `iptables` |
-
-**Switch backends:**
-```bash
-mvm config set settings firewall_backend nftables   # default
-mvm config set settings firewall_backend iptables
-mvm network sync                                    # reload rules
-```
+v0.3.0 has one typed nftables implementation using the kernel netlink API. The `nft` and `iptables` command-line
+packages are not firewall runtime dependencies, and the old selectable backend setting is retired. Managed networks
+need kernel support for the required `inet` and `bridge` nftables families, connection tracking, and NAT expressions.
+Host readiness probes the actual kernel behavior in a disposable network namespace and fails closed when unavailable;
+installing an `nft` CLI alone cannot supply missing kernel support.
 
 ---
 
@@ -129,7 +119,7 @@ mvm config set settings guestfs_enabled true
 | RHEL/Fedora | `sudo dnf install libguestfs libguestfs-tools supermin` |
 | Arch | `sudo pacman -S libguestfs supermin` |
 
-The codebase uses the `guestfish` CLI tool as a subprocess — no cgo or Go bindings required. `mvm init` checks for the `guestfish` binary and configures the sudoers entry for it automatically.
+The optional backend uses the `guestfish` CLI tool as a subprocess; it is not a separate sudoers grant.
 
 ---
 
@@ -193,12 +183,12 @@ Firecracker/Jailer pair. Users do not invoke an installation service directly; s
 | Command | External Binaries Invoked |
 |---------|--------------------------|
 | `mvm host install-system` | No external command; exact early root bootstrap uses descriptor-relative filesystem operations |
-| `mvm host init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `lsmod`, `iptables`/`nft`, `modprobe` |
-| `mvm host clean` | `sudo`, `ip`, `iptables`/`nft` |
+| `mvm host init` | `sudo` for sudo-invoker mode, plus administrator tools such as `groupadd`, `usermod`, `visudo`, `sysctl`, `lsmod`, `modprobe` |
+| `mvm host clean` | Typed privileged actions; no `ip`, `iptables`, or `nft` firewall subprocess |
 | `mvm host reset` | `sudo`, `groupdel`, `sysctl` |
-| `mvm network create` | `ip`, `iptables`/`nft` |
-| `mvm network rm` / `sync` | `ip`, `iptables`/`nft` |
-| `mvm policy create/rm/sync` | `iptables`/`nft` |
+| `mvm network create` | Typed root netlink and nftables-kernel operations; no `ip`, `iptables`, or `nft` CLI |
+| `mvm network rm` / `sync` | Typed root netlink and nftables-kernel operations; no firewall CLI |
+| `mvm policy traffic/exec` | Typed root policy actions; no firewall CLI |
 | `mvm image pull` | `qemu-img` (may trigger conversion), `fakeroot` (tar-rootfs) |
 | `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `fakeroot` (tar-rootfs), `truncate`, `mkfs.ext4`, `unsquashfs`, `dumpe2fs`, `du`, `dd` |
 | `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
@@ -207,10 +197,10 @@ Firecracker/Jailer pair. Users do not invoke an installation service directly; s
 | `mvm key import/ls/rm/inspect/export/default` | Internal only |
 | `mvm bin pull/rm` | Typed privileged release actions; no public service subcommand |
 | `mvm bin ls/default` | Internal architecture-scoped SQLite display projection only |
-| `mvm vm create` | trusted `jailer` + `firecracker`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
-| `mvm vm start/stop/reboot/pause/resume` | trusted `jailer` + `firecracker`, `ip`, `iptables`/`nft` |
-| `mvm vm rm` | `mvm run jailer cleanup`, `ip`, `iptables`/`nft` |
-| `mvm snapshot create/restore` | Internal (Firecracker API via Unix socket) |
+| `mvm vm create` | Trusted `jailer` + `firecracker`; provisioning may use `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
+| `mvm vm start/stop/reboot/pause/resume` | Trusted `jailer` + `firecracker`; protected API access is root-brokered |
+| `mvm vm rm` | Typed privileged VM cleanup, with no standalone Jailer cleanup command |
+| `mvm snapshot create/restore` | Typed root snapshot actions and root-brokered Firecracker API access |
 | `mvm volume attach/detach` | `firecracker` |
 | `mvm volume create/rm/resize` | `qemu-img` |
 | `mvm volume ls/inspect` | Internal only |
@@ -220,4 +210,3 @@ Firecracker/Jailer pair. Users do not invoke an installation service directly; s
 | `mvm logs` | Internal (file read) |
 | `mvm console` | Internal (Unix socket PTY relay) |
 | `mvm ssh` | User's SSH client (`ssh` binary) |
-| `mvm init` | `sudo`, `groupadd`, `usermod`, `visudo` |

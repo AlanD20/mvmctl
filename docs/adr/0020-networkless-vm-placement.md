@@ -85,7 +85,8 @@ The strict schema-5 instance codec rejects older-schema records, including clean
 root path now carries a typed networkless namespace lease through Jailer launch, activation, cleanup, and same-/prior-
 boot recovery. Placement is sealed in the protected device and instance records; the managed topology journal and
 lock order are unchanged. Snapshot capture currently rejects networkless placement before effects; consistent capture
-and restore remain pending. Public create and relaunch are source-wired but not installed-candidate runtime-qualified.
+and restore remain pending. Public create and relaunch are source-wired; a focused installed-candidate
+create/stop/start/host-to-guest-vsock-exec smoke passed inside the named disposable runner.
 Preserve current networked behavior until both branches have complete lifecycle ownership.
 
 Go tests should prove closed input combinations, exact wire-shape rejection, no-NIC Firecracker config, placement
@@ -94,4 +95,5 @@ namespace isolation, absent IP/TAP/host exposure, host-to-VM vsock exec, same-/c
 exec authorization, stop/start/reboot/recovery, and snapshot restore. The runner kernel's missing bridge-family
 nftables capability still blocks networked comparisons; a passing isolated networkless case alone cannot qualify the
 whole placement and policy matrix. Focused Go config, persistence, input, namespace, and Jailer package tests passed
-in the named runner; they do not prove an installed-candidate networkless VM runtime pass or release qualification.
+in the named runner. The focused installed-candidate networkless lifecycle smoke does not establish full Python
+system qualification, networked comparison, VM-to-VM authorization, snapshot restore, or release readiness.

@@ -13,7 +13,7 @@ Think "Docker for VMs" — one command to create, start, and connect.
 - ⚡ **Fast boot times** — VMs boot in 2-4 seconds (loop-mount) or 9-14 seconds (guestfs), so you iterate at container speed with VM-grade isolation
 - 🔥 **Powered by Firecracker** — AWS's battle-tested microVM technology, the engine behind Lambda and Fargate
 - 🛡️ **Secure by default** — hardware-level isolation with KVM
-- 📦 **Single binary** — one statically-linked Go binary with no language runtime dependencies. Calls standard Linux utilities (ip, sudo, iptables/nftables, losetup, mount)
+- 📦 **Single installed binary** — the root-owned `mvm` executable serves both the unprivileged CLI and its narrowly typed privileged operations; host packages are still needed for VM setup and provisioning
 - 🖼️ **Image support** — ready-to-use images for Ubuntu, Debian, Arch, Alpine, and more. Import your own base images
 - 💾 **Volumes & persistence** — create, attach, resize, and detach persistent data disks that survive VM lifecycles
 - ⚙️ **Custom kernels** — download pre-built Firecracker kernels or build official kernels with custom features (KVM, nftables)
@@ -51,11 +51,11 @@ Think "Docker for VMs" — one command to create, start, and connect.
 
   Ubuntu/Debian:
   ```bash
-  sudo apt-get install -y iproute2 iptables nftables qemu-utils e2fsprogs util-linux procps kmod openssh-client tar sudo passwd fakeroot
+  sudo apt-get install -y iproute2 qemu-utils e2fsprogs util-linux procps kmod openssh-client tar sudo passwd fakeroot
   ```
   Arch Linux:
   ```bash
-  sudo pacman -S --needed iproute2 iptables nftables qemu-img e2fsprogs util-linux procps-ng kmod openssh tar sudo shadow fakeroot
+  sudo pacman -S --needed iproute2 qemu-img e2fsprogs util-linux procps-ng kmod openssh tar sudo shadow fakeroot
   ```
   Optional (for ISO cloud-init mode only): `cloud-image-utils` (Ubuntu/Debian) or `cloud-utils` (Arch)
 - **Root access (one-time):** install the trusted artifact at `/usr/local/bin/mvm`, then run `host init`; normal commands run without `sudo` after setup
@@ -98,8 +98,8 @@ See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference 
 ## Quick Start
 
 ```bash
-# 1. One-time system setup (interactive, handles sudo)
-mvm init
+# 1. One-time system setup after installing the root-owned binary
+sudo /usr/local/bin/mvm host init
 
 # 2. Log out and back in, then download a kernel and image
 mvm kernel pull --type firecracker --default
@@ -119,6 +119,7 @@ That's it. When you're done: `mvm vm rm myvm`.
 | Task | Command | Learn more |
 |------|---------|-----------|
 | Create a VM | `mvm vm create myvm --image ubuntu:24.04` | [REFERENCES.md](docs/REFERENCES.md#mvm-vm) |
+| Create without an IP network | `mvm vm create offline-worker --no-network` | [REFERENCES.md](docs/REFERENCES.md#mvm-vm) |
 | Run a command inside a VM | `mvm exec myvm -- ls -la` | [REFERENCES.md](docs/REFERENCES.md#mvm-exec) |
 | Copy files to/from a VM | `mvm cp ./file.txt myvm:/root/` | [REFERENCES.md](docs/REFERENCES.md#mvm-cp) |
 | SSH into a VM | `mvm ssh myvm` | [REFERENCES.md](docs/REFERENCES.md#mvm-ssh) |
@@ -152,7 +153,7 @@ That's it. When you're done: `mvm vm rm myvm`.
 |-------|----------|
 | **Permission denied: /dev/kvm** | Missing: `sudo modprobe kvm && sudo modprobe kvm_intel` (or `kvm_amd`). Unreadable: `sudo usermod -aG kvm $USER`, log out/back in |
 | **VM won't boot / SSH times out** | Cloud-init takes 30-60s. Watch with `mvm logs myvm --follow` |
-| **nocloud-net server failed** | Port range exhausted. Check: `sudo ss -tlnp \| grep -E ':(8[0-9]{3}\|9[0-9]{3})'` |
+| **nocloud-net server failed** | NoCloud uses fixed TCP port `8000` on the managed network gateway; check that listener and the network's service grant. |
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the full guide.
 

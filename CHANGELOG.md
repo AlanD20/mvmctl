@@ -43,6 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added explicit `vm create --no-network` with a root-owned loopback-only per-VM namespace and no fabricated
+  network/endpoint identity. A candidate installed only inside the disposable `mvmctl-030-test` runner passed
+  create, stop, start, and host-to-guest vsock exec; networkless snapshot and full Python system QA remain pending.
+- Completed the isolated Jailer startup handoff with root-prepared detached resource mounts, a private read-only
+  sealed-configuration mount, exact pre/post-seal ownership checks, and read-only API readiness through the typed
+  root broker. A Jailer root-ownership race found on repeated creation has a red-green Go regression and a second
+  successful sequential create in the runner. These are focused runtime checks, not release qualification.
+
 #### Implementation-only integration updates
 
 - Removed the obsolete routed service-access policy input, model, and result types. Migration `007` refuses populated

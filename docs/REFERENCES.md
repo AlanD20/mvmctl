@@ -359,6 +359,7 @@ captured topology and independent protected disks; the named privileged route is
 | `--ip ADDRESS` | Guest IP | auto-assigned |
 | `--mac ADDRESS` | Custom MAC address | auto-generated |
 | `--network, --net NAME` | Named network | from config |
+| `--no-network` | Explicitly create without a managed network, NIC, guest IP, or MAC; use vsock exec rather than SSH | `false` |
 | `--volume, -v TEXT` | Attach volume(s) to the VM | none |
 | `--ssh-key NAME_OR_PATH` | SSH public key (name from cache or file path) | default keys |
 | `--user USER` | Default SSH user | from config |
@@ -393,7 +394,15 @@ mvm vm create my-vm --image ubuntu:24.04 --kernel official:6.19.9 --vcpu 2 --mem
 
 # Create 3 VMs in batch
 mvm vm create cluster-node --count 3
+
+# Create a networkless VM for vsock-only access
+mvm vm create offline-worker --no-network --cloud-init-mode off
 ```
+
+`--no-network` is an explicit choice, not the result of omitting `--network`. It conflicts with `--network`,
+`--ip`, `--mac`, and NoCloud network mode. Networkless snapshot capture/restore is not yet available in this
+development release. The focused runner smoke passed create, stop, start, and `mvm exec`; the full system suite and
+networked policy matrix remain unqualified.
 
 ---
 

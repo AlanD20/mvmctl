@@ -1426,9 +1426,10 @@ The strict on-disk shape has these fixed fields; state-specific objects are omit
 
 The strict codec rejects schemas 1 through 4, unknown or duplicate fields, missing required fields, and a state-specific
 object that is present or absent in the wrong lifecycle. v0.3 performs no record migration or adoption.
-Current launch admission requires the explicit `managed` network placement; omitted, unknown, and `networkless`
-placements are rejected until the separate networkless root lifecycle is implemented. This applies to durable records,
-including recovery; older cleaned tombstones are not adopted.
+Current launch admission requires an explicit, complete `managed` or endpoint-free `networkless` placement. Omitted,
+unknown, and mixed shapes are rejected in launch and durable recovery; older cleaned tombstones are not adopted.
+The networkless root lifecycle has a focused installed-candidate create/stop/start/vsock-exec smoke pass, not the full
+Python or networked policy qualification.
 
 `launching` is durable pre-effect intent, not a process-health claim. Fixed cgroup and jail paths are derived from the
 VM ID and compiled constants; the exact cgroup membership and fixed jail metadata are verified rather than duplicated
@@ -1507,15 +1508,18 @@ The activation order is fixed:
    namespace/root, root-owned `/usr/local/bin/mvm` executable metadata and digest, and verify readiness.
 7. Recheck the pinned release, fresh jail-destination absence, cgroup-leaf absence, and root-then-parent controller
    readiness at the last handoff boundary, then release the authenticated Firecracker child. It creates
-   and descriptor-pins the exclusive fresh jail tree, installs only the admitted fixed-name mounts
-   from retained descriptors, and executes the exact Jailer with the pinned network namespace.
+   and descriptor-pins the exclusive fresh jail tree, attaches only the root-parent-prepared fixed-name detached
+   mounts, and executes the exact Jailer with the pinned network namespace. The root parent materializes the sealed
+   configuration in a private read-only tmpfs and retains the original source descriptors for attestation; the child
+   re-pins the fixed jail parent in its own mount namespace before attaching resources.
    No existing tree, caller-supplied path, or generic command can substitute for this transition.
    Record successful
    Jailer-handoff provenance in the retained cgroup authority before it may bind the resulting leaf. The prepared
    release supplies the fixed store paths; the caller supplies neither a hash nor path. This release occurs only after
    the complete firewall generation and links are verified.
 8. Retain the original pidfd for stable task identity and exit detection while bounded, context-aware observation
-   repeatedly opens and verifies `/proc/<pid>/exe` until it is the copied Firecracker rather than transient Jailer
+   waits for both Jailer's isolated-owner private root and copied executable before binding their pre-seal identity.
+   It then repeatedly opens and verifies `/proc/<pid>/exe` until it is the copied Firecracker rather than transient Jailer
    state. The compiled observation budget is 10 seconds with a 25-millisecond minimum interval; an earlier context
    deadline wins. Each interval checks the pidfd nonblocking for exit and rechecks boot ID, PID, and start ticks. An
    exited pidfd ends observation immediately. A pidfd becomes readable for exit, not for `exec`, so it is never used as

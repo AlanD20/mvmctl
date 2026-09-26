@@ -573,8 +573,9 @@ complete managed or endpoint-free networkless shapes;
 its offline NoCloud allowance is limited to fixed local ISO/injected-seed arguments. Relaunch reconstruction retains
 the stored placement and rejects malformed networkless state before reboot stops a VM. Offline cloud-init seeds can
 omit network configuration. Public SSH rejects networkless placement in favor of vsock exec. Snapshot capture
-rejects networkless placement until consistent capture and restore are implemented. The newly wired public create
-path has passed focused Go package tests, but no installed-candidate networkless lifecycle is runtime-qualified.
+rejects networkless placement until consistent capture and restore are implemented. Focused Go packages and an
+installed-candidate networkless create/stop/start/host-to-guest-vsock-exec smoke passed inside the disposable runner.
+This does not qualify networked policy behavior, snapshot restore, the full Python suite, or the release.
 Omitting `--network` must never become an implicit networkless fallback.
 
 ADR-0017 fixes the L3 contract consumed by the typed root transactions. The per-VM
