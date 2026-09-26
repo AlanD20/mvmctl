@@ -50,6 +50,13 @@ with `0.3.0-rc.cgroup-full`, built by the repository release script under pinned
 the cgroup case and the existing networkless create/restart/reboot/vsock-exec case each passed 1/1, with no nested VM
 left in the isolated cache. The outer controller was unchanged.
 
+**Current-source Go CI (2026-09-27):** An isolated checkout of `b430a359` inside `mvmctl-030-test` passed the
+repository CI sequence with pinned Go 1.26.3: tidy with no tracked diff, architecture check, gofmt and golines,
+agent generation with no tracked diff, vet, every selected unprivileged package, the Jailer CI contracts, and both
+atomic coverage profiles. The full root-effect Jailer package had already passed against the same production source
+after `89c5137e`. This closes the local current-source Go CI gate, not the Python matrix, memory-saturation diagnosis,
+bridge-dependent network qualification, or remote GitHub CI.
+
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
 | Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
