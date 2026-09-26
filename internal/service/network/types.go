@@ -102,7 +102,7 @@ type NamespacePin interface {
 }
 
 type namespaceCreateSpec struct {
-	key topologyKey
+	key namespaceKey
 }
 
 type localBridgeCreateSpec struct {

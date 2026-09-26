@@ -26,13 +26,13 @@ func TestNamespaceEffectPublishesAndRemovesDerivedNamespace(t *testing.T) {
 
 	fixture := newNamespaceEffectFixture()
 	effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+	key := mustNamespaceKey(t, testOwnerUID, testVMID)
 
 	pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 	require.NoError(t, err)
 	require.NotNil(t, pin)
 	wantHandle := namespaceHandle{
-		path:     deriveTopologyNames(key).namespaceHandle,
+		path:     deriveNamespaceHandle(key),
 		identity: namespaceIdentity{device: 5, inode: 400},
 		ownerUID: 0,
 		ownerGID: 0,
@@ -214,7 +214,7 @@ func TestNamespaceEffectCancellationRetainsOutcomeEvidence(t *testing.T) {
 			fixture.cancelAfter = test.cancelAfter
 			fixture.cancel = cancel
 			effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-			key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+			key := mustNamespaceKey(t, testOwnerUID, testVMID)
 
 			pin, err := effect.CreateNamespace(ctx, namespaceCreateSpec{key: key})
 			require.ErrorIs(t, err, context.Canceled)
@@ -246,7 +246,7 @@ func TestNamespaceEffectThreadUnlockUsesCleanupContext(t *testing.T) {
 	fixture.cancelAfter = "thread.lock"
 	fixture.cancel = cancel
 	effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+	key := mustNamespaceKey(t, testOwnerUID, testVMID)
 
 	pin, err := effect.CreateNamespace(ctx, namespaceCreateSpec{key: key})
 	require.ErrorIs(t, err, context.Canceled)
@@ -272,7 +272,7 @@ func TestNamespaceEffectUnsafeWorkerExitsLockedBeforeCallerResumes(t *testing.T)
 	cause := errors.New("host namespace restoration failed")
 	fixture.inject("setns.13", 1, cause)
 	effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+	key := mustNamespaceKey(t, testOwnerUID, testVMID)
 
 	pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 	require.ErrorIs(t, err, cause)
@@ -364,7 +364,7 @@ func TestNamespaceEffectKernelFaultsReturnExactOutcome(t *testing.T) {
 			cause := errors.New("injected " + name)
 			fixture.inject(test.event, test.at, cause)
 			effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-			key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+			key := mustNamespaceKey(t, testOwnerUID, testVMID)
 
 			pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 			require.ErrorIs(t, err, cause)
@@ -433,7 +433,7 @@ func TestNamespaceEffectRejectsAuthorityMountIdentityDriftBeforeEffects(t *testi
 			fixture := newNamespaceEffectFixture()
 			fixture.overrideStatx(test.event, test.at, test.stat)
 			effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-			key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+			key := mustNamespaceKey(t, testOwnerUID, testVMID)
 
 			pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 			require.Error(t, err)
@@ -465,7 +465,7 @@ func TestNamespaceEffectAcceptsExplicitlyUnavailableMountIdentity(t *testing.T) 
 	fixture.statxMounts[12] = unix.Statx_t{}
 	fixture.statxMounts[16] = unix.Statx_t{}
 	effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+	key := mustNamespaceKey(t, testOwnerUID, testVMID)
 
 	pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 	require.NoError(t, err)
@@ -507,7 +507,7 @@ func TestNamespaceEffectRejectsReservedNameAndMountIdentityChanges(t *testing.T)
 			fixture := newNamespaceEffectFixture()
 			test.mutate(fixture)
 			effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-			key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+			key := mustNamespaceKey(t, testOwnerUID, testVMID)
 
 			pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 			require.Error(t, err)
@@ -582,7 +582,7 @@ func TestNamespaceEffectRejectsInvalidPublishedMountMetadata(t *testing.T) {
 			fixture := newNamespaceEffectFixture()
 			mutate(fixture)
 			effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-			key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+			key := mustNamespaceKey(t, testOwnerUID, testVMID)
 
 			pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 			require.Error(t, err)
@@ -610,7 +610,7 @@ func TestNamespaceEffectDeleteRejectsReservedNameReplacement(t *testing.T) {
 
 	fixture := newNamespaceEffectFixture()
 	effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+	key := mustNamespaceKey(t, testOwnerUID, testVMID)
 	pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 	require.NoError(t, err)
 	fixture.stats[19] = namespaceEffectNamespaceStat(5, 999)
@@ -683,7 +683,7 @@ func TestNamespaceEffectReconcilesUnmountErrorWithoutDuplicateUnmount(t *testing
 
 			fixture := newNamespaceEffectFixture()
 			effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-			key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+			key := mustNamespaceKey(t, testOwnerUID, testVMID)
 			pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 			require.NoError(t, err)
 			cause := errors.New("unmount result lost")
@@ -727,7 +727,7 @@ func TestNamespaceEffectCleanupFaultsRetryPrecisely(t *testing.T) {
 
 			fixture := newNamespaceEffectFixture()
 			effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-			key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+			key := mustNamespaceKey(t, testOwnerUID, testVMID)
 			pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 			require.NoError(t, err)
 			cause := errors.New("cleanup fault")
@@ -764,7 +764,7 @@ func TestNamespacePinCopiedConcurrentReleaseIsExactOnce(t *testing.T) {
 
 			fixture := newNamespaceEffectFixture()
 			effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
-			key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+			key := mustNamespaceKey(t, testOwnerUID, testVMID)
 			pinValue, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{key: key})
 			require.NoError(t, err)
 			pin := pinValue.(*namespacePin)
@@ -808,7 +808,7 @@ func TestNamespaceEffectRetainLinkNamespaceRechecksAndClosesOnce(t *testing.T) {
 	fixture := newNamespaceEffectFixture()
 	effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
 	pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{
-		key: mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID),
+		key: mustNamespaceKey(t, testOwnerUID, testVMID),
 	})
 	require.NoError(t, err)
 
@@ -850,7 +850,7 @@ func TestNamespaceEffectRetainLinkNamespaceRejectsDriftAndInactivePins(t *testin
 		fixture.stats[20] = namespaceEffectNamespaceStat(5, 401)
 		effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
 		pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{
-			key: mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID),
+			key: mustNamespaceKey(t, testOwnerUID, testVMID),
 		})
 		require.NoError(t, err)
 
@@ -875,7 +875,7 @@ func TestNamespaceEffectRetainLinkNamespaceRejectsDriftAndInactivePins(t *testin
 		fixture := newNamespaceEffectFixture()
 		effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
 		pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{
-			key: mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID),
+			key: mustNamespaceKey(t, testOwnerUID, testVMID),
 		})
 		require.NoError(t, err)
 		require.NoError(t, effect.DeleteNamespace(t.Context(), pin))
@@ -915,7 +915,7 @@ func TestOpenNamespaceTargetUsesOrdinaryVerifiedDescriptors(t *testing.T) {
 		rootPath: root, expectedUID: uint32(os.Geteuid()), expectedGID: uint32(os.Getegid()),
 	}
 	deps := systemNamespaceEffectDeps()
-	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+	key := mustNamespaceKey(t, testOwnerUID, testVMID)
 
 	parentFD, placeholderFD, err := openExactNamespaceTarget(t.Context(), deps, policy, key, target)
 	require.NoError(t, err)
@@ -1078,7 +1078,7 @@ type fakeNamespaceTargetAuthority struct {
 
 func (authority *fakeNamespaceTargetAuthority) create(
 	ctx context.Context,
-	_ topologyKey,
+	_ namespaceKey,
 ) (namespaceTargetLease, error) {
 	if err := authority.fixture.recordContext("authority.create", ctx, false); err != nil {
 		return authority.target, err

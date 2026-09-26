@@ -48,7 +48,7 @@ type namespaceTargetLease interface {
 }
 
 type namespaceTargetAuthority interface {
-	create(context.Context, topologyKey) (namespaceTargetLease, error)
+	create(context.Context, namespaceKey) (namespaceTargetLease, error)
 }
 
 type namespaceHandleAuthority struct {
@@ -75,7 +75,7 @@ func newNamespaceHandleAuthority(tree networkAuthorityTree) *namespaceHandleAuth
 
 func (authority *namespaceHandleAuthority) create(
 	ctx context.Context,
-	key topologyKey,
+	key namespaceKey,
 ) (_ namespaceTargetLease, returnErr error) {
 	if ctx == nil {
 		return nil, topologyPrepareError(

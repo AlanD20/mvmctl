@@ -93,6 +93,10 @@ func (service *service) prepare(
 	if err != nil {
 		return nil, topologyPrepareError("validate topology identity", string(launch.vmID), err, false)
 	}
+	namespaceKey, err := newNamespaceKey(uint32(key.ownerUID), string(key.vmID))
+	if err != nil {
+		return nil, topologyPrepareError("validate namespace identity", string(launch.vmID), err, false)
+	}
 	names := deriveTopologyNames(key)
 
 	// CRITICAL: The VM authority owns the earlier lock classes. This is the only acquisition performed here, preserving
@@ -128,7 +132,7 @@ func (service *service) prepare(
 		return preparation, err
 	}
 
-	pin, err := service.effects.CreateNamespace(ctx, namespaceCreateSpec{key: key})
+	pin, err := service.effects.CreateNamespace(ctx, namespaceCreateSpec{key: namespaceKey})
 	if pin != nil {
 		preparation.pin = pin
 		preparation.namespaceCreated = true

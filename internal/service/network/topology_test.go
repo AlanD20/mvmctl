@@ -83,6 +83,34 @@ func TestNewTopologyKeyRejectsUntrustedIdentityShapes(t *testing.T) {
 	}
 }
 
+// Rationale: namespace ownership is valid without a managed network ID, but never with root or caller-shaped VM IDs.
+func TestNewNamespaceKeyRejectsUntrustedIdentityShapes(t *testing.T) {
+	tests := map[string]struct {
+		ownerUID    uint32
+		vmID        string
+		wantMessage string
+	}{
+		"root owner": {ownerUID: 0, vmID: testVMID, wantMessage: "owner UID must identify a non-root user"},
+		"invalid VM ID": {
+			ownerUID: testOwnerUID, vmID: "../../caller-name",
+			wantMessage: "vm ID must be 32 lowercase hexadecimal characters",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := newNamespaceKey(tc.ownerUID, tc.vmID)
+			require.Error(t, err)
+			de := errs.AsDomainError(err)
+			require.NotNil(t, de)
+			assert.Equal(t, errs.CodeValidationFailed, de.Code)
+			assert.Equal(t, tc.wantMessage, de.Message)
+		})
+	}
+	key, err := newNamespaceKey(testOwnerUID, testVMID)
+	require.NoError(t, err)
+	assert.Equal(t, namespaceKey{ownerUID: OwnerUID(testOwnerUID), vmID: VMID(testVMID)}, key)
+}
+
 // Rationale: Link names are persisted root-authority identifiers. A separately composed SHA-256 expectation proves
 // the fixed prefix, NUL-separated preimage, lowercase hexadecimal encoding, and Linux interface-name width.
 func TestHashedLinkNameMatchesIndependentContract(t *testing.T) {
@@ -1089,6 +1117,13 @@ type fakeNetworkLockerConfig struct {
 func mustTopologyKey(t *testing.T, ownerUID uint32, vmID, networkID string) topologyKey {
 	t.Helper()
 	key, err := newTopologyKey(ownerUID, vmID, networkID)
+	require.NoError(t, err)
+	return key
+}
+
+func mustNamespaceKey(t *testing.T, ownerUID uint32, vmID string) namespaceKey {
+	t.Helper()
+	key, err := newNamespaceKey(ownerUID, vmID)
 	require.NoError(t, err)
 	return key
 }

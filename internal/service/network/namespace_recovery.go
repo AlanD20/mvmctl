@@ -19,7 +19,7 @@ type recoveredNamespaceTarget struct {
 // Recovery admits recorded authority only; it never creates or repairs a missing mount.
 func (effect *namespaceEffect) recoverNamespace(
 	ctx context.Context,
-	key topologyKey,
+	key namespaceKey,
 	handle namespaceHandle,
 	target namespaceTargetIdentity,
 	hold *authorityfs.TopologyHold,
@@ -33,10 +33,10 @@ func (effect *namespaceEffect) recoverNamespace(
 	if effect == nil || validateNamespaceEffectDeps(effect.deps) != nil {
 		return nil, topologyRemoveError(string(key.vmID), "namespace recovery dependencies are incomplete", nil)
 	}
-	if err := validateTopologyKey(key); err != nil {
+	if err := validateNamespaceKey(key); err != nil {
 		return nil, err
 	}
-	if err := validateNamespaceHandle(handle, deriveTopologyNames(key).namespaceHandle); err != nil {
+	if err := validateNamespaceHandle(handle, deriveNamespaceHandle(key)); err != nil {
 		return nil, err
 	}
 	vmKey, err := authorityfs.NewVMKey(string(key.vmID))
@@ -127,7 +127,7 @@ func (effect *namespaceEffect) recoverNamespace(
 func openNamespaceRecoveryDirectory(
 	ctx context.Context,
 	effect *namespaceEffect,
-	key topologyKey,
+	key namespaceKey,
 	target namespaceTargetIdentity,
 ) (_ int, returnErr error) {
 	rootFD, err := effect.deps.open(ctx, effect.policy.rootPath, namespaceDirectoryOpenFlags, 0)

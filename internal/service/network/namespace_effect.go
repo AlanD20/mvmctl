@@ -54,7 +54,7 @@ type namespacePinState struct {
 	deps                   namespaceEffectDeps
 	target                 namespaceTargetLease
 	targetID               namespaceTargetIdentity
-	key                    topologyKey
+	key                    namespaceKey
 	handlePath             namespaceHandlePath
 	namespaceID            namespaceIdentity
 	handle                 namespaceHandle
@@ -234,7 +234,7 @@ func (effect *namespaceEffect) createNamespaceOnWorker(
 		deps:       effect.deps,
 		target:     target,
 		key:        spec.key,
-		handlePath: deriveTopologyNames(spec.key).namespaceHandle,
+		handlePath: deriveNamespaceHandle(spec.key),
 		parentFD:   -1, targetFD: -1, netnsFD: -1, publishFD: -1,
 	}
 	pin := &namespacePin{state: state}
@@ -1074,7 +1074,7 @@ func observeNamespaceUnmount(
 }
 
 func namespaceEffectCreateError(
-	key topologyKey,
+	key namespaceKey,
 	stage string,
 	cause error,
 	outcome namespaceCreateOutcome,
@@ -1100,7 +1100,7 @@ func namespaceEffectCreateError(
 }
 
 func appendNamespaceEffectCreateCleanupError(
-	key topologyKey,
+	key namespaceKey,
 	primary error,
 	cleanup error,
 	outcome namespaceCreateOutcome,
@@ -1118,7 +1118,7 @@ func appendNamespaceEffectCreateCleanupError(
 }
 
 func markNamespaceThreadFatal(
-	key topologyKey,
+	key namespaceKey,
 	primary error,
 	cause error,
 	outcome namespaceCreateOutcome,

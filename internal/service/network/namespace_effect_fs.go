@@ -40,7 +40,7 @@ func openExactNamespaceTarget(
 	ctx context.Context,
 	deps namespaceEffectDeps,
 	policy namespaceEffectPolicy,
-	key topologyKey,
+	key namespaceKey,
 	target namespaceTargetIdentity,
 ) (_ int, _ int, returnErr error) {
 	parentFD := -1

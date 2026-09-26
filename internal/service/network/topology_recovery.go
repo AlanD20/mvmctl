@@ -152,7 +152,11 @@ func (lease *VMTopologyLease) recover(
 	if !current.Progress.Namespace {
 		return networkAuthorityCorruptError("incomplete namespace creation has no exact recovery identity", nil)
 	}
-	pin, err := lease.effects.namespace.(*namespaceEffect).recoverNamespace(ctx, lease.key,
+	namespaceKey, err := newNamespaceKey(uint32(lease.key.ownerUID), string(lease.key.vmID))
+	if err != nil {
+		return err
+	}
+	pin, err := lease.effects.namespace.(*namespaceEffect).recoverNamespace(ctx, namespaceKey,
 		topology.handle, namespaceTargetFromJournal(current.NamespaceTarget), lease.hold)
 	if err != nil {
 		return err
@@ -299,7 +303,11 @@ func (lease *VMTopologyLease) DetachActive(ctx context.Context) error {
 		return networkAuthorityCorruptError("active topology journal changed before detach", err)
 	}
 	effect := lease.effects.namespace.(*namespaceEffect)
-	probe, err := effect.recoverNamespace(ctx, lease.key, lease.preparation.topology.handle,
+	namespaceKey, err := newNamespaceKey(uint32(lease.key.ownerUID), string(lease.key.vmID))
+	if err != nil {
+		return err
+	}
+	probe, err := effect.recoverNamespace(ctx, namespaceKey, lease.preparation.topology.handle,
 		namespaceTargetFromJournal(record.NamespaceTarget), lease.hold)
 	if err != nil {
 		return err

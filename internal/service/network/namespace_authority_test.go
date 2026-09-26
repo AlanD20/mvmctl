@@ -39,7 +39,7 @@ func TestNamespaceHandleAuthorityMapsIdentityAndOutlivesParents(t *testing.T) {
 	authority := newNamespaceHandleAuthority(&fakeNamespaceAuthorityTree{root: root, recorder: recorder})
 	ctx := context.WithValue(t.Context(), namespaceAuthorityContextKey{}, "retained")
 
-	lease, err := authority.create(ctx, mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID))
+	lease, err := authority.create(ctx, mustNamespaceKey(t, testOwnerUID, testVMID))
 	require.NoError(t, err)
 	require.NotNil(t, lease)
 	identity, err := lease.targetIdentity(ctx)
@@ -157,7 +157,7 @@ func TestNamespaceHandleAuthorityFaultsPreserveCleanupOwnership(t *testing.T) {
 
 			lease, err := authority.create(
 				t.Context(),
-				mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID),
+				mustNamespaceKey(t, testOwnerUID, testVMID),
 			)
 			require.Error(t, err)
 			assert.Equal(t, test.wantLease, lease != nil)
@@ -192,7 +192,7 @@ func TestNamespaceHandleAuthorityCancellationAfterMutationReturnsLease(t *testin
 	root := &fakeNamespaceAuthorityRoot{uid: uid, recorder: recorder}
 	authority := newNamespaceHandleAuthority(&fakeNamespaceAuthorityTree{root: root, recorder: recorder})
 
-	lease, err := authority.create(ctx, mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID))
+	lease, err := authority.create(ctx, mustNamespaceKey(t, testOwnerUID, testVMID))
 	require.ErrorIs(t, err, context.Canceled)
 	require.NotNil(t, lease)
 	assertNamespaceAuthorityCreateError(t, err, true)
@@ -264,7 +264,7 @@ func TestNamespaceHandleAuthorityRejectsBindingMismatch(t *testing.T) {
 
 			lease, createErr := authority.create(
 				t.Context(),
-				mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID),
+				mustNamespaceKey(t, testOwnerUID, testVMID),
 			)
 			require.ErrorContains(t, createErr, "binding")
 			require.NotNil(t, lease)

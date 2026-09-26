@@ -36,6 +36,12 @@ type topologyKey struct {
 	networkID NetworkID
 }
 
+// namespaceKey identifies one owner's VM namespace independently of managed network placement.
+type namespaceKey struct {
+	ownerUID OwnerUID
+	vmID     VMID
+}
+
 type networkKey struct {
 	ownerUID  OwnerUID
 	networkID NetworkID
@@ -65,6 +71,16 @@ func newTopologyKey(ownerUID uint32, vmID, networkID string) (topologyKey, error
 		return topologyKey{}, topologyValidationError("network ID must be 64 lowercase hexadecimal characters")
 	}
 	return topologyKey{ownerUID: OwnerUID(ownerUID), vmID: VMID(vmID), networkID: NetworkID(networkID)}, nil
+}
+
+func newNamespaceKey(ownerUID uint32, vmID string) (namespaceKey, error) {
+	if ownerUID == 0 {
+		return namespaceKey{}, topologyValidationError("owner UID must identify a non-root user")
+	}
+	if !vmIDPattern.MatchString(vmID) {
+		return namespaceKey{}, topologyValidationError("vm ID must be 32 lowercase hexadecimal characters")
+	}
+	return namespaceKey{ownerUID: OwnerUID(ownerUID), vmID: VMID(vmID)}, nil
 }
 
 // OwnerUID returns the authenticated owner identity.
@@ -98,6 +114,11 @@ func validateTopologyKey(key topologyKey) error {
 	return err
 }
 
+func validateNamespaceKey(key namespaceKey) error {
+	_, err := newNamespaceKey(uint32(key.ownerUID), string(key.vmID))
+	return err
+}
+
 func validateNetworkKey(key networkKey) error {
 	if key.ownerUID == 0 {
 		return topologyValidationError("network owner UID must identify a non-root user")
@@ -109,17 +130,19 @@ func validateNetworkKey(key networkKey) error {
 }
 
 func deriveTopologyNames(key topologyKey) topologyNames {
-	uid := strconv.FormatUint(uint64(key.ownerUID), 10)
 	return topologyNames{
-		namespaceHandle: namespaceHandlePath(
-			namespaceAuthorityRoot + "/" + uid + "/netns/" + string(key.vmID),
-		),
-		managedBridge: deriveNetworkLinkName("mvb", key.Network(), "managed-bridge"),
-		hostVeth:      deriveVMLinkName("mvh", key.ownerUID, key.vmID, "host-veth"),
-		namespaceVeth: deriveVMLinkName("mvn", key.ownerUID, key.vmID, "namespace-veth"),
-		localBridge:   deriveVMLinkName("mvl", key.ownerUID, key.vmID, "local-bridge"),
-		tap:           deriveVMLinkName("mvt", key.ownerUID, key.vmID, "tap"),
+		namespaceHandle: deriveNamespaceHandle(namespaceKey{ownerUID: key.ownerUID, vmID: key.vmID}),
+		managedBridge:   deriveNetworkLinkName("mvb", key.Network(), "managed-bridge"),
+		hostVeth:        deriveVMLinkName("mvh", key.ownerUID, key.vmID, "host-veth"),
+		namespaceVeth:   deriveVMLinkName("mvn", key.ownerUID, key.vmID, "namespace-veth"),
+		localBridge:     deriveVMLinkName("mvl", key.ownerUID, key.vmID, "local-bridge"),
+		tap:             deriveVMLinkName("mvt", key.ownerUID, key.vmID, "tap"),
 	}
+}
+
+func deriveNamespaceHandle(key namespaceKey) namespaceHandlePath {
+	uid := strconv.FormatUint(uint64(key.ownerUID), 10)
+	return namespaceHandlePath(namespaceAuthorityRoot + "/" + uid + "/netns/" + string(key.vmID))
 }
 
 func deriveNetworkLinkName(prefix string, key networkKey, role string) linkName {
