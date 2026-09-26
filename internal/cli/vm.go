@@ -154,6 +154,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		diskSize        string
 		ip              string
 		networkName     string
+		noNetwork       bool
 		mac             string
 		sshKey          string
 		cloudinitConfig string
@@ -241,6 +242,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 				SkipDeblob:  skipDeblob,
 				Atomic:      atomic,
 				Volumes:     volume,
+				NoNetwork:   noNetwork,
 			}
 
 			if cmd.Flags().Changed("writeback") {
@@ -340,6 +342,9 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		StringVarP(&diskSize, "disk-size", "s", "", "Rootfs disk size in MiB/GiB (e.g., 512M=512MiB, 1G=1GiB). Default from config.")
 	cmd.Flags().StringVar(&ip, "ip", "", "Guest IP (auto-assigned if omitted)")
 	cmd.Flags().StringVar(&networkName, "network", "", "Named network to use")
+	cmd.Flags().
+		BoolVar(&noNetwork, "no-network", false, "Launch in an isolated loopback-only namespace without a guest NIC")
+	cmd.MarkFlagsMutuallyExclusive("network", "no-network")
 	cmd.Flags().StringVar(&mac, "mac", "", "Custom MAC address (auto-generated if omitted)")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key name (from key cache) or file path")
 	cmd.Flags().StringVar(&cloudinitConfig, "cloudinit-config", "", "Path to custom cloud-init configuration file")

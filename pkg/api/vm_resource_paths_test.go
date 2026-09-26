@@ -55,11 +55,12 @@ func TestVMCreateBuilderUsesFixedFirecrackerLeaves(t *testing.T) {
 		vmDir: vmDir,
 		vmID:  resourcePathsTestVMID,
 		resolved: &inputs.ResolvedVMCreateInput{
-			Binary:  &model.BinaryItem{},
-			Jailer:  &model.BinaryItem{},
-			Kernel:  &model.KernelItem{},
-			Image:   &model.ImageItem{},
-			Network: &model.NetworkItem{},
+			NetworkPlacement: model.VMNetworkPlacementManaged,
+			Binary:           &model.BinaryItem{},
+			Jailer:           &model.BinaryItem{},
+			Kernel:           &model.KernelItem{},
+			Image:            &model.ImageItem{},
+			Network:          &model.NetworkItem{},
 		},
 	}
 
@@ -74,6 +75,46 @@ func TestVMCreateBuilderUsesFixedFirecrackerLeaves(t *testing.T) {
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename), config.MetricsPath)
 	assert.Equal(t, filepath.Join("/run/mvmctl/runtime", strconv.Itoa(os.Geteuid()),
 		resourcePathsTestVMID, infra.VMFirecrackerPIDFilename), config.PIDPath)
+}
+
+// Rationale: public create must carry explicit absence through generated
+// Firecracker devices and the persisted VM row without inventing a network ID.
+func TestVMCreateBuilderRetainsNetworklessPlacement(t *testing.T) {
+	vmDir := filepath.Join(t.TempDir(), resourcePathsTestVMID)
+	builder := &VMCreateBuilder{
+		vmDir: vmDir, vmID: resourcePathsTestVMID, vsockCID: 42,
+		resolved: &inputs.ResolvedVMCreateInput{
+			Name: "offline-vm", NetworkPlacement: model.VMNetworkPlacementNetworkless,
+			Binary: &model.BinaryItem{Version: "1.16.1"}, Jailer: &model.BinaryItem{},
+			Kernel: &model.KernelItem{}, Image: &model.ImageItem{},
+		},
+	}
+	config := builder.buildFirecrackerConfig()
+	require.NotNil(t, config)
+	assert.Equal(t, model.VMNetworkPlacementNetworkless, config.NetworkPlacement)
+	assert.Empty(t, config.NetworkID)
+	assert.Empty(t, config.GuestIP)
+	assert.Empty(t, config.GuestMAC)
+	assert.Empty(t, config.TapName)
+	require.NotNil(t, config.VsockGuestCID)
+	generated, err := corevm.NewFirecrackerSpawner(config).Generate()
+	require.NoError(t, err)
+	assert.Empty(t, generated.NetworkInterfaces)
+
+	spawner := corevm.NewFirecrackerSpawner(config)
+	pid := 1234
+	spawner.PID = &pid
+	builder.spawner = spawner
+	builder.cloudInitResult = &cloudInitResult{mode: model.CloudInitModeISO}
+	item := builder.toVMModel()
+	require.NotNil(t, item)
+	assert.Equal(t, model.VMNetworkPlacementNetworkless, item.NetworkPlacement)
+	assert.Empty(t, item.NetworkID)
+	assert.Empty(t, item.IPv4)
+	assert.Empty(t, item.MAC)
+	assert.Empty(t, item.TapDevice)
+	assert.Nil(t, item.NocloudNetPort)
+	assert.Nil(t, item.NocloudNetPID)
 }
 
 // Rationale: persisted path columns are display metadata, not launch

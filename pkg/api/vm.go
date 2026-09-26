@@ -101,8 +101,10 @@ func (op *Operation) VMCreate(
 	sharedResolved.Binary = pair.Firecracker
 	sharedResolved.Jailer = pair.Jailer
 	sharedResolved.Provisioner = model.ProvisionerType(op.ProvisionerType)
-	if err := op.Services.Network.EnsureManagedNetwork(ctx, sharedResolved.Network); err != nil {
-		return nil, fmt.Errorf("ensure managed network before VM creation: %w", err)
+	if sharedResolved.NetworkPlacement == model.VMNetworkPlacementManaged {
+		if err := op.Services.Network.EnsureManagedNetwork(ctx, sharedResolved.Network); err != nil {
+			return nil, fmt.Errorf("ensure managed network before VM creation: %w", err)
+		}
 	}
 	// Shared nocloudnet server for NET mode (across all VMs in the batch).
 	if sharedResolved.CloudInitMode == model.CloudInitModeNET {
@@ -289,17 +291,19 @@ func (op *Operation) vmBuilderExecute(
 	tl := timinglog.Start("vm_create", "vm_name", builder.name, "vm_id", builder.vmID)
 	defer tl.Complete()
 
-	// Generate MAC and TAP name
-	if resolved.RequestedGuestMAC != nil {
-		builder.guestMAC = *resolved.RequestedGuestMAC
-	} else {
-		builder.guestMAC = libnet.VMGenerateMAC(resolved.GuestMACPrefix)
+	// Only managed placement owns a guest endpoint and derived TAP identity.
+	if resolved.NetworkPlacement == model.VMNetworkPlacementManaged {
+		if resolved.RequestedGuestMAC != nil {
+			builder.guestMAC = *resolved.RequestedGuestMAC
+		} else {
+			builder.guestMAC = libnet.VMGenerateMAC(resolved.GuestMACPrefix)
+		}
+		tapName, err := networkservice.VMTAPName(uint32(os.Geteuid()), resolved.Network.ID, builder.vmID)
+		if err != nil {
+			return err
+		}
+		builder.tapName = tapName
 	}
-	tapName, err := networkservice.VMTAPName(uint32(os.Geteuid()), resolved.Network.ID, builder.vmID)
-	if err != nil {
-		return err
-	}
-	builder.tapName = tapName
 	// The receiver admits only private caller-owned managed directories.
 	if err := os.MkdirAll(filepath.Dir(builder.vmDir), 0700); err != nil {
 		return fmt.Errorf("create managed VM parent directory: %w", err)
@@ -309,36 +313,36 @@ func (op *Operation) vmBuilderExecute(
 		return fmt.Errorf("create vm directory: %w", err)
 	}
 	builder.markCreated("vm_dir")
-	// Progress: network
-	emitProgress(builder.onProgress, "network", "running", "Configuring network...")
-	// IP Lease, TAP device creation (timed)
-	var networkErr error
-	tl.StageFunc("network", func() {
-		leaseCtrl, err := network.NewLeaseController(ctx, resolved.Network, op.Repos.Lease, nil)
-		if err != nil {
-			networkErr = fmt.Errorf("create lease controller: %w", err)
-			return
-		}
-		if resolved.RequestedGuestIP != nil {
-			ip, leaseErr := leaseCtrl.LeaseSpecific(ctx, *resolved.RequestedGuestIP, builder.vmID)
-			if leaseErr != nil {
-				networkErr = fmt.Errorf("lease specific ip: %w", leaseErr)
+	if resolved.NetworkPlacement == model.VMNetworkPlacementManaged {
+		emitProgress(builder.onProgress, "network", "running", "Configuring network...")
+		var networkErr error
+		tl.StageFunc("network", func() {
+			leaseCtrl, err := network.NewLeaseController(ctx, resolved.Network, op.Repos.Lease, nil)
+			if err != nil {
+				networkErr = fmt.Errorf("create lease controller: %w", err)
 				return
 			}
-			builder.guestIP = ip
-		} else {
-			ip, leaseErr := leaseCtrl.Lease(ctx, builder.vmID)
-			if leaseErr != nil {
-				networkErr = fmt.Errorf("lease ip: %w", leaseErr)
-				return
+			if resolved.RequestedGuestIP != nil {
+				ip, leaseErr := leaseCtrl.LeaseSpecific(ctx, *resolved.RequestedGuestIP, builder.vmID)
+				if leaseErr != nil {
+					networkErr = fmt.Errorf("lease specific ip: %w", leaseErr)
+					return
+				}
+				builder.guestIP = ip
+			} else {
+				ip, leaseErr := leaseCtrl.Lease(ctx, builder.vmID)
+				if leaseErr != nil {
+					networkErr = fmt.Errorf("lease ip: %w", leaseErr)
+					return
+				}
+				builder.guestIP = ip
 			}
-			builder.guestIP = ip
+		})
+		if networkErr != nil {
+			return networkErr
 		}
-	})
-	if networkErr != nil {
-		return networkErr
+		builder.markCreated("network_lease")
 	}
-	builder.markCreated("network_lease")
 	// Progress: rootfs
 	emitProgress(builder.onProgress, "rootfs", "running", "Copying root filesystem...")
 	// Clone rootfs (timed)
@@ -359,7 +363,15 @@ func (op *Operation) vmBuilderExecute(
 		provisionErr    error
 		cloudInitMarker string
 		ciResultOut     *cloudInitResult
+		networkID       string
+		networkName     string
+		networkGateway  string
 	)
+	if resolved.Network != nil {
+		networkID = resolved.Network.ID
+		networkName = resolved.Network.Name
+		networkGateway = resolved.Network.IPv4Gateway
+	}
 	tl.StageFunc("provision_rootfs", func() {
 		backend, backendErr := provisioner.NewBackend(ctx, provisioner.BackendOpts{
 			RootfsPath:      builder.rootfsPath,
@@ -423,9 +435,9 @@ func (op *Operation) vmBuilderExecute(
 				GuestIP:               builder.guestIP,
 				TapName:               builder.tapName,
 				User:                  resolved.User,
-				NetworkID:             resolved.Network.ID,
-				NetworkName:           resolved.Network.Name,
-				IPv4Gateway:           resolved.Network.IPv4Gateway,
+				NetworkID:             networkID,
+				NetworkName:           networkName,
+				IPv4Gateway:           networkGateway,
 				NetworkPrefixLen:      resolved.NetworkPrefixLen,
 				SkipNetworkConfig:     resolved.SkipCINetworkConfig,
 				SSHPubkeys:            pubkeys,
@@ -467,9 +479,9 @@ func (op *Operation) vmBuilderExecute(
 				GuestIP:               builder.guestIP,
 				TapName:               builder.tapName,
 				User:                  resolved.User,
-				NetworkID:             resolved.Network.ID,
-				NetworkName:           resolved.Network.Name,
-				IPv4Gateway:           resolved.Network.IPv4Gateway,
+				NetworkID:             networkID,
+				NetworkName:           networkName,
+				IPv4Gateway:           networkGateway,
 				NetworkPrefixLen:      resolved.NetworkPrefixLen,
 				SkipNetworkConfig:     resolved.SkipCINetworkConfig,
 				SSHPubkeys:            pubkeys,
@@ -491,11 +503,13 @@ func (op *Operation) vmBuilderExecute(
 				return
 			}
 			ciResultOut = &cloudInitResult{
-				mode:        ciResult.Mode,
-				isoPath:     ciResult.ISOPath,
-				nocloudURL:  ciResult.NocloudURL,
-				nocloudPort: &ciResult.NocloudPort,
-				nocloudPID:  ciResult.NocloudPID,
+				mode:       ciResult.Mode,
+				isoPath:    ciResult.ISOPath,
+				nocloudURL: ciResult.NocloudURL,
+			}
+			if ciResult.Mode == model.CloudInitModeNET {
+				ciResultOut.nocloudPort = &ciResult.NocloudPort
+				ciResultOut.nocloudPID = ciResult.NocloudPID
 			}
 			if resolved.CloudInitMode == model.CloudInitModeISO {
 				cloudInitMarker = "cloud-init-iso"
@@ -1484,10 +1498,9 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		}
 	}
 	fcConfig := &model.FirecrackerConfig{
-		NetworkPlacement:    model.VMNetworkPlacementManaged,
+		NetworkPlacement:    c.resolved.NetworkPlacement,
 		CacheRoot:           c.cacheRoot,
 		KernelID:            c.resolved.Kernel.ID,
-		NetworkID:           c.resolved.Network.ID,
 		ReleaseArchitecture: c.resolved.Binary.Architecture,
 		VMDir:               c.vmDir,
 		RootfsPath:          c.rootfsPath,
@@ -1501,7 +1514,6 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		GuestIP:             c.guestIP,
 		GuestMAC:            c.guestMAC,
 		TapName:             c.tapName,
-		NetworkGateway:      c.resolved.Network.IPv4Gateway,
 		NetworkNetmask:      c.resolved.NetworkNetmask,
 		ImageFSUUID:         c.resolved.Image.FSUUID,
 		ImageFSType:         c.resolved.Image.FSType,
@@ -1525,6 +1537,10 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		SerialOutputPath: filepath.Join(c.vmDir, infra.VMFirecrackerConsoleLogFilename),
 		MetricsPath:      filepath.Join(c.vmDir, infra.VMFirecrackerMetricsFilename),
 		PIDPath:          vm.RuntimePath(os.Geteuid(), c.vmID, infra.VMFirecrackerPIDFilename),
+	}
+	if c.resolved.Network != nil {
+		fcConfig.NetworkID = c.resolved.Network.ID
+		fcConfig.NetworkGateway = c.resolved.Network.IPv4Gateway
 	}
 	// Cloud-init info from result (isoPath, nocloudURL)
 	if c.cloudInitResult != nil {
@@ -1563,8 +1579,7 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		Status:           model.VMStatusRunning,
 		IPv4:             c.guestIP,
 		MAC:              c.guestMAC,
-		NetworkPlacement: model.VMNetworkPlacementManaged,
-		NetworkID:        model.VMNetworkID(c.resolved.Network.ID),
+		NetworkPlacement: c.resolved.NetworkPlacement,
 		TapDevice:        c.tapName,
 		ImageID:          c.resolved.Image.ID,
 		KernelID:         c.resolved.Kernel.ID,
@@ -1589,6 +1604,9 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		SSHUser:          &c.resolved.User,
 		LogPath:          &logPath,
 		SerialOutputPath: &serialPath,
+	}
+	if c.resolved.Network != nil {
+		item.NetworkID = model.VMNetworkID(c.resolved.Network.ID)
 	}
 	// Extract key names for the VM record (model.SSHKeys is []string)
 	for _, k := range c.resolved.SSHKeys {

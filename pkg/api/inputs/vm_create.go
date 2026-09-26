@@ -364,12 +364,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if err := input.Validate(); err != nil {
 		return nil, err
 	}
-	// The public create path remains managed-only until start, reboot, and snapshot
-	// preserve the networkless placement. Resolve performs no dependent lookup before this guard.
-	if input.NoNetwork {
-		return nil, errs.New(errs.CodeValidationFailed, "networkless VM creation is not yet available")
-	}
-	// Resolve image, kernel, network, binary, keys, volumes
+	// Resolve image, kernel, optional managed network, binary, keys, volumes.
 	img, err := r.resolveImage(ctx, input)
 	if err != nil {
 		return nil, err
@@ -378,9 +373,15 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if err != nil {
 		return nil, err
 	}
-	netw, err := r.resolveNetwork(ctx, input)
-	if err != nil {
-		return nil, err
+	placement := model.VMNetworkPlacementManaged
+	var netw *model.NetworkItem
+	if input.NoNetwork {
+		placement = model.VMNetworkPlacementNetworkless
+	} else {
+		netw, err = r.resolveNetwork(ctx, input)
+		if err != nil {
+			return nil, err
+		}
 	}
 	fcBinary, err := r.resolveBinary(ctx, input)
 	if err != nil {
@@ -403,13 +404,17 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		writeback = *input.Writeback
 	}
 	extraDrives := volume.VolumesToDrives(vols)
-	// Validate and parse network subnet.
-	_, ipv4Net, parseErr := net.ParseCIDR(netw.Subnet)
-	if parseErr != nil {
-		return nil, errs.New(errs.CodeNetworkNotFound, fmt.Sprintf("Invalid network subnet: %s", netw.Subnet))
+	// A networkless VM has no prefix or netmask to infer from defaults.
+	var networkPrefixLen int
+	var networkNetmask string
+	if netw != nil {
+		_, ipv4Net, parseErr := net.ParseCIDR(netw.Subnet)
+		if parseErr != nil {
+			return nil, errs.New(errs.CodeNetworkNotFound, fmt.Sprintf("Invalid network subnet: %s", netw.Subnet))
+		}
+		networkPrefixLen, _ = ipv4Net.Mask.Size()
+		networkNetmask = net.IP(ipv4Net.Mask).String()
 	}
-	networkPrefixLen, _ := ipv4Net.Mask.Size()
-	networkNetmask := net.IP(ipv4Net.Mask).String()
 	// Resolve disk size
 	var rootfsDiskSizeMib int
 	if input.DiskSize != "" {
@@ -473,6 +478,9 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		return nil, err
 	}
 	ciMode := ciResult.Mode
+	if input.NoNetwork && ciMode == model.CloudInitModeNET {
+		return nil, errs.New(errs.CodeValidationFailed, "--no-network cannot use NoCloud NET mode")
+	}
 	// Resolve nested_virt
 	nestedVirt, _ := r.cfg.GetBool(ctx, "defaults.vm", "nested_virt")
 	if input.NestedVirt != nil {
@@ -526,6 +534,14 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if bootArgs == "" {
 		defaultBootArgs, _ := r.cfg.GetString(ctx, "defaults.vm", "boot_args")
 		bootArgs = defaultBootArgs + " root=UUID=" + img.FSUUID
+	}
+	if input.NoNetwork {
+		for argument := range strings.FieldsSeq(bootArgs) {
+			if strings.HasPrefix(argument, "ip=") || strings.HasPrefix(argument, "ds=") {
+				return nil, errs.New(errs.CodeValidationFailed,
+					"--no-network cannot use network boot arguments from input or defaults")
+			}
+		}
 	}
 	// Resolve lsm_flags
 	lsmFlags := input.LSMFlags
@@ -581,14 +597,14 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		UserUID:               userUID,
 		UserGID:               userGID,
 		GuestMACPrefix:        guestMACPrefix,
-		NetworkPlacement:      model.VMNetworkPlacementManaged,
+		NetworkPlacement:      placement,
 		Network:               netw,
 		Image:                 img,
 		Kernel:                krnl,
 		Binary:                fcBinary,
 		NetworkPrefixLen:      networkPrefixLen,
 		CloudInitMode:         ciMode,
-		SkipCINetworkConfig:   input.SkipCINetworkConfig,
+		SkipCINetworkConfig:   input.SkipCINetworkConfig || input.NoNetwork,
 		PCIEnabled:            pciEnabled,
 		NestedVirt:            nestedVirt,
 		CPUConfig:             infra.MapToStruct[model.CpuConfig](cpuConfig),
@@ -664,6 +680,19 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			),
 			errs.WithClass(errs.ClassValidation),
 		)
+	}
+	switch result.NetworkPlacement {
+	case model.VMNetworkPlacementManaged:
+		if result.Network == nil {
+			return errs.New(errs.CodeValidationFailed, "managed VM creation requires a network")
+		}
+	case model.VMNetworkPlacementNetworkless:
+		if result.Network != nil || result.NetworkPrefixLen != 0 || result.NetworkNetmask != "" ||
+			!result.SkipCINetworkConfig || result.CloudInitMode == model.CloudInitModeNET {
+			return errs.New(errs.CodeValidationFailed, "networkless VM creation contains managed network state")
+		}
+	default:
+		return errs.New(errs.CodeValidationFailed, "VM creation network placement is invalid")
 	}
 	kernelPath := result.Kernel.Path
 	if _, err := os.Stat(kernelPath); os.IsNotExist(err) {

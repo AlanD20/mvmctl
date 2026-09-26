@@ -1,7 +1,6 @@
 package inputs
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -69,17 +68,4 @@ func TestVMCreateInputValidatesNetworklessConflicts(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
-}
-
-// Rationale: until the entire public lifecycle is wired, an explicit networkless request
-// must stop before managed-network resolution, even when no dependencies are available.
-func TestVMCreateRequestResolveKeepsNetworklessPlacementClosed(t *testing.T) {
-	request := &VMCreateRequest{input: VMCreateInput{Name: "offline-qa", NoNetwork: true}}
-	resolved, err := request.Resolve(context.Background())
-	require.Error(t, err)
-	assert.Nil(t, resolved)
-	domain := errs.AsDomainError(err)
-	require.NotNil(t, domain)
-	assert.Equal(t, errs.CodeValidationFailed, domain.Code)
-	assert.ErrorContains(t, err, "networkless VM creation is not yet available")
 }

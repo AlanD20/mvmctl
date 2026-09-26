@@ -49,6 +49,10 @@ func (op *Operation) SnapshotCreate(
 	if err != nil {
 		return nil, err
 	}
+	if vmItem.NetworkPlacement != model.VMNetworkPlacementManaged {
+		return nil, errs.New(errs.CodeSnapshotCreateFailed,
+			"snapshot capture requires a managed-network VM until networkless volume-consistent restore is implemented")
+	}
 	sourceVsock, err := op.Repos.Vsock.GetByVMID(ctx, vmItem.ID)
 	if err != nil {
 		return nil, err
