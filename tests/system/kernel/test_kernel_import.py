@@ -8,14 +8,22 @@ Also tests auto-detected version from filename and error paths.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.system.conftest import _ensure_kernel, _guest_run, _run_mvm, ensure_vm_deps
+from tests.system.conftest import (
+    _ensure_kernel,
+    _guest_run,
+    _json_success_data,
+    _run_mvm,
+    ensure_vm_deps,
+)
 
 VM_CACHE_DIR = "/root/.cache/mvmctl"
 VM_KERNEL_DIR = f"{VM_CACHE_DIR}/kernels"
@@ -31,46 +39,33 @@ pytestmark = [
 # ============================================================================
 
 
-def _get_firecracker_kernel_path(runner_vm: str) -> str:
-    """Return the absolute path of a present firecracker kernel inside the VM.
+def _get_present_kernel_path(runner_vm: str) -> str:
+    """Return the absolute path of a present kernel inside the runner VM.
 
     Caller should invoke ``_ensure_kernel()`` first.
     """
-    kernels = json.loads(
-        _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+    kernels = _json_success_data(
+        _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
     )
-    firecracker = [
-        k for k in kernels
-        if k.get("type") == "firecracker" and k.get("is_present")
-    ]
-    assert firecracker, (
-        "No present firecracker kernel — _ensure_kernel should have pulled one"
-    )
+    present = [kernel for kernel in kernels if kernel.get("is_present")]
+    assert present, "No present kernel — _ensure_kernel should have registered one"
 
-    fc = firecracker[0]
-    fc_id = fc["id"][:6]
-    inspect = json.loads(
-        _run_mvm(runner_vm, "kernel", "inspect", fc_id, "--json").stdout
+    source = next(
+        (kernel for kernel in present if kernel.get("type") == "firecracker"),
+        present[0],
     )
-    path = inspect.get("storage", {}).get("path", inspect.get("path", ""))
+    inspect = _json_success_data(
+        _run_mvm(runner_vm, "kernel", "inspect", source["id"][:6], "--json").stdout,
+        dict,
+    )
+    path = inspect["storage"]["path"]
 
-    if not path:
-        pytest.fail(
-            "Kernel inspect returned empty path for firecracker kernel"
-        )
+    assert path, "Kernel inspect returned empty storage path"
 
     # The path may be relative — resolve against kernel cache dir.
     # Use os.path.join to handle absolute paths correctly.
     full_path = os.path.join(VM_KERNEL_DIR, path) if not os.path.isabs(path) else path
-    check = _guest_run(
-        runner_vm,
-        f"test -f {full_path} && echo exists || echo not-found",
-        check=False,
-    )
-    assert "exists" in check.stdout, (
-        f"Firecracker kernel path does not exist inside VM: "
-        f"{path} (resolved: {full_path})"
-    )
+    assert Path(full_path).is_file(), f"Kernel path does not exist: {full_path}"
     return full_path
 
 
@@ -114,15 +109,15 @@ class TestKernelImportLifecycle:
     _network_subnet: str | None = None
 
     # ------------------------------------------------------------------
-    # Step 1: Import the firecracker kernel as custom type
+    # Step 1: Import a present kernel as custom type
     # ------------------------------------------------------------------
 
-    def test_import_firecracker_kernel(self, runner_vm: str) -> None:
-        """Import a firecracker kernel as a custom kernel and verify state."""
+    def test_import_present_kernel(self, runner_vm: str) -> None:
+        """Import a real kernel and verify its identity, bytes, and metadata."""
         type(self)._binary = runner_vm
         _ensure_kernel(runner_vm)
 
-        source_path = _get_firecracker_kernel_path(runner_vm)
+        source_path = _get_present_kernel_path(runner_vm)
         import_name = f"sys-test-import-{uuid.uuid4().hex[:6]}"
         type(self)._import_name = import_name
 
@@ -136,23 +131,24 @@ class TestKernelImportLifecycle:
             source_path,
             "--version",
             import_version,
+            "--json",
         )
         assert result.returncode == 0, f"kernel import failed: {result.stderr}"
+        import_result = _json_success_data(result.stdout, dict)
+        imported_id = import_result["id"]
+        type(self)._import_kernel_id = imported_id
+        type(self)._import_kernel_short_id = imported_id[:6]
 
         # ------------------------------------------------------------------
         # Option C verification: JSON state
         # ------------------------------------------------------------------
-        kernels_after = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels_after = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
-        imported = [
-            k for k in kernels_after if k.get("base_name") == import_name
-        ]
-        assert len(imported) == 1, (
-            f"Expected exactly 1 imported kernel with base_name='{import_name}', "
-            f"found {len(imported)} in ls --json"
-        )
+        imported = [kernel for kernel in kernels_after if kernel.get("id") == imported_id]
+        assert len(imported) == 1, imported
         imported_kernel = imported[0]
+        assert imported_kernel["base_name"] == import_name
         assert imported_kernel["type"] == "custom", (
             f"Expected type 'custom', got '{imported_kernel['type']}'"
         )
@@ -162,36 +158,18 @@ class TestKernelImportLifecycle:
         )
         assert imported_kernel["is_present"] is True
 
-        type(self)._import_kernel_id = imported_kernel["id"]
-        type(self)._import_kernel_short_id = imported_kernel["id"][:6]
-
         # ------------------------------------------------------------------
         # Option C verification: Filesystem (inside VM)
         # ------------------------------------------------------------------
         kernel_path_rel = imported_kernel.get("path", "")
         assert kernel_path_rel, "Imported kernel path is empty in ls --json"
         full_path = kernel_path_rel if os.path.isabs(kernel_path_rel) else f"{VM_KERNEL_DIR}/{kernel_path_rel}"
-        check = _guest_run(
-            runner_vm,
-            f"test -f {full_path} && echo exists || echo not-found",
-            check=False,
-        )
-        assert "exists" in check.stdout, (
-            f"Imported kernel file not found inside VM: {full_path}"
-        )
-        # Cross-check via stat: file must be non-empty
-        size_check = _guest_run(
-            runner_vm,
-            f"stat -c%s {full_path}",
-            check=False,
-        )
-        assert size_check.returncode == 0, (
-            f"Failed to stat imported kernel file: {size_check.stderr}"
-        )
-        file_size = int(size_check.stdout.strip())
-        assert file_size > 0, (
-            f"Imported kernel file is empty: {full_path}"
-        )
+        assert Path(full_path).is_file(), full_path
+        assert Path(full_path).stat().st_size == Path(source_path).stat().st_size
+        with open(source_path, "rb") as source, open(full_path, "rb") as copied:
+            assert hashlib.file_digest(copied, "sha256").digest() == hashlib.file_digest(
+                source, "sha256"
+            ).digest()
 
         # ------------------------------------------------------------------
         # Option C verification: inspect --json
@@ -204,8 +182,9 @@ class TestKernelImportLifecycle:
             "--json",
         )
         assert inspect_result.returncode == 0
-        inspect_data = json.loads(inspect_result.stdout)
-        kdata = inspect_data.get("kernel", {})
+        inspect_data = _json_success_data(inspect_result.stdout, dict)
+        kdata = inspect_data["kernel"]
+        assert kdata["id"] == imported_id
         assert kdata.get("type") == "custom", (
             f"Expected type 'custom', got '{kdata.get('type')}' in {kdata}"
         )
@@ -216,6 +195,7 @@ class TestKernelImportLifecycle:
         )
         assert kdata.get("is_present") is True
         assert kdata.get("name") == f"{import_name} {import_version}"
+        assert inspect_data["storage"]["path"] == full_path
 
     # ------------------------------------------------------------------
     # Step 2: Create a VM with the imported kernel
@@ -358,16 +338,27 @@ class TestKernelImportLifecycle:
     @classmethod
     def teardown_class(cls) -> None:
         """Clean up resources created during tests 1-3."""
+        if cls._binary is None:
+            return
+        failures = []
         if cls._vm_name:
-            _run_mvm(cls._binary, "vm", "rm", cls._vm_name, "--force", check=False)
+            result = _run_mvm(cls._binary, "vm", "rm", cls._vm_name, "--force", check=False)
+            if result.returncode != 0:
+                failures.append(f"VM removal: {result.stderr}")
 
         if cls._network_name:
-            _run_mvm(cls._binary, "network", "rm", cls._network_name, check=False)
+            result = _run_mvm(cls._binary, "network", "rm", cls._network_name, check=False)
+            if result.returncode != 0:
+                failures.append(f"network removal: {result.stderr}")
 
-        if cls._import_name:
-            _run_mvm(
-                cls._binary, "kernel", "rm", cls._import_name, "--force", check=False,
+        if cls._import_kernel_id:
+            result = _run_mvm(
+                cls._binary, "kernel", "rm", cls._import_kernel_id, "--force", check=False,
             )
+            if result.returncode != 0:
+                failures.append(f"kernel removal: {result.stderr}")
+        if failures:
+            pytest.fail("; ".join(failures))
 
 
 # ============================================================================
@@ -390,7 +381,7 @@ class TestKernelImportAutoVersion:
         """Copy firecracker kernel to a versioned temp filename inside the VM and
         import without ``--version``; verify version is auto-detected."""
         _ensure_kernel(runner_vm)
-        source_path = _get_firecracker_kernel_path(runner_vm)
+        source_path = _get_present_kernel_path(runner_vm)
 
         # Copy to a temp path with version info in the filename (inside VM)
         temp_kernel = f"{VM_TMP_DIR}/vmlinux-6.1-x86_64-{uuid.uuid4().hex[:6]}"
@@ -496,7 +487,7 @@ class TestKernelImportDefault:
     ) -> None:
         """Import a kernel with --default and verify is_default=true in ls --json."""
         _ensure_kernel(runner_vm)
-        source_path = _get_firecracker_kernel_path(runner_vm)
+        source_path = _get_present_kernel_path(runner_vm)
 
         import_name = f"sys-test-default-{uuid.uuid4().hex[:6]}"
         imported_prefix = None
@@ -572,7 +563,7 @@ class TestKernelImportError:
     def test_import_empty_name_fails(self, runner_vm: str) -> None:
         """Importing with an empty name must fail."""
         _ensure_kernel(runner_vm)
-        source_path = _get_firecracker_kernel_path(runner_vm)
+        source_path = _get_present_kernel_path(runner_vm)
 
         result = _run_mvm(
             runner_vm,
@@ -591,7 +582,7 @@ class TestKernelImportError:
     def test_import_basic_succeeds(self, runner_vm: str) -> None:
         """Import a kernel with valid args (arch is auto-detected in Go CLI)."""
         _ensure_kernel(runner_vm)
-        source_path = _get_firecracker_kernel_path(runner_vm)
+        source_path = _get_present_kernel_path(runner_vm)
 
         result = _run_mvm(
             runner_vm,
@@ -611,7 +602,7 @@ class TestKernelImportError:
         """Importing a kernel with the same name+version+arch creates
         a new entry (different content-addressed ID). Type should be 'custom'."""
         _ensure_kernel(runner_vm)
-        source_path = _get_firecracker_kernel_path(runner_vm)
+        source_path = _get_present_kernel_path(runner_vm)
 
         import_name = f"sys-test-dup-{uuid.uuid4().hex[:6]}"
         import_version = "6.1"
