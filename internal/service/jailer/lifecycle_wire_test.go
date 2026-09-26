@@ -8,8 +8,8 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-func TestVMLaunchRequestRequiresAdmittedNetworkPlacement(t *testing.T) {
-	request := VMLaunchRequest{
+func validVMLaunchRequest() VMLaunchRequest {
+	return VMLaunchRequest{
 		VMID:             strings.Repeat("a", 32),
 		CacheRoot:        "/home/runner/.cache/mvmctl",
 		KernelID:         strings.Repeat("b", 64),
@@ -28,6 +28,10 @@ func TestVMLaunchRequestRequiresAdmittedNetworkPlacement(t *testing.T) {
 			PIDsMax:        64,
 		}),
 	}
+}
+
+func TestVMLaunchRequestRequiresAdmittedNetworkPlacement(t *testing.T) {
+	request := validVMLaunchRequest()
 	if err := request.Validate(); err != nil {
 		t.Fatalf("valid managed launch request rejected: %v", err)
 	}
@@ -36,7 +40,6 @@ func TestVMLaunchRequestRequiresAdmittedNetworkPlacement(t *testing.T) {
 		name      string
 		placement model.VMNetworkPlacement
 	}{
-		{name: "networkless", placement: model.VMNetworkPlacementNetworkless},
 		{name: "unknown", placement: "other"},
 		{name: "empty"},
 	} {
@@ -44,7 +47,7 @@ func TestVMLaunchRequestRequiresAdmittedNetworkPlacement(t *testing.T) {
 			candidate := request
 			candidate.NetworkPlacement = tc.placement
 			if err := candidate.Validate(); err == nil || !strings.Contains(err.Error(), "network placement") {
-				t.Fatalf("non-managed launch reached the managed path: %v", err)
+				t.Fatalf("invalid launch placement was admitted: %v", err)
 			}
 		})
 	}
@@ -75,5 +78,54 @@ func TestVMLaunchRequestRequiresAdmittedNetworkPlacement(t *testing.T) {
 	var decoded VMLaunchRequest
 	if err := json.Unmarshal(encoded, &decoded); err == nil || !strings.Contains(err.Error(), "network_placement") {
 		t.Fatalf("untagged launch was accepted by the root wire: %v", err)
+	}
+}
+
+func TestVMLaunchRequestNetworklessWireIsClosed(t *testing.T) {
+	request := validVMLaunchRequest()
+	request.NetworkPlacement = model.VMNetworkPlacementNetworkless
+	request.NetworkID = ""
+	request.GuestIPv4 = ""
+	request.GuestMAC = ""
+	if err := request.Validate(); err != nil {
+		t.Fatalf("valid networkless launch request rejected: %v", err)
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(fields["network_placement"]); got != `"networkless"` {
+		t.Fatalf("networkless launch wire placement = %s, want explicit networkless variant", got)
+	}
+	var decoded VMLaunchRequest
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("valid networkless launch did not decode: %v", err)
+	}
+	if err := decoded.Validate(); err != nil {
+		t.Fatalf("decoded networkless launch was rejected: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		change func(*VMLaunchRequest)
+		want   string
+	}{
+		{name: "managed network ID", change: func(value *VMLaunchRequest) { value.NetworkID = strings.Repeat("c", 64) }, want: "managed endpoint"},
+		{name: "guest IPv4", change: func(value *VMLaunchRequest) { value.GuestIPv4 = "10.0.0.2" }, want: "managed endpoint"},
+		{name: "guest MAC", change: func(value *VMLaunchRequest) { value.GuestMAC = "02:00:00:00:00:02" }, want: "managed endpoint"},
+		{name: "kernel IP", change: func(value *VMLaunchRequest) { value.BootArgs += " ip=dhcp" }, want: "boot arguments"},
+		{name: "NoCloud NET", change: func(value *VMLaunchRequest) { value.BootArgs += " ds=nocloud-net" }, want: "boot arguments"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := request
+			tc.change(&candidate)
+			if err := candidate.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("networkless request with %s was admitted: %v", tc.name, err)
+			}
+		})
 	}
 }

@@ -155,8 +155,10 @@ type VMCleanupResult struct {
 
 // Validate enforces receiver resource selection and guest intent without any effect.
 func (request VMLaunchRequest) Validate() error {
-	if request.NetworkPlacement != model.VMNetworkPlacementManaged {
-		return instanceValidationError("VM launch network placement is not an admitted managed variant")
+	switch request.NetworkPlacement {
+	case model.VMNetworkPlacementManaged, model.VMNetworkPlacementNetworkless:
+	default:
+		return instanceValidationError("VM launch network placement is invalid")
 	}
 	if request.NestedVirt && (!request.PCIEnabled || request.CPUConfig == nil) {
 		return instanceValidationError("nested virtualization requires PCI and explicit CPU configuration")
@@ -177,8 +179,7 @@ func (request VMLaunchRequest) Validate() error {
 	if err := validateVMVolumeResourceSelection(volumes); err != nil {
 		return err
 	}
-	if !vmIDPattern.MatchString(request.VMID) || !driveIDPattern.MatchString(request.KernelID) ||
-		!driveIDPattern.MatchString(request.NetworkID) {
+	if !vmIDPattern.MatchString(request.VMID) || !driveIDPattern.MatchString(request.KernelID) {
 		return instanceValidationError("VM launch canonical identities are invalid")
 	}
 	if _, err := parseManagedCacheLocator(request.CacheRoot); err != nil {
@@ -190,13 +191,28 @@ func (request VMLaunchRequest) Validate() error {
 	if request.RootfsBytes < managedVMRootfsMinBytes || request.RootfsBytes > managedVMRootfsMaxBytes {
 		return instanceValidationError("VM launch rootfs size is outside receiver policy")
 	}
-	ip, err := netip.ParseAddr(request.GuestIPv4)
-	if err != nil || !ip.Is4() || ip.String() != request.GuestIPv4 {
-		return instanceValidationError("VM launch guest IPv4 is not canonical")
-	}
-	mac, err := net.ParseMAC(request.GuestMAC)
-	if err != nil || len(mac) != 6 || mac.String() != request.GuestMAC {
-		return instanceValidationError("VM launch guest MAC is not canonical")
+	switch request.NetworkPlacement {
+	case model.VMNetworkPlacementManaged:
+		if !driveIDPattern.MatchString(request.NetworkID) {
+			return instanceValidationError("VM launch managed network identity is invalid")
+		}
+		ip, err := netip.ParseAddr(request.GuestIPv4)
+		if err != nil || !ip.Is4() || ip.String() != request.GuestIPv4 {
+			return instanceValidationError("VM launch guest IPv4 is not canonical")
+		}
+		mac, err := net.ParseMAC(request.GuestMAC)
+		if err != nil || len(mac) != 6 || mac.String() != request.GuestMAC {
+			return instanceValidationError("VM launch guest MAC is not canonical")
+		}
+	case model.VMNetworkPlacementNetworkless:
+		if request.NetworkID != "" || request.GuestIPv4 != "" || request.GuestMAC != "" {
+			return instanceValidationError("VM launch networkless placement contains a managed endpoint")
+		}
+		for argument := range strings.FieldsSeq(request.BootArgs) {
+			if strings.HasPrefix(argument, "ip=") || strings.HasPrefix(argument, "ds=") {
+				return instanceValidationError("VM launch networkless boot arguments configure networking")
+			}
+		}
 	}
 	if err := validateManagedVMCgroupLimits(request.CgroupLimits); err != nil {
 		return err
