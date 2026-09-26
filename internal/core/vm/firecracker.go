@@ -377,6 +377,10 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 			return "", errs.New(errs.CodeFirecrackerConfigError,
 				"networkless VM configuration cannot include kernel ip boot arguments")
 		}
+		if bootArgs.entryIndex("ds") >= 0 {
+			return "", errs.New(errs.CodeFirecrackerConfigError,
+				"networkless VM configuration cannot include caller-supplied cloud-init datasource")
+		}
 	} else {
 		// The managed endpoint must be ready before cloud-init begins.
 		bootArgs.set(

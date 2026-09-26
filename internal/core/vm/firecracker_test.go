@@ -512,6 +512,22 @@ func TestFirecrackerSpawnerGenerateNetworklessPlacement(t *testing.T) {
 	assert.JSONEq(t, `[]`, string(serialized["network-interfaces"]))
 }
 
+func TestFirecrackerSpawnerGenerateNetworklessISOCloudInit(t *testing.T) {
+	spawner := vm.NewFirecrackerSpawner(&model.FirecrackerConfig{
+		VMDir:            filepath.Join(t.TempDir(), testSpawnerVMID),
+		NetworkPlacement: model.VMNetworkPlacementNetworkless,
+		CloudInitMode:    ptr.Ptr(model.CloudInitModeISO),
+	})
+
+	got, err := spawner.Generate()
+	require.NoError(t, err)
+	assert.Equal(t, "pci=off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service ds=nocloud",
+		got.BootSource.BootArgs)
+	if diff := cmp.Diff([]model.NetworkInterfaceConfig{}, got.NetworkInterfaces); diff != "" {
+		t.Errorf("networkless ISO interfaces mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestFirecrackerSpawnerRejectsMixedNetworklessPlacement(t *testing.T) {
 	tests := map[string]struct {
 		placement model.VMNetworkPlacement
@@ -543,6 +559,9 @@ func TestFirecrackerSpawnerRejectsMixedNetworklessPlacement(t *testing.T) {
 			wantErr: "cannot use NoCloud NET"},
 		"kernel_ip": {placement: model.VMNetworkPlacementNetworkless, bootArgs: "ip=10.0.0.2 quiet",
 			wantErr: "cannot include kernel ip boot arguments"},
+		"network_datasource": {placement: model.VMNetworkPlacementNetworkless,
+			bootArgs: "ds=nocloud;seedfrom=http://10.0.0.1:8000/",
+			wantErr:  "cannot include caller-supplied cloud-init datasource"},
 	}
 
 	for name, tc := range tests {
