@@ -25,12 +25,14 @@ architecture is release-qualified. The authoritative release gate is `tasks/todo
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
 9 JSON/flag-invariant, 26 non-VM key, and 5 internal-service entry-point Python cases (98 total); the focused
-networkless create/stop/start/reboot/vsock case and five focused raw-volume/removed-format cases also passed. The
+networkless create/stop/start/reboot/vsock case, five focused raw-volume/removed-format cases, and a networkless
+raw-volume guest-attachment/restart case also passed. The
 installed binary predates `8e0be4fe`, but the intervening source change under `internal/`, `pkg/`, and `cmd/` was
 test-only.
 These are scoped results, **not** a full Python matrix or release sign-off. The current runner kernel still rejects
 bridge-family nftables tables, blocking network/policy qualification there. Volume/snapshot consistency, host-reboot,
-and full Jailer system journeys also remain unqualified.
+and full Jailer system journeys also remain unqualified; one guest-visible volume attach is not snapshot-consistency
+qualification.
 
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
@@ -223,7 +225,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `vm create --count` with `--ip` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMCreateCountIP` | L1 — rejected, mutually exclusive with --count > 1 |
 | `vm create --count` with `--mac` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMCreateCountMAC` | L1 — rejected, mutually exclusive with --count > 1 |
 | `vm create --count -1` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMCreateCountNegative` | L1 — non-zero exit with error |
-| `vm create` with `--volume` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L2 — volume status=attached |
+| `vm create` with `--volume` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMVolumeIntegration`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless raw attach passed: root-brokered volume status/VM ID, guest `vdb` before and after restart, checked removal. Networked and snapshot journeys remain unqualified. |
 | `vm create` with `--volume <id-prefix>` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L2 — volume status=attached |
 | `vm create` with `--ssh-key <key>` | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMSSHIntegration` | L3 — SSH reachable if key works |
 | `vm create` with `--ssh-key <filepath>` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L2 — key injected from file path |
@@ -325,7 +327,7 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `volume create <size>` (raw-only) | 🟡 Partial | `volume/test_volume.py` | `TestRawVolumeAuthoritativeStorage`, `TestVolumeLifecycle` | Focused installed-candidate 16 MiB create, inspect, 32 MiB grow, checked remove, and backing-file absence passed in the named runner; broader options and VM attachment remain unqualified. |
+| `volume create <size>` (raw-only) | 🟡 Partial | `volume/test_volume.py`, `vm/test_jailer.py` | `TestRawVolumeAuthoritativeStorage`, `TestNetworklessJailerLifecycle`, `TestVolumeLifecycle` | Focused installed-candidate 16 MiB create, inspect, 32 MiB grow, checked remove, backing-file absence, and one guest-visible networkless attachment/restart passed in the named runner; broader options and snapshot consistency remain unqualified. |
 | `volume create --format` (removed) | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_create_removed_format_flag_rejected_without_side_effects` | Installed-candidate raw/QCOW2/VMDK variants passed 3/3: unknown flag, no new volume record or backing file, checked sentinel cleanup. QCOW2 **image import** remains supported. |
 | `volume create` invalid size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` duplicate name | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |

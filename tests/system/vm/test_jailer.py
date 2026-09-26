@@ -326,6 +326,66 @@ def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
 
 
 class TestNetworklessJailerLifecycle:
+    def test_raw_volume_is_attached_at_launch_and_after_restart(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """A raw data volume reaches the guest through the protected Jailer launch."""
+        ensure_vm_deps(runner_vm)
+        name = networkless_vm_name
+        volume_name = f"sys-networkless-vol-{uuid.uuid4().hex[:8]}"
+        try:
+            created_volume = _json_success_data(
+                _run_mvm(
+                    runner_vm, "volume", "create", volume_name, "16M", "--json",
+                ).stdout,
+                dict,
+            )
+            assert created_volume["format"] == "raw"
+
+            created_vm = _json_success_data(
+                _run_mvm(
+                    runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
+                    "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M",
+                    "--vcpu", "1", "--volume", volume_name, "--json", timeout=180,
+                ).stdout,
+                list,
+            )
+            assert len(created_vm) == 1
+            assert created_vm[0]["status"] == "running"
+
+            attached = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", volume_name, "--json").stdout,
+                dict,
+            )
+            assert attached["volume"]["status"] == "attached"
+            assert attached["attachment"]["vm_id"] == created_vm[0]["id"]
+
+            for attempt in range(2):
+                partitions = _run_mvm(
+                    runner_vm, "exec", name, "--", "cat", "/proc/partitions", timeout=30,
+                )
+                assert "vdb" in partitions.stdout
+                if attempt == 0:
+                    _run_mvm(runner_vm, "vm", "stop", name, timeout=120)
+                    _run_mvm(runner_vm, "vm", "start", name, timeout=120)
+        finally:
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            if any(vm["name"] == name for vm in listed):
+                removed = _run_mvm(runner_vm, "vm", "rm", name, "--force", check=False, timeout=120)
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            if any(volume["name"] == volume_name for volume in volumes):
+                removed = _run_mvm(
+                    runner_vm, "volume", "rm", volume_name, "--force", check=False,
+                )
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            assert all(volume["name"] != volume_name for volume in volumes)
+
     def test_create_restart_reboot_and_vsock_exec_without_guest_nic(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
