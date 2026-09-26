@@ -777,9 +777,13 @@ func TestPrivilegedControlHelper(t *testing.T) {
 		if _, err := io.ReadFull(os.Stdin, header); err != nil {
 			os.Exit(96)
 		}
-		_ = unix.Shutdown(int(os.Stdin.Fd()), unix.SHUT_RD)
 		_, _ = os.Stdin.WriteString("response:early")
 		_ = unix.Shutdown(int(os.Stdin.Fd()), unix.SHUT_WR)
+		// Drain the request until the parent half-closes. Exiting with unread
+		// socket bytes can reset its read side despite our response half-close.
+		if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
+			os.Exit(97)
+		}
 		os.Exit(17)
 	case "test-final-without-read":
 		_ = unix.Shutdown(int(os.Stdin.Fd()), unix.SHUT_RD)
