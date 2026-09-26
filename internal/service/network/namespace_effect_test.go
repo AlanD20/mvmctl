@@ -890,7 +890,7 @@ func TestNamespaceEffectRetainLinkNamespaceRejectsDriftAndInactivePins(t *testin
 func TestOpenNamespaceTargetUsesOrdinaryVerifiedDescriptors(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := secureNetworkTestRoot(t)
 	uid := fmt.Sprintf("%d", testOwnerUID)
 	parentPath := filepath.Join(root, "run", "mvmctl", "authority", uid, "netns")
 	require.NoError(t, os.MkdirAll(parentPath, 0o700))

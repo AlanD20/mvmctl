@@ -716,7 +716,7 @@ func TestNetworkAuthorityConcurrentRegistrationSerializesClaims(t *testing.T) {
 
 func newNetworkAuthorityFixture(t *testing.T, bootID string) *networkAuthorityFixture {
 	t.Helper()
-	root := t.TempDir()
+	root := secureNetworkTestRoot(t)
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib"), 0755))
 	tree := newTestNetworkAuthorityTree()
 	fixture := &networkAuthorityFixture{root: root, bootID: bootID, tree: tree}

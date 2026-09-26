@@ -19,7 +19,7 @@ import (
 func TestResolveDefaultUserDirFreshSudoHomeSupportsUnprivilegedFollowUp(t *testing.T) {
 	t.Parallel()
 
-	home := t.TempDir()
+	home := secureUserDirTestHome(t)
 	uid := uint32(os.Geteuid())
 	gid := uint32(os.Getegid())
 	require.NotZero(t, uid, "the ownership regression requires an unprivileged test process")
@@ -86,7 +86,7 @@ func TestResolveDefaultUserDirRejectsWritableExistingDirectory(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			home := t.TempDir()
+			home := secureUserDirTestHome(t)
 			tc.prepare(t, home)
 
 			_, err := resolveDefaultUserDir(
@@ -103,7 +103,7 @@ func TestResolveDefaultUserDirRejectsWritableExistingDirectory(t *testing.T) {
 func TestResolveDefaultUserDirAllowsReadOnlyExistingDirectoryAccess(t *testing.T) {
 	t.Parallel()
 
-	home := t.TempDir()
+	home := secureUserDirTestHome(t)
 	uid := uint32(os.Geteuid())
 	gid := uint32(os.Getegid())
 	require.NotZero(t, uid)
@@ -140,7 +140,7 @@ func TestResolveDefaultUserDirRejectsUnsafeEEXISTRaceWithoutChown(t *testing.T) 
 	}
 	for name, substitute := range tests {
 		t.Run(name, func(t *testing.T) {
-			home := t.TempDir()
+			home := secureUserDirTestHome(t)
 			deps := testDefaultUserDirDeps(home, uid, gid)
 			realOpenAt := deps.openAt
 			baseOpenCount := 0
@@ -195,7 +195,7 @@ func TestResolveDefaultUserDirStopsAfterIncompleteBaseOwnership(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			home := t.TempDir()
+			home := secureUserDirTestHome(t)
 			deps := testDefaultUserDirDeps(home, uid, gid)
 			realMkdirAt := deps.mkdirAt
 			created := make([]string, 0, 1)
@@ -274,7 +274,7 @@ func TestResolveDefaultUserDirSurfacesSyncAndCloseFailures(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			home := t.TempDir()
+			home := secureUserDirTestHome(t)
 			deps := testDefaultUserDirDeps(home, uid, gid)
 			primary := errors.New("sync failed")
 			closeFailure := errors.New("close failed")
@@ -299,7 +299,7 @@ func TestResolveDefaultUserDirSurfacesSyncAndCloseFailures(t *testing.T) {
 func TestResolveUserDirRejectsOverrideUnderSudoBeforeFilesystemMutation(t *testing.T) {
 	t.Parallel()
 
-	home := t.TempDir()
+	home := secureUserDirTestHome(t)
 	uid := uint32(os.Geteuid())
 	gid := uint32(os.Getegid())
 	require.NotZero(t, uid)
@@ -337,7 +337,7 @@ func TestResolveUserDirPreservesUnprivilegedOverride(t *testing.T) {
 func TestResolveDefaultUserDirDoesNotChownPreExistingBaseOrContents(t *testing.T) {
 	t.Parallel()
 
-	home := t.TempDir()
+	home := secureUserDirTestHome(t)
 	uid := uint32(os.Geteuid())
 	gid := uint32(os.Getegid())
 	require.NotZero(t, uid)
@@ -364,7 +364,7 @@ func TestResolveDefaultUserDirDoesNotChownPreExistingBaseOrContents(t *testing.T
 func TestResolveDefaultUserDirDoesNotChownPreExistingProjectContents(t *testing.T) {
 	t.Parallel()
 
-	home := t.TempDir()
+	home := secureUserDirTestHome(t)
 	uid := uint32(os.Geteuid())
 	gid := uint32(os.Getegid())
 	require.NotZero(t, uid)
@@ -515,6 +515,13 @@ func testDefaultUserDirDeps(home string, uid, gid uint32) defaultUserDirDeps {
 		}, nil
 	}
 	return deps
+}
+
+func secureUserDirTestHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	require.NoError(t, os.Chmod(home, 0700))
+	return home
 }
 
 func assertDirectoryOwner(t *testing.T, path string, uid, gid uint32) {

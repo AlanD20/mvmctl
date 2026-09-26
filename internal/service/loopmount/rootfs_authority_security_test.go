@@ -78,6 +78,7 @@ func runRootfsReplacementCase(t *testing.T, tc rootfsReplacementCase, phase root
 	t.Helper()
 
 	root := t.TempDir()
+	require.NoError(t, os.Chmod(root, 0700))
 	trustedPrefix := []byte("trusted!")
 	attackerPrefix := []byte("attacker")
 	expectedBytes := uint64(len(trustedPrefix))

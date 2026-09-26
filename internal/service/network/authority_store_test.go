@@ -413,7 +413,7 @@ func TestNetworkStoreTemporaryNameCollisionRetryIsBounded(t *testing.T) {
 func TestNetworkStoreRejectsUnsafeManagedDirectoryWithoutRepair(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := secureNetworkTestRoot(t)
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib/mvmctl/networks"), 0755))
 	policy := networkStorePolicy{
 		rootPath: root, stateRoot: "/var/lib/mvmctl/networks",
@@ -431,7 +431,7 @@ func TestNetworkStoreRejectsUnsafeManagedDirectoryWithoutRepair(t *testing.T) {
 func TestNetworkStoreRootReleaseClosesReverseOnceWithCleanupContext(t *testing.T) {
 	t.Parallel()
 
-	rootPath := t.TempDir()
+	rootPath := secureNetworkTestRoot(t)
 	require.NoError(t, os.MkdirAll(filepath.Join(rootPath, "var/lib"), 0755))
 	deps := realNetworkStoreDeps()
 	realOpen := deps.open
@@ -633,7 +633,7 @@ func newNetworkStoreFixture(t *testing.T) *networkStoreFixture {
 
 func newNetworkStoreFixtureWithoutCleanup(t *testing.T) *networkStoreFixture {
 	t.Helper()
-	root := t.TempDir()
+	root := secureNetworkTestRoot(t)
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib"), 0755))
 	policy := networkStorePolicy{
 		rootPath: root, stateRoot: "/var/lib/mvmctl/networks",
@@ -648,6 +648,13 @@ func newNetworkStoreFixtureWithoutCleanup(t *testing.T) *networkStoreFixture {
 		root: root, policy: policy, storeRoot: storeRoot, uid: uid, record: record,
 		recordPath: filepath.Join(root, "var/lib/mvmctl/networks/1000", testNetworkID+".json"),
 	}
+}
+
+func secureNetworkTestRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, os.Chmod(root, 0700))
+	return root
 }
 
 func (fixture *networkStoreFixture) writeRaw(t *testing.T, raw []byte, mode os.FileMode) {
