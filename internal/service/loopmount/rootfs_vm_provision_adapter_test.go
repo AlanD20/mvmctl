@@ -2,6 +2,7 @@ package loopmount
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -26,6 +27,7 @@ func TestRootfsVMProvisionAdapterConvergedReplayUsesClosedReadWriteFlow(t *testi
 	t.Parallel()
 
 	fixture := newTestRootfsVMProvisionFixture(t)
+	fixture.reportedFilesystemOverhead = 8 << 20
 	outcome, err := fixture.adapter().ProvisionVM(t.Context(), fixture.base.lease, FilesystemExt4, VMProvisionPlan{
 		ResizeBytes: fixture.target,
 	})
@@ -57,6 +59,7 @@ func TestRootfsVMProvisionAdapterFirstGrowConvergesBackingAndExtFilesystem(t *te
 	fixture.target = targetBytes
 	fixture.backingBytes = oldBytes
 	fixture.initialFilesystemBytes = oldBytes
+	fixture.reportedFilesystemOverhead = 8 << 20
 	fixture.base.lease.admittedBytes = oldBytes
 	fixture.base.lease.metadata.size = oldBytes
 	var commands [][]string
@@ -166,6 +169,15 @@ func TestRootfsVMProvisionAdapterClassifiesGrowToolAndRemountFaults(t *testing.T
 					return &system.RunResult{ExitCode: 0}, nil
 				}
 				f.remountErr = errors.New("remount")
+			},
+			wantCommandsRun: 2,
+		},
+		"resize_success_without_ext_growth_is_unknown": {
+			configure: func(f *testRootfsVMProvisionFixture) {
+				f.resizeDoesNotGrow = true
+				f.runTool = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
+					return &system.RunResult{ExitCode: 0}, nil
+				}
 			},
 			wantCommandsRun: 2,
 		},
@@ -560,6 +572,8 @@ func TestConvergeRootfsProvisionGrowUsesOnlyFilesystemSpecificFixedTools(t *test
 
 	t.Run("ext_offline", func(t *testing.T) {
 		fixture := newTestRootfsVMProvisionFixture(t)
+		fixture.target = target
+		fixture.initialFilesystemBytes = target - 4096
 		deps := fixture.adapter().deps
 		fixture.base.openAt2Count = 2
 		var probes int
@@ -581,6 +595,9 @@ func TestConvergeRootfsProvisionGrowUsesOnlyFilesystemSpecificFixedTools(t *test
 			_ system.RunCmdOpts,
 		) (*system.RunResult, error) {
 			gotCommands = append(gotCommands, slices.Clone(args))
+			if args[0] == rootfsResize2fsPath {
+				fixture.extGrowCompleted = true
+			}
 			return &system.RunResult{ExitCode: 0}, nil
 		}
 		tracker := &rootfsProvisionTracker{modified: true}
@@ -1328,23 +1345,26 @@ func testSystemRootfsGuestTreeDeps(sequence *atomic.Uint32) rootfsGuestTreeDeps 
 }
 
 type testRootfsVMProvisionFixture struct {
-	t                      *testing.T
-	base                   *testRootfsImageInspectFixture
-	target                 uint64
-	backingBytes           uint64
-	initialFilesystemBytes uint64
-	filesystemStatCalls    int
-	truncateCalls          int
-	truncateErr            error
-	backingFsyncCalls      int
-	backingFsyncErrors     []error
-	rootfsMountCalls       int
-	remountErr             error
-	runTool                func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error)
-	attachErr              error
-	syncfsErr              error
-	finalSizeDelta         uint64
-	cancelDuringSync       context.CancelFunc
+	t                          *testing.T
+	base                       *testRootfsImageInspectFixture
+	target                     uint64
+	backingBytes               uint64
+	initialFilesystemBytes     uint64
+	reportedFilesystemOverhead uint64
+	extGrowCompleted           bool
+	resizeDoesNotGrow          bool
+	filesystemStatCalls        int
+	truncateCalls              int
+	truncateErr                error
+	backingFsyncCalls          int
+	backingFsyncErrors         []error
+	rootfsMountCalls           int
+	remountErr                 error
+	runTool                    func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error)
+	attachErr                  error
+	syncfsErr                  error
+	finalSizeDelta             uint64
+	cancelDuringSync           context.CancelFunc
 }
 
 // newTestRootfsVMProvisionFixture constructs a complete hermetic provisioning effect with observable cleanup state.
@@ -1397,6 +1417,9 @@ func (fixture *testRootfsVMProvisionFixture) adapter() *rootfsVMProvisionAdapter
 			if fixture.filesystemStatCalls <= 2 {
 				capacity = fixture.initialFilesystemBytes
 			}
+			if fixture.reportedFilesystemOverhead != 0 {
+				capacity -= fixture.reportedFilesystemOverhead
+			}
 			stat.Type = unix.EXT4_SUPER_MAGIC
 			stat.Bsize = 4096
 			stat.Blocks = capacity / 4096
@@ -1421,7 +1444,21 @@ func (fixture *testRootfsVMProvisionFixture) adapter() *rootfsVMProvisionAdapter
 			fixture.base.events = append(fixture.base.events, "snapshot")
 			return nil
 		},
-		pread:  func(context.Context, int, []byte, int64) (int, error) { return 0, io.EOF },
+		pread: func(_ context.Context, _ int, data []byte, offset int64) (int, error) {
+			if offset != 1024 || len(data) != 1024 {
+				return 0, io.EOF
+			}
+			clear(data)
+			capacity := fixture.initialFilesystemBytes
+			if fixture.extGrowCompleted {
+				capacity = fixture.target
+			}
+			binary.LittleEndian.PutUint32(data[0x04:], uint32(capacity/4096))
+			binary.LittleEndian.PutUint32(data[0x18:], 2)
+			binary.LittleEndian.PutUint16(data[0x38:], 0xef53)
+			binary.LittleEndian.PutUint16(data[0x3a:], 1)
+			return len(data), nil
+		},
 		pwrite: func(context.Context, int, []byte, int64) (int, error) { return 0, errors.New("unexpected write") },
 		ftruncate: func(_ context.Context, _ int, size int64) error {
 			fixture.truncateCalls++
@@ -1468,7 +1505,12 @@ func (fixture *testRootfsVMProvisionFixture) adapter() *rootfsVMProvisionAdapter
 		},
 		run: func(ctx context.Context, args []string, opts system.RunCmdOpts) (*system.RunResult, error) {
 			if fixture.runTool != nil {
-				return fixture.runTool(ctx, args, opts)
+				result, err := fixture.runTool(ctx, args, opts)
+				if err == nil && result != nil && result.ExitCode == 0 && !fixture.resizeDoesNotGrow && len(args) > 0 &&
+					args[0] == rootfsResize2fsPath {
+					fixture.extGrowCompleted = true
+				}
+				return result, err
 			}
 			return nil, errors.New("unexpected grow tool")
 		},

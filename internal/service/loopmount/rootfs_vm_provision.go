@@ -590,7 +590,7 @@ func convergeRootfsProvisionGrow(
 	tracker *rootfsProvisionTracker,
 	commandsRun *uint32,
 ) (int, bool, error) {
-	converged, err := probeRootfsProvisionCapacity(ctx, deps, mountedRootFD, target)
+	converged, err := probeRootfsProvisionCapacity(ctx, deps, source, filesystem, mountedRootFD, target)
 	if err != nil {
 		return mountedRootFD, mounted, err
 	}
@@ -641,6 +641,15 @@ func convergeRootfsProvisionGrow(
 			return mountedRootFD, mounted, err
 		}
 		tracker.outcomeUnknown = true
+		extBytes, blockBytes, err := readExtFilesystemSize(ctx, deps, source, target, true)
+		if err != nil {
+			return mountedRootFD, mounted, err
+		}
+		if !rootfsCapacityConverged(extBytes, target, blockBytes) {
+			return mountedRootFD, mounted, rootfsAtomicError(
+				"grown ext filesystem did not reach the requested capacity", nil,
+			)
+		}
 		if err := deps.mount(
 			ctx,
 			sourcePath,
@@ -658,7 +667,7 @@ func convergeRootfsProvisionGrow(
 			return mountedRootFD, mounted, err
 		}
 	}
-	converged, err = probeRootfsProvisionCapacity(ctx, deps, mountedRootFD, target)
+	converged, err = probeRootfsProvisionCapacity(ctx, deps, source, filesystem, mountedRootFD, target)
 	if err != nil {
 		return mountedRootFD, mounted, err
 	}
@@ -674,9 +683,18 @@ func convergeRootfsProvisionGrow(
 func probeRootfsProvisionCapacity(
 	ctx context.Context,
 	deps rootfsVMProvisionDeps,
+	source *rootfsSelectedSource,
+	filesystem Filesystem,
 	rootFD int,
 	target uint64,
 ) (bool, error) {
+	if filesystem != FilesystemBtrfs {
+		capacity, blockSize, err := readExtFilesystemSize(ctx, deps, source, target, false)
+		if err != nil {
+			return false, err
+		}
+		return rootfsCapacityConverged(capacity, target, blockSize), nil
+	}
 	var stat unix.Statfs_t
 	if err := deps.fstatfs(ctx, rootFD, &stat); err != nil {
 		return false, rootfsAtomicError("probe managed VM filesystem capacity", err)
@@ -823,11 +841,19 @@ func applyRootfsProvisionPlan(
 				if err != nil {
 					return filesWritten, err
 				}
-				if _, err := tree.ensureDirectory(ctx, "/root/.ssh", 0700, rootAccount.uid, rootAccount.gid); err != nil {
+				if _, err := tree.ensureDirectory(
+					ctx,
+					"/root/.ssh",
+					0700,
+					rootAccount.uid,
+					rootAccount.gid,
+				); err != nil {
 					return filesWritten, err
 				}
 				if err := write(rootfsProvisionFile{
-					path: "/root/.ssh/authorized_keys", content: []byte(strings.Join(plan.SSH.PublicKeys, "\n") + "\n"), mode: 0600,
+					path:    "/root/.ssh/authorized_keys",
+					content: []byte(strings.Join(plan.SSH.PublicKeys, "\n") + "\n"),
+					mode:    0600,
 				}); err != nil {
 					return filesWritten, err
 				}

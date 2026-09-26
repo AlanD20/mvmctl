@@ -173,14 +173,32 @@ func (adapter *rootfsImageShrinkAdapter) OptimizeImage(
 	}
 	// A prepared replay retains the original backing length. Never truncate after an
 	// interrupted tool until fsck, resize, fsck, and exact superblock admission succeed.
-	if err := runImageShrinkTool(ctx, adapter.deps, []string{rootfsE2fsckPath, "-f", "-p", sourcePath}, true, tracker); err != nil {
+	if err := runImageShrinkTool(
+		ctx,
+		adapter.deps,
+		[]string{rootfsE2fsckPath, "-f", "-p", sourcePath},
+		true,
+		tracker,
+	); err != nil {
 		return outcome, err
 	}
 	if transaction.record.Phase == imageShrinkPrepared {
-		if err := runImageShrinkTool(ctx, adapter.deps, []string{rootfsResize2fsPath, "-M", sourcePath}, false, tracker); err != nil {
+		if err := runImageShrinkTool(
+			ctx,
+			adapter.deps,
+			[]string{rootfsResize2fsPath, "-M", sourcePath},
+			false,
+			tracker,
+		); err != nil {
 			return outcome, err
 		}
-		if err := runImageShrinkTool(ctx, adapter.deps, []string{rootfsE2fsckPath, "-f", "-p", sourcePath}, true, tracker); err != nil {
+		if err := runImageShrinkTool(
+			ctx,
+			adapter.deps,
+			[]string{rootfsE2fsckPath, "-f", "-p", sourcePath},
+			true,
+			tracker,
+		); err != nil {
 			return outcome, err
 		}
 	}
@@ -205,7 +223,11 @@ func (adapter *rootfsImageShrinkAdapter) OptimizeImage(
 		return outcome, rootfsAtomicError("shrunk filesystem no longer matches its durable target", nil)
 	}
 	// The block device must no longer retain the original capacity when truncating its backing inode.
-	if err := errors.Join(source.Release(cleanupCtx), partitions.Release(cleanupCtx), loop.Release(cleanupCtx)); err != nil {
+	if err := errors.Join(
+		source.Release(cleanupCtx),
+		partitions.Release(cleanupCtx),
+		loop.Release(cleanupCtx),
+	); err != nil {
 		return outcome, rootfsCleanupError("detach image shrink source before truncation", err)
 	}
 	if err := finalizeRootfsProvisionBacking(ctx, adapter.deps, lease, admittedBytes); err != nil {
@@ -260,24 +282,46 @@ func readImageShrinkSize(
 	limit uint64,
 ) (uint64, error) {
 	source.state.mu.Lock()
-	defer source.state.mu.Unlock()
 	if source.state.released || source.state.kind != rootfsMountSourceRaw {
+		source.state.mu.Unlock()
 		return 0, rootfsAtomicError("image shrink superblock authority is inactive", nil)
+	}
+	source.state.mu.Unlock()
+	size, _, err := readExtFilesystemSize(ctx, deps, source, limit, true)
+	return size, err
+}
+
+// readExtFilesystemSize checks the filesystem's logical block count, not
+// statfs f_blocks, which excludes ext metadata and cannot equal backing size.
+func readExtFilesystemSize(
+	ctx context.Context,
+	deps rootfsVMProvisionDeps,
+	source *rootfsSelectedSource,
+	limit uint64,
+	requireClean bool,
+) (uint64, uint64, error) {
+	source.state.mu.Lock()
+	defer source.state.mu.Unlock()
+	if source.state.released || source.state.fd < 0 {
+		return 0, 0, rootfsAtomicError("ext filesystem superblock authority is inactive", nil)
 	}
 	var first, second [1024]byte
 	for _, buffer := range [][]byte{first[:], second[:]} {
 		n, err := deps.pread(ctx, source.state.fd, buffer, 1024)
 		if err != nil || n != len(buffer) {
-			return 0, rootfsAtomicError("read bounded image shrink superblock", errors.Join(err, io.ErrUnexpectedEOF))
+			return 0, 0, rootfsAtomicError(
+				"read bounded ext filesystem superblock",
+				errors.Join(err, io.ErrUnexpectedEOF),
+			)
 		}
 	}
 	if first != second || binary.LittleEndian.Uint16(first[0x38:]) != 0xef53 ||
-		binary.LittleEndian.Uint16(first[0x3a:])&1 == 0 {
-		return 0, rootfsAtomicError("image shrink superblock is unstable or not clean ext", nil)
+		requireClean && binary.LittleEndian.Uint16(first[0x3a:])&1 == 0 {
+		return 0, 0, rootfsAtomicError("ext filesystem superblock is unstable or not clean", nil)
 	}
 	logBlockSize := binary.LittleEndian.Uint32(first[0x18:])
 	if logBlockSize > 6 {
-		return 0, rootfsAtomicError("image shrink block size exceeds ext bounds", nil)
+		return 0, 0, rootfsAtomicError("ext filesystem block size exceeds bounds", nil)
 	}
 	blockSize := uint64(1024) << logBlockSize
 	blocks := uint64(binary.LittleEndian.Uint32(first[0x04:]))
@@ -285,7 +329,7 @@ func readImageShrinkSize(
 		blocks |= uint64(binary.LittleEndian.Uint32(first[0x150:])) << 32
 	}
 	if blocks == 0 || blocks > limit/blockSize {
-		return 0, rootfsAtomicError("image shrink filesystem exceeds admitted backing bounds", nil)
+		return 0, 0, rootfsAtomicError("ext filesystem exceeds admitted backing bounds", nil)
 	}
-	return blocks * blockSize, nil
+	return blocks * blockSize, blockSize, nil
 }
