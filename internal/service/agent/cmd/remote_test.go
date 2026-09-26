@@ -206,7 +206,10 @@ func TestRemoteExchangeRedactsTerminalErrorAndRequiresEOF(t *testing.T) {
 }
 
 func TestRunRemoteSubcommandUsesUnixBrokerContractAndDistinctRequestIDs(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "agent.sock")
+	socketDir, err := os.MkdirTemp(os.TempDir(), "mvm-remote-")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.Remove(socketDir)) })
+	socketPath := filepath.Join(socketDir, "agent.sock")
 	listener, err := net.Listen("unix", socketPath)
 	if errors.Is(err, syscall.EPERM) {
 		t.Skip("sandbox does not permit creating an AF_UNIX listener")
