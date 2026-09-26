@@ -25,8 +25,9 @@ architecture is release-qualified. The authoritative release gate is `tasks/todo
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
 9 JSON/flag-invariant, 26 non-VM key, and 5 internal-service entry-point Python cases (98 total); the focused
-networkless create/stop/start/reboot/vsock case and two raw-volume lifecycle/shrink cases also passed. The installed
-binary predates `8e0be4fe`, but the intervening source change under `internal/`, `pkg/`, and `cmd/` was test-only.
+networkless create/stop/start/reboot/vsock case and five focused raw-volume/removed-format cases also passed. The
+installed binary predates `8e0be4fe`, but the intervening source change under `internal/`, `pkg/`, and `cmd/` was
+test-only.
 These are scoped results, **not** a full Python matrix or release sign-off. The current runner kernel still rejects
 bridge-family nftables tables, blocking network/policy qualification there. Volume/snapshot consistency, host-reboot,
 and full Jailer system journeys also remain unqualified.
@@ -325,7 +326,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
 | `volume create <size>` (raw-only) | 🟡 Partial | `volume/test_volume.py` | `TestRawVolumeAuthoritativeStorage`, `TestVolumeLifecycle` | Focused installed-candidate 16 MiB create, inspect, 32 MiB grow, checked remove, and backing-file absence passed in the named runner; broader options and VM attachment remain unqualified. |
-| `volume create --format` (removed) | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_create_removed_format_flag_rejected_without_side_effects` | 0.3.0 rejects the former flag; the existing negative case still needs versioned-JSON reconciliation and execution. QCOW2 **image import** remains supported. |
+| `volume create --format` (removed) | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_create_removed_format_flag_rejected_without_side_effects` | Installed-candidate raw/QCOW2/VMDK variants passed 3/3: unknown flag, no new volume record or backing file, checked sentinel cleanup. QCOW2 **image import** remains supported. |
 | `volume create` invalid size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` duplicate name | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` negative size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |

@@ -388,29 +388,33 @@ class TestVolumeLifecycle:
     def test_volume_create_removed_format_flag_rejected_without_side_effects(
         self,
         runner_vm: str,
-        shared_volume: str,
         unique_key_name: str,
         removed_format: str,
     ) -> None:
-        # Rationale: Both former formats must fail during flag parsing,
-        # before creating a volume record or a backing file.
-        """The removed --format flag rejects every value without creating a volume."""
+        """Reject the removed --format flag before creating a record or backing file."""
         vol_name = f"sys-vol-removedfmt-{unique_key_name}"
-        inspect = _run_mvm(
-            runner_vm, "volume", "inspect", shared_volume, "--json"
-        )
-        volume_dir = PurePosixPath(json.loads(inspect.stdout)["volume"]["path"]).parent
-        list_backing_files = (
-            f"find {shlex.quote(str(volume_dir))} -mindepth 1 -maxdepth 1 -print"
-        )
-        backing_files_before = _guest_run(runner_vm, list_backing_files)
+        sentinel = f"sys-vol-sentinel-{uuid.uuid4().hex[:8]}"
+        sentinel_created = False
         try:
+            _run_mvm(runner_vm, "volume", "create", sentinel, "16M")
+            sentinel_created = True
+            sentinel_data = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", sentinel, "--json").stdout,
+                dict,
+            )
+            volume_dir = PurePosixPath(sentinel_data["volume"]["path"]).parent
+            list_backing_files = (
+                f"find {shlex.quote(str(volume_dir))} -mindepth 1 -maxdepth 1 -print"
+            )
+            backing_files_before = set(
+                _guest_run(runner_vm, list_backing_files).stdout.splitlines()
+            )
             result = _run_mvm(
                 runner_vm,
                 "volume",
                 "create",
                 vol_name,
-                "512M",
+                "16M",
                 "--format",
                 removed_format,
                 check=False,
@@ -418,18 +422,29 @@ class TestVolumeLifecycle:
             assert result.returncode != 0
             assert "unknown flag: --format" in (result.stdout + result.stderr).lower()
 
-            ls_result = _run_mvm(runner_vm, "volume", "ls", "--json")
-            volumes = json.loads(ls_result.stdout)
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
             assert not any(v["name"] == vol_name for v in volumes)
 
-            backing_files_after = _guest_run(runner_vm, list_backing_files)
-            assert set(backing_files_after.stdout.splitlines()) == set(
-                backing_files_before.stdout.splitlines()
-            ), backing_files_after.stdout
-        finally:
-            _run_mvm(
-                runner_vm, "volume", "rm", vol_name, "--force", check=False
+            backing_files_after = set(
+                _guest_run(runner_vm, list_backing_files).stdout.splitlines()
             )
+            assert backing_files_after == backing_files_before
+        finally:
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            if any(volume["name"] == vol_name for volume in volumes):
+                removed = _run_mvm(runner_vm, "volume", "rm", vol_name, "--force", check=False)
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            if sentinel_created:
+                removed = _run_mvm(runner_vm, "volume", "rm", sentinel, "--force", check=False)
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            remaining = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            assert all(volume["name"] not in (vol_name, sentinel) for volume in remaining)
 
     def test_volume_inspect_nonexistent_fails(self, runner_vm: str) -> None:
         # Rationale: No resources needed — error path for nonexistent volume.
