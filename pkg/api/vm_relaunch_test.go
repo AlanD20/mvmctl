@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	corevm "mvmctl/internal/core/vm"
 	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/logging"
@@ -241,9 +242,10 @@ func TestLoadVMRelaunchStateCarriesResolvedRawVolumesToConfig(t *testing.T) {
 	}
 	require.NoError(t, volumeRepo.Upsert(t.Context(), raw))
 	vmItem := &model.VMItem{
-		ID: relaunchTestVMID, VolumeIDs: []string{relaunchTestVolumeID},
-		Volumes: []*model.VolumeItem{{ID: "stale", Format: model.VolumeFormatQCOW2}},
-		Image:   &model.ImageItem{}, Kernel: &model.KernelItem{}, Binary: &model.BinaryItem{},
+		ID: relaunchTestVMID, NetworkPlacement: model.VMNetworkPlacementManaged,
+		VolumeIDs: []string{relaunchTestVolumeID},
+		Volumes:   []*model.VolumeItem{{ID: "stale", Format: model.VolumeFormatQCOW2}},
+		Image:     &model.ImageItem{}, Kernel: &model.KernelItem{}, Binary: &model.BinaryItem{},
 		Network: &model.NetworkItem{},
 	}
 	op := &Operation{Repos: Repos{Volume: volumeRepo, Vsock: testutil.NewVsockRepo()}}
@@ -258,4 +260,73 @@ func TestLoadVMRelaunchStateCarriesResolvedRawVolumesToConfig(t *testing.T) {
 		DriveID: relaunchTestVolumeID, PathOnHost: "/managed/" + relaunchTestVolumeID + ".raw",
 		IsReadOnly: true, CacheType: model.CacheTypeWriteback, IOEngine: "Sync",
 	}}, config.ExtraDrives)
+}
+
+// Rationale: relaunch reconstructs the admitted placement from the VM row;
+// an absent network must not acquire a managed NIC, TAP, or kernel IP argument.
+func TestBuildRespawnFirecrackerConfigRetainsNetworklessPlacement(t *testing.T) {
+	vmItem := &model.VMItem{
+		ID: relaunchTestVMID, NetworkPlacement: model.VMNetworkPlacementNetworkless,
+		Binary: &model.BinaryItem{}, Kernel: &model.KernelItem{},
+		BootArgs: "console=ttyS0", VCPUCount: 1, MemSizeMiB: 256,
+	}
+	state := &vmRelaunchState{vm: vmItem, vsock: &model.VsockConfigItem{GuestCID: 42}}
+	config := buildRespawnFirecrackerConfig(state, &model.BinaryPair{
+		Firecracker: &model.BinaryItem{Version: "1.16.1", Architecture: "x86_64"},
+		Jailer:      &model.BinaryItem{},
+	}, t.TempDir(), false, "", "Info")
+	require.Equal(t, model.VMNetworkPlacementNetworkless, config.NetworkPlacement)
+	require.Empty(t, config.NetworkID)
+	require.Empty(t, config.GuestIP)
+	require.Empty(t, config.GuestMAC)
+	require.Empty(t, config.TapName)
+	require.NotNil(t, config.VsockGuestCID)
+	require.Equal(t, 42, *config.VsockGuestCID)
+
+	generated, err := corevm.NewFirecrackerSpawner(config).Generate()
+	require.NoError(t, err)
+	assert.Empty(t, generated.NetworkInterfaces)
+	assert.NotContains(t, generated.BootSource.BootArgs, "ip=")
+	assert.NotContains(t, generated.BootSource.BootArgs, "ds=")
+	require.NotNil(t, generated.Vsock)
+	assert.Equal(t, 42, generated.Vsock.GuestCID)
+}
+
+func TestVMRespawnRejectsInvalidPlacementBeforeEffects(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		vm   model.VMItem
+		want string
+	}{
+		{name: "unknown placement", vm: model.VMItem{NetworkPlacement: "other"}, want: "network placement"},
+		{name: "managed without network", vm: model.VMItem{NetworkPlacement: model.VMNetworkPlacementManaged}, want: "network info"},
+		{name: "networkless with endpoint", vm: model.VMItem{
+			NetworkPlacement: model.VMNetworkPlacementNetworkless, IPv4: "10.0.0.2",
+		}, want: "managed network state"},
+		{name: "networkless with NoCloud NET", vm: model.VMItem{
+			NetworkPlacement: model.VMNetworkPlacementNetworkless, CloudInitMode: string(model.CloudInitModeNET),
+		}, want: "managed network state"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := (&Operation{}).vmRespawnFirecracker(t.Context(), &vmRelaunchState{vm: &tc.vm}, false, "")
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+// Rationale: reboot must validate persisted placement before it stops a running VM.
+func TestVMRebootRejectsNetworklessEndpointBeforeStop(t *testing.T) {
+	vmRepo := testutil.NewVMRepo()
+	vmItem := &model.VMItem{
+		ID: relaunchTestVMID, Name: "networkless-invalid", Status: model.VMStatusRunning,
+		NetworkPlacement: model.VMNetworkPlacementNetworkless, IPv4: "10.0.0.2",
+	}
+	require.NoError(t, vmRepo.Upsert(t.Context(), vmItem))
+	op := &Operation{Repos: Repos{VM: vmRepo, Vsock: testutil.NewVsockRepo()}}
+	result := op.VMReboot(t.Context(), inputs.VMInput{Identifiers: []string{relaunchTestVMID}})
+	require.Len(t, result.Items, 1)
+	require.ErrorContains(t, result.Items[0].Exception, "managed network state")
+	persisted, err := vmRepo.Get(t.Context(), relaunchTestVMID)
+	require.NoError(t, err)
+	assert.Equal(t, model.VMStatusRunning, persisted.Status)
 }

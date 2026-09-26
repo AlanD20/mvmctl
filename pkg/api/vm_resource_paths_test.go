@@ -84,6 +84,7 @@ func TestBuildRespawnFirecrackerConfigIgnoresPersistedPaths(t *testing.T) {
 	serialPath := "/user-selected/console.log"
 	vmItem := &model.VMItem{
 		ID:               resourcePathsTestVMID,
+		NetworkPlacement: model.VMNetworkPlacementManaged,
 		RootfsPath:       "/user-selected/rootfs.img",
 		ConfigPath:       "/user-selected/config.json",
 		APISocketPath:    "/user-selected/api.socket",
@@ -127,8 +128,13 @@ func TestLoadedRelaunchStateProducesJailedVsockConfig(t *testing.T) {
 	cacheDir := t.TempDir()
 	networkID := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 	vmItem := &model.VMItem{
-		ID: resourcePathsTestVMID, Image: &model.ImageItem{}, Binary: &model.BinaryItem{},
-		Kernel: &model.KernelItem{}, NetworkID: model.VMNetworkID(networkID), Network: &model.NetworkItem{ID: networkID},
+		ID:               resourcePathsTestVMID,
+		NetworkPlacement: model.VMNetworkPlacementManaged,
+		Image:            &model.ImageItem{},
+		Binary:           &model.BinaryItem{},
+		Kernel:           &model.KernelItem{},
+		NetworkID:        model.VMNetworkID(networkID),
+		Network:          &model.NetworkItem{ID: networkID},
 	}
 	repo := testutil.NewVsockRepo()
 	require.NoError(t, repo.Upsert(t.Context(), &model.VsockConfigItem{

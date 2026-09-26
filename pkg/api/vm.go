@@ -595,7 +595,8 @@ func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuil
 		return nil
 	}
 	if builder.wasCreated("launch_attempted") {
-		if _, err := jailer.NewVMLifecycleClient().Remove(ctx, jailer.VMCleanupRequest{VMID: builder.vmID}); err != nil {
+		if _, err := jailer.NewVMLifecycleClient().
+			Remove(ctx, jailer.VMCleanupRequest{VMID: builder.vmID}); err != nil {
 			return fmt.Errorf("remove partial VM authority: %w", err)
 		}
 	}
@@ -977,6 +978,23 @@ func (op *Operation) relaunchVM(
 	return op.vmRespawnFirecracker(ctx, state, snapshotMode, snapshotDir)
 }
 
+func validateVMRelaunchPlacement(v *model.VMItem) error {
+	switch v.NetworkPlacement {
+	case model.VMNetworkPlacementManaged:
+		if v.Network == nil {
+			return fmt.Errorf("network info is required for managed VM respawn")
+		}
+	case model.VMNetworkPlacementNetworkless:
+		if v.Network != nil || v.NetworkID != "" || v.IPv4 != "" || v.MAC != "" || v.TapDevice != "" ||
+			v.CloudInitMode == string(model.CloudInitModeNET) || v.NocloudNetPort != nil || v.NocloudNetPID != nil {
+			return errs.New(errs.CodeValidationFailed, "networkless VM respawn contains managed network state")
+		}
+	default:
+		return errs.New(errs.CodeValidationFailed, "VM respawn network placement is invalid")
+	}
+	return nil
+}
+
 // Start starts one or more VMs.
 func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
@@ -1096,16 +1114,15 @@ func (op *Operation) vmRespawnFirecracker(
 			"snapshot restore requires root-owned capture and backing authority")
 	}
 	v := state.vm
+	if err := validateVMRelaunchPlacement(v); err != nil {
+		return err
+	}
 	if v.CgroupLimits.PolicyVersion != model.VMCgroupPolicyVersion {
 		return errs.New(errs.CodeVMCgroupVerificationFailed,
 			"VM cgroup policy requires a clean pressure-only policy-v2 VM; existing limits are not migrated",
 			errs.WithClass(errs.ClassConflict), errs.WithEntity(v.ID))
 	}
 	vmDir := infra.GetVMDirByID(v.ID)
-	// Network info is required — the VM record must have it pre-loaded.
-	if v.Network == nil {
-		return fmt.Errorf("network info is required for VM respawn")
-	}
 	if v.Binary == nil || v.Binary.Path == "" {
 		return fmt.Errorf("binary info is required for VM respawn")
 	}
@@ -1130,19 +1147,23 @@ func (op *Operation) vmRespawnFirecracker(
 	if err := vm.CleanupJail(ctx, v.ID); err != nil {
 		return fmt.Errorf("clean VM before respawn: %w", err)
 	}
-	// Recover the network only after old VM authority has completed cleanup;
-	// network recovery must finish before Launch acquires the new VM lease.
-	if err := op.Services.Network.EnsureManagedNetwork(ctx, v.Network); err != nil {
-		return fmt.Errorf("ensure managed network before VM respawn: %w", err)
+	// Recover a managed network only after old VM authority has completed cleanup;
+	// networkless placement has no managed endpoint to recover.
+	if v.NetworkPlacement == model.VMNetworkPlacementManaged {
+		if err := op.Services.Network.EnsureManagedNetwork(ctx, v.Network); err != nil {
+			return fmt.Errorf("ensure managed network before VM respawn: %w", err)
+		}
 	}
 	logLevel, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "log_level")
 	fcConfig := buildRespawnFirecrackerConfig(state, pair, vmDir, snapshotMode, snapshotDir, logLevel)
 	fcConfig.CacheRoot = op.CacheDir
-	tapName, err := networkservice.VMTAPName(uint32(os.Geteuid()), string(v.NetworkID), v.ID)
-	if err != nil {
-		return err
+	if v.NetworkPlacement == model.VMNetworkPlacementManaged {
+		tapName, err := networkservice.VMTAPName(uint32(os.Geteuid()), string(v.NetworkID), v.ID)
+		if err != nil {
+			return err
+		}
+		fcConfig.TapName = tapName
 	}
-	fcConfig.TapName = tapName
 	// --- Write config and spawn ---
 	spawner := vm.NewFirecrackerSpawner(fcConfig)
 	if err := spawner.WriteToFile(); err != nil {
@@ -1182,7 +1203,7 @@ func buildRespawnFirecrackerConfig(
 ) *model.FirecrackerConfig {
 	v := state.vm
 	config := &model.FirecrackerConfig{
-		NetworkPlacement:    model.VMNetworkPlacementManaged,
+		NetworkPlacement:    v.NetworkPlacement,
 		CacheRoot:           filepath.Dir(filepath.Dir(vmDir)),
 		KernelID:            v.KernelID,
 		NetworkID:           string(v.NetworkID),
@@ -1199,7 +1220,6 @@ func buildRespawnFirecrackerConfig(
 		GuestIP:             v.IPv4,
 		GuestMAC:            v.MAC,
 		TapName:             v.TapDevice,
-		NetworkGateway:      v.Network.IPv4Gateway,
 		PCIEnabled:          v.PCIEnabled,
 		NestedVirt:          v.NestedVirt,
 		EnableConsole:       v.EnableConsole,
@@ -1216,6 +1236,9 @@ func buildRespawnFirecrackerConfig(
 		MetricsPath:         filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename),
 		LogLevel:            logLevel,
 		PIDPath:             vm.RuntimePath(os.Geteuid(), v.ID, infra.VMFirecrackerPIDFilename),
+	}
+	if v.Network != nil {
+		config.NetworkGateway = v.Network.IPv4Gateway
 	}
 	if v.Image != nil {
 		config.ImageFSUUID = v.Image.FSUUID
@@ -1262,6 +1285,9 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 	}
 	for _, vmLocal := range vms {
 		state, err := op.loadVMRelaunchState(ctx, vmLocal)
+		if err == nil {
+			err = validateVMRelaunchPlacement(state.vm)
+		}
 		if err != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.reboot_failed",
