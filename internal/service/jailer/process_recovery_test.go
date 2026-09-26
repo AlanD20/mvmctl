@@ -441,6 +441,10 @@ func newActiveRecoveryTestAuthority(
 	fake *fakeProcessIdentityDeps,
 ) (*instanceAuthority, processRecoveryDeps, processIdentityVerifierDeps, *recoveryEventLog) {
 	t.Helper()
+
+	// A real launch creates this root-owned inventory before publishing an active record.
+	// Synthetic recovery records need the same prerequisite, independent of test order.
+	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), record.ownerUID))
 	root := prepareInstanceAuthorityTestRoot(t)
 	writeTestAuthorityRecord(t, root, record)
 	authority := newInstanceAuthorityWithPolicy(
