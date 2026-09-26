@@ -23,11 +23,13 @@ func TestRealRunnerRunReplacesEnvironmentWithClosedSet(t *testing.T) {
 	// Rationale: The privileged filesystem probe depends on ReplaceEnv preventing inherited process state from changing
 	// fixed-tool behavior, so exercise the actual exec boundary rather than only the environment-building helper.
 	t.Setenv("MVM_RUNNER_INHERITED_SENTINEL", "must-not-leak")
+	coverageDir := t.TempDir()
 
 	runner := &RealRunner{}
 	result, err := runner.Run(t.Context(), realRunnerRunHelperCommand("environment"), RunCmdOpts{
 		Capture: true,
 		Env: map[string]string{
+			"GOCOVERDIR":                coverageDir,
 			"MVM_RUNNER_SUPPLIED_ALPHA": "one",
 			"MVM_RUNNER_SUPPLIED_BETA":  "two",
 		},
@@ -38,7 +40,7 @@ func TestRealRunnerRunReplacesEnvironmentWithClosedSet(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 	assert.Equal(
 		t,
-		"MVM_RUNNER_SUPPLIED_ALPHA=one\nMVM_RUNNER_SUPPLIED_BETA=two",
+		"GOCOVERDIR="+coverageDir+"\nMVM_RUNNER_SUPPLIED_ALPHA=one\nMVM_RUNNER_SUPPLIED_BETA=two",
 		result.Stdout,
 	)
 	assert.NotContains(t, result.Stdout, "MVM_RUNNER_INHERITED_SENTINEL")
