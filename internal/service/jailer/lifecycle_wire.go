@@ -27,31 +27,32 @@ const (
 // VMLaunchRequest selects canonical resources and typed guest intent. CacheRoot is only a
 // locator; no effect may use it after the receiver pins the managed cache authority.
 type VMLaunchRequest struct {
-	VMID            string               `json:"vm_id"`
-	CacheRoot       string               `json:"cache_root"`
-	KernelID        string               `json:"kernel_id"`
-	RootfsBytes     uint64               `json:"rootfs_bytes"`
-	Release         ReleaseSlot          `json:"release"`
-	NetworkID       string               `json:"network_id"`
-	GuestIPv4       string               `json:"guest_ipv4"`
-	GuestMAC        string               `json:"guest_mac"`
-	BootArgs        string               `json:"boot_args"`
-	VCPUs           int                  `json:"vcpus"`
-	MemoryMiB       int                  `json:"memory_mib"`
-	SMT             bool                 `json:"smt"`
-	TrackDirtyPages bool                 `json:"track_dirty_pages"`
-	RootfsCacheType string               `json:"rootfs_cache_type"`
-	CloudInit       bool                 `json:"cloud_init"`
-	Logging         bool                 `json:"logging"`
-	LogLevel        string               `json:"log_level"`
-	Metrics         bool                 `json:"metrics"`
-	Console         bool                 `json:"console"`
-	CPUConfig       *model.CpuConfig     `json:"cpu_config,omitempty"`
-	VsockCID        *uint32              `json:"vsock_cid,omitempty"`
-	CgroupLimits    model.VMCgroupLimits `json:"cgroup_limits"`
-	Volumes         []VMLaunchVolume     `json:"volumes,omitempty"`
-	PCIEnabled      bool                 `json:"pci_enabled"`
-	NestedVirt      bool                 `json:"nested_virt"`
+	VMID             string                   `json:"vm_id"`
+	CacheRoot        string                   `json:"cache_root"`
+	KernelID         string                   `json:"kernel_id"`
+	RootfsBytes      uint64                   `json:"rootfs_bytes"`
+	Release          ReleaseSlot              `json:"release"`
+	NetworkPlacement model.VMNetworkPlacement `json:"network_placement"`
+	NetworkID        string                   `json:"network_id"`
+	GuestIPv4        string                   `json:"guest_ipv4"`
+	GuestMAC         string                   `json:"guest_mac"`
+	BootArgs         string                   `json:"boot_args"`
+	VCPUs            int                      `json:"vcpus"`
+	MemoryMiB        int                      `json:"memory_mib"`
+	SMT              bool                     `json:"smt"`
+	TrackDirtyPages  bool                     `json:"track_dirty_pages"`
+	RootfsCacheType  string                   `json:"rootfs_cache_type"`
+	CloudInit        bool                     `json:"cloud_init"`
+	Logging          bool                     `json:"logging"`
+	LogLevel         string                   `json:"log_level"`
+	Metrics          bool                     `json:"metrics"`
+	Console          bool                     `json:"console"`
+	CPUConfig        *model.CpuConfig         `json:"cpu_config,omitempty"`
+	VsockCID         *uint32                  `json:"vsock_cid,omitempty"`
+	CgroupLimits     model.VMCgroupLimits     `json:"cgroup_limits"`
+	Volumes          []VMLaunchVolume         `json:"volumes,omitempty"`
+	PCIEnabled       bool                     `json:"pci_enabled"`
+	NestedVirt       bool                     `json:"nested_virt"`
 }
 
 // VMLaunchVolume selects one canonical raw file without granting pathname authority.
@@ -123,7 +124,7 @@ func (request *VMLaunchRequest) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
-	for _, name := range []string{"vm_id", "cache_root", "kernel_id", "rootfs_bytes", "release", "network_id", "guest_ipv4", "guest_mac", "boot_args", "vcpus", "memory_mib", "smt", "track_dirty_pages", "rootfs_cache_type", "cloud_init", "logging", "log_level", "metrics", "console", "cgroup_limits", "pci_enabled", "nested_virt"} {
+	for _, name := range []string{"vm_id", "cache_root", "kernel_id", "rootfs_bytes", "release", "network_placement", "network_id", "guest_ipv4", "guest_mac", "boot_args", "vcpus", "memory_mib", "smt", "track_dirty_pages", "rootfs_cache_type", "cloud_init", "logging", "log_level", "metrics", "console", "cgroup_limits", "pci_enabled", "nested_virt"} {
 		field, ok := fields[name]
 		if !ok || bytes.Equal(bytes.TrimSpace(field), []byte("null")) {
 			return fmt.Errorf("launch request %s is required", name)
@@ -154,6 +155,9 @@ type VMCleanupResult struct {
 
 // Validate enforces receiver resource selection and guest intent without any effect.
 func (request VMLaunchRequest) Validate() error {
+	if request.NetworkPlacement != model.VMNetworkPlacementManaged {
+		return instanceValidationError("VM launch network placement is not an admitted managed variant")
+	}
 	if request.NestedVirt && (!request.PCIEnabled || request.CPUConfig == nil) {
 		return instanceValidationError("nested virtualization requires PCI and explicit CPU configuration")
 	}
