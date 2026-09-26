@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import re
-import shlex
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterator
 
 import pytest
 
 from tests.system.conftest import (
-    _guest_run,
+    _json_success_data,
+    _parse_vm_list,
     _run_mvm,
-    _unique_subnet,
     ensure_vm_deps,
 )
 
@@ -127,143 +126,100 @@ def cgroup_config_overrides(runner_vm: str) -> Iterator[None]:
 
 
 def _vm_entry(runner_vm: str, vm_name: str) -> dict[str, Any] | None:
-    entries: list[dict[str, Any]] = json.loads(
+    entries = _parse_vm_list(
         _run_mvm(runner_vm, "vm", "ls", "--json").stdout
     )
     return next((entry for entry in entries if entry.get("name") == vm_name), None)
 
 
-def _read(runner_vm: str, path: str) -> str:
-    return _guest_run(runner_vm, f"cat {shlex.quote(path)}").stdout.strip()
-
-
 class TestVMCgroupEnvelope:
-    def test_running_vm_envelope_and_lifecycle_cleanup(
+    def test_operator_inspects_protected_pressure_only_envelope(
         self,
         runner_vm: str,
         cgroup_config_overrides: None,
     ) -> None:
         vm_name = f"sys-cgroup-{uuid.uuid4().hex[:8]}"
-        net_name = f"sys-cgroup-net-{uuid.uuid4().hex[:6]}"
-        vm_id = ""
         ensure_vm_deps(runner_vm)
-        controller_probe = _guest_run(
-            runner_vm, "cat /sys/fs/cgroup/cgroup.controllers", check=False
-        )
-        controllers = (
-            set(controller_probe.stdout.split())
-            if controller_probe.returncode == 0
-            else set()
-        )
-        missing = {"cpu", "memory", "pids"} - controllers
-        _run_mvm(
-            runner_vm,
-            "network",
-            "create",
-            net_name,
-            "--subnet",
-            _unique_subnet(net_name),
-            "--non-interactive",
-        )
         try:
-            created = _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-                "--vcpu",
-                "2",
-                "--mem",
-                "512",
-                check=False,
-                timeout=120,
+            created = _json_success_data(
+                _run_mvm(
+                    runner_vm,
+                    "vm",
+                    "create",
+                    vm_name,
+                    "--no-network",
+                    "--cloud-init-mode",
+                    "off",
+                    "--skip-deblob",
+                    "--no-pci",
+                    "--disk-size",
+                    "512M",
+                    "--vcpu",
+                    "2",
+                    "--mem",
+                    "512M",
+                    "--json",
+                    timeout=180,
+                ).stdout,
+                list,
             )
-            if missing:
-                assert created.returncode != 0
-                combined = (created.stdout + created.stderr).lower()
-                assert "cgroup" in combined
-                assert "controller" in combined or "v2" in combined or "unified" in combined
-                assert _vm_entry(runner_vm, vm_name) is None
-                return
-
-            assert created.returncode == 0, created.stderr
+            assert len(created) == 1
             vm = _vm_entry(runner_vm, vm_name)
             assert vm is not None and vm["status"] == "running"
-            vm_id = vm["id"]
             pid = int(vm["pid"])
-            relative = f"/mvmctl/{vm_id}"
-            leaf = f"/sys/fs/cgroup{relative}"
+            relative = f"/mvmctl/{vm['id']}"
+            leaf = Path(f"/sys/fs/cgroup{relative}")
 
-            membership = _read(runner_vm, f"/proc/{pid}/cgroup").splitlines()
+            membership = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
             assert f"0::{relative}" in membership
-            assert str(pid) in _read(runner_vm, f"{leaf}/cgroup.procs").split()
+            leaf_stat = leaf.stat()
+            assert leaf_stat.st_uid == 0
+            assert leaf_stat.st_mode & 0o777 == 0o700
+            with pytest.raises(PermissionError):
+                (leaf / "cpu.max").read_text()
 
-            inspected = json.loads(
-                _run_mvm(
-                    runner_vm, "vm", "inspect", vm_name, "--json"
-                ).stdout
+            inspected = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
             )
             cgroup = inspected["resources"]["cgroup"]
             requested = cgroup["requested"]
             actual = cgroup["actual"]
-            assert cgroup["path"] == leaf
+            usage = cgroup["usage"]
+            assert cgroup["path"] == str(leaf)
             assert cgroup["status"] == "enforced"
             assert cgroup.get("mismatches", []) == []
             assert requested == actual
             assert requested == {
-                "policy_version": 1,
+                "policy_version": 2,
                 "cpu_quota_micros": 200000,
                 "cpu_period_micros": 100000,
                 "cpu_weight": 100,
                 "memory_high_bytes": 640 * 1024 * 1024,
-                "memory_max_bytes": 640 * 1024 * 1024,
+                "memory_max_bytes": 0,
+                "memory_max_unlimited": True,
                 "swap_max_bytes": 0,
                 "pids_max": 256,
             }
 
-            assert _read(runner_vm, f"{leaf}/cpu.max") == "200000 100000"
-            assert _read(runner_vm, f"{leaf}/cpu.weight") == "100"
-            assert _read(runner_vm, f"{leaf}/memory.high") == str(640 * 1024 * 1024)
-            assert _read(runner_vm, f"{leaf}/memory.max") == str(640 * 1024 * 1024)
-            assert _read(runner_vm, f"{leaf}/memory.swap.max") == "0"
-            assert _read(runner_vm, f"{leaf}/pids.max") == "256"
-            for key in (
-                "cpu_quota_micros",
-                "cpu_period_micros",
-                "cpu_weight",
-                "memory_high_bytes",
-                "memory_max_bytes",
-                "pids_max",
-            ):
-                assert int(actual[key]) > 0
-            assert actual["swap_max_bytes"] == 0
+            assert usage["cpu_usage_micros"] >= 0
+            assert usage["memory_bytes"] > 0
+            assert usage["swap_bytes"] >= 0
+            assert usage["pids_current"] >= 1
 
             _run_mvm(runner_vm, "vm", "stop", vm_name, timeout=120)
-            assert _guest_run(
-                runner_vm, f"test ! -e {shlex.quote(leaf)}", check=False
-            ).returncode == 0
+            assert not leaf.exists()
             _run_mvm(runner_vm, "vm", "start", vm_name, timeout=120)
-            assert _guest_run(
-                runner_vm, f"test -d {shlex.quote(leaf)}", check=False
-            ).returncode == 0
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", timeout=120)
-            assert _guest_run(
-                runner_vm, f"test ! -e {shlex.quote(leaf)}", check=False
-            ).returncode == 0
-            assert _vm_entry(runner_vm, vm_name) is None
+            restarted = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
+            )
+            assert restarted["vm"]["status"] == "running"
+            assert restarted["resources"]["cgroup"]["status"] == "enforced"
+            assert leaf.is_dir()
         finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120
-            )
-            if vm_id:
-                leaf = f"/sys/fs/cgroup/mvmctl/{vm_id}"
-                assert _guest_run(
-                    runner_vm, f"test ! -e {shlex.quote(leaf)}", check=False
-                ).returncode == 0
-            _run_mvm(
-                runner_vm, "network", "rm", net_name, "--force", check=False
-            )
+            remaining = _vm_entry(runner_vm, vm_name)
+            if remaining is not None:
+                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", timeout=120)
+                assert not Path(f"/sys/fs/cgroup/mvmctl/{remaining['id']}").exists()
+                assert _vm_entry(runner_vm, vm_name) is None
