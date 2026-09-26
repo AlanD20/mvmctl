@@ -44,10 +44,17 @@ resource limits still differ.
 
 - `/dev/kvm` is fully accessible — mvm creates and runs nested VMs inside the
   runner VM
-- `iptables`/`nftables` work — each runner VM has its own network stack with NAT
-- `sudo`, `docker`, kernel module loading all work
-- The 7.0.11 kernel has everything compiled in (no modules needed)
+- The runner has its own network stack, but its kernel must support the **modeled bridge and inet nftables rules**, not
+  merely create an inet table. Check the installed candidate's `mvm host status --json` and require
+  `data.resources.nftables_available: true` before treating network or policy tests as release evidence.
+- Check `sudo` and `docker` availability in the exact runner image. Kernel module loading also depends on that
+  image's matching module tree; do not assume every required feature is compiled into the 7.0.11 asset.
 - tmpfs, overlayfs, btrfs, ext4 — all standard Linux facilities
+
+The `vmlinux-official-7.0.11-x86_64` image used by `mvmctl-030-test` on 2026-09-26 accepted a bare inet nftables table
+but returned `operation not supported` for a bare bridge-family table in a disposable network namespace. That runner
+cannot qualify the 0.3.0 bridge firewall or same-network traffic policy until its kernel is replaced or rebuilt with
+the required capability. Its missing `/lib/modules/7.0.11` tree means `modprobe` is not a repair for that image.
 
 Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
 tests run directly on the outer host and therefore require a dedicated clean
