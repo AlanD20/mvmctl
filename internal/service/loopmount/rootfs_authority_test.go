@@ -106,7 +106,7 @@ func TestRootfsAuthorityUsesFixedSelectionAndAccess(t *testing.T) {
 				return admitImageInspectRootfs(ctx, deps, testRootfsCaller(), testImageInspectRequest())
 			},
 			wantComponents: []string{"srv", "cache", "images", "staging", testImageID, "rootfs.img"},
-			wantLeafFlags:  rootfsReadOnlyOpenFlags,
+			wantLeafFlags:  rootfsReadOnlyOpenFlags | unix.O_NOATIME,
 			wantAccess:     rootfsReadOnly,
 			wantStagingFD:  true,
 		},

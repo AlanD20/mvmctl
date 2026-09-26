@@ -378,6 +378,9 @@ func admitProvisionSelectedRootfs(
 	leafFlags := rootfsReadOnlyOpenFlags
 	if policy.access == rootfsReadWrite {
 		leafFlags = rootfsReadWriteOpenFlags
+	} else if selection.kind == rootfsImageInspectSelection {
+		// Kernel loop reads are observational and must not advance the staged image's atime.
+		leafFlags |= unix.O_NOATIME
 	}
 	rootfsFD, err := openRootfsComponent(
 		ctx,
