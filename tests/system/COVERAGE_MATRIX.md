@@ -414,10 +414,10 @@ Specific legacy conflicts that must be rewritten before release:
 | `image rm` | ⏭️ Skip | `images/test_images.py` | `TestImageRemove` | L2 — uses imported_prefix cleanup |
 | `image rm --force` | ⏭️ Skip | `images/test_images.py` | `TestImageRemoveForce` | L2 — force remove, verify via ls --json |
 | `image rm` blocked by VM dependency | 🟡 Partial | `images/test_images.py` | `TestImageDependencyDeletion` | L3: rm rejected when image used by stopped/running VM; formerly-default promotes another |
-| `image warm` | ⏭️ Skip | `images/test_images.py` | `TestImageWarm` | L1 — may skip |
-| `image warm --all` | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | L1 — warmed/ready message |
-| `image warm` by ID prefix | ⏭️ Skip | `images/test_images.py` | `TestImageWarm` | L1 — may skip |
-| `image warm` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | L1 |
+| `image warm` | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: schema-1 path is a regular ready-pool file of the image's uncompressed size. |
+| `image warm --all` | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: warmed/ready message for cached image. |
+| `image warm` by ID prefix | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: prefix resolves and reports warmed/ready. |
+| `image warm` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: command rejects missing image. |
 | `image import` | ⏭️ Skip | `images/test_images.py` | `TestImageImport` | L2 — often skips on zstd/mkfs |
 | `image import --format qcow2` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — skips on qemu-img |
 | `image import --root-partition` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — skips on qemu-img |
@@ -677,7 +677,7 @@ Specific legacy conflicts that must be rewritten before release:
 | snapshot | 13 | 1 | 12 | 0 | 0 | 0 |
 | volume | 35 | 4 | 29 | 2 | 0 | 0 |
 | key | 28 | 3 | 25 | 0 | 0 | 0 |
-| image | 41 | 0 | 12 | 3 | 3 | 23 |
+| image | 41 | 0 | 14 | 3 | 3 | 21 |
 | kernel | 30 | 2 | 15 | 6 | 0 | 7 |
 | bin | 17 | 2 | 6 | 1 | 0 | 8 |
 | ssh | 6 | 4 | 1 | 1 | 0 | 0 |
@@ -689,15 +689,15 @@ Specific legacy conflicts that must be rewritten before release:
 | env | 22 | 9 | 13 | 0 | 0 | 0 |
 | run | 4 | 1 | 3 | 0 | 0 | 0 |
 | full-journeys | 15 | 7 | 8 | 0 | 0 | 0 |
-| **Total** | **431** | **83** | **281** | **21** | **6** | **40** |
+| **Total** | **431** | **83** | **283** | **21** | **6** | **38** |
 
 **Current-row coverage health:**
 - ✅ Deep (L3): 83/431 = 19.3%
-- ⚡ Shallow (L0-L2): 281/431 = 65.2%
+- ⚡ Shallow (L0-L2): 283/431 = 65.7%
 - 🟡 Partial: 21/431 = 4.9%
 - 🔴 Missing: **6/431 = 1.4%** — three user-owned `self-update` success/check paths, two remote image-list
   flag cases, and the phantom `image inspect --tree` entry
-- ⏭️ Skip-prone: 40/431 = 9.3%
+- ⏭️ Skip-prone: 38/431 = 8.8%
 
 These counts inventory rows for the transitional CLI only. They do not include the separate v0.3.0 security blockers in
 the qualification overlay. Successful user-owned `self-update` check/apply behavior remains unqualified at L2. The

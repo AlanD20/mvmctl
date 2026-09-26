@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -365,22 +366,34 @@ class TestImageWarm:
     """Test image warm operations."""
 
     def test_image_warm(self, runner_vm):
-        """Pre-decompress image to ready pool for fast VM creation."""
-        _ensure_image(runner_vm, "alpine:3.23")
+        """Warm Alpine into a complete, uncompressed ready-pool file."""
+        images = _parse_json_output(
+            _run_mvm(runner_vm, "image", "ls", "--json").stdout
+        )
+        alpine = next(
+            (
+                image for image in images
+                if image.get("type") == "alpine"
+                and image.get("version") == "3.23"
+                and image.get("is_present")
+            ),
+            None,
+        )
+        assert alpine is not None, "the module's pre-seeded Alpine 3.23 image is missing"
         result = _run_mvm(
             runner_vm,
             "image",
             "warm",
             "alpine:3.23",
+            "--json",
             check=False,
         )
-        assert result.returncode == 0, (
-            f"Image warm failed in Tier 2 environment: {result.stderr.strip()}"
-        )
-        assert (
-            "warmed" in result.stdout.lower()
-            or "ready" in result.stdout.lower()
-        )
+        assert result.returncode == 0, result.stderr
+        paths = _parse_json_output(result.stdout)
+        assert isinstance(paths, list) and len(paths) == 1, paths
+        warmed = Path(paths[0])
+        assert warmed.is_file(), paths
+        assert warmed.stat().st_size == alpine["original_size"]
 
     def test_warm_nonexistent_image_fails(self, runner_vm):
         """Warming a nonexistent image slug should fail with clear error."""
