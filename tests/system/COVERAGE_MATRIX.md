@@ -455,11 +455,11 @@ Specific legacy conflicts that must be rewritten before release:
 | `kernel inspect` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelInspect` | Installed rc.7: human output names the selected present kernel and version. |
 | `kernel inspect --json` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelInspect` | Installed rc.7: schema-1 inspect identity and storage path match the listed kernel. |
 | `kernel default` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | Installed rc.7: transfer to a test-owned import, then restore prior default and remove only that import. |
-| `kernel rm <id>` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemove` | L2 — JSON listing after rm |
-| `kernel rm --force` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemoveForce` | L2 — removed from listing after --force |
+| `kernel rm <id>` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemove` | Installed rc.7: remove only a uniquely imported ID prefix; verify absence and preserve the pre-seeded source. |
+| `kernel rm --force` on referenced kernel | 🔴 Missing | — | — | Prior test selected an unreferenced kernel, so it did not test force semantics; a VM-owned reference case remains unqualified. |
 | `kernel rm <nonexistent>` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemove` | L1 — non-zero exit, error message |
-| `kernel rm` blocked by stopped VM | ✅ Deep | `kernel/test_kernel.py` | `TestKernelStoppedVMDeletion` | L3: rm kernel used by stopped VM — VM still listed after deletion |
-| `kernel pull` then `rm` lifecycle | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemoveAndPull` | L2: pull with --default, verify is_default, rm, verify gone |
+| `kernel rm` blocked by stopped VM | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelStoppedVMDeletion` | Owner-scoped rejection case now requires `kernel.in_use` and preserves VM/kernel; not run because the runner lacks bridge nftables. |
+| `kernel pull` then `rm` lifecycle | 🔴 Missing | — | — | Former case removed the first available kernel and unrelated referencing VMs; a safely owned pull/remove journey remains to be written. |
 | `kernel import` | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportLifecycle` | Installed rc.7: mirrored vmlinux import, exact copied bytes, schema-1 list/inspect, checked test-owned removal; VM boot remains unproved. |
 | `kernel import --version` | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportLifecycle` | Installed rc.7: explicit version matches list and inspect. |
 | `kernel import` arch in listing | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportLifecycle` | Installed rc.7: imported arch appears in list and inspect; no `--arch` flag. |
@@ -677,7 +677,7 @@ Specific legacy conflicts that must be rewritten before release:
 | volume | 35 | 4 | 29 | 2 | 0 | 0 |
 | key | 28 | 3 | 25 | 0 | 0 | 0 |
 | image | 41 | 0 | 16 | 3 | 3 | 19 |
-| kernel | 29 | 1 | 19 | 6 | 1 | 2 |
+| kernel | 29 | 0 | 17 | 7 | 3 | 2 |
 | bin | 17 | 2 | 6 | 1 | 0 | 8 |
 | ssh | 6 | 4 | 1 | 1 | 0 | 0 |
 | console | 6 | 0 | 6 | 0 | 0 | 0 |
@@ -688,14 +688,15 @@ Specific legacy conflicts that must be rewritten before release:
 | env | 22 | 9 | 13 | 0 | 0 | 0 |
 | run | 4 | 1 | 3 | 0 | 0 | 0 |
 | full-journeys | 15 | 7 | 8 | 0 | 0 | 0 |
-| **Total** | **430** | **82** | **289** | **21** | **7** | **31** |
+| **Total** | **430** | **81** | **287** | **22** | **9** | **31** |
 
 **Current-row coverage health:**
-- ✅ Deep (L3): 82/430 = 19.1%
-- ⚡ Shallow (L0-L2): 289/430 = 67.2%
-- 🟡 Partial: 21/430 = 4.9%
-- 🔴 Missing: **7/430 = 1.6%** — three user-owned `self-update` success/check paths, two remote image-list
-  flag cases, the phantom `image inspect --tree` entry, and kernel empty-list coverage
+- ✅ Deep (L3): 81/430 = 18.8%
+- ⚡ Shallow (L0-L2): 287/430 = 66.7%
+- 🟡 Partial: 22/430 = 5.1%
+- 🔴 Missing: **9/430 = 2.1%** — three user-owned `self-update` success/check paths, two remote image-list
+  flag cases, the phantom `image inspect --tree` entry, kernel empty-list coverage, referenced-force removal,
+  and safely owned pull/remove lifecycle
 - ⏭️ Skip-prone: 31/430 = 7.2%
 
 These counts inventory rows for the transitional CLI only. They do not include the separate v0.3.0 security blockers in
@@ -735,5 +736,5 @@ To run the full system test suite with zero skips, the dedicated test machine mu
 - **Developer machine:** a focused run may fail prerequisite admission when dependencies are absent. Such a run is useful
   for diagnosis but cannot serve as release evidence.
 
-**430 transitional CLI scenarios are documented. Seven rows are marked missing; the v0.3.0 qualification overlay lists
+**430 transitional CLI scenarios are documented. Nine rows are marked missing; the v0.3.0 qualification overlay lists
 additional release-security gaps that must close before signoff.**
