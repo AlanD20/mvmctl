@@ -23,7 +23,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -702,21 +701,9 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-	binPath := result.Binary.Path
-	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		return errs.New(
-			errs.CodeVMCreateFailed,
-			fmt.Sprintf("Firecracker binary not found: %s", binPath),
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	if err := syscall.Access(binPath, 1); err != nil {
-		return errs.New(
-			errs.CodeVMCreateFailed,
-			fmt.Sprintf("Firecracker binary not executable: %s", binPath),
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
+	// The selected Firecracker binary lives in a root-only release store. The
+	// unprivileged caller cannot traverse that store; root launch admission pins
+	// and verifies the installed release before executing it.
 	if result.CustomCloudInitConfig != nil && *result.CustomCloudInitConfig != "" {
 		if _, err := os.Stat(*result.CustomCloudInitConfig); os.IsNotExist(err) {
 			return errs.New(

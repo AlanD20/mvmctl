@@ -17,13 +17,23 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-func networklessResolveFixture(t *testing.T, noNetwork bool) (*inputs.VMCreateRequest, *testutil.ConfigRepo) {
+func networklessResolveFixture(t *testing.T, noNetwork, protectedBinary bool) (*inputs.VMCreateRequest, *testutil.ConfigRepo) {
 	t.Helper()
 	dir := t.TempDir()
 	kernelPath := filepath.Join(dir, "vmlinux")
-	binaryPath := filepath.Join(dir, "firecracker")
+	binaryDir := filepath.Join(dir, "protected-release")
+	require.NoError(t, os.Mkdir(binaryDir, 0700))
+	binaryPath := filepath.Join(binaryDir, "firecracker")
 	require.NoError(t, os.WriteFile(kernelPath, []byte("kernel"), 0600))
 	require.NoError(t, os.WriteFile(binaryPath, []byte("binary"), 0700))
+	if protectedBinary {
+		require.NoError(t, os.Chmod(binaryDir, 0000))
+		t.Cleanup(func() { require.NoError(t, os.Chmod(binaryDir, 0700)) })
+		if os.Geteuid() != 0 {
+			_, err := os.Stat(binaryPath)
+			require.ErrorIs(t, err, os.ErrPermission)
+		}
+	}
 	imageRepo := testutil.NewImageRepo()
 	kernelRepo := testutil.NewKernelRepo()
 	binaryRepo := testutil.NewBinaryRepo()
@@ -51,7 +61,7 @@ func networklessResolveFixture(t *testing.T, noNetwork bool) (*inputs.VMCreateRe
 // Rationale: explicit absence bypasses default-network lookup while omission
 // must retain the managed default requirement; neither may fabricate an endpoint.
 func TestVMCreateRequestResolveNetworklessWithoutDefaultNetwork(t *testing.T) {
-	request, _ := networklessResolveFixture(t, true)
+	request, _ := networklessResolveFixture(t, true, false)
 	resolved, err := request.Resolve(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, model.VMNetworkPlacementNetworkless, resolved.NetworkPlacement)
@@ -60,14 +70,26 @@ func TestVMCreateRequestResolveNetworklessWithoutDefaultNetwork(t *testing.T) {
 	assert.Empty(t, resolved.NetworkNetmask)
 	assert.True(t, resolved.SkipCINetworkConfig)
 
-	managed, _ := networklessResolveFixture(t, false)
+	managed, _ := networklessResolveFixture(t, false, false)
 	_, err = managed.Resolve(t.Context())
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMNetworkNotFound, errs.AsDomainError(err).Code)
 }
 
+// Rationale: the installed Firecracker release is root-only, so an operator
+// must not have to traverse its directory before the root launch broker pins it.
+func TestVMCreateRequestResolveWithRootOnlyBinary(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires an unprivileged operator")
+	}
+	request, _ := networklessResolveFixture(t, true, true)
+	resolved, err := request.Resolve(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, model.VMNetworkPlacementNetworkless, resolved.NetworkPlacement)
+}
+
 func TestVMCreateRequestRejectsNetworkBootArgumentFromDefault(t *testing.T) {
-	request, configRepo := networklessResolveFixture(t, true)
+	request, configRepo := networklessResolveFixture(t, true, false)
 	require.NoError(t, configRepo.Set(t.Context(), "defaults.vm", "boot_args", "console=ttyS0 ip=dhcp"))
 	resolved, err := request.Resolve(t.Context())
 	require.Error(t, err)
