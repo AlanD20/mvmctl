@@ -11,8 +11,6 @@ import (
 )
 
 func TestFreshRecoveryCleanupReopensAndRemovesStaleVMRuntime(t *testing.T) {
-	t.Parallel()
-
 	authority, recoveryDeps, identityDeps := newManagedVMRuntimeRecoveryTestAuthority(t)
 	runtimePath := prepareStaleManagedVMRuntimeTestDirectory(t, authority.policy.rootPath)
 	for _, leaf := range []string{
@@ -42,8 +40,6 @@ func TestFreshRecoveryCleanupReopensAndRemovesStaleVMRuntime(t *testing.T) {
 // Rationale: recovery observes ephemeral state; it must not recreate an absent runtime hierarchy while cleaning a
 // durable instance record after a host reboot.
 func TestFreshRecoveryCleanupAbsentRuntimeDoesNotCreateRuntimeTree(t *testing.T) {
-	t.Parallel()
-
 	authority, recoveryDeps, identityDeps := newManagedVMRuntimeRecoveryTestAuthority(t)
 	runtimePath := filepath.Join(authority.policy.rootPath, "run/mvmctl/runtime")
 
@@ -64,8 +60,6 @@ func TestFreshRecoveryCleanupAbsentRuntimeDoesNotCreateRuntimeTree(t *testing.T)
 // Rationale: recovery must not mark a VM cleaned when the non-authoritative runtime path cannot be safely reopened.
 // It keeps the root-owned cleanup record and lock available for repair and retry instead of following a symlink.
 func TestFreshRecoveryCleanupRejectsUnsafeRuntimeParentBeforeCleaned(t *testing.T) {
-	t.Parallel()
-
 	authority, recoveryDeps, identityDeps := newManagedVMRuntimeRecoveryTestAuthority(t)
 	root := authority.policy.rootPath
 	mvmctlPath := filepath.Join(root, "run/mvmctl")
@@ -118,6 +112,9 @@ func newManagedVMRuntimeRecoveryTestAuthority(
 	t.Helper()
 
 	root := prepareInstanceAuthorityTestRoot(t)
+	// A launching record is only valid after the root-controlled grant inventory exists.
+	// These cases use the real fixed inventory path and therefore run serially.
+	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), testAuthorityUID))
 	writeTestAuthorityRecord(t, root, testLaunchingInstanceRecord())
 	authority := newInstanceAuthorityWithPolicy(
 		realInstanceAuthorityDeps(),
@@ -142,5 +139,6 @@ func prepareStaleManagedVMRuntimeTestDirectory(t *testing.T, root string) string
 		require.NoError(t, os.Chmod(path, 0o711))
 	}
 	require.NoError(t, os.Mkdir(vmPath, 0o700))
+	require.NoError(t, os.Chown(vmPath, int(testAuthorityUID), int(testAuthorityGID)))
 	return vmPath
 }
