@@ -85,6 +85,26 @@ func TestRepositoryPersistsClosedVMNetworkPlacement(t *testing.T) {
 		VCPUCount: 1, MemSizeMiB: 128, DiskSizeMiB: 64,
 	}
 	require.NoError(t, repo.Upsert(ctx, managed))
+	storedManaged, err := repo.Get(ctx, managed.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedManaged)
+	managedPlacement := struct {
+		Placement model.VMNetworkPlacement
+		NetworkID model.VMNetworkID
+		IPv4      string
+		MAC       string
+		TAP       string
+	}{storedManaged.NetworkPlacement, storedManaged.NetworkID, storedManaged.IPv4, storedManaged.MAC, storedManaged.TapDevice}
+	wantManaged := struct {
+		Placement model.VMNetworkPlacement
+		NetworkID model.VMNetworkID
+		IPv4      string
+		MAC       string
+		TAP       string
+	}{model.VMNetworkPlacementManaged, "net", "10.0.0.2", "02:00:00:00:00:02", "tap-managed"}
+	if diff := cmp.Diff(wantManaged, managedPlacement); diff != "" {
+		t.Errorf("managed placement mismatch (-want +got):\n%s", diff)
+	}
 
 	networkless := *managed
 	networkless.ID, networkless.Name = "networkless", "networkless"
@@ -139,6 +159,8 @@ func TestRepositoryPersistsClosedVMNetworkPlacement(t *testing.T) {
 			"CHECK",
 		},
 		"managed_without_network": {managed, func(item *model.VMItem) { item.NetworkID = "" }, "CHECK"},
+		"managed_without_ipv4":    {managed, func(item *model.VMItem) { item.IPv4 = "" }, "CHECK"},
+		"managed_without_mac":     {managed, func(item *model.VMItem) { item.MAC = "" }, "CHECK"},
 		"managed_with_foreign_network": {managed,
 			func(item *model.VMItem) { item.NetworkID = "foreign" }, "FOREIGN KEY"},
 	}

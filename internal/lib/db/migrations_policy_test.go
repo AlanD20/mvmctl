@@ -92,22 +92,39 @@ func TestMigrationsAcceptFreshSchema(t *testing.T) {
 
 // The clean-break schema must reject an older version-7 VM table before adopting its state.
 func TestMigration008RejectsOlderVMPlacementSchema(t *testing.T) {
-	ctx := t.Context()
-	handle := db.New(filepath.Join(t.TempDir(), "old-v7.db"))
-	t.Cleanup(func() { require.NoError(t, handle.Close()) })
-	_, err := handle.DB().ExecContext(ctx, `
-		CREATE TABLE vm_instances (id TEXT PRIMARY KEY, network_id TEXT NOT NULL);
-		PRAGMA user_version = 7;
-	`)
-	require.NoError(t, err)
+	checks := map[string]func(context.Context, *db.Handle) (int, error){
+		"pending migration admission": func(ctx context.Context, handle *db.Handle) (int, error) {
+			_, err := handle.GetPendingMigrations(ctx)
+			return 0, err
+		},
+		"migration admission": func(ctx context.Context, handle *db.Handle) (int, error) {
+			return handle.RunMigrationsCtx(ctx)
+		},
+	}
+	for name, check := range checks {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			handle := db.New(filepath.Join(t.TempDir(), "old-v7.db"))
+			t.Cleanup(func() { require.NoError(t, handle.Close()) })
+			_, err := handle.DB().ExecContext(ctx, `
+				CREATE TABLE vm_instances (id TEXT PRIMARY KEY, network_id TEXT NOT NULL);
+				PRAGMA user_version = 7;
+			`)
+			require.NoError(t, err)
 
-	applied, err := handle.RunMigrationsCtx(ctx)
-	require.Error(t, err)
-	assert.Zero(t, applied)
-	assert.Contains(t, err.Error(), "network_placement")
-	var version int
-	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
-	assert.Equal(t, 7, version)
+			applied, err := check(ctx, handle)
+			require.Error(t, err)
+			assert.Zero(t, applied)
+			var domainErr *errs.DomainError
+			require.True(t, errors.As(err, &domainErr))
+			assert.Equal(t, errs.CodeMigrationFailed, domainErr.Code)
+			assert.Equal(t, errs.ClassValidation, domainErr.Class)
+			assert.Contains(t, domainErr.Message, "clean installation required")
+			var version int
+			require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
+			assert.Equal(t, 7, version)
+		})
+	}
 }
 
 // Rationale: Schema presence, even with every legacy bit false, marks unsupported

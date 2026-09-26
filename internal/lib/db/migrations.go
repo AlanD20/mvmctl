@@ -127,6 +127,9 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 	if err := d.rejectLegacyRemoteExecSchema(ctx); err != nil {
 		return 0, err
 	}
+	if err := d.rejectLegacyVMPlacementSchema(ctx); err != nil {
+		return 0, err
+	}
 
 	// Ensure the tracking table exists
 	if err := d.ensureMigrationsTable(ctx); err != nil {
@@ -203,6 +206,9 @@ func (d *Handle) GetPendingMigrations(ctx context.Context) ([]string, error) {
 	if err := d.rejectLegacyRemoteExecSchema(ctx); err != nil {
 		return nil, err
 	}
+	if err := d.rejectLegacyVMPlacementSchema(ctx); err != nil {
+		return nil, err
+	}
 
 	var currentVersion int
 	if err := d.DB().QueryRow("PRAGMA user_version").Scan(&currentVersion); err != nil {
@@ -238,6 +244,28 @@ func (d *Handle) rejectLegacyRemoteExecSchema(ctx context.Context) error {
 	return errs.New(
 		errs.CodeMigrationFailed,
 		"clean installation required: v0.3.0 cannot use this legacy VM database; "+
+			"preserve desired artifacts, remove the old mvm state directory, and run mvm init",
+		errs.WithClass(errs.ClassValidation),
+	)
+}
+
+func (d *Handle) rejectLegacyVMPlacementSchema(ctx context.Context) error {
+	var legacyTableCount int
+	if err := d.DB().GetContext(ctx, &legacyTableCount, `
+		SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = 'vm_instances'
+		AND NOT EXISTS (
+			SELECT 1 FROM pragma_table_info('vm_instances') WHERE name = 'network_placement'
+		)
+	`); err != nil {
+		return errs.WrapMsg(errs.CodeMigrationFailed, "failed to inspect VM placement schema", err)
+	}
+	if legacyTableCount == 0 {
+		return nil
+	}
+	return errs.New(
+		errs.CodeMigrationFailed,
+		"clean installation required: v0.3.0 cannot use a VM database without network placement; "+
 			"preserve desired artifacts, remove the old mvm state directory, and run mvm init",
 		errs.WithClass(errs.ClassValidation),
 	)
