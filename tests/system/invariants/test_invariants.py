@@ -240,40 +240,41 @@ class TestInvariants:
         the invariant being tested. If duplicate defaults exist, the test fails
         and the production code should be fixed.
         """
-        img_result = _run_mvm(runner_vm, "image", "ls", "--json")
-        kernel_result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        bin_result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        net_result = _run_mvm(runner_vm, "network", "ls", "--json")
-
-        images: list[dict[str, Any]] = json.loads(img_result.stdout)
-        kernels: list[dict[str, Any]] = json.loads(kernel_result.stdout)
-        binaries: list[dict[str, Any]] = json.loads(bin_result.stdout)
-        networks: list[dict[str, Any]] = json.loads(net_result.stdout)
+        images = _ls_json(runner_vm, "image")
+        kernels = _ls_json(runner_vm, "kernel")
+        binaries = _ls_json(runner_vm, "bin")
+        networks = _ls_json(runner_vm, "network")
 
         for domain_name, resource_list in [
             ("image", images),
             ("kernel", kernels),
             ("network", networks),
         ]:
-            defaults = [
-                r
-                for r in resource_list
-                if r.get("is_default") and r.get("is_present", True)
-            ]
+            assert all(isinstance(r.get("is_default"), bool) for r in resource_list)
+            defaults = [r for r in resource_list if r["is_default"]]
             assert len(defaults) <= 1, (
                 f"{domain_name}: expected at most 1 default, "
                 f"got {len(defaults)}"
             )
+            if domain_name in ("image", "kernel"):
+                for default in defaults:
+                    assert default.get("is_present") is True, (
+                        f"{domain_name} default is not present: {default}"
+                    )
 
         binary_defaults_by_type: dict[str, list[dict[str, Any]]] = {}
         for b in binaries:
-            if b.get("is_default") and b.get("is_present"):
+            assert isinstance(b.get("is_default"), bool), b
+            if b["is_default"]:
                 btype = b.get("type", "unknown")
                 binary_defaults_by_type.setdefault(btype, []).append(b)
         for btype, defaults in binary_defaults_by_type.items():
             assert len(defaults) <= 1, (
                 f"binary/{btype}: expected at most 1 default, "
                 f"got {len(defaults)}"
+            )
+            assert defaults[0].get("is_present") is True, (
+                f"binary/{btype} default is not present: {defaults[0]}"
             )
 
     @pytest.mark.needs_kvm
@@ -439,26 +440,6 @@ class TestInvariants:
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
-
-    def test_default_resource_is_present(self, runner_vm: str) -> None:
-        """Default resource must exist and be present on disk."""
-        img_result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images: list[dict[str, Any]] = json.loads(img_result.stdout)
-        default_images = [i for i in images if i.get("is_default")]
-        if default_images:
-            assert default_images[0].get("is_present"), (
-                f"Default image '{default_images[0].get('type', '?')}' "
-                f"is not present on disk"
-            )
-
-        kernel_result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        kernels: list[dict[str, Any]] = json.loads(kernel_result.stdout)
-        default_kernels = [k for k in kernels if k.get("is_default")]
-        if default_kernels:
-            assert default_kernels[0].get("is_present"), (
-                "Default kernel is not present on disk"
-            )
-
 
 # ============================================================================
 # Section 2: JSON consistency
