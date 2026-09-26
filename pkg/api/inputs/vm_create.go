@@ -53,6 +53,7 @@ type VMCreateInput struct {
 	BootArgs            string         `json:"boot_args,omitempty"      yaml:"boot_args,omitempty"`
 	LSMFlags            string         `json:"lsm_flags,omitempty"      yaml:"lsm_flags,omitempty"`
 	NetworkID           *string        `json:"network,omitempty"        yaml:"network,omitempty"`
+	NoNetwork           bool           `json:"no_network,omitempty"    yaml:"no_network,omitempty"`
 	RequestedGuestMAC   *string        `json:"guest_mac,omitempty"      yaml:"guest_mac,omitempty"`
 	// CustomCloudInitConfig is a file path to a custom cloud-init user-data config.
 	CustomCloudInitConfig *string  `json:"custom_cloud_init_config,omitempty" yaml:"custom_cloud_init_config,omitempty"`
@@ -83,6 +84,7 @@ type ResolvedVMCreateInput struct {
 	UserUID             int
 	UserGID             int
 	GuestMACPrefix      string
+	NetworkPlacement    model.VMNetworkPlacement
 	Network             *model.NetworkItem
 	Image               *model.ImageItem
 	Kernel              *model.KernelItem
@@ -328,16 +330,44 @@ func (r *VMCreateRequest) resolveMemory(ctx context.Context, input *VMCreateInpu
 	return int(bytes / disk.MebibyteBytes), nil
 }
 
+// Validate rejects conflicting raw create choices without resolving dependencies.
+func (input VMCreateInput) Validate() error {
+	if input.NocloudNetPort != nil {
+		return errs.New(errs.CodeValidationFailed,
+			"custom NoCloud ports are unsupported; omit nocloud_net_port to use reserved gateway TCP 8000")
+	}
+	if err := validators.VMName(input.Name); err != nil {
+		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid VM name: %s", err.Error()))
+	}
+	if !input.NoNetwork {
+		return nil
+	}
+	if input.NetworkID != nil || input.RequestedGuestIP != nil || input.RequestedGuestMAC != nil {
+		return errs.New(errs.CodeValidationFailed,
+			"--no-network cannot be combined with --network, --ip, or --mac")
+	}
+	if input.CloudInitMode != nil && *input.CloudInitMode == string(model.CloudInitModeNET) {
+		return errs.New(errs.CodeValidationFailed, "--no-network cannot use NoCloud NET mode")
+	}
+	for argument := range strings.FieldsSeq(input.BootArgs) {
+		if strings.HasPrefix(argument, "ip=") || strings.HasPrefix(argument, "ds=") {
+			return errs.New(errs.CodeValidationFailed,
+				"--no-network cannot use network boot arguments")
+		}
+	}
+	return nil
+}
+
 // Resolve resolves all inputs to explicit values and validates.
 func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, error) {
 	input := &r.input
-	if input.NocloudNetPort != nil {
-		return nil, errs.New(errs.CodeValidationFailed,
-			"custom NoCloud ports are unsupported; omit nocloud_net_port to use reserved gateway TCP 8000")
+	if err := input.Validate(); err != nil {
+		return nil, err
 	}
-	// Validate VM name early
-	if err := validators.VMName(input.Name); err != nil {
-		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid VM name: %s", err.Error()))
+	// The public create path remains managed-only until start, reboot, and snapshot
+	// preserve the networkless placement. Resolve performs no dependent lookup before this guard.
+	if input.NoNetwork {
+		return nil, errs.New(errs.CodeValidationFailed, "networkless VM creation is not yet available")
 	}
 	// Resolve image, kernel, network, binary, keys, volumes
 	img, err := r.resolveImage(ctx, input)
@@ -551,6 +581,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		UserUID:               userUID,
 		UserGID:               userGID,
 		GuestMACPrefix:        guestMACPrefix,
+		NetworkPlacement:      model.VMNetworkPlacementManaged,
 		Network:               netw,
 		Image:                 img,
 		Kernel:                krnl,
