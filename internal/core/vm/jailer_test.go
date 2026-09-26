@@ -179,7 +179,8 @@ func jailerTestConfig(vmDir string) *model.FirecrackerConfig {
 	isoPath := filepath.Join(vmDir, infra.VMCloudInitISOFilename)
 	cid := 42
 	return &model.FirecrackerConfig{
-		VMDir: vmDir, NetworkID: testJailerNetworkID, RootfsPath: filepath.Join(vmDir, infra.VMRootfsFilename),
+		VMDir: vmDir, NetworkPlacement: model.VMNetworkPlacementManaged, NetworkID: testJailerNetworkID,
+		RootfsPath: filepath.Join(vmDir, infra.VMRootfsFilename),
 		BinaryPath: "/var/lib/mvmctl/binaries/1.16.0/firecracker",
 		JailerPath: "/var/lib/mvmctl/binaries/1.16.0/jailer", BinaryVersion: "1.16.0",
 		KernelPath: filepath.Join(filepath.Dir(vmDir), "kernels", "vmlinux"),

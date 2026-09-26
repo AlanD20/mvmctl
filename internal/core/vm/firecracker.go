@@ -72,11 +72,26 @@ func (s *FirecrackerSpawner) Cleanup(ctx context.Context) {
 
 // Generate builds the Firecracker VM config.
 func (s *FirecrackerSpawner) Generate() (*model.FirecrackerVMConfig, error) {
-	tapName, err := networksvc.VMTAPName(uint32(os.Geteuid()), s.config.NetworkID, s.vmID())
-	if err != nil {
-		return nil, err
+	switch s.config.NetworkPlacement {
+	case model.VMNetworkPlacementManaged:
+		tapName, err := networksvc.VMTAPName(uint32(os.Geteuid()), s.config.NetworkID, s.vmID())
+		if err != nil {
+			return nil, err
+		}
+		s.config.TapName = tapName
+	case model.VMNetworkPlacementNetworkless:
+		if s.config.NetworkID != "" || s.config.GuestIP != "" || s.config.GuestMAC != "" ||
+			s.config.TapName != "" || s.config.NetworkGateway != "" || s.config.NetworkNetmask != "" {
+			return nil, errs.New(errs.CodeFirecrackerConfigError,
+				"networkless VM configuration cannot include a managed network endpoint")
+		}
+		if s.config.CloudInitMode != nil && *s.config.CloudInitMode == model.CloudInitModeNET {
+			return nil, errs.New(errs.CodeFirecrackerConfigError,
+				"networkless VM configuration cannot use NoCloud NET")
+		}
+	default:
+		return nil, errs.New(errs.CodeFirecrackerConfigError, "VM network placement is invalid")
 	}
-	s.config.TapName = tapName
 	// Nested virt requires PCI — force it on
 	if s.config.NestedVirt {
 		if s.config.ReleaseArchitecture != "x86_64" {
@@ -257,6 +272,9 @@ func (s *FirecrackerSpawner) buildCPUConfig() *model.CpuConfig {
 
 // buildNetworkConfig builds the network-interfaces section.
 func (s *FirecrackerSpawner) buildNetworkConfig() []model.NetworkInterfaceConfig {
+	if s.config.NetworkPlacement == model.VMNetworkPlacementNetworkless {
+		return []model.NetworkInterfaceConfig{}
+	}
 	networks := []model.NetworkInterfaceConfig{
 		{
 			IfaceID:     "eth0",
@@ -354,18 +372,22 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 		bootArgs.set("pci", []string{"off"})
 	}
 
-	// Use static kernel ip= parameter for early network bringup
-	// This ensures network is ready before cloud-init runs
-	// For NO_CLOUD_NET mode, also include kernel ip= for initial network bringup
-	// cloud-init's network-config will ensure the IP stays consistent
-	bootArgs.set(
-		"ip",
-		[]string{fmt.Sprintf("%s::%s:%s::eth0:off",
-			s.config.GuestIP,
-			s.config.NetworkGateway,
-			s.config.NetworkNetmask,
-		)},
-	)
+	if s.config.NetworkPlacement == model.VMNetworkPlacementNetworkless {
+		if bootArgs.entryIndex("ip") >= 0 {
+			return "", errs.New(errs.CodeFirecrackerConfigError,
+				"networkless VM configuration cannot include kernel ip boot arguments")
+		}
+	} else {
+		// The managed endpoint must be ready before cloud-init begins.
+		bootArgs.set(
+			"ip",
+			[]string{fmt.Sprintf("%s::%s:%s::eth0:off",
+				s.config.GuestIP,
+				s.config.NetworkGateway,
+				s.config.NetworkNetmask,
+			)},
+		)
+	}
 
 	if s.config.LSMFlags != "" {
 		bootArgs.set("lsm", []string{s.config.LSMFlags})
@@ -411,10 +433,7 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 	// Determine cloud-init datasource string
 	// Don't handle CloudInitMode.OFF since we don't have to add any boot args
 	// Mask systemd-networkd-wait-online to prevent 2+ minute boot delay.
-	// The kernel ip= parameter already configures the network; this service
-	// would block waiting for systemd-networkd to mark it as "online".
-	// Applied unconditionally — even with --cloud-init-mode off the network
-	// is pre-configured by the kernel ip= boot parameter.
+	// Managed VMs receive a kernel ip= endpoint; networkless VMs have no NIC.
 	bootArgs.set("systemd.mask", []string{"systemd-networkd-wait-online.service"})
 
 	cloudInitMode := s.config.CloudInitMode

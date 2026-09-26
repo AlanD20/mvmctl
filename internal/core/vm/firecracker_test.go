@@ -26,7 +26,10 @@ func spawnerWithCanonicalIdentity(t *testing.T, config *model.FirecrackerConfig)
 	if config.VMDir == "" {
 		config.VMDir = filepath.Join(t.TempDir(), testSpawnerVMID)
 	}
-	if config.NetworkID == "" {
+	if config.NetworkPlacement == "" {
+		config.NetworkPlacement = model.VMNetworkPlacementManaged
+	}
+	if config.NetworkPlacement == model.VMNetworkPlacementManaged && config.NetworkID == "" {
 		config.NetworkID = testSpawnerNetworkID
 	}
 	return vm.NewFirecrackerSpawner(config)
@@ -478,6 +481,90 @@ func TestFirecrackerSpawner_Generate_networkConfig(t *testing.T) {
 	assert.Equal(t, config.GuestMAC, interfaceConfig.GuestMAC)
 	assert.Regexp(t, `^mvt[0-9a-f]{12}$`, interfaceConfig.HostDevName)
 	assert.NotEqual(t, "tap-test", interfaceConfig.HostDevName)
+}
+
+// A networkless VM has no guest IP data plane but retains its vsock device.
+func TestFirecrackerSpawnerGenerateNetworklessPlacement(t *testing.T) {
+	vmDir := filepath.Join(t.TempDir(), testSpawnerVMID)
+	cid := model.MinVsockGuestCID
+	spawner := vm.NewFirecrackerSpawner(&model.FirecrackerConfig{
+		VMDir:            vmDir,
+		NetworkPlacement: model.VMNetworkPlacementNetworkless,
+		BootArgs:         "quiet",
+		VsockGuestCID:    &cid,
+	})
+
+	got, err := spawner.Generate()
+	require.NoError(t, err)
+	if diff := cmp.Diff([]model.NetworkInterfaceConfig{}, got.NetworkInterfaces); diff != "" {
+		t.Errorf("networkless interfaces mismatch (-want +got):\n%s", diff)
+	}
+	assert.Equal(t, "quiet pci=off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service",
+		got.BootSource.BootArgs)
+	wantVsock := &model.VsockConfig{GuestCID: cid, UDSPath: filepath.Join(vmDir, "vsock.sock")}
+	if diff := cmp.Diff(wantVsock, got.Vsock); diff != "" {
+		t.Errorf("networkless vsock mismatch (-want +got):\n%s", diff)
+	}
+	data, err := json.Marshal(got)
+	require.NoError(t, err)
+	var serialized map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &serialized))
+	assert.JSONEq(t, `[]`, string(serialized["network-interfaces"]))
+}
+
+func TestFirecrackerSpawnerRejectsMixedNetworklessPlacement(t *testing.T) {
+	tests := map[string]struct {
+		placement model.VMNetworkPlacement
+		networkID string
+		guestIP   string
+		guestMAC  string
+		tapName   string
+		gateway   string
+		netmask   string
+		cloudMode *model.CloudInitMode
+		bootArgs  string
+		wantErr   string
+	}{
+		"missing_placement": {wantErr: "VM network placement is invalid"},
+		"unknown_placement": {placement: "unknown", wantErr: "VM network placement is invalid"},
+		"network_id": {placement: model.VMNetworkPlacementNetworkless, networkID: testSpawnerNetworkID,
+			wantErr: "cannot include a managed network endpoint"},
+		"guest_ip": {placement: model.VMNetworkPlacementNetworkless, guestIP: "10.0.0.2",
+			wantErr: "cannot include a managed network endpoint"},
+		"guest_mac": {placement: model.VMNetworkPlacementNetworkless, guestMAC: "02:00:00:00:00:01",
+			wantErr: "cannot include a managed network endpoint"},
+		"tap_name": {placement: model.VMNetworkPlacementNetworkless, tapName: "tap-test",
+			wantErr: "cannot include a managed network endpoint"},
+		"gateway": {placement: model.VMNetworkPlacementNetworkless, gateway: "10.0.0.1",
+			wantErr: "cannot include a managed network endpoint"},
+		"netmask": {placement: model.VMNetworkPlacementNetworkless, netmask: "255.255.255.0",
+			wantErr: "cannot include a managed network endpoint"},
+		"nocloud_net": {placement: model.VMNetworkPlacementNetworkless, cloudMode: ptr.Ptr(model.CloudInitModeNET),
+			wantErr: "cannot use NoCloud NET"},
+		"kernel_ip": {placement: model.VMNetworkPlacementNetworkless, bootArgs: "ip=10.0.0.2 quiet",
+			wantErr: "cannot include kernel ip boot arguments"},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			spawner := vm.NewFirecrackerSpawner(&model.FirecrackerConfig{
+				VMDir:            filepath.Join(t.TempDir(), testSpawnerVMID),
+				NetworkPlacement: tc.placement,
+				NetworkID:        tc.networkID,
+				GuestIP:          tc.guestIP,
+				GuestMAC:         tc.guestMAC,
+				TapName:          tc.tapName,
+				NetworkGateway:   tc.gateway,
+				NetworkNetmask:   tc.netmask,
+				CloudInitMode:    tc.cloudMode,
+				BootArgs:         tc.bootArgs,
+			})
+			_, err := spawner.Generate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+			return
+		})
+	}
 }
 
 // --- Generate: CPU config ---

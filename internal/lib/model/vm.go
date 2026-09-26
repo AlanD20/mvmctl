@@ -21,6 +21,14 @@ const (
 
 // --- VM ---
 
+// VMNetworkPlacement identifies the admitted guest network shape.
+type VMNetworkPlacement string
+
+const (
+	VMNetworkPlacementManaged     VMNetworkPlacement = "managed"
+	VMNetworkPlacementNetworkless VMNetworkPlacement = "networkless"
+)
+
 // VMItem represents a microVM instance.
 type VMItem struct {
 	ID             string         `json:"id"              db:"id"`

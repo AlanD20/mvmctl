@@ -1182,6 +1182,7 @@ func buildRespawnFirecrackerConfig(
 ) *model.FirecrackerConfig {
 	v := state.vm
 	config := &model.FirecrackerConfig{
+		NetworkPlacement:    model.VMNetworkPlacementManaged,
 		CacheRoot:           filepath.Dir(filepath.Dir(vmDir)),
 		KernelID:            v.KernelID,
 		NetworkID:           v.NetworkID,
@@ -1457,6 +1458,7 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		}
 	}
 	fcConfig := &model.FirecrackerConfig{
+		NetworkPlacement:    model.VMNetworkPlacementManaged,
 		CacheRoot:           c.cacheRoot,
 		KernelID:            c.resolved.Kernel.ID,
 		NetworkID:           c.resolved.Network.ID,

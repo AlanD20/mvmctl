@@ -343,11 +343,12 @@ type FirecrackerConfig struct {
 	CgroupLimits VMCgroupLimits `json:"cgroup_limits"`
 
 	// Network
-	GuestIP        string `json:"guest_ip"`
-	GuestMAC       string `json:"guest_mac"`
-	TapName        string `json:"tap_name"`
-	NetworkGateway string `json:"network_gateway"`
-	NetworkNetmask string `json:"network_netmask"`
+	NetworkPlacement VMNetworkPlacement `json:"network_placement"`
+	GuestIP          string             `json:"guest_ip"`
+	GuestMAC         string             `json:"guest_mac"`
+	TapName          string             `json:"tap_name"`
+	NetworkGateway   string             `json:"network_gateway"`
+	NetworkNetmask   string             `json:"network_netmask"`
 
 	// Image metadata
 	ImageFSUUID string `json:"image_fs_uuid,omitempty"`
