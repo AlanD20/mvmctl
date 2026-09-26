@@ -326,7 +326,7 @@ def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
 
 
 class TestNetworklessJailerLifecycle:
-    def test_create_stop_start_and_vsock_exec_without_guest_nic(
+    def test_create_restart_reboot_and_vsock_exec_without_guest_nic(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
         """The installed candidate can restart a loopback-only VM without a network record."""
@@ -362,6 +362,15 @@ class TestNetworklessJailerLifecycle:
                        if vm["name"] == name)
         assert started["status"] == "running"
         assert started["process_start_time"] != original["process_start_time"]
+        interfaces = _networkless_guest_interfaces(runner_vm, name)
+        assert "lo" in interfaces
+        assert "eth0" not in interfaces
+
+        _run_mvm(runner_vm, "vm", "reboot", name, timeout=120)
+        rebooted = next(vm for vm in _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+                        if vm["name"] == name)
+        assert rebooted["status"] == "running"
+        assert rebooted["process_start_time"] != started["process_start_time"]
         interfaces = _networkless_guest_interfaces(runner_vm, name)
         assert "lo" in interfaces
         assert "eth0" not in interfaces
