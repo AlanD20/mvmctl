@@ -3,16 +3,13 @@ package binary
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/download"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
 )
@@ -99,73 +96,24 @@ func (s *Service) ResolvePair(ctx context.Context, firecracker *model.BinaryItem
 			return nil, binaryError(errs.CodeBinaryPairInvalid,
 				fmt.Sprintf("%s %s is marked missing", item.Type, item.Version))
 		}
-		if err := validateTrustedBinary(item); err != nil {
+		if err := validateTrustedBinaryProjection(item); err != nil {
 			return nil, binaryError(errs.CodeBinaryUntrusted, err.Error())
-		}
-		result, runErr := system.DefaultRunner.Run(ctx, []string{item.Path, "--version"}, system.RunCmdOpts{
-			Check: true, Capture: true,
-		})
-		if runErr != nil || !strings.Contains(result.Stdout+result.Stderr, item.Version) {
-			return nil, binaryError(errs.CodeBinaryPairInvalid,
-				fmt.Sprintf("%s executable does not report expected version %s", item.Type, item.Version))
 		}
 	}
 	return pair, nil
 }
 
-func validateTrustedBinary(item *model.BinaryItem) error {
-	cleanRoot := filepath.Clean(infra.TrustedBinaryRoot) + string(filepath.Separator)
-	cleanPath := filepath.Clean(item.Path)
-	if !strings.HasPrefix(cleanPath, cleanRoot) {
+// validateTrustedBinaryProjection checks the repository locator without
+// traversing the root-only release store. Root launch admission pins the exact
+// installed slot and verifies its executable descriptors before any effects.
+func validateTrustedBinaryProjection(item *model.BinaryItem) error {
+	want := filepath.Join(infra.TrustedBinaryRoot, item.Architecture, item.Version, item.Type)
+	if item.Path != want || filepath.Clean(item.Path) != item.Path {
 		return fmt.Errorf(
-			"%s %s is not installed in the trusted root; source-built pairs are unsupported for canonical jailed launch",
+			"%s %s is not installed in the trusted root at its canonical slot; source-built pairs are unsupported for canonical jailed launch",
 			item.Type,
 			item.Version,
 		)
-	}
-	if err := validateTrustedParentChain(filepath.Dir(cleanPath)); err != nil {
-		return fmt.Errorf("%s trusted parent validation failed: %w", item.Type, err)
-	}
-	resolved, err := filepath.EvalSymlinks(cleanPath)
-	if err != nil || resolved != cleanPath {
-		return fmt.Errorf("%s trusted path is missing or contains a symlink", item.Type)
-	}
-	info, err := os.Stat(cleanPath)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0022 != 0 {
-		return fmt.Errorf("%s trusted executable is unusable", item.Type)
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != 0 {
-		return fmt.Errorf("%s trusted executable is not root-owned", item.Type)
-	}
-	return nil
-}
-
-func validateTrustedParentChain(path string) error {
-	abs, err := filepath.Abs(path)
-	if err != nil || abs != filepath.Clean(path) {
-		return fmt.Errorf("trusted directory path is not canonical: %s", path)
-	}
-	current := string(filepath.Separator)
-	components := strings.Split(strings.TrimPrefix(abs, string(filepath.Separator)), string(filepath.Separator))
-	for i := -1; i < len(components); i++ {
-		if i >= 0 {
-			current = filepath.Join(current, components[i])
-		}
-		info, err := os.Lstat(current)
-		if err != nil {
-			return fmt.Errorf("inspect trusted path component %s: %w", current, err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return fmt.Errorf("trusted path component is not a real directory: %s", current)
-		}
-		if info.Mode().Perm()&0022 != 0 {
-			return fmt.Errorf("trusted path component is writable by non-root users: %s", current)
-		}
-		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || stat.Uid != 0 {
-			return fmt.Errorf("trusted path component is not root-owned: %s", current)
-		}
 	}
 	return nil
 }

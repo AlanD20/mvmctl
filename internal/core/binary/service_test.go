@@ -2,12 +2,14 @@ package binary_test
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/core/binary"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/testutil"
 )
@@ -68,6 +70,17 @@ func TestService_ResolvePairFailsClosed(t *testing.T) {
 			},
 			wantErr: "not installed in the trusted root",
 		},
+		"pair_in_wrong_trusted_slot": {
+			selected: binaryItem("selected", "firecracker", "1.16.0", true),
+			seed: func() []*model.BinaryItem {
+				firecracker := binaryItem("selected", "firecracker", "1.16.0", true)
+				jailer := binaryItem("jailer", "jailer", "1.16.0", true)
+				firecracker.Path = filepath.Join(infra.TrustedBinaryRoot, "x86_64", "1.16.1", "firecracker")
+				jailer.Path = filepath.Join(infra.TrustedBinaryRoot, "x86_64", "1.16.0", "jailer")
+				return []*model.BinaryItem{firecracker, jailer}
+			}(),
+			wantErr: "canonical slot",
+		},
 	}
 
 	for name, tc := range tests {
@@ -84,6 +97,22 @@ func TestService_ResolvePairFailsClosed(t *testing.T) {
 			assert.Nil(t, pair)
 		})
 	}
+}
+
+// Rationale: the unprivileged operator cannot traverse or execute a root-only
+// release pair; resolving its exact repository projection must still succeed.
+func TestService_ResolvePairUsesProtectedReleaseProjection(t *testing.T) {
+	repo := testutil.NewBinaryRepo()
+	firecracker := binaryItem("selected", "firecracker", "1.16.0", true)
+	jailer := binaryItem("jailer", "jailer", "1.16.0", true)
+	for _, item := range []*model.BinaryItem{firecracker, jailer} {
+		item.Path = filepath.Join(infra.TrustedBinaryRoot, item.Architecture, item.Version, item.Type)
+		require.NoError(t, repo.Upsert(t.Context(), item))
+	}
+	pair, err := binary.NewService(repo, "x86_64").ResolvePair(t.Context(), firecracker)
+	require.NoError(t, err)
+	require.Equal(t, firecracker.ID, pair.Firecracker.ID)
+	assert.Equal(t, jailer.ID, pair.Jailer.ID)
 }
 
 func binaryItem(id, typ, version string, present bool) *model.BinaryItem {
