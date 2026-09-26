@@ -17,7 +17,9 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-func networklessResolveFixture(t *testing.T, noNetwork, protectedBinary bool) (*inputs.VMCreateRequest, *testutil.ConfigRepo) {
+func networklessResolveFixture(
+	t *testing.T, noNetwork, protectedBinary bool,
+) (*inputs.VMCreateRequest, *testutil.ConfigRepo) {
 	t.Helper()
 	dir := t.TempDir()
 	kernelPath := filepath.Join(dir, "vmlinux")
