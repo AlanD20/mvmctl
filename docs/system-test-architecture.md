@@ -99,7 +99,7 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 | python3-pytest, pytest-timeout (pip) | Test runners | Test runner and timeout plugin |
 | qemu-utils | System package | Volume/disk operations in T2 tests |
 | fakeroot | System package | Preserving tarball ownership when pulling tar-rootfs images inside the runner VM |
-| nftables, iptables | System packages | Firewall management in the runner VM |
+| nftables, iptables | System packages | Installed by the current runner-image builder for diagnostics and older test tooling; the 0.3.0 candidate applies nftables through the Go library and does not use either CLI as its firewall backend. |
 | build-essential, bc, bison, flex, libncurses-dev, libssl-dev, libelf-dev, git, curl, dwarves | System packages | Kernel compilation in Tier 3 `kernel_build` tests |
 | cloud-image-utils | System package | Cloud-init ISO generation for `--cloud-init-mode iso` tests |
 
@@ -198,7 +198,7 @@ All T1 runner VMs use the same Firecracker/kernel as T2 (for consistency — the
 - **Hypervisor:** Firecracker v1.16
 - **Kernel:** `official:7.0.11` (features: `nftables`, `tuntap`, `kvm`, `btrfs`)
 - **Resources:** 2 vCPU, 1024 MB RAM, 9 GB disk
-- **Network:** `sys-test-net` (per-VM TAP isolation)
+- **Network:** `sys-test-net` (the outer controller's runner network; do not infer inner-candidate namespace isolation from this attachment)
 - **Volume:** `asset-mirror` (shared RO, mounted at `/dev/vdb`)
 
 The `kvm` feature is unused for T1 tests (they never create nested VMs), but it has no negative effect. Using a single kernel for both tiers avoids an extra build.
@@ -247,10 +247,14 @@ mvm exec <vm-name> --user runner --timeout 600 -- \
 
 Same as T1, but with nested virt enabled (requires `kvm` in the kernel — the `official:7.0.11` kernel has it):
 
+The feature names in the runner specification do not prove bridge-family nftables support. On 2026-09-26,
+`mvmctl-030-test` rejected creation of a bridge-family nftables table despite accepting an inet table; network and
+policy Tier 2 results from that kernel cannot qualify the 0.3.0 firewall until the kernel capability is corrected.
+
 - **Hypervisor:** Firecracker v1.16
 - **Kernel:** `official:7.0.11` (features: `nftables`, `tuntap`, `kvm`, `btrfs`)
 - **Resources:** 4 vCPU, 4096 MB RAM, 9 GB disk (more resources for running nested Firecracker VMs).
-- **Network:** `sys-test-net` (per-VM TAP isolation).
+- **Network:** `sys-test-net` (the outer controller's runner network; inner-candidate network isolation requires separate Tier 2 evidence).
 - **Nested virt:** Enabled (`--nested-virt`).
 - **Volume:** `asset-mirror` (shared RO, mounted at `/dev/vdb`).
 
@@ -498,7 +502,7 @@ tests/system/
 | kernel | 1 | `test_kernel_import.py` | Kernel import — Tier 1 |
 | network | 1 | `test_network.py` | Network creation (TestNetworkEdgeCases class marked `tier2`) |
 | nftables | 2 | `test_nftables.py` | Nftables firewall backend and atomic rule sync — needs nested virt |
-| policies | 2 | `test_policies.py` | Routed service-access allow/default-deny behavior for nftables and iptables — needs nested virt |
+| policies | 2 | `test_policies.py` | Intended 0.3.0 coverage: typed same-/cross-network traffic and directional VM-to-VM exec grants. Existing cases still need contract reconciliation; nested KVM and bridge-family nftables capability are required for network-policy qualification. |
 | host | 1 | `test_host.py` | Host info/status |
 | system_install | 1 | `test_system_install.py` | Root-owned system install path, metadata, routing, and failure safety |
 | run | 1 | `test_run.py` | Service subprocesses |
@@ -536,7 +540,7 @@ Fixture scoping determines trade-offs between test speed and isolation. The foll
 Any test that modifies Firecracker or kernel state (hotplug, snapshot, nested virt, PCI operations) **must** use a function-scoped fixture. Module-scoped VMs leak state across tests because:
 
 - Firecracker is Developer Preview — hotplug/unplug does not fully reset PCI BARs.
-- Nested VMs leave orphaned bridges, TAPs, or iptables rules.
+- Nested VMs can leave orphaned managed namespaces, links, or firewall state after a failed teardown.
 - Volume attachment state persists in Firecracker even after CLI-level detach.
 
 **Exception:** If a domain's tests are read-only or create-zero-state resources (keys, config, images, kernels), module-scoped is acceptable to save ~60-120s per test instance.

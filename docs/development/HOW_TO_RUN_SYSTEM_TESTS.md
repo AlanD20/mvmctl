@@ -432,7 +432,7 @@ KVM) is a **release blocker** — fix the environment, not the code.
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| `iptables` errors | `mvm host init` not run | Run `sudo /usr/local/bin/mvm host init` |
+| `nftables_available: false` or bridge-family `operation not supported` | Runner kernel lacks the required bridge/inet nftables behavior | Use a runner kernel with the required nftables capabilities, then rerun `mvm host status --json`; installing the `nft` or `iptables` CLI does not supply missing kernel support. |
 | VM creation hangs | Binary not built or missing | Re-run `./scripts/build.sh release` |
 | `bridge already exists` | Stale bridges from previous run | Clean up with `mvm network rm --force` |
 | `Text file busy` on service binary | Stale disposable runner or base image | Destroy the affected runner through the outer controller and rebuild the base image; do not kill host processes by basename |
