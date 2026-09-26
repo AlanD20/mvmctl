@@ -14,7 +14,7 @@ const (
 	managedVMCgroupDirectoryFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	managedVMCgroupResolveFlags   = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS |
 		unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV
-	managedVMCgroupRootMode   = uint32(0o755)
+	managedVMCgroupRootMode   = uint32(0o555)
 	managedVMCgroupParentMode = uint32(0o755)
 	managedVMCgroupLeafMode   = uint32(0o755)
 	managedVMCgroupProcsMode  = uint32(0o644)
@@ -236,7 +236,10 @@ func managedVMCgroupIdentityFromDirectoryStatx(
 	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
 		return managedVMCgroupIdentity{}, instanceAtomicError(description+" is not a directory", nil)
 	}
-	if uint32(stat.Mode)&0o7777 != wantMode {
+	mode := uint32(stat.Mode) & 0o7777
+	// The kernel-owned cgroup-v2 mount root may be 0555 even on a writable
+	// mount. Its managed parent and VM leaves still require exact 0755.
+	if mode != wantMode && !(wantMode == managedVMCgroupRootMode && mode == 0o755) {
 		return managedVMCgroupIdentity{}, instanceAtomicError(description+" mode is not exact", nil)
 	}
 	if stat.Uid != deps.trustedUID || stat.Gid != deps.trustedGID {

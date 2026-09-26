@@ -27,7 +27,7 @@ type managedVMCgroupTestFixture struct {
 func newManagedVMCgroupTestFixture(t *testing.T) *managedVMCgroupTestFixture {
 	t.Helper()
 	root := t.TempDir()
-	require.NoError(t, os.Chmod(root, os.FileMode(managedVMCgroupRootMode)))
+	require.NoError(t, os.Chmod(root, 0o755))
 	return &managedVMCgroupTestFixture{t: t, root: root}
 }
 
@@ -177,6 +177,38 @@ func TestPrepareManagedVMCgroupProvesDerivedLeafAbsentWithoutCreating(t *testing
 
 	assert.False(t, fixture.vmLeafPresent(testVMID))
 	assert.True(t, prepared.snapshot().leafAbsent)
+}
+
+// A cgroup-v2 mount can expose a root-owned 0555 mount root while the mount is
+// writable. The root mode must not be confused with the managed child policy.
+func TestPrepareManagedVMCgroupAcceptsReadOnlyModeOnCgroupRoot(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	deps := fixture.deps()
+	openRoot := deps.openRoot
+	rootFD := -1
+	deps.openRoot = func(ctx context.Context) (int, error) {
+		fd, err := openRoot(ctx)
+		if err == nil {
+			rootFD = fd
+		}
+		return fd, err
+	}
+	statx := deps.statx
+	deps.statx = func(ctx context.Context, fd int, stat *unix.Statx_t) error {
+		if err := statx(ctx, fd, stat); err != nil {
+			return err
+		}
+		if fd == rootFD {
+			stat.Mode = stat.Mode&^0o7777 | 0o555
+		}
+		return nil
+	}
+
+	prepared, err := prepareManagedVMCgroup(t.Context(), deps, testVMID)
+	require.NoError(t, err)
+	require.NoError(t, prepared.Release(t.Context()))
 }
 
 // Rationale: a same-name cgroup can contain authority from an interrupted or foreign lifecycle. A fresh launch must
