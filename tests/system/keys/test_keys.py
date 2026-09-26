@@ -11,6 +11,7 @@ Violations removed:
 from __future__ import annotations
 
 import json
+import tempfile
 import uuid
 
 import pytest
@@ -30,6 +31,18 @@ def _success_data(result, expected_type=list):
     data = envelope["data"]
     assert isinstance(data, expected_type), envelope
     return data
+
+
+class TestEmptyKeyListing:
+    def test_key_list_json_uses_array_in_fresh_cache(self, runner_vm, monkeypatch):
+        """A fresh key cache must expose an empty list, not JSON null."""
+        with tempfile.TemporaryDirectory(
+            prefix="mvm-keys-empty-", dir="/home/runner/.cache"
+        ) as cache_dir:
+            monkeypatch.setenv("MVM_CACHE_DIR", cache_dir)
+            _run_mvm(runner_vm, "cache", "init")
+            result = _run_mvm(runner_vm, "key", "ls", "--json")
+            assert _success_data(result) == []
 
 
 # ============================================================================

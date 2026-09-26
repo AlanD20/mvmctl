@@ -77,7 +77,7 @@ func newNetworkListCmd(networkAPI api.NetworkAPI, configAPI api.ConfigAPI) *cobr
 				return err
 			}
 
-			if common.RecordResult(nets) {
+			if common.RecordListResult(nets) {
 				return nil
 			}
 

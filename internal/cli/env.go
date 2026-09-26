@@ -142,9 +142,11 @@ func newEnvListCmd(_ api.API) *cobra.Command {
 		Short:   "List all saved environments",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			summaries, err := env.List(cmd.Context())
-			common.RecordResult(summaries)
 			if err != nil {
 				return fmt.Errorf("list envs failed: %w", err)
+			}
+			if common.RecordListResult(summaries) {
+				return nil
 			}
 
 			if len(summaries) == 0 {

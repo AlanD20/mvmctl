@@ -75,14 +75,14 @@ func newBinaryListCmd(binaryAPI api.BinaryAPI, configAPI api.ConfigAPI) *cobra.C
 				if err != nil {
 					return err
 				}
-				if common.RecordResult(remoteVersions) {
+				if common.RecordListResult(remoteVersions) {
 					return nil
 				}
 				common.RenderVersionTree(remoteVersions)
 				return nil
 			}
 
-			if common.RecordResult(local) {
+			if common.RecordListResult(local) {
 				return nil
 			}
 

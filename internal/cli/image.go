@@ -108,7 +108,7 @@ func newImageListCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Comm
 }
 
 func printRemoteImages(versions []model.VersionInfo, jsonOutput bool) {
-	if common.RecordResult(versions) {
+	if common.RecordListResult(versions) {
 		return
 	}
 
@@ -128,7 +128,7 @@ func printLocalImages(
 	ctx context.Context,
 	configAPI api.ConfigAPI,
 ) {
-	if common.RecordResult(images) {
+	if common.RecordListResult(images) {
 		return
 	}
 

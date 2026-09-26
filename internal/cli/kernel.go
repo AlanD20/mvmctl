@@ -70,7 +70,7 @@ func newKernelListCmd(kernelAPI api.KernelAPI, configAPI api.ConfigAPI) *cobra.C
 					return err
 				}
 
-				if common.RecordResult(remoteVersions) {
+				if common.RecordListResult(remoteVersions) {
 					return nil
 				}
 
@@ -89,7 +89,7 @@ func newKernelListCmd(kernelAPI api.KernelAPI, configAPI api.ConfigAPI) *cobra.C
 				return err
 			}
 
-			if common.RecordResult(kernels) {
+			if common.RecordListResult(kernels) {
 				return nil
 			}
 

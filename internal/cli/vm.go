@@ -98,7 +98,7 @@ func runVMList(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jso
 		return err
 	}
 
-	if common.RecordResult(vms) {
+	if common.RecordListResult(vms) {
 		return nil
 	}
 
@@ -129,7 +129,7 @@ func runVMps(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonO
 		return err
 	}
 
-	if common.RecordResult(vms) {
+	if common.RecordListResult(vms) {
 		return nil
 	}
 

@@ -63,7 +63,7 @@ func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.C
 		RunE: func(cmd *cobra.Command, args []string) error {
 			volumes := volumeAPI.VolumeListAll(cmd.Context())
 
-			if common.RecordResult(volumes) {
+			if common.RecordListResult(volumes) {
 				return nil
 			}
 

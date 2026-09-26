@@ -66,7 +66,7 @@ func newExecPolicyListCmd(policyAPI api.PolicyAPI) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if common.RecordResult(policies) {
+			if common.RecordListResult(policies) {
 				return nil
 			}
 			common.RenderListing(policies, execPolicyColumns, "short")

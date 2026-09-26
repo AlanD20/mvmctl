@@ -57,7 +57,7 @@ func newKeyListCmd(keyAPI api.KeyAPI, configAPI api.ConfigAPI) *cobra.Command {
 				return err
 			}
 
-			if common.RecordResult(keys) {
+			if common.RecordListResult(keys) {
 				return nil
 			}
 

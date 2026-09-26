@@ -68,6 +68,14 @@ func RecordResult(data any) bool {
 	return true
 }
 
+// RecordListResult keeps empty list responses as arrays in the public JSON envelope.
+func RecordListResult[T any](items []T) bool {
+	if items == nil {
+		items = []T{}
+	}
+	return RecordResult(items)
+}
+
 // RecordPartialResult records completed work when the caller also returns an
 // error. The caller determines partial completion from its typed result.
 func RecordPartialResult(data any) {

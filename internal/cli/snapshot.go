@@ -114,7 +114,7 @@ func newSnapshotListCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 			return common.HandleErrors(func() error {
 				snapshots := snapshotAPI.SnapshotList(cmd.Context())
 
-				if common.RecordResult(snapshots) {
+				if common.RecordListResult(snapshots) {
 					return nil
 				}
 

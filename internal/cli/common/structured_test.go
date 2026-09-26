@@ -59,3 +59,31 @@ func TestFinishOutputDistinguishesPartialResultFromFailedResult(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordListResultKeepsArrayShape(t *testing.T) {
+	tests := []struct {
+		name  string
+		items []string
+		want  []any
+	}{
+		{name: "nil list", want: []any{}},
+		{name: "populated list", items: []string{"alpha"}, want: []any{"alpha"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			common.BeginOutput([]string{"--json"})
+			t.Cleanup(func() { common.BeginOutput(nil) })
+			require.True(t, common.RecordListResult(tc.items))
+			var output bytes.Buffer
+			require.NoError(t, common.FinishOutput(&output, nil))
+			var got common.OutputEnvelope
+			require.NoError(t, json.Unmarshal(output.Bytes(), &got))
+			want := common.OutputEnvelope{
+				SchemaVersion: 1, Status: "success", Data: tc.want,
+			}
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("list output mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
