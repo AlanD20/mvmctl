@@ -11,7 +11,30 @@ if ((${#packages[@]} == 0)); then
   exit 1
 fi
 
-go test "${packages[@]}" -count=1 -coverprofile=coverage.out -covermode=atomic
+mkdir -p .tmp
+coverage_scratch="$(mktemp -d .tmp/go-ci-coverage.XXXXXX)"
+package_profile="$coverage_scratch/package.out"
+combined_profile="$coverage_scratch/coverage.out"
+cleanup_coverage_scratch() {
+  rm -f -- "$package_profile" "$combined_profile"
+  rmdir -- "$coverage_scratch"
+}
+trap cleanup_coverage_scratch EXIT
+
+printf 'mode: atomic\n' > "$combined_profile"
+for package in "${packages[@]}"; do
+  # A single go test invocation links every package test binary at once. Keep
+  # the same package/coverage gate while bounding the peak build workspace.
+  go test "$package" -count=1 -coverprofile="$package_profile" -covermode=atomic
+  IFS= read -r profile_mode < "$package_profile"
+  if [[ "$profile_mode" != 'mode: atomic' ]]; then
+    printf 'invalid coverage mode for %s: %s\n' "$package" "$profile_mode" >&2
+    exit 1
+  fi
+  sed '1d' "$package_profile" >> "$combined_profile"
+done
+mv -- "$combined_profile" coverage.out
+go tool cover -func=coverage.out >/dev/null
 
 # Route only the named root-owned lifecycle families to the local full-package run.
 # New Jailer tests run in CI by default, so an unclassified root effect fails visibly.
