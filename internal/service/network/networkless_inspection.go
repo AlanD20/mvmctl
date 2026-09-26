@@ -10,6 +10,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const (
+	networklessIFAProto            = 11 // IFA_PROTO from linux/if_addr.h; not exported by x/sys/unix.
+	networklessKernelLoopbackProto = 1  // IFAPROT_KERNEL_LO from linux/if_addr.h.
+)
+
 // inspectNetworklessNamespace observes complete link and IP authority through a socket bound to the retained
 // namespace. A filtered per-interface dump would miss a foreign route or address attached to another link.
 func inspectNetworklessNamespace(
@@ -71,35 +76,8 @@ func inspectNetworklessIPv6(ctx context.Context, route *directRouteNetlink, fd, 
 			}
 			ipv4Count++
 		case unix.AF_INET6:
-			if message.Data[1] != 128 || message.Data[3] != unix.RT_SCOPE_HOST {
-				return errors.New("networkless IPv6 address differs from ::1/128")
-			}
-			decoder, decodeErr := netlink.NewAttributeDecoder(message.Data[unix.SizeofIfAddrmsg:])
-			if decodeErr != nil {
-				return decodeErr
-			}
-			var local, peer netip.Addr
-			for decoder.Next() {
-				switch decoder.Type() {
-				case unix.IFA_LOCAL:
-					value, ok := netip.AddrFromSlice(decoder.Bytes())
-					if !ok || !value.Is6() {
-						return errors.New("invalid IPv6 local address")
-					}
-					local = value
-				case unix.IFA_ADDRESS:
-					value, ok := netip.AddrFromSlice(decoder.Bytes())
-					if !ok || !value.Is6() {
-						return errors.New("invalid IPv6 peer address")
-					}
-					peer = value
-				case unix.IFA_FLAGS, unix.IFA_CACHEINFO:
-				default:
-					return errors.New("networkless IPv6 address has foreign attributes")
-				}
-			}
-			if decoder.Err() != nil || peer != netip.IPv6Loopback() || (local.IsValid() && local != peer) {
-				return errors.New("networkless IPv6 address is not exactly ::1")
+			if err := inspectNetworklessIPv6Address(message); err != nil {
+				return err
 			}
 			ipv6Count++
 		default:
@@ -153,6 +131,45 @@ func inspectNetworklessIPv6(ctx context.Context, route *directRouteNetlink, fd, 
 		[]routeAddressObservation{{ifIndex: ifIndex, prefix: canonicalLoopbackL3.address.prefix,
 			scope: unix.RT_SCOPE_HOST}}, ipv4Routes, canonicalLoopbackL3.address, wantRoutes, ifIndex,
 	)
+}
+
+func inspectNetworklessIPv6Address(message netlink.Message) error {
+	if message.Data[1] != 128 || message.Data[3] != unix.RT_SCOPE_HOST {
+		return errors.New("networkless IPv6 address differs from ::1/128")
+	}
+	decoder, err := netlink.NewAttributeDecoder(message.Data[unix.SizeofIfAddrmsg:])
+	if err != nil {
+		return err
+	}
+	var local, peer netip.Addr
+	for decoder.Next() {
+		switch decoder.Type() {
+		case unix.IFA_LOCAL:
+			value, ok := netip.AddrFromSlice(decoder.Bytes())
+			if !ok || !value.Is6() {
+				return errors.New("invalid IPv6 local address")
+			}
+			local = value
+		case unix.IFA_ADDRESS:
+			value, ok := netip.AddrFromSlice(decoder.Bytes())
+			if !ok || !value.Is6() {
+				return errors.New("invalid IPv6 peer address")
+			}
+			peer = value
+		case unix.IFA_FLAGS, unix.IFA_CACHEINFO:
+		case networklessIFAProto:
+			protocol := decoder.Bytes()
+			if len(protocol) != 1 || protocol[0] != networklessKernelLoopbackProto {
+				return errors.New("networkless IPv6 address protocol is not kernel loopback")
+			}
+		default:
+			return errors.New("networkless IPv6 address has foreign attributes")
+		}
+	}
+	if decoder.Err() != nil || peer != netip.IPv6Loopback() || (local.IsValid() && local != peer) {
+		return errors.New("networkless IPv6 address is not exactly ::1")
+	}
+	return nil
 }
 
 func inspectNetworklessIPv6Route(message netlink.Message, ifIndex int) error {

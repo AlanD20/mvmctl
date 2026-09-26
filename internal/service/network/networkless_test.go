@@ -146,3 +146,38 @@ func TestNetworklessIPv6RouteRejectsForeignGateway(t *testing.T) {
 		})
 	}
 }
+
+func TestNetworklessIPv6AddressAdmitsOnlyKernelLoopbackProtocol(t *testing.T) {
+	loopback := make([]byte, 16)
+	loopback[15] = 1
+	for name, tc := range map[string]struct {
+		protocol []byte
+		valid    bool
+	}{
+		"legacy_without_protocol": {valid: true},
+		"kernel_loopback":         {protocol: []byte{1}, valid: true},
+		"router_advertisement":    {protocol: []byte{2}},
+		"malformed_protocol":      {protocol: []byte{1, 0}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			data := make([]byte, unix.SizeofIfAddrmsg)
+			data[0], data[1], data[3] = unix.AF_INET6, 128, unix.RT_SCOPE_HOST
+			var err error
+			data, err = appendRouteAttributes(data, func(encoder *netlink.AttributeEncoder) error {
+				encoder.Bytes(unix.IFA_ADDRESS, loopback)
+				if tc.protocol != nil {
+					encoder.Bytes(networklessIFAProto, tc.protocol)
+				}
+				return nil
+			})
+			require.NoError(t, err)
+			message := netlink.Message{Header: netlink.Header{Type: netlink.HeaderType(unix.RTM_NEWADDR)}, Data: data}
+			err = inspectNetworklessIPv6Address(message)
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
