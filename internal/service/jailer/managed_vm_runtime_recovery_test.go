@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +13,8 @@ import (
 
 func TestFreshRecoveryCleanupReopensAndRemovesStaleVMRuntime(t *testing.T) {
 	authority, recoveryDeps, identityDeps := newManagedVMRuntimeRecoveryTestAuthority(t)
-	runtimePath := prepareStaleManagedVMRuntimeTestDirectory(t, authority.policy.rootPath)
+	caller := managedVMRuntimeRecoveryTestCaller()
+	runtimePath := prepareStaleManagedVMRuntimeTestDirectory(t, authority.policy.rootPath, caller)
 	for _, leaf := range []string{
 		"firecracker.api.socket",
 		"vsock.sock",
@@ -26,7 +28,7 @@ func TestFreshRecoveryCleanupReopensAndRemovesStaleVMRuntime(t *testing.T) {
 	cleanup, err := beginFreshRecoveryCleanupWithDeps(
 		t.Context(),
 		authority,
-		testInstanceCaller(),
+		caller,
 		testVMID,
 		recoveryDeps,
 		identityDeps,
@@ -41,12 +43,13 @@ func TestFreshRecoveryCleanupReopensAndRemovesStaleVMRuntime(t *testing.T) {
 // durable instance record after a host reboot.
 func TestFreshRecoveryCleanupAbsentRuntimeDoesNotCreateRuntimeTree(t *testing.T) {
 	authority, recoveryDeps, identityDeps := newManagedVMRuntimeRecoveryTestAuthority(t)
+	caller := managedVMRuntimeRecoveryTestCaller()
 	runtimePath := filepath.Join(authority.policy.rootPath, "run/mvmctl/runtime")
 
 	cleanup, err := beginFreshRecoveryCleanupWithDeps(
 		t.Context(),
 		authority,
-		testInstanceCaller(),
+		caller,
 		testVMID,
 		recoveryDeps,
 		identityDeps,
@@ -61,6 +64,7 @@ func TestFreshRecoveryCleanupAbsentRuntimeDoesNotCreateRuntimeTree(t *testing.T)
 // It keeps the root-owned cleanup record and lock available for repair and retry instead of following a symlink.
 func TestFreshRecoveryCleanupRejectsUnsafeRuntimeParentBeforeCleaned(t *testing.T) {
 	authority, recoveryDeps, identityDeps := newManagedVMRuntimeRecoveryTestAuthority(t)
+	caller := managedVMRuntimeRecoveryTestCaller()
 	root := authority.policy.rootPath
 	mvmctlPath := filepath.Join(root, "run/mvmctl")
 	require.NoError(t, os.Mkdir(mvmctlPath, 0o711))
@@ -72,7 +76,7 @@ func TestFreshRecoveryCleanupRejectsUnsafeRuntimeParentBeforeCleaned(t *testing.
 	cleanup, err := beginFreshRecoveryCleanupWithDeps(
 		t.Context(),
 		authority,
-		testInstanceCaller(),
+		caller,
 		testVMID,
 		recoveryDeps,
 		identityDeps,
@@ -83,7 +87,7 @@ func TestFreshRecoveryCleanupRejectsUnsafeRuntimeParentBeforeCleaned(t *testing.
 	recordPath := filepath.Join(
 		root,
 		"var/lib/mvmctl/instances",
-		managedVMRuntimeUIDName(testAuthorityUID),
+		managedVMRuntimeUIDName(caller.uid),
 		testVMID+".json",
 	)
 	raw, err := os.ReadFile(recordPath)
@@ -112,10 +116,25 @@ func newManagedVMRuntimeRecoveryTestAuthority(
 	t.Helper()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	// A launching record is only valid after the root-controlled grant inventory exists.
-	// These cases use the real fixed inventory path and therefore run serially.
-	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), testAuthorityUID))
-	writeTestAuthorityRecord(t, root, testLaunchingInstanceRecord())
+	caller := managedVMRuntimeRecoveryTestCaller()
+	// These root-only cases use a dedicated UID so their real fixed inventory cannot
+	// satisfy another recovery fixture's missing-inventory check by test ordering.
+	ownerPath := filepath.Join("/var/lib/mvmctl/protected-backing", strconv.FormatUint(uint64(caller.uid), 10))
+	_, err := os.Lstat(ownerPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), caller.uid))
+	t.Cleanup(func() {
+		for _, kind := range protectedInventoryKinds() {
+			require.NoError(t, os.Remove(filepath.Join(ownerPath, "logical", kind)))
+		}
+		require.NoError(t, os.Remove(filepath.Join(ownerPath, "logical")))
+		require.NoError(t, os.Remove(ownerPath))
+	})
+	record, err := registerLaunchingInstanceRecord(
+		caller, testLaunchIntent(false), testLaunchProcessLocators(false), testReleaseIdentity(), nil,
+	)
+	require.NoError(t, err)
+	writeTestAuthorityRecord(t, root, record)
 	authority := newInstanceAuthorityWithPolicy(
 		realInstanceAuthorityDeps(),
 		testInstanceAuthorityPolicy(root),
@@ -127,18 +146,23 @@ func newManagedVMRuntimeRecoveryTestAuthority(
 	return authority, realProcessRecoveryDeps(), identityDeps
 }
 
-func prepareStaleManagedVMRuntimeTestDirectory(t *testing.T, root string) string {
+func managedVMRuntimeRecoveryTestCaller() instanceCaller {
+	uid := uint32(100_000_000 + os.Getpid())
+	return instanceCaller{uid: uid, gid: uid}
+}
+
+func prepareStaleManagedVMRuntimeTestDirectory(t *testing.T, root string, caller instanceCaller) string {
 	t.Helper()
 
 	mvmctlPath := filepath.Join(root, "run/mvmctl")
 	runtimePath := filepath.Join(mvmctlPath, "runtime")
-	uidPath := filepath.Join(runtimePath, managedVMRuntimeUIDName(testAuthorityUID))
+	uidPath := filepath.Join(runtimePath, managedVMRuntimeUIDName(caller.uid))
 	vmPath := filepath.Join(uidPath, testVMID)
 	for _, path := range []string{mvmctlPath, runtimePath, uidPath} {
 		require.NoError(t, os.MkdirAll(path, 0o711))
 		require.NoError(t, os.Chmod(path, 0o711))
 	}
 	require.NoError(t, os.Mkdir(vmPath, 0o700))
-	require.NoError(t, os.Chown(vmPath, int(testAuthorityUID), int(testAuthorityGID)))
+	require.NoError(t, os.Chown(vmPath, int(caller.uid), int(caller.gid)))
 	return vmPath
 }
