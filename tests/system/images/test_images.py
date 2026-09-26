@@ -316,14 +316,14 @@ class TestImageDefaults:
     """Test image default operations."""
 
     def test_image_set_default(self, runner_vm):
-        """Set image as default."""
-        _ensure_image(runner_vm, "alpine:3.23")
+        """Set the selected image, and only that image, as default."""
         result = _run_mvm(runner_vm, "image", "ls", "--json")
         images = _parse_json_output(result.stdout)
         alpine_images = [
-            i for i in images if "alpine" in i.get("type", "").lower()
+            i for i in images
+            if i.get("type") == "alpine" and i.get("version") == "3.23"
         ]
-        assert alpine_images, "No alpine image available in Tier 2 environment"
+        assert alpine_images, "the module's pre-seeded Alpine 3.23 image is missing"
         target_id = alpine_images[0]["id"]
 
         result = _run_mvm(runner_vm, "image", "default", target_id, check=False)
@@ -331,27 +331,34 @@ class TestImageDefaults:
             f"Failed to set image as default: {result.stderr.strip()}"
         )
         ls_result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images_after = json.loads(ls_result.stdout)
-        default_img = next(
-            (i for i in images_after if i.get("is_default")), None
-        )
-        assert default_img is not None, (
-            "No image marked as default in ls --json"
-        )
+        images_after = _parse_json_output(ls_result.stdout)
+        defaults = [i for i in images_after if i.get("is_default")]
+        assert [i["id"] for i in defaults] == [target_id], defaults
 
     def test_set_default_nonexistent_image_fails(self, runner_vm):
-        """Setting default to a nonexistent image slug should fail."""
+        """Reject an unknown image without changing the current default."""
+        before = _parse_json_output(
+            _run_mvm(runner_vm, "image", "ls", "--json").stdout
+        )
+        default_before = [i["id"] for i in before if i.get("is_default")]
         result = _run_mvm(
             runner_vm,
             "image",
             "default",
             "totally-nonexistent-image",
+            "--json",
             check=False,
         )
         assert result.returncode != 0
-        assert result.stderr, (
-            f"Expected stderr with error message, got stdout={result.stdout}"
+        response = json.loads(result.stdout)
+        assert response["schema_version"] == 1
+        assert response["status"] == "error"
+        assert response["data"] is None
+        assert response["error"]["code"] == "image.not_found"
+        after = _parse_json_output(
+            _run_mvm(runner_vm, "image", "ls", "--json").stdout
         )
+        assert [i["id"] for i in after if i.get("is_default")] == default_before
 
 
 class TestImageWarm:
