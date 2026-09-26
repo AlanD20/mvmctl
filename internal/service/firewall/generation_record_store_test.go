@@ -595,6 +595,8 @@ func TestAppendGenerationCleanupErrorPreservesPrimaryAndFirstBoundedEvidence(t *
 func prepareGenerationRecordTestRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
+	// TempDir's numbered child inherits the process umask; the store requires a non-writable trusted root.
+	require.NoError(t, os.Chmod(root, 0700))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib"), 0755))
 	return root
 }
