@@ -230,7 +230,7 @@ func TestFirecrackerSpawner_Generate_bootArgs(t *testing.T) {
 				NetworkNetmask: "255.255.255.0",
 				CloudInitMode:  ptr.Ptr(model.CloudInitModeINJECT),
 			},
-			want: "pci=off ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service ds=ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/",
+			want: "pci=off ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/",
 		},
 		"cloud_init_iso": {
 			config: &model.FirecrackerConfig{
@@ -526,6 +526,23 @@ func TestFirecrackerSpawnerGenerateNetworklessISOCloudInit(t *testing.T) {
 	if diff := cmp.Diff([]model.NetworkInterfaceConfig{}, got.NetworkInterfaces); diff != "" {
 		t.Errorf("networkless ISO interfaces mismatch (-want +got):\n%s", diff)
 	}
+}
+
+func TestFirecrackerSpawnerGenerateNetworklessInjectedCloudInit(t *testing.T) {
+	spawner := vm.NewFirecrackerSpawner(&model.FirecrackerConfig{
+		VMDir:            filepath.Join(t.TempDir(), testSpawnerVMID),
+		NetworkPlacement: model.VMNetworkPlacementNetworkless,
+		CloudInitMode:    ptr.Ptr(model.CloudInitModeINJECT),
+	})
+
+	got, err := spawner.Generate()
+	require.NoError(t, err)
+	assert.Equal(
+		t,
+		"pci=off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/",
+		got.BootSource.BootArgs,
+	)
+	assert.Empty(t, got.NetworkInterfaces)
 }
 
 func TestFirecrackerSpawnerRejectsMixedNetworklessPlacement(t *testing.T) {

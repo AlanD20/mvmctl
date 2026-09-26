@@ -194,12 +194,10 @@ func marshalVMFirecrackerLaunchIntent(intent vmFirecrackerLaunchIntent) ([]byte,
 		if intent.guestMAC != "" || intent.tapIdentity.name != "" {
 			return nil, managedVMResourceValidationError("networkless Firecracker intent contains a managed endpoint")
 		}
-		for argument := range strings.FieldsSeq(intent.bootArgs) {
-			if strings.HasPrefix(argument, "ip=") || strings.HasPrefix(argument, "ds=") {
-				return nil, managedVMResourceValidationError(
-					"networkless Firecracker boot arguments configure networking",
-				)
-			}
+		if !networklessBootArgsAreOffline(intent.bootArgs, intent.cloudInit == cloudInitPresent) {
+			return nil, managedVMResourceValidationError(
+				"networkless Firecracker boot arguments configure networking or an unadmitted datasource",
+			)
 		}
 	default:
 		return nil, managedVMResourceValidationError("Firecracker network placement is invalid")
@@ -259,6 +257,30 @@ func marshalVMFirecrackerLaunchIntent(intent vmFirecrackerLaunchIntent) ([]byte,
 		return nil, managedVMResourceValidationError("managed Firecracker launch intent exceeds configuration policy")
 	}
 	return canonical, nil
+}
+
+func networklessBootArgsAreOffline(bootArgs string, hasCloudInitISO bool) bool {
+	datasourceSeen := false
+	for argument := range strings.FieldsSeq(bootArgs) {
+		if strings.HasPrefix(argument, "ip=") {
+			return false
+		}
+		if !strings.HasPrefix(argument, "ds=") {
+			continue
+		}
+		if datasourceSeen {
+			return false
+		}
+		datasourceSeen = true
+		if hasCloudInitISO && argument == "ds="+infra.NoCloudISODatasource {
+			continue
+		}
+		if !hasCloudInitISO && argument == "ds="+infra.NoCloudInjectDatasource {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func cloneVMFirecrackerLaunchIntent(intent vmFirecrackerLaunchIntent) vmFirecrackerLaunchIntent {

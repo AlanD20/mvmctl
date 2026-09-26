@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
 )
 
@@ -125,6 +126,37 @@ func TestVMLaunchRequestNetworklessWireIsClosed(t *testing.T) {
 			tc.change(&candidate)
 			if err := candidate.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("networkless request with %s was admitted: %v", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestVMLaunchRequestNetworklessAdmitsOnlyLocalNoCloudDatasource(t *testing.T) {
+	request := validVMLaunchRequest()
+	request.NetworkPlacement = model.VMNetworkPlacementNetworkless
+	request.NetworkID, request.GuestIPv4, request.GuestMAC = "", "", ""
+	for _, tc := range []struct {
+		name      string
+		bootArgs  string
+		cloudInit bool
+		wantError bool
+	}{
+		{name: "ISO seed", bootArgs: "console=ttyS0 ds=" + infra.NoCloudISODatasource, cloudInit: true},
+		{name: "injected seed", bootArgs: "console=ttyS0 ds=" + infra.NoCloudInjectDatasource},
+		{name: "ISO without ISO", bootArgs: "console=ttyS0 ds=" + infra.NoCloudISODatasource, wantError: true},
+		{name: "injected with ISO", bootArgs: "console=ttyS0 ds=" + infra.NoCloudInjectDatasource, cloudInit: true, wantError: true},
+		{name: "remote source", bootArgs: "console=ttyS0 ds=nocloud;s=https://example.invalid/", wantError: true},
+		{name: "duplicate source", bootArgs: "console=ttyS0 ds=nocloud ds=nocloud", cloudInit: true, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := request
+			candidate.BootArgs, candidate.CloudInit = tc.bootArgs, tc.cloudInit
+			err := candidate.Validate()
+			if tc.wantError && (err == nil || !strings.Contains(err.Error(), "datasource")) {
+				t.Fatalf("unadmitted networkless datasource was accepted: %v", err)
+			}
+			if !tc.wantError && err != nil {
+				t.Fatalf("local networkless datasource was rejected: %v", err)
 			}
 		})
 	}

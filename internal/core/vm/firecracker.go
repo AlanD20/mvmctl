@@ -20,7 +20,6 @@ const (
 	constSignalExitCodeBase     = 128
 	constDefaultGracefulTimeout = 30.0
 	constDefaultKillTimeout     = 5.0
-	defaultLibguestfsSeedDir    = "/var/lib/cloud/seed/nocloud"
 )
 
 // FirecrackerSpawner manages Firecracker process lifecycle and config generation.
@@ -450,10 +449,10 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 			}
 			bootArgs.set("ds", []string{fmt.Sprintf("nocloud;seedfrom=%s", *s.config.CloudInitNoCloudURL)})
 		} else if *cloudInitMode == model.CloudInitModeINJECT {
-			bootArgs.set("ds", []string{fmt.Sprintf("ds=nocloud;s=file://%s/", defaultLibguestfsSeedDir)})
+			bootArgs.set("ds", []string{infra.NoCloudInjectDatasource})
 		} else if *cloudInitMode == model.CloudInitModeISO {
 			// ISO mode: local nocloud datasource
-			bootArgs.set("ds", []string{"nocloud"})
+			bootArgs.set("ds", []string{infra.NoCloudISODatasource})
 		}
 	}
 

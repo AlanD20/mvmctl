@@ -799,6 +799,34 @@ func TestNetworklessFirecrackerConfigRetainsVsockWithoutNIC(t *testing.T) {
 	assert.Equal(t, "console=ttyS0 reboot=k panic=1", config.BootSource.BootArgs)
 }
 
+func TestNetworklessFirecrackerIntentAdmitsOnlyLocalNoCloudDatasource(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		bootArgs  string
+		cloudInit cloudInitPresence
+		wantError bool
+	}{
+		{name: "ISO seed", bootArgs: "ds=" + infra.NoCloudISODatasource, cloudInit: cloudInitPresent},
+		{name: "injected seed", bootArgs: "ds=" + infra.NoCloudInjectDatasource, cloudInit: cloudInitAbsent},
+		{name: "ISO without backing", bootArgs: "ds=" + infra.NoCloudISODatasource, cloudInit: cloudInitAbsent, wantError: true},
+		{name: "remote source", bootArgs: "ds=nocloud;s=https://example.invalid/", cloudInit: cloudInitAbsent, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			intent := testVMFirecrackerLaunchIntent(tc.cloudInit)
+			intent.networkPlacement = model.VMNetworkPlacementNetworkless
+			intent.guestMAC = ""
+			intent.tapIdentity = vmFirecrackerTapIdentity{}
+			intent.bootArgs += " " + tc.bootArgs
+			_, err := marshalVMFirecrackerLaunchIntent(intent)
+			if tc.wantError {
+				requireManagedVMResourceDomainErrorCode(t, err, errs.CodeValidationFailed)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestNetworklessFirecrackerIntentRejectsManagedEndpointAndBootArgs(t *testing.T) {
 	tests := map[string]func(*vmFirecrackerLaunchIntent){
 		"guest MAC": func(intent *vmFirecrackerLaunchIntent) { intent.guestMAC = "06:00:00:00:00:01" },

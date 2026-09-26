@@ -208,10 +208,10 @@ func (request VMLaunchRequest) Validate() error {
 		if request.NetworkID != "" || request.GuestIPv4 != "" || request.GuestMAC != "" {
 			return instanceValidationError("VM launch networkless placement contains a managed endpoint")
 		}
-		for argument := range strings.FieldsSeq(request.BootArgs) {
-			if strings.HasPrefix(argument, "ip=") || strings.HasPrefix(argument, "ds=") {
-				return instanceValidationError("VM launch networkless boot arguments configure networking")
-			}
+		if !networklessBootArgsAreOffline(request.BootArgs, request.CloudInit) {
+			return instanceValidationError(
+				"VM launch networkless boot arguments configure networking or an unadmitted datasource",
+			)
 		}
 	}
 	if err := validateManagedVMCgroupLimits(request.CgroupLimits); err != nil {

@@ -388,6 +388,10 @@ const DefaultSysctlConfPath = "/etc/sysctl.d/mvmctl.conf"
 // --- Libguestfs ---
 const DefaultLibguestfsSeedDir = "/var/lib/cloud/seed/nocloud"
 
+// These are the only offline NoCloud datasource values generated for VM boot.
+const NoCloudISODatasource = "nocloud"
+const NoCloudInjectDatasource = "nocloud;s=file://" + DefaultLibguestfsSeedDir + "/"
+
 // --- Firecracker GitHub ---
 const FirecrackerGithubDownloadURL = "https://github.com/firecracker-microvm/firecracker/releases/download"
 const FirecrackerGitRepoURL = "https://github.com/firecracker-microvm/firecracker.git"
