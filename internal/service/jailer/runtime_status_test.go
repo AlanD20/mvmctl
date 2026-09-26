@@ -41,6 +41,7 @@ type runtimeStatusFixture struct {
 func newRuntimeStatusFixture(t testing.TB, records ...instanceRecord) *runtimeStatusFixture {
 	t.Helper()
 	root := t.TempDir()
+	require.NoError(t, os.Chmod(root, 0700))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib"), 0755))
 	f := &runtimeStatusFixture{
 		root: root, tree: newTestInstanceAuthorityTree(), bootID: processTestHostBootID,

@@ -413,6 +413,7 @@ func prepareManagedVMRuntimeTestRoot(t *testing.T) string {
 	t.Helper()
 
 	root := t.TempDir()
+	require.NoError(t, os.Chmod(root, 0700))
 	require.NoError(t, os.Mkdir(filepath.Join(root, "run"), 0o755))
 	return root
 }
