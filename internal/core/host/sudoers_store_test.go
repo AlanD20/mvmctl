@@ -38,6 +38,8 @@ type sudoersFixture struct {
 func newSudoersFixture(t *testing.T) *sudoersFixture {
 	t.Helper()
 	root := t.TempDir()
+	// The trusted fixture root must stay non-writable under a group-writable process umask.
+	require.NoError(t, os.Chmod(root, 0700))
 	dir := filepath.Join(root, "etc", "sudoers.d")
 	require.NoError(t, os.MkdirAll(dir, 0755))
 	f := &sudoersFixture{root: root, dir: dir, target: filepath.Join(dir, "mvm"),

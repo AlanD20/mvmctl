@@ -447,6 +447,7 @@ func TestInstallSystemBinary_RealFilesystem(t *testing.T) {
 
 	t.Run("copies current image atomically with exact metadata", func(t *testing.T) {
 		root := t.TempDir()
+		require.NoError(t, os.Chmod(root, 0700))
 		require.NoError(t, os.Mkdir(filepath.Join(root, "usr"), 0755))
 
 		changed, err := installSystemBinaryWithPolicy(
@@ -472,6 +473,7 @@ func TestInstallSystemBinary_RealFilesystem(t *testing.T) {
 
 	t.Run("rejects target symlink", func(t *testing.T) {
 		root := t.TempDir()
+		require.NoError(t, os.Chmod(root, 0700))
 		binDir := filepath.Join(root, "usr", "local", "bin")
 		require.NoError(t, os.MkdirAll(binDir, 0755))
 		require.NoError(t, os.Symlink("/tmp/untrusted-mvm", filepath.Join(binDir, "mvm")))
