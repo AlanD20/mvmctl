@@ -28,6 +28,7 @@ type runtimeDeps struct {
 	control                controlDeps
 	trustedRelease         trustedReleaseHandlerEffects
 	runtimeStatus          runtimeStatusObserve
+	cgroupObservation      cgroupObservationObserve
 	runtimeOwnerInventory  runtimeOwnerInventoryObserve
 	loopMount              loopMountHandlerEffects
 	vmExecSession          vmExecSessionHandlerEffects
@@ -84,6 +85,7 @@ const (
 func Run(ctx context.Context, args []string) error {
 	trustedRelease := jailer.NewTrustedReleaseServer()
 	runtimeStatus := jailer.NewRuntimeStatusServer()
+	cgroupObservation := jailer.NewVMCgroupObserveServer()
 	runtimeOwnerInventory := jailer.NewRuntimeOwnerInventoryServer()
 	loopMount := loopmount.NewProvisionInspectServer(systemLoopMountAgentBinary)
 	imageShrink := loopmount.NewImageShrinkServer()
@@ -101,6 +103,7 @@ func Run(ctx context.Context, args []string) error {
 		vmExecSession:          newVMExecSessionHandlerEffects(vmExecSession),
 		vmExecConnectionReader: realVMExecConnectionReaderDeps(),
 		runtimeStatus:          runtimeStatus.Observe,
+		cgroupObservation:      cgroupObservation.Observe,
 		runtimeOwnerInventory:  runtimeOwnerInventory.Observe,
 		trustedRelease: trustedReleaseHandlerEffects{
 			install: trustedRelease.Install,
@@ -310,6 +313,8 @@ func dispatch(
 		return dispatchHandled, handleRemoveVMTrafficPolicy(ctx, endpoint, caller, deps.control)
 	case jailer.RuntimeStatusAction:
 		return dispatchHandled, handleRuntimeStatus(ctx, endpoint, caller, deps.runtimeStatus, deps.control)
+	case jailer.VMCgroupObserveAction:
+		return dispatchHandled, handleVMCgroupObserve(ctx, endpoint, caller, deps.cgroupObservation, deps.control)
 	case jailer.RuntimeOwnerInventoryAction:
 		return dispatchHandled, handleRuntimeOwnerInventory(
 			ctx,

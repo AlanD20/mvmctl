@@ -857,12 +857,16 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 		Path: vm.CgroupPath(vmItem.ID), Requested: vmItem.CgroupLimits, Status: model.VMCgroupEnforcementInactive,
 	}
 	if vmItem.PID > 0 && system.IsProcessAlive(vmItem.PID, vmItem.ProcessStartTime) {
-		observed, inspectErr := vm.InspectCgroup(ctx, vmItem.ID, vmItem.PID, vmItem.CgroupLimits)
+		observed, inspectErr := jailer.NewVMCgroupObserveClient().Observe(
+			ctx, jailer.VMCgroupObserveRequest{
+				VMID: vmItem.ID, PID: vmItem.PID, Requested: vmItem.CgroupLimits,
+			},
+		)
 		if inspectErr != nil {
 			cgroupState.Status = model.VMCgroupEnforcementUnavailable
 			cgroupState.Mismatches = []string{inspectErr.Error()}
 		} else {
-			cgroupState = *observed
+			cgroupState = observed.State
 		}
 	}
 	return &results.VMInspect{

@@ -238,7 +238,7 @@ func managedVMCgroupIdentityFromDirectoryStatx(
 	}
 	mode := uint32(stat.Mode) & 0o7777
 	// The kernel-owned cgroup-v2 mount root may be 0555 even on a writable
-	// mount. Its managed parent and VM leaves still require exact 0755.
+	// mount. The managed parent and VM leaf still require their exact modes.
 	if mode != wantMode && !(wantMode == managedVMCgroupRootMode && mode == 0o755) {
 		return managedVMCgroupIdentity{}, instanceAtomicError(description+" mode is not exact", nil)
 	}

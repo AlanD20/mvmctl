@@ -24,6 +24,10 @@ const (
 	managedVMCgroupMemoryMaxControl
 	managedVMCgroupMemorySwapMaxControl
 	managedVMCgroupPIDsMaxControl
+	managedVMCgroupCPUStatControl
+	managedVMCgroupMemoryCurrentControl
+	managedVMCgroupMemorySwapCurrentControl
+	managedVMCgroupPIDsCurrentControl
 )
 
 type managedVMCgroupControlFileSpec struct {
@@ -487,6 +491,14 @@ func managedVMCgroupControlSpec(control managedVMCgroupControlFile) (managedVMCg
 		return managedVMCgroupControlFileSpec{name: "memory.swap.max", mode: 0o644, writable: true}, nil
 	case managedVMCgroupPIDsMaxControl:
 		return managedVMCgroupControlFileSpec{name: "pids.max", mode: 0o644, writable: true}, nil
+	case managedVMCgroupCPUStatControl:
+		return managedVMCgroupControlFileSpec{name: "cpu.stat", mode: 0o444}, nil
+	case managedVMCgroupMemoryCurrentControl:
+		return managedVMCgroupControlFileSpec{name: "memory.current", mode: 0o444}, nil
+	case managedVMCgroupMemorySwapCurrentControl:
+		return managedVMCgroupControlFileSpec{name: "memory.swap.current", mode: 0o444}, nil
+	case managedVMCgroupPIDsCurrentControl:
+		return managedVMCgroupControlFileSpec{name: "pids.current", mode: 0o444}, nil
 	default:
 		return managedVMCgroupControlFileSpec{}, instanceAtomicError("managed VM cgroup control is invalid", nil)
 	}
