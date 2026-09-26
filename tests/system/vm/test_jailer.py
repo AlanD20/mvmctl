@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import time
 import uuid
 from typing import Any, Generator
 
@@ -11,6 +12,8 @@ import pytest
 
 from tests.system.conftest import (
     _guest_run,
+    _json_success_data,
+    _parse_vm_list,
     _run_mvm,
     cleanup_vm_resources,
     create_vm_core,
@@ -286,3 +289,79 @@ class TestJailerFailClosed:
                     runner_vm, "bin", "rm", "--version", alternate_version,
                     "--force", check=False,
                 )
+
+
+@pytest.fixture
+def networkless_vm_name(runner_vm: str) -> Generator[str, None, None]:
+    """Give each mutating networkless journey its own VM and checked teardown."""
+    name = f"sys-networkless-{uuid.uuid4().hex[:8]}"
+    try:
+        yield name
+    finally:
+        listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+        if any(vm["name"] == name for vm in listed):
+            removed = _run_mvm(runner_vm, "vm", "rm", name, "--force", check=False, timeout=120)
+            assert removed.returncode == 0, (removed.stdout, removed.stderr)
+        listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+        assert all(vm["name"] != name for vm in listed), f"VM {name} survived checked teardown"
+
+
+def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
+    """Wait for the guest agent and read the guest's kernel interface list."""
+    deadline = time.monotonic() + 20
+    last_error = ""
+    while time.monotonic() < deadline:
+        result = _run_mvm(
+            runner_vm, "exec", name, "--", "cat", "/proc/net/dev", check=False, timeout=15,
+        )
+        if result.returncode == 0:
+            return {
+                line.split(":", 1)[0].strip()
+                for line in result.stdout.splitlines()
+                if ":" in line
+            }
+        last_error = result.stderr
+        time.sleep(0.5)
+    raise AssertionError(f"vsock agent did not return guest interfaces: {last_error}")
+
+
+class TestNetworklessJailerLifecycle:
+    def test_create_stop_start_and_vsock_exec_without_guest_nic(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """The installed candidate can restart a loopback-only VM without a network record."""
+        ensure_vm_deps(runner_vm)
+        name = networkless_vm_name
+        created = _json_success_data(
+            _run_mvm(
+                runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
+                "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                "--json", timeout=180,
+            ).stdout,
+            list,
+        )
+        assert len(created) == 1, created
+        original = created[0]
+        assert original["name"] == name
+        assert original["status"] == "running"
+        assert original["network_placement"] == "networkless"
+        assert (original["network_id"], original["ipv4"], original["mac"], original["tap_device"]) == (
+            "", "", "", "",
+        )
+        interfaces = _networkless_guest_interfaces(runner_vm, name)
+        assert "lo" in interfaces
+        assert "eth0" not in interfaces
+
+        _run_mvm(runner_vm, "vm", "stop", name)
+        stopped = next(vm for vm in _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+                       if vm["name"] == name)
+        assert stopped["status"] == "stopped"
+
+        _run_mvm(runner_vm, "vm", "start", name)
+        started = next(vm for vm in _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+                       if vm["name"] == name)
+        assert started["status"] == "running"
+        assert started["process_start_time"] != original["process_start_time"]
+        interfaces = _networkless_guest_interfaces(runner_vm, name)
+        assert "lo" in interfaces
+        assert "eth0" not in interfaces
