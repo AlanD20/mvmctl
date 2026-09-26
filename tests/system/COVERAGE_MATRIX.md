@@ -35,6 +35,16 @@ bridge-family nftables tables, blocking network/policy qualification there. Volu
 and full Jailer system journeys also remain unqualified; one guest-visible volume attach is not snapshot-consistency
 qualification.
 
+**Protected cgroup-inspection checkpoint (2026-09-27):** Commit `89c5137e` replaces the unprivileged direct cgroup
+reader with an authenticated, fixed-path, descriptor-pinned root observation and removes the obsolete reader. Pinned
+Go 1.26.3 affected-package tests, full root Jailer tests, vet, formatting, and one-pass read-only security review
+passed in `mvmctl-030-test`. The runner-only installed `0.3.0-rc.cgroup-observe` candidate returned `enforced` with
+matching policy-v2 limits and usage for a running networkless VM, and the updated `vm/test_cgroup.py` case passed 1/1 across create,
+operator-denied direct leaf read, root-brokered inspection, stop, restart, and checked removal. The first test attempt
+failed on runner disk exhaustion during restart; clearing only its rebuildable Go build cache raised free space from
+419 MiB to 4.0 GiB, and the unchanged case then passed. This does not qualify memory saturation survival, full Jailer
+system journeys, or the bridge-dependent network/policy matrix.
+
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
 | Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
@@ -46,7 +56,7 @@ qualification.
 | nftables-only engine | 🔴 Missing | Atomic bridge-family generation and removal of iptables/backend-selection tests and product paths. |
 | Typed `traffic` policy | 🔴 Missing | Same/cross-network default deny and exact source/protocol/port allows plus spoof/reverse/IP-reuse denials. |
 | Typed VM-to-VM `exec` policy | 🔴 Missing | Directional non-root authorization for same/cross/no-IP networks plus identity, bounds, and redaction denials. |
-| Cgroup/process identity lifecycle | 🟡 Partial | A focused installed-candidate networkless case proves the Firecracker process UID differs from root and the operator. Blocker: unprivileged `vm inspect --json` reports cgroup `unavailable` with `failed to read VM cgroup limits` while direct `cpu.max` read gets permission denied; accurate root-brokered inspection is missing. Per-VM uniqueness, root-record, pidfd, mount/cgroup cleanup, and reconciliation binding also remain unqualified. |
+| Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove the Firecracker process UID differs from root and the operator, and that an unprivileged caller receives `enforced` policy-v2 limits and usage through authenticated root inspection while direct leaf read is denied. Per-VM uniqueness, root-record, pidfd, broader mount/cgroup cleanup, saturation survival, and host-reboot reconciliation binding remain unqualified. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
 Specific legacy conflicts that must be rewritten before release:
@@ -239,13 +249,13 @@ Specific legacy conflicts that must be rewritten before release:
 | `vm create` with `--nested-virt` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — cpu-config in Firecracker JSON, boot args validated |
 | `vm create` with `--cpu-template` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — merged cpu-config in Firecracker JSON |
 | `vm create` with `--no-nested-virt` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — no cpu-config, no nested boot args |
-| `vm ls` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L1 |
+| `vm ls` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle` | Runtime status now reconciles through root authority; focused networkless cases cover running/stopped projection, not guest-initiated exit or host reboot. |
 | `vm ls --json` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L2 — checks many fields |
 | `vm ls --json` empty | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListEmpty` | L2 — empty list. Clears VMs first. |
 | `vm ps` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_ps_lists_running, test_ps_shows_running_vm_details` | L2 — name and column headers in table output |
 | `vm ps --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless case proved inclusion while running, exclusion after CLI stop, and inclusion after restart. Guest-initiated exit and host-reboot reconciliation remain unqualified. |
-| `vm inspect <name>` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L1 |
-| `vm inspect <name> --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless case proved running/stopped/running status projection. Running cgroup details still report `unavailable` to the unprivileged operator; guest-initiated exit and host-reboot reconciliation remain unqualified. |
+| `vm inspect <name>` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle` | Runtime observation is privileged; focused networkless lifecycle covers the selector, while root-brokered cgroup detail is qualified through `--json` below. |
+| `vm inspect <name> --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py`, `vm/test_cgroup.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMCgroupEnvelope` | Focused installed-candidate networkless cases proved running/stopped/running status projection and root-brokered `enforced` cgroup limits/usage to an unprivileged operator. Guest-initiated exit and host-reboot reconciliation remain unqualified. |
 | `vm inspect` by IP | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L2 — stop by IP test covers resolution |
 | `vm start` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L3 — PID alive in /proc after start |
 | `vm start` on running | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitionErrors` | L1 — exit 0 |
@@ -671,7 +681,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Export/import config journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestExportImport` | L2: inspect --json schema verification |
 | Concurrent VM creation | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestConcurrentVMCreation` | L3: 10 concurrent VMs, all running via ls --json, SSH into each |
 | Canonical Jailer lifecycle | ✅ Deep | `vm/test_jailer.py`, `full_journeys/test_full_journeys.py` | `TestCanonicalJailerLaunch`, `TestJailerFailClosed` | L2: trusted pair, non-root jailed process, lifecycle, volume, snapshot, fail-closed |
-| Typed cgroup-v2 envelope | ✅ Deep | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | L2: exact membership and limits, inspect state, snapshot preservation, stop/start/remove cleanup, prerequisite fail-closed |
+| Typed cgroup-v2 envelope | 🟡 Partial | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | Focused L2: protected policy-v2 limit/usage inspection, operator direct-read denial, and stop/start/remove cleanup. Snapshot preservation, controller-unavailable admission, saturation survival, and broader exact-identity cleanup remain unqualified. |
 
 ---
 

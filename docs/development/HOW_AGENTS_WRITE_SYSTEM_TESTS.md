@@ -269,11 +269,11 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `vm create --nested-virt` | **L2** | Real KVM passthrough |
 | `vm create --cpu-template` | **L2** | Real Firecracker config |
 | `vm create --cloudinit-config` | **L2** | Real cloud-init |
-| `vm ls` / `vm ls --json` | L1 | DB query + JSON |
-| `vm ls --json` empty | L1 | DB query |
+| `vm ls` / `vm ls --json` | **L2** | Root-observed runtime reconciliation plus DB projection and JSON |
+| `vm ls --json` empty | **L2** | Root authority absence and empty JSON projection |
 | `vm ps` / `vm ps --json` | **L2** | Real process table |
-| `vm inspect` / `--json` / `--tree` | L1 | DB query + JSON |
-| `vm inspect` by IP | L1 | DB query + JSON |
+| `vm inspect` / `--json` / `--tree` | **L2** | Running VM inspection requires authenticated root runtime and protected cgroup reads |
+| `vm inspect` by IP | **L2** | Selector lookup followed by authenticated runtime/cgroup observation |
 | `vm start / stop / reboot / pause / resume` | **L2** | Real process signaling |
 | `vm stop --force` | **L2** | Real process kill |
 | `vm rm` / `vm rm --force` | **L2** | Real process + file cleanup |

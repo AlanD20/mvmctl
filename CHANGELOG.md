@@ -85,6 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `memory.max` is explicitly `max`, and swap/CPU/PID settings remain unchanged. Root admission and readback enforce
   the versioned policy; old/missing policy cannot silently launch or migrate. VMs may exceed the pressure threshold.
   Host/ancestor/userspace OOM risks remain; this does not diagnose or prove resolution of the reported saturation failure.
+- `vm inspect --json` now obtains running-VM cgroup limits and usage through an authenticated, read-only root request.
+  The request checks root VM ownership and process identity, then pins and verifies the fixed cgroup-v2 leaf; the
+  operator cannot read its protected controls directly. A focused networkless installed-candidate system case passed
+  create, inspection, stop, restart, and cleanup in the named runner. Memory-saturation survival remains unqualified.
 - Cgroup configuration read failures now propagate instead of silently deriving zero headroom or other zero values.
 - Removed unused public Jailer launch/cleanup actions, old manifest serialization, and raw snapshot/volume exposure
   operations after their typed consumers were introduced.
