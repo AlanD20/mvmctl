@@ -33,7 +33,7 @@ type managedNetworkTransaction struct {
 	host      *linkNamespaceLease
 	uplink    *uplinkLease
 	firewall  *firewall.MutationLease
-	route     *directRouteNetlink
+	route     routeNetlink
 	record    networkAuthorityRecord
 	found     bool
 	removed   bool
@@ -147,6 +147,10 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 				return ManagedNetworkResult{}, networkAuthorityCorruptError(
 					"created bridge alias could not be verified", errors.Join(labelErr, inspectErr),
 				)
+			}
+			if observed.alias == "" && createErr == nil {
+				return ManagedNetworkResult{}, tx.removeUnpublishedUnlabeledBridge(ctx, bridge,
+					errors.Join(labelErr, errors.New("created bridge alias was not applied")))
 			}
 			createErr = errors.Join(createErr, labelErr)
 		}
@@ -681,6 +685,48 @@ func (tx *managedNetworkTransaction) removeUnpublishedBridge(
 		}
 	}
 	return appendNetworkAuthorityError(primary, "remove unpublished managed bridge", err)
+}
+
+// removeUnpublishedUnlabeledBridge rolls back only the exact acknowledged, still-down
+// bridge whose alias failed before any root record or L3 authority was published.
+func (tx *managedNetworkTransaction) removeUnpublishedUnlabeledBridge(
+	ctx context.Context,
+	bridge linkIdentity,
+	primary error,
+) error {
+	cleanup := context.WithoutCancel(ctx)
+	fd, namespace, err := tx.host.descriptor()
+	if err != nil || namespace != bridge.namespace {
+		return appendNetworkAuthorityError(primary, "retain unpublished bridge rollback",
+			errors.Join(err, errors.New("unpublished bridge namespace changed")))
+	}
+	link, err := tx.route.inspectLink(cleanup, fd, bridge.name)
+	if err != nil || link == nil {
+		return appendNetworkAuthorityError(primary, "inspect unpublished bridge rollback", err)
+	}
+	if err := validateExactManagedLink(*link, bridge, linkKindBridge, "", 0, 0); err != nil {
+		return appendNetworkAuthorityError(primary, "admit unpublished bridge rollback", err)
+	}
+	if link.flags&unix.IFF_UP != 0 {
+		return appendNetworkAuthorityError(primary, "admit unpublished bridge rollback",
+			errors.New("unpublished bridge is unexpectedly up"))
+	}
+	if err := tx.requireChildless(cleanup, bridge.ifIndex); err != nil {
+		return appendNetworkAuthorityError(primary, "admit unpublished bridge rollback", err)
+	}
+	addresses, addressErr := tx.route.listIPv4Addresses(cleanup, fd, bridge.ifIndex)
+	routes, routeErr := tx.route.listIPv4Routes(cleanup, fd, bridge.ifIndex)
+	if err := errors.Join(addressErr, routeErr); err != nil || len(addresses) != 0 || len(routes) != 0 {
+		return appendNetworkAuthorityError(primary, "admit unpublished bridge rollback",
+			errors.Join(err, errors.New("unpublished bridge has unexpected IPv4 authority")))
+	}
+	deleteErr := tx.route.deleteLink(cleanup, fd, bridge.ifIndex)
+	after, inspectErr := tx.route.inspectLink(cleanup, fd, bridge.name)
+	if inspectErr != nil || after != nil {
+		return appendNetworkAuthorityError(primary, "remove unpublished bridge rollback",
+			errors.Join(deleteErr, inspectErr, managedBridgeStillPresent(after)))
+	}
+	return primary
 }
 
 func managedBridgeStillPresent(link *routeLinkObservation) error {

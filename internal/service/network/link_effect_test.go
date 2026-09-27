@@ -101,6 +101,40 @@ func TestLinkEffectLabelsKernelCreatedBridgeAndVeth(t *testing.T) {
 		fixture.route.mustLink(t, fixture.vmFD, fixture.names.namespaceVeth).alias)
 }
 
+// Rationale: An alias mutation can fail after RTM_NEWLINK has created an unowned-by-alias
+// link. The effect must remove only that newly observed identity before returning nil rollback authority.
+func TestLinkEffectRollsBackFreshUnlabeledLinks(t *testing.T) {
+	t.Parallel()
+
+	t.Run("local bridge", func(t *testing.T) {
+		fixture := newLinkEffectFixture(t)
+		fixture.route.afterCreate = func(link *routeLinkObservation) { link.alias = "" }
+		fixture.route.applyAlias = false
+		fixture.route.aliasError = errors.New("alias mutation rejected")
+		identity, err := fixture.effect.CreateLocalBridgeDown(t.Context(), fixture.pin,
+			localBridgeCreateSpec{name: fixture.names.localBridge})
+		require.Error(t, err)
+		assert.Nil(t, identity)
+		assert.Nil(t, fixture.route.link(fixture.vmFD, fixture.names.localBridge))
+	})
+
+	t.Run("veth pair", func(t *testing.T) {
+		fixture := newLinkEffectFixture(t)
+		fixture.route.afterVethCreate = func(host, peer *routeLinkObservation) {
+			host.alias, peer.alias = "", ""
+		}
+		fixture.route.applyAlias = false
+		fixture.route.aliasError = errors.New("alias mutation rejected")
+		identity, err := fixture.effect.CreateVethPairDown(t.Context(), fixture.pin, vethCreateSpec{
+			hostName: fixture.names.hostVeth, peerName: fixture.names.namespaceVeth,
+		})
+		require.Error(t, err)
+		assert.Nil(t, identity)
+		assert.Nil(t, fixture.route.link(fixture.hostFD, fixture.names.hostVeth))
+		assert.Nil(t, fixture.route.link(fixture.vmFD, fixture.names.namespaceVeth))
+	})
+}
+
 // Rationale: a transport error after mutation remains rollback-visible and is reconciled under a non-cancelled read.
 func TestLinkEffectCreationUncertaintyReturnsIdentityAndInspectsWithoutCancellation(t *testing.T) {
 	t.Parallel()

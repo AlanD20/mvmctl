@@ -194,12 +194,32 @@ func (effect *linkEffect) CreateVethPairDown(
 		if hostAfter, err = effect.labelCreatedLink(
 			ctx, hostFD, hostAfter, result.host, linkKindVeth, hostAlias, 0,
 		); err != nil {
-			return result, linkCreateError(spec.hostName, "label created host veth", err, false)
+			rollbackErr := effect.rollbackFreshVethPair(context.WithoutCancel(ctx), hostFD, vmFD,
+				*result, hostAlias, peerAlias)
+			if rollbackErr == nil {
+				return nil, linkCreateError(spec.hostName, "label created host veth", err, false)
+			}
+			return result, linkCreateError(
+				spec.hostName,
+				"label created host veth",
+				errors.Join(err, rollbackErr),
+				true,
+			)
 		}
 		if peerAfter, err = effect.labelCreatedLink(
 			ctx, vmFD, peerAfter, result.peer, linkKindVeth, peerAlias, 0,
 		); err != nil {
-			return result, linkCreateError(spec.peerName, "label created namespace veth", err, false)
+			rollbackErr := effect.rollbackFreshVethPair(context.WithoutCancel(ctx), hostFD, vmFD,
+				*result, hostAlias, peerAlias)
+			if rollbackErr == nil {
+				return nil, linkCreateError(spec.peerName, "label created namespace veth", err, false)
+			}
+			return result, linkCreateError(
+				spec.peerName,
+				"label created namespace veth",
+				errors.Join(err, rollbackErr),
+				true,
+			)
 		}
 	}
 	validationErr := errors.Join(
@@ -571,7 +591,11 @@ func (effect *linkEffect) createSingleLink(
 	if mutationErr == nil {
 		after, err = effect.labelCreatedLink(ctx, namespaceFD, after, result, kind, alias, owner)
 		if err != nil {
-			return &result, linkCreateError(name, "label created link", err, false)
+			rollbackErr := effect.rollbackFreshLink(context.WithoutCancel(ctx), namespaceFD, result, kind, alias, owner)
+			if rollbackErr == nil {
+				return nil, linkCreateError(name, "label created link", err, false)
+			}
+			return &result, linkCreateError(name, "label created link", errors.Join(err, rollbackErr), true)
 		}
 	}
 	validationErr := validateManagedLink(*after, result, kind, alias, 0, owner)
@@ -615,6 +639,97 @@ func (effect *linkEffect) labelCreatedLink(
 		return nil, err
 	}
 	return current, nil
+}
+
+// rollbackFreshLink is only for an acknowledged creation in this transaction, before attachment
+// or publication. It will not delete a changed, numbered, mastered, or child-bearing link.
+func (effect *linkEffect) rollbackFreshLink(
+	ctx context.Context,
+	namespaceFD int,
+	identity linkIdentity,
+	kind string,
+	alias string,
+	owner OwnerUID,
+) error {
+	current, err := effect.route.inspectLink(ctx, namespaceFD, identity.name)
+	if err != nil || current == nil {
+		return err
+	}
+	if current.alias != "" && current.alias != alias {
+		return errors.New("created link alias changed before rollback")
+	}
+	if err := validateManagedLink(*current, identity, kind, current.alias, 0, owner); err != nil {
+		return err
+	}
+	addresses, addressErr := effect.route.listIPv4Addresses(ctx, namespaceFD, identity.ifIndex)
+	routes, routeErr := effect.route.listIPv4Routes(ctx, namespaceFD, identity.ifIndex)
+	if err := errors.Join(addressErr, routeErr); err != nil {
+		return err
+	}
+	if len(addresses) != 0 || len(routes) != 0 {
+		return errors.New("created link acquired IPv4 authority before rollback")
+	}
+	if kind == linkKindBridge {
+		links, err := effect.route.listLinks(ctx, namespaceFD)
+		if err != nil {
+			return err
+		}
+		for _, link := range links {
+			if link.master == identity.ifIndex {
+				return errors.New("created bridge acquired a child before rollback")
+			}
+		}
+	}
+	deleteErr := effect.route.deleteLink(ctx, namespaceFD, identity.ifIndex)
+	after, inspectErr := effect.route.inspectLink(ctx, namespaceFD, identity.name)
+	if inspectErr != nil || after != nil {
+		return errors.Join(deleteErr, inspectErr, errors.New("created link absence is unproven"))
+	}
+	return nil
+}
+
+func (effect *linkEffect) rollbackFreshVethPair(
+	ctx context.Context,
+	hostFD int,
+	peerFD int,
+	pair vethPairIdentity,
+	hostAlias string,
+	peerAlias string,
+) error {
+	host, hostErr := effect.route.inspectLink(ctx, hostFD, pair.host.name)
+	peer, peerErr := effect.route.inspectLink(ctx, peerFD, pair.peer.name)
+	if err := errors.Join(hostErr, peerErr); err != nil {
+		return err
+	}
+	if host == nil && peer == nil {
+		return nil
+	}
+	if host == nil || peer == nil || host.peer != pair.peer.ifIndex || peer.peer != pair.host.ifIndex {
+		return errors.New("created veth reciprocal identity changed before rollback")
+	}
+	if peer.alias != "" && peer.alias != peerAlias {
+		return errors.New("created veth peer alias changed before rollback")
+	}
+	if err := validateManagedLink(*peer, pair.peer, linkKindVeth, peer.alias, 0, 0); err != nil {
+		return err
+	}
+	peerAddresses, addressErr := effect.route.listIPv4Addresses(ctx, peerFD, pair.peer.ifIndex)
+	peerRoutes, routeErr := effect.route.listIPv4Routes(ctx, peerFD, pair.peer.ifIndex)
+	if err := errors.Join(addressErr, routeErr); err != nil {
+		return err
+	}
+	if len(peerAddresses) != 0 || len(peerRoutes) != 0 {
+		return errors.New("created veth peer acquired IPv4 authority before rollback")
+	}
+	if err := effect.rollbackFreshLink(ctx, hostFD, pair.host, linkKindVeth, hostAlias, 0); err != nil {
+		return err
+	}
+	hostAfter, hostInspectErr := effect.route.inspectLink(ctx, hostFD, pair.host.name)
+	peerAfter, peerInspectErr := effect.route.inspectLink(ctx, peerFD, pair.peer.name)
+	if hostInspectErr != nil || peerInspectErr != nil || hostAfter != nil || peerAfter != nil {
+		return errors.Join(hostInspectErr, peerInspectErr, errors.New("created veth pair absence is unproven"))
+	}
+	return nil
 }
 
 func (effect *linkEffect) attachLink(
