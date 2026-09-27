@@ -64,6 +64,18 @@ installed checksum matched. Network/nftables/traffic-policy plus self-cleaning i
 same clean source with a strict zero-skip/deselection report and empty VM, volume, network, and traffic-policy
 inventories. GitHub CI, the other Python domains, memory saturation, host reboot, and Tier 3 remain open.
 
+With that same installed binary and unchanged Go source, subsequent full Python modules passed: volume 37/37, both
+exec files 7/7, SSH 9/9, logs 11/11, and console 5/5. Their strict reports are respectively
+`qa-volume-exact-15611a9a.json`, `qa-exec-exact-15611a9a.json`, `qa-ssh-alpine-clean.json`,
+`qa-logs-historical.json`, and `qa-console-exact.json` under the named runner's
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/`; each recorded zero failures, errors, skips, and deselections.
+SSH fixtures now use the mirrored Alpine image and clean up exact resources on setup failure. The logs test confirms
+retained historical output is readable by IP after VM stop; its earlier “must fail” assertion accepted both success
+and failure and was not a valid contract. Console's duplicate state case was removed and its stopped-state assertion
+now checks the schema-1 VM listing. VM and network inventories were empty after those modules; the baseline default
+key remained. These results do not qualify the unrun Python domains, reboot recovery, pressure-only memory behavior,
+GitHub CI, Tier 3, or the release.
+
 **Runner evidence (2026-09-27):** In the named `mvmctl-030-test` runner, pinned Go 1.26.3 passed the complete
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
