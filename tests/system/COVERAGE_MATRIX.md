@@ -160,6 +160,14 @@ real but intermittent in these probes. A successful repeat is not a fix or full 
 per-attempt device evidence and add an orchestrated regression before qualification. No observed failure was a vsock
 handshake failure.
 
+**Bounded repeat (2026-09-28):** After clearing the named runner's prior cgroup pressure by rebooting only that
+runner, a fresh 256 MiB managed VM answered `mvm exec` before its host reboot. The next boot projected it as
+stopped with an empty `vm ps`; `vm stop --force` removed the old jail, and one `vm start` attempt plus post-start
+`mvm exec` succeeded. The new jail's `/dev/kvm` and `/dev/net/tun` were mode 0600 and owned by the isolated
+Firecracker UID/GID. VM, network, volume, snapshot, and both policy inventories were empty after typed cleanup;
+the old jail was absent. This repeat did not reproduce or explain the earlier EACCES, and it is not an orchestrated
+host-reboot regression or release qualification.
+
 **Runner evidence (2026-09-27):** In the named `mvmctl-030-test` runner, pinned Go 1.26.3 passed the complete
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
