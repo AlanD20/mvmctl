@@ -87,7 +87,9 @@ Both `mvm vm create` (rootfs provisioning) and `mvm image pull`/`mvm image impor
 
 ### E1. Loop-Mount (Default)
 
-The `mvm run provision` subcommand is a built-in CLI subcommand compiled into the `mvm` binary. It uses system tools directly — no extra runtime dependencies beyond system packages.
+Loop-mount provisioning uses the closed typed privileged receiver compiled into the same `mvm` binary. The former
+public `mvm run provision` command and raw-sudo grant are removed. The receiver still needs the host filesystem tools
+below; it does not accept arbitrary host commands or paths from the operator.
 
 | Binary | Purpose | Debian/Ubuntu | Arch |
 |--------|---------|---------------|------|

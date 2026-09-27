@@ -95,7 +95,9 @@ pattern is:
 
 ### `mvm init`
 
-First-time setup wizard. Walks through host init, binary/kernel/image download, and SSH key setup.
+First-time operator setup wizard. Coordinates host admission, a default network, cache initialization, and a
+Firecracker/Jailer release pair. Kernel, image, and SSH-key setup are separate commands. VM launch in v0.3.0 requires
+the matching Firecracker/Jailer 1.16.1 pair.
 
 ```
 mvm init [flags]
@@ -107,6 +109,9 @@ mvm init [flags]
 | `--skip-host` | Skip host init step | `false` |
 | `--skip-network` | Skip default network creation | `false` |
 | `--binary-version <version>` | Download this exact Firecracker version when no local pair exists | empty (interactive choice or latest in non-interactive mode) |
+
+`--binary-version` does not replace an existing default pair. To select the v0.3.0 launch pair when another release is
+already installed, run `mvm bin pull 1.16.1 --default` and check `mvm bin ls` before creating a VM.
 
 ---
 
@@ -864,7 +869,7 @@ The security model applies to the net cloud-init mode only:
 | `MVM_CACHE_DIR` | Override the managed cache directory | `~/.cache/mvmctl` |
 | `MVM_CONFIG_DIR` | Override config directory | `~/.config/mvmctl` |
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) | `WARN` |
-| `MVM_ASSET_MIRROR` | Local mirror directory for downloaded assets | (not set) |
+| `MVM_ASSET_MIRROR` | Local archive mirror; a new Firecracker/Jailer install still fetches the official checksum sidecar for root verification | (not set) |
 | `MVM_WARM_POOL` | Warm image pool backend (`disk` for cache-backed; otherwise under `/tmp/mvmctl-<uid>/ready`, on tmpfs only when `/tmp` is tmpfs) | (not set) |
 | `MVM_ESCALATED` | Set by sudo wrapper to indicate privilege escalation | `1` |
 | `MVM_TEMP_DIR` | Override the per-operator temporary work directory and, when set, the warm-pool location | Managed cache `tmp/` (normally `~/.cache/mvmctl/tmp`) |

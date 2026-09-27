@@ -1,618 +1,122 @@
 # mvmctl Runtime Architecture
 
-This document describes the runtime backend systems that execute provisioning,
-cloud-init, firewall, and service operations during VM creation and management.
-Contributors and advanced users should read this to understand which backend
-runs when, why multiple backends exist for the same task, and how a `mvm vm create`
-request flows through the system.
-
-## Table of Contents
-
-- [1. Provisioning Backends](#1-provisioning-backends)
-  - [1.1 Loop-Mount Backend (Default)](#11-loop-mount-backend-default)
-  - [1.2 GuestFS Backend (Opt-in)](#12-guestfs-backend-opt-in)
-  - [1.3 Backend Selection](#13-backend-selection)
-  - [1.4 Shared Provisioner Content](#14-shared-provisioner-content)
-- [2. Cloud-Init Modes](#2-cloud-init-modes)
-  - [Inject Mode](#inject-mode)
-  - [Net Mode](#net-mode)
-  - [ISO Mode](#iso-mode)
-  - [Off Mode](#off-mode)
-- [3. Service Backends](#3-service-backends)
-  - [3.1 Service Architecture](#31-service-architecture)
-  - [3.2 Console Relay](#32-console-relay)
-  - [3.3 NoCloud Server](#33-nocloud-server)
-  - [3.4 Loop-Mount Provisioner Service](#34-loop-mount-provisioner-service)
-  - [3.5 Service Lifecycle](#35-service-lifecycle)
-- [4. Firewall Backends](#4-firewall-backends)
-- [5. Selection Guide](#5-selection-guide)
-- [6. Performance Comparison](#6-performance-comparison)
-  - [End-to-End VM Creation (create_s)](#end-to-end-vm-creation-create_s)
-  - [Notes](#notes)
-- [7. Binary Build](#7-binary-build)
-  - [Service Invocation](#service-invocation)
-  - [Sudoers](#sudoers)
-- [8. Architecture Diagram](#8-architecture-diagram)
-
-## 1. Provisioning Backends
-
-A **provisioning backend** modifies a VM root filesystem before first boot. Every
-backend supports the same set of operations: resizing, SSH key injection, hostname
-setup, DNS configuration, cloud-init inject, OS detection, package cache cleanup
-("deblob"), fstab fix (PARTUUID → /dev/vda), and arbitrary file writes.
-
-Two backends implement this interface — **Loop-Mount** and **GuestFS**. They are
-mutually exclusive: the provisioner type is selected once at startup by reading
-the `guestfs_enabled` setting. Loop-Mount is the default (~2.3s average); GuestFS
-is the opt-in alternative (~8.4s+).
-
-### 1.1 Loop-Mount Backend (Default)
-
-The loop-mount backend mounts the VM's root filesystem image via a loop device,
-operates on it directly with host tools, and unmounts when done. It is the primary
-backend because it requires no additional system packages beyond standard Linux
-utilities (`losetup`, `mount`, `umount`, `blkid`, `resize2fs`, `chroot`).
-
-**Flow:**
-
-```
-pkg/api/vm.go: VMCreate()
-  → provisioner.NewBackend(opts)      # Creates LoopMountBackend
-    → backend.Resize() / SetHostname() / ...  # Queues operations
-    → backend.Run()
-      → runWireOp() → system.DefaultRunner.Run(["sudo", "mvm", "run", "provision"])
-        → JSON ops on stdin → losetup/mount/chroot → JSON results on stdout
-```
-
-The API layer (`pkg/api/vm.go`) calls `provisioner.NewBackend()` with `BackendOpts`
-that include the rootfs image path and filesystem type. Each `backend.SetHostname()`,
-`backend.SetupSSH()`, etc. call queues a provisioning operation. When `backend.Run()`
-is called, all queued operations are serialized to JSON, piped to an `mvm run provision`
-subprocess via stdin, and results are read from stdout.
-
-**Execution steps inside the subprocess:**
-
-1. `truncate` the image file (for grow resize operations)
-2. `losetup -f -P --show <image>` — attach loop device with partition scanning
-3. Detect root partition (first partition, second, largest Linux filesystem, or raw device)
-4. Detect filesystem type via `blkid` (ext4 fallback)
-5. `mount <root_partition> <mount_point>`
-6. Write all queued files (base64-decoded content with correct mode/uid/gid)
-7. Copy directories from host to mount point (recursive)
-8. `chroot <mount_point>` for each shell command (tries multiple shell paths, 60s timeout)
-9. Post-mount resize: `e2fsck` + `resize2fs` for ext4; `btrfs filesystem resize` for btrfs
-10. `umount` + `losetup -d` (always via `finally`)
-
-**Key files:**
-
-| File | Purpose |
-|------|---------|
-| `internal/service/loopmount/provisioner.go` | Provisioning engine — losetup, mount, chroot, resize |
-| `internal/service/loopmount/entry.go` | Config struct + `Run()` entry point |
-| `internal/service/loopmount/spawn.go` | `Spawn()` via `system.SpawnService()` |
-| `internal/service/loopmount/wire.go` | JSON wire protocol types |
-| `internal/lib/provisioner/backend.go` | `Backend` interface |
-| `internal/infra/provcontent/content.go` | Shared provisioning content builders |
-
-**Boundary:** The loop-mount backend requires passwordless sudo (set up by `mvm host init`).
-It does NOT support images with non-standard partition layouts or damaged filesystems
-that `e2fsck` cannot repair.
-
-### 1.2 GuestFS Backend (Opt-in)
-
-The GuestFS backend uses the `guestfish` CLI tool (from `libguestfs`) as a subprocess
-to manipulate the root filesystem through a QEMU appliance. It exists for environments
-where loop-mount is impractical: systems without sudo access, or images requiring
-advanced filesystem features.
-
-**Flow:**
-
-```
-pkg/api/vm.go: VMCreate()
-  → provisioner.NewBackend(opts)
-    → guestfs.EnsureAppliance(cacheDir)   # Build or verify cached appliance
-    → NewGuestfsBackend(rootfsPath, rootUID, rootGID, userUID, userGID)
-      → guestfish CLI → QEMU appliance microVM
-```
-
-The guestfs backend launches a small QEMU microVM that mounts the target filesystem
-and exposes `libguestfs` operations. Operations are performed via `guestfish` CLI
-subprocess invocations, not through a JSON subprocess protocol.
-
-**Key differences from loop-mount:**
-- OS detection reads `/etc/os-release` via guestfs `ReadFile()` instead of `chroot`
-- SSH setup detects the init system: systemd, OpenRC, or sysvinit
-- Supports user creation via `useradd` with sudoers drop-in
-- Cloud-init inject uses guestfish `upload` instead of directory copy
-- Shrink uses `ZeroFreeSpace()` + `e2fsck` + `Resize2fsSize()` with safety margin
-
-**Appliance lifecycle:**
-- Built once by `guestfs.BuildAppliance()` via `libguestfs-make-fixed-appliance`
-- Cached at `~/.cache/mvmctl/appliance/` (kernel, initrd, root files)
-- `guestfs.KernelDetector.FindBestKernel()` or `FindBestKernel()` selects a kernel with virtio drivers
-- Stale state cleanup handles orphaned QEMU processes, lock files, daemon sockets
-- Pruned by `mvm cache prune misc` calling `guestfs.PruneAppliance()`
-
-**Key files:**
-
-| File | Purpose |
-|------|---------|
-| `internal/lib/provisioner/guestfs/provisioner.go` | Rootfs operations via guestfs API |
-| `internal/lib/provisioner/guestfs/base.go` | Handle creation, mount, partition extraction |
-| `internal/lib/provisioner/guestfs/utils.go` | Appliance building, stale state cleanup |
-| `internal/lib/provisioner/guestfs/kernel_detector.go` | Suitable appliance kernel selection |
-
-**Boundary:** GuestFS requires `libguestfs`, `supermin`, and `qemu` system packages.
-The appliance build may fail or hang if no kernel with `CONFIG_VIRTIO_PCI` is available.
-This backend is approximately 3-4x slower than loop-mount.
-
-### 1.3 Backend Selection
-
-The provisioner type is resolved once at application startup in `api.NewOperation()`:
-
-```go
-provisionerType := provisioner.ProvisionerLoopMount
-guestfsEnabled, _ := s.Config.GetBool(ctx, "settings", "guestfs_enabled")
-if guestfsEnabled {
-    provisionerType = provisioner.ProvisionerGuestFS
-}
-```
-
-All callers reference `op.ProvisionerType`. The `provisioner.NewBackend()` factory in
-`internal/lib/provisioner/backend.go` dispatches to the correct implementation based on
-this type. Resolution happens once — there is no backend fallback at runtime.
-
-### 1.4 Shared Provisioner Content
-
-Both backends consume the same operation builders from `internal/infra/provcontent/content.go`:
-
-| Builder | Purpose |
-|---------|---------|
-| `BuildHostnameOps(hostname)` | `/etc/hostname` + `/etc/hosts` |
-| `BuildDNSOps(dnsServer)` | `/etc/resolv.conf` nameserver entry |
-| `BuildSSHOps(user, sshPubkeys)` | SSH authorized keys and user setup |
-| `BuildCloudInitDisableOps()` | Datasource blocking + service masking |
-| `BuildCloudInitInjectOps(cloudInitDir)` | Copy cloud-init seed directory |
-| `BuildResizeOps(targetSizeBytes)` | Grow filesystem |
-| `BuildShrinkOps(limitBytes)` | Shrink filesystem (pass `0` for minimum) |
-| `BuildDeblobOps(osType)` | OS cache cleanup (apt, yum, apk, pacman) |
-| `BuildFixFstabOps()` | PARTUUID → /dev/vda migration |
-
-The builders produce a generic `Operation` list. Each backend consumes the same list
-but executes it differently — loop-mount via JSON subprocess, guestfs via direct API calls.
-
----
-
-## 2. Cloud-Init Modes
-
-**Cloud-init** is the standard mechanism for provisioning cloud images on first boot.
-mvmctl supports four delivery modes, each with different trade-offs:
-
-| Mode | Flag | Mechanism | Latency | Use Case |
-|------|------|-----------|---------|----------|
-| **inject** | `--cloud-init-mode inject` | Direct rootfs injection via provisioner backend | ~200ms | Primary mode — no runtime dependencies |
-| **net** | `--cloud-init-mode net` | HTTP server (nocloud-net datasource) | ~50ms | Dynamic config, no rootfs modification |
-| **iso** | `--cloud-init-mode iso` | Seed ISO via `cloud-localds` | ~500ms | Legacy images requiring ISO datasource |
-| **off** | `--cloud-init-mode off` | Datasources blocked, services masked | 0ms | No provisioning needed |
-
-### Inject Mode
-
-```
-VMCreate()
-  → cloudinit.Provisioner.Provision()
-    → Generate user-data, meta-data, network-config
-    → manager.WriteConfigFiles()
-    → provisioner.InjectCloudInit(cloudInitDir)
-      → Backend copies files into rootfs
-  → VM boots with files baked in
-```
-
-Files are written directly into the root filesystem before first boot. The files
-persist for the lifetime of the VM and survive reboots. This is the default mode
-because it requires no network server and no ISO generation.
-
-### Net Mode
-
-```
-VMCreate()
-  → cloudinit.Provisioner.Provision()
-    → Generate configs
-    → nocloudnet.Spawn(ctx, cfg)
-      → Find free port (8000-9000 range)
-      → Spawn HTTP server via system.SpawnService()
-      → Bind to bridge gateway IP only
-      → Firewall rule in MVM-NOCLOUDNET-INPUT chain
-  → VM boots with ds=nocloud;seedfrom=http://<gateway>:<port>/
-  → Server runs until VM removal
-```
-
-The HTTP server responds to cloud-init metadata, user-data, and network-config
-requests. It binds exclusively to the bridge gateway IP — never to `0.0.0.0` —
-to prevent external network access. A firewall rule in the active backend
-(nftables by default) allows the VM's source IP to reach the server.
-
-### ISO Mode
-
-```
-VMCreate()
-  → cloudinit.Provisioner.Provision()
-    → Generate configs
-    → manager.CreateSeedISO() via cloud-localds subprocess
-  → ISO attached as secondary Firecracker drive
-  → VM boots, cloud-init reads from ISO
-```
-
-ISO mode generates a cloud-init seed ISO using the `cloud-localds` tool and
-attaches it as a secondary block device to the Firecracker VM. This mode is
-necessary for images that do not support the nocloud-net datasource.
-
-### Off Mode
-
-```
-VMCreate()
-  → cloudinit.Provisioner.Provision()
-    → Returns CloudInitResult{Mode: CloudInitModeOFF}
-    → provisioner.DisableCloudInit()
-      → Writes datasource block file + masks services
-```
-
-"Off" mode physically disables cloud-init inside the rootfs by writing datasource
-block files and masking cloud-init systemd services. The VM boots without any
-provisioning step.
-
-**Key files:**
-
-| File | Purpose |
-|------|---------|
-| `internal/core/cloudinit/provisioner.go` | Config generation, mode dispatch |
-| `internal/core/cloudinit/manager.go` | Config file writing, seed ISO creation |
-| `internal/core/cloudinit/config.go` | Provisioning parameters |
-| `internal/service/nocloudnet/entry.go` | HTTP server lifecycle |
-| `internal/service/nocloudnet/handler.go` | Metadata request handler |
-
----
-
-## 3. Service Backends
-
-Service backends are long-running subprocesses compiled into the same `mvm` binary.
-Each is invoked via `mvm run <service>` and spawned in the background by the core
-layer via `system.SpawnService()`. The `agent` is a special case — it runs
-inside the guest VM, not on the host.
-
-### 3.1 Service Architecture
-
-Four foreground services and one embedded guest agent share the same binary.
-No separate service binaries, no symlinks, no extraction step.
-
-| Service | Entry Point | Runs As | Purpose |
-|---------|-------------|---------|---------|
-| `mvm run console relay` | `console.Run(ctx, cfg)` | user | PTY-to-socket relay for serial console |
-| `mvm run nocloudnet serve` | `nocloudnet.Run(ctx, cfg)` | user | HTTP server for cloud-init nocloud-net |
-| `mvm run provision` | `loopmount.Run(ctx, cfg)` | **root** (sudo) | Loop-mount rootfs provisioning |
-| `mvm run jailer` | `jailer.Run(ctx, cfg)` | **root** (sudo) | Trusted release installation, jail setup, and Firecracker launch |
-| `agent/` (embedded) | Guest agent binary | root (in-VM) | Command execution and file transfer inside the guest |
-
-The vsock agent is cross-compiled at build time, zstd-compressed, embedded via
-`//go:embed`, and injected into the VM at runtime through the vsock device. This
-avoids the need for SSH or any guest-side package installation for `mvm exec`,
-`mvm cp`, and console operations.
-
-Each service follows a consistent pattern: a **`Config`** struct holds all parameters,
-**`Run(ctx, cfg)`** runs the service in the foreground (blocking), and
-**`Spawn(ctx, cfg, ...)`** launches it as a background subprocess.
-
-### 3.2 Console Relay
-
-The console relay converts a Firecracker VM's serial console into an interactive
-terminal session accessible through `mvm console`. It exists because Firecracker
-exposes the serial console as a PTY pair, and the relay multiplexes that PTY
-between a Unix socket (for CLI attachment) and a log file.
-
-```
-console.Controller → console.Spawn(ctx, cfg) → system.SpawnService("mvm", "run", "console", "relay")
-                                                                  │
-                                            PTY master fd ← → Unix socket ← → Client (CLI)
-                                                                  │
-                                                            console.log
-```
-
-The relay entry point is `mvm run console relay`. The `Run()` function in
-`entry.go` opens the PTY master file descriptor (inherited as FD 3), sets up
-a Unix listener, and enters the I/O loop. The I/O loop reads from the PTY in
-a goroutine (fed to a channel), accepts Unix socket connections from the CLI,
-and uses Go `select` to multiplex data between the PTY, the connected client,
-and the log file concurrently.
-
-- **Signal handling:** SIGTERM/SIGINT trigger graceful shutdown with PID file and socket cleanup
-- **PID file:** `$MVM_CACHE_DIR/vms/<vm-id>/console.pid`
-- **Socket:** `$MVM_CACHE_DIR/vms/<vm-id>/console.sock`
-- **Log:** `$MVM_CACHE_DIR/vms/<vm-id>/firecracker.console.log`
-
-**Key files:**
-
-| File | Purpose |
-|------|---------|
-| `internal/service/console/entry.go` | Config struct, `Run()`, and the `runRelayIO` I/O loop |
-| `internal/service/console/spawn.go` | `Spawn()` via `system.SpawnService()` |
-| `internal/service/console/relay.go` | `Relay` struct — PID management and lifecycle |
-| `internal/service/console/client.go` | `RelayClient` — CLI-side console attachment |
-
-**Boundary:** The relay supports one client connection at a time. If a client is
-already attached, new connection attempts are refused. The detach sequence is
-Ctrl+X followed by `d`.
-
-### 3.3 NoCloud Server
-
-The nocloud-net HTTP server delivers cloud-init metadata to VMs over HTTP.
-It is the runtime component for the "net" cloud-init mode (see §2). The server
-is started per-VM and lives for the VM's lifetime.
-
-```
-cloudinit.Provisioner → nocloudnet.Spawn(ctx, cfg) → system.SpawnService("mvm", "run", "nocloudnet")
-                                                                        │
-                                          HTTPServer(bind=gateway_ip:port) ← → VM guest (HTTP)
-                                                                        │
-                                                                  serves: meta-data
-                                                                         user-data
-                                                                         network-config
-```
-
-- **Port range:** 8000–9000, auto-allocated via `socket.bind()` probe
-- **Security:** Binds to bridge gateway IP only (never `0.0.0.0`), firewall rule in `MVM-NOCLOUDNET-INPUT` chain
-- **PID file:** `$MVM_CACHE_DIR/vms/<vm-id>/nocloud-server.pid`
-- **Headers:** Cache-disabling headers (`Cache-Control: no-cache, no-store, must-revalidate`)
-
-**Key files:**
-
-| File | Purpose |
-|------|---------|
-| `internal/service/nocloudnet/entry.go` | Config struct + `Run()` entry point |
-| `internal/service/nocloudnet/spawn.go` | `Spawn()` via `system.SpawnService()` |
-| `internal/service/nocloudnet/handler.go` | HTTP request handler |
-
-**Boundary:** The server binds to the bridge gateway IP, not to `0.0.0.0`.
-VMs on a different subnet cannot reach it. This is intentional — cloud-init
-data is per-VM and must not be accessible from outside the VM's network.
-
-### 3.4 Loop-Mount Provisioner Service
-
-The loop-mount provisioner is the execution engine for filesystem operations.
-It is spawned as a root subprocess by the `LoopMountBackend` in the API layer.
-
-```
-API layer → provisioner.NewBackend() → LoopMountBackend
-  → backend.Resize() / SetHostname() / ... (queues operations)
-  → backend.Run() → runWireOp() → DefaultRunner.Run(["sudo", "mvm", "run", "provision"])
-                                            │
-                        JSON ops stdin → losetup/mount/chroot → JSON results stdout
-```
-
-- **Communication:** JSON operation list on stdin, JSON results on stdout
-- **Timeout:** 60 seconds per chroot command (in `provisioner.go`)
-- **Sudo:** Passwordless sudo via `/etc/sudoers.d/mvm` drop-in
-- **Speed:** ~2.3s average end-to-end
-
-**Key files:**
-
-| File | Purpose |
-|------|---------|
-| `internal/service/loopmount/provisioner.go` | Provisioning engine — losetup, mount, chroot |
-| `internal/service/loopmount/entry.go` | Config struct + `Run()` entry point |
-| `internal/service/loopmount/spawn.go` | `Spawn()` via `system.SpawnService()` |
-| `internal/service/loopmount/wire.go` | JSON wire protocol types |
-
-**Boundary:** Requires root. The subprocess runs with full privileges and performs
-raw block device operations. The JSON protocol ensures no state leaks between
-invocations.
-
-### 3.5 Firecracker Jailer Service
-
-Jailer is the only VM launch path. `mvm bin pull` streams the checksum-verified Firecracker release archive to the privileged installer, which atomically installs the exact Firecracker/Jailer pair under `/var/lib/mvmctl/binaries/<version>/`. VM launch then exposes only that VM's required resources inside `/var/lib/mvmctl/jailer/firecracker/<vm-id>/root/` and execs the trusted Jailer binary.
-
-Jailer does not daemonize, so the serial-console descriptors remain attached. The service derives the non-root Firecracker UID/GID from the sudo caller, translates Firecracker configuration paths into the jail, and records the actual Firecracker PID. Stop, remove, reboot, hotplug, and snapshot operations reconcile the corresponding jail mounts and cgroup.
-
-There is no direct-Firecracker fallback. Every launch requires cgroup v2 with the CPU, memory, and PID controllers and creates `/sys/fs/cgroup/mvmctl/<vm-id>`. mvmctl persists typed CPU, memory, swap, and PID limits, passes only internally derived Jailer arguments, and verifies exact membership and values after launch. Verification failure terminates the VM. `mvm vm inspect` reports requested limits, observed limits, usage, mismatches, and enforcement status. Network namespaces remain separate follow-up work.
-
-**Key files:**
-
-| File | Purpose |
-|------|---------|
-| `internal/service/jailer/entry.go` | Validates privileged operations, installs trusted pairs, mounts resources, and execs Jailer |
-| `internal/service/jailer/spawn.go` | Typed normal-user calls into the privileged service |
-| `internal/core/vm/jailer.go` | Per-VM manifest generation and host-to-jail path translation |
-| `internal/core/vm/firecracker.go` | Firecracker configuration and caller-facing spawn lifecycle |
-
-### 3.6 Service Lifecycle
-
-| Phase | Action | Component |
-|-------|--------|-----------|
-| **Init** | Create sudoers drop-in, firewall chains, cache dirs | `host.Service.Init()` |
-| **Create VM** | Provision rootfs via loop-mount or guestfs | `backend.Run()` |
-| **Create VM** | Start NoCloud server (net mode) or inject cloud-init (inject mode) | `nocloudnet.Spawn()` / `backend.InjectCloudInit()` |
-| **Create VM** | Start console relay (when `--console` is set) | `console.Spawn()` |
-| **Create/start/restore VM** | Launch exact Firecracker/Jailer pair in per-VM jail | `jailer.Launch()` |
-| **Remove VM** | Stop console relay + NoCloud server + clean firewall rules | `console.Stop()`, `nocloudnet.Stop()` |
-| **Cache prune** | Clean up stale PID files + orphan processes | `cache.Service.Prune()` |
-
----
-
-## 4. Firewall Backends
-
-Firewall backends manage NAT rules, forwarding rules, routed service-access
-policies, and per-VM access control for nocloud-net servers. Two backends are available, selected by the
-`firewall_backend` setting in the database (default: `nftables`).
-
-A **`FirewallTracker`** in `internal/lib/firewall/tracker.go` provides a unified
-interface for both backends. It dispatches all operations to the active backend
-via the `Tracker` interface. The tracker is created once at startup in
-`api.NewOperation()` with a default nftables tracker. After `mvm host init`
-resolves the actual backend setting, it replaces the tracker via
-`SetFirewallTracker()`.
-
-| Backend | Default | Files |
-|---------|---------|-------|
-| **nftables** | Yes (`firewall_backend: nftables`) | `tracker.go`, `nftables.go`, `nftables_repository.go` |
-| **iptables** | Opt-in (`firewall_backend: iptables`) | `tracker.go`, `iptables.go`, `iptables_repository.go` |
-
-Both backends manage five chain types: `MVM-FORWARD` (ip filter),
-`MVM-POSTROUTING` (ip nat), `MVM-NOCLOUDNET-INPUT` (ip filter),
-`MVM-ROUTED-POLICY` (ip filter), and `MVM-HOST-INPUT` (ip filter). The nftables
-backend adds jump rules at position 0 of the built-in chains, using non-hook
-chains so that `accept` verdicts are terminal within the mvm table — matching
-the behavior users expect from iptables.
-
-Service-access intent stores a source network ID, exact destination VM ID,
-TCP or UDP, and a destination port or bounded range. The API resolves current
-network, bridge, VM, and IP state; the network domain compiles backend-neutral
-derived rules. Reconciliation commits desired rows before atomically rebuilding
-the active backend. `MVM-ROUTED-POLICY` orders established replies, exact allows,
-then managed-bridge default deny. `MVM-NOCLOUDNET-INPUT` precedes
-`MVM-HOST-INPUT`, which permits established replies and denies other traffic
-from managed bridges. Internet egress does not match the managed-output drop.
-
-**Why two backends?** Different Linux distributions ship with different firewall
-defaults. Some use nftables natively; others use iptables or iptables-legacy.
-mvmctl supports both to avoid conflicts with the host's existing firewall
-configuration, particularly when Docker or other container runtimes are present.
-
----
-
-## 5. Selection Guide
-
-Each backend choice represents a trade-off between speed, dependencies, and
-capability. This guide maps common scenarios to the recommended configuration.
-
-| Scenario | Recommended Backend | Rationale |
-|----------|-------------------|-----------|
-| Normal VM creation | Loop-Mount + inject cloud-init | Fastest path (~2.3s creation) |
-| No sudo available | GuestFS provisioning | Uses `guestfs_enabled` opt-in |
-| Minimal VM, no customization | Off mode cloud-init | Fastest boot, no provisioning |
-| Dynamic cloud-init config | Net mode cloud-init | Network-served, no rootfs modification |
-| Legacy ISO requirement | ISO mode cloud-init | Pre-built ISO via `cloud-localds` |
-| Console access | Console Relay | Opt-in via `--console` (disabled by default) |
-| Image optimization | Loop-Mount partition extraction | ~500ms vs ~2000ms guestfs |
-
----
-
-## 6. Performance Comparison
-
-Benchmark data from `benchmarks/results.json` (2026-06-16, sequential run, 5s threshold).
-
-Measured via `mvm exec -- echo ok` inside the VM — replaces the earlier
-SSH-based probe. All images use the loop-mount provisioning backend (the default).
-
-### End-to-End VM Creation (create_s)
-
-| Image | create_s | total_s | Threshold |
-|-------|----------|---------|-----------|
-| alpine | 1.4s | 2.0s | 5s ✅ |
-| ubuntu:24.04 | 2.0s | 2.4s | 5s ✅ |
-| ubuntu-minimal:24.04 | 2.0s | 2.4s | 5s ✅ |
-| archlinux | 2.4s | 3.9s | 5s ✅ |
-| debian:12 | 4.3s | 4.6s | 5s ✅ |
-| firecracker:v1.15 | 1.9s | 2.1s | 5s ✅ |
-| **Average** | **2.3s** | **2.9s** | **100% pass** |
-
-### Notes
-
-- All six images passed within the 5s threshold in sequential mode.
-- Parallel benchmark execution (use `--no-parallel` in `benchmarks/boot_time.py`)
-  avoids I/O contention on the host for resource-heavy images (debian, archlinux).
-- The probe now uses `echo ok` via `mvm exec` (vsock guest agent)
-  instead of SSH — this measures end-to-end VM readiness (vsock agent responding).
-- **Console relay startup**: ~10ms (negligible, no separate benchmark)
-- **NoCloud server startup**: ~50ms (negligible, no separate benchmark)
-
----
-
-## 7. Binary Build
-
-The `mvm` binary is a standard Go binary that includes all services compiled in:
-
-```bash
-./scripts/build.sh release
-sudo ./dist/mvm host install-system
-```
-
-The release artifact and the root-owned `/usr/local/bin/mvm` installation are the same single executable. Background
-services and the vsock guest agent are compiled into it; there is no separate privileged helper, service binary,
-symlink, or extraction step. User-owned development artifacts are not sudo targets.
-
-### Service Invocation
-
-Services are invoked via `mvm run <service>`:
-
-```bash
-mvm run console relay     # Start console relay
-mvm run nocloudnet serve  # Start nocloud-net HTTP server
-mvm run provision         # Start loopmount provisioner (requires sudo)
-```
-
-The CLI layer dispatches `mvm run <service>` to the appropriate service entry point.
-Services are spawned in the background by the core layer via `system.SpawnService()`.
-
-### Sudoers
-
-During the privilege-boundary migration, `mvm host init` targets only root-owned `/usr/local/bin/mvm` but still retains
-the legacy raw-tool and public-service grants needed by unmigrated callers. Task 14 removes those grants, after Tasks
-8–13 migrate every caller, and leaves only the versioned early privileged marker. See ADR-0016; the transitional policy
-is not the final security model.
-
----
-
-## 8. Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           CLI Layer (Cobra)                                  │
-│  mvm vm create my-vm --cloud-init-mode inject                               │
-└───────────────────────────┬─────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           API Layer (pkg/api)                                │
-│  op.VMCreate(ctx, input)                                                    │
-│    ├── cloudinit.Provisioner.Provision()  (prepare configs)                   │
-│    ├── provisioner.NewBackend(opts)  (select backend at startup)            │
-│    │   ├── LoopMount → backend.Resize()/SetHostname()/... → backend.Run()  │
-│    │   │   └── runWireOp() → DefaultRunner.Run(["mvm","run","provision"])  │
-│    │   │       → losetup → mount → write → chroot → resize → umount        │
-│    │   └── GuestFS   → backend.Resize()/SetHostname()/... → backend.Run()  │
-│    │       → guestfs.Backend → libguestfs (QEMU appliance)                 │
-│    ├── console.Spawn()  (if --console)                                      │
-│    └── nocloudnet.Spawn()  (if net mode)                                    │
-└───────────────────────────┬─────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Core Layer (internal/core)                            │
-│                                                                             │
-│  core/vm/          Controller, Service, Repository, SQLite, Resolver        │
-│  core/network/     Controller, Service, Repository, SQLite, Resolver        │
-│  core/volume/      Controller, Service, Repository, SQLite, Resolver        │
-│  core/cloudinit/   Provisioner, Manager, Config                             │
-│  core/image/       Provisioner, Service, Repository, SQLite, Resolver       │
-│  core/kernel/      Controller, Service, Repository, SQLite, Resolver        │
-│  core/host/        Controller, Service, Repository, SQLite, Detector, Probe │
-│  core/config/      Service, Repository, SQLite, Constraints                 │
-│  core/console/     Controller                                               │
-│  core/logs/        Controller, Service                                      │
-│  core/cache/       Service                                                  │
-│  core/ssh/         Service                                                  │
-│  core/binary/      Controller, Service, Repository, SQLite, Resolver        │
-│  core/key/         Controller, Service, Repository, SQLite, Resolver        │
-│  core/vsock/       Client, Service, Repository, SQLite, Resolver            │
-│  core/snapshot/    Repository, SQLite, Resolver                             │
-└───────────────────────────┬─────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      Service Layer (internal/service)                        │
-│                                                                             │
-│  All compiled into the single mvm binary                                    │
-│    ├── mvm run console relay    → console relay (PTY proxy)                 │
-│    ├── mvm run nocloudnet serve → nocloud-net HTTP server                   │
-│    ├── mvm run provision        → loopmount provisioner (requires sudo)     │
-│    └── agent               → embedded guest agent (injected into VM)   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+This document describes the v0.3.0 runtime design for operators and contributors. v0.3.0 is still under
+qualification: the architecture described here is not a claim that the full release test matrix or clean-host
+installation gate has passed. See [RC_QA.md](RC_QA.md) for the release gates and
+[CONTEXT.md](../CONTEXT.md) for package and domain ownership.
+
+## One binary, two authority levels
+
+The installed `/usr/local/bin/mvm` is one root-owned executable. An operator runs its public CLI without `sudo`.
+`host install-system`, `host init`, and `host reset` are separate administrator operations; `host init` enrolls the
+operator in the `mvm` group. The managed sudoers entry grants that group only the versioned, closed privileged entry
+point of the root-owned binary. It does not grant the public CLI, a general shell, `ip`, `nft`, or raw host tools.
+
+An ordinary request follows `internal/cli/` → `pkg/api/` → the owning `internal/core/` domain. Public inputs are
+validated in `pkg/api/inputs/`; `pkg/api/` coordinates multiple domains. When an operation requires root, its typed
+client calls the early authenticated dispatcher in `internal/service/privileged/`. The receiver independently checks
+caller authorization, resource identity, bounds, and effect-specific invariants. It does not accept a generic command
+or arbitrary host path. Jailer, LoopMount, network, firewall, and snapshot effects have their own closed handlers.
+
+The public `mvm run provision` and `mvm run jailer` commands were removed. Ordinary-user console and NoCloud
+subprocesses still use the same installed binary. The embedded guest agent runs *inside* a VM for vsock execution and
+file transfer; it is not a second host release artifact. See [ADR-0016](adr/0016-root-owned-single-binary-privileged-dispatch.md)
+and [ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md) for the trust boundary.
+
+## State and process layout
+
+| Location | Owner and purpose |
+|---|---|
+| `/var/lib/mvmctl` | Durable root authority: installation, trusted release, host admission, VM and network records, and Jailer state. |
+| `/run/mvmctl/authority` | Root-only transient locks and handshakes; not durable truth. |
+| `/run/mvmctl/runtime/<uid>/<vm-id>` | Ephemeral API/vsock/console sockets and display-only PID mirrors. |
+| `MVM_CACHE_DIR` (normally `~/.cache/mvmctl`) | Operator configuration, SQLite projection, original images, managed disk inputs, and output artifacts. Root-protected active backing and snapshots are pinned under the selected cache but are not made operator-writable. |
+
+The operator's SQLite rows and PID mirrors are not root authorization. Root effects pin the managed cache and their
+resources by identity; a renamed cache, replaced file, stale process, or conflicting managed topology must not be
+silently adopted. Listing and inspection use bounded root observation to distinguish live VMs from stale recorded
+PIDs. A reboot does not imply the old Firecracker process survived. Cleanup and relaunch must reconcile retained
+records before effectful reuse, and ambiguous state fails closed rather than being guessed away.
+
+## VM launch and resource control
+
+`mvm bin pull` installs an exact matching Firecracker/Jailer release in root-controlled storage. For a new install, a
+local `MVM_ASSET_MIRROR` can supply the archive, but the root receiver still obtains and checks the official release
+checksum sidecar; a local archive alone is not a trust assertion. v0.3.0 VM launch requires Firecracker/Jailer
+**1.16.1**. Older pairs may be managed as artifacts but cannot launch VMs.
+
+Jailer is the only VM launcher. The authenticated root launch path prepares a fresh, pinned jail tree, admits the
+selected kernel and disk resources, installs an isolated per-VM execution identity, and brokers the private
+Firecracker API. Firecracker does not run as the operator, and the operator cannot open its control socket directly.
+The launch path checks its process identity, cgroup membership, resource mounts, and network placement. There is no
+direct-Firecracker fallback.
+
+The VM leaf uses cgroup v2 for CPU, memory, swap, and PID policy. `memory.high` is guest RAM plus the configurable
+VMM headroom; `memory.max` is `max`. This is pressure/reclaim control, **not a hard memory ceiling or an OOM-proof
+guarantee**. A host or ancestor limit, host-wide pressure, or guest OOM can still terminate processes. `mvm vm inspect`
+exposes requested and observed cgroup values and usage through root-brokered observation. See
+[ADR-0019](adr/0019-pressure-only-vm-memory-control.md).
+
+## Root filesystem provisioning and cloud-init
+
+LoopMount is the default rootfs provisioner. It queues named operations through
+`internal/lib/provisioner/loopmount/` and executes them via the closed, root-authorized LoopMount receiver. The
+receiver works on admitted managed backing; it does not run a public root service with caller-supplied shell commands.
+The typed operations include filesystem growth, hostname/DNS/SSH account setup, cloud-init injection, and automatic
+deblob. The optional `guestfs_enabled` backend uses `guestfish`; selecting it does not bypass administrator host setup
+or the VM launch authority. See [DEPENDENCIES.md](DEPENDENCIES.md) for required host tools.
+
+Cloud-init delivery has four modes. `inject` writes seed data into the admitted rootfs before boot. `net` serves
+NoCloud metadata through an ordinary-user service bound to the managed network's root-derived gateway on fixed TCP
+**8000**; a custom port or bind collision is refused. `iso` creates a seed ISO using `cloud-localds` and requires
+that optional package. `off` disables cloud-init delivery. A networkless VM cannot use `net`; it has no guest IP or
+MAC and uses vsock rather than SSH for guest access. The applicable default and input conflicts are documented in
+[REFERENCES.md](REFERENCES.md#mvm-vm).
+
+## Networking, policy, and guest execution
+
+Every managed networked VM gets its own root-created network namespace. A networkless VM gets an isolated
+loopback-only placement. Managed same-network and cross-network VM traffic starts denied. The root firewall adapter
+uses `github.com/google/nftables` to compile and submit fixed nftables generations to the kernel. It does not execute
+or parse the `nft` CLI, use iptables, or offer a backend switch. Managed networking needs kernel nftables `inet` and
+`bridge` support, connection tracking, and NAT capabilities; installing a command-line tool cannot provide missing
+kernel support. Detected foreign or changed managed firewall state is refused rather than overwritten.
+
+There are two public policy families:
+
+| Policy | Grants | Does not grant |
+|---|---|---|
+| `mvm policy traffic` | Exact source network or source VM to destination VM TCP/UDP ports, after resolving current managed identities. | Vsock command execution or host commands. |
+| `mvm policy exec` | Directional source-VM to destination-VM execution as an exact non-root target user, independent of network membership. | IP connectivity, reverse execution, VM-to-host execution, or destination root execution. |
+
+The host-to-guest `mvm exec` and `mvm cp` paths use the embedded vsock agent. VM-to-VM execution additionally passes
+through an authenticated host relay that binds the live source and destination identities and enforces the typed
+exec grant. The relay bounds its command, output, duration, and concurrency and writes a command-redacted audit
+record. See [ADR-0017](adr/0017-per-vm-network-namespaces-and-typed-policies.md).
+
+## Volumes, snapshots, and recovery
+
+Attached VM data volumes are raw-only; QCOW2 remains supported for image import/conversion, not as an attached
+data-volume format. Active writable disks are root-protected rather than reused from an operator-writable staging
+file. An attached volume can grow while its VM is stopped without detaching it. `volume rm --force` likewise
+requires the attached VM stopped; it does not hot-unplug a running guest.
+
+A full snapshot captures rootfs, memory/vmstate, and attached data volumes under exclusive write ownership. Its
+artifacts are root-controlled under the selected cache, with CLI-mediated removal. Restore creates independent
+writable disks while retaining immutable captured memory backing; it preserves the recorded release, drive IDs, and
+managed network identity. A conflicting writer or unresolved artifact identity blocks capture or restore. The
+approved vmstate limit is 10,000,000 bytes and captured RAM length comes from trusted memory state; v0.3.0 does not
+invent a data-volume size or aggregate-storage quota. See [ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md)
+and [the resource-limit decision](improvements/volume-snapshot-resource-limits.md).
+
+VM stop, remove, reboot, and restore use typed cleanup and reconciliation rather than deleting a PID file as proof
+of process death. `host clean` is caller-scoped and refuses running or incompletely observed VMs; administrator
+`host reset` is a separate, quiescence-checked operation and is not an old-state migration command. The exact
+host-reboot/exec recovery and sustained memory-saturation journeys remain release QA gates, not guarantees inferred
+from a single successful smoke test.
+
+## Performance evidence
+
+[`benchmarks/results.json`](../benchmarks/results.json) records an older measured workload. Its values predate the
+v0.3.0 root broker, per-VM namespaces, protected backing, and direct-Go firewall path, so they must not be used as
+v0.3.0 boot-time or throughput promises. Rebenchmark the release candidate before publishing performance numbers.

@@ -10,7 +10,7 @@
 
 Think "Docker for VMs" — one command to create, start, and connect.
 
-- ⚡ **Fast boot times** — VMs boot in 2-4 seconds (loop-mount) or 9-14 seconds (guestfs), so you iterate at container speed with VM-grade isolation
+- ⚡ **Fast boot times** — lightweight Firecracker guests keep development feedback fast; the older timing benchmarks are not a v0.3.0 performance guarantee
 - 🔥 **Powered by Firecracker** — AWS's battle-tested microVM technology, the engine behind Lambda and Fargate
 - 🛡️ **Secure by default** — hardware-level isolation with KVM
 - 📦 **Single installed binary** — the root-owned `mvm` executable serves both the unprivileged CLI and its narrowly typed privileged operations; host packages are still needed for VM setup and provisioning
@@ -42,7 +42,7 @@ Think "Docker for VMs" — one command to create, start, and connect.
 
 ## Prerequisites
 
-- **Linux** (x86_64 or aarch64) with KVM access (`/dev/kvm`):
+- **Linux** with KVM access (`/dev/kvm`). The v0.3.0 runtime qualification is on x86_64; aarch64 is not yet runtime-qualified:
   ```bash
   sudo usermod -aG kvm $USER
   # Log out and back in
@@ -58,19 +58,20 @@ Think "Docker for VMs" — one command to create, start, and connect.
   sudo pacman -S --needed iproute2 qemu-img e2fsprogs util-linux procps-ng kmod openssh tar sudo shadow fakeroot
   ```
   Optional (for ISO cloud-init mode only): `cloud-image-utils` (Ubuntu/Debian) or `cloud-utils` (Arch)
-- **Root access (one-time):** install the trusted artifact at `/usr/local/bin/mvm`, then run `host init`; normal commands run without `sudo` after setup
+- **Administrator access for installation and host setup:** install the trusted artifact at `/usr/local/bin/mvm`, then run `host init`; normal commands run without `sudo` after setup. Later system-binary upgrades also require an administrator.
+- **Firecracker/Jailer 1.16.1:** v0.3.0 VM launch requires this exact matching release pair. Managed networking also requires kernel nftables support for both `inet` and `bridge` families; installing the `nft` CLI does not add missing kernel support.
 - **Environment variables:** Configure runtime behavior via `MVM_*` variables. See [docs/REFERENCES.md](docs/REFERENCES.md#environment-variables) for the full list.
 
 ---
 
 ## Installation
 
-### 1. Download prebuilt binary (recommended)
+### 1. Download a published v0.3.0 binary
 
-You may head over to [Releases](https://github.com/AlanD20/mvmctl/releases) page to get the desired package for your distro or you may simply get the static and standalone binary itself:
+v0.3.0 is not released yet. Once published, obtain the `v0.3.0` artifact from [Releases](https://github.com/AlanD20/mvmctl/releases); do not use `releases/latest` while it may still point to an older installation contract. For current development, use the source-build path below in a disposable environment.
 
 ```bash
-curl -L -o ./mvm https://github.com/AlanD20/mvmctl/releases/latest/download/mvm
+curl -fL -o ./mvm https://github.com/AlanD20/mvmctl/releases/download/v0.3.0/mvm
 chmod +x ./mvm
 sudo ./mvm host install-system
 sudo /usr/local/bin/mvm host init
@@ -85,7 +86,7 @@ sudo /usr/local/bin/mvm host init
 ```bash
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
-./scripts/build.sh release
+./scripts/build.sh release --version 0.3.0-rc.1
 sudo ./dist/mvm host install-system
 sudo /usr/local/bin/mvm host init
 /usr/local/bin/mvm --help
@@ -101,16 +102,20 @@ See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference 
 # 1. One-time system setup after installing the root-owned binary
 sudo /usr/local/bin/mvm host init
 
-# 2. Log out and back in, then download a kernel and image
+# 2. Log out and back in, then initialize the operator cache and the exact qualified binary pair
+mvm init --skip-host --non-interactive --binary-version 1.16.1
+
+# 3. Download a kernel and image
 mvm kernel pull --type firecracker --default
 mvm image pull ubuntu:24.04 --default
 
-# 3. Create and connect to a VM
+# 4. Create and connect to a VM
 mvm vm create myvm --image ubuntu:24.04 --vcpu 2 --mem 2G --disk-size 20G
 mvm exec myvm                    # vsock agent — no SSH needed
 ```
 
-That's it. When you're done: `mvm vm rm myvm`.
+`--binary-version` is used by `mvm init` only when no local pair is selected. If a different pair is already the
+default, run `mvm bin pull 1.16.1 --default` before creating a VM. When you're done: `mvm vm rm myvm`.
 
 ---
 
