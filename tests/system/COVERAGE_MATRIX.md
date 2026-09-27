@@ -45,6 +45,17 @@ VM. Focused Go volume and full root-effect Jailer packages plus changed-package 
 passed in that runner. This does not qualify managed-network snapshots, concurrent writers, crash recovery, the full
 Python matrix, or the release.
 
+**Restore-failure regression (2026-09-27):** The single
+`TestNetworklessJailerLifecycle::test_restore_missing_release_leaves_no_vm_projection` case passed against the
+installed `0.3.0-rc.snapshot-receipt` candidate inside only `mvmctl-030-test`. It captured a networkless VM,
+removed its source VM, made the captured release unavailable through the normal root-authorized `bin rm` route,
+and proved restore returned an error with no target projection. Snapshot removal succeeded, proving no protected
+restore reference remained. The case failed against the preceding `0.3.0-rc.snapshot-ref-fix` candidate for the
+intended `partial` response and orphan VM without root authority; that exact test-owned orphan and snapshot were
+removed after root/process/reference checks. The mirrored release and both original defaults were restored, the
+current candidate was reinstalled, and the private VM/snapshot lists were empty. This is one pre-spawn failure
+path, not post-spawn cleanup, transport-uncertainty, or full snapshot-domain qualification.
+
 **Protected cgroup-inspection checkpoint (2026-09-27):** Commit `89c5137e` replaces the unprivileged direct cgroup
 reader with an authenticated, fixed-path, descriptor-pinned root observation and removes the obsolete reader. Pinned
 Go 1.26.3 affected-package tests, full root Jailer tests, vet, formatting, and one-pass read-only security review
@@ -348,7 +359,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `snapshot ls --json` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore` | L2 — JSON list |
 | `snapshot inspect <id>` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotInspect::test_snapshot_inspect` | L1 — inspect succeeds |
 | `snapshot inspect <id> --json` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotInspect::test_snapshot_inspect_json` | L2 — JSON fields verified |
-| `snapshot restore <id> <name>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless restore passed with no endpoint, independent attached-volume bytes, vsock exec, and checked teardown; managed-network and fault paths remain unqualified. |
+| `snapshot restore <id> <name>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused networkless restore passed with no endpoint, independent attached-volume bytes, vsock exec, and checked teardown. A red-green installed-candidate L2 case proves pre-spawn missing-release failure leaves no VM projection or snapshot reference. Managed-network, post-spawn, and transport-uncertain paths remain unqualified. |
 | `snapshot restore --resume` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless restore resumed, preserved absent endpoint, restored independent data-volume bytes, and allowed vsock exec. Other placements remain unqualified. |
 | `snapshot restore --network` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestSnapshotRestoreNetwork`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless snapshot rejected a managed-network override without creating a target VM. The legacy test expects a different network; that outdated positive contract still needs reconciliation, and managed-network override behavior remains unqualified. |
 | `snapshot rm <id>` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotDestroyRestore` | L2 — cleanup via --force |

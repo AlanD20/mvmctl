@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+import platform
 import shlex
 import socket
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Generator
 
 import pytest
@@ -574,6 +577,109 @@ class TestNetworklessJailerLifecycle:
                 _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
             )
             assert all(snapshot["name"] != snapshot_name for snapshot in snapshots)
+
+    def test_restore_missing_release_leaves_no_vm_projection(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """A root rejection before launch must not strand a user-side VM record."""
+        ensure_vm_deps(runner_vm)
+        binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        original = next(
+            binary for binary in binaries
+            if binary["type"] == "firecracker" and binary["is_default"]
+        )
+        original_jailer = next(
+            binary for binary in binaries
+            if binary["type"] == "jailer" and binary["is_default"]
+        )
+        source_version, alternate_version = "1.16.1", "1.16.0"
+        mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
+        for version in (source_version, alternate_version):
+            archive = mirror / f"firecracker-v{version}-{platform.machine()}.tgz"
+            assert archive.is_file(), f"restore test requires mirrored {archive.name} for cleanup"
+        initially_present = {
+            version: all(any(
+                binary["type"] == binary_type and binary["version"] == version
+                and binary["is_present"] for binary in binaries
+            ) for binary_type in ("firecracker", "jailer"))
+            for version in (source_version, alternate_version)
+        }
+        source_name = networkless_vm_name
+        target_name = f"{source_name}-failed-restore"
+        snapshot_name = f"sys-restore-failure-{uuid.uuid4().hex[:8]}"
+        snapshot_id: str | None = None
+        release_removed = False
+        try:
+            for version in (source_version, alternate_version):
+                if not initially_present[version]:
+                    _run_mvm(runner_vm, "bin", "pull", version, timeout=300)
+            binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+            source = next(
+                binary for binary in binaries
+                if binary["type"] == "firecracker" and binary["version"] == source_version
+                and binary["is_present"]
+            )
+            alternate = next(
+                binary for binary in binaries
+                if binary["type"] == "firecracker" and binary["version"] == alternate_version
+                and binary["is_present"]
+            )
+            _run_mvm(runner_vm, "bin", "default", source["id"])
+            _run_mvm(
+                runner_vm, "vm", "create", source_name, "--no-network", "--cloud-init-mode", "off",
+                "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                timeout=180,
+            )
+            captured = _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "create", source_name, "--name", snapshot_name,
+                         "--json", timeout=180).stdout,
+                dict,
+            )
+            snapshot_id = captured["id"]
+            _run_mvm(runner_vm, "vm", "rm", source_name, "--force", timeout=120)
+            _run_mvm(runner_vm, "bin", "default", alternate["id"])
+            _run_mvm(runner_vm, "bin", "rm", source_version, "--force")
+            release_removed = True
+
+            denied = _run_mvm(
+                runner_vm, "snapshot", "restore", snapshot_id, target_name, "--json", check=False,
+            )
+            assert denied.returncode != 0
+            response = json.loads(denied.stdout)
+            assert response["status"] == "error"
+            assert response["data"] is None
+            assert "did not launch VM" in response["error"]["message"]
+            assert all(vm["name"] != target_name for vm in _parse_vm_list(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+            ))
+            # Snapshot removal reaches the root-owned reference check; a leaked
+            # restore reference would reject this operation.
+            _run_mvm(runner_vm, "snapshot", "rm", snapshot_id, "--force")
+            snapshot_id = None
+        finally:
+            if release_removed:
+                _run_mvm(runner_vm, "bin", "pull", source_version, timeout=300)
+            _run_mvm(runner_vm, "bin", "default", original["id"])
+            _run_mvm(runner_vm, "bin", "default", original_jailer["id"])
+            if snapshot_id is not None:
+                removed = _run_mvm(runner_vm, "snapshot", "rm", snapshot_id, "--force", check=False)
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            for vm_name in (target_name, source_name):
+                listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+                if any(vm["name"] == vm_name for vm in listed):
+                    removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120)
+                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            for version in (source_version, alternate_version):
+                if not initially_present[version]:
+                    _run_mvm(runner_vm, "bin", "rm", version, "--force")
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(vm["name"] not in (source_name, target_name) for vm in listed)
+            snapshots = _json_success_data(_run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list)
+            assert all(snapshot["name"] != snapshot_name for snapshot in snapshots)
+            final_binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+            assert {binary["type"]: binary["id"] for binary in final_binaries if binary["is_default"]} == {
+                "firecracker": original["id"], "jailer": original_jailer["id"],
+            }
 
     def test_create_restart_reboot_and_vsock_exec_without_guest_nic(
         self, runner_vm: str, networkless_vm_name: str,

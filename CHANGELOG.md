@@ -86,8 +86,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Failed snapshot restore retains the protected snapshot reference whenever registration returns a live launch lease,
   including a post-publication durability error. For a root-confirmed failure before child spawn, or after an
   unregistered child is reaped and its snapshot reference removed, restore can remove its local VM projection and
-  reserved lease. Transport failures and incomplete root cleanup still retain them for recovery. This failure path
-  has focused Go checks but not yet an installed-candidate system regression.
+  reserved lease. Transport failures and incomplete root cleanup still retain them for recovery. A focused
+  installed-candidate Python regression proved the pre-spawn rejection without an orphan VM or leaked snapshot
+  reference, and failed against the previous candidate for the intended `partial`/orphan behavior. Other
+  partial-failure paths remain unqualified.
 
 - Typed launch now admits PCI for the pinned Firecracker 1.16.1 profile, accounting for the usable PCI bus slots and
   MSI-X vectors of the complete generated device set. The authenticated child receives the transport choice and adds
