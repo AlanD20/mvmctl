@@ -33,6 +33,7 @@ type priorBootRecord struct {
 	SchemaVersion     uint32          `json:"schema_version"`
 	OwnerUID          uint32          `json:"owner_uid"`
 	VMID              string          `json:"vm_id"`
+	NetworkPlacement  string          `json:"network_placement"`
 	Lifecycle         string          `json:"lifecycle"`
 	LaunchGeneration  uint64          `json:"launch_generation"`
 	CleanupGeneration uint64          `json:"cleanup_generation"`
@@ -41,13 +42,18 @@ type priorBootRecord struct {
 }
 
 type priorBootLaunch struct {
-	OwnerGID       uint32          `json:"owner_gid"`
-	HostBootID     string          `json:"host_boot_id"`
-	PID            int             `json:"pid"`
-	StartTimeTicks uint64          `json:"start_time_ticks"`
-	Relay          json.RawMessage `json:"relay"`
-	ManagedCache   json.RawMessage `json:"managed_cache"`
-	Release        json.RawMessage `json:"release"`
+	OwnerGID          uint32          `json:"owner_gid"`
+	NetworkPlacement  string          `json:"network_placement"`
+	ExecutionIdentity json.RawMessage `json:"execution_identity"`
+	SnapshotID        string          `json:"snapshot_id"`
+	CacheLocator      string          `json:"cache_locator"`
+	OutputIdentity    json.RawMessage `json:"output_identity,omitempty"`
+	HostBootID        string          `json:"host_boot_id"`
+	PID               int             `json:"pid"`
+	StartTimeTicks    uint64          `json:"start_time_ticks"`
+	Relay             json.RawMessage `json:"relay"`
+	ManagedCache      json.RawMessage `json:"managed_cache"`
+	Release           json.RawMessage `json:"release"`
 }
 
 // ProvePriorBootVMAbsence derives all evidence from fixed receiver-owned paths
@@ -201,26 +207,9 @@ func readPriorBootRecord(ctx context.Context, owner uint32, key VMKey) (_ priorB
 	if err != nil {
 		return priorBootRecord{}, err
 	}
-	if err := scanPriorBootJSON(json.NewDecoder(bytes.NewReader(raw)), 0); err != nil {
+	record, err := decodePriorBootRecord(raw, owner, key)
+	if err != nil {
 		return priorBootRecord{}, err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	var record priorBootRecord
-	if err := decoder.Decode(&record); err != nil {
-		return priorBootRecord{}, err
-	}
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return priorBootRecord{}, fmt.Errorf("authorityfs: prior-boot record contains trailing data")
-	}
-	if record.SchemaVersion != 3 || record.OwnerUID != owner || record.VMID != key.value ||
-		record.Lifecycle != "cleaning" ||
-		record.LaunchGeneration == 0 || record.CleanupGeneration == 0 || record.Launch.OwnerGID == 0 ||
-		record.Launch.PID <= 0 || record.Launch.StartTimeTicks == 0 ||
-		!priorBootIDPattern.MatchString(record.Launch.HostBootID) ||
-		len(record.Launch.Relay) == 0 || len(record.Launch.ManagedCache) == 0 ||
-		len(record.Launch.Release) == 0 {
-		return priorBootRecord{}, fmt.Errorf("authorityfs: prior-boot root record binding is invalid")
 	}
 	var after, entry unix.Stat_t
 	if err := unix.Fstat(fd, &after); err != nil {
@@ -234,6 +223,35 @@ func readPriorBootRecord(ctx context.Context, owner uint32, key VMKey) (_ priorB
 		after.Ctim != stat.Ctim || entry.Dev != stat.Dev || entry.Ino != stat.Ino || entry.Mode != stat.Mode ||
 		entry.Uid != stat.Uid || entry.Gid != stat.Gid || entry.Nlink != stat.Nlink {
 		return priorBootRecord{}, fmt.Errorf("authorityfs: prior-boot root record changed during admission")
+	}
+	return record, nil
+}
+
+// decodePriorBootRecord projects the schema-5 fields needed by prior-boot absence.
+func decodePriorBootRecord(raw []byte, owner uint32, key VMKey) (priorBootRecord, error) {
+	if err := scanPriorBootJSON(json.NewDecoder(bytes.NewReader(raw)), 0); err != nil {
+		return priorBootRecord{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var record priorBootRecord
+	if err := decoder.Decode(&record); err != nil {
+		return priorBootRecord{}, err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return priorBootRecord{}, fmt.Errorf("authorityfs: prior-boot record contains trailing data")
+	}
+	if record.SchemaVersion != 5 || record.OwnerUID != owner || record.VMID != key.value ||
+		(record.NetworkPlacement != "managed" && record.NetworkPlacement != "networkless") ||
+		record.Lifecycle != "cleaning" ||
+		record.LaunchGeneration == 0 || record.CleanupGeneration != record.LaunchGeneration ||
+		record.Launch.OwnerGID == 0 || record.Launch.NetworkPlacement != record.NetworkPlacement ||
+		len(record.Launch.ExecutionIdentity) == 0 || record.Launch.CacheLocator == "" ||
+		record.Launch.PID <= 0 || record.Launch.StartTimeTicks == 0 ||
+		!priorBootIDPattern.MatchString(record.Launch.HostBootID) ||
+		len(record.Launch.Relay) == 0 || len(record.Launch.ManagedCache) == 0 ||
+		len(record.Launch.Release) == 0 {
+		return priorBootRecord{}, fmt.Errorf("authorityfs: prior-boot root record binding is invalid")
 	}
 	return record, nil
 }
