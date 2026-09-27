@@ -66,6 +66,15 @@ root-effect Jailer package separately passed under runner root. The generated co
 ignored repo-local `.tmp`, leaving the checkout with no tracked or untracked source changes. This is local Go
 evidence, not GitHub CI or the complete installed-candidate Python release matrix.
 
+**Complete network-domain checkpoint (2026-09-27):** Installed `mvm 0.3.0-rc.d0db3be6` in only the named
+`mvmctl-030-test` runner passed all 47 tests in `tests/system/network/` (network lifecycle, fixed nftables, and
+same-/cross-network TCP traffic-policy journeys). The schema-1 report at
+`/home/runner/mvmctl-030-ci-613b0cc4/.tmp/qa-network-domain-6270e5dd.json` recorded 47 collected/passed and zero
+failed, errors, collection errors, skips, deselections, XFAIL, or XPASS. Installed CLI readback found empty VM,
+network, exec-policy, and traffic-policy inventories afterward. This qualifies this local domain run, not VM-source
+or UDP grants, adversarial firewall recovery, prior-boot live-network reconciliation, the full Python matrix,
+GitHub CI, or the release.
+
 **Same-network traffic-policy checkpoint (2026-09-27):** A live nft trace in the named runner proved that a
 same-network SYN, despite an exact bridge allow, also reached inet forward with both logical interfaces equal to
 the managed bridge and hit its default drop while `net.bridge.bridge-nf-call-iptables=1`. Commit `1a6255f3`
