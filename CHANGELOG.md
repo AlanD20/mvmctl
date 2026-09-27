@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Python cases there. Against the installed `0.3.0-rc.5` candidate, 26 selected SSH-key cases and all five internal
 > service entry-point cases passed there; two bridge-dependent key cases were deselected. The broader installed-candidate
 > Python release matrix has not run.
+> A later clean checkout at `5fcb3b87`, including the unused raw-sudo helper and privileged service-spawn removal,
+> passed offline tidy with no tracked diff, gofmt, verified golines v0.13.0, agent generation with no tracked diff,
+> vet, the complete unprivileged Go CI selection, and the separate full root-effect Jailer package under pinned Go
+> 1.26.3 inside that same runner. This is local exact-source Go evidence, not GitHub CI or installed-candidate Python
+> release qualification.
 > Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation.
 > A focused networkless data-volume capture/restore journey passed against an installed candidate inside the named
 > disposable runner; this does not qualify the managed-network or full Python release matrix.
