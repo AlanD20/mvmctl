@@ -245,6 +245,7 @@ func (c *Controller) SnapshotRestore(
 	}
 	c.vm.IPv4, c.vm.MAC, c.vm.NetworkID = result.Configuration.GuestIPv4, result.Configuration.GuestMAC,
 		model.VMNetworkID(result.Configuration.NetworkID)
+	c.vm.NetworkPlacement = result.Configuration.NetworkPlacement
 	c.vm.VCPUCount, c.vm.MemSizeMiB = result.Configuration.VCPUCount, result.Configuration.MemSizeMiB
 	c.vm.CgroupLimits = result.Configuration.CgroupLimits
 	c.vm.KernelID = result.Configuration.KernelID

@@ -109,6 +109,7 @@ func (record snapshotCaptureRecord) projection(paused bool) model.SnapshotCaptur
 		VCPUCount:           record.Source.Config.MachineConfig.VCPUCount,
 		MemSizeMiB:          record.Source.Config.MachineConfig.MemSizeMiB,
 		RootfsBytes:         record.Source.Rootfs.bytes,
+		NetworkPlacement:    record.Source.NetworkPlacement,
 		NetworkID:           record.Source.NetworkID,
 		GuestIPv4:           record.Source.GuestIPv4,
 		GuestMAC:            record.Source.GuestMAC,

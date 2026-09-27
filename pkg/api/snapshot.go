@@ -49,10 +49,6 @@ func (op *Operation) SnapshotCreate(
 	if err != nil {
 		return nil, err
 	}
-	if vmItem.NetworkPlacement != model.VMNetworkPlacementManaged {
-		return nil, errs.New(errs.CodeSnapshotCreateFailed,
-			"snapshot capture requires a managed-network VM until networkless volume-consistent restore is implemented")
-	}
 	sourceVsock, err := op.Repos.Vsock.GetByVMID(ctx, vmItem.ID)
 	if err != nil {
 		return nil, err
@@ -133,7 +129,7 @@ func (op *Operation) SnapshotRestore(
 	if input.Count != 1 {
 		return nil, errs.New(
 			errs.CodeSnapshotRestoreFailed,
-			"a snapshot preserves one exact guest IP/MAC endpoint; concurrent duplicate restores would conflict",
+			"snapshot restore currently accepts exactly one target VM per invocation",
 		)
 	}
 	snapshot, err := input.ResolveSnapshot(ctx, op.Repos.Snapshot)
@@ -146,6 +142,10 @@ func (op *Operation) SnapshotRestore(
 		return nil, err
 	}
 	if input.Network != nil && *input.Network != "" {
+		if projection.NetworkPlacement != model.VMNetworkPlacementManaged {
+			return nil, errs.New(errs.CodeSnapshotRestoreFailed,
+				"a networkless snapshot cannot restore onto a managed network")
+		}
 		selected, err := input.ResolveNetwork(ctx, op.Repos.Network)
 		if err != nil {
 			return nil, err
@@ -169,19 +169,23 @@ func (op *Operation) SnapshotRestore(
 	// have committed at root, even when both start within the same second.
 	vmID := crypto.VMID(input.Name, created+":"+crypto.UUIDV4())
 	directory := filepath.Join(op.CacheDir, "vms", vmID)
-	// CRITICAL: A restored guest keeps its captured endpoint. Reserve that exact
-	// address before publishing a VM record or asking root to restore it.
-	lease, err := op.Repos.Lease.Acquire(ctx, projection.NetworkID, projection.GuestIPv4, &vmID)
-	if err != nil {
-		// Acquire may have inserted the row before its readback failed. Root has
-		// not been called, so releasing only this new VM's lease is safe.
-		cleanupErr := op.Repos.Lease.ReleaseByVM(context.WithoutCancel(ctx), vmID)
-		return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
-			"reserve captured IP for restored VM "+vmID, errors.Join(err, cleanupErr))
-	}
-	if lease == nil || lease.VMID == nil || *lease.VMID != vmID {
-		return nil, errs.New(errs.CodeSnapshotRestoreFailed,
-			"captured IP "+projection.GuestIPv4+" is already leased on network "+projection.NetworkID)
+	leaseAcquired := false
+	if projection.NetworkPlacement == model.VMNetworkPlacementManaged {
+		// CRITICAL: A managed guest keeps its captured endpoint. Reserve that exact
+		// address before publishing a VM record or asking root to restore it.
+		lease, err := op.Repos.Lease.Acquire(ctx, projection.NetworkID, projection.GuestIPv4, &vmID)
+		if err != nil {
+			// Acquire may have inserted the row before its readback failed. Root has
+			// not been called, so releasing only this new VM's lease is safe.
+			cleanupErr := op.Repos.Lease.ReleaseByVM(context.WithoutCancel(ctx), vmID)
+			return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
+				"reserve captured IP for restored VM "+vmID, errors.Join(err, cleanupErr))
+		}
+		if lease == nil || lease.VMID == nil || *lease.VMID != vmID {
+			return nil, errs.New(errs.CodeSnapshotRestoreFailed,
+				"captured IP "+projection.GuestIPv4+" is already leased on network "+projection.NetworkID)
+		}
+		leaseAcquired = true
 	}
 	var item *model.VMItem
 	var directoryCreated, vmRecordAttempted, vsockRecordAttempted, rootAttempted bool
@@ -199,7 +203,7 @@ func (op *Operation) SnapshotRestore(
 		if cleanupErr == nil && vmRecordAttempted {
 			cleanupErr = op.Repos.VM.Delete(cleanupCtx, vmID)
 		}
-		if cleanupErr == nil {
+		if cleanupErr == nil && leaseAcquired {
 			cleanupErr = op.Repos.Lease.ReleaseByVM(cleanupCtx, vmID)
 		}
 		if cleanupErr == nil && directoryCreated {
@@ -224,7 +228,7 @@ func (op *Operation) SnapshotRestore(
 		Status:           model.VMStatusStarting,
 		IPv4:             projection.GuestIPv4,
 		MAC:              projection.GuestMAC,
-		NetworkPlacement: model.VMNetworkPlacementManaged,
+		NetworkPlacement: projection.NetworkPlacement,
 		NetworkID:        model.VMNetworkID(projection.NetworkID),
 		KernelID:         projection.KernelID,
 		ImageID:          snapshot.ImageID,

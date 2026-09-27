@@ -108,6 +108,9 @@ func removeJailDirectory(
 		return processAuthorityError(record.vmID, "stopped jail root differs from committed identity", nil)
 	}
 	if kind == jailCleanupRoot {
+		if err := removeStoppedSnapshotProducerDirectories(ctx, fd, record); err != nil {
+			return err
+		}
 		if err := archiveStoppedVMLaunchDevices(ctx, record, fd); err != nil {
 			return err
 		}

@@ -51,31 +51,32 @@ type SnapshotRestoreConfig struct {
 // SnapshotCaptureResult is a display projection of the root-authenticated capture.
 // It is not a capability to reopen artifacts or choose restore configuration.
 type SnapshotCaptureResult struct {
-	SnapshotID          string         `json:"snapshot_id"`
-	SourceVMID          string         `json:"source_vm_id"`
-	Mode                string         `json:"mode"`
-	Paused              bool           `json:"paused"`
-	VCPUCount           int            `json:"vcpu_count"`
-	MemSizeMiB          int            `json:"mem_size_mib"`
-	RootfsBytes         uint64         `json:"rootfs_bytes"`
-	NetworkID           string         `json:"network_id"`
-	GuestIPv4           string         `json:"guest_ipv4"`
-	GuestMAC            string         `json:"guest_mac"`
-	ReleaseVersion      string         `json:"release_version"`
-	ReleaseArchitecture string         `json:"release_architecture"`
-	FirecrackerSHA256   string         `json:"firecracker_sha256"`
-	JailerSHA256        string         `json:"jailer_sha256"`
-	KernelID            string         `json:"kernel_id"`
-	PCIEnabled          bool           `json:"pci_enabled"`
-	NestedVirt          bool           `json:"nested_virt"`
-	CloudInit           bool           `json:"cloud_init"`
-	BootArgs            string         `json:"boot_args"`
-	CgroupLimits        VMCgroupLimits `json:"cgroup_limits"`
-	CPUConfig           *CpuConfig     `json:"cpu_config,omitempty"`
-	VsockCID            *uint32        `json:"vsock_cid,omitempty"`
-	Logging             bool           `json:"logging"`
-	Metrics             bool           `json:"metrics"`
-	LogLevel            string         `json:"log_level"`
+	SnapshotID          string             `json:"snapshot_id"`
+	SourceVMID          string             `json:"source_vm_id"`
+	Mode                string             `json:"mode"`
+	Paused              bool               `json:"paused"`
+	VCPUCount           int                `json:"vcpu_count"`
+	MemSizeMiB          int                `json:"mem_size_mib"`
+	RootfsBytes         uint64             `json:"rootfs_bytes"`
+	NetworkPlacement    VMNetworkPlacement `json:"network_placement"`
+	NetworkID           string             `json:"network_id"`
+	GuestIPv4           string             `json:"guest_ipv4"`
+	GuestMAC            string             `json:"guest_mac"`
+	ReleaseVersion      string             `json:"release_version"`
+	ReleaseArchitecture string             `json:"release_architecture"`
+	FirecrackerSHA256   string             `json:"firecracker_sha256"`
+	JailerSHA256        string             `json:"jailer_sha256"`
+	KernelID            string             `json:"kernel_id"`
+	PCIEnabled          bool               `json:"pci_enabled"`
+	NestedVirt          bool               `json:"nested_virt"`
+	CloudInit           bool               `json:"cloud_init"`
+	BootArgs            string             `json:"boot_args"`
+	CgroupLimits        VMCgroupLimits     `json:"cgroup_limits"`
+	CPUConfig           *CpuConfig         `json:"cpu_config,omitempty"`
+	VsockCID            *uint32            `json:"vsock_cid,omitempty"`
+	Logging             bool               `json:"logging"`
+	Metrics             bool               `json:"metrics"`
+	LogLevel            string             `json:"log_level"`
 }
 
 // SnapshotRestoredVolume projects a new independent disk while retaining its guest drive identity.

@@ -84,5 +84,10 @@ func validateSnapshotProjection(result model.SnapshotCaptureResult, snapshotID s
 	if _, err := managedSnapshotMemoryBytes(result.MemSizeMiB); err != nil {
 		return err
 	}
+	if err := validateLaunchDevicePlacement(
+		result.NetworkPlacement, result.NetworkID, result.GuestIPv4, result.GuestMAC,
+	); err != nil {
+		return err
+	}
 	return (ReleaseSlot{Version: result.ReleaseVersion, Architecture: result.ReleaseArchitecture}).Validate()
 }

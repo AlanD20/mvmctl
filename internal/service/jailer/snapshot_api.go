@@ -114,7 +114,7 @@ func (session *snapshotAPISession) resume(ctx context.Context) error {
 }
 
 func snapshotProducerPath(snapshotID string) string {
-	return managedVMPrivateRuntimeMountPath + "/capture-" + snapshotID
+	return "/capture-" + snapshotID
 }
 
 func (session *snapshotAPISession) apply(

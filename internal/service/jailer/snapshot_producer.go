@@ -7,21 +7,23 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The root-only ancestor of the execution runtime excludes operator writers. The temporary
-// directory is private to the already-admitted producer, never used as immutable restore backing.
+// The admitted jail root is disk-backed and excludes operator writers. Snapshot RAM must
+// not be staged in the small /run tmpfs. This directory is private to the producer and
+// never used as immutable restore backing.
 func prepareSnapshotProducerDirectory(
 	ctx context.Context,
-	session *snapshotAPISession,
+	rootFD int,
+	record instanceRecord,
 	snapshotID string,
 ) (_ int, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return -1, err
 	}
 	name := "capture-" + snapshotID
-	if err := unix.Mkdirat(session.directoryFD, name, 0700); err != nil {
+	if err := unix.Mkdirat(rootFD, name, 0700); err != nil {
 		return -1, err
 	}
-	fd, err := unix.Openat2(session.directoryFD, name, &unix.OpenHow{
+	fd, err := unix.Openat2(rootFD, name, &unix.OpenHow{
 		Flags:   unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW,
 		Resolve: managedVMResourceResolveFlags,
 	})
@@ -35,15 +37,15 @@ func prepareSnapshotProducerDirectory(
 	}()
 	if err := unix.Fchown(
 		fd,
-		int(session.record.active.userIDs.effective),
-		int(session.record.active.groupIDs.effective),
+		int(record.active.userIDs.effective),
+		int(record.active.groupIDs.effective),
 	); err != nil {
 		return -1, err
 	}
 	if err := unix.Fchmod(fd, 0700); err != nil {
 		return -1, err
 	}
-	if err := unix.Fsync(session.directoryFD); err != nil {
+	if err := unix.Fsync(rootFD); err != nil {
 		return -1, err
 	}
 	return fd, nil
@@ -100,7 +102,8 @@ func copySnapshotProducerArtifact(
 
 func removeSnapshotProducerDirectory(
 	ctx context.Context,
-	session *snapshotAPISession,
+	rootFD int,
+	record instanceRecord,
 	producerFD int,
 	snapshotID string,
 ) error {
@@ -112,8 +115,8 @@ func removeSnapshotProducerDirectory(
 		if err := unix.Fstatat(producerFD, leaf, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 			return err
 		}
-		if stat.Mode != unix.S_IFREG|0600 || stat.Uid != session.record.active.userIDs.effective ||
-			stat.Gid != session.record.active.groupIDs.effective || stat.Nlink != 1 {
+		if stat.Mode != unix.S_IFREG|0600 || stat.Uid != record.active.userIDs.effective ||
+			stat.Gid != record.active.groupIDs.effective || stat.Nlink != 1 {
 			return instanceValidationError("snapshot temporary producer artifact identity changed")
 		}
 		if err := unix.Unlinkat(producerFD, leaf, 0); err != nil {
@@ -125,14 +128,14 @@ func removeSnapshotProducerDirectory(
 		return err
 	}
 	name := "capture-" + snapshotID
-	if err := unix.Fstatat(session.directoryFD, name, &current, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+	if err := unix.Fstatat(rootFD, name, &current, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return err
 	}
 	if pinned.Dev != current.Dev || pinned.Ino != current.Ino {
 		return instanceValidationError("snapshot temporary directory identity changed")
 	}
-	if err := unix.Unlinkat(session.directoryFD, name, unix.AT_REMOVEDIR); err != nil {
+	if err := unix.Unlinkat(rootFD, name, unix.AT_REMOVEDIR); err != nil {
 		return err
 	}
-	return unix.Fsync(session.directoryFD)
+	return unix.Fsync(rootFD)
 }

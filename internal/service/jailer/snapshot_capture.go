@@ -177,7 +177,7 @@ func (server *VMSnapshotServer) Capture(
 		}
 		// An uncertain or failed operation deliberately leaves the source paused. No
 		// deferred resume may race an unfinished capture after a broken API exchange.
-		producerFD, err = prepareSnapshotProducerDirectory(ctx, session, request.SnapshotID)
+		producerFD, err = prepareSnapshotProducerDirectory(ctx, rootFD, record, request.SnapshotID)
 		if err != nil {
 			return model.SnapshotCaptureResult{}, err
 		}
@@ -228,7 +228,7 @@ func (server *VMSnapshotServer) Capture(
 	}
 	paused := session != nil
 	if session != nil {
-		if err := removeSnapshotProducerDirectory(ctx, session, producerFD, request.SnapshotID); err != nil {
+		if err := removeSnapshotProducerDirectory(ctx, rootFD, record, producerFD, request.SnapshotID); err != nil {
 			return capture.projection(paused), err
 		}
 		if wasRunning && !request.PauseOnly {

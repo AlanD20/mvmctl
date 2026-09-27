@@ -463,6 +463,109 @@ class TestNetworklessJailerLifecycle:
             )
             assert all(volume["name"] != volume_name for volume in volumes)
 
+    def test_networkless_snapshot_restores_independent_data_volume(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """A full capture restores the original volume bytes without an IP endpoint."""
+        ensure_vm_deps(runner_vm)
+        source_name = networkless_vm_name
+        restored_name = f"{source_name}-restore"
+        volume_name = f"sys-snapshot-vol-{uuid.uuid4().hex[:8]}"
+        snapshot_name = f"sys-snapshot-{uuid.uuid4().hex[:8]}"
+        restored_volume_ids: set[str] = set()
+        try:
+            _run_mvm(runner_vm, "volume", "create", volume_name, "16M", "--json")
+            _run_mvm(
+                runner_vm, "vm", "create", source_name, "--no-network", "--cloud-init-mode", "off",
+                "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                "--volume", volume_name, "--json", timeout=180,
+            )
+            _run_mvm(
+                runner_vm, "exec", source_name, "--", "dd", "if=/dev/urandom", "of=/dev/vdb",
+                "bs=4096", "count=1", "conv=fsync", timeout=30,
+            )
+            captured_hash = _run_mvm(
+                runner_vm, "exec", source_name, "--", "sha256sum", "/dev/vdb", timeout=30,
+            ).stdout.split()[0]
+
+            captured = _json_success_data(
+                _run_mvm(
+                    runner_vm, "snapshot", "create", source_name, "--name", snapshot_name,
+                    "--json", timeout=180,
+                ).stdout,
+                dict,
+            )
+            assert captured["memory_file"] and captured["state_file"]
+
+            _run_mvm(
+                runner_vm, "exec", source_name, "--", "dd", "if=/dev/zero", "of=/dev/vdb",
+                "bs=4096", "count=1", "conv=fsync", timeout=30,
+            )
+            changed_hash = _run_mvm(
+                runner_vm, "exec", source_name, "--", "sha256sum", "/dev/vdb", timeout=30,
+            ).stdout.split()[0]
+            assert changed_hash != captured_hash
+
+            _run_mvm(runner_vm, "vm", "rm", source_name, "--force", timeout=120)
+            _run_mvm(runner_vm, "volume", "rm", volume_name, "--force")
+            restored = _json_success_data(
+                _run_mvm(
+                    runner_vm, "snapshot", "restore", captured["id"], restored_name,
+                    "--resume", "--json", timeout=180,
+                ).stdout,
+                list,
+            )
+            assert len(restored) == 1
+            assert restored[0]["network_placement"] == "networkless"
+            assert not restored[0]["network_id"]
+            assert not restored[0]["ipv4"]
+            assert not restored[0]["mac"]
+            restored_hash = _run_mvm(
+                runner_vm, "exec", restored_name, "--", "sha256sum", "/dev/vdb", timeout=30,
+            ).stdout.split()[0]
+            assert restored_hash == captured_hash
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            restored_volumes = [volume for volume in volumes if volume.get("vm_id") == restored[0]["id"]]
+            assert len(restored_volumes) == 1
+            restored_volume_ids = {restored_volumes[0]["id"]}
+        finally:
+            for vm_name in (restored_name, source_name):
+                listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+                if any(vm["name"] == vm_name for vm in listed):
+                    removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120)
+                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            for volume in volumes:
+                if volume["name"] == volume_name or volume["id"] in restored_volume_ids:
+                    removed = _run_mvm(
+                        runner_vm, "volume", "rm", volume["id"], "--force", check=False,
+                    )
+                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            snapshots = _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            )
+            for snapshot in snapshots:
+                if snapshot["name"] == snapshot_name:
+                    removed = _run_mvm(
+                        runner_vm, "snapshot", "rm", snapshot["id"], "--force", check=False,
+                    )
+                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(vm["name"] not in (source_name, restored_name) for vm in listed)
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            assert all(volume["name"] != volume_name and volume["id"] not in restored_volume_ids
+                       for volume in volumes)
+            snapshots = _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            )
+            assert all(snapshot["name"] != snapshot_name for snapshot in snapshots)
+
     def test_create_restart_reboot_and_vsock_exec_without_guest_nic(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:

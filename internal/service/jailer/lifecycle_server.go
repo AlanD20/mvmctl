@@ -180,7 +180,6 @@ func (server *VMLifecycleServer) launch(
 	}
 	if restore != nil {
 		intent.snapshotID = restore.snapshotID
-		restore.registered = true
 	}
 	launching, err = prepared.registerLaunching(
 		ctx,
@@ -190,6 +189,9 @@ func (server *VMLifecycleServer) launch(
 	)
 	if err != nil {
 		return VMLaunchResult{}, err
+	}
+	if restore != nil {
+		restore.registered = true
 	}
 	if err := launching.prepareJailDestination(ctx, realJailDestinationDeps()); err != nil {
 		return VMLaunchResult{}, err
@@ -242,9 +244,6 @@ func (server *VMLifecycleServer) launch(
 			network.VMIntent{NetworkID: request.NetworkID, GuestIPv4: guestIP, MAC: &request.GuestMAC},
 		)
 	case model.VMNetworkPlacementNetworkless:
-		if restore != nil {
-			return VMLaunchResult{}, instanceValidationError("networkless snapshot restore is not admitted")
-		}
 		err = launching.prepareProductionNetworkless(ctx)
 	default:
 		return VMLaunchResult{}, instanceValidationError("VM launch network placement is invalid")

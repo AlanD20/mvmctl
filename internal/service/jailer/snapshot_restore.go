@@ -231,7 +231,7 @@ func (prepared *preparedSnapshotRestore) launchRequest(cacheRoot string) VMLaunc
 		KernelID:         source.KernelID,
 		RootfsBytes:      source.Rootfs.bytes,
 		Release:          source.Release,
-		NetworkPlacement: model.VMNetworkPlacementManaged,
+		NetworkPlacement: source.NetworkPlacement,
 		NetworkID:        source.NetworkID,
 		GuestIPv4:        source.GuestIPv4,
 		GuestMAC:         source.GuestMAC,

@@ -330,9 +330,6 @@ func validateLaunchIntent(intent launchIntent) error {
 		intent.networkPlacement != model.VMNetworkPlacementNetworkless {
 		return instanceValidationError("instance launch network placement is invalid")
 	}
-	if intent.networkPlacement == model.VMNetworkPlacementNetworkless && intent.snapshotID != "" {
-		return instanceValidationError("networkless snapshot restore is not admitted")
-	}
 	if !hostBootIDPattern.MatchString(intent.hostBootID) {
 		return instanceValidationError("instance authority host boot ID is invalid")
 	}
@@ -421,9 +418,6 @@ func validateInstanceLaunchRecord(launch instanceLaunchRecord) error {
 	if launch.networkPlacement != model.VMNetworkPlacementManaged &&
 		launch.networkPlacement != model.VMNetworkPlacementNetworkless {
 		return fmt.Errorf("instance launch network placement is invalid")
-	}
-	if launch.networkPlacement == model.VMNetworkPlacementNetworkless && launch.snapshotID != "" {
-		return fmt.Errorf("networkless snapshot restore is not admitted")
 	}
 	if launch.outputIdentity != nil {
 		if launch.outputIdentity.log.device == 0 || launch.outputIdentity.log.inode == 0 {

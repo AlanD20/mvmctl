@@ -10,6 +10,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/service/network"
 )
 
@@ -29,13 +30,23 @@ func (prepared *preparedSnapshotRestore) loadIntoActive(
 		record.launch.release.architecture != source.Release.Architecture ||
 		record.launch.release.firecrackerSHA256 != source.FirecrackerSHA256 ||
 		record.launch.release.jailerSHA256 != source.JailerSHA256 ||
-		topology.OwnerUID != prepared.ownerUID ||
-		topology.VMID != prepared.targetVMID ||
-		topology.NetworkID != source.NetworkID ||
-		topology.GuestIPv4.String() != source.GuestIPv4 ||
-		topology.GuestMAC != source.GuestMAC ||
-		!managedVMHostDevicePattern.MatchString(topology.TAPName) {
-		return instanceValidationError("snapshot restore process/release/endpoint differs from captured authority")
+		record.networkPlacement != source.NetworkPlacement ||
+		record.launch.networkPlacement != source.NetworkPlacement {
+		return instanceValidationError("snapshot restore process/release/placement differs from captured authority")
+	}
+	switch source.NetworkPlacement {
+	case model.VMNetworkPlacementManaged:
+		if topology.OwnerUID != prepared.ownerUID || topology.VMID != prepared.targetVMID ||
+			topology.NetworkID != source.NetworkID || topology.GuestIPv4.String() != source.GuestIPv4 ||
+			topology.GuestMAC != source.GuestMAC || !managedVMHostDevicePattern.MatchString(topology.TAPName) {
+			return instanceValidationError("snapshot restore endpoint differs from captured authority")
+		}
+	case model.VMNetworkPlacementNetworkless:
+		if topology != (network.JailerNetworkConfig{}) {
+			return instanceValidationError("networkless snapshot restore received a managed endpoint")
+		}
+	default:
+		return instanceValidationError("snapshot restore network placement is invalid")
 	}
 	processes, err := reopenRecordedProcesses(ctx, realProcessRecoveryDeps(), record)
 	if err != nil {
@@ -120,16 +131,18 @@ func (prepared *preparedSnapshotRestore) loadIntoActive(
 		Memory          memoryBackend     `json:"mem_backend"`
 		TrackDirtyPages bool              `json:"track_dirty_pages"`
 		Resume          bool              `json:"resume_vm"`
-		Networks        []networkOverride `json:"network_overrides"`
+		Networks        []networkOverride `json:"network_overrides,omitempty"`
 		Vsock           *vsockOverride    `json:"vsock_override,omitempty"`
 	}{
 		State:           "/snapshot/vmstate",
 		Memory:          memoryBackend{Type: "File", Path: "/snapshot/memory"},
 		TrackDirtyPages: source.Config.MachineConfig.TrackDirtyPages,
 		Resume:          prepared.resume,
-		Networks: []networkOverride{
+	}
+	if source.NetworkPlacement == model.VMNetworkPlacementManaged {
+		request.Networks = []networkOverride{
 			{IfaceID: source.Config.NetworkInterfaces[0].IfaceID, HostDevName: topology.TAPName},
-		},
+		}
 	}
 	if source.Config.Vsock != nil {
 		request.Vsock = &vsockOverride{Path: managedVMPrivateRuntimeMountPath + "/" + infra.VMVsockSocketFilename}
