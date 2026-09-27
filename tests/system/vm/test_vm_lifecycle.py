@@ -436,10 +436,16 @@ class TestVMListInspect:
         for header in ("name", "status", "ipv4"):
             assert header in output.lower(), output
 
-    def test_inspect_json(self, runner_vm, listing_vm):
+    @pytest.mark.parametrize("selector", ["name", "ipv4", "id_prefix"])
+    def test_inspect_json(self, runner_vm, listing_vm, selector):
         """Inspect exposes the same selected VM, explicit resources, and public sections."""
+        identifier = {
+            "name": listing_vm["name"],
+            "ipv4": listing_vm["ipv4"],
+            "id_prefix": listing_vm["id"][:8],
+        }[selector]
         data = _json_success_data(
-            _run_mvm(runner_vm, "vm", "inspect", listing_vm["name"], "--json").stdout, dict,
+            _run_mvm(runner_vm, "vm", "inspect", identifier, "--json").stdout, dict,
         )
         for section in (
             "vm", "resources", "networking", "assets", "filesystem", "console",

@@ -36,6 +36,15 @@ created and stopped a VM using it, required `kernel.in_use` on ordinary removal,
 Independent VM/network inventories were empty afterward, no test-owned kernel remained, and the original default
 kernel remained. This does not qualify forced removal of a referenced kernel or the full kernel module.
 
+**Listing/inspection audit checkpoint (2026-09-28):** Commit `abbac386` consolidates duplicate and vacuous
+listing/inspection probes; a follow-up extends the same inspect owner to name, IPv4, and ID-prefix selection.
+The final ten cases cover read-only empty JSON listing, ls/ps JSON, actual ls/ps text, inspect JSON/text, and
+structured missing-VM console rejection. They share one explicitly small test-owned VM without unnecessary SSH
+setup. All ten collected and passed in only `mvmctl-030-test`; strict report
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/qa-crash-5b23766f/.tmp/qa-list-inspect-selectors-0928.json`
+records zero other outcomes. Independent VM/network inventories were empty. This qualifies that group, not the
+remaining lifecycle cases. The empty-list case no longer attempts global VM deletion.
+
 **Confirmed-crash recovery checkpoint (2026-09-28):** Commit `a1430018` replaces the obsolete CLI `kill`
 probe with one exact PID/start-tick/jail/executable-verified pidfd SIGKILL of a test-owned Firecracker inside only
 `mvmctl-030-test`. The test waits for that retained pidfd to prove exit before invoking public status, then requires
@@ -645,13 +654,14 @@ Specific legacy conflicts that must be rewritten before release:
 | `vm create` with `--cpu-template` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — merged cpu-config in Firecracker JSON |
 | `vm create` with `--no-nested-virt` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — no cpu-config, no nested boot args |
 | `vm ls` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMStateTransitions` | Root-authority running/stopped projection and confirmed external Firecracker exit (`crashed`) passed in focused installed-candidate cases. Guest-initiated exit and complete host-reboot qualification remain open. |
-| `vm ls --json` | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMListInspect`, `TestVMStateTransitions::test_crashed_vm_status_and_restart` | Installed-candidate L2 proves versioned-envelope `crashed` projection after pidfd-confirmed exit, not the full listing module. |
-| `vm ls --json` empty | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListEmpty` | L2 — empty list. Clears VMs first. |
-| `vm ps` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_ps_lists_running, test_ps_shows_running_vm_details` | L2 — name and column headers in table output |
+| `vm ls --json` | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_listing_json[ls]`, `TestVMStateTransitions::test_crashed_vm_status_and_restart` | Installed-candidate L2 proves schema-1 running identity/resource fields and `crashed` projection after pidfd-confirmed exit. Guest-initiated exit remains open. |
+| `vm ls --json` empty | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListEmpty` | Installed-candidate L2 passed a read-only versioned empty-list assertion on the clean runner; no global deletion. |
+| `vm ps` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_listing_text[ps]` | Installed-candidate L2 passed actual human output containing the exact VM name, IPv4, and headers. |
 | `vm ps --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMStateTransitions` | Focused installed-candidate cases prove inclusion while running and after restart, exclusion after CLI stop and confirmed external Firecracker exit. Guest-initiated exit and complete host-reboot qualification remain open. |
-| `vm inspect <name>` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle` | Runtime observation is privileged; focused networkless lifecycle covers the selector, while root-brokered cgroup detail is qualified through `--json` below. |
+| `vm inspect <name>` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect::test_inspect_tree`, `TestNetworklessJailerLifecycle` | Installed-candidate L2 passed the actual text route with exact name, full ID, IPv4, and running status. Root-brokered cgroup detail is qualified through `--json` below. |
 | `vm inspect <name> --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py`, `vm/test_cgroup.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMCgroupEnvelope`, `TestVMStateTransitions` | Focused installed-candidate cases prove running/stopped/running and confirmed-exit `crashed` projection, plus root-brokered cgroup limits/usage. Guest-initiated exit and complete host-reboot qualification remain open. |
-| `vm inspect` by IP | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L2 — stop by IP test covers resolution |
+| `vm inspect` by IP | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_inspect_json[ipv4]` | Installed-candidate L2 passed the direct IPv4 selector with exact VM ID, allocation, and networking readback. |
+| `vm inspect` by ID prefix | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_inspect_json[id_prefix]` | Installed-candidate L2 passed the direct unique ID-prefix selector with exact full-ID readback; ambiguous-prefix behavior is not proved here. |
 | `vm start` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L3 — PID alive in /proc after start |
 | `vm start` on running | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitionErrors` | L1 — exit 0 |
 | `vm stop` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L2 — status=stopped |
@@ -929,9 +939,9 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `console <vm> --state` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L1 — checks state |
+| `console <vm> --state` | ⚡ Shallow | `console/test_console.py` | `TestConsoleState` | L2 owner for successful state observation; the listing group covers only missing-VM rejection. |
 | `console <vm> --kill` | ⚡ Shallow | `console/test_console.py` | `TestConsoleKill` | L1 — state check before/after kill |
-| `console <nonexistent> --state` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L1 |
+| `console <nonexistent> --state` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_console_state_nonexistent_vm` | Installed-candidate L2 passed schema-1 `vm.not_found` rejection with no result data. |
 | `console <ip> --state` | ⚡ Shallow | `console/test_console.py` | `TestConsoleState` | Resolves by IP |
 | `console lifecycle: state → kill → state` | ⚡ Shallow | `console/test_console.py` | `TestConsoleKill` | Full lifecycle verification |
 | `console on stopped VM` | ⚡ Shallow | `console/test_console.py` | `TestConsoleOnStoppedVM` | Non-zero exit |
