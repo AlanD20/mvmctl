@@ -50,6 +50,15 @@ The original unbounded-default-size case timed out after 90 seconds: root had pu
 The operator-facing interruption/reconciliation path remains unqualified; a fresh unprivileged client may not know
 the full ID. Do not treat the successful bounded case as closing that gap.
 
+**Snapshot recovery-handle checkpoint (2026-09-27):** Commit `487b4a0d` emits the full request ID to stderr before
+root capture, including `--json`, while leaving the closed root inspect/remove authority unchanged. The strengthened
+managed DR case failed on the preceding installed candidate because JSON-mode stderr was empty, then passed 1/1 on
+the new installed runner candidate (SHA-256
+`11a432dc425ddf56f7b9695efeea085541e3948a435cadf0a40d3f49da900c27`), with strict zero-skip report
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/qa-snapshot-dr-856bf013/.tmp/qa-snapshot-handle-green.json`.
+VM, network, and snapshot lists were empty afterward. The test proves emission on success, not an abrupt-kill
+recovery journey; if stderr is lost, a root-published capture remains undiscoverable from `snapshot ls`.
+
 **Full Jailer-file runner checkpoint (2026-09-27):** The official 1.16.0 checksum sidecar was reachable by a bounded
 direct HTTPS probe, which changed the earlier external-metadata blocker; the archive remained present in the configured
 runner mirror. The two formerly blocked tests then passed 2/2, and the entire 13-case `tests/system/vm/test_jailer.py`
@@ -665,7 +674,7 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `snapshot create <vm>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless full capture with an attached raw volume and one managed-network DR capture passed. Client interruption can leave a root-published capture without a listable SQLite projection; its operator recovery path remains unqualified. |
+| `snapshot create <vm>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless full capture with an attached raw volume and one managed-network DR capture passed. The CLI now emits the full request ID before capture, including in JSON mode; its interruption cleanup journey remains unqualified and `snapshot ls` does not discover unindexed root captures. |
 | `snapshot create --name` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_with_name` | L2 — custom name in ls --json |
 | `snapshot create --pause` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_pause_flag` | L2 — VM status=paused after snapshot |
 | `snapshot create` on stopped VM | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L1 — non-zero, no snapshot files created |

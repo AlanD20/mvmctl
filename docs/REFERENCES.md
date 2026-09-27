@@ -405,21 +405,20 @@ mvm vm create offline-worker --no-network --cloud-init-mode off
 ```
 
 `--no-network` is an explicit choice, not the result of omitting `--network`. It conflicts with `--network`,
-`--ip`, `--mac`, and NoCloud network mode. Networkless snapshot capture/restore is not yet available in this
-development release. The focused runner smoke passed create, stop, start, and `mvm exec`; the full system suite and
+`--ip`, `--mac`, and NoCloud network mode. Focused installed-candidate runner cases passed networkless full
+capture/restore with an attached raw volume and guest exec, plus create/stop/start; the full system suite and
 networked policy matrix remain unqualified.
 
 ---
 
 ### `mvm snapshot` (alias: `ss`)
 
-The listed snapshot surface is not qualified support for trusted capture/restore in this development build.
-Capture/inspect/remove production code uses root-controlled storage and exclusive protected rootfs/data-volume
-capture. Restore source composition copies disks into independent protected backing and retains immutable memory
-backing for full restores. It preserves captured guest drive IDs and network identity. The named privileged restore
-route is integrated. The public API reserves the exact captured IP locally before root restore; conflicts fail, and an
-uncertain root outcome keeps the reservation for recovery. ADR-0018 approved the process/API/backing isolation prerequisite and superseded the
-earlier design pause. No build, tests, or runtime qualification have been performed for this pass.
+The listed snapshot surface is implemented but not release-qualified. Capture/inspect/remove use root-controlled
+storage and exclusive protected rootfs/data-volume capture. Restore copies disks into independent protected backing,
+retains immutable memory backing, and preserves captured drive IDs and network identity. The public API reserves the
+captured IP before root restore; conflicts fail, and an uncertain root outcome keeps the reservation for recovery.
+Focused installed-candidate networkless and same-network managed restore journeys passed in the named runner; the
+full snapshot fault matrix, interruption reconciliation, and release QA remain open (see ADR-0018).
 
 Create, list, inspect, restore, and remove VM snapshots.
 
@@ -437,6 +436,12 @@ The snapshot resolver tries selectors in priority order:
 | `mvm snapshot inspect` | `SELECTOR`, `--json` | Show detailed information about a snapshot |
 | `mvm snapshot restore` | `SELECTOR`, `NAME`, `--network`, `--resume`, `--count N` | Restore one or more VMs from a snapshot |
 | `mvm snapshot rm` | `SELECTOR`, `--force, -f` | Remove a snapshot |
+
+`snapshot create` writes the full **Snapshot request ID** to stderr before trusted capture, including with `--json`.
+Keep that ID until the command completes. If the command is interrupted, `snapshot ls` may omit a root-published
+capture; after the root operation settles, use `mvm snapshot inspect <full-id> --json` to check it and
+`mvm snapshot rm <full-id> --force` to remove an unwanted artifact. Do not edit the root-controlled files directly.
+`snapshot ls` does not discover unindexed root captures, so losing the ID still requires administrator investigation.
 
 ---
 
@@ -896,12 +901,15 @@ The security model applies to the net cloud-init mode only:
 │       └── cloud-init/               # Generated seed inputs
 ├── workflows/            # Workflow state persistence
 ├── nocloudnet/           # nocloud-net batch server dirs and logs
-├── snapshots/            # Snapshot files (mem, vmstate, disk)
-│   └── <snapshot-id>/
+├── .mvm-protected/       # Root-controlled store; not caller-editable
+│   └── snapshots/<snapshot-id>/
+│       ├── capture.json              # Root-authenticated artifact record
+│       ├── capture-progress.json     # Interrupted-capture outcome
 │       ├── rootfs.img
-│       ├── memory
-│       ├── vmstate
-│       └── phantom-rootfs.img        # Transitional until private namespace overlay
+│       ├── kernel
+│       ├── memory                    # Full snapshots only
+│       ├── vmstate                   # Full snapshots only
+│       └── volume-<drive-id>.raw     # Each captured data volume, when present
 ├── logs/                 # Application log files
 ├── firecracker-src/      # Firecracker git clone (for building from source)
 ├── mvmdb.db              # SQLite database (canonical asset state)

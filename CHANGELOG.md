@@ -34,6 +34,10 @@ earlier partial-state statement. They are not a substitute for the final release
   guest rootfs file, a full snapshot captures it, the source changes and is removed, and `snapshot restore --resume`
   returns the original bytes. The one-case module passed in the named runner with checked VM/snapshot teardown;
   protected rootfs backing is never accessed through a caller path.
+- `snapshot create` now emits its full request ID to stderr before root capture, including in JSON mode, so a caller
+  retaining command output can inspect or remove a published capture after interruption. A focused same-network
+  managed restore/guest-exec case passed in the named runner. An interrupted capture can still be absent from
+  `snapshot ls` if its local projection was not stored; automatic discovery without the ID is not implemented.
 - Completed the isolated Jailer startup handoff with root-prepared detached resource mounts, a private read-only
   sealed-configuration mount, exact pre/post-seal ownership checks, and read-only API readiness through the typed
   root broker. A Jailer root-ownership race found on repeated creation has a red-green Go regression and a second
