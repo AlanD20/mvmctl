@@ -17,6 +17,8 @@ import pytest
 
 from tests.system.conftest import (
     _guest_run,
+    _json_success_data,
+    _parse_vm_list,
     _run_mvm,
     _unique_subnet,
     ensure_vm_deps,
@@ -27,6 +29,52 @@ pytestmark = [
     pytest.mark.system,
     pytest.mark.domain_vm,
 ]
+
+
+def _kill_exact_test_firecracker(pid: int, start_ticks: int, vm_id: str) -> None:
+    """Inject one crash only after root rechecks the test VM's process identity."""
+    jail_root = f"/var/lib/mvmctl/jailer/firecracker/{vm_id}/root"
+    script = """
+import os
+import select
+import signal
+import sys
+
+pid, start_ticks, jail_root = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+pidfd = os.pidfd_open(pid)
+try:
+    stat = open(f"/proc/{pid}/stat", encoding="ascii").read().rpartition(") ")[2].split()
+    if len(stat) < 20 or int(stat[19]) != start_ticks:
+        raise RuntimeError("test Firecracker PID/start identity changed")
+    root = os.stat(f"/proc/{pid}/root")
+    expected_root = os.stat(jail_root)
+    if (root.st_dev, root.st_ino) != (expected_root.st_dev, expected_root.st_ino):
+        raise RuntimeError("test Firecracker jail root changed")
+    executable = os.stat(f"/proc/{pid}/exe")
+    expected_executable = os.stat(f"{jail_root}/firecracker")
+    if (executable.st_dev, executable.st_ino) != (
+        expected_executable.st_dev, expected_executable.st_ino
+    ):
+        raise RuntimeError("test Firecracker executable changed")
+    signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+    poller = select.poll()
+    poller.register(pidfd, select.POLLIN)
+    events = poller.poll(10_000)
+    if (len(events) != 1 or events[0][0] != pidfd
+            or events[0][1] & (select.POLLERR | select.POLLNVAL)
+            or not events[0][1] & (select.POLLIN | select.POLLHUP)):
+        raise RuntimeError("test Firecracker exit was not proven by its retained pidfd")
+finally:
+    os.close(pidfd)
+"""
+    result = subprocess.run(
+        ["sudo", "-n", "python3", "-c", script, str(pid), str(start_ticks), jail_root],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
 
 
 # ========================================================================
@@ -1476,14 +1524,16 @@ class TestVMStateTransitions:
     @pytest.mark.system
     @pytest.mark.requires_kvm
     @pytest.mark.slow
-    def test_create_start_crash_inspect(
+    @pytest.mark.destructive
+    def test_crashed_vm_status_and_restart(
         self,
         runner_vm,
         unique_vm_name,
         unique_network_name,
     ):
-        """Kill the firecracker process -- vm rm --force must recover."""
+        """A confirmed Firecracker exit is crashed in public status and can relaunch."""
         net_name = unique_network_name
+        ensure_vm_deps(runner_vm)
         _run_mvm(
             runner_vm,
             "network",
@@ -1491,6 +1541,7 @@ class TestVMStateTransitions:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
+            "--no-nat",
         )
         try:
             _run_mvm(
@@ -1502,23 +1553,72 @@ class TestVMStateTransitions:
                 "alpine:3.23",
                 "--network",
                 net_name,
+                "--cloud-init-mode",
+                "off",
+                "--skip-deblob",
+                "--no-pci",
+                "-s",
+                "512M",
+                "--mem",
+                "256M",
+                "--vcpu",
+                "1",
+                timeout=180,
             )
-            _run_mvm(runner_vm, "vm", "start", unique_vm_name)
-            inspect_result = _run_mvm(
-                runner_vm, "vm", "inspect", unique_vm_name, "--json"
+            inspected = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", unique_vm_name, "--json").stdout,
+                dict,
             )
-            vm_data = json.loads(inspect_result.stdout)
-            pid = vm_data.get("vm", {}).get("pid")
-            if pid:
-                _run_mvm(runner_vm, "kill", "-9", str(pid), check=False)
-            _run_mvm(runner_vm, "vm", "rm", unique_vm_name, "--force")
+            vm_data = next(vm for vm in _parse_vm_list(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+            ) if vm["name"] == unique_vm_name)
+            assert inspected["vm"]["status"] == "running"
+            assert inspected["vm"]["pid"] == vm_data["pid"]
+            assert vm_data["status"] == "running"
+            assert int(vm_data["pid"]) > 0
+            assert int(vm_data["process_start_time"]) > 0
+            _kill_exact_test_firecracker(
+                int(vm_data["pid"]), int(vm_data["process_start_time"]), vm_data["id"],
+            )
+
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            entry = next(vm for vm in listed if vm["id"] == vm_data["id"])
+            assert entry["status"] == "crashed"
+            running = _parse_vm_list(_run_mvm(runner_vm, "vm", "ps", "--json").stdout)
+            assert all(vm["id"] != vm_data["id"] for vm in running)
+            inspected = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", unique_vm_name, "--json").stdout,
+                dict,
+            )
+            assert inspected["vm"]["status"] == "crashed"
+
+            _run_mvm(runner_vm, "vm", "stop", unique_vm_name, "--force", timeout=120)
+            _run_mvm(runner_vm, "vm", "start", unique_vm_name, timeout=120)
+            assert _run_mvm(
+                runner_vm, "exec", unique_vm_name, "--", "printf", "restarted-after-crash",
+            ).stdout == "restarted-after-crash"
         finally:
-            _run_mvm(
-                runner_vm, "network", "rm", net_name, "--force", check=False
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            if any(vm["name"] == unique_vm_name for vm in listed):
+                removed = _run_mvm(
+                    runner_vm, "vm", "rm", unique_vm_name, "--force", check=False,
+                    timeout=120,
+                )
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            networks = _json_success_data(
+                _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
             )
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
+            if any(network["name"] == net_name for network in networks):
+                removed = _run_mvm(
+                    runner_vm, "network", "rm", net_name, "--force", check=False,
+                )
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            assert all(vm["name"] != unique_vm_name for vm in _parse_vm_list(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+            ))
+            assert all(network["name"] != net_name for network in _json_success_data(
+                _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
+            ))
 
     def test_stop_by_name_flag(self, runner_vm, created_vm):
         """Stop VM using name as positional argument."""
