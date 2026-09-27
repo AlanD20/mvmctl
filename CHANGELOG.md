@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > service entry-point cases passed there; two bridge-dependent key cases were deselected. The broader installed-candidate
 > Python release matrix has not run.
 > Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation.
+> A focused networkless data-volume capture/restore journey passed against an installed candidate inside the named
+> disposable runner; this does not qualify the managed-network or full Python release matrix.
 > The mapped production integration gaps are committed; release qualification remains incomplete. Raw-volume launch,
 > host clean/reset, and typed image recovery are
 > implemented but unverified. Earlier slice evidence below does not qualify these later changes.
@@ -45,7 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added explicit `vm create --no-network` with a root-owned loopback-only per-VM namespace and no fabricated
   network/endpoint identity. A candidate installed only inside the disposable `mvmctl-030-test` runner passed
-  create, stop, start, and host-to-guest vsock exec; networkless snapshot and full Python system QA remain pending.
+  create, stop, start, and host-to-guest vsock exec. A later focused installed-candidate test passed full networkless
+  capture/restore with an attached raw volume and post-restore vsock exec; full Python system QA remains pending.
 - Completed the isolated Jailer startup handoff with root-prepared detached resource mounts, a private read-only
   sealed-configuration mount, exact pre/post-seal ownership checks, and read-only API readiness through the typed
   root broker. A Jailer root-ownership race found on repeated creation has a red-green Go regression and a second
@@ -73,7 +76,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   root-owned immutable artifact metadata, and recorded uncertain/paused capture progress. Stopped-source archive and
   immutable restore composition are now integrated. Restore prepares independent protected disk copies, retains
   immutable memory backing for a full restore, and keeps captured guest drive IDs and network identity. The named
-  privileged restore route validates one typed request before invoking the root receiver. None of this has been qualified.
+  privileged restore route validates one typed request before invoking the root receiver. Networkless capture/restore
+  now preserves endpoint-free placement. Snapshot RAM producer output stages in the admitted disk-backed jail root,
+  not the smaller `/run` tmpfs; stopped cleanup validates only named producer artifacts. A focused installed-candidate
+  networkless data-volume journey passed, while broader snapshot qualification remains open.
+
+- Raw volume creation now allocates through an exclusive private `0600` descriptor, including under a permissive
+  operator umask, so root admission accepts the resulting file without making group-writable backing authoritative.
+- Failed snapshot restore no longer transfers the protected snapshot reference before target VM registration succeeds.
 
 - Typed launch now admits PCI for the pinned Firecracker 1.16.1 profile, accounting for the usable PCI bus slots and
   MSI-X vectors of the complete generated device set. The authenticated child receives the transport choice and adds

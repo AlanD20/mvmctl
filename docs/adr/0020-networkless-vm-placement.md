@@ -84,16 +84,19 @@ endpoint variants before effects.
 The strict schema-5 instance codec rejects older-schema records, including cleaned tombstones. Separately, the private
 root path now carries a typed networkless namespace lease through Jailer launch, activation, cleanup, and same-/prior-
 boot recovery. Placement is sealed in the protected device and instance records; the managed topology journal and
-lock order are unchanged. Snapshot capture currently rejects networkless placement before effects; consistent capture
-and restore remain pending. Public create and relaunch are source-wired; a focused installed-candidate
-create/stop/start/host-to-guest-vsock-exec smoke passed inside the named disposable runner.
+lock order are unchanged. Snapshot capture and restore now retain the networkless placement without allocating an
+endpoint. A focused installed-candidate journey in the named disposable runner passed full capture and restore with
+an attached raw volume, independent restored bytes, no restored IP/MAC, post-restore vsock exec, and checked teardown.
+Snapshot producer memory is staged in the admitted disk-backed jail root rather than the bounded `/run` tmpfs; stopped
+jail cleanup accepts only validated capture directories and producer artifacts. Public create and relaunch are
+source-wired; focused create/stop/start/host-to-guest-vsock-exec smoke also passed in that runner.
 Preserve current networked behavior until both branches have complete lifecycle ownership.
 
 Go tests should prove closed input combinations, exact wire-shape rejection, no-NIC Firecracker config, placement
 round-trip, and fail-closed root effects. Installed-candidate Python tests in the approved runner must prove creation,
 namespace isolation, absent IP/TAP/host exposure, host-to-VM vsock exec, same-/cross-/no-network directional VM-to-VM
 exec authorization, stop/start/reboot/recovery, and snapshot restore. The runner kernel's missing bridge-family
-nftables capability still blocks networked comparisons; a passing isolated networkless case alone cannot qualify the
-whole placement and policy matrix. Focused Go config, persistence, input, namespace, and Jailer package tests passed
-in the named runner. The focused installed-candidate networkless lifecycle smoke does not establish full Python
-system qualification, networked comparison, VM-to-VM authorization, snapshot restore, or release readiness.
+nftables capability still blocks networked comparisons; passing isolated networkless cases cannot qualify the whole
+placement and policy matrix. Focused Go config, persistence, input, namespace, and Jailer package tests passed in the
+named runner. The focused snapshot journey does not establish full Python system qualification, networked comparison,
+VM-to-VM authorization, host-reboot recovery, or release readiness.

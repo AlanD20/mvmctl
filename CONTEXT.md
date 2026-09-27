@@ -572,10 +572,11 @@ recovery, with placement sealed in the protected device and instance records. Th
 complete managed or endpoint-free networkless shapes;
 its offline NoCloud allowance is limited to fixed local ISO/injected-seed arguments. Relaunch reconstruction retains
 the stored placement and rejects malformed networkless state before reboot stops a VM. Offline cloud-init seeds can
-omit network configuration. Public SSH rejects networkless placement in favor of vsock exec. Snapshot capture
-rejects networkless placement until consistent capture and restore are implemented. Focused Go packages and an
-installed-candidate networkless create/stop/start/host-to-guest-vsock-exec smoke passed inside the disposable runner.
-This does not qualify networked policy behavior, snapshot restore, the full Python suite, or the release.
+omit network configuration. Public SSH rejects networkless placement in favor of vsock exec. Snapshot capture and
+restore preserve the endpoint-free placement. A focused installed-candidate journey in the disposable runner passed
+consistent full capture/restore of a networkless VM with one attached raw volume, independent restored bytes, and
+post-restore vsock exec. Snapshot RAM staging is disk-backed inside the admitted jail root, not under `/run`.
+This does not qualify networked policy behavior, the full Python suite, or the release.
 Omitting `--network` must never become an implicit networkless fallback.
 
 ADR-0017 fixes the L3 contract consumed by the typed root transactions. The per-VM
@@ -655,14 +656,15 @@ protected backing, pauses the isolated producer, and publishes root-controlled i
 capture progress retains explicit paused/unknown state rather than assuming a safe resume. Stopped-source device
 archives and immutable restore composition now exist in source. Full restore holds memory/vmstate through the restored
 VM lifetime; restored disks have independent protected backing while guest drive IDs remain captured IDs. The named
-privileged Restore dispatcher route is now integrated. These source changes have
-not been built or tested. [ADR-0018](docs/adr/0018-isolated-vm-execution-and-snapshot-authority.md) supersedes the earlier
+privileged Restore dispatcher route is integrated. A focused installed-candidate networkless volume-snapshot journey
+passed inside `mvmctl-030-test`; managed-network restore and the full system matrix remain unqualified.
+[ADR-0018](docs/adr/0018-isolated-vm-execution-and-snapshot-authority.md) supersedes the earlier
 snapshot pause: schema-5 records separate operator ownership from isolated per-VM system accounts; named root API
 operations and an authenticated host-vsock descriptor handoff replace operator access to private VMM sockets.
 Protected logical disks, typed volume storage operations, and protected rootfs provisioning replace mutation of
 caller staging files after import. This is not evidence of an exploited vulnerability or qualified isolation.
 Typed launch accepts the prepared root-owned restore capability; the caller cannot submit snapshot paths, machine
-configuration, or alternate network identity. The public restore path is implemented in source but unqualified.
+configuration, or alternate network identity. The public restore path has focused networkless L2 evidence only.
 
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An

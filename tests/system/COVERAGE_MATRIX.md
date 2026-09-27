@@ -32,8 +32,17 @@ installed binary predates `8e0be4fe`, but the intervening source change under `i
 test-only.
 These are scoped results, **not** a full Python matrix or release sign-off. The current runner kernel still rejects
 bridge-family nftables tables, blocking network/policy qualification there. Volume/snapshot consistency, host-reboot,
-and full Jailer system journeys also remain unqualified; one guest-visible volume attach is not snapshot-consistency
-qualification.
+and full Jailer system journeys also remained unqualified at that checkpoint; one guest-visible volume attach was
+not snapshot-consistency qualification. The later focused checkpoint below addresses only the networkless
+data-volume snapshot journey, not the broader release gaps.
+
+**Focused snapshot checkpoint (2026-09-27):** An installed `0.3.0-rc.snapshot-ref-fix` candidate inside only
+`mvmctl-030-test` passed `TestNetworklessJailerLifecycle::test_networkless_snapshot_restores_independent_data_volume`
+(1/1). It wrote a raw attached guest volume, captured a full networkless snapshot, changed and removed the source
+volume/VM, restored an independent volume without an IP/MAC endpoint, compared the guest-visible bytes, ran vsock exec,
+and checked VM/volume/snapshot teardown. Focused Go volume and full root-effect Jailer packages plus changed-package vet
+passed in that runner. This does not qualify managed-network snapshots, concurrent writers, crash recovery, the full
+Python matrix, or the release.
 
 **Protected cgroup-inspection checkpoint (2026-09-27):** Commit `89c5137e` replaces the unprivileged direct cgroup
 reader with an authenticated, fixed-path, descriptor-pinned root observation and removes the obsolete reader. Pinned
@@ -330,7 +339,7 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `snapshot create <vm>` | ✅ Deep | `vm/test_vm_snapshot_load.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore` | L3 — snapshot files exist and are non-empty |
+| `snapshot create <vm>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless full capture with an attached raw volume passed; managed-network and fault paths remain unqualified. |
 | `snapshot create --name` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_with_name` | L2 — custom name in ls --json |
 | `snapshot create --pause` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_pause_flag` | L2 — VM status=paused after snapshot |
 | `snapshot create` on stopped VM | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L1 — non-zero, no snapshot files created |
@@ -338,9 +347,9 @@ Specific legacy conflicts that must be rewritten before release:
 | `snapshot ls --json` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore` | L2 — JSON list |
 | `snapshot inspect <id>` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotInspect::test_snapshot_inspect` | L1 — inspect succeeds |
 | `snapshot inspect <id> --json` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotInspect::test_snapshot_inspect_json` | L2 — JSON fields verified |
-| `snapshot restore <id> <name>` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore` | L2 — VM status=running after restore |
-| `snapshot restore --resume` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore` | L2 — status=running after restore with --resume |
-| `snapshot restore --network` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotRestoreNetwork::test_snapshot_restore_with_network` | L2 — VM restored with different network |
+| `snapshot restore <id> <name>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless restore passed with no endpoint, independent attached-volume bytes, vsock exec, and checked teardown; managed-network and fault paths remain unqualified. |
+| `snapshot restore --resume` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless restore resumed, preserved absent endpoint, restored independent data-volume bytes, and allowed vsock exec. Other placements remain unqualified. |
+| `snapshot restore --network` | **?** | `vm/test_vm_snapshot_load.py` | `TestSnapshotRestoreNetwork::test_snapshot_restore_with_network` | Legacy test expects a different network; current source refuses changing the captured endpoint and rejects any managed-network override for networkless snapshots. Test contract needs reconciliation before qualification. |
 | `snapshot rm <id>` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotDestroyRestore` | L2 — cleanup via --force |
 | `snapshot rm --force` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotDestroyRestore` | L2 — forced removal |
 
@@ -350,7 +359,7 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `volume create <size>` (raw-only) | 🟡 Partial | `volume/test_volume.py`, `vm/test_jailer.py` | `TestRawVolumeAuthoritativeStorage`, `TestNetworklessJailerLifecycle`, `TestVolumeLifecycle` | Focused installed-candidate 16 MiB create, inspect, 32 MiB grow, checked remove, backing-file absence, and one guest-visible networkless attachment/restart passed in the named runner; broader options and snapshot consistency remain unqualified. |
+| `volume create <size>` (raw-only) | 🟡 Partial | `volume/test_volume.py`, `vm/test_jailer.py` | `TestRawVolumeAuthoritativeStorage`, `TestNetworklessJailerLifecycle`, `TestVolumeLifecycle` | Focused installed-candidate 16 MiB create, inspect, 32 MiB grow, checked remove, guest-visible networkless attach/restart, and full snapshot/restore of independent data-volume bytes passed in the named runner; broader options remain unqualified. |
 | `volume create --format` (removed) | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_create_removed_format_flag_rejected_without_side_effects` | Installed-candidate raw/QCOW2/VMDK variants passed 3/3: unknown flag, no new volume record or backing file, checked sentinel cleanup. QCOW2 **image import** remains supported. |
 | `volume create` invalid size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` duplicate name | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
