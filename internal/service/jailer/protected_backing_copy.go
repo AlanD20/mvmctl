@@ -94,6 +94,10 @@ func (lease *protectedBackingLease) copyAndPublish(
 		return managedVMResourceValidationError("initial protected backing source changed during import recovery")
 	}
 	lease.record.Source = sourceIdentity
+	if lease.record.Kind == protectedBackingVolume && !lease.record.SnapshotSource {
+		lease.record.SourceCTimeSec = before.Ctim.Sec
+		lease.record.SourceCTimeNsec = before.Ctim.Nsec
+	}
 	if err := writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record); err != nil {
 		return err
 	}

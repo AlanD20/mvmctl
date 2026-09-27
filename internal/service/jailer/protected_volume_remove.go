@@ -30,6 +30,52 @@ type initialVolumeRemovalReceipt struct {
 	DirectoryMountID     uint64 `json:"directory_mount_id"`
 }
 
+// protectedSourcePresent admits only the original mvm-created source inode. A caller
+// that replaced or changed it retains that file; root must not remove it by pathname.
+func (storage *protectedVolumeStorage) protectedSourcePresent(
+	ctx context.Context, id string,
+) (_ bool, returnErr error) {
+	record := storage.backing.record
+	if record.Source.Inode == 0 || record.SnapshotSource {
+		return false, managedVMResourceValidationError("protected volume has no managed raw source")
+	}
+	directory, err := openManagedVMResourceDirectory(ctx, storage.cache.deps, storage.cache.cacheFD,
+		"volumes", "volume store", storage.cache.ownerUID)
+	if err != nil {
+		return false, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(directory)) }()
+	var named unix.Stat_t
+	if err := unix.Fstatat(directory, id+".raw", &named, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		return false, syncInitialVolumeDirectory(directory)
+	} else if err != nil {
+		return false, err
+	}
+	raw, err := storage.openInitialRaw(ctx, id, false)
+	if err != nil {
+		return false, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, raw.Release()) }()
+	if err := requireProtectedSourceIdentity(record, raw); err != nil {
+		return false, err
+	}
+	if err := raw.requireCurrentName(ctx, storage.cache); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func requireProtectedSourceIdentity(record protectedBackingRecord, raw *initialRawVolume) error {
+	if record.SourceCTimeSec == 0 || record.Source.Size <= 0 ||
+		unix.Mkdev(raw.identity.deviceMajor, raw.identity.deviceMinor) != record.Source.Device ||
+		raw.identity.inode != record.Source.Inode || raw.identity.size != uint64(record.Source.Size) ||
+		raw.identity.ctime.Sec != record.SourceCTimeSec ||
+		int64(raw.identity.ctime.Nsec) != record.SourceCTimeNsec {
+		return managedVMResourceValidationError("managed raw volume source changed after protection")
+	}
+	return nil
+}
+
 func (storage *protectedVolumeStorage) removeInitialRaw(ctx context.Context, id string) (returnErr error) {
 	if err := storage.backing.BeginInitialVolumeRemoval(ctx); err != nil {
 		return err
@@ -52,11 +98,25 @@ func (storage *protectedVolumeStorage) removeInitialRaw(ctx context.Context, id 
 		if entries["data.raw"] || entries["captured"] {
 			return managedVMResourceValidationError("initial volume quarantine has no removal receipt")
 		}
+		if storage.backing.record.Source.Inode != 0 {
+			present, err := storage.protectedSourcePresent(ctx, id)
+			if err != nil {
+				return err
+			}
+			if !present {
+				return storage.backing.CommitInitialVolumeRemoval(ctx)
+			}
+		}
 		raw, err := storage.openInitialRaw(ctx, id, false)
 		if err != nil {
 			return err
 		}
 		defer func() { returnErr = errors.Join(returnErr, raw.Release()) }()
+		if storage.backing.record.Source.Inode != 0 {
+			if err := requireProtectedSourceIdentity(storage.backing.record, raw); err != nil {
+				return err
+			}
+		}
 		if err := raw.requireCurrentName(ctx, storage.cache); err != nil {
 			return err
 		}

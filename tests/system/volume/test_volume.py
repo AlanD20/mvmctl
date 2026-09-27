@@ -12,9 +12,11 @@ VIOLATIONS REMOVED:
 from __future__ import annotations
 
 import json
+import os
 import shlex
+import time
 import uuid
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Generator
 
 import pytest
@@ -697,6 +699,7 @@ class TestVolumeLifecycle:
         """A protected raw volume keeps its identity through attach and detach."""
         vm_name = unique_vm_name
         vol_name = f"sys-vol-inv-{unique_key_name}"
+        backing_path: str | None = None
         try:
             _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
             available = _json_success_data(
@@ -766,6 +769,10 @@ class TestVolumeLifecycle:
                 assert removed.returncode == 0, (removed.stdout, removed.stderr)
             volumes = _json_success_data(_run_mvm(runner_vm, "volume", "ls", "--json").stdout, list)
             assert all(item["name"] != vol_name for item in volumes)
+            if backing_path is not None:
+                assert _guest_run(
+                    runner_vm, f"test ! -e {shlex.quote(backing_path)}", check=False,
+                ).returncode == 0, "removed protected volume retained its managed raw source"
 
 
 class TestRawVolumeAuthoritativeStorage:
@@ -811,6 +818,77 @@ class TestRawVolumeAuthoritativeStorage:
                 _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
             )
             assert all(volume["name"] != name for volume in listed)
+
+    @pytest.mark.requires_kvm
+    def test_changed_protected_source_is_retained(
+        self, runner_vm: str, unique_vm_name: str,
+    ) -> None:
+        """Removal refuses a same-inode, same-size source changed after import."""
+        name = f"sys-raw-changed-{uuid.uuid4().hex[:8]}"
+        source_path: Path | None = None
+        retained_path: Path | None = None
+        try:
+            created = _json_success_data(
+                _run_mvm(runner_vm, "volume", "create", name, "16M", "--json").stdout,
+                dict,
+            )
+            source_path = Path(created["path"])
+            assert source_path.name == f"{created['id']}.raw"
+            retained_path = source_path.with_suffix(".retained")
+            assert not retained_path.exists()
+            ensure_vm_deps(runner_vm)
+            _run_mvm(
+                runner_vm, "vm", "create", unique_vm_name, "--image", "alpine:3.23",
+                "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
+                "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                "--volume", name, timeout=180,
+            )
+            _run_mvm(runner_vm, "vm", "stop", unique_vm_name)
+            _run_mvm(runner_vm, "volume", "detach", unique_vm_name, name)
+            inspected = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", name, "--json").stdout,
+                dict,
+            )
+            assert inspected["disk_info"]["protected"] is True
+
+            before = source_path.stat().st_ctime_ns
+            time.sleep(0.02)
+            with source_path.open("r+b") as raw:
+                raw.write(b"X")
+                raw.flush()
+                os.fsync(raw.fileno())
+            assert source_path.stat().st_ctime_ns != before
+
+            rejected = _run_mvm(runner_vm, "volume", "rm", name, "--force", check=False)
+            assert rejected.returncode != 0
+            with source_path.open("rb") as raw:
+                assert raw.read(1) == b"X"
+            still_protected = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", name, "--json").stdout,
+                dict,
+            )
+            assert still_protected["disk_info"]["protected"] is True
+
+            source_path.rename(retained_path)
+            _run_mvm(runner_vm, "volume", "rm", name, "--force")
+            with retained_path.open("rb") as raw:
+                assert raw.read(1) == b"X"
+        finally:
+            _run_mvm(runner_vm, "vm", "rm", unique_vm_name, "--force", check=False)
+            if (
+                source_path is not None and source_path.exists()
+                and retained_path is not None and not retained_path.exists()
+            ):
+                source_path.rename(retained_path)
+            _run_mvm(runner_vm, "volume", "rm", name, "--force", check=False)
+            if retained_path is not None:
+                retained_path.unlink(missing_ok=True)
+            vms = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+            assert all(vm["name"] != unique_vm_name for vm in vms)
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            assert all(volume["name"] != name for volume in volumes)
 
 
 class TestVolumeAttachDetach:

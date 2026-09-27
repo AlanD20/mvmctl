@@ -58,19 +58,21 @@ type protectedBackingReference struct {
 }
 
 type protectedBackingRecord struct {
-	Version        uint32                      `json:"version"`
-	Kind           string                      `json:"kind"`
-	ID             string                      `json:"id"`
-	Owner          uint32                      `json:"owner"`
-	Cache          protectedBackingCache       `json:"cache"`
-	Directory      protectedBackingIdentity    `json:"directory"`
-	Source         protectedBackingIdentity    `json:"source"`
-	Backing        protectedBackingIdentity    `json:"backing"`
-	Phase          string                      `json:"phase"`
-	GrowBytes      uint64                      `json:"grow_bytes,omitempty"`
-	References     []protectedBackingReference `json:"references"`
-	NextReferences []protectedBackingReference `json:"next_references,omitempty"`
-	SnapshotSource bool                        `json:"snapshot_source"`
+	Version         uint32                      `json:"version"`
+	Kind            string                      `json:"kind"`
+	ID              string                      `json:"id"`
+	Owner           uint32                      `json:"owner"`
+	Cache           protectedBackingCache       `json:"cache"`
+	Directory       protectedBackingIdentity    `json:"directory"`
+	Source          protectedBackingIdentity    `json:"source"`
+	SourceCTimeSec  int64                       `json:"source_ctime_sec,omitempty"`
+	SourceCTimeNsec int64                       `json:"source_ctime_nsec,omitempty"`
+	Backing         protectedBackingIdentity    `json:"backing"`
+	Phase           string                      `json:"phase"`
+	GrowBytes       uint64                      `json:"grow_bytes,omitempty"`
+	References      []protectedBackingReference `json:"references"`
+	NextReferences  []protectedBackingReference `json:"next_references,omitempty"`
+	SnapshotSource  bool                        `json:"snapshot_source"`
 }
 
 // protectedBackingLease retains the exact protected object and its root-owned logical-object lock.

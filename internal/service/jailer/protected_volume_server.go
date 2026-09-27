@@ -187,7 +187,13 @@ func (server *ProtectedVolumeServer) Remove(
 	if err != nil {
 		return ProtectedVolumeRemoveResult{}, err
 	}
+	managedSource := storage.backing.record.Source.Inode != 0 && !storage.backing.record.SnapshotSource
 	if removed {
+		if managedSource {
+			if err := storage.removeInitialRaw(ctx, request.VolumeID); err != nil {
+				return ProtectedVolumeRemoveResult{}, err
+			}
+		}
 		return ProtectedVolumeRemoveResult{VolumeID: request.VolumeID, Removed: true}, nil
 	}
 	pending, err := storage.backing.IsInitialVolumeRemovalPending(ctx)
@@ -195,8 +201,18 @@ func (server *ProtectedVolumeServer) Remove(
 		return ProtectedVolumeRemoveResult{}, err
 	}
 	if storage.protected && !pending {
+		if managedSource {
+			if _, err := storage.protectedSourcePresent(ctx, request.VolumeID); err != nil {
+				return ProtectedVolumeRemoveResult{}, err
+			}
+		}
 		if err := storage.backing.Remove(ctx); err != nil {
 			return ProtectedVolumeRemoveResult{}, err
+		}
+		if managedSource {
+			if err := storage.removeInitialRaw(ctx, request.VolumeID); err != nil {
+				return ProtectedVolumeRemoveResult{}, err
+			}
 		}
 	} else if err := storage.removeInitialRaw(ctx, request.VolumeID); err != nil {
 		return ProtectedVolumeRemoveResult{}, err

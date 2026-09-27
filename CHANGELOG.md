@@ -105,7 +105,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent upgrades use an authenticated connected-descriptor handoff rather than opening the private socket directly.
 - Integrated protected logical backing, typed volume inspect/grow/remove, protected rootfs provisioning, and root-owned
   live-volume hotplug intent. Original caller files are staging inputs, not authoritative active disks after import.
-  Recovery helpers bind logical cache identity and track access grants. This is not a runnable sign-off.
+  The mvm-created managed-cache raw volume source is removed with the protected backing only when root verifies its
+  original inode, size, and change time; detected changed or replaced source files are retained. Removal is retryable
+  after an interrupted protected-disk deletion. Recovery helpers bind logical cache identity and track access grants.
+  This is not a runnable sign-off.
 - Added the trusted snapshot capture/inspect/remove implementation, including exclusive protected data-volume capture,
   root-owned immutable artifact metadata, and recorded uncertain/paused capture progress. Stopped-source archive and
   immutable restore composition are now integrated. Restore prepares independent protected disk copies, retains

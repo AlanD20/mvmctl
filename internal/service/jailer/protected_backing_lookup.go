@@ -185,9 +185,11 @@ func (lease *protectedBackingLease) BeginInitialVolumeRemoval(ctx context.Contex
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	protectedSource := lease.record.Phase == "removed" && lease.record.Source.Inode != 0 &&
+		!lease.record.SnapshotSource
 	if lease.released || lease.lockFD < 0 || lease.record.Kind != protectedBackingVolume ||
-		(lease.record.Phase != "absent" && lease.record.Phase != "initial-removing") {
-		return managedVMResourceValidationError("initial volume removal does not hold an absent import lease")
+		(lease.record.Phase != "absent" && lease.record.Phase != "initial-removing" && !protectedSource) {
+		return managedVMResourceValidationError("initial volume removal does not hold an admitted source lease")
 	}
 	lease.record.Phase = "initial-removing"
 	if err := markProtectedLogicalInitialized(ctx, lease.logicalFD); err != nil {

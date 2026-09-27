@@ -34,7 +34,12 @@ the isolation prerequisite after previously pausing it for a separate design dec
   anchor outside the caller's namespace. A missing or renamed store must not trigger silent reimport of stale source
   data. Named execution-identity access grants must be exact; filesystem inability to enforce them is an error, not
   permission to make the data generally accessible. Resize, removal, and guest provisioning must use authoritative
-  protected backing after import rather than modifying the original caller-owned staging files.
+  protected backing after import rather than modifying the original caller-owned staging files. A raw source created by
+  `mvm volume create` under the managed cache is mvm-owned, not an external staging file: final `volume rm` removes it
+  only after root verifies its recorded inode, size, and change time. A missing source is harmless after protected
+  deletion; a detected changed or replaced source is retained and removal fails closed. The protected backing and raw
+  source share one durable removal lock and tombstone, so an interrupted deletion can be retried without reimporting
+  source data.
 - Require exclusive write ownership during capture. Refuse capture when another VM has writable access to any
   captured volume; coordinated multi-VM capture is not selected. Host writers and retained aliases must also be excluded.
 - Capture one consistent state across Full memory/vmstate, rootfs, and attached data disks. Root metadata binds the

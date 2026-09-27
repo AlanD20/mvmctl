@@ -676,7 +676,11 @@ passed inside `mvmctl-030-test`; managed-network restore and the full system mat
 snapshot pause: schema-5 records separate operator ownership from isolated per-VM system accounts; named root API
 operations and an authenticated host-vsock descriptor handoff replace operator access to private VMM sockets.
 Protected logical disks, typed volume storage operations, and protected rootfs provisioning replace mutation of
-caller staging files after import. This is not evidence of an exploited vulnerability or qualified isolation.
+caller staging files after import. The raw source created by `mvm volume create` is a managed-cache artifact:
+`volume rm` now verifies its root-recorded inode, size, and change time and removes it after the protected backing,
+using the same durable removal lock and tombstone. Detected changed or replaced sources remain untouched and fail
+removal; missing sources do not resurrect a removed backing. This is not evidence of an exploited vulnerability or
+qualified isolation.
 Typed launch accepts the prepared root-owned restore capability; the caller cannot submit snapshot paths, machine
 configuration, or alternate network identity. The public restore path has focused networkless L2 evidence only.
 
