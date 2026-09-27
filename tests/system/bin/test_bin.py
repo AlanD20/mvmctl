@@ -133,26 +133,34 @@ class TestBinaryEdges:
             f"Expected 'could be resolved' in output, got: {combined[:300]}"
         )
 
-    def test_remove_nonexistent_binary_fails(self, runner_vm):
-        """Removing nonexistent binary should fail gracefully."""
-        result = _run_mvm(
-            runner_vm, "bin", "rm", "totally-nonexistent-binary", check=False
+    def test_bin_rm_removed_version_flag_rejected_before_effects(self, runner_vm: str) -> None:
+        """A removed selector cannot alter any trusted release."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        rejected = _run_mvm(
+            runner_vm, "bin", "rm", "--version", "999.999.999", check=False,
         )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "could be resolved" in combined, (
-            f"Expected 'could be resolved' in output, got: {combined[:300]}"
-        )
+        assert rejected.returncode != 0
+        assert "unknown flag: --version" in (rejected.stdout + rejected.stderr).lower()
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
-    def test_bin_rm_version_nonexistent(self, runner_vm):
-        """Removing a nonexistent version via --version should fail."""
-        result = _run_mvm(
-            runner_vm, "bin", "rm", "--version", "999.999.999", check=False
+    def test_bin_rm_exact_absent_version_is_skipped(self, runner_vm: str) -> None:
+        """Root-authoritative removal reports a typed no-op for an absent exact slot."""
+        version = "999.999.999"
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert all(item["version"] != version for item in before)
+        data = _json_success_data(
+            _run_mvm(runner_vm, "bin", "rm", version, "--json").stdout,
+            dict,
         )
-        assert result.returncode != 0, (
-            f"Expected failure for nonexistent version, got: "
-            f"stdout={result.stdout}, stderr={result.stderr}"
-        )
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        assert item["error"] is None
+        assert item["result"]["status"] == "skipped"
+        assert item["result"]["code"] == "binary.remove_absent"
+        assert item["result"]["item"] == version
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
     # ---- Destructive pull tests (still no rm) ----
 

@@ -553,8 +553,8 @@ Specific legacy conflicts that must be rewritten before release:
 | Removed pull flags | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryPullAdvanced::test_bin_pull_removed_git_ref_rejected_before_effects` | Installed candidate rejects `--git-ref` before changing the release listing; other retired selector coverage remains open. |
 | `bin pull nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 — no skip |
 | `bin rm <exact-version>` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | Verify typed root removal |
-| Removed rm selectors | ❌ Missing | `bin/test_bin.py` | `TestBinaryEdges` | Add syntax rejection |
-| `bin rm nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 |
+| Removed rm selectors | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges::test_bin_rm_removed_version_flag_rejected_before_effects` | Installed candidate rejects retired `--version` before any release-list change; other removed selectors remain unqualified. |
+| `bin rm <absent exact-version>` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges::test_bin_rm_exact_absent_version_is_skipped` | Installed candidate returns typed `binary.remove_absent`/`skipped` and leaves the release listing unchanged. |
 | Root reference denial | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryStoppedVMDeletion` | Assert root authority |
 | `bin default <id>` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | L2 — may skip |
 | `bin default nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 |
