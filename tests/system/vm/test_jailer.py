@@ -239,6 +239,50 @@ def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
 
 
 class TestNetworklessJailerLifecycle:
+    def test_unqualified_release_is_rejected_before_plain_launch(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """An installed 1.16.0 pair cannot launch even a networkless, no-PCI VM."""
+        ensure_vm_deps(runner_vm)
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        defaults = {item["type"]: item for item in before if item["is_default"]}
+        assert set(defaults) == {"firecracker", "jailer"}
+        assert all(item["version"] == "1.16.1" for item in defaults.values())
+        owned_older = not any(item["version"] == "1.16.0" for item in before)
+
+        try:
+            if owned_older:
+                _run_mvm(runner_vm, "bin", "pull", "1.16.0", timeout=300)
+            binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+            older = {
+                item["type"]: item for item in binaries
+                if item["version"] == "1.16.0" and item["is_present"]
+            }
+            assert set(older) == {"firecracker", "jailer"}
+            _run_mvm(runner_vm, "bin", "default", older["firecracker"]["id"])
+            denied = _run_mvm(
+                runner_vm, "vm", "create", networkless_vm_name,
+                "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
+                "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                "--json", check=False, timeout=180,
+            )
+            assert denied.returncode != 0
+            response = json.loads(denied.stdout)
+            assert response["schema_version"] == 1
+            assert response["status"] == "error"
+            assert response["error"]["code"] == "binary.version.gate"
+            assert "Firecracker/Jailer 1.16.1" in response["error"]["message"]
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(vm["name"] != networkless_vm_name for vm in listed)
+        finally:
+            _run_mvm(runner_vm, "bin", "default", defaults["firecracker"]["id"])
+            if owned_older:
+                _run_mvm(runner_vm, "bin", "rm", "1.16.0", "--force")
+            restored = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+            assert {item["type"]: item["id"] for item in restored if item["is_default"]} == {
+                "firecracker": defaults["firecracker"]["id"], "jailer": defaults["jailer"]["id"],
+            }
+
     def test_default_deblob_provisions_bootable_guest(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:

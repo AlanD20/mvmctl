@@ -161,7 +161,17 @@ This does not qualify long-duration or host/ancestor OOM survival, the original 
 matrix, bridge-dependent policy, or remote CI. Matching Firecracker/Jailer 1.16.0 failed a networkless launch because
 Jailer rejected the launcher's `/proc/self/ns/net` argument as a symbolic-link loop; runner provisioning still pins
 1.16.0 in this historical run. The 0.3.0 contract now requires 1.16.1, and source now gates VM launch and runner
-provisioning to that pair; this correction still needs installed-candidate and orchestrator qualification.
+provisioning to that pair; the focused installed-candidate check below does not replace orchestrator qualification.
+
+**Firecracker 1.16.1 launch-gate checkpoint (2026-09-27):** A full-agent
+`0.3.0-rc.version-gate` candidate was installed through `host install-system` only in `mvmctl-030-test`; staged and
+installed SHA-256 matched. A new installed-CLI L2 case first failed against the previous candidate with
+`vm.create_failure`, then passed against the gated candidate: selecting a present 1.16.0 pair and creating a plain
+networkless/no-PCI VM returned schema-1 `binary.version.gate` before a VM projection appeared. It restored both
+1.16.1 defaults. A separate existing case successfully launched a 1.16.1 networkless VM and proved the operator
+could not traverse its selected trusted release files. Each focused schema-1 report recorded one pass and zero
+failure, error, skip, or deselection; independent readback found no VM afterward. This is not managed-network
+qualification, all lifecycle routes, the complete Python matrix, or orchestrator/remote CI sign-off.
 
 **Exact neighbor/current-candidate checkpoint (2026-09-27):** Clean source `659c8a51` passed offline tidy and
 generation with no tracked diff, gofmt, golines, full vet, the unprivileged Go CI selection, and the complete
@@ -412,6 +422,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `vm create` with `--skip-cleanup` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L1 — VM created successfully |
 | `vm create` with default deblob (Alpine) | 🟡 Partial | `vm/test_jailer.py` | `TestNetworklessJailerLifecycle` | Focused installed-candidate L2: guest booted and exposed deblob-created cloud-init and OpenRC settings. Other distros, cleanup rules, and failure rollback remain unqualified. |
 | `vm create` with `--skip-deblob` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L2 — VM created with skip-deblob |
+| `vm create` with unqualified Firecracker/Jailer pair | 🟡 Partial | `vm/test_jailer.py` | `TestNetworklessJailerLifecycle::test_unqualified_release_is_rejected_before_plain_launch` | Installed-candidate L2: present 1.16.0 pair rejected as `binary.version.gate` before a plain networkless/no-PCI VM projection; defaults restored. A separate 1.16.1 case launched successfully. Start/reboot/restore public paths and orchestrator run remain unqualified. |
 | `vm create` with `--nested-virt` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — cpu-config in Firecracker JSON, boot args validated |
 | `vm create` with `--cpu-template` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — merged cpu-config in Firecracker JSON |
 | `vm create` with `--no-nested-virt` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — no cpu-config, no nested boot args |
