@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -85,7 +87,8 @@ func (transport *sourceTransport) watchHostDisconnect(ctx context.Context) error
 		if err == nil {
 			return fmt.Errorf("source host read made no progress")
 		}
-		if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+		// os.File.Read wraps its poll deadline in fs.PathError, which is not a net.Error.
+		if errors.Is(err, os.ErrDeadlineExceeded) {
 			continue
 		}
 		return err

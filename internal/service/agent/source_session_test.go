@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"io"
+	"io/fs"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -14,6 +16,48 @@ import (
 )
 
 const agentSourceTestToken = "123e4567-e89b-42d3-a456-426614174000"
+
+type wrappedDeadlineSourceConn struct {
+	net.Conn
+	secondRead chan struct{}
+	reads      int
+}
+
+func (conn *wrappedDeadlineSourceConn) Read(buf []byte) (int, error) {
+	conn.reads++
+	if conn.reads == 1 {
+		return 0, &fs.PathError{Op: "read", Path: "vsock", Err: os.ErrDeadlineExceeded}
+	}
+	if conn.reads == 2 {
+		close(conn.secondRead)
+	}
+	return conn.Conn.Read(buf)
+}
+
+func TestSourceDisconnectWatchContinuesAfterWrappedFileDeadline(t *testing.T) {
+	host, guest := net.Pipe()
+	t.Cleanup(func() { _ = host.Close() })
+	t.Cleanup(func() { _ = guest.Close() })
+	conn := &wrappedDeadlineSourceConn{Conn: guest, secondRead: make(chan struct{})}
+	transport := newSourceTransport(conn)
+	result := make(chan error, 1)
+	go func() { result <- transport.watchHostDisconnect(t.Context()) }()
+
+	select {
+	case <-conn.secondRead:
+	case err := <-result:
+		t.Fatalf("deadline was treated as disconnect: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("disconnect watch did not continue after deadline")
+	}
+	require.NoError(t, host.Close())
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, io.EOF)
+	case <-time.After(time.Second):
+		t.Fatal("disconnect watch did not observe host close")
+	}
+}
 
 func TestSourceOpenAuthenticatesBeforeRegistration(t *testing.T) {
 	agent := New(9999, agentSourceTestToken, "/tmp/not-used.sock")
