@@ -726,7 +726,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Stress create/destroy | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestStressCreateDestroy` | L2: 5 sequential create→destroy cycles |
 | Export/import config journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestExportImport` | L2: inspect --json schema verification |
 | Concurrent VM creation | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestConcurrentVMCreation` | L3: 10 concurrent VMs, all running via ls --json, SSH into each |
-| Canonical Jailer lifecycle | ✅ Deep | `vm/test_jailer.py`, `full_journeys/test_full_journeys.py` | `TestCanonicalJailerLaunch`, `TestJailerFailClosed` | L2: trusted pair, non-root jailed process, lifecycle, volume, snapshot, fail-closed |
+| Canonical Jailer lifecycle | 🟡 Partial | `vm/test_jailer.py`, `full_journeys/test_full_journeys.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle`, `TestJailerFailClosed` | L2: networkless exact-pair launch with operator traversal denied, isolated VMM identity, lifecycle, volume, snapshot, and fail-closed cases. Networked Jailer cases remain unqualified on the current runner kernel. |
 | Typed cgroup-v2 envelope | 🟡 Partial | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | Focused L2: protected policy-v2 limit/usage inspection, operator direct-read denial, stop/start/remove cleanup, and charged guest tmpfs load with responsive exec and no VM-leaf hard maximum. Snapshot preservation, controller-unavailable admission, sustained saturation/host-OOM survival, and broader exact-identity cleanup remain unqualified. |
 
 ---

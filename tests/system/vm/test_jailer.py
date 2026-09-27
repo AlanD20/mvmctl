@@ -88,26 +88,6 @@ class TestCanonicalJailerLaunch:
         )
         assert socket_state.stdout.strip() == "socket"
 
-    def test_trusted_pair_is_root_owned_and_not_user_writable(
-        self, runner_vm: str, jailed_vm: dict[str, Any]
-    ) -> None:
-        """Verify both exact-version executables satisfy Jailer's trust contract."""
-        vm = _vm_entry(runner_vm, jailed_vm["name"])
-        binaries: list[dict[str, Any]] = json.loads(
-            _run_mvm(runner_vm, "bin", "ls", "--json").stdout
-        )
-        selected_ids = {vm["binary_id"], vm["jailer_binary_id"]}
-        pair = [item for item in binaries if item.get("id") in selected_ids]
-        assert {item.get("type") for item in pair} == {"firecracker", "jailer"}
-        assert len({item.get("version") for item in pair}) == 1
-        for item in pair:
-            path = shlex.quote(item["path"])
-            stat = _guest_run(runner_vm, f"stat -Lc '%u %a' {path}").stdout.strip()
-            owner, mode_text = stat.split()
-            mode = int(mode_text, 8)
-            assert owner == "0"
-            assert mode & 0o022 == 0
-
     def test_exec_cp_console_and_lifecycle_parity(
         self, runner_vm: str, jailed_vm: dict[str, Any]
     ) -> None:
@@ -330,6 +310,31 @@ def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
 
 
 class TestNetworklessJailerLifecycle:
+    def test_operator_cannot_traverse_trusted_release_pair(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """A launched exact pair is usable by the broker but not directly readable by the operator."""
+        ensure_vm_deps(runner_vm)
+        name = networkless_vm_name
+        _run_mvm(
+            runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
+            "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+            timeout=180,
+        )
+        vm = _vm_entry(runner_vm, name)
+        assert vm["status"] == "running"
+        selected_ids = {vm["binary_id"], vm["jailer_binary_id"]}
+        binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        pair = [item for item in binaries if item["id"] in selected_ids]
+        assert len(pair) == 2
+        assert {item["type"] for item in pair} == {"firecracker", "jailer"}
+        assert len({item["version"] for item in pair}) == 1
+        assert all(item["is_present"] for item in pair)
+        for item in pair:
+            denied = _guest_run(runner_vm, f"stat -L {shlex.quote(item['path'])}", check=False)
+            assert denied.returncode != 0
+            assert "permission denied" in denied.stderr.lower()
+
     def test_ps_and_inspect_follow_stop_and_start(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
