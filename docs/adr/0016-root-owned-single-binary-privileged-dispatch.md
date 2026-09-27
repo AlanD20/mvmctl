@@ -1276,22 +1276,30 @@ root-side lease or sealed configuration. Snapshot, volume, and image-provisionin
 Persistent outputs follow the implemented private preparation policy below; public launch and mount consumption
 remain separate implementation work.
 
-Sockets and PID mirrors are not persistent cache artifacts. Their host layout is fixed beneath the root-controlled
-ephemeral runtime tree:
+Sockets and PID mirrors are not persistent cache artifacts. The current isolated-execution implementation splits
+caller-facing outputs from the Firecracker API and vsock sockets beneath root-controlled ephemeral trees:
 
 ```text
 /run/mvmctl/                         root:root 0711
 ├── authority/                       root:root 0700
 │   └── <uid>/                       root:root 0700
-└── runtime/                         root:root 0711
-    └── <uid>/                       root:root 0711
-        └── <vm-id>/                 caller-uid:caller-gid 0700
+├── runtime/                         root:root 0711
+│   └── <uid>/                       root:root 0711
+│       └── <vm-id>/                 caller-uid:caller-gid 0700
+│           ├── console.sock
+│           ├── firecracker.pid
+│           └── console.pid
+└── vmm-runtime/                     root:root 0700
+    └── <uid>/                       root:root 0700
+        └── <vm-id>/                 execution-uid:execution-gid 0700
             ├── firecracker.api.socket
-            ├── vsock.sock
-            ├── console.sock
-            ├── firecracker.pid
-            └── console.pid
+            └── vsock.sock
 ```
+
+Isolation amendment (2026-09-27): the earlier single caller-owned socket tree was superseded by the approved
+isolated-VM execution boundary. Firecracker binds its API socket under the private `/vmm-runtime` mount; the root
+broker pins and verifies that socket through the observed jail root. Public VM JSON and SQLite no longer persist an
+operator `api_socket_path`, because no such endpoint exists. The caller runtime remains non-authoritative.
 
 Implementation note (updated 2026-09-04): `internal/lib/authorityfs` owns the descriptor-relative initializer for
 `/run/mvmctl` and `/run/mvmctl/authority`. Jailer's index lock, release-lock directory, per-UID authority directories,
@@ -1347,13 +1355,14 @@ state, Jailer handoff, runtime mount consumption, public cutover, and live-kerne
 
 The root-owned UID parent prevents the caller from replacing the VM runtime directory. Root creates and pins that
 directory descriptor-relatively after durable launch registration, verifies its owner, mode, device, and inode, and
-retains the descriptor through mount and rollback. The dropped VM process uses umask `0077`. Socket leaves must be
-caller-owned sockets with no world access; PID leaves are caller-owned `0600` positive-decimal display mirrors capped
-at 32 bytes. Privileged process control never trusts a PID mirror.
+retains the descriptor through mount and rollback. The dropped VM process uses umask `0077`. Caller-runtime socket
+leaves have no world access; private API/vsock sockets are isolated-execution-owned and root-brokered. PID leaves are
+caller-owned `0600` positive-decimal display mirrors capped at 32 bytes. Privileged process control never trusts a PID
+mirror.
 
 The caller can mutate leaves inside its runtime directory, so root treats the directory only as a fixed output area,
-never as authority. It is mounted as a directory at `/run/mvm/runtime` inside the private mount namespace so sockets
-created after child release remain visible. The user-owned cache VM directory is never mounted wholesale. Persistent
+never as authority. Firecracker API and vsock sockets are instead mounted from the private execution-owned runtime at
+`/vmm-runtime` inside the jail. The user-owned cache VM directory is never mounted wholesale. Persistent
 configuration and output files are opened and verified individually, then mounted or inherited through their pinned
 descriptors.
 
@@ -1693,9 +1702,10 @@ State is split by authority and lifetime:
 | Managed-network owner/bridge identity records | `/var/lib/mvmctl/networks/<uid>` | Root-owned, persistent, minimal; not VM-topology authority |
 | Jailer chroot directories | `/var/lib/mvmctl/jailer` | Root-owned lifecycle state |
 | Per-VM locks and launch handshakes | `/run/mvmctl/authority/<uid>` | Root-owned `0700`, ephemeral; no persistent mount-namespace handles |
-| VM sockets and PID mirrors | `/run/mvmctl/runtime/<uid>/<vm-id>` | Root-controlled parent, caller-owned `0700` VM directory, ephemeral and non-authoritative |
+| Console outputs and PID mirrors | `/run/mvmctl/runtime/<uid>/<vm-id>` | Root-controlled parent, caller-owned `0700` VM directory, ephemeral and non-authoritative |
+| Firecracker API and vsock sockets | `/run/mvmctl/vmm-runtime/<uid>/<vm-id>` | Root-controlled `0700` parents, isolated execution-owned `0700` VM directory; API access is root-brokered |
 | Cgroups | `/sys/fs/cgroup/mvmctl/<vm-id>` | Kernel runtime state |
-| `/run/mvm` and `/run/mvm/runtime` | Inside the jail | Individually pinned persistent leaves plus the pinned ephemeral runtime directory; not host authority |
+| `/run/mvm` and `/vmm-runtime` | Inside the jail | Individually pinned persistent leaves plus the private execution-owned runtime mount; not caller authority |
 
 Moving durable user state out of `~/.cache/mvmctl` is a separate XDG migration decision. Full state must not move to
 `/run` or `/var/run`.

@@ -43,8 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > release qualification.
 > After exact neighbor invalidation and its review correction, the clean `659c8a51` checkout passed the same complete
 > offline Go sequence and separate full root-effect Jailer package in `mvmctl-030-test`. The first exact-HEAD gate found
-> one golines-only test layout issue, corrected before this passing run. Networked installed-candidate Python QA is
-> still blocked by the runner's missing nftables bridge-family capability; this Go pass does not qualify release.
+> one golines-only test layout issue, corrected before this passing run. Networked installed-candidate Python QA was
+> blocked at that checkpoint by the former runner's missing nftables bridge-family capability; this Go pass does not
+> qualify release. The replacement named runner now reports nftables available and passed a bridge-table probe, but
+> the network and policy Python matrices remain unqualified.
 > The same source built `0.3.0-rc.neighbor` with its embedded guest agent and installed through `host install-system`
 > only inside `mvmctl-030-test`; installed and built SHA-256 values matched. Five existing networkless Python cases
 > passed there (5/5): create/restart/reboot/vsock exec, status projection, direct API denial, raw-volume restart, and
@@ -925,6 +927,14 @@ composition is described above; the current incomplete-work inventory is under *
   suite. This is gate implementation only; it is not full release-CI or QA evidence.
 
 ### Changed
+
+#### Private VM control projection
+
+- Removed the fabricated public/persisted `api_socket_path` field from VM create/list output, the VM model, and the
+  fresh SQLite schema. Firecracker's API socket is in the isolated execution identity's private runtime and remains
+  accessible only through the authenticated root broker; no operator-connectable socket path replaces this field.
+  A focused installed-candidate Python case in `mvmctl-030-test` verified the real private socket exists, the operator
+  receives access denial, and public stop still works. This is not full system-test qualification.
 
 #### Repository task cache
 - The repository-local `/.tmp/` task cache is now ignored by Git.

@@ -313,11 +313,14 @@ reset. Reset does not kill VMs, delete authority history, or unload kernel modul
 reset or a restoration error. Host activation and qualification remain separate work.
 
 The v0.3 privileged target splits state by authority and lifetime. Durable ownership and release records live beneath
-`/var/lib/mvmctl`; root-only locks and launch handshakes use `/run/mvmctl/authority/<uid>`. API, vsock, and console
-sockets plus display-only PID mirrors will use a separate pinned caller-owned VM directory beneath
-`/run/mvmctl/runtime/<uid>/<vm-id>`. Persistent configuration, disks, logs, console logs, and optional metrics remain in
-the caller's managed cache. Final privileged code must never mount the whole cache VM directory, trust a runtime leaf as
-authority, or signal a PID read from a PID mirror. ADR-0016 defines the exact ownership, modes, launch ordering, and
+`/var/lib/mvmctl`; root-only locks and launch handshakes use `/run/mvmctl/authority/<uid>`. Caller-facing console
+outputs and display-only PID mirrors use the pinned caller-owned directory beneath
+`/run/mvmctl/runtime/<uid>/<vm-id>`. Firecracker API and vsock sockets instead live in the isolated execution
+identity's private `/run/mvmctl/vmm-runtime/<uid>/<vm-id>` directory, mounted at `/vmm-runtime` inside the jail;
+the operator reaches Firecracker control only through the authenticated root broker. Persistent configuration, disks,
+logs, console logs, and optional metrics remain in the caller's managed cache. Final privileged code must never mount
+the whole cache VM directory, trust a runtime leaf as authority, or signal a PID read from a PID mirror. ADR-0016
+defines the exact ownership, modes, launch ordering, and
 cleanup contract; `tasks/todo.md` records implementation status.
 
 The private Jailer runtime-directory foundation now creates the fixed root-owned mode-`0711`
@@ -333,8 +336,9 @@ retained directory descriptor. Missing leaves are already clean, symlinks are un
 directory, mount, or unexpected name remains untouched and blocks `cleaned`. Fresh cleanup after a controller restart
 reopens only the exact existing root-controlled hierarchy and caller-owned VM directory without creating or repairing
 any component. A missing hierarchy is already clean; unsafe state keeps the durable record and VM lock in retryable
-`cleaning`. Typed launch now consumes this directory in the child-created jail mount tree. Host client connections use
-`/run/mvmctl/runtime/<uid>/<vm-id>`; the whole caller-owned VM cache directory is not mounted.
+`cleaning`. Typed launch now consumes this directory in the child-created jail mount tree. Console connections use
+the caller runtime; the API broker pins the separate private runtime through the verified process root. The whole
+caller-owned VM cache directory is not mounted.
 
 The current Jailer instance record is strict schema 5 with
 `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
@@ -486,10 +490,11 @@ The public relaunch path has a separate, private normal-process `vmRelaunchState
 reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,
 mismatched VM identity, or an out-of-range CID aborts before respawn. A present row is cloned, its host UDS metadata is
 normalized to the fixed managed `vsock.sock` leaf, and its CID, agent port, and token remain available to the normal
-process. Only the validated CID enters `model.FirecrackerConfig`; the VM/Jailer path derives the fixed host and
-`/run/mvm/vsock.sock` jail leaves. Snapshot restore preserves the CID stored in vmstate and sends the fixed jail-visible
-vsock UDS override. VM create still uses its existing builder state rather than this common relaunch state. The private
-host `/run/mvmctl/runtime` directory lease transfers through the launch/active/cleanup graph and typed public launch.
+process. Only the validated CID enters `model.FirecrackerConfig`; the root Jailer path derives the private host runtime
+and fixed `/vmm-runtime/vsock.sock` jail leaf. Snapshot restore preserves the CID stored in vmstate and sends the fixed
+jail-visible vsock UDS override. VM create still uses its existing builder state rather than this common relaunch state.
+The private host `/run/mvmctl/runtime` directory lease transfers through the launch/active/cleanup graph and typed
+public launch.
 Host-reboot reconciliation and L2 `mvm exec` relaunch qualification remain separate from this implementation; the
 reported restart failure is not declared resolved without that evidence. Snapshot restore now consumes a prepared
 root-owned capture, with independent protected disks and immutable memory backing for full restores.

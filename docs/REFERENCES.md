@@ -888,11 +888,6 @@ The security model applies to the net cloud-init mode only:
 │       ├── firecracker.log
 │       ├── firecracker.console.log
 │       ├── firecracker.metrics       # Metrics enabled only
-│       ├── firecracker.pid
-│       ├── firecracker.api.socket
-│       ├── vsock.sock                # Vsock enabled only
-│       ├── console.sock
-│       ├── console.pid
 │       └── cloud-init/               # Generated seed inputs
 ├── workflows/            # Workflow state persistence
 ├── nocloudnet/           # nocloud-net batch server dirs and logs
@@ -912,9 +907,11 @@ The security model applies to the net cloud-init mode only:
 ```
 
 The VM and snapshot leaf names above are compiled and are not configurable. `MVM_CACHE_DIR` still selects the managed
-cache root. Typed launch places API/vsock/console sockets and display-only PID mirrors beneath
-`/run/mvmctl/runtime/<uid>/<vm-id>`. The root transaction pins individual persistent resources and mounts the runtime
-directory in a fresh child-created jail tree; it does not mount the whole caller-owned VM directory.
+cache root. Caller-facing console outputs and display-only PID mirrors use
+`/run/mvmctl/runtime/<uid>/<vm-id>`; the Firecracker API and vsock sockets use the isolated execution identity's
+private `/run/mvmctl/vmm-runtime/<uid>/<vm-id>` directory, mounted at `/vmm-runtime` inside the jail. The API is
+available through the authenticated root broker, not a public `api_socket_path` field. The root transaction pins
+individual persistent resources; it does not mount the whole caller-owned VM directory.
 
 The v0.3 privileged path accepts a managed cache root on ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or ZFS.
 FUSE, remote, overlay/stacked, and automount cache roots are unsupported. The descriptor-pinned cache foundation is

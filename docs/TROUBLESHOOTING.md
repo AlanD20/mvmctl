@@ -162,7 +162,7 @@ If launch reports a verification mismatch, `mvm vm inspect <name> --json` shows 
 
 **3. Kernel file is not readable by Firecracker.** Verify the kernel exists and the path is correct:
 ```bash
-mvm kernel ls --json | jq -r '.[].path'
+mvm kernel ls --json | jq -r '.data[].path'
 ls -l <path_from_output>
 ```
 
@@ -171,16 +171,9 @@ ls -l <path_from_output>
 mvm config reset defaults.vm boot_args
 ```
 
-**5. Socket path too long.** Firecracker uses Unix domain sockets which have a 108-character path limit. Long VM names or deep cache directories can exceed this. Check:
+**5. Binary / kernel architecture mismatch.** A kernel built for `x86_64` won't boot under an `aarch64` Firecracker binary. Verify both match:
 ```bash
-# See the VM's socket path
-ls -la ~/.cache/mvmctl/vms/*/firecracker.api.socket
-# If it looks very long, try a shorter VM name
-```
-
-**6. Binary / kernel architecture mismatch.** A kernel built for `x86_64` won't boot under an `aarch64` Firecracker binary. Verify both match:
-```bash
-file $(mvm kernel ls --json | jq -r '.[0].path')
+file $(mvm kernel ls --json | jq -r '.data[0].path')
 mvm bin ls
 ```
 
