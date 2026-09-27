@@ -133,7 +133,8 @@ were empty afterward.
 The duplicate timeout-success and empty-interactive-input cases were removed: all captured-exec cases pass explicit
 `--timeout 10`, while the retained interactive case covers the no-command route. This qualifies only host-to-guest
 exec in the named runner, not typed VM-to-VM policy, managed-network placement, host-reboot recovery, or the full
-Python matrix. The source-level Go gate at `bb56b77e` predates this exec-input change and must be refreshed.
+Python matrix. A separate clean checkout at exact commit `0e315b04` subsequently passed the pinned offline Go CI
+sequence and the complete root-authority Jailer package in the named runner; remote CI remains unqualified.
 
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
