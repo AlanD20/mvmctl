@@ -56,8 +56,12 @@ managed DR case failed on the preceding installed candidate because JSON-mode st
 the new installed runner candidate (SHA-256
 `11a432dc425ddf56f7b9695efeea085541e3948a435cadf0a40d3f49da900c27`), with strict zero-skip report
 `/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/qa-snapshot-dr-856bf013/.tmp/qa-snapshot-handle-green.json`.
-VM, network, and snapshot lists were empty afterward. The test proves emission on success, not an abrupt-kill
-recovery journey; if stderr is lost, a root-published capture remains undiscoverable from `snapshot ls`.
+VM, network, and snapshot lists were empty afterward. The test proves emission on success. A separate bounded manual
+probe in the same named runner killed the CLI after the full ID was emitted and root capture progress existed;
+`mvm snapshot inspect <full-id>` then succeeded and typed `snapshot rm --force` removed the exact protected artifact.
+The probe log is `.tmp/snapshot-interrupt-probe.log` in that runner QA worktree. This is not an automated Python
+system-test case or a complete interruption fault matrix; if stderr is lost, a root-published capture remains
+undiscoverable from `snapshot ls`.
 
 **Full Jailer-file runner checkpoint (2026-09-27):** The official 1.16.0 checksum sidecar was reachable by a bounded
 direct HTTPS probe, which changed the earlier external-metadata blocker; the archive remained present in the configured
@@ -674,7 +678,7 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `snapshot create <vm>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless full capture with an attached raw volume and one managed-network DR capture passed. The CLI now emits the full request ID before capture, including in JSON mode; its interruption cleanup journey remains unqualified and `snapshot ls` does not discover unindexed root captures. |
+| `snapshot create <vm>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless full capture with an attached raw volume and one managed-network DR capture passed. The CLI emits the full request ID before capture, including in JSON mode; one manual CLI-kill/typed-inspect/remove journey passed. Automated interruption QA and `snapshot ls` discovery of unindexed root captures remain open. |
 | `snapshot create --name` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_with_name` | L2 — custom name in ls --json |
 | `snapshot create --pause` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_pause_flag` | L2 — VM status=paused after snapshot |
 | `snapshot create` on stopped VM | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L1 — non-zero, no snapshot files created |
