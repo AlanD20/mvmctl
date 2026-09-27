@@ -46,6 +46,12 @@ allocation did not reach `memory.high`; larger 156/168 MiB attempts lost the gue
 `memory.high`. This does not prove sustained-pressure survival or a host cgroup kill; the guest/agent EOF needs a
 separate bounded diagnosis.
 
+The init module passed 8/8 on the installed candidate, but it left a default network behind. After exact CLI removal
+of that test-created network, an experimental per-case teardown run passed only 6/8: later init calls were refused
+by durable network-removal receipts. The teardown experiment was reverted, and the runner's VM/network inventories
+are empty. Init repeatability after network removal and self-contained test cleanup remain release blockers; the
+initial 8/8 is not a clean, repeatable domain qualification.
+
 **Runner evidence (2026-09-27):** In the named `mvmctl-030-test` runner, pinned Go 1.26.3 passed the complete
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
