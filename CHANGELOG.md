@@ -7,73 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Security release status:** `0.3.0` is still under development. The canonical Jailer, cgroup policy, routed
-> service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
-> and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
-> authority, retained persistent-output preparation, private schema-3 batch status observation, atomic transitional
-> sudoers publication, typed traffic/exec policy persistence, topology preparation, typed nftables compilation with a
-> canonical generation digest, the private firewall generation record/store/lock and evidence-bound replacement authority,
-> bounded raw nftables snapshot collection and private exact-host-netns generation application/reconciliation,
-> the private Jailer and LoopMount ephemeral-authority capabilities, the private root-pinned network namespace and
-> link effects and canonical L3/address/link-state foundations,
-> strict schema-3 Jailer record/registration and private pidfd process-activation/
-> cleanup-recovery authority with retained fixed-name cgroup-v2 lifecycle authority, and typed LoopMount
-> client/protocol, rootfs-authority, resource-lock adapter, split
-> effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, its destination-agent
-> non-root execution side, its isolated process-bound source-session foundation, its closed one-request destination
-> session, its typed command-redacted user audit sink, the private descriptor-pinned VM runtime-directory lifecycle,
-> the production-composed root-owned
-> VM-exec capacity and active-pair authorities with a fixed global ceiling, its exact Firecracker peer/pidfd binding
-> and absolute-boottime stop, its exact-one descriptor transport and structural admission, its closed retained-sidecar
-> wire/process/Jailer-client/registered-handler lifecycle, partial typed vsock-state preservation across start, reboot,
-> and snapshot restore, and clean-break removal of the VM-wide
-> remote-exec trust flag described below are implemented.
-> The late implementation pass also composes typed schema-4 launch/cleanup, per-VM topology, cgroup and descriptor-only
-> mounts, same-boot recovery, root traffic apply/revoke, managed-network transactions, and offline ext-image shrink.
-> A clean checkout at `bdc7b70b` passed the pinned Go 1.26.3 CI checks and full root-effect Jailer Go package inside
-> the named `mvmctl-030-test` runner, using a previously installed, verified golines v0.13.0 binary because the runner
-> is offline. The host-capacity fix at `66580a71` also passed focused pinned Go checks and installed-candidate host
-> Python cases there. Against the installed `0.3.0-rc.5` candidate, 26 selected SSH-key cases and all five internal
-> service entry-point cases passed there; two bridge-dependent key cases were deselected. The broader installed-candidate
-> Python release matrix has not run.
-> A later clean checkout at `5fcb3b87`, including the unused raw-sudo helper and privileged service-spawn removal,
-> passed offline tidy with no tracked diff, gofmt, verified golines v0.13.0, agent generation with no tracked diff,
-> vet, the complete unprivileged Go CI selection, and the separate full root-effect Jailer package under pinned Go
-> 1.26.3 inside that same runner. This is local exact-source Go evidence, not GitHub CI or installed-candidate Python
-> release qualification.
-> After exact neighbor invalidation and its review correction, the clean `659c8a51` checkout passed the same complete
-> offline Go sequence and separate full root-effect Jailer package in `mvmctl-030-test`. The first exact-HEAD gate found
-> one golines-only test layout issue, corrected before this passing run. Networked installed-candidate Python QA was
-> blocked at that checkpoint by the former runner's missing nftables bridge-family capability; this Go pass does not
-> qualify release. The replacement named runner now reports nftables available and passed a bridge-table probe, but
-> the network and policy Python matrices remain unqualified.
-> The same source built `0.3.0-rc.neighbor` with its embedded guest agent and installed through `host install-system`
-> only inside `mvmctl-030-test`; installed and built SHA-256 values matched. Five existing networkless Python cases
-> passed there (5/5): create/restart/reboot/vsock exec, status projection, direct API denial, raw-volume restart, and
-> consistent snapshot/volume restore. VM, volume, and snapshot inventories were empty after checked teardown. This is
-> focused candidate evidence, not the networked or full Python matrix; the outer installed controller was unchanged.
-> Both existing cgroup Python cases also passed (2/2) on that candidate, including root-brokered limit/usage inspection
-> and a bounded charged guest allocation with responsive vsock exec. Sustained saturation and ancestor/host OOM
-> survival remain unqualified.
-> Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation.
-> A focused networkless data-volume capture/restore journey passed against an installed candidate inside the named
-> disposable runner; this does not qualify the managed-network or full Python release matrix.
-> The mapped production integration gaps are committed; release qualification remains incomplete. Raw-volume launch,
-> host clean/reset, and typed image recovery are
-> implemented but unverified. Earlier slice evidence below does not qualify these later changes.
-> A later candidate installed only in `mvmctl-030-test` passed all seven Python `exec` domain cases, including a
-> directional VM-to-VM grant journey across same-network, cross-network, and networkless placements. The journey
-> checked denial before grant, the exact non-root target, a destination file effect, reverse denial, revocation,
-> and absence of test VMs, networks, and policies after teardown. This is focused exec-domain evidence, not the full
-> Python matrix, adversarial relay qualification, or release sign-off.
-> At exact source revision `d0db3be6`, pinned Go 1.26.3 tidy, architecture, formatting with verified golines v0.13.0,
-> agent generation, full vet, the complete unprivileged CI test selection with coverage, and the separate root-effect
-> Jailer package passed inside `mvmctl-030-test`. The binary built from that revision was installed only in that
-> runner; its exec and typed traffic-policy cases passed 9/9, and nftables cases passed 4/4. A later test-only JSON
-> correction passed the focused Jailer snapshot journey; a measured pressure-test correction passed a bounded
-> `memory.high` event without VMM OOM. The full Jailer/cgroup Python domain remains open because a 1.16.0 test pull
-> could not fetch trusted checksum metadata despite the archive being cached. These are local partial gates, not the
-> full Python matrix, GitHub CI, or release approval.
+> **Release status (2026-09-27):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
+> isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
+> traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
+> requires the matching Firecracker/Jailer 1.16.1 pair. An exact clean checkout at `307e09d2` passed pinned
+> Go 1.26.3 local CI and the separate full root-effect Jailer package in the named `mvmctl-030-test` runner.
+> Later Go commit `6b1e5b2b` passed focused host tests, vet, and formatting there; complete Go CI has not yet been
+> rerun at the current source revision. The installed runner candidate passed complete network/nftables/policy
+> (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), and copy (15/15)
+> Python domains with strict zero-skip reports at their recorded revisions. These are domain results, not a
+> complete exact-current-HEAD Python matrix. Host-reboot/exec recovery had one device-open failure and one
+> successful controlled repeat; its cause remains unresolved. Sustained memory saturation, full Jailer/cgroup
+> QA requiring trusted 1.16.0 checksum metadata, clean-host reset/installation, Tier 3, aarch64 runtime,
+> GitHub CI, and final release approval remain open. No candidate has been installed over the outer controller.
+
+The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
+earlier partial-state statement. They are not a substitute for the final release QA report.
 
 ### Added
 
@@ -315,16 +264,18 @@ composition is described above; the current incomplete-work inventory is under *
   operations write schema 3. The 1,000-record L1 fixture uses real files with fake process/lock effects, one owner, and
   no relays; its measurements do not qualify live 1,000-VM performance or host reboot.
 
-#### Routed service-access policies
-- `mvm policy` now persists exact network-to-VM TCP/UDP allows while both firewall backends default-deny other managed cross-network and VM-to-host traffic without blocking NoCloud, established replies, or internet egress.
+#### Earlier routed-policy prototype (retired in v0.3.0)
+- An intermediate `mvm policy` service-access model and dual-firewall implementation were replaced by the final
+  `policy traffic`/`policy exec` families and the sole nftables backend. They are not active v0.3.0 interfaces.
 
 #### Typed traffic and execution policy foundations
 - Added separate SQLite allow-intent models and repositories for source-network traffic, exact source-VM traffic, and
   directional exact-user VM-to-VM execution grants. Schema constraints bind immutable identities, TCP/UDP port ranges,
   non-root target users, duplicate rejection, and foreign-key cleanup.
 - VM invalidation removes both typed traffic families in one transaction, and execution authorization failures use a
-  dedicated structured error code. Typed traffic create/list/inspect now expose desired intent through `policy traffic`;
-  complete root nftables enforcement and revocation remain pending.
+  dedicated structured error code. Typed traffic create/list/inspect expose intent through `policy traffic`; later
+  integration added root nftables application and revocation, with the complete 47-case network domain passing in
+  the named runner at its recorded candidate revision.
 - Added public directional execution-policy CRUD through
   `mvm policy exec create <source-vm> <destination-vm> <target-user>`, `mvm policy exec ls [--json]`, and
   `mvm policy exec rm <policy...> [--force]`. Creation resolves exact VM identities, rejects the same VM and root
@@ -979,8 +930,8 @@ composition is described above; the current incomplete-work inventory is under *
   `sudo /usr/local/bin/mvm host init`.
 - A system-installed `/usr/local/bin/mvm` refuses in-place `self-update apply`. Administrators replace it by running
   `host install-system` from the newly downloaded trusted artifact.
-- During development, the generated sudoers policy targets `/usr/local/bin/mvm` instead of a user-owned executable.
-  Its wildcard and raw-tool grants remain transitional and are not the final `0.3.0` security boundary.
+- The generated sudoers policy now targets only the root-owned `/usr/local/bin/mvm` privileged marker. Public CLI,
+  wildcard arguments, and raw host-tool grants are not part of the v0.3.0 operator policy.
 
 #### System-test asset preparation
 - Shared runner assets are seeded from `MVM_ASSET_MIRROR` with descriptor-pinned, no-follow access and
@@ -1012,11 +963,12 @@ composition is described above; the current incomplete-work inventory is under *
 - Custom cloud-init ISO paths remain accepted as source data, but the ISO is copied into the VM's fixed
   `cloud-init.iso` leaf before launch. Internal console-relay filename flags and filename settings were removed.
 - VM relaunch reconstructs rootfs, configuration, output, metrics, API, PID, and vsock paths from the managed VM
-  directory instead of treating SQLite path columns as launch authority. The transitional privileged Jailer also
-  rejects alternate manifest basenames and constructs its Firecracker API/config arguments from the compiled names.
+  directory instead of treating SQLite path columns as launch authority. Root Jailer admission also rejects
+  alternate manifest basenames and constructs Firecracker API/config arguments from the compiled names.
 - Snapshots now produce and restore `rootfs.img`, `memory`, and `vmstate`. Restore and removal derive the snapshot
   directory and leaves from the validated 64-character lowercase snapshot ID rather than stored file-path columns.
-  The temporary `phantom-rootfs.img` mechanism remains until the private mount-namespace overlay lands.
+  Protected snapshot backing and independent restored writable disks replace the earlier phantom-rootfs staging
+  mechanism; the old `phantom-rootfs.img` name is no longer in active source.
 
 #### Host-to-guest exec input
 
@@ -1046,8 +998,8 @@ composition is described above; the current incomplete-work inventory is under *
   host-reboot, and snapshot-exec qualification remain pending.
 
 #### Network isolation
-- Traffic routed between different managed networks is now denied unless an explicit typed service-access policy permits
-  the destination VM protocol and port. Same-network bridge traffic remains unchanged.
+- Managed same-network and cross-network VM traffic is denied unless an exact typed `policy traffic` grant permits
+  the destination VM protocol and port. A grant carries neither vsock-exec nor host-command authority.
 - VM-to-host traffic is limited to established replies and required managed services such as NoCloud; internet egress
   remains available.
 
@@ -1075,8 +1027,8 @@ composition is described above; the current incomplete-work inventory is under *
   before side effects and requires an administrator-approved system-binary replacement.
 - Jailed VM launch requires cgroup v2, the required controllers, and an exact Firecracker/Jailer release pair. Hosts that
   previously relied on direct Firecracker fallback no longer start VMs through that fallback.
-- Cross-network VM traffic that previously worked without an allow rule is denied after policy reconciliation. Operators
-  must create explicit `mvm policy` entries for required TCP or UDP services.
+- Same- and cross-network managed VM traffic that previously worked without an allow rule is denied. Operators
+  must create explicit `mvm policy traffic` grants for required TCP or UDP services.
 - Scripts that expect `mvm self-update apply` to replace `/usr/local/bin/mvm` must switch to the administrator bootstrap
   flow. Self-update remains available for user-owned candidate artifacts.
 - API consumers can no longer set `output_dir`, `name`, or `output_path` on `KernelPullInput`; managed kernel placement
@@ -1172,35 +1124,21 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Security work still pending
 
-The bounded production gap map is closed in source, including root-controlled snapshot capture/removal, the named
-privileged restore route, immutable backing with consistent data-volume snapshots, cache cleanup, typed policies,
-and structured partial results. Pinned Go CI and the full root-effect Jailer package passed at `3cef1c41`, but that is
-not full installed-candidate qualification. Broader Python T1/T2 journeys, GitHub CI, and the bridge-capable runner-
-kernel gate remain;
-additional implementation defects may still emerge.
-Approval adds no new per-volume or aggregate quota caps. Existing
-unprivileged archive construction remains outside the root service. Pressure-only memory policy v2 is implemented
-without runtime qualification; attribution of the reported OOM incident remains unresolved.
-Snapshot launch still refuses unsupported selections; raw-volume and PCI launch are integrated but unverified.
-The user subsequently approved the isolated-execution prerequisite in ADR-0018. A trusted capture contract must address the
-operator-owned process, caller-accessible Firecracker API, active disk writers, and retained writable aliases.
-No exploit or impossibility of a narrower design has been demonstrated. Root-controlled storage and consistent
-data-volume capture have source implementations that remain unqualified.
-Shared dispatcher admission and guarded administrator reset are composed. Reset requires marker-only sudoers and
-compatible root journals, rejects live or ambiguous managed state, and restores recorded settings through retryable
-rollback receipts. It retains disabled admission after reset or restoration failure and preserves unrelated administrator
-changes and authority history. Typed image deblob/fstab operations now compose with the durable shrink journal.
-Prior-boot cleanup consumes a concrete retained VM/cgroup absence proof,
-retires topology only after namespace/link absence, and preserves firewall reservations/grants. Managed networks
-can rebootstrap exact logical intent using fresh kernel identities, without adopting a competing bridge. These paths
-are unverified. Surviving namespace placeholders and ambiguous ownership remain fail-closed. Old-boot network removal
-receipts and pending desired networks without root records now have absence-only retry/cancellation support, including
-durable tombstones and repeated bridge/topology/firewall checks. Memory policy v2 removes the per-VM finite hard
-maximum; it does not modify ancestor limits or promise immunity from every OOM mechanism.
+The implementation map has source code and bounded runner evidence, but the release is not qualified. Before sign-off:
 
-The code changes in this implementation-only pass have not been built, tested, reviewed, or qualified. Adversarial
-coverage, CLI system tests, cleanup/leak evidence, full CI, and release signoff remain required in a later authorized
-verification pass.
+- Run exact-current-source pinned Go CI and the separate complete root-effect Jailer package after the latest Go fix;
+  obtain the separate GitHub CI result.
+- Complete the installed-candidate Python T1/T2 matrix with strict outcomes and leak checks. The two Jailer cases
+  requiring an older release still need an authenticated official checksum fetch; a mirrored archive alone is not
+  sufficient. Do not bypass the trusted-release receiver to make those cases green.
+- Diagnose the intermittent jailed device-open failure after host reboot and prove a repeatable reboot/status/exec
+  recovery journey. A successful repeat is not an explanation for the earlier failure.
+- Qualify sustained memory pressure and distinguish VM-leaf, ancestor, host, and guest OOM behavior. Pressure-only
+  `memory.max=max` removes one finite VM-leaf ceiling, not every OOM risk.
+- Qualify administrator install/init/reset and destructive host clean only on a dedicated clean host. The shared
+  runner's unprivileged refusal tests do not prove reset success.
+- Finish public documentation and the clean-install procedure, report the aarch64 runtime limitation, and obtain
+  human approval before tagging. Do not install the candidate on the outer controller as an incidental test step.
 
 #### Earlier implementation checkpoints (historical)
 
