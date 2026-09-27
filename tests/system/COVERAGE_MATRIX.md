@@ -547,16 +547,16 @@ Specific legacy conflicts that must be rewritten before release:
 | `bin ls --json` empty | ⚡ Shallow | `bin/test_bin.py` | `TestBinLifecycle` | L2 |
 | `bin ls --remote` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryEdges` | L1 — skips on network |
 | `bin ls --remote --limit` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryEdges` | L1 — skips on network |
-| `bin pull <version>` | 🟡 Partial | `bin/test_bin.py` | `TestBinaryEdges::test_bin_pull_present_exact_version_from_mirror` | Installed candidate re-admits a present exact mirrored release as a matching Firecracker/Jailer pair without changing the default; fresh-slot installation remains unqualified and other legacy pull cases still need rewriting. |
+| `bin pull <version>` | 🟡 Partial | `bin/test_bin.py` | `TestBinaryEdges::test_bin_pull_present_exact_version_from_mirror`, `TestBinaryPullAndLifecycle::test_bin_pull_and_set_default` | Installed candidate re-admits a present pair and installs a mirrored release into an absent root slot; force replacement and remaining legacy pull cases are unqualified. |
 | `bin pull --force` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAdvanced` | Verify replacement authority |
-| `bin pull --default` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAdvanced` | Use positional version |
+| `bin pull --default` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryPullAndLifecycle::test_bin_pull_and_set_default` | Focused L2: both defaults transfer to a fresh exact pair, then the prior pair is restored. Other legacy default-transfer cases remain unqualified. |
 | Removed pull flags | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryPullAdvanced::test_bin_pull_removed_git_ref_rejected_before_effects` | Installed candidate rejects `--git-ref` before changing the release listing; other retired selector coverage remains open. |
 | `bin pull nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 — no skip |
-| `bin rm <exact-version>` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | Verify typed root removal |
+| `bin rm <exact-version>` | 🟡 Partial | `bin/test_bin.py` | `TestBinaryPullAndLifecycle::test_bin_pull_and_set_default` | Focused L2: typed root removal of the test-owned present slot and restored projection; referenced-release denial remains unqualified. |
 | Removed rm selectors | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges::test_bin_rm_removed_version_flag_rejected_before_effects` | Installed candidate rejects retired `--version` before any release-list change; other removed selectors remain unqualified. |
 | `bin rm <absent exact-version>` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges::test_bin_rm_exact_absent_version_is_skipped` | Installed candidate returns typed `binary.remove_absent`/`skipped` and leaves the release listing unchanged. |
 | Root reference denial | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryStoppedVMDeletion` | Assert root authority |
-| `bin default <id>` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | L2 — may skip |
+| `bin default <id>` | 🟡 Partial | `bin/test_bin.py` | `TestBinaryPullAndLifecycle::test_bin_pull_and_set_default` | Focused L2: both original pair defaults restored by exact IDs; dedicated legacy case remains unqualified. |
 | `bin default nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 |
 | Release survives cache clean | ❌ Rewrite | `bin/test_bin.py` | `TestServiceBinarySymlinks` | No legacy symlinks |
 

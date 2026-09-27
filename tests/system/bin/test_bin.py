@@ -442,65 +442,72 @@ class TestBinaryPullAndLifecycle:
     ]
 
     @pytest.mark.slow
-    def test_bin_pull_and_set_default(self, runner_vm):
-        """Pull a specific binary version and set as default."""
-        _ensure_binary(runner_vm)
-
-        local_listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-        local_bins = json.loads(local_listing.stdout)
-
-        # Record original default to restore later
-        original_default_id: str | None = None
-        orig_default = next(
-            (b for b in local_bins if b.get("is_default")), None
+    def test_bin_pull_and_set_default(self, runner_vm: str) -> None:
+        """Install an absent mirrored release, transfer defaults, then remove the test-owned slot."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        defaults = {item["type"]: item for item in before if item["is_default"]}
+        assert set(defaults) == {"firecracker", "jailer"}
+        assert defaults["firecracker"]["version"] == defaults["jailer"]["version"]
+        mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
+        target = next(
+            (
+                version
+                for version in ("1.16.1", "1.15.1")
+                if all(item["version"] != version for item in before)
+                and (mirror / f"firecracker-v{version}-{platform.machine()}.tgz").is_file()
+            ),
+            None,
         )
-        if orig_default:
-            original_default_id = orig_default["id"][:6]
+        assert target is not None, "test requires a mirrored release absent from this isolated runner"
 
+        attempted = False
+        installed = False
         try:
-            # Pick a non-default target
-            non_default = [
-                b for b in local_bins
-                if b.get("type") == "firecracker"
-                and b.get("is_present")
-                and not b.get("is_default")
-            ]
-            if non_default:
-                target = non_default[0]["version"]
-            else:
-                target = "1.14.2"
-
-            pull_result = _run_mvm(
-                runner_vm,
-                "bin",
-                "pull",
-                "firecracker",
-                "--version",
-                target,
-                "--default",
-                "--force",
-                check=False,
+            attempted = True
+            pulled = _json_success_data(
+                _run_mvm(runner_vm, "bin", "pull", target, "--default", "--json", timeout=300).stdout,
+                list,
             )
-            assert pull_result.returncode == 0, (
-                f"bin pull {target} --default --force failed: {pull_result.stderr}"
-            )
-
-            listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-            entries = json.loads(listing.stdout)
-            pulled_entries = [
-                e for e in entries
-                if e.get("version") == target and e.get("type") == "firecracker"
-            ]
-            assert len(pulled_entries) > 0, (
-                f"Pulled version {target} not found in listing"
-            )
-            assert any(e.get("is_default") for e in pulled_entries), (
-                f"Version {target} was pulled with --default but "
-                f"is_default is False in listing"
-            )
+            installed = True
+            assert len(pulled) == 2
+            assert {item["type"] for item in pulled} == {"firecracker", "jailer"}
+            assert {item["version"] for item in pulled} == {target}
+            assert all(item["is_present"] for item in pulled)
+            listing = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+            assert {
+                (item["type"], item["version"], item["id"])
+                for item in listing
+                if item["is_default"]
+            } == {(item["type"], target, item["id"]) for item in pulled}
         finally:
-            if original_default_id:
-                _run_mvm(runner_vm, "bin", "default", original_default_id, check=False)
+            restore_failures: list[str] = []
+            for item in defaults.values():
+                restored = _run_mvm(runner_vm, "bin", "default", item["id"], check=False)
+                if restored.returncode != 0:
+                    restore_failures.append(f"{item['type']}: {restored.stderr}")
+            if attempted:
+                removed = _json_success_data(
+                    _run_mvm(runner_vm, "bin", "rm", target, "--force", "--json").stdout,
+                    dict,
+                )
+                assert len(removed["items"]) == 1
+                result = removed["items"][0]
+                assert result["error"] is None
+                assert result["result"]["item"] == target
+                if installed:
+                    assert result["result"]["status"] == "success"
+                    assert result["result"]["code"] == "binary.removed"
+                else:
+                    assert result["result"]["status"] in ("success", "skipped")
+            assert not restore_failures, restore_failures
+            after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+            assert {
+                (item["type"], item["version"], item["id"], item["is_default"])
+                for item in after
+            } == {
+                (item["type"], item["version"], item["id"], item["is_default"])
+                for item in before
+            }
 
     def test_bin_default(self, runner_vm):
         """Set a cached binary as default using bin default <id>.
