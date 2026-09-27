@@ -61,6 +61,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > The mapped production integration gaps are committed; release qualification remains incomplete. Raw-volume launch,
 > host clean/reset, and typed image recovery are
 > implemented but unverified. Earlier slice evidence below does not qualify these later changes.
+> A later candidate installed only in `mvmctl-030-test` passed all seven Python `exec` domain cases, including a
+> directional VM-to-VM grant journey across same-network, cross-network, and networkless placements. The journey
+> checked denial before grant, the exact non-root target, a destination file effect, reverse denial, revocation,
+> and absence of test VMs, networks, and policies after teardown. This is focused exec-domain evidence, not the full
+> Python matrix, adversarial relay qualification, or release sign-off.
 
 ### Added
 
@@ -212,7 +217,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `data` when empty, and `env ls --json` no longer mixes human-readable output with its envelope.
 - Added `mvm exec --allow-vm-exec` and API-owned directional policy enforcement, retained root authority, bounded
   source/destination relay, cancellation, and command-redacted audit. It requires schema-3 active VM identities and
-  has not been qualified end to end. Ordinary exec, shell, and copy do not enable the source session.
+  passed the installed-candidate directional policy journey in the named runner. Peer-identity attacks,
+  capacity/deadline/cancellation, audit redaction, and reboot/restore remain unqualified at L2. Ordinary exec, shell,
+  and copy do not enable the source session.
 - Replaced the flat policy CLI with `policy traffic` and `policy exec`. Traffic list/inspect expose typed local
   projections for a source network or exact source VM; root records remain enforcement authority.
 - Added early administrator host init with sudo-invoker or direct-root `--operator` selection, root-owned journal,

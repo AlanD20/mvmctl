@@ -270,7 +270,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 | nftables-only engine | 🟡 Partial | Four installed-candidate fixed-table cases passed in the bridge-capable named runner, covering modeled inet/bridge rules, nested-VM rule lifecycle, repeat sync, and NAT/conntrack readback. Full failure/reconciliation and clean-host qualification remain open. |
 | Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests and a disposable real-kernel namespace probe passed; a two-VM reused-IP installed-candidate journey on a bridge-capable runner remains missing. |
 | Typed `traffic` policy | 🟡 Partial | Installed-candidate same-network and cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. Source-VM, UDP, spoof/reverse/IP-reuse, and reboot recovery remain unqualified. |
-| Typed VM-to-VM `exec` policy | 🔴 Missing | Directional non-root authorization for same/cross/no-IP networks plus identity, bounds, and redaction denials. |
+| Typed VM-to-VM `exec` policy | 🟡 Partial | The installed candidate passed the full seven-case exec domain in `mvmctl-030-test`. Its new directional case exercises same-network, cross-network, and networkless placements; denial before grant, exact non-root-user grant, successful command and destination file effect, reverse denial, and denial after revocation. Peer-identity attacks, capacity/deadline/cancellation, audit redaction, and reboot/restore journeys remain unqualified at L2. |
 | Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove the Firecracker process UID differs from root and the operator, and that an unprivileged caller receives `enforced` policy-v2 limits and usage through authenticated root inspection while direct leaf read is denied. A bounded guest tmpfs load remained responsive and increased observed VM memory charge; root-only `memory.high` events were observed separately. Per-VM uniqueness, root-record, pidfd, broader mount/cgroup cleanup, sustained saturation survival, and host-reboot reconciliation binding remain unqualified. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
@@ -279,8 +279,9 @@ Specific legacy conflicts that must be rewritten before release:
 - `network/test_policies.py` now covers same-network and cross-network source-network TCP grants; its former
   dual-backend and same-network rejection assumptions were removed. Additional typed policy variants remain open.
 - `full_journeys/test_full_journeys.py` still expects same-network VM traffic without an allow policy.
-- `exec/test_exec.py` covers host-to-VM execution only; it now uses the exact installed CLI and a networkless fixture.
-  VM-to-VM policy behavior remains a separate unqualified path.
+- `exec/test_exec.py` covers host-to-VM execution through the exact installed CLI and a networkless fixture.
+  `exec/test_vm_to_vm_exec.py` covers the positive and directional-denial VM-to-VM paths; adversarial authority,
+  cancellation, audit, and reboot/restore behavior remain separate release gates.
 - `vm/test_jailer.py` observes process/chroot outcomes through user-visible state but does not qualify root authority or
   the fd-0 transport.
 - Shared cleanup and several test-local teardowns still suppress errors or mutate host state with broad raw sudo.
@@ -412,6 +413,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Fixed nftables sync | 🟡 Partial | `network/test_nftables.py` | `TestAtomicRuleSync` | Three focused installed-candidate cases passed conntrack, repeated generation equality, and NAT readback; crash/failure paths remain open. |
 | Cross-network typed traffic grant | 🟡 Partial | `network/test_policies.py` | `test_cross_network_traffic_policy_exact_allow_and_revoke` | Focused installed-candidate case passed default deny, TCP port 8080 allow, port 8081 deny, and deny after revoke. Other policy variants remain open. |
 | Same-network typed traffic grant | 🟡 Partial | `network/test_policies.py` | `test_same_network_traffic_policy_exact_allow_and_revoke` | Focused installed-candidate case passed default deny, TCP port 8080 allow, port 8081 deny, and deny after revoke with bridge and inet filtering active. VM-source and UDP remain open. |
+| Directional VM-to-VM exec grant | 🟡 Partial | `exec/test_vm_to_vm_exec.py` | `test_directional_vm_to_vm_exec_policy` | Installed-candidate same-network, cross-network, and networkless journeys passed exact non-root grant, real destination effect, default/reverse/revoked denials, and checked VM/network/policy teardown. Authority-abuse, cancellation, and reboot/restore cases remain open. |
 
 ---
 
