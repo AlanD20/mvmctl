@@ -1060,10 +1060,13 @@ fail closed. The former UFW jump-rule recreation behavior and `iptables_xtcommen
 The private v0.3.0 compiler foundation under `internal/service/firewall/` pins `github.com/google/nftables v0.3.0` and
 accepts only fully resolved mvmctl-owned intent. It emits fixed `mvmctl_bridge` and `mvmctl_inet` tables and fixed hook
 chains. Bridge prerouting uses raw priority for source MAC/IPv4/ARP anti-spoofing and unsupported-L3 guards, while
-bridge forward compiles same-network allows and default deny. Inet forward/input/postrouting compile routed allows,
-established replies, host-service access, default deny, and conditional egress/NAT; disabling masquerade emits neither
-uplink egress nor NAT. Compilation rejects overlapping managed IPv4 prefixes and unusable network, host, or endpoint
-addresses. The caller supplies no generation identity. The compiler derives SHA-256 from a versioned canonical closed
+bridge forward compiles same-network allows and default deny. Inet forward also compiles exact same-network companion
+allows ahead of its managed-bridge default drops, because `br_netfilter` may send bridged IPv4 through IP forward;
+the bridge-family endpoint and ingress anti-spoof gates remain authoritative whether that host setting is on or off.
+Inet forward/input/postrouting also compile routed allows, established replies, host-service access, default deny,
+and conditional egress/NAT; disabling masquerade emits neither uplink egress nor NAT. Compilation rejects overlapping
+managed IPv4 prefixes and unusable network, host, or endpoint addresses. The caller supplies no generation identity.
+The compiler derives SHA-256 from a versioned canonical closed
 projection of normalized intent and the exact managed tables, chains, rules, expressions, order, and userdata schema.
 The userdata generation slot uses a fixed placeholder while hashing to break self-reference; the derived digest and
 rule identity are then bound into every rule. Explicit empty intent emits no reserved tables or rules.
@@ -1076,9 +1079,11 @@ nftables-module upgrade or change to the emitted expression set requires an expl
 bump. Input ordering is deterministic.
 ARP admission requires Ethernet/IPv4 request/reply grammar and a complete 28-byte payload; header/opcode guards precede
 the fixed sender-address checks and are revalidated before private application. The representative
-1,000-endpoint/1,000-grant fixture now emits 11,007 rules and used 243,345 allocations normally and 243,346 under race
-instrumentation, below the unchanged 250,000-allocation ceiling. This is compiler evidence; live packet qualification
-remains pending.
+1,000-endpoint/1,000-same-network-grant fixture adds 1,000 inet companion rules. On the named Go 1.26.3 runner,
+compilation used 279,352 allocations and 12,950,960 bytes, versus 243,345 allocations and 11,683,904 bytes before
+those rules. Its fixed allocation guard is 290,000 with the 6x growth guard retained. Focused same-network and
+cross-network TCP grant cases passed in the disposable runner, including default deny, exact-port allow,
+adjacent-port deny, and revocation; broader packet and reboot qualification remains open.
 
 The compiler itself remains effect-free. A separate implemented authority foundation provides the never-unlinked
 global `/run/mvmctl/authority/firewall.lock`, a strict committed/applying generation record and bounded codec, and a

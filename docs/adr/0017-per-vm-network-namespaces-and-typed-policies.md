@@ -318,8 +318,15 @@ is installed successfully.
 Implementation note (2026-08-30): `go.mod` now pins `github.com/google/nftables v0.3.0`, and the private
 `internal/service/firewall/` compiler builds fixed bridge/inet tables and chains from closed resolved intent. Its bridge
 prerouting chain has raw priority and holds source MAC/IPv4/ARP anti-spoofing plus unsupported-L3 guards; the bridge
-forward chain holds same-network policy. Inet forward/input/postrouting cover routed policy, established replies,
-managed host services, default deny, conditional uplink egress, and NAT. Masquerade-disabled networks receive no uplink
+forward chain holds same-network policy. Inet forward also carries an exact companion for each same-network grant
+ahead of managed-bridge default drops: when host `br_netfilter` sends a bridged IPv4 packet through IP forward,
+both logical interfaces are the managed host bridge. The companion does not replace the bridge-family endpoint
+and ingress anti-spoof gates, which remain effective when `br_netfilter` is disabled. The host-wide bridge-netfilter
+setting is not changed: doing so would affect unrelated bridges, and the
+[kernel bridge-netfilter check](https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux-stable.git/+/refs/tags/v6.1.125/net/bridge/br_netfilter_hooks.c)
+allows an enabled global bit to override a per-bridge disabled bit. Inet forward/input/postrouting cover routed
+policy, established replies, managed host services,
+default deny, conditional uplink egress, and NAT. Masquerade-disabled networks receive no uplink
 egress allow. The compiler rejects overlapping prefixes and unusable IPv4 authorities and orders output
 deterministically. The caller no longer supplies generation identity. Explicit empty intent compiles to an empty
 generation with no reserved tables or rules.
@@ -340,9 +347,14 @@ The projection covers every field of exactly the eight expression structs emitte
 Any nftables module upgrade or emitted-expression change requires an explicit field-coverage audit and digest-schema
 version bump.
 
-After the ARP correction, the representative 1,000-endpoint/1,000-grant fixture emits 11,007 rules and used 243,345
-allocations normally and 243,346 under race instrumentation. The 250,000-allocation L1 ceiling is unchanged. These are
-compiler measurements, not live VM or kernel enforcement evidence.
+Before the same-network inet companion, the representative 1,000-endpoint/1,000-grant fixture emitted 11,007 rules
+and used 243,345 allocations normally and 243,346 under race instrumentation. With 1,000 additional exact inet
+rules, the named Go 1.26.3 runner measured 279,352 allocations and 12,950,960 bytes, compared with 11,683,904
+bytes before the change. The L1 fixed ceiling is now 290,000 allocations; its 6x growth guard remains. A live
+disposable-runner nft trace showed a denied same-network SYN enter `mvmctl_inet` forward with both logical interfaces
+equal to the managed bridge and hit its default drop. The installed candidate then passed focused same-network and
+cross-network TCP allow/deny/revoke cases with checked teardown. Other policy variants and full system qualification
+remain open.
 
 The compiler remains effect-free. The separate private generation authority, evidence-bound record replacement, raw
 snapshot collector, retained exact host-netns transport, and application/reconciliation coordinator described below

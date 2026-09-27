@@ -463,8 +463,9 @@ composition is described above; the current incomplete-work inventory is under *
 - ARP admission now requires Ethernet/IPv4 request/reply grammar and the complete 28-byte payload. Header and opcode
   guards precede fixed sender-address checks, and the private application validator verifies them. Malformed,
   truncated, spoofed, and valid cases have L1 coverage; live kernel packet qualification remains pending.
-- The representative 1,000-endpoint/1,000-grant fixture now emits 11,007 rules and used 243,345 allocations normally
-  and 243,346 under race instrumentation, below the unchanged 250,000-allocation ceiling.
+- At this compiler-foundation milestone, the representative 1,000-endpoint/1,000-grant fixture emitted 11,007 rules
+  and used 243,345 allocations normally and 243,346 under race instrumentation, below its then-250,000 ceiling.
+  The same-network inet companion added later in this release changes that measurement and ceiling; see Fixed below.
 - The compiler itself remains effect-free. Its sealed output is now consumed by the separate private application and
   reconciliation foundation below; no public caller or production policy path invokes that foundation.
 
@@ -1077,6 +1078,19 @@ composition is described above; the current incomplete-work inventory is under *
   qualified.
 - A clean `02a4a690` runner checkout passed the pinned offline Go CI sequence and separate full root-effect Jailer
   package. This is local code verification, not remote CI or complete Python/system release qualification.
+
+#### Same-network traffic grants under bridge netfilter
+
+- Fixed explicit same-network TCP/UDP traffic grants on hosts where `br_netfilter` also passes bridged IPv4 through
+  inet forward. The compiler now emits an exact inet companion for each same-network VM- or network-source grant
+  ahead of the managed-bridge default drop, while retaining the bridge-family endpoint gate and default deny.
+  It does not change the host's bridge-netfilter setting. A live runner nft trace identified the second-pass drop;
+  the installed candidate then passed focused same-network and cross-network TCP default-deny, exact-port allow,
+  adjacent-port deny, and revoke cases, each 1/1 with zero skips and clean VM/network/policy teardown.
+- The representative 1,000-same-network-grant compilation now includes 1,000 additional inet rules. On the named
+  Go 1.26.3 runner, allocations rose from 243,345 to 279,352 and allocated bytes from 11,683,904 to 12,950,960.
+  The fixed L1 allocation ceiling is 290,000; the 6x growth guard remains. Source-VM, UDP, spoof/reverse, reused-IP,
+  reboot recovery, and the full Python/CI matrix still require qualification.
 
 #### LoopMount image inspection
 

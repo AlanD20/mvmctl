@@ -56,8 +56,8 @@ case then passed 1/1 against the `371e285b` candidate with a strict zero-skip re
 one exact destination-port allow, adjacent-port deny, and deny after revocation through guest TCP probes. Its
 two nested guests used 256 MiB each; VM, network, and traffic-policy inventories were empty afterward. The
 runner's old outer controller had OOM-killed its Firecracker when an earlier version of the case used two
-default-size guests; this is not evidence of a candidate cgroup kill. Same-network/source-VM policy, spoofing,
-rebooted live-network reconciliation, full Python QA, remote CI, and release sign-off remain open.
+default-size guests; this is not evidence of a candidate cgroup kill. At that checkpoint, same-network/source-VM
+policy, spoofing, rebooted live-network reconciliation, full Python QA, remote CI, and release sign-off remained open.
 
 **Exact-HEAD local Go gate (2026-09-27):** A clean detached checkout of `02a4a690` in only the named runner passed
 offline Go 1.26.3 tidy with no tracked diff, whole-tree gofmt, golines, agent generation with no tracked diff,
@@ -65,6 +65,16 @@ full vet, and `scripts/run-go-ci-tests.sh` including the selected unprivileged J
 root-effect Jailer package separately passed under runner root. The generated coverage artifact was moved into
 ignored repo-local `.tmp`, leaving the checkout with no tracked or untracked source changes. This is local Go
 evidence, not GitHub CI or the complete installed-candidate Python release matrix.
+
+**Same-network traffic-policy checkpoint (2026-09-27):** A live nft trace in the named runner proved that a
+same-network SYN, despite an exact bridge allow, also reached inet forward with both logical interfaces equal to
+the managed bridge and hit its default drop while `net.bridge.bridge-nf-call-iptables=1`. Commit `1a6255f3`
+adds exact inet companions without changing that host setting or the bridge gate. The affected Go firewall package
+and vet passed in the runner. The installed `0.3.0-rc.brnf` candidate then passed the new same-network and existing
+cross-network source-network TCP cases separately, each 1/1 with no other pytest outcomes. Both cases proved
+pre-grant deny, exact port allow, adjacent port deny, and post-revoke deny; VM, network, policy, and nftables
+inventories were empty afterward. VM-source, UDP, spoof/reverse, reused-IP, reboot, and full-matrix qualification
+remain open.
 
 **Current CLI/config checkpoint (2026-09-27):** The installed `0.3.0-rc.exec-port` candidate in only
 `mvmctl-030-test` passed the complete 24-case CLI module and 12-case config module from clean source commit
@@ -259,15 +269,15 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 | Mandatory per-VM network namespace | 🔴 Missing | Distinct namespace inodes/topology, root-record binding, rollback, reconciliation, and zero leaked links/TAPs. |
 | nftables-only engine | 🟡 Partial | Four installed-candidate fixed-table cases passed in the bridge-capable named runner, covering modeled inet/bridge rules, nested-VM rule lifecycle, repeat sync, and NAT/conntrack readback. Full failure/reconciliation and clean-host qualification remain open. |
 | Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests and a disposable real-kernel namespace probe passed; a two-VM reused-IP installed-candidate journey on a bridge-capable runner remains missing. |
-| Typed `traffic` policy | 🟡 Partial | One installed-candidate cross-network source-network TCP case passed default deny, exact port allow, adjacent-port deny, and revoke. Same-network, source-VM, UDP, spoof/reverse/IP-reuse, and reboot recovery remain unqualified. |
+| Typed `traffic` policy | 🟡 Partial | Installed-candidate same-network and cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. Source-VM, UDP, spoof/reverse/IP-reuse, and reboot recovery remain unqualified. |
 | Typed VM-to-VM `exec` policy | 🔴 Missing | Directional non-root authorization for same/cross/no-IP networks plus identity, bounds, and redaction denials. |
 | Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove the Firecracker process UID differs from root and the operator, and that an unprivileged caller receives `enforced` policy-v2 limits and usage through authenticated root inspection while direct leaf read is denied. A bounded guest tmpfs load remained responsive and increased observed VM memory charge; root-only `memory.high` events were observed separately. Per-VM uniqueness, root-record, pidfd, broader mount/cgroup cleanup, sustained saturation survival, and host-reboot reconciliation binding remain unqualified. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
 Specific legacy conflicts that must be rewritten before release:
 
-- `network/test_policies.py` now covers one cross-network typed traffic grant; its former dual-backend and
-  same-network rejection assumptions were removed. Additional typed policy variants remain to be covered.
+- `network/test_policies.py` now covers same-network and cross-network source-network TCP grants; its former
+  dual-backend and same-network rejection assumptions were removed. Additional typed policy variants remain open.
 - `full_journeys/test_full_journeys.py` still expects same-network VM traffic without an allow policy.
 - `exec/test_exec.py` covers host-to-VM execution only; it now uses the exact installed CLI and a networkless fixture.
   VM-to-VM policy behavior remains a separate unqualified path.
@@ -401,6 +411,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Fixed nftables network/VM lifecycle | 🟡 Partial | `network/test_nftables.py` | `TestNFTablesFirewallBackend` | Focused installed-candidate case passed modeled bridge/inet rules, nested VM/SSH, and rule cleanup; no backend selector remains. |
 | Fixed nftables sync | 🟡 Partial | `network/test_nftables.py` | `TestAtomicRuleSync` | Three focused installed-candidate cases passed conntrack, repeated generation equality, and NAT readback; crash/failure paths remain open. |
 | Cross-network typed traffic grant | 🟡 Partial | `network/test_policies.py` | `test_cross_network_traffic_policy_exact_allow_and_revoke` | Focused installed-candidate case passed default deny, TCP port 8080 allow, port 8081 deny, and deny after revoke. Other policy variants remain open. |
+| Same-network typed traffic grant | 🟡 Partial | `network/test_policies.py` | `test_same_network_traffic_policy_exact_allow_and_revoke` | Focused installed-candidate case passed default deny, TCP port 8080 allow, port 8081 deny, and deny after revoke with bridge and inet filtering active. VM-source and UDP remain open. |
 
 ---
 
