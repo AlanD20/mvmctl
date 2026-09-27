@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 import pytest
 
-from tests.system.conftest import _run_mvm, _unique_subnet
+from tests.system.conftest import _parse_vm_list, _run_mvm, _unique_subnet
 
 pytestmark = [
     pytest.mark.system,
@@ -22,23 +19,6 @@ class TestConsoleState:
 
     def test_console_state(self, runner_vm, module_vm):
         """Show console relay state for a running VM."""
-        result = _run_mvm(
-            runner_vm,
-            "console",
-            module_vm["name"],
-            "--state",
-        )
-        assert result.returncode == 0
-        assert (
-            "stopped" in result.stdout.lower()
-            or "not running" in (result.stdout + result.stderr).lower()
-        ), (
-            f"Expected console state output ('stopped' or 'not running'), "
-            f"got: {result.stdout}"
-        )
-
-    def test_console_state_by_name_flag(self, runner_vm, module_vm):
-        """Show console relay state using VM name as positional arg."""
         result = _run_mvm(
             runner_vm,
             "console",
@@ -189,14 +169,10 @@ class TestConsoleOnStoppedVM:
             )
             assert result.returncode != 0
 
-            ls_result = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if ls_result.returncode == 0 and ls_result.stdout.strip():
-                vms: list[dict[str, Any]] = json.loads(ls_result.stdout)
-                vm_entry = next(
-                    (v for v in vms if v.get("name") == vm_name), None
-                )
-                if vm_entry:
-                    assert vm_entry.get("state") != "Running"
+            vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            vm_entry = next((v for v in vms if v.get("name") == vm_name), None)
+            assert vm_entry is not None, f"VM {vm_name} is missing from vm ls"
+            assert vm_entry["status"] != "running"
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
