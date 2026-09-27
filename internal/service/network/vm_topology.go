@@ -205,6 +205,11 @@ func (lease *VMTopologyLease) activate(ctx context.Context, link *linkEffect) er
 		if err := lease.persistStage(ctx, step.name, topologyActivating); err != nil {
 			return err
 		}
+		if step.name == "raise_host_veth" {
+			if err := link.InvalidateManagedNeighbor(ctx, pin, topology, lease.l3); err != nil {
+				return err
+			}
+		}
 		mutationErr := step.raise(ctx, pin, topology)
 		*step.mark = true
 		if err := lease.verifyActivationLinks(context.WithoutCancel(ctx)); err != nil {

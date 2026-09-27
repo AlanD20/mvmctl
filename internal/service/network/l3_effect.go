@@ -146,6 +146,42 @@ func (effect *linkEffect) RaiseHostVeth(ctx context.Context, namespace Namespace
 	return effect.setExactTopologyLinkState(ctx, namespace, topology, linkStateHostVeth, true)
 }
 
+// InvalidateManagedNeighbor clears only the admitted guest IPv4 on the exact root-owned managed bridge.
+// SAFETY: The caller retains the matching VM topology hold, network mutation lock, and verified firewall endpoint;
+// the host veth must remain down until the invalidation has been proven.
+func (effect *linkEffect) InvalidateManagedNeighbor(
+	ctx context.Context,
+	namespace NamespacePin,
+	topology Topology,
+	endpoint endpointL3,
+) (returnErr error) {
+	if err := validateL3EffectAuthority(namespace, topology, endpoint); err != nil {
+		return l3EffectError(topology.managedBridge.name, "validate neighbor authority", err)
+	}
+	retained, err := effect.retainL3Namespaces(ctx, namespace)
+	if err != nil {
+		return l3EffectError(topology.managedBridge.name, "retain neighbor namespaces", err)
+	}
+	defer func() {
+		returnErr = appendL3CloseError(returnErr, retained.close(context.WithoutCancel(ctx)))
+	}()
+	links, err := effect.inspectExactTopologyLinks(ctx, retained, topology, false)
+	if err != nil {
+		return l3EffectError(topology.managedBridge.name, "admit neighbor bridge", err)
+	}
+	if links.managedBridge.flags&unix.IFF_UP == 0 || links.hostVeth.flags&unix.IFF_UP != 0 {
+		return l3EffectError(topology.managedBridge.name, "admit neighbor invalidation order", errors.New(
+			"managed bridge must be up and host veth down",
+		))
+	}
+	if err := effect.route.invalidateIPv4Neighbor(
+		ctx, retained.hostFD, links.managedBridge.ifIndex, endpoint.guestAddress.value,
+	); err != nil {
+		return l3EffectError(topology.managedBridge.name, "invalidate exact guest neighbor", err)
+	}
+	return nil
+}
+
 // LowerHostVeth disables IFF_UP on the exact retained host veth endpoint.
 //
 // SAFETY: The caller must retain matching VM-launch and managed-network mutation authority plus the NamespacePin and

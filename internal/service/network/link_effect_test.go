@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"sort"
 	"sync"
 	"testing"
@@ -563,38 +564,41 @@ type addressMutation struct {
 type fakeRouteNetlink struct {
 	mu sync.Mutex
 
-	links               map[int]map[linkName]routeLinkObservation
-	addresses           map[int]map[int][]routeAddressObservation
-	routes              map[int]map[int][]routeIPv4Observation
-	inspects            map[string]int
-	inspectCancellation map[string]bool
-	addressInspects     map[string]int
-	routeInspects       map[string]int
-	masterMutations     []linkMasterMutation
-	addressMutations    []addressMutation
-	stateMutations      []linkStateMutation
-	aliasError          error
-	applyAlias          bool
-	cancelAlias         context.CancelFunc
-	addressError        error
-	applyAddress        bool
-	cancelAddress       context.CancelFunc
-	stateError          error
-	applyState          bool
-	cancelState         context.CancelFunc
-	deletes             int
-	createError         error
-	applyCreate         bool
-	cancelCreate        context.CancelFunc
-	afterCreate         func(*routeLinkObservation)
-	afterVethCreate     func(*routeLinkObservation, *routeLinkObservation)
-	afterAddress        func(int, int, addressExpectation)
-	afterState          func(int, int, bool)
-	inspectError        func(int, linkName, int) error
-	addressInspectError func(context.Context, int, int, int) error
-	routeInspectError   func(context.Context, int, int, int) error
-	omitHostAfterCreate bool
-	omitPeerAfterCreate bool
+	links                 map[int]map[linkName]routeLinkObservation
+	addresses             map[int]map[int][]routeAddressObservation
+	routes                map[int]map[int][]routeIPv4Observation
+	neighbors             map[routeNeighborKey]routeNeighborObservation
+	neighborInvalidations []routeNeighborKey
+	neighborError         error
+	inspects              map[string]int
+	inspectCancellation   map[string]bool
+	addressInspects       map[string]int
+	routeInspects         map[string]int
+	masterMutations       []linkMasterMutation
+	addressMutations      []addressMutation
+	stateMutations        []linkStateMutation
+	aliasError            error
+	applyAlias            bool
+	cancelAlias           context.CancelFunc
+	addressError          error
+	applyAddress          bool
+	cancelAddress         context.CancelFunc
+	stateError            error
+	applyState            bool
+	cancelState           context.CancelFunc
+	deletes               int
+	createError           error
+	applyCreate           bool
+	cancelCreate          context.CancelFunc
+	afterCreate           func(*routeLinkObservation)
+	afterVethCreate       func(*routeLinkObservation, *routeLinkObservation)
+	afterAddress          func(int, int, addressExpectation)
+	afterState            func(int, int, bool)
+	inspectError          func(int, linkName, int) error
+	addressInspectError   func(context.Context, int, int, int) error
+	routeInspectError     func(context.Context, int, int, int) error
+	omitHostAfterCreate   bool
+	omitPeerAfterCreate   bool
 }
 
 func newFakeRouteNetlink() *fakeRouteNetlink {
@@ -602,6 +606,7 @@ func newFakeRouteNetlink() *fakeRouteNetlink {
 		links:               make(map[int]map[linkName]routeLinkObservation),
 		addresses:           make(map[int]map[int][]routeAddressObservation),
 		routes:              make(map[int]map[int][]routeIPv4Observation),
+		neighbors:           make(map[routeNeighborKey]routeNeighborObservation),
 		inspects:            make(map[string]int),
 		inspectCancellation: make(map[string]bool),
 		addressInspects:     make(map[string]int),
@@ -611,6 +616,29 @@ func newFakeRouteNetlink() *fakeRouteNetlink {
 		applyAddress:        true,
 		applyState:          true,
 	}
+}
+
+type routeNeighborKey struct {
+	namespaceFD int
+	ifIndex     int
+	address     netip.Addr
+}
+
+func (route *fakeRouteNetlink) invalidateIPv4Neighbor(
+	_ context.Context,
+	namespaceFD int,
+	ifIndex int,
+	address netip.Addr,
+) error {
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	key := routeNeighborKey{namespaceFD: namespaceFD, ifIndex: ifIndex, address: address}
+	route.neighborInvalidations = append(route.neighborInvalidations, key)
+	if route.neighborError != nil {
+		return route.neighborError
+	}
+	delete(route.neighbors, key)
+	return nil
 }
 
 func (route *fakeRouteNetlink) inspectLink(

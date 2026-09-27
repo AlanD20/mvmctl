@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ type routeNetlink interface {
 	listLinks(context.Context, int) ([]routeLinkObservation, error)
 	listIPv4Addresses(context.Context, int, int) ([]routeAddressObservation, error)
 	listIPv4Routes(context.Context, int, int) ([]routeIPv4Observation, error)
+	invalidateIPv4Neighbor(context.Context, int, int, netip.Addr) error
 	createBridgeDown(context.Context, int, linkName, string) error
 	createVethPairDown(context.Context, int, int, linkName, string, linkName, string) error
 	addIPv4Address(context.Context, int, int, addressExpectation) error

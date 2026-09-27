@@ -331,12 +331,4 @@ func EnsureInterfaceReady(ctx context.Context, iface string) error {
 	return nil
 }
 
-// FlushARP flushes the ARP cache for a bridge interface.
-func FlushARP(ctx context.Context, bridge string) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	system.DefaultRunner.Run(ctx, []string{"ip", "neigh", "flush", "dev", bridge},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-}
-
 // --- Internal helpers ---

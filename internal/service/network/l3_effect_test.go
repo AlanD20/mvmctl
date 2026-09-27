@@ -123,6 +123,48 @@ func TestLinkEffectConfiguresAndVerifiesOnlyCanonicalKernelDerivedL3(t *testing.
 	}
 }
 
+// Rationale: A reused guest IP may inherit a stale neighbor on the shared host bridge, but clearing a second
+// address or an entry on another link would exceed the VM topology's ownership boundary.
+func TestLinkEffectInvalidatesOnlyAdmittedManagedNeighbor(t *testing.T) {
+	t.Parallel()
+	fixture, topology, endpoint := newL3EffectFixture(t)
+	address := endpoint.guestAddress.value
+	target := routeNeighborKey{
+		namespaceFD: fixture.hostFD, ifIndex: topology.managedBridge.ifIndex, address: address,
+	}
+	other := routeNeighborKey{
+		namespaceFD: fixture.hostFD, ifIndex: topology.managedBridge.ifIndex,
+		address: netip.MustParseAddr("10.44.0.3"),
+	}
+	fixture.route.neighbors[target] = routeNeighborObservation{ifIndex: target.ifIndex, address: target.address}
+	fixture.route.neighbors[other] = routeNeighborObservation{ifIndex: other.ifIndex, address: other.address}
+
+	require.NoError(t, fixture.effect.InvalidateManagedNeighbor(t.Context(), fixture.pin, topology, endpoint))
+
+	_, targetPresent := fixture.route.neighbors[target]
+	assert.False(t, targetPresent)
+	_, otherPresent := fixture.route.neighbors[other]
+	assert.True(t, otherPresent)
+	if diff := cmp.Diff([]routeNeighborKey{target}, fixture.route.neighborInvalidations,
+		cmp.AllowUnexported(routeNeighborKey{}), cmpopts.EquateComparable(netip.Addr{})); diff != "" {
+		t.Errorf("neighbor invalidation target mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestLinkEffectRejectsNeighborInvalidationAfterHostExposure(t *testing.T) {
+	t.Parallel()
+	fixture, topology, endpoint := newL3EffectFixture(t)
+	hostVeth := fixture.route.mustLink(t, fixture.hostFD, topology.veth.host.name)
+	hostVeth.flags |= unix.IFF_UP
+	fixture.route.put(fixture.hostFD, hostVeth)
+
+	err := fixture.effect.InvalidateManagedNeighbor(t.Context(), fixture.pin, topology, endpoint)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, errors.Unwrap(err), "host veth down")
+	assert.Empty(t, fixture.route.neighborInvalidations)
+}
+
 // Rationale: Fabric links are fixed unnumbered L2 members. An unexpected IPv4 address or route is authority-bearing
 // state and must block configuration rather than be repaired or silently retained.
 func TestLinkEffectRejectsUnexpectedFabricIPv4Authority(t *testing.T) {
