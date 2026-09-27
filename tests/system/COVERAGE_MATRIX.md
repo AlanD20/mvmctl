@@ -29,6 +29,13 @@ records eight collected/passed and zero failures, errors, skips, or deselections
 empty afterward, and only the pre-existing default kernel remained. This is local kernel-import evidence, not the
 separate kernel-build domain, the full Python matrix, GitHub CI, or release approval.
 
+**Stopped-VM kernel dependency checkpoint (2026-09-28):** The owner-scoped
+`TestKernelStoppedVMDeletion::test_delete_kernel_used_by_stopped_vm_is_denied` case passed 1/1 with zero other
+outcomes against the installed candidate in only the bridge-capable named runner. It imported a unique kernel,
+created and stopped a VM using it, required `kernel.in_use` on ordinary removal, and verified both records remained.
+Independent VM/network inventories were empty afterward, no test-owned kernel remained, and the original default
+kernel remained. This does not qualify forced removal of a referenced kernel or the full kernel module.
+
 **Rootfs persistence runner checkpoint (2026-09-27):** The old two-case module copied a stopped VM's rootfs from a
 caller-visible path and imported it as an image; the first case never created or restored a snapshot despite its name.
 Commit `2772d7b5` replaces them with one function-scoped installed-candidate journey using `mvm cp`, full snapshot
@@ -859,7 +866,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `kernel rm <id>` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemove` | Installed rc.7: remove only a uniquely imported ID prefix; verify absence and preserve the pre-seeded source. |
 | `kernel rm --force` on referenced kernel | 🔴 Missing | — | — | Prior test selected an unreferenced kernel, so it did not test force semantics; a VM-owned reference case remains unqualified. |
 | `kernel rm <nonexistent>` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemove` | L1 — non-zero exit, error message |
-| `kernel rm` blocked by stopped VM | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelStoppedVMDeletion` | Owner-scoped rejection case now requires `kernel.in_use` and preserves VM/kernel; not yet run on the bridge-capable named runner. |
+| `kernel rm` blocked by stopped VM | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelStoppedVMDeletion` | Focused installed-candidate L2 passed on the bridge-capable named runner: `kernel.in_use` preserved the stopped VM and its test-owned kernel; checked teardown left no test resource. Forced removal of a referenced kernel is separate. |
 | `kernel pull` then `rm` lifecycle | 🔴 Missing | — | — | Former case removed the first available kernel and unrelated referencing VMs; a safely owned pull/remove journey remains to be written. |
 | `kernel import` | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportLifecycle` | Installed rc.7: mirrored vmlinux import, exact copied bytes, schema-1 list/inspect, checked test-owned removal; VM boot remains unproved. |
 | `kernel import --version` | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportLifecycle` | Installed rc.7: explicit version matches list and inspect. |
