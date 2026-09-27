@@ -91,34 +91,8 @@ class TestVMListEmpty:
     ]
 
     def test_list_empty(self, runner_vm):
-        """vm ls --json returns empty list when no VMs exist."""
-        result = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-        if result.returncode == 0 and result.stdout.strip():
-            try:
-                existing = json.loads(result.stdout)
-                for vm in existing:
-                    _run_mvm(
-                        runner_vm,
-                        "vm",
-                        "rm",
-                        vm["name"],
-                        "--force",
-                        check=False,
-                    )
-            except (json.JSONDecodeError, KeyError, TypeError):
-                pass
-
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        assert result.returncode == 0, f"vm ls --json failed: {result.stderr}"
-        vms = json.loads(result.stdout)
-        assert isinstance(vms, list), (
-            f"Expected list, got {type(vms).__name__}: {vms}"
-        )
-        assert len(vms) == 0, (
-            f"Expected empty VM list, got {len(vms)} VMs: "
-            f"{[v.get('name') for v in vms]}. "
-            "Stale VMs should have been cleaned up."
-        )
+        """A clean runner returns a versioned empty list without deleting any VM."""
+        assert _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout) == []
 
 
 # ========================================================================
@@ -390,8 +364,47 @@ class TestVMAdvancedCreateFlags:
 # ========================================================================
 
 
+@pytest.fixture(scope="class")
+def listing_vm(runner_vm) -> Generator[dict, None, None]:
+    """One bounded VM for read-only output checks, without SSH or unrelated cleanup."""
+    suffix = uuid.uuid4().hex[:8]
+    name = f"sys-list-{suffix}"
+    network = f"sys-list-net-{suffix}"
+    ensure_vm_deps(runner_vm)
+    try:
+        _run_mvm(
+            runner_vm, "network", "create", network, "--subnet", _unique_subnet(network),
+            "--no-nat",
+        )
+        created = _json_success_data(
+            _run_mvm(
+                runner_vm, "vm", "create", name, "--image", "alpine:3.23", "--network", network,
+                "--cloud-init-mode", "off", "--skip-deblob", "--no-pci", "-s", "512M",
+                "--mem", "256M", "--vcpu", "1", "--json", timeout=180,
+            ).stdout, list,
+        )
+        assert len(created) == 1, created
+        assert created[0]["name"] == name
+        yield created[0]
+    finally:
+        listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+        if any(vm["name"] == name for vm in listed):
+            _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
+        networks = _json_success_data(
+            _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
+        )
+        if any(net["name"] == network for net in networks):
+            _run_mvm(runner_vm, "network", "rm", network, "--force")
+        assert all(vm["name"] != name for vm in _parse_vm_list(
+            _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+        ))
+        assert all(net["name"] != network for net in _json_success_data(
+            _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
+        ))
+
+
 class TestVMListInspect:
-    """VM listing, inspection, export, import - uses module_vm."""
+    """Each public listing and inspection output boundary is exercised once."""
 
     pytestmark = [
         pytest.mark.system,
@@ -400,147 +413,70 @@ class TestVMListInspect:
         pytest.mark.domain_vm,
     ]
 
-    def test_list_json(self, runner_vm, module_vm):
-        """List VMs in JSON format."""
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        assert result.returncode == 0
-        vms = json.loads(result.stdout)
-        assert any(v["name"] == module_vm["name"] for v in vms)
+    @pytest.mark.parametrize("command", ["ls", "ps"])
+    def test_listing_json(self, runner_vm, listing_vm, command):
+        """The real running VM and explicit allocation survive schema-1 serialization."""
+        vms = _parse_vm_list(_run_mvm(runner_vm, "vm", command, "--json").stdout)
+        matches = [vm for vm in vms if vm["id"] == listing_vm["id"]]
+        assert len(matches) == 1, vms
+        vm = matches[0]
+        assert vm["name"] == listing_vm["name"]
+        assert vm["status"] == "running"
+        assert (vm["vcpu_count"], vm["mem_size_mib"], vm["disk_size_mib"]) == (1, 256, 512)
+        assert vm["ipv4"] == listing_vm["ipv4"]
+        assert vm["pid"] > 0
+        assert vm["process_start_time"] > 0
 
-    def test_list_table(self, runner_vm, module_vm):
-        """List VMs in table format — verify name via JSON."""
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        assert result.returncode == 0
-        vms = json.loads(result.stdout)
-        assert any(v["name"] == module_vm["name"] for v in vms)
+    @pytest.mark.parametrize("command", ["ls", "ps"])
+    def test_listing_text(self, runner_vm, listing_vm, command):
+        """Human output is checked directly, not through a second JSON invocation."""
+        output = _run_mvm(runner_vm, "vm", command).stdout
+        assert listing_vm["name"] in output
+        assert listing_vm["ipv4"] in output
+        for header in ("name", "status", "ipv4"):
+            assert header in output.lower(), output
 
-    def test_inspect(self, runner_vm, module_vm):
-        """Show detailed VM info via vm inspect --json."""
-        result = _run_mvm(
-            runner_vm, "vm", "inspect", module_vm["name"], "--json"
+    def test_inspect_json(self, runner_vm, listing_vm):
+        """Inspect exposes the same selected VM, explicit resources, and public sections."""
+        data = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", listing_vm["name"], "--json").stdout, dict,
         )
-        assert result.returncode == 0
-        data = json.loads(result.stdout)
-        assert data.get("vm", {}).get("name") == module_vm["name"]
-
-    def test_inspect_json(self, runner_vm, module_vm):
-        """vm inspect --json should return structured JSON."""
-        result = _run_mvm(
-            runner_vm, "vm", "inspect", module_vm["name"], "--json"
-        )
-        assert result.returncode == 0
-        data = json.loads(result.stdout)
-        assert isinstance(data, dict)
         for section in (
             "vm", "resources", "networking", "assets", "filesystem", "console",
         ):
-            assert section in data, (
-                f"Top-level section '{section}' missing: {list(data.keys())}"
-            )
-        vm_data = data["vm"]
-        for key in ("id", "name", "status"):
-            assert key in vm_data, (
-                f"'vm.{key}' missing in inspect output: {list(vm_data.keys())}"
-            )
-        net_data = data["networking"]
-        for key in ("ipv4", "mac"):
-            assert key in net_data, (
-                f"'networking.{key}' missing in inspect output: {list(net_data.keys())}"
-            )
-        assert "vm_dir" in data["filesystem"], (
-            "'filesystem.vm_dir' missing in inspect output"
+            assert isinstance(data[section], dict), data
+        assert data["vm"]["id"] == listing_vm["id"]
+        assert data["vm"]["name"] == listing_vm["name"]
+        assert data["vm"]["status"] == "running"
+        assert data["vm"]["pid"] == listing_vm["pid"]
+        assert (data["resources"]["vcpu"], data["resources"]["mem"], data["resources"]["disk"]) == (
+            1, 256, 512,
         )
-        assert "relay_running" in data["console"], (
-            "'console.relay_running' missing in inspect output"
-        )
+        assert data["networking"]["ipv4"] == listing_vm["ipv4"]
+        assert data["networking"]["mac"] == listing_vm["mac"]
+        assert data["filesystem"]["vm_dir"]
+        assert data["console"]["relay_running"] is False
 
-    def test_inspect_tree(self, runner_vm, module_vm):
-        """Inspect VM via --json."""
-        result = _run_mvm(
-            runner_vm, "vm", "inspect", module_vm["name"], "--json"
-        )
-        assert result.returncode == 0
-        data = json.loads(result.stdout)
-        assert data.get("vm", {}).get("name") == module_vm["name"]
-
-    def test_ps_lists_running(self, runner_vm, module_vm):
-        """vm ps lists running VMs — verify name prefix appears in table output."""
-        result = _run_mvm(runner_vm, "vm", "ps")
-        assert result.returncode == 0
-        assert module_vm["name"][:5] in result.stdout
-
-    def test_ls_json_running_vm_fields(self, runner_vm, module_vm):
-        """vm ls --json shows expected fields for a running VM."""
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        assert result.returncode == 0
-        vms = json.loads(result.stdout)
-        running = next(
-            (v for v in vms if v["name"] == module_vm["name"]),
-            None,
-        )
-        assert running is not None
-        for key in (
-            "id", "name", "status", "ipv4", "pid",
-            "vcpu_count", "mem_size_mib", "disk_size_mib",
-        ):
-            assert key in running, (
-                f"Missing key '{key}' in ls --json entry: {running}"
-            )
-        assert running["status"] == "running"
-        assert isinstance(running["pid"], int) and running["pid"] > 0
-        assert "ipv4" in running
-
-    def test_ps_shows_running_vm_details(self, runner_vm, module_vm):
-        """vm ps table output shows running VM details."""
-        result = _run_mvm(runner_vm, "vm", "ps")
-        assert result.returncode == 0
-        output = result.stdout
-        assert module_vm["name"][:5] in output
-        for header in ("Name", "Status", "IPv4"):
-            assert header.lower() in output.lower()
-
-    def test_ps_json(self, runner_vm, module_vm):
-        """vm ps --json returns running VMs with name, status, pid fields."""
-        result = _run_mvm(runner_vm, "vm", "ps", "--json")
-        assert result.returncode == 0
-        entries = json.loads(result.stdout)
-        assert isinstance(entries, list)
-        assert len(entries) > 0
-        running_names = [e.get("name") for e in entries]
-        assert module_vm["name"] in running_names
-        for entry in entries:
-            assert "name" in entry
-            assert "status" in entry
-            assert "pid" in entry
-            if entry.get("status") in ("running", "starting"):
-                assert isinstance(entry["pid"], int) and entry["pid"] > 0
-
-    def test_list_empty_nonexistent_name(self, runner_vm):
-        """Listing a nonexistent VM name returns clean list without it."""
-        nonexistent = f"nonexistent-vm-{uuid.uuid4().hex[:8]}"
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        assert result.returncode == 0
-        vms = json.loads(result.stdout)
-        assert not any(v["name"] == nonexistent for v in vms)
+    def test_inspect_tree(self, runner_vm, listing_vm):
+        """The real text inspection route identifies the selected VM."""
+        output = _run_mvm(runner_vm, "vm", "inspect", listing_vm["name"]).stdout
+        assert listing_vm["name"] in output
+        assert listing_vm["id"] in output
+        assert listing_vm["ipv4"] in output
+        assert "running" in output
 
     def test_console_state_nonexistent_vm(self, runner_vm):
-        """console --state on nonexistent VM should give clear error."""
+        """A nonexistent VM retains its structured domain error through the console route."""
         nonexistent = f"nonexistent-vm-{uuid.uuid4().hex[:8]}"
         result = _run_mvm(
-            runner_vm, "console", nonexistent, "--state", check=False
+            runner_vm, "console", nonexistent, "--state", "--json", check=False
         )
         assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "not found" in combined
-
-    def test_inspect_by_name_flag(self, runner_vm, module_vm):
-        """Inspect VM using name as positional argument (verify via --json)."""
-        result = _run_mvm(
-            runner_vm, "vm", "inspect", module_vm["name"], "--json"
-        )
-        assert result.returncode == 0
         data = json.loads(result.stdout)
-        assert data.get("vm", {}).get("name") == module_vm["name"]
+        assert data["schema_version"] == 1
+        assert data["status"] == "error"
+        assert data["data"] is None
+        assert data["error"]["code"] == "vm.not_found"
 
 
 # ========================================================================
