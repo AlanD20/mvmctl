@@ -51,6 +51,7 @@ def _assert_selection_rejected_before_side_effects(
         "_resolve_candidate_build_version",
         "_build_mvm_binary",
         "verify_release_binary_identity",
+        "_require_release_host_without_active_vms",
         "_require_distinct_candidate_controller",
         "_get_mvm_version",
         "run_prepare",
@@ -105,6 +106,35 @@ def _complete_pytest_outcome_report(collected: int = 1) -> bytes:
             "exit_status": 0,
         }
     ).encode()
+
+
+def _stub_release_host_vm_list(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stdout: str | None,
+    returncode: int = 0,
+    data_payload: bool = False,
+) -> list[tuple[tuple[str, ...], dict[str, object]]]:
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+    monkeypatch.setattr(orchestrator, "MVM_BINARY", "/usr/local/bin/mvm")
+    if data_payload and stdout is not None:
+        stdout = (
+            '{"schema_version":1,"status":"success","data":'
+            + stdout + ',"error":null}'
+        )
+
+    def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(
+            args,
+            returncode,
+            stdout=stdout,
+            stderr="synthetic stderr" if returncode else "",
+        )
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    return calls
 
 
 def test_default_outer_controller_is_the_canonical_system_binary(
@@ -530,6 +560,7 @@ def test_tier3_without_host_direct_is_rejected_before_any_side_effect(
     for helper in (
         "_resolve_candidate_build_version",
         "_build_mvm_binary",
+        "_require_release_host_without_active_vms",
         "_require_distinct_candidate_controller",
         "_get_mvm_version",
         "run_prepare",
@@ -619,6 +650,7 @@ def test_invalid_release_qualification_is_rejected_before_any_probe_or_mutation(
         "_resolve_candidate_build_version",
         "_build_mvm_binary",
         "verify_release_binary_identity",
+        "_require_release_host_without_active_vms",
         "_require_distinct_candidate_controller",
         "_get_mvm_version",
         "run_prepare",
@@ -713,7 +745,12 @@ def test_release_identity_runs_after_build_and_before_host_resource_mutation(
     def unexpected_mutation(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("host/resource mutation must follow identity validation")
 
-    for helper in ("run_prepare", "ensure_shared_volume", "ensure_test_network"):
+    for helper in (
+        "_require_release_host_without_active_vms",
+        "run_prepare",
+        "ensure_shared_volume",
+        "ensure_test_network",
+    ):
         monkeypatch.setattr(orchestrator, helper, unexpected_mutation)
 
     with pytest.raises(SystemExit) as captured:
@@ -727,6 +764,413 @@ def test_release_identity_runs_after_build_and_before_host_resource_mutation(
         "identity-0.3.0",
     ]
     assert "release identity mismatch" in capsys.readouterr().out
+
+
+def test_release_host_admission_runs_after_identity_and_before_resource_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(
+        orchestrator.sys,
+        "argv",
+        [
+            "run-system-tests.py",
+            "--release-qualification",
+            "--all",
+            "--host-direct",
+            "--rebuild",
+            "--candidate-version",
+            "0.3.0",
+        ],
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "validate_release_build_paths",
+        lambda **_kwargs: events.append("path-configuration"),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_resolve_candidate_build_version",
+        lambda version: events.append(f"resolve-{version}") or version,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_mvm_binary",
+        lambda version: events.append(f"build-{version}"),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "verify_release_binary_identity",
+        lambda **kwargs: events.append(f"identity-{kwargs['requested_version']}"),
+    )
+
+    def refuse_active_vm() -> None:
+        events.append("host-vm-admission")
+        raise RuntimeError("release host has an active VM")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_require_release_host_without_active_vms",
+        refuse_active_vm,
+        raising=False,
+    )
+
+    def unexpected(name: str):
+        def fail(*_args: object, **_kwargs: object) -> None:
+            events.append(name)
+            raise AssertionError(f"{name} must follow release host admission")
+
+        return fail
+
+    for helper in (
+        "_require_distinct_candidate_controller",
+        "_get_mvm_version",
+        "run_prepare",
+        "ensure_shared_volume",
+        "ensure_test_network",
+    ):
+        monkeypatch.setattr(orchestrator, helper, unexpected(helper))
+
+    with pytest.raises(SystemExit) as captured:
+        orchestrator.main()
+
+    assert captured.value.code == 1
+    assert events == [
+        "path-configuration",
+        "resolve-0.3.0",
+        "build-0.3.0",
+        "identity-0.3.0",
+        "host-vm-admission",
+    ]
+    assert "release host has an active VM" in capsys.readouterr().out
+
+
+def test_release_host_admission_queries_exact_controller_and_accepts_stopped_vms(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _stub_release_host_vm_list(
+        orchestrator,
+        monkeypatch,
+        stdout=json.dumps(
+            [
+                {
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "name": "stopped-vm",
+                    "status": "stopped",
+                    "pid": 0,
+                }
+            ]
+        ),
+        data_payload=True,
+    )
+
+    orchestrator._require_release_host_without_active_vms()
+
+    assert calls == [
+        (
+            ("vm", "ls", "--json"),
+            {"check": True, "timeout": 15},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        ("[]", "JSON response envelope"),
+        ("{}", "incomplete or unknown response fields"),
+        ('{"schema_version":2,"status":"success","data":[],"error":null}',
+         "unsupported response schema"),
+        ('{"schema_version":1,"status":"partial","data":[],"error":null}',
+         "not a successful response"),
+        ('{"schema_version":1,"status":"success","data":[],"error":{}}',
+         "not a successful response"),
+        ('{"schema_version":1,"status":"success","data":null,"error":null}',
+         "data must be a JSON list"),
+        ('{"schema_version":1,"status":"success","data":[],"error":null,"extra":1}',
+         "incomplete or unknown response fields"),
+    ],
+)
+def test_release_host_admission_rejects_invalid_cli_envelope(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: str,
+    expected_error: str,
+) -> None:
+    _stub_release_host_vm_list(orchestrator, monkeypatch, stdout=payload)
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        orchestrator._require_release_host_without_active_vms()
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        ("{", "malformed JSON"),
+        ("{}", "data must be a JSON list"),
+        ("[null]", "entry 0 must be an object"),
+        ('[{"id":"id","name":"vm"}]', "entry 0 missing fields: status"),
+        (
+            '[{"id":"id","name":"vm","status":1}]',
+            "entry 0 field status must be a string",
+        ),
+        (
+            '[{"id":"id","name":"vm","status":"RUNNING"}]',
+            "entry 0 has unknown status",
+        ),
+        (
+            '[{"id":"id","name":"vm","status":"stopped",'
+            '"status":"running"}]',
+            "duplicate field: status",
+        ),
+        (
+            '[{"id":"id","name":"vm","status":"stopped",'
+            '"STATUS":"running"}]',
+            "case-fold duplicate fields: STATUS, status",
+        ),
+        (
+            '[{"id":"id","name":"vm-a","status":"stopped"},'
+            '{"id":"id","name":"vm-b","status":"stopped"}]',
+            "duplicate VM id: id",
+        ),
+        (
+            '[{"id":"id-a","name":"vm","status":"stopped"},'
+            '{"id":"id-b","name":"vm","status":"stopped"}]',
+            "duplicate VM name: vm",
+        ),
+        (
+            '[{"id":"","name":"vm","status":"stopped"}]',
+            "entry 0 field id must not be empty",
+        ),
+        (
+            '[{"id":"id","name":false,"status":"stopped"}]',
+            "entry 0 field name must be a string",
+        ),
+        (
+            '[{"id":"id","name":"vm","status":"stopped",'
+            '"ambiguous":NaN}]',
+            "non-standard JSON value: NaN",
+        ),
+    ],
+    ids=[
+        "malformed-json",
+        "top-level-object",
+        "non-object-entry",
+        "missing-status",
+        "non-string-status",
+        "unknown-status",
+        "duplicate-status",
+        "casefold-duplicate-status",
+        "duplicate-id",
+        "duplicate-name",
+        "empty-id",
+        "non-string-name",
+        "nonstandard-constant",
+    ],
+)
+def test_release_host_admission_rejects_ambiguous_vm_list_schema(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: str,
+    expected_error: str,
+) -> None:
+    _stub_release_host_vm_list(
+        orchestrator,
+        monkeypatch,
+        stdout=payload,
+        data_payload=True,
+    )
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        orchestrator._require_release_host_without_active_vms()
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "expected_error"),
+    [
+        (1, "[]", "outer controller vm ls --json failed with rc=1"),
+        (0, None, "outer controller vm ls --json returned no stdout"),
+    ],
+    ids=["nonzero", "missing-stdout"],
+)
+def test_release_host_admission_rejects_command_ambiguity(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stdout: str | None,
+    expected_error: str,
+) -> None:
+    _stub_release_host_vm_list(
+        orchestrator,
+        monkeypatch,
+        stdout=stdout,
+        returncode=returncode,
+    )
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        orchestrator._require_release_host_without_active_vms()
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "limit", "payload", "expected_error"),
+    [
+        (
+            "MAX_RELEASE_HOST_VM_LIST_BYTES",
+            16,
+            "[]               ",
+            "exceeds 16 bytes",
+        ),
+        (
+            "MAX_RELEASE_HOST_VM_LIST_ENTRIES",
+            1,
+            '[{"id":"id-a","name":"vm-a","status":"stopped"},'
+            '{"id":"id-b","name":"vm-b","status":"stopped"}]',
+            "exceeds 1 entries",
+        ),
+        (
+            "MAX_RELEASE_HOST_VM_FIELD_LENGTH",
+            4,
+            '[{"id":"id","name":"abcde","status":"stopped"}]',
+            "entry 0 field name exceeds 4 characters",
+        ),
+    ],
+    ids=["bytes", "entries", "field-length"],
+)
+def test_release_host_admission_enforces_bounded_vm_list(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_name: str,
+    limit: int,
+    payload: str,
+    expected_error: str,
+) -> None:
+    monkeypatch.setattr(orchestrator, limit_name, limit, raising=False)
+    _stub_release_host_vm_list(
+        orchestrator,
+        monkeypatch,
+        stdout=payload,
+        data_payload=True,
+    )
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        orchestrator._require_release_host_without_active_vms()
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["starting", "running", "paused", "stopping", "crashed", "error"],
+)
+def test_release_host_admission_rejects_every_non_stopped_vm_status(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+) -> None:
+    _stub_release_host_vm_list(
+        orchestrator,
+        monkeypatch,
+        stdout=json.dumps(
+            [
+                {"id": "stopped-id", "name": "stopped-vm", "status": "stopped"},
+                {"id": "unsafe-id", "name": "unsafe-vm", "status": status},
+            ]
+        ),
+        data_payload=True,
+    )
+
+    with pytest.raises(RuntimeError, match="not safely stopped"):
+        orchestrator._require_release_host_without_active_vms()
+
+
+def test_release_host_admission_rejects_noncanonical_controller_without_query(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        orchestrator,
+        "MVM_BINARY",
+        "/usr/local/bin/mvm --wrapper-argument",
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "mvm",
+        lambda *_args, **_kwargs: pytest.fail(
+            "noncanonical controller must not be invoked"
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="exact /usr/local/bin/mvm"):
+        orchestrator._require_release_host_without_active_vms()
+
+
+@pytest.mark.parametrize(
+    ("domain", "tier"),
+    [("cli", 1), ("jailer", 2)],
+    ids=["tier1", "tier2"],
+)
+def test_focused_tier1_and_tier2_do_not_run_release_host_admission(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    domain: str,
+    tier: int,
+) -> None:
+    candidate = tmp_path / "candidate-mvm"
+    candidate.write_bytes(b"candidate")
+    candidate.chmod(0o755)
+    events: list[str] = []
+    monkeypatch.setattr(
+        orchestrator.sys,
+        "argv",
+        ["run-system-tests.py", domain],
+    )
+    monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_CONFIGURED", candidate)
+    monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_BINARY", str(candidate))
+    monkeypatch.setattr(orchestrator.shutil, "which", lambda _binary: "/usr/local/bin/mvm")
+    monkeypatch.setattr(
+        orchestrator,
+        "_require_release_host_without_active_vms",
+        lambda: pytest.fail("focused T1/T2 must not run release host admission"),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_require_distinct_candidate_controller",
+        lambda: events.append("distinct-paths"),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_get_mvm_version",
+        lambda: events.append("candidate-version") or "0.3.0",
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "ensure_shared_volume",
+        lambda **_kwargs: events.append("shared-volume"),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "ensure_test_network",
+        lambda: events.append("test-network"),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_domains",
+        lambda domains, tier, *_args, **_kwargs: events.append(
+            f"run-tier-{tier}:{','.join(domains)}"
+        ) or [],
+    )
+
+    orchestrator.main()
+
+    assert events == [
+        "distinct-paths",
+        "candidate-version",
+        "shared-volume",
+        "test-network",
+        f"run-tier-{tier}:{domain}",
+    ]
 
 
 def test_guest_product_commands_use_the_exact_installed_cli(

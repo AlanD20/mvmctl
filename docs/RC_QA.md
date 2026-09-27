@@ -99,6 +99,11 @@ Until the remaining Task 17 inventory and cleanup gates land, run full qualifica
 disposable outer VM. On a development workstation, use focused T1/T2 domains or `--tier 1,2`; `--host-direct` is consent,
 not isolation or an ownership-safe cleanup guarantee.
 
+The release preflight rejects non-stopped VMs in the invoking operator's versioned `vm ls --json` projection, but that
+projection begins with the operator's SQLite rows. It cannot prove another user's VMs or a root-owned record without
+a user row are absent. This defense-in-depth check is **not** host-wide quiescence or completion of Task 17; independent
+clean-host assurance and the remaining authority/cleanup gates are still required.
+
 Tests are organized into three tiers:
 
 - **Tier 1** — Host-level CLI operations (no nested virt needed). Each domain

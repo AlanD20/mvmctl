@@ -85,6 +85,13 @@ FORBIDDEN_BUILDER_PULL_MARKERS = (
     "Copied to asset mirror",
 )
 BUILDER_PULL_OUTPUT_LIMIT = 8 * 1024
+MAX_RELEASE_HOST_VM_LIST_BYTES = 1024 * 1024
+MAX_RELEASE_HOST_VM_LIST_ENTRIES = 4096
+MAX_RELEASE_HOST_VM_FIELD_LENGTH = 1024
+_RELEASE_VM_FIELDS = frozenset(("id", "name", "status"))
+_RELEASE_VM_STATUSES = frozenset(
+    ("starting", "running", "paused", "stopping", "stopped", "crashed", "error")
+)
 
 # Custom base image built during --prepare
 BASE_IMAGE_NAME = "mvm-test-runner"
@@ -1803,6 +1810,143 @@ def _validate_release_qualification_args(
         )
 
 
+def _parse_release_host_vm_list(payload: str) -> list[dict[str, object]]:
+    """Parse the outer controller's versioned, caller-scoped VM list."""
+    try:
+        payload_size = len(payload.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise RuntimeError(
+            f"release host VM list is not valid UTF-8: {exc}"
+        ) from exc
+    if payload_size > MAX_RELEASE_HOST_VM_LIST_BYTES:
+        raise RuntimeError(
+            "release host VM list exceeds "
+            f"{MAX_RELEASE_HOST_VM_LIST_BYTES} bytes"
+        )
+
+    def reject_duplicate_fields(
+        pairs: list[tuple[str, object]],
+    ) -> dict[str, object]:
+        values: dict[str, object] = {}
+        names_by_casefold: dict[str, str] = {}
+        for field, value in pairs:
+            if field in values:
+                raise RuntimeError(
+                    f"release host VM list has duplicate field: {field}"
+                )
+            folded = field.casefold()
+            if folded in names_by_casefold:
+                colliding = sorted((names_by_casefold[folded], field))
+                raise RuntimeError(
+                    "release host VM list has case-fold duplicate fields: "
+                    f"{', '.join(colliding)}"
+                )
+            values[field] = value
+            names_by_casefold[folded] = field
+        return values
+
+    def reject_nonstandard_constant(value: str) -> None:
+        raise RuntimeError(
+            f"release host VM list has non-standard JSON value: {value}"
+        )
+
+    try:
+        envelope = json.loads(
+            payload,
+            object_pairs_hook=reject_duplicate_fields,
+            parse_constant=reject_nonstandard_constant,
+        )
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"release host VM list contains malformed JSON: {exc}"
+        ) from exc
+    if not isinstance(envelope, dict):
+        raise RuntimeError("release host VM list must be a JSON response envelope")
+    expected_envelope_fields = {"schema_version", "status", "data", "error"}
+    if set(envelope) != expected_envelope_fields:
+        raise RuntimeError("release host VM list has incomplete or unknown response fields")
+    if type(envelope["schema_version"]) is not int or envelope["schema_version"] != 1:
+        raise RuntimeError("release host VM list has unsupported response schema")
+    if envelope["status"] != "success" or envelope["error"] is not None:
+        raise RuntimeError("release host VM list is not a successful response")
+    vms = envelope["data"]
+    if not isinstance(vms, list):
+        raise RuntimeError("release host VM list data must be a JSON list")
+    if len(vms) > MAX_RELEASE_HOST_VM_LIST_ENTRIES:
+        raise RuntimeError(
+            "release host VM list exceeds "
+            f"{MAX_RELEASE_HOST_VM_LIST_ENTRIES} entries"
+        )
+
+    seen_ids: set[str] = set()
+    seen_names: set[str] = set()
+    for index, vm in enumerate(vms):
+        if not isinstance(vm, dict):
+            raise RuntimeError(
+                f"release host VM list entry {index} must be an object"
+            )
+        missing = sorted(_RELEASE_VM_FIELDS - set(vm))
+        if missing:
+            raise RuntimeError(
+                f"release host VM list entry {index} missing fields: "
+                f"{', '.join(missing)}"
+            )
+        for field in sorted(_RELEASE_VM_FIELDS):
+            value = vm[field]
+            if type(value) is not str:
+                raise RuntimeError(
+                    f"release host VM list entry {index} field {field} "
+                    "must be a string"
+                )
+            if not value:
+                raise RuntimeError(
+                    f"release host VM list entry {index} field {field} "
+                    "must not be empty"
+                )
+            if len(value) > MAX_RELEASE_HOST_VM_FIELD_LENGTH:
+                raise RuntimeError(
+                    f"release host VM list entry {index} field {field} exceeds "
+                    f"{MAX_RELEASE_HOST_VM_FIELD_LENGTH} characters"
+                )
+        status = vm["status"]
+        if status not in _RELEASE_VM_STATUSES:
+            raise RuntimeError(
+                f"release host VM list entry {index} has unknown status: "
+                f"{status}"
+            )
+        vm_id = vm["id"]
+        name = vm["name"]
+        if vm_id in seen_ids:
+            raise RuntimeError(f"release host VM list has duplicate VM id: {vm_id}")
+        if name in seen_names:
+            raise RuntimeError(f"release host VM list has duplicate VM name: {name}")
+        seen_ids.add(vm_id)
+        seen_names.add(name)
+    return vms
+
+
+def _require_release_host_without_active_vms() -> None:
+    """Reject caller-visible active VMs; this is not host-wide quiescence proof."""
+    if MVM_BINARY != "/usr/local/bin/mvm":
+        raise RuntimeError(
+            "release host VM admission requires exact /usr/local/bin/mvm"
+        )
+    result = mvm("vm", "ls", "--json", check=True, timeout=15)
+    if type(result.returncode) is not int or result.returncode != 0:
+        raise RuntimeError(
+            "outer controller vm ls --json failed with "
+            f"rc={result.returncode}"
+        )
+    if type(result.stdout) is not str:
+        raise RuntimeError("outer controller vm ls --json returned no stdout")
+    for vm in _parse_release_host_vm_list(result.stdout):
+        if vm["status"] != "stopped":
+            raise RuntimeError(
+                "release host VM is not safely stopped: "
+                f"{vm['name']} ({vm['status']})"
+            )
+
+
 def _validate_system_test_registry(parser: argparse.ArgumentParser) -> None:
     """Reject an ambiguous or incomplete system-test domain registry."""
     seen: set[str] = set()
@@ -2256,6 +2400,7 @@ def main() -> None:
                 candidate=Path(MVM_CANDIDATE_BINARY),
                 requested_version=args.candidate_version,
             )
+            _require_release_host_without_active_vms()
         except RuntimeError as exc:
             log(f"ERROR: {exc}")
             sys.exit(1)
