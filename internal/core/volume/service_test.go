@@ -10,98 +10,71 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra/ptr"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/lib/system"
 	"mvmctl/internal/testutil"
 	"mvmctl/pkg/errs"
 )
 
 // --- Service.CreateDisk ---
-// Rationale: Tests raw disk creation and propagation of subprocess failures.
+// Rationale: Root admission requires an exact private backing mode even when
+// the operator's process umask permits group writes.
 
 func TestService_CreateDisk(t *testing.T) {
-	ctx := context.Background()
-
-	tests := map[string]struct {
-		vol     func(tmpDir string) *model.VolumeItem
-		stubErr error
-		wantErr bool
-		errCode errs.Code
-		wantCmd string // first element of args expected in FakeRunner call
-	}{
-		// --- Error paths ---
-		"error/context_cancellation_returns_error": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:        "vol-cancel",
-					Name:      "cancel-test",
-					Path:      filepath.Join(tmpDir, "test.raw"),
-					Format:    model.VolumeFormatRaw,
-					SizeBytes: 1024,
-				}
-			},
-			stubErr: context.Canceled,
-			wantErr: true,
-			errCode: errs.CodeVolumeError,
-		},
-		// --- Success paths ---
-		"creates_raw_volume_with_fallocate": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:        "vol-raw-001",
-					Name:      "test-raw",
-					Path:      filepath.Join(tmpDir, "test.raw"),
-					Format:    model.VolumeFormatRaw,
-					SizeBytes: 1_048_576,
-					CreatedAt: "2025-01-01T00:00:00Z",
-				}
-			},
-			wantCmd: "fallocate",
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			repo := testutil.NewVolumeRepo()
-			fake := &testutil.FakeRunner{StubRunErr: tc.stubErr}
-			old := system.DefaultRunner
-			system.DefaultRunner = fake
-			t.Cleanup(func() { system.DefaultRunner = old })
-
-			svc := volume.NewService(repo)
-			tmpDir := t.TempDir()
-			vol := tc.vol(tmpDir)
-
-			got, err := svc.CreateDisk(ctx, vol)
-
-			if tc.wantErr {
-				require.Error(t, err)
-				var de *errs.DomainError
-				require.True(t, errors.As(err, &de))
-				assert.Equal(t, tc.errCode, de.Code)
-				assert.Nil(t, got)
-				return
-			}
-
-			require.NoError(t, err)
-			require.NotNil(t, got)
-
-			// Primary assertion: state change in repo
-			fromRepo, repoErr := repo.Get(ctx, vol.ID)
-			require.NoError(t, repoErr)
-			require.NotNil(t, fromRepo)
-			assert.Equal(t, vol.SizeBytes, fromRepo.SizeBytes)
-
-			// Verify the correct subprocess command was invoked
-			if tc.wantCmd != "" {
-				require.Len(t, fake.Calls, 1)
-				assert.Equal(t, tc.wantCmd, fake.Calls[0].Args[0])
-			}
+	t.Run("cancelled_before_creation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		repo := testutil.NewVolumeRepo()
+		path := filepath.Join(t.TempDir(), "cancelled.raw")
+		item, err := volume.NewService(repo).CreateDisk(ctx, &model.VolumeItem{
+			ID: "vol-cancel", Path: path, SizeBytes: 1024,
 		})
-	}
+		require.Error(t, err)
+		assert.Nil(t, item)
+		assert.ErrorIs(t, err, context.Canceled)
+		_, statErr := os.Lstat(path)
+		assert.True(t, os.IsNotExist(statErr))
+	})
+
+	t.Run("existing_path_is_not_overwritten", func(t *testing.T) {
+		repo := testutil.NewVolumeRepo()
+		path := filepath.Join(t.TempDir(), "existing.raw")
+		content := []byte("operator data")
+		require.NoError(t, os.WriteFile(path, content, 0600))
+		item, err := volume.NewService(repo).CreateDisk(t.Context(), &model.VolumeItem{
+			ID: "vol-existing", Path: path, SizeBytes: 1024,
+		})
+		require.Error(t, err)
+		assert.Nil(t, item)
+		got, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		if diff := cmp.Diff(content, got); diff != "" {
+			t.Errorf("existing raw bytes changed (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("private_allocated_file_under_permissive_umask", func(t *testing.T) {
+		repo := testutil.NewVolumeRepo()
+		path := filepath.Join(t.TempDir(), "private.raw")
+		vol := &model.VolumeItem{ID: "vol-private", Path: path, SizeBytes: 1 << 20}
+		// Umask is process-global, so this subtest must not run in parallel.
+		oldUmask := unix.Umask(0002)
+		defer unix.Umask(oldUmask)
+		item, err := volume.NewService(repo).CreateDisk(t.Context(), vol)
+		require.NoError(t, err)
+		require.NotNil(t, item)
+		stat, err := os.Lstat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), stat.Mode().Perm())
+		assert.Equal(t, vol.SizeBytes, stat.Size())
+		fromRepo, err := repo.Get(t.Context(), vol.ID)
+		require.NoError(t, err)
+		require.NotNil(t, fromRepo)
+		assert.Equal(t, vol.SizeBytes, fromRepo.SizeBytes)
+	})
 }
 
 // --- Service.Remove ---

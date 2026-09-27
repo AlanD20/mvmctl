@@ -4,16 +4,17 @@ package volume
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/lib/system"
 	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
@@ -30,18 +31,31 @@ func NewService(repo Repository) *Service {
 
 // CreateDisk creates a disk file on the filesystem and persists the volume record.
 func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model.VolumeItem, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, errs.WrapMsg(errs.CodeVolumeError, "create volume cancelled", err)
+	}
 	parentDir := filepath.Dir(vol.Path)
-	if err := os.MkdirAll(parentDir, os.ModePerm); err != nil {
+	if err := os.MkdirAll(parentDir, 0700); err != nil {
 		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("create disk directory: %s", err))
 	}
-
-	_, err := system.DefaultRunner.Run(
-		ctx,
-		[]string{"fallocate", "-l", strconv.FormatInt(vol.SizeBytes, 10), vol.Path},
-		system.RunCmdOpts{Check: true, Capture: true},
-	)
+	// CRITICAL: Root admission rejects group-writable files. Allocate through the
+	// exclusive 0600 descriptor so umask and path replacement cannot change the inode.
+	file, err := os.OpenFile(vol.Path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("fallocate failed: %s", err.Error()))
+		return nil, errs.WrapMsg(errs.CodeVolumeError, "create exclusive raw volume", err)
+	}
+	allocationErr := file.Chmod(0600)
+	if allocationErr == nil {
+		allocationErr = unix.Fallocate(int(file.Fd()), 0, 0, vol.SizeBytes)
+	}
+	if allocationErr == nil {
+		allocationErr = file.Sync()
+	}
+	if err := errors.Join(allocationErr, file.Close()); err != nil {
+		return nil, errs.WrapMsg(errs.CodeVolumeError, "allocate raw volume", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, errs.WrapMsg(errs.CodeVolumeError, "create volume cancelled before record publication", err)
 	}
 
 	if err := s.repo.Upsert(ctx, vol); err != nil {

@@ -48,11 +48,6 @@ func TestVolumeCreateUsesImmutableIDForManagedPath(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			repo := testutil.NewVolumeRepo()
-			fakeRunner := &testutil.FakeRunner{}
-			originalRunner := system.DefaultRunner
-			system.DefaultRunner = fakeRunner
-			t.Cleanup(func() { system.DefaultRunner = originalRunner })
-
 			op := &api.Operation{
 				Repos:    api.Repos{Volume: repo},
 				Services: api.Services{Volume: volume.NewService(repo)},
@@ -83,11 +78,11 @@ func TestVolumeCreateUsesImmutableIDForManagedPath(t *testing.T) {
 				wantCache = model.CacheTypeWriteback
 			}
 			assert.Equal(t, wantCache, stored.CacheType)
-
-			require.Len(t, fakeRunner.Calls, 1)
-			require.Len(t, fakeRunner.Calls[0].Args, 4)
-			assert.Equal(t, "fallocate", fakeRunner.Calls[0].Args[0])
-			assert.Equal(t, wantPath, fakeRunner.Calls[0].Args[3])
+			backing, err := os.Lstat(wantPath)
+			require.NoError(t, err)
+			assert.True(t, backing.Mode().IsRegular())
+			assert.Equal(t, os.FileMode(0600), backing.Mode().Perm())
+			assert.Equal(t, stored.SizeBytes, backing.Size())
 		})
 	}
 }
@@ -96,12 +91,9 @@ func TestVolumeCreateRejectsPathLikeDisplayNamesBeforeDiskCreation(t *testing.T)
 	tests := []string{"../escape", "nested/escape"}
 	for _, displayName := range tests {
 		t.Run(displayName, func(t *testing.T) {
+			cacheDir := t.TempDir()
+			t.Setenv("MVM_CACHE_DIR", cacheDir)
 			repo := testutil.NewVolumeRepo()
-			fakeRunner := &testutil.FakeRunner{}
-			originalRunner := system.DefaultRunner
-			system.DefaultRunner = fakeRunner
-			t.Cleanup(func() { system.DefaultRunner = originalRunner })
-
 			op := &api.Operation{
 				Repos:    api.Repos{Volume: repo},
 				Services: api.Services{Volume: volume.NewService(repo)},
@@ -114,7 +106,11 @@ func TestVolumeCreateRejectsPathLikeDisplayNamesBeforeDiskCreation(t *testing.T)
 			})
 			require.Error(t, err)
 			assert.Nil(t, created)
-			assert.Empty(t, fakeRunner.Calls)
+			entries, readErr := os.ReadDir(filepath.Join(cacheDir, "volumes"))
+			if !os.IsNotExist(readErr) {
+				require.NoError(t, readErr)
+				assert.Empty(t, entries)
+			}
 		})
 	}
 }
