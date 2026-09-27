@@ -1,6 +1,7 @@
 package host
 
 import (
+	"fmt"
 	"os"
 	"os/user"
 	"strconv"
@@ -20,10 +21,18 @@ type AdministratorOperator struct {
 
 // ResolveAdministratorOperator admits sudo's invoking account or an explicitly
 // selected account in a direct-root session, before the environment is cleared.
-func ResolveAdministratorOperator(selected string) (AdministratorOperator, error) {
+func ResolveAdministratorOperator(selected, action string) (AdministratorOperator, error) {
+	command := "sudo /usr/local/bin/mvm host init"
+	switch action {
+	case "init":
+	case "reset":
+		command = "sudo /usr/local/bin/mvm host reset --force"
+	default:
+		return AdministratorOperator{}, errs.New(errs.CodeValidationFailed, "invalid host administrator action")
+	}
 	if os.Geteuid() != 0 {
 		return AdministratorOperator{}, errs.New(errs.CodePrivilegeRequired,
-			"run sudo /usr/local/bin/mvm host init; direct root requires --operator <non-root-user>")
+			fmt.Sprintf("run %s; direct root requires --operator <non-root-user>", command))
 	}
 	sudoUID, hasUID := os.LookupEnv("SUDO_UID")
 	sudoGID, hasGID := os.LookupEnv("SUDO_GID")

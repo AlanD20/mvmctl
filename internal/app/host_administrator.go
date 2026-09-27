@@ -90,7 +90,7 @@ func RunHostAdministrator(ctx context.Context, args []string) (*HostAdministrato
 	if args[1] == "reset" && !force {
 		return nil, errs.New(errs.CodeValidationFailed, "host reset requires --force")
 	}
-	identity, err := host.ResolveAdministratorOperator(operator)
+	identity, err := host.ResolveAdministratorOperator(operator, args[1])
 	if err != nil {
 		return nil, err
 	}
