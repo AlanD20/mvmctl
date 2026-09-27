@@ -53,12 +53,14 @@ preserved the active pair. Final readback showed no nested VM and only the origi
 1.16.1 still the Firecracker/Jailer default. This direct full-module pass is not an orchestrator domain run, proof
 of 1.16.0 VM launch support, or full Python release qualification.
 
-**Current networkless Jailer checkpoint (2026-09-27):** On installed `0.3.0-rc.exec-port`, a focused root-protected
-release-pair case proved the unprivileged operator could not stat the running VM's selected Firecracker/Jailer paths.
-A separate focused networkless journey passed create, guest vsock/interface inspection, stop/start, VM reboot, and
-post-restart/reboot vsock/interface inspection. Each case produced a schema-1 report with one collected/passed and
-zero skips/errors/deselections; checked teardown and an independent `vm ls --json` left no nested VM. These are
-VM-reboot results, not host-reboot reconciliation, the complete networkless Jailer class, or networked Jailer QA.
+**Current networkless Jailer checkpoint (2026-09-27):** The complete eight-case
+`TestNetworklessJailerLifecycle` class passed against installed `0.3.0-rc.exec-port` in the named runner. Its
+schema-1 report recorded eight collected/passed and zero failures, errors, skips, or deselections. It covered
+operator denial on the selected trusted release and Firecracker API, isolated VMM UID, public status/stop/start,
+raw data-volume attachment, independent data-volume snapshot restore, missing-release restore cleanup, and
+create/stop/start/VM-reboot vsock execution. Independent `vm ls --json`, `volume ls --json`, and `snapshot ls --json`
+were empty afterward, and the original 1.16.1 pair remained default. This is direct class evidence, not a full
+Jailer module/orchestrator domain pass, host-reboot reconciliation, 1.16.0 launch proof, or networked Jailer QA.
 
 **Current cgroup checkpoint (2026-09-27):** The installed `0.3.0-rc.exec-port` candidate passed the complete
 two-case `vm/test_cgroup.py` module in the named runner. Its schema-1 report recorded two collected/passed and
