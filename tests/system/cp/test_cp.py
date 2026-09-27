@@ -6,11 +6,19 @@ Verification uses SSH inside the nested VM for uploads, and _run_mvm sh -c for d
 
 from __future__ import annotations
 
+import tempfile
 import uuid
+from pathlib import Path
 
 import pytest
 
-from tests.system.conftest import _guest_run, _run_mvm, _unique_subnet, ensure_vm_deps
+from tests.system.conftest import (
+    _guest_run,
+    _parse_vm_list,
+    _run_mvm,
+    _unique_subnet,
+    ensure_vm_deps,
+)
 
 pytestmark = [
     pytest.mark.system,
@@ -32,6 +40,45 @@ def _exec_cmd(
         check=False,
         timeout=45,
     )
+
+
+class TestCpNetworklessRoundTrip:
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_host_to_vm_and_back_without_network(self, runner_vm: str) -> None:
+        """The installed vsock copy path transfers the same bytes in both directions."""
+        ensure_vm_deps(runner_vm)
+        vm_name = f"sys-cp-offline-{uuid.uuid4().hex[:8]}"
+        guest_path = f"/tmp/cp-roundtrip-{uuid.uuid4().hex[:8]}.txt"
+        repo_tmp = Path(__file__).resolve().parents[3] / ".tmp"
+        repo_tmp.mkdir(exist_ok=True)
+        try:
+            with tempfile.TemporaryDirectory(prefix="cp-networkless-", dir=repo_tmp) as scratch:
+                source = Path(scratch) / "source.txt"
+                restored = Path(scratch) / "restored.txt"
+                payload = f"mvmctl-cp-roundtrip-{uuid.uuid4().hex}\n"
+                source.write_text(payload)
+                _run_mvm(
+                    runner_vm, "vm", "create", vm_name, "--image", "alpine:3.23",
+                    "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
+                    "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                    timeout=180,
+                )
+                _run_mvm(runner_vm, "cp", str(source), f"{vm_name}:{guest_path}")
+                guest = _run_mvm(runner_vm, "exec", vm_name, "--", "cat", guest_path)
+                assert guest.stdout == payload
+
+                _run_mvm(runner_vm, "cp", f"{vm_name}:{guest_path}", str(restored))
+                assert restored.read_text() == payload
+        finally:
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            if any(vm["name"] == vm_name for vm in listed):
+                removed = _run_mvm(
+                    runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120,
+                )
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(vm["name"] != vm_name for vm in listed)
 
 
 # ============================================================================

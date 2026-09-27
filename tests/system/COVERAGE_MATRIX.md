@@ -84,6 +84,13 @@ Alpine raw image to QCOW2, imported it as an ext4 image, launched a networkless 
 found no VM, imported image, or test-owned conversion file afterward. This qualifies one QCOW2 image conversion
 and boot path, not QCOW2 data-volume attachment or all image import formats and failure paths.
 
+**Networkless copy checkpoint (2026-09-27):** A focused
+`TestCpNetworklessRoundTrip::test_host_to_vm_and_back_without_network` case passed 1/1 against the installed
+candidate in `mvmctl-030-test`, with no skips or errors. The installed CLI copied unique bytes from runner-local
+repo scratch into a running networkless VM, guest vsock exec read the same bytes, and `mvm cp` copied them back
+to the runner. Checked teardown left no VM or scratch directory. This qualifies one host↔VM file round-trip,
+not directory/multi-source copy, VM↔VM copy, or traffic/exec policy across managed networks.
+
 **Current cgroup checkpoint (2026-09-27):** The installed `0.3.0-rc.exec-port` candidate passed the complete
 two-case `vm/test_cgroup.py` module in the named runner. Its schema-1 report recorded two collected/passed and
 zero failures, errors, skips, or deselections. The cases checked root-protected pressure-only controls and
@@ -755,9 +762,9 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `cp <src> <dst>` (host→VM, file) | ✅ Deep | `cp/test_cp.py` | `TestCpHostToVm` | L3: file exists on VM via SSH, content verified |
+| `cp <src> <dst>` (host→VM, file) | ✅ Deep | `cp/test_cp.py` | `TestCpHostToVm`, `TestCpNetworklessRoundTrip` | Focused current-candidate networkless L2 copied exact bytes into the guest and read them through vsock; existing managed-network case remains separately unqualified on this runner. |
 | `cp <src> <dst>` (host→VM, dir) | ✅ Deep | `cp/test_cp.py` | `TestCpHostToVm` | L3: dir + nested files exist on VM via SSH |
-| `cp <src> <dst>` (VM→host, file) | ✅ Deep | `cp/test_cp.py` | `TestCpVmToHost` | L3: file exists on host, content matches round-trip |
+| `cp <src> <dst>` (VM→host, file) | ✅ Deep | `cp/test_cp.py` | `TestCpVmToHost`, `TestCpNetworklessRoundTrip` | Focused current-candidate networkless L2 copied the guest file back and matched exact bytes; existing managed-network case remains separately unqualified on this runner. |
 | `cp <src> <dst>` (VM→host, dir) | ✅ Deep | `cp/test_cp.py` | `TestCpVmToHost` | L3: dir exists on host with contents verified |
 | `cp <src> <dst>` nonexistent source | ⚡ Shallow | `cp/test_cp.py` | `TestCpEdgeCases` | L1: "not found" in error |
 | `cp <src> <dst>` with `--force` | ✅ Deep | `cp/test_cp.py` | `TestCpEdgeCases` | L3: content changed after overwrite, verified via SSH |
