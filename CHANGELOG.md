@@ -10,10 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Release status (2026-09-27):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
-> requires the matching Firecracker/Jailer 1.16.1 pair. An exact clean checkout at `307e09d2` passed pinned
-> Go 1.26.3 local CI and the separate full root-effect Jailer package in the named `mvmctl-030-test` runner.
-> Later Go commit `6b1e5b2b` passed focused host tests, vet, and formatting there; complete Go CI has not yet been
-> rerun at the current source revision. The installed runner candidate passed complete network/nftables/policy
+> requires the matching Firecracker/Jailer 1.16.1 pair. An exact clean checkout at `856bf013`, including the
+> later host-reset correction, passed pinned Go 1.26.3 local CI and the separate full root-effect Jailer package
+> in the named `mvmctl-030-test` runner. The installed runner candidate passed complete network/nftables/policy
 > (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), and copy (15/15)
 > Python domains with strict zero-skip reports at their recorded revisions. These are domain results, not a
 > complete exact-current-HEAD Python matrix. Host-reboot/exec recovery had one device-open failure and one
