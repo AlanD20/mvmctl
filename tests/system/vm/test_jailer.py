@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import platform
@@ -374,16 +375,33 @@ class TestNetworklessJailerLifecycle:
         """The public VM lifecycle works without exposing direct Firecracker control."""
         ensure_vm_deps(runner_vm)
         name = networkless_vm_name
-        _run_mvm(
+        created = _json_success_data(_run_mvm(
             runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
             "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
-            timeout=180,
-        )
+            "--json", timeout=180,
+        ).stdout, list)
+        assert len(created) == 1
+        assert created[0]["name"] == name
+        assert "api_socket_path" not in created[0]
         vm = _vm_entry(runner_vm, name)
         assert vm["status"] == "running"
-        assert vm["api_socket_path"]
+        assert "api_socket_path" not in vm
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", name, "--json").stdout, dict,
+        )
+        assert "api_socket_path" not in inspected["vm"]
+
+        operator_uid = os.getuid()
+        assert operator_uid != 0
+        api_socket = (
+            f"/run/mvmctl/vmm-runtime/{operator_uid}/{vm['id']}/firecracker.api.socket"
+        )
+        socket_type = _guest_run(
+            runner_vm, f"sudo -n stat -Lc '%F' -- {shlex.quote(api_socket)}"
+        )
+        assert socket_type.stdout.strip() == "socket"
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            assert client.connect_ex(vm["api_socket_path"]) != 0
+            assert client.connect_ex(api_socket) in (errno.EACCES, errno.EPERM)
         _run_mvm(runner_vm, "vm", "stop", name, timeout=120)
         assert _vm_entry(runner_vm, name)["status"] == "stopped"
 
