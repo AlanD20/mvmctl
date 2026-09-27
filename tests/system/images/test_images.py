@@ -702,7 +702,7 @@ class TestImageImportAdvanced:
     ]
 
     def test_image_import_with_format_qcow2(self, runner_vm):
-        """Convert and import a QCOW2 image containing a real Alpine rootfs."""
+        """Convert and boot a QCOW2-imported Alpine rootfs, without a network."""
         # Check qemu-img availability inside the VM
         check = _guest_run(runner_vm, "command -v qemu-img", check=False)
         assert check.returncode == 0 and check.stdout.strip(), (
@@ -713,6 +713,7 @@ class TestImageImportAdvanced:
         raw_name = f"test-qcow2-{suffix}.raw"
         raw_path = f"{VM_TMP_DIR}/{raw_name}"
         qcow2_path = f"{VM_TMP_DIR}/test-qcow2-{suffix}.qcow2"
+        vm_name = f"sys-qcow2-vm-{suffix[:8]}"
         imported_id = None
         try:
             extracted_path = _get_cached_alpine_path_in_vm(runner_vm, raw_name)
@@ -749,8 +750,24 @@ class TestImageImportAdvanced:
             assert imported[0]["is_present"] is True
             assert imported[0]["fs_type"] == "ext4"
             assert imported[0]["distro"] == "alpine"
+
+            created = _parse_json_output(_run_mvm(
+                runner_vm, "vm", "create", vm_name, "--image", imported_id,
+                "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
+                "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                "--json", timeout=180,
+            ).stdout)
+            assert len(created) == 1 and created[0]["status"] == "running"
+            guest = _run_mvm(
+                runner_vm, "exec", vm_name, "--", "cat", "/etc/os-release",
+                timeout=30,
+            )
+            assert "ID=alpine" in guest.stdout.splitlines()
         finally:
             try:
+                vms = _parse_json_output(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+                if any(vm["name"] == vm_name for vm in vms):
+                    _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", timeout=120)
                 if imported_id:
                     _run_mvm(runner_vm, "image", "rm", imported_id)
                     after = _parse_json_output(

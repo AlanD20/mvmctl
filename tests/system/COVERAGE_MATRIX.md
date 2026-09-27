@@ -77,6 +77,13 @@ deselection. The selected cases covered raw creation and options, inspect/list, 
 format rejection, resize/shrink behavior, removal, and partial removal. The isolated volume list was empty afterward.
 This is not a full volume module, guest-visible option enforcement, or networked attach/detach qualification.
 
+**QCOW2 image boot checkpoint (2026-09-27):** The existing `TestImageImportAdvanced::test_image_import_with_format_qcow2`
+case was strengthened and passed 1/1 against the installed candidate in `mvmctl-030-test`. It converted the cached
+Alpine raw image to QCOW2, imported it as an ext4 image, launched a networkless VM from that import, and read
+`ID=alpine` inside the running guest through vsock. The strict report had no skips or errors; independent readback
+found no VM, imported image, or test-owned conversion file afterward. This qualifies one QCOW2 image conversion
+and boot path, not QCOW2 data-volume attachment or all image import formats and failure paths.
+
 **Current cgroup checkpoint (2026-09-27):** The installed `0.3.0-rc.exec-port` candidate passed the complete
 two-case `vm/test_cgroup.py` module in the named runner. Its schema-1 report recorded two collected/passed and
 zero failures, errors, skips, or deselections. The cases checked root-protected pressure-only controls and
@@ -585,7 +592,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `image warm` by ID prefix | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: prefix resolves and reports warmed/ready. |
 | `image warm` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: command rejects missing image. |
 | `image import` | ⚡ Shallow | `images/test_images.py` | `TestImageImport` | Installed rc.7: cached Alpine raw import, exact ext4/Alpine record, checked removal; VM boot remains unproved. |
-| `image import --format qcow2` | ⚡ Shallow | `images/test_images.py` | `TestImageImportAdvanced` | Installed rc.7: cached Alpine raw→QCOW2→ext4 import, detected distro, present record, checked removal; VM boot remains unproved. |
+| `image import --format qcow2` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced::test_image_import_with_format_qcow2` | Installed current-candidate L2: cached Alpine raw→QCOW2→ext4 import booted as a networkless VM; guest OS identity read through vsock and checked VM/image/temp-file removal. Other formats and failure paths remain unqualified; QCOW2 data volumes are unsupported. |
 | `image import --root-partition` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — skips on qemu-img |
 | `image import --force` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — may skip |
 | `image import --default` | ⏭️ Skip | `images/test_images.py` | `TestImageImportSetDefault` | L2 — may skip |
