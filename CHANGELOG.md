@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > passed there (5/5): create/restart/reboot/vsock exec, status projection, direct API denial, raw-volume restart, and
 > consistent snapshot/volume restore. VM, volume, and snapshot inventories were empty after checked teardown. This is
 > focused candidate evidence, not the networked or full Python matrix; the outer installed controller was unchanged.
+> Both existing cgroup Python cases also passed (2/2) on that candidate, including root-brokered limit/usage inspection
+> and a bounded charged guest allocation with responsive vsock exec. Sustained saturation and ancestor/host OOM
+> survival remain unqualified.
 > Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation.
 > A focused networkless data-volume capture/restore journey passed against an installed candidate inside the named
 > disposable runner; this does not qualify the managed-network or full Python release matrix.

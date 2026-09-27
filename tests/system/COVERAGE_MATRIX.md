@@ -97,8 +97,10 @@ root-effect Jailer package inside only `mvmctl-030-test`. Its full-agent `0.3.0-
 through `host install-system` only there, with matching built/installed SHA-256. Five existing networkless Python
 cases passed against that candidate: reboot/vsock, status stop/start, direct API denial, raw-volume restart, and
 consistent data-volume snapshot restore. The private VM, volume, and snapshot inventories were empty afterward.
+Both existing cgroup cases also passed (2/2), proving protected inspection and a bounded charged guest allocation
+with continued vsock responsiveness; the private VM list was empty afterward.
 This is focused evidence, not the full Python matrix or reused-IP/network-policy qualification; the runner kernel
-still lacks nftables bridge-family support.
+still lacks nftables bridge-family support. Sustained memory saturation and host/ancestor OOM survival remain open.
 
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
