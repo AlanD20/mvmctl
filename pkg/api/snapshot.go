@@ -55,6 +55,9 @@ func (op *Operation) SnapshotCreate(
 	}
 	createdAt := infra.Now()
 	snapshotID := crypto.SnapshotID(vmItem.ID, createdAt)
+	// The root capture can outlive an interrupted caller. Publish its full lookup
+	// identity before the root effect so the operator can inspect or remove it.
+	emitProgress(onProgress, "snapshot_intent", "running", "Snapshot request ID: "+snapshotID)
 	emitProgress(onProgress, "snapshot", "running", "Capturing trusted VM state and protected disks...")
 	capture, err := vm.NewController(vmItem, op.Repos.VM).SnapshotCreate(ctx, model.SnapshotCreateConfig{
 		CacheRoot: op.CacheDir, SnapshotID: snapshotID, PauseOnly: input.Pause,

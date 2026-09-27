@@ -57,14 +57,13 @@ class TestSnapshotDestroyRestore:
             assert source["network_id"]
             assert _run_mvm(runner_vm, "exec", vm_name, "--", "uname", "-s").stdout.strip() == "Linux"
 
-            captured = _json_success_data(
-                _run_mvm(
-                    runner_vm, "snapshot", "create", vm_name, "--name", snapshot_name,
-                    "--json", timeout=240,
-                ).stdout,
-                dict,
+            capture_result = _run_mvm(
+                runner_vm, "snapshot", "create", vm_name, "--name", snapshot_name,
+                "--json", timeout=240,
             )
+            captured = _json_success_data(capture_result.stdout, dict)
             snap_id = captured["id"]
+            assert f"Snapshot request ID: {snap_id}" in capture_result.stderr
             assert captured["memory_file"] and captured["state_file"]
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", timeout=120)
 

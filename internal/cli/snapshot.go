@@ -73,13 +73,13 @@ func newSnapshotCreateCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 				input.Name = infraptr.Ptr(name)
 			}
 
-			prog := common.NewProgress()
-			prog.Start("Creating snapshot...")
-			defer prog.Stop()
+			if !common.StructuredOutput() {
+				fmt.Fprintln(cmd.ErrOrStderr(), "Creating snapshot...")
+			}
 
 			snapItem, err := snapshotAPI.SnapshotCreate(cmd.Context(), input, func(e event.Progress) {
-				if e.Message != "" {
-					prog.UpdateText(e.Message)
+				if e.Message != "" && (e.Phase == "snapshot_intent" || !common.StructuredOutput()) {
+					fmt.Fprintln(cmd.ErrOrStderr(), e.Message)
 				}
 			})
 			if err != nil {
