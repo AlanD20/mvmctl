@@ -133,11 +133,28 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 				errs.WithDetails(map[string]any{"outcome_unknown": inspectErr != nil, "network_id": request.NetworkID}))
 		}
 		bridge := linkIdentity{name: name, ifIndex: observed.ifIndex, namespace: host}
+		alias := managedBridgeAlias(name)
+		if observed.name != name || observed.kind != linkKindBridge || observed.master != 0 ||
+			observed.flags&unix.IFF_UP != 0 || (observed.alias != "" && observed.alias != alias) {
+			return ManagedNetworkResult{}, networkAuthorityCorruptError("created bridge identity differs", nil)
+		}
+		// Linux applies IFLA_IFALIAS through RTM_NEWLINK change, not link creation. Label only the
+		// exact down bridge acknowledged by this transaction before publishing its root record.
+		if observed.alias == "" {
+			labelErr := tx.route.setLinkAlias(ctx, fd, observed.ifIndex, alias)
+			observed, inspectErr = tx.route.inspectLink(context.WithoutCancel(ctx), fd, name)
+			if inspectErr != nil || observed == nil {
+				return ManagedNetworkResult{}, networkAuthorityCorruptError(
+					"created bridge alias could not be verified", errors.Join(labelErr, inspectErr),
+				)
+			}
+			createErr = errors.Join(createErr, labelErr)
+		}
 		if err := validateExactManagedLink(
 			*observed,
 			bridge,
 			linkKindBridge,
-			managedBridgeAlias(name),
+			alias,
 			0,
 			0,
 		); err != nil {
