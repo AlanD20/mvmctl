@@ -632,6 +632,39 @@ class TestNetworkLifecycle:
         finally:
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
 
+    def test_recreate_after_remove_gets_new_root_identity(self, runner_vm):
+        """Same-second removal and recreation must not reuse a retired root ID."""
+        net_name = f"sys-recreate-{uuid.uuid4().hex[:8]}"
+        subnet = _unique_subnet(net_name)
+        try:
+            for _ in range(4):
+                _run_mvm(runner_vm, "network", "create", net_name, "--subnet", subnet)
+                first = _network_info(runner_vm, net_name)
+                _run_mvm(runner_vm, "network", "rm", first["id"])
+
+                recreated = _run_mvm(
+                    runner_vm, "network", "create", net_name, "--subnet", subnet,
+                    check=False,
+                )
+                assert recreated.returncode == 0, recreated.stderr
+                second = _network_info(runner_vm, net_name)
+                assert second["id"] != first["id"]
+                if second["created_at"] == first["created_at"]:
+                    return
+                _run_mvm(runner_vm, "network", "rm", second["id"])
+            pytest.fail("four create/remove pairs did not share a timestamp second")
+        finally:
+            remaining = _json_success_data(
+                _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
+            )
+            for item in remaining:
+                if item["name"] == net_name:
+                    _run_mvm(runner_vm, "network", "rm", item["id"])
+            after = _json_success_data(
+                _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
+            )
+            assert not any(item["name"] == net_name for item in after)
+
     @pytest.mark.requires_network
     def test_overlapping_subnet_rejected(self, runner_vm: str) -> None:
         # Rationale: Needs real networks. Tests overlapping subnet rejection.

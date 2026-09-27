@@ -36,7 +36,10 @@ func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCrea
 	item := resolved.Pending
 	if item == nil {
 		createdAt := time.Now().UTC().Format(time.RFC3339)
-		item = &model.NetworkItem{ID: crypto.NetworkID(resolved.Name, resolved.Subnet, createdAt),
+		// A removed network ID is permanently retired by root authority. Two creations
+		// in the same second must not reuse that identity.
+		identitySeed := createdAt + ":" + crypto.UUIDV4()
+		item = &model.NetworkItem{ID: crypto.NetworkID(resolved.Name, resolved.Subnet, identitySeed),
 			Name: resolved.Name, Subnet: resolved.Subnet, IPv4Gateway: resolved.IPv4Gateway,
 			NATEnabled: resolved.NATEnabled, CreatedAt: createdAt, UpdatedAt: createdAt,
 			Bridge: "", BridgeActive: false, IsPresent: false}
