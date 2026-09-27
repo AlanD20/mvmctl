@@ -24,12 +24,11 @@ import pytest
 from tests.system.conftest import _run_mvm, _unique_subnet, wait_for_ssh
 from tests.system.vm.test_jailer import (
     TestCanonicalJailerLaunch,
-    TestJailerFailClosed,
 )
 
 # The orchestrator maps this domain to one explicit file. Re-exporting the
 # focused Jailer journeys keeps canonical-launch coverage in that bounded run.
-_JAILER_JOURNEYS = (TestCanonicalJailerLaunch, TestJailerFailClosed)
+_JAILER_JOURNEYS = (TestCanonicalJailerLaunch,)
 
 pytestmark = [
     pytest.mark.system,
