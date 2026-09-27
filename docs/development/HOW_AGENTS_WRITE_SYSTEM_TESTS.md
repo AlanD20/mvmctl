@@ -301,9 +301,8 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 
 | Scenario | Verdict | Why |
 |----------|---------|-----|
-| `network create --subnet <cidr>` | **L2** | Real bridge + firewall |
+| `network create --subnet <cidr>` | **L2** | Real bridge + firewall; no prompt-suppression flag |
 | `network create` without `--subnet` | L1 | Cobra validation |
-| `network create --non-interactive` | **L2** | Real bridge |
 | `network create` invalid CIDR | L1 | Cobra validation |
 | `network create` duplicate name/subnet | **L2** | Real DB constraint |
 | `network create --no-nat` | **L2** | Verify no managed nftables NAT rule |

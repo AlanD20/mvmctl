@@ -467,7 +467,7 @@ The network resolver tries selectors in priority order:
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--no-nat`, `--non-interactive`, `--default, -d` | Create a named bridge network |
+| `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--no-nat`, `--default, -d` | Create a named bridge network without prompting |
 | `mvm network rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more networks |
 | `mvm network ls` | `--json, --long` | List all networks |
 | `mvm network inspect` | `[SELECTOR]`, `--json` | Show network details, IP leases, and active firewall rules |

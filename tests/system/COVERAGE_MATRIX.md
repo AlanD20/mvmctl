@@ -30,11 +30,22 @@ raw-volume guest-attachment/restart case, an isolated non-root Firecracker UID c
 authorized CLI stop check, and a `vm ps`/inspect stop-start projection case also passed. The
 installed binary predates `8e0be4fe`, but the intervening source change under `internal/`, `pkg/`, and `cmd/` was
 test-only.
-These are scoped results, **not** a full Python matrix or release sign-off. The current runner kernel still rejects
+These are scoped results, **not** a full Python matrix or release sign-off. At that checkpoint, the runner kernel still rejected
 bridge-family nftables tables, blocking network/policy qualification there. Volume/snapshot consistency, host-reboot,
 and full Jailer system journeys also remained unqualified at that checkpoint; one guest-visible volume attach was
 not snapshot-consistency qualification. The later focused checkpoint below addresses only the networkless
 data-volume snapshot journey, not the broader release gaps.
+
+**Fresh-runner bridge and QA checkpoint (2026-09-27):** The original named runner was preserved as a verified
+repo-local backup and replaced, with user approval, by a fresh `mvmctl-030-test` on the bridge-capable 7.0.11
+kernel. A temporary `bridge` nftables table could be created and removed. Exact source commit `91de873f` passed
+the pinned Go 1.26.3 unprivileged CI selection, formatting, generation, vet, and the full root-effect Jailer
+package inside that runner. The source-built `0.3.0-rc.91de873f` candidate was installed only there; its
+staged/installed SHA-256 matched. A 256 MiB managed-network VM launched with the isolated Firecracker UID,
+reported policy-v2 cgroup limits, exposed `eth0` and answered vsock exec; checked VM/network teardown left both
+lists empty. After Python test-source corrections in `7b2ca346` and `93cb6053`, full system-test collection
+found 571 cases, and focused managed Jailer isolation and no-prompt network-create cases each passed 1/1.
+This is not the full Python network/policy matrix, memory-saturation qualification, GitHub CI, or release sign-off.
 
 **Current CLI/config checkpoint (2026-09-27):** The installed `0.3.0-rc.exec-port` candidate in only
 `mvmctl-030-test` passed the complete 24-case CLI module and 12-case config module from clean source commit
@@ -200,7 +211,8 @@ in that runner; focused format checks passed as well. A separate core-volume reg
 an allocation error left the just-created file, then passed after the fix. The installed candidate passed all 25 non-VM
 `TestVolumeLifecycle` cases, including a schema-1 `validation.failed` response for `0M`, no new backing or record,
 and checked test-owned teardown. One network/VM attachment case was explicitly deselected because the runner lacks
-bridge-family nftables; it also still uses the removed `network create --non-interactive` flag. The module collected
+bridge-family nftables; at the time it also used the removed `network create --non-interactive` flag. Commit
+`7b2ca346` corrected that test source, but the attachment case has not been rerun. The module collected
 36 cases. Read-only inspection of the private cache after the pre-fix attempts showed two zero-length raw files
 without volume rows; their cleanup/provenance is not qualified by the 25-case pass. This scoped build used copied
 changed source, not a clean exact-HEAD Go CI run, full volume module, or release sign-off.
@@ -343,9 +355,9 @@ Specific legacy conflicts that must be rewritten before release:
 | `network create --default` | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | L2 — is_default=true in ls JSON |
 | `network create --no-nat` | ✅ Deep | `network/test_network.py` | `TestNetworkLifecycle` | L3: bridge exists, _assert_no_masquerade_rule confirms no MASQUERADE rule exists |
 | `network create --ipv4-gateway` | ✅ Deep | `network/test_network.py` | `TestNetworkAdvancedCreate` | L2 — checks inspect JSON. Could be L3 (bridge IP). |
-| `network create --nat-gateways` | ⚡ Shallow | `network/test_network.py` | `TestNetworkAdvancedCreate` | L2 — checks inspect JSON |
+| `network create --nat-gateways` (removed) | 🟡 Partial | `network/test_network.py` | `TestNetworkAdvancedCreate` | The legacy success assertion is stale; rewrite to require rejection before effects, then run in the named runner |
 | `network create` invalid gateway | ⚡ Shallow | `network/test_network.py` | `TestNetworkAdvancedCreate` | L1 |
-| `network create --non-interactive` | ⚡ Shallow | `network/test_network.py` | `TestNetworkEdgeCases` | L2: ls --json confirms network created |
+| `network create` without prompt flag | ⚡ Shallow | `network/test_network.py` | `TestNetworkEdgeCases` | L2: name is present in the schema-1 `ls --json` result; focused case passed 1/1 in `mvmctl-030-test` on candidate `0.3.0-rc.91de873f` |
 | `network ls` | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | L1 |
 | `network ls --json` | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | L2 — checks list, name, id, subnet |
 | `network ls --json` empty | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | L2 — valid empty list |
