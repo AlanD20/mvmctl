@@ -275,11 +275,10 @@ basenames are compile-time constants in the same file and intentionally do not a
 | `defaults.image` | Import format, remote listing limit and cache TTL |
 | `defaults.kernel` | Default kernel version, build jobs, remote listing limit and cache TTL |
 | `defaults.firecracker` | Firecracker log level |
-| `defaults.cloudinit` | nocloud-net port range, max retries, kill-after duration |
+| `defaults.cloudinit` | NoCloud service kill-after duration; the gateway service port is fixed at TCP 8000 |
 | `defaults.binary` | Remote version limit |
 | `defaults.volume` | Cache type (default: `Unsafe`) |
-| `settings` | General settings: guestfs_enabled, firewall_backend |
-| `settings.firewall` | iptables_xtcomment flag |
+| `settings` | General settings: guestfs_enabled; nftables is the only firewall backend |
 | `settings.vm` | log_lines, log_follow, max_vms, ssh_timeout_sec |
 | `cli` | Listing style (default: `short`) |
 
@@ -289,7 +288,7 @@ These settings derive the persisted envelope when a VM is created. Existing and 
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `cgroup_vmm_headroom_mib` | `128` | Host-memory allowance added to guest-visible RAM for `memory.high` and `memory.max` |
+| `cgroup_vmm_headroom_mib` | `128` | Host-memory allowance added to guest-visible RAM for `memory.high`; the VM leaf's `memory.max` is `max`, not a configurable hard ceiling |
 | `cgroup_cpu_weight` | `100` | cgroup-v2 CPU weight; accepted range is 1–10000 |
 | `cgroup_pids_max` | `256` | Maximum processes in the VM's cgroup |
 | `cgroup_swap_max_bytes` | `0` | Maximum cgroup swap usage in bytes; zero disables swap |

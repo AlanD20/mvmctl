@@ -1,4 +1,4 @@
-.TH MVM 1 "June 2026" "mvm 0.1.0" "User Commands"
+.TH MVM 1 "September 2026" "mvmctl 0.3.0-dev" "User Commands"
 .SH NAME
 mvm \- MicroVM Manager - Container speed, VM isolation
 .SH SYNOPSIS
@@ -6,7 +6,8 @@ mvm \- MicroVM Manager - Container speed, VM isolation
 [\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]...
 .SH DESCRIPTION
 .B mvm
-is a production-grade CLI for managing microVMs on Linux.
+is a CLI for managing Firecracker microVMs on Linux. The v0.3.0 release is under qualification.
+The public CLI runs unprivileged; a root-owned installation performs narrowly typed privileged effects.
 It handles the full VM lifecycle: downloading kernels and images, setting up bridge networking,
 creating and destroying VMs, SSH access, log streaming, snapshots, and cleanup.
 .PP
@@ -71,6 +72,9 @@ Root disk size (e.g. 20G).
 .B \-\-network
 Network to attach to.
 .PP
+.B \-\-no-network
+Create an isolated VM without a guest IP or MAC; use vsock exec rather than SSH.
+.PP
 .B \-\-count
 Create multiple VMs atomically.
 .RE
@@ -103,8 +107,11 @@ Resume one or more paused VMs.
 Reboot one or more VMs.
 .SS Host Configuration
 .TP
+.BR host\ install-system
+Administrator-only installation of the running artifact as root-owned /usr/local/bin/mvm.
+.TP
 .BR host\ init
-Apply host configuration (KVM, modules, ip_forward, mvm group, sudoers).
+Administrator setup and operator enrollment (KVM, modules, forwarding, mvm group, marker-only sudoers).
 .TP
 .BR host\ status
 Show current host configuration state vs expected.
@@ -113,10 +120,10 @@ Show current host configuration state vs expected.
 Show host hardware, limits, and VM capacity projection.
 .TP
 .BR host\ clean
-Remove networking config (bridges, TAPs, firewall rules).
+Remove the caller's registered networks only after proving no VM is running; does not reset shared host settings.
 .TP
 .BR host\ reset
-Full rollback: networking + sysctl + sudoers + group removal.
+Administrator-only, quiescence-checked rollback of recorded host setup; does not force-stop VMs.
 .SS Kernel Management
 .TP
 .BR kernel\ ls
@@ -164,7 +171,7 @@ Pre-decompress image to ready pool.
 List local Firecracker versions.
 .TP
 .BR bin\ pull
-Download a Firecracker version or build from source.
+Install an exact checksum-verified Firecracker/Jailer release pair in root-controlled storage.
 .TP
 .BR bin\ default
 Set the active Firecracker version.
@@ -177,7 +184,7 @@ Remove a cached version.
 Create a new persistent volume.
 .TP
 .BR volume\ rm
-Remove one or more volumes.
+Remove one or more raw volumes; an attached VM must be stopped even with --force.
 .TP
 .BR volume\ ls
 List all volumes.
@@ -186,10 +193,10 @@ List all volumes.
 Show detailed information about a volume.
 .TP
 .BR volume\ resize
-Resize an existing volume.
+Grow a raw volume; an attached VM must be stopped, but need not be detached.
 .TP
 .BR volume\ attach
-Attach a volume to a running VM.
+Attach a raw volume to a VM through protected backing.
 .TP
 .BR volume\ detach
 Detach a volume from a VM.
@@ -214,20 +221,18 @@ Set a network as the default for VM creation.
 Sync firewall rules between database and host.
 .SS Policy Management
 .TP
-.BR policy\ create " SOURCE_NETWORK DESTINATION_VM tcp|udp PORT|START-END"
-Allow routed access to one exact destination VM service.
+.BR policy\ traffic\ create
+Create a TCP/UDP grant from exactly one --from-network or --from-vm source to --to-vm, --protocol,
+and --port. Same- and cross-network managed VM traffic is denied without a grant.
 .TP
-.BR policy\ ls
-List persisted service-access policies. Use --json for structured output.
+.BR policy\ traffic\ ls
+List traffic grants. Use --json for structured output.
 .TP
-.BR policy\ inspect " POLICY_ID"
-Show one policy by exact ID or unambiguous prefix.
+.BR policy\ traffic\ inspect " POLICY_ID"
+Show one traffic grant in its selected source family.
 .TP
-.BR policy\ rm " POLICY_IDS..."
-Remove policies and reconcile firewall state. Use -f to skip confirmation.
-.TP
-.BR policy\ sync
-Resolve current resource identities and atomically reconcile policy rules.
+.BR policy\ traffic\ rm " POLICY_IDS..."
+Revoke traffic grants. Use -f to skip confirmation.
 .TP
 .BR policy\ exec\ create " SOURCE_VM DESTINATION_VM TARGET_USER"
 Persist one directional VM-to-VM execution grant for an exact non-root destination user.
@@ -238,8 +243,8 @@ List directional execution policies. Use --json for structured output.
 .BR policy\ exec\ rm " POLICY_IDS..."
 Remove directional execution policies by exact ID or unambiguous prefix. Use -f to skip confirmation.
 .PP
-Execution-policy commands currently manage desired state only. The v0.3.0 development build does not yet activate
-the API-owned VM-to-VM relay.
+An exec grant is directional and independent of the VMs' network placement. It grants no TCP/UDP access,
+reverse execution, VM-to-host execution, or root target execution.
 .SS SSH Key Management
 .TP
 .BR key\ ls
@@ -287,7 +292,7 @@ Initialize cache directories.
 Prune stale cache entries (VMs, networks, images, kernels).
 .TP
 .BR cache\ clean
-Completely clean all cache — prune everything, host clean, remove cache dir.
+Completely clean all cache: prune resources, run host clean, and remove the cache directory.
 .SS Other Commands
 .TP
 .BR console
@@ -390,13 +395,10 @@ enabling interactive console access without SSH.
 .BR mvm\ run\ nocloudnet\ serve
 HTTP server for the nocloud-net cloud-init datasource.
 Serves meta-data, user-data, and network-config to VMs during
-cloud-init provisioning.
-.TP
-.BR mvm\ run\ provision
-Privileged helper for loop-mount provisioning of root filesystem
-images. Handles partition detection, mounting, file operations,
-chroot commands, and filesystem resize (ext4/btrfs grow and shrink).
-Requires passwordless sudo access.
+cloud-init provisioning on the managed gateway's fixed TCP port 8000.
+.PP
+The former public run provision and run jailer commands are removed. Their root effects use the
+authenticated, closed privileged entry point of the installed binary.
 .SH ENVIRONMENT
 .TP
 .BR MVM_CACHE_DIR
@@ -409,7 +411,8 @@ Override config directory (default: ~/.config/mvmctl).
 Set log level (DEBUG, INFO, WARNING, ERROR, default: WARNING).
 .TP
 .BR MVM_ASSET_MIRROR
-Local mirror directory for downloaded assets (default: not set).
+Local archive mirror (default: not set). A new Firecracker/Jailer install still obtains the official
+checksum sidecar for root verification.
 .TP
 .BR MVM_WARM_POOL
 Set to "disk" to use a managed-cache-backed warm pool. Otherwise the pool is
@@ -428,17 +431,25 @@ Set internally when re-running with sudo for host init (default: not set).
 .SH FILES
 .TP
 .I ~/.cache/mvmctl/
-Cache directory for binaries, kernels, images, volumes, VM state.
+Operator cache for configuration, SQLite projections, images, and managed data artifacts.
 .TP
 .I ~/.cache/mvmctl/mvmdb.db
-SQLite database (canonical store for images, kernels, binaries, VMs, networks, keys, settings).
+SQLite user-side projection; it is not root authority for VM, network, or binary effects.
+.TP
+.I /var/lib/mvmctl/
+Durable root-owned host, release, VM, network, and Jailer authority.
+.TP
+.I /run/mvmctl/
+Ephemeral root locks and runtime sockets; not durable state.
 .SH EXAMPLES
 .PP
 One-time host setup:
 .RS
 .nf
-$ mvm init
-# Log out and back in, or run: newgrp mvm
+$ sudo ./dist/mvm host install-system
+$ sudo /usr/local/bin/mvm host init
+# Log out and back in to activate mvm group membership
+$ mvm init --skip-host --non-interactive --binary-version 1.16.1
 .fi
 .RE
 .PP
@@ -483,14 +494,18 @@ $ mvm init
 .RE
 .SH PREREQUISITES
 .IP \(bu 2
-Linux (x86_64 or aarch64) - Firecracker only runs on Linux
+Linux with KVM; v0.3.0 runtime qualification is on x86_64, not aarch64.
 .IP \(bu 2
 KVM access (/dev/kvm) - add user to kvm group
 .IP \(bu 2
-System packages: iproute2, iptables/nftables, qemu-utils, e2fsprogs, util-linux, openssh-client, tar, procps, kmod, sudo, passwd, fakeroot
+Managed networking needs kernel nftables inet and bridge support; neither nft nor iptables CLI is the firewall backend.
+.IP \(bu 2
+VM launch requires the matching Firecracker/Jailer 1.16.1 pair.
+.IP \(bu 2
+System packages include iproute2, qemu-utils, e2fsprogs, util-linux, openssh-client, tar, procps, kmod, sudo, passwd, fakeroot.
 .SH NOTES
 .IP \(bu 2
-After \fBmvm init\fR, normal mvm commands require no sudo.
+After administrator installation, host init, and group-session activation, normal mvm commands require no sudo.
 .IP \(bu 2
 Cache is stored at ~/.cache/mvmctl/ by default.
 .IP \(bu 2
@@ -499,8 +514,6 @@ All assets are keyed by SHA256 hash (64 characters).
 CLI displays only first 6 characters of hashes as short IDs.
 .SH SEE ALSO
 .BR firecracker (1),
-.BR iptables (8),
-.BR nft (8),
 .BR ip (8)
 .SH BUGS
 Report bugs at: https://github.com/AlanD20/mvmctl/issues
