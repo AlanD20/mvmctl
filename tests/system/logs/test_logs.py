@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import shlex
 import subprocess
@@ -90,9 +89,10 @@ class TestLogsBasic:
 
     def _start_if_needed(self, runner_vm: str, vm_name: str) -> None:
         """Start VM if not already running, then wait briefly for logs."""
-        vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+        vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
         entry = next((v for v in vms if v["name"] == vm_name), None)
-        if entry and entry.get("state") != "Running":
+        assert entry is not None, f"VM {vm_name} is missing from vm ls"
+        if entry["status"] != "running":
             _run_mvm(runner_vm, "vm", "start", vm_name)
             time.sleep(2)
 
@@ -248,10 +248,10 @@ class TestVMLogs:
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
 
-    def test_logs_by_ip_fails_for_stopped_vm(
+    def test_logs_by_ip_remain_available_for_stopped_vm(
         self, runner_vm, unique_vm_name, created_network
     ):
-        """Logs by IP should only work for running VMs."""
+        """A stopped VM retains its identifier and readable historical logs."""
         vm_name = unique_vm_name
         try:
             ensure_vm_deps(runner_vm)
@@ -267,7 +267,7 @@ class TestVMLogs:
             )
 
             ls_result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms: list[dict[str, Any]] = json.loads(ls_result.stdout)
+            vms = _parse_vm_list(ls_result.stdout)
             vm_entry = next((v for v in vms if v.get("name") == vm_name), None)
             vm_ip: str | None = vm_entry.get("ipv4") if vm_entry else None
             assert vm_ip, "VM has no IPv4 address assigned — cannot test logs by IP"
@@ -280,16 +280,13 @@ class TestVMLogs:
                 vm_ip,
                 check=False,
             )
-            assert result.returncode in (0, 1)
+            assert result.returncode == 0, result.stderr
+            assert result.stdout.strip(), "Expected retained logs for stopped VM"
 
-            ls_result = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if ls_result.returncode == 0 and ls_result.stdout.strip():
-                vms: list[dict[str, Any]] = json.loads(ls_result.stdout)
-                vm_entry = next(
-                    (v for v in vms if v.get("name") == vm_name), None
-                )
-                if vm_entry:
-                    assert vm_entry.get("state") != "Running"
+            vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            vm_entry = next((v for v in vms if v.get("name") == vm_name), None)
+            assert vm_entry is not None, f"VM {vm_name} is missing from vm ls"
+            assert vm_entry["status"] != "running"
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
 
