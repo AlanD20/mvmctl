@@ -529,8 +529,8 @@ class TestBinaryPullAndLifecycle:
 # ============================================================================
 
 
-class TestBinaryLiveVMDeletion:
-    """A running VM's trusted release cannot be removed by its operator."""
+class TestBinaryLiveVMReleaseLease:
+    """A running VM's trusted release cannot be removed."""
 
     pytestmark = [
         pytest.mark.system,
@@ -539,10 +539,10 @@ class TestBinaryLiveVMDeletion:
         pytest.mark.needs_kvm,
     ]
 
-    def test_force_remove_referenced_running_release_is_rejected(
+    def test_force_remove_denied_and_identical_pull_keeps_live_release(
         self, runner_vm: str, unique_vm_name: str
     ) -> None:
-        """Even --force cannot bypass the live root-authority release lease."""
+        """Removal is denied; identical force-pull leaves the live pair usable."""
         vm_name = unique_vm_name
         ensure_vm_deps(runner_vm)
 
@@ -594,8 +594,28 @@ class TestBinaryLiveVMDeletion:
             assert rejection["error"]["class"] == 2  # errs.ClassConflict
             assert "referenced by live privileged VM authority" in rejection["error"]["message"]
 
+            mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
+            archive = mirror / f"firecracker-v{version}-{platform.machine()}.tgz"
+            assert archive.is_file(), f"identical force-pull requires mirrored {archive.name}"
+            pulled = _json_success_data(
+                _run_mvm(
+                    runner_vm, "bin", "pull", version, "--force", "--json", timeout=300,
+                ).stdout,
+                list,
+            )
+            assert {item["id"] for item in pulled} == {item["id"] for item in pair}
+            assert {item["type"] for item in pulled} == {"firecracker", "jailer"}
+
             after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-            assert after == before
+            assert {
+                (item["id"], item["type"], item["version"], item["path"],
+                 item["is_default"], item["is_present"])
+                for item in after
+            } == {
+                (item["id"], item["type"], item["version"], item["path"],
+                 item["is_default"], item["is_present"])
+                for item in before
+            }
             vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
             assert next(item for item in vms if item["name"] == vm_name)["status"] == "running"
         finally:
