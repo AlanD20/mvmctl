@@ -13,10 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > requires the matching Firecracker/Jailer 1.16.1 pair. An exact clean checkout at `856bf013`, including the
 > later host-reset correction, passed pinned Go 1.26.3 local CI and the separate full root-effect Jailer package
 > in the named `mvmctl-030-test` runner. The installed runner candidate passed complete network/nftables/policy
-> (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), and copy (15/15)
-> Python domains with strict zero-skip reports at their recorded revisions. These are domain results, not a
-> complete exact-current-HEAD Python matrix. Host-reboot/exec recovery had one device-open failure and one
-> successful controlled repeat; its cause remains unresolved. Sustained memory saturation, full Jailer/cgroup
+> (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), copy (15/15),
+> and kernel import (8/8) Python domains with strict zero-skip reports at their recorded revisions. These are
+> domain results, not a complete exact-current-HEAD Python matrix. Host-reboot/exec recovery had one device-open
+> failure and one successful controlled repeat; its cause remains unresolved. Sustained memory saturation, full
+> Jailer/cgroup
 > QA requiring trusted 1.16.0 checksum metadata, clean-host reset/installation, Tier 3, aarch64 runtime,
 > GitHub CI, and final release approval remain open. No candidate has been installed over the outer controller.
 

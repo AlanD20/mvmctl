@@ -21,6 +21,14 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Kernel-import runner checkpoint (2026-09-27):** The complete eight-case
+`tests/system/kernel/test_kernel_import.py` module passed against the installed 0.3.0 candidate in only
+`mvmctl-030-test`. The strict report at
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/ci-856bf013/.tmp/qa-kernel-import-856bf013.json`
+records eight collected/passed and zero failures, errors, skips, or deselections. VM and network inventories were
+empty afterward, and only the pre-existing default kernel remained. This is local kernel-import evidence, not the
+separate kernel-build domain, the full Python matrix, GitHub CI, or release approval.
+
 **Exact-source local checkpoint (2026-09-27):** The clean `307e09d2` source passed pinned Go 1.26.3 tidy,
 format, generation, vet, the selected unprivileged Go CI suite with coverage, and the complete root-effect Jailer
 package inside only `mvmctl-030-test`. Its release build was installed there through `host install-system`; the
