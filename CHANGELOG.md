@@ -83,7 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Raw volume creation now allocates through an exclusive private `0600` descriptor, including under a permissive
   operator umask, so root admission accepts the resulting file without making group-writable backing authoritative.
-- Failed snapshot restore no longer transfers the protected snapshot reference before target VM registration succeeds.
+- Failed snapshot restore retains the protected snapshot reference whenever registration returns a live launch lease,
+  including a post-publication durability error; a pre-registration failure can release it after cleanup.
 
 - Typed launch now admits PCI for the pinned Firecracker 1.16.1 profile, accounting for the usable PCI bus slots and
   MSI-X vectors of the complete generated device set. The authenticated child receives the transport choice and adds

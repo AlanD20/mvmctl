@@ -187,11 +187,14 @@ func (server *VMLifecycleServer) launch(
 		intent,
 		processes,
 	)
+	// Publication can return both a live launch lease and a durability error.
+	// In that case lifecycle cleanup, not the pre-registration path, owns the
+	// snapshot reference until the target is proven stopped and cleaned.
+	if restore != nil && launching != nil {
+		restore.registered = true
+	}
 	if err != nil {
 		return VMLaunchResult{}, err
-	}
-	if restore != nil {
-		restore.registered = true
 	}
 	if err := launching.prepareJailDestination(ctx, realJailDestinationDeps()); err != nil {
 		return VMLaunchResult{}, err
