@@ -648,6 +648,9 @@ backend path still uses `mvm run provision`, raw wire operations and sudo, arbit
 No live-kernel qualification or public backend cutover follows from handler registration. The legacy `Provisioner`,
 `Op`, path protocol, and cleanup functions must not be wrapped by the new adapter.
 
+The preceding paragraph records the state at that implementation checkpoint, not the current 0.3.0 source. The later
+public backend cutover removed `mvm run provision` and raw fallback; current behavior is described in `CONTEXT.md`.
+
 ### Release trust
 
 The caller supplies a validated release version and architecture and may stream an exact-length bounded archive body for

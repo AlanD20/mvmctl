@@ -3,14 +3,14 @@
 **Status:** Superseded for v0.3.0 by
 [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 **Date:** 2026-05-22
-**Last Updated:** 2026-06-20 (Go implementation complete)
+**Last Updated:** 2026-09-27 (0.3.0 supersession note)
 
-> **Replacement accepted, implementation in progress:** ADR-0016 replaces the user-owned wildcard sudo design with one
-> root-owned system installation and an early typed privileged dispatcher. The system installer and no-action dispatcher
-> foundation are implemented. Raw tool grants and the public-CLI wildcard below remain transitional until Tasks 4-14 and
-> the L2 release gate pass; they must not be described as the final security boundary.
+> **Historical design, not 0.3.0 instructions:** ADR-0016 replaced the user-owned wildcard sudo design with a root-owned
+> system installation and an early typed privileged dispatcher. The 0.3.0 source generates only the fixed
+> `/usr/local/bin/mvm __mvm_privileged_v1 *` sudoers grant; the raw-tool grants and public-CLI wildcard described below
+> are obsolete. Release qualification is separate from source implementation.
 
-The project uses a **tightly scoped, group-based sudo model** where members of a dedicated Unix group (`mvm`) can execute specific privileged commands via `sudo` without a password prompt. This avoids running the entire CLI as root while still allowing VM creation (loop-mount), network management (ip/iptables/nft), kernel module loading (modprobe), and sysctl configuration.
+This superseded design used a **group-based sudo model** where members of a dedicated Unix group (`mvm`) could execute specific privileged commands via `sudo` without a password prompt. It avoided running the entire CLI as root while allowing VM creation (loop-mount), network management (ip/iptables/nft), kernel module loading (modprobe), and sysctl configuration. The sections below preserve the historical design, not current setup instructions.
 
 **Table of Contents**
 

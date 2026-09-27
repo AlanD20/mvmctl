@@ -2,10 +2,10 @@
 
 **Status:** Active
 **Date:** 2026-05-22
-**Last Updated:** 2026-08-20 (root-owned single-binary boundary foundation)
+**Last Updated:** 2026-09-27 (0.3.0 typed service dispatch)
 **Supersedes:** The previous Python Nuitka two-binaries build (legacy/ directory)
 
-The `mvm` project is distributed as a single compiled Go binary with no runtime dependencies. The binary contains both the CLI entry point and all background service subprocesses (console relay, nocloudnet server, loopmount provisioner) via subcommand dispatch (`mvm run <service>`). This replaces the previous Python Nuitka build which produced two separate binaries (`mvm` and `mvm-services`) with multidist symlink dispatch.
+The `mvm` project is distributed as a single compiled Go binary. It contains the CLI, ordinary-user background services (console relay and NoCloud HTTP server), and the closed privileged LoopMount/Jailer receiver. Only the ordinary-user services use public `mvm run <service>` subcommands; privileged actions enter through the early authenticated dispatcher. This replaces the previous Python Nuitka build which produced two separate binaries (`mvm` and `mvm-services`) with multidist symlink dispatch.
 
 **Table of Contents**
 
@@ -20,9 +20,9 @@ The `mvm` project is distributed as a single compiled Go binary with no runtime 
 
 | Aspect | Selection | Rationale |
 |--------|-----------|-----------|
-| Language | Go 1.26.3 | Compiled, zero runtime dependencies, fast startup, excellent concurrency primitives |
-| Binary count | Single binary | One `mvm` binary contains all CLI commands and service subcommands |
-| Service dispatch | Subcommand-based (`mvm run <service>`) | Services are hidden subcommands within the same binary, launched via `system.SpawnService()` |
+| Language | Go 1.26.3 | Compiled, no language interpreter dependency, fast startup, excellent concurrency primitives |
+| Binary count | Single binary | One `mvm` binary contains the CLI, ordinary services, and typed privileged receiver |
+| Service dispatch | Public `mvm run <service>` for ordinary services; early authenticated dispatch for root effects | Ordinary services self-spawn; root actions do not enter the public CLI |
 | Distribution | Single statically-linked ELF | No shared library dependencies beyond libc; no Python interpreter needed |
 
 ## Architecture
@@ -41,9 +41,9 @@ func main() {
 
 `run` recognizes only the reserved versioned privileged protocol and the exact administrator `host install-system`
 bootstrap before ordinary initialization. Both selectors fail closed and cannot enter the public CLI. All ordinary
-commands then enter `runCLI`, which establishes signals, calls `app.Initialize()`, and executes Cobra. Public background
-services remain Cobra subcommands registered in `internal/cli/service.go`; typed privileged actions progressively replace
-the root-requiring public service routes under ADR-0016.
+commands then enter `runCLI`, which establishes signals, calls `app.Initialize()`, and executes Cobra. Ordinary-user
+background services remain Cobra subcommands registered in `internal/cli/service.go`; root-requiring LoopMount and
+Jailer operations use the typed privileged actions of ADR-0016.
 
 ### Service Subcommands
 
@@ -53,13 +53,12 @@ Background services are compiled into the same binary as subcommands under `mvm 
 |---------|-----------|---------|
 | Console relay | `mvm run console relay` | `internal/service/console/` |
 | NoCloud HTTP server | `mvm run nocloudnet serve` | `internal/service/nocloudnet/` |
-| Loop-mount provisioner | `mvm run provision` | `internal/service/loopmount/` |
 
-These are launched via `system.SpawnService()` (`internal/lib/system/spawn.go`) which resolves the executable path, optionally prepends `sudo` when `Privileged` is set, and passes `Args` to `mvm run <name>`.
+These ordinary-user services are launched via `system.SpawnService()` (`internal/lib/system/spawn.go`), which resolves the executable path and passes `Args` to `mvm run <name>` without elevation. LoopMount provisioning uses the same binary's authenticated typed root dispatcher, not `SpawnService` or a public `run provision` route.
 
 ## Why Go
 
-- **Zero runtime dependencies**: A single compiled binary with no interpreter, no virtual environment, no package manager.
+- **No language runtime dependency**: A single compiled binary needs no interpreter or virtual environment. Host facilities and packages required for VM operation are documented separately.
 - **Fast startup**: Go binaries start in milliseconds with zero interpreter startup overhead.
 - **Type safety**: Compile-time type checking prevents entire classes of runtime errors.
 - **Concurrency**: Native goroutines and channels for the parallel execution model (pool.Do, pool.Gather, pool.Seq).
@@ -86,6 +85,6 @@ The previous Python implementation (preserved in `legacy/`) used Nuitka to compi
 
 ## Related Decisions
 
-- ADR-0003: Provisioning backend mutual exclusion — the `mvm run provision` subcommand is the loop-mount entry point.
+- ADR-0003: Provisioning backend mutual exclusion — LoopMount uses the typed root receiver.
 - ADR-0016: Root-owned system installation, early privileged dispatch, and typed privilege migration.
-- CONTEXT.md "Provisioner Backend" — mount/umount consolidated in `mvm run provision` subcommand.
+- CONTEXT.md "Provisioner Backend" — closed rootfs effects are owned by the typed LoopMount receiver.

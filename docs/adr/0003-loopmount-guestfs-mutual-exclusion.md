@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Date:** 2026-05-22
-**Last Updated:** 2026-06-20 (Go implementation complete)
+**Last Updated:** 2026-09-27 (0.3.0 privilege path)
 
 The project provides two independent provisioning backends for root filesystem operations (cloud-init injection, shrink, deblob, OS detection): **LoopMount** and **GuestFS**. These backends are **mutually exclusive** — a single VM or image operation uses exactly one backend, never a combination. The `guestfs_enabled` setting acts as a toggle selector, not a preference.
 
@@ -23,7 +23,7 @@ Only one backend is active for a given operation. The selection logic is:
 1. If `guestfs_enabled` (from user settings) is `true` → use **GuestFS**.
 2. Else → use **LoopMount**.
 
-LoopMount is always available (it runs as the `mvm run provision` subprocess within the same binary, invoked via `system.SpawnService()` or directly via `runWireOp` in `internal/lib/provisioner/loopmount/backend.go`). There is no fallback chain — `guestfs_enabled` is an **override**, not a fallback. The setting is persisted in user settings and can be toggled via `mvm config set settings guestfs_enabled true|false`.
+LoopMount uses the authenticated typed root receiver in the same `mvm` binary; it has no public `mvm run provision` route or raw wire-operation fallback. There is no backend fallback chain — `guestfs_enabled` is an **override**, not a fallback. The setting is persisted in user settings and can be toggled via `mvm config set settings guestfs_enabled true|false`.
 
 ## Independence
 
@@ -31,11 +31,11 @@ Both backends have separate code paths, separate dependencies, separate error ha
 
 | Aspect | LoopMount | GuestFS |
 |--------|-----------|---------|
-| Mechanism | `losetup` + `mount` + `chroot` via compiled `mvm` binary (`mvm run provision`) | `libguestfs` via QEMU appliance |
+| Mechanism | Typed rootfs operations through the authenticated `mvm` receiver | `libguestfs` via QEMU appliance |
 | Dependencies | Compiled binary (same `mvm` binary) | `libguestfs`, `supermin`, QEMU (system packages) |
 | Performance (create → ready, seq) | 2–5s per VM (see benchmarks) | 9–14s per VM (see benchmarks) |
-| Privilege | `mvm run provision` in sudoers | `supermin` in sudoers |
-| Implementation | `internal/lib/provisioner/loopmount/` (backend), `internal/service/loopmount/` (subprocess entry) | `internal/lib/provisioner/guestfs/` |
+| Privilege | Closed privileged-dispatch action through the fixed `mvm` sudoers marker | No separate `supermin` sudoers grant in 0.3.0 |
+| Implementation | `internal/lib/provisioner/loopmount/` (backend), `internal/service/loopmount/` (typed receiver) | `internal/lib/provisioner/guestfs/` |
 | Default | **Yes** (`guestfs_enabled = false`) | **No** (opt-in via `mvm init` prompt or config) |
 
 ## No Mixing
@@ -51,7 +51,7 @@ Attempting to mix backends within a single operation is a bug.
 
 The natural alternative would be a fallback chain: try loop-mount first, fall back to guestfs if unavailable. This was rejected because:
 - **Performance expectations**: If a user explicitly enables GuestFS, they expect GuestFS behavior (slower but more capable OS detection, init-system-aware SSH setup). A silent fallback to loop-mount would violate the principle of least surprise.
-- **Dependency clarity**: Each backend has different sudoers requirements. Mixing them in a single session means both sets of sudoers rules must be valid, increasing the privilege surface area.
+- **Dependency clarity**: The backends have different host dependencies and effect boundaries. A silent fallback would obscure which path performed the rootfs operation.
 - **Test isolation**: Each backend has independent test suites. A fallback chain would require testing all combinations, significantly increasing the test matrix.
 - **Bug prevention**: An earlier version of the selection logic incorrectly described GuestFS as a "fallback," which led to regression bugs where a stale `guestfs_enabled = true` setting silently selected the slow backend during performance-sensitive operations.
 
@@ -69,7 +69,7 @@ if guestfsEnabled {
 
 ## Performance Benchmark (Wall-clock, Sequential)
 
-Measured from `mvm vm create` to first successful `vm exec echo ok` on a single host (x86_64, NVMe SSD). Each row is one VM, created sequentially.
+Historical pre-0.3.0 measurements from `mvm vm create` to first successful `vm exec echo ok` on a single host (x86_64, NVMe SSD). Each row is one VM, created sequentially; these figures do not qualify the current typed receiver.
 
 | Image | LoopMount (create → ready) | GuestFS (create → ready) | Slowdown |
 |---|---|---|---|
@@ -80,11 +80,11 @@ Measured from `mvm vm create` to first successful `vm exec echo ok` on a single 
 | debian:12 | 4.3s → **4.6s** | 13.5s → **13.5s** | **2.9x** |
 | firecracker:v1.15 | 1.9s → **2.1s** | 10.0s → **10.5s** | **5.0x** |
 
-GuestFS is **3–5x slower** than LoopMount for VM creation. Each `guestfish` invocation spins up a full QEMU process with the libguestfs appliance to mount and modify the rootfs. Under **parallel** load, GuestFS degrades further (15–27s per VM) because concurrent QEMU instances contend for the libguestfs appliance lock, serializing on disk I/O.
+In those historical measurements, GuestFS was **3–5x slower** than LoopMount for VM creation. Each `guestfish` invocation spins up a full QEMU process with the libguestfs appliance to mount and modify the rootfs. Under **parallel** load in the same measurements, GuestFS degraded further (15–27s per VM) as concurrent QEMU instances contended for the libguestfs appliance lock, serializing on disk I/O.
 
 The performance gap is an inherent property of the backend architecture, not an implementation issue. LoopMount modifies the rootfs via direct `mount` + `chroot`; GuestFS routes every filesystem operation through a QEMU-backed appliance.
 
 ## Related Decisions
 
-- CONTEXT.md "Provisioner Backend" — mount/umount consolidated in `mvm run provision` subcommand (loop-mount path only).
+- CONTEXT.md "Provisioner Backend" — typed LoopMount receiver and backend selection.
 - `benchmarks/results.json` — Full historical benchmark data for both backends.

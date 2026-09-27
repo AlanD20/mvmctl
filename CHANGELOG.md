@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Implementation-only integration updates
 
+- Retired unused raw-sudo network mutation helpers and the generic privileged service-spawn option. Ordinary-user
+  console and NoCloud services still self-spawn; managed root effects remain on typed authenticated dispatch.
 - Removed the obsolete routed service-access policy input, model, and result types. Migration `007` refuses populated
   legacy policy rows before dropping that transitional table; typed traffic and exec policies remain the public model.
 - `cache clean` now uses the existing typed cleanup operations without checking for a raw `ip` tool or offering to

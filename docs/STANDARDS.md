@@ -172,8 +172,8 @@ if errs.IsNotFound(err) { ... }
 ONE canonical path: `system.DefaultRunner.Run(ctx, args, system.RunCmdOpts{...})` or `system.DefaultRunner.Stream(ctx, args, system.RunCmdOpts{...})` in `internal/lib/system/runner.go`.
 
 ```go
-// Correct
-result, err := system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", tap, "down"}, system.RunCmdOpts{Privileged: true})
+// Correct for an ordinary subprocess that is not a typed root effect
+result, err := system.DefaultRunner.Run(ctx, []string{"ip", "link", "show", tap}, system.RunCmdOpts{})
 
 // Forbidden
 exec.Command("iptables", ...) // NEVER
@@ -197,7 +197,8 @@ Documented exceptions for direct `os/exec` / `os/exec.CommandContext`:
 
 **Binary lookup carve-out:** Utility files across the codebase use `exec.LookPath()` (not `exec.Command`/`exec.CommandContext`) solely to check whether a system binary exists before calling it through `DefaultRunner.Run()`. This is NOT a subprocess execution — it's a filesystem existence check. These files are not listed as exceptions above and do not violate the subprocess rule.
 
-Service subprocesses use `system.SpawnService(ctx, cfg)`.
+Ordinary-user service subprocesses use `system.SpawnService(ctx, cfg)`. Managed network and rootfs effects use their
+closed authenticated privileged-dispatch actions, not raw privileged subprocess arguments.
 
 ## 8. Model Types
 
@@ -435,15 +436,13 @@ if net == nil { net = snap.Network }
 
 ## 17. Subprocess Services
 
-Long-running subprocess services in `internal/service/`:
+Ordinary-user subprocess services in `internal/service/`:
 - `console/` — PTY relay goroutine (entry: `mvm run console relay`)
 - `nocloudnet/` — NoCloud HTTP metadata server goroutine (entry: `mvm run nocloudnet serve`)
-- `loopmount/` — Loop-mount provisioner subprocess (entry: `mvm run provision`)
-- `agent/` — Embedded guest agent binary (cross-compiled, zstd-compressed, injected at runtime via vsock — no `mvm run` entry)
 
-Each subprocess service follows: `Config` struct → `Run(ctx, cfg)` (blocking) → `Spawn(ctx, cfg, extraFiles...)` (background via `system.SpawnService`).
+These services follow: `Config` struct → `Run(ctx, cfg)` (blocking) → `Spawn(ctx, cfg, extraFiles...)` (background via `system.SpawnService`, without elevation).
 
-All compiled into the same `mvm` binary.
+The same `mvm` binary also contains `loopmount/` (closed typed privileged rootfs receiver), `jailer/` (privileged launch and resource authority), and `agent/` (embedded cross-compiled guest binary injected at runtime). None has a public root service route; privileged host effects enter through the authenticated dispatcher.
 
 ## 18. Performance
 

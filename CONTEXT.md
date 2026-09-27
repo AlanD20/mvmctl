@@ -108,14 +108,14 @@ Constructor pattern: `NewRepository(db *sqlx.DB) Repository`.
 
 ### Service subprocess pattern (internal/service/)
 
-Long-running and privileged subprocess services (console relay, nocloud-net server, loopmount provisioner, Jailer launcher) live in `internal/service/{name}/`. These are compiled into the same `mvm` binary — no separate service binaries. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service. An additional embedded service (`agent/`) provides a cross-compiled guest agent binary that is compressed and embedded into the `mvm` binary at build time, then injected into the VM at runtime.
+Long-running ordinary-user subprocess services (console relay and NoCloud HTTP server) live in `internal/service/{name}/` and are launched through the corresponding `mvm run <service>` subcommand in the same binary. LoopMount provisioning and Jailer operations instead use closed authenticated root-dispatch actions, not public root service subcommands. The embedded `agent/` service provides a cross-compiled guest binary that is compressed into `mvm` and injected into the VM at runtime.
 
-Each service follows a consistent three-function pattern:
+The ordinary-user subprocess services follow a three-function pattern:
 - **`Config`** struct — holds all configuration for the service.
 - **`Run(ctx, cfg)`** — runs the service in the foreground (blocking).
-- **`Spawn(ctx, cfg, extraParams...)`** — launches the service as a background subprocess via `system.SpawnService()`. The context parameter is typically `nil` (background/nil) for daemon services (console relay, nocloud-net server) and a real context for synchronous services (loopmount provisioning). Extra parameters carry service-specific data: `console.Spawn()` passes a PTY file descriptor, `nocloudnet.Spawn()` passes the config only, `loopmount.Spawn()` passes a wire protocol input struct.
+- **`Spawn(ctx, cfg, extraParams...)`** — launches the service as an ordinary-user background subprocess via `system.SpawnService()`. Console passes a PTY file descriptor; NoCloud passes its fixed service arguments.
 
-Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (loop-mount provisioner wire protocol), `jailer/` (trusted release installation, per-VM jail setup, and privileged Jailer exec), `agent/` (embedded guest agent binary — cross-compiled, compressed, and injected into the VM at runtime via vsock).
+Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (typed privileged rootfs provision/inspect/optimize receiver), `jailer/` (trusted release installation, per-VM jail setup, and privileged Jailer exec), `agent/` (embedded guest agent binary — cross-compiled, compressed, and injected into the VM at runtime via vsock).
 
 Dependency direction: `cli/` -> `services/`. Services never import `cli/` or `pkg/api/`.
 
@@ -1005,9 +1005,9 @@ arbitrary unmounts, and cleanup errors propagate. Unprivileged archive
 construction remains outside the root service. Remaining dead-code retirement and live-kernel qualification are
 separate from this implementation-only pass.
 
-**Performance:** GuestFS is 3–5x slower than LoopMount for VM creation (9–14s vs 2–5s wall-clock, sequential). Under parallel load GuestFS degrades further due to QEMU lock contention. See `docs/adr/0003-loopmount-guestfs-mutual-exclusion.md` for full benchmark data.
+**Historical performance:** Pre-0.3.0 measurements found GuestFS 3–5x slower than LoopMount for VM creation (9–14s vs 2–5s wall-clock, sequential), with further parallel-load degradation due to QEMU lock contention. These figures do not qualify the current typed receiver. See `docs/adr/0003-loopmount-guestfs-mutual-exclusion.md` for benchmark data.
 
-**Why no fallback chain:** A fallback (try loop-mount, fall back to guestfs) was rejected because: (1) if a user enables GuestFS, they expect GuestFS behavior -- silent fallback to loop-mount violates least surprise; (2) each backend has different sudoers requirements -- mixing them in one session increases the privilege surface; (3) each backend has independent test suites -- a fallback chain requires testing all combinations; (4) an earlier version incorrectly described GuestFS as a "fallback," which caused regression bugs where a stale `guestfs_enabled=true` silently selected the slow backend.
+**Why no fallback chain:** A fallback (try loop-mount, fall back to guestfs) was rejected because: (1) if a user enables GuestFS, they expect GuestFS behavior -- silent fallback to loop-mount violates least surprise; (2) the backends have different host dependencies and effect boundaries -- a fallback obscures which path performed the operation; (3) each backend has independent test suites -- a fallback chain requires testing all combinations; (4) an earlier version incorrectly described GuestFS as a "fallback," which caused regression bugs where a stale `guestfs_enabled=true` silently selected the slow backend.
 
 ### Firewall backend transition
 
@@ -1220,14 +1220,14 @@ host.init.sudoers.failed
 ONE canonical path for all subprocess calls: `system.DefaultRunner.Run()` / `system.DefaultRunner.Stream()` with `system.RunCmdOpts` in `internal/lib/system/runner.go`. No raw `os/exec.Command` except in documented exceptions.
 
 ```go
-// Correct -- everything routes through the centralized runner
-result, err := system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", tap, "down"}, system.RunCmdOpts{Privileged: true})
+// Correct for an ordinary read-only subprocess; managed root effects use typed dispatch
+result, err := system.DefaultRunner.Run(ctx, []string{"ip", "link", "show", tap}, system.RunCmdOpts{})
 
 // Forbidden -- raw os/exec scattered across modules
 exec.Command("iptables", ...) // NEVER
 ```
 
-The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeout`, `Input`, `Env`, `Privileged`, `Interactive`, `StartOnly`. `Timeout` is an absolute cap for operations that genuinely need one (downloads, builds, cleanup). User commands run until completion or context cancellation; pass `Timeout: 0` for those.
+The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeout`, `Input`, `Env`, `Privileged`, `Interactive`, `StartOnly`. Its `Privileged` field remains part of the generic runner, but managed network and rootfs mutations use typed authenticated dispatch. `Timeout` is an absolute cap for operations that genuinely need one (downloads, builds, cleanup). User commands run until completion or context cancellation; pass `Timeout: 0` for those.
 
 ### Timeout taxonomy
 
@@ -1282,7 +1282,7 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 
 **Binary lookup carve-out:** Utility files across the codebase use `exec.LookPath()` (not `exec.Command`/`exec.CommandContext`) solely to check whether a system binary exists before calling it through `DefaultRunner.Run()`. This is NOT a subprocess execution — it's a filesystem existence check that happens to use the `os/exec` package. These files are not listed as exceptions above and do not violate the subprocess rule. Key locations: `internal/core/host/detector.go`, `internal/core/host/probe.go`, `internal/core/host/utils.go`, `internal/core/ssh/service.go`, `internal/core/key/utils.go`, `internal/core/image/service.go`, and others in `internal/lib/`, `internal/core/`, `internal/service/`.
 
-Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(ctx, cfg)` which resolves the executable, optionally prepends `sudo`, and manages process groups. The Jailer service uses the documented `syscall.Exec` exception after validating trusted executables and per-VM resource paths; other services do not execute arbitrary child commands except the documented provisioning engine.
+Ordinary-user subprocess services (`mvm run console relay` and `mvm run nocloudnet serve`) use `system.SpawnService(ctx, cfg)` to resolve the same executable and manage process groups; it does not elevate them. Root LoopMount actions use the authenticated typed privileged dispatcher, and Jailer uses the documented `syscall.Exec` exception after validating trusted executables and per-VM resource paths.
 
 ### Model types
 
