@@ -159,7 +159,8 @@ def test_registry_uses_exec_tier2_and_one_canonical_fresh_env_domain(
     orchestrator: ModuleType,
 ) -> None:
     assert orchestrator.TIER2_DOMAINS["exec"] == [
-        "tests/system/exec/test_exec.py"
+        "tests/system/exec/test_exec.py",
+        "tests/system/exec/test_vm_to_vm_exec.py",
     ]
     assert orchestrator.TIER3_DOMAINS["fresh_env"] == [
         "tests/system/vm/test_vm_fresh_env.py"

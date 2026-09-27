@@ -163,7 +163,10 @@ TIER2_DOMAINS: dict[str, list[str]] = {
         "tests/system/vm/test_jailer.py",
         "tests/system/vm/test_cgroup.py",
     ],
-    "exec": ["tests/system/exec/test_exec.py"],
+    "exec": [
+        "tests/system/exec/test_exec.py",
+        "tests/system/exec/test_vm_to_vm_exec.py",
+    ],
     "ssh": ["tests/system/ssh/test_ssh.py"],
     "console": ["tests/system/console/test_console.py"],
     "logs": ["tests/system/logs/test_logs.py"],
