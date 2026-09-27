@@ -728,8 +728,6 @@ class TestInterVMCommunication:
 class TestCreateWithAllFlags:
     """Creating VM with every flag simultaneously should work."""
 
-    pytestmark = [pytest.mark.domain_workflow]
-
     def test_create_with_all_flags(
         self, runner_vm: str, unique_vm_name: str
     ) -> None:
@@ -800,8 +798,6 @@ class TestCreateWithAllFlags:
 
 class TestMultipleVolumes:
     """VM with 3 volumes should start and run."""
-
-    pytestmark = [pytest.mark.domain_workflow]
 
     @pytest.mark.needs_network
     def test_multiple_volumes_on_one_vm(
@@ -900,8 +896,6 @@ class TestMultipleVolumes:
 class TestStressCreateDestroy:
     """Create and destroy 5 VMs sequentially to detect resource leak accumulation."""
 
-    pytestmark = [pytest.mark.domain_workflow]
-
     def test_stress_create_destroy_sequential(self, runner_vm: str) -> None:
         vm_names = [f"sys-stress-{uuid.uuid4().hex[:8]}" for _ in range(5)]
         net_name = f"sys-stress-net-{uuid.uuid4().hex[:6]}"
@@ -972,8 +966,6 @@ class TestStressCreateDestroy:
 
 class TestExportImport:
     """Test that vm inspect --json provides all VM configuration info."""
-
-    pytestmark = [pytest.mark.domain_workflow]
 
     @pytest.mark.needs_network
     def test_inspect_provides_full_config(

@@ -21,11 +21,6 @@ pytestmark = [
 class TestSnapshotDestroyRestore:
     """Full DR workflow: create VM, snapshot, destroy, restore from snapshot."""
 
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.domain_workflow,
-    ]
-
     def test_snapshot_destroy_restore_workflow(
         self,
         runner_vm: str,
