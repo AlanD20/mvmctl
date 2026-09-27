@@ -725,6 +725,11 @@ func (effect *linkEffect) verifyCanonicalLoopbackAuthority(
 	if err != nil {
 		return err
 	}
+	if !up && len(observedRoutes) == 2 {
+		// Some kernels retain the exact 127/8 local route after lo is lowered.
+		// The one-route fresh-down shape remains valid; no other extra route is admitted.
+		routes = append(routes, canonicalLoopbackL3.connectedRoute)
+	}
 	return validateExactIPv4Authority(
 		addresses,
 		observedRoutes,

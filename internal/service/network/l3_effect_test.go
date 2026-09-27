@@ -518,6 +518,31 @@ func TestLinkEffectRaisesAndLowersExactTopologyRoles(t *testing.T) {
 	}
 }
 
+// Rationale: Linux may retain the exact kernel-created 127/8 local route after lo is lowered.
+// Cleanup must still admit that bounded route set without accepting an unrelated route.
+func TestLinkEffectLowerLoopbackAcceptsRetainedConnectedRoute(t *testing.T) {
+	t.Parallel()
+
+	fixture, topology, endpoint := newL3EffectFixture(t)
+	require.NoError(t, fixture.effect.ConfigureL3Down(t.Context(), fixture.pin, topology, endpoint))
+	require.NoError(t, fixture.effect.RaiseLoopback(t.Context(), fixture.pin, topology))
+	originalAfterState := fixture.route.afterState
+	fixture.route.afterState = func(fd, ifIndex int, up bool) {
+		originalAfterState(fd, ifIndex, up)
+		if fd == fixture.vmFD && ifIndex == 1 && !up {
+			fixture.route.replaceRoutesLocked(fd, ifIndex, []routeIPv4Observation{
+				literalRoute("127.0.0.1/32", "127.0.0.1", ifIndex,
+					unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL),
+				literalRoute("127.0.0.0/8", "127.0.0.1", ifIndex,
+					unix.RT_TABLE_LOCAL, unix.RTPROT_KERNEL, unix.RT_SCOPE_HOST, unix.RTN_LOCAL),
+			})
+		}
+	}
+	require.NoError(t, fixture.effect.LowerLoopback(t.Context(), fixture.pin, topology))
+	loopback := fixture.route.mustLink(t, fixture.vmFD, loopbackLinkName)
+	assert.Zero(t, loopback.flags&unix.IFF_UP)
+}
+
 // Rationale: An identity mismatch must be detected before an ifindex enters a mutation request. This protects against
 // a derived-name replacement reusing the retained numeric ifindex.
 func TestLinkEffectRejectsReplacementBeforeLinkStateMutation(t *testing.T) {
