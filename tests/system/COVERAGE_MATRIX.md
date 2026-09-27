@@ -40,8 +40,9 @@ data-volume snapshot journey, not the broader release gaps.
 `mvmctl-030-test` passed the complete 24-case CLI module and 12-case config module from clean source commit
 `0e315b04`, with zero skips. Both used the established isolated 0.3 runner cache; the runner's default cache is
 an archived pre-0.3 database and correctly fails clean-install admission for non-exempt commands. The config
-module restored its tested VM CPU and memory defaults. These direct focused pytest runs are not orchestrator
-machine-report evidence, full Python qualification, or a claim about the archived cache's compatibility.
+module restored its tested VM CPU and memory defaults. A combined runner-local schema-1 pytest report recorded
+36 collected and passed, with zero errors, skips, deselections, XFAIL, or XPASS. This is direct focused evidence,
+not an orchestrator domain run, full Python qualification, or a claim about the archived cache's compatibility.
 
 **Focused snapshot checkpoint (2026-09-27):** An installed `0.3.0-rc.snapshot-ref-fix` candidate inside only
 `mvmctl-030-test` passed `TestNetworklessJailerLifecycle::test_networkless_snapshot_restores_independent_data_volume`
