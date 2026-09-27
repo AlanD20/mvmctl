@@ -1089,6 +1089,14 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+#### Rapid managed-network recreation
+
+- New managed-network IDs now include a creation nonce before hashing, so removing and recreating the same name and
+  subnet within one timestamp second cannot reuse a root-retired identity. Root removal receipts remain fail-closed.
+  A real network case failed on the prior installed candidate and passed on the scoped fixed candidate in the
+  disposable runner; the init system cases now clean their own networks and passed 8/8 with an empty network
+  inventory. Clean current-HEAD CI and broader release QA remain open.
+
 #### Volume lifecycle safety
 
 - Fixed the underlying root live-detach worker for explicit detach: it unshares filesystem attributes before joining

@@ -46,11 +46,15 @@ allocation did not reach `memory.high`; larger 156/168 MiB attempts lost the gue
 `memory.high`. This does not prove sustained-pressure survival or a host cgroup kill; the guest/agent EOF needs a
 separate bounded diagnosis.
 
-The init module passed 8/8 on the installed candidate, but it left a default network behind. After exact CLI removal
-of that test-created network, an experimental per-case teardown run passed only 6/8: later init calls were refused
-by durable network-removal receipts. The teardown experiment was reverted, and the runner's VM/network inventories
-are empty. Init repeatability after network removal and self-contained test cleanup remain release blockers; the
-initial 8/8 is not a clean, repeatable domain qualification.
+The init module initially passed 8/8 but left a default network behind. Removing that network exposed a real
+same-second identity collision: a new network hashed the same name, subnet, and second-precision timestamp to a
+retired root ID. A focused network-recreation L2 case failed on the old installed binary, then passed after
+`57176124` adds a creation nonce without relaxing the root removal receipt. The scoped candidate built from the
+`307e09d2` source plus that Go fix passed the affected API Go checks and was installed only inside the named runner
+(built/installed SHA-256 `9f46313d4279eccf0282f855fd184fe3bf2924f03b7de7bf8ee65f8d03bd3dba`).
+With `7ac34d78`'s function-scoped exact-network cleanup, all eight init cases collected and passed with zero other
+outcomes; the runner network inventory was empty afterward. This is a focused fixed-candidate gate, not clean
+current-HEAD Go CI or full release qualification.
 
 **Runner evidence (2026-09-27):** In the named `mvmctl-030-test` runner, pinned Go 1.26.3 passed the complete
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
