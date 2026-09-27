@@ -15,6 +15,7 @@ from tests.system.conftest import (
     _ensure_binary,
     _guest_run,
     _json_success_data,
+    _parse_vm_list,
     _run_mvm,
     ensure_vm_deps,
 )
@@ -528,66 +529,81 @@ class TestBinaryPullAndLifecycle:
 # ============================================================================
 
 
-class TestBinaryStoppedVMDeletion:
-    """Test binary deletion behavior with stopped VM references."""
+class TestBinaryLiveVMDeletion:
+    """A running VM's trusted release cannot be removed by its operator."""
 
     pytestmark = [
         pytest.mark.system,
-        pytest.mark.requires_kvm,
         pytest.mark.domain_bin,
+        pytest.mark.tier2,
+        pytest.mark.needs_kvm,
     ]
 
-    def test_delete_binary_used_by_stopped_vm_is_rejected(
-        self, runner_vm: str, unique_vm_name: str, module_network: str
+    def test_force_remove_referenced_running_release_is_rejected(
+        self, runner_vm: str, unique_vm_name: str
     ) -> None:
-        """Neither member of a persisted launch pair can be removed while referenced."""
+        """Even --force cannot bypass the live root-authority release lease."""
         vm_name = unique_vm_name
         ensure_vm_deps(runner_vm)
 
         try:
-            result = _run_mvm(
+            _run_mvm(
                 runner_vm,
                 "vm",
                 "create",
                 vm_name,
-                "--network",
-                module_network,
-                "--image",
-                "alpine:3.23",
+                "--no-network",
+                "--cloud-init-mode",
+                "off",
+                "--skip-deblob",
+                "--no-pci",
+                "-s",
+                "512M",
+                "--mem",
+                "256M",
+                "--vcpu",
+                "1",
+                timeout=180,
             )
+            vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            vm = next(item for item in vms if item["name"] == vm_name)
+            assert vm["status"] == "running"
 
-            vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if vm_ls.returncode == 0 and vm_ls.stdout.strip():
-                vms: list[dict[str, Any]] = json.loads(vm_ls.stdout)
-                vm_names = [v.get("name") for v in vms]
-                assert vm_name in vm_names
+            before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+            pair = [
+                item for item in before
+                if item["id"] in {vm["binary_id"], vm["jailer_binary_id"]}
+            ]
+            assert len(pair) == 2
+            assert {item["type"] for item in pair} == {"firecracker", "jailer"}
+            assert len({item["version"] for item in pair}) == 1
+            assert all(item["is_present"] for item in pair)
+            version = pair[0]["version"]
 
-            result = _run_mvm(runner_vm, "bin", "ls", "--json")
-            binaries: list[dict[str, Any]] = json.loads(result.stdout)
-            present_bins = [b for b in binaries if b.get("is_present")]
-            assert present_bins, "No present binaries found in listing"
-            default_bin = next(
-                (b for b in present_bins if b.get("is_default")),
-                present_bins[0],
+            denied = _run_mvm(
+                runner_vm, "bin", "rm", version, "--force", "--json", check=False,
             )
-            binary_id_prefix = default_bin["id"][:6]
+            assert denied.returncode != 0
+            envelope = json.loads(denied.stdout)
+            assert envelope["schema_version"] == 1
+            assert envelope["status"] == "error"
+            assert len(envelope["data"]["items"]) == 1
+            rejection = envelope["data"]["items"][0]
+            assert rejection["result"]["item"] == version
+            assert rejection["error"]["code"] == "vm.state.invalid"
+            assert rejection["error"]["class"] == 2  # errs.ClassConflict
+            assert "referenced by live privileged VM authority" in rejection["error"]["message"]
 
-            result = _run_mvm(runner_vm, "bin", "rm", binary_id_prefix, check=False)
-            assert result.returncode != 0
-            combined = (result.stdout + result.stderr).lower()
-            assert "referenced by" in combined
-
-            bin_ls = _run_mvm(runner_vm, "bin", "ls", "--json")
-            bins_after: list[dict[str, Any]] = json.loads(bin_ls.stdout)
-            bin_ids = [b.get("id", "")[:6] for b in bins_after]
-            assert binary_id_prefix in bin_ids
-            vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if vm_ls.returncode == 0 and vm_ls.stdout.strip():
-                vms: list[dict[str, Any]] = json.loads(vm_ls.stdout)
-                vm_names = [v.get("name") for v in vms]
-                assert vm_name in vm_names
+            after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+            assert after == before
+            vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert next(item for item in vms if item["name"] == vm_name)["status"] == "running"
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
+            vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            if any(item["name"] == vm_name for item in vms):
+                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", timeout=120)
+            vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(item["name"] != vm_name for item in vms)
 
 
 # ============================================================================
