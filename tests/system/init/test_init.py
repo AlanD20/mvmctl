@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from tests.system.conftest import _run_mvm
@@ -16,6 +18,27 @@ class TestInitWizard:
         pytest.mark.system,
         pytest.mark.domain_init,
     ]
+
+    @pytest.fixture(autouse=True)
+    def remove_test_created_networks(self, runner_vm):
+        """Restore only networks created by this init case."""
+        before = self._network_ids(runner_vm)
+        yield
+        created = self._network_ids(runner_vm) - before
+        for network_id in created:
+            _run_mvm(runner_vm, "network", "rm", network_id)
+        assert not (self._network_ids(runner_vm) - before)
+
+    @staticmethod
+    def _network_ids(runner_vm) -> set[str]:
+        result = _run_mvm(runner_vm, "network", "ls", "--json")
+        envelope = json.loads(result.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "success"
+        assert envelope["error"] is None
+        networks = envelope["data"]
+        assert isinstance(networks, list)
+        return {network["id"] for network in networks}
 
     def test_init_non_interactive_skip_host(self, runner_vm):
         """Run init in non-interactive mode skipping host setup.
