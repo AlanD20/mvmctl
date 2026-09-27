@@ -38,6 +38,16 @@ records one collected/passed and zero failures, errors, skips, or deselections; 
 afterward. This proves one networkless rootfs persistence/independence path, not the full snapshot fault matrix,
 GitHub CI, or release approval.
 
+**Full Jailer-file runner checkpoint (2026-09-27):** The official 1.16.0 checksum sidecar was reachable by a bounded
+direct HTTPS probe, which changed the earlier external-metadata blocker; the archive remained present in the configured
+runner mirror. The two formerly blocked tests then passed 2/2, and the entire 13-case `tests/system/vm/test_jailer.py`
+file passed against the installed candidate with strict report
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/ci-856bf013/.tmp/qa-jailer-full-856bf013.json`.
+It records 13 collected/passed and zero failures, errors, skips, or deselections. VM, network, volume, and snapshot
+inventories were empty afterward; 1.16.1 remained the Firecracker/Jailer default. The separate
+`tests/system/vm/test_cgroup.py` pressure case, host-reboot recovery, full Python matrix, and release sign-off remain
+unqualified.
+
 **Exact-source local checkpoint (2026-09-27):** The clean `307e09d2` source passed pinned Go 1.26.3 tidy,
 format, generation, vet, the selected unprivileged Go CI suite with coverage, and the complete root-effect Jailer
 package inside only `mvmctl-030-test`. Its release build was installed there through `host install-system`; the
