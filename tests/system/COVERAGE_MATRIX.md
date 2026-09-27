@@ -62,6 +62,14 @@ create/stop/start/VM-reboot vsock execution. Independent `vm ls --json`, `volume
 were empty afterward, and the original 1.16.1 pair remained default. This is direct class evidence, not a full
 Jailer module/orchestrator domain pass, host-reboot reconciliation, 1.16.0 launch proof, or networked Jailer QA.
 
+**Default deblob checkpoint (2026-09-27):** A new focused
+`TestNetworklessJailerLifecycle::test_default_deblob_provisions_bootable_guest` case passed 1/1 against that
+installed candidate in only `mvmctl-030-test`, with no skips or errors. It created an Alpine 3.23 VM without
+`--skip-deblob`, observed a running guest through the public CLI, then read the guest's cloud-init disable marker
+and Alpine OpenRC parallel-service setting through vsock. The test-owned VM was removed and the isolated VM list
+was empty. This qualifies that one root-brokered default provisioning path, not all distro-specific deblob rules,
+failure rollback, managed networking, or the full LoopMount system matrix.
+
 **Current cgroup checkpoint (2026-09-27):** The installed `0.3.0-rc.exec-port` candidate passed the complete
 two-case `vm/test_cgroup.py` module in the named runner. Its schema-1 report recorded two collected/passed and
 zero failures, errors, skips, or deselections. The cases checked root-protected pressure-only controls and
@@ -372,6 +380,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `vm create` with `--vsock-port` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMCreateVsockPort` | L2 — vsock socket file created |
 | `vm create` with `--lsm-flags` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L2 — LSM flags in inspect output |
 | `vm create` with `--skip-cleanup` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L1 — VM created successfully |
+| `vm create` with default deblob (Alpine) | 🟡 Partial | `vm/test_jailer.py` | `TestNetworklessJailerLifecycle` | Focused installed-candidate L2: guest booted and exposed deblob-created cloud-init and OpenRC settings. Other distros, cleanup rules, and failure rollback remain unqualified. |
 | `vm create` with `--skip-deblob` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMAdvancedCreateFlags` | L2 — VM created with skip-deblob |
 | `vm create` with `--nested-virt` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — cpu-config in Firecracker JSON, boot args validated |
 | `vm create` with `--cpu-template` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — merged cpu-config in Firecracker JSON |

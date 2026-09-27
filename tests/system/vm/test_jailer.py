@@ -239,6 +239,28 @@ def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
 
 
 class TestNetworklessJailerLifecycle:
+    def test_default_deblob_provisions_bootable_guest(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """The root-brokered default provisioning path edits the guest and still boots it."""
+        ensure_vm_deps(runner_vm)
+        name = networkless_vm_name
+        _run_mvm(
+            runner_vm, "vm", "create", name, "--image", "alpine:3.23",
+            "--no-network", "--cloud-init-mode", "off", "--no-pci",
+            "-s", "512M", "--mem", "256M", "--vcpu", "1", timeout=180,
+        )
+        assert _vm_entry(runner_vm, name)["status"] == "running"
+        marker = _run_mvm(
+            runner_vm, "exec", name, "--", "cat", "/etc/cloud/cloud-init.disabled",
+            timeout=30,
+        )
+        assert marker.stdout.strip() == "disabled by mvmctl"
+        alpine_rc = _run_mvm(
+            runner_vm, "exec", name, "--", "cat", "/etc/rc.conf", timeout=30,
+        )
+        assert 'rc_parallel="YES"' in alpine_rc.stdout.splitlines()
+
     def test_operator_cannot_traverse_trusted_release_pair(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
