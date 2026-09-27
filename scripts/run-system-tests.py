@@ -1014,8 +1014,7 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull firecracker "
-        "--version 1.16.0 --default --force",
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.0 --default --force",
         timeout=150,
     )
 

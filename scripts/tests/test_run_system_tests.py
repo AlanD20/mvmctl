@@ -809,6 +809,38 @@ def test_runner_user_initialization_uses_the_exact_installed_cli(
     ]
 
 
+def test_tier2_provision_pulls_exact_release_with_installed_cli(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tier 2 setup must use the current positional trusted-release command."""
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    for helper in (
+        "_ensure_builder_key",
+        "_ensure_official_kernel_on_host",
+        "_install_system_binary_in_runner",
+        "_initialize_system_binary_in_runner",
+        "_initialize_runner_user",
+    ):
+        monkeypatch.setattr(orchestrator, helper, lambda *_args, **_kwargs: None)
+
+    orchestrator.provision_t2("focused-runner", "0.3.0-rc.test")
+
+    assert calls[-1] == (
+        (
+            "exec", "focused-runner", "--user", "runner", "--timeout", "10", "--",
+            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.0 --default --force",
+        ),
+        {"timeout": 150},
+    )
+
+
 def test_streamed_mvm_failure_preserves_command_and_rc_when_output_is_none(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
