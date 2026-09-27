@@ -1,6 +1,8 @@
 package infra_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -9,6 +11,23 @@ import (
 
 	"mvmctl/internal/infra"
 )
+
+// The default must be writable by each operator independently; a shared
+// 0700 /tmp/mvmctl directory prevented a second enrolled user from pulling images.
+func TestGetTempDirDefaultsToCallerCache(t *testing.T) {
+	t.Setenv(infra.EnvKey("TEMP_DIR"), "")
+	cacheDir, err := infra.GetCacheDir()
+	require.NoError(t, err)
+
+	got := infra.GetTempDir()
+	want := filepath.Join(cacheDir, "tmp")
+	assert.Equal(t, want, got)
+
+	file, err := os.CreateTemp(got, "operator-write-*")
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+	t.Cleanup(func() { require.NoError(t, os.Remove(file.Name())) })
+}
 
 // --- GetDefault ---
 // Rationale: GetDefault is the primary config resolution path used by the entire

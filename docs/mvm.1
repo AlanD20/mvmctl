@@ -415,7 +415,8 @@ Local mirror directory for downloaded assets (default: not set).
 Set to "disk" to use disk-based warm pool (default: tmpfs).
 .TP
 .BR MVM_TEMP_DIR
-Override temp directory (default: /tmp/mvmctl).
+Override per-operator temp directory (default: tmp/ beneath the managed cache,
+normally ~/.cache/mvmctl/tmp).
 .TP
 .BR MVM_ESCALATED
 Set by sudo wrapper to indicate privilege escalation (default: not set).

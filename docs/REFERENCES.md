@@ -867,7 +867,7 @@ The security model applies to the net cloud-init mode only:
 | `MVM_ASSET_MIRROR` | Local mirror directory for downloaded assets | (not set) |
 | `MVM_WARM_POOL` | Warm image pool backend (`disk` for disk-backed, default is tmpfs) | (not set — tmpfs) |
 | `MVM_ESCALATED` | Set by sudo wrapper to indicate privilege escalation | `1` |
-| `MVM_TEMP_DIR` | Override temp directory for microVMs | `/tmp/mvmctl` |
+| `MVM_TEMP_DIR` | Override the per-operator temporary directory | Managed cache `tmp/` (normally `~/.cache/mvmctl/tmp`) |
 | `MVM_SUDO_RESTART` | Set internally when re-running with sudo for host init | (not set) |
 
 ---

@@ -561,7 +561,15 @@ func GetTempDir() string {
 		}
 		return override
 	}
-	path := filepath.Join("/tmp", ProjectName)
+	// Keep ordinary-user temporary work beneath that user's selected cache.
+	// A single /tmp/mvmctl directory lets the first operator's 0700 ownership
+	// prevent every other enrolled operator from pulling images.
+	path := filepath.Join(GetRealHome(), ".cache", ProjectName, "tmp")
+	if cacheDir, err := GetCacheDir(); err == nil {
+		path = filepath.Join(cacheDir, "tmp")
+	} else {
+		slog.Warn("failed to resolve cache directory for temporary work", "error", err)
+	}
 	if err := ensureDirAndChown(path); err != nil {
 		slog.Warn("failed to create temp directory", "path", path, "error", err)
 	}
