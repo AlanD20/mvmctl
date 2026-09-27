@@ -302,7 +302,7 @@ func (effect *linkEffect) inspectExactTopologyLinks(
 	requireDown bool,
 ) (exactTopologyLinks, error) {
 	if topology.handle.identity != retained.vm || topology.managedBridge.namespace != retained.host ||
-		topology.veth.host.namespace != retained.host {
+		topology.veth.host.namespace != retained.host || retained.owner != topology.key.ownerUID {
 		return exactTopologyLinks{}, errors.New("topology links do not match retained namespace descriptors")
 	}
 	managedBridge, err := effect.inspectRequiredLink(ctx, retained.hostFD, topology.managedBridge.name)
@@ -358,9 +358,9 @@ func (effect *linkEffect) inspectExactTopologyLinks(
 			tap,
 			topology.tap,
 			linkKindTAP,
-			managedTAPAlias(topology.tap.name, retained.owner),
+			managedTAPAlias(topology.tap.name, OwnerUID(topology.tapExecutionUID)),
 			topology.localBridge.ifIndex,
-			retained.owner,
+			OwnerUID(topology.tapExecutionUID),
 		),
 		validateExactManagedLink(
 			namespaceVeth,

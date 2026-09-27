@@ -18,6 +18,7 @@ import (
 
 const (
 	testOwnerUID       = uint32(1000)
+	testExecutionUID   = uint32(1001)
 	testVMID           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	testNetworkID      = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	testNamespacePath  = namespaceHandlePath("/run/mvmctl/authority/1000/netns/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -240,12 +241,13 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 	topology, err := preparation.Topology()
 	require.NoError(t, err)
 	wantTopology := Topology{
-		key:           fixture.key,
-		handle:        fixture.pin.handle,
-		managedBridge: fixture.lock.bridge,
-		localBridge:   fixture.effects.localBridge,
-		tap:           fixture.effects.tap,
-		veth:          fixture.effects.veth,
+		key:             fixture.key,
+		tapExecutionUID: testExecutionUID,
+		handle:          fixture.pin.handle,
+		managedBridge:   fixture.lock.bridge,
+		localBridge:     fixture.effects.localBridge,
+		tap:             fixture.effects.tap,
+		veth:            fixture.effects.veth,
 	}
 	if diff := cmp.Diff(
 		wantTopology,
@@ -262,9 +264,10 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 		t.Errorf("prepared topology mismatch (-want +got):\n%s", diff)
 	}
 	wantRecord := TopologyRecord{
-		OwnerUID:  testOwnerUID,
-		VMID:      testVMID,
-		NetworkID: testNetworkID,
+		OwnerUID:        testOwnerUID,
+		TAPExecutionUID: testExecutionUID,
+		VMID:            testVMID,
+		NetworkID:       testNetworkID,
 		Namespace: NamespaceHandle{
 			Path: testNamespacePath.String(),
 			Identity: NamespaceIdentity{
@@ -1041,6 +1044,28 @@ func TestServicePrepareRejectsUnpinnedOrMismatchedEffectIdentity(t *testing.T) {
 	}
 }
 
+// Rationale: cleanup after a process restart must retain the isolated TAP owner rather than infer the operator UID.
+func TestRecoverTopologyRetainsIsolatedTAPExecutionUID(t *testing.T) {
+	t.Parallel()
+
+	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
+	record := TopologyRecord{
+		OwnerUID: testOwnerUID, TAPExecutionUID: testExecutionUID,
+		VMID: testVMID, NetworkID: testNetworkID,
+		ManagedBridge: LinkIdentity{
+			Name: testNames.managedBridge.String(), IfIndex: 10,
+			Namespace: NamespaceIdentity{Device: 51, Inode: 52},
+		},
+	}
+	topology, err := recoverTopologyValue(key, record, topologyProgress{})
+	require.NoError(t, err)
+	assert.Equal(t, testExecutionUID, topology.tapExecutionUID)
+
+	record.TAPExecutionUID = testOwnerUID
+	_, err = recoverTopologyValue(key, record, topologyProgress{})
+	require.Error(t, err)
+}
+
 type topologyFixture struct {
 	key     topologyKey
 	events  *[]string
@@ -1101,7 +1126,8 @@ func newTopologyFixtureWithLocker(t *testing.T, config fakeNetworkLockerConfig) 
 	service := newService(locker, effects)
 	return &topologyFixture{
 		key: key, events: &events,
-		launch:  &vmLaunchLease{ownerUID: key.OwnerUID(), vmID: key.VMID(), lock: &vmLockCapability{}},
+		launch: &vmLaunchLease{ownerUID: key.OwnerUID(), executionUID: testExecutionUID,
+			vmID: key.VMID(), lock: &vmLockCapability{}},
 		lock:    lock,
 		pin:     pin,
 		effects: effects,
@@ -1343,6 +1369,7 @@ func (effects *fakeTopologyEffects) AttachTAPToLocalBridge(
 	_ NamespacePin,
 	_ linkIdentity,
 	_ linkIdentity,
+	_ uint32,
 ) error {
 	return effects.enter(ctx, "attach_tap")
 }
@@ -1367,6 +1394,7 @@ func (effects *fakeTopologyEffects) DeleteTAP(
 	ctx context.Context,
 	_ NamespacePin,
 	_ linkIdentity,
+	_ uint32,
 ) error {
 	return effects.delete(ctx, "delete_tap")
 }

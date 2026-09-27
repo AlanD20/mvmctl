@@ -171,6 +171,9 @@ func validateTopologyIdentities(topology Topology, names topologyNames) error {
 	if err := validateTopologyKey(topology.key); err != nil {
 		return err
 	}
+	if topology.tapExecutionUID == 0 || topology.tapExecutionUID == uint32(topology.key.ownerUID) {
+		return errors.New("TAP execution UID is not isolated from the operator")
+	}
 	if topology.managedBridge.name != names.managedBridge ||
 		topology.managedBridge.ifIndex <= 0 ||
 		!validNamespaceIdentity(topology.managedBridge.namespace) {

@@ -14,6 +14,7 @@ type JailerNamespaceLease struct{ owner *VMTopologyLease }
 // JailerNetworkConfig is a root-derived child configuration projection, not namespace or link authority.
 type JailerNetworkConfig struct {
 	OwnerUID        uint32
+	TAPExecutionUID uint32
 	VMID            string
 	NetworkID       string
 	NamespaceDevice uint64
@@ -53,7 +54,8 @@ func (lease *JailerNamespaceLease) Binding(ctx context.Context) (JailerNetworkCo
 		return JailerNetworkConfig{}, err
 	}
 	topology := owner.preparation.topology
-	return JailerNetworkConfig{OwnerUID: uint32(owner.key.ownerUID), VMID: string(owner.key.vmID),
+	return JailerNetworkConfig{OwnerUID: uint32(owner.key.ownerUID),
+		TAPExecutionUID: topology.tapExecutionUID, VMID: string(owner.key.vmID),
 		NetworkID: string(owner.key.networkID), NamespaceDevice: topology.handle.identity.device,
 		NamespaceInode: topology.handle.identity.inode, TAPName: topology.tap.name.String(),
 		GuestMAC: owner.l3.mac.String(), GuestIPv4: owner.l3.guestAddress.value,

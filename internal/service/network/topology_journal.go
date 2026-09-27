@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const topologyJournalSchema = uint32(1)
+const topologyJournalSchema = uint32(2)
 
 type topologyLifecycle string
 
@@ -259,6 +259,11 @@ func validateTopologyJournal(record topologyJournalRecord) error {
 		record.EndpointID != string(key.vmID) {
 		return networkAuthorityCorruptError("topology journal identity is invalid", err)
 	}
+	if record.Topology.OwnerUID != record.OwnerUID || record.Topology.VMID != record.VMID ||
+		record.Topology.NetworkID != record.NetworkID || record.Topology.TAPExecutionUID == 0 ||
+		record.Topology.TAPExecutionUID == record.OwnerUID {
+		return networkAuthorityCorruptError("topology TAP execution identity is invalid", nil)
+	}
 	switch record.Lifecycle {
 	case topologyPreparing, topologyActivating, topologyActive, topologyCleaning, topologyCleaned:
 	default:
@@ -274,7 +279,9 @@ func validateTopologyJournal(record topologyJournalRecord) error {
 	if err != nil {
 		return err
 	}
-	if _, err := deriveEndpointL3(key, network, endpointL3Input{guestAddress: guest, requestedMAC: &record.GuestMAC}); err != nil {
+	if _, err := deriveEndpointL3(
+		key, network, endpointL3Input{guestAddress: guest, requestedMAC: &record.GuestMAC},
+	); err != nil {
 		return err
 	}
 	if len(record.Pending) > 64 {

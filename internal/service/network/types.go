@@ -60,14 +60,15 @@ type VethPairIdentity struct {
 
 // TopologyRecord is the serializable identity contract for root authority persistence and Jailer registration.
 type TopologyRecord struct {
-	OwnerUID      uint32
-	VMID          string
-	NetworkID     string
-	Namespace     NamespaceHandle
-	ManagedBridge LinkIdentity
-	LocalBridge   LinkIdentity
-	TAP           LinkIdentity
-	VethPair      VethPairIdentity
+	OwnerUID        uint32
+	TAPExecutionUID uint32
+	VMID            string
+	NetworkID       string
+	Namespace       NamespaceHandle
+	ManagedBridge   LinkIdentity
+	LocalBridge     LinkIdentity
+	TAP             LinkIdentity
+	VethPair        VethPairIdentity
 }
 
 type vmLockCapability struct{}
@@ -75,10 +76,11 @@ type vmLockCapability struct{}
 // vmLaunchLease is deliberately private until the Jailer launch authority transfers its concrete held VM lock into
 // this package. A caller cannot satisfy this boundary with identity values and a forgeable boolean.
 type vmLaunchLease struct {
-	ownerUID OwnerUID
-	vmID     VMID
-	lock     *vmLockCapability
-	hold     *authorityfs.TopologyHold
+	ownerUID     OwnerUID
+	executionUID uint32
+	vmID         VMID
+	lock         *vmLockCapability
+	hold         *authorityfs.TopologyHold
 }
 
 // NetworkLocker acquires the final lock class for one root-owned managed network. A non-nil lock returned with an
@@ -110,8 +112,8 @@ type localBridgeCreateSpec struct {
 }
 
 type tapCreateSpec struct {
-	name     linkName
-	ownerUID OwnerUID
+	name         linkName
+	executionUID uint32
 }
 
 type vethCreateSpec struct {
@@ -149,6 +151,7 @@ type TopologyEffects interface {
 		namespace NamespacePin,
 		tap linkIdentity,
 		bridge linkIdentity,
+		executionUID uint32,
 	) error
 	AttachHostVethToManagedBridge(
 		ctx context.Context,
@@ -156,19 +159,20 @@ type TopologyEffects interface {
 		bridge linkIdentity,
 	) error
 	DeleteVethPair(ctx context.Context, namespace NamespacePin, veth vethPairIdentity) error
-	DeleteTAP(ctx context.Context, namespace NamespacePin, tap linkIdentity) error
+	DeleteTAP(ctx context.Context, namespace NamespacePin, tap linkIdentity, executionUID uint32) error
 	DeleteLocalBridge(ctx context.Context, namespace NamespacePin, bridge linkIdentity) error
 	DeleteNamespace(ctx context.Context, namespace NamespacePin) error
 }
 
 // Topology is the exact derived and kernel-returned identity needed for durable authority and reconciliation.
 type Topology struct {
-	key           topologyKey
-	handle        namespaceHandle
-	managedBridge linkIdentity
-	localBridge   linkIdentity
-	tap           linkIdentity
-	veth          vethPairIdentity
+	key             topologyKey
+	tapExecutionUID uint32
+	handle          namespaceHandle
+	managedBridge   linkIdentity
+	localBridge     linkIdentity
+	tap             linkIdentity
+	veth            vethPairIdentity
 }
 
 // Key returns the immutable owner, VM, and network identity.
@@ -192,13 +196,14 @@ func (topology Topology) VethPair() vethPairIdentity { return topology.veth }
 // Export returns the serializable identity contract for authority persistence and Jailer registration.
 func (topology Topology) Export() TopologyRecord {
 	return TopologyRecord{
-		OwnerUID:      uint32(topology.key.ownerUID),
-		VMID:          string(topology.key.vmID),
-		NetworkID:     string(topology.key.networkID),
-		Namespace:     exportNamespaceHandle(topology.handle),
-		ManagedBridge: exportLinkIdentity(topology.managedBridge),
-		LocalBridge:   exportLinkIdentity(topology.localBridge),
-		TAP:           exportLinkIdentity(topology.tap),
+		OwnerUID:        uint32(topology.key.ownerUID),
+		TAPExecutionUID: topology.tapExecutionUID,
+		VMID:            string(topology.key.vmID),
+		NetworkID:       string(topology.key.networkID),
+		Namespace:       exportNamespaceHandle(topology.handle),
+		ManagedBridge:   exportLinkIdentity(topology.managedBridge),
+		LocalBridge:     exportLinkIdentity(topology.localBridge),
+		TAP:             exportLinkIdentity(topology.tap),
 		VethPair: VethPairIdentity{
 			Host: exportLinkIdentity(topology.veth.host),
 			Peer: exportLinkIdentity(topology.veth.peer),

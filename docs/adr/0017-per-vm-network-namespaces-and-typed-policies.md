@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-13 (supported ARP grammar and private application status)
+**Last Updated:** 2026-09-27 (isolated TAP execution identity)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 **No-IP placement:** [ADR-0020: Networkless VM Placement](0020-networkless-vm-placement.md) specifies the separate
@@ -258,14 +258,16 @@ descriptor, applies any context deadline, closes on cancellation, and checks mut
 
 TAP creation does not synthesize an rtnetlink `tun` create request. On a disposable locked thread it rechecks and enters
 the retained VM namespace, opens only fixed `/dev/net/tun` as character device `10:200`, calls `TUNSETIFF` with exact
-TAP/no-PI/exclusive flags, and calls `TUNSETOWNER` for the authenticated non-root UID without setting a group. The
-effect rechecks the temporary TAP, sets its managed alias, and reverifies alias, type, no-PI, owner, absent group,
-down state, ifindex, and non-persistent state before final `TUNSETPERSIST`; the outer link effect then verifies the
-persistent TAP.
+TAP/no-PI/exclusive flags, and calls `TUNSETOWNER` for the root-selected isolated Firecracker execution UID without
+setting a group. This UID is distinct from the authenticated operator UID under
+[ADR-0018](0018-isolated-vm-execution-and-snapshot-authority.md), and the root-owned topology journal retains it for
+exact activation and cleanup checks. The effect rechecks the temporary TAP, sets its managed alias, and reverifies
+alias, type, no-PI, owner, absent group, down state, ifindex, and non-persistent state before final `TUNSETPERSIST`;
+the outer link effect then verifies the persistent TAP.
 
-Neither the composed private topology effect nor the private service has a production caller. VM-lock transfer,
-route/address and verified link-up stages, firewall application, durable VM-topology lifecycle, production construction,
-Jailer handoff, public cutover, and live qualification remain pending.
+The root Jailer lifecycle composes this private effect with its retained VM hold, durable topology journal, firewall
+application, ordered link activation, and exact cleanup/recovery. This source wiring does not itself prove networked
+runtime qualification; the installed-candidate system suite remains a release gate.
 
 ### nftables is the only firewall backend
 

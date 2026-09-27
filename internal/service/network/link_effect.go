@@ -77,9 +77,9 @@ func (effect *linkEffect) CreateTAPDown(
 	if err := validateDerivedEffectLinkName(spec.name, "mvt"); err != nil {
 		return nil, linkCreateError(spec.name, "validate TAP identity", err, false)
 	}
-	if spec.ownerUID == 0 {
+	if spec.executionUID == 0 {
 		return nil, linkCreateError(spec.name, "validate TAP identity", errors.New(
-			"TAP owner must be an authenticated non-root UID",
+			"TAP execution UID must be a root-selected non-root UID",
 		), false)
 	}
 	lease, fd, identity, err := effect.retainVM(ctx, namespace)
@@ -89,13 +89,13 @@ func (effect *linkEffect) CreateTAPDown(
 	defer func() {
 		returnErr = appendLinkCreateCloseError(spec.name, returnErr, lease.close(ctx))
 	}()
-	authenticatedOwner, err := lease.owner()
+	operatorUID, err := lease.owner()
 	if err != nil {
 		return nil, linkCreateError(spec.name, "authenticate TAP owner", err, false)
 	}
-	if authenticatedOwner != spec.ownerUID {
+	if uint32(operatorUID) == spec.executionUID {
 		return nil, linkCreateError(spec.name, "authenticate TAP owner", errors.New(
-			"TAP owner does not match the retained namespace owner",
+			"TAP execution UID must differ from the retained operator",
 		), false)
 	}
 	if effect.tap == nil {
@@ -103,7 +103,7 @@ func (effect *linkEffect) CreateTAPDown(
 			"TAP effect dependency is incomplete",
 		), false)
 	}
-	alias := managedTAPAlias(spec.name, spec.ownerUID)
+	alias := managedTAPAlias(spec.name, OwnerUID(spec.executionUID))
 	return effect.createSingleLink(
 		ctx,
 		fd,
@@ -111,9 +111,11 @@ func (effect *linkEffect) CreateTAPDown(
 		spec.name,
 		linkKindTAP,
 		alias,
-		spec.ownerUID,
+		OwnerUID(spec.executionUID),
 		func(mutationCtx context.Context) error {
-			return effect.tap.createTAPDown(mutationCtx, fd, identity, spec.name, alias, spec.ownerUID)
+			return effect.tap.createTAPDown(
+				mutationCtx, fd, identity, spec.name, alias, OwnerUID(spec.executionUID),
+			)
 		},
 	)
 }
@@ -279,6 +281,7 @@ func (effect *linkEffect) AttachTAPToLocalBridge(
 	namespace NamespacePin,
 	tap linkIdentity,
 	bridge linkIdentity,
+	executionUID uint32,
 ) (returnErr error) {
 	if err := errors.Join(
 		validateDerivedEffectLinkName(tap.name, "mvt"),
@@ -298,12 +301,18 @@ func (effect *linkEffect) AttachTAPToLocalBridge(
 			"TAP attachment identities do not match the retained namespace",
 		), false)
 	}
-	owner, err := lease.owner()
+	operatorUID, err := lease.owner()
 	if err != nil {
 		return linkCreateError(tap.name, "authenticate TAP attachment owner", err, false)
 	}
+	if executionUID == 0 || executionUID == uint32(operatorUID) {
+		return linkCreateError(tap.name, "admit TAP attachment", errors.New(
+			"TAP execution UID is not isolated from the operator",
+		), false)
+	}
 	return effect.attachLink(
-		ctx, fd, tap, linkKindTAP, managedTAPAlias(tap.name, owner), bridge, owner, false,
+		ctx, fd, tap, linkKindTAP, managedTAPAlias(tap.name, OwnerUID(executionUID)),
+		bridge, OwnerUID(executionUID), false,
 	)
 }
 
@@ -448,6 +457,7 @@ func (effect *linkEffect) DeleteTAP(
 	ctx context.Context,
 	namespace NamespacePin,
 	tap linkIdentity,
+	executionUID uint32,
 ) (returnErr error) {
 	if err := validateDerivedEffectLinkName(tap.name, "mvt"); err != nil {
 		return linkRemoveError(tap.name, "validate TAP cleanup identity", err)
@@ -464,9 +474,14 @@ func (effect *linkEffect) DeleteTAP(
 			"TAP cleanup identity does not match the retained namespace",
 		))
 	}
-	owner, err := lease.owner()
+	operatorUID, err := lease.owner()
 	if err != nil {
 		return linkRemoveError(tap.name, "authenticate TAP cleanup owner", err)
+	}
+	if executionUID == 0 || executionUID == uint32(operatorUID) {
+		return linkRemoveError(tap.name, "admit TAP cleanup", errors.New(
+			"TAP execution UID is not isolated from the operator",
+		))
 	}
 	observation, err := effect.route.inspectLink(ctx, fd, tap.name)
 	if err != nil {
@@ -476,7 +491,8 @@ func (effect *linkEffect) DeleteTAP(
 		return nil
 	}
 	if err := validateManagedLink(
-		*observation, tap, linkKindTAP, managedTAPAlias(tap.name, owner), observation.master, owner,
+		*observation, tap, linkKindTAP, managedTAPAlias(tap.name, OwnerUID(executionUID)),
+		observation.master, OwnerUID(executionUID),
 	); err != nil {
 		return linkRemoveError(tap.name, "admit TAP cleanup", err)
 	}

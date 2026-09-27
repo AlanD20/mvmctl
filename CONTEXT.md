@@ -547,15 +547,18 @@ The Network authority family now also creates one exact root-owned
 `/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder and retains its directory, leaf, and mount identities. A private
 network effect can create a network namespace on a disposable locked OS thread, publish its exact nsfs mount onto that
 placeholder through `open_tree`/`move_mount`, verify restoration of the host network namespace, and remove only the
-retained mount and placeholder with explicit uncertain-unmount evidence. This is an inert private effect, not runtime
-activation. A separate private link effect now completes the `TopologyEffects` boundary: it creates and verifies the
-exact namespace-local bridge, host/namespace veth pair, and TAP down; attaches only identity-checked endpoints; and
+retained mount and placeholder with explicit uncertain-unmount evidence. The root Jailer lifecycle composes this private
+effect into the managed VM topology transaction; ordinary callers cannot invoke it directly. A separate private link
+effect completes the `TopologyEffects` boundary: it creates and verifies the exact namespace-local bridge,
+host/namespace veth pair, and TAP down; attaches only identity-checked endpoints; and
 deletes only exact retained identities. Every rtnetlink operation uses an explicit retained network-namespace
 descriptor. TAP creation enters the retained VM namespace on a disposable locked thread, opens only `/dev/net/tun`,
 uses `TUNSETIFF` and `TUNSETOWNER` with no group authority, and reverifies owner, no-PI, down state, and the managed
-alias before final persistence. Separate private L3 effects now admit canonical endpoint values, configure exact
-managed-bridge and down-loopback addresses, inspect kernel-created IPv4 routes, and provide per-role raise/lower
-methods. Address mutation re-admits the exact topology before and after the effect; loopback verification follows the
+alias before final persistence. The TAP owner is the root-selected isolated Firecracker execution UID, not the
+operator UID; the root topology record carries that identity through recovery and cleanup (ADR-0018). Separate private
+L3 effects admit canonical endpoint values, configure exact managed-bridge and down-loopback addresses, inspect
+kernel-created IPv4 routes, and provide per-role raise/lower methods. Address mutation re-admits the exact topology
+before and after the effect; loopback verification follows the
 requested `IFF_UP` state, and errors preserve partial/unknown-outcome and close evidence. The shared managed bridge
 must already be up during down-endpoint preparation. These low-level methods do not enforce the complete activation
 sequence or supply firewall authority themselves. The root lifecycle now composes Jailer VM-lock transfer,

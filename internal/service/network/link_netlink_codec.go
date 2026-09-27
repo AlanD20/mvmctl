@@ -49,8 +49,8 @@ func managedBridgeAlias(name linkName) string {
 	return managedLinkAliasVersion + ":bridge:" + name.String()
 }
 
-func managedTAPAlias(name linkName, owner OwnerUID) string {
-	return fmt.Sprintf("%s:tap:%s:%d", managedLinkAliasVersion, name, owner)
+func managedTAPAlias(name linkName, executionUID OwnerUID) string {
+	return fmt.Sprintf("%s:tap:%s:%d", managedLinkAliasVersion, name, executionUID)
 }
 
 func managedVethAlias(role string, name, peer linkName) string {

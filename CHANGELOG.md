@@ -581,6 +581,8 @@ composition is described above; the current incomplete-work inventory is under *
 - TAP creation enters the retained VM namespace on a disposable locked thread, opens only fixed `/dev/net/tun`, and
   uses `TUNSETIFF` plus `TUNSETOWNER` with no group authority. It rechecks the exact owner, no-PI state, down state, and
   managed alias before `TUNSETPERSIST`, then verifies the persistent TAP through rtnetlink.
+- Corrected managed TAP ownership for isolated Jailer launches: root binds the TAP to the VM's isolated Firecracker UID,
+  not the operator UID, and persists that UID for activation, recovery, and exact cleanup checks.
 - Fixed the pending production L3/authority contract: each per-VM namespace is an L2 extension of a canonical RFC1918
   prefix no longer than `/30`; only the managed bridge and guest are numbered; the default gateway is the first usable
   address; fabric links remain unnumbered; loopback is `127.0.0.1/8`; and routes have no explicit metric. New default

@@ -72,6 +72,12 @@ func (service *service) prepare(
 			false,
 		)
 	}
+	if launch.executionUID == 0 || launch.executionUID == uint32(launch.ownerUID) {
+		return nil, topologyPrepareError(
+			"admit isolated TAP owner", string(launch.vmID),
+			topologyValidationError("root-selected TAP execution UID must differ from the operator"), false,
+		)
+	}
 	if launch.hold != nil {
 		owner, vm, err := launch.hold.Binding()
 		if err != nil || owner != uint32(launch.ownerUID) || vm.String() != string(launch.vmID) {
@@ -106,7 +112,7 @@ func (service *service) prepare(
 		effects: service.effects,
 		lock:    lock,
 		topology: Topology{
-			key: key,
+			key: key, tapExecutionUID: launch.executionUID,
 		},
 		state:           topologyPreparationBuilding,
 		journal:         service.journal,
@@ -206,7 +212,7 @@ func (service *service) prepare(
 	tap, err := service.effects.CreateTAPDown(
 		ctx,
 		pin,
-		tapCreateSpec{name: names.tap, ownerUID: key.ownerUID},
+		tapCreateSpec{name: names.tap, executionUID: launch.executionUID},
 	)
 	if tap != nil {
 		preparation.tapMade = true
@@ -291,7 +297,7 @@ func (service *service) prepare(
 	if err := preparation.persistMutation(ctx, "attach_tap"); err != nil {
 		return preparation, err
 	}
-	if err := service.effects.AttachTAPToLocalBridge(ctx, pin, *tap, *localBridge); err != nil {
+	if err := service.effects.AttachTAPToLocalBridge(ctx, pin, *tap, *localBridge, launch.executionUID); err != nil {
 		return abortTopologyPrepare(ctx, preparation, "attach TAP to local bridge", err)
 	}
 	if err := preparation.persistMutation(ctx, "attach_host_veth"); err != nil {
@@ -364,7 +370,9 @@ func (preparation *topologyPreparation) Cleanup(ctx context.Context) error {
 		if err := preparation.persistMutation(ctx, "delete_tap"); err != nil {
 			return err
 		}
-		if err := preparation.effects.DeleteTAP(ctx, preparation.pin, preparation.topology.tap); err != nil {
+		if err := preparation.effects.DeleteTAP(
+			ctx, preparation.pin, preparation.topology.tap, preparation.topology.tapExecutionUID,
+		); err != nil {
 			return preparation.cleanupFailure("delete namespace-local TAP", err)
 		}
 		preparation.tapMade = false

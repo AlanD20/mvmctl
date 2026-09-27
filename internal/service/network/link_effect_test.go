@@ -26,7 +26,7 @@ func TestLinkEffectCreatesDownOwnedBridgeTAPAndReciprocalVeth(t *testing.T) {
 	)
 	require.NoError(t, err)
 	tap, err := fixture.effect.CreateTAPDown(
-		t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, ownerUID: OwnerUID(testOwnerUID)},
+		t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, executionUID: testExecutionUID},
 	)
 	require.NoError(t, err)
 	veth, err := fixture.effect.CreateVethPairDown(
@@ -62,7 +62,7 @@ func TestLinkEffectCreatesDownOwnedBridgeTAPAndReciprocalVeth(t *testing.T) {
 	assert.Zero(t, bridgeObservation.flags&unix.IFF_UP)
 	assert.Zero(t, bridgeObservation.master)
 	tapObservation := fixture.route.mustLink(t, fixture.vmFD, fixture.names.tap)
-	assert.Equal(t, uint32(testOwnerUID), tapObservation.tunOwner)
+	assert.Equal(t, testExecutionUID, tapObservation.tunOwner)
 	assert.Equal(t, uint8(unix.IFF_TAP), tapObservation.tunType)
 	assert.Zero(t, tapObservation.tunPI)
 	assert.Equal(t, uint8(1), tapObservation.tunPersist)
@@ -168,12 +168,12 @@ func TestLinkEffectCreationUncertaintyReturnsIdentityAndInspectsWithoutCancellat
 	tap, err := partialTAP.effect.CreateTAPDown(
 		tapCtx,
 		partialTAP.pin,
-		tapCreateSpec{name: partialTAP.names.tap, ownerUID: OwnerUID(testOwnerUID)},
+		tapCreateSpec{name: partialTAP.names.tap, executionUID: testExecutionUID},
 	)
 	require.Error(t, err)
 	require.NotNil(t, tap)
 	assert.Equal(t, 21, tap.ifIndex)
-	assert.Equal(t, managedTAPAlias(partialTAP.names.tap, OwnerUID(testOwnerUID)),
+	assert.Equal(t, managedTAPAlias(partialTAP.names.tap, OwnerUID(testExecutionUID)),
 		partialTAP.route.mustLink(t, partialTAP.vmFD, partialTAP.names.tap).alias)
 	assert.False(t, partialTAP.route.lastInspectCancelled(partialTAP.vmFD, partialTAP.names.tap))
 }
@@ -185,7 +185,7 @@ func TestLinkEffectTAPAliasFailureLeavesNoPersistentIdentity(t *testing.T) {
 	fixture.tap.createError = errors.New("set managed TAP alias: acknowledgement lost")
 	fixture.tap.applyCreate = false
 	identity, err := fixture.effect.CreateTAPDown(
-		t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, ownerUID: OwnerUID(testOwnerUID)},
+		t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, executionUID: testExecutionUID},
 	)
 	require.Error(t, err)
 	assert.Nil(t, identity)
@@ -200,7 +200,7 @@ func TestLinkEffectPreservesFatalTAPWorkerClassificationWithRollbackIdentity(t *
 		fixture.names.tap, nil, errors.New("host restoration unproven"),
 	)
 	identity, err := fixture.effect.CreateTAPDown(
-		t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, ownerUID: OwnerUID(testOwnerUID)},
+		t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, executionUID: testExecutionUID},
 	)
 	require.Error(t, err)
 	require.NotNil(t, identity)
@@ -230,13 +230,13 @@ func TestLinkEffectPartialVethCreationReturnsCleanupCapableIdentity(t *testing.T
 	assert.Nil(t, fixture.route.link(fixture.vmFD, fixture.names.namespaceVeth))
 }
 
-func TestLinkEffectTAPOwnerMustMatchRetainedNamespaceOwner(t *testing.T) {
+func TestLinkEffectTAPExecutionUIDMustDifferFromOperator(t *testing.T) {
 	t.Parallel()
 
 	fixture := newLinkEffectFixture(t)
 	identity, err := fixture.effect.CreateTAPDown(
 		t.Context(), fixture.pin,
-		tapCreateSpec{name: fixture.names.tap, ownerUID: OwnerUID(testOwnerUID + 1)},
+		tapCreateSpec{name: fixture.names.tap, executionUID: testOwnerUID},
 	)
 	assert.Nil(t, identity)
 	assert.Error(t, err)
@@ -267,9 +267,9 @@ func TestLinkEffectRejectsWrongCreatedIdentityAndRetainsRollbackResult(t *testin
 
 	t.Run("TAP owner", func(t *testing.T) {
 		fixture := newLinkEffectFixture(t)
-		fixture.tap.afterCreate = func(link *routeLinkObservation) { link.tunOwner = testOwnerUID + 1 }
+		fixture.tap.afterCreate = func(link *routeLinkObservation) { link.tunOwner = testExecutionUID + 1 }
 		identity, err := fixture.effect.CreateTAPDown(
-			t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, ownerUID: OwnerUID(testOwnerUID)},
+			t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, executionUID: testExecutionUID},
 		)
 		require.Error(t, err)
 		require.NotNil(t, identity)
@@ -283,7 +283,7 @@ func TestLinkEffectRejectsWrongCreatedIdentityAndRetainsRollbackResult(t *testin
 			link.tunGroupPresent = true
 		}
 		identity, err := fixture.effect.CreateTAPDown(
-			t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, ownerUID: OwnerUID(testOwnerUID)},
+			t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, executionUID: testExecutionUID},
 		)
 		require.Error(t, err)
 		require.NotNil(t, identity)
@@ -315,7 +315,7 @@ func TestLinkEffectAttachReadmitsEndpointsAndSetsOnlyMaster(t *testing.T) {
 	require.NoError(t, fixture.effect.AttachNamespaceVethToLocalBridge(
 		t.Context(), fixture.pin, veth, bridge,
 	))
-	require.NoError(t, fixture.effect.AttachTAPToLocalBridge(t.Context(), fixture.pin, tap, bridge))
+	require.NoError(t, fixture.effect.AttachTAPToLocalBridge(t.Context(), fixture.pin, tap, bridge, testExecutionUID))
 	managedBridge := fixture.route.mustIdentity(
 		fixture.hostFD, fixture.names.managedBridge, fixture.hostNamespace,
 	)
@@ -363,7 +363,7 @@ func TestLinkEffectAttachRejectsWrongNamespaceKindAliasOwnerAndMaster(t *testing
 			link := fixture.route.mustLink(t, fixture.vmFD, tap.name)
 			link.tunOwner++
 			fixture.route.put(fixture.vmFD, link)
-			return fixture.effect.AttachTAPToLocalBridge(t.Context(), fixture.pin, tap, bridge)
+			return fixture.effect.AttachTAPToLocalBridge(t.Context(), fixture.pin, tap, bridge, testExecutionUID)
 		},
 		"master": func(fixture *linkEffectFixture, bridge, _ linkIdentity, veth vethPairIdentity) error {
 			link := fixture.route.mustLink(t, fixture.vmFD, veth.peer.name)
@@ -396,7 +396,7 @@ func TestLinkEffectDeletionIsExactIdempotentAndFreshlyProvesAbsence(t *testing.T
 	fixture := newLinkEffectFixture(t)
 	bridge, tap, veth := fixture.seedAttachedTopology(t, true)
 	require.NoError(t, fixture.effect.DeleteVethPair(t.Context(), fixture.pin, veth))
-	require.NoError(t, fixture.effect.DeleteTAP(t.Context(), fixture.pin, tap))
+	require.NoError(t, fixture.effect.DeleteTAP(t.Context(), fixture.pin, tap, testExecutionUID))
 	require.NoError(t, fixture.effect.DeleteLocalBridge(t.Context(), fixture.pin, bridge))
 	assert.Nil(t, fixture.route.link(fixture.hostFD, veth.host.name))
 	assert.Nil(t, fixture.route.link(fixture.vmFD, veth.peer.name))
@@ -405,9 +405,23 @@ func TestLinkEffectDeletionIsExactIdempotentAndFreshlyProvesAbsence(t *testing.T
 
 	deleteCount := fixture.route.deleteCount()
 	require.NoError(t, fixture.effect.DeleteVethPair(t.Context(), fixture.pin, veth))
-	require.NoError(t, fixture.effect.DeleteTAP(t.Context(), fixture.pin, tap))
+	require.NoError(t, fixture.effect.DeleteTAP(t.Context(), fixture.pin, tap, testExecutionUID))
 	require.NoError(t, fixture.effect.DeleteLocalBridge(t.Context(), fixture.pin, bridge))
 	assert.Equal(t, deleteCount, fixture.route.deleteCount())
+}
+
+// Rationale: the operator UID must not regain TAP authority through a later attachment or cleanup call.
+func TestLinkEffectRejectsMismatchedTAPExecutionUIDOnAttachAndCleanup(t *testing.T) {
+	t.Parallel()
+
+	fixture := newLinkEffectFixture(t)
+	bridge, tap, _ := fixture.seedAttachedTopology(t, false)
+	wrongUID := testExecutionUID + 1
+	assert.Error(t, fixture.effect.AttachTAPToLocalBridge(t.Context(), fixture.pin, tap, bridge, wrongUID))
+	assert.Empty(t, fixture.route.masterMutationsSnapshot())
+	assert.Error(t, fixture.effect.DeleteTAP(t.Context(), fixture.pin, tap, wrongUID))
+	assert.Zero(t, fixture.route.deleteCount())
+	assert.Equal(t, testExecutionUID, fixture.route.mustLink(t, fixture.vmFD, tap.name).tunOwner)
 }
 
 func TestLinkEffectDeletionRejectsReuseDriftForeignChildrenAndWrongPeer(t *testing.T) {
@@ -429,7 +443,7 @@ func TestLinkEffectDeletionRejectsReuseDriftForeignChildrenAndWrongPeer(t *testi
 		observation := fixture.route.mustLink(t, fixture.vmFD, tap.name)
 		observation.alias = "foreign"
 		fixture.route.put(fixture.vmFD, observation)
-		assert.Error(t, fixture.effect.DeleteTAP(t.Context(), fixture.pin, tap))
+		assert.Error(t, fixture.effect.DeleteTAP(t.Context(), fixture.pin, tap, testExecutionUID))
 		assert.Zero(t, fixture.route.deleteCount())
 	})
 
@@ -572,10 +586,10 @@ func (fixture *linkEffectFixture) seedAttachedTopology(
 	})
 	fixture.route.put(fixture.vmFD, routeLinkObservation{
 		name:       tap.name,
-		alias:      managedTAPAlias(tap.name, OwnerUID(testOwnerUID)),
+		alias:      managedTAPAlias(tap.name, OwnerUID(testExecutionUID)),
 		kind:       linkKindTAP,
 		ifIndex:    tap.ifIndex,
-		tunOwner:   testOwnerUID,
+		tunOwner:   testExecutionUID,
 		tunType:    unix.IFF_TAP,
 		tunPersist: 1,
 	})

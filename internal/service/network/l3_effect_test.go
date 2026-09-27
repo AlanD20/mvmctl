@@ -720,12 +720,13 @@ func newL3EffectFixture(t *testing.T) (*linkEffectFixture, Topology, endpointL3)
 	bridgeObservation.flags |= unix.IFF_UP
 	fixture.route.put(fixture.hostFD, bridgeObservation)
 	topology := Topology{
-		key:           key,
-		handle:        fixture.pin.Handle(),
-		managedBridge: managedBridge,
-		localBridge:   localBridge,
-		tap:           tap,
-		veth:          veth,
+		key:             key,
+		tapExecutionUID: testExecutionUID,
+		handle:          fixture.pin.Handle(),
+		managedBridge:   managedBridge,
+		localBridge:     localBridge,
+		tap:             tap,
+		veth:            veth,
 	}
 	fixture.route.put(fixture.vmFD, routeLinkObservation{
 		name: loopbackLinkName, ifIndex: 1, deviceType: unix.ARPHRD_LOOPBACK,

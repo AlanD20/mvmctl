@@ -17,8 +17,10 @@ import (
 // Recover consumes the current VM hold and reopens only the same-boot topology in its root-owned journal.
 // The caller supplies the launch generation from its admitted root VM record. Recovery never adopts a path or link
 // discovered from user configuration and returns the retained lease with every post-consumption error.
-func Recover(ctx context.Context, hold *authorityfs.TopologyHold, launchGeneration uint64) (*VMTopologyLease, error) {
-	return recoverWithPriorBootProof(ctx, hold, launchGeneration, nil)
+func Recover(
+	ctx context.Context, hold *authorityfs.TopologyHold, launchGeneration uint64, executionUID uint32,
+) (*VMTopologyLease, error) {
+	return recoverWithPriorBootProof(ctx, hold, launchGeneration, executionUID, nil)
 }
 
 // RecoverWithPriorBootAbsence permits retirement, never adoption, of a prior-boot topology.
@@ -28,22 +30,26 @@ func RecoverWithPriorBootAbsence(
 	ctx context.Context,
 	hold *authorityfs.TopologyHold,
 	launchGeneration uint64,
+	executionUID uint32,
 	proof *system.PriorBootVMAbsence,
 ) (*VMTopologyLease, error) {
 	if proof == nil {
 		return nil, networkAuthorityValidationError("prior-boot recovery requires concrete VM absence proof")
 	}
-	return recoverWithPriorBootProof(ctx, hold, launchGeneration, proof)
+	return recoverWithPriorBootProof(ctx, hold, launchGeneration, executionUID, proof)
 }
 
 func recoverWithPriorBootProof(
 	ctx context.Context,
 	hold *authorityfs.TopologyHold,
 	launchGeneration uint64,
+	executionUID uint32,
 	proof *system.PriorBootVMAbsence,
 ) (*VMTopologyLease, error) {
-	if ctx == nil || hold == nil || launchGeneration == 0 {
-		return nil, networkAuthorityValidationError("topology recovery requires VM hold and launch generation")
+	if ctx == nil || hold == nil || launchGeneration == 0 || executionUID == 0 {
+		return nil, networkAuthorityValidationError(
+			"topology recovery requires VM hold, launch generation, and execution UID",
+		)
 	}
 	owner, vm, err := hold.Binding()
 	if err != nil {
@@ -54,7 +60,7 @@ func recoverWithPriorBootProof(
 		return nil, err
 	}
 	lease := &VMTopologyLease{hold: consumed, effects: newTopologyEffect(), recoveryPending: true}
-	if err := lease.recover(ctx, owner, VMID(vm.String()), launchGeneration, proof); err != nil {
+	if err := lease.recover(ctx, owner, VMID(vm.String()), launchGeneration, executionUID, proof); err != nil {
 		if errors.Is(err, errTopologyJournalAbsent) {
 			var closeErr error
 			if lease.journal != nil {
@@ -76,7 +82,8 @@ func recoverWithPriorBootProof(
 var errTopologyJournalAbsent = errors.New("root topology journal is absent")
 
 func (lease *VMTopologyLease) recover(
-	ctx context.Context, owner uint32, vmID VMID, generation uint64, proof *system.PriorBootVMAbsence,
+	ctx context.Context, owner uint32, vmID VMID, generation uint64, executionUID uint32,
+	proof *system.PriorBootVMAbsence,
 ) error {
 	journal, err := openOwnedTopologyJournal(ctx, owner, vmID)
 	if err != nil {
@@ -95,6 +102,9 @@ func (lease *VMTopologyLease) recover(
 	}
 	if record.LaunchGeneration != generation {
 		return networkAuthorityCorruptError("topology launch generation differs from root VM authority", nil)
+	}
+	if record.Topology.TAPExecutionUID != executionUID {
+		return networkAuthorityCorruptError("topology TAP execution UID differs from root VM authority", nil)
 	}
 	lease.key, err = newTopologyKey(owner, string(vmID), record.NetworkID)
 	if err != nil {
@@ -209,10 +219,11 @@ func openOwnedTopologyJournal(ctx context.Context, owner uint32, vmID VMID) (_ *
 
 func recoverTopologyValue(key topologyKey, record TopologyRecord, progress topologyProgress) (Topology, error) {
 	if record.OwnerUID != uint32(key.ownerUID) || record.VMID != string(key.vmID) ||
-		record.NetworkID != string(key.networkID) {
+		record.NetworkID != string(key.networkID) || record.TAPExecutionUID == 0 ||
+		record.TAPExecutionUID == record.OwnerUID {
 		return Topology{}, networkAuthorityCorruptError("persisted topology identity differs from VM authority", nil)
 	}
-	topology := Topology{key: key,
+	topology := Topology{key: key, tapExecutionUID: record.TAPExecutionUID,
 		handle: namespaceHandle{path: namespaceHandlePath(record.Namespace.Path),
 			identity: namespaceIdentity{
 				device: record.Namespace.Identity.Device,
@@ -226,7 +237,12 @@ func recoverTopologyValue(key topologyKey, record TopologyRecord, progress topol
 			peer: importLinkIdentity(record.VethPair.Peer),
 		}}
 	names := deriveTopologyNames(key)
-	if err := validateNetworkLock(key.Network(), topology.managedBridge, key.Network(), names.managedBridge); err != nil {
+	if err := validateNetworkLock(
+		key.Network(),
+		topology.managedBridge,
+		key.Network(),
+		names.managedBridge,
+	); err != nil {
 		return Topology{}, err
 	}
 	if progress.Namespace {
@@ -235,7 +251,9 @@ func recoverTopologyValue(key topologyKey, record TopologyRecord, progress topol
 		}
 	}
 	if progress.LocalBridge {
-		if err := validateLinkIdentity(topology.localBridge, names.localBridge, topology.handle.identity, "local bridge"); err != nil {
+		if err := validateLinkIdentity(
+			topology.localBridge, names.localBridge, topology.handle.identity, "local bridge",
+		); err != nil {
 			return Topology{}, err
 		}
 	}
@@ -245,7 +263,9 @@ func recoverTopologyValue(key topologyKey, record TopologyRecord, progress topol
 		}
 	}
 	if progress.Veth {
-		if err := validateVethPair(topology.veth, names, topology.managedBridge.namespace, topology.handle.identity); err != nil {
+		if err := validateVethPair(
+			topology.veth, names, topology.managedBridge.namespace, topology.handle.identity,
+		); err != nil {
 			return Topology{}, err
 		}
 	}

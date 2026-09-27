@@ -138,6 +138,7 @@ func (lease *launchLease) sendChildSetup(
 			return err
 		}
 		if topology.OwnerUID != state.record.ownerUID || topology.VMID != state.record.vmID ||
+			topology.TAPExecutionUID != state.record.launch.executionIdentity.uid ||
 			(instanceObjectIdentity{device: topology.NamespaceDevice, inode: topology.NamespaceInode}) !=
 				state.networkNamespace.identity {
 			return instanceStateError(state.record.vmID, "managed child namespace binding differs")

@@ -67,12 +67,13 @@ func (lease *cleanupLease) recoverProductionTopology(ctx context.Context) error 
 	}
 	switch state.record.launch.networkPlacement {
 	case model.VMNetworkPlacementManaged:
+		executionUID := state.record.launch.executionIdentity.uid
 		if state.priorBootAbsence != nil {
 			state.topology, err = network.RecoverWithPriorBootAbsence(
-				ctx, hold, state.record.launchGeneration, state.priorBootAbsence,
+				ctx, hold, state.record.launchGeneration, executionUID, state.priorBootAbsence,
 			)
 		} else {
-			state.topology, err = network.Recover(ctx, hold, state.record.launchGeneration)
+			state.topology, err = network.Recover(ctx, hold, state.record.launchGeneration, executionUID)
 		}
 	case model.VMNetworkPlacementNetworkless:
 		var outcome network.NetworklessRecoveryOutcome
@@ -185,6 +186,7 @@ func (lease *launchLease) prepareProductionTopology(
 			"release unused topology hold", hold.Release(context.WithoutCancel(ctx)))
 	}
 	intent.LaunchGeneration = state.record.launchGeneration
+	intent.ExecutionUID = state.record.launch.executionIdentity.uid
 	topology, err := network.Prepare(ctx, hold, intent)
 	if topology != nil {
 		state.topology = topology
@@ -201,7 +203,8 @@ func (lease *launchLease) prepareProductionTopology(
 	if err != nil {
 		return network.JailerNetworkConfig{}, err
 	}
-	if projection.OwnerUID != state.record.ownerUID || projection.VMID != state.record.vmID {
+	if projection.OwnerUID != state.record.ownerUID || projection.VMID != state.record.vmID ||
+		projection.TAPExecutionUID != state.record.launch.executionIdentity.uid {
 		return network.JailerNetworkConfig{}, instanceStateError(
 			state.record.vmID,
 			"topology namespace owner binding differs",

@@ -24,10 +24,10 @@ func TestTopologyEffectDelegatesClosedBoundaryToPrivateEffects(t *testing.T) {
 	veth, err := effect.CreateVethPairDown(t.Context(), pin, vethCreateSpec{})
 	require.NoError(t, err)
 	require.NoError(t, effect.AttachNamespaceVethToLocalBridge(t.Context(), pin, *veth, *bridge))
-	require.NoError(t, effect.AttachTAPToLocalBridge(t.Context(), pin, *tap, *bridge))
+	require.NoError(t, effect.AttachTAPToLocalBridge(t.Context(), pin, *tap, *bridge, testExecutionUID))
 	require.NoError(t, effect.AttachHostVethToManagedBridge(t.Context(), *veth, *bridge))
 	require.NoError(t, effect.DeleteVethPair(t.Context(), pin, *veth))
-	require.NoError(t, effect.DeleteTAP(t.Context(), pin, *tap))
+	require.NoError(t, effect.DeleteTAP(t.Context(), pin, *tap, testExecutionUID))
 	require.NoError(t, effect.DeleteLocalBridge(t.Context(), pin, *bridge))
 	require.NoError(t, effect.DeleteNamespace(t.Context(), pin))
 
@@ -119,6 +119,7 @@ func (effect *recordingTopologyLinkEffect) AttachTAPToLocalBridge(
 	NamespacePin,
 	linkIdentity,
 	linkIdentity,
+	uint32,
 ) error {
 	effect.calls = append(effect.calls, "attach TAP")
 	return nil
@@ -146,6 +147,7 @@ func (effect *recordingTopologyLinkEffect) DeleteTAP(
 	context.Context,
 	NamespacePin,
 	linkIdentity,
+	uint32,
 ) error {
 	effect.calls = append(effect.calls, "delete TAP")
 	return nil

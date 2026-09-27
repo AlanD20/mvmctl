@@ -12,12 +12,14 @@ import (
 	"mvmctl/internal/service/firewall"
 )
 
-// VMIntent contains only immutable guest intent; ownership and VM identity come from the retained Jailer hold.
+// VMIntent contains immutable guest intent and the root-selected isolated execution UID. Operator ownership and VM
+// identity come from the retained Jailer hold; the execution UID is never accepted from a public request.
 type VMIntent struct {
 	NetworkID        string
 	GuestIPv4        netip.Addr
 	MAC              *string
 	LaunchGeneration uint64
+	ExecutionUID     uint32
 }
 
 // VMTopologyLease retains exact topology and cleanup authority for one VM lifetime.
@@ -63,12 +65,17 @@ func (locker retainedNetworkLocker) LockNetwork(ctx context.Context, key network
 // Every failure after consumption returns its non-nil cleanup lease. The caller must call Cleanup on failure and
 // CompleteActivation only after its blocked Jailer child reaches the launch checkpoint.
 func Prepare(ctx context.Context, hold *authorityfs.TopologyHold, intent VMIntent) (*VMTopologyLease, error) {
-	if ctx == nil || hold == nil || intent.LaunchGeneration == 0 {
-		return nil, networkAuthorityValidationError("VM topology context, hold, and launch generation are required")
+	if ctx == nil || hold == nil || intent.LaunchGeneration == 0 || intent.ExecutionUID == 0 {
+		return nil, networkAuthorityValidationError(
+			"VM topology context, hold, launch generation, and execution UID are required",
+		)
 	}
 	owner, vm, err := hold.Binding()
 	if err != nil {
 		return nil, err
+	}
+	if intent.ExecutionUID == owner {
+		return nil, networkAuthorityValidationError("TAP execution UID must differ from the operator UID")
 	}
 	key, err := newTopologyKey(owner, vm.String(), intent.NetworkID)
 	if err != nil {
@@ -144,6 +151,8 @@ func (lease *VMTopologyLease) prepare(ctx context.Context, intent VMIntent) erro
 		Prefix: lease.l3.network.prefix.value.String(), Gateway: lease.l3.network.gateway.value.String(),
 		GuestIPv4: lease.l3.guestAddress.value.String(), GuestMAC: lease.l3.mac.String(),
 		EndpointID: string(lease.key.vmID),
+		Topology: TopologyRecord{OwnerUID: uint32(lease.key.ownerUID), TAPExecutionUID: intent.ExecutionUID,
+			VMID: string(lease.key.vmID), NetworkID: string(lease.key.networkID)},
 	}
 	persistErr := lease.journal.persist(ctx, record)
 	lease.reserved = lease.journal.raw != nil && lease.journal.record.LaunchGeneration == intent.LaunchGeneration
@@ -153,7 +162,8 @@ func (lease *VMTopologyLease) prepare(ctx context.Context, intent VMIntent) erro
 	service := newService(retainedNetworkLocker{lease: lease.network}, lease.effects)
 	service.journal = lease.journal
 	lease.preparation, err = service.prepare(ctx, &vmLaunchLease{
-		ownerUID: lease.key.ownerUID, vmID: lease.key.vmID, hold: lease.hold,
+		ownerUID: lease.key.ownerUID, executionUID: intent.ExecutionUID,
+		vmID: lease.key.vmID, hold: lease.hold,
 	}, lease.key.networkID)
 	if err != nil {
 		return err
@@ -216,7 +226,8 @@ func (lease *VMTopologyLease) activate(ctx context.Context, link *linkEffect) er
 			*step.mark = false
 			return errors.Join(mutationErr, err)
 		}
-		if err := errors.Join(mutationErr, lease.persistStage(context.WithoutCancel(ctx), "", topologyActivating)); err != nil {
+		persistErr := lease.persistStage(context.WithoutCancel(ctx), "", topologyActivating)
+		if err := errors.Join(mutationErr, persistErr); err != nil {
 			return err
 		}
 	}

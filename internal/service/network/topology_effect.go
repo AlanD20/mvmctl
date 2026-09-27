@@ -17,10 +17,10 @@ type topologyLinkEffect interface {
 		vethPairIdentity,
 		linkIdentity,
 	) error
-	AttachTAPToLocalBridge(context.Context, NamespacePin, linkIdentity, linkIdentity) error
+	AttachTAPToLocalBridge(context.Context, NamespacePin, linkIdentity, linkIdentity, uint32) error
 	AttachHostVethToManagedBridge(context.Context, vethPairIdentity, linkIdentity) error
 	DeleteVethPair(context.Context, NamespacePin, vethPairIdentity) error
-	DeleteTAP(context.Context, NamespacePin, linkIdentity) error
+	DeleteTAP(context.Context, NamespacePin, linkIdentity, uint32) error
 	DeleteLocalBridge(context.Context, NamespacePin, linkIdentity) error
 }
 
@@ -82,8 +82,9 @@ func (effect *topologyEffect) AttachTAPToLocalBridge(
 	namespace NamespacePin,
 	tap linkIdentity,
 	bridge linkIdentity,
+	executionUID uint32,
 ) error {
-	return effect.link.AttachTAPToLocalBridge(ctx, namespace, tap, bridge)
+	return effect.link.AttachTAPToLocalBridge(ctx, namespace, tap, bridge, executionUID)
 }
 
 func (effect *topologyEffect) AttachHostVethToManagedBridge(
@@ -106,8 +107,9 @@ func (effect *topologyEffect) DeleteTAP(
 	ctx context.Context,
 	namespace NamespacePin,
 	tap linkIdentity,
+	executionUID uint32,
 ) error {
-	return effect.link.DeleteTAP(ctx, namespace, tap)
+	return effect.link.DeleteTAP(ctx, namespace, tap, executionUID)
 }
 
 func (effect *topologyEffect) DeleteLocalBridge(
