@@ -25,7 +25,7 @@ func (adapter *directRouteNetlink) inspectIPv4Neighbor(
 		Header: netlink.Header{Type: netlink.HeaderType(unix.RTM_GETNEIGH), Flags: netlink.Request},
 		Data:   data,
 	})
-	if errors.Is(err, unix.ENOENT) {
+	if onlyNeighborNotFound(err) {
 		return nil, nil
 	}
 	if err != nil {
@@ -68,7 +68,33 @@ func (adapter *directRouteNetlink) invalidateIPv4Neighbor(
 	defer cancel()
 	remaining, inspectErr := adapter.inspectIPv4Neighbor(inspectionCtx, namespaceFD, ifIndex, address)
 	if remaining == nil && inspectErr == nil {
+		if onlyNeighborNotFound(deleteErr) {
+			return nil
+		}
 		return deleteErr
 	}
 	return errors.Join(deleteErr, inspectErr, fmt.Errorf("exact IPv4 neighbor remains after invalidation"))
+}
+
+// onlyNeighborNotFound refuses joined cancellation or connection failures even when one cause is ENOENT.
+func onlyNeighborNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, cause := range causes {
+			if !onlyNeighborNotFound(cause) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped := errors.Unwrap(err); wrapped != nil {
+		return onlyNeighborNotFound(wrapped)
+	}
+	return err == unix.ENOENT
 }

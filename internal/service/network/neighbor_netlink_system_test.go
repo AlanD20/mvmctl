@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/binary"
+	"errors"
 	"net/netip"
 	"testing"
 
@@ -81,6 +82,56 @@ func TestDirectRouteNetlinkLeavesAbsentNeighborUntouched(t *testing.T) {
 	))
 	require.Len(t, connection.requests, 1)
 	assert.Equal(t, netlink.HeaderType(unix.RTM_GETNEIGH), connection.requests[0].Header.Type)
+}
+
+// Rationale: Kernel neighbor GC may win the race after the first lookup. Only proven absence with a lone
+// ENOENT delete result is safe to accept; a joined transport failure cannot be mistaken for that race.
+func TestDirectRouteNetlinkAcceptsOnlyProvenConcurrentNeighborRemoval(t *testing.T) {
+	t.Parallel()
+	address := netip.MustParseAddr("10.44.0.2")
+	tests := map[string]struct {
+		deleteErr error
+		wantErr   bool
+	}{
+		"kernel collected entry": {deleteErr: unix.ENOENT},
+		"delete also lost connection": {
+			deleteErr: errors.Join(unix.ENOENT, errors.New("connection close failed")), wantErr: true,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			present := true
+			connection := &fakeRouteNetlinkConnection{execute: func(message netlink.Message) ([]netlink.Message, error) {
+				switch message.Header.Type {
+				case netlink.HeaderType(unix.RTM_GETNEIGH):
+					if present {
+						return []netlink.Message{testIPv4NeighborReply(t, 20, address, unix.NUD_STALE, 0)}, nil
+					}
+					return nil, unix.ENOENT
+				case netlink.HeaderType(unix.RTM_DELNEIGH):
+					present = false
+					return nil, test.deleteErr
+				default:
+					t.Fatalf("unexpected neighbor request type %d", message.Header.Type)
+					return nil, nil
+				}
+			}}
+			adapter := &directRouteNetlink{dial: func(int, *netlink.Config) (routeNetlinkConnection, error) {
+				return connection, nil
+			}}
+
+			err := adapter.invalidateIPv4Neighbor(t.Context(), 41, 20, address)
+
+			if test.wantErr {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, "connection close failed")
+			} else {
+				require.NoError(t, err)
+			}
+			require.Len(t, connection.requests, 3)
+			assert.Equal(t, netlink.HeaderType(unix.RTM_GETNEIGH), connection.requests[2].Header.Type)
+		})
+	}
 }
 
 func TestDirectRouteNetlinkRejectsForeignNeighborWithoutDeletion(t *testing.T) {
