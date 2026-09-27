@@ -145,8 +145,9 @@ class TestCanonicalJailerLaunch:
         volume_name = f"sys-jailer-vol-{uuid.uuid4().hex[:6]}"
         snapshot_id: str | None = None
         try:
-            source_inspect = json.loads(
-                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout
+            source_inspect = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
             )
             source_cgroup = source_inspect["resources"]["cgroup"]
             assert source_cgroup["status"] == "enforced"
@@ -155,8 +156,9 @@ class TestCanonicalJailerLaunch:
             _run_mvm(runner_vm, "volume", "create", volume_name, "64M")
             _run_mvm(runner_vm, "vm", "stop", vm_name)
             _run_mvm(runner_vm, "volume", "attach", vm_name, volume_name)
-            attached = json.loads(
-                _run_mvm(runner_vm, "volume", "inspect", volume_name, "--json").stdout
+            attached = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", volume_name, "--json").stdout,
+                dict,
             )
             assert attached["volume"]["status"] == "attached"
             _run_mvm(runner_vm, "vm", "start", vm_name)
@@ -166,8 +168,9 @@ class TestCanonicalJailerLaunch:
             assert "vdb" in partitions.stdout
 
             _run_mvm(runner_vm, "snapshot", "create", vm_name)
-            snapshots: list[dict[str, Any]] = json.loads(
-                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout
+            snapshots: list[dict[str, Any]] = _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout,
+                list,
             )
             selected = [s for s in snapshots if s.get("source_vm_name") == vm_name]
             assert selected
@@ -175,8 +178,9 @@ class TestCanonicalJailerLaunch:
 
             _run_mvm(runner_vm, "vm", "stop", vm_name)
             _run_mvm(runner_vm, "volume", "detach", vm_name, volume_name)
-            detached = json.loads(
-                _run_mvm(runner_vm, "volume", "inspect", volume_name, "--json").stdout
+            detached = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", volume_name, "--json").stdout,
+                dict,
             )
             assert detached["volume"]["status"] == "available"
 
@@ -188,8 +192,9 @@ class TestCanonicalJailerLaunch:
             assert restored.returncode == 0, restored.stderr
             restored_vm = _vm_entry(runner_vm, vm_name)
             assert restored_vm["status"] == "running"
-            restored_inspect = json.loads(
-                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout
+            restored_inspect = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
             )
             restored_cgroup = restored_inspect["resources"]["cgroup"]
             assert restored_cgroup["status"] == "enforced"
