@@ -76,6 +76,12 @@ now checks the schema-1 VM listing. VM and network inventories were empty after 
 key remained. These results do not qualify the unrun Python domains, reboot recovery, pressure-only memory behavior,
 GitHub CI, Tier 3, or the release.
 
+The same candidate also passed all 15 copy-domain cases with zero failures, errors, skips, or deselections in
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/qa-cp-full.json`. The suite exercises host-to-VM, VM-to-host,
+multi-source, and VM-to-VM transfer; its Alpine verification account now matches the fixture, its throwaway
+paths are unique, and its two-guest case uses 256 MiB per VM on this 2 GiB runner. VM/network inventories were
+empty afterward and the baseline key remained. This is local copy-domain evidence, not a full Python matrix.
+
 **Runner evidence (2026-09-27):** In the named `mvmctl-030-test` runner, pinned Go 1.26.3 passed the complete
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
