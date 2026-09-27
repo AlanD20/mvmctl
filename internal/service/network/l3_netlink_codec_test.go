@@ -166,6 +166,34 @@ func TestDecodeRouteMessageAcceptsConnectedDefaultAndLocalRoutes(t *testing.T) {
 	}
 }
 
+// Rationale: A newly created managed bridge can be administratively up without carrier. Linux marks its
+// connected route LINKDOWN; that carrier observation must not make an otherwise exact route unreadable.
+func TestDecodeRouteMessageAcceptsLinkDownCarrierOnly(t *testing.T) {
+	t.Parallel()
+
+	message := testRouteIPv4Message(t, testRouteMessageSpec{
+		destination: "10.44.0.0/24", source: "10.44.0.1", ifIndex: 10,
+		table: unix.RT_TABLE_MAIN, protocol: unix.RTPROT_KERNEL,
+		scope: unix.RT_SCOPE_LINK, kind: unix.RTN_UNICAST,
+	})
+	want, err := decodeRouteIPv4Message(message)
+	require.NoError(t, err)
+
+	binary.NativeEndian.PutUint32(message.Data[8:12], unix.RTNH_F_LINKDOWN)
+	got, err := decodeRouteIPv4Message(message)
+	require.NoError(t, err)
+	if diff := cmp.Diff(want, got,
+		cmp.AllowUnexported(routeIPv4Observation{}),
+		cmpopts.EquateComparable(netip.Addr{}, netip.Prefix{}),
+	); diff != "" {
+		t.Errorf("LINKDOWN route authority mismatch (-want +got):\n%s", diff)
+	}
+
+	binary.NativeEndian.PutUint32(message.Data[8:12], unix.RTNH_F_LINKDOWN|unix.RTNH_F_ONLINK)
+	_, err = decodeRouteIPv4Message(message)
+	require.ErrorContains(t, err, "IPv4 route flags are unsupported")
+}
+
 // Rationale: Multipath, duplicate authority attributes, explicit metrics, and non-canonical destinations cannot be
 // accepted as the exact metric-free single-output routes fixed by ADR-0017.
 func TestDecodeRouteMessageRetainsMetricAndRejectsAmbiguousAuthority(t *testing.T) {

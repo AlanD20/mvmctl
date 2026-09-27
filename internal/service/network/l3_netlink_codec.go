@@ -122,7 +122,9 @@ func decodeRouteIPv4Message(message netlink.Message) (routeIPv4Observation, erro
 		scope:       message.Data[6],
 		kind:        message.Data[7],
 	}
-	if binary.NativeEndian.Uint32(message.Data[8:12]) != 0 {
+	// LINKDOWN reports carrier state, not route authority. An otherwise exact connected route
+	// can carry this flag while its newly raised bridge has no attached VM yet.
+	if binary.NativeEndian.Uint32(message.Data[8:12])&^uint32(unix.RTNH_F_LINKDOWN) != 0 {
 		return routeIPv4Observation{}, errors.New("IPv4 route flags are unsupported")
 	}
 	decoder, err := netlink.NewAttributeDecoder(message.Data[unix.SizeofRtMsg:])
