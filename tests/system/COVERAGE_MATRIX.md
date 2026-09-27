@@ -82,14 +82,19 @@ multi-source, and VM-to-VM transfer; its Alpine verification account now matches
 paths are unique, and its two-guest case uses 256 MiB per VM on this 2 GiB runner. VM/network inventories were
 empty afterward and the baseline key remained. This is local copy-domain evidence, not a full Python matrix.
 
-**Host-reboot recovery remains red (2026-09-27):** A single 256 MiB managed VM answered `mvm exec` before the
-named runner reboot. After reboot, the installed candidate correctly listed it as stopped and `vm ps` was empty.
-`vm stop --force` succeeded, but `vm start` failed because the new Firecracker process exited while opening its
-jailed `/dev/net/tun` (`EACCES`); the public command surfaced only the resulting process-identity failure. A fresh
-VM on the same network then created, answered exec, and passed a same-boot stop/start. The failure is therefore
-specific to prior-boot relaunch of the old VM identity in this bounded probe; its exact cause is not yet proven.
-The two diagnostic VMs and network were removed by the installed CLI, with empty VM/network readback. This blocks
-host-reboot/exec recovery sign-off and is not evidence that vsock itself failed.
+**Host-reboot recovery remains unqualified (2026-09-27):** A 256 MiB managed VM answered `mvm exec` before the
+named runner reboot. After reboot, the installed candidate listed it as stopped and `vm ps` was empty. A forced stop
+succeeded, but `vm start` failed after Firecracker exited; the public command surfaced a process-identity
+failure. The preserved failed Firecracker log shows EACCES opening jailed `/dev/kvm` to create the KVM object, **not**
+the previously reported `/dev/net/tun` failure. The first attempt's log was not preserved, so the exact first-error
+sequence and root cause remain unproven. A fresh VM on the same network passed create, exec, and same-boot restart.
+A second controlled journey with another 256 MiB managed VM passed pre-reboot exec, prior-boot stopped projection,
+`vm stop --force`, relaunch, and post-reboot exec. Its jailed `/dev/kvm` and `/dev/net/tun` had mode 0600 and matched
+the isolated Firecracker UID/GID before reboot; the old jail was absent after stop. Both journeys used only the named
+runner, and all diagnostic VMs/networks were removed through the installed CLI. The original device-open failure is
+real but intermittent in these probes. A successful repeat is not a fix or full reboot-recovery sign-off; retain
+per-attempt device evidence and add an orchestrated regression before qualification. No observed failure was a vsock
+handshake failure.
 
 **Runner evidence (2026-09-27):** In the named `mvmctl-030-test` runner, pinned Go 1.26.3 passed the complete
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
