@@ -6,6 +6,8 @@ import (
 	"runtime"
 
 	"golang.org/x/sys/unix"
+
+	"mvmctl/pkg/errs"
 )
 
 type volumeHotplugAuthority struct {
@@ -134,8 +136,9 @@ func (authority *volumeHotplugAuthority) release(ctx context.Context) error {
 }
 
 // runVolumeHotplugMounts keeps namespace entry on one disposable OS thread. The
-// caller waits for restoration even after cancellation; a failed restoration
-// destroys that thread instead of returning it to the runtime's worker pool.
+// caller waits for restoration even after cancellation. Once CLONE_FS is
+// unshared, the locked goroutine exits without unlocking so the runtime retires
+// its thread rather than reusing changed filesystem attributes.
 func (authority *volumeHotplugAuthority) runVolumeHotplugMounts(
 	ctx context.Context,
 	transaction *volumeHotplugTransaction,
@@ -149,22 +152,40 @@ func (authority *volumeHotplugAuthority) runVolumeHotplugMounts(
 		host, err := unix.Open("/proc/thread-self/ns/mnt", unix.O_RDONLY|unix.O_CLOEXEC, 0)
 		if err != nil {
 			runtime.UnlockOSThread()
-			done <- err
+			done <- instanceAtomicError("open host mount namespace for volume transition", err)
+			return
+		}
+		// Go's worker threads share CLONE_FS. A mount-namespace setns must first
+		// detach this thread's filesystem attributes; after that, retire the
+		// thread instead of returning it to the runtime's worker pool.
+		if err := unix.Unshare(unix.CLONE_FS); err != nil {
+			closeErr := unix.Close(host)
+			runtime.UnlockOSThread()
+			done <- errors.Join(instanceAtomicError("isolate volume worker filesystem attributes", err), closeErr)
 			return
 		}
 		if err := unix.Setns(authority.namespace, unix.CLONE_NEWNS); err != nil {
 			closeErr := unix.Close(host)
-			runtime.UnlockOSThread()
-			done <- errors.Join(err, closeErr)
+			done <- errors.Join(instanceAtomicError("enter retained volume mount namespace", err), closeErr)
 			return
 		}
-		effectErr := transaction.applyMount(ctx, authority)
+		effectErr := transaction.applyMount(ctx)
 		restoreErr := unix.Setns(host, unix.CLONE_NEWNS)
 		closeErr := unix.Close(host)
-		if restoreErr == nil {
-			runtime.UnlockOSThread()
+		if effectErr != nil && errs.AsDomainError(effectErr) == nil {
+			effectErr = instanceAtomicError("apply volume mount transition", effectErr)
+		}
+		if restoreErr != nil {
+			restoreErr = instanceAtomicError("restore host mount namespace after volume transition", restoreErr)
+		}
+		if closeErr != nil {
+			closeErr = instanceAtomicError("close host mount namespace after volume transition", closeErr)
 		}
 		done <- errors.Join(effectErr, restoreErr, closeErr)
 	}()
-	return <-done
+	effectErr := <-done
+	if effectErr != nil {
+		return effectErr
+	}
+	return authority.verify(ctx)
 }

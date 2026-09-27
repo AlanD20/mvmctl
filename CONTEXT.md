@@ -653,7 +653,13 @@ identity checks. Typed launch now carries ordered path-free raw-volume selection
 sealed configuration, and child mounts at `/volumes/<id>.raw`. Child handoff repeats pinned identity checks and
 retains read-only/cache intent; cleanup admits only exact empty jail placeholders, never source data. This unverified
 implementation does not reserve physical storage. Typed live hotplug now has root-owned intent and exact mounted
-resource identity; its protected-backing dependencies remain under integration.
+resource identity. Its mount worker unshares `CLONE_FS` before joining the retained VM mount namespace and retires the
+OS thread afterward; process authority is verified before and after the effect. The jailed namespace has no `/proc`,
+so live detach unmounts the checked volume basename relative to its pinned root-owned volume directory. A focused
+installed-candidate running-VM force-removal case passed in the disposable runner. On later VM teardown, a completed
+`detached` journal proves the protected volume may already be removed; stopped cleanup verifies the jail target is
+absent and does not reopen that backing. Transitional records still require the retained backing to revoke access.
+Broader live hotplug and guest-I/O qualification remains open.
 
 Private Firecracker 1.16.1 MMIO admission accounts for the complete device budget: rootfs, network, VMGenID, VMClock,
 optional cloud-init and vsock, and ARM RTC/serial where applicable. The PCI profile uses the same exact release

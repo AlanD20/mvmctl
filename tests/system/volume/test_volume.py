@@ -1296,6 +1296,7 @@ class TestVolumeRunningVMDependency:
         key_name = unique_key_name
         vol_name = f"sys-dep-vol-{unique_key_name}"
         net_name = unique_network_name
+        vm_created = False
 
         try:
             _run_mvm(
@@ -1330,6 +1331,7 @@ class TestVolumeRunningVMDependency:
                 "--ssh-key",
                 key_name,
             )
+            vm_created = True
             _run_mvm(runner_vm, "vm", "start", vm_name)
 
             vms = _json_success_data(
@@ -1353,7 +1355,7 @@ class TestVolumeRunningVMDependency:
             )
             assert any(volume["name"] == vol_name for volume in volumes_after)
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
+            vm_removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(
                 runner_vm,
                 "volume",
@@ -1364,6 +1366,8 @@ class TestVolumeRunningVMDependency:
             )
             _run_mvm(runner_vm, "key", "rm", key_name, check=False)
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            if vm_created:
+                assert vm_removed.returncode == 0, (vm_removed.stdout, vm_removed.stderr)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -1382,6 +1386,7 @@ class TestVolumeRunningVMDependency:
         key_name = unique_key_name
         vol_name = f"sys-dep-vol-{unique_key_name}"
         net_name = unique_network_name
+        vm_created = False
 
         try:
             _run_mvm(
@@ -1416,6 +1421,7 @@ class TestVolumeRunningVMDependency:
                 "--ssh-key",
                 key_name,
             )
+            vm_created = True
             _run_mvm(runner_vm, "vm", "start", vm_name)
 
             vms = _json_success_data(
@@ -1437,8 +1443,14 @@ class TestVolumeRunningVMDependency:
                 _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
             )
             assert all(volume["name"] != vol_name for volume in volumes_after)
+            vm_after = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
+            )
+            assert vm_after["vm"]["status"] == "running"
+            assert all(volume["name"] != vol_name for volume in vm_after["volumes"])
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
+            vm_removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(
                 runner_vm,
                 "volume",
@@ -1449,6 +1461,8 @@ class TestVolumeRunningVMDependency:
             )
             _run_mvm(runner_vm, "key", "rm", key_name, check=False)
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            if vm_created:
+                assert vm_removed.returncode == 0, (vm_removed.stdout, vm_removed.stderr)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network

@@ -40,6 +40,14 @@ the isolation prerequisite after previously pausing it for a separate design dec
   deletion; a detected changed or replaced source is retained and removal fails closed. The protected backing and raw
   source share one durable removal lock and tombstone, so an interrupted deletion can be retried without reimporting
   source data.
+- A root-owned live-volume mount transition joins only the VM's retained mount namespace. Its disposable worker
+  unshares `CLONE_FS` before `setns`, because Go worker threads otherwise share filesystem attributes and Linux
+  rejects mount-namespace entry. Root rechecks the retained process before and after the transition. A jailed
+  namespace has no `/proc`; detach resolves the admitted volume basename relative to the pinned root-owned volume
+  directory rather than using a `/proc/self/fd` pathname. The worker's OS thread is retired after unsharing, even
+  when namespace restoration succeeds. Stopped-tree cleanup treats a durable `detached` journal as completed only
+  after proving its jail target absent; it does not reopen a protected volume that `volume rm` may already have
+  deleted. Transitional journals still reopen the exact retained backing to revoke access.
 - Require exclusive write ownership during capture. Refuse capture when another VM has writable access to any
   captured volume; coordinated multi-VM capture is not selected. Host writers and retained aliases must also be excluded.
 - Capture one consistent state across Full memory/vmstate, rootfs, and attached data disks. Root metadata binds the

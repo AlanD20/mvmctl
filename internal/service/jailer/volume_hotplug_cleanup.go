@@ -38,13 +38,25 @@ func removeStoppedVolumeHotplugJournal(ctx context.Context, root int, instance i
 		if instance.active == nil {
 			return instanceStateError(instance.vmID, "hotplug cleanup has no committed execution identity")
 		}
-		backing, err := reopenProtectedBacking(ctx, record.backingBinding(instance))
-		if err != nil {
-			return err
-		}
-		revokeErr := backing.Revoke(ctx, instance.vmID, instance.active.userIDs.effective)
-		if err := errors.Join(revokeErr, backing.Release(context.WithoutCancel(ctx))); err != nil {
-			return err
+		if record.State == "detached" {
+			var target unix.Stat_t
+			err := unix.Fstatat(volumes, record.Volume.private().basename(), &target,
+				unix.AT_SYMLINK_NOFOLLOW|unix.AT_NO_AUTOMOUNT)
+			if err == nil {
+				return instanceStateError(instance.vmID, "detached volume target remains in stopped jail")
+			}
+			if !errors.Is(err, unix.ENOENT) {
+				return err
+			}
+		} else {
+			backing, err := reopenProtectedBacking(ctx, record.backingBinding(instance))
+			if err != nil {
+				return err
+			}
+			revokeErr := backing.Revoke(ctx, instance.vmID, instance.active.userIDs.effective)
+			if err := errors.Join(revokeErr, backing.Release(context.WithoutCancel(ctx))); err != nil {
+				return err
+			}
 		}
 		if err := unix.Unlinkat(journal, record.Volume.ID+".json", 0); err != nil {
 			return err

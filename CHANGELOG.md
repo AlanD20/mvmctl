@@ -1081,6 +1081,15 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+#### Root-owned live volume detach
+
+- Fixed running-VM forced volume removal: the root mount worker now unshares filesystem attributes before joining
+  the VM's mount namespace, retires that thread after the effect, and unmounts through the pinned volume directory
+  without relying on `/proc` inside the jail. Later VM teardown recognizes the completed detached journal after
+  protected backing deletion, while still refusing a retained jail target. The exact previously failing case passed
+  in `mvmctl-030-test` with the VM still running, the volume removed, and checked VM teardown. Broader hotplug and
+  guest-I/O qualification remains open.
+
 #### Prior-boot managed-network removal
 
 - `mvm network rm` can now retire an exact root-owned prior-boot live network record without first recreating its

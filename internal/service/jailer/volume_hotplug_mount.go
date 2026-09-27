@@ -3,7 +3,6 @@ package jailer
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"golang.org/x/sys/unix"
 )
@@ -54,10 +53,7 @@ func (transaction *volumeHotplugTransaction) inspectTarget(
 	return fd, stat, nil
 }
 
-func (transaction *volumeHotplugTransaction) applyMount(ctx context.Context, authority *volumeHotplugAuthority) error {
-	if err := authority.verify(ctx); err != nil {
-		return err
-	}
+func (transaction *volumeHotplugTransaction) applyMount(ctx context.Context) error {
 	if transaction.attach {
 		return transaction.attachMount(ctx)
 	}
@@ -180,8 +176,12 @@ func (transaction *volumeHotplugTransaction) detachMount(ctx context.Context) (r
 	defer func() { returnErr = errors.Join(returnErr, unix.Close(target)) }()
 	if stat.Mnt_id == record.MountID && record.matchesSource(stat) {
 		// DELETE/readback already proved no API drive. Detach the exact pinned
-		// mount; closing the descriptor releases its final operation reference.
-		if err := unix.Unmount(fmt.Sprintf("/proc/self/fd/%d", target), unix.MNT_DETACH); err != nil {
+		// mount. The Jailer namespace has no /proc, so resolve the canonical
+		// basename relative to its pinned root-owned volume directory.
+		if err := unix.Fchdir(transaction.directory); err != nil {
+			return err
+		}
+		if err := unix.Unmount("./"+record.Volume.private().basename(), unix.MNT_DETACH); err != nil {
 			return err
 		}
 		current, placeholder, err := transaction.inspectTarget(ctx)
