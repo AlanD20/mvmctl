@@ -147,6 +147,105 @@ func TestCompileGenerationSeparatesIngressGuardsFromForwardPolicy(t *testing.T) 
 		"an exact-source routed policy must be rejected if its source ingress guard is absent from prerouting")
 }
 
+func TestCompileGenerationCompilesExactSameNetworkINetForwardGrants(t *testing.T) {
+	intent := compatibilityIntent()
+	routedVMGrant := vmTrafficGrant{
+		id:              strings.Repeat("8", 32),
+		sourceVMID:      intent.endpoints[0].id,
+		destinationVMID: intent.endpoints[2].id,
+		protocol:        protocolTCP,
+		ports:           portInterval{first: 8443, last: 8443},
+	}
+	intent.vmGrants = append(intent.vmGrants, routedVMGrant)
+
+	compiled, err := compileGeneration(intent)
+	require.NoError(t, err)
+	forward := requireCompiledChain(t, compiled.inet, managedINetForwardChainName)
+
+	// The exact selectors keep both grants on the chosen bridge and destination/port. The VM grant binds one source
+	// address; the source-network grant binds the entire source prefix, as its policy permits.
+	tests := map[string]struct {
+		identity string
+		want     []expr.Any
+	}{
+		"same-network VM": {
+			identity: "inet.forward.allow.vm." + intent.vmGrants[0].id,
+			want: []expr.Any{
+				&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: expectedInterfaceName("mvmbr0")},
+				&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: expectedInterfaceName("mvmbr0")},
+				&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{2}},
+				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 12, Len: 4},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{10, 0, 0, 2}},
+				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{10, 0, 0, 3}},
+				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{6}},
+				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0x01, 0xbb}},
+				&expr.Verdict{Kind: expr.VerdictAccept},
+			},
+		},
+		"same-network source network": {
+			identity: "inet.forward.allow.network." + intent.networkGrants[0].id,
+			want: []expr.Any{
+				&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: expectedInterfaceName("mvmbr0")},
+				&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: expectedInterfaceName("mvmbr0")},
+				&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{2}},
+				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 12, Len: 4},
+				&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 4,
+					Mask: []byte{255, 255, 255, 0}, Xor: []byte{0, 0, 0, 0}},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{10, 0, 0, 0}},
+				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{10, 0, 0, 3}},
+				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{17}},
+				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+				&expr.Range{Op: expr.CmpOpEq, Register: 1,
+					FromData: []byte{0x1f, 0x40}, ToData: []byte{0x1f, 0x4a}},
+				&expr.Verdict{Kind: expr.VerdictAccept},
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			rule := requireCompiledRule(t, compiled, tc.identity)
+			assert.Same(t, forward, rule.Chain)
+			if diff := cmp.Diff(tc.want, rule.Exprs); diff != "" {
+				t.Errorf("inet forward selectors mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+
+	var policyOrder []string
+	for _, rule := range compiled.inet.rules {
+		if strings.HasPrefix(rule.identity, "inet.forward.allow.") ||
+			strings.HasPrefix(rule.identity, "inet.forward.default-deny.") ||
+			strings.HasPrefix(rule.identity, "inet.forward.default-deny-inbound.") {
+			policyOrder = append(policyOrder, rule.identity)
+		}
+	}
+	wantPolicyOrder := []string{
+		"inet.forward.allow.vm." + routedVMGrant.id,
+		"inet.forward.allow.vm." + intent.vmGrants[0].id,
+		"inet.forward.allow.network." + intent.networkGrants[0].id,
+		"inet.forward.allow.network." + intent.networkGrants[1].id,
+		"inet.forward.default-deny." + intent.networks[0].id,
+		"inet.forward.default-deny-inbound." + intent.networks[0].id,
+		"inet.forward.default-deny." + intent.networks[1].id,
+		"inet.forward.default-deny-inbound." + intent.networks[1].id,
+	}
+	if diff := cmp.Diff(wantPolicyOrder, policyOrder); diff != "" {
+		t.Errorf("inet forward grant and deny order mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestCompileGenerationBindsInternetEgressToMasqueradeCapability(t *testing.T) {
 	intent := compatibilityIntent()
 	intent.networks[0].masquerade = false
@@ -357,7 +456,7 @@ func TestCompileGenerationCanonicalDigestGoldenVectors(t *testing.T) {
 		},
 		"complete compatibility generation": {
 			intent: compatibilityIntent(),
-			wantID: "ed632a55b0e0edac1cb28a0241c7b18d70bf49f7b837adf56b87ff744a6ec083",
+			wantID: "805b217ed40bda18d5492d13374bfb0f9dd01c76a264660cd9762a320a4fd3db",
 		},
 	}
 
