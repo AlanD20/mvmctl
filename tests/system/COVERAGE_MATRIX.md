@@ -82,6 +82,15 @@ multi-source, and VM-to-VM transfer; its Alpine verification account now matches
 paths are unique, and its two-guest case uses 256 MiB per VM on this 2 GiB runner. VM/network inventories were
 empty afterward and the baseline key remained. This is local copy-domain evidence, not a full Python matrix.
 
+**Host-reboot recovery remains red (2026-09-27):** A single 256 MiB managed VM answered `mvm exec` before the
+named runner reboot. After reboot, the installed candidate correctly listed it as stopped and `vm ps` was empty.
+`vm stop --force` succeeded, but `vm start` failed because the new Firecracker process exited while opening its
+jailed `/dev/net/tun` (`EACCES`); the public command surfaced only the resulting process-identity failure. A fresh
+VM on the same network then created, answered exec, and passed a same-boot stop/start. The failure is therefore
+specific to prior-boot relaunch of the old VM identity in this bounded probe; its exact cause is not yet proven.
+The two diagnostic VMs and network were removed by the installed CLI, with empty VM/network readback. This blocks
+host-reboot/exec recovery sign-off and is not evidence that vsock itself failed.
+
 **Runner evidence (2026-09-27):** In the named `mvmctl-030-test` runner, pinned Go 1.26.3 passed the complete
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
