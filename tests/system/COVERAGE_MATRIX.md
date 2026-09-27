@@ -547,10 +547,10 @@ Specific legacy conflicts that must be rewritten before release:
 | `bin ls --json` empty | ⚡ Shallow | `bin/test_bin.py` | `TestBinLifecycle` | L2 |
 | `bin ls --remote` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryEdges` | L1 — skips on network |
 | `bin ls --remote --limit` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryEdges` | L1 — skips on network |
-| `bin pull <version>` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | Uses removed syntax |
+| `bin pull <version>` | 🟡 Partial | `bin/test_bin.py` | `TestBinaryEdges::test_bin_pull_present_exact_version_from_mirror` | Installed candidate re-admits a present exact mirrored release as a matching Firecracker/Jailer pair without changing the default; fresh-slot installation remains unqualified and other legacy pull cases still need rewriting. |
 | `bin pull --force` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAdvanced` | Verify replacement authority |
 | `bin pull --default` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAdvanced` | Use positional version |
-| Removed pull flags | ❌ Missing | `bin/test_bin.py` | `TestBinaryPullAdvanced` | Git-ref test is obsolete |
+| Removed pull flags | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryPullAdvanced::test_bin_pull_removed_git_ref_rejected_before_effects` | Installed candidate rejects `--git-ref` before changing the release listing; other retired selector coverage remains open. |
 | `bin pull nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 — no skip |
 | `bin rm <exact-version>` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | Verify typed root removal |
 | Removed rm selectors | ❌ Missing | `bin/test_bin.py` | `TestBinaryEdges` | Add syntax rejection |

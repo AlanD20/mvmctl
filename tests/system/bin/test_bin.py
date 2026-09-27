@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import platform
 import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -153,36 +156,44 @@ class TestBinaryEdges:
 
     # ---- Destructive pull tests (still no rm) ----
 
-    def test_bin_pull_specific_version_plain(self, runner_vm):
-        """Pull a binary version by name without --force or --default.
-
-        Uses a known version (1.15.1) that should be available in Tier 2.
-        """
-        _ensure_binary(runner_vm)
-
-        # Use a specific version that is not the default
-        cached = _run_mvm(runner_vm, "bin", "ls", "--json")
-        cached_bins: list[dict[str, Any]] = json.loads(cached.stdout)
-        default_version = next(
-            (b.get("version") for b in cached_bins if b.get("is_default")),
+    def test_bin_pull_present_exact_version_from_mirror(self, runner_vm: str) -> None:
+        """An exact mirrored release can be re-admitted without changing its pair or default."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        default = next(
+            (item for item in before if item["type"] == "firecracker" and item["is_default"]),
             None,
         )
-        target = "1.14.2" if default_version != "1.14.2" else "1.14.1"
+        assert default is not None and default["is_present"]
+        version = default["version"]
+        prior_pair = [
+            item for item in before
+            if item["version"] == version and item["type"] in ("firecracker", "jailer")
+        ]
+        assert len(prior_pair) == 2 and all(item["is_present"] for item in prior_pair)
+        prior_ids = {item["type"]: item["id"] for item in prior_pair}
+        mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
+        archive = mirror / f"firecracker-v{version}-{platform.machine()}.tgz"
+        assert archive.is_file(), f"binary pull test requires mirrored {archive.name}"
 
-        pull_result = _run_mvm(
-            runner_vm, "bin", "pull", "firecracker", "--version", target,
-            check=False, timeout=120,
+        pulled = _json_success_data(
+            _run_mvm(runner_vm, "bin", "pull", version, "--json", timeout=300).stdout,
+            list,
         )
-        assert pull_result.returncode == 0, (
-            f"bin pull {target} failed in Tier 2 environment (should have network): "
-            f"{pull_result.stderr}"
-        )
-
-        listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-        entries: list[dict[str, Any]] = json.loads(listing.stdout)
-        assert any(e.get("version") == target for e in entries), (
-            f"Version {target} not found in listing after pull"
-        )
+        assert len(pulled) == 2
+        assert {item["type"] for item in pulled} == {"firecracker", "jailer"}
+        assert {item["version"] for item in pulled} == {version}
+        assert all(item["is_present"] for item in pulled)
+        assert {item["type"]: item["id"] for item in pulled} == prior_ids
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        for item in pulled:
+            assert any(
+                entry["id"] == item["id"] and entry["type"] == item["type"]
+                and entry["version"] == version and entry["is_present"]
+                for entry in after
+            )
+        assert {
+            (item["type"], item["version"]) for item in after if item["is_default"]
+        } == {("firecracker", version), ("jailer", version)}
 
     def test_pull_cached_binary_with_default_sets_default(
         self, runner_vm: str
@@ -372,19 +383,16 @@ class TestBinaryPullAdvanced:
             f"Defaults: {[(e['version'], e['is_default']) for e in entries if e.get('name') == 'firecracker']}"
         )
 
-    def test_bin_pull_git_ref_help(self, runner_vm: str) -> None:
-        """Verify CLI accepts --git-ref flag (syntax check)."""
-        result = _run_mvm(
-            runner_vm,
-            "bin",
-            "pull",
-            "--help",
-            check=False,
-            timeout=300,
+    def test_bin_pull_removed_git_ref_rejected_before_effects(self, runner_vm: str) -> None:
+        """The removed source-build selector must not change trusted-release state."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        rejected = _run_mvm(
+            runner_vm, "bin", "pull", "1.16.0", "--git-ref", "main", check=False,
         )
-        assert "--git-ref" in result.stdout, (
-            "--git-ref flag should be documented in bin pull --help"
-        )
+        assert rejected.returncode != 0
+        assert "unknown flag: --git-ref" in (rejected.stdout + rejected.stderr).lower()
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
     def test_bin_pull_version(self, runner_vm: str) -> None:
         """Pull a Firecracker binary from asset mirror — uses pre-built version."""
