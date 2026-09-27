@@ -611,7 +611,7 @@ func (tx *managedNetworkTransaction) checkOwnerPrefixes(
 		return networkAuthorityEffectError("enumerate managed network records", err)
 	}
 	for _, name := range names {
-		if name == "topologies" || name == "removed" || name == "cancelled" {
+		if name == "topologies" || name == "removed" || name == "cancelled" || name == "networkless" {
 			continue
 		}
 		id := strings.TrimSuffix(name, ".json")
