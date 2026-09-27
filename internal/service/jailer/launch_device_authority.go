@@ -333,7 +333,7 @@ func (metadata vmLaunchDeviceAuthority) validate() error {
 // The retained root record supplies transport and fixed-device counts; the hotplug journal
 // must supply the authenticated current volume inventory before proposing its next count.
 func (metadata vmLaunchDeviceAuthority) admitVolumeCount(count int) error {
-	if !metadata.PCIEnabled || metadata.Release.Version != "1.16.1" {
+	if !metadata.PCIEnabled || metadata.Release.Version != infra.QualifiedVMLaunchFirecrackerVersion {
 		return instanceValidationError("live device changes require the admitted Firecracker PCI release")
 	}
 	return validateManagedPCITopology(metadata.Release.Architecture, metadata.CloudInit, metadata.Vsock, count)

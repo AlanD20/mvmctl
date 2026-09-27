@@ -287,6 +287,10 @@ const HTTPTimeoutSha256SidecarS = 15
 
 // --- Default versions ---
 const DefaultFirecrackerCIVersion = "v1.15"
+
+// QualifiedVMLaunchFirecrackerVersion is the exact Firecracker/Jailer pair admitted for v0.3.0 VM execution.
+const QualifiedVMLaunchFirecrackerVersion = "1.16.1"
+
 const MinKernelMajor = 5
 const MinKernelMinor = 10
 

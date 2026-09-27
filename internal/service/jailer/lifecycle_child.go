@@ -254,7 +254,8 @@ func validateLaunchChildPlan(plan launchChildPlan, descriptors []int) error {
 	if len(plan.Volumes) > managedMMIOMaxInterruptSlots {
 		return instanceValidationError("launch child volume descriptor selection exceeds the MMIO pool")
 	}
-	if (len(plan.Volumes) != 0 || plan.PCIEnabled || plan.NestedVirt) && plan.Release.Version != "1.16.1" {
+	if (len(plan.Volumes) != 0 || plan.PCIEnabled || plan.NestedVirt) &&
+		plan.Release.Version != infra.QualifiedVMLaunchFirecrackerVersion {
 		return instanceValidationError("launch child volume device release is unsupported")
 	}
 	if plan.NestedVirt && (!plan.PCIEnabled || plan.Release.Architecture != "x86_64") {

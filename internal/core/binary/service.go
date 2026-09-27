@@ -100,6 +100,12 @@ func (s *Service) ResolvePair(ctx context.Context, firecracker *model.BinaryItem
 			return nil, binaryError(errs.CodeBinaryUntrusted, err.Error())
 		}
 	}
+	// Artifact management admits older audited pairs, but VM launch does not.
+	if pair.Firecracker.Version != infra.QualifiedVMLaunchFirecrackerVersion {
+		return nil, binaryError(errs.CodeBinaryVersionGate,
+			fmt.Sprintf("vm launch requires the matching Firecracker/Jailer %s release",
+				infra.QualifiedVMLaunchFirecrackerVersion))
+	}
 	return pair, nil
 }
 

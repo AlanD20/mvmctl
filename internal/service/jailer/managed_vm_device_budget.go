@@ -1,6 +1,10 @@
 package jailer
 
-import "strings"
+import (
+	"strings"
+
+	"mvmctl/internal/infra"
+)
 
 // The largest reviewed MMIO pool bounds protocol allocation; actual admission subtracts all devices.
 const managedMMIOMaxInterruptSlots = 96
@@ -28,7 +32,7 @@ func validateManagedDeviceRelease(release releaseIdentity) error {
 	if err := validateReleaseIdentityValue(release); err != nil {
 		return managedVMResourceValidationError("managed device profile release is invalid")
 	}
-	if release.version != "1.16.1" {
+	if release.version != infra.QualifiedVMLaunchFirecrackerVersion {
 		return managedVMResourceValidationError("managed device budget is not approved for this Firecracker release")
 	}
 	return nil

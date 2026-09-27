@@ -188,6 +188,11 @@ func (request VMLaunchRequest) Validate() error {
 	if err := request.Release.Validate(); err != nil {
 		return err
 	}
+	// Release installation and inspection admit other audited archives; VM execution does not.
+	if request.Release.Version != infra.QualifiedVMLaunchFirecrackerVersion {
+		return instanceValidationError(fmt.Sprintf("vm launch requires the matching Firecracker/Jailer %s release",
+			infra.QualifiedVMLaunchFirecrackerVersion))
+	}
 	if request.RootfsBytes < managedVMRootfsMinBytes || request.RootfsBytes > managedVMRootfsMaxBytes {
 		return instanceValidationError("VM launch rootfs size is outside receiver policy")
 	}

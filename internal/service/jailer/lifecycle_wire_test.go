@@ -82,6 +82,36 @@ func TestVMLaunchRequestRequiresAdmittedNetworkPlacement(t *testing.T) {
 	}
 }
 
+// Rationale: an otherwise valid 1.16.0 VM must fail before Jailer sees its
+// symlink-valued namespace argument; merely gating PCI or snapshots misses a basic launch.
+func TestVMLaunchRequestRequiresQualifiedRelease(t *testing.T) {
+	for _, placement := range []model.VMNetworkPlacement{
+		model.VMNetworkPlacementManaged,
+		model.VMNetworkPlacementNetworkless,
+	} {
+		t.Run(string(placement), func(t *testing.T) {
+			request := validVMLaunchRequest()
+			request.NetworkPlacement = placement
+			if placement == model.VMNetworkPlacementNetworkless {
+				request.NetworkID, request.GuestIPv4, request.GuestMAC = "", "", ""
+			}
+			for _, version := range []string{"1.16.0", "1.16.2"} {
+				t.Run(version, func(t *testing.T) {
+					candidate := request
+					candidate.Release.Version = version
+					err := candidate.Validate()
+					if err == nil || !strings.Contains(err.Error(), "Firecracker/Jailer 1.16.1") {
+						t.Errorf("unqualified release %s was admitted: %v", version, err)
+					}
+				})
+			}
+			if err := request.Validate(); err != nil {
+				t.Errorf("qualified release was rejected: %v", err)
+			}
+		})
+	}
+}
+
 func TestVMLaunchRequestNetworklessWireIsClosed(t *testing.T) {
 	request := validVMLaunchRequest()
 	request.NetworkPlacement = model.VMNetworkPlacementNetworkless

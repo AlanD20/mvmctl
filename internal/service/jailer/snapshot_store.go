@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"mvmctl/internal/infra"
 )
 
 const snapshotRecordLeaf = "capture.json"
@@ -204,7 +206,7 @@ func (record snapshotCaptureRecord) validate() error {
 	if err := record.Source.validate(); err != nil {
 		return err
 	}
-	if record.Source.Release.Version != "1.16.1" {
+	if record.Source.Release.Version != infra.QualifiedVMLaunchFirecrackerVersion {
 		return instanceValidationError("snapshot release is unsupported")
 	}
 	want := 2 + len(record.Source.Volumes)
