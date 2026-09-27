@@ -84,6 +84,8 @@ lookup, or aliasing the candidate to the controller does not qualify the install
 
 The builder's unprivileged initialization pins Firecracker 1.16.0 through
 `mvm init --non-interactive --binary-version 1.16.0`; it must not resolve a moving latest release during qualification.
+Base-image preparation no longer removes a pre-existing fixed-name builder VM. If creation reports that the name is
+occupied, preparation fails and leaves that VM untouched; cleanup applies only after this run's create succeeds.
 Every builder artifact pull must also report an explicit local-mirror read. A pull error, checksum fallback, or
 HTTP-downloaded mirror auto-population fails qualification; bounded stdout/stderr remains in the evidence log. Fixed
 checksum/version metadata may still use its upstream source.

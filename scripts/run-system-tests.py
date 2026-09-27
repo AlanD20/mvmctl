@@ -1193,9 +1193,6 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             log(f"  Base image '{BASE_IMAGE_NAME}:{img_tag}' already exists, skipping")
             return img_tag
 
-    # Clean up any leftover builder VM from a previous aborted run
-    destroy_vm(BASE_VM_NAME, check=False)
-
     log(f"  Creating builder VM '{BASE_VM_NAME}'...")
     mvm(
         "vm",

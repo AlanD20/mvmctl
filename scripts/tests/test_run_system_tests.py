@@ -2290,7 +2290,28 @@ def test_build_base_image_cleans_builder_when_asset_pull_fails(
         for args in calls
         if args == ("vm", "rm", orchestrator.BASE_VM_NAME, "--force")
     ]
-    assert len(builder_removals) == 2
+    assert len(builder_removals) == 1
+    assert not any(args[:2] == ("image", "import") for args in calls)
+
+
+def test_build_base_image_does_not_remove_existing_builder_on_create_refusal(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[:2] == ("vm", "create"):
+            raise RuntimeError("builder VM already exists")
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="not found")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    with pytest.raises(RuntimeError, match="builder VM already exists"):
+        orchestrator._build_base_image("0.3.0-test")
+
+    assert ("vm", "rm", orchestrator.BASE_VM_NAME, "--force") not in calls
     assert not any(args[:2] == ("image", "import") for args in calls)
 
 
