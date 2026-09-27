@@ -57,7 +57,14 @@ one exact destination-port allow, adjacent-port deny, and deny after revocation 
 two nested guests used 256 MiB each; VM, network, and traffic-policy inventories were empty afterward. The
 runner's old outer controller had OOM-killed its Firecracker when an earlier version of the case used two
 default-size guests; this is not evidence of a candidate cgroup kill. Same-network/source-VM policy, spoofing,
-rebooted live-network reconciliation, full Python QA, exact-HEAD Go CI, and release sign-off remain open.
+rebooted live-network reconciliation, full Python QA, remote CI, and release sign-off remain open.
+
+**Exact-HEAD local Go gate (2026-09-27):** A clean detached checkout of `02a4a690` in only the named runner passed
+offline Go 1.26.3 tidy with no tracked diff, whole-tree gofmt, golines, agent generation with no tracked diff,
+full vet, and `scripts/run-go-ci-tests.sh` including the selected unprivileged Jailer contracts. The complete
+root-effect Jailer package separately passed under runner root. The generated coverage artifact was moved into
+ignored repo-local `.tmp`, leaving the checkout with no tracked or untracked source changes. This is local Go
+evidence, not GitHub CI or the complete installed-candidate Python release matrix.
 
 **Current CLI/config checkpoint (2026-09-27):** The installed `0.3.0-rc.exec-port` candidate in only
 `mvmctl-030-test` passed the complete 24-case CLI module and 12-case config module from clean source commit

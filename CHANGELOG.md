@@ -1075,6 +1075,8 @@ composition is described above; the current incomplete-work inventory is under *
   guest connections: deny before grant, allow one destination port, deny the adjacent port, and deny after revoke.
   The fixed nftables and network JSON cases passed in earlier focused runs; the full policy/system matrix is not yet
   qualified.
+- A clean `02a4a690` runner checkout passed the pinned offline Go CI sequence and separate full root-effect Jailer
+  package. This is local code verification, not remote CI or complete Python/system release qualification.
 
 #### LoopMount image inspection
 
