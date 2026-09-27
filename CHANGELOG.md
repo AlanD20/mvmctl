@@ -14,11 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > later host-reset correction, passed pinned Go 1.26.3 local CI and the separate full root-effect Jailer package
 > in the named `mvmctl-030-test` runner. The installed runner candidate passed complete network/nftables/policy
 > (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), copy (15/15),
-> and kernel import (8/8) Python domains with strict zero-skip reports at their recorded revisions. These are
-> domain results, not a complete exact-current-HEAD Python matrix. Host-reboot/exec recovery had one device-open
-> failure and one successful controlled repeat; its cause remains unresolved. Sustained memory saturation, full
-> Jailer/cgroup
-> QA requiring trusted 1.16.0 checksum metadata, clean-host reset/installation, Tier 3, aarch64 runtime,
+> kernel import (8/8), and rootfs persistence (1/1) Python domains with strict zero-skip reports at their
+> recorded revisions. These domain results do not constitute a complete exact-current-HEAD Python matrix.
+> Host-reboot/exec recovery had one device-open failure and one successful controlled repeat; its cause remains
+> unresolved. Sustained memory saturation, full Jailer/cgroup QA requiring trusted 1.16.0 checksum metadata,
+> clean-host reset/installation, Tier 3, aarch64 runtime,
 > GitHub CI, and final release approval remain open. No candidate has been installed over the outer controller.
 
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
@@ -30,6 +30,10 @@ earlier partial-state statement. They are not a substitute for the final release
   network/endpoint identity. A candidate installed only inside the disposable `mvmctl-030-test` runner passed
   create, stop, start, and host-to-guest vsock exec. A later focused installed-candidate test passed full networkless
   capture/restore with an attached raw volume and post-restore vsock exec; full Python system QA remains pending.
+- Replaced two obsolete rootfs-copy/import persistence tests with one installed-candidate journey: `mvm cp` writes a
+  guest rootfs file, a full snapshot captures it, the source changes and is removed, and `snapshot restore --resume`
+  returns the original bytes. The one-case module passed in the named runner with checked VM/snapshot teardown;
+  protected rootfs backing is never accessed through a caller path.
 - Completed the isolated Jailer startup handoff with root-prepared detached resource mounts, a private read-only
   sealed-configuration mount, exact pre/post-seal ownership checks, and read-only API readiness through the typed
   root broker. A Jailer root-ownership race found on repeated creation has a red-green Go regression and a second

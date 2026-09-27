@@ -29,6 +29,15 @@ records eight collected/passed and zero failures, errors, skips, or deselections
 empty afterward, and only the pre-existing default kernel remained. This is local kernel-import evidence, not the
 separate kernel-build domain, the full Python matrix, GitHub CI, or release approval.
 
+**Rootfs persistence runner checkpoint (2026-09-27):** The old two-case module copied a stopped VM's rootfs from a
+caller-visible path and imported it as an image; the first case never created or restored a snapshot despite its name.
+Commit `2772d7b5` replaces them with one function-scoped installed-candidate journey using `mvm cp`, full snapshot
+capture, post-capture source mutation/removal, `snapshot restore --resume`, and guest readback. The strict report at
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/qa-rootfs-856bf013/.tmp/qa-rootfs-persistence-draft2.json`
+records one collected/passed and zero failures, errors, skips, or deselections; VM and snapshot inventories were empty
+afterward. This proves one networkless rootfs persistence/independence path, not the full snapshot fault matrix,
+GitHub CI, or release approval.
+
 **Exact-source local checkpoint (2026-09-27):** The clean `307e09d2` source passed pinned Go 1.26.3 tidy,
 format, generation, vet, the selected unprivileged Go CI suite with coverage, and the complete root-effect Jailer
 package inside only `mvmctl-030-test`. Its release build was installed there through `host install-system`; the
