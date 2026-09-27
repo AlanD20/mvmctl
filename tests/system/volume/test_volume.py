@@ -693,106 +693,79 @@ class TestVolumeLifecycle:
         runner_vm: str,
         unique_vm_name: str,
         unique_key_name: str,
-        unique_network_name: str,
     ) -> None:
-        # Rationale: Needs a real VM (30-120s) because attachment invariants
-        # require a stopped VM to attach/detach the volume. A volume-only
-        # test cannot verify vm_id transitions or disk path existence.
-        """Verify volume invariants: vm_id and path correctness."""
+        """A protected raw volume keeps its identity through attach and detach."""
         vm_name = unique_vm_name
         vol_name = f"sys-vol-inv-{unique_key_name}"
-        net_name = unique_network_name
-        subnet = _unique_subnet(net_name)
-
         try:
-            _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                net_name,
-                "--subnet",
-                subnet,
-                "--non-interactive",
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
+            available = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json").stdout,
+                dict,
             )
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            volume = available["volume"]
+            assert volume["status"] == "available"
+            assert volume["format"] == "raw"
+            assert available["attachment"]["vm_id"] is None
+            assert available["disk_info"]["protected"] is False
+            backing_path = volume["path"]
+            backing_size = _guest_run(
+                runner_vm, f"sudo -n stat -c %s {shlex.quote(backing_path)}",
+            )
+            assert int(backing_size.stdout.strip()) == 16 * 1024 * 1024
 
-            # State 1: available — vm_id must be null, path must exist on disk
-            inspect = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
-            data = json.loads(inspect.stdout)
-            assert data["volume"]["status"] == "available"
-            assert data.get("attachment", {}).get("vm_id") is None
-
-            # VIOLATION FIXED: os.path.exists replaced with _guest_run inside VM
-            path = data["volume"]["path"]
-            path_result = _guest_run(
-                runner_vm,
-                f"test -f '{path}' && echo 'exists'",
-                check=False,
-                timeout=10,
-            )
-            assert "exists" in path_result.stdout, (
-                f"Volume path {path} does not exist inside VM"
-            )
-
+            # Network placement is incidental to this volume lifecycle.
             ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-            )
-            _run_mvm(runner_vm, "vm", "stop", vm_name, "--force")
+            created = _json_success_data(_run_mvm(
+                runner_vm, "vm", "create", vm_name, "--image", "alpine:3.23",
+                "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
+                "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                "--json", timeout=180,
+            ).stdout, list)
+            assert len(created) == 1 and created[0]["status"] == "running"
+            vm_id = created[0]["id"]
+            _run_mvm(runner_vm, "vm", "stop", vm_name)
             _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
 
-            # State 2: attached — vm_id must be non-null and match VM id
-            inspect = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
+            attached = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json").stdout,
+                dict,
             )
-            data = json.loads(inspect.stdout)
-            assert data["volume"]["status"] == "attached"
-            assert data.get("attachment", {}).get("vm_id") is not None
-
-            vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vm_entries = json.loads(vm_ls.stdout)
-            vm_info = next(
-                (v for v in vm_entries if v["name"] == vm_name), None
+            assert attached["volume"]["id"] == volume["id"]
+            assert attached["volume"]["path"] == backing_path
+            assert attached["volume"]["status"] == "attached"
+            assert attached["attachment"]["vm_id"] == vm_id
+            _run_mvm(runner_vm, "vm", "start", vm_name)
+            partitions = _run_mvm(
+                runner_vm, "exec", vm_name, "--", "cat", "/proc/partitions", timeout=30,
             )
-            assert vm_info is not None
-            assert data["attachment"]["vm_id"] == vm_info["id"]
-
+            assert "vdb" in partitions.stdout
+            _run_mvm(runner_vm, "vm", "stop", vm_name)
             _run_mvm(runner_vm, "volume", "detach", vm_name, vol_name)
 
-            # State 3: available again — vm_id must be null, path still exists
-            inspect = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
+            detached = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json").stdout,
+                dict,
             )
-            data = json.loads(inspect.stdout)
-            assert data["volume"]["status"] == "available"
-            assert data.get("attachment", {}).get("vm_id") is None
-
-            # VIOLATION FIXED: os.path.exists replaced with _guest_run inside VM
-            path = data["volume"]["path"]
-            path_result = _guest_run(
-                runner_vm,
-                f"test -f '{path}' && echo 'exists'",
-                check=False,
-                timeout=10,
-            )
-            assert "exists" in path_result.stdout, (
-                f"Volume path {path} disappeared after detach"
-            )
+            assert detached["volume"]["id"] == volume["id"]
+            assert detached["volume"]["path"] == ""
+            assert detached["volume"]["status"] == "available"
+            assert detached["attachment"]["vm_id"] is None
+            assert detached["disk_info"]["protected"] is True
+            assert detached["disk_info"]["logical_bytes"] == 16 * 1024 * 1024
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm, "volume", "rm", vol_name, "--force", check=False
-            )
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            vms = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+            if any(vm["name"] == vm_name for vm in vms):
+                removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            vms = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+            assert all(vm["name"] != vm_name for vm in vms)
+            volumes = _json_success_data(_run_mvm(runner_vm, "volume", "ls", "--json").stdout, list)
+            if any(item["name"] == vol_name for item in volumes):
+                removed = _run_mvm(runner_vm, "volume", "rm", vol_name, "--force", check=False)
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            volumes = _json_success_data(_run_mvm(runner_vm, "volume", "ls", "--json").stdout, list)
+            assert all(item["name"] != vol_name for item in volumes)
 
 
 class TestRawVolumeAuthoritativeStorage:

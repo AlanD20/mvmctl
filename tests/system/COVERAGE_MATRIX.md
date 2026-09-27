@@ -77,6 +77,14 @@ deselection. The selected cases covered raw creation and options, inspect/list, 
 format rejection, resize/shrink behavior, removal, and partial removal. The isolated volume list was empty afterward.
 This is not a full volume module, guest-visible option enforcement, or networked attach/detach qualification.
 
+**Volume attach/detach checkpoint (2026-09-27):** The previously stale
+`TestVolumeLifecycle::test_volume_invariants_available_attached_cycle` was corrected for schema-1 JSON and the
+root-protected backing contract, then passed 1/1 against the installed candidate in `mvmctl-030-test`. A 16 MiB
+raw volume moved available → attached → available around a networkless VM stop/start; the guest saw `vdb`, and
+inspect retained the same volume ID and logical size. After launch, inspect correctly redacted the former caller
+path and reported protected backing. The strict report had no skips/errors, and independent VM/volume inventories
+were empty after teardown. This is one stopped-VM attachment cycle, not live hotplug or managed-network QA.
+
 **QCOW2 image boot checkpoint (2026-09-27):** The existing `TestImageImportAdvanced::test_image_import_with_format_qcow2`
 case was strengthened and passed 1/1 against the installed candidate in `mvmctl-030-test`. It converted the cached
 Alpine raw image to QCOW2, imported it as an ext4 image, launched a networkless VM from that import, and read
@@ -517,7 +525,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `volume resize` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — size_bytes matches |
 | `volume resize` nonexistent | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume resize` shrink | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_resize_rejects_shrink_without_changing_backing` | Focused installed-candidate 16→8 MiB rejection, successful same-size control, and unchanged authoritative size passed in the named runner. |
-| Volume invariants (available→attached→available) | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_invariants_available_attached_cycle` | The bridge-dependent case was deselected; it still uses removed `network create --non-interactive` syntax and needs correction before a bridge-capable runner can qualify it. |
+| Volume invariants (available→attached→available) | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_invariants_available_attached_cycle` | Focused installed-candidate networkless L2 passed: same volume ID and 16 MiB logical size across stopped-VM attach/detach, guest-visible `vdb` after start, and protected backing with caller path redacted after launch. Live hotplug, guest data persistence, and managed-network attachment remain unqualified. |
 | Cross-VM attach rejection | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeCrossVM` | L2 — attached volume rejects second VM |
 | Volume rm with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L1 |
 | Volume rm --force with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L2 |
