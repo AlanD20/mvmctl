@@ -102,6 +102,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Raw volume creation now allocates through an exclusive private `0600` descriptor, including under a permissive
   operator umask, so root admission accepts the resulting file without making group-writable backing authoritative.
+- Volume creation rejects parsed zero-byte capacity as `validation.failed` before filesystem effects. If an opened
+  raw file fails allocation, sync, close, or pre-publication cancellation, creation now attempts to remove that
+  unpublished backing and retains any cleanup failure in the returned error. Pinned Go input/core-volume tests and
+  25 non-VM volume lifecycle cases passed with the corrected installed candidate in the named runner; post-database-
+  write uncertainty, disk-full behavior, and bridge-dependent attachment remain unqualified.
 - Failed snapshot restore retains the protected snapshot reference whenever registration returns a live launch lease,
   including a post-publication durability error. For a root-confirmed failure before child spawn, or after an
   unregistered child is reaped and its snapshot reference removed, restore can remove its local VM projection and

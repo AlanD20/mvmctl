@@ -110,6 +110,19 @@ cases; both corrected cases passed and the volume module collected 36 cases. The
 inventories were empty after checked teardown. These additions bring bounded current-candidate evidence to 110
 distinct passing Python cases, not a full volume module, full system matrix, or release sign-off.
 
+**Volume admission and rollback checkpoint (2026-09-27):** A later `0.3.0-rc.volume-rollback` build containing
+the zero-capacity validation and pre-publication allocation-failure cleanup was installed only in `mvmctl-030-test`;
+its staged and installed SHA-256 matched. The input regression failed before the fix for `0M` and a fractional size
+rounded to zero, then the full input package, full core-volume package, and focused vet passed under pinned Go 1.26.3
+in that runner; focused format checks passed as well. A separate core-volume regression failed before cleanup because
+an allocation error left the just-created file, then passed after the fix. The installed candidate passed all 25 non-VM
+`TestVolumeLifecycle` cases, including a schema-1 `validation.failed` response for `0M`, no new backing or record,
+and checked test-owned teardown. One network/VM attachment case was explicitly deselected because the runner lacks
+bridge-family nftables; it also still uses the removed `network create --non-interactive` flag. The module collected
+36 cases. Read-only inspection of the private cache after the pre-fix attempts showed two zero-length raw files
+without volume rows; their cleanup/provenance is not qualified by the 25-case pass. This scoped build used copied
+changed source, not a clean exact-HEAD Go CI run, full volume module, or release sign-off.
+
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
 | Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
@@ -409,7 +422,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `volume create` invalid size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` duplicate name | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` negative size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
-| `volume create` zero size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
+| `volume create` zero size | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_zero_size_volume` | Installed candidate returned schema-1 `validation.failed` with no new record or backing; a clean-cache absence audit and disk-full failure remain open. |
 | `volume create --read-only` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — is_read_only=true in ls JSON, inspect JSON |
 | `volume create --shareable` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_create_shareable` | L2 — is_shareable=true in ls JSON |
 | `volume ls` | 🔴 Missing | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_ls_empty` | Only empty-cache human output is tested; nonempty human output remains unqualified. |
@@ -426,7 +439,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `volume resize` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — size_bytes matches |
 | `volume resize` nonexistent | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume resize` shrink | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_resize_rejects_shrink_without_changing_backing` | Focused installed-candidate 16→8 MiB rejection, successful same-size control, and unchanged authoritative size passed in the named runner. |
-| Volume invariants (available→attached→available) | ✅ Deep | `volume/test_volume.py` | `TestVolumeLifecycle` | L3 — vm_id transitions, path exists on disk |
+| Volume invariants (available→attached→available) | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_invariants_available_attached_cycle` | The bridge-dependent case was deselected; it still uses removed `network create --non-interactive` syntax and needs correction before a bridge-capable runner can qualify it. |
 | Cross-VM attach rejection | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeCrossVM` | L2 — attached volume rejects second VM |
 | Volume rm with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L1 |
 | Volume rm --force with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L2 |
