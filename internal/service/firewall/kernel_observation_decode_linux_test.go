@@ -803,6 +803,38 @@ func TestDecodeKernelMasqRejectsAnyAttribute(t *testing.T) {
 	requireKernelObservationRejected(t, err)
 }
 
+// Rationale: Linux 7.0.11 includes NFTA_BITWISE_OP in a dump of the compiler's boolean mask/XOR rule. Accepting
+// only the exact boolean operation keeps live readiness working without admitting shift or other rule semantics.
+func TestDecodeKernelBitwiseAcceptsKernelBooleanOperationAndRejectsOtherOperations(t *testing.T) {
+	value := &expr.Bitwise{
+		SourceRegister: 2, DestRegister: 3, Len: 4,
+		Mask: []byte{0xff, 0xf0, 0x0f, 0xaa}, Xor: []byte{0x11, 0x22, 0x33, 0x44},
+	}
+	tests := map[string]struct {
+		operation []byte
+		accepted  bool
+	}{
+		"boolean_mask_xor": {operation: testBigEndianUint32(0), accepted: true},
+		"left_shift":       {operation: testBigEndianUint32(1)},
+		"malformed_width":  {operation: []byte{0}},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			raw := mutateTestKernelExpressionData(t, value, func(attrs []netlink.Attribute) []netlink.Attribute {
+				// Linux UAPI: NFTA_BITWISE_OP is attribute 6; 0 is MASK_XOR and 1 is LSHIFT.
+				return append(attrs, netlink.Attribute{Type: 6, Data: tc.operation})
+			})
+			decoded, err := decodeKernelExpressions(raw, nftables.TableFamilyINet)
+			if !tc.accepted {
+				requireKernelObservationRejected(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assertKernelExpressionsEqual(t, []expr.Any{value}, decoded)
+		})
+	}
+}
+
 // Rationale: Type-specific attribute sets are closed independently of the common expression envelope; scalar width
 // drift and flags must not be normalized into a compiler-supported expression.
 func TestDecodeKernelExpressionsRejectsTypeSpecificAttributeAmbiguity(t *testing.T) {

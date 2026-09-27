@@ -30,7 +30,9 @@ const (
 	kernelNFTATableHandle        = uint16(4)
 	kernelNFTATablePad           = uint16(5)
 	kernelNFTAChainFlags         = uint16(10)
-	kernelNFTChainBase           = uint32(1)
+	// Linux UAPI defines NFTA_BITWISE_OP, but x/sys v0.45.0 does not expose it.
+	kernelNFTABitwiseOp = uint16(6)
+	kernelNFTChainBase  = uint32(1)
 )
 
 type kernelObservationMessages struct {
@@ -615,9 +617,19 @@ func decodeKernelBitwise(raw []byte) (expr.Any, error) {
 		unix.NFTA_BITWISE_LEN:  {required: true},
 		unix.NFTA_BITWISE_MASK: {required: true},
 		unix.NFTA_BITWISE_XOR:  {required: true},
+		kernelNFTABitwiseOp:    {},
 	})
 	if err != nil {
 		return nil, err
+	}
+	if attribute, present := attrs[kernelNFTABitwiseOp]; present {
+		operation, err := kernelAttributeUint32(attribute, "bitwise operation")
+		if err != nil {
+			return nil, err
+		}
+		if operation != unix.NFT_BITWISE_BOOL {
+			return nil, invalidKernelObservation("bitwise operation is not boolean mask/xor")
+		}
 	}
 	source, err := kernelAttributeUint32(attrs[unix.NFTA_BITWISE_SREG], "bitwise source register")
 	if err != nil {
