@@ -66,25 +66,28 @@ class TestCanonicalJailerLaunch:
         pid = int(vm["pid"])
         invoking_uid = int(_guest_run(runner_vm, "id -u").stdout.strip())
 
-        status = _guest_run(runner_vm, f"cat /proc/{pid}/status").stdout
+        status = _guest_run(runner_vm, f"sudo -n cat /proc/{pid}/status").stdout
         uid_line = next(line for line in status.splitlines() if line.startswith("Uid:"))
         process_uid = int(uid_line.split()[1])
         assert process_uid != invoking_uid
         assert process_uid != 0
 
-        process_root = _guest_run(
-            runner_vm, f"readlink /proc/{pid}/root"
-        ).stdout.strip()
         expected_root = _jail_root(vm["id"])
-        assert process_root == expected_root
+        root_identities = _guest_run(
+            runner_vm,
+            f"sudo -n stat -Lc '%d:%i' -- {shlex.quote(expected_root)} "
+            f"/proc/{pid}/root",
+        ).stdout.splitlines()
+        assert len(root_identities) == 2
+        assert root_identities[0] == root_identities[1]
         cmdline = _guest_run(
-            runner_vm, f"tr '\\0' ' ' < /proc/{pid}/cmdline"
-        ).stdout
+            runner_vm, f"sudo -n cat /proc/{pid}/cmdline"
+        ).stdout.replace("\0", " ")
         assert "firecracker" in cmdline
 
-        api_socket = vm["api_socket_path"]
+        api_socket = f"/proc/{pid}/root/vmm-runtime/firecracker.api.socket"
         socket_state = _guest_run(
-            runner_vm, f"test -S {shlex.quote(api_socket)} && echo socket"
+            runner_vm, f"sudo -n test -S {shlex.quote(api_socket)} && echo socket"
         )
         assert socket_state.stdout.strip() == "socket"
 
@@ -117,7 +120,7 @@ class TestCanonicalJailerLaunch:
         stopped = _vm_entry(runner_vm, vm_name)
         assert stopped["status"] == "stopped"
         assert _guest_run(
-            runner_vm, f"test ! -e {shlex.quote(jail)}", check=False
+            runner_vm, f"sudo -n test ! -e {shlex.quote(jail)}", check=False
         ).returncode == 0
 
         _run_mvm(runner_vm, "vm", "start", vm_name)
@@ -125,7 +128,7 @@ class TestCanonicalJailerLaunch:
         assert started["status"] == "running"
         assert int(started["pid"]) != int(before["pid"])
         assert _guest_run(
-            runner_vm, f"test -d {shlex.quote(jail)}", check=False
+            runner_vm, f"sudo -n test -d {shlex.quote(jail)}", check=False
         ).returncode == 0
 
         _run_mvm(runner_vm, "vm", "reboot", vm_name)
@@ -191,8 +194,9 @@ class TestCanonicalJailerLaunch:
             assert restored_cgroup["status"] == "enforced"
             assert restored_cgroup["requested"] == source_limits
             assert restored_cgroup["actual"] == source_limits
+            restored_jail = _jail_root(restored_vm["id"])
             assert _guest_run(
-                runner_vm, f"test -d {shlex.quote(_jail_root(restored_vm['id']))}",
+                runner_vm, f"sudo -n test -d {shlex.quote(restored_jail)}",
                 check=False,
             ).returncode == 0
         finally:
