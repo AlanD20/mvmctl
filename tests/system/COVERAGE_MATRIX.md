@@ -45,12 +45,13 @@ module restored its tested VM CPU and memory defaults. A combined runner-local s
 not an orchestrator domain run, full Python qualification, or a claim about the archived cache's compatibility.
 
 **Current trusted-binary checkpoint (2026-09-27):** Against the same installed candidate and isolated runner cache,
-ten distinct non-live-VM `bin/test_bin.py` cases passed. Seven list/rejection/absent-slot cases produced a schema-1
-report with seven collected and passed and zero errors, skips, or deselections. Separate focused runs passed remote
-metadata limiting, re-admission of the present 1.16.1 pair, and pull/default-transfer/removal of the previously
-absent mirrored 1.15.1 pair. A final readback showed only the original 1.16.0 and 1.16.1 pairs, with 1.16.1 still
-the Firecracker/Jailer default. The live-VM release-lease case and full binary domain remain unqualified; these
-focused runs are not orchestrator domain evidence or proof of the 1.16.0 launch path.
+the complete `bin/test_bin.py` module passed 11/11. Its runner-local schema-1 report recorded zero failures,
+errors, collection errors, skips, deselections, XFAIL, or XPASS. The module includes malformed/retired selector
+rejection, absent-slot no-op, remote metadata limiting, present 1.16.1 re-admission, mirrored absent 1.15.1
+pull/default-transfer/checked removal, and a live networkless VM denying release removal while identical force-pull
+preserved the active pair. Final readback showed no nested VM and only the original 1.16.0 and 1.16.1 pairs, with
+1.16.1 still the Firecracker/Jailer default. This direct full-module pass is not an orchestrator domain run, proof
+of 1.16.0 VM launch support, or full Python release qualification.
 
 **Focused snapshot checkpoint (2026-09-27):** An installed `0.3.0-rc.snapshot-ref-fix` candidate inside only
 `mvmctl-030-test` passed `TestNetworklessJailerLifecycle::test_networkless_snapshot_restores_independent_data_volume`
