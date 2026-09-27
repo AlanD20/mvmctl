@@ -46,7 +46,7 @@ import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from system_test_release import (
     validate_release_build_paths,
@@ -854,7 +854,9 @@ def _ensure_builder_key() -> None:
         )
 
 
-def provision_t1(vm_name: str, mvm_version: str) -> None:
+def provision_t1(
+    vm_name: str, mvm_version: str, on_created: Callable[[], None]
+) -> None:
     """Provision a Tier 1 VM from custom base image + shared volume."""
     _ensure_builder_key()
     _ensure_official_kernel_on_host(vm_name)
@@ -886,6 +888,7 @@ def provision_t1(vm_name: str, mvm_version: str) -> None:
         SHARED_VOLUME_NAME,
         timeout=180,
     )
+    on_created()
     _install_system_binary_in_runner(vm_name)
     _initialize_system_binary_in_runner(vm_name)
     # CRITICAL: mvm init MUST run as the unprivileged user (runner), NOT via sudo.
@@ -936,7 +939,9 @@ def _ensure_official_kernel_on_host(vm_name: str) -> None:
             fcntl.flock(lf, fcntl.LOCK_UN)
 
 
-def provision_t2(vm_name: str, mvm_version: str) -> None:
+def provision_t2(
+    vm_name: str, mvm_version: str, on_created: Callable[[], None]
+) -> None:
     """Provision a Tier 2 VM from custom base image + shared volume (binary + tests + deps pre-installed)."""
     _ensure_builder_key()
     _ensure_official_kernel_on_host(vm_name)
@@ -968,6 +973,7 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         SHARED_VOLUME_NAME,
         timeout=300,
     )
+    on_created()
     _install_system_binary_in_runner(vm_name)
     _initialize_system_binary_in_runner(vm_name)
 
@@ -1518,9 +1524,14 @@ def run_tier1_domain(
         "passed": False,
         "output": "",
     }
+    created = False
+
+    def mark_created() -> None:
+        nonlocal created
+        created = True
 
     try:
-        provision_t1(vm_name, mvm_version)
+        provision_t1(vm_name, mvm_version, mark_created)
         if push:
             log(f"  Pushing test files into '{vm_name}'...")
             mvm("cp", "-f", "tests/system", f"{vm_name}:/tests/", timeout=60)
@@ -1551,7 +1562,8 @@ def run_tier1_domain(
     except Exception as e:
         result["output"] = str(e)
     finally:
-        _record_runner_destruction(result, vm_name)
+        if created:
+            _record_runner_destruction(result, vm_name)
 
     return result
 
@@ -1567,9 +1579,14 @@ def run_tier2_domain(
         "passed": False,
         "output": "",
     }
+    created = False
+
+    def mark_created() -> None:
+        nonlocal created
+        created = True
 
     try:
-        provision_t2(vm_name, mvm_version)
+        provision_t2(vm_name, mvm_version, mark_created)
         if push:
             log(f"  Pushing test files into '{vm_name}'...")
             mvm("cp", "-f", "tests/system", f"{vm_name}:/tests/", timeout=60)
@@ -1600,7 +1617,8 @@ def run_tier2_domain(
     except Exception as e:
         result["output"] = str(e)
     finally:
-        _record_runner_destruction(result, vm_name)
+        if created:
+            _record_runner_destruction(result, vm_name)
 
     return result
 

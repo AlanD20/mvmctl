@@ -74,6 +74,9 @@ T1/T2 system tests run inside disposable Firecracker VMs with nested KVM. The
 orchestrator creates one VM per T1/T2 domain, runs tests via `mvm exec`, and
 destroys the VM after. Tier 3 is host-direct and has the separate restrictions
 below.
+For T1/T2, a failed pre-create provision step does not authorize VM deletion. The orchestrator records ownership only
+after its `vm create` command succeeds, then includes checked destruction in the domain result even if later setup fails.
+An ambiguous create failure remains a failed domain needing operator inspection; the runner does not guess ownership.
 
 For T1/T2, release qualification keeps the outer controller (`MVM_BINARY`) separate from `./dist/mvm`
 (`MVM_CANDIDATE_BINARY`). The controller manages disposable test resources. The candidate-qualified base image is built

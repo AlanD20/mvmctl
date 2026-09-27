@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
@@ -1274,7 +1275,7 @@ def test_tier2_provision_pulls_exact_release_with_installed_cli(
     ):
         monkeypatch.setattr(orchestrator, helper, lambda *_args, **_kwargs: None)
 
-    orchestrator.provision_t2("focused-runner", "0.3.0-rc.test")
+    orchestrator.provision_t2("focused-runner", "0.3.0-rc.test", lambda: None)
 
     assert calls[-1] == (
         (
@@ -1283,6 +1284,40 @@ def test_tier2_provision_pulls_exact_release_with_installed_cli(
         ),
         {"timeout": 150},
     )
+
+
+@pytest.mark.parametrize("provision_name", ["provision_t1", "provision_t2"])
+@pytest.mark.parametrize("create_fails", [False, True], ids=["created", "create-refused"])
+def test_provision_reports_ownership_only_after_successful_create(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    provision_name: str,
+    create_fails: bool,
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(orchestrator, "_ensure_builder_key", lambda: None)
+    monkeypatch.setattr(orchestrator, "_ensure_official_kernel_on_host", lambda _name: None)
+
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert args[:2] == ("vm", "create")
+        events.append("create")
+        if create_fails:
+            raise RuntimeError("create refused")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    def stop_after_create(_name: str) -> None:
+        events.append("install")
+        raise RuntimeError("stop after creation")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    monkeypatch.setattr(orchestrator, "_install_system_binary_in_runner", stop_after_create)
+
+    with pytest.raises(RuntimeError, match="create refused|stop after creation"):
+        getattr(orchestrator, provision_name)(
+            "focused-runner", "0.3.0-test", lambda: events.append("owned")
+        )
+
+    assert events == (["create"] if create_fails else ["create", "owned", "install"])
 
 
 def test_streamed_mvm_failure_preserves_command_and_rc_when_output_is_none(
@@ -1502,8 +1537,8 @@ def test_remote_domains_require_retrieved_complete_pytest_outcomes(
     monkeypatch.setattr(
         orchestrator,
         provision_name,
-        lambda provisioned, version: events.append(
-            f"provision:{provisioned}:{version}"
+        lambda provisioned, version, on_created: (
+            on_created(), events.append(f"provision:{provisioned}:{version}")
         ),
     )
     monkeypatch.setattr(
@@ -1602,7 +1637,7 @@ def test_remote_domain_preserves_pytest_output_and_checked_cleanup_failure(
     monkeypatch.setattr(
         orchestrator,
         "provision_t1",
-        lambda _vm_name, _version: None,
+        lambda _vm_name, _version, on_created: on_created(),
     )
     monkeypatch.setattr(orchestrator, "destroy_vm", destroyed.append)
 
@@ -1687,8 +1722,8 @@ def test_remote_domain_destruction_failure_overrides_success(
     monkeypatch.setattr(
         orchestrator,
         provision_name,
-        lambda provisioned, version: events.append(
-            f"provision:{provisioned}:{version}"
+        lambda provisioned, version, on_created: (
+            on_created(), events.append(f"provision:{provisioned}:{version}")
         ),
     )
 
@@ -1754,8 +1789,8 @@ def test_remote_domain_preserves_primary_failure_when_destruction_fails(
     monkeypatch.setattr(
         orchestrator,
         provision_name,
-        lambda provisioned, version: events.append(
-            f"provision:{provisioned}:{version}"
+        lambda provisioned, version, on_created: (
+            on_created(), events.append(f"provision:{provisioned}:{version}")
         ),
     )
 
@@ -1790,6 +1825,42 @@ def test_remote_domain_preserves_primary_failure_when_destruction_fails(
         f"pytest:{vm_name}:{660 if tier == 1 else 960}",
         f"destroy:{vm_name}",
     ]
+
+
+@pytest.mark.parametrize(
+    ("runner_name", "provision_name"),
+    [
+        ("run_tier1_domain", "provision_t1"),
+        ("run_tier2_domain", "provision_t2"),
+    ],
+    ids=["tier1", "tier2"],
+)
+@pytest.mark.parametrize("created", [False, True], ids=["before-create", "after-create"])
+def test_remote_domain_destroys_only_a_created_runner(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    runner_name: str,
+    provision_name: str,
+    created: bool,
+) -> None:
+    destroyed: list[str] = []
+    monkeypatch.setattr(orchestrator, "_unique_name", lambda _prefix: "fixed-runner")
+
+    def fail_provision(
+        _vm_name: str, _version: str, on_created: Callable[[], None]
+    ) -> None:
+        if created:
+            on_created()
+        raise RuntimeError("synthetic provision failure")
+
+    monkeypatch.setattr(orchestrator, provision_name, fail_provision)
+    monkeypatch.setattr(orchestrator, "destroy_vm", destroyed.append)
+
+    result = getattr(orchestrator, runner_name)("cli", ["tests/system/cli/test_cli.py"], "0.3.0")
+
+    assert result["passed"] is False
+    assert result["output"] == "synthetic provision failure"
+    assert destroyed == (["fixed-runner"] if created else [])
 
 
 def test_timed_out_parallel_worker_is_joined_and_late_failures_are_preserved(
