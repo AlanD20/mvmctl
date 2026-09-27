@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import shlex
+import tempfile
 import time as _time
+from pathlib import Path
 
 import pytest
 
-from tests.system.conftest import _guest_run, _run_mvm, wait_for_ssh
+from tests.system.conftest import _guest_run, _json_success_data, _run_mvm, wait_for_ssh
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_ssh]
 
@@ -140,35 +143,34 @@ class TestSSHConnect:
         ssh_timeout = timing_targets["alpine:3.23"]
         wait_for_ssh(runner_vm, vm_info["name"], "root", ssh_timeout)
 
-        # Create a throwaway key inside the test VM for the SSH test
-        test_key = "/tmp/ssh_test_key"
-        _guest_run(
-            runner_vm,
-            f"rm -f {test_key} {test_key}.pub && "
-            f"ssh-keygen -t ed25519 -f {test_key} -N '' -q",
-            timeout=30,
-        )
+        with tempfile.TemporaryDirectory(
+            prefix="mvm-ssh-unauthorized-", dir=Path.home() / ".cache"
+        ) as scratch:
+            test_key = f"{scratch}/key"
+            _guest_run(
+                runner_vm,
+                f"ssh-keygen -t ed25519 -f {shlex.quote(test_key)} -N '' -q",
+                timeout=30,
+            )
 
-        result = _run_mvm(
-            runner_vm,
-            "ssh",
-            vm_info["name"],
-            "--key",
-            test_key,
-            "--cmd",
-            "whoami",
-            check=False,
-        )
-        # Will likely fail because the key isn't authorized on the VM,
-        # but the SSH connection itself should attempt and fail gracefully.
-        assert result.returncode != 0, (
-            f"SSH with unauthorized key should fail, got rc={result.returncode} "
-            f"stdout: {result.stdout} stderr: {result.stderr}"
-        )
-        assert "Permission denied" in result.stderr or "timed out" in result.stderr, (
-            f"Expected 'Permission denied' or 'timed out' for unauthorized key, "
-            f"got stderr: {result.stderr}"
-        )
+            result = _run_mvm(
+                runner_vm,
+                "ssh",
+                vm_info["name"],
+                "--key",
+                test_key,
+                "--cmd",
+                "whoami",
+                check=False,
+            )
+            assert result.returncode != 0, (
+                f"SSH with unauthorized key should fail, got rc={result.returncode} "
+                f"stdout: {result.stdout} stderr: {result.stderr}"
+            )
+            assert "Permission denied" in result.stderr or "timed out" in result.stderr, (
+                f"Expected 'Permission denied' or 'timed out' for unauthorized key, "
+                f"got stderr: {result.stderr}"
+            )
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow
@@ -192,8 +194,7 @@ class TestSSHConnect:
         key_ls_result = _run_mvm(runner_vm, "key", "ls", "--json", check=False)
         assert key_ls_result.returncode == 0, "key ls --json failed"
 
-        import json as _json
-        keys = _json.loads(key_ls_result.stdout)
+        keys = _json_success_data(key_ls_result.stdout, list)
         matching_keys = [
             k for k in keys
             if k.get("id") == key_id or k.get("name") == key_id
@@ -201,71 +202,43 @@ class TestSSHConnect:
         assert matching_keys, f"Key with id/name {key_id[:16]}... not found in cache"
         key_name = matching_keys[0]["name"]
 
-        # Export the key to a temp directory inside the test VM
-        key_export_dir = "/tmp/ssh-keys"
-        _guest_run(runner_vm, f"rm -rf {key_export_dir} && mkdir -p {key_export_dir}")
+        with tempfile.TemporaryDirectory(
+            prefix="mvm-ssh-export-", dir=Path.home() / ".cache"
+        ) as key_export_dir:
+            export_result = _run_mvm(
+                runner_vm, "key", "export", key_name, key_export_dir, check=False
+            )
+            assert export_result.returncode == 0, (
+                f"Key export failed: {export_result.stderr}"
+            )
 
-        export_result = _run_mvm(
-            runner_vm,
-            "key",
-            "export",
-            key_name,
-            key_export_dir,
-            check=False,
-        )
-        assert export_result.returncode == 0, (
-            f"Key export failed: {export_result.stderr}"
-        )
+            private_keys = [
+                path for path in Path(key_export_dir).iterdir()
+                if path.is_file() and path.suffix != ".pub"
+            ]
+            assert len(private_keys) == 1, private_keys
 
-        # Find the exported private key file (inside test VM)
-        ls_result = _guest_run(
-            runner_vm, f"ls -1 {key_export_dir}/", timeout=30
-        )
-        exported_files = ls_result.stdout.strip().splitlines()
-        private_key_name = None
-        for fname in exported_files:
-            fname = fname.strip()
-            if not fname:
-                continue
-            if fname.endswith(".pem") or (not fname.endswith(".pub")):
-                private_key_name = fname
-                break
-        assert private_key_name, "Could not find exported private key file"
-        private_key_path = f"{key_export_dir}/{private_key_name}"
+            ssh_available = wait_for_ssh(
+                runner_vm, vm_info["name"], "root", ssh_timeout
+            )
+            assert ssh_available, f"SSH not available within {ssh_timeout}s"
 
-        # Verify the private key file exists inside test VM
-        check_result = _guest_run(
-            runner_vm,
-            f"test -f {private_key_path} && echo exists",
-            check=False,
-        )
-        assert check_result.returncode == 0 and "exists" in check_result.stdout, (
-            f"Exported key not found: {private_key_path}"
-        )
-
-        ssh_available = wait_for_ssh(
-            runner_vm, vm_info["name"], "root", ssh_timeout
-        )
-        assert ssh_available, f"SSH not available within {ssh_timeout}s"
-
-        result = _run_mvm(
-            runner_vm,
-            "ssh",
-            vm_info["name"],
-            "-u", "root",
-            "--key",
-            private_key_path,
-            "--cmd",
-            "whoami",
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"SSH with exported key file failed: rc={result.returncode} "
-            f"stdout={result.stdout} stderr={result.stderr}"
-        )
-        assert "root" in result.stdout, (
-            f"Expected 'root' in output, got: {result.stdout}"
-        )
+            result = _run_mvm(
+                runner_vm,
+                "ssh",
+                vm_info["name"],
+                "-u", "root",
+                "--key", str(private_keys[0]),
+                "--cmd", "whoami",
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"SSH with exported key file failed: rc={result.returncode} "
+                f"stdout={result.stdout} stderr={result.stderr}"
+            )
+            assert "root" in result.stdout, (
+                f"Expected 'root' in output, got: {result.stdout}"
+            )
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow

@@ -414,13 +414,11 @@ def created_vm(
 
     _run_mvm(runner_vm, "key", "create", key_name, "--algorithm",
              "ed25519", timeout=30)
-    _run_mvm(runner_vm, "key", "default", key_name, check=False, timeout=10)
-
-    _ensure_image(runner_vm, "ubuntu:24.04")
-    vm_info = create_vm_core(vm_name, net_name, ssh_key_name=key_name, image="ubuntu:24.04",
-                             extra_args=["--user", "runner"])
-    wait_for_ssh(runner_vm, vm_name, "root", timeout=120)
     try:
+        _ensure_image(runner_vm, "alpine:3.23")
+        vm_info = create_vm_core(vm_name, net_name, ssh_key_name=key_name, image="alpine:3.23",
+                                 extra_args=["--user", "root"])
+        assert wait_for_ssh(runner_vm, vm_name, "root", timeout=120)
         yield vm_info
     finally:
         cleanup_vm_resources(vm_name, net_name, key_name)
@@ -435,11 +433,11 @@ def module_vm(runner_vm) -> Generator[dict[str, Any], None, None]:
 
     _run_mvm(runner_vm, "key", "create", key_name, "--algorithm",
              "ed25519", timeout=30)
-    _ensure_image(runner_vm, "ubuntu:24.04")
-    vm_info = create_vm_core(vm_name, net_name, ssh_key_name=key_name, image="ubuntu:24.04",
-                             extra_args=["--user", "runner"])
-    wait_for_ssh(runner_vm, vm_name, "root", timeout=120)
     try:
+        _ensure_image(runner_vm, "alpine:3.23")
+        vm_info = create_vm_core(vm_name, net_name, ssh_key_name=key_name, image="alpine:3.23",
+                                 extra_args=["--user", "root"])
+        assert wait_for_ssh(runner_vm, vm_name, "root", timeout=120)
         yield vm_info
     finally:
         cleanup_vm_resources(vm_name, net_name, key_name)
