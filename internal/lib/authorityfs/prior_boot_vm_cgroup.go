@@ -50,7 +50,9 @@ func observePriorBootCgroupAbsence(
 			returnErr = errors.Join(returnErr, observation.close())
 		}
 	}()
-	fd, err := openPriorBootDirectory(ctx, []string{"sys", "fs", "cgroup"}, 2, 0755)
+	// The cgroup2 mount root may be read-only to ordinary traversal. Its
+	// exact mode is admitted below; parent and VM-leaf checks stay separate.
+	fd, err := openPriorBootDirectory(ctx, []string{"sys", "fs", "cgroup"}, 3, 0755)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +64,7 @@ func observePriorBootCgroupAbsence(
 	if filesystem.Type != unix.CGROUP2_SUPER_MAGIC {
 		return nil, fmt.Errorf("authorityfs: prior-boot cgroup root is not cgroup v2")
 	}
-	observation.root, err = inspectPriorBootCgroup(fd)
+	observation.root, err = inspectPriorBootCgroup(fd, true)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +76,7 @@ func observePriorBootCgroupAbsence(
 		return nil, err
 	}
 	observation.parentFD = parent
-	observation.parent, err = inspectPriorBootCgroup(parent)
+	observation.parent, err = inspectPriorBootCgroup(parent, false)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +98,7 @@ func observePriorBootCgroupAbsence(
 	return nil, errors.Join(fmt.Errorf("authorityfs: prior-boot VM cgroup is present"), unix.Close(leaf))
 }
 
-func inspectPriorBootCgroup(fd int) (priorBootCgroupIdentity, error) {
+func inspectPriorBootCgroup(fd int, root bool) (priorBootCgroupIdentity, error) {
 	var stat unix.Statx_t
 	mask := unix.STATX_TYPE | unix.STATX_MODE | unix.STATX_UID | unix.STATX_GID | unix.STATX_INO |
 		unix.STATX_MNT_ID | unix.STATX_MNT_ID_UNIQUE
@@ -105,7 +107,8 @@ func inspectPriorBootCgroup(fd int) (priorBootCgroupIdentity, error) {
 		return priorBootCgroupIdentity{}, err
 	}
 	required := uint32(unix.STATX_TYPE | unix.STATX_MODE | unix.STATX_UID | unix.STATX_GID | unix.STATX_INO)
-	if stat.Mask&required != required || stat.Mode != unix.S_IFDIR|0755 || stat.Uid != 0 || stat.Gid != 0 ||
+	if stat.Mask&required != required || !priorBootCgroupModeAdmitted(stat.Mode, root) ||
+		stat.Uid != 0 || stat.Gid != 0 ||
 		stat.Ino == 0 {
 		return priorBootCgroupIdentity{}, fmt.Errorf("authorityfs: prior-boot cgroup metadata is not admitted")
 	}
@@ -120,6 +123,10 @@ func inspectPriorBootCgroup(fd int) (priorBootCgroupIdentity, error) {
 		deviceMajor: stat.Dev_major, deviceMinor: stat.Dev_minor, inode: stat.Ino,
 		mountID: stat.Mnt_id, mountKind: kind,
 	}, nil
+}
+
+func priorBootCgroupModeAdmitted(mode uint16, root bool) bool {
+	return mode == unix.S_IFDIR|0755 || root && mode == unix.S_IFDIR|0555
 }
 
 func (observation *priorBootCgroupObservation) close() error {
