@@ -1464,7 +1464,7 @@ func (c *VMCreateBuilder) cloneImage(
 		return fmt.Errorf("fsType is required")
 	}
 	vmRootfsPath := filepath.Join(c.vmDir, infra.VMRootfsFilename)
-	if _, err := imageSvc.EnsureCached([]*model.ImageItem{resolved.Image}); err != nil {
+	if _, err := imageSvc.EnsureCached(ctx, []*model.ImageItem{resolved.Image}); err != nil {
 		return fmt.Errorf("ensure cached image: %w", err)
 	}
 	if err := imageSvc.MaterializeTo(ctx, resolved.Image.ID, fsType, vmRootfsPath); err != nil {

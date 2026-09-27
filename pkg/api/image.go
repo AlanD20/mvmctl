@@ -323,7 +323,7 @@ func (op *Operation) ImagePull(
 	}
 	// Clean up old entry of the same version (existing is already looked up by version+type).
 	if existing != nil && existing.ID != imageItem.ID {
-		removed := op.Services.Image.RemoveImageFiles(existing)
+		removed := op.Services.Image.RemoveImageFiles(ctx, existing)
 		_ = op.Repos.Image.SoftDelete(ctx, existing.ID)
 		if len(removed) > 0 {
 			slog.Info("Cleaned up old image files", "count", len(removed), "type", spec.Type)
@@ -458,7 +458,7 @@ func (op *Operation) ImageImport(
 	}
 	// Clean up old image files of the same version.
 	if existing != nil && existing.Version == imageItem.Version && existing.ID != imageItem.ID {
-		removed := op.Services.Image.RemoveImageFiles(existing)
+		removed := op.Services.Image.RemoveImageFiles(ctx, existing)
 		// Hard-delete when no VMs reference the old image, soft-delete otherwise.
 		vms, vmErr := op.Repos.VM.GetByImageIDs(ctx, []string{existing.ID})
 		if vmErr == nil && len(vms) == 0 {
@@ -510,7 +510,7 @@ func (op *Operation) ImageWarm(
 			Phase: "warm", Status: "running", Message: "Warming images...",
 		})
 	}
-	warmed, err := op.Services.Image.EnsureCached(images)
+	warmed, err := op.Services.Image.EnsureCached(ctx, images)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageWarmFailed, fmt.Sprintf("Warming failed: %v", err), err)
 	}

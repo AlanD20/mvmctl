@@ -413,7 +413,7 @@ Local mirror directory for downloaded assets (default: not set).
 .TP
 .BR MVM_WARM_POOL
 Set to "disk" to use a managed-cache-backed warm pool. Otherwise the pool is
-under /tmp/mvmctl/ready (tmpfs only when /tmp is tmpfs).
+under /tmp/mvmctl-<uid>/ready (tmpfs only when /tmp is tmpfs).
 .TP
 .BR MVM_TEMP_DIR
 Override per-operator temporary work directory and warm-pool location when

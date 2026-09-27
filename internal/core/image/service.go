@@ -82,7 +82,7 @@ func (s *Service) RemoveImage(ctx context.Context, image *model.ImageItem, force
 	}
 
 	// Delete ALL related files from disk
-	removed := s.RemoveImageFiles(image)
+	removed := s.RemoveImageFiles(ctx, image)
 	if len(removed) > 0 {
 		slog.Info("Removed image files", "files", strings.Join(removed, ", "))
 	}
@@ -102,16 +102,16 @@ func (s *Service) RemoveImage(ctx context.Context, image *model.ImageItem, force
 }
 
 // RemoveManyPaths removes files for multiple images from disk. No DB changes.
-func (s *Service) RemoveManyPaths(images []*model.ImageItem) []string {
+func (s *Service) RemoveManyPaths(ctx context.Context, images []*model.ImageItem) []string {
 	var removed []string
 	for _, image := range images {
-		removed = append(removed, s.RemoveImageFiles(image)...)
+		removed = append(removed, s.RemoveImageFiles(ctx, image)...)
 	}
 	return removed
 }
 
 // RemoveImageFiles removes all files for an image from disk. No DB changes.
-func (s *Service) RemoveImageFiles(image *model.ImageItem) []string {
+func (s *Service) RemoveImageFiles(ctx context.Context, image *model.ImageItem) []string {
 	var removed []string
 
 	entries, err := os.ReadDir(infra.GetImagesDir())
@@ -125,12 +125,17 @@ func (s *Service) RemoveImageFiles(image *model.ImageItem) []string {
 		}
 	}
 
-	entries, err = os.ReadDir(infra.GetWarmImagesDir())
+	warmDir, err := infra.GetWarmImagesDir(ctx)
+	if err != nil {
+		slog.Warn("cannot inspect warm-image pool during removal", "error", err)
+		return removed
+	}
+	entries, err = os.ReadDir(warmDir)
 	if err != nil {
 		return removed
 	}
 	for _, entry := range entries {
-		if err := os.Remove(filepath.Join(infra.GetWarmImagesDir(), entry.Name())); err == nil {
+		if err := os.Remove(filepath.Join(warmDir, entry.Name())); err == nil {
 			removed = append(removed, entry.Name())
 		}
 	}
@@ -441,7 +446,11 @@ func (s *Service) ExtractImage(
 // Uses a fallback chain: sendfile(2) → io.Copy in infra.CopyFile().
 // After copy, fdatasync ensures data integrity.
 func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath string) error {
-	cachedPath := filepath.Join(infra.GetWarmImagesDir(), fmt.Sprintf("%s.%s", imageID, fsType))
+	warmDir, err := infra.GetWarmImagesDir(ctx)
+	if err != nil {
+		return errs.WrapMsg(errs.CodeImageError, "resolve warm-image pool", err)
+	}
+	cachedPath := filepath.Join(warmDir, fmt.Sprintf("%s.%s", imageID, fsType))
 	if _, err := os.Stat(cachedPath); os.IsNotExist(err) {
 		return errs.New(errs.CodeImageError, fmt.Sprintf("Image not in cache: %s", imageID))
 	}
@@ -460,10 +469,14 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 }
 
 // EnsureCached ensures images are decompressed to tmpfs cache, creating if needed.
-func (s *Service) EnsureCached(images []*model.ImageItem) ([]string, error) {
+func (s *Service) EnsureCached(ctx context.Context, images []*model.ImageItem) ([]string, error) {
+	warmDir, err := infra.GetWarmImagesDir(ctx)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeImageWarmFailed, "resolve warm-image pool", err)
+	}
 	var results []string
 	for _, image := range images {
-		cachedPath := filepath.Join(infra.GetWarmImagesDir(), fmt.Sprintf("%s.%s", image.ID, image.FSType))
+		cachedPath := filepath.Join(warmDir, fmt.Sprintf("%s.%s", image.ID, image.FSType))
 		lockPath := cachedPath + ".lock"
 
 		release, err := infra.AcquireExclusiveFileLock(lockPath)

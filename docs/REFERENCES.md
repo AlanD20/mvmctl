@@ -865,7 +865,7 @@ The security model applies to the net cloud-init mode only:
 | `MVM_CONFIG_DIR` | Override config directory | `~/.config/mvmctl` |
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) | `WARN` |
 | `MVM_ASSET_MIRROR` | Local mirror directory for downloaded assets | (not set) |
-| `MVM_WARM_POOL` | Warm image pool backend (`disk` for cache-backed; otherwise under `/tmp/mvmctl/ready`, on tmpfs only when `/tmp` is tmpfs) | (not set) |
+| `MVM_WARM_POOL` | Warm image pool backend (`disk` for cache-backed; otherwise under `/tmp/mvmctl-<uid>/ready`, on tmpfs only when `/tmp` is tmpfs) | (not set) |
 | `MVM_ESCALATED` | Set by sudo wrapper to indicate privilege escalation | `1` |
 | `MVM_TEMP_DIR` | Override the per-operator temporary work directory and, when set, the warm-pool location | Managed cache `tmp/` (normally `~/.cache/mvmctl/tmp`) |
 | `MVM_SUDO_RESTART` | Set internally when re-running with sudo for host init | (not set) |

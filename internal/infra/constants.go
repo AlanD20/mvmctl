@@ -726,29 +726,6 @@ func GetSnapshotDir(id string) string {
 	return path
 }
 
-func GetWarmImagesDir() string {
-	pool, ok := EnvGet("WARM_POOL")
-	if ok && pool == "disk" {
-		path := filepath.Join(GetImagesDir(), "ready")
-		if err := ensureDirAndChown(path); err != nil {
-			slog.Warn("failed to create warm image directory", "path", path, "error", err)
-		}
-		return path
-	}
-	// Keep the warm pool on its existing temporary filesystem by default.
-	// Moving general temp work under the managed cache must not materialize
-	// whole warm images on persistent storage. An explicit TEMP_DIR override
-	// still selects a different warm-pool location as before.
-	path := filepath.Join("/tmp", ProjectName, "ready")
-	if override, ok := EnvGet("TEMP_DIR"); ok && override != "" {
-		path = filepath.Join(GetTempDir(), "ready")
-	}
-	if err := ensureDirAndChown(path); err != nil {
-		slog.Warn("failed to create warm image directory", "path", path, "error", err)
-	}
-	return path
-}
-
 func GetFakerootStateDir() string {
 	path := filepath.Join(GetTempDir(), "fakeroot")
 	if err := ensureDirAndChown(path); err != nil {

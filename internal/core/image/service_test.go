@@ -101,7 +101,7 @@ func concurrentEnsureCached(t *testing.T, s *Service, image *model.ImageItem, wo
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			paths, err := s.EnsureCached([]*model.ImageItem{image})
+			paths, err := s.EnsureCached(context.Background(), []*model.ImageItem{image})
 			results <- result{paths: paths, err: err}
 		}()
 	}

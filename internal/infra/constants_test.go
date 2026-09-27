@@ -1,6 +1,8 @@
 package infra_test
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,13 +35,18 @@ func TestGetWarmImagesDirKeepsTemporaryBackend(t *testing.T) {
 	t.Setenv(infra.EnvKey("WARM_POOL"), "")
 	t.Setenv(infra.EnvKey("TEMP_DIR"), "")
 
-	// The warm pool is deliberately separate from GetTempDir's managed-cache
-	// default, so warming an image does not consume another image-sized cache copy.
-	assert.Equal(t, filepath.Join("/tmp", infra.ProjectName, "ready"), infra.GetWarmImagesDir())
+	// The warm pool remains on the temporary filesystem but is scoped by the
+	// effective operator UID, so a second enrolled operator has a distinct path.
+	want := filepath.Join("/tmp", fmt.Sprintf("%s-%d", infra.ProjectName, os.Getuid()), "ready")
+	got, err := infra.GetWarmImagesDir(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
 
 	override := filepath.Join(t.TempDir(), "scratch")
 	t.Setenv(infra.EnvKey("TEMP_DIR"), override)
-	assert.Equal(t, filepath.Join(override, "ready"), infra.GetWarmImagesDir())
+	got, err = infra.GetWarmImagesDir(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(override, "ready"), got)
 }
 
 // --- GetDefault ---
