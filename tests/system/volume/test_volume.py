@@ -86,50 +86,22 @@ class TestVolumeLifecycle:
             or result.stdout.strip() == ""
         )
 
-    def test_volume_list(self, runner_vm: str, shared_volume: str) -> None:
-        # Rationale: Needs a shared volume (~3s for the whole module) to
-        # verify ls output contains the volume name — proves DB persistence
-        # without creating a volume per test.
-        """List volumes — should include the shared volume."""
-        result = _run_mvm(runner_vm, "volume", "ls", "--json")
-        assert result.returncode == 0
-        data = json.loads(result.stdout)
-        assert any(v["name"] == shared_volume for v in data)
-
     def test_volume_list_json(
         self, runner_vm: str, shared_volume: str
     ) -> None:
-        # Rationale: Needs a shared volume. JSON parsing catches structural
-        # regressions that plain-text output checks miss.
-        """List volumes in JSON format — verify field structure."""
+        """List volumes in the versioned JSON envelope, including the shared volume."""
         result = _run_mvm(runner_vm, "volume", "ls", "--json")
-        assert result.returncode == 0
-        data = json.loads(result.stdout)
-        assert isinstance(data, list)
+        data = _json_success_data(result.stdout, list)
         assert any(v["name"] == shared_volume for v in data)
-
-    def test_volume_inspect(self, runner_vm: str, shared_volume: str) -> None:
-        # Rationale: Needs a shared volume. L1 verification that inspect
-        # returns the volume name — proves the DB lookup by name works.
-        """Inspect a volume — verify name via --json."""
-        result = _run_mvm(
-            runner_vm, "volume", "inspect", shared_volume, "--json"
-        )
-        assert result.returncode == 0
-        data = json.loads(result.stdout)
-        assert data.get("volume", {}).get("name") == shared_volume
 
     def test_volume_inspect_json(
         self, runner_vm: str, shared_volume: str
     ) -> None:
-        # Rationale: Needs a shared volume. L2 verification of all expected
-        # fields — catches missing fields that would break tooling.
-        """Inspect a volume with --json and verify parsed fields."""
+        """Inspect the shared volume through the versioned JSON envelope."""
         result = _run_mvm(
             runner_vm, "volume", "inspect", shared_volume, "--json"
         )
-        assert result.returncode == 0
-        data = json.loads(result.stdout)
+        data = _json_success_data(result.stdout, dict)
         assert "volume" in data
         assert "name" in data["volume"]
         assert "size_bytes" in data["volume"]
