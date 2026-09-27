@@ -169,3 +169,109 @@ def test_cross_network_traffic_policy_exact_allow_and_revoke(runner_vm: str) -> 
             _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
         for name in reversed(created_networks):
             _run_mvm(runner_vm, "network", "rm", name, "--force", timeout=60)
+
+
+def test_same_network_traffic_policy_exact_allow_and_revoke(runner_vm: str) -> None:
+    """A network-source grant opens only its port between peers on one bridge."""
+    suffix = uuid.uuid4().hex[:7]
+    network = f"pol-same-{suffix}"
+    source_vm, destination_vm = f"pol-same-src-{suffix}", f"pol-same-dst-{suffix}"
+    created_networks: list[str] = []
+    created_vms: list[str] = []
+    policy_id: str | None = None
+
+    try:
+        ensure_vm_deps(runner_vm)
+        _run_mvm(
+            runner_vm, "network", "create", network, "--subnet", _unique_subnet(network)
+        )
+        created_networks.append(network)
+        for vm_name in (source_vm, destination_vm):
+            _run_mvm(
+                runner_vm,
+                "vm",
+                "create",
+                vm_name,
+                "--image",
+                "alpine:3.23",
+                "--network",
+                network,
+                "--cloud-init-mode",
+                "inject",
+                "--no-pci",
+                "--disk-size",
+                "512M",
+                "--vcpu",
+                "1",
+                "--mem",
+                "256M",
+                timeout=180,
+            )
+            created_vms.append(vm_name)
+
+        destination = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", destination_vm, "--json").stdout, dict
+        )
+        destination_ip = destination["networking"]["ipv4"]
+        assert destination_ip
+        _run_mvm(
+            runner_vm,
+            "exec",
+            destination_vm,
+            "--user",
+            "root",
+            "--",
+            "sh -c 'nohup nc -lk -p 8080 -e /bin/cat </dev/null >/tmp/policy-8080.log 2>&1 & "
+            "nohup nc -lk -p 8081 -e /bin/cat </dev/null >/tmp/policy-8081.log 2>&1 &'",
+            timeout=15,
+        )
+        assert _guest_probe(runner_vm, destination_vm, destination_ip, 8080), (
+            "destination listener is not reachable on its managed IPv4:8080"
+        )
+        assert _guest_probe(runner_vm, destination_vm, destination_ip, 8081), (
+            "destination listener is not reachable on its managed IPv4:8081"
+        )
+        assert not _guest_probe(runner_vm, source_vm, destination_ip, 8080)
+
+        created = _json_success_data(
+            _run_mvm(
+                runner_vm,
+                "policy",
+                "traffic",
+                "create",
+                "--from-network",
+                network,
+                "--to-vm",
+                destination_vm,
+                "--protocol",
+                "tcp",
+                "--port",
+                "8080",
+                "--json",
+            ).stdout,
+            dict,
+        )
+        policy_id = created["id"]
+        assert _guest_probe(runner_vm, source_vm, destination_ip, 8080)
+        assert not _guest_probe(runner_vm, source_vm, destination_ip, 8081)
+
+        _run_mvm(
+            runner_vm, "policy", "traffic", "rm", policy_id, "--from-network", "--force"
+        )
+        policy_id = None
+        assert not _guest_probe(runner_vm, source_vm, destination_ip, 8080)
+    finally:
+        if policy_id is not None:
+            _run_mvm(
+                runner_vm,
+                "policy",
+                "traffic",
+                "rm",
+                policy_id,
+                "--from-network",
+                "--force",
+            )
+        for name in reversed(created_vms):
+            _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
+        for name in reversed(created_networks):
+            _run_mvm(runner_vm, "network", "rm", name, "--force", timeout=60)
