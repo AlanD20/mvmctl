@@ -249,7 +249,7 @@ class TestVMCgroupEnvelope:
                 _run_mvm(
                     runner_vm, "vm", "create", vm_name,
                     "--no-network", "--cloud-init-mode", "off", "--skip-deblob", "--no-pci",
-                    "--disk-size", "512M", "--vcpu", "1", "--mem", "256M", "--json",
+                    "--disk-size", "512M", "--vcpu", "1", "--mem", "224M", "--json",
                     timeout=180,
                 ).stdout,
                 list,
@@ -260,7 +260,7 @@ class TestVMCgroupEnvelope:
                 dict,
             )["resources"]["cgroup"]
             assert before["status"] == "enforced"
-            assert before["actual"]["memory_high_bytes"] == 256 * 1024 * 1024
+            assert before["actual"]["memory_high_bytes"] == 224 * 1024 * 1024
             assert before["actual"]["memory_max_unlimited"] is True
             initial_bytes = before["usage"]["memory_bytes"]
             initial_events = _memory_events(runner_vm, created[0]["id"])
@@ -284,7 +284,10 @@ class TestVMCgroupEnvelope:
             assert after["resources"]["cgroup"]["usage"]["memory_bytes"] >= initial_bytes + 96 * 1024 * 1024
             final_events = _memory_events(runner_vm, created[0]["id"])
             assert final_events["high"] > initial_events["high"], (
-                f"guest allocation did not trigger cgroup pressure: {initial_events} -> {final_events}"
+                "guest allocation did not trigger cgroup pressure: "
+                f"usage {initial_bytes} -> {after['resources']['cgroup']['usage']['memory_bytes']} bytes, "
+                f"memory.high={before['actual']['memory_high_bytes']}, "
+                f"events {initial_events} -> {final_events}"
             )
             assert final_events["oom_kill"] == initial_events["oom_kill"]
             assert _run_mvm(runner_vm, "exec", vm_name, "--", "uname", "-s").stdout.strip() == "Linux"
