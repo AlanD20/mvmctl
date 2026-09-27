@@ -66,35 +66,25 @@ class TestBinaryEdges:
     assets. Present-release removal is exercised separately below.
     """
 
-    def test_bin_ls_remote_works(self, runner_vm):
-        """Remote binary listing should work in Tier 2 environment."""
-        result = _run_mvm(runner_vm, "bin", "ls", "--remote", "--json", check=False)
-        assert result.returncode == 0, (
-            f"Remote listing failed — Tier 2 environment must have network access: "
-            f"{result.stderr}"
+    def test_bin_ls_remote_limit_applies_to_json(self, runner_vm: str) -> None:
+        """Remote release metadata is structured, and --limit bounds the JSON data."""
+        default = _json_success_data(
+            _run_mvm(runner_vm, "bin", "ls", "--remote", "--json", timeout=60).stdout,
+            list,
         )
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert len(data) > 0, "Expected at least one remote binary"
-
-    def test_bin_ls_remote_with_limit(self, runner_vm):
-        """Remote listing with --limit flag should work (limit is display-only in JSON)."""
-        result = _run_mvm(
-            runner_vm,
-            "bin",
-            "ls",
-            "--remote",
-            "--limit",
-            "3",
-            "--json",
-            check=False,
+        assert len(default) > 3, "remote source must expose enough releases to prove --limit"
+        limited = _json_success_data(
+            _run_mvm(
+                runner_vm, "bin", "ls", "--remote", "--limit", "3", "--json", timeout=60,
+            ).stdout,
+            list,
         )
-        assert result.returncode == 0, (
-            f"Remote listing with --limit failed — Tier 2 environment must have "
-            f"network access: {result.stderr}"
-        )
-        data = json.loads(result.stdout)
-        assert isinstance(data, list), f"Expected list, got {type(data)}"
-        assert len(data) >= 1, f"Expected at least one binary, got {len(data)}"
+        assert len(limited) == 3
+        assert [item["version"] for item in limited] == [item["version"] for item in default[:3]]
+        for item in limited:
+            assert re.fullmatch(r"\d+\.\d+\.\d+", item["version"])
+            assert item["type"] == "bin"
+            assert item["name"] == "firecracker"
 
     def test_bin_pull_invalid_version_rejected_before_effects(self, runner_vm: str) -> None:
         """Malformed exact selectors fail locally without contacting the asset source."""
