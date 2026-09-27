@@ -356,14 +356,8 @@ def create_vm_core(
 
     subnet = _unique_subnet(net_name)
 
-    # Clean stale bridges inside test VM
-    _guest_run(rv,
-             'for br in $(ip -o link show 2>/dev/null | grep -o "mvm-[^:@]*"); '
-             'do ip link delete "$br" 2>/dev/null; done',
-             timeout=10, check=False)
-
     _run_mvm(rv, "network", "create", net_name, "--subnet", subnet,
-             "--non-interactive", timeout=30)
+             timeout=30)
 
     cmd_args: list[str] = [
         "vm", "create", vm_name, "--image", image,
@@ -457,14 +451,14 @@ def module_network(runner_vm) -> Generator[str, None, None]:
     name = f"sys-modnet-{uuid.uuid4().hex[:6]}"
     subnet = _unique_subnet(name)
     _run_mvm(runner_vm, "network", "create", name, "--subnet", subnet,
-             "--non-interactive", timeout=30)
+             timeout=30)
     try:
         yield name
     finally:
         _run_mvm(runner_vm, "network", "rm", name, check=False)
         result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         if result.returncode == 0:
-            nets = json.loads(result.stdout)
+            nets = _json_success_data(result.stdout, list)
             if not any(n.get("is_default") for n in nets) and nets:
                 _run_mvm(runner_vm, "network", "default", nets[0]["name"],
                          check=False)
@@ -477,14 +471,14 @@ def created_network(
     """Create a network inside the test VM and guarantee cleanup."""
     subnet = _unique_subnet(unique_network_name)
     _run_mvm(runner_vm, "network", "create", unique_network_name, "--subnet",
-             subnet, "--non-interactive", timeout=30)
+             subnet, timeout=30)
     try:
         yield unique_network_name
     finally:
         _run_mvm(runner_vm, "network", "rm", unique_network_name, check=False)
         result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         if result.returncode == 0:
-            nets = json.loads(result.stdout)
+            nets = _json_success_data(result.stdout, list)
             if not any(n.get("is_default") for n in nets) and nets:
                 _run_mvm(runner_vm, "network", "default", nets[0]["name"],
                          check=False)

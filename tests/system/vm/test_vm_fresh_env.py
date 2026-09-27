@@ -219,7 +219,6 @@ class TestFreshEnvVM:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         _run_mvm(
             runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
@@ -308,7 +307,6 @@ class TestFreshEnvVM:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         _run_mvm(
             runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
@@ -398,7 +396,6 @@ class TestFreshEnvVM:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         _run_mvm(
             runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
@@ -491,7 +488,6 @@ class TestFreshEnvVM:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         _run_mvm(
             runner_vm, "key", "create", key_name, "--algorithm", "ed25519"

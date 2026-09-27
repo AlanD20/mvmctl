@@ -1307,7 +1307,6 @@ class TestImageImportCreateVM:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             assert result.returncode == 0, (
                 f"Network create failed: {result.stderr}"
@@ -1423,7 +1422,6 @@ class TestImageImportCreateVM:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             assert result.returncode == 0, (
                 f"Network create failed: {result.stderr}"

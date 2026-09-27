@@ -501,7 +501,6 @@ class TestVolumeHotplug:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -707,7 +706,6 @@ class TestVolumeHotplugVersionGate:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
             _run_mvm(
@@ -791,7 +789,6 @@ class TestVolumeHotplugVersionGate:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,

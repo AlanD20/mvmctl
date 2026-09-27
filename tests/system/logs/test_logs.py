@@ -43,7 +43,6 @@ def logs_vm(runner_vm: str) -> Generator[dict[str, Any], None, None]:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
 
         _run_mvm(

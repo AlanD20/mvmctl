@@ -166,7 +166,6 @@ class TestConsoleOnStoppedVM:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
 
             _run_mvm(

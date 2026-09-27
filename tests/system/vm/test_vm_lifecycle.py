@@ -104,7 +104,6 @@ class TestVMAdvancedCreateFlags:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             # Generate a temp SSH key inside the test VM and register it
@@ -162,7 +161,6 @@ class TestVMAdvancedCreateFlags:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -214,7 +212,6 @@ class TestVMAdvancedCreateFlags:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -266,7 +263,6 @@ class TestVMAdvancedCreateFlags:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             # --skip-cleanup triggers typer.confirm(), so we pipe "y" to stdin.
@@ -315,7 +311,6 @@ class TestVMAdvancedCreateFlags:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -544,7 +539,6 @@ def config_options_network(runner_vm) -> Generator[str, None, None]:
         name,
         "--subnet",
         _unique_subnet(name),
-        "--non-interactive",
     )
     try:
         yield name
@@ -1404,7 +1398,6 @@ class TestVMStateTransitions:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -1454,7 +1447,6 @@ class TestVMStateTransitions:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -1499,7 +1491,6 @@ class TestVMStateTransitions:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -1556,7 +1547,6 @@ class TestVMStateTransitions:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -1601,7 +1591,6 @@ class TestVMStateTransitions:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -1646,7 +1635,6 @@ class TestVMStateTransitions:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -1684,7 +1672,6 @@ class TestVMStateTransitions:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         vm_name = unique_vm_name
         try:
@@ -1742,7 +1729,6 @@ class TestVMStateTransitions:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             start = time.monotonic()
             _run_mvm(
@@ -1793,7 +1779,6 @@ class TestVMStateTransitions:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -1860,7 +1845,6 @@ class TestVMStateTransitions:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             ensure_vm_deps(runner_vm)
             _run_mvm(
@@ -1976,7 +1960,6 @@ class TestVMCloudInitModes:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             ensure_vm_deps(runner_vm)
             _run_mvm(
@@ -2013,7 +1996,6 @@ class TestVMCloudInitModes:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             ensure_vm_deps(runner_vm)
             _run_mvm(
@@ -2050,7 +2032,6 @@ class TestVMCloudInitModes:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             ensure_vm_deps(runner_vm)
             _run_mvm(
@@ -2103,7 +2084,6 @@ class TestVMNocloudNetPort:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             ensure_vm_deps(runner_vm)
             _run_mvm(
@@ -2157,7 +2137,6 @@ class TestVMDestructiveRmMultiple:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             ensure_vm_deps(runner_vm)
             _run_mvm(
@@ -2258,7 +2237,6 @@ class TestVMNetworkIntegration:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             result = _run_mvm(
@@ -2295,7 +2273,6 @@ class TestVMNetworkIntegration:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             result = _run_mvm(
@@ -2332,7 +2309,6 @@ class TestVMNetworkIntegration:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         custom_mac = "aa:bb:cc:dd:ee:ff"
         try:
@@ -2423,7 +2399,6 @@ class TestVMCloudInit:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         user_data_path = f"/tmp/user-data-{uuid.uuid4().hex[:8]}.cfg"
         _guest_run(runner_vm,
@@ -2469,7 +2444,6 @@ class TestVMCloudInit:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -2510,7 +2484,6 @@ class TestVMCloudInit:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -2552,7 +2525,6 @@ class TestVMCloudInit:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -2599,7 +2571,6 @@ class TestVMCloudInit:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         key_name = f"sys-outcome-key-{uuid.uuid4().hex[:8]}"
         user_data_path = f"/tmp/user-data-{uuid.uuid4().hex[:8]}"
@@ -2702,7 +2673,6 @@ class TestVMVolumeIntegration:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         vol_name = f"sys-vol-vm-{unique_key_name}"
         key_name = f"sys-volvm-key-{unique_key_name}"
@@ -2759,7 +2729,6 @@ class TestVMVolumeIntegration:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         vol_name = f"sys-vol-ad-{unique_key_name}"
         key_name = f"sys-volad-key-{unique_key_name}"
@@ -2829,7 +2798,6 @@ class TestVMVolumeIntegration:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         vol_name = f"sys-vol-run-{unique_key_name}"
         key_name = f"sys-volrun-key-{unique_key_name}"
@@ -2890,7 +2858,6 @@ class TestVMVolumeIntegration:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         vol_name = f"sys-vol-det-{unique_key_name}"
         key_name = f"sys-voldet-key-{unique_key_name}"
@@ -2956,7 +2923,6 @@ class TestVMVolumeIntegration:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         vol_name = f"sys-vol-prefix-{uuid.uuid4().hex[:6]}"
         key_name = f"sys-volpref-key-{unique_key_name}"
@@ -3017,7 +2983,6 @@ class TestVMVolumeIntegration:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         vol_name = f"sys-vol-rm-{uuid.uuid4().hex[:6]}"
         key_name = f"sys-volrm-key-{unique_key_name}"
@@ -3096,7 +3061,6 @@ class TestVMCreateConsole:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -3167,7 +3131,6 @@ class TestVMCreateCount:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         # generate expected names matching GenerateBatchNames:
         # names[0]=baseName, names[i-1]=baseName-i for i=2..count
@@ -3242,7 +3205,6 @@ class TestVMCreateAtomicCount:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         expected_names = [base_name] + [
             f"{base_name}-{i}" for i in range(2, count + 1)
@@ -3420,7 +3382,6 @@ class TestVMCreateForce:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             # --force skips the confirmation prompt that --skip-cleanup
@@ -3485,7 +3446,6 @@ class TestVMCreateVsockPort:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(

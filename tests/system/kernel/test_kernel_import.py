@@ -229,7 +229,6 @@ class TestKernelImportLifecycle:
             network_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
 
         _run_mvm(

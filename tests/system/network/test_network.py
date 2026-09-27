@@ -31,7 +31,13 @@ from typing import Any
 
 import pytest
 
-from tests.system.conftest import _guest_run, _run_mvm, _unique_subnet, ensure_vm_deps
+from tests.system.conftest import (
+    _guest_run,
+    _json_success_data,
+    _run_mvm,
+    _unique_subnet,
+    ensure_vm_deps,
+)
 
 pytestmark = [
     pytest.mark.system,
@@ -526,7 +532,6 @@ class TestNetworkLifecycle:
             net_name,
             "--subnet",
             "not-a-cidr",
-            "--non-interactive",
             check=False,
         )
         assert result.returncode != 0
@@ -556,7 +561,6 @@ class TestNetworkLifecycle:
                 unique_network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             assert result.returncode == 0
             # Verify via JSON listing
@@ -584,7 +588,6 @@ class TestNetworkLifecycle:
                 unique_network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             assert result.returncode == 0
             # Verify via JSON listing
@@ -703,7 +706,6 @@ class TestNetworkLifecycle:
                 "--subnet",
                 subnet,
                 "--default",
-                "--non-interactive",
             )
             assert result.returncode == 0
 
@@ -752,7 +754,6 @@ class TestNetworkLifecycle:
                 net_a,
                 "--subnet",
                 shared_subnet,
-                "--non-interactive",
             )
 
             result = _run_mvm(
@@ -762,7 +763,6 @@ class TestNetworkLifecycle:
                 net_b,
                 "--subnet",
                 shared_subnet,
-                "--non-interactive",
                 check=False,
             )
             assert result.returncode != 0
@@ -794,7 +794,6 @@ class TestNetworkLifecycle:
                 net_name,
                 "--subnet",
                 "10.252.0.0/32",
-                "--non-interactive",
                 check=False,
             )
             assert result.returncode != 0
@@ -822,7 +821,6 @@ class TestNetworkLifecycle:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
 
             result = _run_mvm(
@@ -832,7 +830,6 @@ class TestNetworkLifecycle:
                 net_name,
                 "--subnet",
                 _unique_subnet(f"{net_name}-other"),
-                "--non-interactive",
                 check=False,
             )
             assert result.returncode != 0
@@ -863,7 +860,6 @@ class TestNetworkLifecycle:
                 net_a,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             result = _run_mvm(
                 runner_vm,
@@ -872,7 +868,6 @@ class TestNetworkLifecycle:
                 net_b,
                 "--subnet",
                 subnet,
-                "--non-interactive",
                 check=False,
             )
             assert result.returncode != 0
@@ -897,7 +892,6 @@ class TestNetworkLifecycle:
             unique_network_name,
             "--subnet",
             _unique_subnet(unique_network_name),
-            "--non-interactive",
         )
 
         try:
@@ -932,7 +926,6 @@ class TestNetworkLifecycle:
             name_a,
             "--subnet",
             _unique_subnet(name_a),
-            "--non-interactive",
         )
         _run_mvm(
             runner_vm,
@@ -941,7 +934,6 @@ class TestNetworkLifecycle:
             name_b,
             "--subnet",
             _unique_subnet(name_b),
-            "--non-interactive",
         )
 
         try:
@@ -1002,7 +994,6 @@ class TestNetworkAdvancedCreate:
                 subnet,
                 "--ipv4-gateway",
                 custom_gateway,
-                "--non-interactive",
             )
             assert result.returncode == 0
 
@@ -1040,7 +1031,6 @@ class TestNetworkAdvancedCreate:
                 subnet,
                 "--nat-gateways",
                 default_iface,
-                "--non-interactive",
             )
             assert result.returncode == 0
 
@@ -1075,7 +1065,6 @@ class TestNetworkAdvancedCreate:
             "10.99.99.0/24",
             "--ipv4-gateway",
             "not-an-ip",
-            "--non-interactive",
             check=False,
         )
         assert result.returncode != 0
@@ -1107,7 +1096,6 @@ class TestNetworkSync:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             # Read bridge name from inspect output (authoritative source)
@@ -1161,7 +1149,6 @@ class TestNetworkSync:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             # Read bridge name from inspect output
@@ -1226,7 +1213,6 @@ class TestNetworkSync:
                 net_a,
                 "--subnet",
                 subnet_a,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -1235,7 +1221,6 @@ class TestNetworkSync:
                 net_b,
                 "--subnet",
                 subnet_b,
-                "--non-interactive",
             )
 
             # Baseline: both networks have active firewall rules
@@ -1390,7 +1375,6 @@ class TestNetworkRemoveForce:
                 unique_network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             result = _run_mvm(
@@ -1452,7 +1436,6 @@ class TestNetworkVMDependency:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             ensure_vm_deps(runner_vm)
@@ -1499,7 +1482,6 @@ class TestNetworkVMDependency:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             ensure_vm_deps(runner_vm)
@@ -1576,7 +1558,6 @@ class TestNetworkSyncAfterReboot:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             # Verify bridge exists before removal
@@ -1677,17 +1658,10 @@ class TestNetworkEdgeCases:
         )
         assert result.returncode != 0
 
-    def test_network_create_non_interactive(
+    def test_network_create_without_prompt_flag(
         self, runner_vm, unique_network_name
     ):
-        """``network create`` with --non-interactive flag should succeed.
-
-        Rationale: Without --non-interactive, network create would prompt
-        for confirmation. The --non-interactive flag suppresses this prompt.
-        A regression where --non-interactive is silently ignored would cause
-        automated workflows to hang forever waiting for input.
-        L1 verification: exit 0 and network appears in listing.
-        """
+        """Network creation needs no prompt-suppression flag."""
         net_name = unique_network_name
         subnet = f"10.{abs(hash(net_name)) % 254 + 1}.0.0/24"
         try:
@@ -1698,16 +1672,14 @@ class TestNetworkEdgeCases:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
                 check=False,
             )
             assert result.returncode == 0, (
-                f"network create --non-interactive failed: {result.stderr}"
+                f"network create failed: {result.stderr}"
             )
 
-            # L2: verify the network appears in ls --json
             ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
-            networks = json.loads(ls_result.stdout)
+            networks = _json_success_data(ls_result.stdout, list)
             assert any(n.get("name") == net_name for n in networks), (
                 f"Network '{net_name}' not found in ls --json after create"
             )

@@ -182,7 +182,7 @@ def fenv_vm() -> Generator[tuple[str, str, str], None, None]:
         # Phase 1: Create host infrastructure
         _run_mvm_host(
             "network", "create", net_name,
-            "--subnet", subnet, "--non-interactive",
+            "--subnet", subnet,
         )
         created_network = True
         _run_mvm_host("key", "create", key_name, "--algorithm", "ed25519")
@@ -502,7 +502,7 @@ class TestNestedIsolated:
             create_result = _guest_run(
                 vm_name,
                 f"mvm network create {net_name} "
-                "--subnet 10.200.0.0/24 --non-interactive",
+                "--subnet 10.200.0.0/24",
                 check=False, timeout=120,
             )
             assert create_result.returncode == 0, (
@@ -556,7 +556,7 @@ class TestNestedIsolated:
             _guest_run(
                 vm_name,
                 f"mvm network create {nested_net} "
-                "--subnet 10.199.0.0/24 --non-interactive",
+                "--subnet 10.199.0.0/24",
                 timeout=60,
             )
 

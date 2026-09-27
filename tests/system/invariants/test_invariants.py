@@ -300,7 +300,6 @@ class TestInvariants:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -354,7 +353,6 @@ class TestInvariants:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -408,7 +406,6 @@ class TestInvariants:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -708,7 +705,6 @@ class TestVolumeVMConsistency:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -787,7 +783,6 @@ class TestVolumeVMConsistency:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -854,7 +849,6 @@ class TestVolumeVMConsistency:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             vol_inspect = _run_mvm(
@@ -928,7 +922,6 @@ class TestVolumeVMConsistency:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             result = _run_mvm(
@@ -995,7 +988,6 @@ class TestVolumeVMConsistency:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -1073,7 +1065,6 @@ class TestNetworkVMConsistency:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             _run_mvm(
@@ -1135,7 +1126,6 @@ class TestNetworkVMConsistency:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -1560,7 +1550,6 @@ class TestAtMostOneDefaultNetwork:
                 net_a_name,
                 "--subnet",
                 _unique_subnet(net_a_name),
-                "--non-interactive",
             )
             _run_mvm(runner_vm, "network", "default", net_a_name)
 
@@ -1579,7 +1568,6 @@ class TestAtMostOneDefaultNetwork:
                 net_b_name,
                 "--subnet",
                 _unique_subnet(net_b_name),
-                "--non-interactive",
             )
             _run_mvm(runner_vm, "network", "default", net_b_name)
 

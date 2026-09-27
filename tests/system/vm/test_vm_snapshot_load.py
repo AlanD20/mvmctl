@@ -43,7 +43,6 @@ class TestSnapshotDestroyRestore:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             _run_mvm(
@@ -168,7 +167,6 @@ class TestSnapshotCreateFlags:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -251,7 +249,6 @@ class TestSnapshotCreateFlags:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -350,7 +347,6 @@ class TestSnapshotInspect:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -429,7 +425,6 @@ class TestSnapshotInspect:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -542,7 +537,6 @@ class TestSnapshotRestoreNetwork:
                 original_net,
                 "--subnet",
                 original_subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -551,7 +545,6 @@ class TestSnapshotRestoreNetwork:
                 restore_net,
                 "--subnet",
                 restore_subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -694,7 +687,6 @@ class TestVMSnapshot:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -764,7 +756,6 @@ class TestVMSnapshot:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -853,7 +844,6 @@ class TestVMSnapshot:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,

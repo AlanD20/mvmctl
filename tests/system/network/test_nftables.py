@@ -214,7 +214,6 @@ class TestNFTablesFirewallBackend:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             # Verify network was created
@@ -597,7 +596,6 @@ class TestAtomicRuleSync:
             net_name,
             "--subnet",
             _unique_subnet(net_name),
-            "--non-interactive",
         )
         try:
             _run_mvm(runner_vm, "network", "sync")

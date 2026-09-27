@@ -64,7 +64,6 @@ class TestCpDataSurvivesSnapshotRestore:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
             _run_mvm(runner_vm, "key", "create", key_name, "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
@@ -217,7 +216,7 @@ class TestCpDataSurvivesBaseImageImport:
 
         try:
             # --- 1. Setup ---
-            _run_mvm(runner_vm, "network", "create", network_name, "--subnet", subnet, "--non-interactive")
+            _run_mvm(runner_vm, "network", "create", network_name, "--subnet", subnet)
             _run_mvm(runner_vm, "key", "create", key_name, "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
             _run_mvm(

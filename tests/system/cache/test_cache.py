@@ -717,7 +717,6 @@ class TestCacheEdgeCases:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             ensure_vm_deps(runner_vm)
             _run_mvm(

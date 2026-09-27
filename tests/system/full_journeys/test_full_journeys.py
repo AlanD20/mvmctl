@@ -82,7 +82,6 @@ class TestQuickStartJourney:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
 
         result = _run_mvm(
@@ -136,7 +135,6 @@ class TestNetworkVMJourney:
             unique_network_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         assert result.returncode == 0
 
@@ -204,7 +202,6 @@ class TestKeyVMJourney:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
 
         try:
@@ -250,7 +247,6 @@ class TestVMStateJourney:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
 
         _run_mvm(
@@ -335,7 +331,6 @@ class TestIPJourney:
             unique_network_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
 
         key_name = f"sys-journey-key-{uuid.uuid4().hex[:6]}"
@@ -412,7 +407,6 @@ class TestIPJourney:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
 
         _run_mvm(
@@ -511,7 +505,6 @@ class TestSSHJourney:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         _run_mvm(
             runner_vm,
@@ -590,7 +583,6 @@ class TestMultiKeyJourney:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
 
         try:
@@ -646,7 +638,6 @@ class TestInterVMCommunication:
             unique_network_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         assert result.returncode == 0
 
@@ -741,7 +732,6 @@ class TestCreateWithAllFlags:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         try:
             _run_mvm(
@@ -830,7 +820,6 @@ class TestMultipleVolumes:
                 net_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             _run_mvm(runner_vm, "volume", "create", vol_a, "512M")
@@ -909,7 +898,6 @@ class TestStressCreateDestroy:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
 
         try:
@@ -986,7 +974,6 @@ class TestExportImport:
                 network_name,
                 "--subnet",
                 subnet,
-                "--non-interactive",
             )
 
             _run_mvm(
@@ -1090,7 +1077,6 @@ class TestConcurrentVMCreation:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
 
         def create_vm(name: str, key_name: str) -> Any:

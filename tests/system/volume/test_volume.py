@@ -857,7 +857,6 @@ class TestVolumeAttachDetach:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
 
@@ -948,7 +947,6 @@ class TestVolumeAttachDetach:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
 
@@ -1029,7 +1027,6 @@ class TestVolumeAttachDetach:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
 
@@ -1117,7 +1114,6 @@ class TestVolumeCrossVM:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
 
             ensure_vm_deps(runner_vm)
@@ -1240,7 +1236,6 @@ class TestVolumeRunningVMDependency:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             ensure_vm_deps(runner_vm)
             _run_mvm(
@@ -1331,7 +1326,6 @@ class TestVolumeRunningVMDependency:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             ensure_vm_deps(runner_vm)
             _run_mvm(
@@ -1421,7 +1415,6 @@ class TestVolumeRunningVMDependency:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             ensure_vm_deps(runner_vm)
             _run_mvm(
@@ -1526,7 +1519,6 @@ class TestVolumeNegativeFailure:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,
@@ -1592,7 +1584,6 @@ class TestVolumeNegativeFailure:
                 net_name,
                 "--subnet",
                 _unique_subnet(net_name),
-                "--non-interactive",
             )
             _run_mvm(
                 runner_vm,

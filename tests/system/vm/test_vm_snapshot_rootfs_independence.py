@@ -114,9 +114,9 @@ class TestRootfsIndependence:
 
         try:
             _run_mvm(runner_vm, "network", "create", src_net,
-                     "--subnet", src_subnet, "--non-interactive")
+                     "--subnet", src_subnet)
             _run_mvm(runner_vm, "network", "create", restored_net,
-                     "--subnet", restored_subnet, "--non-interactive")
+                     "--subnet", restored_subnet)
             _run_mvm(runner_vm, "key", "create", key_name,
                      "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
@@ -190,7 +190,7 @@ class TestRootfsIndependence:
 
         try:
             _run_mvm(runner_vm, "network", "create", net_name,
-                     "--subnet", subnet, "--non-interactive")
+                     "--subnet", subnet)
             _run_mvm(runner_vm, "key", "create", key_name,
                      "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
@@ -253,7 +253,7 @@ class TestRootfsIndependence:
 
         try:
             _run_mvm(runner_vm, "network", "create", net_name,
-                     "--subnet", subnet, "--non-interactive")
+                     "--subnet", subnet)
             _run_mvm(runner_vm, "key", "create", key_name,
                      "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
@@ -324,11 +324,11 @@ class TestRootfsIndependence:
 
         try:
             _run_mvm(runner_vm, "network", "create", net_name,
-                     "--subnet", subnet, "--non-interactive")
+                     "--subnet", subnet)
             _run_mvm(runner_vm, "network", "create", net_b,
-                     "--subnet", sub_b, "--non-interactive")
+                     "--subnet", sub_b)
             _run_mvm(runner_vm, "network", "create", net_c,
-                     "--subnet", sub_c, "--non-interactive")
+                     "--subnet", sub_c)
             _run_mvm(runner_vm, "key", "create", key_name,
                      "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
@@ -423,7 +423,7 @@ class TestRootfsIndependence:
 
         try:
             _run_mvm(runner_vm, "network", "create", net_name,
-                     "--subnet", subnet, "--non-interactive")
+                     "--subnet", subnet)
             _run_mvm(runner_vm, "key", "create", key_name,
                      "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
@@ -512,11 +512,11 @@ class TestRootfsIndependence:
 
         try:
             _run_mvm(runner_vm, "network", "create", net_name,
-                     "--subnet", subnet, "--non-interactive")
+                     "--subnet", subnet)
             _run_mvm(runner_vm, "network", "create", net_b,
-                     "--subnet", sub_b, "--non-interactive")
+                     "--subnet", sub_b)
             _run_mvm(runner_vm, "network", "create", net_c,
-                     "--subnet", sub_c, "--non-interactive")
+                     "--subnet", sub_c)
             _run_mvm(runner_vm, "key", "create", key_name,
                      "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)

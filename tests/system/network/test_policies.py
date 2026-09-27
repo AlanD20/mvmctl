@@ -98,7 +98,6 @@ def test_routed_service_access_policy_specification(
                 name,
                 "--subnet",
                 _unique_subnet(name),
-                "--non-interactive",
             )
         for vm_name, net_name in ((destination_vm, destination_net), (other_vm, other_net)):
             _run_mvm(
