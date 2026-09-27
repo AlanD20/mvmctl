@@ -483,8 +483,11 @@ Surviving placeholders or ambiguous evidence remain fail-closed. Root removal no
 and pending desired networks with no root record only after repeated whole-state absence checks: no managed bridge,
 live topology claim, or firewall reference. Missing ownership never authorizes kernel deletion. Cancellation records
 are permanent identity tombstones; retry may acknowledge absence but cannot recreate the same network identity.
-Live L2/Tier 3/system qualification is deferred;
-none of these implementation-only changes is runtime evidence.
+An exact prior-boot live network record can also be removed without bridge recreation: the root service uses current
+boot and host-namespace authority, repeatedly proves the derived bridge and live topology absent, retires only
+matching firewall intent, and moves the unchanged record to a removal receipt. It never uses old ifindices or
+namespace inodes to delete current kernel objects. One named-runner reboot cleanup of two test networks and focused
+cross-network policy QA passed; full reboot, failure-path, Tier 3, and system qualification remain open.
 
 The public relaunch path has a separate, private normal-process `vmRelaunchState`. Start,
 reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,

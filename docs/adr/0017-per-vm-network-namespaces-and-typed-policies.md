@@ -238,6 +238,15 @@ lock, lock UID, store UID, store root, index lock, then lock root in exact rever
 cleanup. Capability releases are pointer-shared, close once, and repeat the first cached cleanup result; cleanup failure
 preserves the primary `DomainError` and adds bounded `cleanup_required` evidence.
 
+Implementation update (2026-09-27): production network authority uses a later strict schema. Creating a managed
+network may rebootstrap exact prior-boot logical intent with a new bridge identity; removal has a separate
+cleanup-only path for an exact old-boot live record. It takes the same ownership-index and network locks, proves the
+current derived bridge absent and any matching topology journal cleaned, retires the old firewall generation under
+current-boot host-namespace authority, rejects remaining endpoint or reservation intent, repeats absence checks,
+and publishes the unchanged record as a removal receipt. The old bridge ifindex and namespace inode are historical
+evidence only. A named-runner post-reboot cleanup of two test networks passed; comprehensive reboot/failure QA remains
+required. This update does not change the older inert-registration foundation described above.
+
 Registration remains deliberately inert: no production constructor calls it, no real Jailer VM-lock lease is
 transferred into it or the topology transaction, and no namespace or link effect consumes the managed-network record.
 The separate topology-preparation foundation exposes topology authority only from its exact committed in-memory state

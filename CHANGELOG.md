@@ -1062,6 +1062,20 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+#### Prior-boot managed-network removal
+
+- `mvm network rm` can now retire an exact root-owned prior-boot live network record without first recreating its
+  bridge. Under the network and firewall locks, it proves the derived bridge absent, admits only matching cleaned
+  topology history, retires the prior-boot firewall generation, rejects remaining endpoints or reservations, and
+  moves the unchanged network record to a removal receipt. Old ifindices and namespace inodes never authorize
+  deletion. The affected Go package and a focused topology-history regression passed in the named runner; an
+  installed candidate then removed two test networks left by a runner reboot. Broader reboot reconciliation and
+  repeated failure-path system qualification remain open.
+- A focused installed-candidate Python case now exercises the typed cross-network TCP traffic policy through real
+  guest connections: deny before grant, allow one destination port, deny the adjacent port, and deny after revoke.
+  The fixed nftables and network JSON cases passed in earlier focused runs; the full policy/system matrix is not yet
+  qualified.
+
 #### LoopMount image inspection
 
 - The fixed filesystem probe now accepts `/usr/sbin/blkid` only when `/usr/bin/blkid` is absent, without consulting
