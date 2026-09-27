@@ -96,41 +96,33 @@ class TestBinaryEdges:
         assert isinstance(data, list), f"Expected list, got {type(data)}"
         assert len(data) >= 1, f"Expected at least one binary, got {len(data)}"
 
-    def test_pull_nonexistent_version_fails(self, runner_vm):
-        """Pulling a nonexistent version via --version should fail gracefully."""
-        result = _run_mvm(
-            runner_vm,
-            "bin",
-            "pull",
-            "firecracker",
-            "--version",
-            "999.999.999",
-            check=False,
-        )
-        assert result.returncode != 0, (
-            f"Expected failure for nonexistent version, "
-            f"got rc={result.returncode}: {result.stdout[:200]}"
-        )
-        combined = (result.stdout + result.stderr).lower()
-        assert "checksum required" in combined or "not found in remote versions" in combined, (
-            f"Expected error about checksum or version not found in output, "
-            f"got: {combined[:300]}"
-        )
+    def test_bin_pull_invalid_version_rejected_before_effects(self, runner_vm: str) -> None:
+        """Malformed exact selectors fail locally without contacting the asset source."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        rejected = _run_mvm(runner_vm, "bin", "pull", "not-a-version", "--json", check=False)
+        assert rejected.returncode != 0
+        envelope = json.loads(rejected.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "error"
+        assert envelope["error"]["code"] == "binary.pull_failed"
+        assert "invalid version spec" in envelope["error"]["message"].lower()
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
-    def test_set_default_nonexistent_binary_fails(self, runner_vm):
-        """Setting default to nonexistent binary should fail."""
-        result = _run_mvm(
-            runner_vm,
-            "bin",
-            "default",
-            "totally-nonexistent-binary",
-            check=False,
+    def test_bin_default_missing_id_rejected_before_effects(self, runner_vm: str) -> None:
+        """A missing binary ID leaves both default projections unchanged."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        rejected = _run_mvm(
+            runner_vm, "bin", "default", "totally-nonexistent-binary", "--json", check=False,
         )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "could be resolved" in combined, (
-            f"Expected 'could be resolved' in output, got: {combined[:300]}"
-        )
+        assert rejected.returncode != 0
+        envelope = json.loads(rejected.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "error"
+        assert envelope["error"]["code"] == "binary.default_set_failed"
+        assert "could be resolved" in envelope["error"]["message"].lower()
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
     def test_bin_rm_removed_version_flag_rejected_before_effects(self, runner_vm: str) -> None:
         """A removed selector cannot alter any trusted release."""
