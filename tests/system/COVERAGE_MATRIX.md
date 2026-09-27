@@ -98,7 +98,11 @@ The cgroup module's envelope/inspection case passed, but its pressure case remai
 allocation did not reach `memory.high`; larger 156/168 MiB attempts lost the guest exec response. Instrumented
 156 MiB readback still found the VMM running, `memory.max=max`, no cgroup high/OOM events, and usage just below
 `memory.high`. This does not prove sustained-pressure survival or a host cgroup kill; the guest/agent EOF needs a
-separate bounded diagnosis.
+separate bounded diagnosis. A later 156 MiB probe made the fill process the preferred guest-OOM victim
+(`oom_score_adj=1000`), yet exec still ended with EOF and the agent did not answer a later probe. Firecracker remained
+running; VM-leaf usage was 232,345,600 bytes below `memory.high=234,881,024`, and `high`, `oom`, and `oom_kill` stayed
+zero. No OOM line appeared in the last 250 boot-log lines. This excludes a VM-leaf cgroup kill in that probe, not guest
+OOM or an agent/relay failure; the pressure case remains unqualified.
 
 The init module initially passed 8/8 but left a default network behind. Removing that network exposed a real
 same-second identity collision: a new network hashed the same name, subnet, and second-precision timestamp to a
@@ -409,7 +413,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 | Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests and a disposable real-kernel namespace probe passed; a two-VM reused-IP installed-candidate journey on a bridge-capable runner remains missing. |
 | Typed `traffic` policy | 🟡 Partial | Installed-candidate same-network and cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. Source-VM, UDP, spoof/reverse/IP-reuse, and reboot recovery remain unqualified. |
 | Typed VM-to-VM `exec` policy | 🟡 Partial | The installed candidate passed the full seven-case exec domain in `mvmctl-030-test`. Its new directional case exercises same-network, cross-network, and networkless placements; denial before grant, exact non-root-user grant, successful command and destination file effect, reverse denial, and denial after revocation. Peer-identity attacks, capacity/deadline/cancellation, audit redaction, and reboot/restore journeys remain unqualified at L2. |
-| Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove the Firecracker process UID differs from root and the operator, and that an unprivileged caller receives `enforced` policy-v2 limits and usage through authenticated root inspection while direct leaf read is denied. One earlier bounded 224 MiB guest/150 MiB tmpfs pass crossed `memory.high` and retained responsiveness, but a later exact-candidate run stayed below `memory.high`; this is not a deterministic pressure gate. Per-VM uniqueness, root-record, pidfd, broader mount/cgroup cleanup, sustained saturation survival, and host-reboot reconciliation binding remain unqualified. |
+| Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove the Firecracker process UID differs from root and the operator, and that an unprivileged caller receives `enforced` policy-v2 limits and usage through authenticated root inspection while direct leaf read is denied. One earlier bounded 224 MiB guest/150 MiB tmpfs pass crossed `memory.high` and retained responsiveness, but later exact-candidate runs stayed below `memory.high`; one 156 MiB attempt lost guest-agent connectivity without VM-leaf high/OOM/kill events. This is not a deterministic pressure gate or a diagnosis of guest failure. Per-VM uniqueness, root-record, pidfd, broader mount/cgroup cleanup, sustained saturation survival, and host-reboot reconciliation binding remain unqualified. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
 Specific legacy conflicts that must be rewritten before release:
