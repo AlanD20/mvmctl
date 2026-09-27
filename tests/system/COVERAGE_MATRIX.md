@@ -56,6 +56,14 @@ With `7ac34d78`'s function-scoped exact-network cleanup, all eight init cases co
 outcomes; the runner network inventory was empty afterward. This is a focused fixed-candidate gate, not clean
 current-HEAD Go CI or full release qualification.
 
+At clean commit `15611a9a`, pinned Go 1.26.3 tidy/no tracked diff, gofmt, golines, agent generation/no tracked
+diff, full vet, the selected unprivileged CI tests with coverage, and the complete separate root-effect Jailer
+package passed inside the named runner. An exact-commit release build (SHA-256
+`bd1096b4dd979dfef96f4b2d587fac5539b94fa177ac899bffb1ab1a1731a1ba`) was installed only there; the
+installed checksum matched. Network/nftables/traffic-policy plus self-cleaning init then passed 56/56 from that
+same clean source with a strict zero-skip/deselection report and empty VM, volume, network, and traffic-policy
+inventories. GitHub CI, the other Python domains, memory saturation, host reboot, and Tier 3 remain open.
+
 **Runner evidence (2026-09-27):** In the named `mvmctl-030-test` runner, pinned Go 1.26.3 passed the complete
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,

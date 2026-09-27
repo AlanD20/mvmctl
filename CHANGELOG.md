@@ -1095,7 +1095,9 @@ composition is described above; the current incomplete-work inventory is under *
   subnet within one timestamp second cannot reuse a root-retired identity. Root removal receipts remain fail-closed.
   A real network case failed on the prior installed candidate and passed on the scoped fixed candidate in the
   disposable runner; the init system cases now clean their own networks and passed 8/8 with an empty network
-  inventory. Clean current-HEAD CI and broader release QA remain open.
+  inventory. Clean source `15611a9a` subsequently passed the pinned local Go CI sequence and separate root-effect
+  Jailer package; its checksum-matched installed build passed the combined network/traffic-policy/init cases 56/56
+  with empty resource inventories. GitHub CI and the other release QA domains remain open.
 
 #### Volume lifecycle safety
 
