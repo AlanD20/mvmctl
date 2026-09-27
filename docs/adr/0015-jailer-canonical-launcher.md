@@ -2,8 +2,11 @@
 
 **Status:** Active
 **Date:** 2026-08-09
-**Last Updated:** 2026-08-30 (recoverable two-phase launch and mandatory network namespace)
+**Last Updated:** 2026-09-27 (memory-policy supersession and current namespace handoff)
 **See also:** [Project Hosting with MicroVMs](../roadmaps/TENANT_MICROVM.md), [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md), [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
+
+The finite per-VM memory maximum originally described here is superseded by
+[ADR-0019](0019-pressure-only-vm-memory-control.md). The canonical-Jailer decision remains active.
 
 ## Context
 
@@ -27,9 +30,10 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 - Jailer never uses `--daemonize` or `--new-pid-ns`. The receiver-owned PID and pidfd must continue to identify the
   same task through Jailer and Firecracker `exec`, while serial-console standard descriptors remain attached. The
   pidfd reports task exit, not `exec`; the receiver uses bounded `/proc/<pid>/exe` observation while retaining the
-  original pidfd. The separately designed mandatory per-VM network namespace is joined through Jailer's fixed
-  `--netns` argument only after the complete firewall generation and down-link topology are applied and verified;
-  concrete handoff and lifecycle integration remain pending.
+  original pidfd. The mandatory per-VM network namespace is prepared through retained root authority; the blocked
+  child joins its pinned namespace before executing Jailer and passes that namespace through Jailer's fixed `--netns`
+  argument. Managed topology and firewall activation must complete before the child is released. Networked installed-
+  candidate qualification remains pending.
 - Before executing Jailer, root proves the fixed per-VM destination absent. It may remove only an exactly admitted,
   non-mounted stale tree after process absence is proved; ambiguous, mounted, replaced, or unexpected state fails
   unavailable. Jailer must freshly create the destination whose final root and copied executable are activated.
@@ -49,9 +53,11 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 - Existing host paths in Firecracker configuration must be translated into jail-visible paths while host controllers retain corresponding socket and artifact locations.
 - Console, vsock, snapshots, hotplug volumes, PID handling, and partial-failure cleanup require full parity testing.
 - Jailer adds fixed launch overhead and depends on the number of host mount points; benchmarks must track the regression budget.
-- The initial memory maximum is guest-visible RAM plus a configurable 128 MiB VMM headroom; versioned L2 measurements must validate or revise that conservative default.
-- Mandatory per-VM network namespace isolation is the accepted v0.3 target, but the concrete root-side namespace,
-  Jailer `--netns` handoff, TAP/link activation, reconciliation, and qualification remain release blockers.
+- Under ADR-0019, `memory.high` is guest-visible RAM plus configurable VMM headroom (128 MiB by default) and the
+  per-VM `memory.max` is `max`. This pressure-only policy is not a strict host-memory ceiling; sustained saturation
+  and host/ancestor OOM behavior still need runtime qualification.
+- The root-side namespace and Jailer handoff have source implementation, but managed-network lifecycle,
+  firewall/topology reconciliation, and bridge-capable installed-candidate system qualification remain release gates.
 - Release pairs are reinstalled into the trusted store by `mvm bin pull`; hosts without cgroup v2 and the CPU, memory, and PID controllers cannot launch VMs.
 
 ## Related Decisions
