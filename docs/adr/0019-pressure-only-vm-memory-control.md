@@ -32,5 +32,7 @@ incident is reproduced, diagnosed, or proven fixed merely because this policy ch
 
 The v0.3.0 policy-v2 implementation and root-brokered inspection are in source. Focused installed-candidate Python
 cases in `mvmctl-030-test` observed unlimited VM-leaf `memory.max`, charged a bounded guest tmpfs allocation, and
-retained guest responsiveness. Those cases do not establish sustained saturation survival, diagnose the original
-reported kill, or measure ancestor/host OOM safety. Those remain release qualification work.
+retained guest responsiveness. The strengthened cgroup case also observed actual `memory.high` events and no increase
+in the VM leaf's `oom_kill` counter during that bounded allocation. Those cases do not establish sustained saturation
+survival, diagnose the original reported kill, or measure ancestor/host OOM safety. Those remain release qualification
+work.

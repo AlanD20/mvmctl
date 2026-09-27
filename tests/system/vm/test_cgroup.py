@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any, Iterator
 import pytest
 
 from tests.system.conftest import (
+    _guest_run,
     _json_success_data,
     _parse_vm_list,
     _run_mvm,
@@ -132,6 +134,15 @@ def _vm_entry(runner_vm: str, vm_name: str) -> dict[str, Any] | None:
     return next((entry for entry in entries if entry.get("name") == vm_name), None)
 
 
+def _memory_events(runner_vm: str, vm_id: str) -> dict[str, int]:
+    """Read kernel pressure/OOM counters for the test VM's protected leaf."""
+    path = f"/sys/fs/cgroup/mvmctl/{vm_id}/memory.events"
+    result = _guest_run(runner_vm, f"sudo -n cat {shlex.quote(path)}")
+    events = dict(line.split() for line in result.stdout.splitlines())
+    assert "high" in events and "oom_kill" in events, events
+    return {key: int(value) for key, value in events.items()}
+
+
 class TestVMCgroupEnvelope:
     def test_operator_inspects_protected_pressure_only_envelope(
         self,
@@ -229,7 +240,7 @@ class TestVMCgroupEnvelope:
         runner_vm: str,
         cgroup_config_overrides: None,
     ) -> None:
-        """A charged guest allocation must leave the pressure-only VM responsive."""
+        """A charged guest allocation must trigger pressure without killing the VMM."""
         vm_name = f"sys-pressure-{uuid.uuid4().hex[:8]}"
         ensure_vm_deps(runner_vm)
         _run_mvm(runner_vm, "config", "set", "defaults.vm", "cgroup_vmm_headroom_mib", "0")
@@ -252,6 +263,7 @@ class TestVMCgroupEnvelope:
             assert before["actual"]["memory_high_bytes"] == 256 * 1024 * 1024
             assert before["actual"]["memory_max_unlimited"] is True
             initial_bytes = before["usage"]["memory_bytes"]
+            initial_events = _memory_events(runner_vm, created[0]["id"])
 
             _run_mvm(runner_vm, "exec", vm_name, "--", "mkdir", "-p", "/mnt/mvm-pressure")
             _run_mvm(
@@ -270,6 +282,11 @@ class TestVMCgroupEnvelope:
             assert after["vm"]["status"] == "running"
             assert after["resources"]["cgroup"]["status"] == "enforced"
             assert after["resources"]["cgroup"]["usage"]["memory_bytes"] >= initial_bytes + 96 * 1024 * 1024
+            final_events = _memory_events(runner_vm, created[0]["id"])
+            assert final_events["high"] > initial_events["high"], (
+                f"guest allocation did not trigger cgroup pressure: {initial_events} -> {final_events}"
+            )
+            assert final_events["oom_kill"] == initial_events["oom_kill"]
             assert _run_mvm(runner_vm, "exec", vm_name, "--", "uname", "-s").stdout.strip() == "Linux"
         finally:
             try:

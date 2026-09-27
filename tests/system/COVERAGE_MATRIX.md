@@ -63,9 +63,10 @@ VM-reboot results, not host-reboot reconciliation, the complete networkless Jail
 **Current cgroup checkpoint (2026-09-27):** The installed `0.3.0-rc.exec-port` candidate passed the complete
 two-case `vm/test_cgroup.py` module in the named runner. Its schema-1 report recorded two collected/passed and
 zero failures, errors, skips, or deselections. The cases checked root-protected pressure-only controls and
-guest responsiveness after a 150 MiB tmpfs allocation; independent readback found no nested VM and the original
-128 MiB VMM headroom restored. This does not prove sustained guest-memory saturation, absence of host OOM under
-system-wide pressure, or host swap reclamation.
+guest responsiveness after a 150 MiB tmpfs allocation. A strengthened same-owner case then passed 2/2 again while
+proving actual `memory.high` events increased and leaf `oom_kill` did not. Independent readback found no nested VM
+and the original 128 MiB VMM headroom restored. This does not prove sustained guest-memory saturation, absence of
+host OOM under system-wide pressure, or host swap reclamation.
 
 **Focused snapshot checkpoint (2026-09-27):** An installed `0.3.0-rc.snapshot-ref-fix` candidate inside only
 `mvmctl-030-test` passed `TestNetworklessJailerLifecycle::test_networkless_snapshot_restores_independent_data_volume`
