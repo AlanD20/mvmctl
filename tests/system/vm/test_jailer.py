@@ -144,6 +144,7 @@ class TestCanonicalJailerLaunch:
         vm_name = jailed_vm["name"]
         volume_name = f"sys-jailer-vol-{uuid.uuid4().hex[:6]}"
         snapshot_id: str | None = None
+        restored_volume_ids: set[str] = set()
         try:
             source_inspect = _json_success_data(
                 _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
@@ -192,6 +193,16 @@ class TestCanonicalJailerLaunch:
             assert restored.returncode == 0, restored.stderr
             restored_vm = _vm_entry(runner_vm, vm_name)
             assert restored_vm["status"] == "running"
+            restored_volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            attached_copies = [
+                volume for volume in restored_volumes
+                if volume.get("vm_id") == restored_vm["id"]
+            ]
+            assert len(attached_copies) == 1, attached_copies
+            restored_volume_ids.add(attached_copies[0]["id"])
+            assert attached_copies[0]["id"] != attached["volume"]["id"]
             restored_inspect = _json_success_data(
                 _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
                 dict,
@@ -206,12 +217,29 @@ class TestCanonicalJailerLaunch:
                 check=False,
             ).returncode == 0
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            restored_entry = next((vm for vm in listed if vm["name"] == vm_name), None)
+            if restored_entry is not None:
+                volumes = _json_success_data(
+                    _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                )
+                restored_volume_ids.update(
+                    volume["id"] for volume in volumes
+                    if volume.get("vm_id") == restored_entry["id"]
+                    and volume["name"] != volume_name
+                )
+                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force")
+            for volume_id in sorted(restored_volume_ids):
+                _run_mvm(runner_vm, "volume", "rm", volume_id, "--force")
             _run_mvm(runner_vm, "volume", "rm", volume_name, "--force", check=False)
             if snapshot_id:
                 _run_mvm(
                     runner_vm, "snapshot", "rm", snapshot_id, "--force", check=False
                 )
+            remaining = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            assert all(volume["id"] not in restored_volume_ids for volume in remaining)
 
 
 @pytest.fixture
