@@ -48,6 +48,10 @@ the isolation prerequisite after previously pausing it for a separate design dec
   when namespace restoration succeeds. Stopped-tree cleanup treats a durable `detached` journal as completed only
   after proving its jail target absent; it does not reopen a protected volume that `volume rm` may already have
   deleted. Transitional journals still reopen the exact retained backing to revoke access.
+- `volume rm --force` does not hot-unplug a running guest. An attached volume may be removed only after root runtime
+  observation proves its VM stopped; ambiguous or missing VM identity refuses removal. The same stopped-VM requirement
+  applies to growth of an attached volume, without requiring detach. Unattached volumes may grow normally. Root
+  protected-backing reference checks remain the final authority against a concurrent launch or retained writer.
 - Require exclusive write ownership during capture. Refuse capture when another VM has writable access to any
   captured volume; coordinated multi-VM capture is not selected. Host writers and retained aliases must also be excluded.
 - Capture one consistent state across Full memory/vmstate, rootfs, and attached data disks. Root metadata binds the

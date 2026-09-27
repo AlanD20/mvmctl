@@ -184,7 +184,7 @@ func newVolumeRemoveCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "Remove even if attached to VMs")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Remove even if attached to a stopped VM")
 	return cmd
 }
 

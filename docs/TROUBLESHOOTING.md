@@ -496,23 +496,24 @@ libguestfs-make-fixed-appliance ~/.cache/mvmctl/appliance
 **Solution:**
 
 ```bash
-# Detach the volume from the VM first
+# Stop the VM, then detach its volume
+mvm vm stop <vm-identifier>
 mvm volume detach <vm-identifier> <volume-name>
 
 # Then remove the volume
 mvm volume rm <volume-name>
 ```
 
-If the guest has stopped using the volume, `--force` attempts root-brokered drive detach on a running VM before
-removing its protected backing and volume record:
+To remove a volume that remains attached, stop its VM first, then use `--force`:
 
 ```bash
+mvm vm stop <vm-identifier>
 mvm volume rm <volume-name> --force
 ```
 
-`--force` does not unmount a guest filesystem, remove its PCI device in the guest, or prove guest I/O has stopped.
-Firecracker requires guest-side device release before live hot-unplug. Stop the VM first unless you have safely
-released the exact device inside the guest; do not use live force removal on a mounted or busy volume.
+`--force` bypasses the attachment refusal only for a VM authoritatively observed as stopped; it never hot-unplugs
+a running guest. To grow an attached volume, stop the VM but leave the volume attached, then run
+`mvm volume resize <volume-name> <new-size>` before starting the VM again.
 
 ---
 

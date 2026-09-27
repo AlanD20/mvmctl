@@ -947,6 +947,14 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Changed
 
+#### Attached volume removal and growth
+
+- `volume rm --force` now refuses an attached volume unless root runtime observation proves its VM stopped; `--force`
+  does not hot-unplug a running guest. An attached volume may be grown after stopping the VM without detaching it.
+  Root protected-backing reference checks still reject retained writers. The revised volume module passed 37/37
+  installed-candidate system cases inside `mvmctl-030-test`; after a final error-class correction, the two changed
+  cases passed again on the exact final candidate. This is not full release qualification.
+
 #### Private VM control projection
 
 - Removed the fabricated public/persisted `api_socket_path` field from VM create/list output, the VM model, and the
@@ -1081,14 +1089,12 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
-#### Root-owned live volume detach
+#### Volume lifecycle safety
 
-- Fixed running-VM forced volume removal: the root mount worker now unshares filesystem attributes before joining
+- Fixed the underlying root live-detach worker for explicit detach: it unshares filesystem attributes before joining
   the VM's mount namespace, retires that thread after the effect, and unmounts through the pinned volume directory
-  without relying on `/proc` inside the jail. Later VM teardown recognizes the completed detached journal after
-  protected backing deletion, while still refusing a retained jail target. The exact previously failing case passed
-  in `mvmctl-030-test` with the VM still running, the volume removed, and checked VM teardown. Broader hotplug and
-  guest-I/O qualification remains open.
+  without relying on `/proc` inside the jail. Later teardown recognizes a completed detached journal after backing
+  deletion while still refusing a retained jail target. Broader hotplug and guest-I/O qualification remains open.
 
 #### Prior-boot managed-network removal
 

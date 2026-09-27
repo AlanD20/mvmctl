@@ -77,7 +77,7 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 }
 
 // VolumeRemove removes volumes by name or ID.
-// Handles partial-match error reporting, VM volume_ids cleanup, and hot-unplug.
+// Handles partial-match error reporting and stopped-VM volume_ids cleanup.
 func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput, force bool) *errs.BatchResult {
 	if err := input.Validate(); err != nil {
 		inputErr := errs.WrapMsg(errs.CodeVolumeNotFound, err.Error(), err, errs.WithClass(errs.ClassValidation))
@@ -145,28 +145,40 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			})
 			continue
 		}
-		// When force-removing attached volume, clean up the VM's volume_ids reference,
-		// hot-unplug if running, and update config on disk.
-		if vol.Status == model.VolumeStatusAttached && force && vol.VMID != nil {
+		// Force permits removal of an attached volume only after the authoritative
+		// runtime observation proves its VM stopped. It does not hot-unplug a guest.
+		if vol.Status == model.VolumeStatusAttached && force {
+			if vol.VMID == nil || *vol.VMID == "" {
+				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+					Message: "attached volume has no VM identity", Item: vol})
+				continue
+			}
 			vmItem, resolveErr := op.Repos.VM.Get(ctx, *vol.VMID)
 			if resolveErr != nil {
 				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
 					Message: "failed to resolve attached VM", Item: vol, Exception: resolveErr})
 				continue
 			}
-			if vmItem != nil && vmItem.VolumeIDs != nil {
-				if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
-					results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
-						Message: "failed to admit attached VM runtime", Item: vol, Exception: err})
-					continue
-				}
-				if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
-					if err := vm.NewController(vmItem, op.Repos.VM).DetachVolume(ctx, vol.ID); err != nil {
-						results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
-							Message: "root-authoritative volume detach failed", Item: vol, Exception: err})
-						continue
-					}
-				}
+			if vmItem == nil {
+				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+					Message: "attached VM is missing", Item: vol})
+				continue
+			}
+			if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
+				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+					Message: "failed to admit attached VM runtime", Item: vol, Exception: err})
+				continue
+			}
+			if vmItem.Status != model.VMStatusStopped {
+				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+					Message: fmt.Sprintf(
+						"volume '%s' is attached to a VM that is not stopped. Stop the VM before removing it.",
+						vol.Name,
+					),
+					Item: vol})
+				continue
+			}
+			if vmItem.VolumeIDs != nil {
 				// Remove this volume from VM's volume_ids
 				var newIDs []string
 				for _, vid := range vmItem.VolumeIDs {
@@ -248,7 +260,7 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 	}, nil
 }
 
-// VolumeResize resizes a volume.
+// VolumeResize grows an unattached volume or one attached to a stopped VM.
 func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreateInput) error {
 	volInput := inputs.VolumeInput{Identifiers: []string{input.Name}}
 	volumes, err := volInput.ResolveRaw(ctx, op.Repos.Volume)
@@ -259,6 +271,31 @@ func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreate
 	sizeBytes, err := disk.ParseDiskSizeToBytes(input.Size)
 	if err != nil {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid size: %v", err))
+	}
+	if vol.Status == model.VolumeStatusAttached {
+		if vol.VMID == nil || *vol.VMID == "" {
+			return errs.New(errs.CodeVolumeResizeFailed, "attached volume has no VM identity")
+		}
+		vmItem, err := op.Repos.VM.Get(ctx, *vol.VMID)
+		if err != nil {
+			return errs.WrapMsg(errs.CodeVolumeResizeFailed, "failed to resolve attached VM", err)
+		}
+		if vmItem == nil {
+			return errs.New(errs.CodeVolumeResizeFailed, "attached VM is missing")
+		}
+		if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
+			return errs.WrapMsg(errs.CodeVolumeResizeFailed, "failed to admit attached VM runtime", err)
+		}
+		if vmItem.Status != model.VMStatusStopped {
+			return errs.New(
+				errs.CodeVolumeResizeFailed,
+				fmt.Sprintf(
+					"volume '%s' is attached to a VM that is not stopped. Stop the VM before growing it.",
+					vol.Name,
+				),
+				errs.WithClass(errs.ClassValidation),
+			)
+		}
 	}
 	_, err = op.Services.Volume.ResizeDisk(ctx, vol, sizeBytes)
 	if err != nil {

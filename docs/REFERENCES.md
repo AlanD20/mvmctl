@@ -725,10 +725,10 @@ The volume resolver tries selectors in priority order:
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm volume create` | `NAME`, `SIZE` | Create a new persistent raw volume |
-| `mvm volume rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more volumes |
+| `mvm volume rm` | `[SELECTORS]...`, `-f, --force` | Remove volumes; `--force` permits an attachment only when its VM is stopped |
 | `mvm volume ls` | `--json, --long` | List all volumes |
 | `mvm volume inspect` | `SELECTOR`, `--json` | Show detailed information about a volume |
-| `mvm volume resize` | `SELECTOR`, `SIZE` | Resize a volume |
+| `mvm volume resize` | `SELECTOR`, `SIZE` | Grow a volume; an attached VM must be stopped, but detaching is unnecessary |
 | `mvm volume attach` | `VM_SELECTOR`, `VOLUME_SELECTOR` | Attach a volume to a VM |
 | `mvm volume detach` | `VM_SELECTOR`, `VOLUME_SELECTOR` | Detach a volume from a VM |
 

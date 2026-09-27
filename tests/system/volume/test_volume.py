@@ -1372,16 +1372,16 @@ class TestVolumeRunningVMDependency:
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     @pytest.mark.slow
-    def test_delete_volume_used_by_running_vm_with_force_succeeds(
+    def test_force_remove_requires_stopped_vm(
         self,
         runner_vm: str,
         unique_vm_name: str,
         unique_key_name: str,
         unique_network_name: str,
     ) -> None:
-        # Rationale: Needs a real VM with volume (30-120s). Tests --force
-        # allows rm despite running VM.
-        """--force allows deleting a volume even when attached to a running VM."""
+        # Rationale: A running guest may still use its block device. --force
+        # must not hot-unplug or delete its backing before the VM stops.
+        """--force refuses a running VM, then removes its volume after stop."""
         vm_name = unique_vm_name
         key_name = unique_key_name
         vol_name = f"sys-dep-vol-{unique_key_name}"
@@ -1437,7 +1437,22 @@ class TestVolumeRunningVMDependency:
                 "--force",
                 check=False,
             )
-            assert result.returncode == 0
+            assert result.returncode != 0
+            assert "stop the vm" in (result.stdout + result.stderr).lower()
+
+            volumes_while_running = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            assert any(volume["name"] == vol_name for volume in volumes_while_running)
+            vm_while_running = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
+            )
+            assert vm_while_running["vm"]["status"] == "running"
+            assert any(volume["name"] == vol_name for volume in vm_while_running["volumes"])
+
+            _run_mvm(runner_vm, "vm", "stop", vm_name, "--force")
+            _run_mvm(runner_vm, "volume", "rm", vol_name, "--force")
 
             volumes_after = _json_success_data(
                 _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
@@ -1447,7 +1462,7 @@ class TestVolumeRunningVMDependency:
                 _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
                 dict,
             )
-            assert vm_after["vm"]["status"] == "running"
+            assert vm_after["vm"]["status"] == "stopped"
             assert all(volume["name"] != vol_name for volume in vm_after["volumes"])
         finally:
             vm_removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
@@ -1467,16 +1482,16 @@ class TestVolumeRunningVMDependency:
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
     @pytest.mark.slow
-    def test_resize_volume_attached_to_running_vm_succeeds(
+    def test_grow_attached_volume_requires_stopped_vm(
         self,
         runner_vm: str,
         unique_vm_name: str,
         unique_key_name: str,
         unique_network_name: str,
     ) -> None:
-        # Rationale: Needs a real VM with volume (30-120s). Tests resize
-        # while attached to running VM.
-        """Resizing a volume attached to a running VM should succeed."""
+        # Rationale: Growth must not mutate active guest backing, but a stopped
+        # VM may retain the attachment; detach is not required.
+        """Growth refuses a running VM and succeeds while attached after stop."""
         vm_name = unique_vm_name
         key_name = unique_key_name
         vol_name = f"sys-dep-vol-{unique_key_name}"
@@ -1534,7 +1549,20 @@ class TestVolumeRunningVMDependency:
                 "1024M",
                 check=False,
             )
-            assert result.returncode == 0
+            assert result.returncode != 0
+            assert "stop the vm" in (result.stdout + result.stderr).lower()
+
+            vol_list_while_running = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            vol_info_while_running = next(
+                (v for v in vol_list_while_running if v.get("name") == vol_name),
+                {},
+            )
+            assert vol_info_while_running.get("size_bytes") == 512 * 1024 * 1024
+
+            _run_mvm(runner_vm, "vm", "stop", vm_name, "--force")
+            _run_mvm(runner_vm, "volume", "resize", vol_name, "1024M")
 
             vol_list_after = _json_success_data(
                 _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
@@ -1544,6 +1572,12 @@ class TestVolumeRunningVMDependency:
                 {},
             )
             assert vol_info_after.get("size_bytes") == 1024 * 1024 * 1024
+            vm_after = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
+            )
+            assert vm_after["vm"]["status"] == "stopped"
+            assert any(volume["name"] == vol_name for volume in vm_after["volumes"])
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(
