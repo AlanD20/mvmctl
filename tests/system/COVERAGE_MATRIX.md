@@ -21,6 +21,31 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Exact-source local checkpoint (2026-09-27):** The clean `307e09d2` source passed pinned Go 1.26.3 tidy,
+format, generation, vet, the selected unprivileged Go CI suite with coverage, and the complete root-effect Jailer
+package inside only `mvmctl-030-test`. Its release build was installed there through `host install-system`; the
+installed and built SHA-256 both equal `7ad64afbc20b10a8ad7bbd1086ff3793dc2a257f478db9a19e75acecfdb89a3e`.
+Against that installed candidate, the volume module passed 37/37, network/nftables/traffic-policy files passed 47/47,
+and the exec domain passed 7/7, all with strict zero-skip/deselection reports and checked empty resource inventories.
+CLI 24/24, config 12/12, keys 28/28, and internal-service entry points 5/5 also passed. The prior same-version
+installed binary had a different checksum and failed same-network policy; its live ruleset lacked the inet companion.
+The exact-source rebuild passed that case and the full network selection. Do not combine the prior binary's results
+with exact-source evidence.
+
+The old invariants module exposed bare-JSON and vacuous/duplicate cases; a bounded run was interrupted before a large
+image extraction filled the disposable runner. Its ten retained non-destructive cross-domain JSON/default/flag cases
+then passed 10/10 after the test-audit cleanup, while two destructive cache-clean safety cases remain unqualified and
+must move to their owning cache domain. The host module passed 23/27, with four legacy/admin cases still failing for
+unprivileged invocation or obsolete envelope parsing; no host reset/clean success is claimed. These are concrete QA
+blockers, not evidence of a product regression. Full T1/T2, host-reboot and saturation journeys, GitHub CI, dedicated
+clean-host Tier 3, and release approval remain open.
+
+The cgroup module's envelope/inspection case passed, but its pressure case remains unqualified. A 150 MiB guest
+allocation did not reach `memory.high`; larger 156/168 MiB attempts lost the guest exec response. Instrumented
+156 MiB readback still found the VMM running, `memory.max=max`, no cgroup high/OOM events, and usage just below
+`memory.high`. This does not prove sustained-pressure survival or a host cgroup kill; the guest/agent EOF needs a
+separate bounded diagnosis.
+
 **Runner evidence (2026-09-27):** In the named `mvmctl-030-test` runner, pinned Go 1.26.3 passed the complete
 unprivileged CI selection with both coverage profiles and the separate full root-effect Jailer package on clean
 source commit `8e0be4fe`. The installed `mvm 0.3.0-rc.root-ready` candidate passed 58 CLI/config/read-only-host,
