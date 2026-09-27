@@ -1049,6 +1049,11 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Disabled logging no longer forwards the inactive configured log level in the typed launch request. Root admission
+  still rejects unexpected logger intent, and the operator's configured default is preserved. The disabled-logging
+  installed-candidate regression passed in the named runner; the complete resource/configuration group later exposed
+  a separate process-identity startup failure and is not yet qualified.
+
 #### Rapid managed-network recreation
 
 - New managed-network IDs now include a creation nonce before hashing, so removing and recreating the same name and

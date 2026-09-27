@@ -92,7 +92,6 @@ func (s *FirecrackerSpawner) lifecycleRequest() (jailersvc.VMLaunchRequest, erro
 		RootfsCacheType:  config.Drives[0].CacheType,
 		CloudInit:        s.config.CloudInitISOPath != nil && *s.config.CloudInitISOPath != "",
 		Logging:          s.config.EnableLogging,
-		LogLevel:         s.config.LogLevel,
 		Metrics:          s.config.EnableMetrics,
 		Console:          s.config.EnableConsole,
 		CPUConfig:        config.CPUConfig,
@@ -100,6 +99,10 @@ func (s *FirecrackerSpawner) lifecycleRequest() (jailersvc.VMLaunchRequest, erro
 		Volumes:          volumes,
 		PCIEnabled:       s.config.PCIEnabled,
 		NestedVirt:       s.config.NestedVirt,
+	}
+	// Preserve configured defaults locally; the wire carries only active logger intent.
+	if config.Logger != nil {
+		request.LogLevel = config.Logger.Level
 	}
 	if s.config.VsockGuestCID != nil {
 		cid := uint32(*s.config.VsockGuestCID)
