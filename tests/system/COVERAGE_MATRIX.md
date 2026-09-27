@@ -553,10 +553,10 @@ Specific legacy conflicts that must be rewritten before release:
 | Removed pull flags | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryPullAdvanced::test_bin_pull_removed_git_ref_rejected_before_effects` | Installed candidate rejects `--git-ref` before changing the release listing; other retired selector coverage remains open. |
 | `bin pull nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 — no skip |
 | `bin rm <exact-version>` | 🟡 Partial | `bin/test_bin.py` | `TestBinaryPullAndLifecycle::test_bin_pull_and_set_default` | Focused L2: typed root removal of the test-owned present slot and restored projection; referenced-release denial remains unqualified. |
-| Removed rm selectors | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges::test_bin_rm_removed_version_flag_rejected_before_effects` | Installed candidate rejects retired `--version` before any release-list change; other removed selectors remain unqualified. |
+| Removed rm selectors | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges::test_bin_rm_removed_version_flag_rejected_before_effects`, `TestBinaryPullAndLifecycle::test_bin_rm_rejects_binary_id_without_effects` | Installed candidate rejects retired `--version` and binary-ID selectors without changing the release listing. |
 | `bin rm <absent exact-version>` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges::test_bin_rm_exact_absent_version_is_skipped` | Installed candidate returns typed `binary.remove_absent`/`skipped` and leaves the release listing unchanged. |
 | Root reference denial | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryStoppedVMDeletion` | Assert root authority |
-| `bin default <id>` | 🟡 Partial | `bin/test_bin.py` | `TestBinaryPullAndLifecycle::test_bin_pull_and_set_default` | Focused L2: both original pair defaults restored by exact IDs; dedicated legacy case remains unqualified. |
+| `bin default <id>` | 🟡 Partial | `bin/test_bin.py` | `TestBinaryPullAndLifecycle::test_bin_pull_and_set_default` | Focused L2: both original pair defaults restored by exact IDs after fresh install; independent default-selection behavior remains unqualified. |
 | `bin default nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 |
 | Release survives cache clean | ❌ Rewrite | `bin/test_bin.py` | `TestServiceBinarySymlinks` | No legacy symlinks |
 

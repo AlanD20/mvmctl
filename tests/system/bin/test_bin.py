@@ -509,163 +509,18 @@ class TestBinaryPullAndLifecycle:
                 for item in before
             }
 
-    def test_bin_default(self, runner_vm):
-        """Set a cached binary as default using bin default <id>.
-
-        Finds a non-default cached firecracker, sets it as default, then
-        verifies the listing reflects the change. Restores the original
-        default in a finally block.
-        """
-        _ensure_binary(runner_vm)
-
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        binaries = json.loads(result.stdout)
-
-        original_default = next(
-            (b for b in binaries if b.get("is_default")), None
+    def test_bin_rm_rejects_binary_id_without_effects(self, runner_vm: str) -> None:
+        """The exact-version removal API must not interpret a display ID as a release slot."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        selected = next(
+            item for item in before
+            if item["type"] == "firecracker" and item["is_default"]
         )
-        original_default_prefix: str | None = (
-            original_default["id"][:6] if original_default else None
-        )
-
-        non_default = [
-            b for b in binaries
-            if not b.get("is_default", False)
-            and b.get("is_present")
-            and b.get("type") in ("firecracker",)
-        ]
-
-        if not non_default:
-            _run_mvm(
-                runner_vm, "bin", "pull", "firecracker",
-                "--version", "1.14.2", "--force", timeout=120,
-            )
-            result = _run_mvm(runner_vm, "bin", "ls", "--json")
-            binaries = json.loads(result.stdout)
-            non_default = [
-                b for b in binaries
-                if not b.get("is_default", False)
-                and b.get("is_present")
-                and b.get("type") in ("firecracker",)
-            ]
-
-        assert binaries, "No cached binaries found in Tier 2 environment"
-        target = non_default[0] if non_default else binaries[0]
-        target_id = target["id"][:6]
-
-        try:
-            set_result = _run_mvm(runner_vm, "bin", "default", target_id, check=False)
-            assert set_result.returncode == 0, (
-                f"bin default {target_id} failed: {set_result.stderr}"
-            )
-
-            verify = _run_mvm(runner_vm, "bin", "ls", "--json")
-            entries = json.loads(verify.stdout)
-            new_defaults = [
-                e for e in entries
-                if e.get("is_default") and e.get("type") == "firecracker"
-            ]
-            assert len(new_defaults) >= 1, (
-                "No default firecracker found after setting default"
-            )
-            assert new_defaults[0].get("version") == target.get("version"), (
-                f"Expected default version {target.get('version')}, "
-                f"got {new_defaults[0].get('version')}"
-            )
-        finally:
-            if original_default_prefix:
-                _run_mvm(runner_vm, "bin", "default", original_default_prefix, check=False)
-
-    @pytest.mark.slow
-    def test_bin_remove_by_version(self, runner_vm):
-        """Fetch a specific version and remove by version."""
-        _ensure_binary(runner_vm)
-
-        cached = _run_mvm(runner_vm, "bin", "ls", "--json")
-        cached_bins = json.loads(cached.stdout)
-        non_default_present = [
-            b for b in cached_bins
-            if b.get("is_present")
-            and not b.get("is_default")
-            and b.get("type") == "firecracker"
-        ]
-
-        if non_default_present:
-            target = non_default_present[0]["version"]
-        else:
-            # Pull a non-default version
-            _run_mvm(
-                runner_vm, "bin", "pull", "firecracker",
-                "--version", "1.14.2", "--force", timeout=120,
-            )
-            target = "1.14.2"
-
-        result = _run_mvm(
-            runner_vm, "bin", "rm", "--version", target, "--force", check=False
-        )
-        assert result.returncode == 0, (
-            f"bin rm --version {target} failed: {result.stderr}"
-        )
-
-        listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-        entries = json.loads(listing.stdout)
-        still_present = [
-            e for e in entries
-            if e.get("version") == target and e.get("is_present")
-        ]
-        assert len(still_present) == 0, (
-            f"Version {target} still has is_present=True entries "
-            f"after removal: {still_present}"
-        )
-
-    def test_bin_rm_by_id(self, runner_vm):
-        """Remove a cached binary by its 6-character ID prefix.
-
-        Verifies both L2 (listing) and L3 (file on disk) after removal.
-        """
-        _ensure_binary(runner_vm)
-
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        binaries = json.loads(result.stdout)
-
-        non_defaults = [b for b in binaries if not b.get("is_default", False)]
-        if not non_defaults:
-            _run_mvm(
-                runner_vm, "bin", "pull", "firecracker",
-                "--version", "1.14.2", "--force", timeout=120,
-            )
-            result = _run_mvm(runner_vm, "bin", "ls", "--json")
-            binaries = json.loads(result.stdout)
-            non_defaults = [b for b in binaries if not b.get("is_default", False)]
-
-        assert non_defaults, "No non-default binary available for removal test"
-        target = non_defaults[0]
-        target_prefix = target["id"][:6]
-        target_path_str = target.get("path", "")
-
-        result = _run_mvm(runner_vm, "bin", "rm", target_prefix, "--force", check=False)
-        assert result.returncode == 0, (
-            f"bin rm {target_prefix} failed: {result.stderr}"
-        )
-
-        # L2: Verify listing no longer shows the binary
-        listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-        remaining = json.loads(listing.stdout)
-        ids = {b["id"][:6] for b in remaining}
-        assert target_prefix not in ids, (
-            f"Binary {target_prefix} still present in listing after removal"
-        )
-
-        # L3: Verify the file is gone from disk inside the VM
-        if target_path_str:
-            check = _guest_run(runner_vm,
-                f"test -f /root/.cache/mvmctl/bin/{target_path_str} && echo exists || echo not-found",
-                check=False,
-            )
-            assert "not-found" in check.stdout, (
-                f"Binary file still exists at /root/.cache/mvmctl/bin/{target_path_str} "
-                f"after removal"
-            )
+        rejected = _run_mvm(runner_vm, "bin", "rm", selected["id"], check=False)
+        assert rejected.returncode != 0
+        assert "requires exact versions" in (rejected.stdout + rejected.stderr).lower()
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
 
 # ============================================================================
