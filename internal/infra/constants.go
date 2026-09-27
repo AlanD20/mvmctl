@@ -735,8 +735,14 @@ func GetWarmImagesDir() string {
 		}
 		return path
 	}
-	// default: tmpfs
-	path := filepath.Join(GetTempDir(), "ready")
+	// Keep the warm pool on its existing temporary filesystem by default.
+	// Moving general temp work under the managed cache must not materialize
+	// whole warm images on persistent storage. An explicit TEMP_DIR override
+	// still selects a different warm-pool location as before.
+	path := filepath.Join("/tmp", ProjectName, "ready")
+	if override, ok := EnvGet("TEMP_DIR"); ok && override != "" {
+		path = filepath.Join(GetTempDir(), "ready")
+	}
 	if err := ensureDirAndChown(path); err != nil {
 		slog.Warn("failed to create warm image directory", "path", path, "error", err)
 	}
