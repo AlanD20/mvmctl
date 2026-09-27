@@ -138,7 +138,7 @@ class TestCanonicalJailerLaunch:
         assert int(rebooted["pid"]) != int(started["pid"])
 
     def test_volume_and_snapshot_parity(
-        self, runner_vm: str, jailed_vm: dict[str, Any]
+        self, runner_vm: str, jailed_vm: dict[str, Any], created_network: str
     ) -> None:
         """Selected volume and snapshot resources remain usable without collection mounts."""
         vm_name = jailed_vm["name"]
@@ -186,8 +186,21 @@ class TestCanonicalJailerLaunch:
             assert detached["volume"]["status"] == "available"
 
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force")
+            denied_result = _run_mvm(
+                runner_vm, "snapshot", "restore", snapshot_id, vm_name,
+                "--network", created_network, "--json", check=False,
+            )
+            assert denied_result.returncode != 0
+            denied = json.loads(denied_result.stdout)
+            assert denied["status"] == "error"
+            assert denied["error"]["code"] == "snapshot.restore_failed"
+            assert "cannot replace the captured network" in denied["error"]["message"]
+            assert all(vm["name"] != vm_name for vm in _parse_vm_list(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+            ))
             restored = _run_mvm(
-                runner_vm, "snapshot", "restore", snapshot_id, vm_name, "--resume",
+                runner_vm, "snapshot", "restore", snapshot_id, vm_name,
+                "--network", jailed_vm["network_name"], "--resume",
                 check=False, timeout=180,
             )
             assert restored.returncode == 0, restored.stderr
