@@ -36,6 +36,13 @@ and full Jailer system journeys also remained unqualified at that checkpoint; on
 not snapshot-consistency qualification. The later focused checkpoint below addresses only the networkless
 data-volume snapshot journey, not the broader release gaps.
 
+**Current CLI/config checkpoint (2026-09-27):** The installed `0.3.0-rc.exec-port` candidate in only
+`mvmctl-030-test` passed the complete 24-case CLI module and 12-case config module from clean source commit
+`0e315b04`, with zero skips. Both used the established isolated 0.3 runner cache; the runner's default cache is
+an archived pre-0.3 database and correctly fails clean-install admission for non-exempt commands. The config
+module restored its tested VM CPU and memory defaults. These direct focused pytest runs are not orchestrator
+machine-report evidence, full Python qualification, or a claim about the archived cache's compatibility.
+
 **Focused snapshot checkpoint (2026-09-27):** An installed `0.3.0-rc.snapshot-ref-fix` candidate inside only
 `mvmctl-030-test` passed `TestNetworklessJailerLifecycle::test_networkless_snapshot_restores_independent_data_volume`
 (1/1). It wrote a raw attached guest volume, captured a full networkless snapshot, changed and removed the source
