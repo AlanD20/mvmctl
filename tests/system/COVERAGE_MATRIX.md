@@ -102,6 +102,14 @@ with continued vsock responsiveness; the private VM list was empty afterward.
 This is focused evidence, not the full Python matrix or reused-IP/network-policy qualification; the runner kernel
 still lacks nftables bridge-family support. Sustained memory saturation and host/ancestor OOM survival remain open.
 
+**Additional current-candidate QA (2026-09-27):** The same installed `0.3.0-rc.neighbor` passed 97 bounded
+CLI/config/JSON-invariant/internal-entry/host-info/non-VM-key cases, two more networkless security cases proving
+protected release files and isolated Firecracker UID, and two raw-volume grow/shrink cases. Commit `03e89ad3`
+corrected the volume list/inspect tests to parse the schema-1 success envelope and removed their weaker duplicate
+cases; both corrected cases passed and the volume module collected 36 cases. The private test-cache VM and volume
+inventories were empty after checked teardown. These additions bring bounded current-candidate evidence to 110
+distinct passing Python cases, not a full volume module, full system matrix, or release sign-off.
+
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
 | Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
@@ -404,11 +412,11 @@ Specific legacy conflicts that must be rewritten before release:
 | `volume create` zero size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create --read-only` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — is_read_only=true in ls JSON, inspect JSON |
 | `volume create --shareable` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_create_shareable` | L2 — is_shareable=true in ls JSON |
-| `volume ls` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
-| `volume ls --json` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 |
+| `volume ls` | 🔴 Missing | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_ls_empty` | Only empty-cache human output is tested; nonempty human output remains unqualified. |
+| `volume ls --json` | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_list_json` | Installed candidate returned a schema-1 list containing the test-owned volume; other list variants remain unqualified. |
 | `volume ls` empty | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
-| `volume inspect` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
-| `volume inspect --json` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — name, size_bytes, format, status, path |
+| `volume inspect` | 🔴 Missing | `volume/test_volume.py` | — | Human-readable inspection is not currently exercised by this module. |
+| `volume inspect --json` | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_inspect_json` | Installed candidate returned schema-1 volume name, size, format, status, and path for one test-owned volume. |
 | `volume inspect` nonexistent | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume rm` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 |
 | `volume rm --force` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 |
