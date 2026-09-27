@@ -38,6 +38,18 @@ records one collected/passed and zero failures, errors, skips, or deselections; 
 afterward. This proves one networkless rootfs persistence/independence path, not the full snapshot fault matrix,
 GitHub CI, or release approval.
 
+**Managed snapshot DR checkpoint (2026-09-27):** Commit `dfeecd4d` replaces the permissive fallback in
+`TestSnapshotDestroyRestore::test_snapshot_destroy_restore_workflow` with one bounded same-network journey: create,
+guest exec, full capture, source removal, `restore --resume`, retained network/IP, guest exec, and exact teardown.
+The installed candidate in only `mvmctl-030-test` passed this one case with a strict zero-skip report at
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/qa-snapshot-dr-856bf013/.tmp/qa-snapshot-dr-final.json`;
+VM, network, and snapshot lists were empty afterward. This is not the complete snapshot module or fault matrix.
+The original unbounded-default-size case timed out after 90 seconds: root had published a 912 MiB capture, but
+`snapshot ls` returned an empty list. The exact QA artifact was authenticated through
+`snapshot inspect <full-id>` and removed through `snapshot rm <full-id> --force`, recovering runner disk space.
+The operator-facing interruption/reconciliation path remains unqualified; a fresh unprivileged client may not know
+the full ID. Do not treat the successful bounded case as closing that gap.
+
 **Full Jailer-file runner checkpoint (2026-09-27):** The official 1.16.0 checksum sidecar was reachable by a bounded
 direct HTTPS probe, which changed the earlier external-metadata blocker; the archive remained present in the configured
 runner mirror. The two formerly blocked tests then passed 2/2, and the entire 13-case `tests/system/vm/test_jailer.py`
@@ -384,7 +396,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 | Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests and a disposable real-kernel namespace probe passed; a two-VM reused-IP installed-candidate journey on a bridge-capable runner remains missing. |
 | Typed `traffic` policy | 🟡 Partial | Installed-candidate same-network and cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. Source-VM, UDP, spoof/reverse/IP-reuse, and reboot recovery remain unqualified. |
 | Typed VM-to-VM `exec` policy | 🟡 Partial | The installed candidate passed the full seven-case exec domain in `mvmctl-030-test`. Its new directional case exercises same-network, cross-network, and networkless placements; denial before grant, exact non-root-user grant, successful command and destination file effect, reverse denial, and denial after revocation. Peer-identity attacks, capacity/deadline/cancellation, audit redaction, and reboot/restore journeys remain unqualified at L2. |
-| Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove the Firecracker process UID differs from root and the operator, and that an unprivileged caller receives `enforced` policy-v2 limits and usage through authenticated root inspection while direct leaf read is denied. A corrected bounded 224 MiB guest/150 MiB tmpfs case crossed `memory.high`, remained responsive, and observed no VMM OOM kill in one named-runner pass. Per-VM uniqueness, root-record, pidfd, broader mount/cgroup cleanup, sustained saturation survival, and host-reboot reconciliation binding remain unqualified. |
+| Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove the Firecracker process UID differs from root and the operator, and that an unprivileged caller receives `enforced` policy-v2 limits and usage through authenticated root inspection while direct leaf read is denied. One earlier bounded 224 MiB guest/150 MiB tmpfs pass crossed `memory.high` and retained responsiveness, but a later exact-candidate run stayed below `memory.high`; this is not a deterministic pressure gate. Per-VM uniqueness, root-record, pidfd, broader mount/cgroup cleanup, sustained saturation survival, and host-reboot reconciliation binding remain unqualified. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
 Specific legacy conflicts that must be rewritten before release:
@@ -653,7 +665,7 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `snapshot create <vm>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless full capture with an attached raw volume passed; managed-network and fault paths remain unqualified. |
+| `snapshot create <vm>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless full capture with an attached raw volume and one managed-network DR capture passed. Client interruption can leave a root-published capture without a listable SQLite projection; its operator recovery path remains unqualified. |
 | `snapshot create --name` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_with_name` | L2 — custom name in ls --json |
 | `snapshot create --pause` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_pause_flag` | L2 — VM status=paused after snapshot |
 | `snapshot create` on stopped VM | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L1 — non-zero, no snapshot files created |
@@ -661,8 +673,8 @@ Specific legacy conflicts that must be rewritten before release:
 | `snapshot ls --json` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore` | L2 — JSON list |
 | `snapshot inspect <id>` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotInspect::test_snapshot_inspect` | L1 — inspect succeeds |
 | `snapshot inspect <id> --json` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotInspect::test_snapshot_inspect_json` | L2 — JSON fields verified |
-| `snapshot restore <id> <name>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused networkless restore passed with no endpoint, independent attached-volume bytes, vsock exec, and checked teardown. A red-green installed-candidate L2 case proves pre-spawn missing-release failure leaves no VM projection or snapshot reference. Managed-network, post-spawn, and transport-uncertain paths remain unqualified. |
-| `snapshot restore --resume` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless restore resumed, preserved absent endpoint, restored independent data-volume bytes, and allowed vsock exec. Other placements remain unqualified. |
+| `snapshot restore <id> <name>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused networkless restore passed with no endpoint, independent attached-volume bytes, vsock exec, and checked teardown. One same-network managed restore preserved network/IP and guest exec after source deletion. A red-green L2 case proves pre-spawn missing-release failure leaves no VM projection or snapshot reference; different-network, post-spawn, and transport-uncertain paths remain unqualified. |
+| `snapshot restore --resume` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused networkless restore resumed, preserved absent endpoint, restored independent data-volume bytes, and allowed vsock exec. One same-network managed restore resumed with retained IP and working guest exec. Other placements and interruption paths remain unqualified. |
 | `snapshot restore --network` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestSnapshotRestoreNetwork`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless snapshot rejected a managed-network override without creating a target VM. The legacy test expects a different network; that outdated positive contract still needs reconciliation, and managed-network override behavior remains unqualified. |
 | `snapshot rm <id>` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotDestroyRestore` | L2 — cleanup via --force |
 | `snapshot rm --force` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotDestroyRestore` | L2 — forced removal |
