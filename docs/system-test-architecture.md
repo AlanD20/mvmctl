@@ -77,7 +77,7 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 1. Create builder VM from ubuntu-minimal:noble
 2. Stage the release candidate outside `/usr/local/bin` and run `sudo <candidate> host install-system`
 3. mvm cp tests/system/ → /tests/
-4. apt-get install python3-pytest qemu-utils fakeroot nftables iptables zstd htop build-essential bc bison flex libncurses-dev libssl-dev libelf-dev git curl dwarves cloud-image-utils
+4. apt-get install python3-pytest qemu-utils fakeroot nftables iptables zstd htop build-essential bc bison flex libncurses-dev libssl-dev libelf-dev git curl dwarves cloud-image-utils util-linux
 5. pip3 install pytest-timeout
 6. Add runner to mvm, kvm groups
 7. Initialize through exact `sudo /usr/local/bin/mvm host init`; chown `/tests` to runner
@@ -102,6 +102,7 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 | nftables, iptables | System packages | Installed by the current runner-image builder for diagnostics and older test tooling; the 0.3.0 candidate applies nftables through the Go library and does not use either CLI as its firewall backend. |
 | build-essential, bc, bison, flex, libncurses-dev, libssl-dev, libelf-dev, git, curl, dwarves | System packages | Kernel compilation in Tier 3 `kernel_build` tests |
 | cloud-image-utils | System package | Cloud-init ISO generation for `--cloud-init-mode iso` tests |
+| util-linux | System package | Provides `script` so interactive exec tests run with a real PTY |
 
 ### Caching
 

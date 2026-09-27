@@ -1262,7 +1262,7 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             "python3-pytest qemu-utils fakeroot nftables iptables zstd htop "
             "build-essential bc bison flex libncurses-dev "
             "libssl-dev libelf-dev git curl dwarves "
-            "cloud-image-utils && "
+            "cloud-image-utils util-linux && "
             "sudo apt-get clean",
             timeout=300,
         )

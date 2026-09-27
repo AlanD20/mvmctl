@@ -2,14 +2,14 @@
 
 Architecture
 ============
-Tests use a module-scoped VM (``module_vm``) created with ubuntu:24.04 and
-the ``--user runner`` flag. The ``exec_vm`` fixture verifies the vsock agent
-is reachable before any test runs.
+Tests use a module-scoped, networkless VM created with the ``--user runner``
+flag. The ``exec_vm`` fixture verifies the vsock agent is reachable before any
+test runs and checks teardown afterward.
 
 Edge cases covered per file
 ---------------------------
-Happy path: basic command execution, interactive shell, --port, --timeout, --user.
-Invalid args: nonexistent VM, empty command (valid — starts interactive shell).
+Happy path: basic command execution, interactive shell, --port, --user.
+Invalid args: nonexistent VM and invalid vsock port.
 JSON output: exec does not have --json; output is raw command output.
 Confirmation prompts: N/A for exec.
 Non-existent resources: nonexistent VM → error.
@@ -21,10 +21,18 @@ from __future__ import annotations
 import subprocess
 import time
 import uuid
+from typing import Any, Generator
 
 import pytest
 
-from tests.system.conftest import _guest_run, _run_mvm
+from tests.system.conftest import (
+    SYSTEM_MVM_BINARY,
+    _guest_run,
+    _json_success_data,
+    _parse_vm_list,
+    _run_mvm,
+    ensure_vm_deps,
+)
 
 pytestmark = [
     pytest.mark.system,
@@ -92,18 +100,37 @@ def _exec_cmd(
 
 
 @pytest.fixture(scope="module")
-def exec_vm(runner_vm, module_vm) -> dict:
-    """Module-scoped VM with vsock exec verified available.
-
-    Wraps ``module_vm`` and polls until ``mvm exec {vm} -- exit`` succeeds.
-    Tests in this file can assume the vsock agent is reachable.
-    """
-    vm_name = module_vm["name"]
-    if not _wait_for_exec(runner_vm, vm_name):
-        pytest.fail(
+def exec_vm(runner_vm: str) -> Generator[dict[str, Any], None, None]:
+    """A networkless guest with a reachable agent and checked removal."""
+    ensure_vm_deps(runner_vm)
+    vm_name = f"sys-exec-{uuid.uuid4().hex[:8]}"
+    created_by_fixture = False
+    try:
+        creation = _run_mvm(
+            runner_vm, "vm", "create", vm_name, "--no-network", "--cloud-init-mode", "off",
+            "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+            "--user", "runner", "--json", timeout=180,
+        )
+        created_by_fixture = True
+        created = _json_success_data(
+            creation.stdout,
+            list,
+        )
+        assert len(created) == 1 and created[0]["name"] == vm_name
+        assert _wait_for_exec(runner_vm, vm_name), (
             f"mvm exec is not available for VM '{vm_name}' within timeout"
         )
-    return module_vm
+        yield {"name": vm_name}
+    finally:
+        if created_by_fixture:
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            if any(vm["name"] == vm_name for vm in listed):
+                removed = _run_mvm(
+                    runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120,
+                )
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(vm["name"] != vm_name for vm in listed)
 
 
 # ========================================================================
@@ -140,15 +167,16 @@ class TestExecBasic:
         """Run a command via interactive shell (no ``--`` separator).
 
         ``mvm exec <id>`` (without ``--`` or a trailing command) starts an
-        interactive vsock session that reads commands from stdin.  We pipe
-        a command via ``printf`` to exercise this code path.
+        interactive vsock session. The CLI needs a terminal for raw mode, so
+        ``script`` supplies a PTY while stdin feeds a command and exit.
 
         Tier: L2 (requires running VM with vsock agent).
         """
         vm_name = exec_vm["name"]
         result = _guest_run(
             runner_vm,
-            f"printf 'echo hello\\n' | mvm exec {vm_name}",
+            "printf 'echo hello\\nexit\\n' | "
+            f"script -q -e -c '{SYSTEM_MVM_BINARY} exec {vm_name}' /dev/null",
             check=False,
         )
         assert result.returncode == 0, (
@@ -162,12 +190,12 @@ class TestExecBasic:
 
 
 # ========================================================================
-# TestExecFlags — --port, --timeout, --user
+# TestExecFlags — --port, --user
 # ========================================================================
 
 
 class TestExecFlags:
-    """Exec flag handling: --port, --timeout, --user."""
+    """Exec flag handling: --port and --user."""
 
     pytestmark = [
         pytest.mark.system,
@@ -197,32 +225,10 @@ class TestExecFlags:
             f"Expected 'hello' in stdout, got: {result.stdout!r}"
         )
 
-    def test_exec_with_timeout(self, runner_vm, exec_vm):
-        """Execute a command with ``--timeout`` set explicitly.
-
-        ``--timeout`` controls how long the vsock client waits for the
-        agent's initial response.  A reasonable positive value (10 s)
-        should work identically to the default for a healthy VM.
-
-        Tier: L1 (timeout is a client-side parameter, but a running VM
-        is needed to confirm the flag is accepted without error).
-        """
-        vm_name = exec_vm["name"]
-        result = _exec_cmd(
-            runner_vm, vm_name, "echo hello", timeout_s=10,
-        )
-        assert result.returncode == 0, (
-            f"exec --timeout 30 failed: rc={result.returncode} "
-            f"stderr={result.stderr!r}"
-        )
-        assert "hello" in result.stdout, (
-            f"Expected 'hello' in stdout, got: {result.stdout!r}"
-        )
-
     def test_exec_with_user(self, runner_vm, exec_vm):
         """Execute a command as a non-root user via ``--user``.
 
-        The ``module_vm`` was created with ``--user runner``, so a
+        The ``exec_vm`` was created with ``--user runner``, so a
         ``runner`` user should exist inside the guest.  Running
         ``whoami`` via ``--user runner`` should return ``runner``.
 
@@ -279,45 +285,25 @@ class TestExecErrorCases:
         )
 
     def test_exec_invalid_port(self, runner_vm, exec_vm):
-        """``mvm exec <vm> --port -1 -- echo hello`` must fail."""
+        """Invalid 32-bit vsock ports must reject before guest effects."""
         vm_name = exec_vm["name"]
-        result = _run_mvm(
-            runner_vm,
-            "exec",
-            vm_name,
-            "--port",
-            "-1",
-            "--",
-            "echo hello",
-            check=False,
-        )
-        assert result.returncode != 0, (
-            "Expected exec with invalid port to fail, "
-            f"but got rc=0: stdout={result.stdout!r}"
-        )
-
-    def test_exec_empty_command(self, runner_vm, exec_vm):
-        """``mvm exec <vm>`` without ``--`` starts interactive shell.
-
-        With no command and no ``--`` separator, exec enters interactive
-        mode.  We send an empty input (just newline) and verify the
-        session starts (non-zero exit indicates failure).
-
-        Tier: L2 (interactive session requires a running VM).
-        """
-        vm_name = exec_vm["name"]
-        # Use _guest_run with a pipe: send a newline to the interactive
-        # session, which should cause the remote shell to produce a
-        # prompt or at least not crash.
-        result = _guest_run(
-            runner_vm,
-            f"printf '\\n' | mvm exec {vm_name}",
-            check=False,
-        )
-        # Interactive mode with just a newline should succeed (non-error).
-        # Some output is expected (the remote shell's prompt or empty echo).
-        assert result.returncode == 0, (
-            f"Interactive exec with empty input failed: "
-            f"rc={result.returncode} stdout={result.stdout!r} "
-            f"stderr={result.stderr!r}"
-        )
+        for port in ("-1", str(2**32)):
+            sentinel = f"/tmp/mvm-invalid-port-{uuid.uuid4().hex[:8]}"
+            result = _run_mvm(
+                runner_vm,
+                "exec",
+                vm_name,
+                "--port",
+                port,
+                "--",
+                "touch",
+                sentinel,
+                check=False,
+            )
+            assert result.returncode != 0, (
+                f"Expected exec with invalid port {port} to fail, "
+                f"but got rc=0: stdout={result.stdout!r}"
+            )
+            assert "port" in (result.stdout + result.stderr).lower()
+            absent = _exec_cmd(runner_vm, vm_name, f"test ! -e {sentinel}")
+            assert absent.returncode == 0, f"invalid port {port} reached the guest"

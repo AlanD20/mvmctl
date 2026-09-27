@@ -3,6 +3,7 @@ package inputs
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/vsock"
@@ -36,6 +37,9 @@ type ResolvedExecInput struct {
 func (i *ExecInput) Validate() error {
 	if i.AllowVMExec && i.Command == "" {
 		return errs.New(errs.CodeValidationFailed, "VM-to-VM execution requires a non-interactive outer command")
+	}
+	if i.Port < 0 || uint64(i.Port) > math.MaxUint32 {
+		return errs.New(errs.CodeValidationFailed, "vsock port must be within the supported range")
 	}
 	if i.Identifier == "" {
 		return fmt.Errorf("VM identifier is required")

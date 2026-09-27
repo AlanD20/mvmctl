@@ -123,6 +123,18 @@ bridge-family nftables; it also still uses the removed `network create --non-int
 without volume rows; their cleanup/provenance is not qualified by the 25-case pass. This scoped build used copied
 changed source, not a clean exact-HEAD Go CI run, full volume module, or release sign-off.
 
+**Host-to-guest exec checkpoint (2026-09-27):** The runner-only installed `0.3.0-rc.exec-port` candidate was built
+with the negative/overflow vsock-port input guard and its staged/installed SHA-256 matched. The six retained exec
+cases use a checked networkless VM fixture and the exact installed CLI; interactive shell runs under a real PTY.
+The negative-port case failed on the preceding installed candidate because it executed a guest `touch` command,
+then passed on the fixed candidate while proving that neither negative nor overflowing ports left guest files. The
+complete six-case module passed twice (6/6 each run), and separate private-cache `vm ls --json` and `vm ps --json`
+were empty afterward.
+The duplicate timeout-success and empty-interactive-input cases were removed: all captured-exec cases pass explicit
+`--timeout 10`, while the retained interactive case covers the no-command route. This qualifies only host-to-guest
+exec in the named runner, not typed VM-to-VM policy, managed-network placement, host-reboot recovery, or the full
+Python matrix. The source-level Go gate at `bb56b77e` predates this exec-input change and must be refreshed.
+
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
 | Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
@@ -142,7 +154,8 @@ Specific legacy conflicts that must be rewritten before release:
 
 - `network/test_policies.py` still exercises both firewall backends and rejects same-network policy creation.
 - `full_journeys/test_full_journeys.py` still expects same-network VM traffic without an allow policy.
-- `exec/test_exec.py` covers host-to-VM execution only; two cases still use a PATH-selected `mvm`.
+- `exec/test_exec.py` covers host-to-VM execution only; it now uses the exact installed CLI and a networkless fixture.
+  VM-to-VM policy behavior remains a separate unqualified path.
 - `vm/test_jailer.py` observes process/chroot outcomes through user-visible state but does not qualify root authority or
   the fd-0 transport.
 - Shared cleanup and several test-local teardowns still suppress errors or mutate host state with broad raw sudo.
@@ -383,13 +396,13 @@ Specific legacy conflicts that must be rewritten before release:
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
 | `exec <id> -- <cmd>` (command) | ⚡ Shallow | `exec/test_exec.py` | `TestExecBasic::test_exec_basic_command` | L2 — stdout contains command output |
-| `exec <id>` (interactive shell via stdin) | ⚡ Shallow | `exec/test_exec.py` | `TestExecBasic::test_exec_interactive_shell` | L2 — piped command via stdin |
+| `exec <id>` (interactive shell via stdin) | ⚡ Shallow | `exec/test_exec.py` | `TestExecBasic::test_exec_interactive_shell` | L2 — real PTY, command output, and clean exit |
 | `exec` with `--port` | ⚡ Shallow | `exec/test_exec.py` | `TestExecFlags::test_exec_with_port` | L2 — explicit port wiring |
-| `exec` with `--timeout` | ⚡ Shallow | `exec/test_exec.py` | `TestExecFlags::test_exec_with_timeout` | L1 — --timeout flag accepted |
+| `exec` with `--timeout` | ⚡ Shallow | `exec/test_exec.py` | `TestExecBasic`, `TestExecFlags` | Captured-exec helper passes explicit `--timeout 10`; delayed-agent deadline behavior remains unqualified |
 | `exec` with `--user` | ⚡ Shallow | `exec/test_exec.py` | `TestExecFlags::test_exec_with_user` | L2 — whoami returns user name |
 | `exec` nonexistent VM | ⚡ Shallow | `exec/test_exec.py` | `TestExecErrorCases::test_exec_nonexistent_vm` | L1 — "not found" in error |
-| `exec` invalid port | ⚡ Shallow | `exec/test_exec.py` | `TestExecErrorCases::test_exec_invalid_port` | L1 — non-zero exit |
-| `exec` empty command | ⚡ Shallow | `exec/test_exec.py` | `TestExecErrorCases::test_exec_empty_command` | L1 — guidance instead of execution |
+| `exec` invalid port | ⚡ Shallow | `exec/test_exec.py` | `TestExecErrorCases::test_exec_invalid_port` | L2 — negative and overflowing ports reject before guest side effects; red-green installed candidate |
+| `exec` empty command | ⚡ Shallow | `exec/test_exec.py` | `TestExecBasic::test_exec_interactive_shell` | No command selects interactive mode; duplicate newline-only case removed |
 
 ---
 

@@ -977,6 +977,13 @@ composition is described above; the current incomplete-work inventory is under *
   directory and leaves from the validated 64-character lowercase snapshot ID rather than stored file-path columns.
   The temporary `phantom-rootfs.img` mechanism remains until the private mount-namespace overlay lands.
 
+#### Host-to-guest exec input
+
+- Host-to-guest `mvm exec --port` now rejects negative or out-of-range nonzero vsock ports before VM resolution;
+  `0` retains the API's stored-port default. The earlier negative-port path silently used the default port and ran
+  the guest command. The fixed candidate passed the six-case host-to-guest exec module twice in the named runner;
+  this is not VM-to-VM policy or full release qualification.
+
 #### Typed vsock relaunch state (partial)
 
 - VM start, reboot, and snapshot restore now load a private typed relaunch state instead of depending on best-effort VM
