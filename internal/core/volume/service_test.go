@@ -56,6 +56,23 @@ func TestService_CreateDisk(t *testing.T) {
 		}
 	})
 
+	t.Run("failed_allocation_removes_new_backing", func(t *testing.T) {
+		repo := testutil.NewVolumeRepo()
+		path := filepath.Join(t.TempDir(), "failed.raw")
+		// Zero is rejected by the public input; here it deterministically makes
+		// fallocate fail after CreateDisk has created the private raw file.
+		item, err := volume.NewService(repo).CreateDisk(t.Context(), &model.VolumeItem{
+			ID: "vol-failed-allocation", Path: path, SizeBytes: 0,
+		})
+		require.Error(t, err)
+		assert.Nil(t, item)
+		_, statErr := os.Lstat(path)
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
+		fromRepo, repoErr := repo.Get(t.Context(), "vol-failed-allocation")
+		require.NoError(t, repoErr)
+		assert.Nil(t, fromRepo)
+	})
+
 	t.Run("private_allocated_file_under_permissive_umask", func(t *testing.T) {
 		repo := testutil.NewVolumeRepo()
 		path := filepath.Join(t.TempDir(), "private.raw")

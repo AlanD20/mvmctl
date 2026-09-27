@@ -52,10 +52,19 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 		allocationErr = file.Sync()
 	}
 	if err := errors.Join(allocationErr, file.Close()); err != nil {
-		return nil, errs.WrapMsg(errs.CodeVolumeError, "allocate raw volume", err)
+		cleanupErr := os.Remove(vol.Path)
+		if errors.Is(cleanupErr, os.ErrNotExist) {
+			cleanupErr = nil
+		}
+		return nil, errs.WrapMsg(errs.CodeVolumeError, "allocate raw volume", errors.Join(err, cleanupErr))
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, errs.WrapMsg(errs.CodeVolumeError, "create volume cancelled before record publication", err)
+		cleanupErr := os.Remove(vol.Path)
+		if errors.Is(cleanupErr, os.ErrNotExist) {
+			cleanupErr = nil
+		}
+		return nil, errs.WrapMsg(errs.CodeVolumeError, "create volume cancelled before record publication",
+			errors.Join(err, cleanupErr))
 	}
 
 	if err := s.repo.Upsert(ctx, vol); err != nil {
