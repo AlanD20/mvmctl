@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -12,7 +13,7 @@ func VMGenerateMAC(prefix string) string {
 	if prefix == "" {
 		prefix = "02:FC"
 	}
-	return prefix + fmt.Sprintf(":%02x:%02x:%02x:%02x",
+	return strings.ToLower(prefix) + fmt.Sprintf(":%02x:%02x:%02x:%02x",
 		time.Now().UnixNano()&0xff,
 		os.Getpid()&0xff,
 		time.Now().UnixNano()>>8&0xff,
