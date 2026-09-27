@@ -40,8 +40,9 @@ netlink request.
 - Pinned Go 1.26.3 package tests, vet, and a race run passed in `mvmctl-030-test`. A bounded real-kernel probe in a
   disposable runner namespace removed one stale dynamic entry, rejected a permanent entry, and confirmed namespace
   teardown. This proves the netlink protocol on that kernel, not full managed VM/IP-reuse behavior.
-- Full runtime qualification still needs a runner kernel that supports the modeled nftables bridge family. The current
-  named runner lacks that capability, so the reused-IP VM journey remains a release gate.
+- The current named runner supports the modeled nftables bridge family, and the network/nftables/policy Python domain
+  passed there. A two-VM reused-IP journey has not yet proved this exact neighbor invalidation during real VM launch;
+  that remains a release gate.
 
 ## Alternatives
 

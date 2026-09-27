@@ -859,7 +859,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `kernel rm <id>` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemove` | Installed rc.7: remove only a uniquely imported ID prefix; verify absence and preserve the pre-seeded source. |
 | `kernel rm --force` on referenced kernel | 🔴 Missing | — | — | Prior test selected an unreferenced kernel, so it did not test force semantics; a VM-owned reference case remains unqualified. |
 | `kernel rm <nonexistent>` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemove` | L1 — non-zero exit, error message |
-| `kernel rm` blocked by stopped VM | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelStoppedVMDeletion` | Owner-scoped rejection case now requires `kernel.in_use` and preserves VM/kernel; not run because the runner lacks bridge nftables. |
+| `kernel rm` blocked by stopped VM | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelStoppedVMDeletion` | Owner-scoped rejection case now requires `kernel.in_use` and preserves VM/kernel; not yet run on the bridge-capable named runner. |
 | `kernel pull` then `rm` lifecycle | 🔴 Missing | — | — | Former case removed the first available kernel and unrelated referencing VMs; a safely owned pull/remove journey remains to be written. |
 | `kernel import` | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportLifecycle` | Installed rc.7: mirrored vmlinux import, exact copied bytes, schema-1 list/inspect, checked test-owned removal; VM boot remains unproved. |
 | `kernel import --version` | ⚡ Shallow | `kernel/test_kernel_import.py` | `TestKernelImportLifecycle` | Installed rc.7: explicit version matches list and inspect. |
@@ -1036,7 +1036,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `run nocloudnet serve --help` and missing required flags | ⚡ Shallow | `run/test_run.py` | `TestRunEntryPoints` | L2 — installed CLI help and required-identity rejection |
 | `run console relay --help` and missing required flags | ⚡ Shallow | `run/test_run.py` | `TestRunEntryPoints` | L2 — installed CLI help and required-identity rejection |
 | Retired `run provision` absent | ⚡ Shallow | `run/test_run.py` | `TestRunEntryPoints::test_run_help` | L2 — public command listing omits the removed route |
-| Jailer launch/cleanup through public VM lifecycle | 🟡 Partial | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle` | L2 — networkless installed-candidate lifecycle and missing-release restore proved; managed-network lifecycle awaits the bridge-capable runner kernel |
+| Jailer launch/cleanup through public VM lifecycle | 🟡 Partial | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle` | The full 13-case Jailer module passed in the bridge-capable named runner, including managed launch, isolated process identity, stop/start/reboot, and networkless restore. Host-reboot and broader failure-path reconciliation remain open. |
 
 > Internal service subprocesses are tested indirectly through VM operations (console relay, nocloudnet HTTP, volume provisioning).
 
@@ -1059,7 +1059,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Stress create/destroy | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestStressCreateDestroy` | L2: 5 sequential create→destroy cycles |
 | Export/import config journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestExportImport` | L2: inspect --json schema verification |
 | Concurrent VM creation | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestConcurrentVMCreation` | L3: 10 concurrent VMs, all running via ls --json, SSH into each |
-| Canonical Jailer lifecycle | 🟡 Partial | `vm/test_jailer.py`, `full_journeys/test_full_journeys.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle` | L2: networkless exact-pair launch with operator traversal denied, isolated VMM identity, lifecycle, volume, snapshot, and missing-release restore denial. Networked Jailer cases remain unqualified on the current runner kernel. |
+| Canonical Jailer lifecycle | 🟡 Partial | `vm/test_jailer.py`, `full_journeys/test_full_journeys.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle` | The full 13-case Jailer module passed in the bridge-capable named runner, covering managed launch/stop/start/reboot and networkless identity, volume, snapshot, and missing-release checks. Host-reboot and broader failure-path reconciliation remain open. |
 | Typed cgroup-v2 envelope | 🟡 Partial | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | Focused L2: protected policy-v2 limit/usage inspection, operator direct-read denial, stop/start/remove cleanup, and charged guest tmpfs load with responsive exec and no VM-leaf hard maximum. Snapshot preservation, controller-unavailable admission, sustained saturation/host-OOM survival, and broader exact-identity cleanup remain unqualified. |
 
 ---

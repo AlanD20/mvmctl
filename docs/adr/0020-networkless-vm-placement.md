@@ -95,8 +95,9 @@ Preserve current networked behavior until both branches have complete lifecycle 
 Go tests should prove closed input combinations, exact wire-shape rejection, no-NIC Firecracker config, placement
 round-trip, and fail-closed root effects. Installed-candidate Python tests in the approved runner must prove creation,
 namespace isolation, absent IP/TAP/host exposure, host-to-VM vsock exec, same-/cross-/no-network directional VM-to-VM
-exec authorization, stop/start/reboot/recovery, and snapshot restore. The runner kernel's missing bridge-family
-nftables capability still blocks networked comparisons; passing isolated networkless cases cannot qualify the whole
-placement and policy matrix. Focused Go config, persistence, input, namespace, and Jailer package tests passed in the
-named runner. The focused snapshot journey does not establish full Python system qualification, networked comparison,
-VM-to-VM authorization, host-reboot recovery, or release readiness.
+exec authorization, stop/start/reboot/recovery, and snapshot restore. The replaced runner lacked bridge-family
+nftables; the current named runner reports that capability, and focused same-/cross-network directional exec cases
+have since passed. Those cases do not qualify the whole placement and policy matrix. Focused Go config, persistence,
+input, namespace, and Jailer package tests passed in the named runner. The focused networkless snapshot journey alone
+does not establish full Python system qualification, networked comparison, VM-to-VM authorization, host-reboot
+recovery, or release readiness.
