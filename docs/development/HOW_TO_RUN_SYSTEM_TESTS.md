@@ -188,8 +188,8 @@ mkdir -p "$MVM_ASSET_MIRROR"
 "$MVM_BINARY" image pull ubuntu-minimal:24.04 --force
 "$MVM_BINARY" image pull ubuntu --version 24.04 --force
 "$MVM_BINARY" kernel pull --type firecracker --version v1.15 --default
-"$MVM_BINARY" bin pull 1.16.0 --default --force
-"$MVM_BINARY" bin pull 1.16.1 --force
+"$MVM_BINARY" bin pull 1.16.0 --force
+"$MVM_BINARY" bin pull 1.16.1 --default --force
 ```
 
 These pulls populate the local mirror directory. On subsequent runs, each pull
@@ -288,7 +288,7 @@ Host (your machine)
 ├── TIER 1 — Per-domain VMs (custom base image + shared RO volume)
 │   ├── mvm vm create --image mvm-test-runner:<version> --volume asset-mirror
 │   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init \
-│   │   --non-interactive --binary-version 1.16.0
+│   │   --non-interactive --binary-version 1.16.1
 │   ├── pytest tests/system/<domain>/    ← runs INSIDE the VM
 │   └── mvm vm rm --force
 │

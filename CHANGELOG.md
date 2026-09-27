@@ -930,6 +930,8 @@ composition is described above; the current incomplete-work inventory is under *
 #### VM launch and release identity
 - VM create, start, reboot, and snapshot restore no longer fall back to launching Firecracker directly when Jailer setup
   fails.
+- VM launch now requires the exact matching Firecracker/Jailer 1.16.1 pair. Earlier audited archives remain manageable
+  through `mvm bin` but are not launch fallbacks; release runner initialization and asset pulls pin 1.16.1.
 - VM and snapshot state now carry the exact Firecracker/Jailer pair needed by jailed launch paths.
 - Trusted release installation and Jailer launch are internal services compiled into the single `mvm` artifact.
 

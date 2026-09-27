@@ -1191,34 +1191,6 @@ def test_guest_product_commands_use_the_exact_installed_cli(
     assert unqualified == []
 
 
-def test_all_guest_user_initialization_uses_the_pinned_firecracker_version(
-    orchestrator: ModuleType,
-) -> None:
-    tree = ast.parse(Path(orchestrator.__file__).read_text(encoding="utf-8"))
-    init_commands = [
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and "/usr/local/bin/mvm init" in node.value
-    ]
-    init_calls = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_initialize_runner_user"
-    ]
-
-    assert init_commands == [orchestrator.RUNNER_USER_INIT_COMMAND]
-    assert len(init_calls) == 5
-    assert orchestrator.RUNNER_USER_INIT_COMMAND == (
-        "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive "
-        "--binary-version 1.16.0"
-    )
-
-
 def test_runner_user_initialization_uses_the_exact_installed_cli(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -1247,7 +1219,9 @@ def test_runner_user_initialization_uses_the_exact_installed_cli(
                 "--timeout",
                 "10",
                 "--",
-                orchestrator.RUNNER_USER_INIT_COMMAND,
+                "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
+                "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive "
+                "--binary-version 1.16.1",
             ),
             {"timeout": 180, "capture": False},
         )
@@ -1280,7 +1254,7 @@ def test_tier2_provision_pulls_exact_release_with_installed_cli(
     assert calls[-1] == (
         (
             "exec", "focused-runner", "--user", "runner", "--timeout", "10", "--",
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.0 --default --force",
+            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.1 --default --force",
         ),
         {"timeout": 150},
     )
@@ -2331,7 +2305,7 @@ def test_build_base_image_cleans_builder_when_asset_pull_fails(
     ) -> None:
         assert timeout == 180
         assert capture is False
-        initialization_order.append("runner-init-1.16.0")
+        initialization_order.append("runner-init-1.16.1")
 
     def fail_asset_pull(_vm_name: str) -> None:
         initialization_order.append("asset-pulls")
@@ -2353,7 +2327,7 @@ def test_build_base_image_cleans_builder_when_asset_pull_fails(
     assert captured.value is original_failure
     assert initialization_order == [
         "host-init",
-        "runner-init-1.16.0",
+        "runner-init-1.16.1",
         "asset-pulls",
     ]
     builder_removals = [

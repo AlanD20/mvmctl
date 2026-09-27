@@ -36,14 +36,14 @@ Host (your machine)
 ├── TIER 1 — One VM per domain from custom base image + shared volume
 │   ├── mvm vm create --image mvm-test-runner:<version> --volume asset-mirror
 │   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init \
-│   │   --non-interactive --binary-version 1.16.0
+│   │   --non-interactive --binary-version 1.16.1
 │   ├── pytest tests/system/<domain>/        ← runs INSIDE the VM
 │   └── mvm vm rm --force
 │
 ├── TIER 2 — Same as T1 + nested-virt + kernel for Firecracker-in-VM tests
 │   ├── mvm vm create --image mvm-test-runner:<version> --nested-virt --volume asset-mirror
 │   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init \
-│   │   --non-interactive --binary-version 1.16.0
+│   │   --non-interactive --binary-version 1.16.1
 │   ├── MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull / image pull / bin pull (cache hits)
 │   ├── pytest tests/system/<domain>/        ← runs INSIDE the VM
 │   └── mvm vm rm --force
@@ -81,7 +81,7 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 5. pip3 install pytest-timeout
 6. Add runner to mvm, kvm groups
 7. Initialize through exact `sudo /usr/local/bin/mvm host init`; chown `/tests` to runner
-8. Mount the shared volume, run unprivileged `/usr/local/bin/mvm init --binary-version 1.16.0`, then pull remaining
+8. Mount the shared volume, run unprivileged `/usr/local/bin/mvm init --binary-version 1.16.1`, then pull remaining
    images and kernels through the same exact installed binary
 9. apt-get clean
 10. mvm vm stop (graceful stop)
@@ -172,7 +172,8 @@ Because `asset-mirror` has `IsShareable=true` and `IsReadOnly=true`:
 | `vmlinux-*` (firecracker kernels) | ~30 MB | Default kernel for test VMs |
 | `alpine:3.23` image | ~8 MB | Fast VM creation |
 | `ubuntu:noble` image | ~600 MB | Heavier tests (SSH, nested virt) |
-| `firecracker-v1.16.0` tarball | ~20 MB | Firecracker binary |
+| `firecracker-v1.16.1` tarball | ~20 MB | Qualified Firecracker/Jailer launch pair |
+| `firecracker-v1.16.0` tarball | ~20 MB | Audited archive-management tests only; not a VM-launch fallback |
 
 ---
 
@@ -215,7 +216,7 @@ mvm vm create <vm-name> --image mvm-test-runner:<version> \
 mvm exec <vm-name> --user runner --timeout 60 -- \
   "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && \
    MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive \
-   --binary-version 1.16.0"
+   --binary-version 1.16.1"
 ```
 
 ### Test Execution
@@ -280,7 +281,7 @@ mvm exec <vm-name> --user runner --timeout 120 -- \
 mvm exec <vm-name> --user runner --timeout 120 -- \
   "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull ubuntu:noble"
 mvm exec <vm-name> --user runner --timeout 120 -- \
-  "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.0 --default --force"
+  "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.1 --default --force"
 ```
 
 ---

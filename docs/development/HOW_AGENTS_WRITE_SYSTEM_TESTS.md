@@ -504,7 +504,7 @@ Outer host (only controller-owned disposable test resources)
 2. Derive the image tag from an isolated candidate version probe and create a runner VM from that image
 3. Stage the candidate in the runner, invoke `host install-system`, initialize through exact
    `/usr/local/bin/mvm`, mount the shared volume, run unprivileged
-   `/usr/local/bin/mvm init --binary-version 1.16.0`, and pull cache hits through that same installed path
+   `/usr/local/bin/mvm init --binary-version 1.16.1`, and pull cache hits through that same installed path
 4. Execute pytest <test-file> directly inside the VM
 5. Destroy runner VM when done
 ```
@@ -528,7 +528,7 @@ network-dependent skips:
 - Alpine 3.23 image (for fast VM creation)
 - Ubuntu 24.04 image (for nested virt tests)
 - Ubuntu minimal 24.04 image (minimal base for builder VM)
-- Firecracker binary 1.16.0 (for hotplug tests)
+- Firecracker/Jailer 1.16.1 (the exact qualified VM launch pair; 1.16.0 is not a VM-launch fallback)
 - Firecracker kernel v1.15 (default)
 
 The official kernel 7.0.11 is **not pre-baked** into the base image — it is

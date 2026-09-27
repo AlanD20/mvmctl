@@ -707,6 +707,14 @@ that architecture fails closed until an architecture-specific member and format 
 tests. Versions outside the exact audited x86_64 set likewise fail closed rather than assuming that a nearby release
 uses the same packaging.
 
+Archive admission is distinct from VM launch support. The v0.3.0 lifecycle admits only a matching
+Firecracker/Jailer `1.16.1` pair for create, start, reboot, and restore. The authenticated launch request and the
+unprivileged pair resolver reject another selected version before Jailer execution; audited older archives remain
+available for explicit binary-management operations. Jailer `1.16.0` rejected the launcher's
+`/proc/self/ns/net` handle as a symbolic-link loop; the upstream
+[1.16.1 changelog](https://github.com/firecracker-microvm/firecracker/blob/main/CHANGELOG.md#1161) records the
+reversal of that no-follow behavior.
+
 For an accepted version, let `<root>` be `release-v<version>-x86_64` and `<binary>` be
 `v<version>-x86_64`. The logical archive contains exactly 24 regular-file members, in any order, with this exact set:
 

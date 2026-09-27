@@ -297,12 +297,16 @@ def _ensure_binary(vm_name: str) -> None:
     """Ensure firecracker binary is registered."""
     r = _run_mvm(vm_name, "bin", "ls", "--json", timeout=30)
     binaries = _json_success_data(r.stdout, list)
-    has = any(
-        b.get("type") == "firecracker" and b.get("is_present")
-        for b in binaries
+    has = all(
+        any(
+            b.get("type") == binary_type and b.get("version") == "1.16.1"
+            and b.get("is_present") and b.get("is_default")
+            for b in binaries
+        )
+        for binary_type in ("firecracker", "jailer")
     )
     if not has:
-        _run_mvm(vm_name, "bin", "pull", "1.16.0", "--default", timeout=300)
+        _run_mvm(vm_name, "bin", "pull", "1.16.1", "--default", timeout=300)
 
 
 def ensure_vm_deps(vm_name: str) -> None:

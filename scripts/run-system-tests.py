@@ -105,7 +105,7 @@ RUNNER_SYSTEM_UPLOAD = "/home/runner/.mvm-system-candidate.upload"
 RUNNER_USER_INIT_COMMAND = (
     "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
     "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive "
-    "--binary-version 1.16.0"
+    "--binary-version 1.16.1"
 )
 
 # Base VM used to build the custom image
@@ -1027,7 +1027,7 @@ def provision_t2(
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.0 --default --force",
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.1 --default --force",
         timeout=150,
     )
 

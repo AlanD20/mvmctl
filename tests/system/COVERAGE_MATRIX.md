@@ -160,7 +160,8 @@ event counters. The private runner VM/volume/snapshot lists were empty and the o
 This does not qualify long-duration or host/ancestor OOM survival, the original reported kill, the complete Python
 matrix, bridge-dependent policy, or remote CI. Matching Firecracker/Jailer 1.16.0 failed a networkless launch because
 Jailer rejected the launcher's `/proc/self/ns/net` argument as a symbolic-link loop; runner provisioning still pins
-1.16.0, so that supported-version decision and its correction remain a release blocker.
+1.16.0 in this historical run. The 0.3.0 contract now requires 1.16.1, and source now gates VM launch and runner
+provisioning to that pair; this correction still needs installed-candidate and orchestrator qualification.
 
 **Exact neighbor/current-candidate checkpoint (2026-09-27):** Clean source `659c8a51` passed offline tidy and
 generation with no tracked diff, gofmt, golines, full vet, the unprivileged Go CI selection, and the complete

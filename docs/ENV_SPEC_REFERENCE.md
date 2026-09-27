@@ -243,7 +243,7 @@ Download Firecracker binaries.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `type` | `string` | No | `"firecracker"` | Binary type. |
-| `version` | `string` | **Yes** | — | Version tag, e.g. `"1.16.0"`. |
+| `version` | `string` | **Yes** | — | Version tag; VM execution in 0.3.0 requires `"1.16.1"`. |
 | `git_ref` | `string` | No | `""` | Build from git ref instead of downloading. |
 | `default` | `bool` | No | `false` | Set as default binary. |
 | `force` | `bool` | No | `false` | Force re-download. |
@@ -252,7 +252,7 @@ Download Firecracker binaries.
 ```yaml
 binary:
   fc-bin:
-    version: "1.16.0"
+    version: "1.16.1"
     default: true
 ```
 
@@ -475,7 +475,7 @@ kernel:
 
 binary:
   fc-bin:
-    version: "1.16.0"
+    version: "1.16.1"
     default: true
 
 vm:
