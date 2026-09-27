@@ -13,6 +13,9 @@ const (
 	VMSnapshotRemoveAction = "jailer-snapshot-remove"
 	// VMSnapshotRestoreAction launches from one immutable root-authenticated capture.
 	VMSnapshotRestoreAction = "jailer-snapshot-restore"
+	// SnapshotRestoreNoCommitDetail is root's proof that a failed restore
+	// published no VM authority and left no live launch child or snapshot reference.
+	SnapshotRestoreNoCommitDetail = "restore_no_commit"
 )
 
 // VMSnapshotRequest selects a root-controlled snapshot below one admitted cache.

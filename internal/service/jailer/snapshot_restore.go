@@ -10,6 +10,7 @@ import (
 
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
+	"mvmctl/pkg/errs"
 )
 
 // preparedSnapshotRestore is constructed only from a locked immutable root capture.
@@ -31,6 +32,7 @@ type preparedSnapshotRestore struct {
 	backingsPrepared bool
 	resume           bool
 	registered       bool
+	noCommit         bool
 	referenceCreated bool
 	released         bool
 	releaseErr       error
@@ -318,7 +320,18 @@ func (server *VMSnapshotServer) Restore(
 	if err != nil {
 		return model.SnapshotRestoreResult{}, err
 	}
-	defer func() { returnErr = errors.Join(returnErr, prepared.Release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		releaseErr := prepared.Release(context.WithoutCancel(ctx))
+		if returnErr != nil && prepared.noCommit && releaseErr == nil {
+			// This receipt is emitted only after the unregistered child was reaped
+			// and the protected snapshot reference was removed. A transport error
+			// cannot carry it because it has no authoritative root response.
+			returnErr = errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
+				"snapshot restore failed before VM launch committed", returnErr,
+				errs.WithDetails(map[string]any{SnapshotRestoreNoCommitDetail: true}))
+		}
+		returnErr = errors.Join(returnErr, releaseErr)
+	}()
 	launch, err := NewVMLifecycleServer().launchSnapshot(ctx, caller, prepared.launchRequest(request.CacheRoot), prepared)
 	if err != nil {
 		return model.SnapshotRestoreResult{}, err

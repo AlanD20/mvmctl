@@ -38,6 +38,13 @@ func (server *VMLifecycleServer) launch(
 	request VMLaunchRequest,
 	restore *preparedSnapshotRestore,
 ) (_ VMLaunchResult, returnErr error) {
+	spawnAttempted := false
+	defer func() {
+		if restore != nil && returnErr != nil && !spawnAttempted {
+			// All paths before the fixed child spawn are read/admission only.
+			restore.noCommit = true
+		}
+	}()
 	if err := request.Validate(); err != nil {
 		return VMLaunchResult{}, err
 	}
@@ -100,6 +107,7 @@ func (server *VMLifecycleServer) launch(
 	if err != nil {
 		return VMLaunchResult{}, err
 	}
+	spawnAttempted = true
 	processes, session, err := spawnBlockedLaunchChild(ctx, request.VMID)
 	var launching *launchLease
 	var active *activeLease
@@ -108,25 +116,21 @@ func (server *VMLifecycleServer) launch(
 	committed := false
 	defer func() {
 		cleanupCtx := context.WithoutCancel(ctx)
-		returnErr = appendInstanceOperationError(
-			returnErr,
-			"release unconsumed console source",
-			releaseUnconsumedConsoleSource(cleanupCtx, consoleSource),
-		)
+		cleanupSucceeded := true
+		appendCleanup := func(message string, cause error) {
+			if cause != nil {
+				cleanupSucceeded = false
+			}
+			returnErr = appendInstanceOperationError(returnErr, message, cause)
+		}
+		appendCleanup("release unconsumed console source", releaseUnconsumedConsoleSource(cleanupCtx, consoleSource))
 		if console != nil {
-			returnErr = appendInstanceOperationError(
-				returnErr,
-				"close parent console session",
-				console.Release(cleanupCtx),
-			)
+			appendCleanup("close parent console session", console.Release(cleanupCtx))
 		}
 		if session != nil {
-			returnErr = appendInstanceOperationError(
-				returnErr,
-				"close child setup channel",
-				session.Release(cleanupCtx),
-			)
+			appendCleanup("close child setup channel", session.Release(cleanupCtx))
 		}
+		unregisteredReaped := false
 		if !committed {
 			var cleanup *cleanupLease
 			var cleanupErr error
@@ -135,28 +139,23 @@ func (server *VMLifecycleServer) launch(
 			} else if launching != nil {
 				cleanup, cleanupErr = launching.Abort(cleanupCtx)
 			}
-			returnErr = appendInstanceOperationError(returnErr, "enter failed launch cleanup", cleanupErr)
+			appendCleanup("enter failed launch cleanup", cleanupErr)
 			if cleanup != nil && cleanupErr == nil {
-				returnErr = appendInstanceOperationError(
-					returnErr,
-					"clean failed launch",
-					finishLifecycleCleanup(cleanupCtx, cleanup, false),
-				)
+				appendCleanup("clean failed launch", finishLifecycleCleanup(cleanupCtx, cleanup, false))
 			}
 			if launching == nil && active == nil && processes != nil {
-				returnErr = appendInstanceOperationError(
-					returnErr,
-					"terminate unregistered launch child",
-					processes.terminateAndReap(cleanupCtx),
-				)
+				reapErr := processes.terminateAndReap(cleanupCtx)
+				appendCleanup("terminate unregistered launch child", reapErr)
+				unregisteredReaped = reapErr == nil
 			}
 		}
 		if processes != nil && launching == nil && active == nil {
-			returnErr = appendInstanceOperationError(
-				returnErr,
-				"release unregistered launch child",
-				processes.Release(cleanupCtx),
-			)
+			appendCleanup("release unregistered launch child", processes.Release(cleanupCtx))
+		}
+		if restore != nil && unregisteredReaped && cleanupSucceeded && launching == nil && active == nil {
+			// A nil launch lease means registration published no new authority.
+			// The child and any console relay are now proved stopped and reaped.
+			restore.noCommit = true
 		}
 	}()
 	if err != nil {

@@ -188,9 +188,9 @@ func (op *Operation) SnapshotRestore(
 		leaseAcquired = true
 	}
 	var item *model.VMItem
-	var directoryCreated, vmRecordAttempted, vsockRecordAttempted, rootAttempted bool
+	var directoryCreated, vmRecordAttempted, vsockRecordAttempted, rootAttempted, rootNoCommit bool
 	defer func() {
-		if restoreErr == nil || rootAttempted {
+		if restoreErr == nil || (rootAttempted && !rootNoCommit) {
 			return
 		}
 		// CRITICAL: Once root restore is attempted its outcome can be unknown.
@@ -291,6 +291,15 @@ func (op *Operation) SnapshotRestore(
 		CacheRoot: op.CacheDir, SnapshotID: snapshot.ID, Resume: input.Resume,
 	})
 	if err != nil {
+		// Only a fully decoded root response can prove this attempt did not
+		// publish VM authority. Transport failures and incomplete cleanup keep
+		// the local identity for explicit recovery.
+		if domainErr := errs.AsDomainError(err); domainErr != nil &&
+			domainErr.Details[jailersvc.SnapshotRestoreNoCommitDetail] == true {
+			rootNoCommit = true
+			return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
+				"restore did not launch VM "+vmID, err)
+		}
 		// Preserve both local identity and root recovery evidence. A failed transport
 		// does not authorize deleting a VM that may already have consumed memory.
 		return []*model.VMItem{item}, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
