@@ -883,7 +883,7 @@ class TestVolumeAttachDetach:
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
             )
-            vol_data = json.loads(vol_result.stdout)
+            vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data.get("volume", {}).get("status") == "available"
 
             _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
@@ -891,13 +891,13 @@ class TestVolumeAttachDetach:
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
             )
-            vol_data = json.loads(vol_result.stdout)
+            vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data.get("volume", {}).get("status") == "attached"
 
             _run_mvm(runner_vm, "vm", "start", vm_name)
 
             result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
+            vms = _json_success_data(result.stdout, list)
             vm_entry = next((v for v in vms if v["name"] == vm_name), None)
             assert vm_entry is not None
             assert vm_entry.get("status") == "running"
@@ -971,13 +971,13 @@ class TestVolumeAttachDetach:
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
             )
-            vol_data = json.loads(vol_result.stdout)
+            vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data.get("volume", {}).get("status") == "attached"
 
             _run_mvm(runner_vm, "vm", "start", vm_name)
 
             result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
+            vms = _json_success_data(result.stdout, list)
             vm_entry = next((v for v in vms if v["name"] == vm_name), None)
             assert vm_entry is not None
             assert vm_entry.get("status") == "running"
@@ -1053,7 +1053,7 @@ class TestVolumeAttachDetach:
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
             )
-            vol_data = json.loads(vol_result.stdout)
+            vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data.get("volume", {}).get("status") == "available"
 
             _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
@@ -1061,7 +1061,7 @@ class TestVolumeAttachDetach:
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
             )
-            vol_data = json.loads(vol_result.stdout)
+            vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data.get("volume", {}).get("status") == "attached"
 
             _run_mvm(runner_vm, "vm", "start", vm_name)
@@ -1146,12 +1146,12 @@ class TestVolumeCrossVM:
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
             )
-            vol_data = json.loads(vol_result.stdout)
+            vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data["volume"]["status"] == "attached"
             assert vol_data.get("attachment", {}).get("vm_id") is not None
 
             vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vm_entries = json.loads(vm_ls.stdout)
+            vm_entries = _json_success_data(vm_ls.stdout, list)
             vm_a_info = next(
                 (v for v in vm_entries if v["name"] == vm_a), None
             )
@@ -1171,7 +1171,7 @@ class TestVolumeCrossVM:
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
             )
-            vol_data = json.loads(vol_result.stdout)
+            vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data["volume"]["status"] == "attached"
             assert (
                 vol_data.get("attachment", {}).get("vm_id") == vm_a_info["id"]
@@ -1254,11 +1254,10 @@ class TestVolumeRunningVMDependency:
             )
             _run_mvm(runner_vm, "vm", "start", vm_name)
 
-            vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if vm_ls.returncode == 0 and vm_ls.stdout.strip():
-                vms = json.loads(vm_ls.stdout)
-                vm_names = [v.get("name") for v in vms]
-                assert vm_name in vm_names
+            vms = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+            )
+            assert any(vm["name"] == vm_name for vm in vms)
 
             result = _run_mvm(
                 runner_vm,
@@ -1271,13 +1270,10 @@ class TestVolumeRunningVMDependency:
             error_text = (result.stdout + result.stderr).lower()
             assert "in use" in error_text or "attached" in error_text
 
-            vol_ls = _run_mvm(
-                runner_vm, "volume", "ls", "--json", check=False
+            volumes_after = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
             )
-            if vol_ls.returncode == 0 and vol_ls.stdout.strip():
-                volumes_after = json.loads(vol_ls.stdout)
-                vol_names = [v.get("name") for v in volumes_after]
-                assert vol_name in vol_names
+            assert any(volume["name"] == vol_name for volume in volumes_after)
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(
@@ -1344,11 +1340,10 @@ class TestVolumeRunningVMDependency:
             )
             _run_mvm(runner_vm, "vm", "start", vm_name)
 
-            vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if vm_ls.returncode == 0 and vm_ls.stdout.strip():
-                vms = json.loads(vm_ls.stdout)
-                vm_names = [v.get("name") for v in vms]
-                assert vm_name in vm_names
+            vms = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+            )
+            assert any(vm["name"] == vm_name for vm in vms)
 
             result = _run_mvm(
                 runner_vm,
@@ -1360,13 +1355,10 @@ class TestVolumeRunningVMDependency:
             )
             assert result.returncode == 0
 
-            vol_ls = _run_mvm(
-                runner_vm, "volume", "ls", "--json", check=False
+            volumes_after = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
             )
-            if vol_ls.returncode == 0 and vol_ls.stdout.strip():
-                volumes_after = json.loads(vol_ls.stdout)
-                vol_names = [v.get("name") for v in volumes_after]
-                assert vol_name not in vol_names
+            assert all(volume["name"] != vol_name for volume in volumes_after)
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(
@@ -1433,21 +1425,14 @@ class TestVolumeRunningVMDependency:
             )
             _run_mvm(runner_vm, "vm", "start", vm_name)
 
-            vol_ls_before = _run_mvm(
-                runner_vm, "volume", "ls", "--json", check=False
-            )
-            vol_list_before = (
-                []
-                if vol_ls_before.returncode != 0
-                else json.loads(vol_ls_before.stdout)
+            vol_list_before = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
             )
             vol_info_before = next(
                 (v for v in vol_list_before if v.get("name") == vol_name),
                 {},
             )
-            original_size = (
-                vol_info_before.get("size_bytes") if vol_info_before else None
-            )
+            assert vol_info_before.get("size_bytes") == 512 * 1024 * 1024
 
             result = _run_mvm(
                 runner_vm,
@@ -1459,22 +1444,14 @@ class TestVolumeRunningVMDependency:
             )
             assert result.returncode == 0
 
-            vol_ls_after = _run_mvm(
-                runner_vm, "volume", "ls", "--json", check=False
+            vol_list_after = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
             )
-            if vol_ls_after.returncode == 0 and vol_ls_after.stdout.strip():
-                vol_list_after = json.loads(vol_ls_after.stdout)
-                vol_info_after = next(
-                    (v for v in vol_list_after if v.get("name") == vol_name),
-                    {},
-                )
-                new_size = (
-                    vol_info_after.get("size_bytes")
-                    if vol_info_after
-                    else None
-                )
-                assert new_size is not None
-                assert original_size is None or new_size != original_size
+            vol_info_after = next(
+                (v for v in vol_list_after if v.get("name") == vol_name),
+                {},
+            )
+            assert vol_info_after.get("size_bytes") == 1024 * 1024 * 1024
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(
@@ -1539,27 +1516,23 @@ class TestVolumeNegativeFailure:
                 "attach",
                 vm_name,
                 "nonexistent-volume-name",
-                check=False,
-            )
-            assert result.returncode != 0
-            combined = (result.stdout + result.stderr).lower()
-            assert "not found" in combined
-
-            result_ins = _run_mvm(
-                runner_vm,
-                "vm",
-                "inspect",
-                vm_name,
                 "--json",
                 check=False,
             )
-            if result_ins.returncode == 0:
-                vm_info = json.loads(result_ins.stdout)
-                attached_vols = vm_info.get("volumes") or []
-                assert not any(
-                    v.get("name") == "nonexistent-volume-name"
-                    for v in attached_vols
-                )
+            assert result.returncode != 0
+            envelope = json.loads(result.stdout)
+            assert envelope["schema_version"] == 1
+            assert envelope["status"] == "error"
+            assert envelope["error"]["code"] == "volume.not_found"
+
+            vm_info = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
+            )
+            assert not any(
+                volume.get("name") == "nonexistent-volume-name"
+                for volume in vm_info["volumes"]
+            )
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
@@ -1604,33 +1577,25 @@ class TestVolumeNegativeFailure:
                 "detach",
                 vm_name,
                 "nonexistent-volume-name",
-                check=False,
-            )
-            assert result.returncode != 0
-            combined = (result.stdout + result.stderr).lower()
-            assert "not found" in combined
-
-            result_vol = _run_mvm(
-                runner_vm, "volume", "ls", "--json", check=False
-            )
-            if result_vol.returncode == 0:
-                vols = json.loads(result_vol.stdout)
-                assert not any(
-                    v["name"] == "nonexistent-volume-name" for v in vols
-                )
-
-            result_ins = _run_mvm(
-                runner_vm,
-                "vm",
-                "inspect",
-                vm_name,
                 "--json",
                 check=False,
             )
-            if result_ins.returncode == 0:
-                vm_info = json.loads(result_ins.stdout)
-                attached_vols = vm_info.get("volumes") or []
-                assert len(attached_vols) == 0
+            assert result.returncode != 0
+            envelope = json.loads(result.stdout)
+            assert envelope["schema_version"] == 1
+            assert envelope["status"] == "error"
+            assert envelope["error"]["code"] == "volume.not_found"
+
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            assert all(volume["name"] != "nonexistent-volume-name" for volume in volumes)
+
+            vm_info = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
+            )
+            assert not vm_info["volumes"]
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
