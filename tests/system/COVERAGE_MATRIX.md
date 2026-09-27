@@ -91,6 +91,15 @@ matrix, bridge-dependent policy, or remote CI. Matching Firecracker/Jailer 1.16.
 Jailer rejected the launcher's `/proc/self/ns/net` argument as a symbolic-link loop; runner provisioning still pins
 1.16.0, so that supported-version decision and its correction remain a release blocker.
 
+**Exact neighbor/current-candidate checkpoint (2026-09-27):** Clean source `659c8a51` passed offline tidy and
+generation with no tracked diff, gofmt, golines, full vet, the unprivileged Go CI selection, and the complete
+root-effect Jailer package inside only `mvmctl-030-test`. Its full-agent `0.3.0-rc.neighbor` build was installed
+through `host install-system` only there, with matching built/installed SHA-256. Five existing networkless Python
+cases passed against that candidate: reboot/vsock, status stop/start, direct API denial, raw-volume restart, and
+consistent data-volume snapshot restore. The private VM, volume, and snapshot inventories were empty afterward.
+This is focused evidence, not the full Python matrix or reused-IP/network-policy qualification; the runner kernel
+still lacks nftables bridge-family support.
+
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
 | Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
