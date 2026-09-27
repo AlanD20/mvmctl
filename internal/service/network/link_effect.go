@@ -190,6 +190,18 @@ func (effect *linkEffect) CreateVethPairDown(
 			mutationErr, errors.New("created veth pair has only one surviving endpoint"),
 		), false)
 	}
+	if mutationErr == nil {
+		if hostAfter, err = effect.labelCreatedLink(
+			ctx, hostFD, hostAfter, result.host, linkKindVeth, hostAlias, 0,
+		); err != nil {
+			return result, linkCreateError(spec.hostName, "label created host veth", err, false)
+		}
+		if peerAfter, err = effect.labelCreatedLink(
+			ctx, vmFD, peerAfter, result.peer, linkKindVeth, peerAlias, 0,
+		); err != nil {
+			return result, linkCreateError(spec.peerName, "label created namespace veth", err, false)
+		}
+	}
 	validationErr := errors.Join(
 		validateManagedLink(*hostAfter, result.host, linkKindVeth, hostAlias, 0, 0),
 		validateManagedLink(*peerAfter, result.peer, linkKindVeth, peerAlias, 0, 0),
@@ -238,6 +250,7 @@ func (effect *linkEffect) AttachNamespaceVethToLocalBridge(
 		managedVethAlias("veth-peer", veth.peer.name, veth.host.name),
 		bridge,
 		0,
+		false,
 	)
 }
 
@@ -270,7 +283,7 @@ func (effect *linkEffect) AttachTAPToLocalBridge(
 		return linkCreateError(tap.name, "authenticate TAP attachment owner", err, false)
 	}
 	return effect.attachLink(
-		ctx, fd, tap, linkKindTAP, managedTAPAlias(tap.name, owner), bridge, owner,
+		ctx, fd, tap, linkKindTAP, managedTAPAlias(tap.name, owner), bridge, owner, false,
 	)
 }
 
@@ -306,6 +319,7 @@ func (effect *linkEffect) AttachHostVethToManagedBridge(
 		managedVethAlias("veth-host", veth.host.name, veth.peer.name),
 		bridge,
 		0,
+		true,
 	)
 }
 
@@ -554,6 +568,12 @@ func (effect *linkEffect) createSingleLink(
 		}
 		return nil, linkCreateError(name, "create link down", mutationErr, false)
 	}
+	if mutationErr == nil {
+		after, err = effect.labelCreatedLink(ctx, namespaceFD, after, result, kind, alias, owner)
+		if err != nil {
+			return &result, linkCreateError(name, "label created link", err, false)
+		}
+	}
 	validationErr := validateManagedLink(*after, result, kind, alias, 0, owner)
 	if mutationErr != nil || validationErr != nil {
 		return &result, linkCreateError(name, "create link down", errors.Join(
@@ -561,6 +581,40 @@ func (effect *linkEffect) createSingleLink(
 		), false)
 	}
 	return &result, nil
+}
+
+// labelCreatedLink applies an alias only after exact down-link identity has been observed.
+// RTM_NEWLINK creation does not apply IFLA_IFALIAS on all supported kernel device kinds.
+func (effect *linkEffect) labelCreatedLink(
+	ctx context.Context,
+	namespaceFD int,
+	observed *routeLinkObservation,
+	identity linkIdentity,
+	kind string,
+	alias string,
+	owner OwnerUID,
+) (*routeLinkObservation, error) {
+	if observed.alias == alias {
+		return observed, nil
+	}
+	if observed.alias != "" {
+		return nil, errors.New("created link has a foreign alias")
+	}
+	if err := validateManagedLink(*observed, identity, kind, "", 0, owner); err != nil {
+		return nil, err
+	}
+	labelErr := effect.route.setLinkAlias(ctx, namespaceFD, identity.ifIndex, alias)
+	current, inspectErr := effect.route.inspectLink(context.WithoutCancel(ctx), namespaceFD, identity.name)
+	if inspectErr != nil || current == nil {
+		return nil, errors.Join(labelErr, inspectErr, errors.New("created link alias cannot be verified"))
+	}
+	if labelErr != nil {
+		return nil, labelErr
+	}
+	if err := validateManagedLink(*current, identity, kind, alias, 0, owner); err != nil {
+		return nil, err
+	}
+	return current, nil
 }
 
 func (effect *linkEffect) attachLink(
@@ -571,6 +625,7 @@ func (effect *linkEffect) attachLink(
 	alias string,
 	bridge linkIdentity,
 	owner OwnerUID,
+	bridgeUp bool,
 ) error {
 	linkBefore, err := effect.route.inspectLink(ctx, namespaceFD, link.name)
 	if err != nil {
@@ -587,11 +642,16 @@ func (effect *linkEffect) attachLink(
 	}
 	if err := errors.Join(
 		validateManagedLink(*linkBefore, link, kind, alias, linkBefore.master, owner),
-		validateManagedLink(
+		validateExactManagedLink(
 			*bridgeBefore, bridge, linkKindBridge, managedBridgeAlias(bridge.name), 0, 0,
 		),
 	); err != nil {
 		return linkCreateError(link.name, "admit link attachment", err, false)
+	}
+	if (bridgeBefore.flags&unix.IFF_UP != 0) != bridgeUp {
+		return linkCreateError(link.name, "admit link attachment", errors.New(
+			"attachment bridge has the wrong administrative state",
+		), false)
 	}
 	if linkBefore.master == bridge.ifIndex {
 		return nil
@@ -643,9 +703,13 @@ func (effect *linkEffect) validateManagedMaster(
 			return errors.New("link master is not a derived managed bridge")
 		}
 		identity := linkIdentity{name: candidate.name, ifIndex: candidate.ifIndex}
-		return validateManagedLink(
-			candidate, identity, linkKindBridge, managedBridgeAlias(candidate.name), 0, 0,
-		)
+		if wantPrefix == "mvb" {
+			// The root managed bridge is already up when the down host veth is attached.
+			return validateExactManagedLink(
+				candidate, identity, linkKindBridge, managedBridgeAlias(candidate.name), 0, 0,
+			)
+		}
+		return validateManagedLink(candidate, identity, linkKindBridge, managedBridgeAlias(candidate.name), 0, 0)
 	}
 	return errors.New("link master is absent from its namespace")
 }

@@ -73,6 +73,34 @@ func TestLinkEffectCreatesDownOwnedBridgeTAPAndReciprocalVeth(t *testing.T) {
 	assert.Equal(t, 4, fixture.closeCount())
 }
 
+// Rationale: Linux ignores IFLA_IFALIAS in RTM_NEWLINK create for these device kinds;
+// the effect must label the exact newly created links before handing them to topology cleanup.
+func TestLinkEffectLabelsKernelCreatedBridgeAndVeth(t *testing.T) {
+	t.Parallel()
+
+	fixture := newLinkEffectFixture(t)
+	fixture.route.afterCreate = func(link *routeLinkObservation) { link.alias = "" }
+	fixture.route.afterVethCreate = func(host, peer *routeLinkObservation) {
+		host.alias, peer.alias = "", ""
+	}
+	bridge, err := fixture.effect.CreateLocalBridgeDown(
+		t.Context(), fixture.pin, localBridgeCreateSpec{name: fixture.names.localBridge},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, bridge)
+	veth, err := fixture.effect.CreateVethPairDown(t.Context(), fixture.pin, vethCreateSpec{
+		hostName: fixture.names.hostVeth, peerName: fixture.names.namespaceVeth,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, veth)
+	assert.Equal(t, managedBridgeAlias(fixture.names.localBridge),
+		fixture.route.mustLink(t, fixture.vmFD, fixture.names.localBridge).alias)
+	assert.Equal(t, managedVethAlias("veth-host", fixture.names.hostVeth, fixture.names.namespaceVeth),
+		fixture.route.mustLink(t, fixture.hostFD, fixture.names.hostVeth).alias)
+	assert.Equal(t, managedVethAlias("veth-peer", fixture.names.namespaceVeth, fixture.names.hostVeth),
+		fixture.route.mustLink(t, fixture.vmFD, fixture.names.namespaceVeth).alias)
+}
+
 // Rationale: a transport error after mutation remains rollback-visible and is reconciled under a non-cancelled read.
 func TestLinkEffectCreationUncertaintyReturnsIdentityAndInspectsWithoutCancellation(t *testing.T) {
 	t.Parallel()
@@ -309,6 +337,13 @@ func TestLinkEffectAttachRejectsWrongNamespaceKindAliasOwnerAndMaster(t *testing
 			fixture.route.put(fixture.vmFD, link)
 			return fixture.effect.AttachNamespaceVethToLocalBridge(t.Context(), fixture.pin, veth, bridge)
 		},
+		"managed bridge down": func(fixture *linkEffectFixture, _, _ linkIdentity, veth vethPairIdentity) error {
+			bridge := fixture.route.mustLink(t, fixture.hostFD, fixture.names.managedBridge)
+			bridge.flags &^= unix.IFF_UP
+			fixture.route.put(fixture.hostFD, bridge)
+			return fixture.effect.AttachHostVethToManagedBridge(t.Context(), veth,
+				fixture.route.mustIdentity(fixture.hostFD, fixture.names.managedBridge, fixture.hostNamespace))
+		},
 	}
 	for name, operation := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -522,7 +557,7 @@ func (fixture *linkEffectFixture) seedAttachedTopology(
 	})
 	fixture.route.put(fixture.hostFD, routeLinkObservation{
 		name: managedBridge.name, alias: managedBridgeAlias(managedBridge.name), kind: linkKindBridge,
-		ifIndex: managedBridge.ifIndex,
+		ifIndex: managedBridge.ifIndex, flags: unix.IFF_UP,
 	})
 	if attached {
 		host := fixture.route.mustLink(t, fixture.hostFD, veth.host.name)
