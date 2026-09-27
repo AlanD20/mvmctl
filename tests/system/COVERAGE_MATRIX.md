@@ -381,10 +381,10 @@ Specific legacy conflicts that must be rewritten before release:
 | `network create` without --subnet | ⚡ Shallow | `network/test_network.py` | `TestNetworkEdgeCases` | L1: checks error message |
 | `network create` invalid CIDR | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | L1 |
 | `network create` /32 subnet | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | L1 |
-| `network create` duplicate name | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | L1 |
+| `network create` duplicate name | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | Installed CLI returns `network.already_exists` and retains one network record |
 | `network create` duplicate subnet | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | L1 — two tests for this: test_overlapping_subnet_across_networks_rejected, test_overlapping_subnet_rejected |
 | `network create --default` | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | L2 — is_default=true in ls JSON |
-| `network create --no-nat` | ✅ Deep | `network/test_network.py` | `TestNetworkLifecycle` | L3: bridge exists, _assert_no_masquerade_rule confirms no MASQUERADE rule exists |
+| `network create --no-nat` | ✅ Deep | `network/test_network.py` | `TestNetworkLifecycle` | Installed bridge exists and exact subnet/bridge masquerade rule is absent |
 | `network create --ipv4-gateway` | ✅ Deep | `network/test_network.py` | `TestNetworkAdvancedCreate` | L2 — checks inspect JSON. Could be L3 (bridge IP). |
 | `network create --nat-gateways` (removed) | ⚡ Shallow | `network/test_network.py` | `TestNetworkAdvancedCreate` | Installed candidate rejects the removed flag before effects; focused runner case passed. |
 | `network create` invalid gateway | ⚡ Shallow | `network/test_network.py` | `TestNetworkAdvancedCreate` | L1 |
@@ -404,8 +404,8 @@ Specific legacy conflicts that must be rewritten before release:
 | `network sync` | ✅ Deep | `network/test_network.py` | `TestNetworkSync` | L3: bridge, IP, firewall rules |
 | `network sync --json` | ⚡ Shallow | `network/test_network.py` | `TestNetworkSync` | L2 — result dict with per-network stats |
 | `network sync <specific>` | ✅ Deep | `network/test_network.py` | `TestNetworkSync` | L3: bridge and rules |
-| `network sync` idempotent | ✅ Deep | `network/test_network.py` | `TestNetworkSync` | L3: rule count unchanged |
-| Sync after bridge deletion | ✅ Deep | `network/test_network.py` | `TestNetworkSyncAfterReboot` | L3: bridge recreated, IP reassigned, rules restored |
+| `network sync` idempotent | ✅ Deep | `network/test_network.py` | `TestNetworkSync` | Installed inet forward-rule generation is unchanged across repeated sync |
+| Same-boot sync after bridge deletion | ✅ Deep | `network/test_network.py` | `TestNetworkSyncMissingBridge` | L2: missing recorded bridge is rejected, not silently re-created; exact removal cleans up |
 | `network sync` conntrack rule | ✅ Deep | `network/test_network.py` | `TestNetworkSync` | Conntrack established/related accept rule |
 | `network sync` nonexistent | ⚡ Shallow | `network/test_network.py` | `TestNetworkSync` | Error handling for nonexistent network |
 | `network rm` rejects with active VM | ✅ Deep | `network/test_network.py` | `TestNetworkVMDependency` | L3: rm fails without --force when VM uses network; inspect shows VM count |

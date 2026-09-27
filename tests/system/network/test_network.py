@@ -2,7 +2,7 @@
 
 Covers: create, ls, inspect, rm, default, sync, --no-nat, --ipv4-gateway,
 rejected --nat-gateways, error paths, destructive removal, VM dependency, and
-sync-after-reboot (bridge deletion recovery).
+same-boot bridge disappearance rejection.
 
 Structure (top-to-bottom):
   - Helper functions
@@ -10,21 +10,12 @@ Structure (top-to-bottom):
   - State-modifying but self-cleaning classes
   - Destructive classes (force-rm, VM-dependent operations, bridge deletion)
 
-Migrated from tests/e2e/network/test_network.py.
-
-VIOLATIONS REMOVED:
-  - 17+ calls to subprocess.run(["sudo", "nft", ...]) on HOST → run inside VM
-  - subprocess.run(["sudo", "ip", "link", ...]) on HOST → run inside VM
-  - subprocess.run(["sudo", "iptables", ...]) on HOST → run inside VM
-  - subprocess.run(["ip", "link", "show", ...]) on HOST → run inside VM
-  - subprocess.run(["ip", "route", "show", "default"]) on HOST → run inside VM
-  - subprocess.run(["ip", "addr", "show", ...]) on HOST → run inside VM
-  - All helpers now take runner_vm and execute inside the test VM
+All commands execute inside the named disposable runner VM.
 """
 
 from __future__ import annotations
 
-import hashlib
+import json
 import uuid
 from typing import Any
 
@@ -47,50 +38,25 @@ pytestmark = [
 
 
 # ============================================================================
-# Helpers — ALL commands run INSIDE the test VM via _guest_run
+# Helpers — commands run inside the test VM via _guest_run
 # ============================================================================
 
 
-def _compute_bridge_name(name: str) -> str:
-    """Replicate NetworkUtils.compute_bridge_name for test assertions.
-
-    Bridge names are limited to 15 chars (IFNAMSIZ). If the full
-    mvm-{name} exceeds 15, the name portion is truncated and a hash
-    suffix is appended to preserve uniqueness.
-    """
-    raw = f"mvm-{name}"
-    if len(raw) <= 15:
-        return raw
-    hash_len = 8
-    prefix = "mvm-"
-    max_name = 15 - len(prefix) - hash_len - 1
-    name_truncated = name[:max_name]
-    short_hash = hashlib.sha256(name.encode()).hexdigest()[:hash_len]
-    return f"{prefix}{name_truncated}-{short_hash}"
-
-
-def _get_firewall_backend(runner_vm: str) -> str:
-    """Determine the current firewall backend (nftables or iptables).
-
-    Returns ``"nftables"`` as the default (the hardcoded default in
-    ``constants.py``) when config returns ``(default)`` or when the
-    config command fails.
-    """
-    backend_result = _run_mvm(
-        runner_vm,
-        "config",
-        "get",
-        "settings",
-        "firewall_backend",
-        check=False,
+def _network_info(runner_vm: str, name: str) -> dict[str, Any]:
+    """Read the bridge identity published by the installed CLI."""
+    data = _json_success_data(
+        _run_mvm(runner_vm, "network", "inspect", name, "--json").stdout,
+        dict,
     )
-    if backend_result.returncode == 0 and backend_result.stdout.strip():
-        stdout_clean = backend_result.stdout.strip()
-        if "=" in stdout_clean:
-            raw = stdout_clean.split("=")[-1].strip()
-            if raw and raw != "(default)":
-                return raw
-    return "nftables"
+    network = data["network"]
+    assert network["name"] == name
+    return network
+
+
+def _bridge_name(runner_vm: str, name: str) -> str:
+    bridge = _network_info(runner_vm, name)["bridge"]
+    assert isinstance(bridge, str) and bridge
+    return bridge
 
 
 def _assert_bridge_exists(runner_vm: str, bridge: str) -> None:
@@ -103,206 +69,45 @@ def _assert_bridge_exists(runner_vm: str, bridge: str) -> None:
     )
 
 
-def _assert_firewall_rules_contain_bridge(
-    runner_vm: str, bridge: str, backend: str
-) -> None:
-    """Assert the active firewall has rules referencing the bridge (inside VM)."""
-    if backend == "nftables":
-        result = _guest_run(
-            runner_vm,
-            "sudo nft list chain ip filter MVM-FORWARD",
-            check=False,
-            timeout=10,
-        )
-        assert result.returncode == 0, (
-            f"nft list MVM-FORWARD failed: {result.stderr}"
-        )
-        assert bridge in result.stdout, (
-            f"Bridge '{bridge}' not found in nftables MVM-FORWARD:\n"
-            f"{result.stdout}"
-        )
-    else:
-        result = _guest_run(
-            runner_vm,
-            "sudo iptables -t nat -L",
-            check=False,
-            timeout=10,
-        )
-        assert result.returncode == 0
-        assert bridge in result.stdout, (
-            f"Bridge '{bridge}' not found in iptables nat table:\n"
-            f"{result.stdout}"
-        )
-
-
-def _count_firewall_rules(
-    runner_vm: str, backend: str, chain: str = "MVM-FORWARD"
-) -> int:
-    """Count rules in a firewall chain (nftables or iptables) inside the test VM."""
-    if backend == "nftables":
-        result = _guest_run(
-            runner_vm,
-            f"sudo nft list chain ip filter {chain}",
-            check=False,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            return 0
-        count = 0
-        for line in result.stdout.splitlines():
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if stripped.startswith("table "):
-                continue
-            if stripped.startswith("chain "):
-                continue
-            if stripped.startswith("type "):
-                continue
-            if stripped in ("{", "}"):
-                continue
-            count += 1
-        return count
-    else:
-        result = _guest_run(
-            runner_vm,
-            f"sudo iptables -L {chain} -n",
-            check=False,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            return 0
-        lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
-        # Subtract chain header row and column header row
-        return max(0, len(lines) - 2)
-
-
-def _assert_masquerade_rule(runner_vm: str, backend: str) -> None:
-    """Assert MASQUERADE rule exists in MVM-POSTROUTING (inside VM)."""
-    if backend == "nftables":
-        result = _guest_run(
-            runner_vm,
-            "sudo nft list chain ip nat MVM-POSTROUTING",
-            check=False,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            assert "masquerade" in result.stdout.lower(), (
-                f"No MASQUERADE rule in MVM-POSTROUTING:\n{result.stdout}"
-            )
-    else:
-        result = _guest_run(
-            runner_vm,
-            "sudo iptables -t nat -L MVM-POSTROUTING",
-            check=False,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            assert "MASQUERADE" in result.stdout.upper(), (
-                f"No MASQUERADE rule in MVM-POSTROUTING:\n{result.stdout}"
-            )
-
-
-def _assert_no_masquerade_rule(runner_vm: str, backend: str) -> None:
-    """Assert no MASQUERADE rule exists in MVM-POSTROUTING (inside VM)."""
-    if backend == "nftables":
-        result = _guest_run(
-            runner_vm,
-            "sudo nft list chain ip nat MVM-POSTROUTING",
-            check=False,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            assert "masquerade" not in result.stdout.lower(), (
-                "Unexpected MASQUERADE rule in MVM-POSTROUTING "
-                f"(expected --no-nat to suppress it):\n{result.stdout}"
-            )
-    else:
-        result = _guest_run(
-            runner_vm,
-            "sudo iptables -t nat -L MVM-POSTROUTING",
-            check=False,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            assert "MASQUERADE" not in result.stdout.upper(), (
-                "Unexpected MASQUERADE rule in MVM-POSTROUTING "
-                f"(expected --no-nat to suppress it):\n{result.stdout}"
-            )
-
-
-def _assert_masquerade_for_subnet(
-    runner_vm: str, subnet: str, backend: str
-) -> None:
-    """Assert MVM-POSTROUTING has a masquerade rule for ``subnet`` (inside VM)."""
-    if backend == "nftables":
-        result = _guest_run(
-            runner_vm,
-            "sudo nft list chain ip nat MVM-POSTROUTING",
-            check=False,
-            timeout=10,
-        )
-        assert result.returncode == 0, (
-            f"nft list MVM-POSTROUTING failed: {result.stderr}"
-        )
-        assert subnet in result.stdout, (
-            f"Subnet {subnet} not found in nftables MVM-POSTROUTING:\n"
-            f"{result.stdout}"
-        )
-        assert "masquerade" in result.stdout.lower(), (
-            "No masquerade rule in nftables MVM-POSTROUTING:\n"
-            f"{result.stdout}"
-        )
-    else:
-        result = _guest_run(
-            runner_vm,
-            "sudo iptables -t nat -L MVM-POSTROUTING -n",
-            check=False,
-            timeout=10,
-        )
-        assert result.returncode == 0, (
-            f"iptables list MVM-POSTROUTING failed: {result.stderr}"
-        )
-        assert subnet in result.stdout, (
-            f"Subnet {subnet} not found in iptables MVM-POSTROUTING:\n"
-            f"{result.stdout}"
-        )
-        assert "MASQUERADE" in result.stdout.upper(), (
-            "No MASQUERADE rule in iptables MVM-POSTROUTING:\n"
-            f"{result.stdout}"
-        )
-
-
-def _assert_network_firewall_rules(
-    runner_vm: str, net_name: str, subnet: str, backend: str
-) -> None:
-    """Assert bridge, FORWARD accept, and NAT rules exist for a network."""
-    bridge = _compute_bridge_name(net_name)
-    _assert_bridge_exists(runner_vm, bridge)
-    _assert_masquerade_for_subnet(runner_vm, subnet, backend)
-
-    # Option C: bridge accept rule in MVM-FORWARD
-    if backend == "nftables":
-        result = _guest_run(
-            runner_vm,
-            "sudo nft list chain ip filter MVM-FORWARD",
-            check=False,
-            timeout=10,
-        )
-    else:
-        result = _guest_run(
-            runner_vm,
-            "sudo iptables -L MVM-FORWARD -n",
-            check=False,
-            timeout=10,
-        )
+def _inet_rules(runner_vm: str, chain: str) -> list[str]:
+    """Read actual rules from the fixed managed inet generation."""
+    result = _guest_run(
+        runner_vm,
+        f"sudo -n nft list chain inet mvmctl_inet {chain}",
+        check=False,
+        timeout=10,
+    )
     assert result.returncode == 0, (
-        f"Listing MVM-FORWARD failed ({backend}): {result.stderr}"
+        f"managed inet {chain} chain is unavailable: {result.stderr}"
     )
-    assert bridge in result.stdout, (
-        f"Bridge '{bridge}' not found in MVM-FORWARD ({backend}):\n"
-        f"{result.stdout}"
-    )
+    return [
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip()
+        and not line.strip().startswith(("table ", "chain ", "type ", "#"))
+        and line.strip() not in ("{", "}")
+    ]
+
+
+def _assert_firewall_rules_contain_bridge(runner_vm: str, bridge: str) -> None:
+    rules = _inet_rules(runner_vm, "forward")
+    assert any(bridge in rule and "accept" in rule for rule in rules), rules
+    assert any(bridge in rule and "drop" in rule for rule in rules), rules
+
+
+def _assert_masquerade_for_subnet(runner_vm: str, bridge: str, subnet: str) -> None:
+    rules = _inet_rules(runner_vm, "postrouting")
+    assert any(
+        bridge in rule and subnet in rule and "masquerade" in rule
+        for rule in rules
+    ), rules
+
+
+def _assert_network_firewall_rules(runner_vm: str, name: str, subnet: str) -> None:
+    bridge = _bridge_name(runner_vm, name)
+    _assert_bridge_exists(runner_vm, bridge)
+    _assert_firewall_rules_contain_bridge(runner_vm, bridge)
+    _assert_masquerade_for_subnet(runner_vm, bridge, subnet)
 
 
 # ============================================================================
@@ -361,19 +166,16 @@ class TestNetworkLifecycle:
             f"Expected non-empty subnet: {network}"
         )
 
-    def test_ip_rule_verification_iptables(self, runner_vm, module_network):
-        # Rationale: Uses module_network fixture. Verifies iptables/nftables
-        # rules reference the bridge (Option C).
-        """Verify firewall rules were created for network (iptables or nftables)."""
-        bridge = _compute_bridge_name(module_network)
-        backend = _get_firewall_backend(runner_vm)
-        _assert_firewall_rules_contain_bridge(runner_vm, bridge, backend)
+    def test_managed_nftables_rules_reference_bridge(self, runner_vm, module_network):
+        """The installed forward generation contains this network's bridge."""
+        bridge = _bridge_name(runner_vm, module_network)
+        _assert_firewall_rules_contain_bridge(runner_vm, bridge)
 
     def test_nat_gateway_configuration(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies bridge interface
         # exists via ip addr inside test VM.
         """Verify bridge interface exists for created network."""
-        bridge = _compute_bridge_name(module_network)
+        bridge = _bridge_name(runner_vm, module_network)
         _assert_bridge_exists(runner_vm, bridge)
 
     def test_network_inspect(self, runner_vm, module_network):
@@ -513,7 +315,7 @@ class TestNetworkLifecycle:
             check=False,
         )
         assert result.returncode != 0
-        assert "invalid CIDR address" in result.stderr
+        assert "network subnet must be a canonical masked IPv4 prefix" in result.stderr
 
         ls_result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         if ls_result.returncode == 0 and ls_result.stdout.strip():
@@ -579,11 +381,9 @@ class TestNetworkLifecycle:
 
     def test_network_create_no_nat(self, runner_vm, unique_network_name):
         # Rationale: Needs a real network (5-10s). Tests --no-nat flag.
-        # Upgraded to L3: verifies bridge exists and no MASQUERADE rule.
         """Create a network with --no-nat flag.
 
-        L2: Checks JSON listing for the network.
-        L3: Verifies bridge exists but has NO MASQUERADE firewall rule.
+        Checks the JSON projection, real bridge, and absence of its NAT rule.
         """
         try:
             result = _run_mvm(
@@ -597,13 +397,13 @@ class TestNetworkLifecycle:
             )
             assert result.returncode == 0
 
-            # L2: Verify network appears in JSON listing
+            # Verify network appears in JSON listing.
             ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
             networks = _json_success_data(ls_result.stdout, list)
             assert any(n.get("name") == unique_network_name for n in networks)
 
-            # L3: Verify bridge exists and --no-nat was honored
-            bridge = _compute_bridge_name(unique_network_name)
+            # Verify the bridge exists and --no-nat was honored.
+            bridge = _bridge_name(runner_vm, unique_network_name)
             _assert_bridge_exists(runner_vm, bridge)
             inspect_result = _run_mvm(
                 runner_vm, "network", "inspect", unique_network_name, "--json"
@@ -612,6 +412,11 @@ class TestNetworkLifecycle:
             assert inspect_data.get("nat", {}).get("nat_enabled") is False, (
                 f"Expected nat_enabled=False for --no-nat network, "
                 f"got: {inspect_data.get('nat', {}).get('nat_enabled')}"
+            )
+            subnet = _unique_subnet(unique_network_name)
+            assert not any(
+                bridge in rule and subnet in rule and "masquerade" in rule
+                for rule in _inet_rules(runner_vm, "postrouting")
             )
         finally:
             _run_mvm(
@@ -775,7 +580,7 @@ class TestNetworkLifecycle:
                 check=False,
             )
             assert result.returncode != 0
-            assert "invalid" in result.stderr.lower()
+            assert "no longer than /30" in result.stderr
 
             ls_result = _run_mvm(
                 runner_vm, "network", "ls", "--json", check=False
@@ -808,10 +613,14 @@ class TestNetworkLifecycle:
                 net_name,
                 "--subnet",
                 _unique_subnet(f"{net_name}-other"),
+                "--json",
                 check=False,
             )
             assert result.returncode != 0
-            assert "already exists" in result.stderr.lower()
+            response = json.loads(result.stdout)
+            assert response["schema_version"] == 1
+            assert response["status"] == "error"
+            assert response["error"]["code"] == "network.already_exists"
 
             ls_result = _run_mvm(
                 runner_vm, "network", "ls", "--json", check=False
@@ -998,7 +807,7 @@ class TestNetworkAdvancedCreate:
     ):
         """Removed --nat-gateways is rejected without creating a network or bridge."""
         subnet = _unique_subnet(unique_network_name)
-        bridge = _compute_bridge_name(unique_network_name)
+        bridges_before = _guest_run(runner_vm, "ip -o link show type bridge").stdout
         result = _run_mvm(
             runner_vm,
             "network",
@@ -1019,11 +828,9 @@ class TestNetworkAdvancedCreate:
             net.get("name") == unique_network_name for net in networks
         )
 
-        link_result = _guest_run(
-            runner_vm, f"ip link show {bridge} 2>&1", check=False, timeout=10
-        )
-        assert link_result.returncode != 0, (
-            f"Bridge '{bridge}' exists after rejected create:\n{link_result.stdout}"
+        bridges_after = _guest_run(runner_vm, "ip -o link show type bridge").stdout
+        assert bridges_after == bridges_before, (
+            f"Rejected network create changed bridge inventory: {bridges_before!r} -> {bridges_after!r}"
         )
 
     def test_network_create_invalid_gateway_fails(
@@ -1049,7 +856,7 @@ class TestNetworkAdvancedCreate:
 
 
 class TestNetworkSync:
-    """Test mvm network sync with atomicity and Option C verification.
+    """Test network sync against the fixed managed nftables generation.
 
     Non-destructive: all tests either create+cleanup their own networks or
     use the module_network fixture. This class is placed BEFORE destructive
@@ -1057,14 +864,10 @@ class TestNetworkSync:
     """
 
     def test_network_sync_all(self, runner_vm):
-        # Rationale: Creates own network inline. Verifies bridge + firewall
-        # rules persist after sync (Option C). Self-contained to avoid stale
-        # iptables rules from earlier tests in the module.
+        # Rationale: Creates own network and checks bridge/rules after global sync.
         """Sync all networks — verifies bridge and firewall rules persist."""
         net_name = f"sys-sync-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
-        backend = _get_firewall_backend(runner_vm)
-
         try:
             _run_mvm(
                 runner_vm,
@@ -1076,21 +879,15 @@ class TestNetworkSync:
             )
 
             # Read bridge name from inspect output (authoritative source)
-            inspect = _json_success_data(
-                _run_mvm(
-                    runner_vm, "network", "inspect", net_name, "--json"
-                ).stdout,
-                dict,
-            )
-            bridge: str = inspect.get("network", {}).get("bridge", "")
+            bridge = _bridge_name(runner_vm, net_name)
 
             result = _run_mvm(runner_vm, "network", "sync", check=False)
             assert result.returncode == 0, f"sync failed: {result.stderr}"
 
-            # Option C: bridge exists
+            # The exact bridge remains present.
             _assert_bridge_exists(runner_vm, bridge)
 
-            # Option C: bridge has an IP address
+            # The bridge retains its IP address.
             ip_result = _guest_run(
                 runner_vm, f"ip addr show {bridge}", check=False, timeout=10
             )
@@ -1099,8 +896,8 @@ class TestNetworkSync:
                 f"Bridge {bridge} has no IP after sync:\n{ip_result.stdout}"
             )
 
-            # Option C: firewall rules reference the bridge
-            _assert_firewall_rules_contain_bridge(runner_vm, bridge, backend)
+            # The managed firewall rules still reference the bridge.
+            _assert_firewall_rules_contain_bridge(runner_vm, bridge)
         finally:
             _run_mvm(
                 runner_vm,
@@ -1113,12 +910,10 @@ class TestNetworkSync:
 
     def test_network_sync_specific(self, runner_vm):
         # Rationale: Creates own network inline. Verifies sync by name.
-        # Self-contained to avoid stale iptables rules from earlier tests.
+        # Self-contained to avoid depending on earlier network test state.
         """Sync a specific network by name."""
         net_name = f"sys-sync-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
-        backend = _get_firewall_backend(runner_vm)
-
         try:
             _run_mvm(
                 runner_vm,
@@ -1130,13 +925,7 @@ class TestNetworkSync:
             )
 
             # Read bridge name from inspect output
-            inspect = _json_success_data(
-                _run_mvm(
-                    runner_vm, "network", "inspect", net_name, "--json"
-                ).stdout,
-                dict,
-            )
-            bridge: str = inspect.get("network", {}).get("bridge", "")
+            bridge = _bridge_name(runner_vm, net_name)
 
             result = _run_mvm(
                 runner_vm, "network", "sync", net_name, check=False
@@ -1145,9 +934,9 @@ class TestNetworkSync:
                 f"sync {net_name} failed: {result.stderr}"
             )
 
-            # Option C: bridge and rules
+            # The exact bridge and rules remain present.
             _assert_bridge_exists(runner_vm, bridge)
-            _assert_firewall_rules_contain_bridge(runner_vm, bridge, backend)
+            _assert_firewall_rules_contain_bridge(runner_vm, bridge)
         finally:
             _run_mvm(
                 runner_vm,
@@ -1160,29 +949,20 @@ class TestNetworkSync:
 
     def test_network_sync_preserves_all_networks(self, runner_vm):
         # Rationale: Regression for cross-network wipe bug. Syncing all
-        # networks (or a specific one) must rebuild MVM chains from the union
-        # of all networks, not per-network. Option C verifies both bridges and
-        # both masquerade rules survive.
+        # networks (or a specific one) must preserve the union of all managed
+        # nftables rules, not only those for the last network.
         """Sync global and per-network must preserve every network's rules.
 
-        Regression: ``mvm network sync`` rebuilt MVM firewall chains per
-        network, so syncing all networks left only the last network's rules,
-        and syncing a specific network deleted other networks' rules. The fix
-        rebuilds chains from the union of all networks in one batch.
+        Regression guard: global or specific sync must not remove another
+        managed network's nftables rules.
         """
         net_a = f"sys-sync-a-{uuid.uuid4().hex[:6]}"
         net_b = f"sys-sync-b-{uuid.uuid4().hex[:6]}"
         subnet_a = _unique_subnet(net_a)
         subnet_b = _unique_subnet(net_b)
-        backend = _get_firewall_backend(runner_vm)
-
         def _assert_both_networks() -> None:
-            _assert_network_firewall_rules(
-                runner_vm, net_a, subnet_a, backend
-            )
-            _assert_network_firewall_rules(
-                runner_vm, net_b, subnet_b, backend
-            )
+            _assert_network_firewall_rules(runner_vm, net_a, subnet_a)
+            _assert_network_firewall_rules(runner_vm, net_b, subnet_b)
 
         try:
             _run_mvm(
@@ -1248,60 +1028,33 @@ class TestNetworkSync:
     def test_network_sync_idempotent(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies no rule
         # duplication on second sync.
-        """Sync twice — verify no rule duplication (atomicity check).
-
-        batch_ensure_rules flushes MVM chains and re-adds all rules.
-        Running sync twice must produce the same rule count.
-        """
-        backend = _get_firewall_backend(runner_vm)
+        """Sync twice without changing the actual managed forward rules."""
 
         # First sync — establish baseline
         _run_mvm(runner_vm, "network", "sync")
-        count_after_first = _count_firewall_rules(runner_vm, backend)
+        rules_after_first = _inet_rules(runner_vm, "forward")
+        assert rules_after_first
 
         # Second sync — should not add duplicates
         _run_mvm(runner_vm, "network", "sync")
-        count_after_second = _count_firewall_rules(runner_vm, backend)
+        rules_after_second = _inet_rules(runner_vm, "forward")
 
-        # Option C: rule count must not change
-        assert count_after_second == count_after_first, (
-            f"Rule count changed after second sync: "
-            f"{count_after_first} -> {count_after_second}. "
-            f"batch_ensure_rules flush+add should be idempotent."
+        assert rules_after_second == rules_after_first, (
+            f"Managed forward rules changed after second sync: "
+            f"{rules_after_first} -> {rules_after_second}"
         )
 
     def test_network_sync_conntrack_rule(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies conntrack
         # established/related accept rule.
         """Sync ensures conntrack established/related accept rule exists."""
-        backend = _get_firewall_backend(runner_vm)
-
         _run_mvm(runner_vm, "network", "sync")
-
-        if backend == "nftables":
-            result = _guest_run(
-                runner_vm,
-                "sudo nft list chain ip filter MVM-FORWARD",
-                check=False,
-                timeout=10,
-            )
-            assert result.returncode == 0
-            assert "established,related accept" in result.stdout, (
-                "Missing conntrack established/related accept "
-                f"in MVM-FORWARD:\n{result.stdout}"
-            )
-        else:
-            result = _guest_run(
-                runner_vm,
-                "sudo iptables -L MVM-FORWARD -n",
-                check=False,
-                timeout=10,
-            )
-            assert result.returncode == 0
-            assert "ESTABLISHED" in result.stdout.upper(), (
-                "Missing ESTABLISHED,RELATED accept "
-                f"in MVM-FORWARD:\n{result.stdout}"
-            )
+        bridge = _bridge_name(runner_vm, module_network)
+        rules = _inet_rules(runner_vm, "forward")
+        assert any(
+            bridge in rule and "ct state established,related" in rule and "accept" in rule
+            for rule in rules
+        ), rules
 
     def test_network_sync_on_nonexistent_network(self, runner_vm):
         # Rationale: No resources needed -- error path for nonexistent
@@ -1342,10 +1095,10 @@ class TestNetworkRemoveForce:
 
     def test_network_rm_with_force(self, runner_vm, unique_network_name):
         # Rationale: Needs a real network. Tests --force removal.
-        # Cleanup in finally. L3: verifies bridge is actually gone.
+        # Cleanup in finally; verifies the bridge is actually gone.
         """Create a network and remove it with --force, verify cleanup."""
         subnet = _unique_subnet(unique_network_name)
-        bridge = _compute_bridge_name(unique_network_name)
+        bridge: str | None = None
         try:
             _run_mvm(
                 runner_vm,
@@ -1355,6 +1108,7 @@ class TestNetworkRemoveForce:
                 "--subnet",
                 subnet,
             )
+            bridge = _bridge_name(runner_vm, unique_network_name)
 
             result = _run_mvm(
                 runner_vm, "network", "rm", unique_network_name, "--force"
@@ -1369,7 +1123,7 @@ class TestNetworkRemoveForce:
         networks = _json_success_data(ls_result.stdout, list)
         assert not any(n.get("name") == unique_network_name for n in networks)
 
-        # L3: Verify bridge interface is actually gone from the system
+        # Verify bridge interface is actually gone from the system.
         # Rationale: A deletion that removes the DB entry but fails to
         # delete the bridge would leave a stale interface consuming
         # system resources. The `ip link show` check proves the bridge
@@ -1497,17 +1251,11 @@ class TestNetworkVMDependency:
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
 
 
-class TestNetworkSyncAfterReboot:
-    """Test that ``network sync`` recreates missing infrastructure.
+class TestNetworkSyncMissingBridge:
+    """Same-boot bridge disappearance must fail closed, not be re-created.
 
-    Simulates a reboot-like scenario:
-    1. Creates a network (bridge + NAT + firewall rules)
-    2. Deletes the bridge directly via ``ip link delete`` inside the test VM
-    3. Runs ``mvm network sync``
-    4. Verifies bridge, IP address, and firewall rules are restored
-
-    This class is DESTRUCTIVE (deletes bridge mid-test) and is placed last
-    in the file.
+    This class directly deletes a managed bridge and is placed last in the file.
+    A real prior-boot recovery scenario needs a runner reboot, not link deletion.
     """
 
     pytestmark = [
@@ -1516,17 +1264,16 @@ class TestNetworkSyncAfterReboot:
         pytest.mark.domain_network,
     ]
 
-    def test_sync_recreates_bridge_and_nat(
-        # Rationale: Needs a real network (5-10s). Tests sync recreates
-        # bridge after deletion.
+    def test_sync_refuses_missing_managed_bridge(
+        # Rationale: Real bridge deletion proves same-boot tamper refusal.
         self,
         runner_vm,
         unique_network_name,
     ) -> None:
-        """Bridge, IP, and firewall rules are recreated after bridge deletion."""
+        """Sync rejects the missing recorded bridge without adopting a replacement."""
         net_name = unique_network_name
         subnet = _unique_subnet(net_name)
-        bridge = _compute_bridge_name(net_name)
+        bridge: str | None = None
 
         # 1. Create the network
         try:
@@ -1538,11 +1285,12 @@ class TestNetworkSyncAfterReboot:
                 "--subnet",
                 subnet,
             )
+            bridge = _bridge_name(runner_vm, net_name)
 
             # Verify bridge exists before removal
             _assert_bridge_exists(runner_vm, bridge)
 
-            # 2. Delete the bridge (simulates reboot / accidental removal)
+            # 2. Delete the bridge without changing the host boot identity.
             result = _guest_run(
                 runner_vm,
                 f"sudo ip link delete {bridge}",
@@ -1564,39 +1312,25 @@ class TestNetworkSyncAfterReboot:
                 f"Bridge {bridge} should no longer exist"
             )
 
-            # 3. Run sync — should recreate the bridge and re-add firewall rules
+            # 3. The same-boot authority record must reject silent re-creation.
             sync_result = _run_mvm(
                 runner_vm, "network", "sync", check=False
             )
-            assert sync_result.returncode == 0, (
-                f"network sync failed: {sync_result.stderr}"
+            assert sync_result.returncode != 0, (
+                "sync unexpectedly accepted a missing managed bridge"
             )
-
-            # 4. Verify the bridge was recreated
-            _assert_bridge_exists(runner_vm, bridge)
-
-            # 5. Verify bridge has an IP address assigned
+            assert "managed bridge disappeared" in sync_result.stderr
             result = _guest_run(
                 runner_vm,
-                f"ip addr show {bridge}",
+                f"ip link show {bridge} 2>&1",
                 check=False,
                 timeout=10,
             )
-            assert result.returncode == 0
-            gateway_ip = subnet.replace(".0/24", ".1")
-            assert gateway_ip in result.stdout, (
-                f"Bridge {bridge} missing IP {gateway_ip} after sync:\n"
-                f"{result.stdout}"
-            )
-
-            # 6. Verify firewall rules and NAT (use module-level helpers)
-            backend = _get_firewall_backend(runner_vm)
-            _assert_firewall_rules_contain_bridge(runner_vm, bridge, backend)
-            _assert_masquerade_rule(runner_vm, backend)
+            assert result.returncode != 0, "sync recreated the missing bridge"
 
         finally:
-            # Cleanup
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            # Explicit exact-network removal retires the stale firewall intent.
+            _run_mvm(runner_vm, "network", "rm", net_name)
 
 
 class TestNetworkEdgeCases:

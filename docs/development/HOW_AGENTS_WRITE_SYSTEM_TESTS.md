@@ -314,10 +314,10 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `network rm <nonexistent>` | L1 | Error handling |
 | `network rm <name1> <name2>` | **L2** | Multiple bridge cleanup |
 | `network default` / `network default <nonexistent>` | L1 | DB update |
-| `network sync` / `network sync --json` | **L2** | Real bridge + firewall recreation |
+| `network sync` / `network sync --json` | **L2** | Exact bridge and firewall reconciliation; prior-boot recovery requires a real reboot |
 | `policy traffic create/ls/inspect/rm` | **L2** | Exact source, protocol, and port allows; same/cross-network default deny and replies |
 | `policy exec create/ls/rm` | **L2** | Directional non-root VM-to-VM execution without granting TCP/UDP traffic |
-| Sync after bridge deletion | **L2** | Real bridge deletion + recovery |
+| Same-boot sync after bridge deletion | **L2** | Reject missing recorded bridge without silently re-creating it; exact removal remains available |
 
 ### `mvm volume`
 
