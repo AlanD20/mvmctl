@@ -37,7 +37,9 @@ image extraction filled the disposable runner. Its ten retained non-destructive 
 then passed 10/10 after the test-audit cleanup, while two destructive cache-clean safety cases remain unqualified and
 must move to their owning cache domain. The host module passed 23/27, with four legacy/admin cases still failing for
 unprivileged invocation or obsolete envelope parsing; no host reset/clean success is claimed. These are concrete QA
-blockers, not evidence of a product regression. Full T1/T2, host-reboot and saturation journeys, GitHub CI, dedicated
+blockers, not evidence of a product regression. The host module has since been narrowed to read-only checks and two
+mutation guards; destructive clean/reset success remains unqualified and requires a dedicated clean-host context.
+Full T1/T2, host-reboot and saturation journeys, GitHub CI, dedicated
 clean-host Tier 3, and release approval remain open.
 
 The cgroup module's envelope/inspection case passed, but its pressure case remains unqualified. A 150 MiB guest
@@ -875,15 +877,15 @@ Specific legacy conflicts that must be rewritten before release:
 | `host info --refresh --json` | ✅ Deep | `host/test_host.py` | `TestHostInfo`, `TestHostStatusEnhanced` | L2 — timestamp and typed nested sections through the schema-1 success envelope |
 | `host status` | ⚡ Shallow | `host/test_host.py` | `TestHostStatus` | L2 — human-readable KVM and forwarding checks |
 | `host status --json` | ✅ Deep | `host/test_host.py` | `TestHostStatus`, `TestHostStatusEnhanced` | L2 — schema-1 success envelope; `kvm_accessible`, `missing_binaries`, forwarding, live `resources`, and null `state` rather than a user-SQLite setup claim |
-| `host clean --force` | ⏭️ Skip | `host/test_host.py` | `TestHostCleanDestructive` | L1 — marked host_reset, excluded from default runs |
-| `host clean` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostCleanSafety` | L1 |
-| `host reset --force` | ⚡ Shallow | `host/test_host.py` | `TestHostCleanDestructive` | L1 — exit 0, non-empty stdout. Marked host_reset (excluded from default runs) |
-| `host reset` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostResetSafety` | L1 |
+| `host clean --force` success | 🔴 Gap | — | — | Requires a dedicated clean-host context; the shared runner must not erase its installed candidate or root state. |
+| `host clean` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostMutationGuards` | L2 creates one bounded VM, proves it is live, and checks refusal without deleting it. |
+| `host reset --force` success | 🔴 Gap | — | — | Administrator reset requires separate clean-host qualification; no shared-runner success is claimed. |
+| unprivileged `host reset --force` | ⚡ Shallow | `host/test_host.py` | `TestHostMutationGuards` | L2 checks administrator refusal and unchanged host-status fields. |
 | `host install-system` | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | The Python runner stages the RC, invokes the real administrator installer, and then all `_run_mvm` calls use exact `/usr/local/bin/mvm`. L2 verifies root ownership, mode, trusted ancestors, content hash, no temporary sibling, and idempotence. |
 | `host install-system` rejection cases | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | L2 verifies unprivileged and malformed invocations preserve the target, and an existing target symlink is rejected without changing its destination. Symlink-test restoration is mandatory and asserted. |
 | `host install-system` pre-rename failure | ✅ Deep | `host/test_system_install.py`, `internal/core/host/system_binary_test.go` | `TestSystemBinaryInstall`, `TestInstallSystemBinary_PreRenameFailuresPreserveTarget` | L1 covers each injected pre-rename stage. L2 bind-remounts `/usr/local/bin` read-only, invokes the exact staged candidate, verifies the public failure and unchanged canonical metadata/hash, then requires rw remount, unmount, no mount leak, and executable restoration. |
 | `host install-system` remaining partial failures | ⚡ Shallow | `internal/core/host/system_binary_test.go`, `pkg/api/host_system_binary_test.go` | `TestInstallSystemBinary_PreRenameFailuresPreserveTarget`, `TestInstallSystemBinary_ReportsPostRenameAndCleanupFailures`, `TestHostInstallSystemBinary_PreservesPartialSuccess` | L1 deterministically covers write/metadata/fsync/close/rename failures, cleanup failure, and post-rename durability reporting. No safe deterministic public-boundary L2 injection exists for those individual stages; uncontrolled disk filling, timing kills, and production test hooks are explicitly rejected. |
-| `host init` | 🟡 Partial | `host/test_system_install.py`, `host/test_host.py` | `TestSystemBinaryInstall`, `TestHostInit` | L2 invokes exact `sudo /usr/local/bin/mvm host init` in a runner that already has the `mvm` group and membership. It proves happy-path sudoers reconciliation and invoking-user cache/config ownership. Task 13 gaps: group creation/membership, root-owned journal, rollback, and fail-closed mutation errors. |
+| `host init` | 🟡 Partial | `host/test_system_install.py` | `TestSystemBinaryInstall` | L2 invokes exact `sudo /usr/local/bin/mvm host init` in a runner that already has the `mvm` group and membership. It proves happy-path sudoers reconciliation and invoking-user cache/config ownership. Task 13 gaps: group creation/membership, root-owned journal, rollback, and fail-closed mutation errors. |
 
 ---
 

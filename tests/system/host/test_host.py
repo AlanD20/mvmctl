@@ -483,204 +483,48 @@ class TestHostStatusEnhanced:
         assert len(kernel["version"]) > 0
 
 
-class TestHostCleanSafety:
-    """Test host clean safety mechanisms (non-destructive)."""
+class TestHostMutationGuards:
+    """The ordinary operator cannot clean active VMs or invoke administrator reset."""
 
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.needs_kvm,
-        pytest.mark.slow,
-        pytest.mark.domain_host,
-    ]
-
-    def test_host_clean_blocked_by_running_vm(
+    def test_host_clean_rejects_running_vm(
         self, runner_vm, unique_vm_name, created_network
     ):
-        """Host clean should be blocked when a VM is running."""
-        _run_mvm(
+        created = _run_mvm(
             runner_vm,
-            "vm",
-            "create",
-            unique_vm_name,
-            "--image",
-            "alpine:3.23",
-            "--network",
-            created_network,
+            "vm", "create", unique_vm_name,
+            "--image", "alpine:3.23", "--network", created_network,
+            "--vcpu", "1", "--mem", "256M", "--user", "root", "--json",
+            timeout=180,
         )
-
+        created_vms = json.loads(created.stdout)["data"]
+        assert len(created_vms) == 1, created.stdout
+        assert created_vms[0]["name"] == unique_vm_name
         try:
-            result = _run_mvm(
-                runner_vm,
-                "host",
-                "clean",
-                "--force",
-                check=False,
+            live = _run_mvm(runner_vm, "vm", "ps", "--json")
+            assert any(vm["name"] == unique_vm_name for vm in json.loads(live.stdout)["data"]), (
+                "test VM stopped before host-clean preflight"
             )
-            assert result.returncode != 0
-            assert "running" in result.stderr.lower()
+            refused = _run_mvm(runner_vm, "host", "clean", "--force", check=False)
+            assert refused.returncode != 0
+            assert "running" in refused.stderr.lower()
+            live = _run_mvm(runner_vm, "vm", "ps", "--json")
+            assert any(vm["name"] == unique_vm_name for vm in json.loads(live.stdout)["data"])
         finally:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "rm",
-                unique_vm_name,
-                "--force",
-                check=False,
-            )
+            vms = _run_mvm(runner_vm, "vm", "ls", "--json")
+            if any(vm["name"] == unique_vm_name for vm in json.loads(vms.stdout)["data"]):
+                removed = _run_mvm(
+                    runner_vm, "vm", "rm", unique_vm_name, "--force", check=False,
+                    timeout=120,
+                )
+                assert removed.returncode == 0, removed.stderr
 
-
-class TestHostResetSafety:
-    """Test host reset safety mechanisms (non-destructive)."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.needs_kvm,
-        pytest.mark.slow,
-        pytest.mark.domain_host,
-    ]
-
-    def test_host_reset_blocked_by_running_vm(
-        self, runner_vm, unique_vm_name, created_network
-    ):
-        """Host reset should be blocked when a VM is running."""
-        _run_mvm(
-            runner_vm,
-            "vm",
-            "create",
-            unique_vm_name,
-            "--image",
-            "alpine:3.23",
-            "--network",
-            created_network,
-        )
-
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "host",
-                "reset",
-                "--force",
-                check=False,
-            )
-            assert result.returncode != 0
-            assert "running" in result.stderr.lower()
-        finally:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "rm",
-                unique_vm_name,
-                "--force",
-                check=False,
-            )
-
-
-class TestHostCleanDestructive:
-    """Execute host clean --force (destructive).
-
-    Excluded from default test runs via the ``host_reset`` marker and must be
-    explicitly invoked.
-
-    All commands run inside the test VM (no host sudo required).
-    """
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.host_reset,
-        pytest.mark.domain_host,
-    ]
-
-    def test_host_clean_force(self, runner_vm):
-        """Execute host clean --force and verify it exits successfully."""
-        # Check host is initialized; if not, init first
-        status = _run_mvm(runner_vm, "host", "status", "--json", check=False)
-        needs_init = status.returncode != 0
-
-        if needs_init:
-            _run_mvm(runner_vm, "host", "init")
-
-        # Remove any running VMs first
-        vms = json.loads(
-            _run_mvm(runner_vm, "vm", "ls", "--json", check=False).stdout
-            or "[]"
-        )
-        for vm in vms:
-            _run_mvm(runner_vm, "vm", "rm", vm["name"], "--force", check=False)
-
-        # Run host clean inside the test VM
-        result = _run_mvm(runner_vm, "host", "clean", "--force", check=False)
-        assert result.returncode == 0, (
-            f"host clean --force failed: {result.stderr}"
-        )
-        assert len(result.stdout.strip()) > 0, (
-            f"host clean --force produced no stdout: stderr={result.stderr}"
-        )
-
-    def test_host_reset_force(self, runner_vm):
-        """Execute host reset --force and verify it exits successfully."""
-        status = _run_mvm(runner_vm, "host", "status", "--json", check=False)
-        needs_init = status.returncode != 0
-
-        if needs_init:
-            _run_mvm(runner_vm, "host", "init")
-
-        # Remove any running VMs first
-        vms = json.loads(
-            _run_mvm(runner_vm, "vm", "ls", "--json", check=False).stdout
-            or "[]"
-        )
-        for vm in vms:
-            _run_mvm(runner_vm, "vm", "rm", vm["name"], "--force", check=False)
-
-        result = _run_mvm(runner_vm, "host", "reset", "--force", check=False)
-        assert result.returncode == 0, (
-            f"host reset --force failed: {result.stderr}"
-        )
-        assert len(result.stdout.strip()) > 0, (
-            f"host reset --force produced no stdout: stderr={result.stderr}"
-        )
-
-
-class TestHostInit:
-    """Test host init command.
-
-    Excluded from default test runs via the ``host_reset`` marker and must be
-    explicitly invoked.
-    """
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.host_reset,
-        pytest.mark.domain_host,
-    ]
-
-    def test_host_init_success(self, runner_vm):
-        """host init should succeed inside the test VM.
-
-        Inside the test VM, host init was already run during provisioning.
-        If the runner user lacks passwordless sudo, host init returns
-        NeedsInteraction — accept that as a valid outcome.
-        """
-        status = _run_mvm(runner_vm, "host", "status", "--json", check=False)
-        if status.returncode == 0:
-            try:
-                data = json.loads(status.stdout)
-                if data and data.get("state", {}).get("initialized"):
-                    pytest.skip("Host already initialized during provisioning")
-            except (json.JSONDecodeError, AttributeError, TypeError):
-                pass
-
-        result = _run_mvm(runner_vm, "host", "init", check=False)
-        err = (result.stdout + result.stderr).lower()
-        if result.returncode != 0 and ("needs sudo" in err or "needsinteraction" in err):
-            pytest.skip("Host init needs sudo — not available inside test VM")
-        assert result.returncode == 0, f"host init failed: {result.stderr}"
-
-        # Verify host status reflects initialized state
-        check = _run_mvm(runner_vm, "host", "status", "--json", check=False)
-        if check.returncode == 0:
-            data = json.loads(check.stdout)
-            state = data.get("state", {})
-            assert state.get("initialized") is True, (
-                f"Host should be initialized after init: {data}"
-            )
+    def test_host_reset_requires_administrator(self, runner_vm):
+        before = _success_data(_run_mvm(runner_vm, "host", "status", "--json"))
+        refused = _run_mvm(runner_vm, "host", "reset", "--force", check=False)
+        assert refused.returncode != 0
+        assert "sudo /usr/local/bin/mvm host reset" in (
+            refused.stdout + refused.stderr
+        ).lower()
+        after = _success_data(_run_mvm(runner_vm, "host", "status", "--json"))
+        for field in ("group_exists", "sudoers_exists", "ip_forward"):
+            assert after[field] == before[field]
