@@ -40,7 +40,8 @@ data-volume snapshot journey, not the broader release gaps.
 `mvmctl-030-test` passed `TestNetworklessJailerLifecycle::test_networkless_snapshot_restores_independent_data_volume`
 (1/1). It wrote a raw attached guest volume, captured a full networkless snapshot, changed and removed the source
 volume/VM, restored an independent volume without an IP/MAC endpoint, compared the guest-visible bytes, ran vsock exec,
-and checked VM/volume/snapshot teardown. Focused Go volume and full root-effect Jailer packages plus changed-package vet
+and checked VM/volume/snapshot teardown. A later run also rejected a managed-network override before creating a target
+VM. Focused Go volume and full root-effect Jailer packages plus changed-package vet
 passed in that runner. This does not qualify managed-network snapshots, concurrent writers, crash recovery, the full
 Python matrix, or the release.
 
@@ -349,7 +350,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `snapshot inspect <id> --json` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotInspect::test_snapshot_inspect_json` | L2 — JSON fields verified |
 | `snapshot restore <id> <name>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless restore passed with no endpoint, independent attached-volume bytes, vsock exec, and checked teardown; managed-network and fault paths remain unqualified. |
 | `snapshot restore --resume` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless restore resumed, preserved absent endpoint, restored independent data-volume bytes, and allowed vsock exec. Other placements remain unqualified. |
-| `snapshot restore --network` | **?** | `vm/test_vm_snapshot_load.py` | `TestSnapshotRestoreNetwork::test_snapshot_restore_with_network` | Legacy test expects a different network; current source refuses changing the captured endpoint and rejects any managed-network override for networkless snapshots. Test contract needs reconciliation before qualification. |
+| `snapshot restore --network` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestSnapshotRestoreNetwork`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless snapshot rejected a managed-network override without creating a target VM. The legacy test expects a different network; that outdated positive contract still needs reconciliation, and managed-network override behavior remains unqualified. |
 | `snapshot rm <id>` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotDestroyRestore` | L2 — cleanup via --force |
 | `snapshot rm --force` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotDestroyRestore` | L2 — forced removal |
 

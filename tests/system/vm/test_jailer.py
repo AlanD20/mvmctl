@@ -508,6 +508,15 @@ class TestNetworklessJailerLifecycle:
 
             _run_mvm(runner_vm, "vm", "rm", source_name, "--force", timeout=120)
             _run_mvm(runner_vm, "volume", "rm", volume_name, "--force")
+            denied = _run_mvm(
+                runner_vm, "snapshot", "restore", captured["id"], restored_name,
+                "--network", "not-a-network", "--json", check=False,
+            )
+            assert denied.returncode != 0
+            assert json.loads(denied.stdout)["status"] == "error"
+            assert all(vm["name"] != restored_name for vm in _parse_vm_list(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+            ))
             restored = _json_success_data(
                 _run_mvm(
                     runner_vm, "snapshot", "restore", captured["id"], restored_name,
