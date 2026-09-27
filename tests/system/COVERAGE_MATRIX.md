@@ -53,6 +53,13 @@ preserved the active pair. Final readback showed no nested VM and only the origi
 1.16.1 still the Firecracker/Jailer default. This direct full-module pass is not an orchestrator domain run, proof
 of 1.16.0 VM launch support, or full Python release qualification.
 
+**Current networkless Jailer checkpoint (2026-09-27):** On installed `0.3.0-rc.exec-port`, a focused root-protected
+release-pair case proved the unprivileged operator could not stat the running VM's selected Firecracker/Jailer paths.
+A separate focused networkless journey passed create, guest vsock/interface inspection, stop/start, VM reboot, and
+post-restart/reboot vsock/interface inspection. Each case produced a schema-1 report with one collected/passed and
+zero skips/errors/deselections; checked teardown and an independent `vm ls --json` left no nested VM. These are
+VM-reboot results, not host-reboot reconciliation, the complete networkless Jailer class, or networked Jailer QA.
+
 **Focused snapshot checkpoint (2026-09-27):** An installed `0.3.0-rc.snapshot-ref-fix` candidate inside only
 `mvmctl-030-test` passed `TestNetworklessJailerLifecycle::test_networkless_snapshot_restores_independent_data_volume`
 (1/1). It wrote a raw attached guest volume, captured a full networkless snapshot, changed and removed the source
