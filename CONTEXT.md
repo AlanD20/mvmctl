@@ -759,6 +759,13 @@ session ID; normal exec, shell, and copy do not open or inspect a source session
 are protocol failures. The legacy generic `OnHostFrame`, shared `activeConn`, `remote_vm`, and
 `internal/vsockhandler` paths are removed.
 
+After a source request passes directional policy, the API obtains the destination's authenticated raw Firecracker
+socket through the fixed root broker before the retained VM-pair sidecar takes both VM locks. It sends no destination
+guest `CONNECT`, token, command, or request before pair admission. The sidecar then re-proves the actual destination
+peer under its retained authority before the host-built destination request can execute. This ordering avoids a
+second broker attempt to acquire a VM lock already held by the retained pair; see ADR-0017. The live VM-to-VM exec
+system journey remains a release-qualification gate.
+
 After `ReadRequest` succeeds, `SourceSession.WaitCancel` permits exactly one control reader bound to that request's
 ID. It accepts only the matching `cancel` frame. Malformed, non-cancel, wrong-ID, and context-cancelled partial control
 input closes the source transport fail-closed; explicit `Close` and context cancellation unblock a partial read. The

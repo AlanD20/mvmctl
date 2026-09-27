@@ -278,6 +278,11 @@ func (reader *vmExecConnectionReader) receive(payloadSize int) vmExecConnectionR
 			control,
 			unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC,
 		)
+		// Linux recvmsg reports -1 for a syscall error. No payload or ancillary
+		// data was delivered, so let the error handling below poll or return it.
+		if count == -1 && err != nil && controlCount == 0 && flags == 0 && from == nil {
+			count = 0
+		}
 		if count < 0 || count > len(payload) || controlCount < 0 || controlCount > len(control) {
 			return vmExecConnectionReceive{err: errors.New("VM-exec recvmsg returned invalid lengths")}
 		}

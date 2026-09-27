@@ -187,6 +187,20 @@ func (op *Operation) relayVMExec(
 		}
 		cancelDone <- cancelErr
 	}()
+	// The root session retains both VM locks. Acquire the authenticated destination
+	// socket first, but send no guest CONNECT or request until after pair admission.
+	openCtx, stopOpen := context.WithTimeout(requestCtx, min(probeTimeout, 5*time.Second))
+	destinationConn, err := openVMExecAgentSocket(openCtx, destination.ID)
+	stopOpen()
+	if err != nil {
+		record.Result = logging.VMExecAuditRelayFailed
+		return vmExecRelayFailed()
+	}
+	defer func() {
+		if destinationConn != nil {
+			resultErr = errors.Join(resultErr, destinationConn.Close())
+		}
+	}()
 
 	// CRITICAL: Only the root sidecar proves owner, active generations, Firecracker peers,
 	// and global capacity. SQLite status and the caller-selected socket are never authority.
@@ -197,19 +211,22 @@ func (op *Operation) relayVMExec(
 		return vmExecDenied()
 	}
 	record.Result = logging.VMExecAuditRelayFailed
-	destinationConn, err := dialVMExecAgent(requestCtx, destinationConfig, probeTimeout)
+	connectCtx, stopConnect := context.WithTimeout(requestCtx, min(probeTimeout, 5*time.Second))
+	err = connectVMExecAgent(connectCtx, destinationConn, destinationConfig.Port)
+	stopConnect()
 	if err != nil {
 		return vmExecRelayFailed()
 	}
 	if err := authority.BindDestination(requestCtx, destinationConn); err != nil {
 		record.Result = logging.VMExecAuditDenied
-		return errors.Join(vmExecDenied(), destinationConn.Close())
+		return vmExecDenied()
 	}
 	session, err := vsock.NewDestinationSession(destinationConn)
 	if err != nil {
-		return errors.Join(vmExecRelayFailed(), destinationConn.Close())
+		return vmExecRelayFailed()
 	}
 	target.Store(session)
+	destinationConn = nil
 	// Both descriptor proofs and readiness precede construction of command/token-bearing payload.
 	if err := session.Open(requestCtx, vmexecwire.DestinationRequest{
 		RequestID: request.RequestID, AgentToken: destinationConfig.Token,
@@ -261,28 +278,39 @@ func vmExecDenialRecord(
 func dialVMExecAgent(ctx context.Context, config *model.VsockConfigItem, timeout time.Duration) (*net.UnixConn, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, min(timeout, 5*time.Second))
 	defer cancel()
-	conn, err := jailer.NewHostVsockClient().Open(dialCtx, config.VmID)
+	conn, err := openVMExecAgentSocket(dialCtx, config.VmID)
 	if err != nil {
 		return nil, vmExecRelayFailed()
 	}
-	stop := context.AfterFunc(dialCtx, func() {
+	if err := connectVMExecAgent(dialCtx, conn, config.Port); err != nil {
+		return nil, errors.Join(err, conn.Close())
+	}
+	return conn, nil
+}
+
+func openVMExecAgentSocket(ctx context.Context, vmID string) (*net.UnixConn, error) {
+	return jailer.NewHostVsockClient().Open(ctx, vmID)
+}
+
+func connectVMExecAgent(ctx context.Context, conn *net.UnixConn, port int) error {
+	stop := context.AfterFunc(ctx, func() {
 		// Closing is required to interrupt a partial CONNECT exchange on cancellation.
 		_ = conn.Close()
 	})
 	defer stop()
-	deadline, _ := dialCtx.Deadline()
+	deadline, _ := ctx.Deadline()
 	if err := conn.SetDeadline(deadline); err != nil {
-		return nil, errors.Join(vmExecRelayFailed(), conn.Close())
+		return vmExecRelayFailed()
 	}
-	if _, err := fmt.Fprintf(conn, "CONNECT %d\n", config.Port); err != nil {
-		return nil, errors.Join(vmExecRelayFailed(), conn.Close())
+	if _, err := fmt.Fprintf(conn, "CONNECT %d\n", port); err != nil {
+		return vmExecRelayFailed()
 	}
 	// Read only the bounded acknowledgement, without buffering later protocol bytes.
 	var response strings.Builder
 	for range 32 {
 		var value [1]byte
 		if _, err := io.ReadFull(conn, value[:]); err != nil {
-			return nil, errors.Join(vmExecRelayFailed(), conn.Close())
+			return vmExecRelayFailed()
 		}
 		if value[0] == '\n' {
 			text := response.String()
@@ -294,13 +322,13 @@ func dialVMExecAgent(ctx context.Context, config *model.VsockConfigItem, timeout
 				break
 			}
 			if err := conn.SetDeadline(time.Time{}); err != nil {
-				return nil, errors.Join(vmExecRelayFailed(), conn.Close())
+				return vmExecRelayFailed()
 			}
-			return conn, nil
+			return nil
 		}
 		response.WriteByte(value[0])
 	}
-	return nil, errors.Join(vmExecRelayFailed(), conn.Close())
+	return vmExecRelayFailed()
 }
 
 func vmExecDenied() error {

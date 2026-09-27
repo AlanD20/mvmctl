@@ -465,7 +465,8 @@ func TestVMExecConnectionReaderPollsExactDescriptorAndTimeout(t *testing.T) {
 				assert.Equal(t, 23, actualFD)
 				assert.Equal(t, unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC, flags)
 				if recvCalls == 1 {
-					return 0, 0, 0, nil, unix.EAGAIN
+					// Linux recvmsg returns -1, not zero, for EAGAIN.
+					return -1, 0, 0, nil, unix.EAGAIN
 				}
 				payload[0] = 0x41
 				return 1, copy(control, unix.UnixRights(fd)), 0, nil, nil

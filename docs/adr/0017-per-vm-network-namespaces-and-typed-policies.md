@@ -630,10 +630,17 @@ identity, retained-process proof, and final liveness. The registered root compos
 rather than recreating any of those checks; the API listener/consumer that will call it remains pending.
 
 That future socket proof establishes the exact source Firecracker peer, not the selected guest port. The independent
-`SourceSession` token/bootstrap handshake remains the source agent-and-port proof. After pair admission, the API
-performs only the destination Firecracker UDS `CONNECT` handshake and sends exactly one destination-connection duplicate
+`SourceSession` token/bootstrap handshake remains the source agent-and-port proof. After directional policy approval,
+the API acquires only the authenticated destination Firecracker UDS connection through the fixed root broker, before
+opening the retained pair session. This ordering is required because the retained pair holds both VM locks while the
+root broker needs the destination VM lock to admit a socket; attempting that broker operation afterward waits on a
+lock held by the pair. Raw socket acquisition sends no guest `CONNECT`, token, command, or request. After pair
+admission, the API performs the destination `CONNECT` handshake and sends exactly one destination-connection duplicate
 in a closed second phase. Root applies the same peer-pidfd, record, identity, and final-liveness proof before returning
-ready. After both expensive identity proofs, the implemented authority performs one bounded last-look sweep of both
+ready, so a destination that changes between early socket acquisition and binding is refused. Extending the retained
+sidecar protocol to hand a destination descriptor back after admission would preserve the original order but add a
+second descriptor-transfer direction; the approved 0.3.0 design uses the narrower early raw-socket acquisition.
+After both expensive identity proofs, the implemented authority performs one bounded last-look sweep of both
 peer pidfds and both retained process sets before its final host-boot and relay-budget check. Only then does the API send
 the token-and-command-bearing `DestinationRequest`, which the destination agent must validate before any effect. Root
 receives no UDS path, agent token, target user, command, policy material, or response payload.
