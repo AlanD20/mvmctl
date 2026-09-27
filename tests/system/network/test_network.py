@@ -1,7 +1,7 @@
 """Network management system tests.
 
 Covers: create, ls, inspect, rm, default, sync, --no-nat, --ipv4-gateway,
---nat-gateways, error paths, destructive removal, VM dependency, and
+rejected --nat-gateways, error paths, destructive removal, VM dependency, and
 sync-after-reboot (bridge deletion recovery).
 
 Structure (top-to-bottom):
@@ -25,7 +25,6 @@ VIOLATIONS REMOVED:
 from __future__ import annotations
 
 import hashlib
-import json
 import uuid
 from typing import Any
 
@@ -204,27 +203,6 @@ def _assert_masquerade_rule(runner_vm: str, backend: str) -> None:
             )
 
 
-def _get_default_interface(runner_vm: str) -> str:
-    """Detect the default network interface inside the test VM.
-
-    Returns the interface name (e.g., ``"eth0"``, ``"wlo1"``) used for NAT
-    gateways.
-    """
-    result = _guest_run(
-        runner_vm, "ip route show default", check=False, timeout=10
-    )
-    assert result.returncode == 0, (
-        f"Failed to detect default route:\n{result.stderr}"
-    )
-    parts = result.stdout.strip().split()
-    if "dev" in parts:
-        dev_idx = parts.index("dev")
-        if dev_idx + 1 < len(parts):
-            return parts[dev_idx + 1]
-    msg = f"Could not determine default interface from:\n{result.stdout}"
-    raise RuntimeError(msg)
-
-
 def _assert_no_masquerade_rule(runner_vm: str, backend: str) -> None:
     """Assert no MASQUERADE rule exists in MVM-POSTROUTING (inside VM)."""
     if backend == "nftables":
@@ -350,7 +328,7 @@ class TestNetworkLifecycle:
         assert result.returncode == 0, (
             f"network ls --json failed: {result.stderr}"
         )
-        networks = json.loads(result.stdout)
+        networks = _json_success_data(result.stdout, list)
         assert isinstance(networks, list), (
             f"Expected list, got {type(networks).__name__}: {networks}"
         )
@@ -370,7 +348,7 @@ class TestNetworkLifecycle:
         # network appears in JSON listing.
         """List networks and verify created network appears."""
         result = _run_mvm(runner_vm, "network", "ls", "--json")
-        networks: list[dict[str, Any]] = json.loads(result.stdout)
+        networks: list[dict[str, Any]] = _json_success_data(result.stdout, list)
         matched = [n for n in networks if n.get("name") == module_network]
         assert len(matched) == 1, (
             f"Network '{module_network}' not found in JSON listing"
@@ -405,7 +383,7 @@ class TestNetworkLifecycle:
         result = _run_mvm(
             runner_vm, "network", "inspect", module_network, "--json"
         )
-        data: dict[str, Any] = json.loads(result.stdout)
+        data: dict[str, Any] = _json_success_data(result.stdout, dict)
         network_info = data.get("network", {})
         assert network_info.get("name") == module_network, (
             f"Expected name '{module_network}', got '{network_info.get('name')}'"
@@ -428,7 +406,7 @@ class TestNetworkLifecycle:
             runner_vm, "network", "inspect", module_network, "--json"
         )
         assert result.returncode == 0
-        data: dict[str, Any] = json.loads(result.stdout)
+        data: dict[str, Any] = _json_success_data(result.stdout, dict)
         assert "network" in data
         network_info = data["network"]
         assert "name" in network_info
@@ -443,7 +421,7 @@ class TestNetworkLifecycle:
         Every entry must have non-empty name, id, and subnet fields.
         """
         result = _run_mvm(runner_vm, "network", "ls", "--json")
-        data: list[dict[str, Any]] = json.loads(result.stdout)
+        data: list[dict[str, Any]] = _json_success_data(result.stdout, list)
         assert isinstance(data, list)
         if data:
             for entry in data:
@@ -463,7 +441,7 @@ class TestNetworkLifecycle:
         """List networks in JSON format."""
         result = _run_mvm(runner_vm, "network", "ls", "--json")
         assert result.returncode == 0
-        data: list[dict[str, Any]] = json.loads(result.stdout)
+        data: list[dict[str, Any]] = _json_success_data(result.stdout, list)
         assert isinstance(data, list)
         assert any(n["name"] == module_network for n in data)
 
@@ -516,7 +494,7 @@ class TestNetworkLifecycle:
 
         ls_result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         if ls_result.returncode == 0 and ls_result.stdout.strip():
-            networks = json.loads(ls_result.stdout)
+            networks = _json_success_data(ls_result.stdout, list)
             assert not any(
                 n.get("name") == "totally-nonexistent-network" for n in networks
             )
@@ -539,7 +517,7 @@ class TestNetworkLifecycle:
 
         ls_result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         if ls_result.returncode == 0 and ls_result.stdout.strip():
-            networks = json.loads(ls_result.stdout)
+            networks = _json_success_data(ls_result.stdout, list)
             assert not any(n.get("name") == net_name for n in networks)
 
     # ── State-modifying tests (create + cleanup) ───────────────────────
@@ -565,7 +543,7 @@ class TestNetworkLifecycle:
             assert result.returncode == 0
             # Verify via JSON listing
             ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
-            networks = json.loads(ls_result.stdout)
+            networks = _json_success_data(ls_result.stdout, list)
             assert any(n["name"] == unique_network_name for n in networks)
         finally:
             _run_mvm(
@@ -592,7 +570,7 @@ class TestNetworkLifecycle:
             assert result.returncode == 0
             # Verify via JSON listing
             ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
-            networks = json.loads(ls_result.stdout)
+            networks = _json_success_data(ls_result.stdout, list)
             assert any(n["name"] == unique_network_name for n in networks)
         finally:
             _run_mvm(
@@ -621,7 +599,7 @@ class TestNetworkLifecycle:
 
             # L2: Verify network appears in JSON listing
             ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
-            networks = json.loads(ls_result.stdout)
+            networks = _json_success_data(ls_result.stdout, list)
             assert any(n.get("name") == unique_network_name for n in networks)
 
             # L3: Verify bridge exists and --no-nat was honored
@@ -630,7 +608,7 @@ class TestNetworkLifecycle:
             inspect_result = _run_mvm(
                 runner_vm, "network", "inspect", unique_network_name, "--json"
             )
-            inspect_data = json.loads(inspect_result.stdout)
+            inspect_data = _json_success_data(inspect_result.stdout, dict)
             assert inspect_data.get("nat", {}).get("nat_enabled") is False, (
                 f"Expected nat_enabled=False for --no-nat network, "
                 f"got: {inspect_data.get('nat', {}).get('nat_enabled')}"
@@ -648,7 +626,7 @@ class TestNetworkLifecycle:
         ls_before = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         original_default = None
         if ls_before.returncode == 0 and ls_before.stdout.strip():
-            nets_before = json.loads(ls_before.stdout)
+            nets_before = _json_success_data(ls_before.stdout, list)
             orig = next((n for n in nets_before if n.get("is_default")), None)
             if orig:
                 original_default = orig["name"]
@@ -658,7 +636,7 @@ class TestNetworkLifecycle:
             assert result.returncode == 0
             # Verify via JSON listing that the network is now default
             ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
-            networks = json.loads(ls_result.stdout)
+            networks = _json_success_data(ls_result.stdout, list)
             default = next(
                 (n for n in networks if n.get("name") == module_network),
                 None,
@@ -692,7 +670,7 @@ class TestNetworkLifecycle:
         ls_before = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         original_default = None
         if ls_before.returncode == 0 and ls_before.stdout.strip():
-            nets_before = json.loads(ls_before.stdout)
+            nets_before = _json_success_data(ls_before.stdout, list)
             orig = next((n for n in nets_before if n.get("is_default")), None)
             if orig:
                 original_default = orig["name"]
@@ -711,7 +689,7 @@ class TestNetworkLifecycle:
 
             # L2: Verify is_default=true in ls JSON
             ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
-            networks = json.loads(ls_result.stdout)
+            networks = _json_success_data(ls_result.stdout, list)
             new_net = next(
                 (n for n in networks if n.get("name") == unique_network_name),
                 None,
@@ -772,7 +750,7 @@ class TestNetworkLifecycle:
                 runner_vm, "network", "ls", "--json", check=False
             )
             if ls_result.returncode == 0 and ls_result.stdout.strip():
-                networks = json.loads(ls_result.stdout)
+                networks = _json_success_data(ls_result.stdout, list)
                 same_subnet = [
                     n for n in networks if n.get("subnet") == shared_subnet
                 ]
@@ -803,7 +781,7 @@ class TestNetworkLifecycle:
                 runner_vm, "network", "ls", "--json", check=False
             )
             if ls_result.returncode == 0 and ls_result.stdout.strip():
-                networks = json.loads(ls_result.stdout)
+                networks = _json_success_data(ls_result.stdout, list)
                 assert not any(n.get("name") == net_name for n in networks)
         finally:
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
@@ -839,7 +817,7 @@ class TestNetworkLifecycle:
                 runner_vm, "network", "ls", "--json", check=False
             )
             if ls_result.returncode == 0 and ls_result.stdout.strip():
-                networks = json.loads(ls_result.stdout)
+                networks = _json_success_data(ls_result.stdout, list)
                 same_name = [n for n in networks if n.get("name") == net_name]
                 assert len(same_name) == 1
         finally:
@@ -896,7 +874,7 @@ class TestNetworkLifecycle:
 
         try:
             result = _run_mvm(runner_vm, "network", "ls", "--json")
-            networks_before = json.loads(result.stdout)
+            networks_before = _json_success_data(result.stdout, list)
             assert any(
                 n.get("name") == unique_network_name for n in networks_before
             )
@@ -909,7 +887,7 @@ class TestNetworkLifecycle:
             )
 
         result = _run_mvm(runner_vm, "network", "ls", "--json")
-        networks: list[dict[str, Any]] = json.loads(result.stdout)
+        networks: list[dict[str, Any]] = _json_success_data(result.stdout, list)
         assert not any(n.get("name") == unique_network_name for n in networks)
 
     def test_network_remove_multiple(self, runner_vm, unique_network_name):
@@ -940,7 +918,7 @@ class TestNetworkLifecycle:
             result = _run_mvm(runner_vm, "network", "rm", name_a, name_b)
             assert result.returncode == 0
             ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
-            networks = json.loads(ls_result.stdout)
+            networks = _json_success_data(ls_result.stdout, list)
             assert not any(n.get("name") in (name_a, name_b) for n in networks)
         finally:
             _run_mvm(runner_vm, "network", "rm", name_a, check=False)
@@ -1004,7 +982,7 @@ class TestNetworkAdvancedCreate:
                 unique_network_name,
                 "--json",
             )
-            data: dict[str, Any] = json.loads(inspect.stdout)
+            data: dict[str, Any] = _json_success_data(inspect.stdout, dict)
             network_info = data.get("network", {})
             assert network_info.get("ipv4_gateway") == custom_gateway
         finally:
@@ -1012,42 +990,41 @@ class TestNetworkAdvancedCreate:
                 runner_vm, "network", "rm", unique_network_name, check=False
             )
 
-    def test_network_create_with_nat_gateways(
-        # Rationale: Needs a real network (5-10s). Tests --nat-gateways flag.
+    def test_network_create_with_nat_gateways_rejected(
+        # Rationale: Removed --nat-gateways flag must fail before network creation.
         self,
         runner_vm,
         unique_network_name,
     ):
-        """Create a network with explicit --nat-gateways."""
+        """Removed --nat-gateways is rejected without creating a network or bridge."""
         subnet = _unique_subnet(unique_network_name)
-        default_iface = _get_default_interface(runner_vm)
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                unique_network_name,
-                "--subnet",
-                subnet,
-                "--nat-gateways",
-                default_iface,
-            )
-            assert result.returncode == 0
+        bridge = _compute_bridge_name(unique_network_name)
+        result = _run_mvm(
+            runner_vm,
+            "network",
+            "create",
+            unique_network_name,
+            "--subnet",
+            subnet,
+            "--nat-gateways",
+            "eth0",
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "unknown flag: --nat-gateways" in result.stderr.lower()
 
-            inspect = _run_mvm(
-                runner_vm,
-                "network",
-                "inspect",
-                unique_network_name,
-                "--json",
-            )
-            data: dict[str, Any] = json.loads(inspect.stdout)
-            gateways = data.get("nat", {}).get("nat_gateways", [])
-            assert default_iface in gateways
-        finally:
-            _run_mvm(
-                runner_vm, "network", "rm", unique_network_name, check=False
-            )
+        ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
+        networks = _json_success_data(ls_result.stdout, list)
+        assert not any(
+            net.get("name") == unique_network_name for net in networks
+        )
+
+        link_result = _guest_run(
+            runner_vm, f"ip link show {bridge} 2>&1", check=False, timeout=10
+        )
+        assert link_result.returncode != 0, (
+            f"Bridge '{bridge}' exists after rejected create:\n{link_result.stdout}"
+        )
 
     def test_network_create_invalid_gateway_fails(
         # Rationale: Needs one network attempt. Tests invalid gateway rejection.
@@ -1099,10 +1076,11 @@ class TestNetworkSync:
             )
 
             # Read bridge name from inspect output (authoritative source)
-            inspect = json.loads(
+            inspect = _json_success_data(
                 _run_mvm(
                     runner_vm, "network", "inspect", net_name, "--json"
-                ).stdout
+                ).stdout,
+                dict,
             )
             bridge: str = inspect.get("network", {}).get("bridge", "")
 
@@ -1152,10 +1130,11 @@ class TestNetworkSync:
             )
 
             # Read bridge name from inspect output
-            inspect = json.loads(
+            inspect = _json_success_data(
                 _run_mvm(
                     runner_vm, "network", "inspect", net_name, "--json"
-                ).stdout
+                ).stdout,
+                dict,
             )
             bridge: str = inspect.get("network", {}).get("bridge", "")
 
@@ -1255,7 +1234,7 @@ class TestNetworkSync:
         """Sync with JSON output — verify result structure has per-network stats."""
         result = _run_mvm(runner_vm, "network", "sync", "--json", check=False)
         assert result.returncode == 0
-        data = json.loads(result.stdout)
+        data = _json_success_data(result.stdout, dict)
         assert isinstance(data, dict), f"Expected dict, got {type(data)}"
         assert len(data) > 0, "Expected at least one network in sync results"
         for net_id, stats in data.items():
@@ -1345,7 +1324,7 @@ class TestNetworkSync:
 
         ls_result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         if ls_result.returncode == 0 and ls_result.stdout.strip():
-            networks = json.loads(ls_result.stdout)
+            networks = _json_success_data(ls_result.stdout, list)
             assert not any(
                 n.get("name") == "totally-nonexistent-network" for n in networks
             )
@@ -1387,7 +1366,7 @@ class TestNetworkRemoveForce:
             )
 
         ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
-        networks = json.loads(ls_result.stdout)
+        networks = _json_success_data(ls_result.stdout, list)
         assert not any(n.get("name") == unique_network_name for n in networks)
 
         # L3: Verify bridge interface is actually gone from the system
@@ -1455,7 +1434,7 @@ class TestNetworkVMDependency:
             result = _run_mvm(
                 runner_vm, "network", "inspect", net_name, "--json"
             )
-            data: dict[str, Any] = json.loads(result.stdout)
+            data: dict[str, Any] = _json_success_data(result.stdout, dict)
             assert len(data.get("leases", [])) == 0
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
@@ -1506,12 +1485,12 @@ class TestNetworkVMDependency:
                 runner_vm, "network", "ls", "--json", check=False
             )
             if result_net.returncode == 0:
-                nets: list[dict[str, Any]] = json.loads(result_net.stdout)
+                nets: list[dict[str, Any]] = _json_success_data(result_net.stdout, list)
                 assert any(n["name"] == net_name for n in nets)
 
             result_vm = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
             if result_vm.returncode == 0:
-                vms: list[dict[str, Any]] = json.loads(result_vm.stdout)
+                vms: list[dict[str, Any]] = _json_success_data(result_vm.stdout, list)
                 assert any(v["name"] == vm_name for v in vms)
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
