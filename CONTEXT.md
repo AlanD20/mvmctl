@@ -1022,6 +1022,12 @@ Managed network and traffic mutations use typed root nftables transactions. The 
 NoCloud legacy-tracker consumer, CLI nftables/iptables implementations, tracker repositories, and backend selectors
 are removed. The production adapter uses `google/nftables`; no CLI backend or fallback is available.
 
+Managed VM topology activation now invalidates only the admitted guest IPv4's dynamic neighbor on the exact root-owned
+host bridge before raising the host veth. Root derives the bridge and address from retained network and endpoint
+authority, rejects static/proxy/foreign entries, and reads back absence. This replaces ADR-0006's broad raw-sudo
+bridge flush; see [ADR-0021](docs/adr/0021-exact-managed-neighbor-invalidation.md). A disposable runner namespace
+proved the rtnetlink operation, but reused-IP VM behavior still needs bridge-capable installed-candidate QA.
+
 NoCloud now uses fixed gateway TCP `8000` through typed apply/revoke requests containing only the owned network ID.
 Root derives the gateway, protocol, and port. One live batch binds each network's listener before the grant is applied;
 a collision neither adopts nor terminates the existing listener. Normal shutdown revokes while retaining the listener

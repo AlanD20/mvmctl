@@ -133,6 +133,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through typed network removal; it neither force-stops VMs nor claims global administrator quiescence.
 - Added repeated whole-state absence checks for pending-network cancellation and old-boot removal receipts. Cancellation
   publishes an identity tombstone without deleting speculative kernel state; removed/cancelled IDs cannot be reused.
+- Managed VM activation now deletes only the admitted guest IPv4's stale dynamic neighbor on the exact root-owned
+  bridge before host-veth exposure, rejecting static/proxy/foreign entries and proving absence. The unused raw-sudo
+  whole-bridge ARP helper is removed. Pinned Go checks and a disposable runner-kernel netlink probe passed; an actual
+  reused-IP managed-VM journey remains unqualified until bridge-family nftables works in the runner.
 - Added shared privileged-operation and exclusive administrator host-admission leases, durable enabled/disabled state,
   and schema-2 administrator journaling. Init enables admission last, after host setup and enrollment. Old schema-1
   journals are incompatible clean-install state. The dispatcher retains shared admission through each request and

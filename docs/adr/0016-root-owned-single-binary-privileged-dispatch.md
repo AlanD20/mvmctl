@@ -376,7 +376,7 @@ methods; there is no generic privileged-operation interface.
 | Volume expose/remove | Mount one validated volume at one typed drive ID in the registered VM namespace | Invoking UID, VM ID, volume/drive ID, pinned source/target descriptors |
 | Image provision | Execute the existing typed provision operations inside one pinned managed image/rootfs | Invoking UID, managed resource identity, pinned root descriptor, bounded operation list |
 | Bridge/TAP lifecycle | Create, configure, or remove an mvmctl-owned bridge or TAP | Invoking UID, network/VM identity, validated interface/address model |
-| Neighbor flush | Flush neighbors only for an mvmctl-owned bridge | Invoking UID and registered network identity |
+| Neighbor invalidation | Delete only the dynamic guest-IPv4 neighbor on the registered managed bridge before host-veth exposure | Invoking UID, VM/endpoint identity, registered network, exact bridge and host namespace ([ADR-0021](0021-exact-managed-neighbor-invalidation.md)) |
 | Firewall inspect/reconcile/teardown | Render and atomically apply the complete typed mvmctl ruleset | Invoking UID, typed firewall models, fixed mvmctl tables/chains/comments |
 | Retained VM-exec session | Retain and peer-bind one exact source/destination connection pair under capacity and absolute-stop authority | Authenticated caller UID/GID, exact active VM identities and launch generations, pidfd-bound Firecracker peers |
 
