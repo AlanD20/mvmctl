@@ -1236,16 +1236,20 @@ class TestNetworkVMDependency:
             assert "referenced by" in result.stderr.lower()
 
             result_net = _run_mvm(
-                runner_vm, "network", "ls", "--json", check=False
+                runner_vm, "network", "ls", "--json"
             )
-            if result_net.returncode == 0:
-                nets: list[dict[str, Any]] = _json_success_data(result_net.stdout, list)
-                assert any(n["name"] == net_name for n in nets)
+            nets: list[dict[str, Any]] = _json_success_data(result_net.stdout, list)
+            assert any(n["name"] == net_name for n in nets)
 
-            result_vm = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if result_vm.returncode == 0:
-                vms: list[dict[str, Any]] = _json_success_data(result_vm.stdout, list)
-                assert any(v["name"] == vm_name for v in vms)
+            result_vm = _run_mvm(runner_vm, "vm", "ls", "--json")
+            vms: list[dict[str, Any]] = _json_success_data(result_vm.stdout, list)
+            vm = next((item for item in vms if item["name"] == vm_name), None)
+            assert vm is not None
+            inspected = _json_success_data(
+                _run_mvm(runner_vm, "network", "inspect", net_name, "--json").stdout,
+                dict,
+            )
+            assert any(lease["vm_id"] == vm["id"] for lease in inspected["leases"])
         finally:
             _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(runner_vm, "network", "rm", net_name, check=False)
