@@ -53,3 +53,18 @@ func TestVolumeInputResolveRaw(t *testing.T) {
 		})
 	}
 }
+
+func TestVolumeCreateInputRejectsNonpositiveSize(t *testing.T) {
+	for name, size := range map[string]string{
+		"zero":                    "0M",
+		"fraction_truncated_to_0": "0.1B",
+	} {
+		t.Run(name, func(t *testing.T) {
+			input := inputs.VolumeCreateInput{Name: "nonpositive", Size: size}
+			resolved, err := input.Resolve(t.Context(), testutil.NewVolumeRepo())
+			require.Error(t, err)
+			assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+			assert.Nil(t, resolved)
+		})
+	}
+}

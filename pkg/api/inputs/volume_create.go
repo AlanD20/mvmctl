@@ -50,6 +50,9 @@ func (i *VolumeCreateInput) Resolve(ctx context.Context, repo volume.Repository)
 	if err != nil {
 		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid volume size: %s", err.Error()))
 	}
+	if sizeBytes <= 0 {
+		return nil, errs.New(errs.CodeValidationFailed, "volume size must be greater than zero")
+	}
 	isReadOnly := false
 	if i.ReadOnly != nil {
 		isReadOnly = *i.ReadOnly

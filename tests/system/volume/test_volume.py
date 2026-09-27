@@ -130,7 +130,7 @@ class TestVolumeLifecycle:
             inspect = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
             )
-            data = json.loads(inspect.stdout)
+            data = _json_success_data(inspect.stdout, dict)
             assert data["volume"]["name"] == vol_name
             assert data["volume"]["size_bytes"] == 512 * 1024 * 1024
             assert data["volume"]["status"] == "available"
@@ -172,7 +172,7 @@ class TestVolumeLifecycle:
             inspect = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
             )
-            data = json.loads(inspect.stdout)
+            data = _json_success_data(inspect.stdout, dict)
             assert data["volume"]["name"] == vol_name
             assert data["volume"]["format"] == "raw"
             assert data["volume"]["size_bytes"] == 512 * 1024 * 1024
@@ -182,7 +182,7 @@ class TestVolumeLifecycle:
             assert PurePosixPath(data["volume"]["path"]).suffix == ".raw"
 
             ls_result = _run_mvm(runner_vm, "volume", "ls", "--json")
-            volumes = json.loads(ls_result.stdout)
+            volumes = _json_success_data(ls_result.stdout, list)
             matching = [v for v in volumes if v["name"] == vol_name]
             assert len(matching) == 1
             assert matching[0]["is_shareable"] is True
@@ -212,7 +212,7 @@ class TestVolumeLifecycle:
             assert result.returncode == 0
 
             ls_result = _run_mvm(runner_vm, "volume", "ls", "--json")
-            volumes = json.loads(ls_result.stdout)
+            volumes = _json_success_data(ls_result.stdout, list)
             matching = [v for v in volumes if v["name"] == vol_name]
             assert len(matching) == 1
             assert matching[0]["is_read_only"] is True
@@ -240,7 +240,7 @@ class TestVolumeLifecycle:
             assert result.returncode == 0
 
             ls_result = _run_mvm(runner_vm, "volume", "ls", "--json")
-            volumes = json.loads(ls_result.stdout)
+            volumes = _json_success_data(ls_result.stdout, list)
             matching = [v for v in volumes if v["name"] == vol_name]
             assert len(matching) == 1
             assert matching[0]["is_shareable"] is True
@@ -268,7 +268,7 @@ class TestVolumeLifecycle:
             assert result.returncode == 0
 
             inspect = _run_mvm(runner_vm, "vol", "inspect", vol_name, "--json")
-            data = json.loads(inspect.stdout)
+            data = _json_success_data(inspect.stdout, dict)
             assert data["volume"]["name"] == vol_name
             assert data["volume"]["is_read_only"] is True
         finally:
@@ -294,7 +294,7 @@ class TestVolumeLifecycle:
             )
 
             ls_result = _run_mvm(runner_vm, "volume", "ls", "--json")
-            volumes = json.loads(ls_result.stdout)
+            volumes = _json_success_data(ls_result.stdout, list)
 
             rw_match = [v for v in volumes if v["name"] == vol_rw]
             assert len(rw_match) == 1
@@ -329,7 +329,7 @@ class TestVolumeLifecycle:
             assert "already exists" in combined
 
             ls_result = _run_mvm(runner_vm, "volume", "ls", "--json")
-            volumes = json.loads(ls_result.stdout)
+            volumes = _json_success_data(ls_result.stdout, list)
             matching = [v for v in volumes if v["name"] == vol_name]
             assert len(matching) == 1
         finally:
@@ -353,7 +353,7 @@ class TestVolumeLifecycle:
 
         ls_result = _run_mvm(runner_vm, "volume", "ls", "--json", check=False)
         if ls_result.returncode == 0:
-            volumes = json.loads(ls_result.stdout)
+            volumes = _json_success_data(ls_result.stdout, list)
             assert not any(v["name"] == "invalid-size-vol" for v in volumes)
 
     @pytest.mark.parametrize("removed_format", ["raw", "qcow2", "vmdk"])
@@ -461,20 +461,53 @@ class TestVolumeLifecycle:
         assert "invalid" in combined or "negative" in combined
 
     def test_zero_size_volume(self, runner_vm: str) -> None:
-        # Rationale: No resources needed — error path for zero size.
-        """A volume with zero size should be rejected."""
+        """A zero-size request must fail validation before publishing backing or a record."""
         vol_name = f"sys-zero-{uuid.uuid4().hex[:6]}"
-        result = _run_mvm(
-            runner_vm,
-            "volume",
-            "create",
-            vol_name,
-            "0M",
-            check=False,
-        )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "invalid" in combined or "must be" in combined
+        sentinel = f"sys-zero-sentinel-{uuid.uuid4().hex[:6]}"
+        try:
+            _run_mvm(runner_vm, "volume", "create", sentinel, "16M")
+            sentinel_data = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", sentinel, "--json").stdout,
+                dict,
+            )
+            volume_dir = PurePosixPath(sentinel_data["volume"]["path"]).parent
+            list_backing_files = (
+                f"find {shlex.quote(str(volume_dir))} -mindepth 1 -maxdepth 1 -print"
+            )
+            before = set(_guest_run(runner_vm, list_backing_files).stdout.splitlines())
+
+            result = _run_mvm(
+                runner_vm, "volume", "create", vol_name, "0M", "--json", check=False,
+            )
+            assert result.returncode != 0
+            envelope = json.loads(result.stdout)
+            assert envelope["schema_version"] == 1
+            assert envelope["status"] == "error"
+            assert envelope["data"] is None
+            assert envelope["error"]["code"] == "validation.failed"
+
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            assert not any(volume["name"] == vol_name for volume in volumes)
+            after = set(_guest_run(runner_vm, list_backing_files).stdout.splitlines())
+            assert after == before, "rejected request published a raw backing file"
+        finally:
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            for volume in volumes:
+                if volume["name"] in (vol_name, sentinel):
+                    removed = _run_mvm(
+                        runner_vm, "volume", "rm", volume["name"], "--force", check=False,
+                    )
+                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            remaining = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            assert all(
+                volume["name"] not in (vol_name, sentinel) for volume in remaining
+            )
 
     # ── 4. Modify operations (resize) ────────────────────────────────────
 
@@ -497,7 +530,7 @@ class TestVolumeLifecycle:
                 vol_name,
                 "--json",
             )
-            data = json.loads(inspect.stdout)
+            data = _json_success_data(inspect.stdout, dict)
             assert data["volume"]["size_bytes"] == 1024 * 1024 * 1024
         finally:
             _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
@@ -551,7 +584,7 @@ class TestVolumeLifecycle:
         assert result.returncode == 0
 
         result = _run_mvm(runner_vm, "volume", "ls", "--json")
-        volumes = json.loads(result.stdout)
+        volumes = _json_success_data(result.stdout, list)
         assert not any(v["name"] == vol_name for v in volumes)
 
     def test_volume_rm_with_force(
@@ -569,7 +602,7 @@ class TestVolumeLifecycle:
             _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
 
         result = _run_mvm(runner_vm, "volume", "ls", "--json")
-        volumes = json.loads(result.stdout)
+        volumes = _json_success_data(result.stdout, list)
         assert not any(v["name"] == vol_name for v in volumes)
 
     def test_volume_remove_nonexistent(self, runner_vm: str) -> None:
@@ -590,7 +623,7 @@ class TestVolumeLifecycle:
             runner_vm, "volume", "ls", "--json", check=False
         )
         if result_vol.returncode == 0:
-            vols_after = json.loads(result_vol.stdout)
+            vols_after = _json_success_data(result_vol.stdout, list)
             assert not any(
                 v["name"] == "nonexistent-volume-name-that-will-not-exist"
                 for v in vols_after
@@ -612,7 +645,7 @@ class TestVolumeLifecycle:
             assert result.returncode == 0
 
             result = _run_mvm(runner_vm, "volume", "ls", "--json")
-            volumes = json.loads(result.stdout)
+            volumes = _json_success_data(result.stdout, list)
             assert not any(v["name"] == vol1 for v in volumes)
             assert not any(v["name"] == vol2 for v in volumes)
         finally:
@@ -647,7 +680,7 @@ class TestVolumeLifecycle:
             )
 
             result = _run_mvm(runner_vm, "volume", "ls", "--json")
-            volumes = json.loads(result.stdout)
+            volumes = _json_success_data(result.stdout, list)
             assert not any(v["name"] == vol_name for v in volumes)
         finally:
             _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
