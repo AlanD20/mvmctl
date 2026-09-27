@@ -8,7 +8,13 @@ from typing import Any
 
 import pytest
 
-from tests.system.conftest import _run_mvm, _unique_subnet, ensure_vm_deps
+from tests.system.conftest import (
+    _json_success_data,
+    _parse_vm_list,
+    _run_mvm,
+    _unique_subnet,
+    ensure_vm_deps,
+)
 
 pytestmark = [
     pytest.mark.system,
@@ -28,110 +34,72 @@ class TestSnapshotDestroyRestore:
         unique_key_name: str,
         unique_network_name: str,
     ) -> None:
-        """Create VM, pause, snapshot, stop, restore with --resume, verify it runs."""
+        """A managed VM survives destruction and full restore with its guest agent reachable."""
         vm_name = unique_vm_name
         key_name = unique_key_name
         network_name = unique_network_name
         subnet = _unique_subnet(network_name)
+        snapshot_name = f"{vm_name}-dr"
         snap_id: str | None = None
 
         try:
-            _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-            )
-
-            _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                key_name,
-                "--algorithm",
-                "ed25519",
-            )
-
+            _run_mvm(runner_vm, "network", "create", network_name, "--subnet", subnet)
+            _run_mvm(runner_vm, "key", "create", key_name, "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network_name,
-                "--ssh-key",
-                key_name,
+            created = _json_success_data(_run_mvm(
+                runner_vm, "vm", "create", vm_name, "--image", "alpine:3.23",
+                "--network", network_name, "--ssh-key", key_name,
+                "--skip-deblob", "--no-pci", "--disk-size", "512M",
+                "--mem", "256M", "--vcpu", "1", "--json", timeout=180,
+            ).stdout, list)
+            assert len(created) == 1
+            source = created[0]
+            assert source["network_id"]
+            assert _run_mvm(runner_vm, "exec", vm_name, "--", "uname", "-s").stdout.strip() == "Linux"
+
+            captured = _json_success_data(
+                _run_mvm(
+                    runner_vm, "snapshot", "create", vm_name, "--name", snapshot_name,
+                    "--json", timeout=240,
+                ).stdout,
+                dict,
             )
+            snap_id = captured["id"]
+            assert captured["memory_file"] and captured["state_file"]
+            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", timeout=120)
 
-            _run_mvm(runner_vm, "vm", "pause", vm_name)
-
-            # Snapshot create (files managed internally, no --mem/--state flags)
-            _run_mvm(runner_vm, "snapshot", "create", vm_name)
-
-            # Retrieve snapshot ID for restore
-            ls_result = _run_mvm(runner_vm, "snapshot", "ls", "--json")
-            snaps: list[dict[str, Any]] = json.loads(ls_result.stdout)
-            vm_snaps = [s for s in snaps if s["source_vm_name"] == vm_name]
-            assert vm_snaps, "No snapshot found for VM"
-            snap_id = vm_snaps[-1]["id"]
-
-            _run_mvm(runner_vm, "vm", "stop", vm_name)
-
-            # Remove stopped VM to free name for restore
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force")
-
-            restore_result = _run_mvm(
-                runner_vm,
-                "snapshot",
-                "restore",
-                snap_id,
-                vm_name,
-                "--resume",
-                check=False,
+            restored = _json_success_data(
+                _run_mvm(
+                    runner_vm, "snapshot", "restore", snap_id, vm_name,
+                    "--resume", "--json", timeout=180,
+                ).stdout,
+                list,
             )
-
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms: list[dict[str, Any]] = json.loads(result.stdout)
-            vm_entry = next((v for v in vms if v["name"] == vm_name), None)
-            assert vm_entry is not None
-            status = vm_entry.get("status", "")
-            if status == "error":
-                # --resume resulted in error status — try restore without --resume
-                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-                restore_result = _run_mvm(
-                    runner_vm,
-                    "snapshot",
-                    "restore",
-                    snap_id,
-                    vm_name,
-                    check=False,
-                )
-                if restore_result.returncode == 0:
-                    result = _run_mvm(runner_vm, "vm", "ls", "--json")
-                    vms = json.loads(result.stdout)
-                    vm_entry = next((v for v in vms if v["name"] == vm_name), None)
-                    assert vm_entry is not None
-                    assert vm_entry.get("status") in ("stopped", "paused")
-            else:
-                assert status == "running"
+            assert len(restored) == 1 and restored[0]["name"] == vm_name
+            assert restored[0]["status"] == "running"
+            assert restored[0]["network_id"] == source["network_id"]
+            assert restored[0]["ipv4"] == source["ipv4"]
+            assert _run_mvm(runner_vm, "exec", vm_name, "--", "uname", "-s").stdout.strip() == "Linux"
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "network",
-                "rm",
-                network_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            if any(vm["name"] == vm_name for vm in listed):
+                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", timeout=120)
             if snap_id:
-                _run_mvm(runner_vm, "snapshot", "rm", snap_id, "--force", check=False)
+                _run_mvm(runner_vm, "snapshot", "rm", snap_id, "--force")
+            _run_mvm(runner_vm, "network", "rm", network_name, "--force", check=False, timeout=120)
+            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
+            assert all(vm["name"] != vm_name for vm in _parse_vm_list(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+            ))
+            assert all(snapshot["name"] != snapshot_name for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ))
+            assert all(network["name"] != network_name for network in _json_success_data(
+                _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
+            ))
+            assert all(key["name"] != key_name for key in _json_success_data(
+                _run_mvm(runner_vm, "key", "ls", "--json").stdout, list,
+            ))
 
 
 class TestSnapshotCreateFlags:
