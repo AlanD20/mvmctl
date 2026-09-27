@@ -45,6 +45,16 @@ setup. All ten collected and passed in only `mvmctl-030-test`; strict report
 records zero other outcomes. Independent VM/network inventories were empty. This qualifies that group, not the
 remaining lifecycle cases. The empty-list case no longer attempts global VM deletion.
 
+**Current-candidate pressure checkpoint (2026-09-28):** The existing
+`TestVMCgroupEnvelope::test_guest_stays_responsive_under_pressure_only_memory_control` passed 1/1 against the
+SHA-matched installed candidate after one reboot of only the empty named runner. Its real 150 MiB tmpfs load
+increased observed memory charge and `memory.events.high`, left leaf `oom_kill` unchanged, and retained vsock exec.
+Strict report `.tmp/qa-pressure-0928.json` is in the runner's `qa-crash-5b23766f` worktree. All four VM/network/volume/
+snapshot inventories were empty afterward; the outer controller's max/OOM counters stayed zero after reboot.
+The full current-candidate cgroup file was not rerun because remaining outer headroom was below the next case's
+configured envelope. This bounded pass does not establish deterministic pressure across environments, resolve the
+historical larger-allocation guest-agent EOF, or qualify sustained/ancestor-OOM survival.
+
 **Confirmed-crash recovery checkpoint (2026-09-28):** Commit `a1430018` replaces the obsolete CLI `kill`
 probe with one exact PID/start-tick/jail/executable-verified pidfd SIGKILL of a test-owned Firecracker inside only
 `mvmctl-030-test`. The test waits for that retained pidfd to prove exit before invoking public status, then requires
@@ -120,7 +130,8 @@ mutation guards; destructive clean/reset success remains unqualified and require
 Full T1/T2, host-reboot and saturation journeys, GitHub CI, dedicated
 clean-host Tier 3, and release approval remain open.
 
-The cgroup module's envelope/inspection case passed, but its pressure case remains unqualified. A 150 MiB guest
+Historical pressure failures (before the later passing checkpoints above and below): the cgroup module's
+envelope/inspection case passed, but that candidate's pressure run did not qualify the pressure threshold. A 150 MiB guest
 allocation did not reach `memory.high`; larger 156/168 MiB attempts lost the guest exec response. Instrumented
 156 MiB readback still found the VMM running, `memory.max=max`, no cgroup high/OOM events, and usage just below
 `memory.high`. This does not prove sustained-pressure survival or a host cgroup kill; the guest/agent EOF needs a
@@ -128,7 +139,7 @@ separate bounded diagnosis. A later 156 MiB probe made the fill process the pref
 (`oom_score_adj=1000`), yet exec still ended with EOF and the agent did not answer a later probe. Firecracker remained
 running; VM-leaf usage was 232,345,600 bytes below `memory.high=234,881,024`, and `high`, `oom`, and `oom_kill` stayed
 zero. No OOM line appeared in the last 250 boot-log lines. This excludes a VM-leaf cgroup kill in that probe, not guest
-OOM or an agent/relay failure; the pressure case remains unqualified.
+OOM or an agent/relay failure; the larger-allocation guest-agent EOF remains unexplained.
 Two follow-up probes unlinked the tmpfs file before the writer ran, so its pages were not retained by that file after
 the writer exited. At 156 MiB, the writer reported 156 records out but the CLI exited 255; at 160 MiB, it exited 255
 without a completed-record report. The agent answered a subsequent exec in both cases, while VM-leaf `high` and
@@ -453,7 +464,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 | Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests and a disposable real-kernel namespace probe passed; a two-VM reused-IP installed-candidate journey on a bridge-capable runner remains missing. |
 | Typed `traffic` policy | 🟡 Partial | Installed-candidate same-network and cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. Source-VM, UDP, spoof/reverse/IP-reuse, and reboot recovery remain unqualified. |
 | Typed VM-to-VM `exec` policy | 🟡 Partial | The installed candidate passed the full seven-case exec domain in `mvmctl-030-test`. Its new directional case exercises same-network, cross-network, and networkless placements; denial before grant, exact non-root-user grant, successful command and destination file effect, reverse denial, and denial after revocation. Peer-identity attacks, capacity/deadline/cancellation, audit redaction, and reboot/restore journeys remain unqualified at L2. |
-| Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove the Firecracker process UID differs from root and the operator, and that an unprivileged caller receives `enforced` policy-v2 limits and usage through authenticated root inspection while direct leaf read is denied. One earlier bounded 224 MiB guest/150 MiB tmpfs pass crossed `memory.high` and retained responsiveness, but later exact-candidate runs stayed below `memory.high`; one 156 MiB attempt lost guest-agent connectivity without VM-leaf high/OOM/kill events, while unlinked-file probes kept the agent reachable but still did not cross `memory.high`. This is not a deterministic pressure gate or a diagnosis of guest failure. Per-VM uniqueness, root-record, pidfd, broader mount/cgroup cleanup, sustained saturation survival, and host-reboot reconciliation binding remain unqualified. |
+| Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove isolated Firecracker credentials and protected policy-v2 limit/usage inspection. The 2026-09-28 current-candidate 224 MiB guest/150 MiB tmpfs case increased actual `memory.high` events without a leaf OOM kill and retained vsock responsiveness. Historical larger-allocation guest-agent EOF remains unexplained; a bounded pass is not a deterministic pressure gate or ancestor-OOM guarantee. Per-VM uniqueness, root-record/pidfd binding, broader mount/cgroup cleanup, sustained saturation, and host-reboot binding remain unqualified. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
 Specific legacy conflicts that must be rewritten before release:
