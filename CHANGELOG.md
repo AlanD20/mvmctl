@@ -66,6 +66,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > checked denial before grant, the exact non-root target, a destination file effect, reverse denial, revocation,
 > and absence of test VMs, networks, and policies after teardown. This is focused exec-domain evidence, not the full
 > Python matrix, adversarial relay qualification, or release sign-off.
+> At exact source revision `d0db3be6`, pinned Go 1.26.3 tidy, architecture, formatting with verified golines v0.13.0,
+> agent generation, full vet, the complete unprivileged CI test selection with coverage, and the separate root-effect
+> Jailer package passed inside `mvmctl-030-test`. The binary built from that revision was installed only in that
+> runner; its exec and typed traffic-policy cases passed 9/9, and nftables cases passed 4/4. A later test-only JSON
+> correction passed the focused Jailer snapshot journey; a measured pressure-test correction passed a bounded
+> `memory.high` event without VMM OOM. The full Jailer/cgroup Python domain remains open because a 1.16.0 test pull
+> could not fetch trusted checksum metadata despite the archive being cached. These are local partial gates, not the
+> full Python matrix, GitHub CI, or release approval.
 
 ### Added
 
