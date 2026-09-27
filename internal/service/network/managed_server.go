@@ -3,6 +3,8 @@ package network
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -49,7 +51,7 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 	if err := request.Validate(); err != nil {
 		return ManagedNetworkResult{}, err
 	}
-	tx, err := acquireManagedNetworkTransaction(ctx, ownerUID, NetworkID(request.NetworkID), true)
+	tx, err := acquireManagedNetworkTransaction(ctx, ownerUID, NetworkID(request.NetworkID))
 	if err != nil {
 		return ManagedNetworkResult{}, err
 	}
@@ -248,13 +250,19 @@ func (server *ManagedNetworkServer) RemoveManagedNetwork(
 	if err := request.Validate(); err != nil {
 		return ManagedNetworkRemovalResult{}, err
 	}
-	tx, err := acquireManagedNetworkTransaction(ctx, ownerUID, NetworkID(request.NetworkID), false)
+	tx, err := acquireManagedNetworkTransaction(ctx, ownerUID, NetworkID(request.NetworkID))
 	if err != nil {
 		return ManagedNetworkRemovalResult{}, err
 	}
 	defer func() { returnErr = tx.release(ctx, returnErr) }()
 	if !tx.found || tx.removed {
 		if err := tx.completeAbsentRemoval(ctx); err != nil {
+			return ManagedNetworkRemovalResult{}, err
+		}
+		return ManagedNetworkRemovalResult{NetworkID: request.NetworkID}, nil
+	}
+	if tx.priorBoot != nil {
+		if err := tx.removePriorBootNetwork(ctx); err != nil {
 			return ManagedNetworkRemovalResult{}, err
 		}
 		return ManagedNetworkRemovalResult{NetworkID: request.NetworkID}, nil
@@ -317,8 +325,62 @@ func (server *ManagedNetworkServer) RemoveManagedNetwork(
 	return ManagedNetworkRemovalResult{NetworkID: request.NetworkID}, nil
 }
 
+// removePriorBootNetwork retires only logical authority. Old ifindices and namespace inodes
+// are historical evidence, never current kernel deletion authority.
+func (tx *managedNetworkTransaction) removePriorBootNetwork(ctx context.Context) error {
+	boot, err := readCurrentBootID(ctx)
+	if err != nil {
+		return err
+	}
+	if tx.priorBoot == nil || boot == tx.record.bootID {
+		return networkAuthorityCorruptError("prior-boot network removal authority is unavailable", nil)
+	}
+	if err := tx.requireAbsentBridge(ctx); err != nil {
+		return err
+	}
+	if err := tx.requireNoLiveTopologyClaims(ctx); err != nil {
+		return err
+	}
+	_, host, err := tx.host.descriptor()
+	if err != nil {
+		return err
+	}
+	tx.firewall, err = firewall.BeginPolicyChange(ctx, tx.mutation, firewall.PolicyBinding{
+		OwnerUID: tx.record.ownerUID, NetworkID: string(tx.record.networkID), BootID: boot,
+		HostNamespace: firewall.NamespaceIdentity{Device: host.device, Inode: host.inode},
+	})
+	if err != nil {
+		return err
+	}
+	// Firewall acquisition may reconcile prior-boot intent. Recheck current kernel and
+	// topology absence while both network and firewall mutation locks are retained.
+	if err := tx.requireAbsentBridge(ctx); err != nil {
+		return err
+	}
+	if err := tx.requireNoLiveTopologyClaims(ctx); err != nil {
+		return err
+	}
+	if err := tx.firewall.RemoveNetwork(ctx, tx.firewallIntent()); err != nil {
+		return err
+	}
+	if err := tx.firewall.VerifyNetworkAbsent(ctx); err != nil {
+		return err
+	}
+	if err := tx.requireNoLiveTopologyClaims(ctx); err != nil {
+		return err
+	}
+	if err := tx.requireAbsentBridge(ctx); err != nil {
+		return err
+	}
+	currentBoot, err := readCurrentBootID(ctx)
+	if err != nil || currentBoot != boot {
+		return networkAuthorityCorruptError("host boot changed during prior-boot network removal", err)
+	}
+	return tx.removeRecord(ctx)
+}
+
 func acquireManagedNetworkTransaction(
-	ctx context.Context, ownerUID uint32, networkID NetworkID, create bool,
+	ctx context.Context, ownerUID uint32, networkID NetworkID,
 ) (_ *managedNetworkTransaction, returnErr error) {
 	if ctx == nil || ownerUID == 0 {
 		return nil, networkAuthorityValidationError("authenticated non-root network owner and context are required")
@@ -419,9 +481,6 @@ func acquireManagedNetworkTransaction(
 			return nil, err
 		}
 		if boot != tx.record.bootID {
-			if !create && !tx.removed {
-				return nil, staleNetworkAuthorityError(networkID)
-			}
 			previous := tx.record
 			tx.priorBoot = &previous
 		}
@@ -1201,9 +1260,20 @@ func (tx *managedNetworkTransaction) checkAbsentNetworkTopologyClaims(
 		if record.NetworkID != string(tx.key.networkID) {
 			continue
 		}
-		if !tx.removed || record.OwnerUID != tx.record.ownerUID || record.Lifecycle != topologyCleaned ||
+		if (!tx.removed && tx.priorBoot == nil) || record.OwnerUID != tx.record.ownerUID ||
+			record.Lifecycle != topologyCleaned ||
 			record.Prefix != tx.record.configuration.l3.prefix.value.String() || record.Gateway != tx.record.configuration.l3.gateway.value.String() {
 			return networkAuthorityCorruptError("network absence conflicts with root-owned topology authority", nil)
+		}
+		if tx.priorBoot != nil && !tx.removed {
+			raw, err := encodeNetworkAuthorityRecord(tx.record)
+			if err != nil {
+				return err
+			}
+			digest := sha256.Sum256(raw)
+			if record.BootID != tx.record.bootID || record.NetworkDigest != hex.EncodeToString(digest[:]) {
+				return networkAuthorityCorruptError("cleaned topology differs from prior-boot network authority", nil)
+			}
 		}
 	}
 	return nil
