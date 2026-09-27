@@ -238,15 +238,15 @@ func seedTypedPolicyResources(t *testing.T, ctx context.Context, handle *db.Hand
 		VALUES ('firecracker','firecracker','x86_64','1','1','/firecracker',1);
 		INSERT INTO vm_instances
 			(id,name,status,pid,ipv4,mac,network_id,tap_device,image_id,kernel_id,binary_id,
-			 api_socket_path,config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,
+			 config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,
 			 rootfs_path,rootfs_suffix,pci_enabled,nested_virt,lsm_flags,
 			 enable_logging,enable_metrics,enable_console,boot_args)
 		VALUES
 			('vm-a','vm-a','stopped',0,'10.1.0.2','02:00:00:00:00:01','net-a','tap-a',
-			 'image','kernel','firecracker','/api-a','/config-a','inject',1,128,64,'/root-a','',
+			 'image','kernel','firecracker','/config-a','inject',1,128,64,'/root-a','',
 			 0,0,'',0,0,0,''),
 			('vm-b','vm-b','stopped',0,'10.1.0.3','02:00:00:00:00:02','net-a','tap-b',
-			 'image','kernel','firecracker','/api-b','/config-b','inject',1,128,64,'/root-b','',
+			 'image','kernel','firecracker','/config-b','inject',1,128,64,'/root-b','',
 			 0,0,'',0,0,0,'');
 	`)
 	require.NoError(t, err)

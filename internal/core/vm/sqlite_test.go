@@ -3,6 +3,7 @@ package vm_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -25,7 +26,7 @@ func TestRepository_PersistsJailerBinaryID(t *testing.T) {
 		IPv4: "10.0.0.2", MAC: "02:00:00:00:00:02", NetworkPlacement: model.VMNetworkPlacementManaged,
 		NetworkID: "network-id", TapDevice: "tap-test",
 		ImageID: "image-id", KernelID: "kernel-id", BinaryID: "firecracker-id", JailerBinaryID: "jailer-id",
-		APISocketPath: "/tmp/api.socket", ConfigPath: "/tmp/config.json", CloudInitMode: "off",
+		ConfigPath: "/tmp/config.json", CloudInitMode: "off",
 		VCPUCount: 2, MemSizeMiB: 512, DiskSizeMiB: 1024, RootfsPath: "/tmp/rootfs", RootfsSuffix: ".ext4",
 		CgroupLimits: model.NewVMCgroupLimits(2, 512, model.VMCgroupPolicy{
 			VMMHeadroomMiB: 128, CPUWeight: 100, PIDsMax: 256, SwapMaxBytes: 0,
@@ -40,6 +41,11 @@ func TestRepository_PersistsJailerBinaryID(t *testing.T) {
 	assert.Equal(t, "firecracker-id", got.BinaryID)
 	assert.Equal(t, "jailer-id", got.JailerBinaryID)
 	assert.Equal(t, item.CgroupLimits, got.CgroupLimits)
+	serialized, err := json.Marshal(got)
+	require.NoError(t, err)
+	var publicVM map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(serialized, &publicVM))
+	assert.NotContains(t, publicVM, "api_socket_path")
 
 	item.CgroupLimits = model.NewVMCgroupLimits(4, 1024, model.VMCgroupPolicy{
 		VMMHeadroomMiB: 64, CPUWeight: 500, PIDsMax: 512, SwapMaxBytes: 4096,
@@ -81,7 +87,7 @@ func TestRepositoryPersistsClosedVMNetworkPlacement(t *testing.T) {
 		NetworkPlacement: model.VMNetworkPlacementManaged, NetworkID: "net",
 		IPv4: "10.0.0.2", MAC: "02:00:00:00:00:02", TapDevice: "tap-managed",
 		ImageID: "img", KernelID: "kernel", BinaryID: "fc", CloudInitMode: "off",
-		APISocketPath: "/api", ConfigPath: "/config", RootfsPath: "/rootfs", RootfsSuffix: ".ext4",
+		ConfigPath: "/config", RootfsPath: "/rootfs", RootfsSuffix: ".ext4",
 		VCPUCount: 1, MemSizeMiB: 128, DiskSizeMiB: 64,
 	}
 	require.NoError(t, repo.Upsert(ctx, managed))

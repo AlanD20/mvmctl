@@ -276,18 +276,6 @@ func (op *Operation) vmBuilderExecute(
 	if resolved == nil {
 		return fmt.Errorf("failed to resolve necessary dependencies")
 	}
-	// Validate socket path before any expensive operations (cloud-init, resize, etc.).
-	if apiSocketPath := vm.RuntimePath(os.Geteuid(), builder.vmID, infra.VMFirecrackerAPISocketFilename); len(
-		apiSocketPath,
-	) >= 108 {
-		return fmt.Errorf(
-			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). "+
-				"This is a system limit for Unix domain sockets. Path: %s",
-			builder.vmID,
-			len(apiSocketPath),
-			apiSocketPath,
-		)
-	}
 	tl := timinglog.Start("vm_create", "vm_name", builder.name, "vm_id", builder.vmID)
 	defer tl.Complete()
 
@@ -1194,7 +1182,6 @@ func (op *Operation) vmRespawnFirecracker(
 	v.PID = *spawner.PID
 	v.ProcessStartTime = spawner.ProcessStartTime
 	v.Status = model.VMStatusRunning
-	v.APISocketPath = spawner.APISocketPath
 	v.TapDevice = fcConfig.TapName
 	if v.EnableConsole {
 		socketPath := vm.RuntimePath(os.Geteuid(), v.ID, infra.VMConsoleSocketFilename)
@@ -1248,7 +1235,6 @@ func buildRespawnFirecrackerConfig(
 		SnapshotMode:        snapshotMode,
 		SnapshotDir:         snapshotDir,
 		ConfigPath:          filepath.Join(vmDir, infra.VMFirecrackerConfigFilename),
-		APISocketPath:       vm.RuntimePath(os.Geteuid(), v.ID, infra.VMFirecrackerAPISocketFilename),
 		LogPath:             filepath.Join(vmDir, infra.VMFirecrackerLogFilename),
 		SerialOutputPath:    filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename),
 		MetricsPath:         filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename),
@@ -1536,7 +1522,6 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		Writeback:           c.resolved.Writeback,
 		// Fixed managed paths; field names match DB columns used during respawn.
 		ConfigPath:       filepath.Join(c.vmDir, infra.VMFirecrackerConfigFilename),
-		APISocketPath:    vm.RuntimePath(os.Geteuid(), c.vmID, infra.VMFirecrackerAPISocketFilename),
 		LogPath:          filepath.Join(c.vmDir, infra.VMFirecrackerLogFilename),
 		SerialOutputPath: filepath.Join(c.vmDir, infra.VMFirecrackerConsoleLogFilename),
 		MetricsPath:      filepath.Join(c.vmDir, infra.VMFirecrackerMetricsFilename),
@@ -1593,7 +1578,6 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		MemSizeMiB:       c.resolved.MemSizeMib,
 		CgroupLimits:     c.resolved.CgroupLimits,
 		DiskSizeMiB:      c.resolved.DiskSizeMib,
-		APISocketPath:    vm.RuntimePath(os.Geteuid(), c.vmID, infra.VMFirecrackerAPISocketFilename),
 		ConfigPath:       filepath.Join(c.vmDir, infra.VMFirecrackerConfigFilename),
 		CloudInitMode:    string(c.resolved.CloudInitMode),
 		RootfsPath:       c.rootfsPath,

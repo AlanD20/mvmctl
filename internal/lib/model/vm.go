@@ -68,7 +68,6 @@ type VMItem struct {
 	KernelID         string             `json:"kernel_id"       db:"kernel_id"`
 	BinaryID         string             `json:"binary_id"       db:"binary_id"`
 	JailerBinaryID   string             `json:"jailer_binary_id" db:"jailer_binary_id"`
-	APISocketPath    string             `json:"api_socket_path" db:"api_socket_path"`
 	ConfigPath       string             `json:"config_path"     db:"config_path"`
 	CloudInitMode    string             `json:"cloud_init_mode" db:"cloud_init_mode"`
 	VCPUCount        int                `json:"vcpu_count"      db:"vcpu_count"`

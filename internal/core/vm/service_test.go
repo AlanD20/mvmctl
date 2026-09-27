@@ -243,15 +243,14 @@ func TestService_StopMany(t *testing.T) {
 // --- Helpers ---
 
 // ctrlFor creates a Controller with a VM in the given status.
-// PID=0, no socket — ensures only state-machine paths are hit.
+// PID=0 ensures only state-machine paths are hit.
 func ctrlFor(status model.VMStatus) *vm.Controller {
 	repo := testutil.NewVMRepo()
 	m := &model.VMItem{
-		ID:            "vm-1",
-		Name:          "test",
-		Status:        status,
-		PID:           0,
-		APISocketPath: "",
+		ID:     "vm-1",
+		Name:   "test",
+		Status: status,
+		PID:    0,
 	}
 	return vm.NewController(m, repo)
 }

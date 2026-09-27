@@ -30,7 +30,6 @@ type FirecrackerSpawner struct {
 	metricsPath      string
 	serialOutputPath string
 	pidPath          string
-	APISocketPath    string
 	PID              *int
 	ProcessStartTime *int64
 	fcLogFP          *os.File
@@ -47,7 +46,6 @@ func NewFirecrackerSpawner(config *model.FirecrackerConfig) *FirecrackerSpawner 
 	s.metricsPath = config.MetricsPath
 	s.serialOutputPath = config.SerialOutputPath
 	s.pidPath = config.PIDPath
-	s.APISocketPath = config.APISocketPath
 	return s
 }
 

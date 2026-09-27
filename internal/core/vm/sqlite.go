@@ -296,7 +296,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO vm_instances (
 			id, name, status, pid, process_start_time, network_placement, ipv4, mac, network_id, tap_device,
-			image_id, kernel_id, binary_id, jailer_binary_id, api_socket_path,
+			image_id, kernel_id, binary_id, jailer_binary_id,
 			relay_socket_path, config_path, cloud_init_mode,
 			nocloud_net_port, nocloud_net_pid, relay_pid,
 			exit_code, vcpu_count, mem_size_mib, cgroup_limits, disk_size_mib,
@@ -305,7 +305,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 			ssh_keys, ssh_user,
 			created_at, updated_at,
 			log_path, serial_output_path, lsm_flags, boot_args, volume_ids, cpu_config
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			status = excluded.status,
@@ -320,7 +320,6 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 			kernel_id = excluded.kernel_id,
 			binary_id = excluded.binary_id,
 			jailer_binary_id = excluded.jailer_binary_id,
-			api_socket_path = excluded.api_socket_path,
 			relay_socket_path = excluded.relay_socket_path,
 			config_path = excluded.config_path,
 			cloud_init_mode = excluded.cloud_init_mode,
@@ -363,7 +362,6 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 		vm.KernelID,
 		vm.BinaryID,
 		vm.JailerBinaryID,
-		vm.APISocketPath,
 		vm.RelaySocketPath,
 		vm.ConfigPath,
 		vm.CloudInitMode,

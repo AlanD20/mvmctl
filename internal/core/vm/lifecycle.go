@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
 	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
@@ -36,8 +35,6 @@ func (s *FirecrackerSpawner) Spawn(ctx context.Context) (returnErr error) {
 	s.PID = &result.PID
 	start := int64(result.StartTimeTicks)
 	s.ProcessStartTime = &start
-	s.APISocketPath = RuntimePath(os.Geteuid(), s.vmID(), infra.VMFirecrackerAPISocketFilename)
-	s.config.APISocketPath = s.APISocketPath
 	defer func() {
 		if returnErr != nil {
 			_, abortErr := client.Abort(context.WithoutCancel(ctx), jailersvc.VMCleanupRequest{VMID: s.vmID()})

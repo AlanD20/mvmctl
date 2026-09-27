@@ -37,7 +37,7 @@ func TestController_Pause_stateValidation(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			ctrl := newController(tc.status, 0, "")
+			ctrl := newController(tc.status, 0)
 			err := ctrl.Pause(context.Background())
 
 			if tc.wantErr != "" {
@@ -72,7 +72,7 @@ func TestController_Resume_stateValidation(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			ctrl := newController(tc.status, 0, "")
+			ctrl := newController(tc.status, 0)
 			err := ctrl.Resume(context.Background())
 
 			if tc.wantErr != "" {
@@ -107,7 +107,7 @@ func TestController_Start_stateValidation(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			ctrl := newController(tc.status, 0, "")
+			ctrl := newController(tc.status, 0)
 			err := ctrl.Start(context.Background())
 
 			if tc.wantErr != "" {
@@ -128,7 +128,7 @@ func TestController_ContextCancellation(t *testing.T) {
 	t.Run("Pause_paused_noop", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		ctrl := newController(model.VMStatusPaused, 0, "")
+		ctrl := newController(model.VMStatusPaused, 0)
 		err := ctrl.Pause(ctx)
 		assert.NoError(t, err, "no-op must not block on cancelled context")
 	})
@@ -136,7 +136,7 @@ func TestController_ContextCancellation(t *testing.T) {
 	t.Run("Resume_running_noop", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		ctrl := newController(model.VMStatusRunning, 0, "")
+		ctrl := newController(model.VMStatusRunning, 0)
 		err := ctrl.Resume(ctx)
 		assert.NoError(t, err, "no-op must not block on cancelled context")
 	})
@@ -144,7 +144,7 @@ func TestController_ContextCancellation(t *testing.T) {
 	t.Run("Start_running_noop", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		ctrl := newController(model.VMStatusRunning, 0, "")
+		ctrl := newController(model.VMStatusRunning, 0)
 		err := ctrl.Start(ctx)
 		assert.NoError(t, err, "no-op must not block on cancelled context")
 	})
@@ -154,14 +154,13 @@ func TestController_ContextCancellation(t *testing.T) {
 // --- Helpers ---
 
 // newController creates a Controller with a VM in the given state.
-func newController(status model.VMStatus, pid int, socketPath string) *vm.Controller {
+func newController(status model.VMStatus, pid int) *vm.Controller {
 	repo := testutil.NewVMRepo()
 	m := &model.VMItem{
-		ID:            "ctrl-test-vm",
-		Name:          "ctrl-test",
-		Status:        status,
-		PID:           pid,
-		APISocketPath: socketPath,
+		ID:     "ctrl-test-vm",
+		Name:   "ctrl-test",
+		Status: status,
+		PID:    pid,
 	}
 	return vm.NewController(m, repo)
 }

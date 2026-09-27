@@ -30,15 +30,15 @@ func TestMigration002_BackfillsJailerBinaryID(t *testing.T) {
 			('fc-deleted-pair','firecracker','x86_64','1.14.0','1.14.0','/fc-deleted-pair',1,NULL),
 			('jl-deleted','jailer','x86_64','1.14.0','1.14.0','/jl-deleted',1,'2026-08-09T00:00:00Z');
 		INSERT INTO vm_instances (id,name,status,pid,ipv4,mac,network_id,tap_device,image_id,kernel_id,binary_id,
-			api_socket_path,config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,rootfs_path,rootfs_suffix,
+			config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,rootfs_path,rootfs_suffix,
 			pci_enabled,nested_virt,lsm_flags,enable_logging,enable_metrics,enable_console,boot_args)
 		VALUES
 			('vm-match','vm-match','stopped',0,'10.0.0.2','02:00:00:00:00:01','net','tap1','img','kernel','fc-match',
-			 '/api1','/cfg1','inject',1,128,64,'/root1','',0,0,'',0,0,0,''),
+			 '/cfg1','inject',1,128,64,'/root1','',0,0,'',0,0,0,''),
 			('vm-missing','vm-missing','stopped',0,'10.0.0.3','02:00:00:00:00:02','net','tap2','img','kernel','fc-missing',
-			 '/api2','/cfg2','inject',1,128,64,'/root2','',0,0,'',0,0,0,''),
+			 '/cfg2','inject',1,128,64,'/root2','',0,0,'',0,0,0,''),
 			('vm-deleted-pair','vm-deleted-pair','stopped',0,'10.0.0.4','02:00:00:00:00:03','net','tap3','img','kernel',
-			 'fc-deleted-pair','/api3','/cfg3','inject',1,128,64,'/root3','',0,0,'',0,0,0,'');
+			 'fc-deleted-pair','/cfg3','inject',1,128,64,'/root3','',0,0,'',0,0,0,'');
 	`)
 	require.NoError(t, err)
 
@@ -82,10 +82,10 @@ func TestMigration003_AddsTypedVMCgroupLimitsDefault(t *testing.T) {
 		INSERT INTO binaries (id,type,architecture,version,full_version,path,is_present)
 		VALUES ('fc','firecracker','x86_64','1','1','/fc',1);
 		INSERT INTO vm_instances (id,name,status,pid,ipv4,mac,network_id,tap_device,image_id,kernel_id,binary_id,
-			jailer_binary_id,api_socket_path,config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,rootfs_path,
+			jailer_binary_id,config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,rootfs_path,
 			rootfs_suffix,pci_enabled,nested_virt,lsm_flags,enable_logging,enable_metrics,enable_console,boot_args)
 		VALUES ('legacy-vm','legacy-vm','stopped',0,'10.0.0.2','02:00:00:00:00:01','net','tap','img','kernel','fc','',
-			'/api','/cfg','inject',1,512,64,'/root','',0,0,'',0,0,0,'');
+			'/cfg','inject',1,512,64,'/root','',0,0,'',0,0,0,'');
 	`)
 	require.NoError(t, err)
 

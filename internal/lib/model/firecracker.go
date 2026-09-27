@@ -370,7 +370,6 @@ type FirecrackerConfig struct {
 	LogPath          string `json:"log_path"`
 	SerialOutputPath string `json:"serial_output_path"`
 	MetricsPath      string `json:"metrics_path"`
-	APISocketPath    string `json:"api_socket_path"`
 	PIDPath          string `json:"pid_path"`
 	ConfigPath       string `json:"config_path"`
 

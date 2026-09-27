@@ -110,7 +110,6 @@ func jailerTestConfig(vmDir string) *model.FirecrackerConfig {
 		LogPath:          filepath.Join(vmDir, infra.VMFirecrackerLogFilename),
 		MetricsPath:      filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename),
 		SerialOutputPath: filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename),
-		APISocketPath:    filepath.Join(vmDir, infra.VMFirecrackerAPISocketFilename),
 		PIDPath:          filepath.Join(vmDir, infra.VMFirecrackerPIDFilename),
 		ConfigPath:       filepath.Join(vmDir, infra.VMFirecrackerConfigFilename), CloudInitMode: &cloudInitMode,
 		CloudInitISOPath: &isoPath,

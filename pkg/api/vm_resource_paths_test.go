@@ -68,8 +68,6 @@ func TestVMCreateBuilderUsesFixedFirecrackerLeaves(t *testing.T) {
 	require.NotNil(t, config)
 
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerConfigFilename), config.ConfigPath)
-	assert.Equal(t, filepath.Join("/run/mvmctl/runtime", strconv.Itoa(os.Geteuid()),
-		resourcePathsTestVMID, infra.VMFirecrackerAPISocketFilename), config.APISocketPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerLogFilename), config.LogPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename), config.SerialOutputPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename), config.MetricsPath)
@@ -128,7 +126,6 @@ func TestBuildRespawnFirecrackerConfigIgnoresPersistedPaths(t *testing.T) {
 		NetworkPlacement: model.VMNetworkPlacementManaged,
 		RootfsPath:       "/user-selected/rootfs.img",
 		ConfigPath:       "/user-selected/config.json",
-		APISocketPath:    "/user-selected/api.socket",
 		LogPath:          &logPath,
 		SerialOutputPath: &serialPath,
 		EnableMetrics:    true,
@@ -152,8 +149,6 @@ func TestBuildRespawnFirecrackerConfigIgnoresPersistedPaths(t *testing.T) {
 
 	assert.Equal(t, filepath.Join(vmDir, infra.VMRootfsFilename), config.RootfsPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerConfigFilename), config.ConfigPath)
-	assert.Equal(t, filepath.Join("/run/mvmctl/runtime", strconv.Itoa(os.Geteuid()),
-		resourcePathsTestVMID, infra.VMFirecrackerAPISocketFilename), config.APISocketPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerLogFilename), config.LogPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename), config.SerialOutputPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename), config.MetricsPath)

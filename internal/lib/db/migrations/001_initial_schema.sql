@@ -152,7 +152,6 @@ CREATE TABLE vm_instances (
     image_id TEXT NOT NULL,
     kernel_id TEXT NOT NULL,
     binary_id TEXT NOT NULL,
-    api_socket_path TEXT NOT NULL,
     relay_socket_path TEXT NULL,
     config_path TEXT NOT NULL,
     cloud_init_mode TEXT NOT NULL CHECK(network_placement = 'managed' OR cloud_init_mode != 'net'),

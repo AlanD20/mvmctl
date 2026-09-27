@@ -37,7 +37,7 @@ func spawnerWithCanonicalIdentity(t *testing.T, config *model.FirecrackerConfig)
 
 // --- NewFirecrackerSpawner ---
 // Rationale: Ensures the spawner correctly copies config paths to its
-// exported fields. A bug here would misroute log/metrics/socket paths.
+// exported fields. A bug here would misroute log/metrics paths.
 
 func TestNewFirecrackerSpawner(t *testing.T) {
 	config := &model.FirecrackerConfig{
@@ -46,11 +46,9 @@ func TestNewFirecrackerSpawner(t *testing.T) {
 		MetricsPath:      "/tmp/mvm/fc.metrics",
 		SerialOutputPath: "/tmp/mvm/fc-serial.log",
 		PIDPath:          "/tmp/mvm/fc.pid",
-		APISocketPath:    "/tmp/mvm/fc.socket",
 	}
 
 	s := vm.NewFirecrackerSpawner(config)
-	assert.Equal(t, "/tmp/mvm/fc.socket", s.APISocketPath)
 	assert.Nil(t, s.PID)
 	assert.Nil(t, s.ProcessStartTime)
 }
