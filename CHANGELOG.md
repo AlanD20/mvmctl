@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > vet, the complete unprivileged Go CI selection, and the separate full root-effect Jailer package under pinned Go
 > 1.26.3 inside that same runner. This is local exact-source Go evidence, not GitHub CI or installed-candidate Python
 > release qualification.
+> After exact neighbor invalidation and its review correction, the clean `659c8a51` checkout passed the same complete
+> offline Go sequence and separate full root-effect Jailer package in `mvmctl-030-test`. The first exact-HEAD gate found
+> one golines-only test layout issue, corrected before this passing run. Networked installed-candidate Python QA is
+> still blocked by the runner's missing nftables bridge-family capability; this Go pass does not qualify release.
 > Trusted snapshot capture/restore with consistent data volumes and its privileged route have source implementation.
 > A focused networkless data-volume capture/restore journey passed against an installed candidate inside the named
 > disposable runner; this does not qualify the managed-network or full Python release matrix.
