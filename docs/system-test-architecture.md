@@ -121,16 +121,16 @@ feature list does not prove the bridge-family nftables capability required by th
 
 | Tier | Runs inside VM | Shared volume | Nested KVM | Runner VM kernel | What's tested |
 |------|---------------|---------------|------------|-----------------|---------------|
-| **1** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Not needed | `official:7.0.11` (inet nftables; bridge unavailable in the cached image) | Host-level CLI: help, config, init, cache, keys, invariants, bin, images, kernel, network, host, run |
-| **2** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11` (inet nftables; bridge unavailable in the cached image) | VM lifecycle: volume, vm_lifecycle, vm_data_persistence, Jailer/cgroups, routed policies, ssh, console, exec, logs, full_journeys, nftables |
+| **1** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Not needed | `official:7.0.11`; verify bridge capability on the exact image | Host-level CLI: help, config, init, cache, keys, invariants, bin, images, kernel, network, host, run |
+| **2** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11`; verify bridge capability on the exact image | VM lifecycle: volume, vm_lifecycle, vm_data_persistence, Jailer/cgroups, routed policies, ssh, console, exec, logs, full_journeys, nftables |
 | **3** | No — runs directly on host | Host mirror | Yes (host KVM) | N/A (host-direct) | fresh_env, nested_isolated, snapshot_load, snapshot_rootfs, volume_hotplug, cp, kernel_build, env |
 
-**0.3.0 runner-kernel gate:** On 2026-09-26, the cached `vmlinux-official-7.0.11-x86_64` used by
-`mvmctl-030-test` accepted a bare inet nftables table but rejected a bare bridge-family table with
-`operation not supported`. Network, firewall, and traffic-policy T1/T2 results from that image cannot qualify the
-release. Replace or rebuild the runner kernel with bridge-family support and require the installed candidate's
-`mvm host status --json` to report `data.resources.nftables_available: true` before claiming those domains pass. The
-current image has no matching `/lib/modules/7.0.11` tree for a module-only repair.
+**0.3.0 runner-kernel gate:** The cached image used on 2026-09-26 rejected bridge-family nftables despite accepting
+inet tables; its network and policy results cannot qualify the release. On 2026-09-27, the named `mvmctl-030-test`
+runner was replaced with a rebuilt bridge-capable 7.0.11 kernel. Its installed candidate reports
+`data.resources.nftables_available: true`, and a bridge-table create/list/delete probe passed. The orchestrator
+must still prove that capability on every newly provisioned runner image before network, firewall, or policy results
+count as release evidence; the feature list alone is insufficient.
 
 ---
 
@@ -249,9 +249,9 @@ mvm exec <vm-name> --user runner --timeout 600 -- \
 
 Same as T1, but with nested virt enabled (requires `kvm` in the kernel — the `official:7.0.11` kernel has it):
 
-The feature names in the runner specification do not prove bridge-family nftables support. On 2026-09-26,
-`mvmctl-030-test` rejected creation of a bridge-family nftables table despite accepting an inet table; network and
-policy Tier 2 results from that kernel cannot qualify the 0.3.0 firewall until the kernel capability is corrected.
+The feature names in the runner specification do not prove bridge-family nftables support. The named
+`mvmctl-030-test` runner now has a rebuilt bridge-capable kernel, but orchestrator-created runners require their own
+capability check before network and policy Tier 2 results can qualify the 0.3.0 firewall.
 
 - **Hypervisor:** Firecracker v1.16
 - **Kernel:** `official:7.0.11` (features: `nftables`, `tuntap`, `kvm`, `btrfs`)

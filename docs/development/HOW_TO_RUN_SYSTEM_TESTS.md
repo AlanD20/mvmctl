@@ -51,10 +51,11 @@ resource limits still differ.
   image's matching module tree; do not assume every required feature is compiled into the 7.0.11 asset.
 - tmpfs, overlayfs, btrfs, ext4 — all standard Linux facilities
 
-The `vmlinux-official-7.0.11-x86_64` image used by `mvmctl-030-test` on 2026-09-26 accepted a bare inet nftables table
-but returned `operation not supported` for a bare bridge-family table in a disposable network namespace. That runner
-cannot qualify the 0.3.0 bridge firewall or same-network traffic policy until its kernel is replaced or rebuilt with
-the required capability. Its missing `/lib/modules/7.0.11` tree means `modprobe` is not a repair for that image.
+The older `vmlinux-official-7.0.11-x86_64` image used by `mvmctl-030-test` on 2026-09-26 accepted a bare inet
+nftables table but rejected a bridge-family table. The named runner was replaced on 2026-09-27 with a rebuilt
+bridge-capable 7.0.11 kernel. Its installed 0.3.0 candidate reports `nftables_available: true`, and a bridge-table
+create/list/delete probe passed. This does not qualify the orchestrator's separately provisioned runner images:
+check the capability on each exact runner before using its network or policy results as release evidence.
 
 Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
 tests run directly on the outer host and therefore require a dedicated clean
