@@ -36,6 +36,16 @@ created and stopped a VM using it, required `kernel.in_use` on ordinary removal,
 Independent VM/network inventories were empty afterward, no test-owned kernel remained, and the original default
 kernel remained. This does not qualify forced removal of a referenced kernel or the full kernel module.
 
+**Confirmed-crash recovery checkpoint (2026-09-28):** Commit `a1430018` replaces the obsolete CLI `kill`
+probe with one exact PID/start-tick/jail/executable-verified pidfd SIGKILL of a test-owned Firecracker inside only
+`mvmctl-030-test`. The test waits for that retained pidfd to prove exit before invoking public status, then requires
+`crashed` from `vm ls`/inspect, absence from `vm ps`, typed stop/start, successful vsock exec, and checked VM/network
+removal. The installed candidate passed 1/1; strict report
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/qa-crash-5b23766f/.tmp/qa-crash-0928-exitproof.json`
+records zero failures, errors, skips, or deselections. Independent VM/network lists were empty. This is not
+guest-initiated poweroff, complete host-reboot qualification, or the whole lifecycle module. No production behavior
+changed: an incomplete identity read before pidfd-proven exit remains unavailable under ADR-0016.
+
 **Rootfs persistence runner checkpoint (2026-09-27):** The old two-case module copied a stopped VM's rootfs from a
 caller-visible path and imported it as an image; the first case never created or restored a snapshot despite its name.
 Commit `2772d7b5` replaces them with one function-scoped installed-candidate journey using `mvm cp`, full snapshot
@@ -634,13 +644,13 @@ Specific legacy conflicts that must be rewritten before release:
 | `vm create` with `--nested-virt` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — cpu-config in Firecracker JSON, boot args validated |
 | `vm create` with `--cpu-template` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — merged cpu-config in Firecracker JSON |
 | `vm create` with `--no-nested-virt` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — no cpu-config, no nested boot args |
-| `vm ls` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle` | Runtime status now reconciles through root authority; focused networkless cases cover running/stopped projection, not guest-initiated exit or host reboot. |
-| `vm ls --json` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L2 — checks many fields |
+| `vm ls` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMStateTransitions` | Root-authority running/stopped projection and confirmed external Firecracker exit (`crashed`) passed in focused installed-candidate cases. Guest-initiated exit and complete host-reboot qualification remain open. |
+| `vm ls --json` | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMListInspect`, `TestVMStateTransitions::test_crashed_vm_status_and_restart` | Installed-candidate L2 proves versioned-envelope `crashed` projection after pidfd-confirmed exit, not the full listing module. |
 | `vm ls --json` empty | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListEmpty` | L2 — empty list. Clears VMs first. |
 | `vm ps` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_ps_lists_running, test_ps_shows_running_vm_details` | L2 — name and column headers in table output |
-| `vm ps --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless case proved inclusion while running, exclusion after CLI stop, and inclusion after restart. Guest-initiated exit and host-reboot reconciliation remain unqualified. |
+| `vm ps --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMStateTransitions` | Focused installed-candidate cases prove inclusion while running and after restart, exclusion after CLI stop and confirmed external Firecracker exit. Guest-initiated exit and complete host-reboot qualification remain open. |
 | `vm inspect <name>` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle` | Runtime observation is privileged; focused networkless lifecycle covers the selector, while root-brokered cgroup detail is qualified through `--json` below. |
-| `vm inspect <name> --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py`, `vm/test_cgroup.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMCgroupEnvelope` | Focused installed-candidate networkless cases proved running/stopped/running status projection and root-brokered `enforced` cgroup limits/usage to an unprivileged operator. Guest-initiated exit and host-reboot reconciliation remain unqualified. |
+| `vm inspect <name> --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py`, `vm/test_cgroup.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMCgroupEnvelope`, `TestVMStateTransitions` | Focused installed-candidate cases prove running/stopped/running and confirmed-exit `crashed` projection, plus root-brokered cgroup limits/usage. Guest-initiated exit and complete host-reboot qualification remain open. |
 | `vm inspect` by IP | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` | L2 — stop by IP test covers resolution |
 | `vm start` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L3 — PID alive in /proc after start |
 | `vm start` on running | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitionErrors` | L1 — exit 0 |
@@ -666,7 +676,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `volume detach` on running | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L1 — non-zero |
 | `volume detach` nonexistent | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L1 — non-zero |
 | vm rm with attached volume | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L2 — status=available after rm |
-| Crashed firecracker recovery | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L2 — kill PID, stop succeeds, rm succeeds |
+| Crashed firecracker recovery | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions::test_crashed_vm_status_and_restart` | Installed-candidate L2 proves exact pidfd-bound crash/exit, public ls/ps/inspect reconciliation, typed stop/start, vsock exec, and checked removal. Guest poweroff and complete host-reboot qualification remain open. |
 | Config chain precedence | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 — vcpu=2 with --vcpu overrides config=4 |
 | Volume persists stop/start | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L3 — SSH in, check /dev/vdb |
 | Volume mountable in guest | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L3 — mkfs.ext4 + mount + write + read |
