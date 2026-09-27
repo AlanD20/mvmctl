@@ -101,21 +101,23 @@ func TestDirectRouteNetlinkAcceptsOnlyProvenConcurrentNeighborRemoval(t *testing
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			present := true
-			connection := &fakeRouteNetlinkConnection{execute: func(message netlink.Message) ([]netlink.Message, error) {
-				switch message.Header.Type {
-				case netlink.HeaderType(unix.RTM_GETNEIGH):
-					if present {
-						return []netlink.Message{testIPv4NeighborReply(t, 20, address, unix.NUD_STALE, 0)}, nil
+			connection := &fakeRouteNetlinkConnection{
+				execute: func(message netlink.Message) ([]netlink.Message, error) {
+					switch message.Header.Type {
+					case netlink.HeaderType(unix.RTM_GETNEIGH):
+						if present {
+							return []netlink.Message{testIPv4NeighborReply(t, 20, address, unix.NUD_STALE, 0)}, nil
+						}
+						return nil, unix.ENOENT
+					case netlink.HeaderType(unix.RTM_DELNEIGH):
+						present = false
+						return nil, test.deleteErr
+					default:
+						t.Fatalf("unexpected neighbor request type %d", message.Header.Type)
+						return nil, nil
 					}
-					return nil, unix.ENOENT
-				case netlink.HeaderType(unix.RTM_DELNEIGH):
-					present = false
-					return nil, test.deleteErr
-				default:
-					t.Fatalf("unexpected neighbor request type %d", message.Header.Type)
-					return nil, nil
-				}
-			}}
+				},
+			}
 			adapter := &directRouteNetlink{dial: func(int, *netlink.Config) (routeNetlinkConnection, error) {
 				return connection, nil
 			}}
