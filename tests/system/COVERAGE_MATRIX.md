@@ -70,6 +70,13 @@ and Alpine OpenRC parallel-service setting through vsock. The test-owned VM was 
 was empty. This qualifies that one root-brokered default provisioning path, not all distro-specific deblob rules,
 failure rollback, managed networking, or the full LoopMount system matrix.
 
+**Volume-only checkpoint (2026-09-27):** Against the same installed candidate and isolated cache, all 25 selected
+`TestVolumeLifecycle` cases passed with zero failures, errors, or skips. One managed-network VM-attachment case was
+explicitly deselected because the runner kernel lacks bridge-family nftables; the schema-1 report records that
+deselection. The selected cases covered raw creation and options, inspect/list, duplicate/invalid-size and removed
+format rejection, resize/shrink behavior, removal, and partial removal. The isolated volume list was empty afterward.
+This is not a full volume module, guest-visible option enforcement, or networked attach/detach qualification.
+
 **Current cgroup checkpoint (2026-09-27):** The installed `0.3.0-rc.exec-port` candidate passed the complete
 two-case `vm/test_cgroup.py` module in the named runner. Its schema-1 report recorded two collected/passed and
 zero failures, errors, skips, or deselections. The cases checked root-protected pressure-only controls and
@@ -474,7 +481,7 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `volume create <size>` (raw-only) | 🟡 Partial | `volume/test_volume.py`, `vm/test_jailer.py` | `TestRawVolumeAuthoritativeStorage`, `TestNetworklessJailerLifecycle`, `TestVolumeLifecycle` | Focused installed-candidate 16 MiB create, inspect, 32 MiB grow, checked remove, guest-visible networkless attach/restart, and full snapshot/restore of independent data-volume bytes passed in the named runner; broader options remain unqualified. |
+| `volume create <size>` (raw-only) | 🟡 Partial | `volume/test_volume.py`, `vm/test_jailer.py` | `TestRawVolumeAuthoritativeStorage`, `TestNetworklessJailerLifecycle`, `TestVolumeLifecycle` | The installed-candidate volume-only lifecycle selection passed 25/25, including metadata options, resize/shrink, and removal. Separate focused cases proved guest-visible networkless attach/restart and independent snapshot-volume bytes. Guest-visible option enforcement and networked attach/detach remain unqualified. |
 | `volume create --format` (removed) | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_create_removed_format_flag_rejected_without_side_effects` | Installed-candidate raw/QCOW2/VMDK variants passed 3/3: unknown flag, no new volume record or backing file, checked sentinel cleanup. QCOW2 **image import** remains supported. |
 | `volume create` invalid size | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume create` duplicate name | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
@@ -482,7 +489,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `volume create` zero size | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_zero_size_volume` | Installed candidate returned schema-1 `validation.failed` with no new record or backing; a clean-cache absence audit and disk-full failure remain open. |
 | `volume create --read-only` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — is_read_only=true in ls JSON, inspect JSON |
 | `volume create --shareable` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_create_shareable` | L2 — is_shareable=true in ls JSON |
-| `volume ls` | 🔴 Missing | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_ls_empty` | Only empty-cache human output is tested; nonempty human output remains unqualified. |
+| `volume ls` | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_ls_empty` | Empty-cache human output passed in the selected volume-only batch; nonempty human output remains unqualified. |
 | `volume ls --json` | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_list_json` | Installed candidate returned a schema-1 list containing the test-owned volume; other list variants remain unqualified. |
 | `volume ls` empty | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume inspect` | 🔴 Missing | `volume/test_volume.py` | — | Human-readable inspection is not currently exercised by this module. |
