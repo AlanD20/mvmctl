@@ -78,6 +78,19 @@ atomic coverage profiles. The full root-effect Jailer package had already passed
 after `89c5137e`. This closes the local current-source Go CI gate, not the Python matrix, memory-saturation diagnosis,
 bridge-dependent network qualification, or remote GitHub CI.
 
+**Later exact-commit and pressure checkpoint (2026-09-27):** Clean runner worktree `fb3b967f` passed the same pinned
+Go CI gates plus the separate full root-effect Jailer package. The installed `0.3.0-rc.snapshot-receipt` candidate
+passed all seven `TestNetworklessJailerLifecycle` cases and both `TestVMCgroupEnvelope` cases against current Python
+source. The new cgroup case checks that a real 150 MiB guest tmpfs allocation increases the root-brokered observed VM
+memory charge by at least 96 MiB and leaves VM inspection and guest vsock exec responsive with no finite VM-leaf
+memory maximum. In a separate bounded manual probe with zero VMM headroom, the same workload raised the leaf's
+`memory.events.high` from 0 to 35 with `oom_kill=0`; the unprivileged Python test does not directly read root-only
+event counters. The private runner VM/volume/snapshot lists were empty and the original headroom default was restored.
+This does not qualify long-duration or host/ancestor OOM survival, the original reported kill, the complete Python
+matrix, bridge-dependent policy, or remote CI. Matching Firecracker/Jailer 1.16.0 failed a networkless launch because
+Jailer rejected the launcher's `/proc/self/ns/net` argument as a symbolic-link loop; runner provisioning still pins
+1.16.0, so that supported-version decision and its correction remain a release blocker.
+
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
 | Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
@@ -89,7 +102,7 @@ bridge-dependent network qualification, or remote GitHub CI.
 | nftables-only engine | 🔴 Missing | Atomic bridge-family generation and removal of iptables/backend-selection tests and product paths. |
 | Typed `traffic` policy | 🔴 Missing | Same/cross-network default deny and exact source/protocol/port allows plus spoof/reverse/IP-reuse denials. |
 | Typed VM-to-VM `exec` policy | 🔴 Missing | Directional non-root authorization for same/cross/no-IP networks plus identity, bounds, and redaction denials. |
-| Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove the Firecracker process UID differs from root and the operator, and that an unprivileged caller receives `enforced` policy-v2 limits and usage through authenticated root inspection while direct leaf read is denied. Per-VM uniqueness, root-record, pidfd, broader mount/cgroup cleanup, saturation survival, and host-reboot reconciliation binding remain unqualified. |
+| Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove the Firecracker process UID differs from root and the operator, and that an unprivileged caller receives `enforced` policy-v2 limits and usage through authenticated root inspection while direct leaf read is denied. A bounded guest tmpfs load remained responsive and increased observed VM memory charge; root-only `memory.high` events were observed separately. Per-VM uniqueness, root-record, pidfd, broader mount/cgroup cleanup, sustained saturation survival, and host-reboot reconciliation binding remain unqualified. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
 Specific legacy conflicts that must be rewritten before release:
@@ -714,7 +727,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Export/import config journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestExportImport` | L2: inspect --json schema verification |
 | Concurrent VM creation | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestConcurrentVMCreation` | L3: 10 concurrent VMs, all running via ls --json, SSH into each |
 | Canonical Jailer lifecycle | ✅ Deep | `vm/test_jailer.py`, `full_journeys/test_full_journeys.py` | `TestCanonicalJailerLaunch`, `TestJailerFailClosed` | L2: trusted pair, non-root jailed process, lifecycle, volume, snapshot, fail-closed |
-| Typed cgroup-v2 envelope | 🟡 Partial | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | Focused L2: protected policy-v2 limit/usage inspection, operator direct-read denial, and stop/start/remove cleanup. Snapshot preservation, controller-unavailable admission, saturation survival, and broader exact-identity cleanup remain unqualified. |
+| Typed cgroup-v2 envelope | 🟡 Partial | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | Focused L2: protected policy-v2 limit/usage inspection, operator direct-read denial, stop/start/remove cleanup, and charged guest tmpfs load with responsive exec and no VM-leaf hard maximum. Snapshot preservation, controller-unavailable admission, sustained saturation/host-OOM survival, and broader exact-identity cleanup remain unqualified. |
 
 ---
 

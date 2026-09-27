@@ -223,3 +223,59 @@ class TestVMCgroupEnvelope:
                 _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", timeout=120)
                 assert not Path(f"/sys/fs/cgroup/mvmctl/{remaining['id']}").exists()
                 assert _vm_entry(runner_vm, vm_name) is None
+
+    def test_guest_stays_responsive_under_pressure_only_memory_control(
+        self,
+        runner_vm: str,
+        cgroup_config_overrides: None,
+    ) -> None:
+        """A charged guest allocation must leave the pressure-only VM responsive."""
+        vm_name = f"sys-pressure-{uuid.uuid4().hex[:8]}"
+        ensure_vm_deps(runner_vm)
+        _run_mvm(runner_vm, "config", "set", "defaults.vm", "cgroup_vmm_headroom_mib", "0")
+        try:
+            created = _json_success_data(
+                _run_mvm(
+                    runner_vm, "vm", "create", vm_name,
+                    "--no-network", "--cloud-init-mode", "off", "--skip-deblob", "--no-pci",
+                    "--disk-size", "512M", "--vcpu", "1", "--mem", "256M", "--json",
+                    timeout=180,
+                ).stdout,
+                list,
+            )
+            assert len(created) == 1
+            before = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
+            )["resources"]["cgroup"]
+            assert before["status"] == "enforced"
+            assert before["actual"]["memory_high_bytes"] == 256 * 1024 * 1024
+            assert before["actual"]["memory_max_unlimited"] is True
+            initial_bytes = before["usage"]["memory_bytes"]
+
+            _run_mvm(runner_vm, "exec", vm_name, "--", "mkdir", "-p", "/mnt/mvm-pressure")
+            _run_mvm(
+                runner_vm, "exec", vm_name, "--", "mount", "-t", "tmpfs", "-o", "size=180M",
+                "tmpfs", "/mnt/mvm-pressure",
+            )
+            _run_mvm(
+                runner_vm, "exec", vm_name, "--", "dd", "if=/dev/zero",
+                "of=/mnt/mvm-pressure/fill", "bs=1M", "count=150", "conv=fsync",
+            )
+
+            after = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
+                dict,
+            )
+            assert after["vm"]["status"] == "running"
+            assert after["resources"]["cgroup"]["status"] == "enforced"
+            assert after["resources"]["cgroup"]["usage"]["memory_bytes"] >= initial_bytes + 96 * 1024 * 1024
+            assert _run_mvm(runner_vm, "exec", vm_name, "--", "uname", "-s").stdout.strip() == "Linux"
+        finally:
+            try:
+                if _vm_entry(runner_vm, vm_name) is not None:
+                    _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", timeout=120)
+                    assert _vm_entry(runner_vm, vm_name) is None
+            finally:
+                # The fixture then restores the caller's exact pre-test override state.
+                _run_mvm(runner_vm, "config", "set", "defaults.vm", "cgroup_vmm_headroom_mib", "128")
