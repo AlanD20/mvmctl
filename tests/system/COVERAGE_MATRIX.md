@@ -61,6 +61,24 @@ and all four resource inventories remained empty. Reports `qa-config-a93c02db-pa
 category/global reset cases retain the default/type metadata and verify every affected override is null.
 This closes the config domain's local repeated-run gate, not the entire Python matrix or release approval.
 
+**Full-journey repeatability (2026-09-28):** Commit `b92e995a` modernizes all fifteen original journey selectors
+for schema-1 JSON, typed traffic policy, bounded guests and exact owned cleanup. The frozen module passed
+15/15 twice in 204.33 and 210.10 seconds inside only `mvmctl-030-test`, with zero other strict outcomes,
+empty VM/network/volume/snapshot inventories and unchanged complete config JSON. Exact file SHA-256 is
+`9e4048fc5a5a10d00e9604b05b5762389d7b2a358cb9018d398c894a81785da1`; candidate remains `c460278d`.
+Reports `qa-full-journeys-a93c02db-final{1,2}.json` are in the runner's `qa-release-0f95b7bc/.tmp` directory.
+The first pre-final batch passed eight cases and exposed a test-input error: repeated string `--ssh-key`
+flags retain only the last argument. The sole input correction uses one comma-joined argument; the failed
+multi-key case and six previously unexecuted cases then passed 7/7 in 129.93 seconds before full repeats.
+Both keys are exercised through actual SSH. The historical ping selector now proves same-network TCP
+default denial, exact source-VM permission, echoed delivery and revocation while the listener stays healthy.
+Other journeys verify guest IPs, lifecycle process/boot changes, three 16 MiB raw block-device extents,
+five sequential create/remove cycles, and ten distinct creations/SSH sessions in cohorts of at most three
+live guests. Cached Alpine 3.23 requires 360 MiB rootfs, so each guest explicitly uses 512 MiB disk,
+256 MiB RAM and one CPU. Canonical Jailer cases are no longer duplicated through this module's import.
+This closes the full-journey domain's installed-candidate L2 repeat gate, not ten-way simultaneous load,
+Tier 3, host-reboot recovery, unrelated matrix domains or release approval. Runner free disk remained 2.4 GiB.
+
 **Exact-source CLI-domain repeatability (2026-09-28):** The complete CLI domain collected 24 items and passed
 24/24 twice in 0.36 seconds per run inside only `mvmctl-030-test`. Source checkout was clean exact commit
 `0f95b7bc574f29b6c20285159d31cc7c4f9db008`; its Go source independently matched `19c55345`, and installed candidate
@@ -663,7 +681,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 | Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests, a disposable real-kernel namespace probe, and the installed-candidate A-to-B stale-IP reuse journey with a concurrent control VM passed. The journey proves fresh gateway reachability and exact cleanup, but guest boot ARP prevents independent attribution of the pre-exposure ordering; spoofing and prior-host-boot recovery remain unqualified. |
 | Typed `traffic` policy | 🟡 Partial | Installed-candidate same-/cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. The 2026-09-28 acknowledged same-network source-VM UDP journey also passed exact allow, sibling/adjacent-port/reverse denial and fresh-flow revocation. Spoofing, IP reuse, cross-network UDP and reboot recovery remain unqualified. |
 | Typed VM-to-VM `exec` policy | 🟡 Partial | The installed candidate passed the full seven-case exec domain in `mvmctl-030-test`: same-network, cross-network and networkless directional grants and real effects. The later networkless lifecycle journey also passed retained grants across both endpoint restarts and destination VM reboot, with pidfd exit and new-task/boot evidence, stopped/revoked denial and checked cleanup. Peer-identity attacks, capacity/deadline/cancellation, audit redaction, host reboot and snapshot restore remain unqualified at L2. |
-| Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove isolated Firecracker credentials and protected policy-v2 limit/usage inspection. The 2026-09-28 current-candidate 224 MiB guest/150 MiB tmpfs case increased actual `memory.high` events without a leaf OOM kill and retained vsock responsiveness. Historical larger-allocation guest-agent EOF remains unexplained; a bounded pass is not a deterministic pressure gate or ancestor-OOM guarantee. Per-VM uniqueness, root-record/pidfd binding, broader mount/cgroup cleanup, sustained saturation, and host-reboot binding remain unqualified. |
+| Cgroup/process identity lifecycle | 🟡 Partial | Isolated credentials and protected policy-v2 inspection are qualified locally. The three-case measured-pressure module passed twice: both swap variants held at least 80% usable guest-RAM occupancy for at least 15 seconds with fresh high events, unchanged task/boot identity and responsive exec. Historical guest-agent EOF/original incident, broader exact-identity cleanup and host-reboot binding remain unresolved; the bounded hold is not an ancestor/global-OOM guarantee. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
 Specific legacy conflicts that must be rewritten before release:
@@ -1283,21 +1301,21 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| Quick-start journey (create key+net+VM, SSH, cleanup) | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestQuickStartJourney` | L3: full quick-start from README — create→SSH→rm |
+| Quick-start journey (create key+net+VM, SSH, cleanup) | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestQuickStartJourney` | Installed-candidate L2: create owned key/network/VM, authenticated SSH, checked cleanup and baseline preservation. |
 | Network→VM journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestNetworkVMJourney` | L2: create network, VM on it, verify via ls --json |
 | Key→VM journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestKeyVMJourney` | L2: create key, VM with key, verify via ls --json |
 | VM state journey (create→pause→resume→stop→start) | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestVMStateJourney` | L2: full state transitions, ls --json status at each step |
-| IP journey (explicit --ip + SSH) | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestIPJourney` | L3: explicit IP, SSH, two VMs on same network both reachable |
-| SSH journey (command + reboot) | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestSSHJourney` | L3: SSH cmd execution, reboot chain, SSH after reboot |
-| Multi-key VM journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestMultiKeyJourney` | L2: create VM with two --ssh-key flags |
-| Inter-VM communication | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestInterVMCommunication` | L3: 2 VMs on same network, SSH VM-A, ping VM-B |
+| IP journey (explicit --ip + SSH) | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestIPJourney` | Installed-candidate L2: requested IP in public/guest readback and SSH; two distinct peer IPs and independent keyed SSH. |
+| SSH journey (command + reboot) | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestSSHJourney` | Installed-candidate L2: SSH execution before/after reboot, fresh process/start ticks and boot ID, retained VM/IP. |
+| Multi-key VM journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestMultiKeyJourney` | L2: one comma-separated --ssh-key argument, both names in inspect, actual SSH using each key. |
+| Inter-VM communication | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestInterVMCommunication` | L2: same-network TCP default denial, exact source-VM grant and echoed payload, revoke denial with listener still healthy. Historical ping selector is retained; ICMP is not the v0.3.0 policy contract. |
 | Create with all flags | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestCreateWithAllFlags` | L2: --vcpu, --mem, -s, --enable-logging, --enable-metrics |
-| Multiple volumes | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestMultipleVolumes` | L2: 3 volumes, VM with all 3 via --volume |
+| Multiple volumes | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestMultipleVolumes` | L2: three 16 MiB raw volumes, exact inspect bindings and guest vdb/vdc/vdd extents, SSH and checked cleanup. |
 | Stress create/destroy | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestStressCreateDestroy` | L2: 5 sequential create→destroy cycles |
 | Export/import config journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestExportImport` | L2: inspect --json schema verification |
-| Concurrent VM creation | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestConcurrentVMCreation` | L3: 10 concurrent VMs, all running via ls --json, SSH into each |
-| Canonical Jailer lifecycle | 🟡 Partial | `vm/test_jailer.py`, `full_journeys/test_full_journeys.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle` | The full 13-case Jailer module passed in the bridge-capable named runner, covering managed launch/stop/start/reboot and networkless identity, volume, snapshot, and missing-release checks. Host-reboot and broader failure-path reconciliation remain open. |
-| Typed cgroup-v2 envelope | 🟡 Partial | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | Focused L2: protected policy-v2 limit/usage inspection, operator direct-read denial, stop/start/remove cleanup, and charged guest tmpfs load with responsive exec and no VM-leaf hard maximum. Snapshot preservation, controller-unavailable admission, sustained saturation/host-OOM survival, and broader exact-identity cleanup remain unqualified. |
+| Concurrent VM creation | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestConcurrentVMCreation` | Installed-candidate L2: ten distinct creations in concurrent cohorts of 3/3/3/1, running-ID convergence and keyed SSH for every VM, checked cohort removal before reuse. This does not prove ten simultaneous live guests. |
+| Canonical Jailer lifecycle | 🟡 Partial | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle` | Canonical cases are selected once in the Jailer domain, not re-exported by full_journeys. The full 13-case Jailer module passed in the bridge-capable named runner, covering managed launch/stop/start/reboot and networkless identity, volume, snapshot, and missing-release checks. Host-reboot and broader failure-path reconciliation remain open. |
+| Typed cgroup-v2 envelope | 🟡 Partial | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | Installed-candidate L2: protected policy-v2 inspection, direct-read denial and sustained measured-pressure survival with host swap absent/present; complete cgroup module passed twice with exact cleanup. Literal memory.max=max and unchanged other controls. Snapshot policy, controller-unavailable admission, guest allocation failure, host/global OOM safety and broader identity cleanup remain unqualified. |
 
 ---
 
@@ -1326,12 +1344,12 @@ Specific legacy conflicts that must be rewritten before release:
 | cp | 12 | 8 | 3 | 1 | 0 | 0 |
 | env | 22 | 9 | 13 | 0 | 0 | 0 |
 | run | 4 | 1 | 3 | 0 | 0 | 0 |
-| full-journeys | 15 | 7 | 8 | 0 | 0 | 0 |
-| **Total** | **430** | **81** | **288** | **22** | **8** | **31** |
+| full-journeys | 15 | 0 | 15 | 0 | 0 | 0 |
+| **Total** | **430** | **74** | **295** | **22** | **8** | **31** |
 
 **Current-row coverage health:**
-- ✅ Deep (L3): 81/430 = 18.8%
-- ⚡ Shallow (L0-L2): 288/430 = 67.0%
+- ✅ Deep (L3): 74/430 = 17.2%
+- ⚡ Shallow (L0-L2): 295/430 = 68.6%
 - 🟡 Partial: 22/430 = 5.1%
 - 🔴 Missing: **8/430 = 1.9%** — three user-owned `self-update` success/check paths, two remote image-list
   flag cases, the phantom `image inspect --tree` entry, referenced-force removal,
