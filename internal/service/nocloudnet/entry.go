@@ -39,9 +39,10 @@ func Run(ctx context.Context, cfg Config) (returnErr error) {
 	var ready *os.File
 	readySent := false
 	if cfg.NotifyReady {
-		ready = os.NewFile(3, "nocloud-ready")
-		if ready == nil {
-			return errs.New(errs.CodeCloudInitNetModeFailed, "NoCloud readiness pipe is unavailable")
+		var err error
+		ready, err = openStartupPipe(ctx, 3)
+		if err != nil {
+			return err
 		}
 		defer func() {
 			if returnErr != nil && !readySent {
@@ -156,6 +157,15 @@ func Run(ctx context.Context, cfg Config) (returnErr error) {
 		return errors.Join(err, closeErr, serveErr)
 	}
 	return nil
+}
+
+func openStartupPipe(ctx context.Context, fd int) (*os.File, error) {
+	// NOTE: exec makes inherited pipes blocking; NewFile needs nonblocking mode to support deadlines.
+	if err := syscall.SetNonblock(fd, true); err != nil {
+		return nil, errs.WrapMsg(errs.CodeCloudInitNetModeFailed,
+			"configure NoCloud readiness pipe", err, errs.WithClass(errs.ClassInternal))
+	}
+	return os.NewFile(uintptr(fd), "nocloud-ready"), nil
 }
 
 func writeStartup(pipe *os.File, result startupResult) error {
