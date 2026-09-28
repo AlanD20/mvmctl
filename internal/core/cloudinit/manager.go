@@ -128,6 +128,11 @@ func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO str
 		system.RunCmdOpts{Capture: true, Check: false},
 	)
 	if err == nil && result.Success() {
+		// NOTE: cloud-localds inherits the caller's umask; managed backing forbids group/world write.
+		if err := os.Chmod(outputISO, 0600); err != nil {
+			return errs.Wrap(errs.CodeCloudInitProvisionFailed,
+				fmt.Errorf("restrict generated cloud-init ISO permissions: %w", err))
+		}
 		return nil
 	}
 
