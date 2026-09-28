@@ -820,7 +820,14 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 	); err != nil {
 		return nil, err
 	}
-	relayRunning := vmItem.RelayPID != nil && system.IsProcessRunning(*vmItem.RelayPID)
+	consoleState, err := op.consoleAuthority().Observe(ctx, jailer.ConsoleObserveRequest{VMID: vmItem.ID})
+	if err != nil {
+		return nil, err
+	}
+	var consoleSocket *string
+	if consoleState.SocketPath != "" {
+		consoleSocket = &consoleState.SocketPath
+	}
 	vmDir := infra.GetVMDirByID(vmItem.ID)
 	// Volumes (enriched vm.Volumes or fallback to manual lookup).
 	volumes := make([]results.VMVolume, 0)
@@ -888,8 +895,8 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 			SerialOutputPath: vmItem.SerialOutputPath,
 		},
 		Console: results.VMConsoleInfo{
-			RelayRunning: relayRunning, RelayPID: vmItem.RelayPID,
-			RelaySocketPath: vmItem.RelaySocketPath,
+			RelayRunning: consoleState.State == jailer.ConsoleRunning, RelayPID: consoleState.PID,
+			RelaySocketPath: consoleSocket,
 		},
 		Volumes: volumes,
 		Vsock:   vsockToInspectInfo(vmItem.Vsock),

@@ -28,7 +28,7 @@ func reopenLifecycleRecordedProcesses(
 	if err := processes.reopenLifecycleProcess(ctx, record.launch.process, "Firecracker"); err != nil {
 		return nil, err
 	}
-	if record.launch.relay.kind == instanceRelayPresent {
+	if instanceRelayNeedsProcess(record) {
 		if err := processes.reopenLifecycleProcess(ctx, record.launch.relay.locator, "relay"); err != nil {
 			return nil, err
 		}

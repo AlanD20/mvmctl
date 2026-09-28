@@ -28,6 +28,8 @@ type runtimeDeps struct {
 	control                controlDeps
 	trustedRelease         trustedReleaseHandlerEffects
 	runtimeStatus          runtimeStatusObserve
+	consoleObserve         consoleObserve
+	consoleStop            consoleStop
 	cgroupObservation      cgroupObservationObserve
 	runtimeOwnerInventory  runtimeOwnerInventoryObserve
 	loopMount              loopMountHandlerEffects
@@ -85,6 +87,7 @@ const (
 func Run(ctx context.Context, args []string) error {
 	trustedRelease := jailer.NewTrustedReleaseServer()
 	runtimeStatus := jailer.NewRuntimeStatusServer()
+	console := jailer.NewConsoleServer()
 	cgroupObservation := jailer.NewVMCgroupObserveServer()
 	runtimeOwnerInventory := jailer.NewRuntimeOwnerInventoryServer()
 	loopMount := loopmount.NewProvisionInspectServer(systemLoopMountAgentBinary)
@@ -103,6 +106,8 @@ func Run(ctx context.Context, args []string) error {
 		vmExecSession:          newVMExecSessionHandlerEffects(vmExecSession),
 		vmExecConnectionReader: realVMExecConnectionReaderDeps(),
 		runtimeStatus:          runtimeStatus.Observe,
+		consoleObserve:         console.Observe,
+		consoleStop:            console.Stop,
 		cgroupObservation:      cgroupObservation.Observe,
 		runtimeOwnerInventory:  runtimeOwnerInventory.Observe,
 		trustedRelease: trustedReleaseHandlerEffects{
@@ -315,6 +320,10 @@ func dispatch(
 		return dispatchHandled, handleRemoveVMTrafficPolicy(ctx, endpoint, caller, deps.control)
 	case jailer.RuntimeStatusAction:
 		return dispatchHandled, handleRuntimeStatus(ctx, endpoint, caller, deps.runtimeStatus, deps.control)
+	case jailer.ConsoleObserveAction:
+		return dispatchHandled, handleConsoleObserve(ctx, endpoint, caller, deps.consoleObserve, deps.control)
+	case jailer.ConsoleStopAction:
+		return dispatchHandled, handleConsoleStop(ctx, endpoint, caller, deps.consoleStop, deps.control)
 	case jailer.VMCgroupObserveAction:
 		return dispatchHandled, handleVMCgroupObserve(ctx, endpoint, caller, deps.cgroupObservation, deps.control)
 	case jailer.RuntimeOwnerInventoryAction:

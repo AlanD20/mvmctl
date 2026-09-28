@@ -875,7 +875,8 @@ func relayActiveIdentity(
 		return instanceActiveRelay{kind: instanceRelayAbsent}
 	}
 	return instanceActiveRelay{
-		kind: instanceRelayPresent, userIDs: observed.process.userIDs, groupIDs: observed.process.groupIDs,
+		kind: instanceRelayPresent, lifecycle: instanceRelayRunning,
+		userIDs: observed.process.userIDs, groupIDs: observed.process.groupIDs,
 		supplementaryGroups: append([]uint32{}, observed.process.supplementaryGroups...),
 		mountNamespace:      observed.mountNamespace,
 		root:                observed.root,

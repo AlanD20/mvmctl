@@ -117,6 +117,7 @@ type instanceFirecrackerExecutableIdentityWire struct {
 
 type instanceActiveRelayWire struct {
 	Kind                instanceRelayKind                    `json:"kind"`
+	Lifecycle           *instanceRelayLifecycle              `json:"lifecycle,omitempty"`
 	UserIDs             *processCredentialIdentityWire       `json:"user_ids,omitempty"`
 	GroupIDs            *processCredentialIdentityWire       `json:"group_ids,omitempty"`
 	SupplementaryGroups *[]uint32                            `json:"supplementary_groups,omitempty"`
@@ -406,6 +407,7 @@ func instanceActiveRelayJSONFields(wire instanceRecordWire) map[string]instanceJ
 	if wire.Active == nil || wire.Active.Relay.Kind != instanceRelayPresent {
 		return result
 	}
+	result["lifecycle"] = instanceJSONField{kind: instanceJSONScalar}
 	for field, child := range map[string]string{
 		"user_ids":        "credentials",
 		"group_ids":       "credentials",
@@ -594,6 +596,8 @@ func instanceActiveRelayToWire(relay instanceActiveRelay) instanceActiveRelayWir
 	if relay.kind != instanceRelayPresent {
 		return wire
 	}
+	lifecycle := relay.lifecycle
+	wire.Lifecycle = &lifecycle
 	userIDs := processCredentialIdentityToWire(relay.userIDs)
 	groupIDs := processCredentialIdentityToWire(relay.groupIDs)
 	mountNamespace := instanceObjectIdentityToWire(relay.mountNamespace)
@@ -722,11 +726,12 @@ func instanceActiveRelayFromWire(wire instanceActiveRelayWire) (instanceActiveRe
 	if wire.Kind != instanceRelayPresent {
 		return relay, nil
 	}
-	if wire.UserIDs == nil || wire.GroupIDs == nil || wire.SupplementaryGroups == nil ||
+	if wire.Lifecycle == nil || wire.UserIDs == nil || wire.GroupIDs == nil || wire.SupplementaryGroups == nil ||
 		wire.MountNamespace == nil ||
 		wire.Root == nil || wire.Executable == nil {
 		return instanceActiveRelay{}, instanceAtomicError("active instance relay identity is incomplete", nil)
 	}
+	relay.lifecycle = *wire.Lifecycle
 	relay.userIDs = processCredentialIdentityFromWire(*wire.UserIDs)
 	relay.groupIDs = processCredentialIdentityFromWire(*wire.GroupIDs)
 	relay.supplementaryGroups = append([]uint32{}, (*wire.SupplementaryGroups)...)

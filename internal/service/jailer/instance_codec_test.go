@@ -31,12 +31,16 @@ func TestInstanceAuthorityDurableRootConstant(t *testing.T) {
 	assert.Equal(t, "/var/lib/mvmctl/instances", infra.JailerInstanceRoot)
 }
 
-func TestInstanceRecordCodecRoundTripsEverySchemaFiveShape(t *testing.T) {
+func TestInstanceRecordCodecRoundTripsEverySchemaSixShape(t *testing.T) {
 	t.Parallel()
 
 	launching := testLaunchingInstanceRecord()
 	activeAbsent := testActiveInstanceRecord(false)
 	activePresent := testActiveInstanceRecord(true)
+	activeStopping := cloneInstanceRecord(activePresent)
+	activeStopping.active.relay.lifecycle = instanceRelayStopping
+	activeStopped := cloneInstanceRecord(activePresent)
+	activeStopped.active.relay.lifecycle = instanceRelayStopped
 	cleaningLaunch := launching
 	cleaningLaunch.lifecycle = instanceLifecycleCleaning
 	cleaningLaunch.cleanupGeneration = cleaningLaunch.launchGeneration
@@ -47,12 +51,14 @@ func TestInstanceRecordCodecRoundTripsEverySchemaFiveShape(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := map[string]instanceRecord{
-		"launching":            launching,
-		"active_without_relay": activeAbsent,
-		"active_with_relay":    activePresent,
-		"cleaning_from_launch": cleaningLaunch,
-		"cleaning_from_active": cleaningActive,
-		"same_owner_tombstone": cleaned,
+		"launching":             launching,
+		"active_without_relay":  activeAbsent,
+		"active_with_relay":     activePresent,
+		"active_stopping_relay": activeStopping,
+		"active_stopped_relay":  activeStopped,
+		"cleaning_from_launch":  cleaningLaunch,
+		"cleaning_from_active":  cleaningActive,
+		"same_owner_tombstone":  cleaned,
 	}
 	for name, want := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -103,14 +109,14 @@ func TestInstanceRecordCodecOmitsWrongLifecycleObjects(t *testing.T) {
 
 // Rationale: the durable root is attacker-controlled input after host storage tampering. Each malformed case pins one
 // strict-schema boundary and must fail closed as an internal atomic-authority error rather than being defaulted.
-func TestDecodeInstanceRecordRejectsMalformedSchemaFive(t *testing.T) {
+func TestDecodeInstanceRecordRejectsMalformedSchemaSix(t *testing.T) {
 	t.Parallel()
 
 	valid, err := encodeInstanceRecord(testActiveInstanceRecord(true))
 	require.NoError(t, err)
 	validText := string(valid)
-	validLaunching := schemaFiveCanonicalJSON()["launching"]
-	validCleaned := schemaFiveCanonicalJSON()["cleaned"]
+	validLaunching := schemaSixCanonicalJSON()["launching"]
+	validCleaned := schemaSixCanonicalJSON()["cleaned"]
 	launchOffset := strings.LastIndex(validLaunching, `,"launch":`)
 	require.Positive(t, launchOffset)
 	activeOffset := strings.LastIndex(validText, `,"active":`)
@@ -126,7 +132,7 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaFive(t *testing.T) {
 		1,
 	)
 	cleanedWithActive := validCleaned[:len(validCleaned)-1] + validText[activeOffset:]
-	oldSchemaFour := strings.Replace(validText, `"schema_version":5`, `"schema_version":4`, 1)
+	oldSchemaFour := strings.Replace(validText, `"schema_version":6`, `"schema_version":4`, 1)
 	oldSchemaFour = strings.Replace(oldSchemaFour, `"network_placement":"managed",`, "", 1)
 
 	tests := map[string]string{
@@ -161,19 +167,23 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaFive(t *testing.T) {
 			validText, `"owner_gid":1001,"network_placement":"managed"`,
 			`"owner_gid":1001,"network_placement":"networkless"`, 1,
 		),
-		"missing_active_field": strings.Replace(validText, `"supplementary_groups":[],`, "", 1),
+		"missing_active_field":    strings.Replace(validText, `"supplementary_groups":[],`, "", 1),
+		"missing_relay_lifecycle": strings.Replace(validText, `"lifecycle":"running",`, "", 1),
+		"null_relay_lifecycle":    strings.Replace(validText, `"lifecycle":"running"`, `"lifecycle":null`, 1),
+		"unknown_relay_lifecycle": strings.Replace(validText, `"lifecycle":"running"`, `"lifecycle":"unknown"`, 1),
 		"missing_present_relay_locator": strings.Replace(
 			validText,
 			`"relay":{"kind":"present","pid":4343,"start_time_ticks":876543}`,
 			`"relay":{"kind":"present","pid":4343}`,
 			1,
 		),
-		"old_schema_one":          strings.Replace(validText, `"schema_version":5`, `"schema_version":1`, 1),
-		"old_schema_two":          strings.Replace(validText, `"schema_version":5`, `"schema_version":2`, 1),
-		"old_schema_three":        strings.Replace(validText, `"schema_version":5`, `"schema_version":3`, 1),
+		"old_schema_one":          strings.Replace(validText, `"schema_version":6`, `"schema_version":1`, 1),
+		"old_schema_two":          strings.Replace(validText, `"schema_version":6`, `"schema_version":2`, 1),
+		"old_schema_three":        strings.Replace(validText, `"schema_version":6`, `"schema_version":3`, 1),
 		"old_schema_four":         oldSchemaFour,
-		"old_cleaned_schema_four": strings.Replace(validCleaned, `"schema_version":5`, `"schema_version":4`, 1),
-		"unknown_schema":          strings.Replace(validText, `"schema_version":5`, `"schema_version":6`, 1),
+		"old_cleaned_schema_four": strings.Replace(validCleaned, `"schema_version":6`, `"schema_version":4`, 1),
+		"old_schema_five":         strings.Replace(validText, `"schema_version":6`, `"schema_version":5`, 1),
+		"unknown_schema":          strings.Replace(validText, `"schema_version":6`, `"schema_version":7`, 1),
 		"owner_uid_string":        strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":"1000"`, 1),
 		"owner_uid_negative":      strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":-1`, 1),
 		"owner_uid_fractional":    strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":1000.5`, 1),
@@ -698,6 +708,7 @@ func testActiveIdentity(relayPresent bool) instanceActiveIdentity {
 		}
 		identity.relay = instanceActiveRelay{
 			kind:                instanceRelayPresent,
+			lifecycle:           instanceRelayRunning,
 			userIDs:             relayUserIDs,
 			groupIDs:            relayGroupIDs,
 			supplementaryGroups: []uint32{},

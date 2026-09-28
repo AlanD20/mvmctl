@@ -231,8 +231,8 @@ func TestRuntimeStatusActiveProcessOutcomes(t *testing.T) {
 		{"cgroup mismatch", func(f *runtimeStatusFixture) {
 			f.metadata[processMetadataTestKey{pid * 10, processCgroupMetadata}] = []byte("0::/foreign\n")
 		}, runtimeStatusCrashed},
-		{"missing relay", func(f *runtimeStatusFixture) { delete(f.locators, relayPID) }, runtimeStatusCrashed},
-		{"dead relay", func(f *runtimeStatusFixture) { f.alive[relayPID] = false }, runtimeStatusCrashed},
+		{"missing relay", func(f *runtimeStatusFixture) { delete(f.locators, relayPID) }, runtimeStatusRunning},
+		{"dead relay", func(f *runtimeStatusFixture) { f.alive[relayPID] = false }, runtimeStatusRunning},
 		{"matching sealed identities", func(*runtimeStatusFixture) {}, runtimeStatusRunning},
 	}
 	for _, tc := range tests {
@@ -270,7 +270,7 @@ func TestRuntimeStatusActiveMetadataMismatch(t *testing.T) {
 		"uid": func(s *unix.Stat_t) { s.Uid++ }, "gid": func(s *unix.Stat_t) { s.Gid++ },
 		"links": func(s *unix.Stat_t) { s.Nlink++ },
 	}
-	for _, locator := range []instanceProcessLocator{record.launch.process, record.launch.relay.locator} {
+	for _, locator := range []instanceProcessLocator{record.launch.process} {
 		for name, mutate := range mutations {
 			t.Run(fmt.Sprintf("pid_%d_executable_%s", locator.pid, name), func(t *testing.T) {
 				f := newRuntimeStatusFixture(t, record)
@@ -309,7 +309,6 @@ func TestRuntimeStatusEachCredentialFieldMismatch(t *testing.T) {
 		uids, gids processCredentialIdentity
 	}{
 		{"firecracker", record.launch.process, record.active.userIDs, record.active.groupIDs},
-		{"relay", record.launch.relay.locator, record.active.relay.userIDs, record.active.relay.groupIDs},
 	}
 	for _, role := range roles {
 		for _, kind := range []string{"uid", "gid"} {
@@ -369,10 +368,10 @@ func TestRuntimeStatusFinalProcessRecheck(t *testing.T) {
 		change func(*runtimeStatusFixture)
 	}{
 		{
-			"firecracker exits while inspecting relay",
+			"firecracker exits after metadata observation",
 			func(f *runtimeStatusFixture) { f.alive[record.launch.process.pid] = false },
 		},
-		{"firecracker locator drifts while inspecting relay", func(f *runtimeStatusFixture) {
+		{"firecracker locator drifts after metadata observation", func(f *runtimeStatusFixture) {
 			locator := f.locators[record.launch.process.pid]
 			locator.startTimeTicks++
 			f.locators[record.launch.process.pid] = locator
@@ -383,7 +382,7 @@ func TestRuntimeStatusFinalProcessRecheck(t *testing.T) {
 			f := newRuntimeStatusFixture(t, record)
 			read := f.identity.readProcessMetadata
 			f.identity.readProcessMetadata = func(ctx context.Context, fd int, kind processMetadataKind, limit int) ([]byte, error) {
-				if fd == record.launch.relay.locator.pid*10 {
+				if fd == record.launch.process.pid*10 && kind == processStatusMetadata {
 					tc.change(f)
 				}
 				return read(ctx, fd, kind, limit)
@@ -392,7 +391,7 @@ func TestRuntimeStatusFinalProcessRecheck(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, runtimeStatusCrashed, got[record.vmID])
 			if diff := cmp.Diff(
-				[]int{record.launch.relay.locator.pid, record.launch.process.pid},
+				[]int{record.launch.process.pid},
 				f.pidCloses,
 			); diff != "" {
 				t.Errorf("pidfd release order mismatch (-want +got):\n%s", diff)
@@ -401,85 +400,38 @@ func TestRuntimeStatusFinalProcessRecheck(t *testing.T) {
 	}
 }
 
-// Rationale: the relay can exit or lose its locator after both complete metadata observations. The final sweep must
-// recheck the relay as well as Firecracker, and a missing relay proof must invalidate the running classification.
-func TestRuntimeStatusFinalRelayRecheck(t *testing.T) {
+// Relay availability is independent of VM health. None of these states may
+// open the relay PID or turn a verified live Firecracker into crashed.
+func TestRuntimeStatusRelayLifecycleDoesNotChangeVMHealth(t *testing.T) {
 	t.Parallel()
-	record := testActiveInstanceRecord(true)
-	relayPID := record.launch.relay.locator.pid
-	tests := []struct {
-		name        string
-		change      func(*runtimeStatusFixture)
-		livenessErr error
-		locatorErr  error
-		want        runtimeStatus
-	}{
-		{name: "relay exits after metadata observation", change: func(f *runtimeStatusFixture) {
-			f.alive[relayPID] = false
-		}, want: runtimeStatusCrashed},
-		{name: "relay locator changes after metadata observation", change: func(f *runtimeStatusFixture) {
-			locator := f.locators[relayPID]
-			locator.startTimeTicks++
-			f.locators[relayPID] = locator
-		}, want: runtimeStatusCrashed},
-		{name: "relay final liveness unavailable", livenessErr: unix.EIO, want: runtimeStatusUnavailable},
-		{name: "relay final locator unavailable", locatorErr: unix.EIO, want: runtimeStatusUnavailable},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, lifecycle := range []instanceRelayLifecycle{instanceRelayRunning, instanceRelayStopping, instanceRelayStopped} {
+		t.Run(string(lifecycle), func(t *testing.T) {
+			record := testActiveInstanceRecord(true)
+			record.active.relay.lifecycle = lifecycle
 			f := newRuntimeStatusFixture(t, record)
-			relayObserved := false
-			finalSweep := false
-			read := f.identity.readProcessMetadata
-			f.identity.readProcessMetadata = func(ctx context.Context, fd int, kind processMetadataKind, limit int) ([]byte, error) {
-				if fd == relayPID*10 {
-					relayObserved = true
-				}
-				return read(ctx, fd, kind, limit)
-			}
-			alive := f.recovery.pidfdAlive
-			f.recovery.pidfdAlive = func(ctx context.Context, fd int) (bool, error) {
-				if fd == relayPID && finalSweep && tc.livenessErr != nil {
-					return false, tc.livenessErr
-				}
-				return alive(ctx, fd)
-			}
-			derive := f.recovery.deriveLocator
-			f.recovery.deriveLocator = func(ctx context.Context, fd int) (instanceProcessLocator, error) {
-				if fd == record.launch.process.pid && relayObserved {
-					finalSweep = true
-					if tc.change != nil {
-						tc.change(f)
-					}
-				}
-				if fd == relayPID && finalSweep && tc.locatorErr != nil {
-					return instanceProcessLocator{}, tc.locatorErr
-				}
-				return derive(ctx, fd)
+			// A reused or unreadable relay would be unsafe ConsoleObserve authority,
+			// but root VM status must never acquire that unrelated task.
+			f.locators[record.launch.relay.locator.pid] = instanceProcessLocator{
+				pid: record.launch.relay.locator.pid, startTimeTicks: record.launch.relay.locator.startTimeTicks + 1,
 			}
 			got, err := f.observe(t.Context(), record.vmID)
-			require.True(t, finalSweep, "failure must be injected after both processes' metadata observations")
-			if tc.want == runtimeStatusUnavailable {
-				require.Error(t, err)
-				assert.Nil(t, got, "late unavailable relay proof must expose no partial batch")
-				assert.Equal(t, string(runtimeStatusUnavailable), errs.AsDomainError(err).Details["runtime_status"])
-				return
-			}
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, got[record.vmID])
+			assert.Equal(t, runtimeStatusRunning, got[record.vmID])
+			assert.Equal(t, []int{record.launch.process.pid}, f.opened)
 		})
 	}
 }
 
-func TestRuntimeStatusUnavailableDominatesCrashed(t *testing.T) {
+func TestRuntimeStatusMissingFirecrackerDoesNotInspectRelay(t *testing.T) {
 	t.Parallel()
 	record := testActiveInstanceRecord(true)
 	f := newRuntimeStatusFixture(t, record)
 	delete(f.locators, record.launch.process.pid)
 	f.identity.openProcessDirectory = func(context.Context, int) (int, error) { return -1, unix.EACCES }
 	got, err := f.observe(t.Context(), record.vmID)
-	require.ErrorIs(t, err, unix.EACCES)
-	assert.Nil(t, got)
+	require.NoError(t, err)
+	assert.Equal(t, runtimeStatusCrashed, got[record.vmID])
+	assert.Zero(t, f.processDirectoryReads)
 }
 
 func TestRuntimeStatusCleanupFailureInvalidatesCompleteObservation(t *testing.T) {
@@ -553,7 +505,7 @@ func TestRuntimeStatusRejectsOldSchema(t *testing.T) {
 	path := filepath.Join(f.root, "var/lib/mvmctl/instances/1000", record.vmID+".json")
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
-	raw = []byte(strings.Replace(string(raw), `"schema_version":5`, `"schema_version":4`, 1))
+	raw = []byte(strings.Replace(string(raw), `"schema_version":6`, `"schema_version":4`, 1))
 	require.NoError(t, os.WriteFile(path, raw, 0600))
 	got, err := f.observe(t.Context(), record.vmID)
 	require.Error(t, err)

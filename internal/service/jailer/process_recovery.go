@@ -90,7 +90,7 @@ func reopenRecordedProcesses(
 	if err := result.reopen(ctx, record.launch.process, "Firecracker"); err != nil {
 		return nil, err
 	}
-	if record.launch.relay.kind == instanceRelayPresent {
+	if instanceRelayNeedsProcess(record) {
 		if err := result.reopen(ctx, record.launch.relay.locator, "relay"); err != nil {
 			return nil, err
 		}
@@ -473,6 +473,9 @@ func verifyRecoveredActiveIdentity(
 	}
 	if record.launch.relay.kind != instanceRelayPresent {
 		return processObservation{}, processVerificationError(record.vmID, "recovered relay locator is absent", nil)
+	}
+	if active.relay.lifecycle == instanceRelayStopped {
+		return observed.process, nil
 	}
 	relay, err := observeProcessIdentity(
 		ctx,

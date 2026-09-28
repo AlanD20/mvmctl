@@ -25,7 +25,6 @@ const (
 type runtimeStatusProcess struct {
 	locator instanceProcessLocator
 	pidfd   int
-	relay   bool
 	status  runtimeStatus
 }
 
@@ -36,7 +35,7 @@ func runtimeStatusUnavailableError(vmID, message string, cause error) *errs.Doma
 }
 
 // observeRuntimeActive compares sealed active metadata without rehashing executables. The pidfds remain open across
-// both process observations and the final liveness sweep; a relay observation must not hide a Firecracker exit.
+// both process observations and the final liveness sweep. Console relay lifecycle is independent of VM status.
 // CALLER MUST HOLD: the root instance index and this record's VM lock.
 func observeRuntimeActive(
 	ctx context.Context,
@@ -45,12 +44,6 @@ func observeRuntimeActive(
 	identity processIdentityVerifierDeps,
 ) (status runtimeStatus, returnErr error) {
 	processes := []runtimeStatusProcess{{locator: record.launch.process, pidfd: -1}}
-	if record.launch.relay.kind == instanceRelayPresent {
-		processes = append(
-			processes,
-			runtimeStatusProcess{locator: record.launch.relay.locator, pidfd: -1, relay: true},
-		)
-	}
 	defer func() {
 		for index := len(processes) - 1; index >= 0; index-- {
 			if processes[index].pidfd >= 0 {
@@ -248,13 +241,6 @@ func observeRuntimeStatusProcess(
 	}
 	if observed.process.startTimeTicks != process.locator.startTimeTicks || rootStat.Mode&unix.S_IFMT != unix.S_IFDIR {
 		return observed, false, nil
-	}
-	if process.relay {
-		relay := record.active.relay
-		return observed, observed.process.userIDs == relay.userIDs && observed.process.groupIDs == relay.groupIDs &&
-			slices.Equal(observed.process.supplementaryGroups, relay.supplementaryGroups) &&
-			observed.mountNamespace == relay.mountNamespace && observed.root == relay.root &&
-			processExecutableMatchesRecordedRelay(observed.executable, relay.executable), nil
 	}
 	active := record.active
 	return observed, observed.process.userIDs == active.userIDs && observed.process.groupIDs == active.groupIDs &&

@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	instanceRecordSchemaVersion = uint32(5)
+	instanceRecordSchemaVersion = uint32(6)
 	maxInstanceRecordBytes      = 16 * 1024
 )
 
@@ -133,6 +133,7 @@ type instanceRelayExecutableIdentity struct {
 
 type instanceActiveRelay struct {
 	kind                instanceRelayKind
+	lifecycle           instanceRelayLifecycle
 	userIDs             processCredentialIdentity
 	groupIDs            processCredentialIdentity
 	supplementaryGroups []uint32
@@ -253,6 +254,9 @@ func activateInstanceRecord(
 	}
 	identity.supplementaryGroups = append([]uint32{}, identity.supplementaryGroups...)
 	if identity.relay.kind == instanceRelayPresent {
+		if identity.relay.lifecycle != instanceRelayRunning {
+			return instanceRecord{}, instanceStateError(record.vmID, "activation requires a running relay")
+		}
 		identity.relay.supplementaryGroups = append([]uint32{}, identity.relay.supplementaryGroups...)
 	}
 	record.lifecycle = instanceLifecycleActive
@@ -547,6 +551,10 @@ func validateInstanceActiveRelay(
 		}
 		return nil
 	case instanceRelayPresent:
+		if relay.lifecycle != instanceRelayRunning && relay.lifecycle != instanceRelayStopping &&
+			relay.lifecycle != instanceRelayStopped {
+			return fmt.Errorf("instance authority relay lifecycle is invalid")
+		}
 	default:
 		return fmt.Errorf("active instance authority relay kind is invalid")
 	}
@@ -567,7 +575,7 @@ func validateInstanceActiveRelay(
 }
 
 func instanceActiveRelayIdentityIsEmpty(relay instanceActiveRelay) bool {
-	return relay.userIDs == (processCredentialIdentity{}) &&
+	return relay.lifecycle == "" && relay.userIDs == (processCredentialIdentity{}) &&
 		relay.groupIDs == (processCredentialIdentity{}) &&
 		relay.supplementaryGroups == nil &&
 		relay.mountNamespace == (instanceObjectIdentity{}) &&

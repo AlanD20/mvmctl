@@ -49,6 +49,7 @@ type Operation struct {
 	hostSystemBinaryInstaller hostSystemBinaryInstaller
 	hostSudoersConfigurer     hostSudoersConfigurer
 	trustedReleaseClient      trustedReleaseClient
+	consoleClient             consoleAuthorityClient
 	trafficPolicyClient       *networkservice.TrafficPolicyClient
 }
 

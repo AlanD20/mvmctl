@@ -203,7 +203,7 @@ func validateVMExecRetainedProcessAuthority(
 		return vmExecPeerError(record.vmID, role, "retained process authority dependencies are incomplete", err)
 	}
 	wantCount := 1
-	if record.launch.relay.kind == instanceRelayPresent {
+	if instanceRelayNeedsProcess(record) {
 		wantCount++
 	}
 	if len(state.retained) != wantCount || !vmExecRetainedProcessMatches(

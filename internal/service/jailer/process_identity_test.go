@@ -42,6 +42,7 @@ func TestActivateVerifiedProcessUsesRetainedPIDFDsAndPinnedExecutable(t *testing
 		},
 		relay: instanceActiveRelay{
 			kind:                instanceRelayPresent,
+			lifecycle:           instanceRelayRunning,
 			userIDs:             repeatedProcessCredentials(testAuthorityUID),
 			groupIDs:            repeatedProcessCredentials(testAuthorityGID),
 			supplementaryGroups: []uint32{},
