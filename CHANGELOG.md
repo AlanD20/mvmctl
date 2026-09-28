@@ -46,6 +46,10 @@ full current-source network/nftables/policy matrix remain release gates.
 
 ### Added
 
+- The complete 11-case logs module passed twice on the installed runner candidate with owned cleanup.
+  Coverage verifies real guest identity and serial markers, byte-exact LF tails preserving carriage returns,
+  VMM logging/follow, identifier lookup and retained logs after root-authoritative stop. It does not qualify
+  successful interactive console attachment or the complete release matrix.
 - The complete six-case peer-exec module passed twice with retained full-ID/process/file
   ownership and checked cleanup, including same-network, cross-network and networkless
   directionality and endpoint lifecycle. This does not complete release qualification.

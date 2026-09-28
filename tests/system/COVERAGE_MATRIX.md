@@ -17,6 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Complete logs repeat gate (2026-09-28):** Exact logs source SHA-256
+`46c9d7f32f89e837e9ec6d048bce7db3066a0dfbb405da4939ed9f8c207fae09` passed all 11 cases
+twice (74.26/86.98 seconds) against installed candidate `a5518257` inside only `mvmctl-030-test`.
+Both strict reports have zero other outcomes and exact config/four empty inventories after checked owned cleanup.
+The fixture proves actual Alpine 3.23 guest identity and unique serial output rather than requiring the login
+banner deliberately removed by image optimization. Tail checks capture actual CR-containing output as bytes,
+preserve blank and CR-containing LF records, and compare exact final 5/50 records. Other cases cover kernel versus
+VMM logs, live follow, cancellation, missing VM, full-ID/name/IP lookup and retained stopped-VM logs.
+Stopped-state proof uses root-observed status, inactive relay and absence from `vm ps`, not the historical PID
+display projection. Reports are `qa-logs-46c9-full11-pass{1,2}.{json,xml}`.
+This closes this local file's repeat gate, not interactive console attachment or the full release matrix.
+
 **Ubuntu init-layout source gate (2026-09-28):** Commit `d5bf3656` delays OpenRC binary admission until
 both required OpenRC directories exist, preserving no-follow confinement and ambiguous-layout refusal.
 The new Ubuntu usrmerge publication test failed against unchanged production at `open managed guest file parent`.
