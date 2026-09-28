@@ -89,6 +89,8 @@ func (f *sudoersFixture) publish(ctx context.Context) (bool, error) {
 func (f *sudoersFixture) seed(t *testing.T, content string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(f.target, []byte(content), 0440))
+	// WriteFile applies the process umask; valid policies require exactly 0440.
+	require.NoError(t, os.Chmod(f.target, 0440))
 }
 
 func assertSudoersFiles(t *testing.T, f *sudoersFixture, content string) {
