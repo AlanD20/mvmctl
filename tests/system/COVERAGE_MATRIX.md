@@ -17,6 +17,15 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Ubuntu init-layout source gate (2026-09-28):** Commit `d5bf3656` delays OpenRC binary admission until
+both required OpenRC directories exist, preserving no-follow confinement and ambiguous-layout refusal.
+The new Ubuntu usrmerge publication test failed against unchanged production at `open managed guest file parent`.
+Fixed systemd/Ubuntu/OpenRC and missing/ambiguous/unsafe-parent regression cases then passed (0.036 seconds),
+the complete LoopMount package passed (0.223 seconds), and focused race checks passed (1.051 seconds).
+Scoped gofmt/golines 0.13.0 and vet passed under Go 1.26.3 inside only `mvmctl-030-test`.
+Evidence is `ubuntu-init-{red,green,race}.log` and `ubuntu-loopmount-full.log`.
+These source checks do not yet qualify the installed-candidate tar-import/Ubuntu boot journey or whole image domain.
+
 **Basic network lifecycle repeat gate (2026-09-28):** Commit `8af4839a` modernizes the basic
 network file while retaining its separate missing-bridge fault case. Exact file SHA-256
 `65c608e4322e53617fc6afc0a0199a8fd315d127d3f66803e04258784d34ac00` passed the 30 safe
