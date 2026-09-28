@@ -22,8 +22,10 @@ Violations fixed (zzz_destructive source):
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
+import os
 import shlex
 import stat
 import uuid
@@ -223,6 +225,168 @@ def selected_cache_case(runner_vm, tmp_path, monkeypatch):
     assert not failures, "Cache case teardown failed:\n" + "\n".join(failures)
 
 
+class _GuestfsPreviewSentinel:
+    """Pin one owned appliance directory outside the selected user cache."""
+
+    def __init__(self):
+        self.uid = os.getuid()
+        self.parent_name = f".guestfs-{self.uid}"
+        self.directory_name = f"appliance.d-{uuid.uuid4().hex}"
+        self.payload = b"aggregate-cache-preview-must-preserve-global-guestfs-state\n"
+        self.fds = {}
+        self.identities = {}
+        self.created = set()
+
+    @staticmethod
+    def _identity(info):
+        return info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode
+
+    def _binding(self, name, parent_fd, identity, *, directory):
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        assert self._identity(info) == identity, (name, identity, info)
+        assert info.st_uid == self.uid, (name, info.st_uid)
+        assert stat.S_IMODE(info.st_mode) == (0o700 if directory else 0o600), name
+        assert (stat.S_ISDIR if directory else stat.S_ISREG)(info.st_mode), name
+        if not directory:
+            assert info.st_nlink == 1, name
+        return info
+
+    def seed(self):
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        self.fds["base"] = os.open("/var/tmp", flags)
+        base = os.fstat(self.fds["base"])
+        assert stat.S_ISDIR(base.st_mode) and base.st_uid == 0
+        assert base.st_mode & stat.S_ISVTX
+        self.identities["base"] = self._identity(base)
+        try:
+            os.mkdir(self.parent_name, mode=0o700, dir_fd=self.fds["base"])
+            self.created.add("parent")
+        except FileExistsError:
+            pass
+        self.identities["parent"] = self._identity(
+            os.stat(self.parent_name, dir_fd=self.fds["base"], follow_symlinks=False)
+        )
+        self._binding(self.parent_name, self.fds["base"], self.identities["parent"], directory=True)
+        self.fds["parent"] = os.open(self.parent_name, flags, dir_fd=self.fds["base"])
+        assert self._identity(os.fstat(self.fds["parent"])) == self.identities["parent"]
+        os.mkdir(self.directory_name, mode=0o700, dir_fd=self.fds["parent"])
+        self.created.add("directory")
+        self.identities["directory"] = self._identity(
+            os.stat(self.directory_name, dir_fd=self.fds["parent"], follow_symlinks=False)
+        )
+        self._binding(
+            self.directory_name, self.fds["parent"], self.identities["directory"], directory=True
+        )
+        self.fds["directory"] = os.open(self.directory_name, flags, dir_fd=self.fds["parent"])
+        assert self._identity(os.fstat(self.fds["directory"])) == self.identities["directory"]
+        self.fds["marker"] = os.open(
+            "marker", os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600, dir_fd=self.fds["directory"],
+        )
+        self.created.add("marker")
+        self.identities["marker"] = self._identity(os.fstat(self.fds["marker"]))
+        self._binding("marker", self.fds["directory"], self.identities["marker"], directory=False)
+        offset = 0
+        while offset < len(self.payload):
+            written = os.write(self.fds["marker"], self.payload[offset:])
+            assert written > 0
+            offset += written
+        os.fsync(self.fds["marker"])
+        self.snapshot()
+
+    def snapshot(self):
+        assert self._identity(os.fstat(self.fds["base"])) == self.identities["base"]
+        assert self._identity(os.lstat("/var/tmp")) == self.identities["base"]
+        parent = self._binding(
+            self.parent_name, self.fds["base"], self.identities["parent"], directory=True
+        )
+        directory = self._binding(
+            self.directory_name, self.fds["parent"], self.identities["directory"], directory=True
+        )
+        marker = self._binding(
+            "marker", self.fds["directory"], self.identities["marker"], directory=False
+        )
+        for kind in ("parent", "directory", "marker"):
+            assert self._identity(os.fstat(self.fds[kind])) == self.identities[kind]
+        content = os.pread(self.fds["marker"], len(self.payload) + 1, 0)
+        assert marker.st_size == len(self.payload)
+        assert content == self.payload
+        return self._identity(parent), self._identity(directory), self._identity(marker), content
+
+    def cleanup(self):
+        failures = []
+        try:
+            if "base" in self.identities:
+                assert self._identity(os.fstat(self.fds["base"])) == self.identities["base"]
+                assert self._identity(os.lstat("/var/tmp")) == self.identities["base"]
+            if "parent" in self.identities:
+                self._binding(self.parent_name, self.fds["base"], self.identities["parent"], directory=True)
+                if "parent" in self.fds:
+                    assert self._identity(os.fstat(self.fds["parent"])) == self.identities["parent"]
+            if "directory" in self.created:
+                assert "directory" in self.identities, "Unpinned sentinel directory preserved"
+                try:
+                    self._binding(
+                        self.directory_name, self.fds["parent"], self.identities["directory"], directory=True
+                    )
+                except FileNotFoundError:
+                    pass  # The regression already reports an illicit dry-run deletion.
+                else:
+                    if "directory" in self.fds:
+                        assert self._identity(os.fstat(self.fds["directory"])) == self.identities["directory"]
+                    if "marker" in self.created:
+                        try:
+                            self._binding(
+                                "marker", self.fds["directory"], self.identities["marker"], directory=False
+                            )
+                        except FileNotFoundError:
+                            pass
+                        else:
+                            assert self._identity(os.fstat(self.fds["marker"])) == self.identities["marker"]
+                            os.unlink("marker", dir_fd=self.fds["directory"])
+                            with pytest.raises(FileNotFoundError):
+                                os.stat("marker", dir_fd=self.fds["directory"], follow_symlinks=False)
+                    # rmdir is deliberately non-recursive and refuses unexpected contents.
+                    self._binding(
+                        self.directory_name, self.fds["parent"], self.identities["directory"], directory=True
+                    )
+                    os.rmdir(self.directory_name, dir_fd=self.fds["parent"])
+                    with pytest.raises(FileNotFoundError):
+                        os.stat(self.directory_name, dir_fd=self.fds["parent"], follow_symlinks=False)
+            if "parent" in self.created:
+                assert "parent" in self.identities, "Unpinned guestfs parent preserved"
+                self._binding(self.parent_name, self.fds["base"], self.identities["parent"], directory=True)
+                try:
+                    os.rmdir(self.parent_name, dir_fd=self.fds["base"])
+                except OSError as error:
+                    if error.errno != errno.ENOTEMPTY:
+                        raise
+                else:
+                    with pytest.raises(FileNotFoundError):
+                        os.stat(self.parent_name, dir_fd=self.fds["base"], follow_symlinks=False)
+        except (Exception, pytest.fail.Exception) as error:
+            failures.append(f"guestfs sentinel cleanup: {error!r}")
+        finally:
+            for kind in ("marker", "directory", "parent", "base"):
+                if kind in self.fds:
+                    try:
+                        os.close(self.fds[kind])
+                    except OSError as error:
+                        failures.append(f"guestfs sentinel close {kind}: {error!r}")
+        assert not failures, "\n".join(failures)
+
+
+@pytest.fixture
+def guestfs_preview_sentinel(selected_cache_case):
+    """Seed before preview; preserve existing parent state through exact cleanup."""
+    sentinel = _GuestfsPreviewSentinel()
+    try:
+        sentinel.seed()
+        yield sentinel
+    finally:
+        sentinel.cleanup()
+
+
 class TestCacheInit:
     """Test cache initialization operations."""
 
@@ -261,16 +425,23 @@ class TestCachePruneDryRun:
         vms = json.loads(result.stdout)
         assert any(v["name"] == vm_name for v in vms)
 
-    def test_cache_prune_dry_run_shows_what_would_be_removed(self, runner_vm):
-        """cache prune --dry-run --all should succeed and print summary."""
-        result = _run_mvm(runner_vm, "cache", "prune", "--dry-run", "--all")
-        assert result.returncode == 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "dry run" in combined
-
-        ls_after = _run_mvm(runner_vm, "image", "ls", "--json")
-        images_after: list[dict[str, Any]] = json.loads(ls_after.stdout)
-        assert isinstance(images_after, list)
+    def test_cache_prune_dry_run_shows_what_would_be_removed(
+        self, runner_vm, selected_cache_case, guestfs_preview_sentinel
+    ):
+        """Aggregate preview preserves both selected cache and global guestfs state."""
+        selected_cache_case.prepare()
+        before = selected_cache_case.snapshot()
+        sentinel_before = guestfs_preview_sentinel.snapshot()
+        data = _json_success_data(
+            _run_mvm(runner_vm, "cache", "prune", "--dry-run", "--all", "--json").stdout,
+            dict,
+        )
+        assert guestfs_preview_sentinel.snapshot() == sentinel_before
+        assert selected_cache_case.snapshot() == before
+        assert "warm_images" in data["pruned_ids"]
+        assert "guestfs_state" not in data["pruned_ids"]
+        assert not data["failed_ids"]
+        assert data["had_running_vms"] is False
 
     def test_cache_prune_vm_dry_run(self, runner_vm, selected_cache_case):
         """cache prune vm --dry-run should succeed and not remove VMs."""
@@ -390,17 +561,23 @@ class TestCachePruneEdgeCases:
 class TestCacheClean:
     """Test cache clean command."""
 
-    def test_cache_clean_dry_run(self, runner_vm):
-        """cache clean --dry-run --force should preview what would be removed."""
-        result = _run_mvm(
-            runner_vm, "cache", "clean", "--dry-run", "--force"
+    def test_cache_clean_dry_run(self, runner_vm, selected_cache_case, guestfs_preview_sentinel):
+        """Clean preview preserves selected cache and the global appliance sentinel."""
+        selected_cache_case.prepare()
+        before = selected_cache_case.snapshot()
+        sentinel_before = guestfs_preview_sentinel.snapshot()
+        data = _json_success_data(
+            _run_mvm(runner_vm, "cache", "clean", "--dry-run", "--force", "--json").stdout,
+            dict,
         )
-        assert result.returncode == 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "dry run" in combined
-
-        init_result = _run_mvm(runner_vm, "cache", "init", check=False)
-        assert init_result.returncode == 0
+        assert guestfs_preview_sentinel.snapshot() == sentinel_before
+        assert selected_cache_case.snapshot() == before
+        assert data["cache_dir"] == str(selected_cache_case.cache_dir)
+        assert data["cache_dir_removed"] is True  # Planned removal, not an actual deletion.
+        assert "warm_images" in data["prune_result"]["pruned_ids"]
+        assert "guestfs_state" not in data["prune_result"]["pruned_ids"]
+        assert not data["prune_result"]["failed_ids"]
+        assert data["prune_result"]["had_running_vms"] is False
 
     @pytest.mark.needs_kvm
     @pytest.mark.needs_network
