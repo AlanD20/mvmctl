@@ -17,6 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Additional peer-exec behavioral gate (2026-09-28):** Commit `54148a8d` adds four installed-candidate cases;
+file SHA-256 `211d4954d7f76c32fb1a4cef1a9ea69c1abdc2a7a4b29dfde570a7e339f3e311` passed 4/4 in 55.66 seconds
+inside only `mvmctl-030-test`, against candidate `47ce6fda` (Go source `37d399d4`). The strict report has zero
+other outcomes; complete configuration was unchanged and VM/network/volume/snapshot inventories were empty.
+The cases prove opt-in and exact non-root target-user denial without destination side effects, separate output
+streams/nonzero exit status, exact session-correlated command-redacted audit output, cancellation of the observed
+destination process group, and full restore requiring a new endpoint grant. Ownership uses returned full IDs,
+creation metadata and the capture request-ID receipt; ambiguous cleanup refuses deletion. Reports
+`qa-exec-211d-new4.{json,xml}` are in `qa-release-72696719/.tmp` and ignored local evidence. Existing directional
+and restart/reboot cases were unchanged. This is a focused one-pass gate, not complete exec-domain repeats,
+root session-allocation absence/exhaustion proof, or whole-release qualification.
+
 **Isolated cache selection (2026-09-28):** Commit `e3412121` modernizes eight existing cache init,
 VM/network preview and argument-rejection cases in per-case cache/config/temp paths. All eight passed
 twice in 7.03 and 6.49 seconds inside only the named runner, against candidate `c460278d`.

@@ -39,6 +39,11 @@ earlier partial-state statement. They are not a substitute for the final release
 
 ### Added
 
+- Added installed-candidate peer-exec cases for explicit opt-in and exact non-root target users, separate output
+  streams and nonzero exit status, command-redacted audit correlation, destination process-group cancellation,
+  and restored endpoints requiring a fresh grant. All four passed in the named runner with checked teardown;
+  full-domain repeats and root allocation-exhaustion/absence qualification remain open.
+
 - Qualified all eight preseeded kernel-import cases twice, including byte identity, default restoration, bounded
   networkless VM creation, stop/start, and same-content reimport. Six safe initialization cases also passed twice;
   the two administrator-enrollment cases remain excluded and unqualified, not silently skipped.
