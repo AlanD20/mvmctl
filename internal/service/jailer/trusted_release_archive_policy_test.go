@@ -16,18 +16,22 @@ func TestTrustedReleaseArchivePolicyMatchesAuditedX8664Layouts(t *testing.T) {
 	tests := map[string]struct {
 		version      string
 		cpuTemplates []string
+		tarProfile   trustedReleaseArchiveTarProfile
 	}{
 		"legacy lower-case templates": {
 			version:      "1.10.1",
 			cpuTemplates: []string{"c3", "t2a", "t2", "t2s", "v1n1", "t2cl"},
+			tarProfile:   trustedReleaseArchiveTarLocalPAX,
 		},
 		"previous upper-case templates": {
 			version:      "1.16.1",
 			cpuTemplates: []string{"C3", "T2A", "T2", "T2S", "V1N1", "T2CL"},
+			tarProfile:   trustedReleaseArchiveTarLocalPAX,
 		},
 		"current upper-case templates": {
 			version:      "1.16.2",
 			cpuTemplates: []string{"C3", "T2A", "T2", "T2S", "V1N1", "T2CL"},
+			tarProfile:   trustedReleaseArchiveTarPlainGNU,
 		},
 	}
 	for name, tc := range tests {
@@ -38,6 +42,7 @@ func TestTrustedReleaseArchivePolicyMatchesAuditedX8664Layouts(t *testing.T) {
 			require.NoError(t, err)
 			policy, err := newTrustedReleaseArchivePolicy(source)
 			require.NoError(t, err)
+			assert.Equal(t, tc.tarProfile, policy.tarProfile)
 
 			want := expectedTrustedReleaseArchiveMembers(tc.version, tc.cpuTemplates)
 			if diff := cmp.Diff(

@@ -21,32 +21,114 @@ import (
 func TestTrustedReleaseArchiveStageExtractsSelectedMembersFromCompleteAuditedEnvelope(t *testing.T) {
 	t.Parallel()
 
-	fixture := newTrustedReleaseArchiveFixture(t)
-	slices.Reverse(fixture.members)
-	compressed := fixture.compressed(t)
-	stage := readyTrustedReleaseArchiveStageForTest(t, compressed)
-	selected := &trustedReleaseArchiveCapture{}
+	for _, version := range []string{"1.16.1", "1.16.2"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+			fixture := newTrustedReleaseArchiveFixtureForVersion(t, version)
+			slices.Reverse(fixture.members)
+			compressed := fixture.compressed(t)
+			stage := readyTrustedReleaseArchiveStageForTest(t, compressed)
+			selected := &trustedReleaseArchiveCapture{}
 
-	err := stage.extract(t.Context(), fixture.policy, selected)
-	require.NoError(t, err)
-	if diff := cmp.Diff(fixture.firecrackerBytes, selected.firecracker); diff != "" {
-		t.Errorf("extracted Firecracker bytes mismatch (-want +got):\n%s", diff)
-	}
-	if diff := cmp.Diff(fixture.jailerBytes, selected.jailer); diff != "" {
-		t.Errorf("extracted Jailer bytes mismatch (-want +got):\n%s", diff)
-	}
-	assert.Equal(t, trustedReleaseArchiveStageExtracted, stage.state)
-	assert.Equal(t, uint64(len(compressed)), stage.sizeBytes)
-	if diff := cmp.Diff(trustedReleaseArchiveDigestForTest(compressed), stage.archiveDigest); diff != "" {
-		t.Errorf("trusted release archive digest mismatch (-want +got):\n%s", diff)
-	}
-	offset, err := unix.Seek(stage.fd, 0, unix.SEEK_CUR)
-	require.NoError(t, err)
-	assert.Zero(t, offset)
+			err := stage.extract(t.Context(), fixture.policy, selected)
+			require.NoError(t, err)
+			if diff := cmp.Diff(fixture.firecrackerBytes, selected.firecracker); diff != "" {
+				t.Errorf("extracted Firecracker bytes mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(fixture.jailerBytes, selected.jailer); diff != "" {
+				t.Errorf("extracted Jailer bytes mismatch (-want +got):\n%s", diff)
+			}
+			assert.Equal(t, trustedReleaseArchiveStageExtracted, stage.state)
+			assert.Equal(t, uint64(len(compressed)), stage.sizeBytes)
+			if diff := cmp.Diff(trustedReleaseArchiveDigestForTest(compressed), stage.archiveDigest); diff != "" {
+				t.Errorf("trusted release archive digest mismatch (-want +got):\n%s", diff)
+			}
+			offset, err := unix.Seek(stage.fd, 0, unix.SEEK_CUR)
+			require.NoError(t, err)
+			assert.Zero(t, offset)
 
-	err = stage.extract(t.Context(), fixture.policy, &trustedReleaseArchiveCapture{})
-	require.Error(t, err)
-	assert.Equal(t, errs.CodeBinaryTrustedInstallFailed, errs.AsDomainError(err).Code)
+			err = stage.extract(t.Context(), fixture.policy, &trustedReleaseArchiveCapture{})
+			require.Error(t, err)
+			assert.Equal(t, errs.CodeBinaryTrustedInstallFailed, errs.AsDomainError(err).Code)
+		})
+	}
+}
+
+// Rationale: The release identity selects the exact raw tar encoding. A nearby release's
+// valid envelope and alternate encodings of numeric zero must not gain archive authority.
+func TestTrustedReleaseArchiveStageRejectsReleaseTarProfileMismatch(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		version string
+		mutate  func(*testing.T, *trustedReleaseArchiveFixture)
+	}{
+		"older release with plain GNU": {
+			version: "1.16.1",
+			mutate:  func(_ *testing.T, fixture *trustedReleaseArchiveFixture) { fixture.plainGNU = true },
+		},
+		"current release with local PAX": {
+			version: "1.16.2",
+			mutate:  func(_ *testing.T, fixture *trustedReleaseArchiveFixture) { fixture.plainGNU = false },
+		},
+		"current release with older magic": {
+			version: "1.16.2",
+			mutate: func(_ *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) {
+					copy(raw[257:265], []byte{'u', 's', 't', 'a', 'r', 0, '0', '0'})
+				}
+			},
+		},
+		"current release with NUL device major": {
+			version: "1.16.2",
+			mutate: func(_ *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) { clear(raw[329:337]) }
+			},
+		},
+		"current release with NUL device minor": {
+			version: "1.16.2",
+			mutate: func(_ *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) { clear(raw[337:345]) }
+			},
+		},
+		"current release with nonzero device major": {
+			version: "1.16.2",
+			mutate:  func(_ *testing.T, fixture *trustedReleaseArchiveFixture) { fixture.members[0].deviceMajor = 1 },
+		},
+		"current release with nonzero device minor": {
+			version: "1.16.2",
+			mutate:  func(_ *testing.T, fixture *trustedReleaseArchiveFixture) { fixture.members[0].deviceMinor = 1 },
+		},
+		"current release with GNU extension": {
+			version: "1.16.2",
+			mutate: func(_ *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) { raw[345] = 1 }
+			},
+		},
+		"older release with octal zero device": {
+			version: "1.16.1",
+			mutate: func(t *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) {
+					writeTrustedReleaseTarOctalForTest(t, raw[329:337], 0)
+				}
+			},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newTrustedReleaseArchiveFixtureForVersion(t, tc.version)
+			tc.mutate(t, fixture)
+			stage := readyTrustedReleaseArchiveStageForTest(t, fixture.compressed(t))
+			selected := &trustedReleaseArchiveCapture{}
+			err := stage.extract(t.Context(), fixture.policy, selected)
+			require.Error(t, err)
+			assert.Equal(t, errs.CodeBinaryUntrusted, errs.AsDomainError(err).Code)
+			assert.Equal(t, trustedReleaseArchiveStageFailed, stage.state)
+			assert.Empty(t, selected.firecracker)
+			assert.Empty(t, selected.jailer)
+		})
+	}
 }
 
 func TestTrustedReleaseArchiveStageAcceptsExactSizeBoundaries(t *testing.T) {
@@ -339,6 +421,14 @@ func TestTrustedReleaseArchiveStageRejectsBeforeTransitionWhenInputsAreInvalid(t
 			require.NoError(t, err)
 			return stage.extract(t.Context(), policy, &trustedReleaseArchiveCapture{})
 		},
+		"forged tar profile": func(
+			t *testing.T,
+			stage *trustedReleaseArchiveStage,
+			policy trustedReleaseArchivePolicy,
+		) error {
+			policy.tarProfile = trustedReleaseArchiveTarPlainGNU
+			return stage.extract(t.Context(), policy, &trustedReleaseArchiveCapture{})
+		},
 	}
 	for name, run := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -355,6 +445,7 @@ func TestTrustedReleaseArchiveStageRejectsBeforeTransitionWhenInputsAreInvalid(t
 
 type trustedReleaseArchiveFixture struct {
 	policy               trustedReleaseArchivePolicy
+	plainGNU             bool
 	members              []trustedReleaseArchiveFixtureMember
 	endBlocks            int
 	trailingDecompressed []byte
@@ -376,13 +467,20 @@ type trustedReleaseArchiveFixtureMember struct {
 	paxTypeFlag           byte
 	paxRecords            []trustedReleasePAXRecordForTest
 	corruptHeaderChecksum bool
+	mutateHeader          func([]byte)
 	paddingByte           byte
 }
 
 func newTrustedReleaseArchiveFixture(t *testing.T) *trustedReleaseArchiveFixture {
 	t.Helper()
+	return newTrustedReleaseArchiveFixtureForVersion(t, "1.16.1")
+}
 
-	source, err := newTrustedReleaseSource(releaseSlot{version: "1.16.1", architecture: "x86_64"})
+// newTrustedReleaseArchiveFixtureForVersion builds the independently audited raw encoding for each release.
+func newTrustedReleaseArchiveFixtureForVersion(t *testing.T, version string) *trustedReleaseArchiveFixture {
+	t.Helper()
+
+	source, err := newTrustedReleaseSource(releaseSlot{version: version, architecture: "x86_64"})
 	require.NoError(t, err)
 	policy, err := newTrustedReleaseArchivePolicy(source)
 	require.NoError(t, err)
@@ -393,6 +491,7 @@ func newTrustedReleaseArchiveFixture(t *testing.T) *trustedReleaseArchiveFixture
 	sort.Strings(names)
 	fixture := &trustedReleaseArchiveFixture{
 		policy:           policy,
+		plainGNU:         version == "1.16.2",
 		endBlocks:        2,
 		firecrackerBytes: []byte("selected-firecracker"),
 		jailerBytes:      []byte("selected-jailer"),
@@ -432,15 +531,17 @@ func (fixture *trustedReleaseArchiveFixture) decompressed(t *testing.T) []byte {
 
 	var decompressed bytes.Buffer
 	for _, member := range fixture.members {
-		paxPayload := trustedReleasePAXForTest(member.paxRecords...)
-		paxHeader := trustedReleaseTarHeaderForTest(t, trustedReleaseTarHeader{
-			name:      member.paxName,
-			sizeBytes: uint64(len(paxPayload)),
-			typeFlag:  member.paxTypeFlag,
-		})
-		decompressed.Write(paxHeader)
-		decompressed.Write(paxPayload)
-		writeTrustedReleaseArchivePaddingForTest(t, &decompressed, uint64(len(paxPayload)), 0)
+		if !fixture.plainGNU {
+			paxPayload := trustedReleasePAXForTest(member.paxRecords...)
+			paxHeader := trustedReleaseTarHeaderForTest(t, trustedReleaseTarHeader{
+				name:      member.paxName,
+				sizeBytes: uint64(len(paxPayload)),
+				typeFlag:  member.paxTypeFlag,
+			})
+			decompressed.Write(paxHeader)
+			decompressed.Write(paxPayload)
+			writeTrustedReleaseArchivePaddingForTest(t, &decompressed, uint64(len(paxPayload)), 0)
+		}
 
 		declaredSize := member.declaredSize
 		if declaredSize == 0 {
@@ -459,6 +560,15 @@ func (fixture *trustedReleaseArchiveFixture) decompressed(t *testing.T) []byte {
 			deviceMajor: member.deviceMajor,
 			deviceMinor: member.deviceMinor,
 		})
+		if fixture.plainGNU {
+			copy(memberHeader[257:265], []byte{'u', 's', 't', 'a', 'r', ' ', ' ', 0})
+			writeTrustedReleaseTarOctalForTest(t, memberHeader[329:337], member.deviceMajor)
+			writeTrustedReleaseTarOctalForTest(t, memberHeader[337:345], member.deviceMinor)
+		}
+		if member.mutateHeader != nil {
+			member.mutateHeader(memberHeader)
+		}
+		writeTrustedReleaseTarChecksumForTest(t, memberHeader)
 		if member.corruptHeaderChecksum {
 			memberHeader[0] ^= 1
 		}

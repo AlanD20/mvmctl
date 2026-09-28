@@ -20,9 +20,17 @@ type trustedReleaseArchiveMemberPolicy struct {
 	selected trustedReleaseArchiveSelection
 }
 
+type trustedReleaseArchiveTarProfile uint8
+
+const (
+	trustedReleaseArchiveTarLocalPAX trustedReleaseArchiveTarProfile = iota + 1
+	trustedReleaseArchiveTarPlainGNU
+)
+
 type trustedReleaseArchivePolicy struct {
-	source  trustedReleaseSource
-	members map[string]trustedReleaseArchiveMemberPolicy
+	source     trustedReleaseSource
+	tarProfile trustedReleaseArchiveTarProfile
+	members    map[string]trustedReleaseArchiveMemberPolicy
 }
 
 // CRITICAL: Archive layout is release authority, not a compatibility guess. Only versions whose complete x86_64
@@ -40,11 +48,17 @@ func newTrustedReleaseArchivePolicy(source trustedReleaseSource) (trustedRelease
 	}
 
 	var cpuTemplates []string
+	var tarProfile trustedReleaseArchiveTarProfile
 	switch source.slot.version {
 	case "1.10.1":
 		cpuTemplates = []string{"c3", "t2a", "t2", "t2s", "v1n1", "t2cl"}
-	case "1.14.2", "1.14.3", "1.14.4", "1.15.0", "1.15.1", "1.16.0", "1.16.1", "1.16.2":
+		tarProfile = trustedReleaseArchiveTarLocalPAX
+	case "1.14.2", "1.14.3", "1.14.4", "1.15.0", "1.15.1", "1.16.0", "1.16.1":
 		cpuTemplates = []string{"C3", "T2A", "T2", "T2S", "V1N1", "T2CL"}
+		tarProfile = trustedReleaseArchiveTarLocalPAX
+	case "1.16.2":
+		cpuTemplates = []string{"C3", "T2A", "T2", "T2S", "V1N1", "T2CL"}
+		tarProfile = trustedReleaseArchiveTarPlainGNU
 	default:
 		return trustedReleaseArchivePolicy{}, trustedReleaseStoreUntrusted(
 			"trusted release archive version has not been audited",
@@ -101,5 +115,5 @@ func newTrustedReleaseArchivePolicy(source trustedReleaseSource) (trustedRelease
 			nil,
 		)
 	}
-	return trustedReleaseArchivePolicy{source: source, members: members}, nil
+	return trustedReleaseArchivePolicy{source: source, tarProfile: tarProfile, members: members}, nil
 }

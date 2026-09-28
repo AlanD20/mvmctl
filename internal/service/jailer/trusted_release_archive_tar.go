@@ -29,7 +29,11 @@ const (
 	trustedReleaseTarTypePAX            = byte('x')
 )
 
-var trustedReleaseTarMagic = [8]byte{'u', 's', 't', 'a', 'r', 0, '0', '0'}
+var (
+	trustedReleaseTarLocalPAXMagic = [8]byte{'u', 's', 't', 'a', 'r', 0, '0', '0'}
+	trustedReleaseTarPlainGNUMagic = [8]byte{'u', 's', 't', 'a', 'r', ' ', ' ', 0}
+	trustedReleaseTarOctalZero     = [8]byte{'0', '0', '0', '0', '0', '0', '0', 0}
+)
 
 type trustedReleaseTarHeader struct {
 	name        string
@@ -46,10 +50,13 @@ type trustedReleaseTarHeader struct {
 	deviceMinor uint64
 }
 
-// CRITICAL: The accepted release archives use one narrow GNU header encoding. Parsing the raw block keeps hidden tar
+// CRITICAL: Each release profile admits one exact header encoding. Parsing the raw block keeps hidden tar
 // extension records, base-256 numbers, sparse metadata, and non-canonical padding visible to the policy instead of
 // allowing a permissive archive reader to normalize them first.
-func parseTrustedReleaseTarHeader(raw []byte) (trustedReleaseTarHeader, error) {
+func parseTrustedReleaseTarHeader(
+	raw []byte,
+	profile trustedReleaseArchiveTarProfile,
+) (trustedReleaseTarHeader, error) {
 	if len(raw) != trustedReleaseTarBlockBytes {
 		return trustedReleaseTarHeader{}, trustedReleaseArchiveFormatError(
 			"trusted release tar header has invalid length",
@@ -72,7 +79,18 @@ func parseTrustedReleaseTarHeader(raw []byte) (trustedReleaseTarHeader, error) {
 			"trusted release tar header checksum does not match",
 		)
 	}
-	if !bytes.Equal(raw[trustedReleaseTarMagicOffset:trustedReleaseTarUserNameOffset], trustedReleaseTarMagic[:]) {
+	var magic [8]byte
+	switch profile {
+	case trustedReleaseArchiveTarLocalPAX:
+		magic = trustedReleaseTarLocalPAXMagic
+	case trustedReleaseArchiveTarPlainGNU:
+		magic = trustedReleaseTarPlainGNUMagic
+	default:
+		return trustedReleaseTarHeader{}, trustedReleaseArchiveFormatError(
+			"trusted release tar profile is not audited",
+		)
+	}
+	if !bytes.Equal(raw[trustedReleaseTarMagicOffset:trustedReleaseTarUserNameOffset], magic[:]) {
 		return trustedReleaseTarHeader{}, trustedReleaseArchiveFormatError(
 			"trusted release tar header is not in the audited GNU format",
 		)
@@ -121,9 +139,21 @@ func parseTrustedReleaseTarHeader(raw []byte) (trustedReleaseTarHeader, error) {
 	if err != nil {
 		return trustedReleaseTarHeader{}, err
 	}
-	if !allTrustedReleaseArchiveBytesZero(
+	// CRITICAL: These bytes describe only regular files. Numeric zero is required for
+	// plain GNU releases; older local-PAX releases require entirely NUL-filled fields.
+	deviceFieldsAdmitted := allTrustedReleaseArchiveBytesZero(
 		raw[trustedReleaseTarDeviceMajorOffset:trustedReleaseTarGNUExtensionOffset],
-	) {
+	)
+	if profile == trustedReleaseArchiveTarPlainGNU {
+		deviceFieldsAdmitted = bytes.Equal(
+			raw[trustedReleaseTarDeviceMajorOffset:trustedReleaseTarDeviceMinorOffset],
+			trustedReleaseTarOctalZero[:],
+		) && bytes.Equal(
+			raw[trustedReleaseTarDeviceMinorOffset:trustedReleaseTarGNUExtensionOffset],
+			trustedReleaseTarOctalZero[:],
+		)
+	}
+	if !deviceFieldsAdmitted {
 		return trustedReleaseTarHeader{}, trustedReleaseArchiveFormatError(
 			"trusted release tar header contains a device field",
 		)

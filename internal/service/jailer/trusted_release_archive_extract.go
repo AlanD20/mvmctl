@@ -119,7 +119,7 @@ func validateTrustedReleaseArchivePolicy(policy trustedReleaseArchivePolicy) err
 	if err != nil {
 		return err
 	}
-	if len(policy.members) != len(expected.members) {
+	if policy.tarProfile != expected.tarProfile || len(policy.members) != len(expected.members) {
 		return trustedReleaseArchiveFormatError("trusted release archive policy identity is inconsistent")
 	}
 	for name, member := range expected.members {
@@ -144,7 +144,7 @@ func consumeTrustedReleaseArchive(
 	var block [trustedReleaseTarBlockBytes]byte
 	memberCount := 0
 	for {
-		if err := readTrustedReleaseArchiveExact(ctx, reader, block[:], "read trusted release PAX header"); err != nil {
+		if err := readTrustedReleaseArchiveExact(ctx, reader, block[:], "read trusted release tar header"); err != nil {
 			return err
 		}
 		if allTrustedReleaseArchiveBytesZero(block[:]) {
@@ -168,40 +168,43 @@ func consumeTrustedReleaseArchive(
 			return trustedReleaseArchiveFormatError("trusted release archive contains too many members")
 		}
 
-		paxHeader, err := parseTrustedReleaseTarHeader(block[:])
+		memberHeader, err := parseTrustedReleaseTarHeader(block[:], policy.tarProfile)
 		if err != nil {
 			return err
 		}
-		if err := validateTrustedReleaseArchivePAXHeader(paxHeader); err != nil {
-			return err
-		}
-		paxPayload := make([]byte, paxHeader.sizeBytes)
-		if err := readTrustedReleaseArchiveExact(
-			ctx,
-			reader,
-			paxPayload,
-			"read trusted release PAX payload",
-		); err != nil {
-			return err
-		}
-		if err := readTrustedReleaseArchivePadding(ctx, reader, paxHeader.sizeBytes); err != nil {
-			return err
-		}
-		if err := validateTrustedReleasePAXRecords(paxPayload); err != nil {
-			return err
-		}
+		if policy.tarProfile == trustedReleaseArchiveTarLocalPAX {
+			paxHeader := memberHeader
+			if err := validateTrustedReleaseArchivePAXHeader(paxHeader); err != nil {
+				return err
+			}
+			paxPayload := make([]byte, paxHeader.sizeBytes)
+			if err := readTrustedReleaseArchiveExact(
+				ctx,
+				reader,
+				paxPayload,
+				"read trusted release PAX payload",
+			); err != nil {
+				return err
+			}
+			if err := readTrustedReleaseArchivePadding(ctx, reader, paxHeader.sizeBytes); err != nil {
+				return err
+			}
+			if err := validateTrustedReleasePAXRecords(paxPayload); err != nil {
+				return err
+			}
 
-		if err := readTrustedReleaseArchiveExact(
-			ctx,
-			reader,
-			block[:],
-			"read trusted release member header",
-		); err != nil {
-			return err
-		}
-		memberHeader, err := parseTrustedReleaseTarHeader(block[:])
-		if err != nil {
-			return err
+			if err := readTrustedReleaseArchiveExact(
+				ctx,
+				reader,
+				block[:],
+				"read trusted release member header",
+			); err != nil {
+				return err
+			}
+			memberHeader, err = parseTrustedReleaseTarHeader(block[:], policy.tarProfile)
+			if err != nil {
+				return err
+			}
 		}
 		memberPolicy, present := remaining[memberHeader.name]
 		if !present {

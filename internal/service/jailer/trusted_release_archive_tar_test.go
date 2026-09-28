@@ -28,7 +28,7 @@ func TestParseTrustedReleaseTarHeaderAcceptsAuditedGNURegularHeader(t *testing.T
 		groupName: "amazon",
 	})
 
-	got, err := parseTrustedReleaseTarHeader(raw)
+	got, err := parseTrustedReleaseTarHeader(raw, trustedReleaseArchiveTarLocalPAX)
 	require.NoError(t, err)
 	want := trustedReleaseTarHeader{
 		name:      "release-v1.16.1-x86_64/firecracker-v1.16.1-x86_64",
@@ -87,7 +87,7 @@ func TestParseTrustedReleaseTarHeaderRejectsNonCanonicalEncoding(t *testing.T) {
 			if name != "invalid checksum" && name != "noncanonical checksum field" {
 				writeTrustedReleaseTarChecksumForTest(t, raw)
 			}
-			got, err := parseTrustedReleaseTarHeader(raw)
+			got, err := parseTrustedReleaseTarHeader(raw, trustedReleaseArchiveTarLocalPAX)
 			assert.Empty(t, got)
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeBinaryUntrusted, errs.AsDomainError(err).Code)
@@ -102,7 +102,7 @@ func TestParseTrustedReleaseTarHeaderRejectsWrongBlockLength(t *testing.T) {
 		t.Run(strconv.Itoa(size), func(t *testing.T) {
 			t.Parallel()
 
-			got, err := parseTrustedReleaseTarHeader(make([]byte, size))
+			got, err := parseTrustedReleaseTarHeader(make([]byte, size), trustedReleaseArchiveTarLocalPAX)
 			assert.Empty(t, got)
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeBinaryUntrusted, errs.AsDomainError(err).Code)
