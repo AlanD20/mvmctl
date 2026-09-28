@@ -17,6 +17,20 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Host-domain repeat gate (2026-09-28):** Commit `b596fb2c` modernizes first-capacity observation and
+ordinary-user clean/reset refusal ownership; the other 21 methods are unchanged. Exact file SHA-256
+`8ff215defb4a5ce53bd349de6698b5514fb5d6c3e2a13e509e8a03eb1b52f0c4` passed all 24 cases twice
+(17.30/13.78 seconds) inside only `mvmctl-030-test`, against candidate `d28985b6`. Both strict reports
+have zero other outcomes; complete configuration and VM/network/volume/snapshot inventories were
+preserved. The three changed cases first passed 3/3 after shortening only an overlong fixture network
+name; its earlier failure occurred before network creation. The existing root 1.16.2 pair was compared
+with exact mirrored archive members before testing; no installation, enrollment or successful reset
+was exercised. Capacity initialization uses private cache/config paths, and guard cases retain exact
+full-ID, creation and process identity plus healthy guest access and administrator-state baselines.
+All 24 collected. Reports `qa-host-8ff-focus` and `qa-host-8ff-full-pass{1,2}` are in
+`qa-release-72696719/.tmp` and ignored local evidence. This closes the local host-file repeat gate,
+not clean-host administrator enrollment/reset, reboot attribution or complete release qualification.
+
 **Global GuestFS cleanup removal and live mount repair (2026-09-28):** Production commits `c0f41890`
 and `fe7e636e` remove guessed global GuestFS cleanup and prepare live-volume source mounts before VM
 namespace entry, respectively. Candidate `0.3.0-rc.volume-guestfs`, SHA-256

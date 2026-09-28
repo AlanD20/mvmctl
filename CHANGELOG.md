@@ -39,6 +39,9 @@ earlier partial-state statement. They are not a substitute for the final release
 
 ### Added
 
+- The complete 24-case host system-test file passed twice on the installed candidate in the named runner.
+  First-capacity initialization and clean/reset refusal now check owned resources, unchanged administrator state
+  and healthy guest access. This does not qualify administrator enrollment or successful clean-host reset.
 - Added installed-candidate peer-exec cases for explicit opt-in and exact non-root target users, separate output
   streams and nonzero exit status, command-redacted audit correlation, destination process-group cancellation,
   and restored endpoints requiring a fresh grant. All four passed in the named runner with checked teardown;
