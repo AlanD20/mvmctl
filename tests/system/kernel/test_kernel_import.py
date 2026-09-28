@@ -1,585 +1,367 @@
-"""Kernel import system tests — mvm kernel import command.
-
-Tests the full lifecycle: importing a custom kernel from an existing
-firecracker kernel file, verifying JSON/filesystem state, creating
-a VM with the imported kernel, and verifying stop/start roundtrip.
-Also tests auto-detected version from filename and error paths.
-"""
+"""Preseeded kernel import, byte identity, and bounded guest lifecycle journeys."""
 
 from __future__ import annotations
 
 import hashlib
 import os
 import shutil
+import stat
 import tempfile
 import uuid
 from pathlib import Path
 
 import pytest
 
-from tests.system.conftest import (
-    _ensure_kernel,
-    _json_success_data,
-    _run_mvm,
-    ensure_vm_deps,
-)
+from tests.system.conftest import _json_success_data, _run_mvm
 
-VM_CACHE_DIR = "/root/.cache/mvmctl"
-VM_KERNEL_DIR = f"{VM_CACHE_DIR}/kernels"
-
-pytestmark = [
-    pytest.mark.system,
-    pytest.mark.domain_kernel,
-]
-
-# ============================================================================
-# Helpers — all operations run INSIDE the test VM
-# ============================================================================
+pytestmark = [pytest.mark.system, pytest.mark.domain_kernel]
 
 
-def _get_present_kernel_path(runner_vm: str) -> str:
-    """Return the absolute path of a present kernel inside the runner VM.
-
-    Caller should invoke ``_ensure_kernel()`` first.
-    """
-    kernels = _json_success_data(
-        _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
-    )
-    present = [kernel for kernel in kernels if kernel.get("is_present")]
-    assert present, "No present kernel — _ensure_kernel should have registered one"
-
-    source = next(
-        (kernel for kernel in present if kernel.get("type") == "firecracker"),
-        present[0],
-    )
-    inspect = _json_success_data(
-        _run_mvm(runner_vm, "kernel", "inspect", source["id"][:6], "--json").stdout,
-        dict,
-    )
-    path = inspect["storage"]["path"]
-
-    assert path, "Kernel inspect returned empty storage path"
-
-    # The path may be relative — resolve against kernel cache dir.
-    # Use os.path.join to handle absolute paths correctly.
-    full_path = os.path.join(VM_KERNEL_DIR, path) if not os.path.isabs(path) else path
-    assert Path(full_path).is_file(), f"Kernel path does not exist: {full_path}"
-    return full_path
+def _inventory(runner_vm, domain):
+    items = _json_success_data(_run_mvm(runner_vm, domain, "ls", "--json").stdout, list)
+    assert len({item["id"] for item in items}) == len(items), (domain, items)
+    return {item["id"]: item for item in items}
 
 
-def _get_vm_status(runner_vm: str, vm_name: str) -> str | None:
-    """Return the status of a VM by name, or None if not found."""
-    vms = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
-    for vm in vms:
-        if vm.get("name") == vm_name:
-            return vm.get("status")
-    return None
+def _kernel_state(items):
+    # Public kernel listing reconciles missing recorded files and advances updated_at.
+    return {item_id: {key: value for key, value in item.items() if key != "updated_at"}
+            for item_id, item in items.items()}
 
 
-def _remove_imported_kernel(runner_vm: str, kernel_id: str) -> None:
-    """Remove only the imported record owned by the calling test."""
-    result = _run_mvm(runner_vm, "kernel", "rm", kernel_id, "--force", check=False)
-    assert result.returncode == 0, f"kernel removal failed: {result.stderr}"
-    kernels = _json_success_data(
-        _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
-    )
-    assert all(kernel["id"] != kernel_id for kernel in kernels)
+def _kernel_identity(item):
+    return {key: value for key, value in item.items() if key not in ("updated_at", "is_default")}
 
 
-# ============================================================================
-# Test 1-3: Happy path import, VM creation, stop/start (shared state)
-# ============================================================================
+def _vm_identity(item):
+    return {key: item[key] for key in (
+        "id", "name", "created_at", "kernel_id", "image_id", "disk_size_mib", "mem_size_mib", "vcpu_count",
+    )}
+
+
+def _file_identity(path):
+    metadata = path.lstat()
+    assert stat.S_ISREG(metadata.st_mode), path
+    return metadata.st_dev, metadata.st_ino, metadata.st_size
+
+
+def _digest(path):
+    with path.open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+class _KernelImportOwner:
+    """Own newly admitted kernel receipts and at most one small networkless VM."""
+
+    def __init__(self, runner_vm):
+        self.runner_vm = runner_vm
+        self.baseline = {domain: _inventory(runner_vm, domain) for domain in (
+            "vm", "network", "volume", "snapshot", "key", "kernel", "image", "bin",
+        )}
+        self.config = _json_success_data(_run_mvm(runner_vm, "config", "ls", "--json").stdout, dict)
+        self.kernels = {}
+        self.vm_name = None
+        self.vm_record = None
+        mirror = os.environ.get("MVM_ASSET_MIRROR", "")
+        assert mirror and Path(mirror).is_dir(), "a preseeded local asset mirror is required"
+        defaults = [item for item in self.baseline["kernel"].values() if item["is_default"]]
+        assert len(defaults) == 1, defaults
+        self.default_id = defaults[0]["id"]
+        assert defaults[0]["version"].removeprefix("v") == "7.0.11" and defaults[0]["is_present"], defaults
+        for kind in ("firecracker", "jailer"):
+            selected = [item for item in self.baseline["bin"].values()
+                        if item["type"] == kind and item["is_default"]]
+            assert len(selected) == 1, selected
+            assert selected[0]["version"] == "1.16.2" and selected[0]["is_present"], selected
+        images = [item for item in self.baseline["image"].values()
+                  if item["type"] == "alpine" and item["version"] == "3.23" and item["is_present"]]
+        assert len(images) == 1, images
+        self.source_path = self.kernel_path(self.default_id)
+        self.source_identity = _file_identity(self.source_path)
+        self.source_digest = _digest(self.source_path)
+        self.source_arch = defaults[0]["arch"]
+        assert self.source_arch, defaults
+        # KernelID excludes type/name: even an absent record of another type can collide.
+        self.import_id = hashlib.sha256(
+            f"{self.source_digest}:6.1:{self.source_arch}".encode(),
+        ).hexdigest()
+        assert self.import_id not in self.baseline["kernel"], ("baseline content ID collision", self.import_id)
+
+    def kernel_path(self, kernel_id):
+        inspected = _json_success_data(
+            _run_mvm(self.runner_vm, "kernel", "inspect", kernel_id, "--json").stdout, dict,
+        )
+        assert inspected["kernel"]["id"] == kernel_id, inspected
+        path = Path(inspected["storage"]["path"])
+        assert path.is_absolute(), path
+        _file_identity(path)
+        return path
+
+    def remember_kernel(self, name, import_attempt=False):
+        matching = [item for item in _inventory(self.runner_vm, "kernel").values()
+                    if item["base_name"] == name]
+        assert len(matching) <= 1, matching
+        if matching:
+            item = matching[0]
+            assert item["id"] not in self.baseline["kernel"], ("baseline kernel is never owned", item)
+            assert item["id"] == self.import_id, item
+            path = self.kernel_path(item["id"])
+            receipt = (_kernel_identity(item), path, _file_identity(path), _digest(path))
+            assert receipt[3] == self.source_digest, receipt
+            if item["id"] in self.kernels:
+                prior = self.kernels[item["id"]]
+                assert (prior[0], prior[1], prior[3]) == (receipt[0], receipt[1], receipt[3]), (prior, receipt)
+                # An explicit repeat import atomically replaces the managed backing inode.
+                # Admit that publication only here; ordinary cleanup still requires its exact inode.
+                if not import_attempt:
+                    assert prior[2] == receipt[2], (prior, receipt)
+            self.kernels[item["id"]] = receipt
+
+    def import_kernel(self, name, source=None, *, default=False, auto_version=False):
+        assert name not in {item["base_name"] for item in self.baseline["kernel"].values()}, name
+        assert _file_identity(self.source_path) == self.source_identity
+        assert _digest(self.source_path) == self.source_digest
+        source = Path(source or self.source_path)
+        assert _digest(source) == self.source_digest, source
+        prospective_id = hashlib.sha256(f"{_digest(source)}:6.1:{self.source_arch}".encode()).hexdigest()
+        assert prospective_id == self.import_id and prospective_id not in self.baseline["kernel"], prospective_id
+        # Refuse an unrelated publication or inode replacement before authorizing another import.
+        self.remember_kernel(name)
+        args = ["kernel", "import", name, str(source)]
+        if not auto_version:
+            args.extend(["--version", "6.1"])
+        if default:
+            args.append("--default")
+        try:
+            imported = _json_success_data(_run_mvm(self.runner_vm, *args, "--json").stdout, dict)
+            assert imported["id"] not in self.baseline["kernel"], ("dedup returned a baseline ID", imported)
+            assert imported["id"] == prospective_id, imported
+            assert len(imported["id"]) == 64 and all(char in "0123456789abcdef" for char in imported["id"]), imported
+        finally:
+            # Recover only the reserved name's new public receipt if command parsing fails.
+            self.remember_kernel(name, import_attempt=True)
+        assert imported["id"] in self.kernels, imported
+        return imported
+
+    def assert_import(self, imported, name):
+        item = _inventory(self.runner_vm, "kernel")[imported["id"]]
+        assert (item["base_name"], item["type"], item["version"], item["is_present"]) == (
+            name, "custom", "6.1", True,
+        ), item
+        assert item["arch"], item
+        inspected = _json_success_data(
+            _run_mvm(self.runner_vm, "kernel", "inspect", imported["id"], "--json").stdout, dict,
+        )
+        kernel = inspected["kernel"]
+        assert kernel["id"] == imported["id"]
+        assert (kernel["base_name"], kernel["type"], kernel["version"], kernel["is_present"]) == (
+            name, "custom", "6.1", True,
+        ), kernel
+        assert kernel["arch"] and kernel["name"] == f"{name} 6.1", kernel
+        path = self.kernel_path(imported["id"])
+        assert path.stat().st_size == self.source_path.stat().st_size
+        assert _digest(path) == self.source_digest
+
+    def remember_vm(self):
+        matching = [item for item in _inventory(self.runner_vm, "vm").values() if item["name"] == self.vm_name]
+        assert len(matching) <= 1, matching
+        if matching:
+            item = matching[0]
+            assert item["id"] not in self.baseline["vm"], item
+            record = _vm_identity(item)
+            if self.vm_record is not None:
+                assert record == self.vm_record, (record, self.vm_record)
+            else:
+                self.vm_record = record
+
+    def create_vm(self, kernel_id):
+        assert self.vm_name is None, "maximum one owned VM"
+        assert not any(item["status"] not in ("stopped", "failed")
+                       for item in self.baseline["vm"].values()), self.baseline["vm"]
+        self.vm_name = f"sys-import-vm-{uuid.uuid4().hex[:12]}"
+        assert self.vm_name not in {item["name"] for item in self.baseline["vm"].values()}
+        try:
+            created = _json_success_data(_run_mvm(
+                self.runner_vm, "vm", "create", self.vm_name, "--image", "alpine:3.23",
+                "--kernel", kernel_id, "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
+                "--no-pci", "--disk-size", "512M", "--mem", "256M", "--vcpu", "1",
+                "--json", timeout=180,
+            ).stdout, list)
+            assert len(created) == 1 and created[0]["name"] == self.vm_name, created
+        finally:
+            self.remember_vm()
+        assert self.vm_record == _vm_identity(created[0])
+        return self.vm_state(kernel_id, "running")
+
+    def vm_state(self, kernel_id, status):
+        self.remember_vm()
+        assert self.vm_record is not None, self.vm_name
+        vm = _inventory(self.runner_vm, "vm")[self.vm_record["id"]]
+        assert _vm_identity(vm) == self.vm_record
+        assert vm["kernel_id"] == kernel_id and vm["status"] == status, vm
+        assert (vm["vcpu_count"], vm["mem_size_mib"], vm["disk_size_mib"]) == (1, 256, 512), vm
+        inspected = _json_success_data(_run_mvm(
+            self.runner_vm, "vm", "inspect", vm["id"], "--json",
+        ).stdout, dict)
+        assert (inspected["vm"]["id"], inspected["vm"]["name"], inspected["vm"]["status"]) == (
+            vm["id"], self.vm_name, status,
+        ), inspected
+        return vm
+
+    def cleanup(self):
+        failures = []
+        if self.vm_name is not None:
+            try:
+                self.remember_vm()
+                if self.vm_record is not None:
+                    vm_id = self.vm_record["id"]
+                    current = _inventory(self.runner_vm, "vm")
+                    if vm_id in current:
+                        assert _vm_identity(current[vm_id]) == self.vm_record
+                        _run_mvm(self.runner_vm, "vm", "rm", vm_id, "--force", timeout=120)
+                    after = _inventory(self.runner_vm, "vm")
+                    assert vm_id not in after and all(item["name"] != self.vm_name for item in after.values())
+            except Exception as error:
+                failures.append(("owned VM removal", repr(error)))
+        # Default restoration must still run when any resource removal fails.
+        try:
+            current = _inventory(self.runner_vm, "kernel")
+            assert _kernel_identity(current[self.default_id]) == _kernel_identity(self.baseline["kernel"][self.default_id])
+            if {item["id"] for item in current.values() if item["is_default"]} != {self.default_id}:
+                _run_mvm(self.runner_vm, "kernel", "default", self.default_id)
+            assert {item["id"] for item in _inventory(self.runner_vm, "kernel").values()
+                    if item["is_default"]} == {self.default_id}
+        except Exception as error:
+            failures.append(("prior kernel default restoration", repr(error)))
+        for kernel_id, (identity, path, backing, digest) in self.kernels.items():
+            try:
+                assert kernel_id not in self.baseline["kernel"], kernel_id
+                current = _inventory(self.runner_vm, "kernel")
+                if kernel_id in current:
+                    assert _kernel_identity(current[kernel_id]) == identity
+                    assert self.kernel_path(kernel_id) == path and _file_identity(path) == backing
+                    assert _digest(path) == digest
+                    assert _file_identity(self.source_path) == self.source_identity
+                    assert _digest(self.source_path) == self.source_digest
+                    assert path != self.source_path and backing[:2] != self.source_identity[:2], path
+                    _run_mvm(self.runner_vm, "kernel", "rm", kernel_id, "--force")
+                assert kernel_id not in _inventory(self.runner_vm, "kernel")
+                assert not path.exists() and not path.is_symlink(), path
+            except Exception as error:
+                failures.append(("owned kernel removal", kernel_id, repr(error)))
+        for domain, baseline in self.baseline.items():
+            try:
+                current = _inventory(self.runner_vm, domain)
+                if domain == "kernel":
+                    assert _kernel_state(current) == _kernel_state(baseline), (baseline, current)
+                else:
+                    assert current == baseline, (domain, baseline, current)
+            except Exception as error:
+                failures.append((f"{domain} baseline/default readback", repr(error)))
+        try:
+            assert _json_success_data(_run_mvm(self.runner_vm, "config", "ls", "--json").stdout, dict) == self.config
+            assert _file_identity(self.source_path) == self.source_identity
+            assert _digest(self.source_path) == self.source_digest
+        except Exception as error:
+            failures.append(("config/source kernel preservation", repr(error)))
+        assert not failures, failures
+
+
+@pytest.fixture
+def kernel_import_owner(runner_vm):
+    """Capture complete caller state before each independent case can publish resources."""
+    owner = _KernelImportOwner(runner_vm)
+    try:
+        yield owner
+    finally:
+        owner.cleanup()
 
 
 class TestKernelImportLifecycle:
-    """Import a custom kernel, create a VM with it, verify stop/start.
+    """Independent import, exact full-ID selection, and stop/start cases."""
 
-    Tests 1-3 share state via class-level variables so the same imported
-    kernel and VM are used across the sequence. Cleanup happens in
-    ``teardown_class``.
-    """
+    pytestmark = [pytest.mark.requires_kvm]
 
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.domain_kernel,
-        pytest.mark.requires_kvm,
-    ]
+    def test_import_present_kernel(self, kernel_import_owner):
+        owner = kernel_import_owner
+        name = f"sys-test-import-{uuid.uuid4().hex[:12]}"
+        imported = owner.import_kernel(name)
+        owner.assert_import(imported, name)
 
-    _binary: str | None = None
-    _import_name: str | None = None
-    _import_kernel_id: str | None = None
-    _import_kernel_short_id: str | None = None
-    _vm_name: str | None = None
-    _network_name: str | None = None
-    _network_subnet: str | None = None
+    def test_create_vm_with_imported_kernel(self, kernel_import_owner):
+        owner = kernel_import_owner
+        name = f"sys-test-create-{uuid.uuid4().hex[:12]}"
+        imported = owner.import_kernel(name)
+        owner.assert_import(imported, name)
+        owner.create_vm(imported["id"])
+        assert _run_mvm(owner.runner_vm, "exec", owner.vm_record["id"], "--", "uname", "-r").stdout.strip()
 
-    # ------------------------------------------------------------------
-    # Step 1: Import a present kernel as custom type
-    # ------------------------------------------------------------------
-
-    def test_import_present_kernel(self, runner_vm: str) -> None:
-        """Import a real kernel and verify its identity, bytes, and metadata."""
-        type(self)._binary = runner_vm
-        _ensure_kernel(runner_vm)
-
-        source_path = _get_present_kernel_path(runner_vm)
-        import_name = f"sys-test-import-{uuid.uuid4().hex[:6]}"
-        type(self)._import_name = import_name
-
-        import_version = "6.1"
-
-        result = _run_mvm(
-            runner_vm,
-            "kernel",
-            "import",
-            import_name,
-            source_path,
-            "--version",
-            import_version,
-            "--json",
-        )
-        assert result.returncode == 0, f"kernel import failed: {result.stderr}"
-        import_result = _json_success_data(result.stdout, dict)
-        imported_id = import_result["id"]
-        type(self)._import_kernel_id = imported_id
-        type(self)._import_kernel_short_id = imported_id[:6]
-
-        # ------------------------------------------------------------------
-        # Option C verification: JSON state
-        # ------------------------------------------------------------------
-        kernels_after = _json_success_data(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
-        )
-        imported = [kernel for kernel in kernels_after if kernel.get("id") == imported_id]
-        assert len(imported) == 1, imported
-        imported_kernel = imported[0]
-        assert imported_kernel["base_name"] == import_name
-        assert imported_kernel["type"] == "custom", (
-            f"Expected type 'custom', got '{imported_kernel['type']}'"
-        )
-        assert imported_kernel["version"] == import_version
-        assert imported_kernel.get("arch") and len(imported_kernel["arch"]) > 0, (
-            f"Expected non-empty arch, got '{imported_kernel.get('arch')}'"
-        )
-        assert imported_kernel["is_present"] is True
-
-        # ------------------------------------------------------------------
-        # Option C verification: Filesystem (inside VM)
-        # ------------------------------------------------------------------
-        kernel_path_rel = imported_kernel.get("path", "")
-        assert kernel_path_rel, "Imported kernel path is empty in ls --json"
-        full_path = kernel_path_rel if os.path.isabs(kernel_path_rel) else f"{VM_KERNEL_DIR}/{kernel_path_rel}"
-        assert Path(full_path).is_file(), full_path
-        assert Path(full_path).stat().st_size == Path(source_path).stat().st_size
-        with open(source_path, "rb") as source, open(full_path, "rb") as copied:
-            assert hashlib.file_digest(copied, "sha256").digest() == hashlib.file_digest(
-                source, "sha256"
-            ).digest()
-
-        # ------------------------------------------------------------------
-        # Option C verification: inspect --json
-        # ------------------------------------------------------------------
-        inspect_result = _run_mvm(
-            runner_vm,
-            "kernel",
-            "inspect",
-            type(self)._import_kernel_short_id,
-            "--json",
-        )
-        assert inspect_result.returncode == 0
-        inspect_data = _json_success_data(inspect_result.stdout, dict)
-        kdata = inspect_data["kernel"]
-        assert kdata["id"] == imported_id
-        assert kdata.get("type") == "custom", (
-            f"Expected type 'custom', got '{kdata.get('type')}' in {kdata}"
-        )
-        assert kdata.get("base_name") == import_name
-        assert kdata.get("version") == import_version
-        assert kdata.get("arch") and len(kdata["arch"]) > 0, (
-            f"Expected non-empty arch in inspect, got '{kdata.get('arch')}'"
-        )
-        assert kdata.get("is_present") is True
-        assert kdata.get("name") == f"{import_name} {import_version}"
-        assert inspect_data["storage"]["path"] == full_path
-
-    # ------------------------------------------------------------------
-    # Step 2: Create a VM with the imported kernel
-    # ------------------------------------------------------------------
-
-    def test_create_vm_with_imported_kernel(self, runner_vm: str) -> None:
-        """Create a VM using the imported kernel (from step 1)."""
-        assert self._import_kernel_short_id is not None, (
-            "Step 1 must complete before step 2"
-        )
-
-        ensure_vm_deps(runner_vm)
-
-        vm_name = f"sys-test-import-vm-{uuid.uuid4().hex[:8]}"
-        network_name = f"sys-test-import-net-{uuid.uuid4().hex[:6]}"
-        subnet = f"10.{hash(vm_name) % 254 + 1}.0.0/24"
-
-        type(self)._vm_name = vm_name
-        type(self)._network_name = network_name
-        type(self)._network_subnet = subnet
-
-        _run_mvm(
-            runner_vm,
-            "network",
-            "create",
-            network_name,
-            "--subnet",
-            subnet,
-        )
-
-        _run_mvm(
-            runner_vm,
-            "vm",
-            "create",
-            vm_name,
-            "--image",
-            "alpine:3.23",
-            "--kernel",
-            self._import_kernel_short_id,
-            "--network",
-            network_name,
-        )
-
-        # ------------------------------------------------------------------
-        # Option C verification: vm ls --json
-        # ------------------------------------------------------------------
-        vms = _json_success_data(
-            _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
-        )
-        vm_entry = next(
-            (v for v in vms if v.get("name") == vm_name), None
-        )
-        assert vm_entry is not None, (
-            f"VM '{vm_name}' not found in vm ls --json after creation"
-        )
-        assert vm_entry.get("kernel_id", "").startswith(
-            self._import_kernel_short_id
-        ), (
-            f"VM kernel_id '{vm_entry.get('kernel_id')}' does not match "
-            f"imported kernel ID prefix '{self._import_kernel_short_id}'"
-        )
-        status = vm_entry.get("status", "")
-        assert status in ("running", "starting"), (
-            f"Expected VM status to be 'running' or 'starting', got '{status}'"
-        )
-
-        # ------------------------------------------------------------------
-        # Option C verification: vm inspect --json
-        # ------------------------------------------------------------------
-        inspect_result = _run_mvm(
-            runner_vm, "vm", "inspect", vm_name, "--json",
-        )
-        assert inspect_result.returncode == 0
-        vm_inspect = _json_success_data(inspect_result.stdout, dict)
-        vm_data = vm_inspect.get("vm", {})
-        assert vm_data.get("name") == vm_name
-        kernel_id = (
-            vm_inspect.get("vm", {}).get("kernel_id", "")
-            or vm_inspect.get("assets", {}).get("kernel", {}).get("id", "")
-        )
-        assert kernel_id.startswith(self._import_kernel_short_id)
-        assert vm_data.get("status") in ("running", "starting")
-
-    # ------------------------------------------------------------------
-    # Step 3: Verify imported kernel survives stop/start
-    # ------------------------------------------------------------------
-
-    def test_imported_kernel_stop_start(self, runner_vm: str) -> None:
-        """Stop the VM from step 2, then start it again."""
-        assert self._vm_name is not None, "Step 2 must complete before step 3"
-
-        vm_name = self._vm_name
-
-        result = _run_mvm(runner_vm, "vm", "stop", vm_name)
-        assert result.returncode == 0, f"vm stop failed: {result.stderr}"
-
-        import time
-        time.sleep(2)
-
-        status_after_stop = _get_vm_status(runner_vm, vm_name)
-        assert status_after_stop in ("stopped", None), (
-            f"Expected VM status 'stopped' after stop, got '{status_after_stop}'"
-        )
-
-        result = _run_mvm(runner_vm, "vm", "start", vm_name)
-        assert result.returncode == 0, f"vm start failed: {result.stderr}"
-
-        time.sleep(2)
-        status_after_start = _get_vm_status(runner_vm, vm_name)
-        assert status_after_start == "running", (
-            f"Expected VM status 'running' after start, "
-            f"got '{status_after_start}'"
-        )
-
-        # ------------------------------------------------------------------
-        # Option C: verify kernel_id is still our imported kernel
-        # ------------------------------------------------------------------
-        vms = _json_success_data(
-            _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
-        )
-        vm_entry = next(
-            (v for v in vms if v.get("name") == vm_name), None
-        )
-        assert vm_entry is not None, (
-            f"VM '{vm_name}' not found after stop/start cycle"
-        )
-        assert vm_entry.get("kernel_id", "").startswith(
-            self._import_kernel_short_id
-        ), (
-            f"VM kernel_id changed after stop/start: "
-            f"'{vm_entry.get('kernel_id')}' "
-            f"(expected prefix '{self._import_kernel_short_id}')"
-        )
-
-    # ------------------------------------------------------------------
-    # Teardown: clean up VM, network, and imported kernel
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def teardown_class(cls) -> None:
-        """Clean up resources created during tests 1-3."""
-        if cls._binary is None:
-            return
-        failures = []
-        if cls._vm_name:
-            result = _run_mvm(cls._binary, "vm", "rm", cls._vm_name, "--force", check=False)
-            if result.returncode != 0:
-                failures.append(f"VM removal: {result.stderr}")
-
-        if cls._network_name:
-            result = _run_mvm(cls._binary, "network", "rm", cls._network_name, check=False)
-            if result.returncode != 0:
-                failures.append(f"network removal: {result.stderr}")
-
-        if cls._import_kernel_id:
-            try:
-                _remove_imported_kernel(cls._binary, cls._import_kernel_id)
-            except AssertionError as err:
-                failures.append(f"kernel removal: {err}")
-        if failures:
-            pytest.fail("; ".join(failures))
-
-
-# ============================================================================
-# Test 4: Import with auto-detected version from filename
-# ============================================================================
+    def test_imported_kernel_stop_start(self, kernel_import_owner):
+        owner = kernel_import_owner
+        name = f"sys-test-restart-{uuid.uuid4().hex[:12]}"
+        imported = owner.import_kernel(name)
+        owner.assert_import(imported, name)
+        owner.create_vm(imported["id"])
+        vm_id = owner.vm_record["id"]
+        before = _run_mvm(owner.runner_vm, "exec", vm_id, "--", "cat", "/proc/sys/kernel/random/boot_id").stdout.strip()
+        assert before, "initial guest boot identity is required"
+        _run_mvm(owner.runner_vm, "vm", "stop", vm_id)
+        owner.vm_state(imported["id"], "stopped")
+        assert vm_id not in {item["id"] for item in _json_success_data(
+            _run_mvm(owner.runner_vm, "vm", "ps", "--json").stdout, list,
+        )}
+        _run_mvm(owner.runner_vm, "vm", "start", vm_id, timeout=180)
+        owner.vm_state(imported["id"], "running")
+        after = _run_mvm(owner.runner_vm, "exec", vm_id, "--", "cat", "/proc/sys/kernel/random/boot_id").stdout.strip()
+        assert after and after != before, (before, after)
 
 
 class TestKernelImportAutoVersion:
-    """Import a kernel without ``--version`` — version is auto-detected
-    from the filename via ``KernelService.parse_filename()``."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.domain_kernel,
-    ]
-
-    def test_import_auto_detected_version(
-        self, runner_vm: str,
-    ) -> None:
-        """Copy firecracker kernel to a versioned temp filename inside the VM and
-        import without ``--version``; verify version is auto-detected."""
-        _ensure_kernel(runner_vm)
-        source_path = _get_present_kernel_path(runner_vm)
-
-        import_name = f"sys-test-auto-{uuid.uuid4().hex[:6]}"
-        with tempfile.TemporaryDirectory(prefix="sys-test-kernel-") as temp_dir:
-            temp_kernel = Path(temp_dir) / "vmlinux-6.1-x86_64"
-            shutil.copyfile(source_path, temp_kernel)
-            assert temp_kernel.stat().st_size > 0
-
-            imported_id = None
-            try:
-                result = _run_mvm(
-                    runner_vm, "kernel", "import", import_name, str(temp_kernel), "--json"
-                )
-                imported = _json_success_data(result.stdout, dict)
-                imported_id = imported["id"]
-                assert imported["version"] == "6.1"
-
-                kernels = _json_success_data(
-                    _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
-                )
-                matching = [kernel for kernel in kernels if kernel["id"] == imported_id]
-                assert len(matching) == 1
-                assert matching[0]["base_name"] == import_name
-                assert matching[0]["version"] == "6.1"
-                assert matching[0]["type"] == "custom"
-                assert matching[0]["is_present"] is True
-
-                inspected = _json_success_data(
-                    _run_mvm(runner_vm, "kernel", "inspect", imported_id, "--json").stdout,
-                    dict,
-                )
-                assert inspected["kernel"]["id"] == imported_id
-                assert inspected["kernel"]["version"] == "6.1"
-                assert (
-                    Path(inspected["storage"]["path"]).stat().st_size
-                    == temp_kernel.stat().st_size
-                )
-            finally:
-                if imported_id is not None:
-                    _remove_imported_kernel(runner_vm, imported_id)
-
-
-# ============================================================================
-# Test 5: Import with --default flag
-# ============================================================================
+    def test_import_auto_detected_version(self, kernel_import_owner):
+        owner = kernel_import_owner
+        name = f"sys-test-auto-{uuid.uuid4().hex[:12]}"
+        with tempfile.TemporaryDirectory(prefix="sys-test-kernel-") as directory:
+            source = Path(directory) / "vmlinux-6.1-x86_64"
+            shutil.copyfile(owner.source_path, source)
+            assert _digest(source) == owner.source_digest
+            imported = owner.import_kernel(name, source, auto_version=True)
+            owner.assert_import(imported, name)
 
 
 class TestKernelImportDefault:
-    """Import a kernel with --default flag and verify is_default=true."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.domain_kernel,
-    ]
-
-    def test_import_kernel_with_default(
-        self, runner_vm: str,
-    ) -> None:
-        """Import a kernel with --default and verify is_default=true in ls --json."""
-        _ensure_kernel(runner_vm)
-        source_path = _get_present_kernel_path(runner_vm)
-
-        import_name = f"sys-test-default-{uuid.uuid4().hex[:6]}"
-        kernels_before = _json_success_data(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
-        )
-        previous_default = next(
-            kernel["id"] for kernel in kernels_before if kernel["is_default"]
-        )
-        imported_id = None
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "kernel",
-                "import",
-                import_name,
-                source_path,
-                "--version",
-                "6.1",
-                "--default",
-                "--json",
-            )
-            imported_id = _json_success_data(result.stdout, dict)["id"]
-            assert imported_id != previous_default
-            kernels = _json_success_data(
-                _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
-            )
-            assert [kernel["id"] for kernel in kernels if kernel["is_default"]] == [
-                imported_id
-            ]
-            imported = next(kernel for kernel in kernels if kernel["id"] == imported_id)
-            assert imported["base_name"] == import_name
-        finally:
-            if imported_id is not None:
-                _remove_imported_kernel(runner_vm, imported_id)
-                _run_mvm(runner_vm, "kernel", "default", previous_default)
-                kernels = _json_success_data(
-                    _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
-                )
-                assert [kernel["id"] for kernel in kernels if kernel["is_default"]] == [
-                    previous_default
-                ]
-
-
-# ============================================================================
-# Error paths
-# ============================================================================
+    def test_import_kernel_with_default(self, kernel_import_owner):
+        owner = kernel_import_owner
+        name = f"sys-test-default-{uuid.uuid4().hex[:12]}"
+        imported = owner.import_kernel(name, default=True)
+        owner.assert_import(imported, name)
+        assert {item["id"] for item in _inventory(owner.runner_vm, "kernel").values()
+                if item["is_default"]} == {imported["id"]}
 
 
 class TestKernelImportError:
-    """Rejected inputs and repeated content-addressed import."""
+    def test_import_nonexistent_path_fails(self, kernel_import_owner):
+        owner = kernel_import_owner
+        with tempfile.TemporaryDirectory(prefix="sys-test-missing-kernel-") as directory:
+            missing = Path(directory) / "absent.vmlinux"
+            assert not missing.exists() and not missing.is_symlink()
+            result = _run_mvm(owner.runner_vm, "kernel", "import", f"sys-test-missing-{uuid.uuid4().hex[:12]}",
+                              str(missing), "--version", "6.1", check=False)
+            assert result.returncode != 0, (result.stdout, result.stderr)
+            combined = (result.stdout + result.stderr).lower()
+            assert "invalid value for 'path'" in combined or "source file not found" in combined, combined
 
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.domain_kernel,
-    ]
+    def test_import_empty_name_fails(self, kernel_import_owner):
+        owner = kernel_import_owner
+        result = _run_mvm(owner.runner_vm, "kernel", "import", "", str(owner.source_path),
+                          "--version", "6.1", check=False)
+        assert result.returncode != 0, (result.stdout, result.stderr)
 
-    def test_import_nonexistent_path_fails(self, runner_vm: str) -> None:
-        """Importing a non-existent file path must fail."""
-        result = _run_mvm(
-            runner_vm,
-            "kernel",
-            "import",
-            "should-not-exist",
-            "/tmp/nonexistent-kernel-file.vmlinux",
-            "--version",
-            "6.1",
-            check=False,
-        )
-        assert result.returncode != 0, (
-            "Expected kernel import of nonexistent path to fail"
-        )
-        combined = (result.stdout + result.stderr).lower()
-        assert "invalid value for 'path'" in combined or "source file not found" in combined, (
-            f"Expected error mentioning 'invalid value for path', got: {combined}"
-        )
-
-    def test_import_empty_name_fails(self, runner_vm: str) -> None:
-        """Importing with an empty name must fail."""
-        _ensure_kernel(runner_vm)
-        source_path = _get_present_kernel_path(runner_vm)
-
-        result = _run_mvm(
-            runner_vm,
-            "kernel",
-            "import",
-            "",
-            source_path,
-            "--version",
-            "6.1",
-            check=False,
-        )
-        assert result.returncode != 0, (
-            "Expected kernel import with empty name to fail"
-        )
-
-    def test_import_same_bytes_reuses_content_id(self, runner_vm: str) -> None:
-        """Re-importing identical bytes and version keeps one content-addressed record."""
-        _ensure_kernel(runner_vm)
-        source_path = _get_present_kernel_path(runner_vm)
-
-        import_name = f"sys-test-dup-{uuid.uuid4().hex[:6]}"
-        import_version = "6.1"
-        imported_id = None
-        try:
-            result1 = _run_mvm(
-                runner_vm,
-                "kernel",
-                "import",
-                import_name,
-                source_path,
-                "--version",
-                import_version,
-                "--json",
-            )
-            imported_id = _json_success_data(result1.stdout, dict)["id"]
-
-            result2 = _run_mvm(
-                runner_vm,
-                "kernel",
-                "import",
-                import_name,
-                source_path,
-                "--version",
-                import_version,
-                "--json",
-            )
-            assert _json_success_data(result2.stdout, dict)["id"] == imported_id
-
-            kernels = _json_success_data(
-                _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
-            )
-            matching = [kernel for kernel in kernels if kernel["id"] == imported_id]
-            assert len(matching) == 1
-            assert matching[0]["base_name"] == import_name
-            assert matching[0]["type"] == "custom"
-        finally:
-            if imported_id is not None:
-                _remove_imported_kernel(runner_vm, imported_id)
+    def test_import_same_bytes_reuses_content_id(self, kernel_import_owner):
+        owner = kernel_import_owner
+        name = f"sys-test-dup-{uuid.uuid4().hex[:12]}"
+        first = owner.import_kernel(name)
+        second = owner.import_kernel(name)
+        assert second["id"] == first["id"], (first, second)
+        owner.assert_import(second, name)
+        assert len([item for item in _inventory(owner.runner_vm, "kernel").values()
+                    if item["id"] == first["id"]]) == 1
