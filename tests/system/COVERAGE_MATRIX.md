@@ -17,6 +17,17 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Ordinary-exec repeat gate (2026-09-28):** Commit `2dbf63a4` retains all six ordinary-exec
+test bodies while replacing their shared fixture with exact full-ID, creation and process-identity
+ownership and read-only preseeded-asset admission. File SHA-256
+`b177e793689d6dbd6b29cf46e23dc59f8ab02c7df9192a2e97759f557fb3c79b` passed 6/6 twice
+(5.05/8.59 seconds) inside only `mvmctl-030-test`, against candidate `d28985b6`; all six collected.
+Both strict reports have zero other outcomes. Full configuration and eleven inventory baselines were
+preserved, with checked owned VM/network cleanup. The fixture selects the present Alpine 3.23 image
+by full ID without assuming it is the default; no pull or default-asset change occurs. Reports
+`qa-exec-b177-six-pass{1,2}.{json,xml}` are in `qa-release-72696719/.tmp`. This closes the local
+ordinary-exec file repeat gate, not the separate peer-exec repeat gate or release qualification.
+
 **Host-domain repeat gate (2026-09-28):** Commit `b596fb2c` modernizes first-capacity observation and
 ordinary-user clean/reset refusal ownership; the other 21 methods are unchanged. Exact file SHA-256
 `8ff215defb4a5ce53bd349de6698b5514fb5d6c3e2a13e509e8a03eb1b52f0c4` passed all 24 cases twice
