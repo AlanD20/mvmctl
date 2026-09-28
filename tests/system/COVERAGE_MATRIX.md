@@ -17,6 +17,13 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Initialization failure source gate (2026-09-28):** Commit `75ddcb3d` stops both wizard paths after failed
+administrator setup and uses the closed system-binary `host init` route. Focused behavioral regressions and
+the complete CLI/common Go packages passed inside `mvmctl-030-test`, followed by vet. A subsequent formatting-only
+correction passed gofmt/golines and diff checks. This is source-level evidence, not installed-candidate init,
+clean administrator enrollment or complete release qualification. Evidence is `go-init-e26-generated-focused.log`;
+the newer candidate and current init/installer system files remain pending their runtime gates.
+
 **Complete nftables repeat gate (2026-09-28):** Source SHA-256
 `5e0105dfeb4fc2ac41bee37fa6c8d0fdfda7497609afda7e7685cc7a61c72133` passed all five cases
 twice (33.15/29.30 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.

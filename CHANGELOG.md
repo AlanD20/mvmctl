@@ -1177,6 +1177,9 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Initialization no longer marks administrator setup complete after failed sudo execution. Both wizard paths
+  use the fixed system installation for `host init`, without forwarding caller-selected root command paths or
+  environment assignments; cancellation and process-start failures leave setup incomplete.
 - Image import resolves the configured or explicit `auto` format before extraction, using the existing extension
   and magic-byte detection. Concrete configured formats and explicit overrides keep their precedence.
 - GuestFS appliance building and cache pruning no longer kill same-user processes or delete global libguestfs
