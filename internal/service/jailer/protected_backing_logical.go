@@ -40,7 +40,7 @@ func openProtectedLogical(
 		retained = append(retained, fd)
 		parent = fd
 	}
-	lock, err := acquireProtectedLock(ctx, parent)
+	lock, err := acquireProtectedLockMode(ctx, parent, create)
 	if err != nil {
 		return -1, nil, err
 	}

@@ -40,7 +40,7 @@ func removeStoppedVolumeHotplugJournal(ctx context.Context, root int, instance i
 		}
 		if record.State == "detached" {
 			var target unix.Stat_t
-			err := unix.Fstatat(volumes, record.Volume.private().basename(), &target,
+			err := unix.Fstatat(volumes, record.basename(), &target,
 				unix.AT_SYMLINK_NOFOLLOW|unix.AT_NO_AUTOMOUNT)
 			if err == nil {
 				return instanceStateError(instance.vmID, "detached volume target remains in stopped jail")

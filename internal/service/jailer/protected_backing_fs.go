@@ -82,7 +82,15 @@ func openProtectedFile(ctx context.Context, directory int, name string, flags in
 }
 
 func acquireProtectedLock(ctx context.Context, directory int) (int, error) {
-	fd, err := openProtectedFile(ctx, directory, "lock", unix.O_CREAT|unix.O_RDWR)
+	return acquireProtectedLockMode(ctx, directory, true)
+}
+
+func acquireProtectedLockMode(ctx context.Context, directory int, create bool) (int, error) {
+	flags := unix.O_RDWR
+	if create {
+		flags |= unix.O_CREAT
+	}
+	fd, err := openProtectedFile(ctx, directory, "lock", flags)
 	if err != nil {
 		return -1, err
 	}

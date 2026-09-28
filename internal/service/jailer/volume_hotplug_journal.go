@@ -21,6 +21,7 @@ type volumeHotplugRecord struct {
 	BootID           string         `json:"boot_id"`
 	LaunchGeneration uint64         `json:"launch_generation"`
 	Volume           VMLaunchVolume `json:"volume"`
+	GuestDriveID     string         `json:"guest_drive_id"`
 	SourceMajor      uint32         `json:"source_major"`
 	SourceMinor      uint32         `json:"source_minor"`
 	SourceInode      uint64         `json:"source_inode"`
@@ -111,8 +112,9 @@ func readVolumeHotplugRecord(
 	if err != nil || !bytes.Equal(canonical, raw) {
 		return volumeHotplugRecord{}, false, instanceAtomicError("volume journal is not exact canonical schema", err)
 	}
-	if record.Schema != 1 || !vmIDPattern.MatchString(record.VMID) || record.OwnerUID == 0 ||
-		!hostBootIDPattern.MatchString(record.BootID) || record.LaunchGeneration == 0 || record.SourceInode == 0 {
+	if record.Schema != 2 || !isCanonicalManagedResourceID(record.GuestDriveID, 64) || !vmIDPattern.MatchString(record.VMID) || record.OwnerUID == 0 ||
+		!hostBootIDPattern.MatchString(record.BootID) || record.LaunchGeneration == 0 ||
+		record.SourceInode == 0 {
 		return volumeHotplugRecord{}, false, instanceAtomicError("volume journal identity is invalid", nil)
 	}
 	if err := record.Volume.Validate(); err != nil {
@@ -193,6 +195,24 @@ func listVolumeHotplugRecords(
 	directory int,
 	instance instanceRecord,
 ) (_ []volumeHotplugRecord, returnErr error) {
+	return scanVolumeHotplugRecords(ctx, directory, instance, true)
+}
+
+// readVolumeHotplugRecords never repairs interrupted journal publication.
+func readVolumeHotplugRecords(
+	ctx context.Context,
+	directory int,
+	instance instanceRecord,
+) ([]volumeHotplugRecord, error) {
+	return scanVolumeHotplugRecords(ctx, directory, instance, false)
+}
+
+func scanVolumeHotplugRecords(
+	ctx context.Context,
+	directory int,
+	instance instanceRecord,
+	repair bool,
+) (_ []volumeHotplugRecord, returnErr error) {
 	fd, err := unix.Openat(directory, ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
@@ -210,6 +230,12 @@ func listVolumeHotplugRecords(
 		}
 		for _, name := range names {
 			if id, pending := strings.CutSuffix(name, ".pending"); pending && isCanonicalManagedResourceID(id, 64) {
+				if !repair {
+					return nil, instanceStateError(
+						instance.vmID,
+						"volume journal publication is incomplete; stop the VM before recovery",
+					)
+				}
 				if err := removeVolumeHotplugPending(ctx, directory, name); err != nil {
 					return nil, err
 				}
@@ -230,6 +256,9 @@ func listVolumeHotplugRecords(
 				return nil, instanceAtomicError("volume journal differs from the retained VM generation", nil)
 			}
 			records = append(records, record)
+			if len(records) > 128 {
+				return nil, instanceAtomicError("volume journal exceeds its bounded inventory", nil)
+			}
 		}
 		if errors.Is(readErr, io.EOF) {
 			return records, nil

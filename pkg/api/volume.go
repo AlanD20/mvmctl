@@ -474,24 +474,40 @@ func (op *Operation) VolumeDetach(
 				}
 			}
 		}
-		client, err := op.vsockClient(ctx, vmItem)
-		if err != nil {
-			slog.Warn("vsock client not available for PCI device removal",
-				"vm", vmItem.Name, "volume", vol.Name, "error", err)
-		}
-		// Attempt hot-unplug via Firecracker API.
 		ctrl := vm.NewController(vmItem, op.Repos.VM)
-		if err := ctrl.DetachVolume(ctx, vol.ID); err != nil {
-			slog.Warn("Hot-unplug failed for drive", "volume", vol.ID, "error", err)
+		observed, err := ctrl.ObserveVolume(ctx, vol.ID)
+		if err != nil {
 			return err
 		}
-
-		// Post-detach PCI rescan so the guest kernel reclaims the device slot.
-		if client != nil {
-			if err := client.RescanPCI(ctx); err != nil {
-				slog.Warn("guest PCI rescan after hot-unplug failed",
-					"vm", vmItem.Name, "volume", vol.Name, "error", err)
+		if observed.Attached {
+			if vmItem.Status == model.VMStatusPaused {
+				return errs.New(
+					errs.CodeVMStateInvalid,
+					"live detach requires a responsive guest; resume the VM or stop it before detaching",
+				)
 			}
+			client, err := op.vsockClient(ctx, vmItem)
+			if err != nil {
+				return errs.WrapMsg(
+					errs.CodeVsockConnectionFailed,
+					"guest unavailable; stop the VM before detaching",
+					err,
+				)
+			}
+			if err := client.RemovePCIVolume(
+				ctx,
+				model.PCIVolumeIdentity{Serial: observed.Serial, ExpectedBytes: observed.ExpectedBytes},
+			); err != nil {
+				return errs.WrapMsg(
+					errs.CodeVMStateInvalid,
+					"guest volume release failed; retry or stop the VM before detaching",
+					err,
+				)
+			}
+		}
+		if err := ctrl.DetachVolume(ctx, observed); err != nil {
+			slog.Warn("Hot-unplug failed for drive", "volume", vol.ID, "error", err)
+			return err
 		}
 	}
 	// VolumeController.Detach

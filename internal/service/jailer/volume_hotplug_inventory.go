@@ -29,7 +29,7 @@ func (authority *volumeHotplugAuthority) openVolumeTransaction(
 		return nil, nil, vmLaunchDeviceAuthority{}, errors.Join(err, unix.Close(volumes))
 	}
 	transaction := &volumeHotplugTransaction{directory: volumes, journal: journal, source: -1,
-		record: volumeHotplugRecord{Volume: VMLaunchVolume{ID: volumeID}}}
+		record: volumeHotplugRecord{GuestDriveID: volumeID, Volume: VMLaunchVolume{ID: volumeID}}}
 	defer func() {
 		if returnErr != nil {
 			returnErr = errors.Join(returnErr, transaction.close())
@@ -50,6 +50,7 @@ func (authority *volumeHotplugAuthority) openVolumeTransaction(
 			continue
 		}
 		record := newVolumeHotplugRecord(instance, initial.Selection)
+		record.GuestDriveID = initial.GuestDriveID
 		record.SourceMajor, record.SourceMinor, record.SourceInode = initial.DeviceMajor, initial.DeviceMinor, initial.Inode
 		record.SourceUID, record.SourceGID, record.SourceMode = initial.UID, initial.GID, initial.Mode
 		record.Initial, record.State = true, "attached"
@@ -156,6 +157,8 @@ func mergeVolumeHotplugDeviceAuthority(
 			delete(byID, record.Volume.ID)
 		case "attached":
 			byID[record.Volume.ID] = launchDeviceVolume{
+				GuestDriveID: record.GuestDriveID, Path: "/volumes/" + record.GuestDriveID + ".raw",
+				Backing:   record.backingBinding(instance),
 				Selection: record.Volume, DeviceMajor: record.SourceMajor, DeviceMinor: record.SourceMinor,
 				Inode: record.SourceInode, UID: record.SourceUID, GID: record.SourceGID, Mode: record.SourceMode,
 			}

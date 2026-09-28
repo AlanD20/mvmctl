@@ -36,6 +36,10 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 		return
 	}
 	reader := io.MultiReader(bytes.NewReader(prefix), conn)
+	if string(prefix) == PCIVolumeMagic {
+		a.handlePCIVolumeConnection(ctx, conn)
+		return
+	}
 	if string(prefix) == vmexecwire.SourceSessionMagic {
 		sourceDeadline := time.Now().Add(vmexecwire.MaxExecutionDuration)
 		if err := conn.SetDeadline(sourceDeadline); err != nil {

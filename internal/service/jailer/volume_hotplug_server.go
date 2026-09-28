@@ -47,7 +47,9 @@ func (server *VMLifecycleServer) AttachVolume(
 		return VMVolumeResult{}, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, transaction.close()) }()
-	if err := inventory.admitVolumeCount(volumeHotplugDesiredCount(inventory, records, request.Volume.ID, true)); err != nil {
+	if err := inventory.admitVolumeCount(
+		volumeHotplugDesiredCount(inventory, records, request.Volume.ID, true),
+	); err != nil {
 		return VMVolumeResult{}, err
 	}
 	if transaction.record.Schema != 0 && transaction.record.Volume != request.Volume {
@@ -65,11 +67,16 @@ func (server *VMLifecycleServer) AttachVolume(
 	}
 	defer func() { returnErr = errors.Join(returnErr, backing.Release(context.WithoutCancel(ctx))) }()
 	if transaction.record.Schema == 0 || transaction.record.State == "detached" {
+		guestDriveID := transaction.record.GuestDriveID
 		transaction.record = newVolumeHotplugRecord(authority.locked.record, request.Volume)
 		for _, initial := range inventory.Volumes {
 			if initial.Selection.ID == request.Volume.ID {
 				transaction.record.Initial = true
+				transaction.record.GuestDriveID = initial.GuestDriveID
 			}
+		}
+		if guestDriveID != "" {
+			transaction.record.GuestDriveID = guestDriveID
 		}
 		transaction.record.State = "mounting"
 	}
@@ -94,7 +101,12 @@ func (server *VMLifecycleServer) AttachVolume(
 	}
 	// The durable VM journal precedes the ACL claim, so stopped cleanup can
 	// recover a crash at any claim/mount/API boundary without guessing a source.
-	if err := backing.Grant(ctx, request.VMID, authority.locked.record.active.userIDs.effective, request.Volume.private().access); err != nil {
+	if err := backing.Grant(
+		ctx,
+		request.VMID,
+		authority.locked.record.active.userIDs.effective,
+		request.Volume.private().access,
+	); err != nil {
 		return VMVolumeResult{}, err
 	}
 	source, err = volumeHotplugMountIdentity(ctx, backing.fd)
@@ -105,30 +117,37 @@ func (server *VMLifecycleServer) AttachVolume(
 	if err := transaction.write(ctx); err != nil {
 		return VMVolumeResult{}, err
 	}
-	observed, err := authority.observeVolumeDrive(ctx, request.Volume.ID)
+	observed, err := authority.observeVolumeDrive(ctx, transaction.record.GuestDriveID)
 	if err != nil {
 		return VMVolumeResult{}, err
 	}
-	if observed != nil && !volumeDriveMatches(*observed, transaction.record.Volume) {
+	if observed != nil && !volumeRecordDriveMatches(*observed, transaction.record) {
 		return VMVolumeResult{}, instanceStateError(request.VMID, "volume API drive differs from root-owned intent")
 	}
 	if err := authority.runVolumeHotplugMounts(ctx, transaction); err != nil {
 		return VMVolumeResult{}, err
 	}
 	if observed == nil {
-		body, err := json.Marshal(volumeDrive(transaction.record.Volume))
+		selection := transaction.record.Volume
+		selection.ID = transaction.record.GuestDriveID
+		body, err := json.Marshal(volumeDrive(selection))
 		if err != nil {
 			return VMVolumeResult{}, err
 		}
-		if _, err := authority.volumeHotplugAPI(ctx, http.MethodPut, "/drives/"+request.Volume.ID, body); err != nil {
+		if _, err := authority.volumeHotplugAPI(
+			ctx,
+			http.MethodPut,
+			"/drives/"+transaction.record.GuestDriveID,
+			body,
+		); err != nil {
 			return VMVolumeResult{}, err
 		}
 	}
-	observed, err = authority.observeVolumeDrive(ctx, request.Volume.ID)
+	observed, err = authority.observeVolumeDrive(ctx, transaction.record.GuestDriveID)
 	if err != nil {
 		return VMVolumeResult{}, err
 	}
-	if observed == nil || !volumeDriveMatches(*observed, transaction.record.Volume) {
+	if observed == nil || !volumeRecordDriveMatches(*observed, transaction.record) {
 		return VMVolumeResult{}, volumeHotplugUnknown(request.VMID, nil)
 	}
 	transaction.record.State = "attached"
@@ -155,47 +174,45 @@ func (server *VMLifecycleServer) DetachVolume(
 		return VMVolumeResult{}, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, authority.release(ctx)) }()
+	if request.Observed.LaunchGeneration != authority.locked.record.launchGeneration {
+		return VMVolumeResult{}, instanceStateError(request.VMID, "volume launch generation changed; retry observation")
+	}
+	fresh, err := authority.observeSelectedVolume(
+		ctx,
+		VMVolumeObserveRequest{VMID: request.VMID, VolumeID: request.VolumeID},
+	)
+	if err != nil {
+		return VMVolumeResult{}, err
+	}
+	if fresh != request.Observed {
+		return VMVolumeResult{}, instanceStateError(
+			request.VMID,
+			"volume attachment identity changed; retry observation",
+		)
+	}
+	if !fresh.Attached {
+		return VMVolumeResult{
+			VMID:             request.VMID,
+			VolumeID:         request.VolumeID,
+			LaunchGeneration: fresh.LaunchGeneration,
+			Attached:         false,
+		}, nil
+	}
 	transaction, _, _, err := authority.openVolumeTransaction(ctx, request.VolumeID)
 	if err != nil {
 		return VMVolumeResult{}, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, transaction.close()) }()
-	observed, err := authority.observeVolumeDrive(ctx, request.VolumeID)
+	observed, err := authority.observeVolumeDrive(ctx, transaction.record.GuestDriveID)
 	if err != nil {
 		return VMVolumeResult{}, err
 	}
-	if transaction.record.Schema == 0 {
-		if observed != nil {
-			return VMVolumeResult{}, instanceStateError(
-				request.VMID,
-				"volume drive has no root-owned attachment intent",
-			)
-		}
-		fd, _, err := transaction.inspectTarget(ctx)
-		if err == nil {
-			return VMVolumeResult{}, errors.Join(
-				instanceStateError(request.VMID, "unknown volume mount is retained"),
-				unix.Close(fd),
-			)
-		}
-		if !errors.Is(err, unix.ENOENT) {
-			return VMVolumeResult{}, err
-		}
-		return VMVolumeResult{VMID: request.VMID, VolumeID: request.VolumeID,
-			LaunchGeneration: authority.locked.record.launchGeneration, Attached: false}, nil
-	}
-	if transaction.record.State == "detached" && observed == nil {
-		fd, _, err := transaction.inspectTarget(ctx)
-		if err == nil {
-			return VMVolumeResult{}, errors.Join(
-				instanceStateError(request.VMID, "detached volume target reappeared"),
-				unix.Close(fd),
-			)
-		}
-		if !errors.Is(err, unix.ENOENT) {
-			return VMVolumeResult{}, err
-		}
-		return transaction.result(false), nil
+	if transaction.record.Schema != 2 ||
+		transaction.record.State != "attached" && transaction.record.State != "detaching" {
+		return VMVolumeResult{}, instanceStateError(
+			request.VMID,
+			"selected attachment differs from fresh root observation",
+		)
 	}
 	backing, err := reopenProtectedBacking(ctx, transaction.record.backingBinding(authority.locked.record))
 	if err != nil {
@@ -213,7 +230,7 @@ func (server *VMLifecycleServer) DetachVolume(
 			"detach backing differs from root-owned attachment identity",
 		)
 	}
-	if observed != nil && !volumeDriveMatches(*observed, transaction.record.Volume) {
+	if observed != nil && !volumeRecordDriveMatches(*observed, transaction.record) {
 		return VMVolumeResult{}, instanceStateError(request.VMID, "detach API drive differs from root-owned intent")
 	}
 	transaction.record.State = "detaching"
@@ -221,11 +238,16 @@ func (server *VMLifecycleServer) DetachVolume(
 		return VMVolumeResult{}, err
 	}
 	if observed != nil {
-		if _, err := authority.volumeHotplugAPI(ctx, http.MethodDelete, "/drives/"+request.VolumeID, nil); err != nil {
+		if _, err := authority.volumeHotplugAPI(
+			ctx,
+			http.MethodDelete,
+			"/drives/"+transaction.record.GuestDriveID,
+			nil,
+		); err != nil {
 			return VMVolumeResult{}, err
 		}
 	}
-	if observed, err = authority.observeVolumeDrive(ctx, request.VolumeID); err != nil {
+	if observed, err = authority.observeVolumeDrive(ctx, transaction.record.GuestDriveID); err != nil {
 		return VMVolumeResult{}, err
 	} else if observed != nil {
 		return VMVolumeResult{}, volumeHotplugUnknown(request.VMID, nil)
@@ -241,6 +263,8 @@ func (server *VMLifecycleServer) DetachVolume(
 	if err := transaction.write(ctx); err != nil {
 		return VMVolumeResult{}, err
 	}
+	// Initial receipts retain captured guest IDs for restored-volume retry. A live
+	// addition uses its logical ID as the guest ID, so complete absence is sufficient.
 	if !transaction.record.Initial {
 		if err := unix.Unlinkat(transaction.journal, request.VolumeID+".json", 0); err != nil {
 			return VMVolumeResult{}, err
@@ -253,7 +277,7 @@ func (server *VMLifecycleServer) DetachVolume(
 }
 
 func newVolumeHotplugRecord(instance instanceRecord, selection VMLaunchVolume) volumeHotplugRecord {
-	return volumeHotplugRecord{Schema: 1, VMID: instance.vmID, OwnerUID: instance.ownerUID,
+	return volumeHotplugRecord{Schema: 2, GuestDriveID: selection.ID, VMID: instance.vmID, OwnerUID: instance.ownerUID,
 		BootID: instance.launch.hostBootID, LaunchGeneration: instance.launchGeneration, Volume: selection}
 }
 
@@ -270,6 +294,16 @@ func volumeDriveMatches(observed model.DriveConfig, selection VMLaunchVolume) bo
 		observed.RateLimiter == nil && observed.Socket == nil
 }
 
+func volumeRecordDriveMatches(observed model.DriveConfig, record volumeHotplugRecord) bool {
+	selection := record.Volume
+	selection.ID = record.GuestDriveID
+	return volumeDriveMatches(observed, selection)
+}
+
+func (record volumeHotplugRecord) basename() string {
+	return record.GuestDriveID + ".raw"
+}
+
 func (transaction *volumeHotplugTransaction) result(attached bool) VMVolumeResult {
 	return VMVolumeResult{VMID: transaction.record.VMID, VolumeID: transaction.record.Volume.ID,
 		LaunchGeneration: transaction.record.LaunchGeneration, Attached: attached}
@@ -284,8 +318,14 @@ func (record volumeHotplugRecord) backingBinding(instance instanceRecord) protec
 		kind: "volume", logicalID: record.Volume.ID, ownerUID: instance.ownerUID,
 		cacheIdentity: instance.launch.cacheIdentity, bytes: record.Volume.ExpectedBytes,
 		identity: managedVMConfigStat{
-			deviceMajor: record.SourceMajor, deviceMinor: record.SourceMinor, inode: record.SourceInode,
-			uid: record.SourceUID, gid: record.SourceGID, mode: record.SourceMode, nlink: 1, size: record.Volume.ExpectedBytes,
+			deviceMajor: record.SourceMajor,
+			deviceMinor: record.SourceMinor,
+			inode:       record.SourceInode,
+			uid:         record.SourceUID,
+			gid:         record.SourceGID,
+			mode:        record.SourceMode,
+			nlink:       1,
+			size:        record.Volume.ExpectedBytes,
 		},
 	}
 }

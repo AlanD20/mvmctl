@@ -283,6 +283,8 @@ func dispatch(
 		return dispatchHandled, handleVMVolumeAttach(ctx, endpoint, caller, deps.control)
 	case jailer.VMVolumeDetachAction:
 		return dispatchHandled, handleVMVolumeDetach(ctx, endpoint, caller, deps.control)
+	case jailer.VMVolumeObserveAction:
+		return dispatchHandled, handleVMVolumeObserve(ctx, endpoint, caller, deps.control)
 	case jailer.ProtectedVolumeInspectAction:
 		return dispatchHandled, handleProtectedVolumeInspect(ctx, endpoint, caller, deps.control)
 	case jailer.ProtectedVolumeGrowAction:

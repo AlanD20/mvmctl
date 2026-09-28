@@ -163,7 +163,8 @@ func (c *Controller) Start(ctx context.Context) error {
 			fmt.Sprintf("VM '%s' is paused — use resume() instead (current state: %s)", name, c.vm.Status))
 	}
 
-	if _, err := jailersvc.NewVMAPIBrokerClient().StartInstance(ctx, jailersvc.VMAPIRequest{VMID: c.vm.ID}); err != nil {
+	if _, err := jailersvc.NewVMAPIBrokerClient().
+		StartInstance(ctx, jailersvc.VMAPIRequest{VMID: c.vm.ID}); err != nil {
 		return err
 	}
 
@@ -312,11 +313,25 @@ func (c *Controller) AttachManagedVolume(ctx context.Context, cacheRoot string, 
 // --- DetachVolume ---
 // DetachVolume hot-unplugs a drive from the running Firecracker process and
 // removes it from the persisted config.
-func (c *Controller) DetachVolume(ctx context.Context, driveID string) error {
+func (c *Controller) DetachVolume(ctx context.Context, observed jailersvc.VMVolumeObservation) error {
 	_, err := jailersvc.NewVMLifecycleClient().
-		DetachVolume(ctx, jailersvc.VMVolumeDetachRequest{VMID: c.vm.ID, VolumeID: driveID})
+		DetachVolume(ctx, jailersvc.VMVolumeDetachRequest{VMID: c.vm.ID, VolumeID: observed.VolumeID, Observed: observed})
 	if err != nil {
-		slog.Error("failed to detach root-authorized volume", "vm", c.vm.Name, "volume", driveID, "error", err)
+		slog.Error(
+			"failed to detach root-authorized volume",
+			"vm",
+			c.vm.Name,
+			"volume",
+			observed.VolumeID,
+			"error",
+			err,
+		)
 	}
 	return err
+}
+
+// ObserveVolume reads the selected root-owned attachment without mutation.
+func (c *Controller) ObserveVolume(ctx context.Context, volumeID string) (jailersvc.VMVolumeObservation, error) {
+	return jailersvc.NewVMLifecycleClient().
+		ObserveVolume(ctx, jailersvc.VMVolumeObserveRequest{VMID: c.vm.ID, VolumeID: volumeID})
 }

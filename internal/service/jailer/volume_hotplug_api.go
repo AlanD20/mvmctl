@@ -95,6 +95,20 @@ func (authority *volumeHotplugAuthority) observeVolumeDrive(
 	ctx context.Context,
 	id string,
 ) (*model.DriveConfig, error) {
+	drives, err := authority.observeVolumeDrives(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var found *model.DriveConfig
+	for index := range drives {
+		if drives[index].DriveID == id {
+			found = &drives[index]
+		}
+	}
+	return found, nil
+}
+
+func (authority *volumeHotplugAuthority) observeVolumeDrives(ctx context.Context) ([]model.DriveConfig, error) {
 	raw, err := authority.volumeHotplugAPI(ctx, http.MethodGet, "/vm/config", nil)
 	if err != nil {
 		return nil, err
@@ -105,19 +119,18 @@ func (authority *volumeHotplugAuthority) observeVolumeDrive(
 	if err := json.Unmarshal(raw, &config); err != nil || config.Drives == nil {
 		return nil, volumeHotplugUnknown(authority.locked.record.vmID, err)
 	}
-	var found *model.DriveConfig
+	seen := make(map[string]bool, len(config.Drives))
 	for index := range config.Drives {
-		if config.Drives[index].DriveID == id {
-			if found != nil {
-				return nil, instanceStateError(
-					authority.locked.record.vmID,
-					"volume API inventory contains duplicate drive IDs",
-				)
-			}
-			found = &config.Drives[index]
+		id := config.Drives[index].DriveID
+		if id == "" || seen[id] {
+			return nil, instanceStateError(
+				authority.locked.record.vmID,
+				"volume API inventory contains duplicate drive IDs",
+			)
 		}
+		seen[id] = true
 	}
-	return found, nil
+	return config.Drives, nil
 }
 
 func volumeHotplugUnknown(vmID string, cause error) error {

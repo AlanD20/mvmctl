@@ -39,7 +39,7 @@ func (record volumeHotplugRecord) matchesSource(stat unix.Statx_t) bool {
 func (transaction *volumeHotplugTransaction) inspectTarget(
 	ctx context.Context,
 ) (_ int, _ unix.Statx_t, returnErr error) {
-	fd, err := unix.Openat2(transaction.directory, transaction.record.Volume.private().basename(), &unix.OpenHow{
+	fd, err := unix.Openat2(transaction.directory, transaction.record.basename(), &unix.OpenHow{
 		Flags:   unix.O_PATH | unix.O_CLOEXEC | unix.O_NOFOLLOW,
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
 	})
@@ -97,7 +97,7 @@ func (transaction *volumeHotplugTransaction) applyMount(ctx context.Context, mou
 
 func (transaction *volumeHotplugTransaction) attachMount(ctx context.Context, mount int) (returnErr error) {
 	record := &transaction.record
-	name := record.Volume.private().basename()
+	name := record.basename()
 	target, stat, err := transaction.inspectTarget(ctx)
 	if errors.Is(err, unix.ENOENT) {
 		if record.TargetInode != 0 {
@@ -196,7 +196,7 @@ func (transaction *volumeHotplugTransaction) detachMount(ctx context.Context) (r
 		if err := unix.Fchdir(transaction.directory); err != nil {
 			return err
 		}
-		if err := unix.Unmount("./"+record.Volume.private().basename(), unix.MNT_DETACH); err != nil {
+		if err := unix.Unmount("./"+record.basename(), unix.MNT_DETACH); err != nil {
 			return err
 		}
 		current, placeholder, err := transaction.inspectTarget(ctx)
@@ -220,7 +220,7 @@ func (transaction *volumeHotplugTransaction) detachMount(ctx context.Context) (r
 	if !record.matchesPlaceholder(stat) {
 		return instanceStateError(record.VMID, "detached volume target does not match retained placeholder")
 	}
-	if err := unix.Unlinkat(transaction.directory, record.Volume.private().basename(), 0); err != nil {
+	if err := unix.Unlinkat(transaction.directory, record.basename(), 0); err != nil {
 		return err
 	}
 	return unix.Fsync(transaction.directory)

@@ -60,10 +60,19 @@ func TestLaunchManagedVolumeHotplugMountTransition(t *testing.T) {
 			transaction := &volumeHotplugTransaction{
 				directory: directory, journal: journalFD, source: source, attach: true,
 				record: volumeHotplugRecord{
-					Schema: 1, VMID: testVMID, OwnerUID: 1000, BootID: boot, LaunchGeneration: 1,
-					State: "mounting", SourceMajor: unix.Major(sourceStat.Dev),
-					SourceMinor: unix.Minor(sourceStat.Dev), SourceInode: sourceStat.Ino,
-					SourceUID: sourceStat.Uid, SourceGID: sourceStat.Gid, SourceMode: uint16(sourceStat.Mode),
+					Schema:           2,
+					GuestDriveID:     strings.Repeat("b", 64),
+					VMID:             testVMID,
+					OwnerUID:         1000,
+					BootID:           boot,
+					LaunchGeneration: 1,
+					State:            "mounting",
+					SourceMajor:      unix.Major(sourceStat.Dev),
+					SourceMinor:      unix.Minor(sourceStat.Dev),
+					SourceInode:      sourceStat.Ino,
+					SourceUID:        sourceStat.Uid,
+					SourceGID:        sourceStat.Gid,
+					SourceMode:       uint16(sourceStat.Mode),
 					Volume: VMLaunchVolume{
 						ID: strings.Repeat("a", 64), Format: model.VolumeFormatRaw,
 						ExpectedBytes: uint64(len(payload)), ReadOnly: tc.readOnly, CacheType: model.CacheTypeUnsafe,
@@ -95,7 +104,7 @@ func TestLaunchManagedVolumeHotplugMountTransition(t *testing.T) {
 				if tc.changed {
 					assert.Contains(t, err.Error(), "source changed")
 				}
-				_, statErr := os.Stat(filepath.Join(volumes, transaction.record.Volume.private().basename()))
+				_, statErr := os.Stat(filepath.Join(volumes, transaction.record.basename()))
 				assert.ErrorIs(t, statErr, os.ErrNotExist)
 				assertHotplugTestDescriptors(t, beforeFDs)
 				recorded, present, readErr := readVolumeHotplugRecord(
@@ -110,7 +119,7 @@ func TestLaunchManagedVolumeHotplugMountTransition(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assertHotplugTestDescriptors(t, beforeFDs)
-			name := transaction.record.Volume.private().basename()
+			name := transaction.record.basename()
 			target, err := unix.Openat(directory, name, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 			require.NoError(t, err)
 			t.Cleanup(func() {

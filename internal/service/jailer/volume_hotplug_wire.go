@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	VMVolumeAttachAction = "jailer-vm-volume-attach"
-	VMVolumeDetachAction = "jailer-vm-volume-detach"
+	VMVolumeAttachAction  = "jailer-vm-volume-attach"
+	VMVolumeDetachAction  = "jailer-vm-volume-detach"
+	VMVolumeObserveAction = "jailer-vm-volume-observe"
 )
 
 // VMVolumeAttachRequest selects one raw volume. CacheRoot is only the namespace
@@ -48,8 +49,9 @@ func (request *VMVolumeAttachRequest) UnmarshalJSON(raw []byte) error {
 // VMVolumeDetachRequest never accepts a source path or a drive configuration.
 // The receiver recovers that intent from its own committed volume inventory.
 type VMVolumeDetachRequest struct {
-	VMID     string `json:"vm_id"`
-	VolumeID string `json:"volume_id"`
+	VMID     string              `json:"vm_id"`
+	VolumeID string              `json:"volume_id"`
+	Observed VMVolumeObservation `json:"observed"`
 }
 
 func (request VMVolumeDetachRequest) Validate() error {
@@ -59,7 +61,70 @@ func (request VMVolumeDetachRequest) Validate() error {
 	if !isCanonicalManagedResourceID(request.VolumeID, 64) {
 		return instanceValidationError("volume ID must be 64 lowercase hexadecimal characters")
 	}
+	return request.Observed.Validate(request.VMID, request.VolumeID)
+}
+
+// VMVolumeObserveRequest selects root-owned identity without changing it.
+type VMVolumeObserveRequest struct {
+	VMID     string `json:"vm_id"`
+	VolumeID string `json:"volume_id"`
+}
+
+// Validate admits the closed VM and logical volume selection.
+func (request VMVolumeObserveRequest) Validate() error {
+	if err := (VMCleanupRequest{VMID: request.VMID}).Validate(); err != nil {
+		return err
+	}
+	if !isCanonicalManagedResourceID(request.VolumeID, 64) {
+		return instanceValidationError("volume ID must be 64 lowercase hexadecimal characters")
+	}
 	return nil
+}
+
+// VMVolumeObservation binds one guest release to the receiver's observed attachment.
+// CRITICAL: The detach receiver compares every field freshly under the VM lock.
+type VMVolumeObservation struct {
+	VMID             string `json:"vm_id"`
+	VolumeID         string `json:"volume_id"`
+	LaunchGeneration uint64 `json:"launch_generation"`
+	Attached         bool   `json:"attached"`
+	GuestDriveID     string `json:"guest_drive_id"`
+	Serial           string `json:"serial"`
+	ExpectedBytes    uint64 `json:"expected_bytes"`
+	MountID          uint64 `json:"mount_id"`
+	SourceMajor      uint32 `json:"source_major"`
+	SourceMinor      uint32 `json:"source_minor"`
+	SourceInode      uint64 `json:"source_inode"`
+}
+
+// Validate checks response identity and complete attachment evidence.
+func (result VMVolumeObservation) Validate(vmID, volumeID string) error {
+	if result.VMID != vmID || result.VolumeID != volumeID || result.LaunchGeneration == 0 {
+		return instanceValidationError("volume observation differs from requested identity")
+	}
+	if result.Attached {
+		if !isCanonicalManagedResourceID(result.GuestDriveID, 64) || result.Serial == "" || len(result.Serial) > 20 ||
+			result.ExpectedBytes == 0 ||
+			result.MountID == 0 ||
+			result.SourceInode == 0 {
+			return instanceValidationError("volume observation has incomplete attachment identity")
+		}
+	} else if result.GuestDriveID != "" || result.Serial != "" || result.ExpectedBytes != 0 || result.MountID != 0 || result.SourceMajor != 0 || result.SourceMinor != 0 || result.SourceInode != 0 {
+		return instanceValidationError("absent volume observation carries attachment identity")
+	}
+	return nil
+}
+
+// ObserveVolume obtains authoritative attachment identity without journal repair.
+func (client *VMLifecycleClient) ObserveVolume(
+	ctx context.Context,
+	request VMVolumeObserveRequest,
+) (VMVolumeObservation, error) {
+	if err := request.Validate(); err != nil {
+		return VMVolumeObservation{}, err
+	}
+	return exchangeTrustedRelease(ctx, client.transport, VMVolumeObserveAction, request, nil, 0,
+		func(result VMVolumeObservation) error { return result.Validate(request.VMID, request.VolumeID) })
 }
 
 type VMVolumeResult struct {
