@@ -17,6 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Live terminal console repeat gate (2026-09-28):** Exact console source SHA-256
+`307ab71e8298d347e6365cb1a6a250f8f067217852922abea7cf3b93d01facfb` retains the existing
+owned relay lifecycle journey and adds one successful interactive PTY journey. The new case passed alone
+(10.12 seconds); both cases then passed twice (26.42/24.12 seconds) against candidate `a5518257` inside only
+`mvmctl-030-test`, with strict zero-other-outcome reports and exact config/four empty inventory cleanup.
+The real installed CLI obtains raw terminal mode through normal endpoint admission, receives a unique
+guest-agent-emitted serial marker, detaches via Ctrl-X then d, restores terminal attributes and exits cleanly.
+Its retained child pidfd proves exit; original Firecracker identity, root relay observation and vsock responsiveness
+remain unchanged. Reports are `qa-console-307a-two-pass{1,2}.{json,xml}`.
+This supersedes the earlier successful-attachment/serial-byte gap for this local file; hostile endpoint faults,
+the complete release matrix and clean-host qualification remain separate gates.
+
 **Complete logs repeat gate (2026-09-28):** Exact logs source SHA-256
 `46c9d7f32f89e837e9ec6d048bce7db3066a0dfbb405da4939ed9f8c207fae09` passed all 11 cases
 twice (74.26/86.98 seconds) against installed candidate `a5518257` inside only `mvmctl-030-test`.

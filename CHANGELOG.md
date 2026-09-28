@@ -23,8 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > original incident attribution, guest allocation-failure handling and ancestor/global OOM safety remain unproved.
 > Active console discovery/kill now uses root-verified relay authority and durable relay-only stop; affected
 > Go/root/race gates pass. Its owned installed-candidate lifecycle journey passed twice (14.04/13.25s),
-> proving relay-only stop preserves Firecracker/vsock and VM restart renews the relay. Successful interactive
-> endpoint admission and serial-byte delivery remain unqualified; earlier inactive-relay results do not qualify them.
+> proving relay-only stop preserves Firecracker/vsock and VM restart renews the relay. A later real-PTY
+> attachment journey passed, then both console journeys passed twice (26.42/24.12s), including normal endpoint
+> admission, unique guest serial bytes, detach, terminal restoration and preserved VM liveness. Hostile endpoint
+> faults remain separate gates.
 > The full current-source Python matrix,
 > clean-host reset/installation, Tier 3, aarch64 runtime, GitHub CI, and final release approval remain open.
 > No candidate has been installed over the
@@ -46,6 +48,8 @@ full current-source network/nftables/policy matrix remain release gates.
 
 ### Added
 
+- Both console lifecycle and live-PTY attachment journeys passed twice on the installed runner candidate,
+  proving serial delivery, clean detach/terminal restoration and preserved Firecracker/vsock identity.
 - The complete 11-case logs module passed twice on the installed runner candidate with owned cleanup.
   Coverage verifies real guest identity and serial markers, byte-exact LF tails preserving carriage returns,
   VMM logging/follow, identifier lookup and retained logs after root-authoritative stop. It does not qualify
