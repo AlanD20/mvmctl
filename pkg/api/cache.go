@@ -153,7 +153,10 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[strin
 	}
 	appliancePruned := guestfs.PruneAppliance(op.CacheDir, dryRun)
 	warmPruned := op.Services.Cache.PruneWarmImages(ctx, dryRun)
-	guestfsStateCleaned := guestfs.CleanStaleState()
+	guestfsStateCleaned := false
+	if !dryRun {
+		guestfsStateCleaned = guestfs.CleanStaleState()
+	}
 	result := map[string]any{
 		"service_binaries":       serviceBinariesCleaned,
 		"appliance":              appliancePruned,
