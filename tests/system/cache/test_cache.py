@@ -26,8 +26,11 @@ import errno
 import hashlib
 import json
 import os
+import select
 import shlex
+import signal
 import stat
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -387,6 +390,159 @@ def guestfs_preview_sentinel(selected_cache_case):
         sentinel.cleanup()
 
 
+class _UnrelatedGuestfishProcess:
+    """A creation-owned sleep process whose identity is held by a pidfd."""
+
+    def __init__(self):
+        self.pidfd = None
+        self.admitted = False
+        self.pid = None
+        self.start = None
+        self.argv = f"guestfish-cache-sentinel-{uuid.uuid4().hex}".encode()
+        self.uid = os.getuid()
+        self.executable = os.stat("/bin/sleep")
+
+    @staticmethod
+    def _start(pid):
+        # Field 22 follows a parenthesized comm, which may itself contain spaces.
+        raw = Path(f"/proc/{pid}/stat").read_text()
+        return int(raw[raw.rindex(")") + 2:].split()[19])
+
+    def seed(self):
+        assert self.uid != 0, "Run the cache sentinel as the ordinary runner user"
+        receipt_read, receipt_write = os.pipe2(os.O_CLOEXEC)
+        gate_read, gate_write = os.pipe2(os.O_CLOEXEC)
+        intermediary = None
+        try:
+            intermediary = os.fork()
+            if intermediary == 0:
+                try:
+                    os.close(receipt_read)
+                    os.close(gate_write)
+                    child = os.fork()
+                    if child != 0:
+                        os._exit(0)
+                    # Only this directly created child can write the private
+                    # receipt. Without the parent's ack it exits within 5s.
+                    receipt = f"{os.getpid()} {self._start(os.getpid())}\n".encode()
+                    assert os.write(receipt_write, receipt) == len(receipt)
+                    os.close(receipt_write)
+                    ready, _, _ = select.select([gate_read], [], [], 5)
+                    if not ready or os.read(gate_read, 1) != b"x":
+                        os._exit(1)
+                    os.close(gate_read)
+                    os.execv("/bin/sleep", [os.fsdecode(self.argv), "180"])
+                except BaseException:
+                    os._exit(1)
+            os.close(receipt_write)
+            receipt_write = None
+            os.close(gate_read)
+            gate_read = None
+            ready, _, _ = select.select([receipt_read], [], [], 5)
+            assert ready, "Owned sleep child did not publish its creation receipt"
+            receipt = os.read(receipt_read, 128)
+            assert receipt.endswith(b"\n") and len(receipt) < 128, receipt
+            self.pid, self.start = map(int, receipt.split())
+            assert self.pid > 1 and self.start > 0
+            self.pidfd = os.pidfd_open(self.pid)
+            assert not select.select([self.pidfd], [], [], 0)[0]
+            assert self._start(self.pid) == self.start
+            status = Path(f"/proc/{self.pid}/status").read_text()
+            fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
+            assert tuple(map(int, fields["Uid"].split())) == (self.uid,) * 4
+            assert int(fields["PPid"]) in (intermediary, 1)
+            assert self._start(self.pid) == self.start
+            assert not select.select([self.pidfd], [], [], 0)[0]
+            self.admitted = True
+            assert os.write(gate_write, b"x") == 1
+            os.close(gate_write)
+            gate_write = None
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                assert not select.select([self.pidfd], [], [], 0)[0], "Owned sleep exited at startup"
+                cmdline = Path(f"/proc/{self.pid}/cmdline").read_bytes()
+                status = Path(f"/proc/{self.pid}/status").read_text()
+                fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
+                if cmdline == self.argv + b"\x00180\x00" and int(fields["PPid"]) == 1:
+                    break
+                time.sleep(0.01)
+            self.snapshot()
+        finally:
+            for fd in (receipt_read, receipt_write, gate_read, gate_write):
+                if fd is not None:
+                    os.close(fd)
+            if intermediary not in (None, 0):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    waited, status = os.waitpid(intermediary, os.WNOHANG)
+                    if waited:
+                        assert os.waitstatus_to_exitcode(status) == 0
+                        break
+                    time.sleep(0.01)
+                else:
+                    pytest.fail("Owned intermediary did not exit within 5s")
+
+    def snapshot(self):
+        assert self.pidfd is not None
+        assert not select.select([self.pidfd], [], [], 0)[0], "Unrelated owned sleep was terminated"
+        assert self._start(self.pid) == self.start
+        status = Path(f"/proc/{self.pid}/status").read_text()
+        fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
+        uids = tuple(map(int, fields["Uid"].split()))
+        assert uids == (self.uid,) * 4
+        assert int(fields["PPid"]) == 1, "A test ancestor would make the old cleaner miss this process"
+        cmdline = Path(f"/proc/{self.pid}/cmdline").read_bytes()
+        assert cmdline == self.argv + b"\x00180\x00"
+        # The old predicate examines the process itself, then stops before PID 1:
+        # same UID + guestfish in argv + no mvm ancestor is an admitted target.
+        assert b"guestfish" in cmdline.lower() and b"mvm" not in cmdline.lower()
+        executable = os.stat(f"/proc/{self.pid}/exe")
+        identity = (executable.st_dev, executable.st_ino)
+        assert identity == (self.executable.st_dev, self.executable.st_ino)
+        assert self._start(self.pid) == self.start
+        assert not select.select([self.pidfd], [], [], 0)[0]
+        return self.pid, self.start, uids, identity, cmdline
+
+    def cleanup(self):
+        if self.pidfd is None:
+            return
+        try:
+            if not self.admitted:
+                return  # Preserve any process whose creation identity was not proved.
+            if not select.select([self.pidfd], [], [], 0)[0]:
+                # A pidfd can signal only the directly created incarnation,
+                # including on startup failure; a recycled raw PID is never used.
+                try:
+                    signal.pidfd_send_signal(self.pidfd, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                if not select.select([self.pidfd], [], [], 2)[0]:
+                    try:
+                        signal.pidfd_send_signal(self.pidfd, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+            assert select.select([self.pidfd], [], [], 2)[0], "Owned sleep cleanup did not finish"
+        finally:
+            os.close(self.pidfd)
+            self.pidfd = None
+
+
+@pytest.fixture
+def unrelated_guestfish_process(selected_cache_case, record_property):
+    """No GuestFS installation is needed to exercise the old process selector."""
+    sentinel = _UnrelatedGuestfishProcess()
+    try:
+        sentinel.seed()
+        record_property("misc_process_creation", json.dumps(sentinel.snapshot(), default=bytes.hex))
+        yield sentinel
+    finally:
+        sentinel.cleanup()
+        record_property(
+            "misc_process_cleanup",
+            "admitted pidfd exited and closed" if sentinel.admitted else "startup gate closed; no admitted pidfd",
+        )
+
+
 class TestCacheInit:
     """Test cache initialization operations."""
 
@@ -645,13 +801,63 @@ class TestCachePruneActual:
         pytest.mark.domain_cache,
     ]
 
-    def test_cache_prune_misc_actual(self, runner_vm):
-        """Actually prune misc cache (safe to actually clean temp files)."""
-        result = _run_mvm(runner_vm, "cache", "prune", "misc", "--force")
-        assert result.returncode == 0
-
-        init_result = _run_mvm(runner_vm, "cache", "init")
-        assert init_result.returncode == 0
+    def test_cache_prune_misc_actual(
+        self, runner_vm, selected_cache_case, guestfs_preview_sentinel,
+        unrelated_guestfish_process, record_property,
+    ):
+        """Misc prune removes selected artifacts and preserves unrelated GuestFS state."""
+        selected_cache_case.prepare()
+        cache = selected_cache_case.cache_dir
+        appliance = cache / "appliance"
+        appliance.mkdir(mode=0o700)
+        artifacts = [appliance / name for name in ("kernel", "initrd", "root")]
+        artifacts.append(cache / "bin" / "owned-service-artifact")
+        for path in artifacts:
+            with path.open("xb") as output:
+                output.write(b"selected-cache-owned-misc-artifact\n")
+        warm = cache / "tmp" / "ready" / "preview-sentinel"
+        assert warm.read_bytes() == b"cache-preview-must-preserve-this-file\n"
+        before = selected_cache_case.snapshot()
+        global_before = guestfs_preview_sentinel.snapshot()
+        process_before = unrelated_guestfish_process.snapshot()
+        record_property("misc_global_appliance_before", json.dumps(global_before, default=bytes.hex))
+        data = _json_success_data(
+            _run_mvm(runner_vm, "cache", "prune", "misc", "--force", "--json").stdout,
+            dict,
+        )
+        record_property("misc_prune_result", json.dumps(data, sort_keys=True))
+        # Observe both independently so one illicit global mutation cannot hide
+        # the other regression in the old binary's failure output.
+        failures = []
+        for kind, sentinel, expected in (
+            ("global appliance", guestfs_preview_sentinel, global_before),
+            ("unrelated process", unrelated_guestfish_process, process_before),
+        ):
+            try:
+                assert sentinel.snapshot() == expected
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"{kind} preservation: {error!r}")
+        assert not failures, "Misc prune crossed the selected cache boundary:\n" + "\n".join(failures)
+        assert data["service_binaries"] is True
+        assert data["appliance"] is True
+        assert data["warm_images"] is True
+        assert data.get("guestfs_state", False) is False
+        assert data["stale_provision_mounts"] is False
+        removed_paths = (*artifacts, appliance, cache / "bin", warm)
+        for path in removed_paths:
+            with pytest.raises(FileNotFoundError):
+                path.lstat()
+        after = selected_cache_case.snapshot()
+        assert after[0] == before[0]
+        assert after[2] == before[2]
+        removed = {str(path) for path in removed_paths}
+        expected_files = {path: value for path, value in before[1].items() if path not in removed}
+        assert after[1] == expected_files
+        record_property("misc_selected_artifacts_removed", json.dumps(sorted(removed)))
+        record_property(
+            "misc_global_appliance_after", json.dumps(guestfs_preview_sentinel.snapshot(), default=bytes.hex)
+        )
+        record_property("misc_process_after", json.dumps(unrelated_guestfish_process.snapshot(), default=bytes.hex))
 
     def test_cache_prune_misc_with_force(self, runner_vm):
         """Prune misc cache with --force flag.
