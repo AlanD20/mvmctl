@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
 import re
+import select
 import stat
+import subprocess
+import tarfile
 from pathlib import Path
 from typing import Any
 
@@ -206,6 +210,260 @@ class TestBinaryEdges:
 # ============================================================================
 
 
+_BIN_RELEASE_RECEIVER = r'''
+import hashlib, json, os, re, stat, sys
+
+fds, parents = [], []
+directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+file_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+def identity(info, directory=False):
+    basic = [info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode]
+    return basic if directory else basic + [info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        assert key not in result, "duplicate root receipt field"
+        result[key] = value
+    return result
+
+def open_directory(parent, name, managed=True):
+    fd = os.open(name, directory_flags, dir_fd=parent)
+    fds.append(fd)
+    info = os.fstat(fd)
+    assert info.st_uid == info.st_gid == 0 and stat.S_ISDIR(info.st_mode), name
+    assert stat.S_IMODE(info.st_mode) == 0o700 if managed else not info.st_mode & 0o022, name
+    parents.append((parent, name, fd, identity(info, True)))
+    return fd
+
+def verify_parents():
+    for parent, name, fd, expected in parents:
+        assert identity(os.fstat(fd), True) == expected, name
+        assert identity(os.stat(name, dir_fd=parent, follow_symlinks=False), True) == expected, name
+
+def read_file(fd, maximum):
+    before = identity(os.fstat(fd))
+    assert before[6] <= maximum
+    os.lseek(fd, 0, os.SEEK_SET)
+    data = bytearray()
+    while len(data) <= maximum:
+        part = os.read(fd, min(65536, maximum + 1 - len(data)))
+        if not part:
+            break
+        data.extend(part)
+    assert len(data) <= maximum and identity(os.fstat(fd)) == before
+    return bytes(data)
+
+def no_live_instances():
+    try:
+        root = open_directory(state, "instances")
+    except FileNotFoundError:
+        return
+    owners = os.listdir(root)
+    assert len(owners) <= 64
+    for owner in owners:
+        assert re.fullmatch(r"[1-9][0-9]*", owner), owner
+        uid = open_directory(root, owner)
+        names = os.listdir(uid)
+        assert len(names) <= 1000
+        for name in names:
+            assert re.fullmatch(r"[0-9a-f]{32}\.json", name), name
+            fd = os.open(name, file_flags, dir_fd=uid)
+            fds.append(fd)
+            info = os.fstat(fd)
+            assert info.st_uid == info.st_gid == 0 and stat.S_ISREG(info.st_mode)
+            assert info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600
+            record = json.loads(read_file(fd, 65536), object_pairs_hook=unique_object)
+            assert record["schema_version"] == 6 and record["owner_uid"] == int(owner)
+            assert record["vm_id"] + ".json" == name and record["lifecycle"] == "cleaned", name
+            assert identity(os.stat(name, dir_fd=uid, follow_symlinks=False)) == identity(info)
+
+def absent_target():
+    verify_parents()
+    try:
+        os.stat("1.16.1", dir_fd=architecture, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    raise AssertionError("1.16.1 root slot exists; preserve it")
+
+def open_pair(version):
+    directory = open_directory(architecture, version)
+    assert set(os.listdir(directory)) == {"manifest.json", "firecracker", "jailer"}
+    leaves = {}
+    for name in ("manifest.json", "firecracker", "jailer"):
+        fd = os.open(name, file_flags, dir_fd=directory)
+        fds.append(fd)
+        info = os.fstat(fd)
+        assert info.st_uid == info.st_gid == 0 and stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+        assert stat.S_IMODE(info.st_mode) == (0o600 if name == "manifest.json" else 0o755)
+        leaves[name] = (fd, identity(info))
+    return directory, leaves
+
+def pair_receipt(pair, version):
+    directory, leaves = pair
+    verify_parents()
+    assert set(os.listdir(directory)) == set(leaves)
+    content, identities = {}, {}
+    for name, (fd, expected) in leaves.items():
+        assert identity(os.fstat(fd)) == expected, name
+        assert identity(os.stat(name, dir_fd=directory, follow_symlinks=False)) == expected, name
+        content[name] = read_file(fd, 4096 if name == "manifest.json" else 64 * 1024 * 1024)
+        identities[name] = expected
+    manifest = json.loads(content["manifest.json"], object_pairs_hook=unique_object)
+    assert set(manifest) == {"schema_version", "release", "archive_sha256", "firecracker", "jailer"}
+    assert type(manifest["schema_version"]) is int and manifest["schema_version"] == 1
+    assert manifest["release"] == {"version": version, "architecture": "x86_64"}
+    assert re.fullmatch(r"[0-9a-f]{64}", manifest["archive_sha256"])
+    for name in ("firecracker", "jailer"):
+        item = manifest[name]
+        assert set(item) == {"sha256", "size_bytes"} and type(item["size_bytes"]) is int
+        assert 120 <= item["size_bytes"] <= 64 * 1024 * 1024
+        assert item["size_bytes"] == len(content[name])
+        assert item["sha256"] == hashlib.sha256(content[name]).hexdigest()
+    return {"manifest": manifest, "directory": identity(os.fstat(directory), True), "files": identities}
+
+try:
+    root = open_directory(None, "/", False)
+    var = open_directory(root, "var", False)
+    lib = open_directory(var, "lib", False)
+    state = open_directory(lib, "mvmctl")
+    binaries = open_directory(state, "binaries")
+    architecture = open_directory(binaries, "x86_64")
+    original = open_pair("1.16.2")
+    original_receipt = pair_receipt(original, "1.16.2")
+    no_live_instances()
+    absent_target()
+    print(json.dumps({"original": original_receipt, "target_absent": True}), flush=True)
+    owned = None
+    for line in sys.stdin:
+        command = line.strip()
+        if command == "close":
+            break
+        if command == "removed":
+            assert owned is not None
+            # Root removal intentionally unlinks this pinned version directory.
+            parents[:] = [entry for entry in parents if entry[2] != owned[0]]
+        assert pair_receipt(original, "1.16.2") == original_receipt
+        if command == "absent":
+            assert owned is None
+            no_live_instances()
+            absent_target()
+            result = {"target_absent": True}
+        elif command == "admit":
+            assert owned is None
+            owned = open_pair("1.16.1")
+            result = pair_receipt(owned, "1.16.1")
+        elif command == "verify":
+            assert owned is not None
+            no_live_instances()
+            result = pair_receipt(owned, "1.16.1")
+        elif command == "removed":
+            absent_target()
+            result = {"target_absent": True, "original": original_receipt}
+        else:
+            raise AssertionError("unknown bin ownership phase")
+        print(json.dumps(result), flush=True)
+except BaseException as error:
+    print(json.dumps({"error": str(error)}), flush=True)
+    raise
+finally:
+    for fd in reversed(fds):
+        os.close(fd)
+'''
+
+
+class _BinReleaseOwnership:
+    """Keep fixed root receipts pinned; this oracle performs no root mutation."""
+
+    def __init__(self):
+        self.process = subprocess.Popen(
+            ["sudo", "-n", "/usr/bin/python3", "-I", "-u", "-c", _BIN_RELEASE_RECEIVER],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+
+    def read(self) -> dict:
+        assert select.select([self.process.stdout], [], [], 30)[0], "root receipt oracle timed out"
+        line = self.process.stdout.readline(16385)
+        assert line and len(line) <= 16384, "missing or oversized root receipt"
+        receipt = json.loads(line)
+        assert "error" not in receipt, receipt
+        return receipt
+
+    def require(self, phase: str) -> dict:
+        self.process.stdin.write(phase + "\n")
+        self.process.stdin.flush()
+        return self.read()
+
+    def close(self) -> None:
+        if self.process.poll() is None:
+            try:
+                self.process.stdin.write("close\n")
+                self.process.stdin.flush()
+            except BrokenPipeError:
+                # A rejected receipt may already have closed the root reader.
+                pass
+        try:
+            self.process.stdin.close()
+        except BrokenPipeError:
+            pass  # Its nonzero exit and stderr below retain the receiver failure.
+        self.process.wait(timeout=30)
+        error = self.process.stderr.read(16385)
+        self.process.stdout.close()
+        self.process.stderr.close()
+        assert self.process.returncode == 0, error
+
+
+def _mirrored_bin_1161() -> tuple[Path, tuple, dict]:
+    """Hash only the audited mirrored archive and its exact executable members."""
+    assert platform.machine() == "x86_64", "this audited release fixture is x86_64 only"
+    archive = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser() / "firecracker-v1.16.1-x86_64.tgz"
+    identity = _file_identity(archive)
+    assert 0 < identity[-1] <= 128 * 1024 * 1024, archive
+    fd = os.open(archive, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as source:
+        assert _file_identity(archive) == identity
+        info = os.fstat(source.fileno())
+        assert (info.st_dev, info.st_ino) == identity[:2]
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
+        source.seek(0)
+        manifest = {"schema_version": 1, "release": {"version": "1.16.1", "architecture": "x86_64"},
+                    "archive_sha256": digest}
+        names = {f"release-v1.16.1-x86_64/{kind}-v1.16.1-x86_64": kind
+                 for kind in ("firecracker", "jailer")}
+        with tarfile.open(fileobj=source, mode="r|gz") as bundle:
+            for index, member in enumerate(bundle):
+                assert index < 128, "unexpected mirrored archive member count"
+                if member.name in names:
+                    kind = names[member.name]
+                    assert kind not in manifest and member.isfile()
+                    assert 120 <= member.size <= 64 * 1024 * 1024
+                    with bundle.extractfile(member) as executable:
+                        manifest[kind] = {"sha256": hashlib.file_digest(executable, "sha256").hexdigest(),
+                                          "size_bytes": member.size}
+        assert set(manifest) == {"schema_version", "release", "archive_sha256", "firecracker", "jailer"}
+        assert _file_identity(archive) == identity
+        assert os.fstat(source.fileno()).st_ctime_ns == identity[-2]
+    return archive, identity, manifest
+
+
+def _require_bin_root_projection(rows: list[dict], receipt: dict) -> list[dict]:
+    """Bind complete display IDs to the retained root executable digests."""
+    manifest = receipt["manifest"]
+    version = manifest["release"]["version"]
+    pair = [row for row in rows if row["version"] == version]
+    assert len(pair) == 2 and {row["type"] for row in pair} == {"firecracker", "jailer"}, pair
+    for row in pair:
+        kind = row["type"]
+        digest = manifest[kind]["sha256"]
+        assert row["id"] == hashlib.sha256(
+            f"mvmctl:binary-release:v1:{kind}:x86_64:{version}:{digest}".encode(),
+        ).hexdigest(), row
+        assert row["architecture"] == "x86_64" and row["is_present"] is True, row
+        assert row["path"] == f"/var/lib/mvmctl/binaries/x86_64/{version}/{kind}", row
+    return pair
+
+
 class TestBinaryPullAndLifecycle:
     """Test Firecracker binary pull, set-default, and remove operations.
 
@@ -220,37 +478,41 @@ class TestBinaryPullAndLifecycle:
 
     @pytest.mark.slow
     @pytest.mark.destructive
-    def test_bin_pull_and_set_default(self, runner_vm: str) -> None:
+    def test_bin_pull_and_set_default(self, runner_vm: str, record_property) -> None:
         """Install an absent mirrored release, transfer defaults, then remove the test-owned slot."""
         before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-        defaults = {item["type"]: item for item in before if item["is_default"]}
-        assert set(defaults) == {"firecracker", "jailer"}
-        assert defaults["firecracker"]["version"] == defaults["jailer"]["version"]
-        mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
-        target = next(
-            (
-                version
-                for version in ("1.16.1", "1.15.1")
-                if all(item["version"] != version for item in before)
-                and (mirror / f"firecracker-v{version}-{platform.machine()}.tgz").is_file()
-            ),
-            None,
-        )
-        assert target is not None, "test requires a mirrored release absent from this isolated runner"
-
+        defaults = _installed_pair(before)
+        target = "1.16.1"
+        assert all(item["version"] != target for item in before), before
+        assert not _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+        archive, archive_identity, expected_manifest = _mirrored_bin_1161()
+        authority = _BinReleaseOwnership()
         attempted = False
-        installed = False
+        owned = None
         try:
+            original = authority.read()
+            record_property("bin_original_root_receipt", json.dumps(original))
+            _require_bin_root_projection(defaults, original["original"])
+            assert original["target_absent"] is True
+            assert authority.require("absent")["target_absent"] is True
             attempted = True
+            pulled = _json_success_data(
+                _run_mvm(runner_vm, "bin", "pull", target, "--json", timeout=300).stdout,
+                list,
+            )
+            admitted = authority.require("admit")
+            assert admitted["manifest"] == expected_manifest, admitted
+            assert _file_identity(archive) == archive_identity
+            _require_bin_root_projection(pulled, admitted)
+            owned = admitted
+            record_property("bin_owned_root_receipt", json.dumps(owned))
+            assert all(item["is_default"] is False for item in pulled), pulled
+            assert authority.require("verify") == owned
             pulled = _json_success_data(
                 _run_mvm(runner_vm, "bin", "pull", target, "--default", "--json", timeout=300).stdout,
                 list,
             )
-            installed = True
-            assert len(pulled) == 2
-            assert {item["type"] for item in pulled} == {"firecracker", "jailer"}
-            assert {item["version"] for item in pulled} == {target}
-            assert all(item["is_present"] for item in pulled)
+            _require_bin_root_projection(pulled, owned)
             listing = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
             assert {
                 (item["type"], item["version"], item["id"])
@@ -258,34 +520,41 @@ class TestBinaryPullAndLifecycle:
                 if item["is_default"]
             } == {(item["type"], target, item["id"]) for item in pulled}
         finally:
-            restore_failures: list[str] = []
-            for item in defaults.values():
-                restored = _run_mvm(runner_vm, "bin", "default", item["id"], check=False)
-                if restored.returncode != 0:
-                    restore_failures.append(f"{item['type']}: {restored.stderr}")
-            if attempted:
-                removed = _json_success_data(
-                    _run_mvm(runner_vm, "bin", "rm", target, "--force", "--json").stdout,
-                    dict,
-                )
-                assert len(removed["items"]) == 1
-                result = removed["items"][0]
-                assert result["error"] is None
-                assert result["result"]["item"] == target
-                if installed:
+            try:
+                if owned is not None:
+                    assert authority.require("verify") == owned
+                    listing = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+                    _require_bin_root_projection(listing, original["original"])
+                    _require_bin_root_projection(listing, owned)
+                    for item in defaults:
+                        assert authority.require("verify") == owned
+                        _run_mvm(runner_vm, "bin", "default", item["id"])
+                    listing = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+                    assert _binary_identity([item for item in listing if item["version"] != target]) == (
+                        _binary_identity(before)
+                    )
+                    assert authority.require("verify") == owned
+                    removed = _json_success_data(
+                        _run_mvm(runner_vm, "bin", "rm", target, "--force", "--json").stdout,
+                        dict,
+                    )
+                    assert len(removed["items"]) == 1
+                    result = removed["items"][0]
+                    assert result["error"] is None and result["result"]["item"] == target
                     assert result["result"]["status"] == "success"
                     assert result["result"]["code"] == "binary.removed"
-                else:
-                    assert result["result"]["status"] in ("success", "skipped")
-            assert not restore_failures, restore_failures
-            after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-            assert {
-                (item["type"], item["version"], item["id"], item["is_default"])
-                for item in after
-            } == {
-                (item["type"], item["version"], item["id"], item["is_default"])
-                for item in before
-            }
+                    absent = authority.require("removed")
+                    assert absent == {"target_absent": True, "original": original["original"]}
+                    record_property("bin_removed_root_receipt", json.dumps(absent))
+                    after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+                    assert _binary_identity(after) == _binary_identity(before)
+                    assert {item["id"]: item["created_at"] for item in after} == {
+                        item["id"]: item["created_at"] for item in before
+                    }
+                elif attempted:
+                    pytest.fail("unadmitted or uncertain 1.16.1 root/projection state preserved; explicit recovery required")
+            finally:
+                authority.close()
 
     def test_bin_rm_rejects_binary_id_without_effects(self, runner_vm: str) -> None:
         """The exact-version removal API must not interpret a display ID as a release slot."""
