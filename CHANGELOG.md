@@ -17,7 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > kernel import (8/8), Jailer (13/13), and rootfs persistence (1/1) Python domains with strict zero-skip reports at
 > their recorded revisions. These domain results do not constitute a complete exact-current-HEAD Python matrix.
 > Host-reboot/exec recovery had one device-open failure and one successful controlled repeat; its cause remains
-> unresolved. Later complete SSH (11/11), config (12/12), keys (26/26), volumes (37/37), full journeys (15/15),
+> unresolved. A later owned-guest reboot check stopped before restart: inspection rejected stale console boot
+> identity, and typed VM/network cleanup refused prior-boot admission. The retained records were not manually
+> deleted or adopted; post-reboot recovery remains a release blocker. Later complete SSH (11/11), config (12/12),
+> keys (26/26), volumes (37/37), full journeys (15/15),
 > and internal-service entry points (5/5) passed twice at their recorded exact test revisions. Three bounded
 > memory cases also passed twice, including sustained measured cgroup pressure with and without swap;
 > a separate guest-global RAM-exhaustion case now passed once with an identified allocator OOM victim, preserved
@@ -55,6 +58,10 @@ adversarial firewall and recovery cases remain separate release gates.
 
 ### Added
 
+- A focused local reboot experiment captured the exact active jail/mount objects and KVM/TUN identities;
+  private-root readlink text is informational, not process authority. Its owned guest prepared successfully before
+  one controlled runner reboot, but recovery failed before the single permitted start. Console prior-boot observation
+  and typed VM/network retirement require correction; no reboot-recovery success is claimed by this check.
 - The bundled official-kernel nftables feature now requests bridge connection tracking as well as bridge-family
   nftables. Focused kernel Go tests and vet passed in the named runner. Its booted rebuilt kernel has both flags,
   but the older mirrored default does not; this source change does not rebuild or qualify every runner image.
