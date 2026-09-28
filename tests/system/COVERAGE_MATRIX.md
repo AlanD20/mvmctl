@@ -735,6 +735,17 @@ records zero failures, errors, skips, or deselections. Independent VM/network li
 guest-initiated poweroff, complete host-reboot qualification, or the whole lifecycle module. No production behavior
 changed: an incomplete identity read before pidfd-proven exit remains unavailable under ADR-0016.
 
+**Complete owned rootfs persistence repeat gate (2026-09-28):** Commit `c02b7749` retains the one
+copy → full capture → source mutation/removal → independent restore journey while binding cleanup to
+full VM and snapshot IDs, creation receipts and the pre-effect snapshot request handle. Read-only
+preseed admission replaces shared asset preparation; partial publication cleanup and configuration/resource
+baseline checks are explicit. The complete one-case file at SHA-256
+`a644faa53d082433e5331b01f51e5d10b53abcb09c5353f52421130db68dcadb` passed twice in only
+`mvmctl-030-test` against installed candidate `e23b1261` (15.80s and 16.76s), with zero other outcomes,
+exact configuration restoration and empty VM/network/volume/snapshot inventories. Reports are
+`qa-persistence-auto-a644-full1-pass{1,2}.{json,xml}`. This closes this file's repeat gate, not
+interrupted capture, power-loss recovery, data-volume fault consistency or release qualification.
+
 **Rootfs persistence runner checkpoint (2026-09-27):** The old two-case module copied a stopped VM's rootfs from a
 caller-visible path and imported it as an image; the first case never created or restored a snapshot despite its name.
 Commit `2772d7b5` replaces them with one function-scoped installed-candidate journey using `mvm cp`, full snapshot

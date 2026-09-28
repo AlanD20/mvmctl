@@ -53,6 +53,10 @@ adversarial firewall and recovery cases remain separate release gates.
 
 ### Added
 
+- The complete rootfs persistence journey passed twice on the installed runner candidate, proving
+  capture independence after source modification/removal and byte-exact restored content. Full-ID
+  receipts and checked partial cleanup preserve unrelated resources, configuration and defaults;
+  capture interruption and power-loss recovery remain separate qualification gates.
 - The complete five-case nftables module passed twice on the installed runner candidate, retaining NAT,
   conntrack, idempotent sync, real SSH and private-namespace IP-reuse checks with exact owned cleanup.
   Kernel observation failures cannot masquerade as absent rules; adversarial firewall faults remain unqualified.
