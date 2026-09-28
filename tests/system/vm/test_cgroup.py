@@ -770,6 +770,260 @@ def _calibrate_guest_pressure(
 
 
 class TestVMCgroupEnvelope:
+    def test_guest_ram_exhaustion_kills_only_identified_allocator_and_exec_survives(
+        self,
+        runner_vm: str,
+        cgroup_config_overrides: None,
+        record_property: Any,
+    ) -> None:
+        """Attribute a finite anonymous allocation's failure to guest-global OOM."""
+        _require_preseeded_vm_assets(runner_vm)
+        token = uuid.uuid4().hex
+        vm_name = f"sys-memfail-{token[:8]}"
+        directory = f"/run/mvm-memfail-{token}"
+        configured_bytes = 224 * 1024 * 1024
+        runner_boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        host_oom_before = dict(line.split() for line in Path("/proc/vmstat").read_text().splitlines())["oom_kill"]
+        hierarchy_before: dict[str, Any] = {}
+        vm_id = ""
+        # sprintf writes each entire, distinct MiB into retained anonymous strings.
+        # There is no child cgroup, rlimit, OOM-score change, or agent protection.
+        allocator = """
+BEGIN {
+    if ((getline identity < "/proc/self/stat") != 1) exit 21;
+    close("/proc/self/stat");
+    print "identity=" identity;
+    fflush();
+    for (i = 1; i <= 384; i++) {
+        blocks[i] = sprintf("%1048576s", i);
+        if (length(blocks[i]) != 1048576) exit 22;
+        if (i == 1 || i % 8 == 0) {
+            print "allocated_mib=" i;
+            fflush();
+        }
+    }
+    print "allocation_completed=384";
+    fflush();
+}
+"""
+        record_property("guest_allocator_program", allocator)
+        record_property("guest_allocation_bound_bytes", 384 * 1024 * 1024)
+        record_property(
+            "memory_failure_observation_scope",
+            (
+                "Guest-global OOM victim, fresh exec, same guest/runner boot and Firecracker task; "
+                "runner leaf/visible ancestor OOM counters and /proc/vmstat. Enclosing outer-VM "
+                "counters require independent controller-side admission/readback; this is not "
+                "attribution of the historical incident."
+            ),
+        )
+        try:
+            created = _json_success_data(
+                _run_mvm(
+                    runner_vm,
+                    "vm",
+                    "create",
+                    vm_name,
+                    "--no-network",
+                    "--cloud-init-mode",
+                    "off",
+                    "--skip-deblob",
+                    "--no-pci",
+                    "--disk-size",
+                    "512M",
+                    "--vcpu",
+                    "1",
+                    "--mem",
+                    "224M",
+                    "--json",
+                    timeout=180,
+                ).stdout,
+                list,
+            )
+            assert len(created) == 1, created
+            vm_id = created[0]["id"]
+            before = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_id, "--json").stdout,
+                dict,
+            )
+            pid = int(before["vm"]["pid"])
+            start_ticks = int(Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()[19])
+            initial_entry = _vm_entry(runner_vm, vm_name)
+            assert initial_entry is not None and initial_entry["id"] == vm_id, initial_entry
+            assert initial_entry["status"] == before["vm"]["status"] == "running", before
+            assert int(initial_entry["pid"]) == pid, initial_entry
+            assert int(initial_entry["process_start_time"]) == start_ticks, initial_entry
+            policy = before["resources"]["cgroup"]
+            assert policy["status"] == "enforced" and policy.get("mismatches", []) == [], policy
+            expected_policy = {
+                "policy_version": 2,
+                "cpu_quota_micros": 100000,
+                "cpu_period_micros": 100000,
+                "cpu_weight": 100,
+                "memory_high_bytes": configured_bytes + 128 * 1024 * 1024,
+                "memory_max_bytes": 0,
+                "memory_max_unlimited": True,
+                "swap_max_bytes": 0,
+                "pids_max": 256,
+            }
+            assert policy["requested"] == policy["actual"] == expected_policy, policy
+            hierarchy_before = _pressure_hierarchy(runner_vm, vm_id)
+            record_property("memory_failure_hierarchy_before", json.dumps(hierarchy_before, sort_keys=True))
+            initial_boot_id = _run_mvm(
+                runner_vm,
+                "exec",
+                vm_id,
+                "--",
+                "cat /proc/sys/kernel/random/boot_id",
+            ).stdout.strip()
+            assert re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", initial_boot_id)
+            script = (
+                f"set -eu; mkdir {directory}; cd {directory}; "
+                "printf 'virtual_limit=' > metadata; ulimit -v >> metadata; "
+                "printf 'data_limit=' >> metadata; ulimit -d >> metadata; "
+                "printf 'boot_id=' >> metadata; cat /proc/sys/kernel/random/boot_id >> metadata; "
+                'awk \'/^MemTotal:/ {print "total_kib=" $2} '
+                '/^SwapTotal:/ {print "swap_total_kib=" $2}\' /proc/meminfo >> metadata; '
+                "dmesg > dmesg_before; "
+                f"awk {shlex.quote(allocator)} > progress 2> allocator_stderr & worker=$!; "
+                "printf 'worker_pid=%s\\n' \"$worker\" >> metadata; "
+                'if wait "$worker"; then status=0; else status=$?; fi; '
+                "printf 'worker_status=%s\\n' \"$status\" >> metadata; "
+                "dmesg > dmesg_after; printf 'supervisor_complete=1\\n' >> metadata"
+            )
+            result = subprocess.run(
+                ["/usr/local/bin/mvm", "exec", vm_id, "--", f"timeout -s KILL 30 sh -c {shlex.quote(script)}"],
+                capture_output=True,
+                text=True,
+                timeout=45,
+                check=False,
+            )
+            record_property(
+                "guest_allocator_transport",
+                json.dumps(
+                    {
+                        "returncode": result.returncode,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                    },
+                    sort_keys=True,
+                ),
+            )
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            # A separate completed exec reads durable guest evidence and exercises allocation again.
+            parts = ("metadata", "progress", "allocator_stderr", "dmesg_before", "dmesg_after")
+            readback = (
+                f"set -eu; cd {directory}; "
+                + " ".join(f"printf '%s\\n' '{token}:{part}'; cat {part};" for part in parts)
+                + (
+                    f" printf '%s\\n' '{token}:post_exec'; "
+                    "printf 'boot_id='; cat /proc/sys/kernel/random/boot_id; "
+                    'awk \'BEGIN {s=sprintf("%1048576s", 7); '
+                    'if (length(s) != 1048576) exit 23; print "post_allocation_bytes=" length(s)}\'; '
+                    f"printf '%s\\n' '{token}:end'"
+                )
+            )
+            recovered = _run_mvm(runner_vm, "exec", vm_id, "--", readback)
+            record_property("guest_memory_failure_readback", recovered.stdout)
+            sections: dict[str, str] = {}
+            remainder = recovered.stdout
+            for index, part in enumerate(parts + ("post_exec",)):
+                marker = f"{token}:{part}\n"
+                assert remainder.startswith(marker), remainder
+                next_part = (parts + ("post_exec", "end"))[index + 1]
+                content, separator, remainder = remainder[len(marker) :].partition(f"{token}:{next_part}\n")
+                assert separator, (part, recovered.stdout)
+                sections[part] = content
+                remainder = f"{token}:{next_part}\n" + remainder
+            assert remainder == f"{token}:end\n", recovered.stdout
+            metadata = dict(line.split("=", 1) for line in sections["metadata"].splitlines())
+            assert metadata["virtual_limit"] == metadata["data_limit"] == "unlimited", metadata
+            assert metadata["boot_id"] == initial_boot_id, metadata
+            total_kib = int(metadata["total_kib"])
+            assert 0 < total_kib * 1024 <= configured_bytes and metadata["swap_total_kib"] == "0", metadata
+            assert metadata["worker_status"] == "137" and metadata["supervisor_complete"] == "1", metadata
+            progress = sections["progress"].splitlines()
+            identity = re.fullmatch(r"identity=(\d+) \(awk\) (.+)", progress[0])
+            assert identity is not None, progress
+            worker_pid = int(metadata["worker_pid"])
+            assert int(identity[1]) == worker_pid and int(identity[2].split()[19]) > 0, progress
+            allocations = [int(line.removeprefix("allocated_mib=")) for line in progress[1:]]
+            assert allocations[0] == 1 and allocations == sorted(set(allocations)), progress
+            assert 16 <= allocations[-1] < 384, progress
+            assert sections["dmesg_after"].startswith(sections["dmesg_before"]), sections
+            new_kernel_lines = sections["dmesg_after"][len(sections["dmesg_before"]) :].splitlines()
+            assert any(
+                re.search(
+                    rf"oom-kill:constraint=CONSTRAINT_NONE,.*global_oom,.*task=awk,pid={worker_pid},",
+                    line,
+                )
+                for line in new_kernel_lines
+            ), new_kernel_lines
+            victims = [
+                re.search(
+                    rf"Out of memory: Killed process {worker_pid} \(awk\).*anon-rss:(\d+)kB",
+                    line,
+                )
+                for line in new_kernel_lines
+                if re.search(r"Killed process \d+ ", line)
+            ]
+            assert len(victims) == 1 and victims[0] is not None, new_kernel_lines
+            assert int(victims[0][1]) >= total_kib // 2, new_kernel_lines
+            assert sections["post_exec"] == f"boot_id={initial_boot_id}\npost_allocation_bytes=1048576\n", sections
+            after = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_id, "--json").stdout,
+                dict,
+            )
+            current_entry = _vm_entry(runner_vm, vm_name)
+            assert current_entry is not None and current_entry["id"] == vm_id, current_entry
+            assert after["vm"]["status"] == current_entry["status"] == "running", after
+            assert int(after["vm"]["pid"]) == int(current_entry["pid"]) == pid, after
+            assert int(current_entry["process_start_time"]) == start_ticks, current_entry
+            assert int(Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()[19]) == start_ticks
+            assert after["resources"]["cgroup"]["status"] == "enforced", after
+            assert after["resources"]["cgroup"].get("mismatches", []) == [], after
+            assert (
+                after["resources"]["cgroup"]["requested"] == after["resources"]["cgroup"]["actual"] == expected_policy
+            )
+        finally:
+            try:
+                if hierarchy_before:
+                    hierarchy_after = _pressure_hierarchy(runner_vm, vm_id)
+                    record_property("memory_failure_hierarchy_after", json.dumps(hierarchy_after, sort_keys=True))
+                    for path, initial in hierarchy_before.items():
+                        current = hierarchy_after[path]
+                        for control in (
+                            "memory.high",
+                            "memory.max",
+                            "memory.swap.max",
+                            "cpu.max",
+                            "cpu.weight",
+                            "pids.max",
+                        ):
+                            assert current[control] == initial[control], (path, initial, current)
+                        if initial["memory.events"] is not None:
+                            for counter in ("oom", "oom_kill"):
+                                assert current["memory.events"][counter] == initial["memory.events"][counter], (
+                                    path,
+                                    initial,
+                                    current,
+                                )
+                    assert Path("/proc/sys/kernel/random/boot_id").read_text().strip() == runner_boot_id
+                    host_oom_after = dict(line.split() for line in Path("/proc/vmstat").read_text().splitlines())[
+                        "oom_kill"
+                    ]
+                    record_property("runner_oom_kill_counts", json.dumps([host_oom_before, host_oom_after]))
+                    assert host_oom_after == host_oom_before, (host_oom_before, host_oom_after)
+            finally:
+                remaining = _vm_entry(runner_vm, vm_name)
+                if remaining is not None:
+                    if vm_id:
+                        assert remaining["id"] == vm_id, remaining
+                    owned_id = remaining["id"]
+                    _run_mvm(runner_vm, "vm", "rm", owned_id, "--force", timeout=120)
+                    assert _vm_entry(runner_vm, vm_name) is None
+                    assert not Path(f"/sys/fs/cgroup/mvmctl/{owned_id}").exists()
+
     def test_guest_sustains_near_saturation_under_pressure_only_memory_control(
         self,
         runner_vm: str,
