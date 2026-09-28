@@ -17,6 +17,19 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Complete peer-exec repeat gate (2026-09-28):** Commit `4ce01436` replaces name-based cleanup
+in the two original peer-exec journeys with retained full-ID, creation, backing-file and process
+receipts; the four newer cases are unchanged. Exact module SHA-256
+`a92fd17cd00a6d1ea1251d110d174f48b8dadd84b28b6f7882660fb44df8df3b` passed all six cases
+twice (148.03/136.04 seconds) inside only `mvmctl-030-test`, against candidate `7441189d`.
+Both strict reports have zero other outcomes and exact configuration/four empty inventory checks.
+The original directional case exercises same-network, cross-network and networkless placement;
+the module also covers endpoint lifecycle, opt-in/target-user denial, output/audit handling,
+interruption and restore requiring a new endpoint grant. Read-only asset admission and checked
+typed cleanup preserve caller baselines. Reports `qa-peer-a92f-six-pass{1,2}.{json,xml}` are in
+`qa-release-72696719/.tmp`. This closes this local file repeat gate, not the final current-source
+matrix or reboot/root-fault qualification.
+
 **Interrupted VM backing-import cleanup source checkpoint (2026-09-28):** Commit `19376ffa`
 allows the existing typed VM removal to cancel only verified incomplete VM-owned rootfs/cloud-init
 copies after retained root VM authority proves process/tree/grant absence. The original staging file

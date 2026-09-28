@@ -39,6 +39,9 @@ earlier partial-state statement. They are not a substitute for the final release
 
 ### Added
 
+- The complete six-case peer-exec module passed twice with retained full-ID/process/file
+  ownership and checked cleanup, including same-network, cross-network and networkless
+  directionality and endpoint lifecycle. This does not complete release qualification.
 - Nine safe trusted-binary system cases passed twice with exact archive/release and live-VM
   ownership checks; all eleven cases remain present. Remote metadata and destructive
   release/default-transfer qualification remain pending.
