@@ -21,6 +21,16 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Durable exec-grant lifecycle checkpoint (2026-09-28):** One networkless two-VM journey passed 1/1 in 27.93
+seconds inside only `mvmctl-030-test`. An exact non-root `runner` grant produced remote stdout and destination file
+effects, survived typed destination and source stop/start and destination reboot without VM/policy recreation,
+and admitted the new authenticated tasks and guest boot identities. Retained pidfds proved each old process exited;
+stopped endpoints and revoked grants refused the command without its destination file effect. Checked teardown left
+all four resource inventories and exec policies empty. Strict report `qa-exec-peer-lifecycle-959642ba.json` is under
+the runner's `qa-consistency-7073592b/.tmp` directory; candidate/source remain `c460278d`/`19c55345`.
+This closes the named VM restart/reboot journey, not host reboot, snapshot restore, peer-identity attacks,
+capacity/deadline/cancellation, audit redaction, or complete matrix qualification.
+
 **Private namespace and stale-IP reuse checkpoint (2026-09-28):** One installed-candidate journey passed 1/1
 in 21.03 seconds inside only `mvmctl-030-test`. Root-owned topology receipts matched the named namespace and
 Firecracker's actual network namespace; a concurrent control VM had a distinct live namespace. Real guest-to-gateway
@@ -588,7 +598,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 | nftables-only engine | 🟡 Partial | Four installed-candidate fixed-table cases passed in the bridge-capable named runner, covering modeled inet/bridge rules, nested-VM rule lifecycle, repeat sync, and NAT/conntrack readback. Full failure/reconciliation and clean-host qualification remain open. |
 | Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests, a disposable real-kernel namespace probe, and the installed-candidate A-to-B stale-IP reuse journey with a concurrent control VM passed. The journey proves fresh gateway reachability and exact cleanup, but guest boot ARP prevents independent attribution of the pre-exposure ordering; spoofing and prior-host-boot recovery remain unqualified. |
 | Typed `traffic` policy | 🟡 Partial | Installed-candidate same-/cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. The 2026-09-28 acknowledged same-network source-VM UDP journey also passed exact allow, sibling/adjacent-port/reverse denial and fresh-flow revocation. Spoofing, IP reuse, cross-network UDP and reboot recovery remain unqualified. |
-| Typed VM-to-VM `exec` policy | 🟡 Partial | The installed candidate passed the full seven-case exec domain in `mvmctl-030-test`. Its new directional case exercises same-network, cross-network, and networkless placements; denial before grant, exact non-root-user grant, successful command and destination file effect, reverse denial, and denial after revocation. Peer-identity attacks, capacity/deadline/cancellation, audit redaction, and reboot/restore journeys remain unqualified at L2. |
+| Typed VM-to-VM `exec` policy | 🟡 Partial | The installed candidate passed the full seven-case exec domain in `mvmctl-030-test`: same-network, cross-network and networkless directional grants and real effects. The later networkless lifecycle journey also passed retained grants across both endpoint restarts and destination VM reboot, with pidfd exit and new-task/boot evidence, stopped/revoked denial and checked cleanup. Peer-identity attacks, capacity/deadline/cancellation, audit redaction, host reboot and snapshot restore remain unqualified at L2. |
 | Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove isolated Firecracker credentials and protected policy-v2 limit/usage inspection. The 2026-09-28 current-candidate 224 MiB guest/150 MiB tmpfs case increased actual `memory.high` events without a leaf OOM kill and retained vsock responsiveness. Historical larger-allocation guest-agent EOF remains unexplained; a bounded pass is not a deterministic pressure gate or ancestor-OOM guarantee. Per-VM uniqueness, root-record/pidfd binding, broader mount/cgroup cleanup, sustained saturation, and host-reboot binding remain unqualified. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
