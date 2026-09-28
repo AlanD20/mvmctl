@@ -1291,7 +1291,11 @@ User-facing `--timeout` means **connect/probe timeout only**. Once the target is
 
 **1. CLI `--timeout` flags (user-facing, e.g., `mvm exec --timeout`, `mvm ssh --timeout`)**
 
-These are **connect/probe timeouts** only (per ADR-0013). Default: **5 seconds**, absolute max: **10 seconds**. Once the target responds, the operation runs unbounded. This is the speed-first principle: if a connection can't be established in 10s, something is wrong.
+These are **connect/probe timeouts** only (per ADR-0013), not command-duration limits. Defaults are command-specific:
+`mvm exec` uses `defaults.vm.vsock_probe_timeout` (5 seconds), while `mvm ssh` uses
+`settings.vm.ssh_timeout_sec` (10 seconds). A positive explicit `--timeout` overrides that command's configured
+probe budget; the current public inputs do not impose a universal 10-second maximum. Once connected, command
+execution has no absolute duration cap and ends on completion or context cancellation.
 
 **2. Subprocess timeouts in test infrastructure (the `timeout=` parameter of `_run_mvm()` / `_guest_run()`)**
 
