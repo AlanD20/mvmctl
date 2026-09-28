@@ -7,6 +7,7 @@ import (
 
 	"mvmctl/internal/lib/privilegedwire"
 	"mvmctl/internal/lib/system"
+	"mvmctl/pkg/errs"
 )
 
 // ConsoleClient sends only the two closed console operations to the installed receiver.
@@ -68,22 +69,60 @@ func (client *ConsoleClient) Stop(ctx context.Context, request ConsoleStopReques
 		return ConsoleStopResult{}, err
 	}
 	outcome := client.transport.Exchange(ctx, control)
-	if !outcome.ProcessStarted() || !outcome.ResponseEOF() {
-		return ConsoleStopResult{}, consoleAuthorityError(request.VMID,
-			"console stop did not reach authoritative EOF", outcome.Diagnostic())
+	return decodeConsoleStopResponse(ctx, request, consoleStopResponse{
+		response:    outcome.Response(),
+		responseEOF: outcome.ResponseEOF(),
+		started:     outcome.ProcessStarted(),
+		diagnostic:  outcome.Diagnostic(),
+	})
+}
+
+type consoleStopResponse struct {
+	response    []byte
+	responseEOF bool
+	started     bool
+	diagnostic  *errs.DomainError
+}
+
+func decodeConsoleStopResponse(
+	ctx context.Context,
+	request ConsoleStopRequest,
+	outcome consoleStopResponse,
+) (ConsoleStopResult, error) {
+	if outcome.responseEOF && !outcome.started {
+		return ConsoleStopResult{}, consoleStopClientTransportError(false,
+			errors.Join(errors.New("privileged response arrived before process start"), outcome.diagnostic))
+	}
+	if !outcome.responseEOF {
+		return ConsoleStopResult{}, consoleStopClientTransportError(outcome.started,
+			errors.Join(errors.New("privileged response did not reach authoritative EOF"), outcome.diagnostic))
 	}
 	response, err := privilegedwire.DecodeResponse[ConsoleStopResult](context.WithoutCancel(ctx),
-		bytes.NewReader(outcome.Response()), ConsoleStopAction)
+		bytes.NewReader(outcome.response), ConsoleStopAction)
 	if err != nil {
-		return ConsoleStopResult{}, consoleAuthorityError(request.VMID,
-			"console stop response is not authoritative", errors.Join(err, outcome.Diagnostic()))
+		return ConsoleStopResult{}, consoleStopClientTransportError(outcome.started,
+			errors.Join(err, outcome.diagnostic))
 	}
 	if err := response.OperationError(); err != nil {
 		return ConsoleStopResult{}, err
 	}
 	result := response.Result()
 	if err := result.Validate(request); err != nil {
-		return ConsoleStopResult{}, err
+		return ConsoleStopResult{}, consoleStopClientTransportError(outcome.started,
+			errors.Join(err, outcome.diagnostic))
 	}
 	return result, nil
+}
+
+func consoleStopClientTransportError(started bool, cause error) *errs.DomainError {
+	return errs.WrapMsg(
+		errs.CodeProcessError,
+		"console stop privileged response is not authoritative",
+		cause,
+		errs.WithClass(errs.ClassInternal),
+		errs.WithDetails(map[string]any{
+			"process_started": started,
+			"outcome_unknown": started,
+		}),
+	)
 }

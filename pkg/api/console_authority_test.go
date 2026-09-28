@@ -86,6 +86,16 @@ func TestConsolePublicOperationsConsumeRootAuthorityInsteadOfCachePID(t *testing
 	_, err = op.ConsoleGetState(t.Context(), "console-vm")
 	require.ErrorIs(t, err, client.err)
 	require.ErrorIs(t, op.ConsoleKill(t.Context(), "console-vm"), client.err)
+	client.err = errs.New(errs.CodeProcessError, "console stop response is not authoritative",
+		errs.WithClass(errs.ClassInternal),
+		errs.WithDetails(map[string]any{"process_started": true, "outcome_unknown": true}))
+	stopErr := op.ConsoleKill(t.Context(), "console-vm")
+	require.ErrorIs(t, stopErr, client.err)
+	domainErr := errs.AsDomainError(stopErr)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+	assert.Equal(t, true, domainErr.Details["process_started"])
+	assert.Equal(t, true, domainErr.Details["outcome_unknown"])
 	client.err = nil
 	client.stopResult.Stopped = false
 	err = op.ConsoleKill(t.Context(), "console-vm")
