@@ -79,6 +79,22 @@ live guests. Cached Alpine 3.23 requires 360 MiB rootfs, so each guest explicitl
 This closes the full-journey domain's installed-candidate L2 repeat gate, not ten-way simultaneous load,
 Tier 3, host-reboot recovery, unrelated matrix domains or release approval. Runner free disk remained 2.4 GiB.
 
+**Key ownership and tier placement (2026-09-28):** Commit `a3f4d71f` leaves twenty-six VM-free cases in
+the Tier 1 keys domain and relocates its two VM-dependent journeys into the already-selected Tier 2 SSH
+module. The complete keys file passed 26/26 twice in 6.81 and 6.59 seconds inside the named runner;
+the two relocated cases passed 2/2 in 15.49 seconds. Exact file hashes are
+`7304b0e4d6b08321b145e2391c59287d0180a4606d711e09cffc847cdab02b1b` (keys) and
+`b7b3c79b9bc9e04a4c4507328cbea0a718c1078f7361cb4d4b7fb5c0206d3845` (SSH), against candidate `c460278d`.
+All strict reports have zero other outcomes; four resource inventories were empty and config unchanged.
+Key owners restore the exact original default-ID set and compare all stable inventory fields; `updated_at`
+is excluded because public default restoration intentionally changes it. Owned cache files and exports
+receive identity/absence checks, cleanup failures are aggregated, and unrelated artifacts are preserved.
+The relocated cases prove real SSH before/after cached-key removal, plus both default key identities in
+guest authorized_keys and separate authentication using each exported private key. These are small,
+preseed-only guests; they do not qualify the nine unchanged SSH cases or the full SSH-domain repeat gate.
+Reports `qa-keys-fc614785-pass{1,2}.json` and `qa-key-ssh-fc614785.json` are in
+the runner's `qa-release-0f95b7bc/.tmp` directory. No asset pulls, config/default asset changes or outer install.
+
 **Exact-source CLI-domain repeatability (2026-09-28):** The complete CLI domain collected 24 items and passed
 24/24 twice in 0.36 seconds per run inside only `mvmctl-030-test`. Source checkout was clean exact commit
 `0f95b7bc574f29b6c20285159d31cc7c4f9db008`; its Go source independently matched `19c55345`, and installed candidate
@@ -1016,7 +1032,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `key create --algorithm ecdsa` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyLifecycle` | L2 |
 | `key create --bits` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyCreateAdvanced` | L2 |
 | `key create --comment` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyCreateAdvanced` | L2 — comment in inspect |
-| `key create --out` | ✅ Deep | `keys/test_keys.py` | `TestKeyCreateAdvanced` | L3 — files on disk |
+| `key create --out` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyCreateAdvanced` | L2 — exact private/public output paths and regular-file identities, checked owned removal. |
 | `key create --default` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyCreateAdvanced` | L2 — is_default |
 | `key create --force` (overwrite) | ⚡ Shallow | `keys/test_keys.py` | `TestKeyCreateAdvanced` | L2 |
 | `key add <name> <pubkey>` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyLifecycle` | L2 |
@@ -1030,14 +1046,14 @@ Specific legacy conflicts that must be rewritten before release:
 | `key inspect` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyInspectTree` | L1 |
 | `key rm` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyLifecycle` | L2 |
 | `key rm` nonexistent | ⚡ Shallow | `keys/test_keys.py` | `TestKeyLifecycle` | L1 |
-| `key rm --force` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyRunningVMDependency` | L2 |
+| `key rm` with running guest | ⚡ Shallow | `ssh/test_ssh.py` | `TestKeyRunningVMDependency` | L2 — cached key removed without force; same VM remains running and exported private key still authenticates. Not a guest credential-revocation test. |
 | `key rm <name1> <name2>` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyLifecycle` | L2 |
 | `key default` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyLifecycle` | L2 |
 | `key default --clear` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyLifecycle` | L2 |
-| `key export --out` | ✅ Deep | `keys/test_keys.py` | `TestKeyLifecycle` | L3 — files on disk |
+| `key export <name> <directory>` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyLifecycle` | L2 — exact exported private/public bytes match cached originals and owned files are removed. |
 | `key export` overwrite | ⚡ Shallow | `keys/test_keys.py` | `TestKeyExportForce` | L1 |
-| `key export --force` | ✅ Deep | `keys/test_keys.py` | `TestKeyExportForce` | L3 |
-| Multiple defaults | ⚡ Shallow | `keys/test_keys.py` | `TestKeyDefaults` | L2 — is_default for both |
+| `key export --force` | ⚡ Shallow | `keys/test_keys.py` | `TestKeyExportForce` | L2 — ordinary overwrite refused; forced export replaces tampered owned bytes with the original public key. |
+| Multiple defaults | ⚡ Shallow | `ssh/test_ssh.py` | `TestKeyDefaults` | L2 — VM consumes both defaults; inspect, guest authorized_keys and actual SSH with each key agree; prior defaults restored. |
 | Delete default key when only key | ⚡ Shallow | `keys/test_keys.py` | `TestKeyLifecycle` | L2 |
 
 ---
@@ -1332,7 +1348,7 @@ Specific legacy conflicts that must be rewritten before release:
 | exec | 8 | 0 | 8 | 0 | 0 | 0 |
 | snapshot | 13 | 1 | 12 | 0 | 0 | 0 |
 | volume | 35 | 4 | 29 | 2 | 0 | 0 |
-| key | 28 | 3 | 25 | 0 | 0 | 0 |
+| key | 28 | 0 | 28 | 0 | 0 | 0 |
 | image | 41 | 0 | 16 | 3 | 3 | 19 |
 | kernel | 29 | 0 | 18 | 7 | 2 | 2 |
 | bin | 17 | 2 | 6 | 1 | 0 | 8 |
@@ -1345,11 +1361,11 @@ Specific legacy conflicts that must be rewritten before release:
 | env | 22 | 9 | 13 | 0 | 0 | 0 |
 | run | 4 | 1 | 3 | 0 | 0 | 0 |
 | full-journeys | 15 | 0 | 15 | 0 | 0 | 0 |
-| **Total** | **430** | **74** | **295** | **22** | **8** | **31** |
+| **Total** | **430** | **71** | **298** | **22** | **8** | **31** |
 
 **Current-row coverage health:**
-- ✅ Deep (L3): 74/430 = 17.2%
-- ⚡ Shallow (L0-L2): 295/430 = 68.6%
+- ✅ Deep (L3): 71/430 = 16.5%
+- ⚡ Shallow (L0-L2): 298/430 = 69.3%
 - 🟡 Partial: 22/430 = 5.1%
 - 🔴 Missing: **8/430 = 1.9%** — three user-owned `self-update` success/check paths, two remote image-list
   flag cases, the phantom `image inspect --tree` entry, referenced-force removal,
