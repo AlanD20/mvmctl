@@ -21,6 +21,17 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Measured-memory qualification follow-up (2026-09-28):** The revised three-case draft collected successfully;
+the swap-absent sustained hold passed, but swap-present failed its real-pressure assertion. Guest availability was
+15528 KiB out of 196992 KiB (over 92% occupancy), while actual leaf peak/current was 233127936 bytes, below high
+234881024, with zero high/OOM events. Occupancy and read sweeps therefore do not guarantee host-cgroup pressure.
+The strict report `qa-cgroup-working-set-530fa30b.json` records one pass, one failure and one unexecuted item counted
+as an error; no complete module pass is claimed. Exact configuration, VM and test-owned swap cleanup passed,
+including unchanged `guestfs_enabled`; all four inventories were empty and swap inactive. The draft remains only
+in an ignored persistent worktree, not committed test source. The retry circuit breaker stopped further qualification
+attempts: a workload design must produce measured pressure safely rather than drop the high-event assertion,
+change production memory policy, or call occupancy alone a pressure pass.
+
 **Durable exec-grant lifecycle checkpoint (2026-09-28):** One networkless two-VM journey passed 1/1 in 27.93
 seconds inside only `mvmctl-030-test`. An exact non-root `runner` grant produced remote stdout and destination file
 effects, survived typed destination and source stop/start and destination reboot without VM/policy recreation,

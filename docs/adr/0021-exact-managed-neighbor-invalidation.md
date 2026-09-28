@@ -41,8 +41,11 @@ netlink request.
   disposable runner namespace removed one stale dynamic entry, rejected a permanent entry, and confirmed namespace
   teardown. This proves the netlink protocol on that kernel, not full managed VM/IP-reuse behavior.
 - The current named runner supports the modeled nftables bridge family, and the network/nftables/policy Python domain
-  passed there. A two-VM reused-IP journey has not yet proved this exact neighbor invalidation during real VM launch;
-  that remains a release gate.
+  passed there. A later installed-candidate journey passed A-to-B stale-IP reuse with a new MAC, real gateway HTTP,
+  a concurrent control VM's unchanged binding, private live namespace identities and checked cleanup. Guest boot ARP
+  may also refresh the binding, so this qualifies the observed recovery but not independent attribution to the exact
+  pre-exposure invalidation ordering. See the [coverage matrix](../../tests/system/COVERAGE_MATRIX.md) for the strict
+  report and remaining qualification limits.
 
 ## Alternatives
 
