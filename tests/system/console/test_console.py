@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import json
 import os
+import pty
 import select
+import signal
 import stat
+import subprocess
+import termios
 import time
 import uuid
 from pathlib import Path
@@ -18,7 +22,12 @@ from typing import Any, Generator
 
 import pytest
 
-from tests.system.conftest import _json_success_data, _run_mvm, _unique_subnet
+from tests.system.conftest import (
+    SYSTEM_MVM_BINARY,
+    _json_success_data,
+    _run_mvm,
+    _unique_subnet,
+)
 
 pytestmark = [
     pytest.mark.system,
@@ -537,3 +546,137 @@ def test_console_active_relay_journey(
     console_vm["files"][receipt["config_path"]] = (config.st_dev, config.st_ino)
     _wait_for_exec(runner_vm, receipt["id"])
     _assert_live(renewed_task)
+
+
+def test_console_tty_attachment_serial_bytes(
+    runner_vm: str, console_vm: dict[str, Any]
+) -> None:
+    """Real terminal attachment receives guest serial output and detaches cleanly."""
+    receipt = console_vm["receipt"]
+    firecracker_task = console_vm["tasks"][0]
+    initial = _console_state(runner_vm, receipt, True)
+    _assert_live(firecracker_task)
+    _wait_for_exec(runner_vm, receipt["id"])
+    marker = f"mvm-console-serial-{uuid.uuid4().hex}"
+    master, slave = pty.openpty()
+    child = None
+    child_pidfd = None
+    child_receipt = None
+    transcript = bytearray()
+
+    def read_until(expected: bytes) -> None:
+        deadline = time.monotonic() + 10
+        while expected not in transcript:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, (expected, bytes(transcript))
+            readable, _, _ = select.select([master], [], [], min(remaining, 0.2))
+            if readable:
+                chunk = os.read(master, 4096)
+                assert chunk, bytes(transcript)
+                transcript.extend(chunk)
+                assert len(transcript) <= 131_072, "console PTY output exceeded bound"
+            if expected not in transcript:
+                assert child is not None and child.poll() is None, bytes(transcript)
+
+    try:
+        assert os.isatty(slave), "console stdin must be a real terminal"
+        original_terminal = termios.tcgetattr(slave)
+        assert (
+            original_terminal[3] & termios.ICANON
+            and original_terminal[3] & termios.ECHO
+        )
+        child = subprocess.Popen(
+            [SYSTEM_MVM_BINARY, "console", receipt["id"]],
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            env={**os.environ, "NO_COLOR": "1"},
+            close_fds=True,
+            start_new_session=True,
+        )
+        child_pidfd = os.pidfd_open(child.pid)
+        fields = Path(f"/proc/{child.pid}/stat").read_text().rpartition(") ")[2].split()
+        assert len(fields) >= 20 and int(fields[19]) > 0, fields
+        child_receipt = {
+            "pid": child.pid,
+            "process_start_time": int(fields[19]),
+            "arguments": [SYSTEM_MVM_BINARY, "console", receipt["id"]],
+        }
+        child_task = (child_pidfd, child.pid, child_receipt["process_start_time"])
+        _assert_live(child_task)
+        read_until(f"Attaching to console of '{receipt['name']}'".encode())
+        deadline = time.monotonic() + 5
+        while termios.tcgetattr(slave)[3] & (termios.ICANON | termios.ECHO):
+            assert child.poll() is None and time.monotonic() < deadline, (
+                child_receipt,
+                bytes(transcript),
+            )
+            time.sleep(0.05)
+        # Raw mode is reached only after CLI root admission and relay connection.
+        assert _console_state(runner_vm, receipt, True) == initial
+        assert marker.encode() not in transcript, bytes(transcript)
+        emitted = _run_mvm(
+            runner_vm,
+            "exec",
+            receipt["id"],
+            "--",
+            f"printf '\\n%s\\n' '{marker}' > /dev/ttyS0",
+        )
+        assert emitted.stdout == "", emitted.stdout
+        read_until(marker.encode())
+        assert bytes(transcript).count(marker.encode()) == 1, bytes(transcript)
+        _assert_live(child_task)
+        current = _owned_vm(runner_vm, receipt)
+        assert (
+            current["status"] == "running"
+            and (current["pid"], current["process_start_time"]) == firecracker_task[1:]
+        ), current
+        _assert_live(firecracker_task)
+        _wait_for_exec(runner_vm, receipt["id"])
+
+        assert os.write(master, b"\x18d") == 2
+        read_until(b"Detached from console")
+        assert child.wait(timeout=5) == 0, (child_receipt, bytes(transcript))
+        _assert_exited(child_task)
+        assert termios.tcgetattr(slave) == original_terminal, (
+            "console did not restore terminal mode"
+        )
+        assert _console_state(runner_vm, receipt, True) == initial
+        current = _owned_vm(runner_vm, receipt)
+        assert (
+            current["status"] == "running"
+            and (current["pid"], current["process_start_time"]) == firecracker_task[1:]
+        ), current
+        _assert_live(firecracker_task)
+        _wait_for_exec(runner_vm, receipt["id"])
+        print(
+            f"console attachment child={child_receipt} serial_marker={marker}",
+            flush=True,
+        )
+    finally:
+        try:
+            if child is not None and child.poll() is None:
+                # Only the freshly spawned, unreaped child may be cancelled.
+                os.write(master, b"\x18d")
+                try:
+                    child.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    if child_pidfd is None:
+                        # The direct unreaped child cannot have its PID reused.
+                        child.kill()
+                    else:
+                        signal.pidfd_send_signal(child_pidfd, signal.SIGKILL)
+                    child.wait(timeout=5)
+            if child_pidfd is not None:
+                _assert_exited(
+                    (
+                        child_pidfd,
+                        child.pid,
+                        child_receipt["process_start_time"] if child_receipt else 0,
+                    )
+                )
+        finally:
+            if child_pidfd is not None:
+                os.close(child_pidfd)
+            os.close(slave)
+            os.close(master)
