@@ -21,6 +21,17 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Read-only invariant-domain repeatability (2026-09-28):** The ten retained default/JSON/flag cases passed
+10/10 twice in 0.53 and 0.51 seconds inside only `mvmctl-030-test`, against candidate `c460278d`.
+Executed source was exact `0f95b7bc` plus the sole reviewed invariant-file cleanup, SHA-256
+`2f10282b563bc961aa98501017b70e7a073613d475ccb370a0aacae32efb1471`, now committed as `53ea1464`.
+Both strict reports have zero other outcomes and all four resource inventories stayed empty. Reports
+`qa-invariants-0f95b7bc-pass1.json` and `qa-invariants-0f95b7bc-pass2.json` are under the runner's
+`qa-release-0f95b7bc/.tmp` directory. Two misplaced legacy cache cases were removed: they decoded the old JSON
+shape, could restart a deleted VM, counted destructive success as a refusal pass, and used broad process-kill
+cleanup. Their source never established the claimed surviving-process precondition. Cache clean lifecycle and
+failed-kill safety remain cache-owner qualification work; retiring false-positive tests does not qualify them.
+
 **Exact-source CLI-domain repeatability (2026-09-28):** The complete CLI domain collected 24 items and passed
 24/24 twice in 0.36 seconds per run inside only `mvmctl-030-test`. Source checkout was clean exact commit
 `0f95b7bc574f29b6c20285159d31cc7c4f9db008`; its Go source independently matched `19c55345`, and installed candidate
