@@ -174,6 +174,9 @@ func (i *ImageImportInput) Resolve(
 	if format == "" {
 		format, _ = cfg.GetString(ctx, "defaults.image", "import_format")
 	}
+	if format == "auto" {
+		format = ""
+	}
 	// Extension-based auto-detect
 	if format == "" {
 		fname := strings.ToLower(filepath.Base(source))
