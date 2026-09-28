@@ -17,6 +17,16 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current-source Go/Python runner checkpoint (2026-09-28):** A clean checkout at `b2566f8a`
+passed pinned Go 1.26.3 offline tidy, architecture, whole-tree gofmt/golines 0.13.0, generation,
+vet, every CI-selected Go test and complete root Jailer tests (5.214 seconds) inside the freshly
+replaced `mvmctl-030-test`. The Python orchestrator unit suite passed 240/240 in 8.42 seconds.
+Evidence is `full-go-ci-b2566f8a.log` and `python-orchestrator-units-b2566f8a.{log,xml}`.
+The schema-6 candidate built successfully, but its installer refused the reused base image's
+legacy broad sudoers policy before replacing the executable. No old root journals or operator
+database were adopted. Console, network and image runtime gates remain pending; collection
+alone and these local source gates do not qualify the installed candidate or GitHub CI.
+
 **Root console authority source checkpoint (2026-09-28):** Production commits `0d627628` and
 `b306f996`, with test-only corrections `ba7afecd`/`82156ad3`, implement typed root observation
 and relay-only stop, strict schema 6, existing-only authority admission, durable stopping intent
