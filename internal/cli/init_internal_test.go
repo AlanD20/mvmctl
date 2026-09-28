@@ -172,3 +172,73 @@ func TestInitNonInteractiveSudoOutcome(t *testing.T) {
 		})
 	}
 }
+
+func TestInitInteractiveRequiresConfirmedInactiveSessionBeforeSkippingHost(t *testing.T) {
+	// Rationale: missing session evidence must reach the administrator prompt,
+	// so a user's decline cannot silently become a skipped host setup step.
+	tests := map[string]struct {
+		interactionContext map[string]any
+		wantSkip           bool
+	}{
+		"absent_session_evidence": {},
+		"malformed_session_evidence": {
+			interactionContext: map[string]any{"session_has_group": "false"},
+		},
+		"active_session": {
+			interactionContext: map[string]any{"session_has_group": true},
+		},
+		"confirmed_inactive_session": {
+			interactionContext: map[string]any{"session_has_group": false},
+			wantSkip:           true,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			common.BeginOutput(nil)
+			t.Cleanup(func() { common.BeginOutput(nil) })
+			reader, writer, err := os.Pipe()
+			require.NoError(t, err)
+			_, err = writer.WriteString("n\n")
+			require.NoError(t, err)
+			require.NoError(t, writer.Close())
+			originalStdin := os.Stdin
+			os.Stdin = reader
+			t.Cleanup(func() {
+				os.Stdin = originalStdin
+				require.NoError(t, reader.Close())
+			})
+			runner := &testutil.FakeRunner{}
+			originalRunner := system.DefaultRunner
+			system.DefaultRunner = runner
+			t.Cleanup(func() { system.DefaultRunner = originalRunner })
+
+			state := &initState{
+				initAPI: &testutil.MockInitAPI{
+					InitCheckReadinessFunc: func(context.Context) *model.ProbeResult {
+						return &model.ProbeResult{}
+					},
+				},
+				hostAPI: &testutil.MockHostAPI{
+					HostStatusCheckFunc: func(context.Context) *results.HostStatusCheck {
+						return &results.HostStatusCheck{
+							GroupExists: true, SudoersExists: true, UserInGroup: true,
+						}
+					},
+				},
+			}
+			err = state.handleSudoRequired(context.Background(), &errs.NeedsInteraction{
+				Code: "privilege.sudo_required", Context: tc.interactionContext,
+			})
+			// Interaction state remains defined when the user declines setup.
+			assert.Equal(t, tc.wantSkip, state.skipHost)
+			assert.False(t, state.sudoCompleted)
+			assert.Empty(t, runner.Calls, "declined or inactive-session setup must not execute sudo")
+			if !tc.wantSkip {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "skipped by user")
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}

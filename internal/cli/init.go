@@ -204,10 +204,10 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 
 	hostStateBefore := s.hostAPI.HostStatusCheck(ctx)
 
-	sessionHasGroup, _ := interaction.Context["session_has_group"].(bool)
+	sessionHasGroup, sessionKnown := interaction.Context["session_has_group"].(bool)
 
 	// Group exists, user is member, but session doesn't have it active
-	if hostStateBefore.GroupExists && hostStateBefore.UserInGroup && !sessionHasGroup {
+	if sessionKnown && hostStateBefore.GroupExists && hostStateBefore.UserInGroup && !sessionHasGroup {
 		common.Cli.Warning(fmt.Sprintf(
 			"mvm group — session not active (log out and back in, or run: newgrp %s)",
 			infra.MVMUnixGroup,
