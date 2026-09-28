@@ -514,35 +514,66 @@ class TestVMSSHIntegration:
 
 
 # ========================================================================
-# Shared network fixture for TestVMConfigOptions (module-scoped)
-# ========================================================================
-
-
-@pytest.fixture(scope="module")
-def config_options_network(runner_vm) -> Generator[str, None, None]:
-    """Module-scoped network for read-only config tests in TestVMConfigOptions."""
-    name = f"sys-cfg-net-{uuid.uuid4().hex[:6]}"
-    _run_mvm(
-        runner_vm,
-        "network",
-        "create",
-        name,
-        "--subnet",
-        _unique_subnet(name),
-    )
-    try:
-        yield name
-    finally:
-        _run_mvm(runner_vm, "network", "rm", name, check=False)
-
-
-# ========================================================================
 # TestVMConfigOptions
 # ========================================================================
 
 
+@pytest.fixture(scope="class")
+def config_vm_deps(runner_vm) -> None:
+    """Prepare mirrored assets once for the resource/configuration class."""
+    ensure_vm_deps(runner_vm)
+
+
+def _remove_config_vm(runner_vm: str, name: str) -> None:
+    """Remove only this test's exact VM, with checked public readback."""
+    listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+    if any(vm["name"] == name for vm in listed):
+        _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
+    assert all(vm["name"] != name for vm in _parse_vm_list(
+        _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+    ))
+
+
+@pytest.fixture
+def config_vm_name(runner_vm, config_vm_deps) -> Generator[str, None, None]:
+    """Own one unique name and the precedence test's explicit CLI variant."""
+    name = f"sys-config-{uuid.uuid4().hex[:8]}"
+    try:
+        yield name
+    finally:
+        _remove_config_vm(runner_vm, name)
+        _remove_config_vm(runner_vm, f"{name}-cli")
+
+
+def _create_config_vm(
+    runner_vm: str,
+    name: str,
+    *options: str,
+    memory: str = "256M",
+    vcpu: int | None = 1,
+    pci_enabled: bool = False,
+) -> dict:
+    """Launch a small isolated VM through the public CLI, not a test-only backend."""
+    args = [
+        "vm", "create", name, "--image", "alpine:3.23", "--no-network",
+        "--cloud-init-mode", "off", "--skip-deblob", "--disk-size", "512M",
+        "--mem", memory, "--json",
+    ]
+    if vcpu is not None:
+        args.extend(["--vcpu", str(vcpu)])
+    if not pci_enabled:
+        args.append("--no-pci")
+    created = _json_success_data(
+        _run_mvm(runner_vm, *args, *options, timeout=180).stdout, list,
+    )
+    assert len(created) == 1, created
+    assert created[0]["name"] == name
+    assert created[0]["status"] == "running"
+    return created[0]
+
+
 class TestVMConfigOptions:
-    """VM config options: vcpus, mem, disk-size, boot-args, pci, logging, metrics."""
+    """Real allocation and feature effects, plus typed refusal before VM creation."""
 
     pytestmark = [
         pytest.mark.system,
@@ -551,665 +582,154 @@ class TestVMConfigOptions:
         pytest.mark.domain_vm,
     ]
 
-    def test_create_with_vcpus(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with custom --vcpu."""
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--vcpu",
-                "2",
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm["vcpu_count"] == 2
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
+    @pytest.mark.parametrize("memory", ["256", "256M"], ids=["numeric", "human-readable"])
+    def test_resource_allocation(self, runner_vm, config_vm_name, memory):
+        """CPU/RAM/root-disk flags reach the guest, not merely the stored input."""
+        vm = _create_config_vm(runner_vm, config_vm_name, memory=memory, vcpu=2)
+        assert (vm["vcpu_count"], vm["mem_size_mib"], vm["disk_size_mib"]) == (2, 256, 512)
+        assert _run_mvm(runner_vm, "exec", config_vm_name, "--", "nproc").stdout.strip() == "2"
+        memory_info = _run_mvm(
+            runner_vm, "exec", config_vm_name, "--", "cat", "/proc/meminfo",
+        ).stdout
+        total_kib = int(next(line.split()[1] for line in memory_info.splitlines()
+                             if line.startswith("MemTotal:")))
+        # Kernel reservations reduce guest-visible RAM; the bound still rejects an ignored 256 MiB flag.
+        assert (256 - 64) * 1024 < total_kib <= 256 * 1024, memory_info
+        sectors = _run_mvm(
+            runner_vm, "exec", config_vm_name, "--", "cat", "/sys/class/block/vda/size",
+        ).stdout.strip()
+        assert int(sectors) * 512 == 512 * 1024 * 1024
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", config_vm_name, "--json").stdout, dict,
+        )
+        assert inspected["resources"]["vcpu"] == 2
+        assert inspected["resources"]["mem"] == 256
+        assert inspected["resources"]["disk"] == 512
+        assert inspected["vm"]["enable_console"] is False
+        assert inspected["console"]["relay_running"] is False
+        assert inspected["console"]["relay_pid"] is None
 
-    def test_create_with_vcpus_zero_fails(
-        self,
-        runner_vm,
-        config_options_network,
+    @pytest.mark.parametrize(
+        ("flag", "value", "code"),
+        [
+            ("--vcpu", "0", "vm.create.failed"),
+            ("--vcpu", "-1", "vm.create.failed"),
+            ("--mem", "0", "vm.create.failed"),
+            ("--disk-size", "0", "vm.create.failed"),
+            ("--disk-size", "abc", "validation.failed"),
+        ],
+        ids=["zero-cpu", "negative-cpu", "zero-memory", "zero-disk", "malformed-disk"],
+    )
+    def test_invalid_resource_rejected_before_vm_creation(
+        self, runner_vm, config_vm_name, flag, value, code,
     ):
-        """--vcpu 0 must fail."""
-        net_name = config_options_network
+        """An invalid allocation is a validation error, not an incidental launch failure."""
+        before = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
         result = _run_mvm(
-            runner_vm,
-            "vm",
-            "create",
-            "test-vcpus-zero",
-            "--image",
-            "alpine:3.23",
-            "--vcpu",
-            "0",
-            "--network",
-            net_name,
-            check=False,
+            runner_vm, "vm", "create", config_vm_name, "--image", "alpine:3.23",
+            "--no-network", flag, value, "--json", check=False,
         )
         assert result.returncode != 0
+        envelope = json.loads(result.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "error"
+        assert envelope["data"] is None
+        assert envelope["error"]["code"] == code
+        assert envelope["error"]["class"] == 1
+        assert _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout) == before
 
-    def test_create_with_vcpus_negative_fails(
-        self,
-        runner_vm,
-        config_options_network,
-    ):
-        """Negative --vcpu must fail."""
-        net_name = config_options_network
-        result = _run_mvm(
-            runner_vm,
-            "vm",
-            "create",
-            "test-vcpus-neg",
-            "--image",
-            "alpine:3.23",
-            "--vcpu",
-            "-1",
-            "--network",
-            net_name,
-            check=False,
-        )
-        assert result.returncode != 0
+    def test_config_chain_precedence(self, runner_vm, config_vm_name):
+        """Configured CPU count and explicit CLI precedence are observed inside two sequential guests."""
+        def cpu_setting() -> dict:
+            return _json_success_data(
+                _run_mvm(runner_vm, "config", "get", "defaults.vm", "--json").stdout, dict,
+            )["vcpu_count"]
 
-    def test_config_chain_precedence(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ) -> None:
-        """Config values affect VM creation unless CLI flags override."""
-        net_name = config_options_network
-        vm_noflag = unique_vm_name
-        vm_flag = f"{unique_vm_name}-cli"
-        section = "defaults.vm"
-        key = "vcpu_count"
+        original = cpu_setting()
+        assert original["type"] == "int"
         try:
-            original = _run_mvm(
-                runner_vm, "config", "get", section, key, check=False
-            )
-            original_value = (
-                original.stdout.strip()
-                if original.returncode == 0 and original.stdout.strip()
-                else None
-            )
+            _run_mvm(runner_vm, "config", "set", "defaults.vm", "vcpu_count", "2")
+            inherited = _create_config_vm(runner_vm, config_vm_name, vcpu=None)
+            assert inherited["vcpu_count"] == 2
+            assert _run_mvm(
+                runner_vm, "exec", config_vm_name, "--", "nproc",
+            ).stdout.strip() == "2"
+            _remove_config_vm(runner_vm, config_vm_name)
 
-            _run_mvm(runner_vm, "config", "set", section, key, "4")
-
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_noflag,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-            )
-            result = _run_mvm(runner_vm, "vm", "inspect", vm_noflag, "--json")
-            data = json.loads(result.stdout)
-            assert data.get("resources", {}).get("vcpu") == 4
-
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_flag,
-                "--image",
-                "alpine:3.23",
-                "--vcpu",
-                "2",
-                "--network",
-                net_name,
-            )
-            result = _run_mvm(runner_vm, "vm", "inspect", vm_flag, "--json")
-            data = json.loads(result.stdout)
-            assert data.get("resources", {}).get("vcpu") == 2
+            explicit_name = f"{config_vm_name}-cli"
+            explicit = _create_config_vm(runner_vm, explicit_name, vcpu=1)
+            assert explicit["vcpu_count"] == 1
+            assert _run_mvm(
+                runner_vm, "exec", explicit_name, "--", "nproc",
+            ).stdout.strip() == "1"
         finally:
-            if original_value:
-                _run_mvm(
-                    runner_vm, "config", "set", section, key,
-                    original_value, check=False,
-                )
+            if original["override"] is None:
+                _run_mvm(runner_vm, "config", "reset", "defaults.vm", "vcpu_count")
             else:
                 _run_mvm(
-                    runner_vm, "config", "reset", section, key, check=False,
+                    runner_vm, "config", "set", "defaults.vm", "vcpu_count",
+                    str(original["override"]),
                 )
-            for name in (vm_noflag, vm_flag):
-                _run_mvm(runner_vm, "vm", "rm", name, "--force", check=False)
+            assert cpu_setting() == original
 
-    def test_create_with_memory(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with custom --mem."""
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--mem",
-                "1024",
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm["mem_size_mib"] == 1024
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_create_with_memory_zero_fails(
-        self,
-        runner_vm,
-        config_options_network,
-    ):
-        """--mem 0 must fail."""
-        net_name = config_options_network
-        result = _run_mvm(
-            runner_vm,
-            "vm",
-            "create",
-            "test-mem-zero",
-            "--image",
-            "alpine:3.23",
-            "--mem",
-            "0",
-            "--network",
-            net_name,
-            check=False,
+    def test_boot_args_reach_guest(self, runner_vm, config_vm_name):
+        """A distinct custom argument reaches the booted kernel command line."""
+        marker = "mvm_qa_resource=1"
+        _create_config_vm(
+            runner_vm, config_vm_name, "--boot-args", f"rw quiet loglevel=5 {marker}",
         )
-        assert result.returncode != 0
+        command_line = _run_mvm(
+            runner_vm, "exec", config_vm_name, "--", "cat", "/proc/cmdline",
+        ).stdout.split()
+        assert marker in command_line
+        assert "loglevel=5" in command_line
 
-    def test_create_with_memory_human_readable(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with human-readable --mem (1G = 1024 MiB)."""
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--mem",
-                "1G",
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm["mem_size_mib"] == 1024
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
+    @pytest.mark.parametrize("pci_enabled", [True, False], ids=["default-pci", "no-pci"])
+    def test_pci_transport(self, runner_vm, config_vm_name, pci_enabled):
+        """Both transport choices boot; only the PCI choice enumerates guest PCI devices."""
+        vm = _create_config_vm(runner_vm, config_vm_name, pci_enabled=pci_enabled)
+        assert vm["pci_enabled"] is pci_enabled
+        devices = _run_mvm(
+            runner_vm, "exec", config_vm_name, "--", "ls", "/sys/bus/pci/devices",
+        ).stdout.split()
+        assert bool(devices) is pci_enabled, devices
 
-    def test_create_with_disk_size(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with custom --disk-size."""
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--disk-size",
-                "2G",
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm["disk_size_mib"] == 2048
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_create_with_disk_size_zero_fails(
-        self,
-        runner_vm,
-        config_options_network,
-    ):
-        """--disk-size 0 must fail."""
-        net_name = config_options_network
-        result = _run_mvm(
-            runner_vm,
-            "vm",
-            "create",
-            "test-disk-zero",
-            "--image",
-            "alpine:3.23",
-            "--disk-size",
-            "0",
-            "--network",
-            net_name,
-            check=False,
+    @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+    def test_logging_output(self, runner_vm, config_vm_name, enabled):
+        """The logging flag controls Firecracker log output in a fresh VM directory."""
+        flag = "--enable-logging" if enabled else "--disable-logging"
+        vm = _create_config_vm(runner_vm, config_vm_name, flag)
+        assert vm["enable_logging"] is enabled
+        _run_mvm(runner_vm, "exec", config_vm_name, "--", "uname", "-s")
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", config_vm_name, "--json").stdout, dict,
         )
-        assert result.returncode != 0
+        log_path = Path(inspected["filesystem"]["log_path"])
+        assert log_path.is_file()
+        assert (log_path.stat().st_size > 0) is enabled
 
-    def test_create_with_disk_size_invalid_fails(
-        self,
-        runner_vm,
-        config_options_network,
-    ):
-        """Invalid --disk-size format must fail."""
-        net_name = config_options_network
-        result = _run_mvm(
-            runner_vm,
-            "vm",
-            "create",
-            "test-disk-inv",
-            "--image",
-            "alpine:3.23",
-            "--disk-size",
-            "abc",
-            "--network",
-            net_name,
-            check=False,
+    @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+    def test_metrics_output(self, runner_vm, config_vm_name, enabled):
+        """Enabled metrics produce complete JSON records; disabling leaves no metrics file."""
+        flag = "--enable-metrics" if enabled else "--disable-metrics"
+        vm = _create_config_vm(runner_vm, config_vm_name, flag)
+        assert vm["enable_metrics"] is enabled
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", config_vm_name, "--json").stdout, dict,
         )
-        assert result.returncode != 0
-
-    def test_create_with_specific_kernel(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with a specific --kernel."""
-        net_name = config_options_network
-        kernels = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
-        )
-        present = [k for k in kernels if k.get("is_present")]
-        assert present, "No present kernel to test with"
-        kernel_id_prefix = present[0]["id"][:6]
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--kernel",
-                kernel_id_prefix,
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm["kernel_id"].startswith(kernel_id_prefix)
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_create_with_boot_args(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with custom --boot-args."""
-        net_name = config_options_network
-        custom_boot_args = "quiet loglevel=3"
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--boot-args",
-                custom_boot_args,
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            stored_args = vm.get("boot_args", "")
-            assert custom_boot_args in stored_args
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_create_with_no_console(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with no console relay (default behavior)."""
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm.get("enable_console") is False
-            assert vm.get("relay_pid") is None or vm.get("relay_pid") == 0
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_create_with_pci_default(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with PCI enabled by default (no --no-pci)."""
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm.get("pci_enabled") is True
-            assert vm.get("status") == "running"
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_create_with_no_pci(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with --no-pci."""
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--no-pci",
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm.get("pci_enabled") is False
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_create_with_enable_logging(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with --enable-logging.
-
-        L3: Verify firecracker.log file exists and is non-empty via inspect
-        and checking inside the test VM.
-        """
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--enable-logging",
-                "--network",
-                net_name,
-            )
-            # L3: Verify firecracker.log file exists via inspect
-            inspect = _run_mvm(
-                runner_vm, "vm", "inspect", unique_vm_name, "--json"
-            )
-            info = json.loads(inspect.stdout)
-            vm_dir = info.get("filesystem", {}).get("vm_dir", "")
-
-            # Verify the log file exists inside the test VM
-            check_log = _guest_run(runner_vm,
-                f"test -f '{vm_dir}/firecracker.log' && "
-                f"test -s '{vm_dir}/firecracker.log' && echo OK",
-                check=False,
-            )
-            assert check_log.returncode == 0, (
-                f"Firecracker log not found or empty at {vm_dir}/firecracker.log"
-            )
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_create_with_no_enable_logging(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with --disable-logging."""
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--disable-logging",
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm["status"] == "running"
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_create_with_enable_metrics(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with --enable-metrics.
-
-        L3: Verify metrics file exists and is non-empty via inspect
-        and checking inside the test VM.
-        """
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--enable-metrics",
-                "--network",
-                net_name,
-            )
-            inspect = _run_mvm(
-                runner_vm, "vm", "inspect", unique_vm_name, "--json"
-            )
-            info = json.loads(inspect.stdout)
-            vm_dir = info.get("filesystem", {}).get("vm_dir", "")
-
-            check_metrics = _guest_run(runner_vm,
-                f"test -f '{vm_dir}/firecracker.metrics' && "
-                f"test -s '{vm_dir}/firecracker.metrics' && echo OK",
-                check=False,
-            )
-            assert check_metrics.returncode == 0, (
-                f"Firecracker metrics not found or empty at {vm_dir}/firecracker.metrics"
-            )
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_create_with_no_enable_metrics(
-        self,
-        runner_vm,
-        unique_vm_name,
-        config_options_network,
-    ):
-        """Create VM with --disable-metrics."""
-        net_name = config_options_network
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--disable-metrics",
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm["status"] == "running"
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_vcpus_negative_rejected(
-        self,
-        runner_vm: str,
-        config_options_network,
-    ) -> None:
-        """Negative vCPU count should be rejected."""
-        net_name = config_options_network
-        result = _run_mvm(
-            runner_vm,
-            "vm",
-            "create",
-            "test-neg-cpu",
-            "--image",
-            "alpine:3.23",
-            "--vcpu",
-            "-1",
-            "--network",
-            net_name,
-            check=False,
-        )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "invalid" in combined or "must be a positive integer" in combined
-
-    def test_mem_zero_rejected(
-        self,
-        runner_vm: str,
-        config_options_network,
-    ) -> None:
-        """Zero memory should be rejected."""
-        net_name = config_options_network
-        result = _run_mvm(
-            runner_vm,
-            "vm",
-            "create",
-            "test-zero-mem",
-            "--image",
-            "alpine:3.23",
-            "--mem",
-            "0",
-            "--network",
-            net_name,
-            check=False,
-        )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "invalid" in combined
-
-    def test_disk_size_zero_rejected(
-        self,
-        runner_vm: str,
-        config_options_network,
-    ) -> None:
-        """Zero disk size should be rejected."""
-        net_name = config_options_network
-        result = _run_mvm(
-            runner_vm,
-            "vm",
-            "create",
-            "test-zero-disk",
-            "--image",
-            "alpine:3.23",
-            "--mem",
-            "512",
-            "--disk-size",
-            "0",
-            "--network",
-            net_name,
-            check=False,
-        )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "smaller than minimum" in combined
+        path = Path(inspected["filesystem"]["vm_dir"]) / "firecracker.metrics"
+        if not enabled:
+            assert not path.exists()
+            return
+        deadline = time.monotonic() + 10
+        while True:
+            text = path.read_text()
+            if text.endswith("\n"):
+                records = [json.loads(line) for line in text.splitlines()]
+                assert records and all(isinstance(record, dict) and record for record in records)
+                break
+            assert time.monotonic() < deadline, text
+            time.sleep(0.1)
 
 
 # ========================================================================

@@ -21,6 +21,20 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Resource/config audit checkpoint (2026-09-28):** `TestVMConfigOptions` replaces 22 stale, duplicate, or shallow
+probes with 15 installed-candidate cases. They observe guest CPU/RAM/root-disk size, custom boot arguments, both PCI
+transports, logging and metrics enable/disable effects, configured/CLI CPU precedence with exact restoration, and
+five typed invalid-resource refusals with unchanged VM inventory. Each VM is small, networkless, function-owned,
+and removed through checked exact-name cleanup. The improved assertions exposed inactive logger intent and a
+Jailer credential-observation startup race; both were fixed without weakening root admission. The complete group
+passed 15/15 in only `mvmctl-030-test` against candidate SHA-256
+`7a7121519c2984080eb8c464bb58f085b43ff5a54c5409120b8bc53f854528c2`; strict report
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/qa-crash-5b23766f/.tmp/qa-resource-config-0928-transition.json`
+records zero other outcomes. Independent VM/network/volume/snapshot inventories were empty. The retired default-kernel
+prefix probe could pass if its selector were ignored; the distinct imported-kernel/stopped-dependency case owns
+explicit full-ID selection, not independent kernel-prefix resolution. The remaining lifecycle module and full matrix
+are not qualified by this group.
+
 **Kernel-import runner checkpoint (2026-09-27):** The complete eight-case
 `tests/system/kernel/test_kernel_import.py` module passed against the installed 0.3.0 candidate in only
 `mvmctl-030-test`. The strict report at
@@ -615,29 +629,29 @@ Specific legacy conflicts that must be rewritten before release:
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
 | `vm create` basic | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` (via module_vm), `TestVMCreate` | L2 — status=running. Many shallow VM tests. |
-| `vm create` with `--vcpu` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 — vcpu_count in ls JSON |
-| `vm create` with `--vcpu 0` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L1 — non-zero exit |
-| `vm create` with `--vcpu -1` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L1 — non-zero exit |
-| `vm create` with `--mem` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 — mem_size_mib |
-| `vm create` with `--mem 0` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L1 |
-| `vm create` with `--disk-size` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 — disk_size_mib |
-| `vm create` with `--disk-size 0` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L1 |
-| `vm create` with `--disk-size invalid` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L1 |
-| `vm create` with `--kernel` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 — kernel_id starts with prefix |
-| `vm create` with `--boot-args` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 — boot_args in ls JSON |
+| `vm create` with `--vcpu` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_resource_allocation` | Installed-candidate L2 — guest nproc=2 plus create/inspect resource fields. |
+| `vm create` with `--vcpu 0` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_invalid_resource_rejected_before_vm_creation` | L2 — schema-1 class-1 `vm.create.failed`, unchanged VM inventory. |
+| `vm create` with `--vcpu -1` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_invalid_resource_rejected_before_vm_creation` | L2 — typed validation refusal and unchanged VM inventory. |
+| `vm create` with `--mem` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_resource_allocation` | L2 — numeric and human-readable 256 MiB allocation, bounded guest MemTotal and create/inspect fields. |
+| `vm create` with `--mem 0` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_invalid_resource_rejected_before_vm_creation` | L2 — typed validation refusal and unchanged VM inventory. |
+| `vm create` with `--disk-size` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_resource_allocation` | L2 — guest root block-device extent is exactly 512 MiB plus create/inspect fields. |
+| `vm create` with `--disk-size 0` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_invalid_resource_rejected_before_vm_creation` | L2 — typed validation refusal and unchanged VM inventory. |
+| `vm create` with `--disk-size invalid` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_invalid_resource_rejected_before_vm_creation` | L2 — schema-1 class-1 `validation.failed`, unchanged VM inventory. |
+| `vm create` with `--kernel` | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelStoppedVMDeletion` | Installed-candidate L2 — distinct imported kernel selected by full ID, retained while referenced by stopped VM. Independent kernel-prefix resolution remains unproved; retired default-prefix probe was vacuous. |
+| `vm create` with `--boot-args` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_boot_args_reach_guest` | L2 — unique custom marker and requested loglevel in guest /proc/cmdline. |
 | `vm create` with `--ip` (static) | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMNetworkIntegration` | L2 — ipv4 field in ls JSON |
 | `vm create` with invalid IP | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMNetworkIntegration` | L1 |
 | `vm create` with `--mac` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMNetworkIntegration` | L2 — mac field |
 | `vm create` with named `--network` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMNetworkIntegration` | L2 — network_id matches |
 | `vm create --no-network`, stop/start/reboot, and vsock exec | 🟡 Partial | `vm/test_jailer.py` | `TestNetworklessJailerLifecycle` | Focused installed-candidate L2 case passed twice for restart and once with reboot in the named runner: no network identity or guest `eth0`, `lo` present, exec after restart and reboot, checked VM removal. Kernel `dummy0` may exist; namespace isolation, VM-to-VM authorization, and full domain QA remain. |
-| `vm create` default (no console relay) | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L3 — enable_console=false AND relay_pid is None/0. No `--console` flag passed. |
+| `vm create` default (no console relay) | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_resource_allocation` | L2 — no console flag; inspect reports disabled console, relay_running=false and relay_pid=null. |
 | `vm create` with `--console` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMCreateConsole` | L2 — enable_console=true in ls JSON |
-| `vm create` default (PCI enabled) | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L3 — pci_enabled=true AND VM boots successfully. No `--no-pci` flag passed. |
-| `vm create` with `--no-pci` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 — pci_enabled=false |
-| `vm create` with `--enable-logging` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L3: firecracker.log file exists in vm_dir and is non-empty |
-| `vm create` with `--disable-logging` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 |
-| `vm create` with `--enable-metrics` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L3: firecracker.metrics file exists in vm_dir and is non-empty |
-| `vm create` with `--disable-metrics` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 |
+| `vm create` default (PCI enabled) | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_pci_transport` | L2 — default PCI VM boots, stored transport matches, guest enumerates PCI devices. |
+| `vm create` with `--no-pci` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_pci_transport` | L2 — no-PCI VM boots, stored transport matches, no guest PCI devices. |
+| `vm create` with `--enable-logging` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_logging_output` | L2 — configured logging enabled, vsock exec works, fresh log exists and is nonempty. |
+| `vm create` with `--disable-logging` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_logging_output` | L2 — configured logging disabled, vsock exec works, fresh log exists and is empty. |
+| `vm create` with `--enable-metrics` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_metrics_output` | L2 — fresh metrics file contains complete nonempty JSON records within a bounded wait. |
+| `vm create` with `--disable-metrics` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_metrics_output` | L2 — configured metrics disabled and fresh metrics file absent. |
 | `vm create` with `--cloudinit-config` | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMCloudInit` | L1/L2 for most modes, L3 for cloudinit-config script (checks seed dir via SSH). DNS test skips often. |
 | `vm create` with `--cloud-init-mode inject` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMCloudInit` | L2 — status=running only |
 | `vm create` with `--cloud-init-mode iso` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMCloudInitModes` | L2 — status=running |
@@ -698,7 +712,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `volume detach` nonexistent | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L1 — non-zero |
 | vm rm with attached volume | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L2 — status=available after rm |
 | Crashed firecracker recovery | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions::test_crashed_vm_status_and_restart` | Installed-candidate L2 proves exact pidfd-bound crash/exit, public ls/ps/inspect reconciliation, typed stop/start, vsock exec, and checked removal. Guest poweroff and complete host-reboot qualification remain open. |
-| Config chain precedence | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 — vcpu=2 with --vcpu overrides config=4 |
+| Config chain precedence | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_config_chain_precedence` | L2 — guest inherits configured two CPUs, then explicit one-CPU CLI value wins; prior override or override absence restored exactly. |
 | Volume persists stop/start | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L3 — SSH in, check /dev/vdb |
 | Volume mountable in guest | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L3 — mkfs.ext4 + mount + write + read |
 | DNS resolution in guest | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMCloudInit` | L3 — often skips if DNS unavailable |
