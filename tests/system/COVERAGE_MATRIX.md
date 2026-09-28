@@ -24,7 +24,11 @@ Fixed systemd/Ubuntu/OpenRC and missing/ambiguous/unsafe-parent regression cases
 the complete LoopMount package passed (0.223 seconds), and focused race checks passed (1.051 seconds).
 Scoped gofmt/golines 0.13.0 and vet passed under Go 1.26.3 inside only `mvmctl-030-test`.
 Evidence is `ubuntu-init-{red,green,race}.log` and `ubuntu-loopmount-full.log`.
-These source checks do not yet qualify the installed-candidate tar-import/Ubuntu boot journey or whole image domain.
+The exact clean `d5bf3656` candidate was built with its embedded guest agent and installed through the normal
+installer only inside that runner, SHA-256 `a5518257545d2851d116ee9324a1e0e693babcf9923525523b5bab89d5a5e34c`.
+The original mirrored Ubuntu tar-import/warm/VM-boot regression then passed 1/1 in 122.65 seconds, with actual
+guest Ubuntu 24.04 evidence, mirror preservation and exact config/four empty inventory cleanup. Strict report:
+`qa-images-ubuntu-d5bf-tar-pass1.{json,xml}`. This does not qualify the complete image module or full release matrix.
 
 **Basic network lifecycle repeat gate (2026-09-28):** Commit `8af4839a` modernizes the basic
 network file while retaining its separate missing-bridge fault case. Exact file SHA-256

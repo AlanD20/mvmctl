@@ -979,7 +979,8 @@ composition is described above; the current incomplete-work inventory is under *
 - Typed agent provisioning accepts Ubuntu's usrmerged systemd layout without relaxing no-follow file admission.
   Incomplete OpenRC directory evidence no longer triggers an unrelated `/sbin/openrc` probe; complete OpenRC
   candidates retain strict admission, and ambiguous layouts are still rejected. A real old-source regression and
-  focused Go/package/race checks pass; installed-candidate Ubuntu boot qualification remains pending.
+  focused Go/package/race checks pass. The original mirrored tar-import/warm/Ubuntu 24.04 boot regression also
+  passes on the normally installed runner candidate, with checked cleanup; the complete image domain remains open.
 - Console discovery and relay-only stop now consume root journal authority, never cache PID
   mirrors. Strict instance schema 6 retains relay `running|stopping|stopped` identity;
   schema-5 records are rejected without migration. Durable stopping precedes exact pidfd signaling,
