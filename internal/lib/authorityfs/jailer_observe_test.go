@@ -24,6 +24,7 @@ func TestExistingJailerMissingAuthorityNeverCreates(t *testing.T) {
 	} {
 		t.Run(missing, func(t *testing.T) {
 			root := seedObservedJailer(t)
+			require.NoError(t, acquireObservedJailerVM(t.Context(), root))
 			require.NoError(t, os.RemoveAll(filepath.Join(root, missing)))
 			before := observedJailerTree(t, root)
 			t.Cleanup(func() { compareObservedJailerTree(t, before, observedJailerTree(t, root)) })
@@ -88,11 +89,6 @@ func seedObservedJailer(t *testing.T) string {
 	require.NoError(t, uid.Release(t.Context()))
 	require.NoError(t, index.Release(t.Context()))
 	require.NoError(t, jailer.Release(t.Context()))
-	for _, name := range []string{
-		"run/mvmctl/authority/index.lock", "run/mvmctl/authority/1000/" + testVMID + ".lock",
-	} {
-		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte("retained lock evidence"), 0600))
-	}
 	return root
 }
 
