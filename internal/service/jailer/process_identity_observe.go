@@ -34,7 +34,20 @@ func observeProcessIdentity(
 	role string,
 	locator instanceProcessLocator,
 ) (observedProcessIdentity, error) {
-	return observeProcessIdentityWithExecutableOwner(ctx, deps, vmID, role, locator, 0, 0, false)
+	observed, _, err := observeProcessIdentityWithExecutableOwner(ctx, deps, vmID, role, locator, 0, 0, nil)
+	return observed, err
+}
+
+func observeFirecrackerExecCandidate(
+	ctx context.Context,
+	deps processIdentityVerifierDeps,
+	record instanceRecord,
+	destination observedJailDestination,
+) (observedProcessIdentity, bool, error) {
+	return observeProcessIdentityWithExecutableOwner(
+		ctx, deps, record.vmID, "Firecracker", record.launch.process,
+		record.launch.executionIdentity.uid, record.launch.executionIdentity.gid, &destination,
+	)
 }
 
 func observeProcessIdentityWithExecutableOwner(
@@ -45,30 +58,34 @@ func observeProcessIdentityWithExecutableOwner(
 	locator instanceProcessLocator,
 	ownerUID uint32,
 	ownerGID uint32,
-	allowRoot bool,
-) (_ observedProcessIdentity, returnErr error) {
+	execDestination *observedJailDestination,
+) (_ observedProcessIdentity, _ bool, returnErr error) {
 	descriptors := processVerificationDescriptors{deps: deps, vmID: vmID}
 	defer func() {
 		returnErr = descriptors.closeAll(ctx, returnErr)
 	}()
 	directoryFD, err := deps.openProcessDirectory(ctx, locator.pid)
 	if err != nil {
-		return observedProcessIdentity{}, processVerificationError(vmID, "open fixed "+role+" process directory", err)
+		return observedProcessIdentity{}, false, processVerificationError(
+			vmID,
+			"open fixed "+role+" process directory",
+			err,
+		)
 	}
 	descriptors.add(directoryFD)
 	if err := requireProcessDescriptorCLOEXEC(ctx, deps, directoryFD, role+" process directory"); err != nil {
-		return observedProcessIdentity{}, processVerificationError(vmID, "verify "+role+" process directory", err)
-	}
-	observation, err := observeProcessMetadata(ctx, deps, directoryFD, locator.pid)
-	if err != nil {
-		return observedProcessIdentity{}, processVerificationError(vmID, "read "+role+" process identity", err)
-	}
-	if observation.startTimeTicks != locator.startTimeTicks {
-		return observedProcessIdentity{}, processVerificationError(
+		return observedProcessIdentity{}, false, processVerificationError(
 			vmID,
-			role+" process does not match its launch locator",
-			nil,
+			"verify "+role+" process directory",
+			err,
 		)
+	}
+	var observation processObservation
+	if execDestination == nil {
+		observation, err = observeLocatedProcessMetadata(ctx, deps, directoryFD, vmID, role, locator)
+		if err != nil {
+			return observedProcessIdentity{}, false, err
+		}
 	}
 	mountNamespace, err := pinObservedObject(
 		ctx,
@@ -80,7 +97,7 @@ func observeProcessIdentityWithExecutableOwner(
 		false,
 	)
 	if err != nil {
-		return observedProcessIdentity{}, err
+		return observedProcessIdentity{}, false, err
 	}
 	networkNamespace, err := pinObservedObject(
 		ctx,
@@ -92,7 +109,7 @@ func observeProcessIdentityWithExecutableOwner(
 		false,
 	)
 	if err != nil {
-		return observedProcessIdentity{}, err
+		return observedProcessIdentity{}, false, err
 	}
 	root, err := pinObservedObject(
 		ctx,
@@ -104,24 +121,59 @@ func observeProcessIdentityWithExecutableOwner(
 		true,
 	)
 	if err != nil {
-		return observedProcessIdentity{}, err
+		return observedProcessIdentity{}, false, err
 	}
 	executableFD, err := deps.pinProcessObject(ctx, directoryFD, processExecutableObject)
 	if err != nil {
-		return observedProcessIdentity{}, processVerificationError(vmID, "pin "+role+" executable", err)
+		return observedProcessIdentity{}, false, processVerificationError(vmID, "pin "+role+" executable", err)
 	}
 	descriptors.add(executableFD)
 	if err := requireProcessDescriptorCLOEXEC(ctx, deps, executableFD, role+" executable"); err != nil {
-		return observedProcessIdentity{}, processVerificationError(vmID, "verify "+role+" executable", err)
+		return observedProcessIdentity{}, false, processVerificationError(vmID, "verify "+role+" executable", err)
 	}
-	executable, err := inspectProcessExecutableWithOwner(ctx, deps, executableFD, ownerUID, ownerGID, allowRoot)
+	executable, err := inspectProcessExecutableWithOwner(
+		ctx, deps, executableFD, ownerUID, ownerGID, execDestination != nil,
+	)
 	if err != nil {
-		return observedProcessIdentity{}, processVerificationError(vmID, "inspect "+role+" executable", err)
+		return observedProcessIdentity{}, false, processVerificationError(vmID, "inspect "+role+" executable", err)
+	}
+	if execDestination != nil {
+		// Jailer still has root credentials before exec. Read final credentials only after the copied
+		// executable and private root match, rather than pairing pre-exec status with post-exec objects.
+		if root != execDestination.root || !sameExecutableObject(executable, execDestination.executable) {
+			return observedProcessIdentity{}, false, nil
+		}
+		observation, err = observeLocatedProcessMetadata(ctx, deps, directoryFD, vmID, role, locator)
+		if err != nil {
+			return observedProcessIdentity{}, false, err
+		}
 	}
 	return observedProcessIdentity{
 		process: observation, mountNamespace: mountNamespace, networkNamespace: networkNamespace,
 		root: root, executable: executable,
-	}, nil
+	}, true, nil
+}
+
+func observeLocatedProcessMetadata(
+	ctx context.Context,
+	deps processIdentityVerifierDeps,
+	directoryFD int,
+	vmID string,
+	role string,
+	locator instanceProcessLocator,
+) (processObservation, error) {
+	observation, err := observeProcessMetadata(ctx, deps, directoryFD, locator.pid)
+	if err != nil {
+		return processObservation{}, processVerificationError(vmID, "read "+role+" process identity", err)
+	}
+	if observation.startTimeTicks != locator.startTimeTicks {
+		return processObservation{}, processVerificationError(
+			vmID,
+			role+" process does not match its launch locator",
+			nil,
+		)
+	}
+	return observation, nil
 }
 
 func observeProcessMetadata(

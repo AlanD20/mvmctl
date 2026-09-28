@@ -278,11 +278,28 @@ func TestActivateVerifiedProcessWaitsForBoundedExecutableTransition(t *testing.T
 	fixture := newProcessIdentityFixture(t, false)
 	makeFirecrackerObservationTransient(fixture, 112, 113)
 	fixture.fake.bootIDs = append(fixture.fake.bootIDs, processTestHostBootID)
+	deps := fixture.fake.deps()
+	readMetadata := deps.readProcessMetadata
+	deps.readProcessMetadata = func(ctx context.Context, fd int, kind processMetadataKind, limit int) ([]byte, error) {
+		// Rationale: The retained task is still privileged Jailer until its copied executable is observed.
+		// Sampling status first can reject inherited root groups before the final credential drop.
+		if fd == processTestFirecrackerDirFD && kind == processStatusMetadata {
+			fixture.fake.mu.Lock()
+			index := fixture.fake.processObjectIndex[processObjectTestKey{fd, processExecutableObject}]
+			fixture.fake.mu.Unlock()
+			if index == 0 {
+				return []byte(testProcessStatus(0, 0, "0")), nil
+			}
+		}
+		return readMetadata(ctx, fd, kind, limit)
+	}
 
-	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
+	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, deps)
 	require.NoError(t, err)
 	require.NotNil(t, active)
-	assert.Equal(t, []time.Duration{processExecObservationInterval}, fixture.fake.waits)
+	if diff := cmp.Diff([]time.Duration{processExecObservationInterval}, fixture.fake.waits); diff != "" {
+		t.Errorf("bounded transition waits mismatch (-want +got):\n%s", diff)
+	}
 	assert.Equal(t, 4, fixture.fake.destinationMutations)
 
 	cleanup, err := active.BeginCleanup(t.Context())
@@ -442,6 +459,13 @@ func TestActivateVerifiedProcessFailsClosedAtEveryRecheckBoundary(t *testing.T) 
 				)
 			},
 			wantErr: "supplementary groups are not empty",
+		},
+		"root supplementary group on final executable": {
+			mutate: func(fixture *processIdentityFixture) {
+				execution := fixture.launch.snapshot().record.launch.executionIdentity
+				fixture.fake.replaceProcessStatus(processTestFirecrackerDirFD, execution.uid, execution.gid, "0")
+			},
+			wantErr: "supplementary group is invalid",
 		},
 		"cgroup mismatch": {
 			mutate: func(fixture *processIdentityFixture) {

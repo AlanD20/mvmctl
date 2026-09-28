@@ -500,21 +500,11 @@ func observeFirecrackerExecTransition(
 		if err != nil {
 			return observedProcessIdentity{}, observedJailDestination{}, err
 		}
-		observed, err := observeProcessIdentityWithExecutableOwner(
-			ctx,
-			deps,
-			record.vmID,
-			"Firecracker",
-			record.launch.process,
-			record.launch.executionIdentity.uid,
-			record.launch.executionIdentity.gid,
-			true,
-		)
+		observed, ready, err := observeFirecrackerExecCandidate(ctx, deps, record, preSealDestination)
 		if err != nil && !errors.Is(err, unix.ENOENT) {
 			return observedProcessIdentity{}, observedJailDestination{}, err
 		}
-		if err == nil && observed.root == preSealDestination.root &&
-			sameExecutableObject(observed.executable, preSealDestination.executable) {
+		if err == nil && ready {
 			if err := requireExpectedProcessCredentials(
 				observed.process,
 				record.launch.executionIdentity.uid,
