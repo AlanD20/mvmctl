@@ -52,6 +52,9 @@ fail-closed sync and typed removal. The full current-source nftables/policy matr
 
 ### Added
 
+- The complete 69-case VM lifecycle module passed twice on the installed runner candidate, covering
+  SSH authentication, runtime transitions, cold snapshot/crash recovery, cloud-init, networking, volumes
+  and multi-VM creation with exact owned cleanup. Host-reboot and capture/power-loss faults remain separate gates.
 - The complete 23-case cache module passed twice with private cache selections, checked resource cleanup,
   creation-owned non-default release pruning, unprotected-cache removal/recovery and live-VM refusal checks.
   Borrowed releases, original assets, unrelated GuestFS state/processes and firewall policy remain preserved.

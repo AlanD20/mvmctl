@@ -17,6 +17,20 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Complete VM lifecycle repeat gate (2026-09-28):** Source SHA-256
+`a754ed0c6697fc18c7d43f3669c2c65c734c3f1a015c674ffd469906c590238a` passed all 69 expanded cases
+twice (464.22/467.72 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
+Both strict reports have zero other outcomes, unchanged configuration and four empty VM/network/volume/snapshot
+inventories after checked cleanup. All 56 methods remain; function-owned fixtures admit attempted creations,
+retain complete resource identities and separately account for the new VM identity after cold restore.
+Coverage includes real SSH key-file authentication, create/list/inspect flags, resources, logging/metrics,
+pause/resume, repeated stop/start, both VM reboot variants, cold snapshot restore, crash recovery, cloud-init,
+fixed-port refusals, networking, volume operations and multi-VM creation. Crash injection is an independent
+runner-administrator fixture: it verifies the schema-6 root record and process/executable identity and retains
+a pidfd before signaling; it is not a public crash API or permission to signal cache PID files.
+Reports are `qa-lifecycle-auto-a754-full69-pass{1,2}.{json,xml}`. This supersedes the local lifecycle-file gap,
+not host-reboot recovery, snapshot capture/power-loss faults or the complete release matrix and approval.
+
 **Complete cache repeat gate (2026-09-28):** Source SHA-256
 `1a095b836d828b3403b45e10b20ada7a59c8b3145f232ec1b9e37837c64eea34` passed all 23 cases
 twice (206.83/188.53 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
