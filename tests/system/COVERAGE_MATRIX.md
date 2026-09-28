@@ -17,6 +17,32 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Global GuestFS cleanup removal and live mount repair (2026-09-28):** Production commits `c0f41890`
+and `fe7e636e` remove guessed global GuestFS cleanup and prepare live-volume source mounts before VM
+namespace entry, respectively. Candidate `0.3.0-rc.volume-guestfs`, SHA-256
+`d28985b69ec8401c51151095f192835b40c8c25ea61903d7d1b9f257f3fcfc59`, was built and installed only
+inside `mvmctl-030-test`. Its Go source is the root-tested mount commit `4a4c5749` plus the reviewed
+GuestFS source `5fec2a2c`, equivalent to those integrated production changes.
+
+The existing misc-actual cache case, frozen file SHA-256
+`1f0836f7066991cf8238718898db880e785e45c73851ec2ba9dd6e9c48114cca`, genuinely failed against the
+previous installed binary: selected-cache pruning deleted an owned out-of-cache appliance and killed an
+unrelated same-user process matching the old guestfish predicate. That RED was admitted only after
+refusing all unrelated global cleanup targets. It had one assertion failure and no teardown errors.
+The corrected candidate passed the same case twice (0.82/0.84 seconds), removing selected appliance,
+service-binary and warm artifacts while preserving exact global file and pidfd-held process identities.
+Owned cleanup, complete configuration and four empty resource inventories were checked. Cache collection
+retains 23 cases; the other 22 methods are unchanged. Reports `guestfs-misc-old-red` and
+`guestfs-misc-green-pass{1,2}` are in `ci-volume-4a4c/.tmp` and ignored local evidence. This is one newly
+qualified actual-prune case, not whole-cache or enabled-GuestFS provisioning qualification.
+
+The mount change separately passed a genuine old-order root RED, five new root namespace subcases,
+scoped format/vet and the complete root Jailer package (12.385 seconds). The original lifecycle
+`TestVMVolumeIntegration::test_attach_volume_to_running_vm_succeeds` passed on the installed candidate
+in 6.94 seconds with strict zero-other-outcome evidence and unchanged configuration/empty inventories;
+report `qa-live-attach-fe7-d289-pass1` is in `qa-release-72696719/.tmp`. These checks do not close
+live-detach guest removal, lifecycle's whole-file repeat gate, or complete current-source CI.
+
 **Additional peer-exec behavioral gate (2026-09-28):** Commit `54148a8d` adds four installed-candidate cases;
 file SHA-256 `211d4954d7f76c32fb1a4cef1a9ea69c1abdc2a7a4b29dfde570a7e339f3e311` passed 4/4 in 55.66 seconds
 inside only `mvmctl-030-test`, against candidate `47ce6fda` (Go source `37d399d4`). The strict report has zero

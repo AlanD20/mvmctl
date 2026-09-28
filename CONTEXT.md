@@ -912,6 +912,12 @@ Two independent rootfs provisioning backends. They are **mutually exclusive** --
 - **LoopMount** (default, `guestfs_enabled=false`): Managed VM provisioning uses typed `ProvisionVM` over the authenticated privileged receiver. The receiver pins the fixed rootfs/seed resources and performs closed filesystem operations; failed requests have no raw provisioning fallback. Image inspection and optimization use their own typed LoopMount operations.
 - **GuestFS** (opt-in, `guestfs_enabled=true`): Uses `libguestfs` via `internal/lib/provisioner/guestfs/`. Requires `libguestfs` system packages installed on the host.
 
+GuestFS build and miscellaneous pruning never infer ownership of global processes, locks, sockets, or temporary
+appliances from the operator UID or command line. Appliance pruning is restricted to the selected cache directory;
+the miscellaneous result retains `guestfs_state: false`. Interrupted global GuestFS state requires independently
+established manual ownership before cleanup. This deliberately drops automatic orphan recovery without changing
+normal GuestFS invocation or backend selection.
+
 Provisioner type resolved ONCE at startup in `api.NewOperation()` by reading `settings.guestfs_enabled`. All callers use `op.ProvisionerType` directly. Backend interface defined in `internal/lib/provisioner/backend.go`.
 
 Task 13 now has an activated private LoopMount receiver path for VM provisioning and read-only image inspection in

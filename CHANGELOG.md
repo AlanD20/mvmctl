@@ -1111,8 +1111,16 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
-- `cache prune --dry-run` and `cache clean --dry-run` no longer invoke global libguestfs process/file cleanup.
-  The preview guard passed focused pinned Go checks; installed-candidate sentinel regression remains pending.
+- GuestFS appliance building and cache pruning no longer kill same-user processes or delete global libguestfs
+  locks, sockets, or temporary appliances based on guessed ownership. Selected-cache appliance pruning and normal
+  GuestFS operations remain; automatic global orphan recovery is intentionally removed. The miscellaneous JSON
+  result retains `guestfs_state: false`. A genuine old-code regression reproduced global sentinel deletion and
+  unrelated-process termination; the corrected installed candidate preserved both and pruned selected artifacts
+  twice inside the named runner. Scoped Go checks passed. Enabled-GuestFS provisioning remains a separate QA gate.
+- Live-volume attach now clones the protected source mount in the host namespace before entering the retained VM
+  namespace. Exact source/destination admission and durable mount identity checks remain. Real root namespace
+  regressions failed against the previous ordering and passed after correction; the complete root Jailer package
+  and the original installed-candidate live-attach case passed. Live-detach guest release remains a separate repair.
 
 - Jail sealing now establishes the root and copied executable's final access modes before changing ownership,
   preserving the already-running isolated Firecracker task's access throughout the transition. Stopped cleanup admits
