@@ -48,7 +48,7 @@ func TestConsoleStopHandlerRequiresEOFBeforeEffect(t *testing.T) {
 				assert.False(t, stopped)
 				return
 			}
-			require.NoError(t, response.OperationError())
+			require.Nil(t, response.OperationError())
 			assert.Equal(t, jailer.ConsoleStopResult{VMID: vmID, Stopped: true}, response.Result())
 			assert.True(t, stopped)
 		})
