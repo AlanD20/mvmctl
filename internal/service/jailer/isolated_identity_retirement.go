@@ -39,13 +39,11 @@ func retireRemovedVMExecution(ctx context.Context, locked *lockedInstance, calle
 	if err != nil {
 		return err
 	}
-	if err := requireExecutionRetirementTreesAbsent(ctx, caller.uid, locked.record.vmID); err != nil {
+	retirement, err := newProtectedImportRetirement(ctx, locked, caller, identity)
+	if err != nil {
 		return err
 	}
-	if err := requireProtectedVMGrantsAbsent(ctx, caller.uid, locked.record.vmID, identity.uid); err != nil {
-		return err
-	}
-	if err := removeProtectedVMBackingArtifacts(ctx, caller.uid, locked.record.vmID); err != nil {
+	if err := removeProtectedVMBackingArtifacts(ctx, retirement); err != nil {
 		return err
 	}
 	proof := &vmExecutionRetirementProof{state: &vmExecutionRetirementProofState{

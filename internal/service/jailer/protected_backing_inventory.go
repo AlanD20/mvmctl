@@ -208,7 +208,13 @@ func readProtectedInventoryEntry(
 		)
 	}
 	switch record.Phase {
-	case "copying", "copied", "initial-removing", "removed", "removing":
+	case "copying", "copied", "cancelling-copy", "cancelling-copied", "initial-removing", "removed", "removing":
+		if (record.Phase == "cancelling-copy" || record.Phase == "cancelling-copied") &&
+			kind != protectedBackingRootfs && kind != protectedBackingCloudInit {
+			return result, false, managedVMResourceValidationError(
+				"shared protected object has a VM import cancellation phase",
+			)
+		}
 		if len(record.References) != 0 || len(record.NextReferences) != 0 {
 			return result, false, managedVMResourceValidationError("inactive protected object retains grants")
 		}
@@ -286,7 +292,20 @@ func revokeProtectedVMGrants(ctx context.Context, ownerUID uint32, vmID string, 
 	return requireProtectedVMGrantsAbsent(ctx, ownerUID, vmID, executionUID)
 }
 
-func removeProtectedVMBackingArtifacts(ctx context.Context, ownerUID uint32, vmID string) error {
+func removeProtectedVMBackingArtifacts(ctx context.Context, retirement *protectedImportRetirement) error {
+	if err := retirement.requireAuthority(ctx); err != nil {
+		return err
+	}
+	state := retirement.locked.vmLock.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if err := retirement.requireLockedAuthority(state); err != nil {
+		return err
+	}
+	if err := retirement.requireAbsence(ctx); err != nil {
+		return err
+	}
+	ownerUID, vmID := retirement.ownerUID, retirement.vmID
 	entries, err := inventoryProtectedVMBackings(ctx, ownerUID, vmID, 0)
 	if err != nil {
 		return err
@@ -299,6 +318,19 @@ func removeProtectedVMBackingArtifacts(ctx context.Context, ownerUID uint32, vmI
 		cache, err := reopenProtectedCache(ctx, ownerUID, entry.binding.cacheIdentity)
 		if err != nil {
 			return err
+		}
+		if entry.record.Phase == "copying" || entry.record.Phase == "copied" ||
+			entry.record.Phase == "cancelling-copy" || entry.record.Phase == "cancelling-copied" {
+			cancellation, openErr := openProtectedImportCancellation(ctx, cache, entry.binding.kind, vmID)
+			if openErr != nil {
+				return errors.Join(openErr, cache.Release(context.WithoutCancel(ctx)))
+			}
+			cancelErr := cancellation.cancel(ctx, productionProtectedImportCancellationDeps())
+			closeErr := errors.Join(closeProtectedFDs(cancellation.retained), cache.Release(context.WithoutCancel(ctx)))
+			if err := errors.Join(cancelErr, closeErr); err != nil {
+				return err
+			}
+			continue
 		}
 		lease, found, lookupErr := lookupProtectedBacking(ctx, cache, entry.binding.kind, vmID)
 		closeErr := cache.Release(context.WithoutCancel(ctx))
