@@ -61,11 +61,17 @@ Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
 tests run directly on the outer host and therefore require a dedicated clean
 qualification host or disposable outer VM.
 
-### Special Case: libguestfs / Supermin
+### Optional Local GuestFS Qualification
 
-The `guestfish` tool (libguestfs) is not used by system tests in the Go codebase.
-No guestfish-specific tests exist. This section is retained only for reference if
-libguestfs-based features are re-added in the future.
+GuestFS remains an optional backend, disabled by default. With
+`mvm config set settings guestfs_enabled true`, `mvm cache init` requests a
+selected-cache appliance build. Qualify appliance construction and reuse locally
+inside the disposable runner; these heavy checks do not belong in ordinary Go CI.
+
+The cache system tests also exercise preservation of unrelated GuestFS appliance
+state and processes without requiring GuestFS installation. Those preservation
+cases do not prove that an enabled appliance builds or warms successfully. Cache
+cleanup no longer performs automatic global GuestFS process or orphan cleanup.
 
 ### 1.1 Host: Hardware
 
