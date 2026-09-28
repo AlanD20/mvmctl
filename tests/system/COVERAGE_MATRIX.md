@@ -21,6 +21,15 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Exact-source CLI-domain repeatability (2026-09-28):** The complete CLI domain collected 24 items and passed
+24/24 twice in 0.36 seconds per run inside only `mvmctl-030-test`. Source checkout was clean exact commit
+`0f95b7bc574f29b6c20285159d31cc7c4f9db008`; its Go source independently matched `19c55345`, and installed candidate
+SHA remained `c460278d`. Both schema-1 reports have zero other outcomes, all four resource inventories stayed empty,
+and source status stayed clean. Reports `qa-cli-0f95b7bc-pass1.json` and `qa-cli-0f95b7bc-pass2.json` are in
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/qa-release-0f95b7bc/.tmp/`.
+This closes the named CLI domain's local repeated-run gate, not global structured-JSON invariants, cache-clean
+failure safety, the other domains, remote CI, or release approval.
+
 **Measured-memory qualification follow-up (2026-09-28):** The revised three-case draft collected successfully;
 the swap-absent sustained hold passed, but swap-present failed its real-pressure assertion. Guest availability was
 15528 KiB out of 196992 KiB (over 92% occupancy), while actual leaf peak/current was 233127936 bytes, below high
