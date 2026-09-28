@@ -112,8 +112,11 @@ func readVolumeHotplugRecord(
 	if err != nil || !bytes.Equal(canonical, raw) {
 		return volumeHotplugRecord{}, false, instanceAtomicError("volume journal is not exact canonical schema", err)
 	}
-	if record.Schema != 2 || !isCanonicalManagedResourceID(record.GuestDriveID, 64) || !vmIDPattern.MatchString(record.VMID) || record.OwnerUID == 0 ||
-		!hostBootIDPattern.MatchString(record.BootID) || record.LaunchGeneration == 0 ||
+	if record.Schema != 2 || !isCanonicalManagedResourceID(record.GuestDriveID, 64) ||
+		!vmIDPattern.MatchString(record.VMID) ||
+		record.OwnerUID == 0 ||
+		!hostBootIDPattern.MatchString(record.BootID) ||
+		record.LaunchGeneration == 0 ||
 		record.SourceInode == 0 {
 		return volumeHotplugRecord{}, false, instanceAtomicError("volume journal identity is invalid", nil)
 	}
