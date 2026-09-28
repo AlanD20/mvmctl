@@ -17,6 +17,16 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Complete image repeat gate (2026-09-28):** Source SHA-256
+`4efb233daf0703b2d83efbd67b781b5a76288fc9a3a092c8d2661bd84b59f40a` passed all 38 cases
+twice (406.63/412.24 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
+Both reports have strict zero-other outcomes, unchanged configuration and four empty inventories after checked
+owned cleanup. Coverage includes mirrored Ubuntu tar import/warm/actual Ubuntu 24.04 boot, Alpine import/boot,
+raw and QCOW2 format resolution, defaults, warm copies, inspection and dependency-aware removal. Positive raw
+filesystem fixtures carry the OS metadata required by typed inspection; production admission remains unchanged.
+Reports are `qa-images-auto-4efb-full38-pass{1,2}.{json,xml}`. This supersedes the earlier complete-image gap,
+not the remaining current-source Python matrix or release approval.
+
 **Complete basic network repeat gate (2026-09-28):** Source SHA-256
 `6bf44c15a18c9a0572d95196e836615778f2cc6c6372dc71f0602ddd0965a591` passed all 31 cases
 twice (52.96/50.45 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
@@ -45,8 +55,8 @@ Evidence is `image-auto-{red,green}.log`, `host-fixture-44f1e702-green.log`,
 `full-ci-build-auto-dae5510c.log` and `python-unit-dae5510c.xml`. The image fixture's generic metadata correction
 (`4efb233d`) and installed resolver fix then passed all 13 affected or previously unexecuted image cases
 (37.95 seconds), with strict zero-other-outcome reports and exact config/four empty inventory cleanup:
-`qa-images-auto-4efb-delta13-pass1.{json,xml}`. The complete 38-case image module and current-source Python
-matrix remain separate gates; this is not GitHub CI or release approval.
+`qa-images-auto-4efb-delta13-pass1.{json,xml}`. The later complete-image repeat gate above supersedes this
+focused evidence; the current-source Python matrix remains open. This is not GitHub CI or release approval.
 
 **Live terminal console repeat gate (2026-09-28):** Exact console source SHA-256
 `307ab71e8298d347e6365cb1a6a250f8f067217852922abea7cf3b93d01facfb` retains the existing

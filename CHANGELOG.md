@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
 
+The complete 38-case image module passed twice against the current installed runner candidate, covering mirrored
+Ubuntu tar import and boot, Alpine import and boot, format detection, warm copies, defaults and dependency-aware
+removal. Both strict reports have zero non-passing outcomes and checked configuration/inventory cleanup.
+
 The complete 31-case basic network module passed twice against the current installed runner candidate, with exact
 owned cleanup and strict zero-other-outcome reports. This includes an owned missing-bridge administrator fault,
 fail-closed sync and typed removal. The full current-source nftables/policy matrix remains a release gate.
