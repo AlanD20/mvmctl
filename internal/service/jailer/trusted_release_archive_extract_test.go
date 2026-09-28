@@ -113,6 +113,42 @@ func TestTrustedReleaseArchiveStageRejectsReleaseTarProfileMismatch(t *testing.T
 				}
 			},
 		},
+		"current release with negative base-256 UID": {
+			version: "1.16.2",
+			mutate: func(_ *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) { raw[108] = 0xff }
+			},
+		},
+		"current release with overflowing base-256 UID": {
+			version: "1.16.2",
+			mutate: func(_ *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) { raw[111] = 1 }
+			},
+		},
+		"current release with octal-representable base-256 UID": {
+			version: "1.16.2",
+			mutate: func(_ *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) {
+					copy(raw[108:116], []byte{0x80, 0, 0, 0, 0, 0x1f, 0xff, 0xff})
+				}
+			},
+		},
+		"older release with base-256 UID": {
+			version: "1.16.1",
+			mutate: func(_ *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) {
+					copy(raw[108:116], []byte{0x80, 0, 0, 0, 0, 0xd7, 0xa8, 0xb0})
+				}
+			},
+		},
+		"current release with base-256 size": {
+			version: "1.16.2",
+			mutate: func(_ *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) {
+					copy(raw[124:136], []byte{0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
+				}
+			},
+		},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -562,6 +598,8 @@ func (fixture *trustedReleaseArchiveFixture) decompressed(t *testing.T) []byte {
 		})
 		if fixture.plainGNU {
 			copy(memberHeader[257:265], []byte{'u', 's', 't', 'a', 'r', ' ', ' ', 0})
+			// NOTE: All official 1.16.2 members encode metadata UID 14133424 with these eight bytes.
+			copy(memberHeader[108:116], []byte{0x80, 0, 0, 0, 0, 0xd7, 0xa8, 0xb0})
 			writeTrustedReleaseTarOctalForTest(t, memberHeader[329:337], member.deviceMajor)
 			writeTrustedReleaseTarOctalForTest(t, memberHeader[337:345], member.deviceMinor)
 		}

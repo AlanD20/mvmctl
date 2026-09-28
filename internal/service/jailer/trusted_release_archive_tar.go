@@ -2,6 +2,7 @@ package jailer
 
 import (
 	"bytes"
+	"encoding/binary"
 	"math"
 	"strconv"
 	"strings"
@@ -109,7 +110,7 @@ func parseTrustedReleaseTarHeader(
 	if err != nil {
 		return trustedReleaseTarHeader{}, err
 	}
-	uid, err := parseTrustedReleaseTarOctal(raw[trustedReleaseTarUIDOffset:trustedReleaseTarGIDOffset])
+	uid, err := parseTrustedReleaseTarUID(raw[trustedReleaseTarUIDOffset:trustedReleaseTarGIDOffset], profile)
 	if err != nil {
 		return trustedReleaseTarHeader{}, err
 	}
@@ -183,6 +184,22 @@ func parseTrustedReleaseTarString(raw []byte) (string, error) {
 		)
 	}
 	return string(raw[:terminator]), nil
+}
+
+// CRITICAL: Only plain GNU UID metadata may use positive base-256 when seven-digit
+// octal cannot represent it. This value never supplies installed-file ownership.
+func parseTrustedReleaseTarUID(raw []byte, profile trustedReleaseArchiveTarProfile) (uint64, error) {
+	if profile == trustedReleaseArchiveTarPlainGNU && len(raw) == 8 && raw[0]&0x80 != 0 {
+		if raw[0] != 0x80 || !allTrustedReleaseArchiveBytesZero(raw[1:4]) {
+			return 0, trustedReleaseArchiveFormatError("trusted release tar UID is not a positive uint32")
+		}
+		uid := binary.BigEndian.Uint32(raw[4:])
+		if uid <= 0o7777777 {
+			return 0, trustedReleaseArchiveFormatError("trusted release tar UID has a non-canonical base-256 encoding")
+		}
+		return uint64(uid), nil
+	}
+	return parseTrustedReleaseTarOctal(raw)
 }
 
 func parseTrustedReleaseTarOctal(raw []byte) (uint64, error) {
