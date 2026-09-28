@@ -139,6 +139,32 @@ preseed-only guests; they do not qualify the nine unchanged SSH cases or the ful
 Reports `qa-keys-fc614785-pass{1,2}.json` and `qa-key-ssh-fc614785.json` are in
 the runner's `qa-release-0f95b7bc/.tmp` directory. No asset pulls, config/default asset changes or outer install.
 
+**NoCloud correction and next bounded QA gates (2026-09-28):** Clean committed `9aaee216` passed the complete
+pinned Go 1.26.3 local CI sequence and full root-effect Jailer package (22.090s). The CI script's own
+`coverage-jailer.out` was preserved under ignored `.tmp` before the clean-status check; no passed gate was
+rerun to handle that artifact. These logs are `go-ci-9aaee216.log` and `root-jailer-9aaee216.log`.
+Subsequent lifecycle QA advanced 41 passes, then failed NoCloud NET creation. The retained child log proved
+`file type does not support deadline`: the inherited blocking readiness pipe could not send either startup
+acknowledgment. Fix `0d450874` restores nonblocking mode before `os.NewFile`; independent real-pipe success/error
+JSON and invalid-FD Go tests, scoped format/vet, and the original NET-create selector passed (6.86s).
+The new runner-only candidate `0.3.0-rc.nocloud-ready` has SHA-256
+`47ce6fda8c8a063f4989682e4384c519edca179df5079f6a45d0a910cd5565a9`.
+This NoCloud source change is beyond the complete-CI checkpoint; full current CI remains a later milestone.
+
+Kernel-import commit `cfd0c561`, file SHA
+`97e0b2225c43981bc59d9eb127f9fa990d196701398104613cc88391a4ff48ba`, passed all 8/8 cases twice
+in 26.98 and 23.45 seconds. Preseed-only, function-owned cases retain complete baselines, prospective content-ID
+collision refusal before effects, exact same-ID reimport backing renewal, source preservation, independent default
+restoration, and one bounded networkless guest. Initialization commit `b6249045`, file SHA
+`7218655005e8b82ffb62c9996a334e7813a78a41ef404200b1b75648b0865238`, passed the six explicitly selected
+safe cases twice in 3.81 and 3.61 seconds. Two non-skip-host administrator-enrollment cases remain unchanged,
+excluded and unqualified; this is not an eight-case initialization pass. Only source-proven kernel/network
+observational `updated_at` fields are normalized; other identity/default/config fields remain checked.
+All reports have zero other outcomes; final configuration matched exactly and four resource inventories were empty.
+Reports `qa-nocloud-ready-fixed`, `qa-init-7218-pass{1,2}`, `qa-kernel-97e0-pass{1,2}` and
+`qa-next-focused.log` are in the runner's `qa-release-72696719/.tmp` checkout and ignored local evidence directory.
+Whole lifecycle repeats, active console/logs, incomplete-import retirement, and the remaining release matrix stay open.
+
 **Aggregate cache-preview and generated-ISO correction (2026-09-28):** Production guard `578254f2`
 prevents dry-run from invoking global guestfs cleanup; producer fix `a8ddedb7` sets generated cloud-init ISOs
 to `0600` before protected import. Both ISO behavioral Go subcases failed against the old producer; scoped

@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Release status (2026-09-28):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
-> requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean checkout `72c8ef25` passed the complete
-> pinned Go 1.26.3 local CI sequence inside `mvmctl-030-test`. The separate full root-effect Jailer package passed
-> at `19c55345`, whose Go source is unchanged at that checkpoint. The installed runner candidate passed network/nftables/policy
+> requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean checkout `9aaee216` passed the complete
+> pinned Go 1.26.3 local CI sequence inside `mvmctl-030-test`, plus the full root-effect Jailer package (22.090s).
+> This checkpoint predates the later NoCloud readiness-pipe correction. The installed runner candidate passed network/nftables/policy
 > (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), copy (15/15),
 > kernel import (8/8), Jailer (13/13), and rootfs persistence (1/1) Python domains with strict zero-skip reports at
 > their recorded revisions. These domain results do not constitute a complete exact-current-HEAD Python matrix.
@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > memory cases also passed twice, including sustained measured cgroup pressure with and without swap;
 > original incident attribution, guest allocation-failure handling and ancestor/global OOM safety remain unproved.
 > Active console discovery/kill now has a source-proven authority-wiring blocker; its earlier inactive-relay
-> results do not qualify that behavior. Current complete CI after the cache preview guard, the full Python matrix,
+> results do not qualify that behavior. Current complete CI after the NoCloud pipe correction, the full Python matrix,
 > clean-host reset/installation, Tier 3, aarch64 runtime, GitHub CI, and final release approval remain open.
 > No candidate has been installed over the
 > outer controller.
@@ -38,6 +38,10 @@ The detailed entries below retain implementation-stage history; a later entry or
 earlier partial-state statement. They are not a substitute for the final release QA report.
 
 ### Added
+
+- Qualified all eight preseeded kernel-import cases twice, including byte identity, default restoration, bounded
+  networkless VM creation, stop/start, and same-content reimport. Six safe initialization cases also passed twice;
+  the two administrator-enrollment cases remain excluded and unqualified, not silently skipped.
 
 - Added real aggregate cache-preview regressions with an identity-checked guestfs sentinel outside the selected cache.
   The old candidate deleted that sentinel during dry-run; the corrected runner candidate passed both prune and clean
@@ -85,6 +89,10 @@ earlier partial-state statement. They are not a substitute for the final release
 - Generated cloud-init ISOs now receive checked `0600` permissions before protected import, rather than inheriting
   group-write access from the caller's umask. Behavioral Go regressions and the previously failing ISO-create case
   passed in the named runner. Retirement of already incomplete imports remains a separate release blocker.
+
+- NoCloud prepares its inherited readiness pipe for deadline-aware writes before wrapping it. Real blocking-pipe
+  Go tests cover readiness and error acknowledgments, and the formerly failing NET-create case passed inside the
+  named runner. Gateway ownership, fixed TCP port, exclusive listener binding, grants and deadlines are unchanged.
 
 - Retired unused raw-sudo network mutation helpers and the generic privileged service-spawn option. Ordinary-user
   console and NoCloud services still self-spawn; managed root effects remain on typed authenticated dispatch.
