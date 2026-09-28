@@ -540,24 +540,54 @@ class TestNetworklessJailerLifecycle:
     def test_networkless_snapshot_restores_independent_data_volume(
         self, runner_vm: str, networkless_vm_name: str, source_crash: bool,
     ) -> None:
-        """A full capture restores the original volume bytes without an IP endpoint."""
+        """Restore one captured epoch across guest RAM, rootfs, and an independent volume."""
         ensure_vm_deps(runner_vm)
         source_name = networkless_vm_name
         restored_name = f"{source_name}-restore"
         volume_name = f"sys-snapshot-vol-{uuid.uuid4().hex[:8]}"
         snapshot_name = f"sys-snapshot-{uuid.uuid4().hex[:8]}"
+        epoch = uuid.uuid4().hex
+        changed_epoch = uuid.uuid4().hex
+        memory_mount = f"/mnt/mvm-snapshot-{epoch}"
+        memory_file = f"{memory_mount}/epoch"
+        root_file = f"/root/mvm-snapshot-{epoch}"
         restored_volume_ids: set[str] = set()
         try:
-            _run_mvm(runner_vm, "volume", "create", volume_name, "16M", "--json")
+            _run_mvm(runner_vm, "volume", "create", volume_name, "16M", "--writeback", "--json")
             _run_mvm(
                 runner_vm, "vm", "create", source_name, "--no-network", "--cloud-init-mode", "off",
                 "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
-                "--volume", volume_name, "--json", timeout=180,
+                "--volume", volume_name, "--writeback", "--json", timeout=180,
+            )
+            # A fresh tmpfs mount has no cold-boot recreation path. Its contents and
+            # the captured kernel boot ID distinguish restored RAM from disk boot.
+            mount_check = (
+                f"awk '$2 == \"{memory_mount}\" && $3 == \"tmpfs\" {{found=1}} "
+                "END {exit !found}' /proc/mounts"
+            )
+            _run_mvm(
+                runner_vm, "exec", source_name, "--",
+                f"set -e; mkdir {shlex.quote(memory_mount)}; "
+                f"mount -t tmpfs -o size=1M mvm-snapshot {shlex.quote(memory_mount)}; "
+                f"{mount_check}; printf %s {epoch} > {shlex.quote(memory_file)}; "
+                f"printf %s {epoch} > {shlex.quote(root_file)}; sync",
             )
             _run_mvm(
                 runner_vm, "exec", source_name, "--", "dd", "if=/dev/urandom", "of=/dev/vdb",
                 "bs=4096", "count=1", "conv=fsync", timeout=30,
             )
+            _run_mvm(
+                runner_vm, "exec", source_name, "--",
+                f"printf %s {epoch} | dd of=/dev/vdb bs=1 count={len(epoch)} conv=fsync,notrunc",
+            )
+            captured_state = _run_mvm(
+                runner_vm, "exec", source_name, "--",
+                f"set -e; {mount_check}; cat {shlex.quote(memory_file)}; echo; "
+                f"cat {shlex.quote(root_file)}; echo; cat /proc/sys/kernel/random/boot_id",
+            ).stdout.splitlines()
+            assert len(captured_state) == 3
+            assert captured_state[:2] == [epoch, epoch]
+            captured_boot_id = str(uuid.UUID(captured_state[2]))
             captured_hash = _run_mvm(
                 runner_vm, "exec", source_name, "--", "sha256sum", "/dev/vdb", timeout=30,
             ).stdout.split()[0]
@@ -572,9 +602,26 @@ class TestNetworklessJailerLifecycle:
             assert captured["memory_file"] and captured["state_file"]
 
             _run_mvm(
+                runner_vm, "exec", source_name, "--",
+                f"set -e; {mount_check}; printf %s {changed_epoch} > {shlex.quote(memory_file)}; "
+                f"printf %s {changed_epoch} > {shlex.quote(root_file)}; sync",
+            )
+            _run_mvm(
                 runner_vm, "exec", source_name, "--", "dd", "if=/dev/zero", "of=/dev/vdb",
                 "bs=4096", "count=1", "conv=fsync", timeout=30,
             )
+            _run_mvm(
+                runner_vm, "exec", source_name, "--",
+                f"printf %s {changed_epoch} | dd of=/dev/vdb bs=1 "
+                f"count={len(changed_epoch)} conv=fsync,notrunc",
+            )
+            changed_state = _run_mvm(
+                runner_vm, "exec", source_name, "--",
+                f"set -e; {mount_check}; cat {shlex.quote(memory_file)}; echo; "
+                f"cat {shlex.quote(root_file)}; echo; "
+                f"dd if=/dev/vdb bs=1 count={len(changed_epoch)}; echo",
+            ).stdout.splitlines()
+            assert changed_state == [changed_epoch, changed_epoch, changed_epoch]
             changed_hash = _run_mvm(
                 runner_vm, "exec", source_name, "--", "sha256sum", "/dev/vdb", timeout=30,
             ).stdout.split()[0]
@@ -638,6 +685,13 @@ class TestNetworklessJailerLifecycle:
             assert not restored[0]["network_id"]
             assert not restored[0]["ipv4"]
             assert not restored[0]["mac"]
+            restored_state = _run_mvm(
+                runner_vm, "exec", restored_name, "--",
+                f"set -e; {mount_check}; cat {shlex.quote(memory_file)}; echo; "
+                f"cat {shlex.quote(root_file)}; echo; cat /proc/sys/kernel/random/boot_id; "
+                f"dd if=/dev/vdb bs=1 count={len(epoch)}; echo",
+            ).stdout.splitlines()
+            assert restored_state == [epoch, epoch, captured_boot_id, epoch]
             restored_hash = _run_mvm(
                 runner_vm, "exec", restored_name, "--", "sha256sum", "/dev/vdb", timeout=30,
             ).stdout.split()[0]
@@ -677,6 +731,154 @@ class TestNetworklessJailerLifecycle:
             snapshots = _json_success_data(
                 _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
             )
+            assert all(snapshot["name"] != snapshot_name for snapshot in snapshots)
+
+    @pytest.mark.destructive
+    def test_snapshot_refuses_competing_writable_volume_capture(
+        self, runner_vm: str, networkless_vm_name: str,
+    ) -> None:
+        """Public VM creation shares writable bytes; capture refuses the competing writer."""
+        ensure_vm_deps(runner_vm)
+        source_name = networkless_vm_name
+        peer_name = f"{source_name}-peer"
+        volume_name = f"sys-snapshot-shared-{uuid.uuid4().hex[:8]}"
+        snapshot_name = f"sys-snapshot-denied-{uuid.uuid4().hex[:8]}"
+        snapshot_id: str | None = None
+        snapshot_path: str | None = None
+        try:
+            volume = _json_success_data(
+                _run_mvm(
+                    runner_vm, "volume", "create", volume_name, "16M", "--shareable",
+                    "--writeback", "--json",
+                ).stdout, dict,
+            )
+            assert volume["is_shareable"] is True
+            assert volume["is_read_only"] is False
+            assert volume["format"] == "raw"
+            boot_ids: dict[str, str] = {}
+            for vm_name in (source_name, peer_name):
+                # VM creation admits the existing raw volume. The separate
+                # volume-attach command rejects a second writable attachment.
+                created = _json_success_data(
+                    _run_mvm(
+                        runner_vm, "vm", "create", vm_name, "--no-network", "--cloud-init-mode", "off",
+                        "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "224M", "--vcpu", "1",
+                        "--volume", volume_name, "--writeback", "--json", timeout=180,
+                    ).stdout, list,
+                )
+                assert len(created) == 1
+                assert created[0]["status"] == "running"
+                boot_ids[vm_name] = _run_mvm(
+                    runner_vm, "exec", vm_name, "--", "cat", "/proc/sys/kernel/random/boot_id",
+                ).stdout.strip()
+            assert boot_ids[source_name] != boot_ids[peer_name]
+
+            # Invalidate guest block caches before every read so both directions
+            # establish shared backing rather than a guest's cached prior write.
+            for writer, reader in ((source_name, peer_name), (peer_name, source_name)):
+                marker = uuid.uuid4().hex
+                _run_mvm(
+                    runner_vm, "exec", writer, "--",
+                    f"printf %s {marker} | dd of=/dev/vdb bs=1 count={len(marker)} conv=fsync,notrunc",
+                )
+                observed = _run_mvm(
+                    runner_vm, "exec", reader, "--",
+                    f"set -e; sync; echo 3 > /proc/sys/vm/drop_caches; "
+                    f"dd if=/dev/vdb bs=1 count={len(marker)}",
+                ).stdout
+                assert observed == marker
+
+            denied = _run_mvm(
+                runner_vm, "snapshot", "create", source_name, "--name", snapshot_name,
+                "--json", check=False, timeout=180,
+            )
+            intents = [line.removeprefix("Snapshot request ID: ") for line in denied.stderr.splitlines()
+                       if line.startswith("Snapshot request ID: ")]
+            assert len(intents) <= 1, denied.stderr
+            if intents:
+                request_id = intents[0]
+                assert len(request_id) == 64 and all(c in "0123456789abcdef" for c in request_id)
+                snapshot_id = request_id
+                snapshot_path = str(Path(volume["path"]).parent.parent / ".mvm-protected" / "snapshots" / snapshot_id)
+            assert denied.returncode != 0, (denied.stdout, denied.stderr)
+            response = json.loads(denied.stdout)
+            assert response["schema_version"] == 1
+            assert response["status"] == "error"
+            assert response["data"] is None
+            assert response["error"]["code"] == "snapshot.create_failed"
+            assert response["error"]["class"] == 1  # errs.ClassValidation
+            assert response["error"]["message"] == "trusted snapshot capture failed"
+            assert snapshot_id is not None
+            snapshots = _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            )
+            assert all(snapshot["id"] != snapshot_id and snapshot["name"] != snapshot_name
+                       for snapshot in snapshots)
+            assert _guest_run(runner_vm, f"sudo -n test ! -e {shlex.quote(snapshot_path)}").returncode == 0
+            for vm_name in (source_name, peer_name):
+                assert _vm_entry(runner_vm, vm_name)["status"] == "running"
+                responsive = _run_mvm(
+                    runner_vm, "exec", vm_name, "--",
+                    f"set -e; cat /proc/sys/kernel/random/boot_id; "
+                    f"sync; echo 3 > /proc/sys/vm/drop_caches; dd if=/dev/vdb bs=1 count={len(marker)}",
+                ).stdout.splitlines()
+                assert responsive == [boot_ids[vm_name], marker]
+
+            # Removing only the competing VM must make the same source capture
+            # succeed; a generally broken capture path cannot satisfy this case.
+            source_id = _vm_entry(runner_vm, source_name)["id"]
+            _run_mvm(runner_vm, "vm", "rm", peer_name, "--force", timeout=120)
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(vm["name"] != peer_name for vm in listed)
+            accepted = _run_mvm(
+                runner_vm, "snapshot", "create", source_name, "--name", snapshot_name,
+                "--json", check=False, timeout=180,
+            )
+            intents = [line.removeprefix("Snapshot request ID: ") for line in accepted.stderr.splitlines()
+                       if line.startswith("Snapshot request ID: ")]
+            assert len(intents) <= 1, accepted.stderr
+            if intents:
+                request_id = intents[0]
+                assert len(request_id) == 64 and all(c in "0123456789abcdef" for c in request_id)
+                snapshot_id = request_id
+                snapshot_path = str(Path(volume["path"]).parent.parent / ".mvm-protected" / "snapshots" / snapshot_id)
+            assert accepted.returncode == 0, (accepted.stdout, accepted.stderr)
+            assert len(intents) == 1, accepted.stderr
+            captured = _json_success_data(accepted.stdout, dict)
+            assert captured["id"] == snapshot_id
+            assert captured["name"] == snapshot_name
+            assert captured["source_vm_id"] == source_id
+            for field, basename in (("memory_file", "memory"), ("state_file", "vmstate"),
+                                    ("rootfs_file", "rootfs.img")):
+                assert captured[field] == str(Path(snapshot_path) / basename)
+                assert _guest_run(
+                    runner_vm, f"sudo -n test -f {shlex.quote(captured[field])}",
+                ).returncode == 0
+        finally:
+            for vm_name in (peer_name, source_name):
+                listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+                if any(vm["name"] == vm_name for vm in listed):
+                    removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120)
+                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            if snapshot_id is not None:
+                present = _guest_run(
+                    runner_vm, f"sudo -n test -e {shlex.quote(snapshot_path)}", check=False,
+                )
+                assert present.returncode in (0, 1), (present.stdout, present.stderr)
+                if present.returncode == 0:
+                    removed = _run_mvm(runner_vm, "snapshot", "rm", snapshot_id, "--force", check=False)
+                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
+                assert _guest_run(runner_vm, f"sudo -n test ! -e {shlex.quote(snapshot_path)}").returncode == 0
+            volumes = _json_success_data(_run_mvm(runner_vm, "volume", "ls", "--json").stdout, list)
+            for volume in volumes:
+                if volume["name"] == volume_name:
+                    removed = _run_mvm(runner_vm, "volume", "rm", volume["id"], "--force", check=False)
+                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(vm["name"] not in (source_name, peer_name) for vm in listed)
+            volumes = _json_success_data(_run_mvm(runner_vm, "volume", "ls", "--json").stdout, list)
+            assert all(volume["name"] != volume_name for volume in volumes)
+            snapshots = _json_success_data(_run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list)
             assert all(snapshot["name"] != snapshot_name for snapshot in snapshots)
 
     def test_restore_missing_release_leaves_no_vm_projection(
