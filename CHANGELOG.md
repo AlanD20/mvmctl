@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Release status (2026-09-28):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
+> **Release status (2026-09-29):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
 > requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean source snapshot `b2c0a1f8` passed the complete
@@ -15,7 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > package (7.743s) and all 240 Python orchestrator unit cases (7.41s). Earlier runner candidates passed network/nftables/policy
 > (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), copy (15/15),
 > kernel import (8/8), Jailer (13/13), and rootfs persistence (1/1) Python domains with strict zero-skip reports at
-> their recorded revisions. These domain results do not constitute a complete exact-current-HEAD Python matrix.
+> their recorded revisions. The current registered Tier 1/Tier 2 matrix subsequently passed all 415 cases across
+> 26 files against the corrected installed candidate, with unchanged configuration, four empty resource inventories
+> and no remaining runner swap. A QA historical-journal descriptor leak was fixed before the binary file passed;
+> the earlier failed report remains preserved. This is not complete Tier 3 or whole-release qualification.
 > Host-reboot/exec recovery had one device-open failure and one successful controlled repeat; its cause remains
 > unresolved. A later owned-guest reboot check stopped before restart: inspection rejected stale console boot
 > identity, and typed VM/network cleanup refused prior-boot admission. Targeted console and schema-6 absence-proof
@@ -37,8 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > attachment journey passed, then both console journeys passed twice (26.42/24.12s), including normal endpoint
 > admission, unique guest serial bytes, detach, terminal restoration and preserved VM liveness. Hostile endpoint
 > faults remain separate gates.
-> The full current-source Python matrix,
-> clean-host reset/installation, Tier 3, aarch64 runtime, GitHub CI, and final release approval remain open.
+> Clean administrator/marker-only denial and reset, enabled GuestFS, adversarial recovery/fault checks,
+> kernel producer/reusable-base provenance, Tier 3, aarch64 runtime, GitHub CI, and final release approval remain open.
 > No candidate has been installed over the
 > outer controller.
 >

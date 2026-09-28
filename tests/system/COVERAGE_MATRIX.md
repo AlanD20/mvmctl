@@ -17,15 +17,22 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Current installed-candidate matrix checkpoint (2026-09-29):** The exact registered T1/T2 selection collected
-415 cases across 26 files. Installer, CLI, config, init, cache, keys and invariants passed all 113 cases against
-installed candidate `8a6fb1bf` inside only `mvmctl-030-test`. The binary file then exposed a QA observer leak:
+**Complete current installed-candidate T1/T2 matrix (2026-09-29):** The exact registered selection passed
+all 415 cases across 26 files against installed candidate `8a6fb1bf` (`0.3.0-rc.priorboot`) inside only
+`mvmctl-030-test`. Configuration was byte-for-byte unchanged after both tiers; final VM/network/volume/snapshot
+inventories were empty and no runner swap remained. Every file passed strict outcome validation with zero other
+outcomes. Reports are retained in `matrix-b2c0a1f8`; the corrected binary file uses `bin-observer-84eb` instead of
+the preserved earlier failed report. Source is the clean `b2c0a1f8` snapshot plus the binary correction integrated
+as `c43cf9ec`. The outer controller remained unchanged. This closes the registered current T1/T2 matrix,
+not clean-host/Tier 3, remote CI, enabled GuestFS, adversarial fault/recovery, kernel producer/base provenance,
+original incident attribution, aarch64 runtime or release approval.
+
+The binary file initially exposed a QA observer leak after the first seven files passed all 113 cases:
 repeated scans retained historical-journal descriptors and exhausted the unchanged 1,024 soft descriptor limit.
 This is not evidence of a production descriptor leak. The corrected file SHA-256
 `84eb64b50257d5d3f7c175dfe02310ebd60dcec1b793b9a300820ba736630fb4` passed the original failing case
 (8.36 seconds) and all eleven binary cases (23.15 seconds), with strict zero-other outcomes and four empty
-inventories afterward. This brings the completed current matrix files to 124 passing cases; remaining files
-are not qualified by this checkpoint.
+inventories afterward. The remaining eighteen files subsequently passed on the same installed candidate.
 
 The scoped read-only scanner gate observed 320 real cleaned schema-6 journals over ten scans with a constant
 eight descriptors and unchanged limits, and rejected an in-memory digest-baseline mismatch. Two simulated cleanup
