@@ -170,12 +170,14 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 	// Run pre-flight probes before prompting for sudo
 	probeResult := s.initAPI.InitCheckReadiness(ctx)
 
-	// In non-interactive mode: run host init directly (relies on passwordless sudo).
-	// Mark as completed after attempt — even on probe failures (e.g. no KVM inside
-	// a Firecracker VM) — to prevent an infinite loop. Degraded state is acceptable;
-	// the wizard summary will report "setup incomplete".
 	if s.nonInteractive {
-		common.RunWithSudo(ctx, []string{"host", "init"}, infra.EnvKey("ESCALATED")+"=1")
+		proc := common.RunHostInitWithSudo(ctx)
+		if !proc.Success {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("sudo host init failed")
+		}
 		s.sudoCompleted = true
 		return nil
 	}
@@ -239,8 +241,11 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		return fmt.Errorf("skipped by user")
 	}
 
-	proc := common.RunWithSudo(ctx, []string{"host", "init"}, infra.EnvKey("ESCALATED")+"=1")
+	proc := common.RunHostInitWithSudo(ctx)
 	if !proc.Success {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		common.Cli.Warning(fmt.Sprintf("host init failed. Run '%s' manually.", sudoCmd))
 		return fmt.Errorf("sudo host init failed")
 	}
