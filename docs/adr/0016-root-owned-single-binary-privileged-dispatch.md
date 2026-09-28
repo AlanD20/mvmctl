@@ -1540,7 +1540,10 @@ The activation order is fixed:
 8. Retain the original pidfd for stable task identity and exit detection while bounded, context-aware observation
    waits for both Jailer's isolated-owner private root and copied executable before binding their pre-seal identity.
    It then repeatedly opens and verifies `/proc/<pid>/exe` until it is the copied Firecracker rather than transient Jailer
-   state. The compiled observation budget is 10 seconds with a 25-millisecond minimum interval; an earlier context
+   state. Each poll matches the pinned root and executable before reading final credentials, so it cannot combine
+   pre-exec Jailer credentials with post-exec Firecracker objects. A matching final task must still pass the strict
+   credential checks; invalid final credentials are not a retryable transition. The compiled observation budget is
+   10 seconds with a 25-millisecond minimum interval; an earlier context
    deadline wins. Each interval checks the pidfd nonblocking for exit and rechecks boot ID, PID, and start ticks. An
    exited pidfd ends observation immediately. A pidfd becomes readable for exit, not for `exec`, so it is never used as
    an executable-transition notification; see [`pidfd_open(2)`](https://man7.org/linux/man-pages/man2/pidfd_open.2.html).

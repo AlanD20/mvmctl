@@ -1051,8 +1051,12 @@ composition is described above; the current incomplete-work inventory is under *
 
 - Disabled logging no longer forwards the inactive configured log level in the typed launch request. Root admission
   still rejects unexpected logger intent, and the operator's configured default is preserved. The disabled-logging
-  installed-candidate regression passed in the named runner; the complete resource/configuration group later exposed
-  a separate process-identity startup failure and is not yet qualified.
+  installed-candidate regression passed in the named runner. The full resource/configuration group then exposed
+  a separate Jailer startup race; after both fixes it passed 15/15 with checked teardown.
+- Final process credential observation now waits until the pinned jail root and executable match the copied
+  Firecracker. Transient Jailer's root credentials no longer abort that bounded transition; final invalid credentials
+  still fail closed. The Go regression reproduced the reported error before the fix; the complete root-effect Jailer
+  package and focused race checks passed in the named runner. Active/recovery observation is unchanged.
 
 #### Rapid managed-network recreation
 
