@@ -42,9 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
 
-Thirty basic network lifecycle cases passed twice against the current installed runner candidate, with exact
-owned cleanup and strict zero-other-outcome reports. The separate missing-bridge administrative fault and the
-full current-source network/nftables/policy matrix remain release gates.
+The complete 31-case basic network module passed twice against the current installed runner candidate, with exact
+owned cleanup and strict zero-other-outcome reports. This includes an owned missing-bridge administrator fault,
+fail-closed sync and typed removal. The full current-source nftables/policy matrix remains a release gate.
 
 ### Added
 

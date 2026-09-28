@@ -17,6 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Complete basic network repeat gate (2026-09-28):** Source SHA-256
+`6bf44c15a18c9a0572d95196e836615778f2cc6c6372dc71f0602ddd0965a591` passed all 31 cases
+twice (52.96/50.45 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
+Both reports have strict zero-other outcomes, unchanged configuration and four empty inventories after checked
+owned cleanup. The previously unqualified administrator fault now admits the exact fresh network receipt,
+childless bridge, ifindex, alias, MAC, host namespace and boot identity before deletion. Exact-ID sync refuses
+the disappeared bridge without changing the post-fault inventory; typed nonforce removal retires only the
+admitted missing bridge's logical/firewall state. Replacement identities are refused, not deleted or repaired.
+The original 30 cases and shared helpers remain byte-identical. Reports are
+`qa-network-auto-6bf4-full31-pass1-pass1.{json,xml}` and `qa-network-auto-6bf4-full31-pass2.{json,xml}`.
+This supersedes the earlier basic-file missing-bridge gap; the complete nftables/policy matrix remains separate.
+
 **Automatic image format and coherent CI gate (2026-09-28):** Commit `dae5510c` resolves the configured or explicit
 `auto` policy through the existing extension/magic detection before extraction. Three behavioral resolver rows
 failed against unchanged production; all five then passed (0.010 seconds), including concrete-default and explicit
