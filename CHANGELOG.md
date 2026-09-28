@@ -52,6 +52,9 @@ fail-closed sync and typed removal. The full current-source nftables/policy matr
 
 ### Added
 
+- The complete three-case traffic-policy module passed twice on the installed runner candidate, proving
+  same-/cross-network TCP allow and revoke plus exact-source directional UDP. Denial requires real guest
+  probe execution and independent delivery checks, not merely a failed exec command.
 - The complete 69-case VM lifecycle module passed twice on the installed runner candidate, covering
   SSH authentication, runtime transitions, cold snapshot/crash recovery, cloud-init, networking, volumes
   and multi-VM creation with exact owned cleanup. Host-reboot and capture/power-loss faults remain separate gates.

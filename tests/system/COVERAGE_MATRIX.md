@@ -17,6 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Complete traffic-policy repeat gate (2026-09-28):** Source SHA-256
+`805d0debbb303ac75aac1b3bb241645232528d8976b686877dadcbda72a03c1e` passed all three cases
+twice (77.90/79.05 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
+Both strict reports have zero other outcomes, unchanged configuration and four empty inventories after checked
+cleanup. Same- and cross-network TCP journeys require actual guest probe execution, exact nonce/boot/endpoint
+results, acknowledgements, independent destination delivery logs and live listeners: broker or guest failures
+cannot count as denied traffic. They check default deny, exact TCP 8080 grants, TCP 8081 denial and revocation.
+The unchanged UDP journey additionally proves exact VM source, sibling exclusion, direction and fresh tuples.
+Fixtures use preseeded assets, attempted-create/full-ID receipts, successful-create readiness and typed cleanup
+of partial pending networks without root repair. Reports are `qa-policy-auto-805d-full3-pass{1,2}.{json,xml}`.
+This qualifies the current traffic-policy file, not peer-exec, adversarial firewall faults or the full release matrix.
+
 **Complete VM lifecycle repeat gate (2026-09-28):** Source SHA-256
 `a754ed0c6697fc18c7d43f3669c2c65c734c3f1a015c674ffd469906c590238a` passed all 69 expanded cases
 twice (464.22/467.72 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
