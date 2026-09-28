@@ -17,6 +17,17 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Interrupted VM backing-import cleanup source checkpoint (2026-09-28):** Commit `19376ffa`
+allows the existing typed VM removal to cancel only verified incomplete VM-owned rootfs/cloud-init
+copies after retained root VM authority proves process/tree/grant absence. The original staging file
+is untouched. Cancellation refreshes durable intent before exact unlink, syncs the empty backing
+directory, and retains the initialized removed record to prevent re-import. Unknown, changed,
+nonempty unrecorded, mounted or foreign-granted files fail closed. Pinned Go 1.26.3 scoped format,
+vet and root behavioral regressions (0.233 seconds), including interruption replay and actual mount
+refusal, passed in `mvmctl-030-test`; the root race selection passed in 1.522 seconds. Evidence is
+`ci-import-06c6/.tmp/import-06c6-focused-root.log`. Tests construct admitted backing fixtures;
+end-to-end failed-creation/public `VMRemove` and actual power-loss qualification remain open.
+
 **Trusted-binary safe repeat gate (2026-09-28):** Commit `f4d7adb1` retains all eleven binary
 cases and exact archive/release identity and live-lease ownership checks. File SHA-256
 `de6739143ab76be1694c696d01cd9f53e665b39f4e59b4ed3f9df8b9b543f6c2` passed the nine

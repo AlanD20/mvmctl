@@ -966,6 +966,10 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Changed
 
+- Typed VM removal can cancel verified incomplete protected rootfs/cloud-init imports without
+  touching original staging files. Exact ownership and absence checks precede deletion;
+  interrupted cleanup resumes from durable intent and retains an anti-resurrection removal
+  record. Focused root behavioral/race regressions pass; end-to-end failure qualification is pending.
 - Live volume detach authenticates and removes the exact guest PCI disk before removing root
   backing access. Read-only observation does not create authority, and interrupted ACL revoke
   is recoverable only for the admitted exact volume/VM transition. Focused Go/race/root checks
