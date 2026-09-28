@@ -21,6 +21,29 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Private namespace and stale-IP reuse checkpoint (2026-09-28):** One installed-candidate journey passed 1/1
+in 21.03 seconds inside only `mvmctl-030-test`. Root-owned topology receipts matched the named namespace and
+Firecracker's actual network namespace; a concurrent control VM had a distinct live namespace. Real guest-to-gateway
+HTTP warmed A's dynamic neighbor, typed removal retained that stale binding, and B reused the same IP with a new
+MAC and endpoint identity. Before B's first HTTP probe the old MAC was absent; B and the control VM both reached
+the gateway with their correct bindings. Checked teardown proved cleaned receipts, absent namespace/jail/link/rule
+resources, and empty VM/network/volume/snapshot inventories. The first attempt hit a test-observation `KeyError`
+because device-filtered `ip` JSON omits `dev`; only that query was corrected, retaining actual device evidence.
+Strict report `qa-namespace-ip-reuse-correction-959642ba.json` is under the runner's
+`qa-consistency-7073592b/.tmp` directory. Candidate/source remain `c460278d`/`19c55345`. Guest boot ARP may also
+refresh the binding, so this does not independently attribute recovery to pre-exposure invalidation, or qualify
+spoofing, prior-host-boot topology recovery, or the complete matrix.
+
+**Bounded working-set diagnostic (2026-09-28):** A separate swap-present probe used at most twelve physical
+16 MiB appends, a declared 16 MiB control reserve, and bounded guest read sweeps. It stopped after 16.04 seconds
+with 145358848 physical tmpfs bytes, 145465344 guest Shmem bytes, and 15568896 available bytes out of 201719808
+usable guest bytes. The leaf recorded 78 new high events, peak 235130880 above high 234881024, 8310784 swap bytes,
+unchanged process/boot identity and working exec; visible OOM counters did not increase. VM, exact-owned swap and
+configuration cleanup completed, leaving all four inventories empty and no active swap. The ignored diagnostic
+source/report are not qualification tests: `memory-working-set-probe-959642ba.jsonl` explicitly reports
+`release_qualification=false`. This provides a measured workload design, not a sustained-hold pass, full RAM
+exhaustion, guest allocation-failure attribution, or host/ancestor OOM safety. Production memory policy is unchanged.
+
 **Captured-epoch and competing-writer checkpoint (2026-09-28):** Both independent-volume restore variants passed
 with one captured epoch across a mounted tmpfs RAM marker, durable rootfs marker, raw-volume prefix/hash, and guest
 boot identity. All three markers were changed after capture; normal source removal and confirmed source crash/removal
@@ -563,7 +586,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 | Descriptor-pinned resources and private mount namespace | 🔴 Missing | Type/owner/mode/link checks, replacement races, namespace mounts, cleanup, restart, and restore. |
 | Mandatory per-VM network namespace | 🔴 Missing | Distinct namespace inodes/topology, root-record binding, rollback, reconciliation, and zero leaked links/TAPs. |
 | nftables-only engine | 🟡 Partial | Four installed-candidate fixed-table cases passed in the bridge-capable named runner, covering modeled inet/bridge rules, nested-VM rule lifecycle, repeat sync, and NAT/conntrack readback. Full failure/reconciliation and clean-host qualification remain open. |
-| Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests and a disposable real-kernel namespace probe passed; a two-VM reused-IP installed-candidate journey on a bridge-capable runner remains missing. |
+| Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests, a disposable real-kernel namespace probe, and the installed-candidate A-to-B stale-IP reuse journey with a concurrent control VM passed. The journey proves fresh gateway reachability and exact cleanup, but guest boot ARP prevents independent attribution of the pre-exposure ordering; spoofing and prior-host-boot recovery remain unqualified. |
 | Typed `traffic` policy | 🟡 Partial | Installed-candidate same-/cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. The 2026-09-28 acknowledged same-network source-VM UDP journey also passed exact allow, sibling/adjacent-port/reverse denial and fresh-flow revocation. Spoofing, IP reuse, cross-network UDP and reboot recovery remain unqualified. |
 | Typed VM-to-VM `exec` policy | 🟡 Partial | The installed candidate passed the full seven-case exec domain in `mvmctl-030-test`. Its new directional case exercises same-network, cross-network, and networkless placements; denial before grant, exact non-root-user grant, successful command and destination file effect, reverse denial, and denial after revocation. Peer-identity attacks, capacity/deadline/cancellation, audit redaction, and reboot/restore journeys remain unqualified at L2. |
 | Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove isolated Firecracker credentials and protected policy-v2 limit/usage inspection. The 2026-09-28 current-candidate 224 MiB guest/150 MiB tmpfs case increased actual `memory.high` events without a leaf OOM kill and retained vsock responsiveness. Historical larger-allocation guest-agent EOF remains unexplained; a bounded pass is not a deterministic pressure gate or ancestor-OOM guarantee. Per-VM uniqueness, root-record/pidfd binding, broader mount/cgroup cleanup, sustained saturation, and host-reboot binding remain unqualified. |

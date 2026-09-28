@@ -1189,8 +1189,8 @@ The implementation map has source code and bounded runner evidence, but the rele
 - Complete broader exact-current-candidate lifecycle/snapshot QA beyond the now-passing fifteen affected cases.
   The reproduced upstream 1.16.1 pause/resume-vsock blocker is resolved by the qualified 1.16.2 affected gate, not
   by changing retries/timeouts. Its snapshots remain incompatible with 1.16.0/1.16.1; fresh captures are required.
-- Run exact-current-source pinned Go CI and the separate complete root-effect Jailer package after the latest Go fix;
-  obtain the separate GitHub CI result.
+- Obtain the separate GitHub CI result. Matching current Go source has passed the pinned local CI sequence and
+  separate complete root-effect Jailer package in the named runner; repeat affected gates when Go source changes.
 - Complete the installed-candidate Python T1/T2 matrix with strict outcomes and leak checks. The two Jailer cases
   requiring an older release still need an authenticated official checksum fetch; a mirrored archive alone is not
   sufficient. Do not bypass the trusted-release receiver to make those cases green.
