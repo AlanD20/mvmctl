@@ -139,6 +139,27 @@ preseed-only guests; they do not qualify the nine unchanged SSH cases or the ful
 Reports `qa-keys-fc614785-pass{1,2}.json` and `qa-key-ssh-fc614785.json` are in
 the runner's `qa-release-0f95b7bc/.tmp` directory. No asset pulls, config/default asset changes or outer install.
 
+**Aggregate cache-preview and generated-ISO correction (2026-09-28):** Production guard `578254f2`
+prevents dry-run from invoking global guestfs cleanup; producer fix `a8ddedb7` sets generated cloud-init ISOs
+to `0600` before protected import. Both ISO behavioral Go subcases failed against the old producer; scoped
+Go 1.26.3 formatting, vet and complete cloudinit/API tests passed after correction. Built and installed only
+inside `mvmctl-030-test`, candidate `0.3.0-rc.preview-iso` has SHA-256
+`6e9072ba462b538aa426fb1dc29f7fdf7219a1a3c00a6425e9566aa468b83c79`.
+The actual old-candidate cache dry-run deleted the owned out-of-cache sentinel and failed the physical
+identity assertion; that intentional RED run was admitted only after checking for unrelated guestfs
+process, lock, socket and appliance targets. With the corrected candidate, both aggregate-preview cases
+passed 2/2 twice in 1.42 and 1.58 seconds, with zero other outcomes and checked owned cleanup. Test commit
+`073e5ec5`, exact file SHA `720e3eab5c2f9896b2556df9499f1314a89539fdf4175e01049e753c9bc999ad`.
+Together with the prior selected eight cases, ten cache cases have bounded repeat evidence; thirteen
+remain unqualified. The previously failing ISO-create selector passed 1/1 in 6.61 seconds. All four
+resource inventories were empty and full configuration unchanged. Reports `qa-cache-720e-{red,green1,green2}`,
+`qa-iso-mode-fixed` and `qa-preview-iso-gates.log` are in the runner's `qa-release-72696719/.tmp` checkout
+and the ignored local evidence directory. This is not full current CI or whole lifecycle qualification.
+The initial ISO failure left a zero-source/backing, reference-free `copying` record: producer normalization
+does not retire that existing authority. Its bounded cancellation design remains awaiting approval.
+Logs' corrected fixture now reaches creation/adoption/cleanup, but public inspection reports the console
+relay stopped; logs and console qualification remain blocked on the separate console-authority decision.
+
 **Volume-domain repeatability (2026-09-28):** Commit `f26bfab6` preserves all thirty-seven selected cases
 while replacing unchecked cleanup and implicit large guests with exact ownership and bounded resources.
 The frozen file passed 37/37 twice in 94.25 and 96.96 seconds inside only `mvmctl-030-test`;

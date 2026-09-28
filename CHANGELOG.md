@@ -39,6 +39,10 @@ earlier partial-state statement. They are not a substitute for the final release
 
 ### Added
 
+- Added real aggregate cache-preview regressions with an identity-checked guestfs sentinel outside the selected cache.
+  The old candidate deleted that sentinel during dry-run; the corrected runner candidate passed both prune and clean
+  previews twice, with checked cleanup and unchanged configuration. Thirteen other cache cases remain unqualified.
+
 - Qualified eight isolated cache init, VM/network preview and validation cases twice with checked owned cleanup
   and unchanged main configuration. The fifteen other cache cases remain pending; aggregate preview and actual
   destructive cleanup are not covered by this selected gate.
@@ -77,6 +81,10 @@ earlier partial-state statement. They are not a substitute for the final release
   successful sequential create in the runner. These are focused runtime checks, not release qualification.
 
 #### Implementation-only integration updates
+
+- Generated cloud-init ISOs now receive checked `0600` permissions before protected import, rather than inheriting
+  group-write access from the caller's umask. Behavioral Go regressions and the previously failing ISO-create case
+  passed in the named runner. Retirement of already incomplete imports remains a separate release blocker.
 
 - Retired unused raw-sudo network mutation helpers and the generic privileged service-spawn option. Ordinary-user
   console and NoCloud services still self-spawn; managed root effects remain on typed authenticated dispatch.
