@@ -22,14 +22,205 @@ Violations fixed (zzz_destructive source):
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shlex
+import stat
+import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.system.conftest import _guest_run, _run_mvm, _unique_subnet, ensure_vm_deps
+from tests.system.conftest import (
+    _guest_run,
+    _json_success_data,
+    _run_mvm,
+    _unique_subnet,
+    ensure_vm_deps,
+)
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_cache]
+
+
+def _cache_inventory(runner_vm):
+    """Read logical user state without opening SQLite or changing defaults."""
+    inventory = {
+        domain: _json_success_data(
+            _run_mvm(runner_vm, domain, "ls", "--json").stdout, list
+        )
+        for domain in ("vm", "network", "image", "kernel", "bin", "key", "volume")
+    }
+    inventory["config"] = _json_success_data(
+        _run_mvm(runner_vm, "config", "ls", "--json").stdout, dict
+    )
+    return inventory
+
+
+class _SelectedCacheCase:
+    """One user cache; only exact attempted key/network names may be removed."""
+
+    def __init__(self, runner_vm, cache_dir, config_dir):
+        self.runner_vm = runner_vm
+        self.cache_dir = cache_dir
+        self.config_dir = config_dir
+        self.attempted = {"key": set(), "network": set()}
+        self.identities = {}
+        self.initialized = False
+
+    def initialize(self):
+        self.initialized = True
+        result = _run_mvm(self.runner_vm, "cache", "init", "--json")
+        data = _json_success_data(result.stdout, dict)
+        assert data["cache_dir"] == str(self.cache_dir)
+        expected = {
+            str(self.cache_dir / name)
+            for name in ("vms", "images", "kernels", "bin", "logs")
+        }
+        expected.add(str(self.config_dir / "keys"))
+        assert set(data["directories"]) == expected
+        for directory in expected:
+            assert stat.S_ISDIR(Path(directory).lstat().st_mode), directory
+        database = self.cache_dir / "mvmdb.db"
+        assert stat.S_ISREG(database.lstat().st_mode)
+        assert database.stat().st_size > 0
+        # Misc previews must have a real, case-owned warm file to preserve.
+        ready = self.cache_dir / "tmp" / "ready"
+        ready.mkdir(parents=True, exist_ok=True)
+        marker = ready / "preview-sentinel"
+        if not marker.is_file():
+            marker.write_bytes(b"cache-preview-must-preserve-this-file\n")
+        return data
+
+    def prepare(self):
+        self.initialize()
+        name = f"cache-key-{uuid.uuid4().hex[:10]}"
+        self.attempted["key"].add(name)
+        data = _json_success_data(
+            _run_mvm(
+                self.runner_vm, "key", "create", name, "--algorithm", "ed25519",
+                "--out", str(self.cache_dir / "keys"), "--json",
+            ).stdout,
+            dict,
+        )
+        self.identities[("key", name)] = data["id"]
+        assert data["is_default"] is False
+        assert any(row["id"] == data["id"] for row in _cache_inventory(self.runner_vm)["key"])
+        for key_path in (data["public_key_path"], data["private_key_path"]):
+            path = Path(key_path)
+            assert path.is_relative_to(self.cache_dir)
+            assert stat.S_ISREG(path.lstat().st_mode)
+
+    def create_network(self):
+        name = f"cache-net-{uuid.uuid4().hex[:10]}"
+        self.attempted["network"].add(name)
+        data = _json_success_data(
+            _run_mvm(
+                self.runner_vm, "network", "create", name,
+                "--subnet", _unique_subnet(name), "--no-nat", "--json",
+            ).stdout,
+            dict,
+        )
+        self.identities[("network", name)] = data["id"]
+        assert not data["is_default"]
+        return data
+
+    def snapshot(self):
+        inventory = _cache_inventory(self.runner_vm)
+        files = {}
+        for root in (self.cache_dir, self.config_dir):
+            for path in sorted(root.rglob("*")):
+                # SQLite journal bytes are not a stable public read contract.
+                # Compare its logical rows above and DB identity separately.
+                if path.name.startswith("mvmdb.db"):
+                    continue
+                info = path.lstat()
+                assert not stat.S_ISLNK(info.st_mode), path
+                digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+                files[str(path)] = (info.st_dev, info.st_ino, info.st_mode, digest)
+        db_info = (self.cache_dir / "mvmdb.db").lstat()
+        return inventory, files, (db_info.st_dev, db_info.st_ino, db_info.st_mode)
+
+    def cleanup(self):
+        failures = []
+        if not self.initialized:
+            return failures
+        for domain in ("network", "key"):
+            for name in self.attempted[domain]:
+                try:
+                    inventory = _json_success_data(
+                        _run_mvm(self.runner_vm, domain, "ls", "--json").stdout, list
+                    )
+                    rows = [row for row in inventory if row["name"] == name]
+                    assert len(rows) <= 1, rows
+                    if rows:
+                        row = rows[0]
+                        remembered = self.identities.get((domain, name))
+                        assert remembered is None or remembered == row["id"], rows
+                        flags = ("--force",) if domain == "network" else ()
+                        _run_mvm(self.runner_vm, domain, "rm", row["id"], *flags, "--json")
+                        if domain == "network":
+                            bridge = shlex.quote(row["bridge"])
+                            absent = _guest_run(self.runner_vm, f"ip link show dev {bridge}", check=False)
+                            assert absent.returncode != 0, absent.stdout
+                        else:
+                            for key_path in (row["public_key_path"], row["private_key_path"]):
+                                path = Path(key_path)
+                                assert path.is_relative_to(self.cache_dir)
+                                with pytest.raises(FileNotFoundError):
+                                    path.lstat()
+                    if domain == "key":
+                        # A failed creation must not leave an unpublished keypair.
+                        # Preserve unexpected remnants and fail rather than erase evidence.
+                        for suffix in ("", ".pub"):
+                            with pytest.raises(FileNotFoundError):
+                                (self.cache_dir / "keys" / f"{name}{suffix}").lstat()
+                except (Exception, pytest.fail.Exception) as error:
+                    failures.append(f"{domain} cleanup {name}: {error!r}")
+            try:
+                remaining = _json_success_data(
+                    _run_mvm(self.runner_vm, domain, "ls", "--json").stdout, list
+                )
+                assert not remaining, remaining
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"{domain} absence check: {error!r}")
+        return failures
+
+
+@pytest.fixture
+def selected_cache_case(runner_vm, tmp_path, monkeypatch):
+    """Select private paths for the bounded preview and validation cases only."""
+    baseline = _cache_inventory(runner_vm)
+    cache_dir = (tmp_path / "cache").resolve()
+    config_dir = (tmp_path / "config").resolve()
+    cache_dir.mkdir(mode=0o700)
+    config_dir.mkdir(mode=0o700)
+    failures = []
+    with monkeypatch.context() as selection:
+        selection.setenv("MVM_CACHE_DIR", str(cache_dir))
+        selection.setenv("MVM_CONFIG_DIR", str(config_dir))
+        selection.setenv("MVM_TEMP_DIR", str(cache_dir / "tmp"))
+        selection.delenv("MVM_WARM_POOL", raising=False)
+        case = _SelectedCacheCase(runner_vm, cache_dir, config_dir)
+        try:
+            yield case
+        finally:
+            try:
+                failures.extend(case.cleanup())
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"selected cache cleanup: {error!r}")
+    # The caller environment has been restored. Each baseline check is independent
+    # so a network failure cannot prevent the key or configuration observations.
+    for domain, expected in baseline.items():
+        try:
+            current = _json_success_data(
+                _run_mvm(runner_vm, domain, "ls", "--json").stdout,
+                dict if domain == "config" else list,
+            )
+            assert current == expected, (expected, current)
+        except Exception as error:
+            failures.append(f"runner main {domain} baseline: {error!r}")
+    assert not failures, "Cache case teardown failed:\n" + "\n".join(failures)
 
 
 class TestCacheInit:
@@ -40,22 +231,18 @@ class TestCacheInit:
         pytest.mark.domain_cache,
     ]
 
-    def test_cache_init(self, runner_vm):
+    def test_cache_init(self, runner_vm, selected_cache_case):
         """Initialize cache resources."""
-        result = _run_mvm(runner_vm, "cache", "init")
-        assert result.returncode == 0
-        assert "initialized" in result.stdout or "Cache" in result.stdout
+        assert list(selected_cache_case.cache_dir.iterdir()) == []
+        selected_cache_case.initialize()
+        assert _cache_inventory(runner_vm)["bin"] == []
 
-    def test_cache_init_idempotent(self, runner_vm):
+    def test_cache_init_idempotent(self, runner_vm, selected_cache_case):
         """Running cache init multiple times should be safe (idempotent)."""
-        result1 = _run_mvm(runner_vm, "cache", "init")
-        assert result1.returncode == 0
-
-        result2 = _run_mvm(runner_vm, "cache", "init")
-        assert result2.returncode == 0
-
-        bin_result = _run_mvm(runner_vm, "bin", "ls", "--json", check=False)
-        assert bin_result.returncode == 0
+        selected_cache_case.prepare()
+        before = selected_cache_case.snapshot()
+        selected_cache_case.initialize()
+        assert selected_cache_case.snapshot() == before
 
 
 class TestCachePruneDryRun:
@@ -85,65 +272,96 @@ class TestCachePruneDryRun:
         images_after: list[dict[str, Any]] = json.loads(ls_after.stdout)
         assert isinstance(images_after, list)
 
-    def test_cache_prune_vm_dry_run(self, runner_vm):
+    def test_cache_prune_vm_dry_run(self, runner_vm, selected_cache_case):
         """cache prune vm --dry-run should succeed and not remove VMs."""
-        result = _run_mvm(runner_vm, "cache", "prune", "vm", "--dry-run")
-        assert result.returncode == 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "dry run" in combined or "no vms" in combined
-
-        ls_result = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-        assert ls_result.returncode == 0
-
-    def test_cache_prune_network_dry_run(self, runner_vm, created_network):
-        """cache prune network --dry-run should succeed and not remove networks."""
-        network_name = created_network
-        result = _run_mvm(
-            runner_vm, "cache", "prune", "network", "--dry-run"
+        selected_cache_case.prepare()
+        before = selected_cache_case.snapshot()
+        assert before[0]["vm"] == []
+        data = _json_success_data(
+            _run_mvm(runner_vm, "cache", "prune", "vm", "--dry-run", "--json").stdout,
+            dict,
         )
-        assert result.returncode == 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "dry run" in combined
+        assert len(data["items"]) == 1
+        assert data["items"][0]["result"]["status"] == "success"
+        assert not data["items"][0]["result"].get("item")
+        assert selected_cache_case.snapshot() == before
 
-        net_result = _run_mvm(runner_vm, "network", "ls", "--json")
-        networks = json.loads(net_result.stdout)
-        assert any(n["name"] == network_name for n in networks)
+    def test_cache_prune_network_dry_run(self, runner_vm, selected_cache_case):
+        """cache prune network --dry-run should succeed and not remove networks."""
+        selected_cache_case.prepare()
+        network = selected_cache_case.create_network()
+        command = f"ip -j link show dev {shlex.quote(network['bridge'])}"
+        bridge_before = json.loads(_guest_run(runner_vm, command).stdout)
+        assert len(bridge_before) == 1
+        before = selected_cache_case.snapshot()
+        data = _json_success_data(
+            _run_mvm(runner_vm, "cache", "prune", "network", "--dry-run", "--json").stdout,
+            list,
+        )
+        assert data == [network["name"]]
+        assert selected_cache_case.snapshot() == before
+        assert json.loads(_guest_run(runner_vm, command).stdout) == bridge_before
 
 
 class TestCachePruneEdgeCases:
     """Test edge cases for cache prune command."""
 
-    def test_cache_prune_with_nonexistent_category(self, runner_vm):
+    def test_cache_prune_with_nonexistent_category(self, runner_vm, selected_cache_case):
         """Pruning a nonexistent category should fail."""
+        selected_cache_case.prepare()
+        before = selected_cache_case.snapshot()
         result = _run_mvm(
             runner_vm,
             "cache",
             "prune",
             "nonexistent-category",
             "--dry-run",
+            "--json",
             check=False,
         )
         assert result.returncode != 0
+        envelope = json.loads(result.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "error"
+        assert envelope["data"] is None
+        assert "nonexistent-category" in envelope["error"]["message"]
+        assert selected_cache_case.snapshot() == before
 
-    def test_cache_prune_nonexistent_category_flag(self, runner_vm):
+    def test_cache_prune_nonexistent_category_flag(self, runner_vm, selected_cache_case):
         """cache prune with an unknown flag should fail."""
+        selected_cache_case.prepare()
+        before = selected_cache_case.snapshot()
         result = _run_mvm(
             runner_vm,
             "cache",
             "prune",
             "--nonexistent-category",
+            "--json",
             check=False,
         )
         assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "nonexistent-category" in combined
+        envelope = json.loads(result.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "error"
+        assert envelope["data"] is None
+        assert "nonexistent-category" in envelope["error"]["message"]
+        assert selected_cache_case.snapshot() == before
 
-    def test_cache_prune_without_category_or_all_fails(self, runner_vm):
+    def test_cache_prune_without_category_or_all_fails(self, runner_vm, selected_cache_case):
         """cache prune without resource and --all should fail with guidance."""
-        result = _run_mvm(runner_vm, "cache", "prune", check=False)
+        selected_cache_case.prepare()
+        before = selected_cache_case.snapshot()
+        guidance = _run_mvm(runner_vm, "cache", "prune", check=False)
+        assert guidance.returncode != 0
+        assert "--all" in guidance.stdout + guidance.stderr
+        result = _run_mvm(runner_vm, "cache", "prune", "--json", check=False)
         assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "--all" in combined
+        envelope = json.loads(result.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "error"
+        assert envelope["data"] is None
+        assert envelope["error"]["message"] == "no resource specified"
+        assert selected_cache_case.snapshot() == before
 
     def test_cache_prune_default_image_skipped_or_warns(self, runner_vm):
         """Pruning images should skip the default image or warn."""
@@ -690,13 +908,23 @@ class TestCacheEdgeCases:
         pytest.mark.destructive,
     ]
 
-    def test_cache_prune_no_args(self, runner_vm):
+    def test_cache_prune_no_args(self, runner_vm, selected_cache_case):
         """``cache prune`` without resource and without --all should fail."""
         # Rationale: No resources needed — testing CLI validation for
         # missing arguments. Non-destructive.
-        result = _run_mvm(runner_vm, "cache", "prune", check=False)
+        selected_cache_case.prepare()
+        before = selected_cache_case.snapshot()
+        guidance = _run_mvm(runner_vm, "cache", "prune", check=False)
+        assert guidance.returncode != 0
+        assert "No resource specified" in guidance.stdout + guidance.stderr
+        result = _run_mvm(runner_vm, "cache", "prune", "--json", check=False)
         assert result.returncode != 0
-        assert "No resource specified" in (result.stdout + result.stderr)
+        envelope = json.loads(result.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "error"
+        assert envelope["data"] is None
+        assert envelope["error"]["message"] == "no resource specified"
+        assert selected_cache_case.snapshot() == before
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow
