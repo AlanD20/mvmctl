@@ -17,6 +17,24 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current installed-candidate matrix checkpoint (2026-09-29):** The exact registered T1/T2 selection collected
+415 cases across 26 files. Installer, CLI, config, init, cache, keys and invariants passed all 113 cases against
+installed candidate `8a6fb1bf` inside only `mvmctl-030-test`. The binary file then exposed a QA observer leak:
+repeated scans retained historical-journal descriptors and exhausted the unchanged 1,024 soft descriptor limit.
+This is not evidence of a production descriptor leak. The corrected file SHA-256
+`84eb64b50257d5d3f7c175dfe02310ebd60dcec1b793b9a300820ba736630fb4` passed the original failing case
+(8.36 seconds) and all eleven binary cases (23.15 seconds), with strict zero-other outcomes and four empty
+inventories afterward. This brings the completed current matrix files to 124 passing cases; remaining files
+are not qualified by this checkpoint.
+
+The scoped read-only scanner gate observed 320 real cleaned schema-6 journals over ten scans with a constant
+eight descriptors and unchanged limits, and rejected an in-memory digest-baseline mismatch. Two simulated cleanup
+failures exercised the actual lifecycle method: both original defaults were attempted independently, uncertain
+release removal was refused, observer close ran last, and primary plus cleanup errors were retained. Normal typed
+removal recovered the earlier test-created release only after exact equality with its saved creation receipt;
+original root releases and default identities were preserved. These helper gates do not qualify production fault
+recovery or erase the earlier failed matrix report. Reports are `bin-observer-84eb/bin-{focus1,full11}.{json,xml}`.
+
 **Current coherent local CI gate (2026-09-28):** An isolated clean source snapshot of `b2c0a1f8` passed offline
 tidy with no tracked changes, whole-tree gofmt/golines, guest-agent generation, full vet, the complete unprivileged
 Go CI selection and its coverage checks under pinned Go 1.26.3. The separate full root Jailer package passed
