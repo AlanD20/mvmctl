@@ -5,11 +5,13 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import select
 import shlex
 import shutil
 import subprocess
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
@@ -737,8 +739,113 @@ class TestVMConfigOptions:
 # ========================================================================
 
 
+@pytest.fixture(scope="class")
+def lifecycle_vm_deps(runner_vm) -> None:
+    """Prepare mirrored assets once per lifecycle class."""
+    ensure_vm_deps(runner_vm)
+
+
+@pytest.fixture
+def lifecycle_vm(runner_vm, lifecycle_vm_deps) -> Generator[dict, None, None]:
+    """Own one tiny managed VM and remove it before its unique no-NAT network."""
+    name = f"sys-lifecycle-{uuid.uuid4().hex[:8]}"
+    network = f"{name}-net"
+    try:
+        _run_mvm(
+            runner_vm, "network", "create", network, "--subnet", _unique_subnet(network),
+            "--no-nat",
+        )
+        created = _json_success_data(
+            _run_mvm(
+                runner_vm, "vm", "create", name, "--image", "alpine:3.23",
+                "--network", network, "--cloud-init-mode", "off", "--skip-deblob",
+                "--no-pci", "--disk-size", "512M", "--mem", "256M", "--vcpu", "1",
+                "--json", timeout=180,
+            ).stdout,
+            list,
+        )
+        assert len(created) == 1, created
+        assert created[0]["name"] == name
+        assert created[0]["status"] == "running"
+        assert (created[0]["vcpu_count"], created[0]["mem_size_mib"],
+                created[0]["disk_size_mib"]) == (1, 256, 512)
+        yield created[0]
+    finally:
+        _remove_config_vm(runner_vm, name)
+        networks = _json_success_data(
+            _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
+        )
+        if any(item["name"] == network for item in networks):
+            _run_mvm(runner_vm, "network", "rm", network, "--force")
+        assert all(item["name"] != network for item in _json_success_data(
+            _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
+        ))
+
+
+def _lifecycle_vm_state(runner_vm: str, name: str, status: str) -> dict:
+    """Require list and inspect to agree on this exact VM's public state."""
+    matches = [vm for vm in _parse_vm_list(
+        _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+    ) if vm["name"] == name]
+    assert len(matches) == 1, matches
+    vm = matches[0]
+    assert vm["status"] == status, vm
+    inspected = _json_success_data(
+        _run_mvm(runner_vm, "vm", "inspect", name, "--json").stdout, dict,
+    )["vm"]
+    assert inspected["id"] == vm["id"]
+    assert inspected["status"] == status, inspected
+    if status in ("running", "paused"):
+        assert inspected["pid"] == vm["pid"]
+    return vm
+
+
+def _lifecycle_process_identity(vm: dict) -> tuple[int, int]:
+    """Match public PID/start ticks to the live task, rather than PID existence."""
+    pid, ticks = int(vm["pid"]), int(vm["process_start_time"])
+    assert pid > 0 and ticks > 0, vm
+    fields = Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()
+    assert len(fields) >= 20, fields
+    assert int(fields[19]) == ticks, (pid, ticks, fields)
+    assert fields[0] not in ("Z", "X"), fields
+    return pid, ticks
+
+
+@contextmanager
+def _lifecycle_process_handle(vm: dict) -> Generator[tuple[tuple[int, int], int], None, None]:
+    """Retain a pidfd before the CLI mutation and admit its public PID/start identity."""
+    pidfd = os.pidfd_open(int(vm["pid"]))
+    try:
+        identity = _lifecycle_process_identity(vm)
+        poller = select.poll()
+        poller.register(pidfd, select.POLLIN)
+        assert poller.poll(0) == [], f"VM task {identity} exited before the lifecycle mutation"
+        yield identity, pidfd
+    finally:
+        os.close(pidfd)
+
+
+def _assert_lifecycle_process_exited(pidfd: int) -> None:
+    """The retained descriptor proves original task exit independently of PID reuse."""
+    poller = select.poll()
+    poller.register(pidfd, select.POLLIN)
+    events = poller.poll(10_000)
+    assert len(events) == 1 and events[0][0] == pidfd, events
+    assert not events[0][1] & (select.POLLERR | select.POLLNVAL), events
+    assert events[0][1] & (select.POLLIN | select.POLLHUP), events
+
+
+def _lifecycle_boot_id(runner_vm: str, name: str) -> str:
+    """A successful guest-agent read also proves vsock is reachable after launch."""
+    boot_id = _run_mvm(
+        runner_vm, "exec", name, "--", "cat", "/proc/sys/kernel/random/boot_id",
+    ).stdout.strip()
+    assert str(uuid.UUID(boot_id)) == boot_id, boot_id
+    return boot_id
+
+
 class TestVMStateTransitions:
-    """VM state machine: stop/start, pause/resume, reboot, crash recovery, fatigue."""
+    """Public lifecycle journeys with task identity, guest readiness, and checked cleanup."""
 
     pytestmark = [
         pytest.mark.system,
@@ -747,241 +854,153 @@ class TestVMStateTransitions:
         pytest.mark.domain_vm,
     ]
 
-    @pytest.mark.system
-    def test_pause_resume_independent(self, runner_vm, created_vm):
-        """Pause then resume VM."""
-        vm_name = created_vm["name"]
-        result = _run_mvm(runner_vm, "vm", "pause", vm_name)
-        assert result.returncode == 0
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        vms = json.loads(result.stdout)
-        vm = next((v for v in vms if v["name"] == vm_name), None)
-        assert vm is not None
-        assert vm["status"] == "paused"
-        result = _run_mvm(runner_vm, "vm", "resume", vm_name)
-        assert result.returncode == 0
+    def test_pause_resume_preserves_process_and_guest(self, runner_vm, lifecycle_vm):
+        """Pause/resume and repeated target-state requests retain the same process and boot."""
+        name = lifecycle_vm["name"]
+        original = _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "running"))
+        boot_id = _lifecycle_boot_id(runner_vm, name)
 
-    @pytest.mark.system
-    def test_stop_start_independent(self, runner_vm, created_vm):
-        """Stop then restart VM."""
-        vm_name = created_vm["name"]
-        result = _run_mvm(runner_vm, "vm", "stop", vm_name)
-        assert result.returncode == 0
-        result = _run_mvm(runner_vm, "vm", "start", vm_name)
-        assert result.returncode == 0
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        vms = json.loads(result.stdout)
-        vm = next((v for v in vms if v["name"] == vm_name), None)
-        assert vm is not None
-        assert vm["status"] == "running"
+        _run_mvm(runner_vm, "vm", "resume", name)
+        assert _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "running")) == original
+        for _ in range(2):
+            _run_mvm(runner_vm, "vm", "pause", name)
+            assert _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "paused")) == original
+        _run_mvm(runner_vm, "vm", "resume", name)
+        assert _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "running")) == original
+        assert _lifecycle_boot_id(runner_vm, name) == boot_id
+        _run_mvm(runner_vm, "vm", "resume", name)
+        assert _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "running")) == original
+        assert _lifecycle_boot_id(runner_vm, name) == boot_id
 
-    @pytest.mark.system
-    def test_pause_independent(self, runner_vm, created_vm):
-        """Pause a running VM."""
-        result = _run_mvm(runner_vm, "vm", "pause", created_vm["name"])
-        assert result.returncode == 0
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        vms = json.loads(result.stdout)
-        vm = next((v for v in vms if v["name"] == created_vm["name"]), None)
-        assert vm is not None
-        assert vm["status"] == "paused"
+    def test_stop_start_three_cycles_and_idempotence(self, runner_vm, lifecycle_vm):
+        """Three actual stop/start cycles include graceful, forced, and IP-selected stop."""
+        name = lifecycle_vm["name"]
+        running = _lifecycle_vm_state(runner_vm, name, "running")
+        identity = _lifecycle_process_identity(running)
+        boot_id = _lifecycle_boot_id(runner_vm, name)
+        _run_mvm(runner_vm, "vm", "start", name)
+        assert _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "running")) == identity
+        assert _lifecycle_boot_id(runner_vm, name) == boot_id
 
-    @pytest.mark.system
-    def test_resume_independent(self, runner_vm, created_vm):
-        """Pause then resume VM."""
-        vm_name = created_vm["name"]
-        _run_mvm(runner_vm, "vm", "pause", vm_name)
-        result = _run_mvm(runner_vm, "vm", "resume", vm_name)
-        assert result.returncode == 0
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        vms = json.loads(result.stdout)
-        vm = next((v for v in vms if v["name"] == vm_name), None)
-        assert vm is not None
-        assert vm["status"] == "running"
+        # Exactly three stops and three starts; creation already leaves the VM running.
+        for selector, flags in ((name, ()), (name, ("--force",)), (running["ipv4"], ())):
+            assert selector
+            with _lifecycle_process_handle(_lifecycle_vm_state(runner_vm, name, "running")) as (current, pidfd):
+                assert current == identity
+                _run_mvm(runner_vm, "vm", "stop", selector, *flags)
+                stopped = _lifecycle_vm_state(runner_vm, name, "stopped")
+                assert stopped["id"] == lifecycle_vm["id"]
+                _assert_lifecycle_process_exited(pidfd)
+                assert all(vm["id"] != stopped["id"] for vm in _parse_vm_list(
+                    _run_mvm(runner_vm, "vm", "ps", "--json").stdout,
+                ))
+                _run_mvm(runner_vm, "vm", "stop", selector, *flags)
+                assert _lifecycle_vm_state(runner_vm, name, "stopped")["id"] == stopped["id"]
+                _assert_lifecycle_process_exited(pidfd)
 
-        # L3: Verify PID is alive (inside test VM)
-        pid = vm.get("pid")
-        assert pid is not None and pid > 0
-        pid_check = _guest_run(runner_vm,
-            f"test -d /proc/{pid} && echo ALIVE",
-            check=False,
-        )
-        assert pid_check.returncode == 0 and "ALIVE" in pid_check.stdout, (
-            f"Firecracker PID {pid} should be alive after resume"
-        )
+            _run_mvm(runner_vm, "vm", "start", name)
+            restarted = _lifecycle_vm_state(runner_vm, name, "running")
+            next_identity = _lifecycle_process_identity(restarted)
+            assert next_identity != identity
+            assert restarted["ipv4"] == running["ipv4"]
+            next_boot = _lifecycle_boot_id(runner_vm, name)
+            assert next_boot != boot_id
+            assert _run_mvm(
+                runner_vm, "exec", name, "--", "printf", "restarted-after-stop",
+            ).stdout == "restarted-after-stop"
+            identity, boot_id = next_identity, next_boot
 
-    @pytest.mark.system
-    def test_stop_independent(self, runner_vm, created_vm):
-        """Stop a running VM."""
-        result = _run_mvm(runner_vm, "vm", "stop", created_vm["name"])
-        assert result.returncode == 0
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        vms = json.loads(result.stdout)
-        vm = next((v for v in vms if v["name"] == created_vm["name"]), None)
-        assert vm is not None
-        assert vm["status"] == "stopped"
+    @pytest.mark.parametrize("force", [False, True], ids=["graceful", "force"])
+    def test_reboot_changes_process_and_boot_id(self, runner_vm, lifecycle_vm, force):
+        """Both reboot routes replace the process and boot a reachable new guest."""
+        name = lifecycle_vm["name"]
+        boot_id = _lifecycle_boot_id(runner_vm, name)
+        with _lifecycle_process_handle(_lifecycle_vm_state(runner_vm, name, "running")) as (identity, pidfd):
+            _run_mvm(runner_vm, "vm", "reboot", name, *(("--force",) if force else ()))
+            _assert_lifecycle_process_exited(pidfd)
+            rebooted = _lifecycle_vm_state(runner_vm, name, "running")
+            assert rebooted["id"] == lifecycle_vm["id"]
+            assert _lifecycle_process_identity(rebooted) != identity
+            assert _lifecycle_boot_id(runner_vm, name) != boot_id
 
-    @pytest.mark.system
-    def test_start_independent(self, runner_vm, created_vm):
-        """Stop then start a VM."""
-        vm_name = created_vm["name"]
-        _run_mvm(runner_vm, "vm", "stop", vm_name)
-        result = _run_mvm(runner_vm, "vm", "start", vm_name)
-        assert result.returncode == 0
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        vms = json.loads(result.stdout)
-        vm = next((v for v in vms if v["name"] == vm_name), None)
-        assert vm is not None
-        assert vm["status"] == "running"
+    @pytest.mark.destructive
+    def test_paused_forced_removal_exits_process(self, runner_vm, lifecycle_vm):
+        """Forced removal of a paused VM exits its exact process and removes its public record."""
+        name = lifecycle_vm["name"]
+        _lifecycle_boot_id(runner_vm, name)
+        with _lifecycle_process_handle(_lifecycle_vm_state(runner_vm, name, "running")) as (identity, pidfd):
+            _run_mvm(runner_vm, "vm", "pause", name)
+            assert _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "paused")) == identity
+            _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
+            _assert_lifecycle_process_exited(pidfd)
+            assert all(vm["id"] != lifecycle_vm["id"] for vm in _parse_vm_list(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+            ))
 
-        pid = vm.get("pid")
-        assert pid is not None and pid > 0
-        pid_check = _guest_run(runner_vm,
-            f"test -d /proc/{pid} && echo ALIVE",
-            check=False,
-        )
-        assert pid_check.returncode == 0 and "ALIVE" in pid_check.stdout, (
-            f"Firecracker PID {pid} should be alive after start"
-        )
-
-    @pytest.mark.system
-    def test_stop_force(self, runner_vm, created_vm):
-        """Stop a running VM with --force flag."""
-        result = _run_mvm(
-            runner_vm, "vm", "stop", created_vm["name"], "--force"
-        )
-        assert result.returncode == 0
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        vms = json.loads(result.stdout)
-        vm = next((v for v in vms if v["name"] == created_vm["name"]), None)
-        assert vm is not None
-        assert vm["status"] == "stopped"
-
-    @pytest.mark.system
-    def test_reboot_force_independent(self, runner_vm, created_vm):
-        """Reboot VM with --force using a dedicated VM."""
-        vm_name = created_vm["name"]
-
-        inspect_before = json.loads(
-            _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout
-        )
-        old_pid = inspect_before.get("vm", {}).get("pid")
-
-        result = _run_mvm(runner_vm, "vm", "reboot", vm_name, "--force")
-        assert result.returncode == 0
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        vms = json.loads(result.stdout)
-        vm = next((v for v in vms if v["name"] == vm_name), None)
-        assert vm is not None
-        assert vm["status"] == "running"
-
-        new_pid = vm.get("pid")
-        assert new_pid is not None and new_pid > 0
-        if old_pid and old_pid > 0:
-            assert new_pid != old_pid, (
-                f"PID {old_pid} unchanged after reboot --force — "
-                f"VM may not have restarted"
-            )
-        pid_check = _guest_run(runner_vm,
-            f"test -d /proc/{new_pid} && echo ALIVE",
-            check=False,
-        )
-        assert pid_check.returncode == 0 and "ALIVE" in pid_check.stdout, (
-            f"Firecracker PID {new_pid} should be alive after reboot --force"
-        )
-
-    @pytest.mark.system
-    @pytest.mark.requires_kvm
-    @pytest.mark.slow
-    def test_stop_start_cycle_multiple_times(
-        self,
-        runner_vm,
-        unique_vm_name,
-        unique_network_name,
-    ):
-        """Run 3 stop/start cycles -- state machine fatigue."""
-        net_name = unique_network_name
-        _run_mvm(
-            runner_vm,
-            "network",
-            "create",
-            net_name,
-            "--subnet",
-            _unique_subnet(net_name),
-        )
+    @pytest.mark.destructive
+    def test_stopped_snapshot_captures_and_restores_disk(self, runner_vm, lifecycle_vm):
+        """A stopped VM yields a cold disk archive that restores guest data and vsock."""
+        name = lifecycle_vm["name"]
+        snapshot_name = f"{name}-cold"
+        snapshot_id = None
+        marker = uuid.uuid4().hex
         try:
+            boot_id = _lifecycle_boot_id(runner_vm, name)
             _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
+                runner_vm, "exec", name, "--",
+                f"printf '%s' '{marker}' > /root/lifecycle-cold-marker && sync",
             )
-            for _ in range(2):
-                _run_mvm(runner_vm, "vm", "start", unique_vm_name)
-                _run_mvm(runner_vm, "vm", "stop", unique_vm_name, "--force")
-            _run_mvm(runner_vm, "vm", "start", unique_vm_name)
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            vm_entry = next(
-                (v for v in vms if v["name"] == unique_vm_name), None
+            with _lifecycle_process_handle(_lifecycle_vm_state(runner_vm, name, "running")) as (_, pidfd):
+                _run_mvm(runner_vm, "vm", "stop", name)
+                _assert_lifecycle_process_exited(pidfd)
+            _lifecycle_vm_state(runner_vm, name, "stopped")
+            capture = _run_mvm(
+                runner_vm, "snapshot", "create", name, "--name", snapshot_name,
+                "--json", check=False, timeout=240,
             )
-            assert vm_entry is not None
-            assert vm_entry["status"] == "running"
-        finally:
-            _run_mvm(
-                runner_vm, "network", "rm", net_name, "--force", check=False
-            )
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
+            # Keep the root request identity even if capture fails before its local projection.
+            intents = [line.removeprefix("Snapshot request ID: ") for line in capture.stderr.splitlines()
+                       if line.startswith("Snapshot request ID: ")]
+            assert len(intents) <= 1, capture.stderr
+            if intents:
+                snapshot_id = intents[0]
+                assert len(snapshot_id) == 64 and all(c in "0123456789abcdef" for c in snapshot_id)
+            assert capture.returncode == 0, (capture.stdout, capture.stderr)
+            captured = _json_success_data(capture.stdout, dict)
+            assert captured["id"] == snapshot_id
+            assert captured["name"] == snapshot_name
+            assert captured["source_vm_id"] == lifecycle_vm["id"]
+            assert captured["memory_file"] == ""
+            assert captured["state_file"] == ""
+            assert captured["rootfs_file"]
+            _lifecycle_vm_state(runner_vm, name, "stopped")
+            _remove_config_vm(runner_vm, name)
 
-    @pytest.mark.system
-    @pytest.mark.requires_kvm
-    @pytest.mark.slow
-    def test_create_pause_remove(
-        self,
-        runner_vm,
-        unique_vm_name,
-        unique_network_name,
-    ):
-        """Pause a running VM then remove it -- verify cleanup."""
-        net_name = unique_network_name
-        _run_mvm(
-            runner_vm,
-            "network",
-            "create",
-            net_name,
-            "--subnet",
-            _unique_subnet(net_name),
-        )
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
+            restored = _json_success_data(
+                _run_mvm(
+                    runner_vm, "snapshot", "restore", snapshot_id, name, "--resume",
+                    "--json", timeout=180,
+                ).stdout,
+                list,
             )
-            _run_mvm(runner_vm, "vm", "start", unique_vm_name)
-            _run_mvm(runner_vm, "vm", "pause", unique_vm_name)
-            _run_mvm(runner_vm, "vm", "rm", unique_vm_name, "--force")
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            assert not any(v["name"] == unique_vm_name for v in vms)
+            assert len(restored) == 1
+            assert restored[0]["name"] == name and restored[0]["status"] == "running"
+            assert restored[0]["id"] != lifecycle_vm["id"]
+            assert restored[0]["network_id"] == lifecycle_vm["network_id"]
+            assert restored[0]["ipv4"] == lifecycle_vm["ipv4"]
+            _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "running"))
+            assert _lifecycle_boot_id(runner_vm, name) != boot_id
+            assert _run_mvm(
+                runner_vm, "exec", name, "--", "cat", "/root/lifecycle-cold-marker",
+            ).stdout == marker
         finally:
-            _run_mvm(
-                runner_vm, "network", "rm", net_name, "--force", check=False
-            )
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
+            # A restore retains captured resources until VM removal; keep this ordering on failure too.
+            _remove_config_vm(runner_vm, name)
+            if snapshot_id is not None:
+                _run_mvm(runner_vm, "snapshot", "rm", snapshot_id, "--force", timeout=120)
+            assert all(item["name"] != snapshot_name for item in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ))
 
     @pytest.mark.system
     @pytest.mark.requires_kvm
@@ -1082,370 +1101,6 @@ class TestVMStateTransitions:
                 _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
             ))
 
-    def test_stop_by_name_flag(self, runner_vm, created_vm):
-        """Stop VM using name as positional argument."""
-        result = _run_mvm(runner_vm, "vm", "stop", created_vm["name"])
-        assert result.returncode == 0
-
-    def test_stop_by_ip(self, runner_vm, created_vm):
-        """Stop VM using IP as positional argument."""
-        ip = created_vm.get("ipv4", "")
-        assert ip, "VM has no IP address"
-        result = _run_mvm(runner_vm, "vm", "stop", ip)
-        assert result.returncode == 0
-
-    def test_stop_already_stopped_vm_is_idempotent(
-        self,
-        runner_vm,
-        unique_vm_name,
-        unique_network_name,
-    ):
-        """Stopping an already stopped VM should succeed (idempotent)."""
-        net_name = unique_network_name
-        _run_mvm(
-            runner_vm,
-            "network",
-            "create",
-            net_name,
-            "--subnet",
-            _unique_subnet(net_name),
-        )
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-            )
-            _run_mvm(runner_vm, "vm", "stop", unique_vm_name, "--force")
-            _run_mvm(runner_vm, "vm", "stop", unique_vm_name, "--force")
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            vm_entry = next(
-                (v for v in vms if v["name"] == unique_vm_name), None
-            )
-            assert vm_entry is not None
-            assert vm_entry["status"] == "stopped"
-        finally:
-            _run_mvm(
-                runner_vm, "network", "rm", net_name, "--force", check=False
-            )
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_resume_running_vm_is_idempotent(
-        self,
-        runner_vm,
-        unique_vm_name,
-        unique_network_name,
-    ):
-        """Resume on a running VM succeeds (idempotent)."""
-        net_name = unique_network_name
-        _run_mvm(
-            runner_vm,
-            "network",
-            "create",
-            net_name,
-            "--subnet",
-            _unique_subnet(net_name),
-        )
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-            )
-            _run_mvm(runner_vm, "vm", "start", unique_vm_name)
-            _run_mvm(runner_vm, "vm", "resume", unique_vm_name)
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            vm_entry = next(
-                (v for v in vms if v["name"] == unique_vm_name), None
-            )
-            assert vm_entry is not None
-            assert vm_entry["status"] == "running"
-        finally:
-            _run_mvm(
-                runner_vm, "network", "rm", net_name, "--force", check=False
-            )
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_snapshot_from_stopped_vm_fails(
-        self,
-        runner_vm,
-        unique_vm_name,
-        unique_network_name,
-    ):
-        """Snapshot requires paused or running VM -- stopped should be rejected."""
-        net_name = unique_network_name
-        _run_mvm(
-            runner_vm,
-            "network",
-            "create",
-            net_name,
-            "--subnet",
-            _unique_subnet(net_name),
-        )
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-            )
-            _run_mvm(runner_vm, "vm", "stop", unique_vm_name, "--force")
-            _run_mvm(runner_vm, "snapshot", "create", unique_vm_name)
-        finally:
-            _run_mvm(
-                runner_vm, "network", "rm", net_name, "--force", check=False
-            )
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    def test_error_state_is_terminal(
-        self,
-        runner_vm: str,
-        unique_vm_name: str,
-        unique_network_name,
-    ) -> None:
-        """Kill firecracker PID -- verify vm stop works and rm --force succeeds."""
-        net_name = unique_network_name
-        _run_mvm(
-            runner_vm,
-            "network",
-            "create",
-            net_name,
-            "--subnet",
-            _unique_subnet(net_name),
-        )
-        vm_name = unique_vm_name
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-            )
-            vm_inspect = _run_mvm(
-                runner_vm, "vm", "inspect", vm_name, "--json"
-            )
-            vm_data = json.loads(vm_inspect.stdout)
-            pid = vm_data.get("vm", {}).get("pid")
-            assert pid is not None, "VM should have a PID"
-            _run_mvm(runner_vm, "kill", "-9", str(pid), check=False)
-            time.sleep(1)
-
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            vm_entry = next((v for v in vms if v["name"] == vm_name), None)
-            assert vm_entry is not None
-
-            _run_mvm(runner_vm, "vm", "stop", vm_name)
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force")
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            assert not any(v["name"] == vm_name for v in vms)
-        finally:
-            _run_mvm(
-                runner_vm, "network", "rm", net_name, "--force", check=False
-            )
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-
-    @pytest.mark.requires_kvm
-    def test_boot_time_within_limits(
-        self,
-        runner_vm,
-        unique_vm_name,
-        timing_targets,
-    ):
-        """VM boot time should be within limits."""
-        network_name = f"{unique_vm_name}-net"
-        subnet = _unique_subnet(network_name)
-        generous_limit = 30.0
-        try:
-            _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-            )
-            start = time.monotonic()
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network_name,
-            )
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            vm_entry = next(
-                (v for v in vms if v["name"] == unique_vm_name), None
-            )
-            assert vm_entry is not None
-            assert vm_entry["status"] == "running"
-            elapsed = time.monotonic() - start
-            assert elapsed < generous_limit
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-            _run_mvm(
-                runner_vm,
-                "network",
-                "rm",
-                network_name,
-                "--force",
-                check=False,
-            )
-
-    def test_stop_clean_shutdown(
-        self,
-        runner_vm,
-        unique_vm_name,
-    ):
-        """Graceful stop via Firecracker API (no --force)."""
-        network_name = f"{unique_vm_name}-net"
-        subnet = _unique_subnet(network_name)
-        try:
-            _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-            )
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network_name,
-            )
-
-            inspect_before = json.loads(
-                _run_mvm(
-                    runner_vm, "vm", "inspect", unique_vm_name, "--json"
-                ).stdout
-            )
-            pid = inspect_before.get("vm", {}).get("pid")
-
-            _run_mvm(runner_vm, "vm", "stop", unique_vm_name)
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            vm_entry = next(
-                (v for v in vms if v["name"] == unique_vm_name), None
-            )
-            assert vm_entry is not None
-            assert vm_entry["status"] == "stopped"
-
-            # L3: Verify PID is no longer alive inside test VM
-            if pid and pid > 0:
-                pid_check = _guest_run(runner_vm,
-                    f"test -d /proc/{pid} && echo ALIVE || echo DEAD",
-                    check=False,
-                )
-                assert "DEAD" in pid_check.stdout or "ALIVE" not in pid_check.stdout, (
-                    f"Firecracker PID {pid} should not exist after graceful stop"
-                )
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-            _run_mvm(
-                runner_vm,
-                "network",
-                "rm",
-                network_name,
-                "--force",
-                check=False,
-            )
-
-    def test_no_orphaned_processes_after_stop(
-        self,
-        runner_vm,
-        unique_vm_name,
-    ):
-        """Verify Firecracker process is gone after vm stop --force."""
-        network_name = f"{unique_vm_name}-net"
-        subnet = _unique_subnet(network_name)
-        try:
-            _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-            )
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network_name,
-            )
-            result = _run_mvm(
-                runner_vm, "vm", "inspect", unique_vm_name, "--json"
-            )
-            inspect_data = json.loads(result.stdout)
-            pid = inspect_data.get("vm", {}).get("pid")
-            assert pid is not None and pid > 0
-            _run_mvm(runner_vm, "vm", "stop", unique_vm_name, "--force")
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
-            vm_entry = next(
-                (v for v in vms if v["name"] == unique_vm_name), None
-            )
-            assert vm_entry is not None
-            assert vm_entry["status"] == "stopped"
-        finally:
-            _run_mvm(
-                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-            _run_mvm(
-                runner_vm,
-                "network",
-                "rm",
-                network_name,
-                "--force",
-                check=False,
-            )
-
 
 # ========================================================================
 # TestVMStateTransitionErrors (from CLI edge cases)
@@ -1453,7 +1108,7 @@ class TestVMStateTransitions:
 
 
 class TestVMStateTransitionErrors:
-    """Tests for invalid or idempotent VM state transitions."""
+    """Invalid transitions expose typed refusal and retain the original state."""
 
     pytestmark = [
         pytest.mark.system,
@@ -1462,35 +1117,53 @@ class TestVMStateTransitionErrors:
         pytest.mark.domain_vm,
     ]
 
-    def test_vm_stop_stopped_vm(self, runner_vm, created_vm):
-        """Stopping an already-stopped VM should be idempotent."""
-        vm_name = created_vm["name"]
-        _run_mvm(runner_vm, "vm", "stop", vm_name)
-        result = _run_mvm(runner_vm, "vm", "stop", vm_name, check=False)
-        assert result.returncode == 0, f"Second stop failed: {result.stderr}"
+    def test_pause_and_resume_stopped_vm_are_rejected(self, runner_vm, lifecycle_vm):
+        """Neither wrong-direction command relaunches or mutates a stopped VM."""
+        name = lifecycle_vm["name"]
+        with _lifecycle_process_handle(_lifecycle_vm_state(runner_vm, name, "running")) as (identity, pidfd):
+            _run_mvm(runner_vm, "vm", "stop", name)
+            _assert_lifecycle_process_exited(pidfd)
+            for operation in ("pause", "resume"):
+                result = _run_mvm(runner_vm, "vm", operation, name, "--json", check=False)
+                self._assert_invalid_state(result, operation)
+                assert _lifecycle_vm_state(runner_vm, name, "stopped")["id"] == lifecycle_vm["id"]
+                _assert_lifecycle_process_exited(pidfd)
+                assert all(vm["id"] != lifecycle_vm["id"] for vm in _parse_vm_list(
+                    _run_mvm(runner_vm, "vm", "ps", "--json").stdout,
+                ))
+        _run_mvm(runner_vm, "vm", "start", name)
+        assert _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "running")) != identity
+        _lifecycle_boot_id(runner_vm, name)
 
-    def test_vm_pause_stopped_vm(self, runner_vm, created_vm):
-        """Pausing a stopped VM should fail."""
-        vm_name = created_vm["name"]
-        _run_mvm(runner_vm, "vm", "stop", vm_name)
-        result = _run_mvm(runner_vm, "vm", "pause", vm_name, check=False)
-        assert result.returncode != 0
+    def test_start_paused_vm_is_rejected_without_relaunch(self, runner_vm, lifecycle_vm):
+        """Start refuses paused state; resume recovers the same process and guest boot."""
+        name = lifecycle_vm["name"]
+        identity = _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "running"))
+        boot_id = _lifecycle_boot_id(runner_vm, name)
+        _run_mvm(runner_vm, "vm", "pause", name)
+        assert _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "paused")) == identity
+        result = _run_mvm(runner_vm, "vm", "start", name, "--json", check=False)
+        self._assert_invalid_state(result, "start")
+        assert _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "paused")) == identity
+        _run_mvm(runner_vm, "vm", "resume", name)
+        assert _lifecycle_process_identity(_lifecycle_vm_state(runner_vm, name, "running")) == identity
+        assert _lifecycle_boot_id(runner_vm, name) == boot_id
 
-    def test_vm_start_running_vm(self, runner_vm, created_vm):
-        """Starting a running VM should succeed (idempotent)."""
-        vm_name = created_vm["name"]
-        result = _run_mvm(runner_vm, "vm", "start", vm_name, check=False)
-        assert result.returncode == 0, (
-            f"Start on running VM failed: {result.stderr}"
-        )
-
-    def test_vm_resume_running_vm(self, runner_vm, created_vm):
-        """Resuming a running VM should succeed (idempotent)."""
-        vm_name = created_vm["name"]
-        result = _run_mvm(runner_vm, "vm", "resume", vm_name, check=False)
-        assert result.returncode == 0, (
-            f"Resume on running VM failed: {result.stderr}"
-        )
+    @staticmethod
+    def _assert_invalid_state(result: subprocess.CompletedProcess[str], operation: str) -> None:
+        """Batch output retains both the CLI failure and the controller's typed state error."""
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        envelope = json.loads(result.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "error"
+        assert envelope["error"]["code"] == "cli.batch.failed"
+        assert envelope["error"]["class"] == 4
+        items = envelope["data"]["items"]
+        assert len(items) == 1, items
+        assert items[0]["result"]["status"] == "error"
+        assert items[0]["result"]["code"] == f"vm.{operation}_failed"
+        assert items[0]["error"]["code"] == "vm.state.invalid"
+        assert items[0]["error"]["class"] == 1
 
 
 # ========================================================================
