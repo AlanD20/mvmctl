@@ -298,7 +298,7 @@ class TestNetworklessJailerLifecycle:
         before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
         defaults = {item["type"]: item for item in before if item["is_default"]}
         assert set(defaults) == {"firecracker", "jailer"}
-        assert all(item["version"] == "1.16.1" for item in defaults.values())
+        assert all(item["version"] == "1.16.2" for item in defaults.values())
         owned_older = not any(item["version"] == "1.16.0" for item in before)
 
         try:
@@ -322,7 +322,7 @@ class TestNetworklessJailerLifecycle:
             assert response["schema_version"] == 1
             assert response["status"] == "error"
             assert response["error"]["code"] == "binary.version.gate"
-            assert "Firecracker/Jailer 1.16.1" in response["error"]["message"]
+            assert "Firecracker/Jailer 1.16.2" in response["error"]["message"]
             listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
             assert all(vm["name"] != networkless_vm_name for vm in listed)
         finally:
@@ -660,7 +660,7 @@ class TestNetworklessJailerLifecycle:
             binary for binary in binaries
             if binary["type"] == "jailer" and binary["is_default"]
         )
-        source_version, alternate_version = "1.16.1", "1.16.0"
+        source_version, alternate_version = "1.16.2", "1.16.0"
         mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
         for version in (source_version, alternate_version):
             archive = mirror / f"firecracker-v{version}-{platform.machine()}.tgz"
