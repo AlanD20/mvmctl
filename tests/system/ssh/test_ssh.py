@@ -2,318 +2,211 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
-import tempfile
 import time as _time
 import uuid
 from pathlib import Path
 
 import pytest
 
-from tests.system.conftest import _guest_run, _json_success_data, _run_mvm, _unique_subnet, wait_for_ssh
+from tests.system.conftest import _json_success_data, _run_mvm, _unique_subnet
 from tests.system.keys.test_keys import _KeyOwner, _default_ids, _key_inventory
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_ssh]
 
 
+def _ssh_inventory(runner_vm, domain):
+    rows = _json_success_data(_run_mvm(runner_vm, domain, "ls", "--json").stdout, list)
+    if domain in ("kernel", "key"):
+        # Kernel listing may refresh missing rows; restoring a key default advances updated_at.
+        rows = [{key: value for key, value in row.items() if key != "updated_at"} for row in rows]
+    return sorted(rows, key=lambda row: json.dumps(row, sort_keys=True))
+
+
+@pytest.fixture
+def ssh_baseline(runner_vm):
+    """Check exact public inventories/defaults and config after dependent owned teardown."""
+    assert os.geteuid() != 0, "SSH journeys require the installed CLI's non-root operator route"
+    domains = ("vm", "network", "key", "volume", "image", "kernel", "bin")
+    before = {domain: _ssh_inventory(runner_vm, domain) for domain in domains}
+    config = _json_success_data(_run_mvm(runner_vm, "config", "ls", "--json").stdout, dict)
+    try:
+        yield before
+    finally:
+        failures = []
+        for domain, baseline in before.items():
+            try:
+                assert _ssh_inventory(runner_vm, domain) == baseline, domain
+            except Exception as error:
+                failures.append((f"{domain} baseline/default readback", repr(error)))
+        try:
+            assert _json_success_data(
+                _run_mvm(runner_vm, "config", "ls", "--json").stdout, dict,
+            ) == config, "SSH journey changed configuration"
+        except Exception as error:
+            failures.append(("config readback", repr(error)))
+        assert not failures, failures
+
+
+@pytest.fixture
+def ssh_vm_preflight(runner_vm, ssh_baseline):
+    """Fail before resource publication when the bounded runner prerequisites are absent."""
+    images = [item for item in ssh_baseline["image"]
+              if item["type"] == "alpine" and item["version"] == "3.23" and item["is_present"]]
+    assert len(images) == 1 and images[0]["minimum_rootfs_size_mib"] == 360, images
+    live = [vm for vm in ssh_baseline["vm"] if vm["status"] not in ("stopped", "failed")]
+    assert len(live) < 2, ("maximum two live inner VMs", live)
+    host = _json_success_data(_run_mvm(runner_vm, "host", "status", "--json").stdout, dict)
+    assert host["resources"]["nftables_available"] is True, host
+
+
+@pytest.fixture
+def ssh_vm(runner_vm, ssh_baseline, ssh_vm_preflight, key_vm_owner):
+    """One function-owned VM with its own network and explicit authorized cached key."""
+    owned = key_vm_owner
+    key_name = f"{owned['name']}-ssh"
+    owned["keys"].create(key_name, "--algorithm", "ed25519")
+    owned["ssh_key_name"] = key_name
+    vm = _create_key_vm(runner_vm, owned, (key_name,))
+    owned["ipv4"] = vm["ipv4"]
+    assert owned["ipv4"], vm
+    _assert_owned_key_ssh(
+        runner_vm, owned, owned["keys"].entry(key_name)["private_key_path"], "ssh-ready",
+    )
+    return owned
+
+
 class TestSSHConnect:
-    """Test mvm ssh connect (non-interactive via --cmd)."""
+    """Real installed-CLI SSH cases with function-owned VM/key/network teardown."""
 
-    @pytest.mark.requires_kvm
+    pytestmark = [pytest.mark.tier2, pytest.mark.usefixtures("ssh_baseline"), pytest.mark.timeout(600)]
+
+    @pytest.mark.needs_kvm
     @pytest.mark.slow
-    def test_ssh_command_execution(self, runner_vm, module_vm, timing_targets):
-        """Execute a command via SSH on a running VM using name as positional arg."""
-        vm_info = module_vm
-        ssh_timeout = timing_targets["alpine:3.23"]
-        ssh_available = wait_for_ssh(
-            runner_vm, vm_info["name"], "root", ssh_timeout
-        )
-        assert ssh_available, f"SSH not available within {ssh_timeout}s"
-
+    def test_ssh_command_execution(self, runner_vm, ssh_vm):
+        """Resolve the VM's stored key and user, then execute a command by VM name."""
         result = _run_mvm(
-            runner_vm,
-            "ssh",
-            vm_info["name"],
-            "--cmd",
-            "echo hello",
-            check=False,
+            runner_vm, "ssh", ssh_vm["name"], "--cmd", "echo hello", check=False,
         )
-        assert result.returncode == 0, f"SSH command failed: {result.stderr}"
-        assert "hello" in result.stdout, (
-            f"Expected 'hello' in output, got: {result.stdout}"
-        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert result.stdout.strip() == "hello", (result.stdout, result.stderr)
 
-    def test_ssh_nonexistent_vm(self, runner_vm):
-        """SSH to nonexistent VM should fail gracefully."""
-        result = _run_mvm(
-            runner_vm,
-            "ssh",
-            "nonexistent-vm-xyz123",
-            "--cmd",
-            "echo hi",
-            check=False,
-        )
-        assert result.returncode != 0, (
-            f"Expected non-zero exit for nonexistent VM, "
-            f"got: {result.returncode}"
-        )
+    def test_ssh_nonexistent_vm(self, runner_vm, ssh_baseline):
+        """Reject an unknown VM selector before any SSH connection attempt."""
+        name = f"sys-ssh-absent-{uuid.uuid4().hex[:10]}"
+        assert all(vm["name"] != name for vm in ssh_baseline["vm"])
+        result = _run_mvm(runner_vm, "ssh", name, "--cmd", "echo hi", check=False)
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        assert f"Invalid IP address: {name}" in result.stderr, result.stderr
 
-    def test_ssh_timeout_flag_fails_fast(self, runner_vm):
-        """SSH with --timeout to nonexistent VM should fail fast (<5s not 60s)."""
+    def test_ssh_timeout_flag_fails_fast(self, runner_vm, ssh_baseline):
+        """Unknown selectors still fail fast with the explicit connect timeout flag."""
+        name = f"sys-ssh-absent-timeout-{uuid.uuid4().hex[:10]}"
+        assert all(vm["name"] != name for vm in ssh_baseline["vm"])
         start = _time.monotonic()
         result = _run_mvm(
-            runner_vm,
-            "ssh",
-            "nonexistent-vm-timeout-test",
-            "--timeout",
-            "2",
-            "--cmd",
-            "echo hi",
-            check=False,
+            runner_vm, "ssh", name, "--timeout", "2", "--cmd", "echo hi", check=False,
         )
         elapsed = _time.monotonic() - start
-        assert result.returncode != 0, (
-            f"Expected non-zero exit for nonexistent VM, "
-            f"got: {result.returncode} (took {elapsed:.1f}s)"
-        )
-        assert elapsed < 10, (
-            f"--timeout 2 should fail fast, but took {elapsed:.1f}s "
-            f"(default 60s timeout would have masked this)"
-        )
+        assert result.returncode != 0, (elapsed, result.stdout, result.stderr)
+        assert f"Invalid IP address: {name}" in result.stderr, result.stderr
+        assert elapsed < 10, ("unknown selector should fail before probing", elapsed)
 
-    @pytest.mark.requires_kvm
+    @pytest.mark.needs_kvm
     @pytest.mark.slow
-    def test_ssh_with_ip_flag(self, runner_vm, module_vm, timing_targets):
-        """Connect via IP as positional arg instead of VM name."""
-        vm_info = module_vm
-        ssh_timeout = timing_targets["alpine:3.23"]
-        ssh_available = wait_for_ssh(
-            runner_vm, vm_info["name"], "root", ssh_timeout
-        )
-        assert ssh_available, f"SSH not available within {ssh_timeout}s"
-
+    def test_ssh_with_ip_flag(self, runner_vm, ssh_vm):
+        """Connect using the owned VM's IP as the positional selector."""
         result = _run_mvm(
-            runner_vm,
-            "ssh",
-            vm_info["ipv4"],
-            "-u", "root",
-            "--cmd",
-            "whoami",
-            check=False,
+            runner_vm, "ssh", ssh_vm["ipv4"], "-u", "root", "--cmd", "whoami", check=False,
         )
-        assert result.returncode == 0, f"SSH via IP failed: {result.stderr}"
-        assert "root" in result.stdout, (
-            f"Expected 'root' in output, got: {result.stdout}"
-        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert result.stdout.strip() == "root", (result.stdout, result.stderr)
 
-    @pytest.mark.requires_kvm
+    @pytest.mark.needs_kvm
     @pytest.mark.slow
-    def test_ssh_with_user_flag(self, runner_vm, module_vm, timing_targets):
-        """SSH with explicit --user flag."""
-        vm_info = module_vm
-        ssh_timeout = timing_targets["alpine:3.23"]
-        wait_for_ssh(runner_vm, vm_info["name"], "root", ssh_timeout)
-
+    def test_ssh_with_user_flag(self, runner_vm, ssh_vm):
+        """SSH authenticates with the explicit --user flag."""
         result = _run_mvm(
-            runner_vm,
-            "ssh",
-            vm_info["name"],
-            "-u",
-            "root",
-            "--cmd",
-            "whoami",
-            check=False,
+            runner_vm, "ssh", ssh_vm["name"], "--user", "root", "--cmd", "whoami", check=False,
         )
-        assert result.returncode == 0, (
-            f"SSH with --user failed: {result.stderr}"
-        )
-        assert "root" in result.stdout
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert result.stdout.strip() == "root", (result.stdout, result.stderr)
 
-    @pytest.mark.requires_kvm
+    @pytest.mark.needs_kvm
     @pytest.mark.slow
-    def test_ssh_with_key_path(
-        self, runner_vm, module_vm, timing_targets
-    ):
-        """SSH with explicit --key pointing to a private key file.
-
-        Creates a throwaway key inside the test VM, then attempts SSH
-        with --key pointing to the unauthorized key file path.
-        The SSH connection should attempt and fail with Permission denied
-        since the key isn't authorized on the VM.
-        """
-        vm_info = module_vm
-        ssh_timeout = timing_targets["alpine:3.23"]
-        wait_for_ssh(runner_vm, vm_info["name"], "root", ssh_timeout)
-
-        with tempfile.TemporaryDirectory(
-            prefix="mvm-ssh-unauthorized-", dir=Path.home() / ".cache"
-        ) as scratch:
-            test_key = f"{scratch}/key"
-            _guest_run(
-                runner_vm,
-                f"ssh-keygen -t ed25519 -f {shlex.quote(test_key)} -N '' -q",
-                timeout=30,
-            )
-
-            result = _run_mvm(
-                runner_vm,
-                "ssh",
-                vm_info["name"],
-                "--key",
-                test_key,
-                "--cmd",
-                "whoami",
-                check=False,
-            )
-            assert result.returncode != 0, (
-                f"SSH with unauthorized key should fail, got rc={result.returncode} "
-                f"stdout: {result.stdout} stderr: {result.stderr}"
-            )
-            assert "Permission denied" in result.stderr or "timed out" in result.stderr, (
-                f"Expected 'Permission denied' or 'timed out' for unauthorized key, "
-                f"got stderr: {result.stderr}"
-            )
-
-    @pytest.mark.requires_kvm
-    @pytest.mark.slow
-    def test_ssh_with_exported_key_file(
-        self, runner_vm, created_vm, timing_targets
-    ):
-        """SSH with --key pointing to an exported private key file path.
-
-        Uses created_vm fixture (which has an authorized key), exports the
-        key to a temp dir inside the test VM, then SSHes with --key pointing
-        to the exported file path. Verifies SSH succeeds with the exported key.
-        """
-        vm_info = created_vm
-        ssh_timeout = timing_targets["alpine:3.23"]
-
-        # Look up the key used by this VM via its ssh_keys field
-        vm_ssh_keys = vm_info.get("ssh_keys", [])
-        assert vm_ssh_keys, "VM has no ssh_keys — cannot test exported key"
-
-        key_id = vm_ssh_keys[0]
-        key_ls_result = _run_mvm(runner_vm, "key", "ls", "--json", check=False)
-        assert key_ls_result.returncode == 0, "key ls --json failed"
-
-        keys = _json_success_data(key_ls_result.stdout, list)
-        matching_keys = [
-            k for k in keys
-            if k.get("id") == key_id or k.get("name") == key_id
-        ]
-        assert matching_keys, f"Key with id/name {key_id[:16]}... not found in cache"
-        key_name = matching_keys[0]["name"]
-
-        with tempfile.TemporaryDirectory(
-            prefix="mvm-ssh-export-", dir=Path.home() / ".cache"
-        ) as key_export_dir:
-            export_result = _run_mvm(
-                runner_vm, "key", "export", key_name, key_export_dir, check=False
-            )
-            assert export_result.returncode == 0, (
-                f"Key export failed: {export_result.stderr}"
-            )
-
-            private_keys = [
-                path for path in Path(key_export_dir).iterdir()
-                if path.is_file() and path.suffix != ".pub"
-            ]
-            assert len(private_keys) == 1, private_keys
-
-            ssh_available = wait_for_ssh(
-                runner_vm, vm_info["name"], "root", ssh_timeout
-            )
-            assert ssh_available, f"SSH not available within {ssh_timeout}s"
-
-            result = _run_mvm(
-                runner_vm,
-                "ssh",
-                vm_info["name"],
-                "-u", "root",
-                "--key", str(private_keys[0]),
-                "--cmd", "whoami",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"SSH with exported key file failed: rc={result.returncode} "
-                f"stdout={result.stdout} stderr={result.stderr}"
-            )
-            assert "root" in result.stdout, (
-                f"Expected 'root' in output, got: {result.stdout}"
-            )
-
-    @pytest.mark.requires_kvm
-    @pytest.mark.slow
-    def test_ssh_with_named_key(
-        self, runner_vm, module_vm, timing_targets
-    ):
-        """SSH with --key specifying a named key (from key cache).
-
-        Creates a named key and attempts SSH. The connection may fail since
-        the key isn't authorized on the module_vm — that's acceptable. We're
-        verifying the CLI parsed the named key and attempted to use it.
-        """
-        import uuid as _uuid
-
-        vm_info = module_vm
-
-        key_name = f"sys-ssh-key-{_uuid.uuid4().hex[:6]}"
-        try:
-            _run_mvm(
-                runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
-            )
-
-            result = _run_mvm(
-                runner_vm,
-                "ssh",
-                vm_info["name"],
-                "--key",
-                key_name,
-                "--cmd",
-                "exit",
-                check=False,
-            )
-            # The connection may fail if the key isn't authorized on the VM
-            if result.returncode != 0:
-                combined = (result.stdout + result.stderr).lower()
-                assert (
-                    "permission denied" in combined
-                    or "not found" in combined
-                    or "no route to host" in combined
-                    or "connection refused" in combined
-                    or "timed out" in combined
-                ), (
-                    f"Unexpected error with named key: "
-                    f"stdout={result.stdout} stderr={result.stderr}"
-                )
-        finally:
-            _run_mvm(runner_vm, "key", "rm", key_name, "--force", check=False)
-
-    @pytest.mark.requires_kvm
-    @pytest.mark.slow
-    def test_ssh_with_timeout_flag_success(
-        self, runner_vm, module_vm, timing_targets
-    ):
-        """SSH with --timeout on a real VM should succeed."""
-        vm_info = module_vm
-
+    def test_ssh_with_key_path(self, runner_vm, ssh_vm, monkeypatch):
+        """A real valid private key that is not provisioned cannot authenticate a healthy VM."""
+        owner = ssh_vm["keys"]
+        unauthorized = owner.source_pair("unauthorized")
+        public = unauthorized.with_suffix(".pub").read_text().split()[:2]
+        authorized = _run_mvm(
+            runner_vm, "exec", ssh_vm["name"], "--", "cat", "/root/.ssh/authorized_keys",
+        ).stdout.splitlines()
+        assert tuple(public) not in {tuple(line.split()[:2]) for line in authorized if line.strip()}
+        # Prevent an inherited SSH agent from supplying an unrelated authorized identity.
+        monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+        start = _time.monotonic()
         result = _run_mvm(
-            runner_vm,
-            "ssh",
-            vm_info["name"],
-            "--timeout",
-            "30",
-            "--cmd",
-            "echo timeout-test-ok",
-            check=False,
+            runner_vm, "ssh", ssh_vm["name"], "--key", str(unauthorized),
+            "--user", "root", "--timeout", "2", "--cmd", "whoami", check=False,
         )
-        assert result.returncode == 0, (
-            f"SSH with --timeout failed: {result.stderr}"
+        elapsed = _time.monotonic() - start
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        # Auth probes intentionally discard OpenSSH stderr; the public CLI reports their timeout.
+        assert "SSH connection timed out after waiting 2s for VM to become reachable" in result.stderr, result.stderr
+        assert result.stdout.strip() != "root", result.stdout
+        assert elapsed < 10, ("unauthorized authentication exceeded bounded probe", elapsed)
+        _assert_owned_key_ssh(
+            runner_vm, ssh_vm, owner.entry(ssh_vm["ssh_key_name"])["private_key_path"],
+            "authorized-after-rejection",
         )
-        assert "timeout-test-ok" in result.stdout, (
-            f"Expected 'timeout-test-ok' in output, got: {result.stdout}"
+
+    @pytest.mark.needs_kvm
+    @pytest.mark.slow
+    def test_ssh_with_exported_key_file(self, runner_vm, ssh_vm):
+        """Export the VM's owned authorized key and authenticate with its exact file path."""
+        owner = ssh_vm["keys"]
+        name = ssh_vm["ssh_key_name"]
+        exported = owner.export(name)
+        assert exported.read_bytes() == Path(owner.entry(name)["private_key_path"]).read_bytes()
+        result = _run_mvm(
+            runner_vm, "ssh", ssh_vm["name"], "-u", "root",
+            "--key", str(exported), "--cmd", "whoami", check=False,
         )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert result.stdout.strip() == "root", (result.stdout, result.stderr)
+
+    @pytest.mark.needs_kvm
+    @pytest.mark.slow
+    def test_ssh_with_named_key(self, runner_vm, ssh_vm):
+        """Resolve an owned cached key name and require successful guest authentication."""
+        result = _run_mvm(
+            runner_vm, "ssh", ssh_vm["name"], "--key", ssh_vm["ssh_key_name"],
+            "--cmd", "exit", check=False,
+        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        proof = _run_mvm(
+            runner_vm, "ssh", ssh_vm["name"], "--key", ssh_vm["ssh_key_name"],
+            "--cmd", "printf '%s' named-key-ok", check=False,
+        )
+        assert proof.returncode == 0, (proof.stdout, proof.stderr)
+        assert proof.stdout == "named-key-ok", (proof.stdout, proof.stderr)
+
+    @pytest.mark.needs_kvm
+    @pytest.mark.slow
+    def test_ssh_with_timeout_flag_success(self, runner_vm, ssh_vm):
+        """An explicit connect timeout permits a longer successful guest command."""
+        start = _time.monotonic()
+        result = _run_mvm(
+            runner_vm, "ssh", ssh_vm["name"], "--timeout", "2",
+            "--cmd", "sleep 3; echo timeout-test-ok", check=False,
+        )
+        elapsed = _time.monotonic() - start
+        assert result.returncode == 0, (elapsed, result.stdout, result.stderr)
+        assert result.stdout.strip() == "timeout-test-ok", (result.stdout, result.stderr)
+        assert elapsed >= 3, ("guest command did not run past its connect budget", elapsed)
 
 
 @pytest.fixture
