@@ -17,6 +17,26 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Isolated cache selection (2026-09-28):** Commit `e3412121` modernizes eight existing cache init,
+VM/network preview and argument-rejection cases in per-case cache/config/temp paths. All eight passed
+twice in 7.03 and 6.49 seconds inside only the named runner, against candidate `c460278d`.
+Exact file SHA-256 is `da23d310e9d273c657d8db30068e4cdb5c63d9478e68053ab4d6dc60e565abe8`;
+reports `qa-cache-selected-da23-pass{1,2}.json` are in `qa-release-72696719/.tmp` and local ignored evidence.
+Both strict reports have zero other outcomes, complete main config stayed unchanged and four resource
+inventories were empty. These cases check selected-cache file hashes/identities and exact key/network
+teardown; all twenty-three methods remain, with fifteen unchanged cases explicitly unqualified.
+Aggregate previews, actual prune/clean and live-VM failure safety are not part of this eight-case gate.
+Their audit found `CachePruneMisc` invoking global guestfs cleanup during dry-run; production guard
+`578254f2` passed pinned focused API/CLI formatting, vet and Go tests in the runner, but its candidate
+installation and owned out-of-cache sentinel regression are pending. No outer controller was changed.
+
+**Console qualification blocker (2026-09-28):** Public console lookup still derives cache PID/socket
+paths while the authenticated launch publishes the relay endpoint in the caller runtime directory.
+Existing inactive-relay cases do not qualify active state, attach or kill. Merely changing paths is
+insufficient: PID mirrors are not signal authority, and a relay-only kill currently conflicts with
+the recorded VM liveness contract. A typed root-authorized durable relay-stop design awaits approval;
+no console production correction or active-relay qualification is claimed.
+
 **SSH-domain repeatability (2026-09-28):** Commit `66a233cb` modernizes the nine older SSH cases and
 preserves both relocated key journeys unchanged. The complete eleven-case file passed 11/11 twice in
 94.37 and 99.41 seconds inside only `mvmctl-030-test`, against candidate `c460278d` and Go source

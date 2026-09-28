@@ -17,8 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > kernel import (8/8), Jailer (13/13), and rootfs persistence (1/1) Python domains with strict zero-skip reports at
 > their recorded revisions. These domain results do not constitute a complete exact-current-HEAD Python matrix.
 > Host-reboot/exec recovery had one device-open failure and one successful controlled repeat; its cause remains
-> unresolved. Sustained memory saturation and cgroup-pressure QA, clean-host reset/installation, Tier 3,
-> aarch64 runtime, GitHub CI, and final release approval remain open. No candidate has been installed over the
+> unresolved. Later complete SSH (11/11), config (12/12), keys (26/26), volumes (37/37), full journeys (15/15),
+> and internal-service entry points (5/5) passed twice at their recorded exact test revisions. Three bounded
+> memory cases also passed twice, including sustained measured cgroup pressure with and without swap;
+> original incident attribution, guest allocation-failure handling and ancestor/global OOM safety remain unproved.
+> Active console discovery/kill now has a source-proven authority-wiring blocker; its earlier inactive-relay
+> results do not qualify that behavior. Current complete CI after the cache preview guard, the full Python matrix,
+> clean-host reset/installation, Tier 3, aarch64 runtime, GitHub CI, and final release approval remain open.
+> No candidate has been installed over the
 > outer controller.
 >
 > The initial lifecycle/snapshot QA stopped at pause/resume-vsock failure, matching a confirmed upstream 1.16.1
@@ -32,6 +38,10 @@ The detailed entries below retain implementation-stage history; a later entry or
 earlier partial-state statement. They are not a substitute for the final release QA report.
 
 ### Added
+
+- Qualified eight isolated cache init, VM/network preview and validation cases twice with checked owned cleanup
+  and unchanged main configuration. The fifteen other cache cases remain pending; aggregate preview and actual
+  destructive cleanup are not covered by this selected gate.
 
 - Added acknowledged source-VM UDP policy QA: exact port delivery, sibling/adjacent-port/reverse denial, and fresh-flow
   denial after revocation. The installed-candidate case passed with checked cleanup in the named runner; spoofing,
@@ -1079,6 +1089,9 @@ composition is described above; the current incomplete-work inventory is under *
   automount cache roots are intentionally unsupported.
 
 ### Fixed
+
+- `cache prune --dry-run` and `cache clean --dry-run` no longer invoke global libguestfs process/file cleanup.
+  The preview guard passed focused pinned Go checks; installed-candidate sentinel regression remains pending.
 
 - Jail sealing now establishes the root and copied executable's final access modes before changing ownership,
   preserving the already-running isolated Firecracker task's access throughout the transition. Stopped cleanup admits
