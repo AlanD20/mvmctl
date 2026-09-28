@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Release status (2026-09-28):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
-> requires the matching Firecracker/Jailer 1.16.2 pair. An exact clean checkout at `856bf013`, including the
-> later host-reset correction, passed pinned Go 1.26.3 local CI and the separate full root-effect Jailer package
-> in the named `mvmctl-030-test` runner. The installed runner candidate passed complete network/nftables/policy
+> requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean checkout `72c8ef25` passed the complete
+> pinned Go 1.26.3 local CI sequence inside `mvmctl-030-test`. The separate full root-effect Jailer package passed
+> at `19c55345`, whose Go source is unchanged at that checkpoint. The installed runner candidate passed network/nftables/policy
 > (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), copy (15/15),
 > kernel import (8/8), Jailer (13/13), and rootfs persistence (1/1) Python domains with strict zero-skip reports at
 > their recorded revisions. These domain results do not constitute a complete exact-current-HEAD Python matrix.
@@ -21,17 +21,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > aarch64 runtime, GitHub CI, and final release approval remain open. No candidate has been installed over the
 > outer controller.
 >
-> The latest jail-sealing fix at `a1965a4d` passed focused Go checks and the complete root-effect Jailer package,
-> not complete current-source CI. The prepared lifecycle/snapshot QA stopped at its first pause/resume-vsock
-> failure, matching a confirmed upstream 1.16.1 defect. The user approved updating the pinned pair to 1.16.2;
-> its exact formerly failing pause/resume case and all fifteen affected lifecycle/snapshot/version cases now pass
-> in the named runner. This is not complete current-source CI or whole-release qualification.
+> The initial lifecycle/snapshot QA stopped at pause/resume-vsock failure, matching a confirmed upstream 1.16.1
+> defect. After the approved 1.16.2 update, its exact regression and all fifteen affected lifecycle/snapshot/version
+> cases passed. A subsequent ten-case group passed both independent-volume snapshot variants (normal removal and
+> confirmed source crash) plus the complete eight-case snapshot module, including running-source `--pause` and
+> exact naming/inspection. Checked teardown left VM/network/volume/snapshot inventories empty. These focused
+> results are not the full current-source Python release matrix or whole-release qualification.
 
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
 
 ### Added
 
+- Extended the independent raw-volume snapshot journey with confirmed source Firecracker crash recovery. The test
+  authenticates the process and jail, signals through a retained pidfd, checks public crashed status, removes the source,
+  and restores the captured volume bytes independently. Both variants passed against the 1.16.2 candidate in the named
+  runner; this does not prove interruption during capture or competing-writer refusal.
+- Updated the remaining snapshot flag and inspection cases to use small function-owned VMs, schema-1 JSON, and checked
+  teardown. `snapshot create --pause` now starts with a running VM and proves the same process remains paused; naming
+  and inspection assert exact captured identities and resources. The complete eight-case snapshot module passed.
 - Added explicit `vm create --no-network` with a root-owned loopback-only per-VM namespace and no fabricated
   network/endpoint identity. A candidate installed only inside the disposable `mvmctl-030-test` runner passed
   create, stop, start, and host-to-guest vsock exec. A later focused installed-candidate test passed full networkless

@@ -1,6 +1,6 @@
 # Isolated VM Execution and Snapshot Authority
 
-**Status:** Accepted; implementation in progress, not qualified
+**Status:** Accepted; source integrated, release qualification incomplete
 **Date:** 2026-09-19
 **Supersedes:** The operator-as-Firecracker-execution-identity portion of [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -69,5 +69,7 @@ Identity allocation and protected backing details must be implemented explicitly
 changing an ownership field alone completes the boundary. The previous snapshot implementation pause is superseded
 by the user's explicit isolation approval and resumption of implementation.
 
-No tests, builds, review passes, or runtime qualification are authorized in the current implementation-only pass.
-Their later completion remains a release gate.
+The implementation-only phase is historical; the user subsequently authorized Go and installed-candidate Python
+qualification inside the named disposable runner. Focused full-snapshot and independent-volume source-crash journeys
+passed there, as recorded in [the coverage matrix](../../tests/system/COVERAGE_MATRIX.md). Capture interruption,
+competing-writer behavior, broader fault consistency, and complete release qualification remain unproved.
