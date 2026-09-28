@@ -227,7 +227,7 @@ func readPriorBootRecord(ctx context.Context, owner uint32, key VMKey) (_ priorB
 	return record, nil
 }
 
-// decodePriorBootRecord projects the schema-5 fields needed by prior-boot absence.
+// decodePriorBootRecord projects the schema-6 fields needed by prior-boot absence.
 func decodePriorBootRecord(raw []byte, owner uint32, key VMKey) (priorBootRecord, error) {
 	if err := scanPriorBootJSON(json.NewDecoder(bytes.NewReader(raw)), 0); err != nil {
 		return priorBootRecord{}, err
@@ -241,7 +241,7 @@ func decodePriorBootRecord(raw []byte, owner uint32, key VMKey) (priorBootRecord
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return priorBootRecord{}, fmt.Errorf("authorityfs: prior-boot record contains trailing data")
 	}
-	if record.SchemaVersion != 5 || record.OwnerUID != owner || record.VMID != key.value ||
+	if record.SchemaVersion != 6 || record.OwnerUID != owner || record.VMID != key.value ||
 		(record.NetworkPlacement != "managed" && record.NetworkPlacement != "networkless") ||
 		record.Lifecycle != "cleaning" ||
 		record.LaunchGeneration == 0 || record.CleanupGeneration != record.LaunchGeneration ||
@@ -389,7 +389,12 @@ func comparePriorBootVMLock(ctx context.Context, owner uint32, key VMKey, held i
 	if err := unix.Fstat(held, &original); err != nil {
 		return err
 	}
-	if err := unix.Fstatat(dir, key.value+".lock", &current, unix.AT_SYMLINK_NOFOLLOW|unix.AT_NO_AUTOMOUNT); err != nil {
+	if err := unix.Fstatat(
+		dir,
+		key.value+".lock",
+		&current,
+		unix.AT_SYMLINK_NOFOLLOW|unix.AT_NO_AUTOMOUNT,
+	); err != nil {
 		return err
 	}
 	if current.Mode != unix.S_IFREG|0600 || current.Uid != 0 || current.Gid != 0 || current.Nlink != 1 ||
