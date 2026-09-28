@@ -1215,12 +1215,12 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `ssh <vm> --cmd <cmd>` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMCloudInit`, `TestVMVolumeIntegration` | L3 — SSH connectivity verified |
-| `ssh <vm> -u <user> --cmd` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMCloudInit` | L3 |
-| `ssh <vm> --cmd exit` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMSSHIntegration` | L3 |
-| `ssh <vm> --key <name>` | 🟡 Partial | `ssh/test_ssh.py` | `TestSSHConnect` | L3 — SSH with named key, skips if SSH unavailable |
-| `ssh <vm> --key <path>` | ✅ Deep | `ssh/test_ssh.py` | `TestSSHConnect` | L3: SSH succeeds with exported key file path |
-| `ssh <vm> --timeout <sec>` | ⚡ Shallow | `ssh/test_ssh.py` | `TestSSHConnect` | L1 — SSH with --timeout succeeds |
+| `ssh <vm> --cmd <cmd>` | ⚡ Shallow | `ssh/test_ssh.py` | `TestSSHConnect` | Installed-candidate L2: stored-key authentication and exact guest command output; whole domain passed twice. |
+| `ssh <vm> -u <user> --cmd` | ⚡ Shallow | `ssh/test_ssh.py` | `TestSSHConnect` | L2: explicit user and IP selection return exact root identity. |
+| `ssh <vm> --cmd exit` | ⚡ Shallow | `ssh/test_ssh.py` | `TestSSHConnect` | L2: named-key authentication exits successfully, then a separate command proves guest output. |
+| `ssh <vm> --key <name>` | ⚡ Shallow | `ssh/test_ssh.py` | `TestSSHConnect` | L2: authorized named key succeeds; no conditional pass or skip. |
+| `ssh <vm> --key <path>` | ⚡ Shallow | `ssh/test_ssh.py` | `TestSSHConnect` | L2: exact exported private bytes authenticate; an unauthorized key is refused while valid access remains healthy. |
+| `ssh <vm> --timeout <sec>` | ⚡ Shallow | `ssh/test_ssh.py` | `TestSSHConnect` | L2: a three-second guest command succeeds with a two-second connect budget; unknown selectors fail before probing. |
 
 ---
 
@@ -1397,7 +1397,7 @@ Specific legacy conflicts that must be rewritten before release:
 | image | 41 | 0 | 16 | 3 | 3 | 19 |
 | kernel | 29 | 0 | 18 | 7 | 2 | 2 |
 | bin | 17 | 2 | 6 | 1 | 0 | 8 |
-| ssh | 6 | 4 | 1 | 1 | 0 | 0 |
+| ssh | 6 | 0 | 6 | 0 | 0 | 0 |
 | console | 6 | 0 | 6 | 0 | 0 | 0 |
 | logs | 9 | 0 | 9 | 0 | 0 | 0 |
 | host | 15 | 6 | 7 | 1 | 0 | 1 |
@@ -1406,12 +1406,12 @@ Specific legacy conflicts that must be rewritten before release:
 | env | 22 | 9 | 13 | 0 | 0 | 0 |
 | run | 4 | 1 | 3 | 0 | 0 | 0 |
 | full-journeys | 15 | 0 | 15 | 0 | 0 | 0 |
-| **Total** | **430** | **71** | **298** | **22** | **8** | **31** |
+| **Total** | **430** | **67** | **303** | **21** | **8** | **31** |
 
 **Current-row coverage health:**
-- ✅ Deep (L3): 71/430 = 16.5%
-- ⚡ Shallow (L0-L2): 298/430 = 69.3%
-- 🟡 Partial: 22/430 = 5.1%
+- ✅ Deep (L3): 67/430 = 15.6%
+- ⚡ Shallow (L0-L2): 303/430 = 70.5%
+- 🟡 Partial: 21/430 = 4.9%
 - 🔴 Missing: **8/430 = 1.9%** — three user-owned `self-update` success/check paths, two remote image-list
   flag cases, the phantom `image inspect --tree` entry, referenced-force removal,
   and safely owned pull/remove lifecycle
