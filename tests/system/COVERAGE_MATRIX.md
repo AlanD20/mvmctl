@@ -35,6 +35,17 @@ Strict reports under `/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/qa-cons
 epoch and competing-VM writer refusal, not application transaction consistency, interruption during capture,
 untrusted host-writer exclusion, or complete fault/release qualification.
 
+**Source-VM UDP policy checkpoint (2026-09-28):** The new installed-CLI journey passed 1/1 in 27.20 seconds in
+only `mvmctl-030-test`, using three small mirrored Alpine VMs on one managed network. A real UDP responder records
+unique packet nonces and sends exact acknowledgements; local readiness is checked before and after each probe, and
+denial requires both timeout and absent destination delivery. It proves default deny, an exact source-VM/port grant,
+sibling-source denial, adjacent-port denial, reverse denial, and fresh-flow denial after revocation. Strict report
+`qa-traffic-source-vm-udp-7073592b.json` is in the runner's `qa-consistency-7073592b/.tmp` directory; all four resource
+inventories and both traffic-policy lists were empty afterward. A transfer-only function-order correction retained
+the executed source and independently matched all function ASTs before final collection; no test body changed.
+This closes the named same-network UDP/source-VM/reverse journey, not spoofing, IP reuse, cross-network UDP, reboot,
+firewall conflicts, or the complete current-source matrix.
+
 **Snapshot flags and source-crash checkpoint (2026-09-28):** A ten-case group passed 10/10 in 120.56 seconds
 inside only `mvmctl-030-test`: both `test_networkless_snapshot_restores_independent_data_volume` variants and the
 complete eight-case `test_vm_snapshot_load.py` module. The crash variant authenticates the exact source process and
@@ -534,7 +545,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 | Mandatory per-VM network namespace | 🔴 Missing | Distinct namespace inodes/topology, root-record binding, rollback, reconciliation, and zero leaked links/TAPs. |
 | nftables-only engine | 🟡 Partial | Four installed-candidate fixed-table cases passed in the bridge-capable named runner, covering modeled inet/bridge rules, nested-VM rule lifecycle, repeat sync, and NAT/conntrack readback. Full failure/reconciliation and clean-host qualification remain open. |
 | Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests and a disposable real-kernel namespace probe passed; a two-VM reused-IP installed-candidate journey on a bridge-capable runner remains missing. |
-| Typed `traffic` policy | 🟡 Partial | Installed-candidate same-network and cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. Source-VM, UDP, spoof/reverse/IP-reuse, and reboot recovery remain unqualified. |
+| Typed `traffic` policy | 🟡 Partial | Installed-candidate same-/cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. The 2026-09-28 acknowledged same-network source-VM UDP journey also passed exact allow, sibling/adjacent-port/reverse denial and fresh-flow revocation. Spoofing, IP reuse, cross-network UDP and reboot recovery remain unqualified. |
 | Typed VM-to-VM `exec` policy | 🟡 Partial | The installed candidate passed the full seven-case exec domain in `mvmctl-030-test`. Its new directional case exercises same-network, cross-network, and networkless placements; denial before grant, exact non-root-user grant, successful command and destination file effect, reverse denial, and denial after revocation. Peer-identity attacks, capacity/deadline/cancellation, audit redaction, and reboot/restore journeys remain unqualified at L2. |
 | Cgroup/process identity lifecycle | 🟡 Partial | Focused installed-candidate cases prove isolated Firecracker credentials and protected policy-v2 limit/usage inspection. The 2026-09-28 current-candidate 224 MiB guest/150 MiB tmpfs case increased actual `memory.high` events without a leaf OOM kill and retained vsock responsiveness. Historical larger-allocation guest-agent EOF remains unexplained; a bounded pass is not a deterministic pressure gate or ancestor-OOM guarantee. Per-VM uniqueness, root-record/pidfd binding, broader mount/cgroup cleanup, sustained saturation, and host-reboot binding remain unqualified. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |

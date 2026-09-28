@@ -33,6 +33,10 @@ earlier partial-state statement. They are not a substitute for the final release
 
 ### Added
 
+- Added acknowledged source-VM UDP policy QA: exact port delivery, sibling/adjacent-port/reverse denial, and fresh-flow
+  denial after revocation. The installed-candidate case passed with checked cleanup in the named runner; spoofing,
+  IP reuse, cross-network UDP, and reboot qualification remain open.
+
 - Strengthened snapshot QA to restore one captured epoch across RAM, rootfs, and raw-volume bytes after source mutation
   and normal removal or confirmed crash. A separate installed-CLI case proves competing writable VM access refuses
   capture, with successful capture after removing only the peer. These cases passed in the named disposable runner;
