@@ -17,6 +17,30 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current coherent local CI gate (2026-09-28):** An isolated clean source snapshot of `b2c0a1f8` passed offline
+tidy with no tracked changes, whole-tree gofmt/golines, guest-agent generation, full vet, the complete unprivileged
+Go CI selection and its coverage checks under pinned Go 1.26.3. The separate full root Jailer package passed
+(7.743 seconds), followed by all 240 Python orchestrator unit cases (7.41 seconds), inside only `mvmctl-030-test`.
+The unit XML has zero failures, errors or skips. This closes the feasible local source gate at that revision,
+not the complete installed-candidate T1/T2 matrix, remote GitHub CI or release approval.
+
+**Owned host-reboot recovery gate (2026-09-28):** The corrected installed candidate `8a6fb1bf`
+(`0.3.0-rc.priorboot`) passed one fresh, local two-phase Python journey: running projections and guest exec,
+one controlled runner reboot, stopped ls/inspect and empty ps, typed stop, exactly one restart, new host/guest
+boot identities and successful fresh exec. The driver binds exact journal/process/jail/mount/device identities,
+retains a consumed resume claim and checks configuration plus complete inventory restoration after exact owned
+cleanup. Its 14 bounded unit cases passed in 0.25 seconds. Prior-boot console and schema-6 absence regressions
+failed on old production source and passed with the targeted fixes. An earlier failed receipt remains failed;
+no root journals were manually deleted or adopted. This local experiment does not attribute the older intermittent
+KVM-open denial, integrate a generic reboot stage into the orchestrator, or qualify every recovery fault.
+
+**Guest-global exhaustion gate (2026-09-28):** Source `93f2be2c` added one real guest-global RAM-exhaustion case
+to `vm/test_cgroup.py`. It passed once in 10.28 seconds against recorded candidate `886cb7e5`: the guest OOM
+killer terminated the independently identified anonymous allocator, Firecracker retained its identity, and a
+fresh exec and allocation succeeded. Observed runner/ancestor OOM counters, configuration and owned inventories
+were unchanged. This is separate from the three earlier measured-pressure cases and does not attribute the
+original incident or guarantee safety under arbitrary ancestor/global host pressure.
+
 **Complete Jailer repeat gate (2026-09-28):** Source SHA-256
 `c539b5cfb61623f7e819179e9411d2b101a51b7459f79a639836177d70ace839` passed all fifteen expanded cases
 twice (196.32/201.71 seconds) against installed candidate `886cb7e5` inside only `mvmctl-030-test`.
