@@ -17,6 +17,15 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Internal-service entry-point repeatability (2026-09-28):** The five retained `run` cases collected and
+passed 5/5 twice in 0.07 and 0.06 seconds inside only `mvmctl-030-test`, against candidate `c460278d`.
+The runner checkout was clean exact commit `72696719`; production source matched `19c55345`.
+Test-file SHA-256 is `fff27af800dde6a7d94a9ec00caf5e4b4b106a985a6b758d947f6b66cefdd4fe`.
+Both strict reports have zero other outcomes, complete config was unchanged, and VM/network/volume/snapshot
+inventories were empty. Reports `qa-run-72696719-pass{1,2}.json` are under the runner's
+`qa-release-72696719/.tmp` directory and in local ignored evidence. This proves supported help and
+missing-identity rejection for console/NoCloud service entry points, not relay discovery, serving or cleanup.
+
 The command tables below describe tests for the currently implemented CLI, including transitional behavior that v0.3.0
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
@@ -723,7 +732,9 @@ Specific legacy conflicts that must be rewritten before release:
 
 - `network/test_policies.py` now covers same-network and cross-network source-network TCP grants; its former
   dual-backend and same-network rejection assumptions were removed. Additional typed policy variants remain open.
-- `full_journeys/test_full_journeys.py` still expects same-network VM traffic without an allow policy.
+- `full_journeys/test_full_journeys.py` now proves same-network default denial, an exact source-VM TCP
+  grant, echoed delivery and revocation. Its complete fifteen-case domain passed twice; additional policy
+  variants and reboot/fault recovery remain separate gates.
 - `exec/test_exec.py` covers host-to-VM execution through the exact installed CLI and a networkless fixture.
   `exec/test_vm_to_vm_exec.py` covers the positive and directional-denial VM-to-VM paths; adversarial authority,
   cancellation, audit, and reboot/restore behavior remain separate release gates.
