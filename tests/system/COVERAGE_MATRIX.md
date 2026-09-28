@@ -17,6 +17,23 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Complete cache repeat gate (2026-09-28):** Source SHA-256
+`1a095b836d828b3403b45e10b20ada7a59c8b3145f232ec1b9e37837c64eea34` passed all 23 cases
+twice (206.83/188.53 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
+Both strict reports have zero other outcomes, unchanged main configuration and four empty main inventories after
+checked owned cleanup. All 23 case names remain; the seventeen previously modernized bodies are unchanged.
+The six remaining cases now use private selections and receipts: forced misc removal and empty retry, exact
+creation-owned non-default root release pruning, aggregate resource removal with protected history retained,
+two unprotected-cache removal/recovery journeys, and a live VM absent from another cache's SQLite projection.
+The latter independently proves root-authoritative host CLI refusal and the earlier cache process-scan refusal,
+with the same guest boot/process/namespace afterward; it does not claim that the legacy comm scanner is authority.
+Image pruning consumes warm files before the later misc step; absence remains checked even when the misc result
+does not report those earlier removals. Borrowed release manifests/executables, original assets, unrelated
+GuestFS appliance/process receipts and complete baseline firewall policy are preserved. Success cases never
+erase root-protected history. Reports are `qa-cache-auto-1a09-full23-pass{1,2}.{json,xml}`.
+This supersedes earlier local-file gaps, not enabled GuestFS appliance construction/reuse, administrator-level
+protected-history retirement, the full release matrix or approval.
+
 **Complete trusted-binary repeat gate (2026-09-28):** Source SHA-256
 `bf5bf278d6260ae5ff31be4e993d26955016b59db041a9100f63943ab9b88eda` passed all eleven cases
 twice (21.18/27.26 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.

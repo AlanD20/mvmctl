@@ -52,6 +52,10 @@ fail-closed sync and typed removal. The full current-source nftables/policy matr
 
 ### Added
 
+- The complete 23-case cache module passed twice with private cache selections, checked resource cleanup,
+  creation-owned non-default release pruning, unprotected-cache removal/recovery and live-VM refusal checks.
+  Borrowed releases, original assets, unrelated GuestFS state/processes and firewall policy remain preserved.
+  Protected history is retained; administrator-level retirement is not qualified by these cases.
 - Both console lifecycle and live-PTY attachment journeys passed twice on the installed runner candidate,
   proving serial delivery, clean detach/terminal restoration and preserved Firecracker/vsock identity.
 - The complete 11-case logs module passed twice on the installed runner candidate with owned cleanup.
@@ -78,11 +82,12 @@ fail-closed sync and typed removal. The full current-source nftables/policy matr
 
 - Added real aggregate cache-preview regressions with an identity-checked guestfs sentinel outside the selected cache.
   The old candidate deleted that sentinel during dry-run; the corrected runner candidate passed both prune and clean
-  previews twice, with checked cleanup and unchanged configuration. Thirteen other cache cases remain unqualified.
+  previews twice, with checked cleanup and unchanged configuration. The later complete-cache gate above supersedes
+  this partial checkpoint.
 
 - Qualified eight isolated cache init, VM/network preview and validation cases twice with checked owned cleanup
-  and unchanged main configuration. The fifteen other cache cases remain pending; aggregate preview and actual
-  destructive cleanup are not covered by this selected gate.
+  and unchanged main configuration. This selected gate did not cover aggregate preview or destructive cleanup;
+  the later complete-cache gate above supersedes that limitation.
 
 - Added acknowledged source-VM UDP policy QA: exact port delivery, sibling/adjacent-port/reverse denial, and fresh-flow
   denial after revocation. The installed-candidate case passed with checked cleanup in the named runner; spoofing,
