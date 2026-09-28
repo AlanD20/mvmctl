@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from pathlib import Path
-from typing import Any, Generator
+from typing import Generator
 
 import pytest
 
@@ -126,11 +125,11 @@ def _snapshot_boot_id(runner_vm: str, name: str) -> str:
     return boot_id
 
 
-def _capture_full_snapshot(runner_vm: str, owned: dict) -> dict:
+def _capture_full_snapshot(runner_vm: str, owned: dict, *, pause: bool = False) -> dict:
     """Retain the public request ID before asserting successful full publication."""
     result = _run_mvm(
         runner_vm, "snapshot", "create", owned["name"], "--name", owned["snapshot_name"],
-        "--json", check=False, timeout=240,
+        *(("--pause",) if pause else ()), "--json", check=False, timeout=240,
     )
     intents = [line.removeprefix("Snapshot request ID: ") for line in result.stderr.splitlines()
                if line.startswith("Snapshot request ID: ")]
@@ -200,366 +199,74 @@ class TestSnapshotDestroyRestore:
 
 
 class TestSnapshotCreateFlags:
-    """Snapshot create flag tests: --name, --pause."""
+    """Caller naming and --pause are observed on a running full capture."""
 
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.requires_kvm,
-        pytest.mark.slow,
-        pytest.mark.domain_vm,
-    ]
+    def test_snapshot_create_with_name(self, runner_vm: str, snapshot_vm: dict) -> None:
+        """The exact caller-supplied name is published in both listing and inspection."""
+        snapshot_vm["snapshot_name"] = f"caller-snapshot-{uuid.uuid4().hex}"
+        captured = _capture_full_snapshot(runner_vm, snapshot_vm)
+        listed = _json_success_data(
+            _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+        )
+        matches = [item for item in listed if item["id"] == captured["id"]]
+        assert len(matches) == 1, matches
+        assert matches[0]["name"] == snapshot_vm["snapshot_name"]
+        assert matches[0]["source_vm_name"] == snapshot_vm["name"]
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "snapshot", "inspect", captured["id"], "--json").stdout, dict,
+        )
+        assert inspected["snapshot"]["name"] == snapshot_vm["snapshot_name"]
+        assert inspected["snapshot"]["id"] == captured["id"]
 
-    def test_snapshot_create_with_name(
-        self,
-        runner_vm: str,
-        unique_vm_name: str,
-        unique_key_name: str,
-        unique_network_name: str,
-    ) -> None:
-        """Create a snapshot with --name and verify custom name in ls --json."""
-        vm_name = unique_vm_name
-        key_name = unique_key_name
-        network_name = unique_network_name
-        subnet = _unique_subnet(network_name)
-        snap_id: str | None = None
-        snap_name = "my-custom-snap"
-
-        try:
-            _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-            )
-            _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                key_name,
-                "--algorithm",
-                "ed25519",
-            )
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network_name,
-                "--ssh-key",
-                key_name,
-            )
-            _run_mvm(runner_vm, "vm", "pause", vm_name)
-
-            # Snapshot create with --name
-            _run_mvm(
-                runner_vm,
-                "snapshot",
-                "create",
-                vm_name,
-                "--name",
-                snap_name,
-            )
-
-            # Verify snapshot name in ls --json
-            ls_result = _run_mvm(runner_vm, "snapshot", "ls", "--json")
-            snaps: list[dict[str, Any]] = json.loads(ls_result.stdout)
-            vm_snaps = [s for s in snaps if s["source_vm_name"] == vm_name]
-            assert len(vm_snaps) >= 1, "Snapshot not found in listing"
-            assert vm_snaps[-1]["name"] == snap_name, (
-                f"Expected snapshot name '{snap_name}', "
-                f"got '{vm_snaps[-1]['name']}'"
-            )
-            snap_id = vm_snaps[-1]["id"]
-        finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "network",
-                "rm",
-                network_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            if snap_id:
-                _run_mvm(
-                    runner_vm, "snapshot", "rm", snap_id, "--force", check=False
-                )
-
-    def test_snapshot_create_pause_flag(
-        self,
-        runner_vm: str,
-        unique_vm_name: str,
-        unique_key_name: str,
-        unique_network_name: str,
-    ) -> None:
-        """Create a snapshot with --pause and verify VM stays paused."""
-        vm_name = unique_vm_name
-        key_name = unique_key_name
-        network_name = unique_network_name
-        subnet = _unique_subnet(network_name)
-        snap_id: str | None = None
-
-        try:
-            _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-            )
-            _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                key_name,
-                "--algorithm",
-                "ed25519",
-            )
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network_name,
-                "--ssh-key",
-                key_name,
-            )
-            _run_mvm(runner_vm, "vm", "pause", vm_name)
-
-            # Snapshot create with --pause — VM should stay paused
-            _run_mvm(
-                runner_vm,
-                "snapshot",
-                "create",
-                vm_name,
-                "--pause",
-            )
-
-            # Verify VM is still paused
-            result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms: list[dict[str, Any]] = json.loads(result.stdout)
-            vm_entry = next((v for v in vms if v["name"] == vm_name), None)
-            assert vm_entry is not None
-            assert vm_entry["status"] == "paused", (
-                f"Expected VM status 'paused' after snapshot --pause, "
-                f"got '{vm_entry.get('status')}'"
-            )
-
-            # Clean up snapshot for VM removal
-            ls_result = _run_mvm(runner_vm, "snapshot", "ls", "--json")
-            snaps: list[dict[str, Any]] = json.loads(ls_result.stdout)
-            vm_snaps = [s for s in snaps if s["source_vm_name"] == vm_name]
-            if vm_snaps:
-                snap_id = vm_snaps[-1]["id"]
-        finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "network",
-                "rm",
-                network_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            if snap_id:
-                _run_mvm(
-                    runner_vm, "snapshot", "rm", snap_id, "--force", check=False
-                )
+    def test_snapshot_create_pause_flag(self, runner_vm: str, snapshot_vm: dict) -> None:
+        """--pause leaves the originally running source paused without replacing its process."""
+        name = snapshot_vm["name"]
+        identity = _snapshot_process_identity(_snapshot_vm_state(runner_vm, name, "running"))
+        _capture_full_snapshot(runner_vm, snapshot_vm, pause=True)
+        assert _snapshot_process_identity(_snapshot_vm_state(runner_vm, name, "paused")) == identity
+        _run_mvm(runner_vm, "vm", "resume", name)
+        assert _snapshot_process_identity(_snapshot_vm_state(runner_vm, name, "running")) == identity
+        _assert_snapshot_guest_restored(runner_vm, snapshot_vm)
 
 
 class TestSnapshotInspect:
-    """Snapshot inspect tests: default format and --json output."""
+    """Public inspection exposes the captured identity and selected resources."""
 
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.requires_kvm,
-        pytest.mark.slow,
-        pytest.mark.domain_vm,
-    ]
+    def test_snapshot_inspect(self, runner_vm: str, snapshot_vm: dict) -> None:
+        """Text inspection identifies the exact capture, source, and resource values."""
+        captured = _capture_full_snapshot(runner_vm, snapshot_vm)
+        output = _run_mvm(runner_vm, "snapshot", "inspect", captured["id"]).stdout
+        for expected in (
+            f"Snapshot: {snapshot_vm['snapshot_name']}",
+            f"ID: {captured['id']}",
+            f"Source VM ID: {snapshot_vm['source']['id']}",
+            f"Source VM Name: {snapshot_vm['name']}",
+            f"Base Dir: {captured['snapshot_dir']}",
+            "Resources",
+            "Vcpu: 1",
+            "Mem: 256",
+            "Disk: 512",
+        ):
+            assert expected in output, (expected, output)
 
-    def test_snapshot_inspect(
-        self,
-        runner_vm: str,
-        unique_vm_name: str,
-        unique_key_name: str,
-        unique_network_name: str,
-    ) -> None:
-        """Create a snapshot and inspect it — verify basic fields."""
-        vm_name = unique_vm_name
-        key_name = unique_key_name
-        network_name = unique_network_name
-        subnet = _unique_subnet(network_name)
-        snap_id: str | None = None
-
-        try:
-            _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-            )
-            _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                key_name,
-                "--algorithm",
-                "ed25519",
-            )
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network_name,
-                "--ssh-key",
-                key_name,
-            )
-            _run_mvm(runner_vm, "vm", "pause", vm_name)
-
-            _run_mvm(runner_vm, "snapshot", "create", vm_name)
-
-            ls_result = _run_mvm(runner_vm, "snapshot", "ls", "--json")
-            snaps: list[dict[str, Any]] = json.loads(ls_result.stdout)
-            vm_snaps = [s for s in snaps if s["source_vm_name"] == vm_name]
-            assert vm_snaps
-            snap_id = vm_snaps[-1]["id"]
-
-            # Inspect snapshot (default format) — verify it succeeds
-            result = _run_mvm(runner_vm, "snapshot", "inspect", snap_id)
-            assert result.returncode == 0
-            # Should contain the snapshot ID in output
-            assert snap_id[:8] in result.stdout, (
-                f"Expected snapshot ID prefix '{snap_id[:8]}' "
-                f"in inspect output, got: {result.stdout}"
-            )
-        finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "network",
-                "rm",
-                network_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            if snap_id:
-                _run_mvm(
-                    runner_vm, "snapshot", "rm", snap_id, "--force", check=False
-                )
-
-    def test_snapshot_inspect_json(
-        self,
-        runner_vm: str,
-        unique_vm_name: str,
-        unique_key_name: str,
-        unique_network_name: str,
-    ) -> None:
-        """Create a snapshot and inspect it with --json — verify expected fields."""
-        vm_name = unique_vm_name
-        key_name = unique_key_name
-        network_name = unique_network_name
-        subnet = _unique_subnet(network_name)
-        snap_id: str | None = None
-
-        try:
-            _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-            )
-            _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                key_name,
-                "--algorithm",
-                "ed25519",
-            )
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network_name,
-                "--ssh-key",
-                key_name,
-            )
-            _run_mvm(runner_vm, "vm", "pause", vm_name)
-
-            _run_mvm(runner_vm, "snapshot", "create", vm_name)
-
-            ls_result = _run_mvm(runner_vm, "snapshot", "ls", "--json")
-            snaps: list[dict[str, Any]] = json.loads(ls_result.stdout)
-            vm_snaps = [s for s in snaps if s["source_vm_name"] == vm_name]
-            assert vm_snaps
-            snap_id = vm_snaps[-1]["id"]
-
-            # Inspect snapshot with --json
-            result = _run_mvm(
-                runner_vm,
-                "snapshot",
-                "inspect",
-                snap_id,
-                "--json",
-            )
-            assert result.returncode == 0
-            data: dict[str, Any] = json.loads(result.stdout)
-            # Verify expected fields in the inspect output
-            snapshot_data = data.get("snapshot", data)
-            assert "id" in snapshot_data, (
-                f"Expected 'id' in snapshot inspect --json, "
-                f"got keys: {list(snapshot_data.keys())}"
-            )
-            assert snapshot_data["id"].startswith(snap_id[:8]), (
-                f"Expected snapshot id to start with prefix '{snap_id[:8]}', "
-                f"got '{snapshot_data.get('id')}'"
-            )
-            assert "name" in snapshot_data
-            assert "source_vm_name" in snapshot_data
-            assert "created_at" in snapshot_data
-        finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "network",
-                "rm",
-                network_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            if snap_id:
-                _run_mvm(
-                    runner_vm, "snapshot", "rm", snap_id, "--force", check=False
-                )
+    def test_snapshot_inspect_json(self, runner_vm: str, snapshot_vm: dict) -> None:
+        """Schema-1 inspection retains exact nested capture metadata and resource values."""
+        captured = _capture_full_snapshot(runner_vm, snapshot_vm)
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "snapshot", "inspect", captured["id"], "--json").stdout, dict,
+        )
+        assert set(inspected) == {"snapshot", "assets", "resources"}, inspected
+        assert captured["created_at"]
+        assert inspected["snapshot"] == {
+            "id": captured["id"],
+            "name": snapshot_vm["snapshot_name"],
+            "source_vm_id": snapshot_vm["source"]["id"],
+            "source_vm_name": snapshot_vm["name"],
+            "base_dir": captured["snapshot_dir"],
+            "created_at": captured["created_at"],
+        }
+        assert inspected["resources"] == {"vcpu": 1, "mem": 256, "disk": 512}
+        assert isinstance(inspected["assets"], dict), inspected
 
 
 
