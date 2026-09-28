@@ -22,10 +22,23 @@ passed pinned Go 1.26.3 offline tidy, architecture, whole-tree gofmt/golines 0.1
 vet, every CI-selected Go test and complete root Jailer tests (5.214 seconds) inside the freshly
 replaced `mvmctl-030-test`. The Python orchestrator unit suite passed 240/240 in 8.42 seconds.
 Evidence is `full-go-ci-b2566f8a.log` and `python-orchestrator-units-b2566f8a.{log,xml}`.
-The schema-6 candidate built successfully, but its installer refused the reused base image's
-legacy broad sudoers policy before replacing the executable. No old root journals or operator
-database were adopted. Console, network and image runtime gates remain pending; collection
-alone and these local source gates do not qualify the installed candidate or GitHub CI.
+The schema-6 candidate initially refused the reused base image's legacy broad sudoers policy.
+After explicit runner-only administrator cleanup, normal system installation and host initialization
+succeeded; the canonical policy grants only the typed privileged dispatcher. Unused legacy flat
+binary copies were removed, and fresh operator config/database and trusted 1.16.2 assets were
+initialized. No old root VM journals or operator database were adopted. These local source
+gates are not GitHub CI or the complete installed-candidate Python release matrix.
+
+**Console relay lifecycle repeat gate (2026-09-28):** Commit `431b35c1` replaces five permissive
+console cases with one owned lifecycle journey, exact source SHA-256
+`40458e24434ecb67e48408a38f973ed45a75000d66e022fe9ac8c6b1197b2d8d`. It passed twice
+(14.04/13.25 seconds) against installed candidate `833a32a0` inside only `mvmctl-030-test`.
+The journey checks root console/VMInspect agreement, full-ID and real-IP selection, relay-only
+stop with unchanged live Firecracker identity and working vsock exec, repeated-stop refusal,
+inactive attachment refusal, and relay renewal after VM stop/start. Both strict reports have
+zero other outcomes and exact config/four empty inventories after checked cleanup. Reports
+are `qa-console-4045-pass{1,2}.{json,xml}`. Successful interactive TTY attachment, serial-byte
+delivery and its endpoint admission remain separate gates; this journey does not qualify them.
 
 **Root console authority source checkpoint (2026-09-28):** Production commits `0d627628` and
 `b306f996`, with test-only corrections `ba7afecd`/`82156ad3`, implement typed root observation
@@ -37,8 +50,9 @@ complete privileged tests (0.204 seconds), complete root Jailer tests (13.598 se
 root console race tests (1.184 seconds) passed inside `mvmctl-030-test`. The two intermediate
 failures were typed-nil and schema-5 string-target test fixtures; their corrected invariants passed
 separately before the final package gate. Evidence is `ci-console-f2bd/.tmp/console-479f-corrected-root.log`.
-No console candidate has been installed yet. Active endpoint/SO_PEERPIDFD admission, unchanged
-Firecracker/vsock survival, stop retry and clean restart remain runtime gates. Schema 5 is not adopted.
+At this source checkpoint, no console candidate had been installed. The later relay lifecycle
+repeat gate above qualifies survival, stop retry and clean restart; successful interactive
+attachment/SO_PEERPIDFD admission remains open. Schema 5 is not adopted.
 
 **Complete peer-exec repeat gate (2026-09-28):** Commit `4ce01436` replaces name-based cleanup
 in the two original peer-exec journeys with retained full-ID, creation, backing-file and process

@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Release status (2026-09-28):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
-> requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean checkout `9aaee216` passed the complete
-> pinned Go 1.26.3 local CI sequence inside `mvmctl-030-test`, plus the full root-effect Jailer package (22.090s).
-> This checkpoint predates the later NoCloud readiness-pipe correction. The installed runner candidate passed network/nftables/policy
+> requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean checkout `b2566f8a` passed the complete
+> pinned Go 1.26.3 local CI sequence inside the fresh `mvmctl-030-test`, plus the full root-effect Jailer
+> package (5.214s) and all 240 Python orchestrator unit cases. Earlier runner candidates passed network/nftables/policy
 > (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), copy (15/15),
 > kernel import (8/8), Jailer (13/13), and rootfs persistence (1/1) Python domains with strict zero-skip reports at
 > their recorded revisions. These domain results do not constitute a complete exact-current-HEAD Python matrix.
@@ -22,8 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > memory cases also passed twice, including sustained measured cgroup pressure with and without swap;
 > original incident attribution, guest allocation-failure handling and ancestor/global OOM safety remain unproved.
 > Active console discovery/kill now uses root-verified relay authority and durable relay-only stop; affected
-> Go/root/race gates pass, but live endpoint admission and Firecracker/vsock survival remain unqualified.
-> Its earlier inactive-relay results do not qualify that behavior. Current complete CI, the full Python matrix,
+> Go/root/race gates pass. Its owned installed-candidate lifecycle journey passed twice (14.04/13.25s),
+> proving relay-only stop preserves Firecracker/vsock and VM restart renews the relay. Successful interactive
+> endpoint admission and serial-byte delivery remain unqualified; earlier inactive-relay results do not qualify them.
+> The full current-source Python matrix,
 > clean-host reset/installation, Tier 3, aarch64 runtime, GitHub CI, and final release approval remain open.
 > No candidate has been installed over the
 > outer controller.
