@@ -17,6 +17,23 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Owned cache-prune repeat gate (2026-09-28):** Commit `a6a6f384` modernizes six aggregate-preview,
+default-image retention, and actual VM/network/kernel/image-prune cases; all other seventeen methods,
+including the global GuestFS preservation regression, are unchanged. File SHA-256
+`67684f022df8d2b0fc1ecd64e5f7b41d52db0bd44b43a00cc7bfe25e6f013cb4` passed 6/6 twice
+(88.61/87.63 seconds) inside only `mvmctl-030-test`, against candidate `d28985b6`; all 23 cases collected.
+Both strict reports have zero other outcomes. Complete configuration and main/private inventory and
+policy baselines were checked. Fixtures retain exact root namespace, bridge, mount and file receipts;
+preview preserves guest responsiveness and boot identity. Firewall comparison preserves complete
+policy and ordering, excluding only handles/live counters; no foreign-table fixture was present.
+Bridge comparisons retain the raw receipt and exclude only the independently observed `gc_timer`
+countdown. Private imports use distinct content-ID inputs without replacing baseline assets.
+Reports `qa-cache-6768-six-pass{1,2}.{json,xml}` are in `qa-release-72696719/.tmp` and ignored local
+evidence. This is not the whole-cache repeat gate or administrator-level cache-clean qualification.
+Pytest reported old-directory removal warnings: typed VM removal intentionally retains root-controlled
+backing directories/tombstones and unreferenced protected kernel copies. No protected tree or external
+authority was recursively deleted; those inactive fixture artifacts remain until runner disposal.
+
 **Ordinary-exec repeat gate (2026-09-28):** Commit `2dbf63a4` retains all six ordinary-exec
 test bodies while replacing their shared fixture with exact full-ID, creation and process-identity
 ownership and read-only preseeded-asset admission. File SHA-256
