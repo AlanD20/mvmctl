@@ -21,6 +21,21 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Lifecycle/snapshot gate (2026-09-28):** Two prepared, uncommitted owner-scoped QA deltas collected 13 cases in
+only `mvmctl-030-test`. The first pause/resume case failed: the same Firecracker task resumed, but its new vsock
+connection timed out waiting for Firecracker's `CONNECT` acknowledgement. The strict report
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/ci-cb0848ef/.tmp/qa-lifecycle-snapshot-jail-search.json`
+records zero passes, one failure, and twelve unexecuted cases classified as errors by the outcome hook. A separate
+small SSH-enabled diagnostic reproduced the failure with unchanged guest boot ID and agent PID; SSH remained usable.
+Candidate SHA-256 is `f4d43b5cefe85f533677f685a87a8efce2319df277cf41cdcc91e27d09adbde5`, with Go source matching
+`a1965a4d`. The defect matches [upstream #6100](https://github.com/firecracker-microvm/firecracker/pull/6100);
+[Firecracker 1.16.2](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2) fixes it but changes
+snapshot compatibility. Updating the locked pair requires approval and fresh qualification. No lifecycle or snapshot
+pass is claimed for this attempt. The diagnostic VM/network were removed; all four inventories were empty. The
+separate jail-sealing access/partial-cleanup regressions passed after reproducing old-code failures, along with
+focused race checks and the complete root-effect Jailer Go package. Unpublished-capture interruption remains
+unqualified; a transient progress-file observation is not a deterministic mid-copy fault checkpoint.
+
 **Resource/config audit checkpoint (2026-09-28):** `TestVMConfigOptions` replaces 22 stale, duplicate, or shallow
 probes with 15 installed-candidate cases. They observe guest CPU/RAM/root-disk size, custom boot arguments, both PCI
 transports, logging and metrics enable/disable effects, configured/CLI CPU precedence with exact restoration, and
@@ -751,7 +766,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `snapshot create <vm>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless full capture with an attached raw volume and one managed-network DR capture passed. The CLI emits the full request ID before capture, including in JSON mode; one manual CLI-kill/typed-inspect/remove journey passed. Automated interruption QA and `snapshot ls` discovery of unindexed root captures remain open. |
 | `snapshot create --name` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_with_name` | L2 — custom name in ls --json |
 | `snapshot create --pause` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_pause_flag` | L2 — VM status=paused after snapshot |
-| `snapshot create` on stopped VM | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L1 — non-zero, no snapshot files created |
+| `snapshot create` on stopped VM | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | v0.3.0 implements disk-only capture and cold restore; the old rejection claim was incorrect. The replacement regression is prepared but unexecuted after the pause/resume first-failure stop. |
 | `snapshot ls` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore` | L2 — JSON listing |
 | `snapshot ls --json` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore` | L2 — JSON list |
 | `snapshot inspect <id>` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotInspect::test_snapshot_inspect` | L1 — inspect succeeds |

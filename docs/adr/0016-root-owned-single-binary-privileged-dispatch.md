@@ -1551,7 +1551,12 @@ The activation order is fixed:
 9. Open the derived jail root descriptor-relatively. Require the host jail-root leaf and `/proc/<pid>/root` to be the
    same device/inode, and require its fixed `firecracker` leaf to be the same inode as `/proc/<pid>/exe`.
 10. Change the final jail root and copied executable to exact `root:root` mode `0755`, beneath exact `root:root` mode
-   `0700` Jailer base and per-VM ancestors. Hash the sealed copy against the exact release manifest and recheck metadata.
+   `0700` Jailer base and per-VM ancestors. Set each object's final mode before changing its ownership: Firecracker is
+   already running, so an intermediate `root:root 0700` root would deny its isolated task absolute-path traversal.
+   Hash the sealed copy against the exact release manifest and recheck metadata. If sealing stops between mode and
+   ownership changes, stopped cleanup admits an isolated-owned `0755` jail root only for the exact recorded launch
+   UID/GID and only before an active identity is committed. Active roots still require the sealed ownership and inode;
+   private ancestors and foreign ownership are not admitted by this interrupted-seal exception.
 11. Re-observe boot ID, PID/start ticks, credentials, empty groups, cgroup, namespaces, root, executable, relay identity,
     and pidfd liveness. Before membership, descriptor-relatively read back exact policy-v1 `cpu.max`, `cpu.weight`,
     `memory.high`, `memory.max`, `memory.swap.max`, and `pids.max` values. Then prove through the retained cgroup

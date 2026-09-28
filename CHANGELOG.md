@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Release status (2026-09-27):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
+> **Release status (2026-09-28):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
 > requires the matching Firecracker/Jailer 1.16.1 pair. An exact clean checkout at `856bf013`, including the
@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > unresolved. Sustained memory saturation and cgroup-pressure QA, clean-host reset/installation, Tier 3,
 > aarch64 runtime, GitHub CI, and final release approval remain open. No candidate has been installed over the
 > outer controller.
+>
+> The latest jail-sealing fix at `a1965a4d` passed focused Go checks and the complete root-effect Jailer package,
+> not complete current-source CI. The prepared lifecycle/snapshot QA stopped at its first pause/resume-vsock
+> failure, matching a confirmed upstream 1.16.1 defect. Updating the pinned pair requires approval; no passing
+> lifecycle/snapshot gate or 1.16.2 qualification is claimed.
 
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
@@ -1049,6 +1054,12 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Jail sealing now establishes the root and copied executable's final access modes before changing ownership,
+  preserving the already-running isolated Firecracker task's access throughout the transition. Stopped cleanup admits
+  the exact isolated-owned intermediate root only before active identity publication. Behavioral regressions failed
+  against the previous ordering/admission and passed after correction; focused race checks, vet, formatting, and the
+  complete root-effect Jailer package passed in the named runner. This fixes a reachable launch race, not a proved
+  attribution of the earlier intermittent post-reboot KVM denial.
 - Disabled logging no longer forwards the inactive configured log level in the typed launch request. Root admission
   still rejects unexpected logger intent, and the operator's configured default is preserved. The disabled-logging
   installed-candidate regression passed in the named runner. The full resource/configuration group then exposed
@@ -1143,6 +1154,11 @@ composition is described above; the current incomplete-work inventory is under *
 
 The implementation map has source code and bounded runner evidence, but the release is not qualified. Before sign-off:
 
+- Resolve the reproduced Firecracker 1.16.1 pause/resume-vsock blocker. New host-initiated connections wait for
+  `CONNECT` acknowledgement while guest SSH and the agent remain alive.
+  [Upstream 1.16.2](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2) fixes it, but its snapshots
+  are incompatible in both directions with 1.16.0/1.16.1. The project still pins 1.16.1 pending approval and
+  qualification of a new pair; this is not a shipped fix or passing lifecycle gate.
 - Run exact-current-source pinned Go CI and the separate complete root-effect Jailer package after the latest Go fix;
   obtain the separate GitHub CI result.
 - Complete the installed-candidate Python T1/T2 matrix with strict outcomes and leak checks. The two Jailer cases
