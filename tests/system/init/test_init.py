@@ -6,11 +6,17 @@ import json
 import os
 import re
 import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from tests.system.conftest import _guest_run, _json_success_data, _run_mvm
+from tests.system.conftest import (
+    SYSTEM_MVM_BINARY,
+    _guest_run,
+    _json_success_data,
+    _run_mvm,
+)
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_init]
 
@@ -21,8 +27,15 @@ def _init_inventory(runner_vm):
             _run_mvm(runner_vm, domain, "ls", "--json").stdout, list
         )
         for domain in (
-            "vm", "network", "image", "kernel", "bin", "key", "volume",
-            "snapshot", "env",
+            "vm",
+            "network",
+            "image",
+            "kernel",
+            "bin",
+            "key",
+            "volume",
+            "snapshot",
+            "env",
         )
     }
     for policy, expected in (("exec", list), ("traffic", dict)):
@@ -41,8 +54,14 @@ def _retained_rows(domain, rows):
     # updated_at even when all identity, desired and observed fields are equal.
     # Kernel ListAll also refreshes updated_at when reconciling missing files.
     return sorted(
-        ({key: value for key, value in row.items()
-          if domain not in ("network", "kernel") or key != "updated_at"} for row in rows),
+        (
+            {
+                key: value
+                for key, value in row.items()
+                if domain not in ("network", "kernel") or key != "updated_at"
+            }
+            for row in rows
+        ),
         key=lambda row: json.dumps(row, sort_keys=True),
     )
 
@@ -71,20 +90,31 @@ class _OwnedInitCase:
         row = created[0]
         assert re.fullmatch(r"[0-9a-f]{64}", row["id"]), row
         assert {key: row[key] for key in self.expected_network} == self.expected_network
-        receipt = {key: row[key] for key in ("id", "name", "subnet", "nat_enabled", "bridge")}
+        receipt = {
+            key: row[key] for key in ("id", "name", "subnet", "nat_enabled", "bridge")
+        }
         assert self.network_receipt is None or receipt == self.network_receipt
         self.network_receipt = receipt
 
-    def run_init(self, *, skip_network=False):
+    def prepare_default_network_expectation(self, *, skip_network=False):
         if not skip_network and not self.before["network"]:
             configured = self.before["config"]["defaults.network"]
             self.expected_network = {
-                key: value["override"] if value["override"] is not None else value["default"]
+                key: value["override"]
+                if value["override"] is not None
+                else value["default"]
                 for key, value in configured.items()
                 if key in ("name", "subnet", "nat_enabled")
             }
             assert set(self.expected_network) == {"name", "subnet", "nat_enabled"}
-        args = ["init", "--non-interactive", "--skip-host", "--binary-version", "1.16.2"]
+
+    def run_init(self, *, skip_network=False, skip_host=True):
+        self.prepare_default_network_expectation(skip_network=skip_network)
+        args = ["init", "--non-interactive", "--binary-version", "1.16.2"]
+        if skip_host:
+            args.append("--skip-host")
+        else:
+            args.append("--skip-host=false")
         if skip_network:
             args.append("--skip-network")
         try:
@@ -109,7 +139,8 @@ class _OwnedInitCase:
         ), receipt
         if receipt["bridge"]:
             result = _guest_run(
-                self.runner_vm, f"ip link show dev {shlex.quote(receipt['bridge'])}",
+                self.runner_vm,
+                f"ip link show dev {shlex.quote(receipt['bridge'])}",
                 check=False,
             )
             assert result.returncode == 1 and "does not exist" in result.stderr, result
@@ -152,9 +183,13 @@ class _OwnedInitCase:
                         _run_mvm(self.runner_vm, "config", "reset", category, key)
                     else:
                         serialized = (
-                            json.dumps(value) if isinstance(value, (bool, dict)) else str(value)
+                            json.dumps(value)
+                            if isinstance(value, (bool, dict))
+                            else str(value)
                         )
-                        _run_mvm(self.runner_vm, "config", "set", category, key, serialized)
+                        _run_mvm(
+                            self.runner_vm, "config", "set", category, key, serialized
+                        )
                 except Exception as error:
                     failures.append(f"config {category}.{key}: {error}")
         assert not failures, "\n".join(failures)
@@ -162,12 +197,22 @@ class _OwnedInitCase:
 
 @pytest.fixture
 def owned_init_case(runner_vm):
-    """All six selected cases retain the runner's public function baseline."""
+    """Every wizard case retains the runner's public function baseline."""
+    assert os.geteuid() != 0, "init must run as the ordinary enrolled operator"
+    assert "mvm" in _guest_run(runner_vm, "id -Gn").stdout.split(), (
+        "mvm group must be active in this session"
+    )
     before = _init_inventory(runner_vm)
     host = _json_success_data(
         _run_mvm(runner_vm, "host", "status", "--json").stdout, dict
     )
-    for flag in ("kvm_accessible", "ip_forward_ok", "group_exists", "sudoers_exists", "user_in_group"):
+    for flag in (
+        "kvm_accessible",
+        "ip_forward_ok",
+        "group_exists",
+        "sudoers_exists",
+        "user_in_group",
+    ):
         assert host[flag] is True, (flag, host)
     assert not host["missing_binaries"], host
     # This probe exercises bridge-family nftables, not just advertised features.
@@ -183,8 +228,10 @@ def owned_init_case(runner_vm):
     ), before["image"]
     for binary_type in ("firecracker", "jailer"):
         assert any(
-            row["type"] == binary_type and row["version"] == "1.16.2"
-            and row["is_default"] and row["is_present"]
+            row["type"] == binary_type
+            and row["version"] == "1.16.2"
+            and row["is_default"]
+            and row["is_present"]
             for row in before["bin"]
         ), before["bin"]
     assert all(row["is_present"] and row["bridge_active"] for row in before["network"])
@@ -207,6 +254,19 @@ def owned_init_case(runner_vm):
             case.restore_config()
         except Exception as error:
             failures.append(f"config restoration: {error}")
+        try:
+            after_host = _json_success_data(
+                _run_mvm(runner_vm, "host", "status", "--json").stdout, dict
+            )
+            for field in (
+                "group_exists",
+                "sudoers_exists",
+                "ip_forward",
+                "user_in_group",
+            ):
+                assert after_host[field] == host[field], field
+        except Exception as error:
+            failures.append(f"administrator baseline: {error}")
         # One failed inventory cannot suppress the other baseline readbacks.
         for domain, expected in before.items():
             try:
@@ -217,7 +277,9 @@ def owned_init_case(runner_vm):
                     assert actual == expected
                 elif domain.startswith("policy."):
                     actual = _json_success_data(
-                        _run_mvm(runner_vm, "policy", domain.split(".")[1], "ls", "--json").stdout,
+                        _run_mvm(
+                            runner_vm, "policy", domain.split(".")[1], "ls", "--json"
+                        ).stdout,
                         type(expected),
                     )
                     assert actual == expected
@@ -225,7 +287,9 @@ def owned_init_case(runner_vm):
                     actual = _json_success_data(
                         _run_mvm(runner_vm, domain, "ls", "--json").stdout, list
                     )
-                    assert _retained_rows(domain, actual) == _retained_rows(domain, expected)
+                    assert _retained_rows(domain, actual) == _retained_rows(
+                        domain, expected
+                    )
             except Exception as error:
                 failures.append(f"retained {domain} baseline: {error}")
         assert not failures, "\n".join(failures)
@@ -275,50 +339,69 @@ class TestInitWizard:
             f"stderr: {second.stderr}"
         )
         second_output = (second.stdout + second.stderr).strip()
-        assert second_output, (
-            "Second init (idempotent) produced no output"
+        assert second_output, "Second init (idempotent) produced no output"
+
+    def test_init_abort_on_sudo_needed(self, runner_vm, owned_init_case):
+        """Declining explicit administrator setup leaves user and host state intact."""
+        refused = _run_mvm(runner_vm, "host", "init", check=False)
+        assert refused.returncode != 0
+        assert "sudo /usr/local/bin/mvm host init" in refused.stdout + refused.stderr
+
+        owned_init_case.prepare_default_network_expectation()
+        try:
+            result = subprocess.run(
+                [
+                    SYSTEM_MVM_BINARY,
+                    "init",
+                    "--skip-host=false",
+                    "--binary-version",
+                    "1.16.2",
+                ],
+                input="n\n",
+                capture_output=True,
+                text=True,
+                timeout=90,
+                env={**os.environ, "NO_COLOR": "1"},
+            )
+        finally:
+            owned_init_case.capture_network()
+        assert result.returncode != 0, result.stdout + result.stderr
+        output = result.stdout + result.stderr
+        assert "Run 'sudo /usr/local/bin/mvm host init' now?" in output
+        assert (
+            "skipped. Run 'sudo /usr/local/bin/mvm host init' manually when ready."
+            in output
         )
+        assert "setup incomplete" in output
+        assert "Running host init with sudo" not in output
+        assert "all set" not in output
 
-    def test_init_abort_on_sudo_needed(self, runner_vm):
-        """Run init without --skip-host — should succeed as root (no sudo needed).
+    def test_init_without_skip_host(self, runner_vm, owned_init_case):
+        """The runner's explicit administrator bootstrap admits canonical host init.
 
-        Inside the test VM, commands run as root so sudo is not required.
-        This test verifies init handles the privilege path correctly by
-        checking that output mentions the host setup steps.
+        This success case requires the repaired canonical sudo helper and does
+        not qualify a marker-only operator's refusal or failed setup handling.
         """
-        result = _run_mvm(
-            runner_vm,
-            "init",
-            "--non-interactive",
-            check=False,
+        grants = _guest_run(runner_vm, "sudo -n -l", check=False)
+        assert grants.returncode == 0, grants.stdout + grants.stderr
+        assert re.search(r"(?m)^\s*\([^)]*\)\s*NOPASSWD:\s*ALL\s*$", grants.stdout), (
+            "the named runner must have its explicit NOPASSWD administrator bootstrap"
         )
+        refused = _run_mvm(runner_vm, "host", "init", check=False)
+        assert refused.returncode != 0
+        assert "sudo /usr/local/bin/mvm host init" in refused.stdout + refused.stderr
+
+        result = owned_init_case.run_init(skip_host=False)
         assert result.returncode == 0, (
-            f"Expected zero exit (running as root): rc={result.returncode}\n"
+            f"Expected successful administrator bootstrap, got rc={result.returncode}\n"
             f"stdout: {result.stdout}\n"
             f"stderr: {result.stderr}"
         )
         output = result.stdout + result.stderr
-        assert "all set" in output.lower(), (
-            f"Output missing expected success message:\n{output}"
-        )
-
-    def test_init_without_skip_host(self, runner_vm):
-        """Run init without --skip-host non-interactively.
-
-        Inside the test VM, passwordless sudo is always available,
-        so init --non-interactive without --skip-host should succeed.
-        """
-        result = _run_mvm(
-            runner_vm,
-            "init",
-            "--non-interactive",
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Expected zero exit with passwordless sudo, got rc={result.returncode}\n"
-            f"stdout: {result.stdout}\n"
-            f"stderr: {result.stderr}"
-        )
+        assert "sudoers / mvm group" in output
+        assert "host administration completed" in output
+        assert "Skipped (--skip-host)" not in output
+        assert "all set" in output
 
 
 class TestRootFlags:
@@ -328,9 +411,7 @@ class TestRootFlags:
         """``mvm --version`` should print version and exit."""
         result = _run_mvm(runner_vm, "--version", check=False)
         assert result.returncode == 0
-        assert result.stdout.strip(), (
-            "Expected version string in output"
-        )
+        assert result.stdout.strip(), "Expected version string in output"
 
     def test_verbose_flag(self, runner_vm, owned_init_case):
         """``mvm --verbose`` should enable verbose logging output."""
