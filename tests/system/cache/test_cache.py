@@ -28,8 +28,10 @@ import json
 import os
 import select
 import shlex
+import shutil
 import signal
 import stat
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -543,6 +545,830 @@ def unrelated_guestfish_process(selected_cache_case, record_property):
         )
 
 
+def _prune_metadata(info):
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_uid,
+        info.st_gid,
+        info.st_mode,
+        info.st_nlink,
+    )
+
+
+def _prune_backing(path, *, digest=True):
+    """Read an exact regular-file binding without following its final symlink."""
+    assert path.is_absolute() and path.resolve() == path, path
+    info = path.lstat()
+    assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1, path
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as source:
+        assert _prune_metadata(os.fstat(source.fileno())) == _prune_metadata(info), path
+        content = hashlib.file_digest(source, "sha256").hexdigest() if digest else None
+        assert os.fstat(source.fileno()).st_size == info.st_size, path
+    return _prune_metadata(info), info.st_size, content
+
+
+def _prune_row_identity(domain, row):
+    fields = {
+        "image": (
+            "id",
+            "name",
+            "type",
+            "version",
+            "arch",
+            "path",
+            "created_at",
+            "is_imported",
+        ),
+        "kernel": (
+            "id",
+            "name",
+            "base_name",
+            "type",
+            "version",
+            "arch",
+            "path",
+            "created_at",
+        ),
+        "network": (
+            "id",
+            "name",
+            "subnet",
+            "bridge",
+            "ipv4_gateway",
+            "nat_enabled",
+            "created_at",
+        ),
+        "vm": (
+            "id",
+            "name",
+            "created_at",
+            "image_id",
+            "kernel_id",
+            "binary_id",
+            "jailer_binary_id",
+            "rootfs_path",
+            "config_path",
+            "network_placement",
+            "network_id",
+            "tap_device",
+            "vcpu_count",
+            "mem_size_mib",
+            "disk_size_mib",
+        ),
+    }[domain]
+    return {field: row[field] for field in fields}
+
+
+class _OwnedCachePrune:
+    """Class-specific pruning in one private cache; root releases are borrowed."""
+
+    def __init__(self, runner_vm, cache_dir, config_dir, baseline, sources):
+        self.runner_vm = runner_vm
+        self.cache_dir = cache_dir
+        self.config_dir = config_dir
+        self.baseline = baseline
+        self.sources = sources
+        self.kernel_namespace = uuid.uuid4().hex
+        self.roots = {
+            path: _prune_metadata(path.lstat())[:5] for path in (cache_dir, config_dir)
+        }
+        self.attempted = {domain: {} for domain in ("vm", "network", "kernel", "image")}
+        self.receipts = {domain: {} for domain in self.attempted}
+        self.staging = {}
+        self.release = None
+        self.firewall_baseline = None
+        self.initialized = False
+
+    def inventory(self, domain):
+        rows = _json_success_data(
+            _run_mvm(self.runner_vm, domain, "ls", "--json").stdout, list
+        )
+        assert len({row["id"] for row in rows}) == len(rows), rows
+        return {row["id"]: row for row in rows}
+
+    def initialize(self):
+        self.initialized = True
+        data = _json_success_data(
+            _run_mvm(self.runner_vm, "cache", "init", "--json").stdout, dict
+        )
+        assert data["cache_dir"] == str(self.cache_dir), data
+        assert all(not self.inventory(domain) for domain in self.attempted)
+
+    def source(self, domain):
+        assert domain in self.sources, (
+            f"preseeded runner {domain} is required; no pull fallback"
+        )
+        row, path, receipt = self.sources[domain]
+        assert _prune_backing(path) == receipt, path
+        return row, path
+
+    def remember(self, domain, name):
+        rows = [
+            row
+            for row in self.inventory(domain).values()
+            if row["base_name" if domain == "kernel" else "name"] == name
+        ]
+        assert len(rows) <= 1, rows
+        if not rows:
+            return
+        row = rows[0]
+        item_id = row["id"]
+        assert len(item_id) == (32 if domain == "vm" else 64)
+        assert all(char in "0123456789abcdef" for char in item_id), row
+        assert item_id not in {item["id"] for item in self.baseline[domain]}, row
+        expected_id = self.attempted[domain][name]
+        assert expected_id is None or item_id == expected_id, row
+        identity = _prune_row_identity(domain, row)
+        if item_id in self.receipts[domain]:
+            assert identity == self.receipts[domain][item_id]["row"], row
+            return
+        receipt = {"row": identity, "files": {}}
+        self.receipts[domain][item_id] = receipt
+        if domain in ("image", "kernel"):
+            data = _json_success_data(
+                _run_mvm(self.runner_vm, domain, "inspect", item_id, "--json").stdout,
+                dict,
+            )
+            assert data[domain]["id"] == item_id, data
+            path = Path(data["storage"]["path"])
+            assert path.is_absolute() and path.is_relative_to(
+                self.cache_dir / f"{domain}s"
+            ), path
+            paths = [path]
+            if domain == "image":
+                paths = [
+                    entry
+                    for entry in path.parent.iterdir()
+                    if entry.name.startswith(item_id)
+                ]
+                assert path in paths, (path, paths)
+            receipt["files"] = {path: _prune_backing(path) for path in paths}
+        elif domain == "vm":
+            rootfs = Path(row["rootfs_path"])
+            assert rootfs.is_relative_to(self.cache_dir / "vms"), rootfs
+            receipt["files"][rootfs] = _prune_backing(rootfs, digest=False)
+            vm_dir = rootfs.parent
+            receipt["directory"] = (vm_dir, _prune_metadata(vm_dir.lstat()))
+        else:
+            bridge = json.loads(
+                _guest_run(
+                    self.runner_vm,
+                    f"ip -d -j link show dev {shlex.quote(row['bridge'])}",
+                ).stdout
+            )
+            assert len(bridge) == 1 and bridge[0]["ifindex"] > 0, bridge
+            assert bridge[0]["linkinfo"]["info_kind"] == "bridge", bridge
+            receipt["bridge"] = bridge
+            receipt["namespace"] = _prune_metadata(Path("/proc/self/ns/net").stat())
+            authority = (
+                Path("/var/lib/mvmctl/networks") / str(os.getuid()) / f"{item_id}.json"
+            )
+            receipt["authority"] = authority, self.root_file_receipt(authority)
+            recorded = json.loads(
+                _guest_run(
+                    self.runner_vm,
+                    f"sudo -n cat -- {shlex.quote(str(authority))}",
+                ).stdout
+            )
+            assert (
+                recorded["owner_uid"] == os.getuid()
+                and recorded["network_id"] == item_id
+            ), recorded
+            assert recorded["managed_bridge"]["name"] == row["bridge"], recorded
+            assert recorded["managed_bridge"]["ifindex"] == bridge[0]["ifindex"], (
+                recorded
+            )
+            assert (
+                tuple(
+                    recorded["managed_bridge"]["namespace"][key]
+                    for key in ("device", "inode")
+                )
+                == (receipt["namespace"][:2])
+            ), recorded
+        receipt["complete"] = True
+
+    @staticmethod
+    def bridge_comparison(links):
+        assert isinstance(links, list) and len(links) == 1, links
+        projected = json.loads(json.dumps(links))
+        assert projected[0]["linkinfo"]["info_kind"] == "bridge", links
+        # Runner captures proved only this GC countdown changes with elapsed
+        # time; every other identity, configuration and policy field is retained.
+        projected[0]["linkinfo"]["info_data"].pop("gc_timer", None)
+        return projected
+
+    def root_file_receipt(self, path):
+        quoted = shlex.quote(str(path))
+        metadata = _guest_run(
+            self.runner_vm,
+            f"sudo -n stat -c '%d:%i:%u:%g:%f:%h:%s' -- {quoted}",
+        ).stdout.strip()
+        parts = metadata.split(":")
+        assert len(parts) == 7 and parts[2:4] == ["0", "0"], metadata
+        assert stat.S_ISREG(int(parts[4], 16)) and parts[5] == "1", metadata
+        digest = _guest_run(
+            self.runner_vm, f"sudo -n sha256sum -- {quoted}"
+        ).stdout.split()[0]
+        assert len(digest) == 64, digest
+        return metadata, digest
+
+    def import_kernel(self, role, *, default=False):
+        source_row, path = self.source("kernel")
+        version = f"{source_row['version']}-qa-{self.kernel_namespace}-role-{role}"
+        name = f"cache-kernel-{uuid.uuid4().hex}"
+        digest = self.sources["kernel"][2][2]
+        item_id = hashlib.sha256(
+            f"{digest}:{version}:{source_row['arch']}".encode()
+        ).hexdigest()
+        assert item_id not in self.inventory("kernel"), item_id
+        self.attempted["kernel"][name] = item_id
+        flags = ("--default",) if default else ()
+        try:
+            imported = _json_success_data(
+                _run_mvm(
+                    self.runner_vm,
+                    "kernel",
+                    "import",
+                    name,
+                    str(path),
+                    "--version",
+                    version,
+                    *flags,
+                    "--json",
+                ).stdout,
+                dict,
+            )
+            assert imported["id"] == item_id, imported
+        finally:
+            self.remember("kernel", name)
+        assert self.inventory("kernel")[item_id]["is_default"] is default
+        assert (
+            next(iter(self.receipts["kernel"][item_id]["files"].values()))[2] == digest
+        )
+        return self.inventory("kernel")[item_id]
+
+    def import_image(self, *, default=False):
+        _, source = self.source("image")
+        name = f"cache-image-{uuid.uuid4().hex}"
+        raw = self.cache_dir / f"{name}.raw"
+        with raw.open("xb") as target:
+            self.staging[raw] = (_prune_metadata(os.fstat(target.fileno())), None)
+            if source.suffix == ".zst":
+                result = subprocess.run(
+                    ["/usr/bin/zstd", "--decompress", "--stdout", "--", str(source)],
+                    stdout=target,
+                    stderr=subprocess.PIPE,
+                    timeout=120,
+                    check=False,
+                )
+                assert result.returncode == 0, result.stderr
+            else:
+                with source.open("rb") as origin:
+                    shutil.copyfileobj(origin, target)
+        self.staging[raw] = (_prune_metadata(raw.lstat()), _prune_backing(raw))
+        self.source("image")
+        self.attempted["image"][name] = None
+        flags = ("--default",) if default else ()
+        try:
+            imported = _json_success_data(
+                _run_mvm(
+                    self.runner_vm,
+                    "image",
+                    "import",
+                    name,
+                    str(raw),
+                    "--format",
+                    "raw",
+                    "--skip-optimization",
+                    *flags,
+                    "--json",
+                    timeout=120,
+                ).stdout,
+                dict,
+            )
+        finally:
+            self.remember("image", name)
+        assert imported["id"] in self.receipts["image"], imported
+        row = self.inventory("image")[imported["id"]]
+        assert (
+            row["is_default"] is default and row["is_imported"] and row["is_present"]
+        ), row
+        return row
+
+    def create_network(self):
+        assert self.firewall_baseline is None, "one owned network per cache case"
+        self.firewall_baseline = self.firewall_snapshot()
+        foreign = [
+            key
+            for key in self.firewall_baseline[1]
+            if key not in (("bridge", "mvmctl_bridge"), ("inet", "mvmctl_inet"))
+        ]
+        if not foreign:
+            print(
+                "Firewall baseline has no foreign table; existing policy preservation is checked, "
+                "but foreign-table loss is not exercised."
+            )
+        name = f"cache-net-{uuid.uuid4().hex[:16]}"
+        self.attempted["network"][name] = None
+        try:
+            created = _json_success_data(
+                _run_mvm(
+                    self.runner_vm,
+                    "network",
+                    "create",
+                    name,
+                    "--subnet",
+                    _unique_subnet(name),
+                    "--no-nat",
+                    "--json",
+                ).stdout,
+                dict,
+            )
+        finally:
+            self.remember("network", name)
+        assert (
+            created["id"] in self.receipts["network"] and not created["is_default"]
+        ), created
+        return created
+
+    def firewall_snapshot(self):
+        """Preserve all policy expressions and rule order within every table."""
+        data = json.loads(
+            _guest_run(self.runner_vm, "sudo -n nft -j list ruleset").stdout
+        )
+        assert set(data) == {"nftables"} and isinstance(data["nftables"], list), data
+
+        def counters(value):
+            if isinstance(value, list):
+                return [counters(item) for item in value]
+            if not isinstance(value, dict):
+                return value
+            result = {}
+            for key, item in value.items():
+                if key == "counter" and isinstance(item, dict):
+                    # Keep the counter expression, name and configuration; only
+                    # packets/bytes are live observations, not policy inputs.
+                    item = {
+                        field: observed
+                        for field, observed in item.items()
+                        if field not in ("packets", "bytes")
+                    }
+                result[key] = counters(item)
+            return result
+
+        metadata = []
+        tables = {}
+        for entry in data["nftables"]:
+            assert isinstance(entry, dict) and len(entry) == 1, entry
+            kind, value = next(iter(entry.items()))
+            if kind == "metainfo":
+                metadata.append(entry)
+                continue
+            assert isinstance(value, dict) and "family" in value, entry
+            table = value["name"] if kind == "table" else value["table"]
+            # generation application deletes/recreates the managed tables
+            # (kernel_application.go), allocating fresh object handles. Table
+            # listing order is not packet evaluation order; retain each table's
+            # complete ordered contents and canonicalize only table grouping.
+            value = counters(
+                {kind: {key: item for key, item in value.items() if key != "handle"}}
+            )
+            tables.setdefault((entry[kind]["family"], table), []).append(value)
+        return metadata, dict(sorted(tables.items()))
+
+    def assert_firewall_baseline(self):
+        assert self.firewall_baseline is not None
+        assert self.firewall_snapshot() == self.firewall_baseline, (
+            "unrelated firewall policy changed"
+        )
+
+    def release_identity(self, paths):
+        quoted = " ".join(shlex.quote(str(path)) for path in paths)
+        metadata = _guest_run(
+            self.runner_vm,
+            f"sudo -n stat -c '%d:%i:%u:%g:%f:%h:%s' -- {quoted}",
+        ).stdout.splitlines()
+        assert len(metadata) == len(paths), metadata
+        for index, line in enumerate(metadata):
+            parts = line.split(":")
+            assert len(parts) == 7 and parts[2:4] == ["0", "0"], line
+            mode = int(parts[4], 16)
+            assert (stat.S_ISDIR if index == 0 else stat.S_ISREG)(mode), line
+            assert not mode & 0o022, line
+            if index:
+                assert parts[5] == "1" and int(parts[6]) > 0, line
+        digests = _guest_run(
+            self.runner_vm,
+            "sudo -n sha256sum -- "
+            + " ".join(shlex.quote(str(path)) for path in paths[1:]),
+        ).stdout.splitlines()
+        assert len(digests) == 2, digests
+        return metadata, digests
+
+    def reuse_release(self):
+        pairs = [item for item in self.baseline["bin"] if item["version"] == "1.16.2"]
+        assert len(pairs) == 2 and {item["type"] for item in pairs} == {
+            "firecracker",
+            "jailer",
+        }, pairs
+        assert all(item["is_present"] and item["is_default"] for item in pairs), pairs
+        architecture = pairs[0]["architecture"]
+        assert all(item["architecture"] == architecture for item in pairs), pairs
+        slot = Path("/var/lib/mvmctl/binaries") / architecture / "1.16.2"
+        paths = [slot, slot / "firecracker", slot / "jailer"]
+        assert {item["path"] for item in pairs} == {str(path) for path in paths[1:]}, (
+            pairs
+        )
+        mirror = os.environ.get("MVM_ASSET_MIRROR", "")
+        assert mirror, "the preseeded local asset mirror is required"
+        archive = Path(mirror) / f"firecracker-v1.16.2-{architecture}.tgz"
+        archive_receipt = _prune_backing(archive)
+        assert archive_receipt[1] > 0, archive
+        # This root read is a prerequisite; never install an absent release slot.
+        self.release = (paths, self.release_identity(paths))
+        registered = _json_success_data(
+            _run_mvm(
+                self.runner_vm,
+                "bin",
+                "pull",
+                "1.16.2",
+                "--json",
+                timeout=300,
+            ).stdout,
+            list,
+        )
+        assert {item["id"] for item in registered} == {item["id"] for item in pairs}, (
+            registered
+        )
+        assert self.release_identity(paths) == self.release[1]
+        assert _prune_backing(archive) == archive_receipt, archive
+        return next(item for item in registered if item["type"] == "firecracker")
+
+    def create_vm(self):
+        binary = self.reuse_release()
+        kernel = self.import_kernel("6.1", default=True)
+        image = self.import_image(default=True)
+        name = f"cache-vm-{uuid.uuid4().hex}"
+        self.attempted["vm"][name] = None
+        try:
+            created = _json_success_data(
+                _run_mvm(
+                    self.runner_vm,
+                    "vm",
+                    "create",
+                    name,
+                    "--image",
+                    image["id"],
+                    "--kernel",
+                    kernel["id"],
+                    "--no-network",
+                    "--cloud-init-mode",
+                    "off",
+                    "--skip-deblob",
+                    "--no-pci",
+                    "--disk-size",
+                    "512M",
+                    "--mem",
+                    "256M",
+                    "--vcpu",
+                    "1",
+                    "--json",
+                    timeout=180,
+                ).stdout,
+                list,
+            )
+            assert len(created) == 1 and created[0]["name"] == name, created
+        finally:
+            self.remember("vm", name)
+        row = self.inventory("vm")[created[0]["id"]]
+        assert (
+            row["status"] == "running" and row["network_placement"] == "networkless"
+        ), row
+        assert row["binary_id"] == binary["id"], row
+        self.receipts["vm"][row["id"]]["runtime"] = self.vm_runtime(row)
+        self.receipts["vm"][row["id"]]["netns"] = self.vm_namespace(row)
+        return row
+
+    def vm_namespace(self, row):
+        # deriveNamespaceHandle in network/identifiers.go binds this exact
+        # root-owned networkless namespace handle to the owner UID and full VM ID.
+        path = Path("/run/mvmctl/authority") / str(os.getuid()) / "netns" / row["id"]
+        metadata = _guest_run(
+            self.runner_vm,
+            f"sudo -n stat -c '%d:%i:%u:%g:%f' -- {shlex.quote(str(path))}",
+        ).stdout.strip()
+        fields = metadata.split(":")
+        assert len(fields) == 5 and fields[2:4] == ["0", "0"], metadata
+        assert stat.S_ISREG(int(fields[4], 16)), metadata
+        process_identity = _guest_run(
+            self.runner_vm,
+            f"sudo -n stat -Lc '%d:%i' -- /proc/{row['pid']}/ns/net",
+        ).stdout.strip()
+        assert process_identity == ":".join(fields[:2]), (metadata, process_identity)
+        return path, metadata
+
+    def guest_boot_id(self, row):
+        result = _run_mvm(
+            self.runner_vm,
+            "exec",
+            row["id"],
+            "--",
+            "cat",
+            "/proc/sys/kernel/random/boot_id",
+        )
+        boot_id = result.stdout.strip()
+        assert str(uuid.UUID(boot_id)) == boot_id, result.stdout
+        return boot_id
+
+    def preview_marker(self):
+        ready = self.cache_dir / "tmp" / "ready"
+        ready.mkdir(parents=True, exist_ok=True)
+        path = ready / f"preview-{uuid.uuid4().hex}"
+        with path.open("xb") as target:
+            self.staging[path] = (_prune_metadata(os.fstat(target.fileno())), None)
+            target.write(b"owned-warm-preview-must-survive\n")
+        self.staging[path] = (_prune_metadata(path.lstat()), _prune_backing(path))
+
+    def vm_runtime(self, row):
+        inspected = _json_success_data(
+            _run_mvm(
+                self.runner_vm,
+                "vm",
+                "inspect",
+                row["id"],
+                "--json",
+            ).stdout,
+            dict,
+        )
+        assert (
+            inspected["vm"]["id"] == row["id"]
+            and inspected["vm"]["status"] == "running"
+        ), inspected
+        pid = inspected["vm"]["pid"]
+        assert pid > 0, inspected
+        process = _guest_run(self.runner_vm, f"sudo -n cat /proc/{pid}/stat").stdout
+        start_time = int(process.rsplit(")", 1)[1].split()[19])
+        cgroup = inspected["resources"]["cgroup"]
+        assert cgroup["status"] == "enforced" and cgroup["path"].startswith(
+            "/sys/fs/cgroup/"
+        ), cgroup
+        return pid, start_time, cgroup["path"], cgroup["requested"], cgroup["actual"]
+
+    def check_bindings(self, domain, item_id):
+        receipt = self.receipts[domain][item_id]
+        assert receipt.get("complete"), (
+            "incomplete ownership receipt preserved",
+            domain,
+            item_id,
+        )
+        row = self.inventory(domain)[item_id]
+        assert _prune_row_identity(domain, row) == receipt["row"], row
+        for path, expected in receipt["files"].items():
+            assert _prune_backing(path, digest=domain != "vm") == expected, path
+        if domain == "vm":
+            path, expected = receipt["directory"]
+            assert _prune_metadata(path.lstat()) == expected, path
+            if row["status"] == "running" and "netns" in receipt:
+                assert self.vm_namespace(row) == receipt["netns"]
+        if domain == "network":
+            assert (
+                _prune_metadata(Path("/proc/self/ns/net").stat())
+                == receipt["namespace"]
+            )
+            links = json.loads(
+                _guest_run(
+                    self.runner_vm,
+                    f"ip -d -j link show dev {shlex.quote(row['bridge'])}",
+                ).stdout
+            )
+            assert self.bridge_comparison(links) == self.bridge_comparison(
+                receipt["bridge"]
+            ), links
+            path, expected = receipt["authority"]
+            assert self.root_file_receipt(path) == expected, path
+        return row
+
+    def assert_absent(self, domain, item_id):
+        receipt = self.receipts[domain][item_id]
+        assert item_id not in self.inventory(domain), item_id
+        for path in receipt["files"]:
+            with pytest.raises(FileNotFoundError):
+                path.lstat()
+        if domain == "network":
+            result = _guest_run(
+                self.runner_vm,
+                f"ip -j link show dev {shlex.quote(receipt['row']['bridge'])}",
+                check=False,
+            )
+            assert result.returncode != 0 and "does not exist" in result.stderr, result
+            path = receipt["authority"][0]
+            absent = _guest_run(
+                self.runner_vm, f"sudo -n stat -- {shlex.quote(str(path))}", check=False
+            )
+            assert (
+                absent.returncode != 0 and "No such file or directory" in absent.stderr
+            ), absent
+            rules = _guest_run(self.runner_vm, "sudo -n nft -j list ruleset").stdout
+            json.loads(rules)
+            assert receipt["row"]["bridge"] not in rules, rules
+            self.assert_firewall_baseline()
+        if domain == "vm":
+            with pytest.raises(FileNotFoundError):
+                receipt["directory"][0].lstat()
+            if "netns" in receipt:
+                path = receipt["netns"][0]
+                absent = _guest_run(
+                    self.runner_vm,
+                    f"sudo -n stat -- {shlex.quote(str(path))}",
+                    check=False,
+                )
+                assert (
+                    absent.returncode != 0
+                    and "No such file or directory" in absent.stderr
+                ), absent
+            if "runtime" in receipt:
+                pid, started, cgroup, _, _ = receipt["runtime"]
+                observed = _guest_run(
+                    self.runner_vm, f"sudo -n cat /proc/{pid}/stat", check=False
+                )
+                if observed.returncode == 0:
+                    assert (
+                        int(observed.stdout.rsplit(")", 1)[1].split()[19]) != started
+                    ), observed.stdout
+                else:
+                    assert "No such file or directory" in observed.stderr, (
+                        observed.stderr
+                    )
+                for path in (
+                    cgroup,
+                    f"/var/lib/mvmctl/jailer/firecracker/{item_id}/root",
+                ):
+                    absent = _guest_run(
+                        self.runner_vm,
+                        f"sudo -n stat -- {shlex.quote(path)}",
+                        check=False,
+                    )
+                    assert (
+                        absent.returncode != 0
+                        and "No such file or directory" in absent.stderr
+                    ), absent
+
+    def snapshot(self):
+        rows = _cache_inventory(self.runner_vm)
+        rows["snapshot"] = list(self.inventory("snapshot").values())
+        mutable = set()
+        for domain, receipts in self.receipts.items():
+            for item_id, receipt in receipts.items():
+                self.check_bindings(domain, item_id)
+                if domain == "vm":
+                    mutable.update(receipt["files"])
+        bindings = {}
+        for root in (self.cache_dir, self.config_dir):
+            for path in root.rglob("*"):
+                if path.name.startswith("mvmdb.db"):
+                    continue
+                info = path.lstat()
+                assert not stat.S_ISLNK(info.st_mode), path
+                bindings[path] = (
+                    _prune_backing(path, digest=path not in mutable)
+                    if stat.S_ISREG(info.st_mode)
+                    else _prune_metadata(info)
+                )
+        database = self.cache_dir / "mvmdb.db"
+        return rows, bindings, _prune_metadata(database.lstat())
+
+    def cleanup(self):
+        failures = []
+        # Remove exact staging bindings first: image removal also clears the
+        # selected warm pool, so the preview marker must be checked before it.
+        for path, (identity, content) in self.staging.items():
+            try:
+                assert _prune_metadata(path.lstat()) == identity, path
+                if content is not None:
+                    assert _prune_backing(path) == content, path
+                path.unlink()
+                with pytest.raises(FileNotFoundError):
+                    path.lstat()
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"staging cleanup {path}: {error!r}")
+        if self.initialized:
+            for domain in ("vm", "network", "kernel", "image"):
+                for name in self.attempted[domain]:
+                    try:
+                        self.remember(domain, name)
+                    except (Exception, pytest.fail.Exception) as error:
+                        failures.append(f"recover {domain} receipt {name}: {error!r}")
+                for item_id in self.receipts[domain]:
+                    try:
+                        if item_id in self.inventory(domain):
+                            self.check_bindings(domain, item_id)
+                            _run_mvm(
+                                self.runner_vm,
+                                domain,
+                                "rm",
+                                item_id,
+                                "--force",
+                                "--json",
+                                timeout=120,
+                            )
+                        self.assert_absent(domain, item_id)
+                    except (Exception, pytest.fail.Exception) as error:
+                        failures.append(f"remove {domain} {item_id}: {error!r}")
+                try:
+                    assert not self.inventory(domain), domain
+                except (Exception, pytest.fail.Exception) as error:
+                    failures.append(f"selected {domain} absence: {error!r}")
+        for domain, (_, path, expected) in self.sources.items():
+            try:
+                assert _prune_backing(path) == expected, path
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"preseeded {domain} preservation: {error!r}")
+        if self.release is not None:
+            try:
+                assert self.release_identity(self.release[0]) == self.release[1]
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"borrowed root release preservation: {error!r}")
+        if self.firewall_baseline is not None:
+            try:
+                self.assert_firewall_baseline()
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"complete firewall baseline preservation: {error!r}")
+        for path, expected in self.roots.items():
+            try:
+                assert _prune_metadata(path.lstat())[:5] == expected, path
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"private root binding {path}: {error!r}")
+        return failures
+
+
+@pytest.fixture
+def owned_cache_prune(runner_vm, tmp_path, monkeypatch):
+    """Capture runner defaults before selecting any private database or paths."""
+    baseline = _cache_inventory(runner_vm)
+    baseline["snapshot"] = _json_success_data(
+        _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout,
+        list,
+    )
+    sources = {}
+    for domain in ("image", "kernel"):
+        candidates = [
+            row
+            for row in baseline[domain]
+            if row["is_present"]
+            and (
+                row["type"] == "alpine" and row["version"] == "3.23"
+                if domain == "image"
+                else row["is_default"]
+            )
+        ]
+        if len(candidates) == 1:
+            row = candidates[0]
+            inspected = _json_success_data(
+                _run_mvm(
+                    runner_vm,
+                    domain,
+                    "inspect",
+                    row["id"],
+                    "--json",
+                ).stdout,
+                dict,
+            )
+            assert inspected[domain]["id"] == row["id"]
+            path = Path(inspected["storage"]["path"])
+            sources[domain] = row, path, _prune_backing(path)
+    cache_dir = (tmp_path / "prune-cache").resolve()
+    config_dir = (tmp_path / "prune-config").resolve()
+    cache_dir.mkdir(mode=0o700)
+    config_dir.mkdir(mode=0o700)
+    case = _OwnedCachePrune(runner_vm, cache_dir, config_dir, baseline, sources)
+    failures = []
+    with monkeypatch.context() as selection:
+        selection.setenv("MVM_CACHE_DIR", str(cache_dir))
+        selection.setenv("MVM_CONFIG_DIR", str(config_dir))
+        selection.setenv("MVM_TEMP_DIR", str(cache_dir / "tmp"))
+        selection.delenv("MVM_WARM_POOL", raising=False)
+        try:
+            case.initialize()
+            yield case
+        finally:
+            try:
+                failures.extend(case.cleanup())
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"owned cache cleanup: {error!r}")
+    for domain, expected in baseline.items():
+        try:
+            current = _json_success_data(
+                _run_mvm(runner_vm, domain, "ls", "--json").stdout,
+                dict if domain == "config" else list,
+            )
+            assert current == expected, (expected, current)
+        except (Exception, pytest.fail.Exception) as error:
+            failures.append(f"runner main {domain} baseline/defaults: {error!r}")
+    assert not failures, "Owned prune teardown failed:\n" + "\n".join(failures)
+
+
 class TestCacheInit:
     """Test cache initialization operations."""
 
@@ -570,16 +1396,37 @@ class TestCachePruneDryRun:
 
     @pytest.mark.needs_kvm
     @pytest.mark.slow
-    def test_cache_prune_all_dry_run(self, runner_vm, created_vm):
-        """Prune all resources in dry-run mode should not remove the VM."""
-        vm_name = created_vm["name"]
-        result = _run_mvm(runner_vm, "cache", "prune", "--all", "--dry-run")
-        assert result.returncode == 0
-        assert "DRY RUN" in result.stdout
-
-        result = _run_mvm(runner_vm, "vm", "ls", "--json")
-        vms = json.loads(result.stdout)
-        assert any(v["name"] == vm_name for v in vms)
+    @pytest.mark.tier2
+    def test_cache_prune_all_dry_run(self, runner_vm, owned_cache_prune):
+        """Aggregate preview retains one running owned VM and its borrowed pair."""
+        case = owned_cache_prune
+        vm = case.create_vm()
+        boot_id = case.guest_boot_id(vm)
+        case.preview_marker()
+        before = case.snapshot()
+        runtime = case.vm_runtime(vm)
+        data = _json_success_data(
+            _run_mvm(
+                runner_vm,
+                "cache",
+                "prune",
+                "--all",
+                "--dry-run",
+                "--json",
+            ).stdout,
+            dict,
+        )
+        assert data["had_running_vms"] is True and not data["failed_ids"], data
+        assert set(data["pruned_ids"]) == {
+            vm["name"],
+            vm["image_id"],
+            vm["kernel_id"],
+            "warm_images",
+        }, data
+        assert case.snapshot() == before
+        assert case.guest_boot_id(case.inventory("vm")[vm["id"]]) == boot_id
+        assert case.vm_runtime(case.inventory("vm")[vm["id"]]) == runtime
+        assert case.release_identity(case.release[0]) == case.release[1]
 
     def test_cache_prune_dry_run_shows_what_would_be_removed(
         self, runner_vm, selected_cache_case, guestfs_preview_sentinel
@@ -690,28 +1537,31 @@ class TestCachePruneEdgeCases:
         assert envelope["error"]["message"] == "no resource specified"
         assert selected_cache_case.snapshot() == before
 
-    def test_cache_prune_default_image_skipped_or_warns(self, runner_vm):
-        """Pruning images should skip the default image or warn."""
-        ls_result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images: list[dict[str, Any]] = json.loads(ls_result.stdout)
-        default_image = next(
-            (img for img in images if img.get("is_default")), None
+    @pytest.mark.destructive
+    def test_cache_prune_default_image_skipped_or_warns(
+        self, runner_vm, owned_cache_prune
+    ):
+        """Class-specific prune removes the eligible image and preserves exact default bytes."""
+        case = owned_cache_prune
+        protected = case.import_image(default=True)
+        target = case.import_image()
+        before = case.check_bindings("image", protected["id"])
+        removed = _json_success_data(
+            _run_mvm(
+                runner_vm,
+                "cache",
+                "prune",
+                "image",
+                "--force",
+                "--json",
+            ).stdout,
+            list,
         )
-
-        result = _run_mvm(runner_vm, "cache", "prune", "image", "--force")
-        assert result.returncode == 0
-
-        if default_image:
-            ls_after = _run_mvm(runner_vm, "image", "ls", "--json")
-            images_after: list[dict[str, Any]] = json.loads(ls_after.stdout)
-            default_after = next(
-                (img for img in images_after if img.get("is_default")), None
-            )
-            assert default_after is not None
-        else:
-            ls_after = _run_mvm(runner_vm, "image", "ls", "--json")
-            images_after = json.loads(ls_after.stdout)
-            assert result.returncode == 0
+        assert removed == [target["id"]], removed
+        case.assert_absent("image", target["id"])
+        assert case.check_bindings("image", protected["id"]) == before
+        assert set(case.inventory("image")) == {protected["id"]}
+        assert case.inventory("image")[protected["id"]]["is_default"] is True
 
 
 class TestCacheClean:
@@ -892,111 +1742,52 @@ class TestCachePruneNonDryRun:
         pytest.mark.domain_cache,
     ]
 
-    def test_cache_prune_network_non_dry_run(self, runner_vm, created_network):
-        """Prune a network without dry-run; verify JSON and bridge removal.
-
-        Violation fix: replaced sqlite3.connect on host + subprocess.run
-        with _run_mvm JSON checks and sh commands inside the VM.
-        """
-        network_name = created_network
-
-        # Capture bridge name before pruning (inside the VM)
-        net_result = _run_mvm(runner_vm, "network", "ls", "--json")
-        networks = json.loads(net_result.stdout)
-        network = next(n for n in networks if n["name"] == network_name)
-        bridge_name = network["bridge"]
-
-        # Prune network
-        result = _run_mvm(
-            runner_vm, "cache", "prune", "network", "--force"
-        )
-        assert result.returncode == 0
-
-        # JSON check: network no longer listed
-        net_result = _run_mvm(runner_vm, "network", "ls", "--json")
-        networks = json.loads(net_result.stdout)
-        assert not any(n.get("name") == network_name for n in networks)
-
-        # Bridge check: bridge device removed (inside the VM)
-        bridge_result = _guest_run(
-            runner_vm,
-            f"ip link show {bridge_name} 2>&1",
-            check=False,
-        )
-        assert bridge_result.returncode != 0, (
-            f"Bridge {bridge_name} should have been removed"
-        )
-
-    def test_cache_prune_kernel_non_dry_run(self, runner_vm):
-        """Prune a non-default kernel without dry-run; verify JSON and file.
-
-        Violation fix: replaced sqlite3 + os.path.exists on host with
-        _run_mvm JSON checks and sh commands inside the VM.
-        Removed pytest.skip() — precondition is asserted.
-        """
-        # Ensure deps are present (provides default kernel)
-        ensure_vm_deps(runner_vm)
-
-        kernel_result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        kernels: list[dict[str, Any]] = json.loads(kernel_result.stdout)
-        non_default = [
-            k
-            for k in kernels
-            if not k.get("is_default") and k.get("is_present")
-        ]
-
-        if not non_default:
-            # Pull a second kernel to have a non-default entry to prune
-            pull_result = _run_mvm(
+    @pytest.mark.destructive
+    def test_cache_prune_network_non_dry_run(self, runner_vm, owned_cache_prune):
+        """Prune only the privately registered network and its exact bridge."""
+        case = owned_cache_prune
+        network = case.create_network()
+        case.check_bindings("network", network["id"])
+        removed = _json_success_data(
+            _run_mvm(
                 runner_vm,
+                "cache",
+                "prune",
+                "network",
+                "--force",
+                "--json",
+            ).stdout,
+            list,
+        )
+        assert removed == [network["name"]], removed
+        case.assert_absent("network", network["id"])
+
+    @pytest.mark.destructive
+    def test_cache_prune_kernel_non_dry_run(self, runner_vm, owned_cache_prune):
+        """Prune an imported kernel while retaining the exact owned default."""
+        case = owned_cache_prune
+        protected = case.import_kernel("6.1", default=True)
+        target = case.import_kernel("6.2")
+        before = case.check_bindings("kernel", protected["id"])
+        case.check_bindings("kernel", target["id"])
+        removed = _json_success_data(
+            _run_mvm(
+                runner_vm,
+                "cache",
+                "prune",
                 "kernel",
-                "pull",
-                "--type",
-                "firecracker",
-                "--version",
-                "v1.15",
-                timeout=120,
-                check=False,
-            )
-            assert pull_result.returncode == 0, (
-                "Could not pull a second kernel for prune test"
-            )
-            kernel_result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-            kernels = json.loads(kernel_result.stdout)
-            non_default = [
-                k
-                for k in kernels
-                if not k.get("is_default") and k.get("is_present")
-            ]
-            assert non_default, (
-                "No non-default kernel entry available to prune even after pull"
-            )
-
-        target = non_default[0]
-        target_id = target["id"]
-        target_path = target["path"]
-
-        result = _run_mvm(
-            runner_vm, "cache", "prune", "kernel", "--force"
+                "--force",
+                "--json",
+            ).stdout,
+            list,
         )
-        assert result.returncode == 0
-
-        # JSON check: target kernel absent from listing
-        kernel_result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        kernels_after: list[dict[str, Any]] = json.loads(
-            kernel_result.stdout
-        )
-        assert all(k["id"] != target_id for k in kernels_after)
-
-        # File check: kernel file removed from disk (inside the VM)
-        file_result = _guest_run(
-            runner_vm,
-            f"test -f ~/.cache/mvmctl/kernels/{target_path} && echo exists",
-            check=False,
-        )
-        assert "exists" not in file_result.stdout, (
-            f"Kernel file should have been pruned: {target_path}"
-        )
+        assert removed == [target["id"]], removed
+        case.assert_absent("kernel", target["id"])
+        assert _prune_row_identity(
+            "kernel", case.check_bindings("kernel", protected["id"])
+        ) == (_prune_row_identity("kernel", before))
+        assert set(case.inventory("kernel")) == {protected["id"]}
+        assert case.inventory("kernel")[protected["id"]]["is_default"] is True
 
     def test_cache_prune_binary_non_dry_run(self, runner_vm):
         """Prune non-default binaries without dry-run; verify JSON and file.
@@ -1075,35 +1866,32 @@ class TestCachePruneNonDryRun:
                         timeout=120,
                     )
 
-    def test_cache_prune_image_all_non_dry_run(self, runner_vm):
-        """Prune ALL images without dry-run; verify JSON.
-
-        Violation fix: replaced sqlite3 on host with _run_mvm JSON
-        checks inside the VM. Removed pytest.skip() — precondition
-        is asserted.
-        """
-        img_result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images: list[dict[str, Any]] = json.loads(img_result.stdout)
-
-        if not images:
-            # Ensure an image exists
-            ensure_vm_deps(runner_vm)
-            img_result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = json.loads(img_result.stdout)
-
-        assert images, "No images available to prune"
-
-        result = _run_mvm(
-            runner_vm, "cache", "prune", "image", "--all", "--force"
+    @pytest.mark.destructive
+    def test_cache_prune_image_all_non_dry_run(self, runner_vm, owned_cache_prune):
+        """Image-only --all removes both owned backing files, including the default."""
+        case = owned_cache_prune
+        protected = case.import_image(default=True)
+        target = case.import_image()
+        for item in (protected, target):
+            case.check_bindings("image", item["id"])
+        removed = _json_success_data(
+            _run_mvm(
+                runner_vm,
+                "cache",
+                "prune",
+                "image",
+                "--all",
+                "--force",
+                "--json",
+            ).stdout,
+            list,
         )
-        assert result.returncode == 0
-
-        # JSON check: no images remain
-        img_result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images_after: list[dict[str, Any]] = json.loads(img_result.stdout)
-        assert len(images_after) == 0, (
-            f"Expected no images after prune, got {len(images_after)}"
+        assert set(removed) == {protected["id"], target["id"]} and len(removed) == 2, (
+            removed
         )
+        for item in (protected, target):
+            case.assert_absent("image", item["id"])
+        assert not case.inventory("image")
 
 
 # ============================================================================
@@ -1311,61 +2099,35 @@ class TestCacheEdgeCases:
 
     @pytest.mark.requires_kvm
     @pytest.mark.slow
-    def test_cache_prune_vm_no_dry_run(
-        self, runner_vm, unique_vm_name, unique_network_name
-    ):
-        """Stop a VM, prune it (no --dry-run), verify it is gone."""
-        # Rationale: Needs a real VM (unique_vm_name) + network
-        # (unique_network_name) to test actual cache prune of VMs.
-        # Destructive — removes the VM from cache.
-        vm_name = unique_vm_name
-        net_name = unique_network_name
-        try:
-            _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                net_name,
-                "--subnet",
-                _unique_subnet(net_name),
-            )
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-            )
-
-            _run_mvm(runner_vm, "vm", "stop", vm_name)
-
+    def test_cache_prune_vm_no_dry_run(self, runner_vm, owned_cache_prune):
+        """VM-only prune removes a stopped owned VM, preserving its imported assets."""
+        case = owned_cache_prune
+        vm = case.create_vm()
+        _run_mvm(runner_vm, "vm", "stop", vm["id"], "--json", timeout=120)
+        stopped = case.check_bindings("vm", vm["id"])
+        assert stopped["status"] == "stopped", stopped
+        data = _json_success_data(
             _run_mvm(
                 runner_vm,
                 "cache",
                 "prune",
                 "vm",
                 "--force",
-            )
-
-            ls_result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(ls_result.stdout)
-            assert not any(v["name"] == vm_name for v in vms), (
-                f"VM {vm_name} still present after prune"
-            )
-        finally:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "rm",
-                vm_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+                "--json",
+            ).stdout,
+            dict,
+        )
+        assert len(data["items"]) == 1, data
+        result = data["items"][0]["result"]
+        assert result["status"] == "success" and result["code"] == "cache.pruned", (
+            result
+        )
+        assert result["item"] == [vm["name"]], result
+        case.assert_absent("vm", vm["id"])
+        for domain in ("kernel", "image"):
+            row = case.check_bindings(domain, vm[f"{domain}_id"])
+            assert row["is_default"] is True and row["is_present"] is True, row
+        assert case.release_identity(case.release[0]) == case.release[1]
 
 
 class TestCacheCleanActual:
