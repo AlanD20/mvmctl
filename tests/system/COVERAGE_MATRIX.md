@@ -17,6 +17,19 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Complete nftables repeat gate (2026-09-28):** Source SHA-256
+`5e0105dfeb4fc2ac41bee37fa6c8d0fdfda7497609afda7e7685cc7a61c72133` passed all five cases
+twice (33.15/29.30 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
+Both strict reports have zero other outcomes, unchanged configuration and four empty inventories after checked
+cleanup. Function-owned fixtures retain full identities and complete baseline inventories/defaults, including
+saved environments. Read-only kernel rule observations reject tool/permission/transport failures; missing
+chains require independently confirmed absence. Coverage retains real SSH, NAT/masquerade, conntrack,
+idempotent sync and private-namespace IP reuse through fixed gateway-bound NoCloud, with an unrelated control
+neighbor preserved. The reuse journey proves natural recovery; guest boot ARP may refresh the binding, so it
+does not independently prove pre-exposure invalidation ordering. Reports are
+`qa-nft-auto-5e01-full5-pass{1,2}.{json,xml}`. This qualifies the current five-case file, not late-invalid batch
+rollback, unknown outcomes, foreign-generation faults, anti-spoof enforcement or reboot recovery.
+
 **Complete traffic-policy repeat gate (2026-09-28):** Source SHA-256
 `805d0debbb303ac75aac1b3bb241645232528d8976b686877dadcbda72a03c1e` passed all three cases
 twice (77.90/79.05 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
@@ -92,7 +105,8 @@ the disappeared bridge without changing the post-fault inventory; typed nonforce
 admitted missing bridge's logical/firewall state. Replacement identities are refused, not deleted or repaired.
 The original 30 cases and shared helpers remain byte-identical. Reports are
 `qa-network-auto-6bf4-full31-pass1-pass1.{json,xml}` and `qa-network-auto-6bf4-full31-pass2.{json,xml}`.
-This supersedes the earlier basic-file missing-bridge gap; the complete nftables/policy matrix remains separate.
+This supersedes the earlier basic-file missing-bridge gap; separate current nftables/traffic-policy complete-file
+gates are recorded above. Adversarial firewall and reboot-recovery qualification remains open.
 
 **Automatic image format and coherent CI gate (2026-09-28):** Commit `dae5510c` resolves the configured or explicit
 `auto` policy through the existing extension/magic detection before extraction. Three behavioral resolver rows

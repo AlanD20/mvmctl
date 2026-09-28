@@ -48,10 +48,14 @@ removal. Both strict reports have zero non-passing outcomes and checked configur
 
 The complete 31-case basic network module passed twice against the current installed runner candidate, with exact
 owned cleanup and strict zero-other-outcome reports. This includes an owned missing-bridge administrator fault,
-fail-closed sync and typed removal. The full current-source nftables/policy matrix remains a release gate.
+fail-closed sync and typed removal. Current nftables and traffic-policy modules also passed complete-file repeats;
+adversarial firewall and recovery cases remain separate release gates.
 
 ### Added
 
+- The complete five-case nftables module passed twice on the installed runner candidate, retaining NAT,
+  conntrack, idempotent sync, real SSH and private-namespace IP-reuse checks with exact owned cleanup.
+  Kernel observation failures cannot masquerade as absent rules; adversarial firewall faults remain unqualified.
 - The complete three-case traffic-policy module passed twice on the installed runner candidate, proving
   same-/cross-network TCP allow and revoke plus exact-source directional UDP. Denial requires real guest
   probe execution and independent delivery checks, not merely a failed exec command.
