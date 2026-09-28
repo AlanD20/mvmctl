@@ -53,6 +53,10 @@ adversarial firewall and recovery cases remain separate release gates.
 
 ### Added
 
+- The complete fifteen-case Jailer module passed twice on the checked installed candidate, covering isolated
+  credentials/API access, lifecycle and vsock parity, raw volumes, independent memory/rootfs/data-volume restore,
+  competing-writer refusal and missing-release recovery. Exact crash admission supports explicitly bound managed
+  and networkless placements; it never authorizes signaling from cache PID files.
 - The complete eight-case init and ten-case installer files each passed twice against the checked candidate
   inside the named runner. Coverage includes actual administrator-prompt decline, successful explicit bootstrap,
   canonical installation, update refusal and exact-identity read-only/symlink fault cleanup. This does not qualify

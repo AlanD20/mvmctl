@@ -17,6 +17,23 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Complete Jailer repeat gate (2026-09-28):** Source SHA-256
+`c539b5cfb61623f7e819179e9411d2b101a51b7459f79a639836177d70ace839` passed all fifteen expanded cases
+twice (196.32/201.71 seconds) against installed candidate `886cb7e5` inside only `mvmctl-030-test`.
+Both strict reports have zero other outcomes, unchanged full configuration and four empty inventories after
+checked cleanup. All fourteen methods remain, with owned creation/partial-publication receipts and retained
+asset/default baselines. Coverage includes isolated credentials and API denial, real exec/copy/console,
+networkless restart/reboot, default deblob, unqualified-release refusal, raw-volume attachment, competing-writer
+capture refusal and missing-release restore cleanup. Both normal-removal and source-crash snapshot variants
+verify captured RAM/boot identity, rootfs bytes and independent data-volume content after source mutation/removal.
+The reused crash helper at SHA-256 `538cf4cf81790b16db7ab7143d004e8677ac35effc6758c444f381194a986693`
+requires a closed, explicit expected placement; managed remains the default. Root journal, process/executable,
+credentials, generation and pidfd checks remain strict. Its managed crash journey also passed in the five-case
+delta gate (92.61 seconds). That does not rerun or qualify the whole lifecycle file at this newer helper hash.
+Reports are `qa-jailer-session-c539-selected5.{json,xml}` and
+`qa-jailer-session-c539-full15-pass{1,2}.{json,xml}`. Capture interruption/power loss, host-reboot attribution,
+hostile endpoints, larger-memory exhaustion and the complete current-source matrix remain separate gates.
+
 **Complete init and installer repeat gates (2026-09-28):** Init source SHA-256
 `4709839298066c505bd5864bc94905896761c48f620335d152f1e9a66b0b2028` passed all eight cases twice
 (6.95/7.50 seconds); installer source `c4f98f26f7eba57e9b7545303d5dc0ec9607ec0601e3b99b32478856e8056117`
