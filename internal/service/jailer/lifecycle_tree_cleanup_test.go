@@ -25,6 +25,18 @@ func TestStoppedJailDirectoryAdmitsOnlyExactJailerPrivateShape(t *testing.T) {
 		"active root must be sealed": {
 			kind: jailCleanupRoot, mode: 0700, uid: isolated.uid, gid: isolated.gid, active: true,
 		},
+		"inactive root after partial sealing": {
+			kind: jailCleanupRoot, mode: 0755, uid: isolated.uid, gid: isolated.gid, want: true,
+		},
+		"active root cannot retain partial sealing": {
+			kind: jailCleanupRoot, mode: 0755, uid: isolated.uid, gid: isolated.gid, active: true,
+		},
+		"partial sealing cannot admit foreign owner": {
+			kind: jailCleanupRoot, mode: 0755, uid: isolated.uid + 1, gid: isolated.gid,
+		},
+		"partial sealing cannot admit foreign group": {
+			kind: jailCleanupRoot, mode: 0755, uid: isolated.uid, gid: isolated.gid + 1,
+		},
 		"Jailer run": {kind: jailCleanupRun, mode: 0700, uid: isolated.uid, gid: isolated.gid, want: true},
 		"Jailer devices": {
 			kind: jailCleanupDevices, mode: 0700, uid: isolated.uid, gid: isolated.gid, want: true,

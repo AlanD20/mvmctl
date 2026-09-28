@@ -167,6 +167,11 @@ func stoppedJailDirectoryAdmitted(kind jailCleanupDirectory, stat unix.Stat_t, r
 	if stat.Mode == unix.S_IFDIR|mode && rootOwned {
 		return true
 	}
+	// CRITICAL: Sealing may change mode before ownership and fail before committing active.
+	// Admit that intermediate root only for the recorded isolated launch identity.
+	if kind == jailCleanupRoot && record.active == nil && isolatedOwned && stat.Mode == unix.S_IFDIR|0755 {
+		return true
+	}
 	// Jailer 1.16.1 owns these private directories at 0700 before the
 	// controller seals the jail root. The VM root itself may retain that
 	// shape only when no active identity was committed.

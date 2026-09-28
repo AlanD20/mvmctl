@@ -333,17 +333,19 @@ func (lease *jailDestinationLease) seal(ctx context.Context, ownerUID, ownerGID 
 	); err != nil {
 		return err
 	}
-	if err := state.deps.fchown(ctx, root.fd, 0, 0); err != nil {
-		return processAuthorityError(state.vmID, "seal jail root owner", err)
-	}
+	// CRITICAL: Firecracker already runs with isolated credentials. Establish its final
+	// access before changing ownership so neither object passes through root-owned 0700.
 	if err := state.deps.fchmod(ctx, root.fd, 0755); err != nil {
 		return processAuthorityError(state.vmID, "seal jail root mode", err)
 	}
-	if err := state.deps.fchown(ctx, executable.fd, 0, 0); err != nil {
-		return processAuthorityError(state.vmID, "seal copied Firecracker owner", err)
+	if err := state.deps.fchown(ctx, root.fd, 0, 0); err != nil {
+		return processAuthorityError(state.vmID, "seal jail root owner", err)
 	}
 	if err := state.deps.fchmod(ctx, executable.fd, 0755); err != nil {
 		return processAuthorityError(state.vmID, "seal copied Firecracker mode", err)
+	}
+	if err := state.deps.fchown(ctx, executable.fd, 0, 0); err != nil {
+		return processAuthorityError(state.vmID, "seal copied Firecracker owner", err)
 	}
 	if err := lease.reinspectBindingsLocked(ctx); err != nil {
 		return err

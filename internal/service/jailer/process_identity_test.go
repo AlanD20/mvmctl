@@ -229,6 +229,90 @@ func TestCopiedLaunchExecutableReadyAdmitsJailerPrivateCopy(t *testing.T) {
 	assert.True(t, ready, "Jailer-owned 0700 copy must be ready for root sealing")
 }
 
+func TestJailDestinationSealPreservesExecutionAccess(t *testing.T) {
+	t.Parallel()
+
+	// Rationale: The isolated task can open absolute paths while the parent seals its
+	// root and executable. Every intermediate state must preserve those access rights.
+	fake := newPostHandoffJailDestinationFixture()
+	// Keep metadata available through binding, sealing, and final readback. The
+	// existing effect callbacks update every observation of the same object.
+	for fd, stats := range fake.stats {
+		fake.stats[fd] = repeatProcessStat(stats[0], 24)
+	}
+	destination, err := fake.destination.bindAfterHandoff(t.Context(), testAuthorityUID, testAuthorityGID)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, destination.Release(t.Context())) })
+	root := destination.state.bindings[2]
+	executable := destination.state.bindings[3]
+	wantRoot := fake.stats[root.fd][0]
+	wantRoot.Mode, wantRoot.Uid, wantRoot.Gid = unix.S_IFDIR|0755, 0, 0
+	wantExecutable := fake.stats[executable.fd][0]
+	wantExecutable.Mode, wantExecutable.Uid, wantExecutable.Gid = unix.S_IFREG|0755, 0, 0
+
+	// POSIX access selects owner, group, or other bits for this non-root task,
+	// which has no supplementary groups. The fixture contains no ACLs.
+	canAccess := func(stat unix.Stat_t, permissions uint32) bool {
+		bits := stat.Mode
+		if stat.Uid == testAuthorityUID {
+			bits >>= 6
+		} else if stat.Gid == testAuthorityGID {
+			bits >>= 3
+		}
+		return bits&permissions == permissions
+	}
+	checkAccess := func() {
+		rootStat := fake.stats[root.fd][0]
+		executableStat := fake.stats[executable.fd][0]
+		assert.True(t, canAccess(rootStat, unix.X_OK),
+			"isolated task lost root search: uid=%d gid=%d mode=%#o", rootStat.Uid, rootStat.Gid, rootStat.Mode)
+		assert.True(t, canAccess(executableStat, unix.R_OK|unix.X_OK),
+			"isolated task lost executable access: uid=%d gid=%d mode=%#o",
+			executableStat.Uid, executableStat.Gid, executableStat.Mode)
+		for _, ancestor := range destination.state.bindings[:2] {
+			stat := fake.stats[ancestor.fd][0]
+			assert.Equal(t, uint32(unix.S_IFDIR|0700), stat.Mode, "protected ancestor mode")
+			assert.Zero(t, stat.Uid, "protected ancestor UID")
+			assert.Zero(t, stat.Gid, "protected ancestor GID")
+		}
+	}
+	deps := &destination.state.deps
+	fchmod, fchown := deps.fchmod, deps.fchown
+	deps.fchmod = func(ctx context.Context, fd int, mode uint32) error {
+		if err := fchmod(ctx, fd, mode); err != nil {
+			return err
+		}
+		checkAccess()
+		return nil
+	}
+	deps.fchown = func(ctx context.Context, fd, uid, gid int) error {
+		if err := fchown(ctx, fd, uid, gid); err != nil {
+			return err
+		}
+		checkAccess()
+		return nil
+	}
+	checkAccess()
+	assert.NoError(t, destination.seal(t.Context(), testAuthorityUID, testAuthorityGID))
+	assert.True(t, destination.state.sealed)
+	for _, object := range []struct {
+		name string
+		fd   int
+		want unix.Stat_t
+	}{
+		{name: "root", fd: root.fd, want: wantRoot},
+		{name: "executable", fd: executable.fd, want: wantExecutable},
+	} {
+		t.Run(object.name, func(t *testing.T) {
+			var got unix.Stat_t
+			require.NoError(t, deps.fstat(t.Context(), object.fd, &got))
+			if diff := cmp.Diff(object.want, got); diff != "" {
+				t.Errorf("sealed metadata mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestCopiedLaunchExecutableReadyWaitsForPrivateJailRoot(t *testing.T) {
 	fake := newPostHandoffJailDestinationFixture()
 	root := fake.stats[202][0]
