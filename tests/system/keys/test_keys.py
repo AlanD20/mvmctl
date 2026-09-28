@@ -1,22 +1,17 @@
-"""SSH key management system tests — CRUD, advanced options, edge cases, dependencies.
-
-Migrated from tests/e2e/keys/test_keys.py.
-Violations removed:
-- NO pytest.skip() — all preconditions are fixed
-- NO subprocess.run on host — ssh-keygen runs inside the test VM
-- NO os.path.exists on host paths — checks done inside the VM via _guest_run
-- NO tmp_path (host path) — uses /tmp/<unique-name> inside the test VM instead
-"""
+"""VM-free key CRUD and export system tests with checked resource/default ownership."""
 
 from __future__ import annotations
 
 import json
+import shlex
+import stat
 import tempfile
 import uuid
+from pathlib import Path
 
 import pytest
 
-from tests.system.conftest import _guest_run, _run_mvm, ensure_vm_deps
+from tests.system.conftest import _guest_run, _run_mvm
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_keys]
 
@@ -33,708 +28,429 @@ def _success_data(result, expected_type=list):
     return data
 
 
-class TestEmptyKeyListing:
-    def test_key_list_json_uses_array_in_fresh_cache(self, runner_vm, monkeypatch):
-        """A fresh key cache must expose an empty list, not JSON null."""
-        with tempfile.TemporaryDirectory(
-            prefix="mvm-keys-empty-", dir="/home/runner/.cache"
-        ) as cache_dir:
-            monkeypatch.setenv("MVM_CACHE_DIR", cache_dir)
+def _key_inventory(runner_vm):
+    items = _success_data(_run_mvm(runner_vm, "key", "ls", "--json"))
+    assert len({item["id"] for item in items}) == len(items), items
+    return {item["id"]: item for item in items}
+
+
+def _default_ids(items):
+    assert all(type(item["is_default"]) is bool for item in items.values()), items
+    return {key_id for key_id, item in items.items() if item["is_default"]}
+
+
+def _inventory_state(items):
+    # Setting a prior default through the public CLI advances its update timestamp.
+    return {key_id: {key: value for key, value in item.items() if key != "updated_at"}
+            for key_id, item in items.items()}
+
+
+def _file_identity(path):
+    metadata = path.lstat()
+    assert stat.S_ISREG(metadata.st_mode), path
+    return metadata.st_dev, metadata.st_ino
+
+
+class _KeyOwner:
+    """Own exact key records and a flat directory of admitted export/source files."""
+
+    def __init__(self, runner_vm):
+        self.runner_vm = runner_vm
+        self.baseline = _key_inventory(runner_vm)
+        self.defaults = _default_ids(self.baseline)
+        self.names = {}
+        self.backing = {}
+        self.directory = Path(tempfile.mkdtemp(prefix="mvm-keys-", dir=Path.home() / ".cache"))
+        metadata = self.directory.lstat()
+        self.directory_identity = metadata.st_dev, metadata.st_ino
+        self.artifacts = {}
+
+    def reserve(self, name):
+        assert name not in {item["name"] for item in self.baseline.values()}, name
+        assert "/" not in name and name not in ("", ".", ".."), name
+        self.names.setdefault(name, None)
+
+    def entry(self, name):
+        items = [item for item in _key_inventory(self.runner_vm).values() if item["name"] == name]
+        assert len(items) == 1, items
+        return items[0]
+
+    def remember_key(self, name):
+        items = [item for item in _key_inventory(self.runner_vm).values() if item["name"] == name]
+        assert len(items) <= 1, items
+        if items:
+            item = items[0]
+            self.names[name] = item["id"]
+            for raw in (item["public_key_path"], item["private_key_path"]):
+                if raw is not None:
+                    path = Path(raw)
+                    self.backing[path] = _file_identity(path)
+
+    def admit_pair(self, name):
+        for filename in (name, f"{name}.pub"):
+            self.artifacts.setdefault(self.directory / filename, None)
+
+    def remember_artifacts(self):
+        for path in self.artifacts:
+            if path.exists() or path.is_symlink():
+                self.artifacts[path] = _file_identity(path)
+
+    def create(self, name, *options):
+        self.reserve(name)
+        if "--out" in options:
+            assert options[options.index("--out") + 1] == str(self.directory), options
+            self.admit_pair(name)
+        try:
+            return _success_data(_run_mvm(
+                self.runner_vm, "key", "create", name, *options, "--json",
+            ), dict)
+        finally:
+            self.remember_key(name)
+            self.remember_artifacts()
+
+    def source_pair(self, name="source"):
+        self.admit_pair(name)
+        path = self.directory / name
+        try:
+            _guest_run(self.runner_vm, f"ssh-keygen -t ed25519 -f {shlex.quote(str(path))} -N '' -q")
+        finally:
+            self.remember_artifacts()
+        return path
+
+    def import_key(self, name, source, *options):
+        self.reserve(name)
+        try:
+            return _success_data(_run_mvm(
+                self.runner_vm, "key", "import", name, str(source), *options, "--json",
+            ), dict)
+        finally:
+            self.remember_key(name)
+            self.remember_artifacts()
+
+    def export(self, name, *options):
+        self.admit_pair(name)
+        try:
+            paths = _success_data(_run_mvm(
+                self.runner_vm, "key", "export", name, str(self.directory), *options, "--json",
+            ))
+        finally:
+            self.remember_artifacts()
+        assert set(paths) == {str(self.directory / name), str(self.directory / f"{name}.pub")}, paths
+        for raw in paths:
+            assert _file_identity(Path(raw)) == self.artifacts[Path(raw)]
+        return self.directory / name
+
+    def remove(self, name):
+        items = [item for item in _key_inventory(self.runner_vm).values() if item["name"] == name]
+        assert len(items) <= 1, items
+        if items:
+            item = items[0]
+            assert item["id"] == self.names[name], (item, self.names)
+            for raw in (item["public_key_path"], item["private_key_path"]):
+                if raw is not None:
+                    path = Path(raw)
+                    assert _file_identity(path) == self.backing[path], path
+            _run_mvm(self.runner_vm, "key", "rm", item["id"])
+        assert all(item["name"] != name for item in _key_inventory(self.runner_vm).values())
+
+    def cleanup(self):
+        failures = []
+        for name in self.names:
+            try:
+                self.remove(name)
+            except Exception as error:
+                failures.append(("owned key removal", name, repr(error)))
+        remaining = None
+        try:
+            remaining = _key_inventory(self.runner_vm)
+            assert set(remaining) == set(self.baseline), (self.baseline, remaining)
+            def identity_fields(items):
+                return {key_id: {key: value for key, value in item.items()
+                                 if key not in ("is_default", "updated_at")}
+                        for key_id, item in items.items()}
+            assert identity_fields(remaining) == identity_fields(self.baseline), (self.baseline, remaining)
+            defaults_changed = _default_ids(remaining) != self.defaults
+        except Exception as error:
+            failures.append(("baseline membership proof", repr(error)))
+        else:
+            if defaults_changed:
+                try:
+                    _run_mvm(self.runner_vm, "key", "default", "--clear")
+                except Exception as error:
+                    failures.append(("clear changed defaults", repr(error)))
+                if self.defaults:
+                    try:
+                        _run_mvm(self.runner_vm, "key", "default", *sorted(self.defaults))
+                    except Exception as error:
+                        failures.append(("restore prior defaults", repr(error)))
+            try:
+                restored = _key_inventory(self.runner_vm)
+                assert _default_ids(restored) == self.defaults, restored
+                assert _inventory_state(restored) == _inventory_state(self.baseline), (self.baseline, restored)
+            except Exception as error:
+                failures.append(("baseline/default readback", repr(error)))
+        for path in self.backing:
+            if path not in self.artifacts:
+                try:
+                    assert not path.exists() and not path.is_symlink(), path
+                except Exception as error:
+                    failures.append(("cache backing absence", str(path), repr(error)))
+        try:
+            metadata = self.directory.lstat()
+            assert stat.S_ISDIR(metadata.st_mode), self.directory
+            assert (metadata.st_dev, metadata.st_ino) == self.directory_identity, self.directory
+        except Exception as error:
+            failures.append(("scratch directory identity", repr(error)))
+        else:
+            try:
+                unexpected = set(self.directory.iterdir()) - set(self.artifacts)
+                assert not unexpected, unexpected
+            except Exception as error:
+                failures.append(("unexpected scratch artifacts", repr(error)))
+            # Do not bypass failed key removal by deleting backing still referenced by a key.
+            try:
+                assert remaining is not None, "Key inventory unavailable for backing-reference proof"
+                retained = {Path(raw) for item in remaining.values()
+                            for raw in (item["public_key_path"], item["private_key_path"]) if raw is not None}
+            except Exception as error:
+                failures.append(("scratch backing-reference proof", repr(error)))
+                retained = set(self.backing)
+            for path, identity in self.artifacts.items():
+                try:
+                    if path.exists() or path.is_symlink():
+                        metadata = self.directory.lstat()
+                        assert (metadata.st_dev, metadata.st_ino) == self.directory_identity, self.directory
+                        assert path not in retained, f"Still referenced by a retained key: {path}"
+                        assert identity is not None and _file_identity(path) == identity, path
+                        path.unlink()
+                except Exception as error:
+                    failures.append(("owned scratch artifact", str(path), repr(error)))
+            try:
+                metadata = self.directory.lstat()
+                assert (metadata.st_dev, metadata.st_ino) == self.directory_identity, self.directory
+                self.directory.rmdir()
+                assert not self.directory.exists(), self.directory
+            except Exception as error:
+                failures.append(("scratch directory removal", repr(error)))
+        assert not failures, failures
+
+
+@pytest.fixture
+def key_owner(runner_vm):
+    owner = _KeyOwner(runner_vm)
+    try:
+        yield owner
+    finally:
+        owner.cleanup()
+
+
+@pytest.fixture
+def created_key(key_owner, unique_key_name):
+    """Replace the inherited fixture with a function-owned, checked key record."""
+    key_owner.create(unique_key_name, "--algorithm", "ed25519")
+    return unique_key_name
+
+
+@pytest.fixture
+def fresh_key_cache(runner_vm, monkeypatch):
+    baseline = _key_inventory(runner_vm)
+    with tempfile.TemporaryDirectory(prefix="mvm-keys-empty-", dir=Path.home() / ".cache") as cache_dir:
+        with monkeypatch.context() as environment:
+            environment.setenv("MVM_CACHE_DIR", cache_dir)
             _run_mvm(runner_vm, "cache", "init")
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            assert _success_data(result) == []
+            try:
+                yield
+            finally:
+                assert _key_inventory(runner_vm) == {}
+    assert _key_inventory(runner_vm) == baseline
 
 
-# ============================================================================
-# Read-only classes (no resources created within tests)
-# ============================================================================
+class TestEmptyKeyListing:
+    def test_key_list_json_uses_array_in_fresh_cache(self, runner_vm, fresh_key_cache):
+        """A fresh key cache exposes an empty list, not JSON null."""
+        assert _key_inventory(runner_vm) == {}
 
 
 class TestKeyInspectTree:
-    """Test SSH key inspect with default output format."""
-
     def test_key_inspect_tree(self, runner_vm, created_key):
-        """Inspect key with default output format."""
-        # Rationale: Uses created_key fixture. Read-only — tests the
-        # default output format for key inspect.
-        result = _run_mvm(runner_vm, "key", "inspect", created_key)
-        assert result.returncode == 0
-        assert "├─ " in result.stdout or "└─ " in result.stdout
+        output = _run_mvm(runner_vm, "key", "inspect", created_key).stdout
+        assert f"Key: {created_key}" in output, output
+        assert "├─ " in output or "└─ " in output, output
 
 
 class TestKeyExportForce:
-    """Test SSH key export with --force overwrite behavior."""
-
-    def test_key_export_force(self, runner_vm, created_key):
-        """Export key, reject overwrite, accept with --force.
-
-        Uses /tmp/<uuid> inside the test VM instead of host tmp_path.
-        """
-        export_tag = f"key-export-{uuid.uuid4().hex[:6]}"
-        export_dir = f"/tmp/{export_tag}"
-        _guest_run(runner_vm, f"mkdir -p {export_dir}")
-
-        result = _run_mvm(runner_vm, "key", "export", created_key, export_dir)
-        assert result.returncode == 0
-        file_check = _guest_run(
-            runner_vm, f"ls -A {export_dir} 2>/dev/null | head -1", check=False
+    def test_key_export_force(self, runner_vm, created_key, key_owner):
+        """Export real bytes, reject overwrite, and replace admitted files with --force."""
+        private = key_owner.export(created_key)
+        public = private.with_suffix(".pub")
+        original = public.read_bytes()
+        source = Path(key_owner.entry(created_key)["private_key_path"])
+        assert private.read_bytes() == source.read_bytes()
+        rejected = _run_mvm(
+            runner_vm, "key", "export", created_key, str(key_owner.directory), check=False,
         )
-        assert file_check.returncode == 0 and file_check.stdout.strip(), (
-            f"Export directory {export_dir} should contain key files"
-        )
-
-        export_tag2 = f"key-export2-{uuid.uuid4().hex[:6]}"
-        export_dir2 = f"/tmp/{export_tag2}"
-        _guest_run(runner_vm, f"mkdir -p {export_dir2}")
-        _run_mvm(runner_vm, "key", "export", created_key, export_dir2)
-
-        result = _run_mvm(
-            runner_vm, "key", "export", created_key, export_dir2, check=False
-        )
-        assert result.returncode != 0
-
-        result = _run_mvm(
-            runner_vm, "key", "export", created_key, export_dir2, "--force"
-        )
-        assert result.returncode == 0
-        file_check = _guest_run(
-            runner_vm, f"ls -A {export_dir2} 2>/dev/null | head -1", check=False
-        )
-        assert file_check.returncode == 0 and file_check.stdout.strip(), (
-            f"Export directory {export_dir2} should contain key files after --force"
-        )
-
-
-# ============================================================================
-# Mixed class: read-only tests first, then state-modifying, then destructive
-# ============================================================================
+        assert rejected.returncode != 0, (rejected.stdout, rejected.stderr)
+        assert public.read_bytes() == original
+        public.write_text("replace-this-owned-export\n")
+        key_owner.export(created_key, "--force")
+        assert public.read_bytes() == original
 
 
 class TestKeyLifecycle:
-    """Test SSH key CRUD operations — read-only first, destructive last."""
+    def test_key_listing(self, runner_vm, created_key, key_owner):
+        assert key_owner.entry(created_key)["is_present"] is True
 
-    # ------------------------------------------------------------------
-    # Read-only tests (use created_key fixture, no mutation)
-    # ------------------------------------------------------------------
-
-    def test_key_listing(self, runner_vm, created_key):
-        """List keys and verify created key appears (via --json)."""
-        result = _run_mvm(runner_vm, "key", "ls", "--json")
-        assert result.returncode == 0
-        data = _success_data(result)
-        assert any(k["name"] == created_key for k in data)
-
-    def test_duplicate_key_rejection(self, runner_vm, created_key):
-        """Reject duplicate key name."""
+    def test_duplicate_key_rejection(self, runner_vm, created_key, key_owner):
+        before = _key_inventory(runner_vm)
         result = _run_mvm(
-            runner_vm,
-            "key",
-            "create",
-            created_key,
-            "--algorithm",
-            "ed25519",
-            check=False,
+            runner_vm, "key", "create", created_key, "--algorithm", "ed25519", check=False,
         )
-        assert result.returncode != 0
+        assert result.returncode != 0, (result.stdout, result.stderr)
         assert "already exists" in (result.stdout + result.stderr).lower()
+        assert _key_inventory(runner_vm) == before
 
-    def test_key_show(self, runner_vm, created_key):
-        """Inspect key details (verify via --json)."""
-        result = _run_mvm(runner_vm, "key", "inspect", created_key, "--json")
-        assert result.returncode == 0
-        data = _success_data(result, dict)
-        assert data.get("key", {}).get("name") == created_key
+    def test_key_show(self, runner_vm, created_key, key_owner):
+        data = _success_data(_run_mvm(runner_vm, "key", "inspect", created_key, "--json"), dict)
+        item = key_owner.entry(created_key)
+        assert data["key"]["name"] == created_key
+        assert data["key"]["id"] == item["id"]
+        assert data["key"]["fingerprint"] == item["fingerprint"]
 
     def test_key_remove_nonexistent(self, runner_vm):
-        """Removing a non-existent key should fail and not create artifacts."""
-        result = _run_mvm(
-            runner_vm, "key", "rm", "nonexistent-key-name-xyz", check=False
-        )
-        assert result.returncode != 0
+        before = _key_inventory(runner_vm)
+        name = f"missing-key-{uuid.uuid4().hex}"
+        result = _run_mvm(runner_vm, "key", "rm", name, check=False)
+        assert result.returncode != 0, (result.stdout, result.stderr)
         assert "not found" in (result.stdout + result.stderr).lower()
+        assert _key_inventory(runner_vm) == before
 
-        result = _run_mvm(runner_vm, "key", "ls", "--json")
-        data = _success_data(result)
-        assert not any(k["name"] == "nonexistent-key-name-xyz" for k in data)
+    def test_key_inspect_json(self, runner_vm, created_key, key_owner):
+        data = _success_data(_run_mvm(runner_vm, "key", "inspect", created_key, "--json"), dict)
+        item = key_owner.entry(created_key)
+        assert set(data) == {"key", "files", "timestamps"}, data
+        assert data["key"] == {key: item[key] for key in (
+            "id", "name", "fingerprint", "algorithm", "comment", "is_default", "is_present",
+        )}
+        assert data["files"] == {key: item[key] for key in ("private_key_path", "public_key_path")}
 
-    def test_key_inspect_json(self, runner_vm, created_key):
-        """Inspect key with JSON output."""
-        result = _run_mvm(runner_vm, "key", "inspect", created_key, "--json")
-        assert result.returncode == 0
-        data = _success_data(result, dict)
-        assert "name" in data.get("key", {})
+    def test_key_export(self, runner_vm, created_key, key_owner):
+        private = key_owner.export(created_key)
+        item = key_owner.entry(created_key)
+        assert private.read_bytes() == Path(item["private_key_path"]).read_bytes()
+        assert private.with_suffix(".pub").read_bytes() == Path(item["public_key_path"]).read_bytes()
 
-    def test_key_export(self, runner_vm, created_key):
-        """Export a key to a file and verify files exist on disk (inside VM)."""
-        export_tag = f"key-export-{uuid.uuid4().hex[:6]}"
-        export_dir = f"/tmp/{export_tag}"
-        _guest_run(runner_vm, f"mkdir -p {export_dir}")
-        result = _run_mvm(runner_vm, "key", "export", created_key, export_dir)
-        assert result.returncode == 0
-        file_check = _guest_run(
-            runner_vm, f"ls -A {export_dir} 2>/dev/null | head -1", check=False
-        )
-        assert file_check.returncode == 0 and file_check.stdout.strip(), (
-            f"Export directory {export_dir} should contain key files"
-        )
+    def test_key_list_json(self, runner_vm, created_key, key_owner):
+        listed = _success_data(_run_mvm(runner_vm, "key", "ls", "--json"))
+        assert [item for item in listed if item["name"] == created_key] == [key_owner.entry(created_key)]
 
-    def test_key_list_json(self, runner_vm, created_key):
-        """List keys in JSON format."""
-        result = _run_mvm(runner_vm, "key", "ls", "--json")
-        assert result.returncode == 0
-        data = _success_data(result)
-        assert isinstance(data, list)
-        assert any(k["name"] == created_key for k in data)
-
-    # ------------------------------------------------------------------
-    # Serial state-modifying tests (modify shared default state)
-    # ------------------------------------------------------------------
-
-    def test_key_set_default(self, runner_vm, created_key):
-        """Set key as default and verify is_default in ls --json."""
-        result = _run_mvm(runner_vm, "key", "default", created_key)
-        assert result.returncode == 0
-
-        result = _run_mvm(runner_vm, "key", "ls", "--json")
-        data = _success_data(result)
-        key_entry = next((k for k in data if k["name"] == created_key), None)
-        assert key_entry is not None
-        assert key_entry.get("is_default")
-
-    def test_key_set_default_clear(self, runner_vm, created_key):
-        """Set key as default then clear the default."""
+    def test_key_set_default(self, runner_vm, created_key, key_owner):
         _run_mvm(runner_vm, "key", "default", created_key)
+        assert _default_ids(_key_inventory(runner_vm)) == key_owner.defaults | {key_owner.names[created_key]}
+
+    def test_key_set_default_clear(self, runner_vm, created_key, key_owner):
+        _run_mvm(runner_vm, "key", "default", created_key)
+        assert key_owner.entry(created_key)["is_default"] is True
         _run_mvm(runner_vm, "key", "default", "--clear")
+        assert _default_ids(_key_inventory(runner_vm)) == set()
 
-        result = _run_mvm(runner_vm, "key", "ls", "--json")
-        data = _success_data(result)
-        key_entry = next((k for k in data if k["name"] == created_key), None)
-        assert key_entry is not None
-        assert not key_entry.get("is_default")
+    def test_key_create_ed25519(self, runner_vm, unique_key_name, key_owner):
+        key_owner.create(unique_key_name, "--algorithm", "ed25519")
+        assert key_owner.entry(unique_key_name)["algorithm"] == "ssh-ed25519"
 
-    # ------------------------------------------------------------------
-    # Destructive tests (create resources that are cleaned up)
-    # ------------------------------------------------------------------
+    def test_key_create_rsa(self, runner_vm, unique_key_name, key_owner):
+        key_owner.create(unique_key_name, "--algorithm", "rsa")
+        assert key_owner.entry(unique_key_name)["algorithm"] == "ssh-rsa"
 
-    def test_key_create_ed25519(self, runner_vm, unique_key_name):
-        """Create ed25519 SSH key and verify via ls --json."""
+    def test_key_create_ecdsa(self, runner_vm, unique_key_name, key_owner):
+        key_owner.create(unique_key_name, "--algorithm", "ecdsa")
+        assert key_owner.entry(unique_key_name)["algorithm"].startswith("ecdsa-sha2-")
+
+    def test_key_add_existing(self, runner_vm, unique_key_name, key_owner):
+        source = key_owner.source_pair()
+        imported = key_owner.import_key(unique_key_name, source.with_suffix(".pub"))
+        assert key_owner.entry(unique_key_name)["id"] == imported["id"]
+        assert Path(imported["public_key_path"]).read_bytes() == source.with_suffix(".pub").read_bytes()
+
+    def test_key_import_shows_fingerprint(self, runner_vm, unique_key_name, key_owner):
+        source = key_owner.source_pair()
+        key_owner.import_key(unique_key_name, source.with_suffix(".pub"))
+        item = key_owner.entry(unique_key_name)
+        fingerprint = _guest_run(runner_vm, f"ssh-keygen -lf {shlex.quote(str(source))}").stdout.split()[1]
+        assert item["fingerprint"] == fingerprint
+        assert item["id"] == fingerprint
+
+    def test_key_delete(self, runner_vm, unique_key_name, key_owner):
+        key_owner.create(unique_key_name, "--algorithm", "ed25519")
+        _run_mvm(runner_vm, "key", "rm", unique_key_name)
+        assert all(item["name"] != unique_key_name for item in _key_inventory(runner_vm).values())
+
+    def test_remove_default_key_when_only_key(self, runner_vm, fresh_key_cache):
+        owner = _KeyOwner(runner_vm)
+        name = f"sys-only-key-{uuid.uuid4().hex[:8]}"
         try:
-            result = _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                unique_key_name,
-                "--algorithm",
-                "ed25519",
-            )
-            assert result.returncode == 0
-
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            assert any(k["name"] == unique_key_name for k in data)
+            assert owner.baseline == {}
+            owner.create(name, "--algorithm", "ed25519", "--default")
+            assert set(_key_inventory(runner_vm)) == {owner.names[name]}
+            assert _default_ids(_key_inventory(runner_vm)) == {owner.names[name]}
+            _run_mvm(runner_vm, "key", "rm", name)
+            assert _key_inventory(runner_vm) == {}
         finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
+            owner.cleanup()
 
-    def test_key_create_rsa(self, runner_vm, unique_key_name):
-        """Create RSA SSH key and verify via ls --json."""
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                unique_key_name,
-                "--algorithm",
-                "rsa",
-            )
-            assert result.returncode == 0
-
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            assert any(k["name"] == unique_key_name for k in data)
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
-
-    def test_key_create_ecdsa(self, runner_vm, unique_key_name):
-        """Create ECDSA SSH key and verify via ls --json."""
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                unique_key_name,
-                "--algorithm",
-                "ecdsa",
-            )
-            assert result.returncode == 0
-
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            assert any(k["name"] == unique_key_name for k in data)
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
-
-    def test_key_add_existing(self, runner_vm, unique_key_name):
-        """Import an existing SSH public key and verify via ls --json.
-
-        ssh-keygen runs inside the test VM — no host subprocess.
-        """
-        key_tag = f"key-add-{uuid.uuid4().hex[:6]}"
-        key_path = f"/tmp/{key_tag}"
-        _guest_run(
-            runner_vm,
-            f"ssh-keygen -t ed25519 -f {key_path} -N '' -q",
-        )
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "key",
-                "import",
-                unique_key_name,
-                f"{key_path}.pub",
-            )
-            assert result.returncode == 0
-
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            assert any(k["name"] == unique_key_name for k in data)
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
-
-    def test_key_import_shows_fingerprint(self, runner_vm, unique_key_name):
-        """Import an existing SSH public key and verify fingerprint appears in ls --json.
-
-        ssh-keygen runs inside the test VM. Runs a key import, then checks
-        the ls --json output for a non-empty fingerprint field on the imported key.
-        """
-        key_tag = f"key-fp-{uuid.uuid4().hex[:6]}"
-        key_path = f"/tmp/{key_tag}"
-        _guest_run(
-            runner_vm,
-            f"ssh-keygen -t ed25519 -f {key_path} -N '' -q",
-        )
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "key",
-                "import",
-                unique_key_name,
-                f"{key_path}.pub",
-            )
-            assert result.returncode == 0
-
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            key_entry = next(
-                (k for k in data if k["name"] == unique_key_name), None
-            )
-            assert key_entry is not None, (
-                f"Imported key '{unique_key_name}' not found in listing"
-            )
-            assert "fingerprint" in key_entry, (
-                f"Expected 'fingerprint' field in key entry, "
-                f"got keys: {list(key_entry.keys())}"
-            )
-            assert key_entry["fingerprint"], (
-                f"Expected non-empty fingerprint, got '{key_entry['fingerprint']}'"
-            )
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
-
-    def test_key_delete(self, runner_vm, unique_key_name):
-        """Create and delete key, verify it's gone via ls --json."""
-        _run_mvm(
-            runner_vm,
-            "key",
-            "create",
-            unique_key_name,
-            "--algorithm",
-            "ed25519",
-        )
-
-        try:
-            result = _run_mvm(runner_vm, "key", "rm", unique_key_name)
-            assert result.returncode == 0
-
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            assert not any(k["name"] == unique_key_name for k in data)
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
-
-    def test_remove_default_key_when_only_key(self, runner_vm, unique_key_name):
-        """Removing the default key when it's the only key should be allowed."""
-        try:
-            _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                unique_key_name,
-                "--algorithm",
-                "ed25519",
-                "--default",
-            )
-
-            _run_mvm(runner_vm, "key", "rm", unique_key_name)
-
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            names = [k["name"] for k in data]
-            assert unique_key_name not in names
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
-
-    def test_key_rm_multiple(self, runner_vm, unique_key_name):
-        """Remove two keys at once and verify both are gone via ls --json."""
-        key1 = f"{unique_key_name}-multi1"
-        key2 = f"{unique_key_name}-multi2"
-        try:
-            _run_mvm(
-                runner_vm, "key", "create", key1, "--algorithm", "ed25519"
-            )
-            _run_mvm(
-                runner_vm, "key", "create", key2, "--algorithm", "ed25519"
-            )
-
-            result = _run_mvm(runner_vm, "key", "rm", key1, key2)
-            assert result.returncode == 0
-
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            assert not any(k["name"] == key1 for k in data)
-            assert not any(k["name"] == key2 for k in data)
-        finally:
-            _run_mvm(runner_vm, "key", "rm", key1, check=False)
-            _run_mvm(runner_vm, "key", "rm", key2, check=False)
-
-
-# ============================================================================
-# Destructive classes (create/modify key resources)
-# ============================================================================
+    def test_key_rm_multiple(self, runner_vm, unique_key_name, key_owner):
+        names = [f"{unique_key_name}-1", f"{unique_key_name}-2"]
+        for name in names:
+            key_owner.create(name, "--algorithm", "ed25519")
+        _run_mvm(runner_vm, "key", "rm", *names)
+        assert all(item["name"] not in names for item in _key_inventory(runner_vm).values())
 
 
 class TestKeyCreateAdvanced:
-    """Test SSH key creation with advanced options."""
+    def test_key_create_with_bits(self, runner_vm, unique_key_name, key_owner):
+        key_owner.create(unique_key_name, "--algorithm", "rsa", "--bits", "2048")
+        public = key_owner.entry(unique_key_name)["public_key_path"]
+        assert _guest_run(runner_vm, f"ssh-keygen -lf {shlex.quote(public)}").stdout.split()[0] == "2048"
 
-    def test_key_create_with_bits(self, runner_vm, unique_key_name):
-        """Create RSA key with custom bits and verify via ls --json."""
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                unique_key_name,
-                "--algorithm",
-                "rsa",
-                "--bits",
-                "2048",
-            )
-            assert result.returncode == 0
+    def test_key_create_with_comment(self, runner_vm, unique_key_name, key_owner):
+        comment = f"test-comment-{uuid.uuid4().hex}"
+        key_owner.create(unique_key_name, "--algorithm", "ed25519", "--comment", comment)
+        inspected = _success_data(_run_mvm(runner_vm, "key", "inspect", unique_key_name, "--json"), dict)
+        assert inspected["key"]["comment"] == comment
+        assert Path(key_owner.entry(unique_key_name)["public_key_path"]).read_text().split(maxsplit=2)[2].strip() == comment
 
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            assert any(k["name"] == unique_key_name for k in data)
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
-
-    def test_key_create_with_comment(self, runner_vm, unique_key_name):
-        """Create key with --comment and verify via inspect --json."""
-        comment = "test-comment-for-key"
-        result = _run_mvm(
-            runner_vm,
-            "key",
-            "create",
-            unique_key_name,
-            "--algorithm",
-            "ed25519",
-            "--comment",
-            comment,
+    def test_key_create_with_out(self, runner_vm, unique_key_name, key_owner):
+        created = key_owner.create(
+            unique_key_name, "--algorithm", "ed25519", "--out", str(key_owner.directory),
         )
-        assert result.returncode == 0
+        assert created["private_key_path"] == str(key_owner.directory / unique_key_name)
+        assert created["public_key_path"] == str(key_owner.directory / f"{unique_key_name}.pub")
+        assert _file_identity(Path(created["private_key_path"])) == key_owner.artifacts[Path(created["private_key_path"])]
+        assert _file_identity(Path(created["public_key_path"])) == key_owner.artifacts[Path(created["public_key_path"])]
 
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "key",
-                "inspect",
-                unique_key_name,
-                "--json",
-            )
-            data = _success_data(result, dict)
-            assert data.get("key", {}).get("comment") == comment
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
+    def test_key_create_with_set_default(self, runner_vm, unique_key_name, key_owner):
+        key_owner.create(unique_key_name, "--algorithm", "ed25519", "--default")
+        assert _default_ids(_key_inventory(runner_vm)) == key_owner.defaults | {key_owner.names[unique_key_name]}
 
-    def test_key_create_with_out(self, runner_vm, unique_key_name):
-        """Create key with --out pointing to a temp directory inside the VM."""
-        out_tag = f"key-out-{uuid.uuid4().hex[:6]}"
-        out_dir = f"/tmp/{out_tag}"
-        _guest_run(runner_vm, f"mkdir -p {out_dir}")
-
-        result = _run_mvm(
-            runner_vm,
-            "key",
-            "create",
-            unique_key_name,
-            "--algorithm",
-            "ed25519",
-            "--out",
-            out_dir,
-        )
-        assert result.returncode == 0
-
-        try:
-            priv_check = _guest_run(
-                runner_vm,
-                f"test -f {out_dir}/{unique_key_name} && echo exists",
-                check=False,
-            )
-            assert priv_check.returncode == 0, (
-                f"Private key {out_dir}/{unique_key_name} not found inside VM"
-            )
-            pub_check = _guest_run(
-                runner_vm,
-                f"test -f {out_dir}/{unique_key_name}.pub && echo exists",
-                check=False,
-            )
-            assert pub_check.returncode == 0, (
-                f"Public key {out_dir}/{unique_key_name}.pub not found inside VM"
-            )
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
-
-    def test_key_create_with_set_default(self, runner_vm, unique_key_name):
-        """Create key with --default and verify is_default in ls --json."""
-        result = _run_mvm(
-            runner_vm,
-            "key",
-            "create",
-            unique_key_name,
-            "--algorithm",
-            "ed25519",
-            "--default",
-        )
-        assert result.returncode == 0
-
-        try:
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            key_entry = next(
-                (k for k in data if k["name"] == unique_key_name), None
-            )
-            assert key_entry is not None
-            assert key_entry.get("is_default")
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
-            _run_mvm(runner_vm, "key", "default", "--clear", check=False)
-
-    def test_key_create_force_overwrite(self, runner_vm, unique_key_name):
-        """Force overwrite an existing key with --force."""
-        _run_mvm(
-            runner_vm,
-            "key",
-            "create",
-            unique_key_name,
-            "--algorithm",
-            "ed25519",
-        )
-
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                unique_key_name,
-                "--algorithm",
-                "ed25519",
-                "--force",
-                check=False,
-            )
-            assert result.returncode == 0
-
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            assert any(k["name"] == unique_key_name for k in data)
-        finally:
-            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
+    def test_key_create_force_overwrite(self, runner_vm, unique_key_name, key_owner):
+        original = key_owner.create(unique_key_name, "--algorithm", "ed25519")
+        replacement = key_owner.create(unique_key_name, "--algorithm", "ed25519", "--force")
+        assert replacement["id"] != original["id"]
+        assert key_owner.entry(unique_key_name)["id"] == replacement["id"]
+        assert original["id"] not in _key_inventory(runner_vm)
 
 
 class TestKeyImportOverwrite:
-    """Test SSH key import with overwrite behavior."""
-
-    def test_key_import_overwrite(self, runner_vm, unique_key_name):
-        """Import key, reject duplicate, accept with --force.
-
-        ssh-keygen runs inside the test VM.
-        """
-        key_tag = f"key-import-{uuid.uuid4().hex[:6]}"
-        key_path = f"/tmp/{key_tag}"
-        _guest_run(
-            runner_vm,
-            f"ssh-keygen -t ed25519 -f {key_path} -N '' -q",
+    def test_key_import_overwrite(self, runner_vm, unique_key_name, key_owner):
+        source = key_owner.source_pair()
+        replacement_source = key_owner.source_pair("replacement")
+        original = key_owner.import_key(unique_key_name, source.with_suffix(".pub"))
+        result = _run_mvm(
+            runner_vm, "key", "import", unique_key_name, str(replacement_source.with_suffix(".pub")),
+            check=False,
         )
-        pub_key_path = f"{key_path}.pub"
-        key_name = f"test-add-overwrite-{unique_key_name}"
-
-        try:
-            result = _run_mvm(runner_vm, "key", "import", key_name, pub_key_path)
-            assert result.returncode == 0
-
-            ls_result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(ls_result)
-            assert any(k["name"] == key_name for k in data), (
-                f"Key '{key_name}' not found in ls --json after import"
-            )
-
-            result = _run_mvm(
-                runner_vm, "key", "import", key_name, pub_key_path, check=False
-            )
-            assert result.returncode != 0
-            assert "already exists" in (result.stdout + result.stderr).lower()
-
-            result = _run_mvm(
-                runner_vm,
-                "key",
-                "import",
-                key_name,
-                pub_key_path,
-                "--force",
-            )
-            assert result.returncode == 0
-
-            ls_result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(ls_result)
-            assert any(k["name"] == key_name for k in data), (
-                "Key should still be listed after --force overwrite"
-            )
-        finally:
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-
-
-class TestKeyRunningVMDependency:
-    """SSH key dependency behavior with running VMs."""
-
-    @pytest.mark.needs_kvm
-    @pytest.mark.needs_network
-    @pytest.mark.slow
-    def test_delete_ssh_key_used_by_running_vm(
-        self,
-        runner_vm,
-        unique_vm_name,
-        unique_key_name,
-        created_network,
-    ):
-        """SSH key used by a running VM: rm succeeds even when key is in use."""
-        vm_name = unique_vm_name
-        key_name = unique_key_name
-        network_name = created_network
-
-        try:
-            _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                key_name,
-                "--algorithm",
-                "ed25519",
-            )
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network_name,
-                "--ssh-key",
-                key_name,
-            )
-            _run_mvm(runner_vm, "vm", "start", vm_name)
-
-            result = _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            assert result.returncode == 0
-
-            key_ls = _run_mvm(runner_vm, "key", "ls", "--json")
-            keys_after = _success_data(key_ls)
-            key_names = [k.get("name") for k in keys_after]
-            assert key_name not in key_names, (
-                "Key should be removed after rm"
-            )
-        finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-
-
-class TestKeyDefaults:
-    """Test SSH key default behavior — multiple defaults are supported."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.domain_keys,
-    ]
-
-    @pytest.mark.needs_kvm
-    @pytest.mark.needs_network
-    @pytest.mark.slow
-    def test_multiple_default_ssh_keys(
-        self, runner_vm, unique_vm_name, unique_key_name, created_network
-    ) -> None:
-        key1 = f"{unique_key_name}-1"
-        key2 = f"{unique_key_name}-2"
-        vm_name = unique_vm_name
-        network_name = created_network
-
-        try:
-            _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                key1,
-                "--algorithm",
-                "ed25519",
-            )
-            _run_mvm(
-                runner_vm,
-                "key",
-                "create",
-                key2,
-                "--algorithm",
-                "ed25519",
-            )
-
-            _run_mvm(runner_vm, "key", "default", key1, key2)
-
-            result = _run_mvm(runner_vm, "key", "ls", "--json")
-            data = _success_data(result)
-            k1 = next(k for k in data if k["name"] == key1)
-            k2 = next(k for k in data if k["name"] == key2)
-            assert k1.get("is_default"), f"'{key1}' should be default"
-            assert k2.get("is_default"), f"'{key2}' should be default"
-
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network_name,
-                "--ssh-key",
-                f"{key1},{key2}",
-            )
-
-            result = _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json")
-            data = _success_data(result, dict)
-            ssh_keys = data.get("vm", {}).get("ssh_keys")
-            assert ssh_keys is not None
-            for key_name in [key1, key2]:
-                assert key_name in ssh_keys, (
-                    f"VM should contain key name {key_name}"
-                )
-        finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(runner_vm, "key", "rm", key1, check=False)
-            _run_mvm(runner_vm, "key", "rm", key2, check=False)
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        assert "already exists" in (result.stdout + result.stderr).lower()
+        assert key_owner.entry(unique_key_name)["id"] == original["id"]
+        replacement = key_owner.import_key(unique_key_name, replacement_source.with_suffix(".pub"), "--force")
+        assert replacement["id"] != original["id"]
+        assert key_owner.entry(unique_key_name)["id"] == replacement["id"]
