@@ -32,6 +32,35 @@ shape, could restart a deleted VM, counted destructive success as a refusal pass
 cleanup. Their source never established the claimed surviving-process precondition. Cache clean lifecycle and
 failed-kill safety remain cache-owner qualification work; retiring false-positive tests does not qualify them.
 
+**Measured-pressure module repeatability (2026-09-28):** Commit `76fc9b3d` replaces the false fixed-fill
+pressure assumption with measured physical tmpfs staging and an optional, bounded four-MiB calibration.
+The formerly failing swap-present selector passed 1/1 in 28.97 seconds; the complete three-case module then
+passed 3/3 twice in 60.43 and 60.81 seconds inside only `mvmctl-030-test`, against candidate `c460278d`
+and Go source `19c55345`. Exact test-file SHA-256 is
+`f2a41614f942d06ec251357426e8cdc3adaefff76721f260b4b6c4083684d0e3`.
+Both swap variants held at least 80% usable guest-RAM occupancy for at least 15 seconds with fresh
+`memory.events.high`, historical peak above the 224 MiB high threshold, unchanged process/boot identity,
+responsive exec, unchanged policy and no increase in visible OOM counters. The leaf retained literal
+`memory.max=max`; successful reclaim was allowed to lower current usage below high. All four inventories
+were empty afterward, complete config JSON matched the baseline, and only the test-owned swapfile was
+disabled and removed. Reports `qa-memory-calibration-a93c02db-present.json` and
+`qa-memory-calibration-a93c02db-full{1,2}.json` are in the runner's `qa-consistency-7073592b/.tmp` directory.
+Every run reached pressure during initial staging, so the nonzero optional calibration branch remains
+unexecuted. The focused swap-present run observed 8278016 leaf swap bytes; swap availability does not
+require actual swapping in every repeat. This closes the bounded sustained-pressure/module-repeatability
+gate, not guest allocation-failure handling, the original reported incident, full RAM exhaustion,
+host/global/outer-ancestor OOM safety, snapshot memory policy, or release qualification.
+
+**Config-domain repeatability (2026-09-28):** Commit `1d7f6502` preserves all twelve public config behaviors
+and restores exact prior overrides, including absence, after key, category and global resets. All twelve
+passed twice in 0.85 seconds per run inside only the named runner. Source-file SHA-256 is
+`f977acf8194ad735f639173753f2517534e0bff6024ac194833895e4f3aaa919`; candidate remains `c460278d`.
+Both strict reports recorded zero other outcomes, complete config JSON equalled its pre-run baseline,
+and all four resource inventories remained empty. Reports `qa-config-a93c02db-pass{1,2}.json` are in
+`qa-release-0f95b7bc/.tmp`. Invalid requests assert error envelopes and unchanged configuration;
+category/global reset cases retain the default/type metadata and verify every affected override is null.
+This closes the config domain's local repeated-run gate, not the entire Python matrix or release approval.
+
 **Exact-source CLI-domain repeatability (2026-09-28):** The complete CLI domain collected 24 items and passed
 24/24 twice in 0.36 seconds per run inside only `mvmctl-030-test`. Source checkout was clean exact commit
 `0f95b7bc574f29b6c20285159d31cc7c4f9db008`; its Go source independently matched `19c55345`, and installed candidate
@@ -721,16 +750,16 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `config get <cat> <key>` (existing) | ⚡ Shallow | `config/test_config.py` | `TestConfigLifecycle` | L2 via regex parse of output — fragile. |
-| `config get <cat>` (category only) | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCases` | Checks multiple keys listed |
-| `config get <cat> <nonexistent>` | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCasesExtended` | Exit 0, guidance returned |
-| `config set <cat> <key> <val>` then get | ⚡ Shallow | `config/test_config.py` | `TestConfigLifecycle` | L2 roundtrip |
-| `config set` invalid category | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCases` | Non-zero exit |
-| `config set` invalid value type | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCasesExtended` | Non-zero exit |
-| `config reset <cat> <key>` | ⚡ Shallow | `config/test_config.py` | `TestConfigLifecycle` | L2 — value not in output after reset |
-| `config reset <cat>` (category only) | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCases` | L2 — value not in output |
+| `config get <cat> <key>` (existing) | ⚡ Shallow | `config/test_config.py` | `TestConfigLifecycle` | L2 — exact schema-1 scalar agrees with inventory and text output. |
+| `config get <cat>` (category only) | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCases` | L2 — exact category metadata agrees with complete inventory. |
+| `config get <cat> <nonexistent>` | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCasesExtended` | L2 — nonzero schema-1 error and unchanged inventory. |
+| `config set <cat> <key> <val>` then get | ⚡ Shallow | `config/test_config.py` | `TestConfigLifecycle` | L2 — exact integer override/readback, exact prior override restored. |
+| `config set` invalid category | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCases` | L2 — nonzero error envelope and unchanged inventory. |
+| `config set` invalid value type | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCasesExtended` | L2 — nonzero error envelope and unchanged inventory. |
+| `config reset <cat> <key>` | ⚡ Shallow | `config/test_config.py` | `TestConfigLifecycle` | L2 — null override, exact default scalar and baseline restoration. |
+| `config reset <cat>` (category only) | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCases` | L2 — all category overrides null, other categories unchanged, exact restoration. |
 | `config reset` no args | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCases` | Shows guidance, exit 0 |
-| `config reset --all` | ⚡ Shallow | `config/test_config.py` | `TestConfigLifecycle`, `TestConfigEdgeCasesResetAllAfterSet` | Multiple overrides then reset --all |
+| `config reset --all` | ⚡ Shallow | `config/test_config.py` | `TestConfigLifecycle`, `TestConfigEdgeCasesResetAllAfterSet` | L2 — all overrides null, metadata unchanged; restores the complete prior inventory. |
 | `config reset --force` | ⚡ Shallow | `config/test_config.py` | `TestConfigEdgeCasesResetAllAfterSet` | Skipped confirmation |
 | `config ls` | ⚡ Shallow | `config/test_config.py` | `TestConfigLifecycle` | L1 — checks [defaults.vm] in output |
 
