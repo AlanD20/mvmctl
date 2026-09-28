@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import re
 import shlex
 import time
 import uuid
+from typing import Any
 
 import pytest
 
@@ -12,7 +15,6 @@ from tests.system.conftest import (
     _json_success_data,
     _run_mvm,
     _unique_subnet,
-    ensure_vm_deps,
 )
 
 pytestmark = [
@@ -25,258 +27,665 @@ pytestmark = [
 ]
 
 
-def _guest_probe(runner_vm: str, source: str, destination: str, port: int) -> bool:
-    result = _run_mvm(
+def _tcp_data(runner_vm: str, *args: str, kind: type = dict) -> Any:
+    return _json_success_data(_run_mvm(runner_vm, *args, "--json").stdout, kind)
+
+
+def _tcp_baseline(runner_vm: str) -> dict[str, Any]:
+    """Capture complete public inventories, defaults and configuration."""
+    before = {
+        domain: sorted(
+            _tcp_data(runner_vm, domain, "ls", kind=list),
+            key=lambda item: item["id"],
+        )
+        for domain in (
+            "vm",
+            "network",
+            "volume",
+            "snapshot",
+            "image",
+            "kernel",
+            "bin",
+            "key",
+        )
+    }
+    before["config"] = _tcp_data(runner_vm, "config", "ls")
+    before["traffic"] = _tcp_data(runner_vm, "policy", "traffic", "ls")
+    before["exec"] = sorted(
+        _tcp_data(runner_vm, "policy", "exec", "ls", kind=list),
+        key=lambda item: item["id"],
+    )
+    return before
+
+
+def _require_tcp_preseed(before: dict[str, Any]) -> None:
+    """Missing runner assets fail before effects; do not pull or change defaults."""
+    assert all(
+        any(
+            item["type"] == binary_type
+            and item["version"] == "1.16.2"
+            and item["is_default"]
+            and item["is_present"]
+            for item in before["bin"]
+        )
+        for binary_type in ("firecracker", "jailer")
+    ), "preseed the mirrored default Firecracker/Jailer 1.16.2 pair"
+    assert any(
+        item["is_default"] and item["is_present"] for item in before["kernel"]
+    ), "preseed a default kernel"
+    assert any(
+        item["type"] == "alpine" and item["version"] == "3.23" and item["is_present"]
+        for item in before["image"]
+    ), "preseed mirrored Alpine 3.23"
+
+
+def _tcp_network_binding(item: dict[str, Any]) -> dict[str, Any]:
+    assert re.fullmatch(r"[0-9a-f]{64}", item["id"]), item
+    assert item["name"] and item["created_at"], item
+    return {
+        key: item[key]
+        for key in (
+            "id",
+            "name",
+            "created_at",
+            "subnet",
+            "ipv4_gateway",
+            "bridge",
+            "nat_enabled",
+        )
+    }
+
+
+def _tcp_vm_binding(item: dict[str, Any]) -> dict[str, Any]:
+    assert re.fullmatch(r"[0-9a-f]{32}", item["id"]), item
+    assert item["name"] and item["created_at"], item
+    assert re.fullmatch(r"[0-9a-f]{64}", item["network_id"]), item
+    return {
+        key: item[key]
+        for key in ("id", "name", "created_at", "network_id", "ipv4", "mac")
+    }
+
+
+def _create_tcp_network(
+    runner_vm: str, name: str, attempts: dict[str, dict[str, Any] | None]
+) -> dict[str, Any]:
+    assert not any(
+        item["name"] == name
+        for item in _tcp_data(runner_vm, "network", "ls", kind=list)
+    ), name
+    attempts[name] = None  # A failed create may already have published a resource.
+    created = _tcp_data(
+        runner_vm,
+        "network",
+        "create",
+        name,
+        "--subnet",
+        _unique_subnet(name),
+        "--no-nat",
+    )
+    receipt = _tcp_network_binding(created)
+    attempts[name] = receipt
+    assert receipt["name"] == name and receipt["subnet"] == _unique_subnet(name), (
+        created
+    )
+    assert receipt["nat_enabled"] is False, created
+    assert receipt["bridge"], created
+    return receipt
+
+
+def _create_tcp_vm(
+    runner_vm: str,
+    name: str,
+    network_id: str,
+    attempts: dict[str, tuple[str, dict[str, Any] | None]],
+) -> dict[str, Any]:
+    assert not any(
+        item["name"] == name for item in _tcp_data(runner_vm, "vm", "ls", kind=list)
+    ), name
+    attempts[name] = (network_id, None)
+    created = _json_success_data(
+        _run_mvm(
+            runner_vm,
+            "vm",
+            "create",
+            name,
+            "--image",
+            "alpine:3.23",
+            "--network",
+            network_id,
+            "--cloud-init-mode",
+            "inject",
+            "--no-pci",
+            "--disk-size",
+            "512M",
+            "--vcpu",
+            "1",
+            "--mem",
+            "256M",
+            "--json",
+            timeout=180,
+        ).stdout,
+        list,
+    )
+    assert len(created) == 1, created
+    receipt = _tcp_vm_binding(created[0])
+    attempts[name] = (network_id, receipt)
+    assert receipt["name"] == name and receipt["network_id"] == network_id, created
+    current = _tcp_data(runner_vm, "vm", "inspect", receipt["id"])
+    assert current["vm"]["id"] == receipt["id"], current
+    assert current["vm"]["created_at"] == receipt["created_at"], current
+    assert current["networking"]["network"]["id"] == network_id, current
+    assert current["networking"]["ipv4"] == receipt["ipv4"] and receipt["ipv4"], current
+    assert current["networking"]["mac"] == receipt["mac"], current
+    matches = [
+        item
+        for item in _tcp_data(runner_vm, "vm", "ls", kind=list)
+        if item["id"] == receipt["id"] or item["name"] == name
+    ]
+    assert len(matches) == 1 and _tcp_vm_binding(matches[0]) == receipt, matches
+    live = matches[0]
+    assert live["status"] == "running" and live["pid"] > 0, live
+    assert (
+        isinstance(live["process_start_time"], int) and live["process_start_time"] > 0
+    ), live
+    boot_id = _run_mvm(
         runner_vm,
         "exec",
-        source,
+        receipt["id"],
         "--user",
         "root",
         "--",
-        f"nc -z -w 2 {destination} {port}",
-        check=False,
+        "cat /proc/sys/kernel/random/boot_id",
+        timeout=15,
+    ).stdout.strip()
+    assert re.fullmatch(r"[0-9a-f-]{36}", boot_id), boot_id
+    return {
+        "binding": receipt,
+        "pid": live["pid"],
+        "process_start_time": live["process_start_time"],
+        "boot_id": boot_id,
+    }
+
+
+def _assert_tcp_peer(runner_vm: str, peer: dict[str, Any]) -> None:
+    receipt = peer["binding"]
+    matches = [
+        item
+        for item in _tcp_data(runner_vm, "vm", "ls", kind=list)
+        if item["id"] == receipt["id"] or item["name"] == receipt["name"]
+    ]
+    assert len(matches) == 1 and _tcp_vm_binding(matches[0]) == receipt, matches
+    assert matches[0]["status"] == "running", matches
+    assert matches[0]["pid"] == peer["pid"], matches
+    assert matches[0]["process_start_time"] == peer["process_start_time"], matches
+
+
+_TCP_RESPONDER = """
+import pathlib, selectors, socket, sys, time
+directory = pathlib.Path(sys.argv[1])
+selector = selectors.DefaultSelector()
+for port in map(int, sys.argv[2:]):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(('0.0.0.0', port))
+    sock.listen(8)
+    selector.register(sock, selectors.EVENT_READ, port)
+    (directory / f'{port}.received').touch()
+(directory / 'ready').touch()
+deadline = time.monotonic() + 600
+try:
+    while time.monotonic() < deadline:
+        for key, _ in selector.select(timeout=1):
+            connection, _ = key.fileobj.accept()
+            with connection:
+                connection.settimeout(2)
+                payload = b''
+                while not payload.endswith(b'\\n'):
+                    chunk = connection.recv(64)
+                    assert chunk and len(payload) + len(chunk) <= 64, repr(payload)
+                    payload += chunk
+                with (directory / f'{key.data}.received').open('ab') as log:
+                    log.write(payload)
+                connection.sendall(b'ack:' + payload)
+finally:
+    for key in list(selector.get_map().values()):
+        key.fileobj.close()
+    selector.close()
+"""
+
+_TCP_REQUEST = """
+import json, pathlib, socket, sys
+destination, port, nonce = sys.argv[1:]
+boot_id = pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+print('TCP_PROBE_STARTED ' + nonce, flush=True)
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.settimeout(2)
+    try:
+        sock.connect((destination, int(port)))
+    except socket.timeout:
+        outcome = 'connect_timeout'
+    else:
+        payload = nonce.encode('ascii') + b'\\n'
+        sock.sendall(payload)
+        reply = b''
+        while not reply.endswith(b'\\n'):
+            chunk = sock.recv(64)
+            assert chunk and len(reply) + len(chunk) <= 64, repr(reply)
+            reply += chunk
+        assert reply == b'ack:' + payload, repr(reply)
+        outcome = 'ack'
+print(json.dumps({
+    'nonce': nonce, 'boot_id': boot_id, 'destination': destination,
+    'port': int(port), 'outcome': outcome,
+}, sort_keys=True))
+"""
+
+
+def _start_tcp_listener(
+    runner_vm: str, destination: dict[str, Any], directory: str
+) -> None:
+    _assert_tcp_peer(runner_vm, destination)
+    command = shlex.join(
+        ["python3", "-u", "-c", _TCP_RESPONDER, directory, "8080", "8081"]
+    )
+    _run_mvm(
+        runner_vm,
+        "exec",
+        destination["binding"]["id"],
+        "--user",
+        "root",
+        "--",
+        f"mkdir {shlex.quote(directory)} && "
+        f"nohup {command} </dev/null >{shlex.quote(directory + '/server.log')} 2>&1 &",
         timeout=15,
     )
-    return result.returncode == 0
+    ready = """
+import pathlib, sys, time
+path = pathlib.Path(sys.argv[1])
+deadline = time.monotonic() + 10
+while not path.is_file() and time.monotonic() < deadline:
+    time.sleep(0.1)
+assert path.is_file(), 'TCP responder failed to bind; inspect server.log'
+"""
+    _run_mvm(
+        runner_vm,
+        "exec",
+        destination["binding"]["id"],
+        "--user",
+        "root",
+        "--",
+        shlex.join(["python3", "-c", ready, directory + "/ready"]),
+        timeout=15,
+    )
 
 
+def _guest_probe(
+    runner_vm: str, source: dict[str, Any], destination: str, port: int, nonce: str
+) -> bool:
+    """Only a completed guest connect timeout is denial; exec failures raise."""
+    _assert_tcp_peer(runner_vm, source)
+    result = _run_mvm(
+        runner_vm,
+        "exec",
+        source["binding"]["id"],
+        "--user",
+        "root",
+        "--",
+        shlex.join(["python3", "-c", _TCP_REQUEST, destination, str(port), nonce]),
+        timeout=15,
+    )
+    lines = result.stdout.splitlines()
+    assert len(lines) == 2 and lines[0] == f"TCP_PROBE_STARTED {nonce}", result.stdout
+    observed = json.loads(lines[1])
+    outcome = observed["outcome"]
+    assert outcome in ("ack", "connect_timeout"), observed
+    assert observed == {
+        "nonce": nonce,
+        "boot_id": source["boot_id"],
+        "destination": destination,
+        "port": port,
+        "outcome": outcome,
+    }, observed
+    return outcome == "ack"
+
+
+def _assert_tcp_flow(
+    runner_vm: str,
+    source: dict[str, Any],
+    destination: dict[str, Any],
+    directory: str,
+    port: int,
+    *,
+    allowed: bool,
+) -> None:
+    ip = destination["binding"]["ipv4"]
+    assert _guest_probe(runner_vm, destination, ip, port, uuid.uuid4().hex), (
+        f"destination listener unavailable on {ip}:{port}"
+    )
+    nonce = uuid.uuid4().hex
+    assert _guest_probe(runner_vm, source, ip, port, nonce) is allowed
+    # A positive ACK proves replies; the independent log proves actual delivery.
+    received = """
+import pathlib, sys
+path, nonce = sys.argv[1:]
+payloads = pathlib.Path(path).read_bytes().splitlines()
+print('DELIVERED' if nonce.encode('ascii') in payloads else 'ABSENT')
+"""
+    _assert_tcp_peer(runner_vm, destination)
+    observed = _run_mvm(
+        runner_vm,
+        "exec",
+        destination["binding"]["id"],
+        "--user",
+        "root",
+        "--",
+        shlex.join(["python3", "-c", received, f"{directory}/{port}.received", nonce]),
+        timeout=15,
+    ).stdout.strip()
+    assert observed == ("DELIVERED" if allowed else "ABSENT"), observed
+    assert _guest_probe(runner_vm, destination, ip, port, uuid.uuid4().hex), (
+        f"destination listener disappeared on {ip}:{port}"
+    )
+
+
+def _assert_tcp_policy(
+    runner_vm: str,
+    policy: dict[str, Any],
+    source_network: dict[str, Any],
+    destination: dict[str, Any],
+    *,
+    same_network: bool,
+) -> None:
+    assert re.fullmatch(r"[0-9a-f]{64}", policy["id"]), policy
+    assert policy["created_at"], policy
+    expected = {
+        "id": policy["id"],
+        "created_at": policy["created_at"],
+        "source_network_id": source_network["id"],
+        "source_network_name": source_network["name"],
+        "destination_vm_id": destination["binding"]["id"],
+        "destination_vm_name": destination["binding"]["name"],
+        "destination_network_id": destination["binding"]["network_id"],
+        "network_relation": "same-network" if same_network else "cross-network",
+        "protocol": "tcp",
+        "destination_port_start": 8080,
+        "destination_port_end": 8080,
+    }
+    inspected = _tcp_data(
+        runner_vm, "policy", "traffic", "inspect", policy["id"], "--from-network"
+    )
+    assert all(inspected[key] == value for key, value in expected.items()), inspected
+    listed = _tcp_data(runner_vm, "policy", "traffic", "ls")
+    assert isinstance(listed["vm_to_vm"], list), listed
+    matches = [item for item in listed["network_to_vm"] if item["id"] == policy["id"]]
+    assert len(matches) == 1, matches
+    assert all(matches[0][key] == value for key, value in expected.items()), matches
+
+
+def _cleanup_tcp_resources(
+    runner_vm: str,
+    before: dict[str, Any],
+    networks: dict[str, dict[str, Any] | None],
+    vms: dict[str, tuple[str, dict[str, Any] | None]],
+    *,
+    policy_attempted: bool,
+    source_network: dict[str, Any] | None,
+    destination: dict[str, Any] | None,
+    policy: dict[str, Any] | None,
+) -> None:
+    errors = []
+    if policy_attempted:
+        try:
+            assert source_network is not None and destination is not None
+            matches = [
+                item
+                for item in _tcp_data(runner_vm, "policy", "traffic", "ls")[
+                    "network_to_vm"
+                ]
+                if item["source_network_id"] == source_network["id"]
+                and item["destination_vm_id"] == destination["binding"]["id"]
+                and item["protocol"] == "tcp"
+                and item["destination_port_start"] == 8080
+                and item["destination_port_end"] == 8080
+            ]
+            assert len(matches) <= 1, matches
+            for item in matches:
+                assert re.fullmatch(r"[0-9a-f]{64}", item["id"]), item
+                assert policy is None or (
+                    item["id"] == policy["id"]
+                    and item["created_at"] == policy["created_at"]
+                ), item
+                _run_mvm(
+                    runner_vm,
+                    "policy",
+                    "traffic",
+                    "rm",
+                    item["id"],
+                    "--from-network",
+                    "--force",
+                )
+                assert not any(
+                    remaining["id"] == item["id"]
+                    for remaining in _tcp_data(runner_vm, "policy", "traffic", "ls")[
+                        "network_to_vm"
+                    ]
+                ), f"owned TCP policy remains: {item['id']}"
+        except Exception as exc:
+            errors.append(f"TCP policy cleanup: {exc}")
+    for name, (network_id, expected) in reversed(list(vms.items())):
+        try:
+            matches = [
+                item
+                for item in _tcp_data(runner_vm, "vm", "ls", kind=list)
+                if item["name"] == name
+                or (expected is not None and item["id"] == expected["id"])
+            ]
+            assert len(matches) <= 1, matches
+            if matches:
+                receipt = _tcp_vm_binding(matches[0])
+                assert (
+                    receipt["name"] == name and receipt["network_id"] == network_id
+                ), receipt
+                assert expected is None or receipt == expected, receipt
+                assert receipt["id"] not in {item["id"] for item in before["vm"]}, (
+                    receipt
+                )
+                expected = receipt  # Pin a partial create before exact-ID removal.
+                _run_mvm(runner_vm, "vm", "rm", receipt["id"], "--force", timeout=120)
+            assert not any(
+                item["name"] == name
+                or (expected is not None and item["id"] == expected["id"])
+                for item in _tcp_data(runner_vm, "vm", "ls", kind=list)
+            ), f"owned VM remains: {name}"
+        except Exception as exc:
+            errors.append(f"VM cleanup {name}: {exc}")
+    for name, expected in reversed(list(networks.items())):
+        try:
+            matches = [
+                item
+                for item in _tcp_data(runner_vm, "network", "ls", kind=list)
+                if item["name"] == name
+                or (expected is not None and item["id"] == expected["id"])
+            ]
+            assert len(matches) <= 1, matches
+            if matches:
+                receipt = _tcp_network_binding(matches[0])
+                assert receipt["name"] == name and receipt["subnet"] == _unique_subnet(
+                    name
+                ), receipt
+                assert receipt["nat_enabled"] is False, receipt
+                assert expected is None or receipt == expected, receipt
+                assert receipt["id"] not in {
+                    item["id"] for item in before["network"]
+                }, receipt
+                expected = receipt
+                _run_mvm(
+                    runner_vm, "network", "rm", receipt["id"], "--force", timeout=60
+                )
+            assert not any(
+                item["name"] == name
+                or (expected is not None and item["id"] == expected["id"])
+                for item in _tcp_data(runner_vm, "network", "ls", kind=list)
+            ), f"owned network remains: {name}"
+        except Exception as exc:
+            errors.append(f"network cleanup {name}: {exc}")
+    try:
+        after = _tcp_baseline(runner_vm)
+        assert after == before, {
+            key: {"before": before[key], "after": after[key]}
+            for key in before
+            if after[key] != before[key]
+        }
+    except Exception as exc:
+        errors.append(f"TCP journey baseline restoration: {exc}")
+    assert not errors, "\n".join(errors)
+
+
+@pytest.mark.timeout(720, method="signal")
 def test_cross_network_traffic_policy_exact_allow_and_revoke(runner_vm: str) -> None:
     """A network-source grant opens one destination TCP port, then closes it."""
-    suffix = uuid.uuid4().hex[:7]
+    suffix = uuid.uuid4().hex[:12]
     source_net, destination_net = f"pol-src-{suffix}", f"pol-dst-{suffix}"
     source_vm, destination_vm = f"pol-src-vm-{suffix}", f"pol-dst-vm-{suffix}"
-    created_networks: list[str] = []
-    created_vms: list[str] = []
-    policy_id: str | None = None
-
+    directory = f"/tmp/policy-tcp-{suffix}"
+    before = _tcp_baseline(runner_vm)
+    _require_tcp_preseed(before)
+    assert not any(
+        item["name"] in (source_net, destination_net) for item in before["network"]
+    )
+    assert not any(item["name"] in (source_vm, destination_vm) for item in before["vm"])
+    networks: dict[str, dict[str, Any] | None] = {}
+    vms: dict[str, tuple[str, dict[str, Any] | None]] = {}
+    source_network = destination = policy = None
+    policy_attempted = False
     try:
-        ensure_vm_deps(runner_vm)
-        for name in (source_net, destination_net):
-            _run_mvm(
-                runner_vm, "network", "create", name, "--subnet", _unique_subnet(name)
-            )
-            created_networks.append(name)
-        for vm_name, net_name in (
-            (source_vm, source_net),
-            (destination_vm, destination_net),
-        ):
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                net_name,
-                "--cloud-init-mode",
-                "inject",
-                "--no-pci",
-                "--disk-size",
-                "512M",
-                "--vcpu",
-                "1",
-                "--mem",
-                "256M",
-                timeout=180,
-            )
-            created_vms.append(vm_name)
-
-        destination = _json_success_data(
-            _run_mvm(runner_vm, "vm", "inspect", destination_vm, "--json").stdout, dict
+        source_network = _create_tcp_network(runner_vm, source_net, networks)
+        destination_network = _create_tcp_network(runner_vm, destination_net, networks)
+        source = _create_tcp_vm(runner_vm, source_vm, source_network["id"], vms)
+        destination = _create_tcp_vm(
+            runner_vm, destination_vm, destination_network["id"], vms
         )
-        destination_ip = destination["networking"]["ipv4"]
-        assert destination_ip
+        _start_tcp_listener(runner_vm, destination, directory)
+        for port in (8080, 8081):
+            assert _guest_probe(
+                runner_vm, destination, "127.0.0.1", port, uuid.uuid4().hex
+            )
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=False)
+        policy_attempted = True
+        policy = _tcp_data(
+            runner_vm,
+            "policy",
+            "traffic",
+            "create",
+            "--from-network",
+            source_network["id"],
+            "--to-vm",
+            destination["binding"]["id"],
+            "--protocol",
+            "tcp",
+            "--port",
+            "8080",
+        )
+        _assert_tcp_policy(
+            runner_vm, policy, source_network, destination, same_network=False
+        )
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=True)
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8081, allowed=False)
         _run_mvm(
             runner_vm,
-            "exec",
-            destination_vm,
-            "--user",
-            "root",
-            "--",
-            "sh -c 'nohup nc -lk -p 8080 -e /bin/cat </dev/null >/tmp/policy-8080.log 2>&1 & "
-            "nohup nc -lk -p 8081 -e /bin/cat </dev/null >/tmp/policy-8081.log 2>&1 &'",
-            timeout=15,
-        )
-        assert _guest_probe(runner_vm, destination_vm, "127.0.0.1", 8080)
-        assert _guest_probe(runner_vm, destination_vm, "127.0.0.1", 8081)
-        assert _guest_probe(runner_vm, destination_vm, destination_ip, 8080), (
-            "destination listener is not reachable on its managed IPv4:8080"
-        )
-        assert _guest_probe(runner_vm, destination_vm, destination_ip, 8081), (
-            "destination listener is not reachable on its managed IPv4:8081"
-        )
-        assert not _guest_probe(runner_vm, source_vm, destination_ip, 8080)
-
-        created = _json_success_data(
-            _run_mvm(
-                runner_vm,
-                "policy",
-                "traffic",
-                "create",
-                "--from-network",
-                source_net,
-                "--to-vm",
-                destination_vm,
-                "--protocol",
-                "tcp",
-                "--port",
-                "8080",
-                "--json",
-            ).stdout,
-            dict,
-        )
-        policy_id = created["id"]
-        listed = _json_success_data(
-            _run_mvm(runner_vm, "policy", "traffic", "ls", "--json").stdout, dict
-        )
-        assert isinstance(listed["vm_to_vm"], list)
-        assert any(
-            item["id"] == policy_id
-            and item["source_network_name"] == source_net
-            and item["destination_vm_name"] == destination_vm
-            and item["protocol"] == "tcp"
-            and item["destination_port_start"] == 8080
-            and item["destination_port_end"] == 8080
-            for item in listed["network_to_vm"]
-        )
-        assert _guest_probe(runner_vm, source_vm, destination_ip, 8080)
-        assert not _guest_probe(runner_vm, source_vm, destination_ip, 8081)
-
-        _run_mvm(
-            runner_vm, "policy", "traffic", "rm", policy_id, "--from-network", "--force"
-        )
-        policy_id = None
-        listed = _json_success_data(
-            _run_mvm(runner_vm, "policy", "traffic", "ls", "--json").stdout, dict
+            "policy",
+            "traffic",
+            "rm",
+            policy["id"],
+            "--from-network",
+            "--force",
         )
         assert not any(
-            item["source_network_name"] == source_net
-            and item["destination_vm_name"] == destination_vm
-            for item in listed["network_to_vm"]
+            item["source_network_id"] == source_network["id"]
+            and item["destination_vm_id"] == destination["binding"]["id"]
+            for item in _tcp_data(runner_vm, "policy", "traffic", "ls")["network_to_vm"]
         )
-        assert not _guest_probe(runner_vm, source_vm, destination_ip, 8080)
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=False)
     finally:
-        if policy_id is not None:
-            _run_mvm(
-                runner_vm,
-                "policy",
-                "traffic",
-                "rm",
-                policy_id,
-                "--from-network",
-                "--force",
-            )
-        for name in reversed(created_vms):
-            _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
-        for name in reversed(created_networks):
-            _run_mvm(runner_vm, "network", "rm", name, "--force", timeout=60)
+        _cleanup_tcp_resources(
+            runner_vm,
+            before,
+            networks,
+            vms,
+            policy_attempted=policy_attempted,
+            source_network=source_network,
+            destination=destination,
+            policy=policy,
+        )
 
 
+@pytest.mark.timeout(720, method="signal")
 def test_same_network_traffic_policy_exact_allow_and_revoke(runner_vm: str) -> None:
     """A network-source grant opens only its port between peers on one bridge."""
-    suffix = uuid.uuid4().hex[:7]
+    suffix = uuid.uuid4().hex[:12]
     network = f"pol-same-{suffix}"
     source_vm, destination_vm = f"pol-same-src-{suffix}", f"pol-same-dst-{suffix}"
-    created_networks: list[str] = []
-    created_vms: list[str] = []
-    policy_id: str | None = None
-
+    directory = f"/tmp/policy-tcp-{suffix}"
+    before = _tcp_baseline(runner_vm)
+    _require_tcp_preseed(before)
+    assert not any(item["name"] == network for item in before["network"])
+    assert not any(item["name"] in (source_vm, destination_vm) for item in before["vm"])
+    networks: dict[str, dict[str, Any] | None] = {}
+    vms: dict[str, tuple[str, dict[str, Any] | None]] = {}
+    source_network = destination = policy = None
+    policy_attempted = False
     try:
-        ensure_vm_deps(runner_vm)
-        _run_mvm(
-            runner_vm, "network", "create", network, "--subnet", _unique_subnet(network)
+        source_network = _create_tcp_network(runner_vm, network, networks)
+        source = _create_tcp_vm(runner_vm, source_vm, source_network["id"], vms)
+        destination = _create_tcp_vm(
+            runner_vm, destination_vm, source_network["id"], vms
         )
-        created_networks.append(network)
-        for vm_name in (source_vm, destination_vm):
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                network,
-                "--cloud-init-mode",
-                "inject",
-                "--no-pci",
-                "--disk-size",
-                "512M",
-                "--vcpu",
-                "1",
-                "--mem",
-                "256M",
-                timeout=180,
-            )
-            created_vms.append(vm_name)
-
-        destination = _json_success_data(
-            _run_mvm(runner_vm, "vm", "inspect", destination_vm, "--json").stdout, dict
+        _start_tcp_listener(runner_vm, destination, directory)
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=False)
+        policy_attempted = True
+        policy = _tcp_data(
+            runner_vm,
+            "policy",
+            "traffic",
+            "create",
+            "--from-network",
+            source_network["id"],
+            "--to-vm",
+            destination["binding"]["id"],
+            "--protocol",
+            "tcp",
+            "--port",
+            "8080",
         )
-        destination_ip = destination["networking"]["ipv4"]
-        assert destination_ip
+        _assert_tcp_policy(
+            runner_vm, policy, source_network, destination, same_network=True
+        )
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=True)
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8081, allowed=False)
         _run_mvm(
             runner_vm,
-            "exec",
-            destination_vm,
-            "--user",
-            "root",
-            "--",
-            "sh -c 'nohup nc -lk -p 8080 -e /bin/cat </dev/null >/tmp/policy-8080.log 2>&1 & "
-            "nohup nc -lk -p 8081 -e /bin/cat </dev/null >/tmp/policy-8081.log 2>&1 &'",
-            timeout=15,
+            "policy",
+            "traffic",
+            "rm",
+            policy["id"],
+            "--from-network",
+            "--force",
         )
-        assert _guest_probe(runner_vm, destination_vm, destination_ip, 8080), (
-            "destination listener is not reachable on its managed IPv4:8080"
+        assert not any(
+            item["id"] == policy["id"]
+            for item in _tcp_data(runner_vm, "policy", "traffic", "ls")["network_to_vm"]
         )
-        assert _guest_probe(runner_vm, destination_vm, destination_ip, 8081), (
-            "destination listener is not reachable on its managed IPv4:8081"
-        )
-        assert not _guest_probe(runner_vm, source_vm, destination_ip, 8080)
-
-        created = _json_success_data(
-            _run_mvm(
-                runner_vm,
-                "policy",
-                "traffic",
-                "create",
-                "--from-network",
-                network,
-                "--to-vm",
-                destination_vm,
-                "--protocol",
-                "tcp",
-                "--port",
-                "8080",
-                "--json",
-            ).stdout,
-            dict,
-        )
-        policy_id = created["id"]
-        assert _guest_probe(runner_vm, source_vm, destination_ip, 8080)
-        assert not _guest_probe(runner_vm, source_vm, destination_ip, 8081)
-
-        _run_mvm(
-            runner_vm, "policy", "traffic", "rm", policy_id, "--from-network", "--force"
-        )
-        policy_id = None
-        assert not _guest_probe(runner_vm, source_vm, destination_ip, 8080)
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=False)
     finally:
-        if policy_id is not None:
-            _run_mvm(
-                runner_vm,
-                "policy",
-                "traffic",
-                "rm",
-                policy_id,
-                "--from-network",
-                "--force",
-            )
-        for name in reversed(created_vms):
-            _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
-        for name in reversed(created_networks):
-            _run_mvm(runner_vm, "network", "rm", name, "--force", timeout=60)
+        _cleanup_tcp_resources(
+            runner_vm,
+            before,
+            networks,
+            vms,
+            policy_attempted=policy_attempted,
+            source_network=source_network,
+            destination=destination,
+            policy=policy,
+        )
 
 
 _UDP_RESPONDER = """
