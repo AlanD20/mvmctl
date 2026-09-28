@@ -71,5 +71,8 @@ by the user's explicit isolation approval and resumption of implementation.
 
 The implementation-only phase is historical; the user subsequently authorized Go and installed-candidate Python
 qualification inside the named disposable runner. Focused full-snapshot and independent-volume source-crash journeys
-passed there, as recorded in [the coverage matrix](../../tests/system/COVERAGE_MATRIX.md). Capture interruption,
-competing-writer behavior, broader fault consistency, and complete release qualification remain unproved.
+passed there, as recorded in [the coverage matrix](../../tests/system/COVERAGE_MATRIX.md). Later installed-candidate
+cases preserved one captured epoch across RAM, rootfs, and attached-volume bytes after source mutation/removal or
+confirmed source crash. A real competing writable VM prevented capture; removing only that peer allowed the same
+source and volume to capture successfully. These cases do not prove application transaction atomicity, exclusion of
+all host writers, interruption during capture, broader fault consistency, or complete release qualification.

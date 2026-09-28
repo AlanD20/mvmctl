@@ -21,6 +21,20 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
+**Captured-epoch and competing-writer checkpoint (2026-09-28):** Both independent-volume restore variants passed
+with one captured epoch across a mounted tmpfs RAM marker, durable rootfs marker, raw-volume prefix/hash, and guest
+boot identity. All three markers were changed after capture; normal source removal and confirmed source crash/removal
+each restored the original captured values. A separate public-CLI journey established two real writable VM references
+and shared byte effects in both directions, required structured capture refusal with no published snapshot artifact,
+then removed only the peer and successfully captured the same source/volume as a positive control. The first group
+recorded two passes and one test-schema failure (numeric error class 1 was incorrectly expected as a string); after
+that sole assertion correction, only the failed competing-writer case reran and passed 1/1 in 17.90 seconds.
+Strict reports under `/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/qa-consistency-7073592b/.tmp/` are
+`qa-snapshot-consistency-7073592b.json` and `qa-snapshot-competing-correction-7073592b.json`. Candidate/source remain
+`c460278d`/`19c55345`; all four inventories were empty after both commands. This proves the named quiescent captured
+epoch and competing-VM writer refusal, not application transaction consistency, interruption during capture,
+untrusted host-writer exclusion, or complete fault/release qualification.
+
 **Snapshot flags and source-crash checkpoint (2026-09-28):** A ten-case group passed 10/10 in 120.56 seconds
 inside only `mvmctl-030-test`: both `test_networkless_snapshot_restores_independent_data_volume` variants and the
 complete eight-case `test_vm_snapshot_load.py` module. The crash variant authenticates the exact source process and

@@ -33,6 +33,11 @@ earlier partial-state statement. They are not a substitute for the final release
 
 ### Added
 
+- Strengthened snapshot QA to restore one captured epoch across RAM, rootfs, and raw-volume bytes after source mutation
+  and normal removal or confirmed crash. A separate installed-CLI case proves competing writable VM access refuses
+  capture, with successful capture after removing only the peer. These cases passed in the named disposable runner;
+  capture interruption and broader fault consistency remain open.
+
 - Extended the independent raw-volume snapshot journey with confirmed source Firecracker crash recovery. The test
   authenticates the process and jail, signals through a retained pidfd, checks public crashed status, removes the source,
   and restores the captured volume bytes independently. Both variants passed against the 1.16.2 candidate in the named
