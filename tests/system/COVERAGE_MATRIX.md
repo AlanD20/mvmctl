@@ -128,7 +128,26 @@ setup. All ten collected and passed in only `mvmctl-030-test`; strict report
 records zero other outcomes. Independent VM/network inventories were empty. This qualifies that group, not the
 remaining lifecycle cases. The empty-list case no longer attempts global VM deletion.
 
-**Current-candidate pressure checkpoint (2026-09-28):** The existing
+**Later saturation qualification attempt (2026-09-28):** A prepared, uncommitted cgroup QA draft observed the
+swap-absent guest hold 85.04–85.05% of usable RAM for 15.34 seconds, with unchanged guest/process identity, working
+fresh exec probes, historical memory peak above `memory.high`, increased high events, and unchanged visible OOM
+counters. Current usage could fall below high after successful reclaim; remaining above high is not a valid survival
+oracle. The swap-present setup eventually activated a test-owned, hole-free 512 MiB backing file, but the held guest's
+availability moved to 33044 KiB, above the draft's fixed 32 MiB target band; sustained swap-present qualification did
+not pass. A separate two-case existing-cgroup selection passed protected inspection but failed its pressure test:
+a real 150 MiB guest allocation increased charge from 45305856 to 231022592 bytes, below high 234881024, so it did
+not produce the required high event. No VM kill was observed in these failures. All four resource inventories were
+empty, the temporary swap was inactive and removed, and configuration restoration completed.
+Strict reports `qa-memory-peak-oracle-7073592b.json`, `qa-memory-swap-capacity-correction-7073592b.json`, and
+`qa-cgroup-existing-7073592b.json` remain in the runner's `qa-consistency-7073592b/.tmp` directory; the first two also
+have retained JUnit measurements. Small evidence copies are preserved in ignored local `.tmp/qa-evidence-20260928/`.
+The draft was removed from the integration checkout only after exact parity with its persistent isolated worktree;
+it is not committed or release-qualified. Retries stopped at the workload-design dependency. A revised oracle must
+establish actual pressure despite boot/cache/reclaim variation without mistaking normal reclaim or auxiliary target
+drift for a product failure. Guest allocation failure, original-incident attribution, ancestor/global OOM, and broader
+fault/release qualification remain open.
+
+**Earlier bounded pressure checkpoint (2026-09-28):** The existing
 `TestVMCgroupEnvelope::test_guest_stays_responsive_under_pressure_only_memory_control` passed 1/1 against the
 SHA-matched installed candidate after one reboot of only the empty named runner. Its real 150 MiB tmpfs load
 increased observed memory charge and `memory.events.high`, left leaf `oom_kill` unchanged, and retained vsock exec.
