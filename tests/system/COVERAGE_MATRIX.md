@@ -95,6 +95,25 @@ preseed-only guests; they do not qualify the nine unchanged SSH cases or the ful
 Reports `qa-keys-fc614785-pass{1,2}.json` and `qa-key-ssh-fc614785.json` are in
 the runner's `qa-release-0f95b7bc/.tmp` directory. No asset pulls, config/default asset changes or outer install.
 
+**Volume-domain repeatability (2026-09-28):** Commit `f26bfab6` preserves all thirty-seven selected cases
+while replacing unchecked cleanup and implicit large guests with exact ownership and bounded resources.
+The frozen file passed 37/37 twice in 94.25 and 96.96 seconds inside only `mvmctl-030-test`;
+strict reports have zero other outcomes. Exact file SHA-256 is
+`eac82c8b80a93d5fd39b801cf5fda424642b3b1c27631b4ad4fbb2271145e9da`, candidate `c460278d`.
+All four inventories were empty, full config JSON matched baseline, and free disk remained 2.4 GiB after
+both runs. Reports `qa-volume-fc614785-pass{1,2}.json` are in `qa-release-0f95b7bc/.tmp`.
+Public-CLI journeys retain raw-only admission, invalid/removed flags and sizes, growth/shrink checks,
+attachment cycles, stopped-but-attached growth, running-VM force-removal refusal and stopped-VM removal.
+All twelve nested creates use 512 MiB disk, 256 MiB RAM and one CPU, with at most two guests;
+ordinary data volumes use 8–32 MiB. Dependency admission reads preseeded assets rather than pulling or
+changing defaults/configuration. Every case and the shared-volume lifetime perform checked owned
+VM/volume/key/network cleanup and baseline comparisons. Only kernel `updated_at` is excluded from
+asset comparisons because public listing reconciles missing recorded files and refreshes that timestamp;
+all other kernel fields, resource identities/defaults and config remain checked. The changed-source case
+preserves the unrelated replacement and verifies/removes only its exact test-owned retained inode.
+This closes the complete volume module's local repeat gate, not snapshot fault recovery, aggregate
+storage quotas (still deliberately unresolved), full matrix qualification or release approval.
+
 **Exact-source CLI-domain repeatability (2026-09-28):** The complete CLI domain collected 24 items and passed
 24/24 twice in 0.36 seconds per run inside only `mvmctl-030-test`. Source checkout was clean exact commit
 `0f95b7bc574f29b6c20285159d31cc7c4f9db008`; its Go source independently matched `19c55345`, and installed candidate
@@ -1012,8 +1031,8 @@ Specific legacy conflicts that must be rewritten before release:
 | Volume invariants (available→attached→available) | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_invariants_available_attached_cycle` | Focused installed-candidate networkless L2 passed: same volume ID and 16 MiB logical size across stopped-VM attach/detach, guest-visible `vdb` after start, and protected backing with caller path redacted after launch. Live hotplug, guest data persistence, and managed-network attachment remain unqualified. |
 | Cross-VM attach rejection | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeCrossVM` | L2 — attached volume rejects second VM |
 | Volume rm with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L1 |
-| Volume rm --force with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L2 |
-| Volume resize with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L2 |
+| Volume rm --force with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L2 — refusal while running; stop required before checked force removal. |
+| Volume resize with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L2 — refusal while running; stopped-but-attached volume grows without requiring detach. |
 | Volume hotplug (attach to running) | 🟡 Partial | `volume/test_volume_hotplug.py` | `TestVolumeHotplug` | L3 — SSH check /dev/vdb appears. Requires firecracker_116 marker (excluded from default run) |
 | Volume hotunplug (detach from running) | 🟡 Partial | `volume/test_volume_hotplug.py` | `TestVolumeHotplug` | L3 — SSH check /dev/vdb disappears. Requires firecracker_116 marker (excluded from default run) |
 | Volume attach/detach lifecycle (stop→detach→reattach→start) | ✅ Deep | `volume/test_volume.py` | `TestVolumeAttachDetach` | L3: full lifecycle including attach-to-stopped-then-start (Bug #7), detach-reattach-verify |
