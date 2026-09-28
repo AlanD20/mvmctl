@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Release status (2026-09-28):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
-> requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean checkout `b2566f8a` passed the complete
+> requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean checkout `dae5510c` passed the complete
 > pinned Go 1.26.3 local CI sequence inside the fresh `mvmctl-030-test`, plus the full root-effect Jailer
-> package (5.214s) and all 240 Python orchestrator unit cases. Earlier runner candidates passed network/nftables/policy
+> package (9.190s) and all 240 Python orchestrator unit cases (7.21s). Earlier runner candidates passed network/nftables/policy
 > (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), copy (15/15),
 > kernel import (8/8), Jailer (13/13), and rootfs persistence (1/1) Python domains with strict zero-skip reports at
 > their recorded revisions. These domain results do not constitute a complete exact-current-HEAD Python matrix.
@@ -1154,6 +1154,8 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Image import resolves the configured or explicit `auto` format before extraction, using the existing extension
+  and magic-byte detection. Concrete configured formats and explicit overrides keep their precedence.
 - GuestFS appliance building and cache pruning no longer kill same-user processes or delete global libguestfs
   locks, sockets, or temporary appliances based on guessed ownership. Selected-cache appliance pruning and normal
   GuestFS operations remain; automatic global orphan recovery is intentionally removed. The miscellaneous JSON

@@ -17,6 +17,25 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Automatic image format and coherent CI gate (2026-09-28):** Commit `dae5510c` resolves the configured or explicit
+`auto` policy through the existing extension/magic detection before extraction. Three behavioral resolver rows
+failed against unchanged production; all five then passed (0.010 seconds), including concrete-default and explicit
+override precedence. Full inputs/API/image packages passed (0.013/0.032/0.196 seconds), focused race passed
+(1.025 seconds), and scoped format/vet passed inside only `mvmctl-030-test`.
+The clean exact `dae5510c` checkout also passed pinned Go 1.26.3 offline tidy, architecture, whole-tree
+gofmt/golines 0.13.0, agent generation, full vet, the complete CI-selected Go suite, full root Jailer package
+(9.190 seconds), and Python runner units (240/240, 7.21 seconds). The ordinary gate used umask 022;
+the exact-mode sudoers fixture correction `d92fd383` separately passed the complete host package under both
+077 and 022 (0.200/0.204 seconds), without weakening production checks.
+Its clean candidate was normally built/installed only inside that runner, SHA-256
+`e23b126180f573d45b70a01c800cd43269cca829b0c1a7976f582f3aacf59347` (`0.3.0-rc.auto`).
+Evidence is `image-auto-{red,green}.log`, `host-fixture-44f1e702-green.log`,
+`full-ci-build-auto-dae5510c.log` and `python-unit-dae5510c.xml`. The image fixture's generic metadata correction
+(`4efb233d`) and installed resolver fix then passed all 13 affected or previously unexecuted image cases
+(37.95 seconds), with strict zero-other-outcome reports and exact config/four empty inventory cleanup:
+`qa-images-auto-4efb-delta13-pass1.{json,xml}`. The complete 38-case image module and current-source Python
+matrix remain separate gates; this is not GitHub CI or release approval.
+
 **Live terminal console repeat gate (2026-09-28):** Exact console source SHA-256
 `307ab71e8298d347e6365cb1a6a250f8f067217852922abea7cf3b93d01facfb` retains the existing
 owned relay lifecycle journey and adds one successful interactive PTY journey. The new case passed alone
