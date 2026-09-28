@@ -37,6 +37,63 @@ func TestOpenInstanceAuthorityRootsCreatesDurableManagedTree(t *testing.T) {
 	assertExactMode(t, filepath.Join(root, "var/lib/mvmctl/instances/1000"), 0700)
 }
 
+func TestVolumeObservationMissingPersistentAuthorityNeverCreates(t *testing.T) {
+	// Rationale: A missing instance tree must not be initialized by a read-only volume request.
+	for _, missing := range []string{"mvmctl", "instances"} {
+		t.Run(missing, func(t *testing.T) {
+			root := prepareInstanceAuthorityTestRoot(t)
+			if missing == "instances" {
+				require.NoError(t, os.Mkdir(filepath.Join(root, "var/lib/mvmctl"), 0711))
+			}
+			before, err := os.ReadDir(filepath.Join(root, "var/lib"))
+			require.NoError(t, err)
+			authority := &instanceAuthority{
+				deps: realInstanceAuthorityDeps(), policy: testInstanceAuthorityPolicy(root),
+				authorityTree: newTestInstanceAuthorityTree(),
+			}
+			_, err = authority.lockObservedInstance(
+				t.Context(), instanceCaller{uid: testAuthorityUID, gid: testAuthorityGID}, testVMID,
+			)
+			t.Cleanup(func() {
+				assert.NoDirExists(t, filepath.Join(root, "var/lib/mvmctl/instances"))
+				after, readErr := os.ReadDir(filepath.Join(root, "var/lib"))
+				require.NoError(t, readErr)
+				assert.Equal(t, len(before), len(after))
+			})
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestVolumeObservationUnknownVMDoesNotInitializeOwner(t *testing.T) {
+	// Rationale: An unknown VM with an existing index has no authority to publish UID state.
+	root := prepareInstanceAuthorityTestRoot(t)
+	tree := newTestInstanceAuthorityTree()
+	roots, err := openInstanceAuthorityRoots(
+		t.Context(),
+		realInstanceAuthorityDeps(),
+		testInstanceAuthorityPolicy(root),
+		tree,
+	)
+	require.NoError(t, err)
+	require.NoError(t, roots.Release(t.Context()))
+	authority := &instanceAuthority{
+		deps: realInstanceAuthorityDeps(), policy: testInstanceAuthorityPolicy(root), authorityTree: tree,
+	}
+	t.Cleanup(func() {
+		entries, err := os.ReadDir(filepath.Join(root, "var/lib/mvmctl/instances"))
+		require.NoError(t, err)
+		assert.Empty(t, entries)
+	})
+	_, err = authority.lockObservedInstance(
+		t.Context(),
+		instanceCaller{uid: testAuthorityUID, gid: testAuthorityGID},
+		testVMID,
+	)
+	assert.Error(t, err)
+	assert.Equal(t, errs.CodeVMNotFound, errs.AsDomainError(err).Code)
+}
+
 func TestOpenInstanceAuthorityRootsRejectsUnsafeTree(t *testing.T) {
 	t.Parallel()
 

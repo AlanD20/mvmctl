@@ -10,6 +10,7 @@ import (
 
 type instanceAuthorityTree interface {
 	openJailer(context.Context) (instanceJailerAuthority, error)
+	openExistingJailer(context.Context) (instanceJailerAuthority, error)
 }
 
 type instanceJailerAuthority interface {
@@ -90,6 +91,14 @@ func (systemInstanceAuthorityTree) openJailer(ctx context.Context) (instanceJail
 	value, err := authorityfs.OpenJailer(ctx)
 	if err != nil {
 		return nil, instanceAtomicError("open Jailer authority tree", err)
+	}
+	return &systemJailerAuthority{value: value}, nil
+}
+
+func (systemInstanceAuthorityTree) openExistingJailer(ctx context.Context) (instanceJailerAuthority, error) {
+	value, err := authorityfs.OpenExistingJailer(ctx)
+	if err != nil {
+		return nil, instanceAtomicError("open existing Jailer authority tree", err)
 	}
 	return &systemJailerAuthority{value: value}, nil
 }

@@ -887,13 +887,25 @@ func (authority *instanceAuthority) lockOwnedInstance(
 	caller instanceCaller,
 	vmID string,
 ) (_ *lockedInstance, returnErr error) {
+	return authority.lockOwnedInstanceMode(ctx, caller, vmID, true)
+}
+
+func (authority *instanceAuthority) lockObservedInstance(
+	ctx context.Context, caller instanceCaller, vmID string,
+) (*lockedInstance, error) {
+	return authority.lockOwnedInstanceMode(ctx, caller, vmID, false)
+}
+
+func (authority *instanceAuthority) lockOwnedInstanceMode(
+	ctx context.Context, caller instanceCaller, vmID string, create bool,
+) (_ *lockedInstance, returnErr error) {
 	if err := validateInstanceCaller(caller); err != nil {
 		return nil, err
 	}
 	if !vmIDPattern.MatchString(vmID) {
 		return nil, instanceValidationError("vm ID is invalid")
 	}
-	roots, err := openInstanceAuthorityRoots(ctx, authority.deps, authority.policy, authority.authorityTree)
+	roots, err := openInstanceAuthorityRootsMode(ctx, authority.deps, authority.policy, authority.authorityTree, create)
 	if err != nil {
 		return nil, err
 	}

@@ -90,6 +90,16 @@ func openInstanceAuthorityRoots(
 	policy instanceAuthorityPolicy,
 	authorityTree instanceAuthorityTree,
 ) (_ *instanceAuthorityRoots, returnErr error) {
+	return openInstanceAuthorityRootsMode(ctx, deps, policy, authorityTree, true)
+}
+
+func openInstanceAuthorityRootsMode(
+	ctx context.Context,
+	deps instanceAuthorityDeps,
+	policy instanceAuthorityPolicy,
+	authorityTree instanceAuthorityTree,
+	create bool,
+) (_ *instanceAuthorityRoots, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, instanceAtomicError("open instance authority roots", err)
 	}
@@ -162,7 +172,7 @@ func openInstanceAuthorityRoots(
 		deps,
 		libFD,
 		stateNames[2],
-		true,
+		create,
 		instanceStateBaseDirectory,
 		policy,
 	)
@@ -175,7 +185,7 @@ func openInstanceAuthorityRoots(
 		deps,
 		stateBaseFD,
 		stateNames[3],
-		true,
+		create,
 		instancePrivateDirectory,
 		policy,
 	)
@@ -187,7 +197,11 @@ func openInstanceAuthorityRoots(
 	if authorityTree == nil {
 		return nil, instanceAtomicError("Jailer authority tree is not configured", nil)
 	}
-	authority, err = authorityTree.openJailer(ctx)
+	if create {
+		authority, err = authorityTree.openJailer(ctx)
+	} else {
+		authority, err = authorityTree.openExistingJailer(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}

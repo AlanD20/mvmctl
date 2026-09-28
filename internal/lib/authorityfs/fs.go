@@ -54,15 +54,16 @@ type Jailer struct {
 
 type jailerState struct {
 	// mu guards every descriptor and lifecycle field below.
-	mu         sync.Mutex
-	deps       dependencies
-	policy     policy
-	authority  int
-	releases   int
-	retained   []int
-	active     bool
-	released   bool
-	releaseErr error
+	mu           sync.Mutex
+	deps         dependencies
+	policy       policy
+	authority    int
+	releases     int
+	retained     []int
+	active       bool
+	released     bool
+	releaseErr   error
+	existingOnly bool
 }
 
 // JailerUID pins one fixed root-owned Jailer UID directory.
@@ -72,19 +73,26 @@ type JailerUID struct {
 
 type jailerUIDState struct {
 	// mu guards fd and every lifecycle field below. ownerUID is immutable after construction.
-	mu         sync.Mutex
-	deps       dependencies
-	policy     policy
-	ownerUID   uint32
-	fd         int
-	active     bool
-	released   bool
-	releaseErr error
+	mu           sync.Mutex
+	deps         dependencies
+	policy       policy
+	ownerUID     uint32
+	fd           int
+	active       bool
+	released     bool
+	releaseErr   error
+	existingOnly bool
 }
 
 // OpenJailer opens or creates the fixed root-owned Jailer authority tree.
 func OpenJailer(ctx context.Context) (*Jailer, error) {
 	return openJailerWithPolicy(ctx, realDependencies(), productionPolicy())
+}
+
+// OpenExistingJailer pins existing authority and locks without creating or repairing anything.
+// Missing runtime authority (including after reboot) fails closed.
+func OpenExistingJailer(ctx context.Context) (*Jailer, error) {
+	return openJailerMode(ctx, realDependencies(), productionPolicy(), false)
 }
 
 func productionPolicy() policy {
@@ -96,10 +104,14 @@ func openJailerWithPolicy(
 	deps dependencies,
 	policy policy,
 ) (_ *Jailer, returnErr error) {
+	return openJailerMode(ctx, deps, policy, true)
+}
+
+func openJailerMode(ctx context.Context, deps dependencies, policy policy, create bool) (_ *Jailer, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("authorityfs: open Jailer authority: %w", err)
 	}
-	root, err := openAuthorityRoot(ctx, deps, policy)
+	root, err := openAuthorityRootMode(ctx, deps, policy, create)
 	if err != nil {
 		return nil, fmt.Errorf("authorityfs: open Jailer authority: %w", err)
 	}
@@ -113,7 +125,7 @@ func openJailerWithPolicy(
 		}
 	}()
 
-	releasesFD, err := openManagedDirectory(
+	releasesFD, err := openManagedDirectoryMode(
 		ctx,
 		deps,
 		root.authority,
@@ -121,6 +133,7 @@ func openJailerWithPolicy(
 		directoryMode,
 		resolveManaged,
 		policy,
+		create,
 	)
 	if err != nil {
 		return nil, err
@@ -129,6 +142,7 @@ func openJailerWithPolicy(
 
 	return &Jailer{state: &jailerState{
 		deps: deps, policy: policy, authority: root.authority, releases: releasesFD, retained: retained, active: true,
+		existingOnly: !create,
 	}}, nil
 }
 
@@ -136,6 +150,15 @@ func openAuthorityRoot(
 	ctx context.Context,
 	deps dependencies,
 	policy policy,
+) (_ authorityRoot, returnErr error) {
+	return openAuthorityRootMode(ctx, deps, policy, true)
+}
+
+func openAuthorityRootMode(
+	ctx context.Context,
+	deps dependencies,
+	policy policy,
+	create bool,
 ) (_ authorityRoot, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return authorityRoot{}, fmt.Errorf("authorityfs: open authority root: %w", err)
@@ -163,12 +186,12 @@ func openAuthorityRoot(
 		return authorityRoot{}, err
 	}
 	retained = append(retained, runFD)
-	mvmctlFD, err := openManagedDirectory(ctx, deps, runFD, "mvmctl", baseMode, resolveManaged, policy)
+	mvmctlFD, err := openManagedDirectoryMode(ctx, deps, runFD, "mvmctl", baseMode, resolveManaged, policy, create)
 	if err != nil {
 		return authorityRoot{}, err
 	}
 	retained = append(retained, mvmctlFD)
-	authorityFD, err := openManagedDirectory(
+	authorityFD, err := openManagedDirectoryMode(
 		ctx,
 		deps,
 		mvmctlFD,
@@ -176,6 +199,7 @@ func openAuthorityRoot(
 		directoryMode,
 		resolveManaged,
 		policy,
+		create,
 	)
 	if err != nil {
 		return authorityRoot{}, err
@@ -199,7 +223,7 @@ func (jailer *Jailer) OpenUID(ctx context.Context, uid uint32) (*JailerUID, erro
 		return nil, fmt.Errorf("authorityfs: Jailer authority is released")
 	}
 	name := formatUID(uid)
-	fd, err := openManagedDirectory(
+	fd, err := openManagedDirectoryMode(
 		ctx,
 		state.deps,
 		state.authority,
@@ -207,12 +231,14 @@ func (jailer *Jailer) OpenUID(ctx context.Context, uid uint32) (*JailerUID, erro
 		directoryMode,
 		resolveManaged,
 		state.policy,
+		!state.existingOnly,
 	)
 	if err != nil {
 		return nil, err
 	}
 	return &JailerUID{state: &jailerUIDState{
 		deps: state.deps, policy: state.policy, ownerUID: uid, fd: fd, active: true,
+		existingOnly: state.existingOnly,
 	}}, nil
 }
 
@@ -293,6 +319,19 @@ func openManagedDirectory(
 	resolve uint64,
 	policy policy,
 ) (int, error) {
+	return openManagedDirectoryMode(ctx, deps, parentFD, name, mode, resolve, policy, true)
+}
+
+func openManagedDirectoryMode(
+	ctx context.Context,
+	deps dependencies,
+	parentFD int,
+	name string,
+	mode uint32,
+	resolve uint64,
+	policy policy,
+	create bool,
+) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return -1, fmt.Errorf("authorityfs: open managed directory %s: %w", name, err)
 	}
@@ -304,7 +343,7 @@ func openManagedDirectory(
 		}
 		return fd, nil
 	}
-	if !errors.Is(err, unix.ENOENT) {
+	if !create || !errors.Is(err, unix.ENOENT) {
 		return -1, fmt.Errorf("authorityfs: open managed directory %s: %w", name, err)
 	}
 	mkdirErr := deps.mkdirAt(ctx, parentFD, name, mode)

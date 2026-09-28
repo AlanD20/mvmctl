@@ -214,7 +214,7 @@ func (server *VMLifecycleServer) DetachVolume(
 			"selected attachment differs from fresh root observation",
 		)
 	}
-	backing, err := reopenProtectedBacking(ctx, transaction.record.backingBinding(authority.locked.record))
+	backing, err := reopenVolumeDetachBacking(ctx, transaction, authority.locked.record, observed == nil)
 	if err != nil {
 		return VMVolumeResult{}, err
 	}

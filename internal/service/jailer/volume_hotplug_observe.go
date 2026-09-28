@@ -21,7 +21,7 @@ func (server *VMLifecycleServer) ObserveVolume(
 	if err := request.Validate(); err != nil {
 		return VMVolumeObservation{}, err
 	}
-	authority, err := server.instances.lockVolumeHotplug(ctx, instanceCaller{uid: uid, gid: gid}, request.VMID)
+	authority, err := server.instances.lockVolumeObservation(ctx, instanceCaller{uid: uid, gid: gid}, request.VMID)
 	if err != nil {
 		return VMVolumeObservation{}, err
 	}
@@ -173,7 +173,7 @@ func (authority *volumeHotplugAuthority) observeSelectedVolume(
 				"volume API inventory differs from root intent",
 			)
 		}
-		serial, err := observeBackingSerial(ctx, record.backingBinding(instance))
+		serial, err := observeVolumeBackingSerial(ctx, &transaction, instance, observed == nil)
 		if err != nil {
 			return VMVolumeObservation{}, err
 		}
@@ -246,8 +246,32 @@ func (transaction *volumeHotplugTransaction) proveTargetAbsent(ctx context.Conte
 }
 
 func observeBackingSerial(ctx context.Context, binding protectedBackingBinding) (_ string, returnErr error) {
-	// The mutating backing reopener may finish ACL/grow/removal journals.
-	// Observation instead admits only already-ready metadata and existing locks.
+	lease, err := openObservedBacking(ctx, binding)
+	if err != nil {
+		return "", err
+	}
+	defer func() { returnErr = errors.Join(returnErr, lease.Release(context.WithoutCancel(ctx))) }()
+	if lease.record.Phase != "ready" || len(lease.record.NextReferences) != 0 {
+		return "", instanceValidationError("observed protected backing is incomplete")
+	}
+	if err := verifyProtectedACL(ctx, lease.fd, lease.record.References); err != nil {
+		return "", err
+	}
+	return observedBackingSerial(lease), nil
+}
+
+// openObservedBacking pins existing authority and retains the logical and object locks.
+// It does not repair any phase; each named consumer admits its own exact durable intent.
+func openObservedBacking(
+	ctx context.Context,
+	binding protectedBackingBinding,
+) (result *protectedBackingLease, returnErr error) {
+	defer func() {
+		if returnErr != nil && result != nil {
+			returnErr = errors.Join(returnErr, result.Release(context.WithoutCancel(ctx)))
+			result = nil
+		}
+	}()
 	anchorFD, retained, err := openProtectedLogical(
 		ctx,
 		binding.ownerUID,
@@ -257,19 +281,21 @@ func observeBackingSerial(ctx context.Context, binding protectedBackingBinding) 
 		false,
 	)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	// openProtectedLogical retains its logical object directory immediately before its lock.
+	logicalFD := retained[len(retained)-2]
 	defer func() { returnErr = errors.Join(returnErr, closeProtectedFDs(retained)) }()
 	var anchor protectedBackingAnchor
 	if err := readProtectedRecord(ctx, anchorFD, "store.json", &anchor); err != nil {
-		return "", err
+		return nil, err
 	}
 	if anchor.Owner != binding.ownerUID || anchor.Cache != protectedCacheIdentity(binding.cacheIdentity) {
-		return "", instanceValidationError("observed protected anchor differs from lifecycle authority")
+		return nil, instanceValidationError("observed protected anchor differs from lifecycle authority")
 	}
 	locator, err := parseManagedCacheLocator(anchor.Locator)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	cache, err := pinManagedCache(
 		ctx,
@@ -279,40 +305,39 @@ func observeBackingSerial(ctx context.Context, binding protectedBackingBinding) 
 		locator,
 	)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, cache.Release(context.WithoutCancel(ctx))) }()
 	if cache.identity != binding.cacheIdentity {
-		return "", instanceValidationError("observed protected cache identity changed")
+		return nil, instanceValidationError("observed protected cache identity changed")
 	}
 	store, err := pinProtectedStore(ctx, cache, anchorFD, false)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	retained = append(retained, store)
 	metadata := anchorFD
 	for _, component := range []string{binding.kind, binding.logicalID} {
 		fd, err := openProtectedDirectory(ctx, metadata, component, false, true)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		retained, metadata = append(retained, fd), fd
 	}
 	lock, err := acquireProtectedLockMode(ctx, metadata, false)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	retained = append(retained, lock)
 	var record protectedBackingRecord
 	if err := readProtectedRecord(ctx, metadata, "record.json", &record); err != nil {
-		return "", err
+		return nil, err
 	}
 	if record.Version != 1 || record.Kind != binding.kind || record.ID != binding.logicalID ||
 		record.Owner != binding.ownerUID ||
 		record.Cache != anchor.Cache ||
-		record.Phase != "ready" ||
 		record.Backing.Size != int64(binding.bytes) {
-		return "", instanceValidationError(
+		return nil, instanceValidationError(
 			"observed protected backing is incomplete or differs from lifecycle authority",
 		)
 	}
@@ -320,37 +345,54 @@ func observeBackingSerial(ctx context.Context, binding protectedBackingBinding) 
 	for _, component := range []string{binding.kind, binding.logicalID} {
 		fd, err := openProtectedDirectory(ctx, directory, component, false, true)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		retained, directory = append(retained, fd), fd
 	}
 	directoryIdentity, err := protectedIdentity(directory)
 	if err != nil || !sameProtectedNode(directoryIdentity, record.Directory) {
-		return "", managedVMResourceAtomicError("observed protected directory identity changed", err)
+		return nil, managedVMResourceAtomicError("observed protected directory identity changed", err)
 	}
 	fd, err := openProtectedFile(ctx, directory, "disk", unix.O_RDONLY)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	retained = append(retained, fd)
 	stat, err := volumeHotplugMountIdentity(ctx, fd)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	identity, err := protectedIdentity(fd)
 	if err != nil || !sameProtectedNode(identity, record.Backing) || stat.Dev_major != binding.identity.deviceMajor ||
 		stat.Dev_minor != binding.identity.deviceMinor ||
 		stat.Ino != binding.identity.inode ||
 		stat.Size != binding.bytes {
-		return "", managedVMResourceAtomicError("observed protected backing identity changed", err)
+		return nil, managedVMResourceAtomicError("observed protected backing identity changed", err)
 	}
-	if err := verifyProtectedACL(ctx, fd, record.References); err != nil {
-		return "", err
+	stable, err := stableManagedVMConfigStat(ctx, realManagedFirecrackerConfigDeps(), fd)
+	if err != nil {
+		return nil, err
 	}
+	lease := &protectedBackingLease{
+		fd:            fd,
+		identity:      stable,
+		ownerUID:      binding.ownerUID,
+		cacheIdentity: binding.cacheIdentity,
+		metadataFD:    metadata,
+		logicalFD:     logicalFD,
+		directoryFD:   directory,
+		lockFD:        lock,
+		record:        record,
+		retained:      retained,
+	}
+	retained = nil
+	return lease, nil
+}
+
+func observedBackingSerial(lease *protectedBackingLease) string {
 	// Firecracker 1.16.2 virtio/block/device.rs builds the 20-byte disk ID
 	// by concatenating decimal st_dev, st_rdev, and st_ino. Raw backing is regular.
-	serial := firecrackerVolumeSerial(unix.Mkdev(stat.Dev_major, stat.Dev_minor), 0, stat.Ino)
-	return serial, nil
+	return firecrackerVolumeSerial(lease.record.Backing.Device, 0, lease.record.Backing.Inode)
 }
 
 func firecrackerVolumeSerial(device, rdev, inode uint64) string {

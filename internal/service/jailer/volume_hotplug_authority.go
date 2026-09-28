@@ -27,6 +27,25 @@ func (authority *instanceAuthority) lockVolumeHotplug(
 	if err != nil {
 		return nil, err
 	}
+	return admitVolumeHotplugAuthority(ctx, locked)
+}
+
+func (authority *instanceAuthority) lockVolumeObservation(
+	ctx context.Context, caller instanceCaller, vmID string,
+) (*volumeHotplugAuthority, error) {
+	locked, err := authority.lockObservedInstance(ctx, caller, vmID)
+	if err != nil {
+		return nil, err
+	}
+	return admitVolumeHotplugAuthority(ctx, locked)
+}
+
+func admitVolumeHotplugAuthority(
+	ctx context.Context,
+	locked *lockedInstance,
+) (_ *volumeHotplugAuthority, returnErr error) {
+	vmID := locked.record.vmID
+	var err error
 	result := &volumeHotplugAuthority{locked: locked, pidfd: -1, root: -1, namespace: -1}
 	defer func() {
 		if returnErr != nil {

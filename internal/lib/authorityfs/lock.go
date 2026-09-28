@@ -40,7 +40,15 @@ func (jailer *Jailer) AcquireIndex(ctx context.Context) (*Lock, error) {
 	if !state.active {
 		return nil, fmt.Errorf("authorityfs: Jailer authority is released")
 	}
-	return acquireLock(ctx, state.deps, state.policy, state.authority, "index.lock", "Jailer index")
+	return acquireLockMode(
+		ctx,
+		state.deps,
+		state.policy,
+		state.authority,
+		"index.lock",
+		"Jailer index",
+		!state.existingOnly,
+	)
 }
 
 // AcquireIndex acquires the global managed-network ownership-index lock.
@@ -78,7 +86,15 @@ func (jailer *Jailer) AcquireRelease(ctx context.Context, key ReleaseKey) (*Lock
 	if !state.active {
 		return nil, fmt.Errorf("authorityfs: Jailer authority is released")
 	}
-	return acquireLock(ctx, state.deps, state.policy, state.releases, key.value+".lock", "Jailer release")
+	return acquireLockMode(
+		ctx,
+		state.deps,
+		state.policy,
+		state.releases,
+		key.value+".lock",
+		"Jailer release",
+		!state.existingOnly,
+	)
 }
 
 // AcquireVM acquires the Jailer VM authority for one canonical owner-bound VM identity.
@@ -95,7 +111,15 @@ func (uid *JailerUID) AcquireVM(ctx context.Context, key VMKey) (*JailerVM, erro
 	if !state.active {
 		return nil, fmt.Errorf("authorityfs: Jailer UID authority is released")
 	}
-	lock, err := acquireLock(ctx, state.deps, state.policy, state.fd, key.value+".lock", "Jailer VM")
+	lock, err := acquireLockMode(
+		ctx,
+		state.deps,
+		state.policy,
+		state.fd,
+		key.value+".lock",
+		"Jailer VM",
+		!state.existingOnly,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -170,13 +194,22 @@ func acquireLock(
 	name string,
 	description string,
 ) (*Lock, error) {
+	return acquireLockMode(ctx, deps, policy, parentFD, name, description, true)
+}
+
+func acquireLockMode(
+	ctx context.Context, deps dependencies, policy policy, parentFD int, name string, description string, create bool,
+) (*Lock, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("authorityfs: acquire %s lock: %w", description, err)
 	}
 	createHow := &unix.OpenHow{Flags: lockCreate, Mode: uint64(lockMode), Resolve: resolveManaged}
+	if !create {
+		createHow = &unix.OpenHow{Flags: lockFlags, Resolve: resolveManaged}
+	}
 	fd, err := deps.openAt2(ctx, parentFD, name, createHow)
-	created := err == nil
-	if errors.Is(err, unix.EEXIST) {
+	created := create && err == nil
+	if create && errors.Is(err, unix.EEXIST) {
 		fd, err = deps.openAt2(
 			ctx,
 			parentFD,

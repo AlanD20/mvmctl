@@ -127,6 +127,10 @@ func (tree *testInstanceAuthorityTree) openJailer(ctx context.Context) (instance
 	return &testInstanceJailerAuthority{tree: tree}, nil
 }
 
+func (tree *testInstanceAuthorityTree) openExistingJailer(ctx context.Context) (instanceJailerAuthority, error) {
+	return tree.openJailer(ctx)
+}
+
 func (authority *testInstanceJailerAuthority) acquireIndex(
 	ctx context.Context,
 ) (instanceAuthorityLock, error) {
