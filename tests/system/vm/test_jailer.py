@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import platform
+import re
+import select
 import shlex
 import socket
+import subprocess
+import tarfile
 import time
 import uuid
+from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generator
 
@@ -19,12 +26,11 @@ from tests.system.conftest import (
     _guest_run,
     _json_success_data,
     _parse_vm_list,
-    _run_mvm,
-    cleanup_vm_resources,
-    create_vm_core,
-    ensure_vm_deps,
+    _run_mvm as _installed_mvm,
+    _unique_subnet,
 )
 from tests.system.vm.test_vm_lifecycle import _kill_exact_test_firecracker
+from tests.system.bin.test_bin import _file_identity, _require_bin_root_projection
 
 pytestmark = [
     pytest.mark.system,
@@ -35,11 +41,776 @@ pytestmark = [
 ]
 
 
+@dataclass(frozen=True)
+class _JailerReceipt:
+    domain: str
+    identifier: str
+    name: str
+    identity: tuple[tuple[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class _JailerSnapshotIntent:
+    identifier: str
+    name: str
+    source_id: str
+    path: str
+
+
+class _JailerResources:
+    """Own only admitted test creations; names never authorize removal."""
+
+    def __init__(self, runner_vm: str) -> None:
+        self.runner_vm = runner_vm
+        self.baseline = {domain: self.rows(domain) for domain in ("vm", "network", "volume", "snapshot")}
+        self.attempts: dict[tuple[str, str], str | None] = {}
+        self.pending: set[tuple[str, str]] = set()
+        self.receipts: dict[tuple[str, str], _JailerReceipt] = {}
+        self.snapshot_intents: dict[str, _JailerSnapshotIntent] = {}
+        self.binaries = self.rows("bin")
+        self.kernels = self.rows("kernel")
+        self.images = self.rows("image")
+        self.settings = _json_success_data(
+            _installed_mvm(runner_vm, "config", "get", "settings", "--json").stdout,
+            dict,
+        )
+        guestfs = _json_success_data(
+            _installed_mvm(runner_vm, "config", "get", "settings", "guestfs_enabled", "--json").stdout,
+            bool,
+        )
+        assert guestfs is False, "preseed the runner's LoopMount setting"
+        assert any(row["is_default"] and row["is_present"] for row in self.kernels), "preseed the default kernel"
+        assert any(row["type"] == "alpine" and row["version"] == "3.23" and row["is_present"] for row in self.images), (
+            "preseed alpine:3.23"
+        )
+        defaults = {row["type"]: row for row in self.binaries if row["is_default"]}
+        assert set(defaults) == {"firecracker", "jailer"}
+        assert all(row["version"] == "1.16.2" and row["is_present"] for row in defaults.values())
+
+    def rows(self, domain: str) -> list[dict[str, Any]]:
+        return _json_success_data(_installed_mvm(self.runner_vm, domain, "ls", "--json").stdout, list)
+
+    def attempt(self, domain: str, name: str, source_id: str | None = None) -> None:
+        assert all(row["name"] != name for row in self.baseline[domain]), f"pre-existing {domain}: {name}"
+        assert all(row["name"] != name for row in self.rows(domain)), f"occupied {domain}: {name}"
+        self.attempts[domain, name] = source_id
+        self.pending.add((domain, name))
+
+    def retain(self, domain: str, row: dict[str, Any]) -> None:
+        identifier, name = row["id"], row["name"]
+        assert re.fullmatch(r"[0-9a-f]{32}" if domain == "vm" else r"[0-9a-f]{64}", identifier), row
+        assert all(item["id"] != identifier for item in self.baseline[domain]), row
+        if domain == "volume" and (domain, name) not in self.attempts:
+            assert any(
+                receipt.domain == "vm" and receipt.identifier == row.get("vm_id") for receipt in self.receipts.values()
+            ), "unowned restored volume"
+        else:
+            assert (domain, name) in self.attempts, (domain, row)
+        fields = {
+            "vm": (
+                "name",
+                "kernel_id",
+                "image_id",
+                "network_id",
+                "binary_id",
+                "jailer_binary_id",
+            ),
+            "network": ("name", "subnet"),
+            "volume": ("name", "path", "format"),
+            "snapshot": (
+                "name",
+                "source_vm_id",
+                "memory_file",
+                "state_file",
+                "rootfs_file",
+            ),
+        }[domain]
+        identity = tuple((field, row[field]) for field in fields)
+        if domain == "snapshot":
+            assert row["source_vm_id"] == self.attempts[domain, name]
+            intent = self.snapshot_intents.get(identifier)
+            assert intent is not None and (intent.name, intent.source_id) == (
+                name,
+                row["source_vm_id"],
+            )
+            assert str(Path(row["memory_file"]).parent) == intent.path
+        receipt = _JailerReceipt(domain, identifier, name, identity)
+        previous = self.receipts.get((domain, identifier))
+        assert (
+            previous is not None
+            or (domain, name) in self.pending
+            or (domain == "volume" and (domain, name) not in self.attempts)
+        ), "refuse a replacement outside the creation attempt"
+        assert previous is None or previous == receipt, "creation identity changed"
+        self.receipts[domain, identifier] = receipt
+        self.pending.discard((domain, name))
+
+    def reconcile(self) -> None:
+        """Retain partial projections before assertions and before removing any VM."""
+        for domain in ("vm", "network", "snapshot"):
+            for row in self.rows(domain):
+                if (domain, row["name"]) in self.attempts:
+                    self.retain(domain, row)
+        for row in self.rows("volume"):
+            if ("volume", row["name"]) in self.attempts or any(
+                receipt.domain == "vm" and receipt.identifier == row.get("vm_id") for receipt in self.receipts.values()
+            ):
+                self.retain("volume", row)
+
+    def checked_id(self, domain: str, identifier: str) -> str:
+        rows = self.rows(domain)
+        selected = [row for row in rows if row["id"] == identifier or row["name"] == identifier]
+        assert len(selected) == 1, (domain, identifier, selected)
+        row = selected[0]
+        receipt = self.receipts.get((domain, row["id"]))
+        assert receipt is not None, f"refuse removal without {domain} creation receipt"
+        assert row["name"] == receipt.name
+        assert tuple((field, row[field]) for field, _ in receipt.identity) == receipt.identity
+        return receipt.identifier
+
+    def retain_snapshot_intent(self, stderr: str, name: str, source_id: str, directory: str) -> None:
+        identifiers = [
+            line.removeprefix("Snapshot request ID: ")
+            for line in stderr.splitlines()
+            if line.startswith("Snapshot request ID: ")
+        ]
+        assert len(identifiers) <= 1, stderr
+        for identifier in identifiers:
+            assert re.fullmatch(r"[0-9a-f]{64}", identifier), stderr
+            assert all(row["id"] != identifier for row in self.baseline["snapshot"])
+            intent = _JailerSnapshotIntent(identifier, name, source_id, str(Path(directory) / identifier))
+            previous = self.snapshot_intents.get(identifier)
+            assert previous is None or previous == intent
+            self.snapshot_intents[identifier] = intent
+
+    def path_present(self, path: str) -> bool:
+        result = _guest_run(self.runner_vm, f"sudo -n test -e {shlex.quote(path)}", check=False)
+        assert result.returncode in (0, 1) and not result.stderr, (
+            result.stdout,
+            result.stderr,
+        )
+        return result.returncode == 0
+
+    def cleanup(self, *, check_assets: bool = True) -> None:
+        errors: list[str] = []
+
+        def checked(label: str, operation: Any) -> None:
+            try:
+                operation()
+            except Exception as error:
+                errors.append(f"{label}: {error}")
+
+        checked("retain partial creations", self.reconcile)
+        for domain in ("vm", "volume", "snapshot", "network"):
+            for receipt in tuple(self.receipts.values()):
+                if receipt.domain != domain:
+                    continue
+
+                def remove(receipt: _JailerReceipt = receipt) -> None:
+                    rows = self.rows(receipt.domain)
+                    assert all(
+                        row["name"] != receipt.name
+                        or row["id"] == receipt.identifier
+                        or (receipt.domain, row["id"]) in self.receipts
+                        for row in rows
+                    )
+                    if any(row["id"] == receipt.identifier for row in rows):
+                        exact = self.checked_id(receipt.domain, receipt.identifier)
+                        result = _installed_mvm(
+                            self.runner_vm,
+                            receipt.domain,
+                            "rm",
+                            exact,
+                            "--force",
+                            check=False,
+                            timeout=120,
+                        )
+                        assert result.returncode == 0, (result.stdout, result.stderr)
+                    assert all(row["id"] != receipt.identifier for row in self.rows(receipt.domain))
+                    if receipt.domain == "vm":
+                        assert not self.path_present(_jail_root(receipt.identifier))
+                    elif receipt.domain == "volume":
+                        assert not self.path_present(dict(receipt.identity)["path"])
+                    elif receipt.domain == "snapshot":
+                        assert not self.path_present(str(Path(dict(receipt.identity)["memory_file"]).parent))
+
+                checked(f"remove {domain} {receipt.identifier}", remove)
+            if domain == "snapshot":
+                for intent in self.snapshot_intents.values():
+
+                    def remove_intent(intent: _JailerSnapshotIntent = intent) -> None:
+                        if self.path_present(intent.path):
+                            result = _installed_mvm(
+                                self.runner_vm,
+                                "snapshot",
+                                "rm",
+                                intent.identifier,
+                                "--force",
+                                check=False,
+                            )
+                            assert result.returncode == 0, (
+                                result.stdout,
+                                result.stderr,
+                            )
+                        assert not self.path_present(intent.path)
+
+                    checked(
+                        f"remove partial snapshot request {intent.identifier}",
+                        remove_intent,
+                    )
+            checked(
+                f"restore {domain} inventory",
+                lambda domain=domain: self.require_baseline(domain),
+            )
+        if check_assets:
+            for domain, original in (
+                ("bin", self.binaries),
+                ("kernel", self.kernels),
+                ("image", self.images),
+            ):
+                checked(
+                    f"preserve {domain} assets/defaults",
+                    lambda domain=domain, original=original: self.require_assets(domain, original),
+                )
+        checked("preserve settings", lambda: self.require_settings())
+        assert not errors, "Jailer teardown failures:\n" + "\n".join(errors)
+
+    def require_baseline(self, domain: str) -> None:
+        fields = {
+            "vm": ("id", "name", "status", "pid", "process_start_time", "network_id", "ipv4", "mac"),
+            "network": ("id", "name", "subnet", "is_default", "is_present"),
+            "volume": ("id", "name", "path", "format", "status", "vm_id", "size_bytes", "is_shareable", "is_read_only"),
+            "snapshot": ("id", "name", "source_vm_id", "memory_file", "state_file", "rootfs_file"),
+        }[domain]
+        current = {tuple(row.get(field) for field in fields) for row in self.rows(domain)}
+        original = {tuple(row.get(field) for field in fields) for row in self.baseline[domain]}
+        assert current == original, (domain, current, original)
+
+    def require_assets(self, domain: str, original: list[dict[str, Any]]) -> None:
+        def identity(rows: list[dict[str, Any]]) -> set[tuple[Any, ...]]:
+            return {
+                (
+                    row["id"],
+                    row.get("path"),
+                    row.get("is_present"),
+                    row.get("is_default"),
+                )
+                for row in rows
+            }
+
+        assert identity(self.rows(domain)) == identity(original), domain
+
+    def require_settings(self) -> None:
+        current = _json_success_data(
+            _installed_mvm(self.runner_vm, "config", "get", "settings", "--json").stdout,
+            dict,
+        )
+        assert current == self.settings
+
+
+_resources: ContextVar[_JailerResources] = ContextVar("jailer_resources")
+
+
+_JAILER_RELEASE_RECEIVER = r"""
+import hashlib, json, os, re, stat, sys
+
+fds, parents = [], []
+directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+file_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+def identity(info, directory=False):
+    value = [info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode]
+    return value if directory else value + [info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+
+def unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        assert key not in value, "duplicate trusted release field"
+        value[key] = item
+    return value
+
+def directory(parent, name, managed=True):
+    fd = os.open(name, directory_flags, dir_fd=parent)
+    fds.append(fd)
+    info = os.fstat(fd)
+    assert info.st_uid == info.st_gid == 0 and stat.S_ISDIR(info.st_mode), name
+    assert stat.S_IMODE(info.st_mode) == 0o700 if managed else not info.st_mode & 0o022, name
+    parents.append((parent, name, fd, identity(info, True)))
+    return fd
+
+def verify_parents():
+    for parent, name, fd, expected in parents:
+        assert identity(os.fstat(fd), True) == expected, name
+        assert identity(os.stat(name, dir_fd=parent, follow_symlinks=False), True) == expected, name
+
+def read_file(fd, maximum):
+    expected = identity(os.fstat(fd))
+    assert expected[6] <= maximum
+    os.lseek(fd, 0, os.SEEK_SET)
+    data = bytearray()
+    while len(data) <= maximum:
+        part = os.read(fd, min(65536, maximum + 1 - len(data)))
+        if not part:
+            break
+        data.extend(part)
+    assert len(data) <= maximum and identity(os.fstat(fd)) == expected
+    return bytes(data)
+
+def absent(version):
+    verify_parents()
+    try:
+        os.stat(version, dir_fd=architecture, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    raise AssertionError("trusted release slot exists: " + version)
+
+def pair(version):
+    slot = directory(architecture, version)
+    assert set(os.listdir(slot)) == {"manifest.json", "firecracker", "jailer"}
+    leaves = {}
+    for name in ("manifest.json", "firecracker", "jailer"):
+        fd = os.open(name, file_flags, dir_fd=slot)
+        fds.append(fd)
+        info = os.fstat(fd)
+        assert info.st_uid == info.st_gid == 0 and stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+        assert stat.S_IMODE(info.st_mode) == (0o600 if name == "manifest.json" else 0o755)
+        leaves[name] = (fd, identity(info))
+    return slot, leaves
+
+def receipt(retained, version):
+    slot, leaves = retained
+    verify_parents()
+    assert set(os.listdir(slot)) == set(leaves)
+    contents, identities = {}, {}
+    for name, (fd, expected) in leaves.items():
+        assert identity(os.fstat(fd)) == expected
+        assert identity(os.stat(name, dir_fd=slot, follow_symlinks=False)) == expected
+        contents[name] = read_file(fd, 4096 if name == "manifest.json" else 64 * 1024 * 1024)
+        identities[name] = expected
+    manifest = json.loads(contents["manifest.json"], object_pairs_hook=unique_object)
+    assert set(manifest) == {"schema_version", "release", "archive_sha256", "firecracker", "jailer"}
+    assert type(manifest["schema_version"]) is int and manifest["schema_version"] == 1
+    assert manifest["release"] == {"version": version, "architecture": "x86_64"}
+    assert re.fullmatch(r"[0-9a-f]{64}", manifest["archive_sha256"])
+    for name in ("firecracker", "jailer"):
+        item = manifest[name]
+        assert set(item) == {"sha256", "size_bytes"} and type(item["size_bytes"]) is int
+        assert 120 <= item["size_bytes"] <= 64 * 1024 * 1024
+        assert item["size_bytes"] == len(contents[name])
+        assert re.fullmatch(r"[0-9a-f]{64}", item["sha256"])
+        assert item["sha256"] == hashlib.sha256(contents[name]).hexdigest()
+    return {"manifest": manifest, "directory": identity(os.fstat(slot), True), "files": identities}
+
+def forget(retained):
+    parents[:] = [entry for entry in parents if entry[2] != retained[0]]
+
+try:
+    root = directory(None, "/", False)
+    var = directory(root, "var", False)
+    lib = directory(var, "lib", False)
+    state = directory(lib, "mvmctl")
+    binaries = directory(state, "binaries")
+    architecture = directory(binaries, "x86_64")
+    source = pair("1.16.2")
+    source_baseline = receipt(source, "1.16.2")
+    try:
+        os.stat("1.16.0", dir_fd=architecture, follow_symlinks=False)
+    except FileNotFoundError:
+        older = None
+        absent("1.16.0")
+    else:
+        older = pair("1.16.0")
+    older_baseline = receipt(older, "1.16.0") if older else None
+    print(json.dumps({"source": source_baseline, "older": older_baseline}), flush=True)
+    for line in sys.stdin:
+        command = line.strip()
+        if command == "close":
+            break
+        if command == "older-admit":
+            assert older is None
+            older = pair("1.16.0")
+            value = receipt(older, "1.16.0")
+        elif command == "older-observe":
+            if older is None:
+                try:
+                    os.stat("1.16.0", dir_fd=architecture, follow_symlinks=False)
+                except FileNotFoundError:
+                    absent("1.16.0")
+                    value = {"absent": True}
+                else:
+                    older = pair("1.16.0")
+                    value = receipt(older, "1.16.0")
+            else:
+                value = receipt(older, "1.16.0")
+        elif command == "older-verify":
+            assert older is not None
+            value = receipt(older, "1.16.0")
+        elif command == "older-removed":
+            assert older_baseline is None and older is not None
+            forget(older)
+            older = None
+            absent("1.16.0")
+            value = {"absent": True}
+        elif command == "older-absent":
+            assert older is None
+            absent("1.16.0")
+            value = {"absent": True}
+        elif command == "source-verify":
+            assert source is not None
+            value = receipt(source, "1.16.2")
+        elif command == "source-removed":
+            assert source is not None
+            forget(source)
+            source = None
+            absent("1.16.2")
+            value = {"absent": True}
+        elif command == "source-observe":
+            try:
+                os.stat("1.16.2", dir_fd=architecture, follow_symlinks=False)
+            except FileNotFoundError:
+                if source is not None:
+                    forget(source)
+                    source = None
+                absent("1.16.2")
+                value = {"absent": True}
+            else:
+                if source is None:
+                    source = pair("1.16.2")
+                value = receipt(source, "1.16.2")
+                assert value["manifest"] == source_baseline["manifest"]
+        elif command == "source-readmit":
+            assert source is None
+            source = pair("1.16.2")
+            value = receipt(source, "1.16.2")
+            assert value["manifest"] == source_baseline["manifest"]
+        else:
+            raise AssertionError("unknown Jailer release observation")
+        if source is not None:
+            assert receipt(source, "1.16.2")["manifest"] == source_baseline["manifest"]
+        if older_baseline is not None:
+            assert receipt(older, "1.16.0") == older_baseline
+        print(json.dumps(value), flush=True)
+except BaseException as error:
+    print(json.dumps({"error": str(error)}), flush=True)
+    raise
+finally:
+    for fd in reversed(fds):
+        os.close(fd)
+"""
+
+
+class _JailerReleaseOwnership:
+    """Pin the two fixed release slots through the deliberate release-failure tests."""
+
+    def __init__(self) -> None:
+        assert platform.machine() == "x86_64"
+        self.process = subprocess.Popen(
+            [
+                "sudo",
+                "-n",
+                "/usr/bin/python3",
+                "-I",
+                "-u",
+                "-c",
+                _JAILER_RELEASE_RECEIVER,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def read(self) -> dict[str, Any]:
+        assert select.select([self.process.stdout], [], [], 30)[0], "release ownership observation timed out"
+        line = self.process.stdout.readline(16385)
+        assert line and len(line) <= 16384, "missing or oversized release receipt"
+        receipt = json.loads(line)
+        assert "error" not in receipt, receipt
+        return receipt
+
+    def require(self, phase: str) -> dict[str, Any]:
+        self.process.stdin.write(phase + "\n")
+        self.process.stdin.flush()
+        return self.read()
+
+    def close(self) -> None:
+        if self.process.poll() is None:
+            try:
+                self.process.stdin.write("close\n")
+                self.process.stdin.flush()
+            except BrokenPipeError:
+                pass
+        try:
+            self.process.stdin.close()
+        except BrokenPipeError:
+            pass
+        self.process.wait(timeout=30)
+        error = self.process.stderr.read(16385)
+        self.process.stdout.close()
+        self.process.stderr.close()
+        assert self.process.returncode == 0, error
+
+
+def _mirrored_jailer_release(version: str) -> tuple[Path, tuple, dict[str, Any]]:
+    assert version in ("1.16.0", "1.16.2") and platform.machine() == "x86_64"
+    archive = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser() / f"firecracker-v{version}-x86_64.tgz"
+    identity = _file_identity(archive)
+    assert 0 < identity[-1] <= 128 * 1024 * 1024, archive
+    fd = os.open(archive, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as source:
+        assert _file_identity(archive) == identity
+        info = os.fstat(source.fileno())
+        assert (info.st_dev, info.st_ino) == identity[:2]
+        manifest = {
+            "schema_version": 1,
+            "release": {"version": version, "architecture": "x86_64"},
+            "archive_sha256": hashlib.file_digest(source, "sha256").hexdigest(),
+        }
+        source.seek(0)
+        names = {f"release-v{version}-x86_64/{kind}-v{version}-x86_64": kind for kind in ("firecracker", "jailer")}
+        with tarfile.open(fileobj=source, mode="r|gz") as bundle:
+            for index, member in enumerate(bundle):
+                assert index < 128
+                if member.name in names:
+                    kind = names[member.name]
+                    assert kind not in manifest and member.isfile()
+                    assert 120 <= member.size <= 64 * 1024 * 1024
+                    with bundle.extractfile(member) as executable:
+                        manifest[kind] = {
+                            "sha256": hashlib.file_digest(executable, "sha256").hexdigest(),
+                            "size_bytes": member.size,
+                        }
+        assert set(manifest) == {
+            "schema_version",
+            "release",
+            "archive_sha256",
+            "firecracker",
+            "jailer",
+        }
+        assert _file_identity(archive) == identity
+        assert os.fstat(source.fileno()).st_ctime_ns == identity[-2]
+    return archive, identity, manifest
+
+
+class _JailerReleases:
+    """Restore only this journey's observed default and fixed-release mutations."""
+
+    def __init__(self, runner_vm: str, *, remove_source: bool = False) -> None:
+        self.runner_vm = runner_vm
+        self.resources = _resources.get()
+        self.defaults = {row["type"]: row["id"] for row in self.resources.binaries if row["is_default"]}
+        self.older_archive = _mirrored_jailer_release("1.16.0")
+        self.source_archive = _mirrored_jailer_release("1.16.2") if remove_source else None
+        self.older_pull_attempted = False
+        self.source_remove_attempted = False
+        self.older_receipt: dict[str, Any] | None = None
+        self.ownership = _JailerReleaseOwnership()
+        try:
+            self.baseline = self.ownership.read()
+            self.source_pair = _require_bin_root_projection(self.resources.binaries, self.baseline["source"])
+            self.older_owned = self.baseline["older"] is None
+            older_rows = [row for row in self.resources.binaries if row["version"] == "1.16.0"]
+            if self.older_owned:
+                assert not older_rows, "preserve an existing unadmitted 1.16.0 projection"
+            else:
+                _require_bin_root_projection(self.resources.binaries, self.baseline["older"])
+            if self.source_archive is not None:
+                assert self.source_archive[2] == self.baseline["source"]["manifest"]
+        except Exception:
+            self.ownership.close()
+            raise
+
+    def pull_older(self) -> dict[str, Any]:
+        if self.older_owned:
+            self.ownership.require("older-absent")
+            assert _file_identity(self.older_archive[0]) == self.older_archive[1]
+            self.older_pull_attempted = True
+            result = _installed_mvm(
+                self.runner_vm,
+                "bin",
+                "pull",
+                "1.16.0",
+                "--json",
+                check=False,
+                timeout=300,
+            )
+            self.older_receipt = self.ownership.require("older-observe")
+            assert "manifest" in self.older_receipt, (result.stdout, result.stderr)
+            assert self.older_receipt["manifest"] == self.older_archive[2]
+            assert _file_identity(self.older_archive[0]) == self.older_archive[1]
+            assert result.returncode == 0, (result.stdout, result.stderr)
+        else:
+            self.older_receipt = self.ownership.require("older-verify")
+        pair = _require_bin_root_projection(self.resources.rows("bin"), self.older_receipt)
+        return next(row for row in pair if row["type"] == "firecracker")
+
+    def remove_source(self) -> None:
+        assert self.source_archive is not None
+        assert self.ownership.require("source-verify") == self.baseline["source"]
+        _require_bin_root_projection(self.resources.rows("bin"), self.baseline["source"])
+        self.source_remove_attempted = True
+        result = _installed_mvm(self.runner_vm, "bin", "rm", "1.16.2", "--force", check=False)
+        observed = self.ownership.require("source-observe")
+        assert result.returncode == 0 and observed == {"absent": True}, (
+            result.stdout,
+            result.stderr,
+            observed,
+        )
+
+    def cleanup(self) -> None:
+        errors: list[str] = []
+
+        def checked(label: str, operation: Any) -> None:
+            try:
+                operation()
+            except Exception as error:
+                errors.append(f"{label}: {error}")
+
+        checked(
+            "remove owned VM/storage resources",
+            lambda: self.resources.cleanup(check_assets=False),
+        )
+
+        def restore_source() -> None:
+            if self.source_remove_attempted:
+                observed = self.ownership.require("source-observe")
+                if observed == {"absent": True}:
+                    assert self.source_archive is not None
+                    assert _file_identity(self.source_archive[0]) == self.source_archive[1]
+                    result = _installed_mvm(
+                        self.runner_vm,
+                        "bin",
+                        "pull",
+                        "1.16.2",
+                        "--json",
+                        check=False,
+                        timeout=300,
+                    )
+                    admitted = self.ownership.require("source-readmit")
+                    assert admitted["manifest"] == self.baseline["source"]["manifest"]
+                    assert _file_identity(self.source_archive[0]) == self.source_archive[1]
+                    _require_bin_root_projection(self.resources.rows("bin"), admitted)
+                    assert result.returncode == 0, (result.stdout, result.stderr)
+            else:
+                assert self.ownership.require("source-verify") == self.baseline["source"]
+
+        checked("restore exact captured source release", restore_source)
+        for kind, identifier in self.defaults.items():
+            checked(
+                f"restore {kind} default {identifier}",
+                lambda identifier=identifier: _installed_mvm(self.runner_vm, "bin", "default", identifier),
+            )
+
+        def remove_older() -> None:
+            assert self.ownership.require("source-verify")["manifest"] == self.baseline["source"]["manifest"]
+            rows = self.resources.rows("bin")
+            assert {row["type"]: row["id"] for row in rows if row["is_default"]} == self.defaults
+            if self.older_owned and self.older_pull_attempted:
+                observed = self.ownership.require("older-observe")
+                if observed != {"absent": True}:
+                    assert observed["manifest"] == self.older_archive[2]
+                    if self.older_receipt is not None and "manifest" in self.older_receipt:
+                        assert observed == self.older_receipt
+                    self.older_receipt = observed
+                    _require_bin_root_projection(rows, observed)
+                    assert self.ownership.require("older-verify") == observed
+                    result = _installed_mvm(self.runner_vm, "bin", "rm", "1.16.0", "--force", check=False)
+                    assert result.returncode == 0, (result.stdout, result.stderr)
+                    assert self.ownership.require("older-removed") == {"absent": True}
+                else:
+                    assert self.ownership.require("older-absent") == {"absent": True}
+            elif not self.older_owned:
+                assert self.ownership.require("older-verify") == self.baseline["older"]
+
+        checked("remove only the owned older release", remove_older)
+        checked("restore all inventories/assets/defaults", self.resources.cleanup)
+        checked("close retained root release observations", self.ownership.close)
+        assert not errors, "Jailer release rollback failures:\n" + "\n".join(errors)
+
+
+@pytest.fixture(autouse=True)
+def jailer_resources(runner_vm: str) -> Generator[_JailerResources, None, None]:
+    resources = _JailerResources(runner_vm)
+    token = _resources.set(resources)
+    try:
+        yield resources
+    finally:
+        try:
+            resources.cleanup()
+        finally:
+            _resources.reset(token)
+
+
+def _run_mvm(runner_vm: str, *args: str, check: bool = True, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    """Retain this module's create/restore receipts before returning to its test body."""
+    resources = _resources.get()
+    command = list(args)
+    domain, action = command[:2]
+    created_domain: str | None = None
+    snapshot_intent: tuple[str, str, str] | None = None
+    if action == "create" and domain in ("vm", "network", "volume", "snapshot"):
+        created_domain = domain
+        if domain == "snapshot":
+            source = _vm_entry(runner_vm, command[2])
+            source_id = resources.checked_id("vm", source["id"])
+            if "--name" not in command:
+                command.extend(["--name", f"sys-jailer-snapshot-{uuid.uuid4().hex[:8]}"])
+            resources.attempt(domain, command[command.index("--name") + 1], source_id)
+            inspected = _json_success_data(
+                _installed_mvm(runner_vm, "vm", "inspect", source_id, "--json").stdout,
+                dict,
+            )
+            assert inspected["vm"]["id"] == source_id
+            cache = Path(inspected["filesystem"]["vm_dir"]).parent.parent
+            snapshot_intent = (
+                command[command.index("--name") + 1],
+                source_id,
+                str(cache / ".mvm-protected" / "snapshots"),
+            )
+        else:
+            resources.attempt(domain, command[2])
+    elif domain == "snapshot" and action == "restore":
+        created_domain = "vm"
+        resources.attempt("vm", command[3])
+    elif action == "rm" and domain in ("vm", "network", "volume", "snapshot"):
+        resources.reconcile()
+        command[2] = resources.checked_id(domain, command[2])
+    if created_domain and "--json" not in command:
+        command.append("--json")
+    try:
+        result = _installed_mvm(runner_vm, *command, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        if snapshot_intent is not None and error.stderr:
+            stderr = error.stderr.decode() if isinstance(error.stderr, bytes) else error.stderr
+            resources.retain_snapshot_intent(stderr, *snapshot_intent)
+        raise
+    if snapshot_intent is not None:
+        resources.retain_snapshot_intent(result.stderr, *snapshot_intent)
+    if created_domain:
+        if result.returncode == 0:
+            rows = _json_success_data(result.stdout, list if created_domain == "vm" else dict)
+            for row in rows if isinstance(rows, list) else [rows]:
+                resources.retain(created_domain, row)
+        elif result.stdout.strip():
+            response = json.loads(result.stdout)
+            assert response["schema_version"] == 1 and response["status"] == "error", response
+            partial = response["data"]
+            if partial is not None:
+                assert isinstance(partial, list if created_domain == "vm" else dict), response
+                for row in partial if isinstance(partial, list) else [partial]:
+                    resources.retain(created_domain, row)
+        resources.reconcile()
+    if check:
+        assert result.returncode == 0, (command, result.stdout, result.stderr)
+    return result
+
+
 def _vm_entry(runner_vm: str, vm_name: str) -> dict[str, Any]:
     result = _run_mvm(runner_vm, "vm", "ls", "--json")
     vms = _parse_vm_list(result.stdout)
     entry = next((vm for vm in vms if vm.get("name") == vm_name), None)
     assert entry is not None, f"VM {vm_name!r} is absent from vm ls --json"
+    _resources.get().checked_id("vm", entry["id"])
     return entry
 
 
@@ -51,12 +822,48 @@ def _jail_root(vm_id: str) -> str:
 def jailed_vm(runner_vm: str) -> Generator[dict[str, Any], None, None]:
     vm_name = f"sys-jailer-{uuid.uuid4().hex[:8]}"
     net_name = f"sys-jailer-net-{uuid.uuid4().hex[:6]}"
-    vm = create_vm_core(vm_name, net_name, extra_args=["--console"])
-    vm["network_name"] = net_name
     try:
+        _run_mvm(
+            runner_vm,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            _unique_subnet(net_name),
+        )
+        created = _json_success_data(
+            _run_mvm(
+                runner_vm,
+                "vm",
+                "create",
+                vm_name,
+                "--image",
+                "alpine:3.23",
+                "--network",
+                net_name,
+                "--console",
+                "--json",
+                timeout=180,
+            ).stdout,
+            list,
+        )
+        assert len(created) == 1
+        vm = created[0]
+        vm["network_name"] = net_name
         yield vm
     finally:
-        cleanup_vm_resources(vm_name, net_name)
+        _resources.get().cleanup()
+
+
+@pytest.fixture
+def created_network(runner_vm: str) -> Generator[str, None, None]:
+    """Own the mismatch-oracle network without changing a shared default."""
+    name = f"sys-jailer-other-net-{uuid.uuid4().hex[:8]}"
+    try:
+        _run_mvm(runner_vm, "network", "create", name, "--subnet", _unique_subnet(name))
+        yield name
+    finally:
+        _resources.get().cleanup()
 
 
 class TestCanonicalJailerLaunch:
@@ -145,7 +952,6 @@ class TestCanonicalJailerLaunch:
         vm_name = jailed_vm["name"]
         volume_name = f"sys-jailer-vol-{uuid.uuid4().hex[:6]}"
         snapshot_id: str | None = None
-        restored_volume_ids: set[str] = set()
         try:
             source_inspect = _json_success_data(
                 _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
@@ -215,7 +1021,7 @@ class TestCanonicalJailerLaunch:
                 if volume.get("vm_id") == restored_vm["id"]
             ]
             assert len(attached_copies) == 1, attached_copies
-            restored_volume_ids.add(attached_copies[0]["id"])
+            assert ("volume", attached_copies[0]["id"]) in _resources.get().receipts
             assert attached_copies[0]["id"] != attached["volume"]["id"]
             restored_inspect = _json_success_data(
                 _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
@@ -231,29 +1037,7 @@ class TestCanonicalJailerLaunch:
                 check=False,
             ).returncode == 0
         finally:
-            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            restored_entry = next((vm for vm in listed if vm["name"] == vm_name), None)
-            if restored_entry is not None:
-                volumes = _json_success_data(
-                    _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
-                )
-                restored_volume_ids.update(
-                    volume["id"] for volume in volumes
-                    if volume.get("vm_id") == restored_entry["id"]
-                    and volume["name"] != volume_name
-                )
-                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force")
-            for volume_id in sorted(restored_volume_ids):
-                _run_mvm(runner_vm, "volume", "rm", volume_id, "--force")
-            _run_mvm(runner_vm, "volume", "rm", volume_name, "--force", check=False)
-            if snapshot_id:
-                _run_mvm(
-                    runner_vm, "snapshot", "rm", snapshot_id, "--force", check=False
-                )
-            remaining = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
-            )
-            assert all(volume["id"] not in restored_volume_ids for volume in remaining)
+            _resources.get().cleanup()
 
 
 @pytest.fixture
@@ -263,12 +1047,7 @@ def networkless_vm_name(runner_vm: str) -> Generator[str, None, None]:
     try:
         yield name
     finally:
-        listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-        if any(vm["name"] == name for vm in listed):
-            removed = _run_mvm(runner_vm, "vm", "rm", name, "--force", check=False, timeout=120)
-            assert removed.returncode == 0, (removed.stdout, removed.stderr)
-        listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-        assert all(vm["name"] != name for vm in listed), f"VM {name} survived checked teardown"
+        _resources.get().cleanup()
 
 
 def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
@@ -277,14 +1056,17 @@ def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
     last_error = ""
     while time.monotonic() < deadline:
         result = _run_mvm(
-            runner_vm, "exec", name, "--", "cat", "/proc/net/dev", check=False, timeout=15,
+            runner_vm,
+            "exec",
+            name,
+            "--",
+            "cat",
+            "/proc/net/dev",
+            check=False,
+            timeout=15,
         )
         if result.returncode == 0:
-            return {
-                line.split(":", 1)[0].strip()
-                for line in result.stdout.splitlines()
-                if ":" in line
-            }
+            return {line.split(":", 1)[0].strip() for line in result.stdout.splitlines() if ":" in line}
         last_error = result.stderr
         time.sleep(0.5)
     raise AssertionError(f"vsock agent did not return guest interfaces: {last_error}")
@@ -292,31 +1074,34 @@ def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
 
 class TestNetworklessJailerLifecycle:
     def test_unqualified_release_is_rejected_before_plain_launch(
-        self, runner_vm: str, networkless_vm_name: str,
+        self,
+        runner_vm: str,
+        networkless_vm_name: str,
     ) -> None:
         """An installed 1.16.0 pair cannot launch even a networkless, no-PCI VM."""
-        ensure_vm_deps(runner_vm)
-        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-        defaults = {item["type"]: item for item in before if item["is_default"]}
-        assert set(defaults) == {"firecracker", "jailer"}
-        assert all(item["version"] == "1.16.2" for item in defaults.values())
-        owned_older = not any(item["version"] == "1.16.0" for item in before)
-
+        releases = _JailerReleases(runner_vm)
         try:
-            if owned_older:
-                _run_mvm(runner_vm, "bin", "pull", "1.16.0", timeout=300)
-            binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-            older = {
-                item["type"]: item for item in binaries
-                if item["version"] == "1.16.0" and item["is_present"]
-            }
-            assert set(older) == {"firecracker", "jailer"}
-            _run_mvm(runner_vm, "bin", "default", older["firecracker"]["id"])
+            older = releases.pull_older()
+            _run_mvm(runner_vm, "bin", "default", older["id"])
             denied = _run_mvm(
-                runner_vm, "vm", "create", networkless_vm_name,
-                "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
-                "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
-                "--json", check=False, timeout=180,
+                runner_vm,
+                "vm",
+                "create",
+                networkless_vm_name,
+                "--no-network",
+                "--cloud-init-mode",
+                "off",
+                "--skip-deblob",
+                "--no-pci",
+                "-s",
+                "512M",
+                "--mem",
+                "256M",
+                "--vcpu",
+                "1",
+                "--json",
+                check=False,
+                timeout=180,
             )
             assert denied.returncode != 0
             response = json.loads(denied.stdout)
@@ -327,19 +1112,12 @@ class TestNetworklessJailerLifecycle:
             listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
             assert all(vm["name"] != networkless_vm_name for vm in listed)
         finally:
-            _run_mvm(runner_vm, "bin", "default", defaults["firecracker"]["id"])
-            if owned_older:
-                _run_mvm(runner_vm, "bin", "rm", "1.16.0", "--force")
-            restored = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-            assert {item["type"]: item["id"] for item in restored if item["is_default"]} == {
-                "firecracker": defaults["firecracker"]["id"], "jailer": defaults["jailer"]["id"],
-            }
+            releases.cleanup()
 
     def test_default_deblob_provisions_bootable_guest(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
         """The root-brokered default provisioning path edits the guest and still boots it."""
-        ensure_vm_deps(runner_vm)
         name = networkless_vm_name
         _run_mvm(
             runner_vm, "vm", "create", name, "--image", "alpine:3.23",
@@ -361,7 +1139,6 @@ class TestNetworklessJailerLifecycle:
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
         """A launched exact pair is usable by the broker but not directly readable by the operator."""
-        ensure_vm_deps(runner_vm)
         name = networkless_vm_name
         _run_mvm(
             runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
@@ -386,7 +1163,6 @@ class TestNetworklessJailerLifecycle:
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
         """The public process list and inspection follow the VM lifecycle."""
-        ensure_vm_deps(runner_vm)
         name = networkless_vm_name
         _run_mvm(
             runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
@@ -420,7 +1196,6 @@ class TestNetworklessJailerLifecycle:
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
         """The public VM lifecycle works without exposing direct Firecracker control."""
-        ensure_vm_deps(runner_vm)
         name = networkless_vm_name
         created = _json_success_data(_run_mvm(
             runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
@@ -456,7 +1231,6 @@ class TestNetworklessJailerLifecycle:
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
         """The guest VMM must not inherit either root or the operator's UID."""
-        ensure_vm_deps(runner_vm)
         name = networkless_vm_name
         created = _json_success_data(
             _run_mvm(
@@ -479,7 +1253,6 @@ class TestNetworklessJailerLifecycle:
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
         """A raw data volume reaches the guest through the protected Jailer launch."""
-        ensure_vm_deps(runner_vm)
         name = networkless_vm_name
         volume_name = f"sys-networkless-vol-{uuid.uuid4().hex[:8]}"
         try:
@@ -518,22 +1291,8 @@ class TestNetworklessJailerLifecycle:
                     _run_mvm(runner_vm, "vm", "stop", name, timeout=120)
                     _run_mvm(runner_vm, "vm", "start", name, timeout=120)
         finally:
-            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            if any(vm["name"] == name for vm in listed):
-                removed = _run_mvm(runner_vm, "vm", "rm", name, "--force", check=False, timeout=120)
-                assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
-            )
-            if any(volume["name"] == volume_name for volume in volumes):
-                removed = _run_mvm(
-                    runner_vm, "volume", "rm", volume_name, "--force", check=False,
-                )
-                assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
-            )
-            assert all(volume["name"] != volume_name for volume in volumes)
+            _resources.get().cleanup()
+
 
     @pytest.mark.destructive
     @pytest.mark.parametrize("source_crash", [False, True], ids=["normal-removal", "source-crash"])
@@ -541,7 +1300,6 @@ class TestNetworklessJailerLifecycle:
         self, runner_vm: str, networkless_vm_name: str, source_crash: bool,
     ) -> None:
         """Restore one captured epoch across guest RAM, rootfs, and an independent volume."""
-        ensure_vm_deps(runner_vm)
         source_name = networkless_vm_name
         restored_name = f"{source_name}-restore"
         volume_name = f"sys-snapshot-vol-{uuid.uuid4().hex[:8]}"
@@ -551,7 +1309,6 @@ class TestNetworklessJailerLifecycle:
         memory_mount = f"/mnt/mvm-snapshot-{epoch}"
         memory_file = f"{memory_mount}/epoch"
         root_file = f"/root/mvm-snapshot-{epoch}"
-        restored_volume_ids: set[str] = set()
         try:
             _run_mvm(runner_vm, "volume", "create", volume_name, "16M", "--writeback", "--json")
             _run_mvm(
@@ -640,6 +1397,7 @@ class TestNetworklessJailerLifecycle:
                 assert int(source["process_start_time"]) > 0
                 _kill_exact_test_firecracker(
                     int(source["pid"]), int(source["process_start_time"]), source["id"],
+                    expected_placement="networkless",
                 )
                 crashed = _vm_entry(runner_vm, source_name)
                 assert crashed["id"] == source["id"]
@@ -679,7 +1437,6 @@ class TestNetworklessJailerLifecycle:
             )
             restored_vm_ids = {vm["id"] for vm in restored}
             restored_volumes = [volume for volume in volumes if volume.get("vm_id") in restored_vm_ids]
-            restored_volume_ids = {volume["id"] for volume in restored_volumes}
             assert len(restored) == 1
             assert restored[0]["network_placement"] == "networkless"
             assert not restored[0]["network_id"]
@@ -698,47 +1455,14 @@ class TestNetworklessJailerLifecycle:
             assert restored_hash == captured_hash
             assert len(restored_volumes) == 1
         finally:
-            for vm_name in (restored_name, source_name):
-                listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-                if any(vm["name"] == vm_name for vm in listed):
-                    removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120)
-                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
-            )
-            for volume in volumes:
-                if volume["name"] == volume_name or volume["id"] in restored_volume_ids:
-                    removed = _run_mvm(
-                        runner_vm, "volume", "rm", volume["id"], "--force", check=False,
-                    )
-                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            snapshots = _json_success_data(
-                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
-            )
-            for snapshot in snapshots:
-                if snapshot["name"] == snapshot_name:
-                    removed = _run_mvm(
-                        runner_vm, "snapshot", "rm", snapshot["id"], "--force", check=False,
-                    )
-                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            assert all(vm["name"] not in (source_name, restored_name) for vm in listed)
-            volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
-            )
-            assert all(volume["name"] != volume_name and volume["id"] not in restored_volume_ids
-                       for volume in volumes)
-            snapshots = _json_success_data(
-                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
-            )
-            assert all(snapshot["name"] != snapshot_name for snapshot in snapshots)
+            _resources.get().cleanup()
+
 
     @pytest.mark.destructive
     def test_snapshot_refuses_competing_writable_volume_capture(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
         """Public VM creation shares writable bytes; capture refuses the competing writer."""
-        ensure_vm_deps(runner_vm)
         source_name = networkless_vm_name
         peer_name = f"{source_name}-peer"
         volume_name = f"sys-snapshot-shared-{uuid.uuid4().hex[:8]}"
@@ -855,140 +1579,91 @@ class TestNetworklessJailerLifecycle:
                     runner_vm, f"sudo -n test -f {shlex.quote(captured[field])}",
                 ).returncode == 0
         finally:
-            for vm_name in (peer_name, source_name):
-                listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-                if any(vm["name"] == vm_name for vm in listed):
-                    removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120)
-                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            if snapshot_id is not None:
-                present = _guest_run(
-                    runner_vm, f"sudo -n test -e {shlex.quote(snapshot_path)}", check=False,
-                )
-                assert present.returncode in (0, 1), (present.stdout, present.stderr)
-                if present.returncode == 0:
-                    removed = _run_mvm(runner_vm, "snapshot", "rm", snapshot_id, "--force", check=False)
-                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
-                assert _guest_run(runner_vm, f"sudo -n test ! -e {shlex.quote(snapshot_path)}").returncode == 0
-            volumes = _json_success_data(_run_mvm(runner_vm, "volume", "ls", "--json").stdout, list)
-            for volume in volumes:
-                if volume["name"] == volume_name:
-                    removed = _run_mvm(runner_vm, "volume", "rm", volume["id"], "--force", check=False)
-                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            assert all(vm["name"] not in (source_name, peer_name) for vm in listed)
-            volumes = _json_success_data(_run_mvm(runner_vm, "volume", "ls", "--json").stdout, list)
-            assert all(volume["name"] != volume_name for volume in volumes)
-            snapshots = _json_success_data(_run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list)
-            assert all(snapshot["name"] != snapshot_name for snapshot in snapshots)
+            _resources.get().cleanup()
+
 
     def test_restore_missing_release_leaves_no_vm_projection(
-        self, runner_vm: str, networkless_vm_name: str,
+        self,
+        runner_vm: str,
+        networkless_vm_name: str,
     ) -> None:
         """A root rejection before launch must not strand a user-side VM record."""
-        ensure_vm_deps(runner_vm)
-        binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-        original = next(
-            binary for binary in binaries
-            if binary["type"] == "firecracker" and binary["is_default"]
-        )
-        original_jailer = next(
-            binary for binary in binaries
-            if binary["type"] == "jailer" and binary["is_default"]
-        )
-        source_version, alternate_version = "1.16.2", "1.16.0"
-        mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
-        for version in (source_version, alternate_version):
-            archive = mirror / f"firecracker-v{version}-{platform.machine()}.tgz"
-            assert archive.is_file(), f"restore test requires mirrored {archive.name} for cleanup"
-        initially_present = {
-            version: all(any(
-                binary["type"] == binary_type and binary["version"] == version
-                and binary["is_present"] for binary in binaries
-            ) for binary_type in ("firecracker", "jailer"))
-            for version in (source_version, alternate_version)
-        }
+        releases = _JailerReleases(runner_vm, remove_source=True)
         source_name = networkless_vm_name
         target_name = f"{source_name}-failed-restore"
         snapshot_name = f"sys-restore-failure-{uuid.uuid4().hex[:8]}"
         snapshot_id: str | None = None
-        release_removed = False
         try:
-            for version in (source_version, alternate_version):
-                if not initially_present[version]:
-                    _run_mvm(runner_vm, "bin", "pull", version, timeout=300)
-            binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-            source = next(
-                binary for binary in binaries
-                if binary["type"] == "firecracker" and binary["version"] == source_version
-                and binary["is_present"]
-            )
-            alternate = next(
-                binary for binary in binaries
-                if binary["type"] == "firecracker" and binary["version"] == alternate_version
-                and binary["is_present"]
-            )
+            alternate = releases.pull_older()
+            source = next(row for row in releases.source_pair if row["type"] == "firecracker")
             _run_mvm(runner_vm, "bin", "default", source["id"])
             _run_mvm(
-                runner_vm, "vm", "create", source_name, "--no-network", "--cloud-init-mode", "off",
-                "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                runner_vm,
+                "vm",
+                "create",
+                source_name,
+                "--no-network",
+                "--cloud-init-mode",
+                "off",
+                "--skip-deblob",
+                "--no-pci",
+                "-s",
+                "512M",
+                "--mem",
+                "256M",
+                "--vcpu",
+                "1",
                 timeout=180,
             )
             captured = _json_success_data(
-                _run_mvm(runner_vm, "snapshot", "create", source_name, "--name", snapshot_name,
-                         "--json", timeout=180).stdout,
+                _run_mvm(
+                    runner_vm,
+                    "snapshot",
+                    "create",
+                    source_name,
+                    "--name",
+                    snapshot_name,
+                    "--json",
+                    timeout=180,
+                ).stdout,
                 dict,
             )
             snapshot_id = captured["id"]
             _run_mvm(runner_vm, "vm", "rm", source_name, "--force", timeout=120)
             _run_mvm(runner_vm, "bin", "default", alternate["id"])
-            _run_mvm(runner_vm, "bin", "rm", source_version, "--force")
-            release_removed = True
+            releases.remove_source()
 
             denied = _run_mvm(
-                runner_vm, "snapshot", "restore", snapshot_id, target_name, "--json", check=False,
+                runner_vm,
+                "snapshot",
+                "restore",
+                snapshot_id,
+                target_name,
+                "--json",
+                check=False,
             )
             assert denied.returncode != 0
             response = json.loads(denied.stdout)
             assert response["status"] == "error"
             assert response["data"] is None
             assert "did not launch VM" in response["error"]["message"]
-            assert all(vm["name"] != target_name for vm in _parse_vm_list(
-                _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
-            ))
+            assert all(
+                vm["name"] != target_name
+                for vm in _parse_vm_list(
+                    _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+                )
+            )
             # Snapshot removal reaches the root-owned reference check; a leaked
             # restore reference would reject this operation.
             _run_mvm(runner_vm, "snapshot", "rm", snapshot_id, "--force")
             snapshot_id = None
         finally:
-            if release_removed:
-                _run_mvm(runner_vm, "bin", "pull", source_version, timeout=300)
-            _run_mvm(runner_vm, "bin", "default", original["id"])
-            _run_mvm(runner_vm, "bin", "default", original_jailer["id"])
-            if snapshot_id is not None:
-                removed = _run_mvm(runner_vm, "snapshot", "rm", snapshot_id, "--force", check=False)
-                assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            for vm_name in (target_name, source_name):
-                listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-                if any(vm["name"] == vm_name for vm in listed):
-                    removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120)
-                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            for version in (source_version, alternate_version):
-                if not initially_present[version]:
-                    _run_mvm(runner_vm, "bin", "rm", version, "--force")
-            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            assert all(vm["name"] not in (source_name, target_name) for vm in listed)
-            snapshots = _json_success_data(_run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list)
-            assert all(snapshot["name"] != snapshot_name for snapshot in snapshots)
-            final_binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-            assert {binary["type"]: binary["id"] for binary in final_binaries if binary["is_default"]} == {
-                "firecracker": original["id"], "jailer": original_jailer["id"],
-            }
+            releases.cleanup()
 
     def test_create_restart_reboot_and_vsock_exec_without_guest_nic(
         self, runner_vm: str, networkless_vm_name: str,
     ) -> None:
         """The installed candidate can restart a loopback-only VM without a network record."""
-        ensure_vm_deps(runner_vm)
         name = networkless_vm_name
         created = _json_success_data(
             _run_mvm(

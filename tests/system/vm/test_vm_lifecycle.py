@@ -13,7 +13,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Literal
 
 import pytest
 
@@ -31,12 +31,19 @@ pytestmark = [
 ]
 
 
-def _kill_exact_test_firecracker(pid: int, start_ticks: int, vm_id: str) -> None:
+def _kill_exact_test_firecracker(
+    pid: int,
+    start_ticks: int,
+    vm_id: str,
+    *,
+    expected_placement: Literal["managed", "networkless"] = "managed",
+) -> None:
     """Runner-admin fault injection, admitted from schema-6 authority before signaling."""
     assert os.environ.get("MVM_TEST_VM") == "mvmctl-030-test", (
         "crash injection is restricted to the named runner"
     )
     assert re.fullmatch(r"[0-9a-f]{32}", vm_id) and pid > 0 and start_ticks > 0
+    assert expected_placement in ("managed", "networkless")
     script = r"""
 import hashlib
 import json
@@ -48,6 +55,8 @@ import stat
 import sys
 
 pid, ticks, vm_id, owner = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+expected_placement = sys.argv[5]
+assert expected_placement in ("managed", "networkless")
 assert os.geteuid() == 0 and int(os.environ["SUDO_UID"]) == owner and owner > 0
 assert re.fullmatch(r"[0-9a-f]{32}", vm_id) and pid > 0 and ticks > 0
 fds = []
@@ -115,7 +124,7 @@ try:
     assert type(record["schema_version"]) is int and record["schema_version"] == 6
     assert type(record["owner_uid"]) is int and record["owner_uid"] == owner
     assert record["vm_id"] == vm_id and record["lifecycle"] == "active"
-    assert record["network_placement"] == "managed"
+    assert record["network_placement"] == expected_placement
     generation, cleanup = record["launch_generation"], record["cleanup_generation"]
     assert type(generation) is int and type(cleanup) is int and generation > cleanup >= 0
     launch, active = record["launch"], record["active"]
@@ -175,6 +184,7 @@ try:
     assert not events[0][1] & (select.POLLERR | select.POLLNVAL)
     assert events[0][1] & (select.POLLIN | select.POLLHUP)
     print(json.dumps({"schema_version": 6, "owner_uid": owner, "vm_id": vm_id,
+                      "network_placement": record["network_placement"],
                       "launch_generation": generation, "host_boot_id": launch["host_boot_id"],
                       "pid": pid, "start_time_ticks": ticks, "exited": True}))
 finally:
@@ -194,6 +204,7 @@ finally:
             str(start_ticks),
             vm_id,
             str(os.getuid()),
+            expected_placement,
         ],
         capture_output=True,
         text=True,
@@ -207,6 +218,7 @@ finally:
     )
     receipt = json.loads(result.stdout)
     assert receipt["schema_version"] == 6 and receipt["owner_uid"] == os.getuid()
+    assert receipt["network_placement"] == expected_placement
     assert (
         receipt["vm_id"] == vm_id
         and receipt["pid"] == pid
