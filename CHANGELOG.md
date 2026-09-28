@@ -21,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > and internal-service entry points (5/5) passed twice at their recorded exact test revisions. Three bounded
 > memory cases also passed twice, including sustained measured cgroup pressure with and without swap;
 > original incident attribution, guest allocation-failure handling and ancestor/global OOM safety remain unproved.
-> Active console discovery/kill now has a source-proven authority-wiring blocker; its earlier inactive-relay
-> results do not qualify that behavior. Current complete CI after the NoCloud pipe correction, the full Python matrix,
+> Active console discovery/kill now uses root-verified relay authority and durable relay-only stop; affected
+> Go/root/race gates pass, but live endpoint admission and Firecracker/vsock survival remain unqualified.
+> Its earlier inactive-relay results do not qualify that behavior. Current complete CI, the full Python matrix,
 > clean-host reset/installation, Tier 3, aarch64 runtime, GitHub CI, and final release approval remain open.
 > No candidate has been installed over the
 > outer controller.
@@ -969,6 +970,11 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Changed
 
+- Console discovery and relay-only stop now consume root journal authority, never cache PID
+  mirrors. Strict instance schema 6 retains relay `running|stopping|stopped` identity;
+  schema-5 records are rejected without migration. Durable stopping precedes exact pidfd signaling,
+  and VM status remains based on Firecracker independently. Lost stop replies preserve effect
+  uncertainty. Affected Go/root/race checks pass; active-console runtime qualification is pending.
 - Typed VM removal can cancel verified incomplete protected rootfs/cloud-init imports without
   touching original staging files. Exact ownership and absence checks precede deletion;
   interrupted cleanup resumes from durable intent and retains an anti-resurrection removal

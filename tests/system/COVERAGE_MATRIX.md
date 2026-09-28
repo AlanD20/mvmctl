@@ -17,6 +17,19 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Root console authority source checkpoint (2026-09-28):** Production commits `0d627628` and
+`b306f996`, with test-only corrections `ba7afecd`/`82156ad3`, implement typed root observation
+and relay-only stop, strict schema 6, existing-only authority admission, durable stopping intent
+before exact pidfd signaling, exit-only stopped publication, independent Firecracker status and
+root-backed public console/VMInspect projections. Untrusted stop replies preserve process-start
+and outcome uncertainty. Pinned Go 1.26.3 scoped format/vet, complete API tests (0.027 seconds),
+complete privileged tests (0.204 seconds), complete root Jailer tests (13.598 seconds) and focused
+root console race tests (1.184 seconds) passed inside `mvmctl-030-test`. The two intermediate
+failures were typed-nil and schema-5 string-target test fixtures; their corrected invariants passed
+separately before the final package gate. Evidence is `ci-console-f2bd/.tmp/console-479f-corrected-root.log`.
+No console candidate has been installed yet. Active endpoint/SO_PEERPIDFD admission, unchanged
+Firecracker/vsock survival, stop retry and clean restart remain runtime gates. Schema 5 is not adopted.
+
 **Complete peer-exec repeat gate (2026-09-28):** Commit `4ce01436` replaces name-based cleanup
 in the two original peer-exec journeys with retained full-ID, creation, backing-file and process
 receipts; the four newer cases are unchanged. Exact module SHA-256

@@ -1464,13 +1464,13 @@ The strict on-disk shape has these fixed fields; state-specific objects are omit
 | `managed_cache` | `device_major`, `device_minor`, `inode`, `mount_identity.kind`, `mount_identity.id` | Nested under `launch` |
 | `release` | `version`, `architecture`, `firecracker_sha256`, `jailer_sha256` | Nested under `launch` |
 | `active` | `user_ids`, `group_ids`, `supplementary_groups`, `mount_namespace`, `jail_root`, `executable`, `relay` | `active`, and `cleaning` only after activation |
-| `active.relay` | `kind`; when `present`, also `user_ids`, `group_ids`, `supplementary_groups`, `mount_namespace`, `root`, `executable` | Nested under `active` |
+| `active.relay` | `kind`; when `present`, also `lifecycle`, `user_ids`, `group_ids`, `supplementary_groups`, `mount_namespace`, `root`, `executable` | Nested under `active` |
 | Each credential set | `real`, `effective`, `saved`, `filesystem` | Nested under `active` |
 | Each namespace/root identity | `device`, `inode` | Nested under `active` |
 | `active.executable` | `device`, `inode`, `size_bytes`, `mode`, `uid`, `gid`, `links`, `manifest_sha256` | Nested under `active` |
 | `active.relay.executable` | `device`, `inode`, `size_bytes`, `mode`, `uid`, `gid`, `links`, `sha256` | Nested under `active.relay` when present |
 
-The strict codec rejects schemas 1 through 4, unknown or duplicate fields, missing required fields, and a state-specific
+The current record is schema 6. The strict codec rejects schemas 1 through 5, unknown or duplicate fields, missing required fields, and a state-specific
 object that is present or absent in the wrong lifecycle. v0.3 performs no record migration or adoption.
 Current launch admission requires an explicit, complete `managed` or endpoint-free `networkless` placement. Omitted,
 unknown, and mixed shapes are rejected in launch and durable recovery; older cleaned tombstones are not adopted.
@@ -1491,6 +1491,17 @@ authenticated caller UID and every GID must equal the authenticated caller GID. 
 receiver's host mount namespace with a root equal to the receiver's host `/` and executes the exact receiver-pinned
 root-owned `/usr/local/bin/mvm` content. The record stores no socket path, PID-file path, raw descriptor, or argv.
 `console.pid` and every other PID mirror remain display-only.
+
+The approved independent-console extension adds a required `running|stopping|stopped` lifecycle to a present
+active relay while retaining its complete locator and final identity in every state. Root `jailer-console-observe` uses
+existing-only instance authority, verifies that identity and the fixed caller runtime endpoint, and performs no
+repair. Root `jailer-console-stop` holds the verified relay pidfd, publishes durable `stopping` before signaling and
+publishes `stopped` only after actual exit. Retry must re-admit the same recorded task; a reused or ambiguous PID
+never authorizes a signal. Firecracker remains running, and VM status is based on its identity independently of
+console availability. Recovery does not reopen or signal a durably stopped relay. This is a clean break: even
+schema-5 cleaned tombstones are not adopted. A lost or invalid post-start stop reply returns `process.error`
+with explicit `process_started` and `outcome_unknown` details, not a claim that no effect occurred.
+Installed-candidate endpoint admission and unchanged Firecracker/vsock survival remain qualification gates.
 
 `active` retains that intent and adds receiver-observed final identity: every real/effective/saved/filesystem UID and
 GID, the exact empty supplementary-group set, final mount-namespace device/inode, final
@@ -1791,7 +1802,7 @@ recovery returns unavailable and neither guesses nor deletes ambiguous state. `c
 | `launching`, exact task and optional relay prove final identities | Finish sealing and verification, then commit `active` | `running` |
 | `launching`, exact task is Jailer/transient/wrong exec and optional relay is exactly admitted | Terminate only through verified pidfds, then clean | `crashed` |
 | `active`, host boot mismatch | Do not signal; reconcile fixed artifacts to `cleaned` | `stopped` |
-| `active`, same-boot VM or present relay absent/dead/identity mismatch | Do not signal an unverified task; reconcile through `cleaning` | `crashed` |
+| `active`, same-boot Firecracker absent/dead/identity mismatch | Do not signal an unverified task; reconcile through `cleaning` | `crashed` |
 | `cleaning` | Resume the recorded cleanup generation idempotently | `stopped` |
 | Any state that cannot be classified completely | Preserve authority and perform no guessed kill/delete | `unavailable`; fail the read |
 

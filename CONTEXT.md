@@ -340,7 +340,7 @@ any component. A missing hierarchy is already clean; unsafe state keeps the dura
 the caller runtime; the API broker pins the separate private runtime through the verified process root. The whole
 caller-owned VM cache directory is not mounted.
 
-The current Jailer instance record is strict schema 5 with
+The current Jailer instance record is strict schema 6 with
 `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
 `launching` is durable pre-effect intent: owner UID/GID, VM ID, managed-cache identity, exact Firecracker/Jailer release
 identity, explicit managed or networkless placement, isolated execution UID/GID, host boot ID, launch/cleanup generations,
@@ -352,6 +352,13 @@ groups and private authority verification of exact derived cgroup membership, an
 to the release. The schema stores no cgroup path or caller-shaped cgroup value. A present active
 relay records its caller credentials, empty groups, host mount namespace/root, and exact root-owned
 `/usr/local/bin/mvm` executable metadata and digest; absence is explicit, and `console.pid` remains display-only.
+A present relay additionally carries `running|stopping|stopped`. Typed root console observation opens only
+existing authority and verifies the recorded task and fixed runtime socket; SQLite and cache PID files do not
+authorize discovery or signaling. Relay-only stop retains a verified pidfd, durably commits `stopping` before
+signaling and commits `stopped` only after exit. Firecracker identity and VM liveness remain independent;
+whole-VM cleanup skips a durably stopped relay. An uncertain reply preserves whether the privileged child
+started and effects may have occurred. Schema-5 records are rejected, including cleaned tombstones; there is
+no adoption or migration. Installed-candidate endpoint and Firecracker/vsock-survival qualification remains open.
 Network namespace identity remains in the separate closed topology capability and is compared during activation rather
 than stored as a raw path or descriptor.
 `cleaned` is the same-UID tombstone and carries no launch-specific GID, cache, release, or process identity; mount
@@ -416,7 +423,7 @@ membership error keeps the same cleanup lease authoritative with cgroup cleanup 
 mismatch it opens and signals no process, requires the fixed leaf to be stably absent, and rejects a present or unstable
 leaf. Recovery from `launching` retains its provisional leaf-absence proof through exact process termination and reap
 before binding for cleanup. Only fresh-recovery cgroup admission callbacks run outside the `cleanupLease` mutex;
-ordinary `Complete` still serializes cleanup effects under it. None of this adds a cgroup path to schema 5.
+ordinary `Complete` still serializes cleanup effects under it. None of this adds a cgroup path to schema 6.
 
 The original pidfd provides stable task identity and exit detection but does not notify `exec`. Activation uses a
 bounded context-aware `/proc/<pid>/exe` observation loop, stopping immediately on pidfd-observed exit, before final
@@ -433,13 +440,13 @@ deleted. Reconciliation and public projection remain target behavior. The privat
 1,000 canonical unique VM IDs, scans ownership once under the index lock, and retains at most one VM lock and process
 set at a time. It compares the recorded active credentials, mount namespace, root, executable metadata, and derived
 cgroup path through pidfd-bound observations without rehashing executables. Network namespace identity must remain
-stable between its two observations, but is not checked against persisted topology authority: schema 5 stores no
+stable between its two observations, but is not checked against persisted topology authority: schema 6 stores no
 network namespace identity. Same-boot `launching` or `cleaning` records are unavailable; the observer never signals,
 repairs records, or returns a partial map. Public list/get now use root batch observation and return errors when it
 fails. List observes the complete selection before status filtering; paused display state is preserved only for an
-observed live process. Legacy launches have no schema-5 authority and are not adopted from SQLite or PID mirrors.
+observed live process. Legacy launches have no schema-6 authority and are not adopted from SQLite or PID mirrors.
 
-Main also implements the private strict schema-5
+Main also implements the private strict schema-6
 record/codec and the process-authority side of `launching -> active -> cleaning -> cleaned`. An already-created
 Firecracker child and optional relay can be admitted while handshake-blocked through challenged EOF-fails-closed gates,
 retained close-on-exec pidfds, exact PID/start locators, and a pinned receiver executable. Consuming release
@@ -464,7 +471,7 @@ runtime cleanup. It creates or repairs nothing, treats an absent hierarchy as al
 and remove transactions. Core VM spawning and process control use these requests; returned PID/start values are display
 projections only. Launch registers the handshake-blocked child before mutable effects, prepares cgroup/runtime and
 persistent-output authority, creates topology down, applies/verifies firewall state, and transfers pinned resources
-into a fresh child-created jail tree. It commits the observed schema-5 active identity before close-only detach; a
+into a fresh child-created jail tree. It commits the observed schema-6 active identity before close-only detach; a
 detach failure does not destructively roll back an already committed active instance.
 
 Cleanup re-admits exact root records and pidfd-bound processes, including same-boot dead-process recovery, then removes
@@ -681,7 +688,7 @@ VM lifetime; restored disks have independent protected backing while guest drive
 privileged Restore dispatcher route is integrated. A focused installed-candidate networkless volume-snapshot journey
 passed inside `mvmctl-030-test`; managed-network restore and the full system matrix remain unqualified.
 [ADR-0018](docs/adr/0018-isolated-vm-execution-and-snapshot-authority.md) supersedes the earlier
-snapshot pause: schema-5 records separate operator ownership from isolated per-VM system accounts; named root API
+snapshot pause: schema-6 records separate operator ownership from isolated per-VM system accounts; named root API
 operations and an authenticated host-vsock descriptor handoff replace operator access to private VMM sockets.
 Protected logical disks, typed volume storage operations, and protected rootfs provisioning replace mutation of
 caller staging files after import. The raw source created by `mvm volume create` is a managed-cache artifact:
@@ -900,7 +907,7 @@ bounded output and cancellation, and writes command-redacted audit records. Unre
 separate bounded audit form. `--allow-vm-exec` is required per source command; interactive execution cannot opt in.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
 environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
-Python L2 qualification remains pending. The typed lifecycle now produces eligible schema-5 active identities;
+Python L2 qualification remains pending. The typed lifecycle now produces eligible schema-6 active identities;
 legacy and incomplete records remain ineligible.
 No SQLite VM status,
 guest-supplied source ID, socket path, or process-local semaphore may substitute for root runtime authority.
