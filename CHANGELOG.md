@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Release status (2026-09-28):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
-> requires the matching Firecracker/Jailer 1.16.1 pair. An exact clean checkout at `856bf013`, including the
+> requires the matching Firecracker/Jailer 1.16.2 pair. An exact clean checkout at `856bf013`, including the
 > later host-reset correction, passed pinned Go 1.26.3 local CI and the separate full root-effect Jailer package
 > in the named `mvmctl-030-test` runner. The installed runner candidate passed complete network/nftables/policy
 > (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), copy (15/15),
@@ -23,8 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 >
 > The latest jail-sealing fix at `a1965a4d` passed focused Go checks and the complete root-effect Jailer package,
 > not complete current-source CI. The prepared lifecycle/snapshot QA stopped at its first pause/resume-vsock
-> failure, matching a confirmed upstream 1.16.1 defect. Updating the pinned pair requires approval; no passing
-> lifecycle/snapshot gate or 1.16.2 qualification is claimed.
+> failure, matching a confirmed upstream 1.16.1 defect. The user approved updating the pinned pair to 1.16.2;
+> its exact formerly failing pause/resume case and all fifteen affected lifecycle/snapshot/version cases now pass
+> in the named runner. This is not complete current-source CI or whole-release qualification.
 
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
@@ -911,6 +912,11 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Changed
 
+- VM execution now requires the matching Firecracker/Jailer **1.16.2** pair, replacing 1.16.1 to address the
+  upstream pause/resume-vsock RX-gate defect. Runner provisioning pins the same pair. Older audited releases remain
+  available for binary management, not VM launch. Its x86_64 archive retains the exact 24-member names/modes but uses
+  a separately admitted plain-GNU header profile instead of the older local-PAX profile. This does not authorize
+  unaudited aarch64 packaging or substitute for runtime qualification.
 #### Attached volume removal and growth
 
 - `volume rm --force` now refuses an attached volume unless root runtime observation proves its VM stopped; `--force`
@@ -933,8 +939,8 @@ composition is described above; the current incomplete-work inventory is under *
 #### VM launch and release identity
 - VM create, start, reboot, and snapshot restore no longer fall back to launching Firecracker directly when Jailer setup
   fails.
-- VM launch now requires the exact matching Firecracker/Jailer 1.16.1 pair. Earlier audited archives remain manageable
-  through `mvm bin` but are not launch fallbacks; release runner initialization and asset pulls pin 1.16.1.
+- VM launch now requires the exact matching Firecracker/Jailer 1.16.2 pair. Earlier audited archives remain manageable
+  through `mvm bin` but are not launch fallbacks; release runner initialization and asset pulls pin 1.16.2.
 - VM and snapshot state now carry the exact Firecracker/Jailer pair needed by jailed launch paths.
 - Trusted release installation and Jailer launch are internal services compiled into the single `mvm` artifact.
 
@@ -1018,6 +1024,9 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Breaking changes
 
+- Snapshots created by Firecracker 1.16.0/1.16.1 are incompatible with 1.16.2 in both directions. Create fresh
+  snapshots after upgrading; mvmctl does not convert or relabel older snapshot state. See the
+  [upstream release notes](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2).
 - v0.3.0 requires a clean installation. It does not migrate, backfill, adopt, or preserve legacy databases, running VMs,
   Jailer directories, cgroups, TAP devices, firewall state, policy rows, or remote-exec flags. Initialization must refuse
   ambiguous legacy runtime state rather than silently adopting or deleting it.
@@ -1060,6 +1069,12 @@ composition is described above; the current incomplete-work inventory is under *
   against the previous ordering/admission and passed after correction; focused race checks, vet, formatting, and the
   complete root-effect Jailer package passed in the named runner. This fixes a reachable launch race, not a proved
   attribution of the earlier intermittent post-reboot KVM denial.
+- Firecracker 1.16.2's official archive now imports through its exact plain-GNU profile, including bounded positive
+  base-256 UID metadata, without repacking or broadening other numeric fields. Old-profile and UID regressions failed
+  before correction and passed afterward; the complete root-effect Jailer package passed. The installed candidate
+  successfully imported the official mirrored pair, and the formerly failing pause/resume-vsock case passed in the
+  named runner. All fifteen affected lifecycle/snapshot/version cases then passed with strict zero-other-outcome
+  evidence and empty inventories. Complete current-source CI and the broader system matrix remain separate gates.
 - Disabled logging no longer forwards the inactive configured log level in the typed launch request. Root admission
   still rejects unexpected logger intent, and the operator's configured default is preserved. The disabled-logging
   installed-candidate regression passed in the named runner. The full resource/configuration group then exposed
@@ -1154,11 +1169,9 @@ composition is described above; the current incomplete-work inventory is under *
 
 The implementation map has source code and bounded runner evidence, but the release is not qualified. Before sign-off:
 
-- Resolve the reproduced Firecracker 1.16.1 pause/resume-vsock blocker. New host-initiated connections wait for
-  `CONNECT` acknowledgement while guest SSH and the agent remain alive.
-  [Upstream 1.16.2](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2) fixes it, but its snapshots
-  are incompatible in both directions with 1.16.0/1.16.1. The project still pins 1.16.1 pending approval and
-  qualification of a new pair; this is not a shipped fix or passing lifecycle gate.
+- Complete broader exact-current-candidate lifecycle/snapshot QA beyond the now-passing fifteen affected cases.
+  The reproduced upstream 1.16.1 pause/resume-vsock blocker is resolved by the qualified 1.16.2 affected gate, not
+  by changing retries/timeouts. Its snapshots remain incompatible with 1.16.0/1.16.1; fresh captures are required.
 - Run exact-current-source pinned Go CI and the separate complete root-effect Jailer package after the latest Go fix;
   obtain the separate GitHub CI result.
 - Complete the installed-candidate Python T1/T2 matrix with strict outcomes and leak checks. The two Jailer cases

@@ -43,7 +43,10 @@ records before effectful reuse, and ambiguous state fails closed rather than bei
 `mvm bin pull` installs an exact matching Firecracker/Jailer release in root-controlled storage. For a new install, a
 local `MVM_ASSET_MIRROR` can supply the archive, but the root receiver still obtains and checks the official release
 checksum sidecar; a local archive alone is not a trust assertion. v0.3.0 VM launch requires Firecracker/Jailer
-**1.16.1**. Older pairs may be managed as artifacts but cannot launch VMs.
+**1.16.2**. Older pairs may be managed as artifacts but cannot launch VMs. This release fixes the upstream
+pause/resume-vsock defect. Its snapshot format is incompatible in both directions with 1.16.0/1.16.1: create fresh
+snapshots after upgrading; mvmctl does not convert older snapshot state. See the
+[upstream release notes](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2).
 
 Jailer is the only VM launcher. The authenticated root launch path prepares a fresh, pinned jail tree, admits the
 selected kernel and disk resources, installs an isolated per-VM execution identity, and brokers the private

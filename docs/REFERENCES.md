@@ -97,7 +97,7 @@ pattern is:
 
 First-time operator setup wizard. Coordinates host admission, a default network, cache initialization, and a
 Firecracker/Jailer release pair. Kernel, image, and SSH-key setup are separate commands. VM launch in v0.3.0 requires
-the matching Firecracker/Jailer 1.16.1 pair.
+the matching Firecracker/Jailer 1.16.2 pair.
 
 ```
 mvm init [flags]
@@ -111,7 +111,7 @@ mvm init [flags]
 | `--binary-version <version>` | Download this exact Firecracker version when no local pair exists | empty (interactive choice or latest in non-interactive mode) |
 
 `--binary-version` does not replace an existing default pair. To select the v0.3.0 launch pair when another release is
-already installed, run `mvm bin pull 1.16.1 --default` and check `mvm bin ls` before creating a VM.
+already installed, run `mvm bin pull 1.16.2 --default` and check `mvm bin ls` before creating a VM.
 
 ---
 

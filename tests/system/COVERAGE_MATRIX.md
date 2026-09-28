@@ -21,7 +21,21 @@ The command tables below describe tests for the currently implemented CLI, inclu
 will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
 architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
 
-**Lifecycle/snapshot gate (2026-09-28):** Two prepared, uncommitted owner-scoped QA deltas collected 13 cases in
+**Firecracker 1.16.2 affected gate (2026-09-28):** The exact formerly failing pause/resume-vsock case passed 1/1,
+then the complete affected group passed 15/15 in 79.83 seconds inside only `mvmctl-030-test`. The group covers nine
+lifecycle items, four full-capture/restore owners, older-release launch refusal and missing-source-release restore
+refusal. It proves pause/resume retains process/guest identity with working new vsock connections; three stop/start
+cycles, both reboot modes, paused removal, cold disk capture/restore, crash recovery and typed state refusals; and
+paused/running capture with default-paused/explicit-resumed restore and durable guest markers. Candidate SHA-256 is
+`c460278d4329d6818c27e9ec82ce47d65d53b7da58e71a27c208c4c3509d0da6`; independently compared Go source matches
+`19c55345`. Strict report
+`/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/ci-cb0848ef/.tmp/qa-fc1162-lifecycle-snapshot.json`
+records fifteen collected/passed and zero other outcomes. VM/network/volume/snapshot inventories were empty afterward.
+The official mirrored 1.16.2 pair imported through the exact release-specific plain-GNU and bounded UID metadata
+profiles, with no repacking or trusted-checksum bypass. This supersedes the failed attempt below, not full current-source
+CI, the remaining snapshot flag/inspect classes, data-volume fault consistency, interruption or whole-release gates.
+
+**Earlier lifecycle/snapshot attempt (superseded, 2026-09-28):** Two prepared, uncommitted owner-scoped QA deltas collected 13 cases in
 only `mvmctl-030-test`. The first pause/resume case failed: the same Firecracker task resumed, but its new vsock
 connection timed out waiting for Firecracker's `CONNECT` acknowledgement. The strict report
 `/home/runner/mvmctl-030-ci-307e09d2/.tmp/worktrees/ci-cb0848ef/.tmp/qa-lifecycle-snapshot-jail-search.json`
@@ -30,8 +44,8 @@ small SSH-enabled diagnostic reproduced the failure with unchanged guest boot ID
 Candidate SHA-256 is `f4d43b5cefe85f533677f685a87a8efce2319df277cf41cdcc91e27d09adbde5`, with Go source matching
 `a1965a4d`. The defect matches [upstream #6100](https://github.com/firecracker-microvm/firecracker/pull/6100);
 [Firecracker 1.16.2](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2) fixes it but changes
-snapshot compatibility. Updating the locked pair requires approval and fresh qualification. No lifecycle or snapshot
-pass is claimed for this attempt. The diagnostic VM/network were removed; all four inventories were empty. The
+snapshot compatibility. The user approved updating the locked pair to 1.16.2; the corrected affected gate above passed.
+No lifecycle or snapshot pass is claimed for this earlier attempt. The diagnostic VM/network were removed; all four inventories were empty. The
 separate jail-sealing access/partial-cleanup regressions passed after reproducing old-code failures, along with
 focused race checks and the complete root-effect Jailer Go package. Unpublished-capture interruption remains
 unqualified; a transient progress-file observation is not a deterministic mid-copy fault checkpoint.
@@ -766,7 +780,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `snapshot create <vm>` | 🟡 Partial | `vm/test_vm_snapshot_load.py`, `vm/test_jailer.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore`, `TestNetworklessJailerLifecycle` | Focused installed-candidate networkless full capture with an attached raw volume and one managed-network DR capture passed. The CLI emits the full request ID before capture, including in JSON mode; one manual CLI-kill/typed-inspect/remove journey passed. Automated interruption QA and `snapshot ls` discovery of unindexed root captures remain open. |
 | `snapshot create --name` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_with_name` | L2 — custom name in ls --json |
 | `snapshot create --pause` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotCreateFlags::test_snapshot_create_pause_flag` | L2 — VM status=paused after snapshot |
-| `snapshot create` on stopped VM | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | v0.3.0 implements disk-only capture and cold restore; the old rejection claim was incorrect. The replacement regression is prepared but unexecuted after the pause/resume first-failure stop. |
+| `snapshot create` on stopped VM | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions::test_stopped_snapshot_captures_and_restores_disk` | Installed 1.16.2 candidate passed disk-only capture, source removal and cold restore with durable marker readback and changed guest boot ID. No running-memory capture is claimed by this row. |
 | `snapshot ls` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore` | L2 — JSON listing |
 | `snapshot ls --json` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestVMSnapshot`, `TestSnapshotDestroyRestore` | L2 — JSON list |
 | `snapshot inspect <id>` | ⚡ Shallow | `vm/test_vm_snapshot_load.py` | `TestSnapshotInspect::test_snapshot_inspect` | L1 — inspect succeeds |

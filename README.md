@@ -59,7 +59,8 @@ Think "Docker for VMs" — one command to create, start, and connect.
   ```
   Optional (for ISO cloud-init mode only): `cloud-image-utils` (Ubuntu/Debian) or `cloud-utils` (Arch)
 - **Administrator access for installation and host setup:** install the trusted artifact at `/usr/local/bin/mvm`, then run `host init`; normal commands run without `sudo` after setup. Later system-binary upgrades also require an administrator.
-- **Firecracker/Jailer 1.16.1:** v0.3.0 VM launch requires this exact matching release pair. Managed networking also requires kernel nftables support for both `inet` and `bridge` families; installing the `nft` CLI does not add missing kernel support.
+- **Firecracker/Jailer 1.16.2:** v0.3.0 VM launch requires this exact matching release pair. Managed networking also requires kernel nftables support for both `inet` and `bridge` families; installing the `nft` CLI does not add missing kernel support.
+- **Fresh snapshots after upgrade:** 1.16.2 snapshots are incompatible with 1.16.0/1.16.1 in both directions; older snapshot state is not converted. See [runtime guidance](docs/RUNTIME.md#vm-launch-and-resource-control).
 - **Environment variables:** Configure runtime behavior via `MVM_*` variables. See [docs/REFERENCES.md](docs/REFERENCES.md#environment-variables) for the full list.
 
 ---
@@ -103,7 +104,7 @@ See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference 
 sudo /usr/local/bin/mvm host init
 
 # 2. Log out and back in, then initialize the operator cache and the exact qualified binary pair
-mvm init --skip-host --non-interactive --binary-version 1.16.1
+mvm init --skip-host --non-interactive --binary-version 1.16.2
 
 # 3. Download a kernel and image
 mvm kernel pull --type firecracker --default
@@ -115,7 +116,7 @@ mvm exec myvm                    # vsock agent — no SSH needed
 ```
 
 `--binary-version` is used by `mvm init` only when no local pair is selected. If a different pair is already the
-default, run `mvm bin pull 1.16.1 --default` before creating a VM. When you're done: `mvm vm rm myvm`.
+default, run `mvm bin pull 1.16.2 --default` before creating a VM. When you're done: `mvm vm rm myvm`.
 
 ---
 

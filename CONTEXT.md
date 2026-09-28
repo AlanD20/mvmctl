@@ -1411,8 +1411,8 @@ installed controller used only to create, inspect, copy to, and destroy disposab
 image tag comes from an isolated `MVM_CANDIDATE_BINARY --version` probe. Building or testing a candidate must never
 replace `MVM_BINARY`.
 
-Runner initialization requests exact Firecracker 1.16.0 with
-`/usr/local/bin/mvm init --non-interactive --binary-version 1.16.0` when no local pair exists. This avoids a moving
+Runner initialization requests exact Firecracker 1.16.2 with
+`/usr/local/bin/mvm init --non-interactive --binary-version 1.16.2` when no local pair exists. This avoids a moving
 `latest` dependency while preserving existing local/default selection on already-prepared images.
 
 This controller/candidate isolation applies only to T1/T2 runner VMs. Tier 3 is host-direct and may mutate outer-host
