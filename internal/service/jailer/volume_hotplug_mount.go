@@ -53,14 +53,49 @@ func (transaction *volumeHotplugTransaction) inspectTarget(
 	return fd, stat, nil
 }
 
-func (transaction *volumeHotplugTransaction) applyMount(ctx context.Context) error {
+func (transaction *volumeHotplugTransaction) prepareMount(ctx context.Context) (_ int, returnErr error) {
+	if !transaction.attach {
+		return -1, nil
+	}
+	if transaction.source < 0 {
+		return -1, instanceStateError(transaction.record.VMID, "volume attach has no retained source descriptor")
+	}
+	source, err := volumeHotplugMountIdentity(ctx, transaction.source)
+	if err != nil {
+		return -1, err
+	}
+	if !transaction.record.matchesSource(source) {
+		return -1, instanceStateError(transaction.record.VMID, "volume source changed after root descriptor admission")
+	}
+	mount, err := unix.OpenTree(
+		transaction.source, "", uint(unix.OPEN_TREE_CLONE|unix.OPEN_TREE_CLOEXEC|unix.AT_EMPTY_PATH),
+	)
+	if err != nil {
+		return -1, instanceAtomicError("clone retained volume source mount", err)
+	}
+	defer func() {
+		if returnErr != nil {
+			returnErr = errors.Join(returnErr, unix.Close(mount))
+		}
+	}()
+	attributes := uint64(unix.MOUNT_ATTR_NOSUID | unix.MOUNT_ATTR_NODEV | unix.MOUNT_ATTR_NOEXEC)
+	if transaction.record.Volume.ReadOnly {
+		attributes |= unix.MOUNT_ATTR_RDONLY
+	}
+	if err := unix.MountSetattr(mount, "", unix.AT_EMPTY_PATH, &unix.MountAttr{Attr_set: attributes}); err != nil {
+		return -1, instanceAtomicError("set retained volume mount attributes", err)
+	}
+	return mount, nil
+}
+
+func (transaction *volumeHotplugTransaction) applyMount(ctx context.Context, mount int) error {
 	if transaction.attach {
-		return transaction.attachMount(ctx)
+		return transaction.attachMount(ctx, mount)
 	}
 	return transaction.detachMount(ctx)
 }
 
-func (transaction *volumeHotplugTransaction) attachMount(ctx context.Context) (returnErr error) {
+func (transaction *volumeHotplugTransaction) attachMount(ctx context.Context, mount int) (returnErr error) {
 	record := &transaction.record
 	name := record.Volume.private().basename()
 	target, stat, err := transaction.inspectTarget(ctx)
@@ -98,35 +133,15 @@ func (transaction *volumeHotplugTransaction) attachMount(ctx context.Context) (r
 	if !record.matchesPlaceholder(stat) {
 		return instanceStateError(record.VMID, "volume target is not the retained exclusive placeholder")
 	}
-	if transaction.source < 0 {
-		return instanceStateError(record.VMID, "volume attach has no retained source descriptor")
-	}
-	source, err := volumeHotplugMountIdentity(ctx, transaction.source)
-	if err != nil {
-		return err
-	}
-	if !record.matchesSource(source) {
-		return instanceStateError(record.VMID, "volume source changed after root descriptor admission")
-	}
-	mount, err := unix.OpenTree(
-		transaction.source,
-		"",
-		uint(unix.OPEN_TREE_CLONE|unix.OPEN_TREE_CLOEXEC|unix.AT_EMPTY_PATH),
-	)
-	if err != nil {
-		return err
-	}
-	defer func() { returnErr = errors.Join(returnErr, unix.Close(mount)) }()
-	attributes := uint64(unix.MOUNT_ATTR_NOSUID | unix.MOUNT_ATTR_NODEV | unix.MOUNT_ATTR_NOEXEC)
-	if record.Volume.ReadOnly {
-		attributes |= unix.MOUNT_ATTR_RDONLY
-	}
-	if err := unix.MountSetattr(mount, "", unix.AT_EMPTY_PATH, &unix.MountAttr{Attr_set: attributes}); err != nil {
-		return err
+	if mount < 0 {
+		return instanceStateError(record.VMID, "volume attach has no prepared source mount")
 	}
 	identity, err := volumeHotplugMountIdentity(ctx, mount)
 	if err != nil {
 		return err
+	}
+	if !record.matchesSource(identity) {
+		return instanceStateError(record.VMID, "prepared volume mount differs from retained source identity")
 	}
 	record.MountID = identity.Mnt_id
 	if err := transaction.write(ctx); err != nil {

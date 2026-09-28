@@ -146,6 +146,19 @@ func (authority *volumeHotplugAuthority) runVolumeHotplugMounts(
 	if err := authority.verify(ctx); err != nil {
 		return err
 	}
+	if err := runVolumeHotplugMountWorker(ctx, authority.namespace, transaction); err != nil {
+		return err
+	}
+	return authority.verify(ctx)
+}
+
+// runVolumeHotplugMountWorker clones host source mounts before namespace entry,
+// then publishes only the detached mount through retained target descriptors.
+func runVolumeHotplugMountWorker(
+	ctx context.Context,
+	namespace int,
+	transaction *volumeHotplugTransaction,
+) error {
 	done := make(chan error, 1)
 	go func() {
 		runtime.LockOSThread()
@@ -164,12 +177,27 @@ func (authority *volumeHotplugAuthority) runVolumeHotplugMounts(
 			done <- errors.Join(instanceAtomicError("isolate volume worker filesystem attributes", err), closeErr)
 			return
 		}
-		if err := unix.Setns(authority.namespace, unix.CLONE_NEWNS); err != nil {
-			closeErr := unix.Close(host)
-			done <- errors.Join(instanceAtomicError("enter retained volume mount namespace", err), closeErr)
+		mount, err := transaction.prepareMount(ctx)
+		if err != nil {
+			done <- errors.Join(err, unix.Close(host))
 			return
 		}
-		effectErr := transaction.applyMount(ctx)
+		closeMount := func() error {
+			if mount < 0 {
+				return nil
+			}
+			if err := unix.Close(mount); err != nil {
+				return instanceAtomicError("close prepared volume source mount", err)
+			}
+			return nil
+		}
+		if err := unix.Setns(namespace, unix.CLONE_NEWNS); err != nil {
+			closeErr := unix.Close(host)
+			done <- errors.Join(instanceAtomicError("enter retained volume mount namespace", err), closeErr, closeMount())
+			return
+		}
+		effectErr := transaction.applyMount(ctx, mount)
+		mountCloseErr := closeMount()
 		restoreErr := unix.Setns(host, unix.CLONE_NEWNS)
 		closeErr := unix.Close(host)
 		if effectErr != nil && errs.AsDomainError(effectErr) == nil {
@@ -181,11 +209,7 @@ func (authority *volumeHotplugAuthority) runVolumeHotplugMounts(
 		if closeErr != nil {
 			closeErr = instanceAtomicError("close host mount namespace after volume transition", closeErr)
 		}
-		done <- errors.Join(effectErr, restoreErr, closeErr)
+		done <- errors.Join(effectErr, mountCloseErr, restoreErr, closeErr)
 	}()
-	effectErr := <-done
-	if effectErr != nil {
-		return effectErr
-	}
-	return authority.verify(ctx)
+	return <-done
 }
