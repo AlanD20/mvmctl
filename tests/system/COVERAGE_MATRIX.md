@@ -51,6 +51,10 @@ including unchanged `guestfs_enabled`; all four inventories were empty and swap 
 in an ignored persistent worktree, not committed test source. The retry circuit breaker stopped further qualification
 attempts: a workload design must produce measured pressure safely rather than drop the high-event assertion,
 change production memory policy, or call occupancy alone a pressure pass.
+A subsequent once-only guarded diagnostic allowed at most four extra 1 MiB guest writes, but initial staging already
+produced 50 high events, peak 235139072 above high 234881024 and 5124096 swap bytes. It executed zero calibration
+increments and completed exact cleanup. Report `memory-pressure-calibration-53ea1464.jsonl` is diagnostic only:
+this establishes another bounded pressure observation, not the unexecuted calibration branch or a qualification fix.
 
 **Durable exec-grant lifecycle checkpoint (2026-09-28):** One networkless two-VM journey passed 1/1 in 27.93
 seconds inside only `mvmctl-030-test`. An exact non-root `runner` grant produced remote stdout and destination file
