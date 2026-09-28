@@ -7,9 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"mvmctl/internal/infra"
@@ -18,7 +16,6 @@ import (
 )
 
 const applianceBuildTimeout = 60 * time.Second
-const staleProcessWaitTime = 500 * time.Millisecond
 
 // --- Low-level helpers ---
 
@@ -76,9 +73,6 @@ func BuildAppliance(ctx context.Context, cacheDir string) (string, error) {
 		}
 	}
 
-	// Clean stale state first
-	CleanStaleState()
-
 	// Build environment
 	env := os.Environ()
 	kd := &KernelDetector{}
@@ -134,119 +128,7 @@ func BuildAppliance(ctx context.Context, cacheDir string) (string, error) {
 	return applianceDir, nil
 }
 
-// CleanStaleState removes stale libguestfs processes, locks, sockets, and caches.
-func CleanStaleState() bool {
-	uid := os.Getuid()
-	cleaned := false
-
-	abandonedPids := findAbandonedGuestfsProcesses(uid)
-	if len(abandonedPids) > 0 {
-		for _, pid := range abandonedPids {
-			if proc, err := os.FindProcess(pid); err == nil {
-				proc.Signal(syscall.SIGTERM)
-			}
-		}
-
-		time.Sleep(staleProcessWaitTime)
-
-		for _, pid := range abandonedPids {
-			if proc, err := os.FindProcess(pid); err == nil {
-				proc.Kill()
-			}
-		}
-		cleaned = true
-	}
-
-	lockFile := filepath.Join("/var/tmp", fmt.Sprintf(".guestfs-%d", uid), "lock")
-	if _, err := os.Stat(lockFile); err == nil {
-		if err := os.Remove(lockFile); err == nil {
-			cleaned = true
-			slog.Debug("Removed stale libguestfs lock", "path", lockFile)
-		}
-	}
-
-	sockBase := filepath.Join("/run/user", strconv.Itoa(uid))
-	sockDirs, err := filepath.Glob(filepath.Join(sockBase, "libguestfs*"))
-	if err == nil {
-		for _, sockDir := range sockDirs {
-			socks, _ := filepath.Glob(filepath.Join(sockDir, "guestfsd.sock"))
-			for _, sock := range socks {
-				if err := os.Remove(sock); err == nil {
-					cleaned = true
-					slog.Debug("Removed stale libguestfs socket", "path", sock)
-				}
-			}
-		}
-	}
-
-	guestfsTmp := filepath.Join("/var/tmp", fmt.Sprintf(".guestfs-%d", uid))
-	if entries, err := os.ReadDir(guestfsTmp); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() && strings.HasPrefix(entry.Name(), "appliance.d") {
-				appliancePath := filepath.Join(guestfsTmp, entry.Name())
-				if err := os.RemoveAll(appliancePath); err == nil {
-					cleaned = true
-					slog.Debug("Removed stale libguestfs cache", "path", appliancePath)
-				}
-			}
-		}
-	}
-
-	return cleaned
-}
-
-// findAbandonedGuestfsProcesses finds QEMU/guestfish PIDs owned by uid that
-// are running the libguestfs appliance but have no mvmctl ancestor.
-func findAbandonedGuestfsProcesses(uid int) []int {
-	var abandoned []int
-	procDir := "/proc"
-	entries, err := os.ReadDir(procDir)
-	if err != nil {
-		return abandoned
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil {
-			continue
-		}
-
-		statusPath := filepath.Join(procDir, entry.Name(), "status")
-		statusData, err := os.ReadFile(statusPath)
-		if err != nil {
-			continue
-		}
-		procUid := system.ParseProcStatusField(string(statusData), "Uid:")
-		if procUid != uid {
-			continue
-		}
-
-		cmdlinePath := filepath.Join(procDir, entry.Name(), "cmdline")
-		cmdlineData, err := os.ReadFile(cmdlinePath)
-		if err != nil {
-			continue
-		}
-		cmdline := string(cmdlineData)
-
-		if strings.Contains(cmdline, ".guestfs-") &&
-			(strings.Contains(cmdline, "appliance.d") || strings.Contains(cmdline, "guestfsd.sock")) {
-			if !system.HasAncestorWithCmdline(pid, "mvm") {
-				abandoned = append(abandoned, pid)
-			}
-		} else if strings.Contains(strings.ToLower(cmdline), "guestfish") {
-			if !system.HasAncestorWithCmdline(pid, "mvm") {
-				abandoned = append(abandoned, pid)
-			}
-		}
-	}
-
-	return abandoned
-}
-
-// PruneAppliance removes the libguestfs appliance folder and stale system state.
+// PruneAppliance removes the libguestfs appliance folder from the selected cache.
 func PruneAppliance(cacheDir string, dryRun bool) bool {
 	applianceDir := filepath.Join(cacheDir, "appliance")
 	removed := false
@@ -259,11 +141,6 @@ func PruneAppliance(cacheDir string, dryRun bool) bool {
 		} else {
 			removed = true
 		}
-	}
-
-	if !dryRun {
-		stateCleaned := CleanStaleState()
-		removed = removed || stateCleaned
 	}
 
 	return removed
