@@ -66,6 +66,12 @@ Do not infer kernel capability from version or filename, or treat this runner re
 every future runner image has been rebuilt. Historical source/config/toolchain provenance for the retained kernel
 artifacts is incomplete; the flag change does not reconstruct that provenance.
 
+The retained config and ELF identify GCC `16.2.1 20260810`, GNU assembler/linker `2.47`, and GNU build ID
+`edf249dea9c6b0a5afa1aa47526a1fd9626009b3`. Embedded version strings do not identify the actual compiler binaries,
+source tree, upstream base config, overlays, or producer invocation. Closing this provenance gap requires a fresh
+mirrored-source build with an input/output receipt, followed by a candidate-qualified reusable-base provisioning
+check. Do not rebuild or reboot the current runner merely to repeat its already recorded capability check.
+
 Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
 tests run directly on the outer host and therefore require a dedicated clean
 qualification host or disposable outer VM.
