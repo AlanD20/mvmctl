@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	"mvmctl/pkg/errs"
 )
 
 type consoleStopFixture struct {
@@ -234,6 +236,170 @@ func TestConsoleObserveDoesNotCompleteInterruptedStop(t *testing.T) {
 	after, err := os.ReadFile(f.path)
 	require.NoError(t, err)
 	assert.Empty(t, cmp.Diff(before, after))
+}
+
+// forbidConsoleProcessAndEndpointAccess makes an accidental prior-boot process or socket admission fail immediately.
+func forbidConsoleProcessAndEndpointAccess(t *testing.T, f *consoleStopFixture) {
+	t.Helper()
+	f.server.recovery.pidfdOpen = func(context.Context, int) (int, error) {
+		t.Fatal("inactive boot authority must not open any PID")
+		return -1, nil
+	}
+	f.server.identity.openProcessDirectory = func(context.Context, int) (int, error) {
+		t.Fatal("inactive boot authority must not inspect a current process")
+		return -1, nil
+	}
+	f.server.runtime = realManagedVMRuntimeDeps()
+	f.server.runtime.open = func(context.Context, string, int, uint32) (int, error) {
+		t.Fatal("inactive boot authority must not open the console runtime or socket")
+		return -1, nil
+	}
+	// Existing-only observation must remain usable without any journal mutation capability.
+	f.server.authority.deps.mkdirAt = nil
+	f.server.authority.deps.write = nil
+	f.server.authority.deps.renameAt = nil
+	f.server.authority.deps.unlinkAt = nil
+}
+
+func TestConsoleObservePriorBootIsStoppedWithoutProcessAccess(t *testing.T) {
+	t.Parallel()
+	// Rationale: a valid prior-boot journal proves this relay inactive even when its PID is reused on the current boot.
+	tests := map[string]instanceRecord{
+		"running relay":          testActiveInstanceRecord(true),
+		"stopping relay":         testActiveInstanceRecord(true),
+		"stopped relay":          testActiveInstanceRecord(true),
+		"active absent relay":    testActiveInstanceRecord(false),
+		"launching absent relay": testLaunchingInstanceRecordWithRelay(false),
+		"cleaning absent relay":  runtimeStatusCleaningRecord(),
+	}
+	record := tests["stopping relay"]
+	record.active.relay.lifecycle = instanceRelayStopping
+	tests["stopping relay"] = record
+	record = tests["stopped relay"]
+	record.active.relay.lifecycle = instanceRelayStopped
+	tests["stopped relay"] = record
+	for name, record := range tests {
+		t.Run(name, func(t *testing.T) {
+			f := newConsoleStopFixture(t)
+			f.locked.record = record
+			require.NoError(t, f.locked.directories.writeRecord(t.Context(), f.locked.record))
+			before, err := os.ReadFile(f.path)
+			require.NoError(t, err)
+			f.server.identity.readBootID = func(context.Context) (string, error) { return processOtherBootID, nil }
+			forbidConsoleProcessAndEndpointAccess(t, f)
+			result, err := f.server.Observe(t.Context(), ConsoleCaller{UID: testAuthorityUID, GID: testAuthorityGID},
+				ConsoleObserveRequest{VMID: f.locked.record.vmID})
+			require.NoError(t, err)
+			want := ConsoleObserveResult{VMID: f.locked.record.vmID, State: ConsoleStopped}
+			if diff := cmp.Diff(want, result); diff != "" {
+				t.Errorf("prior-boot console observation mismatch (-want +got):\n%s", diff)
+			}
+			require.NoError(t, result.Validate(ConsoleObserveRequest{VMID: f.locked.record.vmID}))
+			assert.Empty(t, f.signaled)
+			after, err := os.ReadFile(f.path)
+			require.NoError(t, err)
+			if diff := cmp.Diff(before, after); diff != "" {
+				t.Errorf("console observation changed the journal (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestConsoleObserveSameBootIncompleteLifecycleRemainsUnavailable(t *testing.T) {
+	t.Parallel()
+	// Rationale: relaxing prior-boot classification must not treat interrupted same-boot authority as stopped.
+	tests := map[string]instanceRecord{
+		"launching": testLaunchingInstanceRecordWithRelay(false),
+		"cleaning":  runtimeStatusCleaningRecord(),
+	}
+	for name, record := range tests {
+		t.Run(name, func(t *testing.T) {
+			f := newConsoleStopFixture(t)
+			f.locked.record = record
+			require.NoError(t, f.locked.directories.writeRecord(t.Context(), record))
+			before, err := os.ReadFile(f.path)
+			require.NoError(t, err)
+			forbidConsoleProcessAndEndpointAccess(t, f)
+			_, err = f.server.Observe(t.Context(), ConsoleCaller{UID: testAuthorityUID, GID: testAuthorityGID},
+				ConsoleObserveRequest{VMID: record.vmID})
+			require.Error(t, err)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, errs.CodeConsoleRelayFailed, domainErr.Code)
+			assert.Empty(t, f.signaled)
+			after, err := os.ReadFile(f.path)
+			require.NoError(t, err)
+			if diff := cmp.Diff(before, after); diff != "" {
+				t.Errorf("incomplete console observation changed the journal (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestConsoleObserveUnavailableBootDoesNotProveStopped(t *testing.T) {
+	t.Parallel()
+	// Rationale: only a successfully read valid boot identity can prove that the recorded relay is from another boot.
+	injected := errors.New("boot identity read failed")
+	tests := map[string]struct {
+		readBootID func(context.Context) (string, error)
+		wantCause  error
+	}{
+		"missing reader": {},
+		"read failure with valid different boot": {
+			readBootID: func(context.Context) (string, error) { return processOtherBootID, injected },
+			wantCause:  injected,
+		},
+		"malformed boot": {
+			readBootID: func(context.Context) (string, error) { return "not-a-boot-id", nil },
+		},
+		"empty boot": {readBootID: func(context.Context) (string, error) { return "", nil }},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			f := newConsoleStopFixture(t)
+			before, err := os.ReadFile(f.path)
+			require.NoError(t, err)
+			f.server.identity.readBootID = tc.readBootID
+			forbidConsoleProcessAndEndpointAccess(t, f)
+			_, err = f.server.Observe(t.Context(), ConsoleCaller{UID: testAuthorityUID, GID: testAuthorityGID},
+				ConsoleObserveRequest{VMID: f.locked.record.vmID})
+			require.Error(t, err)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, errs.CodeConsoleRelayFailed, domainErr.Code)
+			if tc.wantCause != nil {
+				assert.ErrorIs(t, err, tc.wantCause)
+			}
+			assert.Empty(t, f.signaled)
+			after, err := os.ReadFile(f.path)
+			require.NoError(t, err)
+			if diff := cmp.Diff(before, after); diff != "" {
+				t.Errorf("failed console observation changed the journal (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestConsoleStopPriorBootDoesNotAcquireOrSignalCurrentProcess(t *testing.T) {
+	t.Parallel()
+	// Rationale: the read-only stopped classification must not relax signal authority for a reused current-boot PID.
+	f := newConsoleStopFixture(t)
+	before, err := os.ReadFile(f.path)
+	require.NoError(t, err)
+	f.server.identity.readBootID = func(context.Context) (string, error) { return processOtherBootID, nil }
+	forbidConsoleProcessAndEndpointAccess(t, f)
+	_, err = f.server.Stop(t.Context(), ConsoleCaller{UID: testAuthorityUID, GID: testAuthorityGID},
+		ConsoleStopRequest{VMID: f.locked.record.vmID})
+	require.Error(t, err)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeConsoleRelayFailed, domainErr.Code)
+	assert.Empty(t, f.signaled)
+	after, err := os.ReadFile(f.path)
+	require.NoError(t, err)
+	if diff := cmp.Diff(before, after); diff != "" {
+		t.Errorf("rejected prior-boot console stop changed the journal (-want +got):\n%s", diff)
+	}
 }
 
 func TestStoppedRelayDoesNotBlockExactFirecrackerRecovery(t *testing.T) {

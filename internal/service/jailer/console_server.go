@@ -59,11 +59,26 @@ func (server *ConsoleServer) Observe(ctx context.Context, caller ConsoleCaller, 
 	if record.lifecycle == instanceLifecycleCleaned {
 		return result, nil
 	}
-	if record.lifecycle != instanceLifecycleActive || record.launch == nil || record.active == nil {
+	if record.launch == nil {
 		return ConsoleObserveResult{}, consoleAuthorityError(request.VMID, "console requires active authority", nil)
 	}
-	if err := server.verifyBoot(ctx, record); err != nil {
-		return ConsoleObserveResult{}, err
+	if server.identity.readBootID == nil {
+		return ConsoleObserveResult{}, consoleAuthorityError(
+			request.VMID,
+			"console boot observation is unavailable",
+			nil,
+		)
+	}
+	bootID, err := server.identity.readBootID(ctx)
+	if err != nil || !hostBootIDPattern.MatchString(bootID) {
+		return ConsoleObserveResult{}, consoleAuthorityError(request.VMID, "read console host boot identity", err)
+	}
+	if bootID != record.launch.hostBootID {
+		// A prior-boot relay cannot be live. Its PID must never select a current task or endpoint.
+		return ConsoleObserveResult{VMID: request.VMID, State: ConsoleStopped}, nil
+	}
+	if record.lifecycle != instanceLifecycleActive || record.active == nil {
+		return ConsoleObserveResult{}, consoleAuthorityError(request.VMID, "console requires active authority", nil)
 	}
 	if record.active.relay.kind == instanceRelayAbsent {
 		return result, nil
