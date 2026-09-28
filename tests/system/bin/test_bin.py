@@ -214,6 +214,7 @@ _BIN_RELEASE_RECEIVER = r'''
 import hashlib, json, os, re, stat, sys
 
 fds, parents = [], []
+journal_baseline = None
 directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 file_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
 
@@ -255,29 +256,80 @@ def read_file(fd, maximum):
     assert len(data) <= maximum and identity(os.fstat(fd)) == before
     return bytes(data)
 
-def no_live_instances():
+def scan_instances():
+    verify_parents()
     try:
-        root = open_directory(state, "instances")
+        root = os.open("instances", directory_flags, dir_fd=state)
     except FileNotFoundError:
-        return
-    owners = os.listdir(root)
-    assert len(owners) <= 64
-    for owner in owners:
-        assert re.fullmatch(r"[1-9][0-9]*", owner), owner
-        uid = open_directory(root, owner)
-        names = os.listdir(uid)
-        assert len(names) <= 1000
-        for name in names:
-            assert re.fullmatch(r"[0-9a-f]{32}\.json", name), name
-            fd = os.open(name, file_flags, dir_fd=uid)
-            fds.append(fd)
-            info = os.fstat(fd)
-            assert info.st_uid == info.st_gid == 0 and stat.S_ISREG(info.st_mode)
-            assert info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600
-            record = json.loads(read_file(fd, 65536), object_pairs_hook=unique_object)
-            assert record["schema_version"] == 6 and record["owner_uid"] == int(owner)
-            assert record["vm_id"] + ".json" == name and record["lifecycle"] == "cleaned", name
-            assert identity(os.stat(name, dir_fd=uid, follow_symlinks=False)) == identity(info)
+        try:
+            os.stat("instances", dir_fd=state, follow_symlinks=False)
+        except FileNotFoundError:
+            verify_parents()
+            return {"directory": None, "owners": {}}
+        raise AssertionError("instance directory appeared during absence observation")
+
+    def directory_receipt(fd):
+        info = os.fstat(fd)
+        assert info.st_uid == info.st_gid == 0 and stat.S_ISDIR(info.st_mode)
+        assert stat.S_IMODE(info.st_mode) == 0o700
+        return identity(info)
+
+    def verify_directory(parent, name, fd, expected):
+        assert identity(os.fstat(fd)) == expected, name
+        assert identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) == expected, name
+
+    try:
+        root_identity = directory_receipt(root)
+        owners = sorted(os.listdir(root))
+        assert len(owners) <= 64
+        snapshot = {"directory": root_identity, "owners": {}}
+        for owner in owners:
+            assert re.fullmatch(r"[1-9][0-9]*", owner), owner
+            uid = os.open(owner, directory_flags, dir_fd=root)
+            try:
+                uid_identity = directory_receipt(uid)
+                names = sorted(os.listdir(uid))
+                assert len(names) <= 1000
+                records = {}
+                for name in names:
+                    assert re.fullmatch(r"[0-9a-f]{32}\.json", name), name
+                    fd = os.open(name, file_flags, dir_fd=uid)
+                    try:
+                        info = os.fstat(fd)
+                        assert info.st_uid == info.st_gid == 0 and stat.S_ISREG(info.st_mode)
+                        assert info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600
+                        raw = read_file(fd, 65536)
+                        record = json.loads(raw, object_pairs_hook=unique_object)
+                        assert type(record["schema_version"]) is int and record["schema_version"] == 6
+                        assert type(record["owner_uid"]) is int and record["owner_uid"] == int(owner)
+                        assert record["vm_id"] + ".json" == name and record["lifecycle"] == "cleaned", name
+                        expected = identity(info)
+                        assert identity(os.fstat(fd)) == expected, name
+                        assert identity(os.stat(name, dir_fd=uid, follow_symlinks=False)) == expected, name
+                        records[name] = {"identity": expected, "sha256": hashlib.sha256(raw).hexdigest()}
+                    finally:
+                        os.close(fd)
+                assert sorted(os.listdir(uid)) == names, owner
+                for name, receipt in records.items():
+                    assert identity(os.stat(name, dir_fd=uid, follow_symlinks=False)) == receipt["identity"], name
+                verify_directory(root, owner, uid, uid_identity)
+                snapshot["owners"][owner] = {"directory": uid_identity, "records": records}
+            finally:
+                os.close(uid)
+        assert sorted(os.listdir(root)) == owners
+        verify_directory(state, "instances", root, root_identity)
+        verify_parents()
+        return snapshot
+    finally:
+        os.close(root)
+
+def no_live_instances():
+    global journal_baseline
+    snapshot = scan_instances()
+    if journal_baseline is None:
+        journal_baseline = snapshot
+    else:
+        assert snapshot == journal_baseline, "instance journals changed; preserve release state"
 
 def absent_target():
     verify_parents()
@@ -321,6 +373,10 @@ def pair_receipt(pair, version):
         assert 120 <= item["size_bytes"] <= 64 * 1024 * 1024
         assert item["size_bytes"] == len(content[name])
         assert item["sha256"] == hashlib.sha256(content[name]).hexdigest()
+    for name, (fd, expected) in leaves.items():
+        assert identity(os.fstat(fd)) == expected, name
+        assert identity(os.stat(name, dir_fd=directory, follow_symlinks=False)) == expected, name
+    verify_parents()
     return {"manifest": manifest, "directory": identity(os.fstat(directory), True), "files": identities}
 
 try:
@@ -345,9 +401,9 @@ try:
             # Root removal intentionally unlinks this pinned version directory.
             parents[:] = [entry for entry in parents if entry[2] != owned[0]]
         assert pair_receipt(original, "1.16.2") == original_receipt
+        no_live_instances()
         if command == "absent":
             assert owned is None
-            no_live_instances()
             absent_target()
             result = {"target_absent": True}
         elif command == "admit":
@@ -356,7 +412,6 @@ try:
             result = pair_receipt(owned, "1.16.1")
         elif command == "verify":
             assert owned is not None
-            no_live_instances()
             result = pair_receipt(owned, "1.16.1")
         elif command == "removed":
             absent_target()
@@ -407,10 +462,12 @@ class _BinReleaseOwnership:
             self.process.stdin.close()
         except BrokenPipeError:
             pass  # Its nonzero exit and stderr below retain the receiver failure.
-        self.process.wait(timeout=30)
-        error = self.process.stderr.read(16385)
-        self.process.stdout.close()
-        self.process.stderr.close()
+        try:
+            self.process.wait(timeout=30)
+            error = self.process.stderr.read(16385)
+        finally:
+            self.process.stdout.close()
+            self.process.stderr.close()
         assert self.process.returncode == 0, error
 
 
@@ -489,6 +546,17 @@ class TestBinaryPullAndLifecycle:
         authority = _BinReleaseOwnership()
         attempted = False
         owned = None
+        failures: list[BaseException] = []
+
+        def checked(label: str, operation) -> bool:
+            try:
+                operation()
+            except BaseException as error:
+                error.add_note(label)
+                failures.append(error)
+                return False
+            return True
+
         try:
             original = authority.read()
             record_property("bin_original_root_receipt", json.dumps(original))
@@ -519,42 +587,76 @@ class TestBinaryPullAndLifecycle:
                 for item in listing
                 if item["is_default"]
             } == {(item["type"], target, item["id"]) for item in pulled}
+        except BaseException as error:
+            error.add_note("binary lifecycle assertion or operation failed")
+            failures.append(error)
         finally:
-            try:
-                if owned is not None:
+            # Default selection only changes the caller projection. Restore both
+            # captured IDs even when the root observer cannot prove target ownership.
+            restored = True
+            for item in defaults:
+                succeeded = checked(
+                    f"restore original {item['type']} default {item['id']}",
+                    lambda item=item: _run_mvm(runner_vm, "bin", "default", item["id"]),
+                )
+                restored = succeeded and restored
+
+            def verify_defaults() -> None:
+                listing = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+                assert {item["id"] for item in listing if item["is_default"]} == {
+                    item["id"] for item in defaults
+                }, listing
+                assert _binary_identity([item for item in listing if item["version"] != target]) == (
+                    _binary_identity(before)
+                )
+
+            defaults_verified = checked("verify both original defaults and unaffected projections", verify_defaults)
+            restored = defaults_verified and restored
+            if owned is not None:
+                def verify_owned() -> None:
                     assert authority.require("verify") == owned
                     listing = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
                     _require_bin_root_projection(listing, original["original"])
                     _require_bin_root_projection(listing, owned)
-                    for item in defaults:
+
+                ownership_verified = checked("verify unchanged owned and original root releases", verify_owned)
+                if restored and ownership_verified:
+                    def remove_owned() -> None:
+                        verify_defaults()
                         assert authority.require("verify") == owned
-                        _run_mvm(runner_vm, "bin", "default", item["id"])
-                    listing = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-                    assert _binary_identity([item for item in listing if item["version"] != target]) == (
-                        _binary_identity(before)
-                    )
-                    assert authority.require("verify") == owned
-                    removed = _json_success_data(
-                        _run_mvm(runner_vm, "bin", "rm", target, "--force", "--json").stdout,
-                        dict,
-                    )
-                    assert len(removed["items"]) == 1
-                    result = removed["items"][0]
-                    assert result["error"] is None and result["result"]["item"] == target
-                    assert result["result"]["status"] == "success"
-                    assert result["result"]["code"] == "binary.removed"
-                    absent = authority.require("removed")
-                    assert absent == {"target_absent": True, "original": original["original"]}
-                    record_property("bin_removed_root_receipt", json.dumps(absent))
-                    after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-                    assert _binary_identity(after) == _binary_identity(before)
-                    assert {item["id"]: item["created_at"] for item in after} == {
-                        item["id"]: item["created_at"] for item in before
-                    }
-                elif attempted:
-                    pytest.fail("unadmitted or uncertain 1.16.1 root/projection state preserved; explicit recovery required")
-            finally:
-                authority.close()
+                        removed = _json_success_data(
+                            _run_mvm(runner_vm, "bin", "rm", target, "--force", "--json").stdout,
+                            dict,
+                        )
+                        assert len(removed["items"]) == 1
+                        result = removed["items"][0]
+                        assert result["error"] is None and result["result"]["item"] == target
+                        assert result["result"]["status"] == "success"
+                        assert result["result"]["code"] == "binary.removed"
+                        absent = authority.require("removed")
+                        assert absent == {"target_absent": True, "original": original["original"]}
+                        record_property("bin_removed_root_receipt", json.dumps(absent))
+                        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+                        assert _binary_identity(after) == _binary_identity(before)
+                        assert {item["id"]: item["created_at"] for item in after} == {
+                            item["id"]: item["created_at"] for item in before
+                        }
+
+                    checked("remove only the verified owned release and verify exact restoration", remove_owned)
+                else:
+                    failures.append(AssertionError(
+                        "uncertain 1.16.1 root/projection state preserved; explicit recovery required"
+                    ))
+            elif attempted:
+                failures.append(AssertionError(
+                    "unadmitted or uncertain 1.16.1 root/projection state preserved; explicit recovery required"
+                ))
+            checked("close retained root release observations", authority.close)
+
+        if len(failures) == 1:
+            raise failures[0]
+        if failures:
+            raise BaseExceptionGroup("binary lifecycle and cleanup failures", failures)
 
     def test_bin_rm_rejects_binary_id_without_effects(self, runner_vm: str) -> None:
         """The exact-version removal API must not interpret a display ID as a release slot."""
