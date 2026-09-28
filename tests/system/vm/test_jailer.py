@@ -24,6 +24,7 @@ from tests.system.conftest import (
     create_vm_core,
     ensure_vm_deps,
 )
+from tests.system.vm.test_vm_lifecycle import _kill_exact_test_firecracker
 
 pytestmark = [
     pytest.mark.system,
@@ -534,8 +535,10 @@ class TestNetworklessJailerLifecycle:
             )
             assert all(volume["name"] != volume_name for volume in volumes)
 
+    @pytest.mark.destructive
+    @pytest.mark.parametrize("source_crash", [False, True], ids=["normal-removal", "source-crash"])
     def test_networkless_snapshot_restores_independent_data_volume(
-        self, runner_vm: str, networkless_vm_name: str,
+        self, runner_vm: str, networkless_vm_name: str, source_crash: bool,
     ) -> None:
         """A full capture restores the original volume bytes without an IP endpoint."""
         ensure_vm_deps(runner_vm)
@@ -577,6 +580,33 @@ class TestNetworklessJailerLifecycle:
             ).stdout.split()[0]
             assert changed_hash != captured_hash
 
+            if source_crash:
+                source = _vm_entry(runner_vm, source_name)
+                inspected = _json_success_data(
+                    _run_mvm(runner_vm, "vm", "inspect", source_name, "--json").stdout,
+                    dict,
+                )
+                assert source["status"] == inspected["vm"]["status"] == "running"
+                assert source["id"] == inspected["vm"]["id"]
+                assert source["pid"] == inspected["vm"]["pid"]
+                assert int(source["pid"]) > 0
+                assert int(source["process_start_time"]) > 0
+                _kill_exact_test_firecracker(
+                    int(source["pid"]), int(source["process_start_time"]), source["id"],
+                )
+                crashed = _vm_entry(runner_vm, source_name)
+                assert crashed["id"] == source["id"]
+                assert crashed["status"] == "crashed"
+                inspected = _json_success_data(
+                    _run_mvm(runner_vm, "vm", "inspect", source_name, "--json").stdout,
+                    dict,
+                )
+                assert inspected["vm"]["id"] == source["id"]
+                assert inspected["vm"]["status"] == "crashed"
+                assert all(vm["id"] != source["id"] for vm in _parse_vm_list(
+                    _run_mvm(runner_vm, "vm", "ps", "--json").stdout,
+                ))
+
             _run_mvm(runner_vm, "vm", "rm", source_name, "--force", timeout=120)
             _run_mvm(runner_vm, "volume", "rm", volume_name, "--force")
             denied = _run_mvm(
@@ -595,6 +625,14 @@ class TestNetworklessJailerLifecycle:
                 ).stdout,
                 list,
             )
+            # Register restored disks before assertions or guest readback can fail;
+            # VM removal in finally clears the attachment used to identify them.
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+            )
+            restored_vm_ids = {vm["id"] for vm in restored}
+            restored_volumes = [volume for volume in volumes if volume.get("vm_id") in restored_vm_ids]
+            restored_volume_ids = {volume["id"] for volume in restored_volumes}
             assert len(restored) == 1
             assert restored[0]["network_placement"] == "networkless"
             assert not restored[0]["network_id"]
@@ -604,12 +642,7 @@ class TestNetworklessJailerLifecycle:
                 runner_vm, "exec", restored_name, "--", "sha256sum", "/dev/vdb", timeout=30,
             ).stdout.split()[0]
             assert restored_hash == captured_hash
-            volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
-            )
-            restored_volumes = [volume for volume in volumes if volume.get("vm_id") == restored[0]["id"]]
             assert len(restored_volumes) == 1
-            restored_volume_ids = {restored_volumes[0]["id"]}
         finally:
             for vm_name in (restored_name, source_name):
                 listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
