@@ -940,66 +940,155 @@ class TestNetworkSyncMissingBridge:
         pytest.mark.domain_network,
     ]
 
-    def test_sync_refuses_missing_managed_bridge(
-        # Rationale: Real bridge deletion proves same-boot tamper refusal.
-        self,
-        runner_vm,
-        unique_network_name,
-    ) -> None:
-        """Sync rejects the missing recorded bridge without adopting a replacement."""
-        net_name = unique_network_name
-        subnet = _unique_subnet(net_name)
-        bridge: str | None = None
-
-        # 1. Create the network
+    @pytest.mark.destructive
+    def test_sync_refuses_missing_managed_bridge(self, network_case) -> None:
+        """An exact administrator fault is rejected and removed through typed authority."""
+        runner_vm = network_case.runner_vm
+        assert runner_vm == "mvmctl-030-test", (
+            "administrator fault requires the named disposable runner"
+        )
+        receipt = network_case.create_network()
+        boot_id = _guest_run(
+            runner_vm, "cat /proc/sys/kernel/random/boot_id"
+        ).stdout.strip()
+        # The root fault pins its inherited namespace, freshly admits the receipt
+        # and childless bridge, then deletes by that observed ifindex, not a name.
+        fault = """
+import json, os, socket, struct, subprocess, sys
+bridge, index, alias, device, inode, mac, boot_id = sys.argv[1:]
+index, device, inode = int(index), int(device), int(inode)
+assert os.geteuid() == 0
+namespace_fd = os.open('/proc/self/ns/net', os.O_RDONLY | os.O_CLOEXEC)
+channel = None
+def links():
+    return json.loads(subprocess.check_output(['ip', '-j', '-d', 'link', 'show'], text=True))
+def namespace():
+    current = os.stat('/proc/self/ns/net')
+    pinned = os.fstat(namespace_fd)
+    assert (current.st_dev, current.st_ino) == (pinned.st_dev, pinned.st_ino) == (device, inode)
+def same_boot():
+    with open('/proc/sys/kernel/random/boot_id') as source:
+        assert source.read().strip() == boot_id
+try:
+    namespace()
+    same_boot()
+    observed = links()
+    matches = [link for link in observed if link['ifname'] == bridge or link['ifindex'] == index]
+    assert len(matches) == 1
+    link = matches[0]
+    assert link['ifname'] == bridge and link['ifindex'] == index
+    assert link['linkinfo']['info_kind'] == 'bridge' and link.get('ifalias') == alias
+    assert link['address'] == mac and 'UP' in link['flags']
+    assert not any(link.get('master') in (bridge, index) for link in observed)
+    channel = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW | socket.SOCK_CLOEXEC, socket.NETLINK_ROUTE)
+    channel.settimeout(5)
+    channel.bind((0, 0))
+    namespace()
+    same_boot()
+    # RTM_DELLINK, NLM_F_REQUEST | NLM_F_ACK, exact admitted ifindex.
+    body = struct.pack('=BBHiII', socket.AF_UNSPEC, 0, 0, index, 0, 0)
+    channel.sendto(struct.pack('=IHHII', 16 + len(body), 17, 5, 1, 0) + body, (0, 0))
+    reply, peer = channel.recvfrom(65536)
+    assert peer[0] == 0 and len(reply) >= 20
+    length, kind, flags, sequence, pid = struct.unpack_from('=IHHII', reply)
+    assert 20 <= length <= len(reply) and kind == 2 and sequence == 1
+    assert struct.unpack_from('=i', reply, 16)[0] == 0
+    namespace()
+    same_boot()
+    assert not any(link['ifname'] == bridge or link['ifindex'] == index for link in links())
+    print('deleted exact bridge')
+finally:
+    if channel is not None:
+        channel.close()
+    os.close(namespace_fd)
+"""
         try:
-            _run_mvm(
+            _assert_network_receipt(runner_vm, receipt)
+            inspected = _data(runner_vm, "network", "inspect", receipt.id)
+            assert inspected["leases"] == []
+            link = next(
+                link for link in _links(runner_vm) if link["ifname"] == receipt.bridge
+            )
+            result = _guest_run(
                 runner_vm,
+                shlex.join(
+                    [
+                        "sudo",
+                        "-n",
+                        "python3",
+                        "-I",
+                        "-c",
+                        fault,
+                        receipt.bridge,
+                        str(receipt.ifindex),
+                        receipt.alias,
+                        str(receipt.namespace[0]),
+                        str(receipt.namespace[1]),
+                        link["address"],
+                        boot_id,
+                    ]
+                ),
+                timeout=10,
+            )
+            assert result.stdout.strip() == "deleted exact bridge", result
+            assert _namespace(runner_vm) == receipt.namespace
+            assert not any(
+                link["ifname"] == receipt.bridge or link["ifindex"] == receipt.ifindex
+                for link in _links(runner_vm)
+            )
+            error = _assert_rejected(
+                network_case,
                 "network",
-                "create",
-                net_name,
-                "--subnet",
-                subnet,
+                "sync",
+                receipt.id,
+                message="managed bridge disappeared",
+                code="network.error",
             )
-            bridge = _bridge_name(runner_vm, net_name)
-
-            # Verify bridge exists before removal
-            _assert_bridge_exists(runner_vm, bridge)
-
-            # 2. Delete the bridge without changing the host boot identity.
-            result = _guest_run(
-                runner_vm,
-                f"sudo ip link delete {bridge}",
-                check=False,
-                timeout=10,
+            assert error["class"] == 4, error
+            assert (
+                _guest_run(
+                    runner_vm, "cat /proc/sys/kernel/random/boot_id"
+                ).stdout.strip()
+                == boot_id
             )
-            assert result.returncode == 0, (
-                f"Failed to delete bridge {bridge}: {result.stderr}"
-            )
-
-            # Verify bridge is really gone
-            result = _guest_run(
-                runner_vm,
-                f"ip link show {bridge} 2>&1",
-                check=False,
-                timeout=10,
-            )
-            assert result.returncode != 0, f"Bridge {bridge} should no longer exist"
-
-            # 3. The same-boot authority record must reject silent re-creation.
-            sync_result = _run_mvm(runner_vm, "network", "sync", check=False)
-            assert sync_result.returncode != 0, (
-                "sync unexpectedly accepted a missing managed bridge"
-            )
-            assert "managed bridge disappeared" in sync_result.stderr
-            result = _guest_run(
-                runner_vm,
-                f"ip link show {bridge} 2>&1",
-                check=False,
-                timeout=10,
-            )
-            assert result.returncode != 0, "sync recreated the missing bridge"
-
         finally:
-            # Explicit exact-network removal retires the stale firewall intent.
-            _run_mvm(runner_vm, "network", "rm", net_name)
+            # Presence admits ordinary cleanup. Absence admits only exact logical
+            # retirement through root; a replacement is never faulted or repaired.
+            assert _namespace(runner_vm) == receipt.namespace
+            links = _links(runner_vm)
+            if any(
+                link["ifname"] == receipt.bridge or link["ifindex"] == receipt.ifindex
+                for link in links
+            ):
+                network_case.remove_network(receipt)
+            else:
+                matches = [
+                    item
+                    for item in _networks(runner_vm)
+                    if item["id"] == receipt.id or item["name"] == receipt.name
+                ]
+                assert len(matches) == 1, "refusing ambiguous missing-bridge cleanup"
+                item = matches[0]
+                assert (
+                    item["id"],
+                    item["name"],
+                    item["created_at"],
+                    item["subnet"],
+                    item["ipv4_gateway"],
+                    item["nat_enabled"],
+                    item["bridge"],
+                ) == (
+                    receipt.id,
+                    receipt.name,
+                    receipt.created_at,
+                    receipt.subnet,
+                    receipt.gateway,
+                    receipt.nat_enabled,
+                    receipt.bridge,
+                ), item
+                assert item["is_present"] is False and item["bridge_active"] is False, (
+                    item
+                )
+                _run_mvm(runner_vm, "network", "rm", receipt.id)
+                _assert_network_absent(runner_vm, receipt)
+                network_case.networks.remove(receipt)
