@@ -17,6 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Complete trusted-binary repeat gate (2026-09-28):** Source SHA-256
+`bf5bf278d6260ae5ff31be4e993d26955016b59db041a9100f63943ab9b88eda` passed all eleven cases
+twice (21.18/27.26 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
+Both strict reports have zero other outcomes, unchanged configuration and four empty inventories after checked
+owned cleanup. Remote metadata passed separately; the new release lifecycle passed alone in 9.37 seconds.
+A read-only root oracle retains no-follow parent/default/target descriptors, requires schema-6 journals cleaned
+and the target slot absent, and matches the installed 1.16.1 manifest/executables to the mirrored archive before
+default transfer. Cleanup restores full original default IDs and removes only the admitted test-owned release;
+partial or uncertain installations are preserved, not removed speculatively. The other ten case bodies remain
+unchanged, including live-VM release refusal. Reports are `qa-bin-auto-bf5b-full11-pass{1,2}.{json,xml}`.
+This supersedes the earlier remote/destructive binary gaps, not the complete release matrix or approval.
+
 **Complete image repeat gate (2026-09-28):** Source SHA-256
 `4efb233daf0703b2d83efbd67b781b5a76288fc9a3a092c8d2661bd84b59f40a` passed all 38 cases
 twice (406.63/412.24 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.

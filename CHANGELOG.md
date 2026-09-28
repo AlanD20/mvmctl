@@ -61,9 +61,9 @@ fail-closed sync and typed removal. The full current-source nftables/policy matr
 - The complete six-case peer-exec module passed twice with retained full-ID/process/file
   ownership and checked cleanup, including same-network, cross-network and networkless
   directionality and endpoint lifecycle. This does not complete release qualification.
-- Nine safe trusted-binary system cases passed twice with exact archive/release and live-VM
-  ownership checks; all eleven cases remain present. Remote metadata and destructive
-  release/default-transfer qualification remain pending.
+- The complete eleven-case trusted-binary module passed twice, including remote metadata,
+  exact creation-owned mirrored release installation/default transfer/removal, and live-VM
+  release protection. Retained root manifest/executable receipts protect the borrowed pair.
 - The complete 24-case host system-test file passed twice on the installed candidate in the named runner.
   First-capacity initialization and clean/reset refusal now check owned resources, unchanged administrator state
   and healthy guest access. This does not qualify administrator enrollment or successful clean-host reset.
