@@ -17,6 +17,19 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Basic network lifecycle repeat gate (2026-09-28):** Commit `8af4839a` modernizes the basic
+network file while retaining its separate missing-bridge fault case. Exact file SHA-256
+`65c608e4322e53617fc6afc0a0199a8fd315d127d3f66803e04258784d34ac00` passed the 30 safe
+cases twice (41.15/41.04 seconds) against installed candidate `833a32a0` inside only
+`mvmctl-030-test`. Both strict reports have zero other outcomes and exact config/four empty
+inventories after checked owned cleanup. Assertions retain bridge/namespace/lease identities,
+configured port state/delay, routes and firewall policy; comparisons exclude elapsed timers,
+handles and live counters. A duplicate-name oracle now asserts the actual conflicting name,
+stable error code and conflict class. A targeted diagnostic proved the omitted bridge-port
+forward-delay countdown was the only changing field before adding it to the elapsed-timer
+projection. Reports are `qa-network-65c6-safe30-pass{1,2}.{json,xml}`. The missing-bridge
+administrative fault remains unqualified; this is not the whole network/nftables/policy matrix.
+
 **Current-source Go/Python runner checkpoint (2026-09-28):** A clean checkout at `b2566f8a`
 passed pinned Go 1.26.3 offline tidy, architecture, whole-tree gofmt/golines 0.13.0, generation,
 vet, every CI-selected Go test and complete root Jailer tests (5.214 seconds) inside the freshly
