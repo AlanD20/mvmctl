@@ -23,7 +23,6 @@ from tests.system.conftest import (
     _parse_vm_list,
     _run_mvm,
     _unique_subnet,
-    ensure_vm_deps,
 )
 
 pytestmark = [
@@ -90,55 +89,127 @@ def _exec_policies(runner_vm: str) -> list[dict]:
     )
 
 
-def _cleanup_pair(
-    runner_vm: str, source: str, destination: str, networks: list[str]
-) -> None:
-    """Remove only this case's resources and prove each is absent afterward."""
+def _pair_inventory(runner_vm: str, domain: str):
+    args = {"exec_policy": ("policy", "exec"), "traffic_policy": ("policy", "traffic")}.get(domain, (domain,))
+    expected = dict if domain in ("config", "traffic_policy") else list
+    data = _json_success_data(_run_mvm(runner_vm, *args, "ls", "--json").stdout, expected)
+    return sorted(data, key=lambda item: json.dumps(item, sort_keys=True)) if isinstance(data, list) else data
+
+
+def _pair_owner(runner_vm: str) -> dict:
+    """Admit mirrored assets and retain unrelated records before either old journey."""
+    _require_exec_lifecycle_assets(runner_vm)
+    baseline = {domain: _pair_inventory(runner_vm, domain) for domain in (
+        "image", "kernel", "bin", "vm", "network", "key", "volume", "snapshot", "env", "exec_policy", "traffic_policy", "config",
+    )}
+    images = [item for item in baseline["image"] if item["is_present"]
+              and (item["type"], item["version"]) == ("alpine", "3.23")]
+    assert len(images) == 1, images
+    kernels = [item for item in baseline["kernel"] if item["is_present"] and item["is_default"]]
+    assert len(kernels) == 1, kernels
+    assets = {"image_id": images[0]["id"], "kernel_id": kernels[0]["id"]}
+    for kind in ("firecracker", "jailer"):
+        binaries = [item for item in baseline["bin"] if item["type"] == kind and item["is_present"]
+                    and item["is_default"] and item["version"] == "1.16.2"]
+        assert len(binaries) == 1, binaries
+        assets["binary_id" if kind == "firecracker" else "jailer_binary_id"] = binaries[0]["id"]
+    return {"baseline": baseline, "image_id": images[0]["id"], "assets": assets, "vms": {}, "vm_intents": [],
+            "vm_files": {}, "runtime": {}, "networks": {}, "network_intents": {},
+            "policy_ids": set(), "policies": {}}
+
+
+def _pair_create_vm(runner_vm: str, owned: dict, name: str, args: list[str]) -> list[dict]:
+    owned["vms"][name] = {}
+    before_ids = _extra_vm_creation_intent(runner_vm, owned, name, args)
+    result = _run_mvm(runner_vm, *args, check=False, timeout=180)
+    _extra_retain_vm_receipts(result, owned, name, before_ids)
+    for vm in json.loads(result.stdout).get("data") or []:
+        assert vm["id"] in owned["vms"][name], vm
+        owned["vm_files"][vm["id"]] = {key: vm[key] for key in ("config_path", "rootfs_path")}
+        owned["runtime"][name] = {"vm_id": vm["id"], "pid": vm["pid"], "start_ticks": vm["process_start_time"]}
+        assert {key: vm[key] for key in owned["assets"]} == owned["assets"], (vm, owned["assets"])
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    return _json_success_data(result.stdout, list)
+
+
+def _pair_identity(runner_vm: str, owned: dict, name: str, vm_id: str) -> dict:
+    identity = _exec_lifecycle_identity(runner_vm, name, vm_id)
+    owned["runtime"][name] = identity
+    return identity
+
+
+def _pair_create_network(runner_vm: str, owned: dict, name: str) -> dict:
+    before = _pair_inventory(runner_vm, "network")
+    subnet = _unique_subnet(name)
+    assert all(item["name"] != name and item["subnet"] != subnet for item in before), (name, subnet, before)
+    args = ["network", "create", name, "--subnet", subnet, "--json"]
+    owned["networks"][name] = {}
+    owned["network_intents"][name] = {"arguments": args[:], "before_ids": {item["id"] for item in before}}
+    result = _run_mvm(runner_vm, *args, check=False)
+    envelope = json.loads(result.stdout)
+    assert envelope["schema_version"] == 1 and envelope["status"] in ("success", "partial", "error"), envelope
+    if envelope["data"] is not None:
+        item = envelope["data"]
+        assert isinstance(item, dict) and item["name"] == name and item["subnet"] == subnet, item
+        assert item["id"] not in owned["network_intents"][name]["before_ids"] and item["created_at"], item
+        owned["networks"][name][item["id"]] = {key: item[key] for key in (
+            "id", "name", "created_at", "bridge", "subnet", "ipv4_gateway", "nat_enabled",
+        )}
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    return _json_success_data(result.stdout, dict)
+
+
+def _pair_create_policy(runner_vm: str, owned: dict) -> dict:
+    policy = _extra_exec_grant(runner_vm, owned)
+    owned["policies"][policy["id"]] = policy
+    return policy
+
+
+def _cleanup_pair(runner_vm: str, owned: dict) -> None:
+    """Reject replacements; remove only returned exact identities and current admitted tasks."""
     errors: list[str] = []
     try:
-        policies = [
-            item
-            for item in _exec_policies(runner_vm)
-            if item["source_vm_name"] == source
-            and item["destination_vm_name"] == destination
-            and item["target_user"] == "runner"
-        ]
-        for item in policies:
-            _run_mvm(runner_vm, "policy", "exec", "rm", item["id"], "--force")
-        if any(
-            item["id"] in {policy["id"] for policy in policies}
-            for item in _exec_policies(runner_vm)
-        ):
-            errors.append("execution policy remains")
+        for policy in _exec_policies(runner_vm):
+            if policy["id"] in owned["policy_ids"]:
+                assert policy == owned["policies"].get(policy["id"]), (policy, owned["policies"])
+                _run_mvm(runner_vm, "policy", "exec", "rm", policy["id"], "--force")
+        assert all(item["id"] not in owned["policy_ids"] for item in _exec_policies(runner_vm))
     except Exception as exc:
         errors.append(f"execution policy cleanup: {exc}")
-
-    for vm_name in (destination, source):
+    for name, receipts in reversed(list(owned["vms"].items())):
         try:
-            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            if any(item["name"] == vm_name for item in listed):
-                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", timeout=120)
-            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            if any(item["name"] == vm_name for item in listed):
-                errors.append(f"VM remains: {vm_name}")
+            listed = _pair_inventory(runner_vm, "vm")
+            matches = [item for item in listed if item["name"] == name or item["id"] in receipts]
+            assert len(matches) <= 1 and all(item["id"] in receipts for item in matches), matches
+            for vm in matches:
+                assert {key: vm[key] for key in receipts[vm["id"]]} == receipts[vm["id"]], vm
+                assert {key: vm[key] for key in owned["vm_files"][vm["id"]]} == owned["vm_files"][vm["id"]], vm
+                if vm["status"] in ("running", "paused"):
+                    identity = owned["runtime"][name]
+                    assert (vm["pid"], vm["process_start_time"]) == (identity["pid"], identity["start_ticks"]), (vm, identity)
+                    with _exec_lifecycle_task(identity):
+                        _run_mvm(runner_vm, "vm", "rm", vm["id"], "--force", timeout=120)
+                else:
+                    _run_mvm(runner_vm, "vm", "rm", vm["id"], "--force", timeout=120)
+            assert all(item["name"] != name and item["id"] not in receipts for item in _pair_inventory(runner_vm, "vm"))
         except Exception as exc:
-            errors.append(f"VM cleanup {vm_name}: {exc}")
-
-    for name in reversed(networks):
+            errors.append(f"VM cleanup {name}: {exc}")
+    for name, receipts in reversed(list(owned["networks"].items())):
         try:
-            listed = _json_success_data(
-                _run_mvm(runner_vm, "network", "ls", "--json").stdout, list
-            )
-            if any(item["name"] == name for item in listed):
-                _run_mvm(runner_vm, "network", "rm", name, timeout=60)
-            listed = _json_success_data(
-                _run_mvm(runner_vm, "network", "ls", "--json").stdout, list
-            )
-            if any(item["name"] == name for item in listed):
-                errors.append(f"network remains: {name}")
+            matches = [item for item in _pair_inventory(runner_vm, "network")
+                       if item["name"] == name or item["id"] in receipts]
+            assert len(matches) <= 1 and all(item["id"] in receipts for item in matches), matches
+            for item in matches:
+                assert {key: item[key] for key in receipts[item["id"]]} == receipts[item["id"]], item
+                _run_mvm(runner_vm, "network", "rm", item["id"], timeout=60)
+            assert all(item["name"] != name and item["id"] not in receipts for item in _pair_inventory(runner_vm, "network"))
         except Exception as exc:
             errors.append(f"network cleanup {name}: {exc}")
-
+    for domain, baseline in owned["baseline"].items():
+        try:
+            assert _pair_inventory(runner_vm, domain) == baseline, f"{domain} baseline changed"
+        except Exception as exc:
+            errors.append(f"{domain} baseline: {exc}")
     assert not errors, "; ".join(errors)
 
 
@@ -146,6 +217,7 @@ def _exercise_placement(runner_vm: str, placement: str) -> None:
     suffix = uuid.uuid4().hex[:8]
     source, destination = f"exec-src-{suffix}", f"exec-dst-{suffix}"
     networks: list[str] = []
+    owned = _pair_owner(runner_vm)
 
     try:
         if placement != "networkless":
@@ -153,28 +225,20 @@ def _exercise_placement(runner_vm: str, placement: str) -> None:
             for index in range(count):
                 name = f"exec-net-{index}-{suffix}"
                 networks.append(name)
-                _run_mvm(
-                    runner_vm,
-                    "network",
-                    "create",
-                    name,
-                    "--subnet",
-                    _unique_subnet(name),
-                )
+                _pair_create_network(runner_vm, owned, name)
 
         for vm_name, network in (
             (source, networks[0] if networks else None),
             (destination, networks[-1] if networks else None),
         ):
-            placement_args = ["--network", network] if network else ["--no-network"]
-            created = _json_success_data(
-                _run_mvm(
-                    runner_vm,
+            placement_args = ["--network", next(iter(owned["networks"][network]))] if network else ["--no-network"]
+            created = _pair_create_vm(
+                runner_vm, owned, vm_name, [
                     "vm",
                     "create",
                     vm_name,
                     "--image",
-                    "alpine:3.23",
+                    owned["image_id"],
                     *placement_args,
                     "--cloud-init-mode",
                     "off" if network is None else "inject",
@@ -189,9 +253,7 @@ def _exercise_placement(runner_vm: str, placement: str) -> None:
                     "--user",
                     "runner",
                     "--json",
-                    timeout=180,
-                ).stdout,
-                list,
+                ],
             )
             assert len(created) == 1 and created[0]["name"] == vm_name
             inspected = _json_success_data(
@@ -210,6 +272,10 @@ def _exercise_placement(runner_vm: str, placement: str) -> None:
             else:
                 assert inspected["networking"]["network"]["name"] == network
             _wait_for_runner(runner_vm, vm_name)
+            _pair_identity(runner_vm, owned, vm_name, created[0]["id"])
+
+        owned["source_id"] = next(iter(owned["vms"][source]))
+        owned["destination_id"] = next(iter(owned["vms"][destination]))
 
         before = f"/tmp/exec-denied-{suffix}"
         _sentinel_absent(runner_vm, destination, before)
@@ -217,19 +283,7 @@ def _exercise_placement(runner_vm: str, placement: str) -> None:
         assert denied.returncode != 0, (denied.stdout, denied.stderr)
         _sentinel_absent(runner_vm, destination, before)
 
-        policy = _json_success_data(
-            _run_mvm(
-                runner_vm,
-                "policy",
-                "exec",
-                "create",
-                source,
-                destination,
-                "runner",
-                "--json",
-            ).stdout,
-            dict,
-        )
+        policy = _pair_create_policy(runner_vm, owned)
         assert policy["source_vm_name"] == source
         assert policy["destination_vm_name"] == destination
         assert policy["target_user"] == "runner"
@@ -260,12 +314,12 @@ def _exercise_placement(runner_vm: str, placement: str) -> None:
         assert revoked.returncode != 0, (revoked.stdout, revoked.stderr)
         _sentinel_absent(runner_vm, destination, revoked_path)
     finally:
-        _cleanup_pair(runner_vm, source, destination, networks)
+        _cleanup_pair(runner_vm, owned)
 
 
 def test_directional_vm_to_vm_exec_policy(runner_vm: str) -> None:
     """Same-network, cross-network, and networkless grants stay directional."""
-    ensure_vm_deps(runner_vm)
+    _require_exec_lifecycle_assets(runner_vm)
     for placement in ("same", "cross", "networkless"):
         _exercise_placement(runner_vm, placement)
 
@@ -388,15 +442,14 @@ def test_vm_to_vm_exec_current_peers_after_restart_and_reboot(runner_vm: str) ->
     effect_path = f"/home/runner/exec-life-effect-{suffix}"
     stopped_path = f"/home/runner/exec-life-stopped-{suffix}"
     revoked_path = f"/home/runner/exec-life-revoked-{suffix}"
+    owned = _pair_owner(runner_vm)
     try:
         for name in (source, destination):
-            created = _json_success_data(
-                _run_mvm(
-                    runner_vm, "vm", "create", name, "--image", "alpine:3.23",
+            created = _pair_create_vm(
+                runner_vm, owned, name, ["vm", "create", name, "--image", owned["image_id"],
                     "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
                     "--no-pci", "--disk-size", "512M", "--mem", "256M",
-                    "--vcpu", "1", "--user", "runner", "--json", timeout=180,
-                ).stdout, list,
+                    "--vcpu", "1", "--user", "runner", "--json"],
             )
             assert len(created) == 1 and created[0]["name"] == name, created
             vm_ids[name] = created[0]["id"]
@@ -404,14 +457,10 @@ def test_vm_to_vm_exec_current_peers_after_restart_and_reboot(runner_vm: str) ->
                     created[0]["disk_size_mib"]) == (1, 256, 512)
             assert created[0]["network_placement"] == "networkless", created
             assert created[0]["ipv4"] == "" and created[0]["mac"] == "", created
-            identities[name] = _exec_lifecycle_identity(runner_vm, name, vm_ids[name])
+            identities[name] = _pair_identity(runner_vm, owned, name, vm_ids[name])
 
-        policy = _json_success_data(
-            _run_mvm(
-                runner_vm, "policy", "exec", "create", source, destination,
-                "runner", "--json",
-            ).stdout, dict,
-        )
+        owned["source_id"], owned["destination_id"] = vm_ids[source], vm_ids[destination]
+        policy = _pair_create_policy(runner_vm, owned)
         assert policy["source_vm_id"] == vm_ids[source]
         assert policy["destination_vm_id"] == vm_ids[destination]
         assert policy["target_user"] == "runner"
@@ -430,7 +479,7 @@ def test_vm_to_vm_exec_current_peers_after_restart_and_reboot(runner_vm: str) ->
             denied = _remote_exec(runner_vm, source, destination, "touch", stopped_path)
             assert denied.returncode != 0, (denied.stdout, denied.stderr)
             _run_mvm(runner_vm, "vm", "start", vm_ids[name], timeout=60)
-            current = _exec_lifecycle_identity(runner_vm, name, vm_ids[name])
+            current = _pair_identity(runner_vm, owned, name, vm_ids[name])
             print(f"exec lifecycle restart old={json.dumps(previous, sort_keys=True)} "
                   f"new={json.dumps(current, sort_keys=True)}", flush=True)
             assert current["vm_id"] == previous["vm_id"]
@@ -444,7 +493,7 @@ def test_vm_to_vm_exec_current_peers_after_restart_and_reboot(runner_vm: str) ->
         previous = identities[destination]
         with _exec_lifecycle_task(previous):
             _run_mvm(runner_vm, "vm", "reboot", vm_ids[destination], timeout=60)
-        current = _exec_lifecycle_identity(runner_vm, destination, vm_ids[destination])
+        current = _pair_identity(runner_vm, owned, destination, vm_ids[destination])
         print(f"exec lifecycle reboot old={json.dumps(previous, sort_keys=True)} "
               f"new={json.dumps(current, sort_keys=True)}", flush=True)
         assert current["vm_id"] == previous["vm_id"]
@@ -460,7 +509,7 @@ def test_vm_to_vm_exec_current_peers_after_restart_and_reboot(runner_vm: str) ->
         assert denied.returncode != 0, (denied.stdout, denied.stderr)
         _sentinel_absent(runner_vm, destination, revoked_path)
     finally:
-        _cleanup_pair(runner_vm, source, destination, [])
+        _cleanup_pair(runner_vm, owned)
 
 
 def _exec_case_baseline(runner_vm: str) -> dict:
