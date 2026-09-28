@@ -43,7 +43,7 @@ func newTrustedReleaseArchivePolicy(source trustedReleaseSource) (trustedRelease
 	switch source.slot.version {
 	case "1.10.1":
 		cpuTemplates = []string{"c3", "t2a", "t2", "t2s", "v1n1", "t2cl"}
-	case "1.14.2", "1.14.3", "1.14.4", "1.15.0", "1.15.1", "1.16.0", "1.16.1":
+	case "1.14.2", "1.14.3", "1.14.4", "1.15.0", "1.15.1", "1.16.0", "1.16.1", "1.16.2":
 		cpuTemplates = []string{"C3", "T2A", "T2", "T2S", "V1N1", "T2CL"}
 	default:
 		return trustedReleaseArchivePolicy{}, trustedReleaseStoreUntrusted(

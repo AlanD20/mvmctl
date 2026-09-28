@@ -103,8 +103,8 @@ func TestService_ResolvePairFailsClosed(t *testing.T) {
 // release pair; resolving its exact repository projection must still succeed.
 func TestService_ResolvePairUsesProtectedReleaseProjection(t *testing.T) {
 	repo := testutil.NewBinaryRepo()
-	firecracker := binaryItem("selected", "firecracker", "1.16.1", true)
-	jailer := binaryItem("jailer", "jailer", "1.16.1", true)
+	firecracker := binaryItem("selected", "firecracker", "1.16.2", true)
+	jailer := binaryItem("jailer", "jailer", "1.16.2", true)
 	for _, item := range []*model.BinaryItem{firecracker, jailer} {
 		item.Path = filepath.Join(infra.TrustedBinaryRoot, item.Architecture, item.Version, item.Type)
 		require.NoError(t, repo.Upsert(t.Context(), item))
@@ -117,17 +117,21 @@ func TestService_ResolvePairUsesProtectedReleaseProjection(t *testing.T) {
 
 // Rationale: a valid older artifact pair must remain manageable but cannot be selected for VM execution.
 func TestService_ResolvePairRejectsUnqualifiedRelease(t *testing.T) {
-	repo := testutil.NewBinaryRepo()
-	firecracker := binaryItem("selected", "firecracker", "1.16.0", true)
-	jailer := binaryItem("jailer", "jailer", "1.16.0", true)
-	for _, item := range []*model.BinaryItem{firecracker, jailer} {
-		item.Path = filepath.Join(infra.TrustedBinaryRoot, item.Architecture, item.Version, item.Type)
-		require.NoError(t, repo.Upsert(t.Context(), item))
+	for _, version := range []string{"1.16.0", "1.16.1", "1.16.3"} {
+		t.Run(version, func(t *testing.T) {
+			repo := testutil.NewBinaryRepo()
+			firecracker := binaryItem("selected", "firecracker", version, true)
+			jailer := binaryItem("jailer", "jailer", version, true)
+			for _, item := range []*model.BinaryItem{firecracker, jailer} {
+				item.Path = filepath.Join(infra.TrustedBinaryRoot, item.Architecture, item.Version, item.Type)
+				require.NoError(t, repo.Upsert(t.Context(), item))
+			}
+			pair, err := binary.NewService(repo, "x86_64").ResolvePair(t.Context(), firecracker)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "Firecracker/Jailer 1.16.2")
+			assert.Nil(t, pair)
+		})
 	}
-	pair, err := binary.NewService(repo, "x86_64").ResolvePair(t.Context(), firecracker)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "Firecracker/Jailer 1.16.1")
-	assert.Nil(t, pair)
 }
 
 func binaryItem(id, typ, version string, present bool) *model.BinaryItem {

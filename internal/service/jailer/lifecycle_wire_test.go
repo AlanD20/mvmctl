@@ -15,7 +15,7 @@ func validVMLaunchRequest() VMLaunchRequest {
 		CacheRoot:        "/home/runner/.cache/mvmctl",
 		KernelID:         strings.Repeat("b", 64),
 		RootfsBytes:      managedVMRootfsMinBytes,
-		Release:          ReleaseSlot{Version: "1.16.1", Architecture: "x86_64"},
+		Release:          ReleaseSlot{Version: "1.16.2", Architecture: "x86_64"},
 		NetworkPlacement: model.VMNetworkPlacementManaged,
 		NetworkID:        strings.Repeat("c", 64),
 		GuestIPv4:        "10.0.0.2",
@@ -82,8 +82,8 @@ func TestVMLaunchRequestRequiresAdmittedNetworkPlacement(t *testing.T) {
 	}
 }
 
-// Rationale: an otherwise valid 1.16.0 VM must fail before Jailer sees its
-// symlink-valued namespace argument; merely gating PCI or snapshots misses a basic launch.
+// Rationale: exact launch admission must reject previously admitted and future releases
+// before Jailer executes, including the 1.16.0 namespace-handle regression.
 func TestVMLaunchRequestRequiresQualifiedRelease(t *testing.T) {
 	for _, placement := range []model.VMNetworkPlacement{
 		model.VMNetworkPlacementManaged,
@@ -95,12 +95,12 @@ func TestVMLaunchRequestRequiresQualifiedRelease(t *testing.T) {
 			if placement == model.VMNetworkPlacementNetworkless {
 				request.NetworkID, request.GuestIPv4, request.GuestMAC = "", "", ""
 			}
-			for _, version := range []string{"1.16.0", "1.16.2"} {
+			for _, version := range []string{"1.16.0", "1.16.1", "1.16.3"} {
 				t.Run(version, func(t *testing.T) {
 					candidate := request
 					candidate.Release.Version = version
 					err := candidate.Validate()
-					if err == nil || !strings.Contains(err.Error(), "Firecracker/Jailer 1.16.1") {
+					if err == nil || !strings.Contains(err.Error(), "Firecracker/Jailer 1.16.2") {
 						t.Errorf("unqualified release %s was admitted: %v", version, err)
 					}
 				})

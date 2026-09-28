@@ -27,6 +27,7 @@ func TestTrustedReleaseArchivePolicyRejectsEveryUnauditedAArch64Release(t *testi
 		"1.15.1",
 		"1.16.0",
 		"1.16.1",
+		"1.16.2",
 	}
 	for _, version := range versions {
 		t.Run(version, func(t *testing.T) {
