@@ -55,6 +55,9 @@ adversarial firewall and recovery cases remain separate release gates.
 
 ### Added
 
+- The bundled official-kernel nftables feature now requests bridge connection tracking as well as bridge-family
+  nftables. Focused kernel Go tests and vet passed in the named runner. Its booted rebuilt kernel has both flags,
+  but the older mirrored default does not; this source change does not rebuild or qualify every runner image.
 - Added a real guest-global RAM-exhaustion case, without a synthetic child-cgroup limit or OOM-score protection.
   It passed once in 10.28s on the checked installed candidate: the guest killed only the identified anonymous
   allocator, then completed a fresh exec and allocation while Firecracker remained alive. Exact configuration,

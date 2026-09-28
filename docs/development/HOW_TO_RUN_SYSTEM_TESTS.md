@@ -57,6 +57,15 @@ bridge-capable 7.0.11 kernel. Its installed 0.3.0 candidate reports `nftables_av
 create/list/delete probe passed. This does not qualify the orchestrator's separately provisioned runner images:
 check the capability on each exact runner before using its network or policy results as release evidence.
 
+The bundled `kernel-official` nftables feature now also requests `CONFIG_NF_CONNTRACK_BRIDGE=y`. A fresh
+2026-09-28 readback confirmed that the named runner boots the rebuilt `mvmctl-030-bridge-ct` kernel
+(SHA-256 `5b56e531b3f9621f176289847b1f1a295daea4bf0a4e89fed63a3d182664d4b2`), whose live config has
+`CONFIG_BRIDGE_NETFILTER`, `CONFIG_NF_TABLES_BRIDGE`, and `CONFIG_NF_CONNTRACK_BRIDGE` enabled. Its selected
+inner default and the older mirrored official 7.0.11 file are different bytes and lack both bridge nftables flags.
+Do not infer kernel capability from version or filename, or treat this runner result as proof that the mirror or
+every future runner image has been rebuilt. Historical source/config/toolchain provenance for the retained kernel
+artifacts is incomplete; the flag change does not reconstruct that provenance.
+
 Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
 tests run directly on the outer host and therefore require a dedicated clean
 qualification host or disposable outer VM.
