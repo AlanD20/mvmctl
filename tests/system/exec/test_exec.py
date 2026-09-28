@@ -18,9 +18,13 @@ Duplicates: N/A for exec.
 
 from __future__ import annotations
 
+import json
+import os
+import select
 import subprocess
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Generator
 
 import pytest
@@ -31,7 +35,6 @@ from tests.system.conftest import (
     _json_success_data,
     _parse_vm_list,
     _run_mvm,
-    ensure_vm_deps,
 )
 
 pytestmark = [
@@ -99,38 +102,141 @@ def _exec_cmd(
 # ============================================================================
 
 
+_EXEC_INVENTORIES = {
+    "image": ("image", "ls"), "kernel": ("kernel", "ls"), "bin": ("bin", "ls"),
+    "vm": ("vm", "ls"), "network": ("network", "ls"), "volume": ("volume", "ls"),
+    "key": ("key", "ls"), "snapshot": ("snapshot", "ls"), "env": ("env", "ls"),
+    "exec_policy": ("policy", "exec", "ls"), "traffic_policy": ("policy", "traffic", "ls"),
+    "config": ("config", "ls"),
+}
+
+
+def _exec_inventory(runner_vm: str, domain: str):
+    expected = dict if domain in ("traffic_policy", "config") else list
+    data = _json_success_data(_run_mvm(runner_vm, *_EXEC_INVENTORIES[domain], "--json").stdout, expected)
+    return sorted(data, key=lambda item: json.dumps(item, sort_keys=True)) if isinstance(data, list) else data
+
+
+def _require_exec_assets(baseline: dict) -> dict[str, str]:
+    """Require the preseeded launch selection without pulling or changing defaults."""
+    images = [item for item in baseline["image"] if item["is_present"]
+              and (item["type"], item["version"]) == ("alpine", "3.23")]
+    assert len(images) == 1, images
+    kernels = [item for item in baseline["kernel"] if item["is_default"]]
+    assert len(kernels) == 1 and kernels[0]["is_present"], kernels
+    selected = {"image_id": images[0]["id"], "kernel_id": kernels[0]["id"]}
+    for kind in ("firecracker", "jailer"):
+        binaries = [item for item in baseline["bin"] if item["type"] == kind and item["is_default"]]
+        assert len(binaries) == 1 and binaries[0]["is_present"] and binaries[0]["version"] == "1.16.2", binaries
+        selected["binary_id" if kind == "firecracker" else "jailer_binary_id"] = binaries[0]["id"]
+    return selected
+
+
+def _exec_pin_task(vm: dict) -> tuple[int, int, int]:
+    """Pin the CLI-observed task and prove its exact start identity and liveness."""
+    pid, ticks = int(vm["pid"]), int(vm["process_start_time"])
+    assert pid > 0 and ticks > 0, vm
+    fd = os.pidfd_open(pid)
+    try:
+        fields = Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()
+        assert len(fields) >= 20 and int(fields[19]) == ticks and fields[0] not in ("Z", "X"), (vm, fields)
+        poller = select.poll()
+        poller.register(fd, select.POLLIN)
+        assert poller.poll(0) == [], vm
+        return fd, pid, ticks
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 @pytest.fixture(scope="module")
 def exec_vm(runner_vm: str) -> Generator[dict[str, Any], None, None]:
-    """A networkless guest with a reachable agent and checked removal."""
-    ensure_vm_deps(runner_vm)
+    """One preseeded networkless guest, retained creation identity, and checked cleanup."""
+    baseline = {domain: _exec_inventory(runner_vm, domain) for domain in _EXEC_INVENTORIES}
+    selected_assets = _require_exec_assets(baseline)
     vm_name = f"sys-exec-{uuid.uuid4().hex[:8]}"
-    created_by_fixture = False
-    try:
-        creation = _run_mvm(
-            runner_vm, "vm", "create", vm_name, "--no-network", "--cloud-init-mode", "off",
+    current_vms = _exec_inventory(runner_vm, "vm")
+    assert current_vms == baseline["vm"], "VM inventory changed before fixture creation"
+    before_ids = {item["id"] for item in baseline["vm"]}
+    assert all(item["name"] != vm_name for item in baseline["vm"]), vm_name
+    args = ["vm", "create", vm_name, "--image", selected_assets["image_id"], "--no-network", "--cloud-init-mode", "off",
             "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
-            "--user", "runner", "--json", timeout=180,
-        )
-        created_by_fixture = True
+            "--user", "runner", "--json"]
+    intent = {"name": vm_name, "arguments": args[:], "before_ids": before_ids}
+    receipt = None
+    task = None
+    try:
+        creation = _run_mvm(runner_vm, *args, check=False, timeout=180)
+        envelope = json.loads(creation.stdout)
+        assert envelope["schema_version"] == 1 and envelope["status"] in ("success", "partial", "error"), envelope
+        if envelope["data"] is not None:
+            assert isinstance(envelope["data"], list) and len(envelope["data"]) <= 1, envelope
+            for vm in envelope["data"]:
+                assert vm["name"] == intent["name"] and vm["id"] not in intent["before_ids"] and vm["created_at"], vm
+                receipt = {key: vm[key] for key in ("id", "name", "created_at", "pid", "process_start_time")}
+        assert creation.returncode == 0, (creation.stdout, creation.stderr)
         created = _json_success_data(
             creation.stdout,
             list,
         )
         assert len(created) == 1 and created[0]["name"] == vm_name
+        vm = created[0]
+        assert receipt is not None and vm["id"] == receipt["id"], (vm, receipt)
+        assert {key: vm[key] for key in selected_assets} == selected_assets, (vm, selected_assets)
+        assert (vm["vcpu_count"], vm["mem_size_mib"], vm["disk_size_mib"]) == (1, 256, 512), vm
+        assert vm["network_placement"] == "networkless" and vm["network_id"] == "", vm
+        assert vm["ipv4"] == vm["mac"] == vm["tap_device"] == "" and vm["pci_enabled"] is False, vm
+        task = _exec_pin_task(vm)
         assert _wait_for_exec(runner_vm, vm_name), (
             f"mvm exec is not available for VM '{vm_name}' within timeout"
         )
+        print(f"ordinary exec intent={intent['arguments']} receipt={json.dumps(receipt, sort_keys=True)} "
+              f"assets={json.dumps(selected_assets, sort_keys=True)}", flush=True)
         yield {"name": vm_name}
     finally:
-        if created_by_fixture:
+        errors = []
+        try:
             listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            if any(vm["name"] == vm_name for vm in listed):
+            matches = [item for item in listed if item["name"] == vm_name
+                       or (receipt is not None and item["id"] == receipt["id"])]
+            assert len(matches) <= 1, matches
+            for vm in matches:
+                assert receipt is not None, f"unreceipted VM at creation name: {matches}"
+                assert {key: vm[key] for key in ("id", "name", "created_at")} == {
+                    key: receipt[key] for key in ("id", "name", "created_at")
+                }, (vm, receipt)
+                if vm["status"] == "running":
+                    assert (vm["pid"], vm["process_start_time"]) == (receipt["pid"], receipt["process_start_time"]), (vm, receipt)
+                    if task is None:
+                        task = _exec_pin_task(vm)
+                    poller = select.poll()
+                    poller.register(task[0], select.POLLIN)
+                    assert poller.poll(0) == [], (vm, task)
                 removed = _run_mvm(
-                    runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120,
+                    runner_vm, "vm", "rm", receipt["id"], "--force", check=False, timeout=120,
                 )
                 assert removed.returncode == 0, (removed.stdout, removed.stderr)
+                if task is not None:
+                    poller = select.poll()
+                    poller.register(task[0], select.POLLIN)
+                    events = poller.poll(10_000)
+                    assert len(events) == 1 and events[0][0] == task[0], (receipt, events)
+                    assert events[0][1] & (select.POLLIN | select.POLLHUP), events
+                    assert not events[0][1] & (select.POLLERR | select.POLLNVAL), events
             listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
-            assert all(vm["name"] != vm_name for vm in listed)
+            assert all(item["name"] != vm_name and (receipt is None or item["id"] != receipt["id"])
+                       for item in listed), listed
+        except Exception as exc:
+            errors.append(f"owned VM cleanup: {exc}")
+        finally:
+            if task is not None:
+                os.close(task[0])
+        for domain, original in baseline.items():
+            try:
+                assert _exec_inventory(runner_vm, domain) == original, f"{domain} inventory/config changed"
+            except Exception as exc:
+                errors.append(f"{domain} baseline: {exc}")
+        assert not errors, "; ".join(errors)
 
 
 # ========================================================================
