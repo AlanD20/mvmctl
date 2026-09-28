@@ -134,6 +134,13 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaSix(t *testing.T) {
 	cleanedWithActive := validCleaned[:len(validCleaned)-1] + validText[activeOffset:]
 	oldSchemaFour := strings.Replace(validText, `"schema_version":6`, `"schema_version":4`, 1)
 	oldSchemaFour = strings.Replace(oldSchemaFour, `"network_placement":"managed",`, "", 1)
+	activeRelayAbsentWithIdentity := strings.Replace(
+		validText,
+		`"relay":{"kind":"present","lifecycle":"running","user_ids":`,
+		`"relay":{"kind":"absent","user_ids":`,
+		1,
+	)
+	require.NotEqual(t, validText, activeRelayAbsentWithIdentity, "absent relay fixture must mutate the valid record")
 
 	tests := map[string]string{
 		"empty":                 "",
@@ -276,12 +283,7 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaSix(t *testing.T) {
 			`"jailer_sha256":"invalid"`,
 			1,
 		),
-		"active_relay_absent_with_identity": strings.Replace(
-			validText,
-			`"relay":{"kind":"present","user_ids":`,
-			`"relay":{"kind":"absent","user_ids":`,
-			1,
-		),
+		"active_relay_absent_with_identity": activeRelayAbsentWithIdentity,
 		"present_active_relay_missing_digest": strings.Replace(
 			validText,
 			`,"sha256":"`+testRelayHash+`"`,
