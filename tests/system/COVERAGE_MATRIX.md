@@ -17,6 +17,21 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**SSH-domain repeatability (2026-09-28):** Commit `66a233cb` modernizes the nine older SSH cases and
+preserves both relocated key journeys unchanged. The complete eleven-case file passed 11/11 twice in
+94.37 and 99.41 seconds inside only `mvmctl-030-test`, against candidate `c460278d` and Go source
+`19c55345`. The exact test-file hash is
+`8f002be181e7da10cd265bae1eb4e04ab6c42762a65c10560e856e42b7996fdc`; executed checkout was clean
+`72696719` plus this sole reviewed SSH overlay. Both strict reports have zero other outcomes, all four
+resource inventories were empty and complete config was unchanged. Reports `qa-ssh-72696719-pass{1,2}.json`
+are in the runner's `qa-release-72696719/.tmp` directory and local ignored evidence. Cases now require
+actual authentication through stored, named and exported keys, exact root command output, unauthorized
+key rejection with healthy authorized access before/after, and a three-second guest command succeeding
+with a two-second connect budget. Function owners check seven resource/asset inventories and config,
+excluding only kernel/key reconciliation/default-restoration timestamps. Guests use preseeded Alpine
+3.23, 512 MiB disk, 256 MiB RAM and one CPU; no pulls or config/default asset changes occur.
+This closes the whole SSH-domain local repeat gate, not console lifecycle, other domains or release approval.
+
 **Internal-service entry-point repeatability (2026-09-28):** The five retained `run` cases collected and
 passed 5/5 twice in 0.07 and 0.06 seconds inside only `mvmctl-030-test`, against candidate `c460278d`.
 The runner checkout was clean exact commit `72696719`; production source matched `19c55345`.
