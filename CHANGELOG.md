@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > identity, and typed VM/network cleanup refused prior-boot admission. Targeted console and schema-6 absence-proof
 > fixes passed affected Go/root gates. The corrected installed runner candidate then reported that exact VM stopped
 > and removed its VM/network through normal typed commands, preserving the cleaned root journal and leaving all four
-> inventories empty. No records were manually deleted or adopted. A fresh reboot/start/exec journey remains required.
+> inventories empty. No records were manually deleted or adopted. One fresh, exact-candidate reboot journey then
+> passed stopped-state reconciliation, one restart, new host/guest boot identities, fresh exec and checked cleanup.
+> This bounded pass does not attribute the earlier intermittent KVM-open denial or qualify every recovery fault.
 > Later complete SSH (11/11), config (12/12),
 > keys (26/26), volumes (37/37), full journeys (15/15),
 > and internal-service entry points (5/5) passed twice at their recorded exact test revisions. Three bounded
@@ -64,8 +66,9 @@ adversarial firewall and recovery cases remain separate release gates.
 - A focused local reboot experiment captured the exact active jail/mount objects and KVM/TUN identities;
   private-root readlink text is informational, not process authority. Its owned guest prepared successfully before
   one controlled runner reboot, but recovery failed before the single permitted start. Later targeted fixes passed
-  affected Go/root checks and installed-candidate inspection/typed cleanup. The original failed receipt remains failed;
-  no complete reboot/start/exec success is claimed by this check.
+  affected Go/root checks and installed-candidate inspection/typed cleanup. A new owned receipt subsequently passed
+  the full stopped-state/restart/fresh-exec journey and exact cleanup on the corrected candidate. The original failed
+  receipt remains failed; the earlier intermittent KVM-open denial remains unattributed.
 - The bundled official-kernel nftables feature now requests bridge connection tracking as well as bridge-family
   nftables. Focused kernel Go tests and vet passed in the named runner. Its booted rebuilt kernel has both flags,
   but the older mirrored default does not; this source change does not rebuild or qualify every runner image.
@@ -1269,8 +1272,10 @@ composition is described above; the current incomplete-work inventory is under *
   without opening a PID or endpoint, while signal authorization remains unchanged. Behavioral regressions failed on
   the old source; the complete authority package, full root Jailer package and scoped vet/format checks passed inside
   the named runner. Its normally installed candidate successfully inspected and removed the exact retained test VM
-  and network, with independent cleaned-journal and empty-inventory checks. Fresh reboot/start/exec qualification
-  remains open.
+  and network, with independent cleaned-journal and empty-inventory checks. A fresh owned reboot journey then passed
+  stopped ls/inspect and empty ps, typed stop, one restart, new host/guest boot identities, fresh exec and exact
+  configuration/inventory restoration. The 14 bounded QA-driver unit cases also passed. This one current-artifact
+  journey does not explain the earlier intermittent KVM-open denial or qualify unrelated failure paths.
 - `mvm network rm` can now retire an exact root-owned prior-boot live network record without first recreating its
   bridge. Under the network and firewall locks, it proves the derived bridge absent, admits only matching cleaned
   topology history, retires the prior-boot firewall generation, rejects remaining endpoints or reservations, and
