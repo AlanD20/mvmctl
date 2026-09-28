@@ -721,6 +721,91 @@ func TestApplyRootfsProvisionPlanEnablesAgentForExistingSystemdLayout(t *testing
 	assert.Equal(t, vmProvisionEffectStateUnchanged, tree.tracker.state())
 }
 
+// Rationale: Ubuntu's usrmerged /sbin must not prevent systemd provisioning when the
+// required OpenRC runlevel directory is absent, even though /etc/init.d exists.
+func TestApplyRootfsProvisionPlanEnablesAgentForUbuntuUsrmergedSystemdLayout(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, path := range []string{"usr/lib/systemd", "usr/sbin", "etc/systemd", "etc/init.d"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, path), 0755))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(root, "usr/lib/systemd/systemd"), []byte("systemd"), 0755))
+	require.NoError(t, os.Symlink("usr/sbin", filepath.Join(root, "sbin")))
+	tree := newTestUnprivilegedRootfsGuestTree(t, root)
+	token := "5c9a355a-eafa-48e5-9305-76b95e9967ca"
+	agentBytes := []byte("ubuntu-agent-binary")
+
+	filesWritten, err := applyRootfsProvisionPlan(t.Context(), tree, rootfsVMProvisionDeps{
+		agentBinary: func(context.Context) ([]byte, error) { return agentBytes, nil },
+	}, VMProvisionPlan{Agent: &AgentSetup{Port: 1024, Token: token}})
+	require.NoError(t, err)
+	assert.Equal(t, uint32(4), filesWritten)
+	assertRootfsProvisionedFile(t, root, "/usr/bin/mvm-agent", agentBytes, 0755)
+	assertRootfsProvisionedFile(t, root, infra.GuestAgentTokenPath, []byte(token+"\n"), 0600)
+	assertRootfsProvisionedFile(
+		t, root, "/etc/systemd/system/mvm-agent.service", rootfsAgentSystemdService(1024), 0644,
+	)
+	assertRootfsProvisionedSymlink(
+		t, root, "/etc/systemd/system/sysinit.target.wants/mvm-agent.service", "../mvm-agent.service",
+	)
+	assert.NoDirExists(t, filepath.Join(root, "etc/runlevels"))
+	assert.NoFileExists(t, filepath.Join(root, "etc/init.d/mvm-agent"))
+	target, err := os.Readlink(filepath.Join(root, "sbin"))
+	require.NoError(t, err)
+	assert.Equal(t, "usr/sbin", target)
+}
+
+// Rationale: Complete OpenRC directory evidence must still require a confined binary
+// probe, including when systemd is present; an unsafe parent cannot be skipped.
+func TestApplyRootfsProvisionPlanRejectsUnsafeOpenRCBinaryParentBeforeWrites(t *testing.T) {
+	t.Parallel()
+
+	for _, systemd := range []bool{false, true} {
+		name := "openrc_only"
+		if systemd {
+			name = "systemd_and_openrc"
+		}
+		t.Run(name, func(t *testing.T) {
+			root, outside := t.TempDir(), t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/init.d"), 0755))
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/runlevels/default"), 0755))
+			require.NoError(t, os.WriteFile(filepath.Join(outside, "openrc"), []byte("outside-openrc"), 0755))
+			require.NoError(t, os.Symlink(outside, filepath.Join(root, "sbin")))
+			if systemd {
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "usr/lib/systemd"), 0755))
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/systemd"), 0755))
+				require.NoError(
+					t,
+					os.WriteFile(filepath.Join(root, "usr/lib/systemd/systemd"), []byte("systemd"), 0755),
+				)
+			}
+			tree := newTestUnprivilegedRootfsGuestTree(t, root)
+			filesWritten, err := applyRootfsProvisionPlan(t.Context(), tree, rootfsVMProvisionDeps{
+				agentBinary: func(context.Context) ([]byte, error) { return []byte("agent-binary"), nil },
+			}, VMProvisionPlan{Agent: &AgentSetup{
+				Port: 1024, Token: "5c9a355a-eafa-48e5-9305-76b95e9967ca",
+			}})
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "open managed guest file parent")
+			assert.Zero(t, filesWritten)
+			assert.Equal(t, vmProvisionEffectStateUnchanged, tree.tracker.state())
+			for _, path := range []string{
+				"usr/bin/mvm-agent", strings.TrimPrefix(infra.GuestAgentTokenPath, "/"),
+				"etc/systemd/system/mvm-agent.service", "etc/systemd/system/sysinit.target.wants/mvm-agent.service",
+				"etc/init.d/mvm-agent", "etc/runlevels/default/mvm-agent",
+			} {
+				assert.NoFileExists(t, filepath.Join(root, path))
+			}
+			outsideBytes, readErr := os.ReadFile(filepath.Join(outside, "openrc"))
+			require.NoError(t, readErr)
+			if diff := cmp.Diff([]byte("outside-openrc"), outsideBytes); diff != "" {
+				t.Errorf("outside binary changed (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // Rationale: An OpenRC guest must not require or create /etc/systemd and must receive only its fixed default-runlevel
 // link after existing OpenRC layout evidence is pinned.
 func TestApplyRootfsProvisionPlanEnablesAgentForExistingOpenRCLayout(t *testing.T) {

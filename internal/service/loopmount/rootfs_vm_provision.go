@@ -997,10 +997,6 @@ func detectRootfsAgentInitLayout(
 	if err != nil {
 		return rootfsAgentInitUnknown, err
 	}
-	openRCBinary, err := tree.fixedPathHasType(ctx, rootfsAgentOpenRCEvidencePath, unix.S_IFREG)
-	if err != nil {
-		return rootfsAgentInitUnknown, err
-	}
 	openRCInit, err := tree.fixedPathHasType(ctx, rootfsAgentOpenRCInitPath, unix.S_IFDIR)
 	if err != nil {
 		return rootfsAgentInitUnknown, err
@@ -1008,6 +1004,15 @@ func detectRootfsAgentInitLayout(
 	openRCRunlevel, err := tree.fixedPathHasType(ctx, rootfsAgentOpenRCRunlevelPath, unix.S_IFDIR)
 	if err != nil {
 		return rootfsAgentInitUnknown, err
+	}
+	// Missing required directories rule out OpenRC without probing a usrmerged
+	// /sbin alias. Complete candidates still require the confined binary probe.
+	openRCBinary := false
+	if openRCInit && openRCRunlevel {
+		openRCBinary, err = tree.fixedPathHasType(ctx, rootfsAgentOpenRCEvidencePath, unix.S_IFREG)
+		if err != nil {
+			return rootfsAgentInitUnknown, err
+		}
 	}
 	systemd := systemdBinary && systemdConfig
 	openRC := openRCBinary && openRCInit && openRCRunlevel
