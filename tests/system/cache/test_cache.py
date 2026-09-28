@@ -1369,6 +1369,268 @@ def owned_cache_prune(runner_vm, tmp_path, monkeypatch):
     assert not failures, "Owned prune teardown failed:\n" + "\n".join(failures)
 
 
+def _cache_root_directory_receipt(runner_vm, path):
+    metadata = _guest_run(
+        runner_vm, f"sudo -n stat -c '%d:%i:%u:%g:%f' -- {shlex.quote(str(path))}"
+    ).stdout.strip()
+    fields = metadata.split(":")
+    assert len(fields) == 5 and fields[2:4] == ["0", "0"], metadata
+    mode = int(fields[4], 16)
+    assert stat.S_ISDIR(mode) and not mode & 0o022, metadata
+    return metadata
+
+
+def _cache_release_receipt(case, version):
+    """Read the complete fixed root slot, including its authority manifest."""
+    slot = Path("/var/lib/mvmctl/binaries") / os.uname().machine / version
+    directory = _cache_root_directory_receipt(case.runner_vm, slot)
+    files = {
+        name: _OwnedCachePrune.root_file_receipt(case, slot / name)
+        for name in ("manifest.json", "firecracker", "jailer")
+    }
+    return directory, files
+
+
+class _CacheExternalPreservation:
+    """Creation-owned GuestFS sentinels and read-only runner authority receipts."""
+
+    def __init__(self, case):
+        self.case = case
+        self.runner_vm = case.runner_vm
+        self.appliance = _GuestfsPreviewSentinel()
+        self.process = _UnrelatedGuestfishProcess()
+        self.before = None
+
+    def seed(self):
+        self.appliance.seed()
+        self.process.seed()
+        self.before = (
+            self.appliance.snapshot(), self.process.snapshot(),
+            _cache_release_receipt(self.case, "1.16.2"),
+            _OwnedCachePrune.firewall_snapshot(self),
+        )
+
+    def assert_preserved(self):
+        assert self.before is not None
+        failures = []
+        observations = (
+            ("global appliance", self.appliance.snapshot, self.before[0]),
+            ("unrelated process", self.process.snapshot, self.before[1]),
+            ("default root release", lambda: _cache_release_receipt(self.case, "1.16.2"), self.before[2]),
+            ("complete firewall", lambda: _OwnedCachePrune.firewall_snapshot(self), self.before[3]),
+        )
+        for name, observe, expected in observations:
+            try:
+                assert observe() == expected, name
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"{name}: {error!r}")
+        assert not failures, "Cache crossed its ownership boundary:\n" + "\n".join(failures)
+
+    def cleanup(self):
+        failures = []
+        for name, sentinel in (("process", self.process), ("appliance", self.appliance)):
+            try:
+                sentinel.cleanup()
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"{name} cleanup: {error!r}")
+        assert not failures, "Cache sentinel teardown failed:\n" + "\n".join(failures)
+
+
+@pytest.fixture
+def selected_cache_preservation(selected_cache_case):
+    preservation = _CacheExternalPreservation(selected_cache_case)
+    try:
+        preservation.seed()
+        yield preservation
+    finally:
+        preservation.cleanup()
+
+
+@pytest.fixture
+def owned_cache_preservation(owned_cache_prune):
+    preservation = _CacheExternalPreservation(owned_cache_prune)
+    try:
+        preservation.seed()
+        yield preservation
+    finally:
+        preservation.cleanup()
+
+
+class _CacheMiscArtifacts:
+    """Exact unprivileged artifacts created only in the selected private cache."""
+
+    def __init__(self, case):
+        cache = case.cache_dir
+        appliance = cache / "appliance"
+        appliance.mkdir(mode=0o700)
+        ready = cache / "tmp" / "ready"
+        ready.mkdir(parents=True, exist_ok=True)
+        artifacts = [appliance / name for name in ("kernel", "initrd", "root")]
+        artifacts.extend((cache / "bin" / "owned-force-artifact", ready / "owned-force-warm"))
+        for path in artifacts:
+            with path.open("xb") as target:
+                target.write(b"exact-selected-cache-misc-artifact\n")
+        # _SelectedCacheCase.initialize also creates this case-owned marker.
+        marker = ready / "preview-sentinel"
+        if marker.is_file():
+            assert marker.read_bytes() == b"cache-preview-must-preserve-this-file\n"
+            artifacts.append(marker)
+        self.files = {path: _prune_backing(path) for path in artifacts}
+        self.directories = {
+            path: _prune_metadata(path.lstat()) for path in (appliance, cache / "bin")
+        }
+
+    def assert_bound(self):
+        for path, receipt in self.files.items():
+            assert _prune_backing(path) == receipt, path
+        for path, receipt in self.directories.items():
+            assert _prune_metadata(path.lstat()) == receipt, path
+
+    def assert_absent(self):
+        for path in (*self.files, *self.directories):
+            with pytest.raises(FileNotFoundError):
+                path.lstat()
+
+
+class _OwnedCacheRelease:
+    """An absent audited slot becomes owned only after a complete CLI install."""
+
+    def __init__(self, case):
+        self.case = case
+        self.version = None
+        self.receipt = None
+        self.attempted = False
+        self.archive = None
+        self.archive_receipt = None
+
+    def slot_absent(self, version):
+        slot = Path("/var/lib/mvmctl/binaries") / os.uname().machine / version
+        result = _guest_run(
+            self.case.runner_vm, f"sudo -n stat -- {shlex.quote(str(slot))}", check=False
+        )
+        if result.returncode == 0:
+            return False
+        assert "No such file or directory" in result.stderr, result
+        return True
+
+    def install(self):
+        self.case.reuse_release()
+        mirror = Path(os.environ["MVM_ASSET_MIRROR"])
+        for version in ("1.16.0", "1.16.1"):
+            if any(row["version"] == version for row in self.case.baseline["bin"]):
+                continue
+            if not self.slot_absent(version):
+                continue
+            archive = mirror / f"firecracker-v{version}-{os.uname().machine}.tgz"
+            try:
+                receipt = _prune_backing(archive)
+            except FileNotFoundError:
+                continue
+            assert receipt[1] > 0, archive
+            self.version, self.archive, self.archive_receipt = version, archive, receipt
+            break
+        assert self.version is not None, "No absent audited mirrored release slot; preserve runner releases"
+        assert self.slot_absent(self.version), "Slot appeared before install; no removal authority"
+        self.attempted = True
+        pair = _json_success_data(
+            _run_mvm(self.case.runner_vm, "bin", "pull", self.version, "--json", timeout=300).stdout,
+            list,
+        )
+        assert len(pair) == 2 and {row["type"] for row in pair} == {"firecracker", "jailer"}, pair
+        assert all(
+            row["version"] == self.version and row["architecture"] == os.uname().machine
+            and row["is_present"] and not row["is_default"]
+            and row["path"] == str(
+                Path("/var/lib/mvmctl/binaries") / row["architecture"] / self.version / row["type"]
+            ) for row in pair
+        ), pair
+        self.receipt = _cache_release_receipt(self.case, self.version)
+        assert _prune_backing(self.archive) == self.archive_receipt
+        return pair
+
+    def assert_absent(self):
+        assert self.receipt is not None, "Incomplete release receipt; preserve any root remnant"
+        assert self.slot_absent(self.version), self.version
+        assert all(row["version"] != self.version for row in self.case.inventory("bin").values())
+        assert _prune_backing(self.archive) == self.archive_receipt
+
+    def assert_bound(self):
+        assert self.receipt is not None, "Destructive prune requires the complete owned release receipt"
+        assert _cache_release_receipt(self.case, self.version) == self.receipt
+        assert _prune_backing(self.archive) == self.archive_receipt
+
+    def cleanup(self):
+        if not self.attempted:
+            return
+        if self.receipt is None:
+            assert self.slot_absent(self.version), "Uncertain install retained; no admitted removal receipt"
+            return
+        if not self.slot_absent(self.version):
+            assert _cache_release_receipt(self.case, self.version) == self.receipt
+            data = _json_success_data(
+                _run_mvm(
+                    self.case.runner_vm, "bin", "rm", self.version, "--force", "--json", timeout=120
+                ).stdout,
+                dict,
+            )
+            assert len(data["items"]) == 1 and data["items"][0]["error"] is None, data
+            result = data["items"][0]["result"]
+            assert result["code"] == "binary.removed" and result["item"] == self.version, result
+        self.assert_absent()
+
+
+@pytest.fixture
+def owned_cache_release(owned_cache_prune):
+    release = _OwnedCacheRelease(owned_cache_prune)
+    try:
+        yield release
+    finally:
+        release.cleanup()
+
+
+def _cache_config_receipt(case):
+    return {
+        path: _prune_backing(path) if path.is_file() else _prune_metadata(path.lstat())
+        for path in case.config_dir.rglob("*")
+    }
+
+
+def _require_unprotected_clean_case(case):
+    """Success cases never ask an ordinary user to erase root-controlled history."""
+    assert not case.receipts["vm"] and not case.inventory("vm")
+    assert not case.inventory("volume") and not case.inventory("snapshot")
+    with pytest.raises(FileNotFoundError):
+        (case.cache_dir / ".mvm-protected").lstat()
+
+
+def _reinitialize_cleaned_cache(case, data, expected_ids, config_before):
+    """Acknowledge checked removal before admitting a fresh cache incarnation."""
+    assert data["cache_dir"] == str(case.cache_dir) and data["cache_dir_removed"] is True, data
+    prune = data["prune_result"]
+    assert set(prune["pruned_ids"]) == expected_ids and len(prune["pruned_ids"]) == len(expected_ids), prune
+    assert not prune["failed_ids"] and prune["had_running_vms"] is False, prune
+    with pytest.raises(FileNotFoundError):
+        case.cache_dir.lstat()
+    assert _cache_config_receipt(case) == config_before
+    for path in case.staging:
+        with pytest.raises(FileNotFoundError):
+            path.lstat()
+    case.initialize()
+    assert not case.inventory("bin")
+    for domain, receipts in case.receipts.items():
+        for item_id in receipts:
+            case.assert_absent(domain, item_id)
+        # Only already-proved absent resources leave the teardown ledger.
+        receipts.clear()
+        case.attempted[domain].clear()
+    case.staging.clear()
+    case.roots[case.cache_dir] = _prune_metadata(case.cache_dir.lstat())[:5]
+    if case.firewall_baseline is not None:
+        case.assert_firewall_baseline()
+        case.firewall_baseline = None
+    assert _cache_config_receipt(case) == config_before
+
+
 class TestCacheInit:
     """Test cache initialization operations."""
 
@@ -1588,58 +1850,81 @@ class TestCacheClean:
     @pytest.mark.needs_kvm
     @pytest.mark.needs_network
     @pytest.mark.slow
+    @pytest.mark.tier2
+    @pytest.mark.destructive
     def test_cache_clean_refuses_with_running_vm(
-        self, runner_vm, unique_vm_name, created_network
+        self, runner_vm, owned_cache_prune, owned_cache_preservation, tmp_path,
+        monkeypatch, record_property,
     ):
-        """Should not clean cache while resources are in use.
-
-        Violation fix: replaced subprocess.run with stdin pipe on host
-        with _run_mvm inside the VM. If the command hangs on a confirmation
-        prompt (no stdin connected), the timeout is caught and the test
-        passes as long as the VM survives.
-        """
-        vm_name = unique_vm_name
-        try:
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                created_network,
-            )
-
-            # cache clean should either refuse or warn about running VMs.
-            # _run_mvm cannot pipe stdin, so we accept a timeout or non-zero
-            # exit as long as the warning is in the output.
-            import subprocess as _subprocess
-
+        """Root host cleanup and cache's process scan independently refuse the live VM."""
+        case = owned_cache_prune
+        vm = case.create_vm()
+        assert case.check_bindings("vm", vm["id"])["status"] == "running"
+        boot_before = case.guest_boot_id(vm)
+        runtime_before = case.vm_runtime(vm)
+        namespace_before = case.vm_namespace(vm)
+        live_pid = runtime_before[0]
+        live_comm = _guest_run(runner_vm, f"sudo -n cat /proc/{live_pid}/comm").stdout.strip()
+        assert live_comm == "firecracker", live_comm
+        cache_b = (tmp_path / "unregistered-clean-cache").resolve()
+        config_b = (tmp_path / "unregistered-clean-config").resolve()
+        cache_b.mkdir(mode=0o700)
+        config_b.mkdir(mode=0o700)
+        other = _SelectedCacheCase(runner_vm, cache_b, config_b)
+        with monkeypatch.context() as selection:
+            selection.setenv("MVM_CACHE_DIR", str(cache_b))
+            selection.setenv("MVM_CONFIG_DIR", str(config_b))
+            selection.setenv("MVM_TEMP_DIR", str(cache_b / "tmp"))
+            selection.delenv("MVM_WARM_POOL", raising=False)
             try:
+                other.prepare()
+                before = other.snapshot()
+                assert not before[0]["vm"], "The live VM must be absent from B's SQLite projection"
+                host_result = _run_mvm(runner_vm, "host", "clean", "--json", check=False)
+                assert host_result.returncode != 0, host_result.stdout
+                host_envelope = json.loads(host_result.stdout)
+                assert host_envelope["schema_version"] == 1 and host_envelope["status"] == "error", host_envelope
+                assert host_envelope["error"]["code"] == "cli.failed", host_envelope
+                assert host_envelope["error"]["message"] == f"VMs still running: {vm['id']}", host_envelope
+                assert other.snapshot() == before
+                # Cache clean's earlier legacy comm scanner is a separate refusal,
+                # not the root-owner inventory contract exercised above.
                 result = _run_mvm(
-                    runner_vm, "cache", "clean", check=False, timeout=15
+                    runner_vm, "cache", "clean", "--force", "--json", check=False, timeout=180
                 )
-                combined = (result.stdout + result.stderr).lower()
-                if result.returncode != 0:
-                    assert "running" in combined or "in use" in combined, (
-                        f"Expected running/in-use warning, got: {combined}"
-                    )
-            except _subprocess.TimeoutExpired:
-                # Command hung on confirmation prompt — expected.
-                # The warning was already emitted before the prompt.
-                pass
-
-            # Verify the VM is unaffected (not cleaned)
-            result_vm = _run_mvm(
-                runner_vm, "vm", "ls", "--json", check=False
-            )
-            if result_vm.returncode == 0:
-                vms: list[dict[str, Any]] = json.loads(result_vm.stdout)
-                assert any(v["name"] == vm_name for v in vms)
-        finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
+                assert result.returncode != 0, result.stdout
+                envelope = json.loads(result.stdout)
+                assert envelope["schema_version"] == 1 and envelope["status"] == "partial", envelope
+                assert envelope["error"]["code"] == "cache.clean_failed", envelope
+                assert envelope["error"]["message"] == (
+                    f"Orphan process(es) still running (PID(s) {live_pid}: {live_comm}). "
+                    "Kill them manually and re-run ``mvm clean``."
+                ), envelope
+                data = envelope["data"]
+                assert data["cache_dir"] == str(cache_b) and data["cache_dir_removed"] is False, data
+                assert data["prune_result"]["pruned_ids"] == ["warm_images"], data
+                assert not data["prune_result"]["failed_ids"]
+                assert data["prune_result"]["had_running_vms"] is False
+                after = other.snapshot()
+                assert after[0] == before[0] and after[2] == before[2]
+                consumed = {str(cache_b / "bin"), str(cache_b / "tmp" / "ready" / "preview-sentinel")}
+                assert after[1] == {
+                    path: receipt for path, receipt in before[1].items() if path not in consumed
+                }
+                record_property("cache_process_scan_refusal", json.dumps(envelope, sort_keys=True))
+                record_property("root_owner_host_clean_refusal", json.dumps(host_envelope, sort_keys=True))
+            finally:
+                failures = other.cleanup()
+                assert not failures, "Refused cache B teardown failed:\n" + "\n".join(failures)
+        assert case.check_bindings("vm", vm["id"])["status"] == "running"
+        assert case.guest_boot_id(vm) == boot_before
+        assert case.vm_runtime(vm) == runtime_before
+        assert case.vm_namespace(vm) == namespace_before
+        owned_cache_preservation.assert_preserved()
+        record_property("refusal_live_vm", json.dumps({
+            "vm_id": vm["id"], "boot_id": boot_before, "runtime": runtime_before,
+            "namespace": [str(namespace_before[0]), namespace_before[1]],
+        }, sort_keys=True))
 
 
 class TestCachePruneActual:
@@ -1709,19 +1994,43 @@ class TestCachePruneActual:
         )
         record_property("misc_process_after", json.dumps(unrelated_guestfish_process.snapshot(), default=bytes.hex))
 
-    def test_cache_prune_misc_with_force(self, runner_vm):
-        """Prune misc cache with --force flag.
-
-        Violation fix: removed pytest.skip() — prune may fail if no
-        temp files exist; we verify cache is still functional after.
-        """
-        result = _run_mvm(
-            runner_vm, "cache", "prune", "misc", "--force", check=False
+    @pytest.mark.destructive
+    def test_cache_prune_misc_with_force(
+        self, runner_vm, selected_cache_case, selected_cache_preservation, record_property
+    ):
+        """Forced misc prune consumes exact artifacts and an empty retry succeeds."""
+        case = selected_cache_case
+        case.prepare()
+        artifacts = _CacheMiscArtifacts(case)
+        artifacts.assert_bound()
+        before = case.snapshot()
+        data = _json_success_data(
+            _run_mvm(runner_vm, "cache", "prune", "misc", "--force", "--json").stdout,
+            dict,
         )
-        # Prune may fail if no temp files exist — acceptable.
-        # Verify the cache is still functional after the attempt.
-        init_result = _run_mvm(runner_vm, "cache", "init")
-        assert init_result.returncode == 0
+        assert data == {
+            "service_binaries": True, "appliance": True, "warm_images": True,
+            "guestfs_state": False, "stale_provision_mounts": False,
+        }, data
+        artifacts.assert_absent()
+        after = case.snapshot()
+        assert after[0] == before[0] and after[2] == before[2]
+        removed = {str(path) for path in (*artifacts.files, *artifacts.directories)}
+        assert after[1] == {path: receipt for path, receipt in before[1].items() if path not in removed}
+        selected_cache_preservation.assert_preserved()
+        retry = _json_success_data(
+            _run_mvm(runner_vm, "cache", "prune", "misc", "--force", "--json").stdout,
+            dict,
+        )
+        # GetBinDir creates its fixed directory even when no service file remains.
+        assert retry == {
+            "service_binaries": True, "appliance": False, "warm_images": False,
+            "guestfs_state": False, "stale_provision_mounts": False,
+        }, retry
+        artifacts.assert_absent()
+        assert case.snapshot() == after
+        selected_cache_preservation.assert_preserved()
+        record_property("misc_force_results", json.dumps([data, retry], sort_keys=True))
 
 
 # ============================================================================
@@ -1789,82 +2098,32 @@ class TestCachePruneNonDryRun:
         assert set(case.inventory("kernel")) == {protected["id"]}
         assert case.inventory("kernel")[protected["id"]]["is_default"] is True
 
-    def test_cache_prune_binary_non_dry_run(self, runner_vm):
-        """Prune non-default binaries without dry-run; verify JSON and file.
-
-        Violation fix: replaced sqlite3 + os.path.exists on host with
-        _run_mvm JSON checks and sh commands inside the VM.
-        Removed _restore_service_binaries() (was host-level).
-        Removed pytest.skip() — precondition is asserted.
-        """
-        bin_result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        all_bins: list[dict[str, Any]] = json.loads(bin_result.stdout)
-        non_default = [
-            b
-            for b in all_bins
-            if not b.get("is_default")
-            and b.get("is_present")
-            and b.get("name") in ("firecracker",)
-        ]
-
-        if not non_default:
-            # Inside the runner VM, remote download is not available.
-            # Skip detailed file removal verification and just verify the
-            # prune command succeeds gracefully with nothing to prune.
-            result = _run_mvm(
-                runner_vm, "cache", "prune", "binary", "--force"
-            )
-            assert result.returncode == 0
-            return
-
-        result = _run_mvm(
-            runner_vm, "cache", "prune", "binary", "--force"
+    @pytest.mark.destructive
+    def test_cache_prune_binary_non_dry_run(
+        self, runner_vm, owned_cache_prune, owned_cache_release, owned_cache_preservation,
+        record_property,
+    ):
+        """Prune one newly installed non-default root release, retaining the borrowed pair."""
+        case = owned_cache_prune
+        pair = owned_cache_release.install()
+        before = case.inventory("bin")
+        assert {row["id"] for row in pair}.issubset(before)
+        owned_cache_release.assert_bound()
+        removed = _json_success_data(
+            _run_mvm(runner_vm, "cache", "prune", "binary", "--force", "--json").stdout,
+            list,
         )
-        assert result.returncode == 0
-
-        try:
-            # JSON check: non-default targets absent from listing or not present
-            bin_result = _run_mvm(runner_vm, "bin", "ls", "--json")
-            bins_after: list[dict[str, Any]] = json.loads(
-                bin_result.stdout
-            )
-            for target in non_default:
-                still_present = any(
-                    b["id"] == target["id"] and b.get("is_present")
-                    for b in bins_after
-                )
-                if still_present:
-                    # Binary may not be removable (e.g., jailer paired with
-                    # firecracker). At minimum, prune ran without error.
-                    pass
-
-            # File check: binary files removed from disk (inside the VM)
-            bin_dir = "~/.cache/mvmctl/bin"
-            for target in non_default:
-                file_result = _guest_run(
-                    runner_vm,
-                    (
-                        f"test -f {bin_dir}/{target['path']} "
-                        f"&& echo exists || echo not_found"
-                    ),
-                    check=False,
-                )
-                assert "exists" not in file_result.stdout, (
-                    f"Binary file should have been pruned: "
-                    f"{target['name']}:{target['path']}"
-                )
-        finally:
-            # Re-pull non-default firecracker/jailer binaries so env is usable
-            for target in non_default:
-                if target["name"] in ("firecracker", "jailer"):
-                    _run_mvm(
-                        runner_vm,
-                        "bin",
-                        "pull",
-                        f"firecracker:{target['version']}",
-                        check=False,
-                        timeout=120,
-                    )
+        assert removed == [owned_cache_release.version], removed
+        owned_cache_release.assert_absent()
+        after = case.inventory("bin")
+        assert after == {item_id: row for item_id, row in before.items() if row["version"] == "1.16.2"}
+        assert len(after) == 2 and all(row["is_default"] for row in after.values()), after
+        owned_cache_preservation.assert_preserved()
+        record_property("owned_release_pruned", json.dumps({
+            "version": owned_cache_release.version,
+            "pair_ids": sorted(row["id"] for row in pair),
+            "root_receipt": owned_cache_release.receipt,
+        }, sort_keys=True))
 
     @pytest.mark.destructive
     def test_cache_prune_image_all_non_dry_run(self, runner_vm, owned_cache_prune):
@@ -1907,53 +2166,57 @@ class TestCachePruneAll:
         pytest.mark.domain_cache,
     ]
 
-    def test_cache_prune_all_non_dry_run(self, runner_vm):
-        """Prune EVERYTHING without dry-run; verify all listings are empty."""
-        result = _run_mvm(
-            runner_vm, "cache", "prune", "--all", "--force"
+    @pytest.mark.tier2
+    @pytest.mark.requires_kvm
+    @pytest.mark.destructive
+    def test_cache_prune_all_non_dry_run(
+        self, runner_vm, owned_cache_prune, owned_cache_release, owned_cache_preservation,
+        record_property,
+    ):
+        """Aggregate prune removes only owned resources and retains default/root history."""
+        case = owned_cache_prune
+        vm = case.create_vm()
+        _run_mvm(runner_vm, "vm", "stop", vm["id"], "--json", timeout=120)
+        assert case.check_bindings("vm", vm["id"])["status"] == "stopped"
+        network = case.create_network()
+        owned_cache_release.install()
+        artifacts = _CacheMiscArtifacts(case)
+        artifacts.assert_bound()
+        protected = case.cache_dir / ".mvm-protected"
+        history_before = _cache_root_directory_receipt(runner_vm, protected)
+        for domain, item_id in (
+            ("vm", vm["id"]), ("network", network["id"]),
+            ("image", vm["image_id"]), ("kernel", vm["kernel_id"]),
+        ):
+            case.check_bindings(domain, item_id)
+        expected = {
+            vm["name"], network["name"], vm["image_id"], vm["kernel_id"],
+            owned_cache_release.version, "appliance",
+        }
+        owned_cache_release.assert_bound()
+        data = _json_success_data(
+            _run_mvm(runner_vm, "cache", "prune", "--all", "--force", "--json", timeout=180).stdout,
+            dict,
         )
-        assert result.returncode == 0
-
-        # Verify each resource category is empty.
-        # Networks are excluded: they may survive prune-all by design
-        # (host-level infrastructure managed by iptables/bridge).
-        checks = [
-            ("vm", "ls", "--json"),
-            ("image", "ls", "--json"),
-            ("kernel", "ls", "--json"),
-        ]
-        for cmd_args in checks:
-            ls_result = _run_mvm(runner_vm, *cmd_args, check=False)
-            if ls_result.returncode == 0:
-                items: list[dict[str, Any]] = json.loads(ls_result.stdout)
-                if cmd_args == ("kernel", "ls", "--json"):
-                    # Entries with is_present=False are DB artifacts from
-                    # earlier prune operations — they have no file on disk.
-                    # The default kernel survives prune --all by design
-                    # (product preserves defaults to avoid breaking VM
-                    # creation after a clean/restore).
-                    present = [i for i in items if i.get("is_present")]
-                    default = [i for i in present if i.get("is_default")]
-                    if default:
-                        assert len(present) == 1, (
-                            f"{' '.join(cmd_args)}: expected only default "
-                            f"to survive prune, got {len(present)} present: "
-                            f"{present}"
-                        )
-                        assert present[0]["is_default"], (
-                            f"{' '.join(cmd_args)}: surviving kernel must "
-                            f"be the default"
-                        )
-                    else:
-                        assert len(present) == 0, (
-                            f"{' '.join(cmd_args)}: unexpected present "
-                            f"entries after cache prune --all: {present}"
-                        )
-                else:
-                    assert len(items) == 0, (
-                        f"{' '.join(cmd_args)} should be empty "
-                        f"after cache prune --all, got {len(items)} entries"
-                    )
+        assert set(data["pruned_ids"]) == expected and len(data["pruned_ids"]) == len(expected), data
+        assert not data["failed_ids"] and data["had_running_vms"] is False, data
+        for domain, item_id in (
+            ("vm", vm["id"]), ("network", network["id"]),
+            ("image", vm["image_id"]), ("kernel", vm["kernel_id"]),
+        ):
+            case.assert_absent(domain, item_id)
+            assert not case.inventory(domain), domain
+        owned_cache_release.assert_absent()
+        artifacts.assert_absent()
+        assert _cache_root_directory_receipt(runner_vm, protected) == history_before
+        binaries = case.inventory("bin")
+        assert len(binaries) == 2 and all(
+            row["version"] == "1.16.2" and row["is_default"] and row["is_present"]
+            for row in binaries.values()
+        ), binaries
+        owned_cache_preservation.assert_preserved()
+        record_property("aggregate_owned_prune", json.dumps(data, sort_keys=True))
+        record_property("retained_protected_store", history_before)
 
 
 # ============================================================================
@@ -1980,93 +2243,44 @@ class TestZzzDestructive:
         pytest.mark.slow,
     ]
 
-    def test_cache_clean_actual(self, runner_vm) -> None:
-        """Run cache clean --force, then cache init to verify recovery.
-
-        cache clean --force destroys the SQLite DB, asset files, and iptables
-        chains. This test verifies that cache init + asset re-pull can recover
-        the system state. iptables chains are NOT restored (need sudo host init).
-        """
-        result = _run_mvm(
-            runner_vm, "cache", "clean", "--force", check=False
-        )
-        assert result.returncode == 0, (
-            f"cache clean --force failed: {result.stderr}"
-        )
-
-        init_result = _run_mvm(runner_vm, "cache", "init", check=False)
-        assert init_result.returncode == 0
-
-        # Recreate database, binary, kernel, image, and network records.
-        _run_mvm(
-            runner_vm,
-            "init",
-            "--non-interactive",
-            "--skip-host",
-            check=False,
-        )
-        _run_mvm(
-            runner_vm, "bin", "pull", "1.15.1", "--default", check=False
-        )
-        bin_ls = _run_mvm(runner_vm, "bin", "ls", "--json", check=False)
-        if bin_ls.returncode == 0 and bin_ls.stdout.strip():
-            bins = json.loads(bin_ls.stdout)
-            fc = next(
-                (b for b in bins if b.get("name") == "firecracker"), None
+    def test_cache_clean_actual(
+        self, runner_vm, owned_cache_prune, owned_cache_preservation, record_property
+    ) -> None:
+        """Clean an unprotected key/misc cache, then recreate usable local state."""
+        case = owned_cache_prune
+        keys = _SelectedCacheCase(runner_vm, case.cache_dir, case.config_dir)
+        try:
+            keys.prepare()
+            case.reuse_release()
+            artifacts = _CacheMiscArtifacts(case)
+            artifacts.assert_bound()
+            _require_unprotected_clean_case(case)
+            key_before = keys.snapshot()[0]["key"]
+            config_before = _cache_config_receipt(case)
+            data = _json_success_data(
+                _run_mvm(runner_vm, "cache", "clean", "--force", "--json", timeout=180).stdout,
+                dict,
             )
-            if fc and not any(
-                b.get("is_default")
-                for b in bins
-                if b.get("name") == "firecracker"
-            ):
-                _run_mvm(
-                    runner_vm, "bin", "default", fc["id"][:6], check=False
-                )
-        kernel_result = _run_mvm(
-            runner_vm,
-            "kernel",
-            "pull",
-            "--type",
-            "firecracker",
-            "--version",
-            "v1.15",
-            check=False,
-        )
-        if kernel_result.returncode == 0:
-            kernel_ls = _run_mvm(
-                runner_vm, "kernel", "ls", "--json", check=False
-            )
-            if kernel_ls.returncode == 0 and kernel_ls.stdout.strip():
-                kernels = json.loads(kernel_ls.stdout)
-                present = [k for k in kernels if k.get("is_present")]
-                if present:
-                    _run_mvm(
-                        runner_vm,
-                        "kernel",
-                        "default",
-                        present[0]["id"][:6],
-                        check=False,
-                    )
-        _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "alpine",
-            "--version",
-            "3.21",
-            check=False,
-        )
-        _run_mvm(
-            runner_vm,
-            "network",
-            "create",
-            "net",
-            "--subnet",
-            "10.200.0.0/24",
-            "--no-nat",
-            check=False,
-        )
-        _run_mvm(runner_vm, "network", "default", "net", check=False)
+            artifacts.assert_absent()
+            owned_cache_preservation.assert_preserved()
+            _reinitialize_cleaned_cache(case, data, {"appliance", "warm_images"}, config_before)
+            assert not case.inventory("key")
+            for row in key_before:
+                for field in ("public_key_path", "private_key_path"):
+                    with pytest.raises(FileNotFoundError):
+                        Path(row[field]).lstat()
+            keys.prepare()
+            case.reuse_release()
+            recovered = keys.snapshot()[0]["key"]
+            assert len(recovered) == 1 and recovered[0]["id"] not in {row["id"] for row in key_before}
+            owned_cache_preservation.assert_preserved()
+            record_property("clean_key_recovery", json.dumps({
+                "clean": data, "removed_keys": [row["id"] for row in key_before],
+                "recovered_key": recovered[0]["id"],
+            }, sort_keys=True))
+        finally:
+            failures = keys.cleanup()
+            assert not failures, "Clean key teardown failed:\n" + "\n".join(failures)
 
 
 class TestCacheEdgeCases:
@@ -2141,81 +2355,43 @@ class TestCacheCleanActual:
         pytest.mark.slow,
     ]
 
-    def test_cache_clean_actual(self, runner_vm) -> None:
-        """Run cache clean --force, then cache init to verify recovery.
-
-        cache clean --force destroys the SQLite DB, asset files, and iptables
-        chains. This test verifies that cache init + asset re-pull can recover
-        the system state. iptables chains are NOT restored (need sudo host init).
-        """
-        # Rationale: Needs actual cache state (SQLite DB, asset files) because
-        # modifying the cache destroys persisted data that no fixture or JSON
-        # query can simulate. A cache ls --json test would not exercise the
-        # destroy-and-recover code path.
-        result = _run_mvm(runner_vm, "cache", "clean", "--force", check=False)
-        assert result.returncode == 0, (
-            f"cache clean --force failed: {result.stderr}"
+    def test_cache_clean_actual(
+        self, runner_vm, owned_cache_prune, owned_cache_preservation, record_property
+    ) -> None:
+        """Clean owned unprotected assets/network and recover from exact local sources."""
+        case = owned_cache_prune
+        case.reuse_release()
+        kernel = case.import_kernel("before-clean", default=True)
+        image = case.import_image(default=True)
+        network = case.create_network()
+        artifacts = _CacheMiscArtifacts(case)
+        artifacts.assert_bound()
+        _require_unprotected_clean_case(case)
+        config_before = _cache_config_receipt(case)
+        expected = {kernel["id"], image["id"], network["name"], "appliance"}
+        data = _json_success_data(
+            _run_mvm(runner_vm, "cache", "clean", "--force", "--json", timeout=180).stdout,
+            dict,
         )
-
-        init_result = _run_mvm(runner_vm, "cache", "init", check=False)
-        assert init_result.returncode == 0
-
-        # Recreate database, binary, kernel, image, and network records.
-        _run_mvm(
-            runner_vm,
-            "init",
-            "--non-interactive",
-            check=False,
-        )
-        _run_mvm(runner_vm, "bin", "pull", "1.15.1", "--default", check=False)
-        bin_ls = _run_mvm(runner_vm, "bin", "ls", "--json", check=False)
-        if bin_ls.returncode == 0 and bin_ls.stdout.strip():
-            bins = json.loads(bin_ls.stdout)
-            fc = next((b for b in bins if b.get("name") == "firecracker"), None)
-            if fc and not any(
-                b.get("is_default")
-                for b in bins
-                if b.get("name") == "firecracker"
-            ):
-                _run_mvm(
-                    runner_vm, "bin", "default", fc["id"][:6], check=False
-                )
-        kernel_result = _run_mvm(
-            runner_vm, "kernel", "pull", "--type", "firecracker",
-            "--version", "v1.15", check=False
-        )
-        if kernel_result.returncode == 0:
-            kernel_ls = _run_mvm(
-                runner_vm, "kernel", "ls", "--json", check=False
-            )
-            if kernel_ls.returncode == 0 and kernel_ls.stdout.strip():
-                kernels = json.loads(kernel_ls.stdout)
-                present = [k for k in kernels if k.get("is_present")]
-                if present:
-                    _run_mvm(
-                        runner_vm,
-                        "kernel",
-                        "default",
-                        present[0]["id"][:6],
-                        check=False,
-                    )
-        _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "alpine",
-            "--version",
-            "3.23",
-            check=False,
-        )
-        _run_mvm(
-            runner_vm,
-            "network",
-            "create",
-            "net",
-            "--subnet",
-            "10.200.0.0/24",
-            "--no-nat",
-            check=False,
-        )
-        _run_mvm(runner_vm, "network", "default", "net", check=False)
+        artifacts.assert_absent()
+        owned_cache_preservation.assert_preserved()
+        _reinitialize_cleaned_cache(case, data, expected, config_before)
+        case.reuse_release()
+        recovered_kernel = case.import_kernel("after-clean", default=True)
+        recovered_image = case.import_image(default=True)
+        recovered_network = case.create_network()
+        assert recovered_kernel["id"] != kernel["id"]
+        assert recovered_image["id"] != image["id"]
+        assert recovered_network["id"] != network["id"], "Removal tombstones must not be resurrected"
+        for domain, row in (
+            ("kernel", recovered_kernel), ("image", recovered_image), ("network", recovered_network),
+        ):
+            case.check_bindings(domain, row["id"])
+        # The recovered owned network intentionally changes only managed firewall state.
+        assert _cache_release_receipt(case, "1.16.2") == owned_cache_preservation.before[2]
+        assert owned_cache_preservation.appliance.snapshot() == owned_cache_preservation.before[0]
+        assert owned_cache_preservation.process.snapshot() == owned_cache_preservation.before[1]
+        record_property("clean_asset_recovery", json.dumps({
+            "clean": data, "recovered_kernel": recovered_kernel["id"],
+            "recovered_image": recovered_image["id"], "recovered_network": recovered_network["id"],
+        }, sort_keys=True))
