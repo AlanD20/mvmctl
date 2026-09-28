@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Release status (2026-09-28):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
-> requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean checkout `dae5510c` passed the complete
+> requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean checkout `3ae3a89c` passed the complete
 > pinned Go 1.26.3 local CI sequence inside the fresh `mvmctl-030-test`, plus the full root-effect Jailer
-> package (9.190s) and all 240 Python orchestrator unit cases (7.21s). Earlier runner candidates passed network/nftables/policy
+> package (7.147s) and all 240 Python orchestrator unit cases (7.63s). Earlier runner candidates passed network/nftables/policy
 > (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), copy (15/15),
 > kernel import (8/8), Jailer (13/13), and rootfs persistence (1/1) Python domains with strict zero-skip reports at
 > their recorded revisions. These domain results do not constitute a complete exact-current-HEAD Python matrix.
@@ -53,6 +53,10 @@ adversarial firewall and recovery cases remain separate release gates.
 
 ### Added
 
+- The complete eight-case init and ten-case installer files each passed twice against the checked candidate
+  inside the named runner. Coverage includes actual administrator-prompt decline, successful explicit bootstrap,
+  canonical installation, update refusal and exact-identity read-only/symlink fault cleanup. This does not qualify
+  clean administrator enrollment/reset or marker-only operator denial.
 - The complete rootfs persistence journey passed twice on the installed runner candidate, proving
   capture independence after source modification/removal and byte-exact restored content. Full-ID
   receipts and checked partial cleanup preserve unrelated resources, configuration and defaults;
@@ -1180,6 +1184,7 @@ composition is described above; the current incomplete-work inventory is under *
 - Initialization no longer marks administrator setup complete after failed sudo execution. Both wizard paths
   use the fixed system installation for `host init`, without forwarding caller-selected root command paths or
   environment assignments; cancellation and process-start failures leave setup incomplete.
+  Missing or malformed session-group evidence no longer silently skips the administrator prompt.
 - Image import resolves the configured or explicit `auto` format before extraction, using the existing extension
   and magic-byte detection. Concrete configured formats and explicit overrides keep their precedence.
 - GuestFS appliance building and cache pruning no longer kill same-user processes or delete global libguestfs

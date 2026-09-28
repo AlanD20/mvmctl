@@ -17,12 +17,26 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Initialization failure source gate (2026-09-28):** Commit `75ddcb3d` stops both wizard paths after failed
-administrator setup and uses the closed system-binary `host init` route. Focused behavioral regressions and
-the complete CLI/common Go packages passed inside `mvmctl-030-test`, followed by vet. A subsequent formatting-only
-correction passed gofmt/golines and diff checks. This is source-level evidence, not installed-candidate init,
-clean administrator enrollment or complete release qualification. Evidence is `go-init-e26-generated-focused.log`;
-the newer candidate and current init/installer system files remain pending their runtime gates.
+**Complete init and installer repeat gates (2026-09-28):** Init source SHA-256
+`4709839298066c505bd5864bc94905896761c48f620335d152f1e9a66b0b2028` passed all eight cases twice
+(6.95/7.50 seconds); installer source `c4f98f26f7eba57e9b7545303d5dc0ec9607ec0601e3b99b32478856e8056117`
+passed all ten cases twice (7.57/7.66 seconds). Both used installed/staged candidate `886cb7e5`, built from
+clean `3ae3a89c` as `0.3.0-rc.init-session`, inside only `mvmctl-030-test`. Each strict report has zero other
+outcomes, unchanged full configuration and four empty inventories after checked cleanup. The fixtures retain
+the fuller resource/default/policy baseline and exact file/mount receipts, including effects observed after
+subprocess timeouts. Coverage includes actual interactive decline, explicit administrator success, canonical
+installation, update refusal, read-only destination and symlink rejection/restoration. The independent
+runner administrator bootstrap is not a marker-only grant. Clean enrollment/reset and marker-only denial
+remain unqualified. Reports are `qa-init-session-4709-full8-pass{1,2}.{json,xml}` and
+`qa-install-session-c4f9-full10-pass{1,2}.{json,xml}`.
+
+**Initialization source corrections (2026-09-28):** `75ddcb3d` stops failed administrator setup and uses
+the closed canonical route. `3ae3a89c` requires confirmed inactive-session evidence before silently skipping
+the prompt. The new behavior regressions and complete CLI/common packages passed with vet/format checks.
+The clean `3ae3a89c` checkout then passed the complete pinned Go 1.26.3 local CI sequence, full root Jailer
+package (7.147 seconds), 240 Python orchestrator unit cases (7.63 seconds, zero other outcomes), and release
+build. Evidence is `go-init-session-focused.log` and `full-ci-build-init-3ae3a89c.log`. These results do not
+qualify the complete current-source Python matrix, remote GitHub CI or the release.
 
 **Complete nftables repeat gate (2026-09-28):** Source SHA-256
 `5e0105dfeb4fc2ac41bee37fa6c8d0fdfda7497609afda7e7685cc7a61c72133` passed all five cases
