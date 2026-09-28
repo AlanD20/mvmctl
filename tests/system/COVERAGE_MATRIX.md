@@ -17,6 +17,32 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Trusted-binary safe repeat gate (2026-09-28):** Commit `f4d7adb1` retains all eleven binary
+cases and exact archive/release identity and live-lease ownership checks. File SHA-256
+`de6739143ab76be1694c696d01cd9f53e665b39f4e59b4ed3f9df8b9b543f6c2` passed the nine
+safe cases twice (15.94/15.64 seconds) inside only `mvmctl-030-test`, against candidate
+`d28985b6`; the live-lease refusal first passed separately in 10.96 seconds. All eleven
+collected. Both strict repeat reports have zero other outcomes; complete configuration and
+VM/network/volume/snapshot inventories were preserved. The fixture uses the existing trusted
+1.16.2 pair without installing another release or changing defaults. Remote metadata and the
+destructive release/default-transfer case remain unqualified. Reports are
+`qa-bin-de67-live-focus` and `qa-bin-de67-safe9-pass{1,2}.{json,xml}` in
+`qa-release-72696719/.tmp`. This is not the complete binary-domain or release gate.
+
+**Exact live-detach source checkpoint (2026-09-28):** Production commits `0728487a` and
+`65344c35`, with fixture/format corrections `42c0bab6` and `c37fc5c9`, authenticate the
+selected guest PCI disk removal before root detach and preserve exact interrupted ACL-revoke
+recovery. Observation opens existing authority only; it does not create missing directories or
+locks or repair a pending journal. Pinned Go 1.26.3 generation, scoped format/vet, agent/vsock
+behavior and race tests, root existing-authority tests, focused root Jailer regressions and the
+complete root Jailer package (12.850 seconds) passed inside `mvmctl-030-test`. The original
+live-detach case then passed 1/1 in 9.94 seconds against installed runner candidate
+`0.3.0-rc.detach` (SHA-256 `7441189d6821ac1d5b9e88ac6f92eda492410f962e7635dbaf97c9852c4e5056`).
+It proves actual guest-device disappearance and a still-running VM, with strict zero-other
+outcomes and exact configuration/four empty inventory checks after cleanup. Report
+`qa-lifecycle-detach-c37f-focus.{json,xml}` is in `qa-release-72696719/.tmp`.
+This is not the complete lifecycle repeat gate or complete current-source CI.
+
 **Owned cache-prune repeat gate (2026-09-28):** Commit `a6a6f384` modernizes six aggregate-preview,
 default-image retention, and actual VM/network/kernel/image-prune cases; all other seventeen methods,
 including the global GuestFS preservation regression, are unchanged. File SHA-256

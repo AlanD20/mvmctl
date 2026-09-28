@@ -39,6 +39,9 @@ earlier partial-state statement. They are not a substitute for the final release
 
 ### Added
 
+- Nine safe trusted-binary system cases passed twice with exact archive/release and live-VM
+  ownership checks; all eleven cases remain present. Remote metadata and destructive
+  release/default-transfer qualification remain pending.
 - The complete 24-case host system-test file passed twice on the installed candidate in the named runner.
   First-capacity initialization and clean/reset refusal now check owned resources, unchanged administrator state
   and healthy guest access. This does not qualify administrator enrollment or successful clean-host reset.
@@ -963,6 +966,11 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Changed
 
+- Live volume detach authenticates and removes the exact guest PCI disk before removing root
+  backing access. Read-only observation does not create authority, and interrupted ACL revoke
+  is recoverable only for the admitted exact volume/VM transition. Focused Go/race/root checks
+  pass; the original live-detach system case also passes, proving guest-device removal while
+  the VM stays running. Complete lifecycle repeat qualification remains pending.
 - VM execution now requires the matching Firecracker/Jailer **1.16.2** pair, replacing 1.16.1 to address the
   upstream pause/resume-vsock RX-gate defect. Runner provisioning pins the same pair. Older audited releases remain
   available for binary management, not VM launch. Its x86_64 archive retains the exact 24-member names/modes but uses
