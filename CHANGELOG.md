@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > unresolved. Later complete SSH (11/11), config (12/12), keys (26/26), volumes (37/37), full journeys (15/15),
 > and internal-service entry points (5/5) passed twice at their recorded exact test revisions. Three bounded
 > memory cases also passed twice, including sustained measured cgroup pressure with and without swap;
-> original incident attribution, guest allocation-failure handling and ancestor/global OOM safety remain unproved.
+> a separate guest-global RAM-exhaustion case now passed once with an identified allocator OOM victim, preserved
+> Firecracker identity, successful fresh exec and unchanged observed runner/ancestor OOM counters. Original incident
+> attribution and safety under arbitrary ancestor/global pressure remain unproved.
 > Active console discovery/kill now uses root-verified relay authority and durable relay-only stop; affected
 > Go/root/race gates pass. Its owned installed-candidate lifecycle journey passed twice (14.04/13.25s),
 > proving relay-only stop preserves Firecracker/vsock and VM restart renews the relay. A later real-PTY
@@ -53,6 +55,11 @@ adversarial firewall and recovery cases remain separate release gates.
 
 ### Added
 
+- Added a real guest-global RAM-exhaustion case, without a synthetic child-cgroup limit or OOM-score protection.
+  It passed once in 10.28s on the checked installed candidate: the guest killed only the identified anonymous
+  allocator, then completed a fresh exec and allocation while Firecracker remained alive. Exact configuration,
+  owned-resource cleanup and observed inner/outer OOM counters were checked. This does not attribute the original
+  reported incident or guarantee survival under unrelated host pressure.
 - The complete fifteen-case Jailer module passed twice on the checked installed candidate, covering isolated
   credentials/API access, lifecycle and vsock parity, raw volumes, independent memory/rootfs/data-volume restore,
   competing-writer refusal and missing-release recovery. Exact crash admission supports explicitly bound managed
@@ -212,7 +219,8 @@ adversarial firewall and recovery cases remain separate release gates.
 - `vm inspect --json` now obtains running-VM cgroup limits and usage through an authenticated, read-only root request.
   The request checks root VM ownership and process identity, then pins and verifies the fixed cgroup-v2 leaf; the
   operator cannot read its protected controls directly. A focused networkless installed-candidate system case passed
-  create, inspection, stop, restart, and cleanup in the named runner. Memory-saturation survival remains unqualified.
+  create, inspection, stop, restart, and cleanup in the named runner. Later bounded pressure and guest-exhaustion
+  qualification above supersedes this initial checkpoint; original incident attribution remains open.
 - Cgroup configuration read failures now propagate instead of silently deriving zero headroom or other zero values.
 - Removed unused public Jailer launch/cleanup actions, old manifest serialization, and raw snapshot/volume exposure
   operations after their typed consumers were introduced.
@@ -1318,8 +1326,8 @@ The implementation map has source code and bounded runner evidence, but the rele
   sufficient. Do not bypass the trusted-release receiver to make those cases green.
 - Diagnose the intermittent jailed device-open failure after host reboot and prove a repeatable reboot/status/exec
   recovery journey. A successful repeat is not an explanation for the earlier failure.
-- Qualify sustained memory pressure and distinguish VM-leaf, ancestor, host, and guest OOM behavior. Pressure-only
-  `memory.max=max` removes one finite VM-leaf ceiling, not every OOM risk.
+- Attribute the original memory-saturation incident and establish the limits of the bounded pressure/exhaustion
+  evidence above. Pressure-only `memory.max=max` removes one finite VM-leaf ceiling, not every OOM risk.
 - Qualify administrator install/init/reset and destructive host clean only on a dedicated clean host. The shared
   runner's unprivileged refusal tests do not prove reset success.
 - Finish public documentation and the clean-install procedure, report the aarch64 runtime limitation, and obtain
