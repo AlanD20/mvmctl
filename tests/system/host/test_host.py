@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import tempfile
+import uuid
+from pathlib import Path
 
 import pytest
 
-from tests.system.conftest import _guest_run, _run_mvm
+from tests.system.conftest import _json_success_data, _run_mvm, _unique_subnet
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_host]
 
@@ -30,31 +31,187 @@ def _success_data(result):
     return data
 
 
+def _host_inventory(runner_vm, domain):
+    data = _json_success_data(
+        _run_mvm(runner_vm, domain, "ls", "--json").stdout,
+        dict if domain == "config" else list,
+    )
+    return data if isinstance(data, dict) else sorted(data, key=lambda row: row["id"])
+
+
+def _host_administrator_state(runner_vm):
+    data = _success_data(_run_mvm(runner_vm, "host", "status", "--json"))
+    return {
+        field: data[field]
+        for field in ("group_exists", "sudoers_exists", "ip_forward", "user_in_group")
+    }
+
+
+class _HostGuardCase:
+    """Own only attempted unique resources; preserve the runner's prior state."""
+
+    def __init__(self, runner_vm):
+        self.runner_vm = runner_vm
+        self.baseline = {
+            domain: _host_inventory(runner_vm, domain)
+            for domain in ("vm", "network", "image", "kernel", "bin", "key", "volume", "config")
+        }
+        self.administrator = _host_administrator_state(runner_vm)
+        self.attempted = {}
+        self.receipts = {}
+        self.vm_paths = ()
+
+    def require_launch_assets(self):
+        assert os.geteuid() != 0, "host guards must run as the ordinary operator"
+        assert os.environ.get("MVM_ASSET_MIRROR"), "the runner must provide its asset mirror"
+        binaries = self.baseline["bin"]
+        for member in ("firecracker", "jailer"):
+            assert any(
+                row["type"] == member and row["version"] == "1.16.2"
+                and row["is_default"] and row["is_present"]
+                for row in binaries
+            ), f"preseeded default {member} 1.16.2 is required"
+
+    def attempt(self, domain, name):
+        assert not any(row["name"] == name for row in self.baseline[domain])
+        self.attempted[domain] = name
+
+    def remember(self, domain, row):
+        assert row["name"] == self.attempted[domain], row
+        assert row["id"] and row["created_at"], row
+        self.receipts[domain] = (row["id"], row["created_at"])
+        return row
+
+    def create_running_vm(self):
+        self.require_launch_assets()
+        assert _json_success_data(_run_mvm(
+            self.runner_vm, "config", "get", "settings", "guestfs_enabled", "--json",
+        ).stdout, bool) is False, "the provisioned runner must use LoopMount"
+        assert any(
+            row["type"] == "alpine" and row["version"] == "3.23" and row["is_present"]
+            for row in self.baseline["image"]
+        ), "preseeded Alpine 3.23 is required"
+        kernels = [row for row in self.baseline["kernel"] if row["is_default"] and row["is_present"]]
+        assert len(kernels) == 1, kernels
+        name = f"sys-host-net-{uuid.uuid4().hex[:16]}"
+        self.attempt("network", name)
+        network = self.remember("network", _success_data(_run_mvm(
+            self.runner_vm, "network", "create", name,
+            "--subnet", _unique_subnet(name), "--no-nat", "--json",
+        )))
+        assert not network["is_default"], network
+        name = f"sys-host-vm-{uuid.uuid4().hex}"
+        self.attempt("vm", name)
+        rows = _json_success_data(_run_mvm(
+            self.runner_vm, "vm", "create", name,
+            "--image", "alpine:3.23", "--kernel", kernels[0]["id"],
+            "--network", network["id"], "--disk-size", "512M",
+            "--vcpu", "1", "--mem", "256M", "--user", "root",
+            "--cloud-init-mode", "off", "--skip-deblob", "--json", timeout=180,
+        ).stdout, list)
+        assert len(rows) == 1, rows
+        vm = self.remember("vm", rows[0])
+        inspection = _success_data(_run_mvm(self.runner_vm, "vm", "inspect", vm["id"], "--json"))
+        self.vm_paths = tuple(inspection["filesystem"][field] for field in ("vm_dir", "rootfs_path"))
+        assert inspection["resources"]["vcpu"] == 1
+        assert inspection["resources"]["mem"] == 256
+        assert inspection["resources"]["disk"] == 512
+        return vm
+
+    def assert_healthy(self):
+        identity = self.receipts["vm"]
+        live = _json_success_data(_run_mvm(self.runner_vm, "vm", "ps", "--json").stdout, list)
+        rows = [row for row in live if row["id"] == identity[0]]
+        assert len(rows) == 1 and rows[0]["created_at"] == identity[1], live
+        assert rows[0]["status"] == "running" and rows[0]["pid"] > 0, rows
+        inspection = _success_data(_run_mvm(self.runner_vm, "vm", "inspect", identity[0], "--json"))
+        assert inspection["vm"]["id"] == identity[0]
+        assert inspection["vm"]["created_at"] == identity[1]
+        assert inspection["vm"]["status"] == "running"
+        assert _run_mvm(self.runner_vm, "exec", identity[0], "--", "uname", "-s").stdout.strip() == "Linux"
+        return rows[0]
+
+    def cleanup(self):
+        failures = []
+        for domain in ("vm", "network"):
+            name = self.attempted.get(domain)
+            if name is None:
+                continue
+            try:
+                rows = [row for row in _host_inventory(self.runner_vm, domain) if row["name"] == name]
+                assert len(rows) <= 1, rows
+                if rows:
+                    row = rows[0]
+                    # A partial create can publish its row before returning an error.
+                    # The name was absent before this case's recorded attempt.
+                    if domain not in self.receipts:
+                        self.remember(domain, row)
+                    assert (row["id"], row["created_at"]) == self.receipts[domain], rows
+                    _run_mvm(self.runner_vm, domain, "rm", row["id"], "--force", timeout=120)
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"{domain} cleanup: {error!r}")
+            try:
+                remaining = _host_inventory(self.runner_vm, domain)
+                identity = self.receipts.get(domain)
+                assert not any(
+                    row["name"] == name or (identity is not None and row["id"] == identity[0])
+                    for row in remaining
+                ), remaining
+                if domain == "vm":
+                    live = _json_success_data(_run_mvm(self.runner_vm, "vm", "ps", "--json").stdout, list)
+                    assert not any(row["name"] == name or (identity and row["id"] == identity[0]) for row in live), live
+                    paths = list(self.vm_paths)
+                    if identity:
+                        paths.append(f"/run/mvmctl/runtime/{os.getuid()}/{identity[0]}")
+                    for path in paths:
+                        with pytest.raises(FileNotFoundError):
+                            Path(path).lstat()
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"{domain} absence receipt: {error!r}")
+        for domain, expected in self.baseline.items():
+            try:
+                assert _host_inventory(self.runner_vm, domain) == expected, domain
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"runner main {domain} baseline: {error!r}")
+        try:
+            assert _host_administrator_state(self.runner_vm) == self.administrator
+        except (Exception, pytest.fail.Exception) as error:
+            failures.append(f"administrator baseline: {error!r}")
+        assert not failures, "Host guard teardown failed:\n" + "\n".join(failures)
+
+
+@pytest.fixture
+def host_guard_case(runner_vm):
+    case = _HostGuardCase(runner_vm)
+    try:
+        yield case
+    finally:
+        case.cleanup()
+
+
 class TestHostInfo:
     """Test host info command (read-only, non-destructive)."""
 
-    def test_host_info_detects_first_capacity_snapshot(self, runner_vm):
+    def test_host_info_detects_first_capacity_snapshot(self, runner_vm, host_guard_case, monkeypatch):
         """A fresh operator cache must not need a prior refresh to show host info."""
         mirror = os.environ.get("MVM_ASSET_MIRROR")
         assert mirror, "the runner must provide its pre-cached asset mirror"
+        host_guard_case.require_launch_assets()
         with tempfile.TemporaryDirectory(
             prefix="mvm-host-info-", dir="/home/runner/.cache"
         ) as cache_dir:
-            env = (
-                f"MVM_CACHE_DIR={shlex.quote(cache_dir)} "
-                f"MVM_ASSET_MIRROR={shlex.quote(mirror)}"
-            )
-            _guest_run(
-                runner_vm,
-                f"{env} /usr/local/bin/mvm init --non-interactive "
-                "--skip-host --skip-network --binary-version 1.16.0",
-                timeout=180,
-            )
-            first = _guest_run(
-                runner_vm,
-                f"MVM_CACHE_DIR={shlex.quote(cache_dir)} "
-                "/usr/local/bin/mvm host info --json",
-            )
+            with monkeypatch.context() as selection:
+                selection.setenv("MVM_CACHE_DIR", cache_dir)
+                selection.setenv("MVM_CONFIG_DIR", str(Path(cache_dir) / "config"))
+                selection.setenv("MVM_TEMP_DIR", str(Path(cache_dir) / "tmp"))
+                selection.delenv("MVM_WARM_POOL", raising=False)
+                # Non-interactive init disables GuestFS before cache init. Its
+                # config writes must remain private so no global appliance is built.
+                _run_mvm(
+                    runner_vm, "init", "--non-interactive", "--skip-host", "--skip-network",
+                    "--binary-version", "1.16.2", timeout=180,
+                )
+                first = _run_mvm(runner_vm, "host", "info", "--json")
             data = _success_data(first)
             assert data["hostname"]
             assert data["memory"]["total_mib"] > 0
@@ -486,39 +643,25 @@ class TestHostStatusEnhanced:
 class TestHostMutationGuards:
     """The ordinary operator cannot clean active VMs or invoke administrator reset."""
 
-    def test_host_clean_rejects_running_vm(
-        self, runner_vm, unique_vm_name, created_network
-    ):
-        created = _run_mvm(
-            runner_vm,
-            "vm", "create", unique_vm_name,
-            "--image", "alpine:3.23", "--network", created_network,
-            "--vcpu", "1", "--mem", "256M", "--user", "root", "--json",
-            timeout=180,
-        )
-        created_vms = json.loads(created.stdout)["data"]
-        assert len(created_vms) == 1, created.stdout
-        assert created_vms[0]["name"] == unique_vm_name
-        try:
-            live = _run_mvm(runner_vm, "vm", "ps", "--json")
-            assert any(vm["name"] == unique_vm_name for vm in json.loads(live.stdout)["data"]), (
-                "test VM stopped before host-clean preflight"
-            )
-            refused = _run_mvm(runner_vm, "host", "clean", "--force", check=False)
-            assert refused.returncode != 0
-            assert "running" in refused.stderr.lower()
-            live = _run_mvm(runner_vm, "vm", "ps", "--json")
-            assert any(vm["name"] == unique_vm_name for vm in json.loads(live.stdout)["data"])
-        finally:
-            vms = _run_mvm(runner_vm, "vm", "ls", "--json")
-            if any(vm["name"] == unique_vm_name for vm in json.loads(vms.stdout)["data"]):
-                removed = _run_mvm(
-                    runner_vm, "vm", "rm", unique_vm_name, "--force", check=False,
-                    timeout=120,
-                )
-                assert removed.returncode == 0, removed.stderr
+    def test_host_clean_rejects_running_vm(self, runner_vm, host_guard_case):
+        host_guard_case.create_running_vm()
+        before_vm = host_guard_case.assert_healthy()
+        before = {
+            domain: _host_inventory(runner_vm, domain)
+            for domain in host_guard_case.baseline
+        }
+        administrator = _host_administrator_state(runner_vm)
+        refused = _run_mvm(runner_vm, "host", "clean", "--force", check=False)
+        assert refused.returncode != 0
+        assert "running" in refused.stderr.lower()
+        after_vm = host_guard_case.assert_healthy()
+        assert after_vm == before_vm
+        for domain, expected in before.items():
+            assert _host_inventory(runner_vm, domain) == expected, domain
+        assert _host_administrator_state(runner_vm) == administrator
 
-    def test_host_reset_requires_administrator(self, runner_vm):
+    def test_host_reset_requires_administrator(self, runner_vm, host_guard_case):
+        assert os.geteuid() != 0, "administrator refusal must use the ordinary operator"
         before = _success_data(_run_mvm(runner_vm, "host", "status", "--json"))
         refused = _run_mvm(runner_vm, "host", "reset", "--force", check=False)
         assert refused.returncode != 0
