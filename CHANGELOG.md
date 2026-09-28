@@ -18,8 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > their recorded revisions. These domain results do not constitute a complete exact-current-HEAD Python matrix.
 > Host-reboot/exec recovery had one device-open failure and one successful controlled repeat; its cause remains
 > unresolved. A later owned-guest reboot check stopped before restart: inspection rejected stale console boot
-> identity, and typed VM/network cleanup refused prior-boot admission. The retained records were not manually
-> deleted or adopted; post-reboot recovery remains a release blocker. Later complete SSH (11/11), config (12/12),
+> identity, and typed VM/network cleanup refused prior-boot admission. Targeted console and schema-6 absence-proof
+> fixes passed affected Go/root gates. The corrected installed runner candidate then reported that exact VM stopped
+> and removed its VM/network through normal typed commands, preserving the cleaned root journal and leaving all four
+> inventories empty. No records were manually deleted or adopted. A fresh reboot/start/exec journey remains required.
+> Later complete SSH (11/11), config (12/12),
 > keys (26/26), volumes (37/37), full journeys (15/15),
 > and internal-service entry points (5/5) passed twice at their recorded exact test revisions. Three bounded
 > memory cases also passed twice, including sustained measured cgroup pressure with and without swap;
@@ -60,8 +63,9 @@ adversarial firewall and recovery cases remain separate release gates.
 
 - A focused local reboot experiment captured the exact active jail/mount objects and KVM/TUN identities;
   private-root readlink text is informational, not process authority. Its owned guest prepared successfully before
-  one controlled runner reboot, but recovery failed before the single permitted start. Console prior-boot observation
-  and typed VM/network retirement require correction; no reboot-recovery success is claimed by this check.
+  one controlled runner reboot, but recovery failed before the single permitted start. Later targeted fixes passed
+  affected Go/root checks and installed-candidate inspection/typed cleanup. The original failed receipt remains failed;
+  no complete reboot/start/exec success is claimed by this check.
 - The bundled official-kernel nftables feature now requests bridge connection tracking as well as bridge-family
   nftables. Focused kernel Go tests and vet passed in the named runner. Its booted rebuilt kernel has both flags,
   but the older mirrored default does not; this source change does not rebuild or qualify every runner image.
@@ -1260,6 +1264,13 @@ composition is described above; the current incomplete-work inventory is under *
 
 #### Prior-boot managed-network removal
 
+- Corrected prior-boot VM absence admission to require the current schema-6 root journal rather than stale schema 5;
+  legacy and unknown schemas still fail closed. Console observation classifies a valid prior-boot relay as stopped
+  without opening a PID or endpoint, while signal authorization remains unchanged. Behavioral regressions failed on
+  the old source; the complete authority package, full root Jailer package and scoped vet/format checks passed inside
+  the named runner. Its normally installed candidate successfully inspected and removed the exact retained test VM
+  and network, with independent cleaned-journal and empty-inventory checks. Fresh reboot/start/exec qualification
+  remains open.
 - `mvm network rm` can now retire an exact root-owned prior-boot live network record without first recreating its
   bridge. Under the network and firewall locks, it proves the derived bridge absent, admits only matching cleaned
   topology history, retires the prior-boot firewall generation, rejects remaining endpoints or reservations, and

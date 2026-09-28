@@ -1495,7 +1495,11 @@ root-owned `/usr/local/bin/mvm` content. The record stores no socket path, PID-f
 The approved independent-console extension adds a required `running|stopping|stopped` lifecycle to a present
 active relay while retaining its complete locator and final identity in every state. Root `jailer-console-observe` uses
 existing-only instance authority, verifies that identity and the fixed caller runtime endpoint, and performs no
-repair. Root `jailer-console-stop` holds the verified relay pidfd, publishes durable `stopping` before signaling and
+repair. A successfully read, canonical current boot ID differing from validated launch authority proves the
+prior-boot relay stopped, including interrupted launching or cleaning records. Observation then returns no PID or
+socket and never opens a current process or endpoint. Failed or malformed boot observations remain errors; same-boot
+incomplete lifecycle authority remains unavailable. This read-side classification does not relax stop authority.
+Root `jailer-console-stop` holds the verified relay pidfd, publishes durable `stopping` before signaling and
 publishes `stopped` only after actual exit. Retry must re-admit the same recorded task; a reused or ambiguous PID
 never authorizes a signal. Firecracker remains running, and VM status is based on its identity independently of
 console availability. Recovery does not reopen or signal a durably stopped relay. This is a clean break: even
