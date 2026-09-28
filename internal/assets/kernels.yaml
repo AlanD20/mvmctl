@@ -64,6 +64,7 @@ kernel-official:
         CONFIG_NFT_NAT: y
         CONFIG_NF_TABLES_INET: y
         CONFIG_NF_TABLES_BRIDGE: y
+        CONFIG_NF_CONNTRACK_BRIDGE: y
         CONFIG_NF_NAT_MASQUERADE: y
         CONFIG_NFT_MASQ: y
     tuntap:
