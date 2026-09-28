@@ -14,25 +14,278 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import stat
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
-from typing import Generator
+from typing import Any, Generator
 
 import pytest
 
 from tests.system.conftest import (
     _guest_run,
     _json_success_data,
-    _run_mvm,
+    _run_mvm as _installed_mvm,
     _unique_subnet,
-    ensure_vm_deps,
 )
 
 pytestmark = [
     pytest.mark.system,
     pytest.mark.domain_volume,
 ]
+
+
+def _inventory(runner_vm: str, domain: str) -> list[dict[str, Any]]:
+    rows = _json_success_data(
+        _installed_mvm(runner_vm, domain, "ls", "--json").stdout,
+        list,
+    )
+    return sorted(rows, key=lambda row: json.dumps(row, sort_keys=True))
+
+
+def _baseline_inventory(runner_vm: str, domain: str) -> list[dict[str, Any]]:
+    rows = _inventory(runner_vm, domain)
+    if domain == "kernel":
+        # Public listing refreshes updated_at for missing recorded kernel files.
+        # Compare every other field without repairing unrelated missing assets.
+        rows = [
+            {key: value for key, value in row.items() if key != "updated_at"}
+            for row in rows
+        ]
+        rows.sort(key=lambda row: json.dumps(row, sort_keys=True))
+    return rows
+
+
+class _OwnedVolumeCase:
+    """Only public removal of exact names attempted by this case is authorized."""
+
+    domains = ("vm", "volume", "key", "network", "image", "kernel", "bin")
+
+    def __init__(self, runner_vm: str) -> None:
+        self.runner_vm = runner_vm
+        self.before = {
+            domain: _baseline_inventory(runner_vm, domain) for domain in self.domains
+        }
+        self.config = _json_success_data(
+            _installed_mvm(runner_vm, "config", "ls", "--json").stdout,
+            dict,
+        )
+        self.attempted: dict[str, dict[str, str | None]] = {
+            domain: {} for domain in ("vm", "volume", "key", "network")
+        }
+        self.volume_sources: dict[str, tuple[Path, tuple[int, int]]] = {}
+
+    def remember(self, domain: str, name: str) -> None:
+        assert all(row.get("name") != name for row in self.before[domain]), (
+            "creation would address a baseline resource",
+            domain,
+            name,
+        )
+        self.attempted[domain].setdefault(name, None)
+
+    def remove(self, domain: str, name: str) -> None:
+        rows = [
+            row for row in _inventory(self.runner_vm, domain) if row.get("name") == name
+        ]
+        if name not in self.attempted[domain]:
+            assert not rows, ("unattempted cleanup target exists", domain, name, rows)
+            return
+        assert len(rows) <= 1, rows
+        if rows:
+            resource_id = rows[0]["id"]
+            remembered_id = self.attempted[domain][name]
+            assert remembered_id is None or remembered_id == resource_id, (
+                "owned name changed identity",
+                domain,
+                name,
+                remembered_id,
+                resource_id,
+            )
+            self.attempted[domain][name] = resource_id
+            assert all(row["id"] != resource_id for row in self.before[domain])
+            flags = () if domain == "key" else ("--force",)
+            _installed_mvm(
+                self.runner_vm,
+                domain,
+                "rm",
+                resource_id,
+                *flags,
+                timeout=120 if domain == "vm" else 60,
+            )
+        remaining = _inventory(self.runner_vm, domain)
+        assert all(row.get("name") != name for row in remaining), (
+            domain,
+            name,
+            remaining,
+        )
+        resource_id = self.attempted[domain][name]
+        if resource_id is not None:
+            assert all(row["id"] != resource_id for row in remaining), (
+                domain,
+                resource_id,
+            )
+        if domain == "volume" and name in self.volume_sources:
+            source_path, _ = self.volume_sources[name]
+            assert not os.path.lexists(source_path), (
+                "removed volume retained source",
+                source_path,
+            )
+
+    def cleanup(self) -> None:
+        failures = []
+        for domain in ("vm", "volume", "key", "network"):
+            for name in self.attempted[domain]:
+                try:
+                    self.remove(domain, name)
+                except Exception as error:
+                    failures.append(f"{domain}/{name}: {error}")
+        for domain, baseline in self.before.items():
+            try:
+                assert _baseline_inventory(self.runner_vm, domain) == baseline, domain
+            except Exception as error:
+                failures.append(f"baseline {domain}: {error}")
+        try:
+            assert (
+                _json_success_data(
+                    _installed_mvm(self.runner_vm, "config", "ls", "--json").stdout,
+                    dict,
+                )
+                == self.config
+            ), "configuration changed"
+        except Exception as error:
+            failures.append(f"baseline config: {error}")
+        assert not failures, "\n".join(failures)
+
+
+_active_case: ContextVar[_OwnedVolumeCase] = ContextVar("volume_case")
+
+
+@contextmanager
+def _owned_scope(runner_vm: str) -> Generator[_OwnedVolumeCase, None, None]:
+    case = _OwnedVolumeCase(runner_vm)
+    token = _active_case.set(case)
+    try:
+        yield case
+    finally:
+        try:
+            case.cleanup()
+        finally:
+            _active_case.reset(token)
+
+
+@pytest.fixture(autouse=True)
+def checked_volume_case(runner_vm: str) -> Generator[None, None, None]:
+    with _owned_scope(runner_vm):
+        yield
+
+
+def _run_mvm(runner_vm: str, *args: str, **kwargs: Any) -> Any:
+    domain = "volume" if args[0] == "vol" else args[0]
+    if len(args) >= 3 and args[1] == "create":
+        _active_case.get().remember(domain, args[2])
+    result = _installed_mvm(runner_vm, *args, **kwargs)
+    if len(args) >= 3 and args[1] == "create":
+        case = _active_case.get()
+        rows = [
+            row for row in _inventory(runner_vm, domain) if row.get("name") == args[2]
+        ]
+        if rows:
+            resource_id = rows[0]["id"]
+            remembered_id = case.attempted[domain][args[2]]
+            assert remembered_id is None or remembered_id == resource_id
+            case.attempted[domain][args[2]] = resource_id
+            if domain == "volume" and args[2] not in case.volume_sources:
+                path = Path(rows[0]["path"])
+                source_stat = path.lstat()
+                assert path.name == f"{resource_id}.raw" and stat.S_ISREG(
+                    source_stat.st_mode
+                )
+                case.volume_sources[args[2]] = (
+                    path,
+                    (source_stat.st_dev, source_stat.st_ino),
+                )
+    return result
+
+
+def _remove_owned(runner_vm: str, domain: str, *names: str) -> None:
+    case = _active_case.get()
+    assert case.runner_vm == runner_vm
+    for name in names:
+        case.remove("volume" if domain == "vol" else domain, name)
+
+
+def _require_vm_deps(runner_vm: str) -> None:
+    """Admission is read-only: missing assets fail instead of repairing the runner."""
+    mirror = os.environ.get("MVM_ASSET_MIRROR")
+    assert mirror, "MVM_ASSET_MIRROR must identify the preseeded mirror"
+    mirror_path = Path(mirror).expanduser()
+    assert mirror_path.is_dir() and any(mirror_path.iterdir()), mirror_path
+    images = _inventory(runner_vm, "image")
+    alpine = [
+        row
+        for row in images
+        if row["type"] == "alpine" and row["version"] == "3.23" and row["is_present"]
+    ]
+    assert len(alpine) == 1, alpine
+    assert 0 < alpine[0]["minimum_rootfs_size_mib"] <= 512, alpine
+    assert any(
+        row["is_present"] and row["is_default"]
+        for row in _inventory(runner_vm, "kernel")
+    )
+    binaries = _inventory(runner_vm, "bin")
+    for binary_type in ("firecracker", "jailer"):
+        assert any(
+            row["type"] == binary_type
+            and row["version"] == "1.16.2"
+            and row["is_present"]
+            and row["is_default"]
+            for row in binaries
+        ), (binary_type, binaries)
+
+
+def _create_volume_vm(runner_vm: str, name: str, *options: str) -> Any:
+    """Bound nested guests and explicitly own every SSH key selected at creation."""
+    _require_vm_deps(runner_vm)
+    guests = _inventory(runner_vm, "vm")
+    assert len(guests) < 2, ("nested VM budget exhausted", guests)
+    args = list(options)
+    networkless = (
+        "--no-network" in args
+        and "--cloud-init-mode" in args
+        and args[args.index("--cloud-init-mode") + 1] == "off"
+    )
+    if "--ssh-key" not in args and not networkless:
+        key_name = f"sys-vol-key-{uuid.uuid4().hex[:8]}"
+        _run_mvm(runner_vm, "key", "create", key_name, "--algorithm", "ed25519")
+        args.extend(("--ssh-key", key_name))
+    return _run_mvm(
+        runner_vm,
+        "vm",
+        "create",
+        name,
+        "--image",
+        "alpine:3.23",
+        "-s",
+        "512M",
+        "--mem",
+        "256M",
+        "--vcpu",
+        "1",
+        *args,
+        timeout=180,
+    )
+
+
+def _assert_source_identity(path: Path, identity: tuple[int, int]) -> None:
+    source_stat = path.lstat()
+    assert stat.S_ISREG(source_stat.st_mode)
+    assert (source_stat.st_dev, source_stat.st_ino) == identity, (
+        path,
+        source_stat,
+        identity,
+    )
 
 
 # ============================================================================
@@ -48,11 +301,9 @@ def shared_volume(runner_vm: str) -> Generator[str, None, None]:
     module-scoped volume serves all read-only assertions in the class.
     """
     name = f"sys-modvol-{uuid.uuid4().hex[:6]}"
-    _run_mvm(runner_vm, "volume", "create", name, "512M")
-    try:
+    with _owned_scope(runner_vm):
+        _run_mvm(runner_vm, "volume", "create", name, "16M")
         yield name
-    finally:
-        _run_mvm(runner_vm, "volume", "rm", name, "--force", check=False)
 
 
 # ============================================================================
@@ -88,21 +339,15 @@ class TestVolumeLifecycle:
             or result.stdout.strip() == ""
         )
 
-    def test_volume_list_json(
-        self, runner_vm: str, shared_volume: str
-    ) -> None:
+    def test_volume_list_json(self, runner_vm: str, shared_volume: str) -> None:
         """List volumes in the versioned JSON envelope, including the shared volume."""
         result = _run_mvm(runner_vm, "volume", "ls", "--json")
         data = _json_success_data(result.stdout, list)
         assert any(v["name"] == shared_volume for v in data)
 
-    def test_volume_inspect_json(
-        self, runner_vm: str, shared_volume: str
-    ) -> None:
+    def test_volume_inspect_json(self, runner_vm: str, shared_volume: str) -> None:
         """Inspect the shared volume through the versioned JSON envelope."""
-        result = _run_mvm(
-            runner_vm, "volume", "inspect", shared_volume, "--json"
-        )
+        result = _run_mvm(runner_vm, "volume", "inspect", shared_volume, "--json")
         data = _json_success_data(result.stdout, dict)
         assert "volume" in data
         assert "name" in data["volume"]
@@ -125,16 +370,14 @@ class TestVolumeLifecycle:
                 "volume",
                 "create",
                 vol_name,
-                "512M",
+                "16M",
             )
             assert result.returncode == 0
 
-            inspect = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
+            inspect = _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json")
             data = _json_success_data(inspect.stdout, dict)
             assert data["volume"]["name"] == vol_name
-            assert data["volume"]["size_bytes"] == 512 * 1024 * 1024
+            assert data["volume"]["size_bytes"] == 16 * 1024 * 1024
             assert data["volume"]["status"] == "available"
             assert data["volume"]["format"] == "raw"
             assert data["volume"]["is_read_only"] is False
@@ -147,9 +390,9 @@ class TestVolumeLifecycle:
             )
             disk = json.loads(disk_info.stdout)
             assert disk["format"] == "raw"
-            assert disk["virtual-size"] == 512 * 1024 * 1024
+            assert disk["virtual-size"] == 16 * 1024 * 1024
         finally:
-            _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
+            _remove_owned(runner_vm, "volume", vol_name)
 
     def test_volume_create_raw_with_read_only_shareable_writeback(
         self, runner_vm: str, unique_key_name: str
@@ -164,20 +407,18 @@ class TestVolumeLifecycle:
                 "volume",
                 "create",
                 vol_name,
-                "512M",
+                "16M",
                 "--read-only",
                 "--shareable",
                 "--writeback",
             )
             assert result.returncode == 0
 
-            inspect = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
+            inspect = _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json")
             data = _json_success_data(inspect.stdout, dict)
             assert data["volume"]["name"] == vol_name
             assert data["volume"]["format"] == "raw"
-            assert data["volume"]["size_bytes"] == 512 * 1024 * 1024
+            assert data["volume"]["size_bytes"] == 16 * 1024 * 1024
             assert data["volume"]["status"] == "available"
             assert data["volume"]["is_read_only"] is True
             assert data["volume"]["cache_type"] == "Writeback"
@@ -189,9 +430,7 @@ class TestVolumeLifecycle:
             assert len(matching) == 1
             assert matching[0]["is_shareable"] is True
         finally:
-            _run_mvm(
-                runner_vm, "volume", "rm", vol_name, "--force", check=False
-            )
+            _remove_owned(runner_vm, "volume", vol_name)
 
     # ── Read-only flag tests ─────────────────────────────────────────────
 
@@ -208,7 +447,7 @@ class TestVolumeLifecycle:
                 "volume",
                 "create",
                 vol_name,
-                "512M",
+                "16M",
                 "--read-only",
             )
             assert result.returncode == 0
@@ -219,9 +458,7 @@ class TestVolumeLifecycle:
             assert len(matching) == 1
             assert matching[0]["is_read_only"] is True
         finally:
-            _run_mvm(
-                runner_vm, "volume", "rm", vol_name, "--force", check=False
-            )
+            _remove_owned(runner_vm, "volume", vol_name)
 
     def test_volume_create_shareable(
         self, runner_vm: str, unique_key_name: str
@@ -236,7 +473,7 @@ class TestVolumeLifecycle:
                 "volume",
                 "create",
                 vol_name,
-                "512M",
+                "16M",
                 "--shareable",
             )
             assert result.returncode == 0
@@ -247,9 +484,7 @@ class TestVolumeLifecycle:
             assert len(matching) == 1
             assert matching[0]["is_shareable"] is True
         finally:
-            _run_mvm(
-                runner_vm, "volume", "rm", vol_name, "--force", check=False
-            )
+            _remove_owned(runner_vm, "volume", vol_name)
 
     def test_volume_create_readonly_alias(
         self, runner_vm: str, unique_key_name: str
@@ -264,7 +499,7 @@ class TestVolumeLifecycle:
                 "vol",
                 "create",
                 vol_name,
-                "512M",
+                "16M",
                 "--readonly",
             )
             assert result.returncode == 0
@@ -274,7 +509,7 @@ class TestVolumeLifecycle:
             assert data["volume"]["name"] == vol_name
             assert data["volume"]["is_read_only"] is True
         finally:
-            _run_mvm(runner_vm, "vol", "rm", vol_name, "--force", check=False)
+            _remove_owned(runner_vm, "vol", vol_name)
 
     def test_volume_list_json_read_only(
         self, runner_vm: str, unique_key_name: str
@@ -285,13 +520,13 @@ class TestVolumeLifecycle:
         vol_rw = f"sys-vol-rw-{unique_key_name}"
         vol_ro = f"sys-vol-rolist-{unique_key_name}"
         try:
-            _run_mvm(runner_vm, "volume", "create", vol_rw, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_rw, "16M")
             _run_mvm(
                 runner_vm,
                 "volume",
                 "create",
                 vol_ro,
-                "256M",
+                "8M",
                 "--read-only",
             )
 
@@ -306,8 +541,8 @@ class TestVolumeLifecycle:
             assert len(ro_match) == 1
             assert ro_match[0]["is_read_only"] is True
         finally:
-            _run_mvm(runner_vm, "volume", "rm", vol_rw, "--force", check=False)
-            _run_mvm(runner_vm, "volume", "rm", vol_ro, "--force", check=False)
+            _remove_owned(runner_vm, "volume", vol_rw)
+            _remove_owned(runner_vm, "volume", vol_ro)
 
     def test_volume_duplicate_name_rejected(
         self, runner_vm: str, unique_key_name: str
@@ -317,13 +552,13 @@ class TestVolumeLifecycle:
         """Creating a volume with duplicate name should be rejected."""
         vol_name = f"sys-vol-dup-{unique_key_name}"
         try:
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
             result = _run_mvm(
                 runner_vm,
                 "volume",
                 "create",
                 vol_name,
-                "256M",
+                "8M",
                 check=False,
             )
             assert result.returncode != 0
@@ -335,7 +570,7 @@ class TestVolumeLifecycle:
             matching = [v for v in volumes if v["name"] == vol_name]
             assert len(matching) == 1
         finally:
-            _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
+            _remove_owned(runner_vm, "volume", vol_name)
 
     # ── 3. Error paths (no side effects) ─────────────────────────────────
 
@@ -353,10 +588,9 @@ class TestVolumeLifecycle:
         )
         assert result.returncode != 0
 
-        ls_result = _run_mvm(runner_vm, "volume", "ls", "--json", check=False)
-        if ls_result.returncode == 0:
-            volumes = _json_success_data(ls_result.stdout, list)
-            assert not any(v["name"] == "invalid-size-vol" for v in volumes)
+        ls_result = _run_mvm(runner_vm, "volume", "ls", "--json")
+        volumes = _json_success_data(ls_result.stdout, list)
+        assert not any(v["name"] == "invalid-size-vol" for v in volumes)
 
     @pytest.mark.parametrize("removed_format", ["raw", "qcow2", "vmdk"])
     def test_volume_create_removed_format_flag_rejected_without_side_effects(
@@ -397,7 +631,8 @@ class TestVolumeLifecycle:
             assert "unknown flag: --format" in (result.stdout + result.stderr).lower()
 
             volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             assert not any(v["name"] == vol_name for v in volumes)
 
@@ -407,18 +642,20 @@ class TestVolumeLifecycle:
             assert backing_files_after == backing_files_before
         finally:
             volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             if any(volume["name"] == vol_name for volume in volumes):
-                removed = _run_mvm(runner_vm, "volume", "rm", vol_name, "--force", check=False)
-                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+                _remove_owned(runner_vm, "volume", vol_name)
             if sentinel_created:
-                removed = _run_mvm(runner_vm, "volume", "rm", sentinel, "--force", check=False)
-                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+                _remove_owned(runner_vm, "volume", sentinel)
             remaining = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
-            assert all(volume["name"] not in (vol_name, sentinel) for volume in remaining)
+            assert all(
+                volume["name"] not in (vol_name, sentinel) for volume in remaining
+            )
 
     def test_volume_inspect_nonexistent_fails(self, runner_vm: str) -> None:
         # Rationale: No resources needed — error path for nonexistent volume.
@@ -440,7 +677,7 @@ class TestVolumeLifecycle:
             "volume",
             "resize",
             "nonexistent-volume-def",
-            "1G",
+            "32M",
             check=False,
         )
         assert result.returncode != 0
@@ -479,7 +716,13 @@ class TestVolumeLifecycle:
             before = set(_guest_run(runner_vm, list_backing_files).stdout.splitlines())
 
             result = _run_mvm(
-                runner_vm, "volume", "create", vol_name, "0M", "--json", check=False,
+                runner_vm,
+                "volume",
+                "create",
+                vol_name,
+                "0M",
+                "--json",
+                check=False,
             )
             assert result.returncode != 0
             envelope = json.loads(result.stdout)
@@ -489,23 +732,23 @@ class TestVolumeLifecycle:
             assert envelope["error"]["code"] == "validation.failed"
 
             volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             assert not any(volume["name"] == vol_name for volume in volumes)
             after = set(_guest_run(runner_vm, list_backing_files).stdout.splitlines())
             assert after == before, "rejected request published a raw backing file"
         finally:
             volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             for volume in volumes:
                 if volume["name"] in (vol_name, sentinel):
-                    removed = _run_mvm(
-                        runner_vm, "volume", "rm", volume["name"], "--force", check=False,
-                    )
-                    assert removed.returncode == 0, (removed.stdout, removed.stderr)
+                    _remove_owned(runner_vm, "volume", volume["name"])
             remaining = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             assert all(
                 volume["name"] not in (vol_name, sentinel) for volume in remaining
@@ -520,9 +763,9 @@ class TestVolumeLifecycle:
         """Create a volume and resize it, verify new size via inspect --json."""
         vol_name = f"sys-vol-resize-{unique_key_name}"
         try:
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
 
-            result = _run_mvm(runner_vm, "volume", "resize", vol_name, "1G")
+            result = _run_mvm(runner_vm, "volume", "resize", vol_name, "32M")
             assert result.returncode == 0
 
             inspect = _run_mvm(
@@ -533,9 +776,9 @@ class TestVolumeLifecycle:
                 "--json",
             )
             data = _json_success_data(inspect.stdout, dict)
-            assert data["volume"]["size_bytes"] == 1024 * 1024 * 1024
+            assert data["volume"]["size_bytes"] == 32 * 1024 * 1024
         finally:
-            _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
+            _remove_owned(runner_vm, "volume", vol_name)
 
     def test_volume_resize_rejects_shrink_without_changing_backing(
         self, runner_vm: str, unique_key_name: str
@@ -554,7 +797,12 @@ class TestVolumeLifecycle:
             assert before["size_bytes"] == 16 * 1024 * 1024
 
             result = _run_mvm(
-                runner_vm, "volume", "resize", vol_name, "8M", check=False,
+                runner_vm,
+                "volume",
+                "resize",
+                vol_name,
+                "8M",
+                check=False,
             )
             assert result.returncode != 0
             _run_mvm(runner_vm, "volume", "resize", vol_name, "16M")
@@ -567,10 +815,7 @@ class TestVolumeLifecycle:
             assert after["size_bytes"] == before["size_bytes"]
         finally:
             if created:
-                removed = _run_mvm(
-                    runner_vm, "volume", "rm", vol_name, "--force", check=False,
-                )
-                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+                _remove_owned(runner_vm, "volume", vol_name)
 
     # ── 5. Remove / destructive operations ──────────────────────────────
 
@@ -580,7 +825,7 @@ class TestVolumeLifecycle:
         # DB records.
         """Create and remove a volume, verify it's gone via ls --json."""
         vol_name = f"sys-vol-rm-{unique_key_name}"
-        _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+        _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
 
         result = _run_mvm(runner_vm, "volume", "rm", vol_name)
         assert result.returncode == 0
@@ -589,19 +834,17 @@ class TestVolumeLifecycle:
         volumes = _json_success_data(result.stdout, list)
         assert not any(v["name"] == vol_name for v in volumes)
 
-    def test_volume_rm_with_force(
-        self, runner_vm: str, unique_key_name: str
-    ) -> None:
+    def test_volume_rm_with_force(self, runner_vm: str, unique_key_name: str) -> None:
         # Rationale: Needs a real volume. Tests --force removal and verifies
         # gone via ls --json — force path differs from normal rm.
         """Remove a volume with --force and verify it's gone via ls --json."""
         vol_name = f"sys-vol-frc-{unique_key_name}"
         try:
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
             result = _run_mvm(runner_vm, "volume", "rm", vol_name, "--force")
             assert result.returncode == 0
         finally:
-            _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
+            _remove_owned(runner_vm, "volume", vol_name)
 
         result = _run_mvm(runner_vm, "volume", "ls", "--json")
         volumes = _json_success_data(result.stdout, list)
@@ -621,27 +864,22 @@ class TestVolumeLifecycle:
         combined = (result.stdout + result.stderr).lower()
         assert "not found" in combined
 
-        result_vol = _run_mvm(
-            runner_vm, "volume", "ls", "--json", check=False
+        result_vol = _run_mvm(runner_vm, "volume", "ls", "--json")
+        vols_after = _json_success_data(result_vol.stdout, list)
+        assert not any(
+            v["name"] == "nonexistent-volume-name-that-will-not-exist"
+            for v in vols_after
         )
-        if result_vol.returncode == 0:
-            vols_after = _json_success_data(result_vol.stdout, list)
-            assert not any(
-                v["name"] == "nonexistent-volume-name-that-will-not-exist"
-                for v in vols_after
-            )
 
-    def test_volume_remove_multiple(
-        self, runner_vm: str, unique_key_name: str
-    ) -> None:
+    def test_volume_remove_multiple(self, runner_vm: str, unique_key_name: str) -> None:
         # Rationale: Needs two real volumes. Tests multi-rm and verifies
         # both gone — catches multi-rm that only removes the first.
         """Remove two volumes at once and verify both gone via ls --json."""
         vol1 = f"sys-vol-mrm1-{unique_key_name}"
         vol2 = f"sys-vol-mrm2-{unique_key_name}"
         try:
-            _run_mvm(runner_vm, "volume", "create", vol1, "512M")
-            _run_mvm(runner_vm, "volume", "create", vol2, "256M")
+            _run_mvm(runner_vm, "volume", "create", vol1, "16M")
+            _run_mvm(runner_vm, "volume", "create", vol2, "8M")
 
             result = _run_mvm(runner_vm, "volume", "rm", vol1, vol2)
             assert result.returncode == 0
@@ -651,7 +889,7 @@ class TestVolumeLifecycle:
             assert not any(v["name"] == vol1 for v in volumes)
             assert not any(v["name"] == vol2 for v in volumes)
         finally:
-            _run_mvm(runner_vm, "volume", "rm", vol1, vol2, check=False)
+            _remove_owned(runner_vm, "volume", vol1, vol2)
 
     def test_volume_remove_partial_failure(
         self, runner_vm: str, unique_key_name: str
@@ -662,7 +900,7 @@ class TestVolumeLifecycle:
         vol_name = f"sys-vol-partial-{unique_key_name}"
         nonexistent = "nonexistent-volume-partial-test"
         try:
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
 
             result = _run_mvm(
                 runner_vm,
@@ -677,15 +915,14 @@ class TestVolumeLifecycle:
             # the nonexistent volume.
             combined = (result.stdout + result.stderr).lower()
             assert nonexistent in combined, (
-                f"Expected error mentioning '{nonexistent}', "
-                f"got: {combined}"
+                f"Expected error mentioning '{nonexistent}', got: {combined}"
             )
 
             result = _run_mvm(runner_vm, "volume", "ls", "--json")
             volumes = _json_success_data(result.stdout, list)
             assert not any(v["name"] == vol_name for v in volumes)
         finally:
-            _run_mvm(runner_vm, "volume", "rm", vol_name, check=False)
+            _remove_owned(runner_vm, "volume", vol_name)
 
     # ── 6. Advanced: invariants across attach/detach ─────────────────────
 
@@ -713,18 +950,25 @@ class TestVolumeLifecycle:
             assert available["disk_info"]["protected"] is False
             backing_path = volume["path"]
             backing_size = _guest_run(
-                runner_vm, f"sudo -n stat -c %s {shlex.quote(backing_path)}",
+                runner_vm,
+                f"sudo -n stat -c %s {shlex.quote(backing_path)}",
             )
             assert int(backing_size.stdout.strip()) == 16 * 1024 * 1024
 
             # Network placement is incidental to this volume lifecycle.
-            ensure_vm_deps(runner_vm)
-            created = _json_success_data(_run_mvm(
-                runner_vm, "vm", "create", vm_name, "--image", "alpine:3.23",
-                "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
-                "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
-                "--json", timeout=180,
-            ).stdout, list)
+            created = _json_success_data(
+                _create_volume_vm(
+                    runner_vm,
+                    vm_name,
+                    "--no-network",
+                    "--cloud-init-mode",
+                    "off",
+                    "--skip-deblob",
+                    "--no-pci",
+                    "--json",
+                ).stdout,
+                list,
+            )
             assert len(created) == 1 and created[0]["status"] == "running"
             vm_id = created[0]["id"]
             _run_mvm(runner_vm, "vm", "stop", vm_name)
@@ -740,7 +984,13 @@ class TestVolumeLifecycle:
             assert attached["attachment"]["vm_id"] == vm_id
             _run_mvm(runner_vm, "vm", "start", vm_name)
             partitions = _run_mvm(
-                runner_vm, "exec", vm_name, "--", "cat", "/proc/partitions", timeout=30,
+                runner_vm,
+                "exec",
+                vm_name,
+                "--",
+                "cat",
+                "/proc/partitions",
+                timeout=30,
             )
             assert "vdb" in partitions.stdout
             _run_mvm(runner_vm, "vm", "stop", vm_name)
@@ -757,22 +1007,33 @@ class TestVolumeLifecycle:
             assert detached["disk_info"]["protected"] is True
             assert detached["disk_info"]["logical_bytes"] == 16 * 1024 * 1024
         finally:
-            vms = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+            vms = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
             if any(vm["name"] == vm_name for vm in vms):
-                removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-                assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            vms = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+                _remove_owned(runner_vm, "vm", vm_name)
+            vms = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
             assert all(vm["name"] != vm_name for vm in vms)
-            volumes = _json_success_data(_run_mvm(runner_vm, "volume", "ls", "--json").stdout, list)
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list
+            )
             if any(item["name"] == vol_name for item in volumes):
-                removed = _run_mvm(runner_vm, "volume", "rm", vol_name, "--force", check=False)
-                assert removed.returncode == 0, (removed.stdout, removed.stderr)
-            volumes = _json_success_data(_run_mvm(runner_vm, "volume", "ls", "--json").stdout, list)
+                _remove_owned(runner_vm, "volume", vol_name)
+            volumes = _json_success_data(
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list
+            )
             assert all(item["name"] != vol_name for item in volumes)
             if backing_path is not None:
-                assert _guest_run(
-                    runner_vm, f"test ! -e {shlex.quote(backing_path)}", check=False,
-                ).returncode == 0, "removed protected volume retained its managed raw source"
+                assert (
+                    _guest_run(
+                        runner_vm,
+                        f"test ! -e {shlex.quote(backing_path)}",
+                        check=False,
+                    ).returncode
+                    == 0
+                ), "removed protected volume retained its managed raw source"
 
 
 class TestRawVolumeAuthoritativeStorage:
@@ -804,29 +1065,38 @@ class TestRawVolumeAuthoritativeStorage:
             assert grown["size_bytes"] == 32 * 1024 * 1024
 
             _run_mvm(runner_vm, "volume", "rm", name, "--force")
-            assert _guest_run(
-                runner_vm, f"test ! -e {shlex.quote(created['path'])}", check=False,
-            ).returncode == 0
+            assert (
+                _guest_run(
+                    runner_vm,
+                    f"test ! -e {shlex.quote(created['path'])}",
+                    check=False,
+                ).returncode
+                == 0
+            )
         finally:
             listed = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             if any(volume["name"] == name for volume in listed):
-                removed = _run_mvm(runner_vm, "volume", "rm", name, "--force", check=False)
-                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+                _remove_owned(runner_vm, "volume", name)
             listed = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             assert all(volume["name"] != name for volume in listed)
 
     @pytest.mark.requires_kvm
     def test_changed_protected_source_is_retained(
-        self, runner_vm: str, unique_vm_name: str,
+        self,
+        runner_vm: str,
+        unique_vm_name: str,
     ) -> None:
         """Removal refuses a same-inode, same-size source changed after import."""
         name = f"sys-raw-changed-{uuid.uuid4().hex[:8]}"
         source_path: Path | None = None
         retained_path: Path | None = None
+        source_identity: tuple[int, int] | None = None
         try:
             created = _json_success_data(
                 _run_mvm(runner_vm, "volume", "create", name, "16M", "--json").stdout,
@@ -834,14 +1104,20 @@ class TestRawVolumeAuthoritativeStorage:
             )
             source_path = Path(created["path"])
             assert source_path.name == f"{created['id']}.raw"
+            source_identity = _active_case.get().volume_sources[name][1]
+            _assert_source_identity(source_path, source_identity)
             retained_path = source_path.with_suffix(".retained")
             assert not retained_path.exists()
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
-                runner_vm, "vm", "create", unique_vm_name, "--image", "alpine:3.23",
-                "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
-                "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
-                "--volume", name, timeout=180,
+            _create_volume_vm(
+                runner_vm,
+                unique_vm_name,
+                "--no-network",
+                "--cloud-init-mode",
+                "off",
+                "--skip-deblob",
+                "--no-pci",
+                "--volume",
+                name,
             )
             _run_mvm(runner_vm, "vm", "stop", unique_vm_name)
             _run_mvm(runner_vm, "volume", "detach", unique_vm_name, name)
@@ -853,7 +1129,10 @@ class TestRawVolumeAuthoritativeStorage:
 
             before = source_path.stat().st_ctime_ns
             time.sleep(0.02)
-            with source_path.open("r+b") as raw:
+            source_fd = os.open(source_path, os.O_RDWR | os.O_NOFOLLOW)
+            with os.fdopen(source_fd, "r+b") as raw:
+                opened = os.fstat(raw.fileno())
+                assert (opened.st_dev, opened.st_ino) == source_identity
                 raw.write(b"X")
                 raw.flush()
                 os.fsync(raw.fileno())
@@ -869,24 +1148,36 @@ class TestRawVolumeAuthoritativeStorage:
             )
             assert still_protected["disk_info"]["protected"] is True
 
+            _assert_source_identity(source_path, source_identity)
+            assert not os.path.lexists(retained_path)
             source_path.rename(retained_path)
             _run_mvm(runner_vm, "volume", "rm", name, "--force")
             with retained_path.open("rb") as raw:
                 assert raw.read(1) == b"X"
         finally:
-            _run_mvm(runner_vm, "vm", "rm", unique_vm_name, "--force", check=False)
+            _remove_owned(runner_vm, "vm", unique_vm_name)
             if (
-                source_path is not None and source_path.exists()
-                and retained_path is not None and not retained_path.exists()
+                source_path is not None
+                and source_path.exists()
+                and retained_path is not None
+                and not retained_path.exists()
             ):
+                assert source_identity is not None
+                _assert_source_identity(source_path, source_identity)
                 source_path.rename(retained_path)
-            _run_mvm(runner_vm, "volume", "rm", name, "--force", check=False)
-            if retained_path is not None:
-                retained_path.unlink(missing_ok=True)
-            vms = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+            _remove_owned(runner_vm, "volume", name)
+            if retained_path is not None and os.path.lexists(retained_path):
+                assert source_identity is not None
+                _assert_source_identity(retained_path, source_identity)
+                retained_path.unlink()
+                assert not os.path.lexists(retained_path)
+            vms = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
             assert all(vm["name"] != unique_vm_name for vm in vms)
             volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             assert all(volume["name"] != name for volume in volumes)
 
@@ -936,16 +1227,11 @@ class TestVolumeAttachDetach:
                 "--subnet",
                 _unique_subnet(net_name),
             )
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
 
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
+            _create_volume_vm(
                 runner_vm,
-                "vm",
-                "create",
                 vm_name,
-                "--image",
-                "alpine:3.23",
                 "--network",
                 net_name,
                 "--volume",
@@ -958,17 +1244,13 @@ class TestVolumeAttachDetach:
 
             _run_mvm(runner_vm, "volume", "detach", vm_name, vol_name)
 
-            vol_result = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
+            vol_result = _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json")
             vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data.get("volume", {}).get("status") == "available"
 
             _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
 
-            vol_result = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
+            vol_result = _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json")
             vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data.get("volume", {}).get("status") == "attached"
 
@@ -980,17 +1262,10 @@ class TestVolumeAttachDetach:
             assert vm_entry is not None
             assert vm_entry.get("status") == "running"
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "volume",
-                "rm",
-                vol_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _remove_owned(runner_vm, "vm", vm_name)
+            _remove_owned(runner_vm, "volume", vol_name)
+            _remove_owned(runner_vm, "key", key_name)
+            _remove_owned(runner_vm, "network", net_name)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -1026,16 +1301,11 @@ class TestVolumeAttachDetach:
                 "--subnet",
                 _unique_subnet(net_name),
             )
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
 
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
+            _create_volume_vm(
                 runner_vm,
-                "vm",
-                "create",
                 vm_name,
-                "--image",
-                "alpine:3.23",
                 "--network",
                 net_name,
                 "--ssh-key",
@@ -1046,9 +1316,7 @@ class TestVolumeAttachDetach:
 
             _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
 
-            vol_result = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
+            vol_result = _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json")
             vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data.get("volume", {}).get("status") == "attached"
 
@@ -1060,17 +1328,10 @@ class TestVolumeAttachDetach:
             assert vm_entry is not None
             assert vm_entry.get("status") == "running"
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "volume",
-                "rm",
-                vol_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _remove_owned(runner_vm, "vm", vm_name)
+            _remove_owned(runner_vm, "volume", vol_name)
+            _remove_owned(runner_vm, "key", key_name)
+            _remove_owned(runner_vm, "network", net_name)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -1106,16 +1367,11 @@ class TestVolumeAttachDetach:
                 "--subnet",
                 _unique_subnet(net_name),
             )
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
 
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
+            _create_volume_vm(
                 runner_vm,
-                "vm",
-                "create",
                 vm_name,
-                "--image",
-                "alpine:3.23",
                 "--network",
                 net_name,
                 "--volume",
@@ -1128,33 +1384,22 @@ class TestVolumeAttachDetach:
 
             _run_mvm(runner_vm, "volume", "detach", vm_name, vol_name)
 
-            vol_result = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
+            vol_result = _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json")
             vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data.get("volume", {}).get("status") == "available"
 
             _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
 
-            vol_result = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
+            vol_result = _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json")
             vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data.get("volume", {}).get("status") == "attached"
 
             _run_mvm(runner_vm, "vm", "start", vm_name)
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "volume",
-                "rm",
-                vol_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _remove_owned(runner_vm, "vm", vm_name)
+            _remove_owned(runner_vm, "volume", vol_name)
+            _remove_owned(runner_vm, "key", key_name)
+            _remove_owned(runner_vm, "network", net_name)
 
 
 class TestVolumeCrossVM:
@@ -1184,7 +1429,7 @@ class TestVolumeCrossVM:
         net_name = unique_network_name
 
         try:
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
             _run_mvm(
                 runner_vm,
                 "network",
@@ -1194,24 +1439,15 @@ class TestVolumeCrossVM:
                 _unique_subnet(net_name),
             )
 
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
+            _create_volume_vm(
                 runner_vm,
-                "vm",
-                "create",
                 vm_a,
-                "--image",
-                "alpine:3.23",
                 "--network",
                 net_name,
             )
-            _run_mvm(
+            _create_volume_vm(
                 runner_vm,
-                "vm",
-                "create",
                 vm_b,
-                "--image",
-                "alpine:3.23",
                 "--network",
                 net_name,
             )
@@ -1221,18 +1457,14 @@ class TestVolumeCrossVM:
 
             _run_mvm(runner_vm, "volume", "attach", vm_a, vol_name)
 
-            vol_result = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
+            vol_result = _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json")
             vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data["volume"]["status"] == "attached"
             assert vol_data.get("attachment", {}).get("vm_id") is not None
 
             vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json")
             vm_entries = _json_success_data(vm_ls.stdout, list)
-            vm_a_info = next(
-                (v for v in vm_entries if v["name"] == vm_a), None
-            )
+            vm_a_info = next((v for v in vm_entries if v["name"] == vm_a), None)
             assert vm_a_info is not None
             assert vol_data["attachment"]["vm_id"] == vm_a_info["id"]
 
@@ -1246,26 +1478,15 @@ class TestVolumeCrossVM:
             )
             assert result.returncode != 0
 
-            vol_result = _run_mvm(
-                runner_vm, "volume", "inspect", vol_name, "--json"
-            )
+            vol_result = _run_mvm(runner_vm, "volume", "inspect", vol_name, "--json")
             vol_data = _json_success_data(vol_result.stdout, dict)
             assert vol_data["volume"]["status"] == "attached"
-            assert (
-                vol_data.get("attachment", {}).get("vm_id") == vm_a_info["id"]
-            )
+            assert vol_data.get("attachment", {}).get("vm_id") == vm_a_info["id"]
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_a, "--force", check=False)
-            _run_mvm(runner_vm, "vm", "rm", vm_b, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "volume",
-                "rm",
-                vol_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _remove_owned(runner_vm, "vm", vm_a)
+            _remove_owned(runner_vm, "vm", vm_b)
+            _remove_owned(runner_vm, "volume", vol_name)
+            _remove_owned(runner_vm, "network", net_name)
 
 
 class TestVolumeRunningVMDependency:
@@ -1296,7 +1517,6 @@ class TestVolumeRunningVMDependency:
         key_name = unique_key_name
         vol_name = f"sys-dep-vol-{unique_key_name}"
         net_name = unique_network_name
-        vm_created = False
 
         try:
             _run_mvm(
@@ -1307,7 +1527,7 @@ class TestVolumeRunningVMDependency:
                 "--algorithm",
                 "ed25519",
             )
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
             _run_mvm(
                 runner_vm,
                 "network",
@@ -1316,14 +1536,9 @@ class TestVolumeRunningVMDependency:
                 "--subnet",
                 _unique_subnet(net_name),
             )
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
+            _create_volume_vm(
                 runner_vm,
-                "vm",
-                "create",
                 vm_name,
-                "--image",
-                "alpine:3.23",
                 "--network",
                 net_name,
                 "--volume",
@@ -1331,11 +1546,10 @@ class TestVolumeRunningVMDependency:
                 "--ssh-key",
                 key_name,
             )
-            vm_created = True
-            _run_mvm(runner_vm, "vm", "start", vm_name)
 
             vms = _json_success_data(
-                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+                list,
             )
             assert any(vm["name"] == vm_name for vm in vms)
 
@@ -1351,23 +1565,15 @@ class TestVolumeRunningVMDependency:
             assert "in use" in error_text or "attached" in error_text
 
             volumes_after = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             assert any(volume["name"] == vol_name for volume in volumes_after)
         finally:
-            vm_removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "volume",
-                "rm",
-                vol_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
-            if vm_created:
-                assert vm_removed.returncode == 0, (vm_removed.stdout, vm_removed.stderr)
+            _remove_owned(runner_vm, "vm", vm_name)
+            _remove_owned(runner_vm, "volume", vol_name)
+            _remove_owned(runner_vm, "key", key_name)
+            _remove_owned(runner_vm, "network", net_name)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -1386,7 +1592,6 @@ class TestVolumeRunningVMDependency:
         key_name = unique_key_name
         vol_name = f"sys-dep-vol-{unique_key_name}"
         net_name = unique_network_name
-        vm_created = False
 
         try:
             _run_mvm(
@@ -1397,7 +1602,7 @@ class TestVolumeRunningVMDependency:
                 "--algorithm",
                 "ed25519",
             )
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
             _run_mvm(
                 runner_vm,
                 "network",
@@ -1406,14 +1611,9 @@ class TestVolumeRunningVMDependency:
                 "--subnet",
                 _unique_subnet(net_name),
             )
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
+            _create_volume_vm(
                 runner_vm,
-                "vm",
-                "create",
                 vm_name,
-                "--image",
-                "alpine:3.23",
                 "--network",
                 net_name,
                 "--volume",
@@ -1421,11 +1621,10 @@ class TestVolumeRunningVMDependency:
                 "--ssh-key",
                 key_name,
             )
-            vm_created = True
-            _run_mvm(runner_vm, "vm", "start", vm_name)
 
             vms = _json_success_data(
-                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout,
+                list,
             )
             assert any(vm["name"] == vm_name for vm in vms)
 
@@ -1441,7 +1640,8 @@ class TestVolumeRunningVMDependency:
             assert "stop the vm" in (result.stdout + result.stderr).lower()
 
             volumes_while_running = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             assert any(volume["name"] == vol_name for volume in volumes_while_running)
             vm_while_running = _json_success_data(
@@ -1449,13 +1649,16 @@ class TestVolumeRunningVMDependency:
                 dict,
             )
             assert vm_while_running["vm"]["status"] == "running"
-            assert any(volume["name"] == vol_name for volume in vm_while_running["volumes"])
+            assert any(
+                volume["name"] == vol_name for volume in vm_while_running["volumes"]
+            )
 
             _run_mvm(runner_vm, "vm", "stop", vm_name, "--force")
             _run_mvm(runner_vm, "volume", "rm", vol_name, "--force")
 
             volumes_after = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             assert all(volume["name"] != vol_name for volume in volumes_after)
             vm_after = _json_success_data(
@@ -1465,19 +1668,10 @@ class TestVolumeRunningVMDependency:
             assert vm_after["vm"]["status"] == "stopped"
             assert all(volume["name"] != vol_name for volume in vm_after["volumes"])
         finally:
-            vm_removed = _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "volume",
-                "rm",
-                vol_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
-            if vm_created:
-                assert vm_removed.returncode == 0, (vm_removed.stdout, vm_removed.stderr)
+            _remove_owned(runner_vm, "vm", vm_name)
+            _remove_owned(runner_vm, "volume", vol_name)
+            _remove_owned(runner_vm, "key", key_name)
+            _remove_owned(runner_vm, "network", net_name)
 
     @pytest.mark.requires_kvm
     @pytest.mark.requires_network
@@ -1506,7 +1700,7 @@ class TestVolumeRunningVMDependency:
                 "--algorithm",
                 "ed25519",
             )
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_name, "16M")
             _run_mvm(
                 runner_vm,
                 "network",
@@ -1515,14 +1709,9 @@ class TestVolumeRunningVMDependency:
                 "--subnet",
                 _unique_subnet(net_name),
             )
-            ensure_vm_deps(runner_vm)
-            _run_mvm(
+            _create_volume_vm(
                 runner_vm,
-                "vm",
-                "create",
                 vm_name,
-                "--image",
-                "alpine:3.23",
                 "--network",
                 net_name,
                 "--volume",
@@ -1530,48 +1719,50 @@ class TestVolumeRunningVMDependency:
                 "--ssh-key",
                 key_name,
             )
-            _run_mvm(runner_vm, "vm", "start", vm_name)
 
             vol_list_before = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             vol_info_before = next(
                 (v for v in vol_list_before if v.get("name") == vol_name),
                 {},
             )
-            assert vol_info_before.get("size_bytes") == 512 * 1024 * 1024
+            assert vol_info_before.get("size_bytes") == 16 * 1024 * 1024
 
             result = _run_mvm(
                 runner_vm,
                 "volume",
                 "resize",
                 vol_name,
-                "1024M",
+                "32M",
                 check=False,
             )
             assert result.returncode != 0
             assert "stop the vm" in (result.stdout + result.stderr).lower()
 
             vol_list_while_running = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             vol_info_while_running = next(
                 (v for v in vol_list_while_running if v.get("name") == vol_name),
                 {},
             )
-            assert vol_info_while_running.get("size_bytes") == 512 * 1024 * 1024
+            assert vol_info_while_running.get("size_bytes") == 16 * 1024 * 1024
 
             _run_mvm(runner_vm, "vm", "stop", vm_name, "--force")
-            _run_mvm(runner_vm, "volume", "resize", vol_name, "1024M")
+            _run_mvm(runner_vm, "volume", "resize", vol_name, "32M")
 
             vol_list_after = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
             vol_info_after = next(
                 (v for v in vol_list_after if v.get("name") == vol_name),
                 {},
             )
-            assert vol_info_after.get("size_bytes") == 1024 * 1024 * 1024
+            assert vol_info_after.get("size_bytes") == 32 * 1024 * 1024
             vm_after = _json_success_data(
                 _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
                 dict,
@@ -1579,17 +1770,10 @@ class TestVolumeRunningVMDependency:
             assert vm_after["vm"]["status"] == "stopped"
             assert any(volume["name"] == vol_name for volume in vm_after["volumes"])
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(
-                runner_vm,
-                "volume",
-                "rm",
-                vol_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _remove_owned(runner_vm, "vm", vm_name)
+            _remove_owned(runner_vm, "volume", vol_name)
+            _remove_owned(runner_vm, "key", key_name)
+            _remove_owned(runner_vm, "network", net_name)
 
 
 class TestVolumeNegativeFailure:
@@ -1623,13 +1807,9 @@ class TestVolumeNegativeFailure:
                 "--subnet",
                 _unique_subnet(net_name),
             )
-            _run_mvm(
+            _create_volume_vm(
                 runner_vm,
-                "vm",
-                "create",
                 vm_name,
-                "--image",
-                "alpine:3.23",
                 "--network",
                 net_name,
             )
@@ -1660,8 +1840,8 @@ class TestVolumeNegativeFailure:
                 for volume in vm_info["volumes"]
             )
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _remove_owned(runner_vm, "vm", vm_name)
+            _remove_owned(runner_vm, "network", net_name)
 
     @pytest.mark.requires_kvm
     def test_detach_nonexistent_volume_from_vm_fails(
@@ -1684,13 +1864,9 @@ class TestVolumeNegativeFailure:
                 "--subnet",
                 _unique_subnet(net_name),
             )
-            _run_mvm(
+            _create_volume_vm(
                 runner_vm,
-                "vm",
-                "create",
                 vm_name,
-                "--image",
-                "alpine:3.23",
                 "--network",
                 net_name,
             )
@@ -1713,9 +1889,12 @@ class TestVolumeNegativeFailure:
             assert envelope["error"]["code"] == "volume.not_found"
 
             volumes = _json_success_data(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout, list,
+                _run_mvm(runner_vm, "volume", "ls", "--json").stdout,
+                list,
             )
-            assert all(volume["name"] != "nonexistent-volume-name" for volume in volumes)
+            assert all(
+                volume["name"] != "nonexistent-volume-name" for volume in volumes
+            )
 
             vm_info = _json_success_data(
                 _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout,
@@ -1723,5 +1902,5 @@ class TestVolumeNegativeFailure:
             )
             assert not vm_info["volumes"]
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _remove_owned(runner_vm, "vm", vm_name)
+            _remove_owned(runner_vm, "network", net_name)
