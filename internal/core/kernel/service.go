@@ -352,6 +352,9 @@ func (s *Service) BuildOfficialKernel(
 // buildFromSource orchestrates download → extract → configure → build.
 func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*KernelPipelineResult, error) {
 	buildDir := cfg.Spec.BuildDir
+	if override, _ := infra.EnvGet("TEMP_DIR"); override != "" {
+		buildDir = filepath.Join(infra.GetTempDir(), "kernel-build")
+	}
 	if buildDir == "" {
 		buildDir = "."
 	}

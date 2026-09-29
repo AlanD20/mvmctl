@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
@@ -227,54 +228,83 @@ func TestBuildOfficialKernelUsesReceiverStagingLeaf(t *testing.T) {
 		KernelBuildLibraries = originalLibraries
 	})
 
-	root := t.TempDir()
-	managedDir := filepath.Join(root, "managed-kernels")
-	buildDir := filepath.Join(root, "build", "linux")
-	spec := &model.KernelSpec{
-		Version:        "6.1.0",
-		Source:         "https://example.invalid/linux.tar.xz",
-		OutputName:     "../caller-selected-output",
-		BuildDir:       buildDir,
-		DefaultConfigs: map[string]string{},
+	// Rationale: A selected scratch directory must also select its cached kernel,
+	// while an unset or empty override must preserve the spec's build location.
+	cases := map[string]struct {
+		unsetTemp     bool
+		selectScratch bool
+		wantKernel    string
+	}{
+		"unset_temp_preserves_spec":    {unsetTemp: true, wantKernel: "spec-kernel"},
+		"empty_temp_preserves_spec":    {wantKernel: "spec-kernel"},
+		"selected_temp_overrides_spec": {selectScratch: true, wantKernel: "scratch-kernel"},
 	}
-	service := NewService(&managedOutputRepository{}, managedDir)
-	configHash := service.computeConfigHash(spec, spec.Version, nil, nil)
-	cacheKey := fmt.Sprintf("%s-%s", spec.Version, configHash)
-	cacheDir := filepath.Dir(buildDir)
-	require.NoError(t, os.MkdirAll(cacheDir, 0755))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(cacheDir, fmt.Sprintf(KernelCacheMarker, cacheKey)),
-		[]byte(cacheKey),
-		0644,
-	))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(cacheDir, fmt.Sprintf(KernelCachePath, cacheKey)),
-		[]byte("official-kernel"),
-		0755,
-	))
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			managedDir := filepath.Join(root, "managed-kernels")
+			buildDir := filepath.Join(root, "build", "linux")
+			scratchDir := filepath.Join(root, "scratch")
+			t.Setenv(infra.EnvKey("TEMP_DIR"), "")
+			if tc.unsetTemp {
+				require.NoError(t, os.Unsetenv(infra.EnvKey("TEMP_DIR")))
+			} else if tc.selectScratch {
+				t.Setenv(infra.EnvKey("TEMP_DIR"), scratchDir)
+			}
+			spec := &model.KernelSpec{
+				Version:        "6.1.0",
+				Source:         "https://example.invalid/linux.tar.xz",
+				OutputName:     "../caller-selected-output",
+				BuildDir:       buildDir,
+				DefaultConfigs: map[string]string{},
+			}
+			service := NewService(&managedOutputRepository{}, managedDir)
+			configHash := service.computeConfigHash(spec, spec.Version, nil, nil)
+			cacheKey := fmt.Sprintf("%s-%s", spec.Version, configHash)
+			for cacheDir, payload := range map[string]string{
+				filepath.Dir(buildDir): "spec-kernel",
+				scratchDir:             "scratch-kernel",
+			} {
+				require.NoError(t, os.MkdirAll(cacheDir, 0755))
+				require.NoError(t, os.WriteFile(
+					filepath.Join(cacheDir, fmt.Sprintf(KernelCacheMarker, cacheKey)),
+					[]byte(cacheKey),
+					0644,
+				))
+				require.NoError(t, os.WriteFile(
+					filepath.Join(cacheDir, fmt.Sprintf(KernelCachePath, cacheKey)),
+					[]byte(payload),
+					0755,
+				))
+			}
 
-	result, err := service.BuildOfficialKernel(
-		context.Background(),
-		spec,
-		"x86_64",
-		1,
-		false,
-		true,
-		false,
-		nil,
-		nil,
-		nil,
-		nil,
-	)
-	require.NoError(t, err)
-	require.NotNil(t, result)
+			result, err := service.BuildOfficialKernel(
+				context.Background(),
+				spec,
+				"x86_64",
+				1,
+				false,
+				true,
+				false,
+				nil,
+				nil,
+				nil,
+				nil,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
 
-	assert.Equal(t, managedDir, filepath.Dir(result.Path))
-	assert.NotContains(t, filepath.Base(result.Path), "caller-selected-output")
-	assert.NotContains(t, filepath.Base(result.Path), spec.Version)
-	assert.NotContains(t, filepath.Base(result.Path), "x86_64")
-	assert.FileExists(t, result.Path)
-	assert.NoDirExists(t, filepath.Join(managedDir, "caller-selected-output"))
+			payload, err := os.ReadFile(result.Path)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantKernel, string(payload))
+			assert.Equal(t, buildDir, spec.BuildDir)
+			assert.Equal(t, managedDir, filepath.Dir(result.Path))
+			assert.NotContains(t, filepath.Base(result.Path), "caller-selected-output")
+			assert.NotContains(t, filepath.Base(result.Path), spec.Version)
+			assert.NotContains(t, filepath.Base(result.Path), "x86_64")
+			assert.NoDirExists(t, filepath.Join(managedDir, "caller-selected-output"))
+		})
+	}
 }
 
 type managedOutputRepository struct {
