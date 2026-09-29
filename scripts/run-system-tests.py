@@ -428,8 +428,8 @@ def _run_pytest(
 # ============================================================================
 
 
-def _volume_inspect_record(stdout: str, name: str) -> dict[str, object]:
-    """Decode a volume record from the installed controller's JSON response."""
+def _volume_inspect_response(stdout: str, name: str) -> tuple[dict[str, object], bool]:
+    """Decode inspection data and whether the controller uses the versioned protocol."""
     try:
         info = json.loads(stdout)
     except json.JSONDecodeError as exc:
@@ -439,7 +439,8 @@ def _volume_inspect_record(stdout: str, name: str) -> dict[str, object]:
     if not isinstance(info, dict):
         raise RuntimeError(f"volume inspect response for '{name}' must be an object")
     envelope_fields = {"schema_version", "status", "data", "error"}
-    if envelope_fields.intersection(info):
+    versioned = bool(envelope_fields.intersection(info))
+    if versioned:
         if set(info) != envelope_fields:
             raise RuntimeError(
                 f"volume inspect response for '{name}' has incomplete or unknown envelope fields"
@@ -460,7 +461,13 @@ def _volume_inspect_record(stdout: str, name: str) -> dict[str, object]:
         raise RuntimeError(
             f"volume inspect response for '{name}' must contain a volume object"
         )
-    return volume
+    return info, versioned
+
+
+def _volume_inspect_record(stdout: str, name: str) -> dict[str, object]:
+    """Decode a volume record from the installed controller's JSON response."""
+    info, _versioned = _volume_inspect_response(stdout, name)
+    return info["volume"]
 
 
 def _inspect_volume_path(name: str) -> tuple[bool, str | None]:
@@ -479,24 +486,96 @@ def _get_volume_path(name: str) -> str | None:
     return path
 
 
-def _expected_shared_volume_path() -> Path:
+def _inspect_shared_volume() -> tuple[bool, str | None, str | None, bool]:
+    """Inspect the mirror source or its authoritative protected backing."""
+    result = mvm(
+        "volume", "inspect", SHARED_VOLUME_NAME, "--json", check=False, timeout=30
+    )
+    if result.returncode != 0:
+        return False, None, None, False
+    try:
+        info, versioned = _volume_inspect_response(result.stdout, SHARED_VOLUME_NAME)
+    except RuntimeError as exc:
+        raise _UnsafeVolumeBackingPath(
+            f"cannot establish shared volume identity: {exc}"
+        ) from exc
+    volume = info["volume"]
+    if volume.get("name") != SHARED_VOLUME_NAME:
+        raise _UnsafeVolumeBackingPath(
+            "shared volume inspection returned a different name"
+        )
+    path = volume.get("path")
+    if not versioned:
+        disk = info.get("disk_info")
+        if isinstance(disk, dict) and {
+            "volume_id",
+            "logical_bytes",
+            "protected",
+        }.intersection(disk):
+            raise _UnsafeVolumeBackingPath(
+                "authoritative shared volume inspection requires a versioned response"
+            )
+        return True, path if isinstance(path, str) and path else None, None, False
+
+    volume_id = volume.get("id")
+    if (
+        not isinstance(volume_id, str)
+        or re.fullmatch(r"[0-9a-f]{64}", volume_id) is None
+    ):
+        raise _UnsafeVolumeBackingPath(
+            "shared volume inspection returned an invalid volume ID"
+        )
+    disk = info.get("disk_info")
+    if not isinstance(disk, dict) or disk.get("volume_id") != volume_id:
+        raise _UnsafeVolumeBackingPath(
+            "shared volume accounting does not match its volume ID"
+        )
+    if type(disk.get("protected")) is not bool:
+        raise _UnsafeVolumeBackingPath(
+            "shared volume inspection has no explicit protection state"
+        )
+    logical_bytes = disk.get("logical_bytes")
+    if type(logical_bytes) is not int or not 0 < logical_bytes <= sys.maxsize:
+        raise _UnsafeVolumeBackingPath(
+            "shared volume accounting has an invalid logical size"
+        )
+    if volume.get("format") != "raw" or volume.get("is_read_only") is not True:
+        raise _UnsafeVolumeBackingPath("shared volume must be raw and read-only")
+    if disk["protected"]:
+        if path != "":
+            raise _UnsafeVolumeBackingPath(
+                "protected shared volume must hide its backing path"
+            )
+        return True, None, volume_id, True
+    if not isinstance(path, str) or not path:
+        raise _UnsafeVolumeBackingPath("unprotected shared volume has no source path")
+    return True, path, volume_id, False
+
+
+def _expected_shared_volume_path(volume_id: str | None = None) -> Path:
     """Return the lexical managed path without following any symlinks."""
-    cache_root = Path(
-        os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")
-    ).expanduser()
+    if volume_id is not None and re.fullmatch(r"[0-9a-f]{64}", volume_id) is None:
+        raise _UnsafeVolumeBackingPath(
+            "shared volume source requires a canonical volume ID"
+        )
+    cache_root = Path(os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")).expanduser()
     return Path(
-        os.path.abspath(cache_root / "volumes" / f"{SHARED_VOLUME_NAME}.raw")
+        os.path.abspath(
+            cache_root / "volumes" / f"{volume_id or SHARED_VOLUME_NAME}.raw"
+        )
     )
 
 
-def _validated_volume_backing_path(raw_path: str | os.PathLike[str]) -> Path:
+def _validated_volume_backing_path(
+    raw_path: str | os.PathLike[str],
+    volume_id: str | None = None,
+) -> Path:
     """Require the exact regular, non-symlink runner volume backing file."""
     path = Path(os.path.abspath(Path(raw_path).expanduser()))
-    expected = _expected_shared_volume_path()
+    expected = _expected_shared_volume_path(volume_id)
     if path != expected:
         raise _UnsafeVolumeBackingPath(
-            "unexpected shared volume backing path: "
-            f"expected {expected}, got {path}"
+            f"unexpected shared volume backing path: expected {expected}, got {path}"
         )
     try:
         info = path.lstat()
@@ -526,9 +605,11 @@ def _open_directory_without_symlinks(path: Path) -> int:
         raise
 
 
-def _require_shared_volume_path_absent_before_create() -> None:
+def _require_shared_volume_path_absent_before_create(
+    volume_id: str | None = None,
+) -> None:
     """Refuse create if old cleanup left any object at the canonical path."""
-    expected = _expected_shared_volume_path()
+    expected = _expected_shared_volume_path(volume_id)
     try:
         expected.lstat()
     except FileNotFoundError:
@@ -542,9 +623,13 @@ def _require_shared_volume_path_absent_before_create() -> None:
     )
 
 
-def _populate_volume_image(volume_path: Path, mirror_path: Path) -> None:
+def _populate_volume_image(
+    volume_path: Path,
+    mirror_path: Path,
+    volume_id: str | None = None,
+) -> None:
     """Format and populate one ext4 image without sudo or loop mounts."""
-    backing = _validated_volume_backing_path(volume_path)
+    backing = _validated_volume_backing_path(volume_path, volume_id)
     mirror = mirror_path.expanduser().resolve()
     if not mirror.is_dir():
         raise RuntimeError(f"asset mirror is not a directory: {mirror}")
@@ -659,11 +744,16 @@ def _create_and_seed_volume() -> None:
         timeout=30,
     )
 
+    volume_id = None
     try:
-        record_exists, raw_path = _inspect_volume_path(SHARED_VOLUME_NAME)
+        record_exists, raw_path, volume_id, protected = _inspect_shared_volume()
+        if protected:
+            raise _UnsafeVolumeBackingPath(
+                "created shared volume is already protected; refusing to reseed"
+            )
         if not record_exists or not raw_path:
             raise RuntimeError("created shared volume has no recorded backing path")
-        vol_path = _validated_volume_backing_path(raw_path)
+        vol_path = _validated_volume_backing_path(raw_path, volume_id)
 
         if not any(mirror_path.iterdir()):
             log(f"WARNING: Asset mirror at {mirror_path} is empty.")
@@ -671,14 +761,14 @@ def _create_and_seed_volume() -> None:
                 "Populating volume with empty filesystem. "
                 "Tests that need assets will fail."
             )
-        _populate_volume_image(vol_path, mirror_path)
+        _populate_volume_image(vol_path, mirror_path, volume_id)
     except _UnsafeVolumeBackingPath:
         raise
     except RuntimeError as primary:
         cleanup = mvm(
             "volume",
             "rm",
-            SHARED_VOLUME_NAME,
+            volume_id or SHARED_VOLUME_NAME,
             "--force",
             check=False,
             timeout=30,
@@ -695,8 +785,8 @@ def _create_and_seed_volume() -> None:
 def ensure_shared_volume(*, rebuild: bool = False) -> None:
     """Ensure the shared asset volume exists and is populated.
 
-    If the volume doesn't exist (or --rebuild is passed), remove it,
-    recreate it, and populate it with the host asset mirror contents.
+    Reuse authoritative protected backing without accessing its old source.
+    Explicit rebuild removes the selected volume through the controller before recreation.
     """
     mirror_path = Path(ASSET_MIRROR_HOST).expanduser()
     if not mirror_path.exists():
@@ -705,13 +795,22 @@ def ensure_shared_volume(*, rebuild: bool = False) -> None:
             "Create it first by pulling images/kernels/binaries with MVM_ASSET_MIRROR set."
         )
 
-    record_exists, raw_path = _inspect_volume_path(SHARED_VOLUME_NAME)
+    record_exists, raw_path, volume_id, protected = _inspect_shared_volume()
+    if protected:
+        if rebuild:
+            mvm("volume", "rm", volume_id, "--force", check=True, timeout=30)
+            _create_and_seed_volume()
+            return
+        log(
+            f"Shared volume '{SHARED_VOLUME_NAME}' already has protected backing ({volume_id})"
+        )
+        return
     existing_path: Path | None = None
     if record_exists:
         try:
             if raw_path is None:
                 raise RuntimeError("volume record has no backing path")
-            existing_path = _validated_volume_backing_path(raw_path)
+            existing_path = _validated_volume_backing_path(raw_path, volume_id)
         except _UnsafeVolumeBackingPath:
             raise
         except RuntimeError as exc:
@@ -726,7 +825,8 @@ def ensure_shared_volume(*, rebuild: bool = False) -> None:
 
     if record_exists:
         log(f"Rebuilding: removing existing volume '{SHARED_VOLUME_NAME}'...")
-        mvm("volume", "rm", SHARED_VOLUME_NAME, "--force", timeout=30)
+        mvm("volume", "rm", volume_id or SHARED_VOLUME_NAME, "--force", timeout=30)
+        _require_shared_volume_path_absent_before_create(volume_id)
 
     _create_and_seed_volume()
 

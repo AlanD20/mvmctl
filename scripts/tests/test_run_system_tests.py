@@ -2507,8 +2507,259 @@ def test_prepare_decodes_volume_status_and_cleans_up_on_response_refusal(
     assert destroyed == ["prep-t1", "prep-t2"]
 
 
+def _shared_volume_inspection(
+    path: str, *, protected: bool = False
+) -> dict[str, object]:
+    volume_id = "a" * 64
+    return {
+        "schema_version": 1,
+        "status": "success",
+        "data": {
+            "volume": {
+                "id": volume_id,
+                "name": "asset-mirror",
+                "path": path,
+                "format": "raw",
+                "is_read_only": True,
+            },
+            "disk_info": {
+                "volume_id": volume_id,
+                "logical_bytes": 4096,
+                "allocated_bytes": 4096,
+                "protected": protected,
+            },
+        },
+        "error": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "legacy", [False, True], ids=["schema-1-id-path", "legacy-name-path"]
+)
+def test_shared_volume_creation_seeds_only_the_inspected_source(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    legacy: bool,
+) -> None:
+    cache = tmp_path / "cache"
+    backing = cache / "volumes" / f"{'asset-mirror' if legacy else 'a' * 64}.raw"
+    backing.parent.mkdir(parents=True)
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    (mirror / "asset").write_bytes(b"mirrored asset")
+    monkeypatch.setenv("MVM_CACHE_DIR", str(cache))
+    monkeypatch.setattr(orchestrator, "ASSET_MIRROR_HOST", str(mirror))
+    response = _shared_volume_inspection(str(backing))
+    if legacy:
+        response = response["data"]
+        response["disk_info"] = {"format": "raw"}
+    calls: list[tuple[str, ...]] = []
+
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[:2] == ("volume", "create"):
+            backing.write_bytes(b"\0" * 4096)
+        elif args[:2] != ("volume", "inspect"):
+            raise AssertionError("successful source seeding must not remove a volume")
+        return subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps(response), stderr=""
+        )
+
+    def seed_pinned_source(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        (fd,) = kwargs["pass_fds"]
+        assert command == ["mkfs.ext4", "-F", "-d", str(mirror), f"/proc/self/fd/{fd}"]
+        assert os.fstat(fd).st_ino == backing.stat().st_ino
+        os.write(fd, b"seeded")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    monkeypatch.setattr(orchestrator.subprocess, "run", seed_pinned_source)
+
+    orchestrator._create_and_seed_volume()
+
+    assert [call[:2] for call in calls] == [("volume", "create"), ("volume", "inspect")]
+    assert backing.read_bytes().startswith(b"seeded")
+
+
+@pytest.mark.parametrize(
+    "rebuild, removal_refused",
+    [(False, False), (True, False), (True, True)],
+    ids=["reuse", "typed-rebuild", "refused-rebuild"],
+)
+def test_shared_volume_protected_backing_delegates_explicit_rebuild_to_controller(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    rebuild: bool,
+    removal_refused: bool,
+) -> None:
+    cache = tmp_path / "cache"
+    source = cache / "volumes" / f"{'a' * 64}.raw"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"caller must not mutate retained staging")
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    monkeypatch.setenv("MVM_CACHE_DIR", str(cache))
+    monkeypatch.setattr(orchestrator, "ASSET_MIRROR_HOST", str(mirror))
+    response = _shared_volume_inspection("", protected=True)
+    calls: list[tuple[str, ...]] = []
+    events: list[str] = []
+
+    def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        events.append(args[1])
+        if args[:2] == ("volume", "rm"):
+            assert args == ("volume", "rm", "a" * 64, "--force")
+            assert kwargs == {"check": True, "timeout": 30}
+            if removal_refused:
+                raise RuntimeError("root refused referenced or changed-source volume")
+        else:
+            assert args[:2] == ("volume", "inspect")
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(response))
+
+    def no_source_access(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("protected backing must not access old caller staging")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    monkeypatch.setattr(orchestrator.subprocess, "run", no_source_access)
+    monkeypatch.setattr(
+        orchestrator, "_validated_volume_backing_path", no_source_access
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_require_shared_volume_path_absent_before_create",
+        no_source_access,
+    )
+    monkeypatch.setattr(
+        orchestrator, "_create_and_seed_volume", lambda: events.append("create")
+    )
+    if removal_refused:
+        with pytest.raises(RuntimeError, match="root refused"):
+            orchestrator.ensure_shared_volume(rebuild=True)
+    else:
+        orchestrator.ensure_shared_volume(rebuild=rebuild)
+    assert len(calls) == (2 if rebuild else 1)
+    assert events == (
+        ["inspect", "rm"]
+        if removal_refused
+        else ["inspect", "rm", "create"]
+        if rebuild
+        else ["inspect"]
+    )
+    assert source.read_bytes() == b"caller must not mutate retained staging"
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "different-name",
+        "invalid-id",
+        "mismatched-id",
+        "wrong-source-id",
+        "missing-authority",
+        "invalid-protected",
+        "visible-protected-path",
+        "bare-authority",
+    ],
+)
+def test_shared_volume_refuses_invalid_identity_before_any_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    defect: str,
+) -> None:
+    cache = tmp_path / "cache"
+    backing = cache / "volumes" / f"{'a' * 64}.raw"
+    backing.parent.mkdir(parents=True)
+    backing.write_bytes(b"source must survive")
+    monkeypatch.setenv("MVM_CACHE_DIR", str(cache))
+    response = _shared_volume_inspection(str(backing))
+    info = response["data"]
+    if defect == "different-name":
+        info["volume"]["name"] = "unrelated"
+    elif defect == "invalid-id":
+        info["volume"]["id"] = "../unrelated"
+    elif defect == "mismatched-id":
+        info["disk_info"]["volume_id"] = "b" * 64
+    elif defect == "wrong-source-id":
+        info["volume"]["path"] = str(backing.with_name(f"{'b' * 64}.raw"))
+    elif defect == "missing-authority":
+        del info["disk_info"]
+    elif defect == "invalid-protected":
+        info["disk_info"]["protected"] = "true"
+    elif defect == "visible-protected-path":
+        info["disk_info"]["protected"] = True
+    elif defect == "bare-authority":
+        response = info
+    calls: list[tuple[str, ...]] = []
+
+    def inspect_only(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        assert args[:2] == ("volume", "inspect"), (
+            "invalid identity must not create or remove"
+        )
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(response))
+
+    monkeypatch.setattr(orchestrator, "mvm", inspect_only)
+    monkeypatch.setattr(
+        orchestrator.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail(
+            "invalid identity must not seed a source"
+        ),
+    )
+    with pytest.raises(orchestrator._UnsafeVolumeBackingPath):
+        orchestrator.ensure_shared_volume()
+    assert len(calls) == 1
+    assert backing.read_bytes() == b"source must survive"
+
+
+@pytest.mark.parametrize(
+    "malformed", [False, True], ids=["already-protected", "malformed-response"]
+)
+def test_created_shared_volume_with_uncertain_source_is_not_seeded_or_removed(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    malformed: bool,
+) -> None:
+    cache = tmp_path / "cache"
+    source = cache / "volumes" / f"{'a' * 64}.raw"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"source must survive")
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    monkeypatch.setenv("MVM_CACHE_DIR", str(cache))
+    monkeypatch.setattr(orchestrator, "ASSET_MIRROR_HOST", str(mirror))
+    stdout = (
+        "not-json"
+        if malformed
+        else json.dumps(_shared_volume_inspection("", protected=True))
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        assert args[:2] in [("volume", "create"), ("volume", "inspect")]
+        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    monkeypatch.setattr(
+        orchestrator.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("uncertain source must not be seeded"),
+    )
+    with pytest.raises(orchestrator._UnsafeVolumeBackingPath):
+        orchestrator._create_and_seed_volume()
+    assert [call[:2] for call in calls] == [("volume", "create"), ("volume", "inspect")]
+    assert source.read_bytes() == b"source must survive"
+
+
 @pytest.mark.parametrize("backing_kind", ["missing", "directory", "symlink"])
-def test_ensure_shared_volume_rebuilds_stale_volume_records(
+def test_ensure_shared_volume_recreates_only_after_stale_backing_is_absent(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2525,13 +2776,14 @@ def test_ensure_shared_volume_rebuilds_stale_volume_records(
         target = tmp_path / "target.raw"
         target.write_bytes(b"volume")
         backing.symlink_to(target)
+    leftover = backing.lstat() if backing_kind != "missing" else None
 
     monkeypatch.setattr(orchestrator, "ASSET_MIRROR_HOST", str(mirror))
     monkeypatch.setenv("MVM_CACHE_DIR", str(cache))
     monkeypatch.setattr(
         orchestrator,
-        "_inspect_volume_path",
-        lambda _name: (True, str(backing)),
+        "_inspect_shared_volume",
+        lambda: (True, str(backing), None, False),
     )
     calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
 
@@ -2545,7 +2797,22 @@ def test_ensure_shared_volume_rebuilds_stale_volume_records(
         orchestrator, "_create_and_seed_volume", lambda: seeded.append(True)
     )
 
-    orchestrator.ensure_shared_volume()
+    if backing_kind == "missing":
+        orchestrator.ensure_shared_volume()
+        assert seeded == [True]
+    else:
+        with pytest.raises(RuntimeError, match="still exists before volume create"):
+            orchestrator.ensure_shared_volume()
+        assert seeded == []
+        preserved = backing.lstat()
+        assert (preserved.st_dev, preserved.st_ino, preserved.st_mode) == (
+            leftover.st_dev,
+            leftover.st_ino,
+            leftover.st_mode,
+        )
+        if backing_kind == "symlink":
+            assert backing.readlink() == target
+            assert target.read_bytes() == b"volume"
 
     assert calls == [
         (
@@ -2553,7 +2820,6 @@ def test_ensure_shared_volume_rebuilds_stale_volume_records(
             {"timeout": 30},
         )
     ]
-    assert seeded == [True]
 
 
 def test_ensure_shared_volume_rejects_poisoned_arbitrary_path_without_mutation(
@@ -2571,8 +2837,8 @@ def test_ensure_shared_volume_rejects_poisoned_arbitrary_path_without_mutation(
     monkeypatch.setattr(orchestrator, "ASSET_MIRROR_HOST", str(mirror))
     monkeypatch.setattr(
         orchestrator,
-        "_inspect_volume_path",
-        lambda _name: (True, str(unrelated)),
+        "_inspect_shared_volume",
+        lambda: (True, str(unrelated), None, False),
     )
 
     def unexpected_mvm(*_args: object, **_kwargs: object) -> None:
@@ -2688,8 +2954,8 @@ def test_create_volume_removes_record_when_created_backing_is_missing(
     monkeypatch.setenv("MVM_CACHE_DIR", str(cache))
     monkeypatch.setattr(
         orchestrator,
-        "_inspect_volume_path",
-        lambda _name: (True, str(missing_backing)),
+        "_inspect_shared_volume",
+        lambda: (True, str(missing_backing), None, False),
     )
     calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
 
@@ -2731,8 +2997,8 @@ def test_stale_record_cleanup_must_remove_backing_path_before_volume_create(
     monkeypatch.setattr(orchestrator, "ASSET_MIRROR_HOST", str(mirror))
     monkeypatch.setattr(
         orchestrator,
-        "_inspect_volume_path",
-        lambda _name: (True, str(backing)),
+        "_inspect_shared_volume",
+        lambda: (True, str(backing), None, False),
     )
     calls: list[tuple[str, ...]] = []
 
@@ -2768,8 +3034,8 @@ def test_created_volume_with_unsafe_record_path_skips_automatic_cleanup(
     monkeypatch.setattr(orchestrator, "ASSET_MIRROR_HOST", str(mirror))
     monkeypatch.setattr(
         orchestrator,
-        "_inspect_volume_path",
-        lambda _name: (True, str(unrelated)),
+        "_inspect_shared_volume",
+        lambda: (True, str(unrelated), None, False),
     )
     calls: list[tuple[str, ...]] = []
 
