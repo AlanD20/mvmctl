@@ -14,6 +14,7 @@ import select
 import signal
 import stat
 import subprocess
+import sys
 import termios
 import time
 import uuid
@@ -680,3 +681,224 @@ def test_console_tty_attachment_serial_bytes(
                 os.close(child_pidfd)
             os.close(slave)
             os.close(master)
+
+
+def test_console_pid_mirror_cannot_redirect_discovery_or_stop(
+    runner_vm: str, console_vm: dict[str, Any]
+) -> None:
+    """A caller-writable PID mirror cannot select discovery or a signal target."""
+    receipt = console_vm["receipt"]
+    firecracker_task = console_vm["tasks"][0]
+    initial = _console_state(runner_vm, receipt, True)
+    uid, gid = os.getuid(), os.getgid()
+    assert uid == os.geteuid() > 0 and gid == os.getegid() > 0
+    descriptors: list[int] = []
+    bindings: list[tuple[int, str, int, tuple[int, ...]]] = []
+    root_fd = None
+    root_identity = None
+    mirror_identity = None
+    mirror_fd = None
+    original = None
+    mirror_changed = False
+    relay_task = None
+    decoy = None
+    decoy_fd = None
+    decoy_task = None
+    decoy_arguments = [sys.executable, "-c", "import time; time.sleep(300)"]
+
+    def assert_mirror_bindings() -> None:
+        for root in (os.fstat(root_fd), os.stat("/", follow_symlinks=False)):
+            assert (
+                root.st_dev, root.st_ino, root.st_mode, root.st_uid, root.st_gid
+            ) == root_identity, root
+        for parent_fd, name, directory_fd, identity in bindings:
+            for current in (
+                os.fstat(directory_fd),
+                os.stat(name, dir_fd=parent_fd, follow_symlinks=False),
+            ):
+                assert (
+                    current.st_dev,
+                    current.st_ino,
+                    current.st_mode,
+                    current.st_uid,
+                    current.st_gid,
+                ) == identity, (name, current, identity)
+        for current in (
+            os.fstat(mirror_fd),
+            os.stat("console.pid", dir_fd=bindings[-1][2], follow_symlinks=False),
+        ):
+            assert (
+                current.st_dev,
+                current.st_ino,
+                current.st_mode,
+                current.st_uid,
+                current.st_gid,
+                current.st_nlink,
+            ) == mirror_identity, (current, mirror_identity)
+            assert 0 < current.st_size <= 32, current
+
+    try:
+        fields = Path(f"/proc/{initial['pid']}/stat").read_text().rpartition(") ")[
+            2
+        ].split()
+        assert len(fields) >= 20 and int(fields[19]) > 0, fields
+        relay_task = _pin_task(
+            {"pid": initial["pid"], "process_start_time": int(fields[19])}
+        )
+        descriptors.append(relay_task[0])
+        decoy = subprocess.Popen(
+            decoy_arguments,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        decoy_fd = os.pidfd_open(decoy.pid)
+        descriptors.append(decoy_fd)
+        fields = Path(f"/proc/{decoy.pid}/stat").read_text().rpartition(") ")[
+            2
+        ].split()
+        assert len(fields) >= 20 and int(fields[19]) > 0, fields
+        decoy_task = (decoy_fd, decoy.pid, int(fields[19]))
+        assert decoy.pid not in (initial["pid"], firecracker_task[1]), decoy_task
+        _assert_live(decoy_task)
+
+        # Root-owned 0711 ancestors permit traversal, not directory listing.
+        flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        root_fd = os.open("/", flags)
+        descriptors.append(root_fd)
+        directory_fd = root_fd
+        root = os.fstat(root_fd)
+        assert stat.S_ISDIR(root.st_mode) and (root.st_uid, root.st_gid) == (0, 0)
+        assert root.st_mode & 0o022 == 0, root
+        root_identity = (
+            root.st_dev, root.st_ino, root.st_mode, root.st_uid, root.st_gid
+        )
+        for name in ("run", "mvmctl", "runtime", str(uid), receipt["id"]):
+            parent_fd = directory_fd
+            directory_fd = os.open(name, flags, dir_fd=parent_fd)
+            descriptors.append(directory_fd)
+            current = os.fstat(directory_fd)
+            expected_owner = (uid, gid) if name == receipt["id"] else (0, 0)
+            assert stat.S_ISDIR(current.st_mode), (name, current)
+            assert (current.st_uid, current.st_gid) == expected_owner, (name, current)
+            assert current.st_mode & 0o022 == 0, (name, current)
+            if name != "run":
+                expected_mode = 0o700 if name == receipt["id"] else 0o711
+                assert stat.S_IMODE(current.st_mode) == expected_mode, (name, current)
+            bindings.append(
+                (
+                    parent_fd,
+                    name,
+                    directory_fd,
+                    (
+                        current.st_dev,
+                        current.st_ino,
+                        current.st_mode,
+                        current.st_uid,
+                        current.st_gid,
+                    ),
+                )
+            )
+        mirror_fd = os.open(
+            "console.pid",
+            os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=directory_fd,
+        )
+        descriptors.append(mirror_fd)
+        mirror = os.fstat(mirror_fd)
+        assert (
+            stat.S_ISREG(mirror.st_mode)
+            and stat.S_IMODE(mirror.st_mode) == 0o600
+            and (mirror.st_uid, mirror.st_gid) == (uid, gid)
+            and mirror.st_nlink == 1
+            and 0 < mirror.st_size <= 32
+        ), mirror
+        mirror_identity = (
+            mirror.st_dev,
+            mirror.st_ino,
+            mirror.st_mode,
+            mirror.st_uid,
+            mirror.st_gid,
+            mirror.st_nlink,
+        )
+        original = os.pread(mirror_fd, 32, 0)
+        assert original == str(initial["pid"]).encode(), original
+        assert_mirror_bindings()
+        assert os.fstat(mirror_fd).st_size == len(original)
+        assert os.pread(mirror_fd, 32, 0) == original
+        forged = str(decoy.pid).encode()
+        assert 0 < len(forged) <= 32
+        mirror_changed = True
+        assert os.pwrite(mirror_fd, forged, 0) == len(forged)
+        os.ftruncate(mirror_fd, len(forged))
+        assert_mirror_bindings()
+        assert os.pread(mirror_fd, 32, 0) == forged
+
+        assert _console_state(runner_vm, receipt, True) == initial
+        for task in (relay_task, decoy_task, firecracker_task):
+            _assert_live(task)
+        killed = _run_mvm(
+            runner_vm, "console", receipt["id"], "--kill", "--json", check=False
+        )
+        assert killed.returncode == 0, (killed.stdout, killed.stderr)
+        envelope = json.loads(killed.stdout)
+        assert (
+            envelope["schema_version"] == 1
+            and envelope["status"] == "success"
+            and envelope["error"] is None
+        ), envelope
+        _assert_exited(relay_task)
+        _console_state(runner_vm, receipt, False)
+        assert_mirror_bindings()
+        assert os.pread(mirror_fd, 32, 0) == forged
+        _assert_live(decoy_task)
+        current = _owned_vm(runner_vm, receipt)
+        assert (
+            current["status"] == "running"
+            and (current["pid"], current["process_start_time"]) == firecracker_task[1:]
+        ), current
+        _assert_live(firecracker_task)
+        _wait_for_exec(runner_vm, receipt["id"])
+        _assert_live(decoy_task)
+        _assert_live(firecracker_task)
+        print(
+            f"console mirror={mirror_identity} relay={relay_task[1:]} "
+            f"decoy={decoy_task[1:]} arguments={decoy_arguments}",
+            flush=True,
+        )
+    finally:
+        errors = []
+        try:
+            if mirror_changed:
+                # Restore only through the admitted leaf while every path binding is exact.
+                assert_mirror_bindings()
+                assert os.pwrite(mirror_fd, original, 0) == len(original)
+                os.ftruncate(mirror_fd, len(original))
+                assert_mirror_bindings()
+                assert os.pread(mirror_fd, 32, 0) == original
+        except Exception as exc:
+            errors.append(f"owned console mirror restore: {exc}")
+        try:
+            if decoy is not None:
+                if decoy.poll() is None:
+                    if decoy_fd is None:
+                        # A directly spawned, unreaped child cannot have its PID reused.
+                        decoy.kill()
+                    else:
+                        signal.pidfd_send_signal(decoy_fd, signal.SIGKILL)
+        except Exception as exc:
+            errors.append(f"owned decoy cancellation: {exc}")
+        try:
+            if decoy is not None:
+                decoy.wait(timeout=5)
+                if decoy_fd is not None:
+                    _assert_exited(decoy_task or (decoy_fd, decoy.pid, 0))
+        except Exception as exc:
+            errors.append(f"owned decoy reap: {exc}")
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except Exception as exc:
+                errors.append(f"owned descriptor {descriptor} close: {exc}")
+        assert not errors, "; ".join(errors)
