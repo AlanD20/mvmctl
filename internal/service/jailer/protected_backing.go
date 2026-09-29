@@ -28,6 +28,7 @@ type protectedBackingBinding struct {
 	cacheIdentity managedCacheIdentity
 	identity      managedVMConfigStat
 	bytes         uint64
+	generation    uint64
 }
 
 type protectedBackingIdentity struct {
@@ -73,6 +74,8 @@ type protectedBackingRecord struct {
 	References      []protectedBackingReference `json:"references"`
 	NextReferences  []protectedBackingReference `json:"next_references,omitempty"`
 	SnapshotSource  bool                        `json:"snapshot_source"`
+	KernelDigest    string                      `json:"kernel_digest,omitempty"`
+	Generation      uint64                      `json:"generation,omitempty"`
 }
 
 // protectedBackingLease retains the exact protected object and its root-owned logical-object lock.
@@ -154,6 +157,7 @@ func (lease *protectedBackingLease) Binding(ctx context.Context) (protectedBacki
 	return protectedBackingBinding{
 		kind: lease.record.Kind, logicalID: lease.record.ID, ownerUID: lease.ownerUID,
 		cacheIdentity: lease.cacheIdentity, identity: lease.identity, bytes: uint64(lease.record.Backing.Size),
+		generation: lease.record.Generation,
 	}, nil
 }
 
@@ -264,16 +268,24 @@ func reopenProtectedBacking(
 	if err != nil {
 		return nil, err
 	}
-	if lease.identity.deviceMajor != binding.identity.deviceMajor ||
-		lease.identity.deviceMinor != binding.identity.deviceMinor ||
-		lease.identity.inode != binding.identity.inode ||
-		lease.identity.size != binding.bytes {
+	if err := lease.requireBinding(binding); err != nil {
 		return nil, errors.Join(
-			managedVMResourceValidationError("protected backing inode differs from lifecycle authority"),
+			err,
 			lease.Release(context.WithoutCancel(ctx)),
 		)
 	}
 	return lease, nil
+}
+
+func (lease *protectedBackingLease) requireBinding(binding protectedBackingBinding) error {
+	if lease.record.Generation != binding.generation || lease.identity.deviceMajor != binding.identity.deviceMajor ||
+		lease.identity.deviceMinor != binding.identity.deviceMinor || lease.identity.inode != binding.identity.inode ||
+		lease.identity.size != binding.bytes {
+		return managedVMResourceValidationError(
+			"protected backing inode or generation differs from lifecycle authority",
+		)
+	}
+	return nil
 }
 
 func protectedLocator(cache *managedCacheLease) string {

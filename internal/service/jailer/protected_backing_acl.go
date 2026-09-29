@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"math"
 	"slices"
 	"sort"
@@ -231,8 +232,15 @@ func (lease *protectedBackingLease) Remove(ctx context.Context) error {
 	if err := lease.active(ctx); err != nil {
 		return err
 	}
-	if len(lease.record.References) != 0 {
+	if len(lease.record.References) != 0 || len(lease.record.NextReferences) != 0 {
 		return managedVMResourceValidationError("referenced protected backing cannot be removed")
+	}
+	if lease.record.Kind == protectedBackingKernel {
+		digest, err := hashProtectedKernel(ctx, lease.fd, lease.record.Backing)
+		if err != nil {
+			return err
+		}
+		lease.record.KernelDigest = digest
 	}
 	lease.record.Phase = "removing"
 	if err := writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record); err != nil {
@@ -242,6 +250,9 @@ func (lease *protectedBackingLease) Remove(ctx context.Context) error {
 }
 
 func (lease *protectedBackingLease) finishRemoval(ctx context.Context) error {
+	if lease.record.Kind == protectedBackingKernel && !isCanonicalManagedResourceID(lease.record.KernelDigest, 64) {
+		return managedVMResourceValidationError("protected kernel retirement has no retained root digest")
+	}
 	if len(lease.record.References) != 0 {
 		return managedVMResourceValidationError("protected removal record retains VM references")
 	}
@@ -252,6 +263,22 @@ func (lease *protectedBackingLease) finishRemoval(ctx context.Context) error {
 		if identity != lease.record.Backing || stat.Uid != 0 || stat.Nlink != 1 ||
 			stat.Mode&unix.S_IFMT != unix.S_IFREG {
 			return managedVMResourceValidationError("protected removal target identity changed")
+		}
+		if lease.record.Kind == protectedBackingKernel {
+			fd, err := openProtectedFile(ctx, lease.directoryFD, "disk", unix.O_RDONLY)
+			if err != nil {
+				return err
+			}
+			digest, hashErr := hashProtectedKernel(ctx, fd, lease.record.Backing)
+			var current unix.Stat_t
+			statErr := unix.Fstatat(lease.directoryFD, "disk", &current, unix.AT_SYMLINK_NOFOLLOW)
+			closeErr := unix.Close(fd)
+			if err := errors.Join(hashErr, statErr, closeErr); err != nil {
+				return err
+			}
+			if digest != lease.record.KernelDigest || !sameProtectedReadStat(stat, current) {
+				return managedVMResourceValidationError("protected kernel changed after retirement intent")
+			}
 		}
 		if err := unix.Unlinkat(lease.directoryFD, "disk", 0); err != nil {
 			return managedVMResourceAtomicError("remove protected backing inode", err)

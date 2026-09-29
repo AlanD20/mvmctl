@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -208,7 +209,11 @@ func readProtectedInventoryEntry(
 		)
 	}
 	switch record.Phase {
-	case "copying", "copied", "cancelling-copy", "cancelling-copied", "initial-removing", "removed", "removing":
+	case "copying", "copied", "cancelling-copy", "cancelling-copied", "initial-removing", "removed", "removing",
+		"kernel-unprotected-removed", "kernel-reimport-copying", "kernel-reimport-copied":
+		if strings.HasPrefix(record.Phase, "kernel-") && kind != protectedBackingKernel {
+			return result, false, managedVMResourceValidationError("non-kernel backing has a kernel recovery phase")
+		}
 		if (record.Phase == "cancelling-copy" || record.Phase == "cancelling-copied") &&
 			kind != protectedBackingRootfs && kind != protectedBackingCloudInit {
 			return result, false, managedVMResourceValidationError(
@@ -227,6 +232,7 @@ func readProtectedInventoryEntry(
 	}
 	result.binding = protectedBackingBinding{
 		kind: kind, logicalID: id, ownerUID: ownerUID, cacheIdentity: cache, bytes: uint64(record.Backing.Size),
+		generation: record.Generation,
 		identity: managedVMConfigStat{
 			deviceMajor: unix.Major(record.Backing.Device),
 			deviceMinor: unix.Minor(record.Backing.Device),
@@ -285,7 +291,10 @@ func revokeProtectedVMGrants(ctx context.Context, ownerUID uint32, vmID string, 
 		if err != nil {
 			return err
 		}
-		if err := errors.Join(lease.Revoke(ctx, vmID, executionUID), lease.Release(context.WithoutCancel(ctx))); err != nil {
+		if err := errors.Join(
+			lease.Revoke(ctx, vmID, executionUID),
+			lease.Release(context.WithoutCancel(ctx)),
+		); err != nil {
 			return err
 		}
 	}

@@ -296,6 +296,10 @@ func dispatch(
 		return dispatchHandled, handleProtectedVolumeGrow(ctx, endpoint, caller, deps.control)
 	case jailer.ProtectedVolumeRemoveAction:
 		return dispatchHandled, handleProtectedVolumeRemove(ctx, endpoint, caller, deps.control)
+	case jailer.ProtectedKernelImportAction:
+		return dispatchHandled, handleProtectedKernelImport(ctx, endpoint, caller, deps.control)
+	case jailer.ProtectedKernelRemoveAction:
+		return dispatchHandled, handleProtectedKernelRemove(ctx, endpoint, caller, deps.control)
 	case jailer.VMSnapshotCaptureAction:
 		return dispatchHandled, handleVMSnapshotCapture(ctx, endpoint, caller, deps.control)
 	case jailer.VMSnapshotInspectAction:

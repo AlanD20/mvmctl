@@ -10,12 +10,13 @@ import (
 )
 
 type protectedBindingWire struct {
-	Kind      string                    `json:"kind"`
-	LogicalID string                    `json:"logical_id"`
-	OwnerUID  uint32                    `json:"owner_uid"`
-	Cache     protectedBindingCacheWire `json:"cache"`
-	Identity  protectedBindingStatWire  `json:"identity"`
-	Bytes     uint64                    `json:"bytes"`
+	Kind       string                    `json:"kind"`
+	LogicalID  string                    `json:"logical_id"`
+	OwnerUID   uint32                    `json:"owner_uid"`
+	Cache      protectedBindingCacheWire `json:"cache"`
+	Identity   protectedBindingStatWire  `json:"identity"`
+	Bytes      uint64                    `json:"bytes"`
+	Generation uint64                    `json:"generation,omitempty"`
 }
 
 type protectedBindingCacheWire struct {
@@ -41,6 +42,7 @@ func (binding protectedBackingBinding) MarshalJSON() ([]byte, error) {
 	cache, stat := binding.cacheIdentity, binding.identity
 	return json.Marshal(protectedBindingWire{
 		Kind: binding.kind, LogicalID: binding.logicalID, OwnerUID: binding.ownerUID, Bytes: binding.bytes,
+		Generation: binding.generation,
 		Cache: protectedBindingCacheWire{
 			cache.deviceMajor,
 			cache.deviceMinor,
@@ -94,6 +96,7 @@ func (binding *protectedBackingBinding) UnmarshalJSON(data []byte) error {
 	}
 	*binding = protectedBackingBinding{
 		kind: wire.Kind, logicalID: wire.LogicalID, ownerUID: wire.OwnerUID, bytes: wire.Bytes,
+		generation: wire.Generation,
 		cacheIdentity: managedCacheIdentity{deviceMajor: wire.Cache.Major, deviceMinor: wire.Cache.Minor,
 			inode: wire.Cache.Inode, mountID: wire.Cache.MountID, mountIDKind: wire.Cache.MountIDKind},
 		identity: managedVMConfigStat{deviceMajor: wire.Identity.Major, deviceMinor: wire.Identity.Minor,

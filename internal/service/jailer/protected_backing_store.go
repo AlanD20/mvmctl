@@ -11,11 +11,18 @@ import (
 func protectBacking(
 	ctx context.Context, cache *managedCacheLease, kind, id string, expectedBytes uint64, create bool,
 ) (_ *protectedBackingLease, returnErr error) {
-	return protectBackingFromSource(ctx, cache, kind, id, expectedBytes, create, -1)
+	return protectBackingWithKernelImport(ctx, cache, kind, id, expectedBytes, create, -1, false)
 }
 
 func protectBackingFromSource(
 	ctx context.Context, cache *managedCacheLease, kind, id string, expectedBytes uint64, create bool, snapshotFD int,
+) (_ *protectedBackingLease, returnErr error) {
+	return protectBackingWithKernelImport(ctx, cache, kind, id, expectedBytes, create, snapshotFD, false)
+}
+
+func protectBackingWithKernelImport(
+	ctx context.Context, cache *managedCacheLease, kind, id string, expectedBytes uint64, create bool,
+	snapshotFD int, explicitKernelImport bool,
 ) (_ *protectedBackingLease, returnErr error) {
 	if err := validateActiveManagedCacheLease(cache); err != nil {
 		return nil, err
@@ -86,8 +93,20 @@ func protectBackingFromSource(
 		if record.Version != 1 || record.Kind != kind || record.ID != id || record.Owner != cache.ownerUID ||
 			record.Cache != protectedCacheIdentity(
 				cache.identity,
-			) || record.Phase == "removed" || record.Phase == "initial-removing" {
+			) {
 			return nil, managedVMResourceValidationError("protected backing record conflicts with requested identity")
+		}
+		kernelRecovery := record.Phase == "kernel-reimport-copying" || record.Phase == "kernel-reimport-copied"
+		if record.Phase == "initial-removing" ||
+			((record.Phase == "removed" || record.Phase == "kernel-unprotected-removed" || kernelRecovery) &&
+				(!explicitKernelImport || kind != protectedBackingKernel)) {
+			return nil, managedVMResourceValidationError("protected backing requires explicit kernel import")
+		}
+		if record.Phase == "kernel-unprotected-removed" {
+			if record.KernelDigest != "" || record.Backing.Inode != 0 || record.Generation != 0 {
+				return nil, managedVMResourceValidationError("never-protected kernel retirement record conflicts")
+			}
+			newObject = true
 		}
 	}
 	dataKind, err := openProtectedDirectory(ctx, storeFD, kind, newObject, true)
@@ -133,6 +152,11 @@ func protectBackingFromSource(
 		fd: -1, identity: managedVMConfigStat{}, ownerUID: cache.ownerUID, cacheIdentity: cache.identity,
 		metadataFD: metadata, logicalFD: logicalFD, directoryFD: directory, lockFD: lock, record: record,
 	}
+	if explicitKernelImport && kind == protectedBackingKernel && lease.record.Phase == "removed" {
+		if err := lease.beginKernelReimport(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if record.Phase == "removing" {
 		if err := lease.finishRemoval(ctx); err != nil {
 			return nil, err
@@ -141,7 +165,8 @@ func protectBackingFromSource(
 		retained = nil
 		return lease, nil
 	}
-	if record.Phase == "copying" || record.Phase == "copied" {
+	if lease.record.Phase == "copying" || lease.record.Phase == "copied" ||
+		lease.record.Phase == "kernel-reimport-copying" || lease.record.Phase == "kernel-reimport-copied" {
 		if snapshotFD >= 0 && !record.SnapshotSource {
 			return nil, managedVMResourceValidationError("snapshot restore cannot resume an operator-source import")
 		}

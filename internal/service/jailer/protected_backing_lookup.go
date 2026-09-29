@@ -52,7 +52,12 @@ func lookupProtectedBacking(
 			return nil, false, managedVMResourceAtomicError("recorded protected store is missing", err)
 		}
 		var stat unix.Stat_t
-		if statErr := unix.Fstatat(cache.cacheFD, protectedBackingDirectory, &stat, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(
+		if statErr := unix.Fstatat(
+			cache.cacheFD,
+			protectedBackingDirectory,
+			&stat,
+			unix.AT_SYMLINK_NOFOLLOW,
+		); !errors.Is(
 			statErr,
 			unix.ENOENT,
 		) {
@@ -125,8 +130,8 @@ func lookupProtectedBacking(
 		record.Cache != protectedCacheIdentity(cache.identity) {
 		return nil, true, managedVMResourceValidationError("protected lookup record identity conflicts")
 	}
-	if record.Phase == "removed" || record.Phase == "initial-removing" {
-		if len(record.References) != 0 {
+	if record.Phase == "removed" || record.Phase == "initial-removing" || record.Phase == "kernel-unprotected-removed" {
+		if len(record.References) != 0 || len(record.NextReferences) != 0 {
 			return nil, true, managedVMResourceValidationError("protected removal tombstone retains references")
 		}
 		return &protectedBackingLease{
@@ -157,7 +162,7 @@ func (lease *protectedBackingLease) IsRemoved(ctx context.Context) (bool, error)
 	if lease.released || lease.lockFD < 0 {
 		return false, managedVMResourceValidationError("protected lookup lease is closed")
 	}
-	return lease.record.Phase == "removed", nil
+	return lease.record.Phase == "removed" || lease.record.Phase == "kernel-unprotected-removed", nil
 }
 
 // CommitInitialVolumeRemoval follows the consumer's exact initial raw-file unlink and directory

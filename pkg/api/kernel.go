@@ -248,6 +248,9 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 	if err := os.Rename(fetchResult.Path, kernelPath); err != nil {
 		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Failed to rename kernel file: %v", err), err)
 	}
+	if err := op.Services.Kernel.ImportProtected(ctx, kernelID); err != nil {
+		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, "import protected kernel", err)
+	}
 	// Preserve the established display metadata without allowing it to select a
 	// managed filename. The on-disk basename is always the content-derived ID.
 	displayName := fmt.Sprintf(kernel.KernelOutputPattern, spec.OutputName, fetchResult.Version, resolved.Arch)

@@ -11,7 +11,7 @@ import (
 func (lease *protectedBackingLease) completeImport(
 	ctx context.Context, cache *managedCacheLease, expectedBytes uint64,
 ) (returnErr error) {
-	if lease.record.Phase == "copied" {
+	if lease.record.Phase == "copied" || lease.record.Phase == "kernel-reimport-copied" {
 		return lease.publishImport(ctx)
 	}
 	source, sourceFDs, err := openProtectedImportSource(ctx, cache, lease.record.Kind, lease.record.ID, expectedBytes)
@@ -90,7 +90,8 @@ func (lease *protectedBackingLease) copyAndPublish(
 		return managedVMResourceAtomicError("inspect initial protected backing source", err)
 	}
 	sourceIdentity := protectedBackingIdentity{Device: uint64(before.Dev), Inode: before.Ino, Size: before.Size}
-	if lease.record.Source.Inode != 0 && lease.record.Source != sourceIdentity {
+	reimport := lease.record.Phase == "kernel-reimport-copying"
+	if !reimport && lease.record.Source.Inode != 0 && lease.record.Source != sourceIdentity {
 		return managedVMResourceValidationError("initial protected backing source changed during import recovery")
 	}
 	lease.record.Source = sourceIdentity
@@ -101,8 +102,12 @@ func (lease *protectedBackingLease) copyAndPublish(
 	if err := writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record); err != nil {
 		return err
 	}
-	pending, err := openProtectedFile(ctx, lease.directoryFD, "pending", unix.O_RDWR|unix.O_CREAT|unix.O_EXCL)
-	if errors.Is(err, unix.EEXIST) {
+	flags := unix.O_RDWR
+	if lease.record.Backing.Inode == 0 {
+		flags |= unix.O_CREAT | unix.O_EXCL
+	}
+	pending, err := openProtectedFile(ctx, lease.directoryFD, "pending", flags)
+	if lease.record.Backing.Inode == 0 && errors.Is(err, unix.EEXIST) {
 		pending, err = openProtectedFile(ctx, lease.directoryFD, "pending", unix.O_RDWR)
 	}
 	if err != nil {
@@ -116,6 +121,14 @@ func (lease *protectedBackingLease) copyAndPublish(
 	if lease.record.Backing.Inode == 0 {
 		if identity.Size != 0 {
 			return managedVMResourceValidationError("unrecorded protected import candidate is not empty")
+		}
+		// CRITICAL: Authority metadata may live on another filesystem. Make this exact inode
+		// and its name durable before committing the identity that every retry must retain.
+		if err := unix.Fsync(pending); err != nil {
+			return managedVMResourceAtomicError("sync protected import candidate", err)
+		}
+		if err := unix.Fsync(lease.directoryFD); err != nil {
+			return managedVMResourceAtomicError("sync protected import candidate directory", err)
 		}
 		lease.record.Backing = identity
 		if err := writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record); err != nil {
@@ -140,7 +153,14 @@ func (lease *protectedBackingLease) copyAndPublish(
 	if err != nil {
 		return err
 	}
-	lease.record.Phase = "copied"
+	if reimport {
+		if err := lease.requireRetiredKernelDigest(ctx, pending); err != nil {
+			return err
+		}
+		lease.record.Phase = "kernel-reimport-copied"
+	} else {
+		lease.record.Phase = "copied"
+	}
 	if err := writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record); err != nil {
 		return err
 	}
@@ -148,6 +168,7 @@ func (lease *protectedBackingLease) copyAndPublish(
 }
 
 func (lease *protectedBackingLease) publishImport(ctx context.Context) (returnErr error) {
+	reimport := lease.record.Phase == "kernel-reimport-copied"
 	fd, err := openProtectedFile(ctx, lease.directoryFD, "disk", unix.O_RDWR)
 	if errors.Is(err, unix.ENOENT) {
 		pending, openErr := openProtectedFile(ctx, lease.directoryFD, "pending", unix.O_RDWR)
@@ -156,13 +177,23 @@ func (lease *protectedBackingLease) publishImport(ctx context.Context) (returnEr
 		}
 		identity, statErr := protectedIdentity(pending)
 		aclErr := verifyProtectedACL(ctx, pending, nil)
-		if err := errors.Join(statErr, aclErr, unix.Close(pending)); err != nil {
+		var digestErr error
+		if reimport {
+			digestErr = lease.requireRetiredKernelDigest(ctx, pending)
+		}
+		if err := errors.Join(statErr, aclErr, digestErr, unix.Close(pending)); err != nil {
 			return err
 		}
 		if identity != lease.record.Backing {
 			return managedVMResourceValidationError("completed protected import candidate differs from record")
 		}
-		if err := unix.Renameat2(lease.directoryFD, "pending", lease.directoryFD, "disk", unix.RENAME_NOREPLACE); err != nil {
+		if err := unix.Renameat2(
+			lease.directoryFD,
+			"pending",
+			lease.directoryFD,
+			"disk",
+			unix.RENAME_NOREPLACE,
+		); err != nil {
 			return managedVMResourceAtomicError("publish protected backing inode", err)
 		}
 		fd, err = openProtectedFile(ctx, lease.directoryFD, "disk", unix.O_RDWR)
@@ -175,11 +206,26 @@ func (lease *protectedBackingLease) publishImport(ctx context.Context) (returnEr
 	if err != nil || identity != lease.record.Backing {
 		return managedVMResourceAtomicError("published protected backing identity changed", err)
 	}
+	if reimport {
+		if err := lease.requireRetiredKernelDigest(ctx, fd); err != nil {
+			return err
+		}
+	}
 	if err := unix.Fsync(lease.directoryFD); err != nil {
 		return managedVMResourceAtomicError("sync protected backing publication", err)
 	}
-	lease.record.Phase = "ready"
-	return writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record)
+	completed := lease.record
+	completed.Phase = "ready"
+	if reimport {
+		completed.Generation++
+	} else if completed.Kind == protectedBackingKernel {
+		completed.Generation = 1
+	}
+	if err := writeProtectedRecord(ctx, lease.metadataFD, "record.json", completed); err != nil {
+		return err
+	}
+	lease.record = completed
+	return nil
 }
 
 func copyProtectedBytes(ctx context.Context, source, target int, size int64) error {

@@ -8,14 +8,17 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
@@ -34,6 +37,7 @@ func TestImportKernelUsesConfiguredManagedDirectory(t *testing.T) {
 
 	repo := &managedOutputRepository{}
 	service := NewService(repo, managedDir)
+	service.protectedKernels = &managedOutputKernelStorage{}
 	item, err := service.ImportKernel(
 		context.Background(),
 		callerName,
@@ -64,6 +68,7 @@ func TestImportKernelHashesReceiverStagedBytes(t *testing.T) {
 	require.NoError(t, os.WriteFile(sourcePath, []byte("original-source"), 0644))
 
 	service := NewService(&managedOutputRepository{}, managedDir)
+	service.protectedKernels = &managedOutputKernelStorage{}
 	service.copyImportedKernel = func(_ context.Context, _, destination string) error {
 		return os.WriteFile(destination, []byte("bytes-copied-to-store"), 0644)
 	}
@@ -95,6 +100,7 @@ func TestImportKernelRemovesFailedReceiverStaging(t *testing.T) {
 
 	copyErr := errors.New("copy failed")
 	service := NewService(&managedOutputRepository{}, managedDir)
+	service.protectedKernels = &managedOutputKernelStorage{}
 	service.copyImportedKernel = func(_ context.Context, _, destination string) error {
 		require.NoError(t, os.WriteFile(destination, []byte("partial"), 0644))
 		return copyErr
@@ -309,7 +315,9 @@ func TestBuildOfficialKernelUsesReceiverStagingLeaf(t *testing.T) {
 
 type managedOutputRepository struct {
 	Repository
-	item *model.KernelItem
+	item        *model.KernelItem
+	softDeleted string
+	deleted     string
 }
 
 func (repo *managedOutputRepository) Upsert(_ context.Context, item *model.KernelItem) error {
@@ -319,4 +327,97 @@ func (repo *managedOutputRepository) Upsert(_ context.Context, item *model.Kerne
 
 func (repo *managedOutputRepository) SetDefault(_ context.Context, _ string) error {
 	return nil
+}
+
+func (repo *managedOutputRepository) SoftDelete(_ context.Context, id string) error {
+	repo.softDeleted = id
+	return nil
+}
+
+func (repo *managedOutputRepository) Delete(_ context.Context, id string) error {
+	repo.deleted = id
+	return nil
+}
+
+type managedOutputKernelStorage struct {
+	importErr error
+	removeErr error
+}
+
+func (storage *managedOutputKernelStorage) Import(
+	_ context.Context,
+	request jailer.ProtectedKernelImportRequest,
+) (jailer.ProtectedKernelImportResult, error) {
+	return jailer.ProtectedKernelImportResult{
+		KernelID: request.KernelID,
+		Imported: storage.importErr == nil,
+	}, storage.importErr
+}
+
+func (storage *managedOutputKernelStorage) Remove(
+	_ context.Context,
+	request jailer.ProtectedKernelRemoveRequest,
+) (jailer.ProtectedKernelRemoveResult, error) {
+	return jailer.ProtectedKernelRemoveResult{
+		KernelID: request.KernelID,
+		Removed:  storage.removeErr == nil,
+	}, storage.removeErr
+}
+
+func TestImportKernelRootRefusalPrecedesProjection(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	content := []byte("imported kernel")
+	require.NoError(t, os.WriteFile(source, content, 0600))
+	repo := &managedOutputRepository{}
+	service := NewService(repo, filepath.Join(root, "kernels"))
+	refusal := errors.New("retired digest mismatch")
+	service.protectedKernels = &managedOutputKernelStorage{importErr: refusal}
+	_, err := service.ImportKernel(t.Context(), "custom", source, "6.1", "x86_64", true)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, refusal)
+	assert.Nil(t, repo.item, "root refusal must not project imported/default kernel")
+	id, err := crypto.KernelID(source, "6.1", "x86_64")
+	require.NoError(t, err)
+	got, err := os.ReadFile(filepath.Join(root, "kernels", id))
+	require.NoError(t, err)
+	if diff := cmp.Diff(content, got); diff != "" {
+		t.Errorf("published import bytes (-want +got):\n%s", diff)
+	}
+}
+
+func TestKernelRemoveRetainsReferencedBackingAndRootRefusal(t *testing.T) {
+	for _, references := range []string{"vm", "snapshot", "none"} {
+		t.Run(references, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "kernel")
+			content := []byte("retained kernel")
+			require.NoError(t, os.WriteFile(path, content, 0600))
+			repo := &managedOutputRepository{}
+			service := NewService(repo, filepath.Join(root, "kernels"))
+			refusal := errors.New("root snapshot reference")
+			service.protectedKernels = &managedOutputKernelStorage{removeErr: refusal}
+			item := &model.KernelItem{ID: strings.Repeat("a", 64), Path: path}
+			if references == "vm" {
+				item.VMs = []*model.VMItem{{ID: "retained-vm"}}
+			} else if references == "snapshot" {
+				item.Snapshots = []*model.SnapshotItem{{ID: "retained-snapshot"}}
+			}
+			_, err := service.Remove(t.Context(), item, true)
+			if references == "none" {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, refusal)
+				assert.Empty(t, repo.softDeleted)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, item.ID, repo.softDeleted)
+			}
+			assert.Empty(t, repo.deleted)
+			got, err := os.ReadFile(path)
+			require.NoError(t, err)
+			if diff := cmp.Diff(content, got); diff != "" {
+				t.Errorf("retained kernel bytes (-want +got):\n%s", diff)
+			}
+		})
+	}
 }

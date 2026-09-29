@@ -25,6 +25,7 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 
 	"mvmctl/internal/assets"
@@ -91,15 +92,22 @@ type Service struct {
 	repo               Repository
 	kernelsDir         string
 	copyImportedKernel func(context.Context, string, string) error
+	protectedKernels   protectedKernelStorage
 	dl                 *download.Downloader
 	resolver           *download.HttpDirVersionResolver
 	specs              map[string]*model.KernelSpec
 }
 
+type protectedKernelStorage interface {
+	Import(context.Context, jailer.ProtectedKernelImportRequest) (jailer.ProtectedKernelImportResult, error)
+	Remove(context.Context, jailer.ProtectedKernelRemoveRequest) (jailer.ProtectedKernelRemoveResult, error)
+}
+
 func NewService(repo Repository, kernelsDir string) *Service {
 	return &Service{
-		repo:       repo,
-		kernelsDir: kernelsDir,
+		repo:             repo,
+		kernelsDir:       kernelsDir,
+		protectedKernels: jailer.NewProtectedKernelClient(),
 		copyImportedKernel: func(ctx context.Context, sourcePath, destinationPath string) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -613,15 +621,21 @@ func (s *Service) Remove(ctx context.Context, kernel *model.KernelItem, force bo
 		)
 	}
 
+	if hasVMs || hasSnapshots {
+		return kernel, s.repo.SoftDelete(ctx, kernel.ID)
+	}
+	if _, err := s.protectedKernels.Remove(ctx, jailer.ProtectedKernelRemoveRequest{
+		CacheRoot: filepath.Dir(s.kernelsDir), KernelID: kernel.ID,
+	}); err != nil {
+		slog.Error("failed to retire protected kernel", "kernel_id", kernel.ID, "error", err)
+		return nil, err
+	}
 	if _, statErr := os.Stat(kernel.Path); statErr == nil {
 		if err := os.Remove(kernel.Path); err != nil {
 			slog.Warn("Failed to remove kernel file", "error", err)
 		}
 	}
 
-	if hasVMs || hasSnapshots {
-		return kernel, s.repo.SoftDelete(ctx, kernel.ID)
-	}
 	return kernel, s.repo.Delete(ctx, kernel.ID)
 }
 
@@ -1337,6 +1351,9 @@ func (s *Service) ImportKernel(
 		return nil, errs.WrapMsg(errs.CodeKernelBuildFailed, "install imported kernel", err)
 	}
 	stagingOwned = false
+	if err := s.ImportProtected(ctx, kernelID); err != nil {
+		return nil, err
+	}
 
 	now := time.Now().Format(time.RFC3339)
 
@@ -1366,6 +1383,17 @@ func (s *Service) ImportKernel(
 	shortID, _ := crypto.ShortenID(kernelID)
 	slog.Info("Imported kernel", "name", kernelItem.Name, "version", version, "arch", arch, "id", shortID)
 	return kernelItem, nil
+}
+
+// ImportProtected explicitly authorizes the published ID leaf before caller database projection.
+func (s *Service) ImportProtected(ctx context.Context, kernelID string) error {
+	_, err := s.protectedKernels.Import(ctx, jailer.ProtectedKernelImportRequest{
+		CacheRoot: filepath.Dir(s.kernelsDir), KernelID: kernelID,
+	})
+	if err != nil {
+		slog.Error("failed to import protected kernel", "kernel_id", kernelID, "error", err)
+	}
+	return err
 }
 
 // --- Version Resolution ---
