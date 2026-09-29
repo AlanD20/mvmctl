@@ -61,6 +61,33 @@ the isolation prerequisite after previously pausing it for a separate design dec
 - Preserve the approved vmstate bound, exact trusted RAM extent, and no-new-storage-quota policy. Source identity,
   immutability, and consistency are additional requirements, not substitutes for those checks.
 
+### Protected kernel retirement and explicit reimport
+
+Accepted on 2026-09-29; implementation and qualification are pending. Kernel removal currently leaves an unused
+protected copy behind. Applying the mutable-disk tombstone unchanged would instead prevent reimport of the same
+content-addressed kernel. The selected solution is a kernel-only, explicitly authorized retirement/import flow,
+not an ordinary-launch fallback or a general resurrection mechanism.
+
+- Named root kernel import and removal requests carry only the managed cache and kernel ID. Caller-supplied paths,
+  digests, generations, ownership, and force flags cannot authorize protected storage changes.
+- Removal requires both root-authoritative VM and snapshot reference sets to be empty. Before unlinking, root pins
+  and hashes the protected bytes, rechecks identity, and durably records the digest. Referenced public force-removal
+  remains a soft deletion that retains protected backing.
+- Pull and explicit import authorize protected publication after the ID-derived caller leaf exists and before the
+  public database projection is published. Launch and restore cannot reopen a retired kernel through caller state.
+- A completed retirement may be explicitly reimported only from identical bytes, proven by hashing the new protected
+  candidate against the retained root digest. Kernel-only intermediate phases retain candidate identity across retries;
+  publication rechecks the digest and advances the backing generation once. Retained bindings compare generation
+  when reopened, so a prior binding cannot select the new incarnation.
+- A kernel that was never protected has no historical digest; that case has its own recorded retirement state.
+  An incomplete initial import is not trusted retired content and refuses removal. Interrupted removal requires its
+  pre-unlink digest rather than reconstructing authority from caller data.
+- Existing owner, cache, store and logical-index bindings remain mandatory. Missing or renamed protected stores still
+  fail closed. Rootfs, volume, cloud-init and snapshot tombstone behavior is unchanged.
+
+Focused qualification must cover identical reimport and boot, changed-byte refusal, retained-reference refusal,
+interrupted retirement/reimport, stale-generation rejection and unchanged mutable-backing anti-resurrection behavior.
+
 ## Consequences
 
 Launch, API consumers, stop/recovery, exec peer checks, disk lifecycle, host reset, and snapshot operations need a
