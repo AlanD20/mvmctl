@@ -1441,7 +1441,7 @@ without `--daemonize` and without `--new-pid-ns`, so the receiver-owned PID, sta
 one task while it changes from the blocked mvmctl child, to Jailer, to the copied Firecracker. Jailer's PID file and all
 user-visible PID mirrors remain display evidence only.
 
-The current strict instance-record schema version is 5, with this lifecycle:
+The current strict instance-record schema version is 6, with this lifecycle:
 
 ```text
 absent  ── registerLaunching ──> launching ── activateVerifiedProcess ──> active
