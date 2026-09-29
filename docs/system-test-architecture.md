@@ -512,7 +512,7 @@ tests/system/
 | vm_lifecycle | 2 | `test_vm_lifecycle.py` | VM create/start/stop/pause |
 | jailer | 2 | `test_jailer.py`, `test_cgroup.py` | Canonical Jailer containment and cgroup-v2 enforcement — needs nested virt |
 | ssh | 2 | `test_ssh.py` | SSH into VMs |
-| console | 2 | `test_console.py` | Console output |
+| console | 2 | `test_console.py` | Root-observed relay lifecycle, live PTY attachment, caller PID-mirror isolation and preexisting counterfeit socket-peer rejection |
 | exec | 2 | `test_exec.py` | Vsock agent command execution — uses module-scoped VM, needs nested virt |
 | logs | 2 | `test_logs.py` | Log retrieval |
 | full_journeys | 2 | `test_full_journeys.py` | Multi-step scenarios |

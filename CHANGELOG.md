@@ -38,9 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Go/root/race gates pass. Its owned installed-candidate lifecycle journey passed twice (14.04/13.25s),
 > proving relay-only stop preserves Firecracker/vsock and VM restart renews the relay. A later real-PTY
 > attachment journey passed, then both console journeys passed twice (26.42/24.12s), including normal endpoint
-> admission, unique guest serial bytes, detach, terminal restoration and preserved VM liveness. Hostile endpoint
-> faults remain separate gates. An added caller-PID-mirror decoy case subsequently passed, followed by the complete
-> three-case console file (33.19s), proving forged display metadata cannot redirect discovery or relay signaling.
+> admission, unique guest serial bytes, detach, terminal restoration and preserved VM liveness. An added
+> caller-PID-mirror decoy case passed, proving forged display metadata cannot redirect discovery or relay signaling.
+> A subsequent preexisting counterfeit socket-peer case passed (9.75s), followed by the complete four-case console
+> file (46.08s) on the corrected installed candidate, with strict zero-other-outcome reports and checked cleanup.
+> This proves rejection before attachment, not resistance to endpoint replacement after observation; other hostile
+> endpoint and race faults remain separate gates.
 > Clean administrator/marker-only denial and reset, enabled GuestFS, adversarial recovery/fault checks,
 > reusable-base provisioning and fresh-kernel boot qualification, Tier 3, aarch64 runtime, GitHub CI, and final
 > release approval remain open. A fresh mirrored-source kernel producer completed with retained input/toolchain/
@@ -118,6 +121,10 @@ adversarial firewall and recovery cases remain separate release gates.
   caller-written decoy PID; only the recorded relay exits, while the independently pinned decoy and Firecracker
   survive and fresh guest exec succeeds. The focused case and complete three-case file passed with checked
   mirror restoration, normal owned cleanup and unchanged configuration.
+- Added an installed-candidate counterfeit console endpoint test. Root-backed discovery and attachment reject
+  a preexisting same-caller socket whose peer is not the authorized relay. The case preserves pinned relay and
+  Firecracker identities, proves fresh guest exec, and restores the exact endpoint before owned cleanup. The focused
+  case and complete four-case console file passed; replacement after observation remains outside this proof.
 - The complete 11-case logs module passed twice on the installed runner candidate with owned cleanup.
   Coverage verifies real guest identity and serial markers, byte-exact LF tails preserving carriage returns,
   VMM logging/follow, identifier lookup and retained logs after root-authoritative stop. It does not qualify
@@ -1224,6 +1231,10 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Console authority failures without an underlying cause now retain the error code's default internal class instead
+  of reporting an unknown class. Cause-bearing errors retain their existing inherited classification. The complete
+  affected Jailer Go package passed as root in the named runner, followed by the installed-candidate counterfeit
+  endpoint case and complete four-case console file.
 - The QA runner-image builder now installs `pkg-config`, which the official-kernel producer requires even when
   development headers are present. The existing provisioning/cleanup unit path passed inside the named runner;
   the fresh producer subsequently passed after installing the missing tool only there. An actual rebuilt reusable
