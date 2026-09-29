@@ -166,7 +166,7 @@ The custom base image (`mvm-test-runner:<candidate-version>`) is built once duri
 - qemu-utils, fakeroot, nftables, iptables, zstd
 - cloud-image-utils (for `--cloud-init-mode iso` tests)
 - util-linux (`script` supplies a PTY for interactive `mvm exec` tests)
-- build-essential, bc, bison, flex, libncurses-dev, libssl-dev, libelf-dev, git, curl, dwarves (for `kernel_build` tests)
+- build-essential, bc, bison, flex, libncurses-dev, libssl-dev, libelf-dev, pkg-config, git, curl, dwarves (for `kernel_build` tests)
 
 The orchestrator installs runner-VM contents automatically. The host needs an existing installed controller for outer
 resource management, but that controller is not the artifact under test and must not be overwritten by the candidate.

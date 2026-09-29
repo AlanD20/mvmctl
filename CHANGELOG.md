@@ -1221,6 +1221,9 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- The QA runner-image builder now installs `pkg-config`, which the official-kernel producer requires even when
+  development headers are present. The existing provisioning/cleanup unit path passed inside the named runner;
+  an actual rebuilt base and enabled kernel producer remain separate qualification gates.
 - Official-kernel builds now honor an explicit `MVM_TEMP_DIR` for both build scratch and compiled-cache selection,
   while unset or empty values preserve the spec's `build_dir`. Existing settings and flags remain. Three behavioral
   cache-hit cases, the complete kernel/infra packages, formatting and focused vet passed under Go 1.26.3 inside the
