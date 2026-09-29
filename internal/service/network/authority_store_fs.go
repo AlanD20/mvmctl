@@ -19,6 +19,14 @@ import (
 	"mvmctl/internal/infra"
 )
 
+type networkStoreDirectoryClass uint8
+
+const (
+	networkStoreAncestorDirectory networkStoreDirectoryClass = iota
+	networkStoreStateBaseDirectory
+	networkStorePrivateDirectory
+)
+
 const (
 	networkStoreDirectoryFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	networkStoreReadFlags      = unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
@@ -115,8 +123,9 @@ func openNetworkStoreRoot(
 	}
 	parentFD := rootFD
 	for index, name := range components {
-		managed := index >= 2
-		fd, openErr := openNetworkStoreDirectory(ctx, deps, parentFD, name, managed, policy)
+		// NOTE: Guest completion markers share mvmctl; only the network authority subtree is private.
+		directoryClass := networkStorePathDirectoryClass(index)
+		fd, openErr := openNetworkStoreDirectoryClass(ctx, deps, parentFD, name, directoryClass, policy)
 		if openErr != nil {
 			return nil, openErr
 		}
@@ -124,6 +133,17 @@ func openNetworkStoreRoot(
 		parentFD = fd
 	}
 	return &networkStoreRoot{deps: deps, policy: policy, stateFD: parentFD, retained: retained}, nil
+}
+
+func networkStorePathDirectoryClass(index int) networkStoreDirectoryClass {
+	switch {
+	case index < 2:
+		return networkStoreAncestorDirectory
+	case index == 2:
+		return networkStoreStateBaseDirectory
+	default:
+		return networkStorePrivateDirectory
+	}
 }
 
 func networkStorePathComponents(value string) ([4]string, error) {
@@ -152,6 +172,21 @@ func openNetworkStoreDirectory(
 	managed bool,
 	policy networkStorePolicy,
 ) (int, error) {
+	directoryClass := networkStoreAncestorDirectory
+	if managed {
+		directoryClass = networkStorePrivateDirectory
+	}
+	return openNetworkStoreDirectoryClass(ctx, deps, parentFD, name, directoryClass, policy)
+}
+
+func openNetworkStoreDirectoryClass(
+	ctx context.Context,
+	deps networkStoreDeps,
+	parentFD int,
+	name string,
+	directoryClass networkStoreDirectoryClass,
+	policy networkStorePolicy,
+) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return -1, networkAuthorityEffectError("open network authority directory "+name, err)
 	}
@@ -159,13 +194,13 @@ func openNetworkStoreDirectory(
 	fd, err := deps.openAt2(ctx, parentFD, name, how)
 	if err == nil {
 		if verifyErr := verifyNetworkStoreDirectory(
-			ctx, deps, fd, name, policy, networkStoreDirectoryMode, managed,
+			ctx, deps, fd, name, policy, networkStoreDirectoryMode, directoryClass == networkStorePrivateDirectory,
 		); verifyErr != nil {
 			return -1, closeRejectedNetworkStoreFD(ctx, deps, fd, verifyErr)
 		}
 		return fd, nil
 	}
-	if !managed || !errors.Is(err, unix.ENOENT) {
+	if directoryClass == networkStoreAncestorDirectory || !errors.Is(err, unix.ENOENT) {
 		return -1, networkAuthorityEffectError("open network authority directory "+name, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -182,7 +217,7 @@ func openNetworkStoreDirectory(
 	}
 	if !created {
 		if verifyErr := verifyNetworkStoreDirectory(
-			ctx, deps, fd, name, policy, networkStoreDirectoryMode, true,
+			ctx, deps, fd, name, policy, networkStoreDirectoryMode, directoryClass == networkStorePrivateDirectory,
 		); verifyErr != nil {
 			return -1, closeRejectedNetworkStoreFD(ctx, deps, fd, verifyErr)
 		}

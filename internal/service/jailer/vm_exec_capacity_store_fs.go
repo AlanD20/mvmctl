@@ -32,6 +32,14 @@ const (
 		unix.STATX_GID | unix.STATX_INO | unix.STATX_SIZE | unix.STATX_MTIME | unix.STATX_CTIME
 )
 
+type vmExecCapacityDirectoryClass uint8
+
+const (
+	vmExecCapacityAncestorDirectory vmExecCapacityDirectoryClass = iota
+	vmExecCapacityStateBaseDirectory
+	vmExecCapacityPrivateDirectory
+)
+
 var (
 	vmExecCapacityRecordNamePattern = regexp.MustCompile(`^[a-f0-9]{32}\.json$`)
 	vmExecCapacityTempNamePattern   = regexp.MustCompile(`^\.mvm-exec-[a-f0-9]{32}\.tmp$`)
@@ -127,8 +135,14 @@ func openVMExecCapacityStore(
 	}
 	parentFD := rootFD
 	for index, name := range components {
-		managed := index >= 2
-		fd, openErr := openVMExecCapacityDirectory(ctx, deps, parentFD, name, managed, policy)
+		// NOTE: Guest completion markers share mvmctl; capacity authority below it remains private.
+		directoryClass := vmExecCapacityAncestorDirectory
+		if index == 2 {
+			directoryClass = vmExecCapacityStateBaseDirectory
+		} else if index > 2 {
+			directoryClass = vmExecCapacityPrivateDirectory
+		}
+		fd, openErr := openVMExecCapacityDirectory(ctx, deps, parentFD, name, directoryClass, policy)
 		if openErr != nil {
 			return nil, openErr
 		}
@@ -161,25 +175,27 @@ func openVMExecCapacityDirectory(
 	deps vmExecCapacityStoreDeps,
 	parentFD int,
 	name string,
-	managed bool,
+	directoryClass vmExecCapacityDirectoryClass,
 	policy vmExecCapacityStorePolicy,
 ) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return -1, vmExecCapacityEffectError("open VM-exec capacity directory", err)
 	}
 	resolve := uint64(vmExecCapacityResolve)
-	if managed {
+	if directoryClass != vmExecCapacityAncestorDirectory {
 		resolve |= unix.RESOLVE_NO_XDEV
 	}
 	how := &unix.OpenHow{Flags: vmExecCapacityDirectoryFlags, Resolve: resolve}
 	fd, err := deps.openAt2(ctx, parentFD, name, how)
 	if err == nil {
-		if verifyErr := verifyVMExecCapacityDirectory(ctx, deps, fd, name, policy, managed); verifyErr != nil {
+		if verifyErr := verifyVMExecCapacityDirectory(
+			ctx, deps, fd, name, policy, directoryClass == vmExecCapacityPrivateDirectory,
+		); verifyErr != nil {
 			return -1, closeRejectedVMExecCapacityFD(ctx, deps, fd, verifyErr)
 		}
 		return fd, nil
 	}
-	if !managed || !errors.Is(err, unix.ENOENT) {
+	if directoryClass == vmExecCapacityAncestorDirectory || !errors.Is(err, unix.ENOENT) {
 		return -1, vmExecCapacityEffectError("open VM-exec capacity directory "+name, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -195,7 +211,9 @@ func openVMExecCapacityDirectory(
 		return -1, vmExecCapacityEffectError("open created VM-exec capacity directory "+name, err)
 	}
 	if !created {
-		if verifyErr := verifyVMExecCapacityDirectory(ctx, deps, fd, name, policy, true); verifyErr != nil {
+		if verifyErr := verifyVMExecCapacityDirectory(
+			ctx, deps, fd, name, policy, directoryClass == vmExecCapacityPrivateDirectory,
+		); verifyErr != nil {
 			return -1, closeRejectedVMExecCapacityFD(ctx, deps, fd, verifyErr)
 		}
 		return fd, nil

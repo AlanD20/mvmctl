@@ -18,6 +18,14 @@ const (
 	trustedReleaseStoreDirectoryMode  = uint32(0700)
 )
 
+type trustedReleaseDirectoryClass uint8
+
+const (
+	trustedReleaseAncestorDirectory trustedReleaseDirectoryClass = iota
+	trustedReleaseStateBaseDirectory
+	trustedReleasePrivateDirectory
+)
+
 type trustedReleaseStoreDeps struct {
 	open                     func(context.Context, string, int, uint32) (int, error)
 	openAt                   func(context.Context, int, string, int, uint32) (int, error)
@@ -115,15 +123,21 @@ func openTrustedReleaseStore(
 
 	parentFD := rootFD
 	for index, name := range components {
-		managed := index >= 2
-		fd, openErr := openTrustedReleaseStoreComponent(
+		// NOTE: Guest completion markers share mvmctl; trusted release directories below it remain private.
+		directoryClass := trustedReleaseAncestorDirectory
+		if index == 2 {
+			directoryClass = trustedReleaseStateBaseDirectory
+		} else if index > 2 {
+			directoryClass = trustedReleasePrivateDirectory
+		}
+		fd, openErr := openTrustedReleaseStoreComponentClass(
 			ctx,
 			deps,
 			parentFD,
 			name,
 			policy,
-			managed,
-			allowCreateManaged && managed,
+			directoryClass,
+			allowCreateManaged && directoryClass != trustedReleaseAncestorDirectory,
 		)
 		if openErr != nil {
 			return nil, openErr
@@ -151,18 +165,36 @@ func openTrustedReleaseStoreComponent(
 	managed bool,
 	allowCreate bool,
 ) (int, error) {
+	directoryClass := trustedReleaseAncestorDirectory
+	if managed {
+		directoryClass = trustedReleasePrivateDirectory
+	}
+	return openTrustedReleaseStoreComponentClass(ctx, deps, parentFD, name, policy, directoryClass, allowCreate)
+}
+
+func openTrustedReleaseStoreComponentClass(
+	ctx context.Context,
+	deps trustedReleaseStoreDeps,
+	parentFD int,
+	name string,
+	policy trustedReleaseStorePolicy,
+	directoryClass trustedReleaseDirectoryClass,
+	allowCreate bool,
+) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return -1, trustedReleaseStoreError("open trusted release store component "+name, err)
 	}
 	fd, err := deps.openAt(ctx, parentFD, name, trustedReleaseStoreDirectoryFlags, 0)
 	if err == nil {
-		if verifyErr := verifyTrustedReleaseStoreDirectory(ctx, deps, fd, name, policy, managed); verifyErr != nil {
+		if verifyErr := verifyTrustedReleaseStoreDirectory(
+			ctx, deps, fd, name, policy, directoryClass == trustedReleasePrivateDirectory,
+		); verifyErr != nil {
 			return -1, closeRejectedTrustedReleaseStoreDirectory(ctx, deps, fd, name, verifyErr)
 		}
 		return fd, nil
 	}
 	if !errors.Is(err, unix.ENOENT) || !allowCreate {
-		return -1, classifyTrustedReleaseStoreOpenError(name, err, managed)
+		return -1, classifyTrustedReleaseStoreOpenError(name, err, directoryClass != trustedReleaseAncestorDirectory)
 	}
 
 	mkdirErr := deps.mkdirAt(ctx, parentFD, name, trustedReleaseStoreDirectoryMode)
@@ -203,7 +235,9 @@ func openTrustedReleaseStoreComponent(
 			)
 		}
 	}
-	if err := verifyTrustedReleaseStoreDirectory(ctx, deps, openedFD, name, policy, true); err != nil {
+	if err := verifyTrustedReleaseStoreDirectory(
+		ctx, deps, openedFD, name, policy, created || directoryClass == trustedReleasePrivateDirectory,
+	); err != nil {
 		return -1, closeRejectedTrustedReleaseStoreDirectory(ctx, deps, openedFD, name, err)
 	}
 	if err := deps.fsync(ctx, openedFD); err != nil {

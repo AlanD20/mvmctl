@@ -42,7 +42,14 @@ func hostResetReservedLink(link routeLinkObservation) bool {
 // openHostResetNetworkStore admits an existing hierarchy or its exact absence. Unlike the ordinary
 // mutation opener, it creates no persistent directories while proving that no inventory exists.
 func openHostResetNetworkStore(ctx context.Context) (_ *networkStoreRoot, returnErr error) {
-	deps, policy := realNetworkStoreDeps(), productionNetworkStorePolicy()
+	return openHostResetNetworkStoreWithDeps(ctx, realNetworkStoreDeps(), productionNetworkStorePolicy())
+}
+
+func openHostResetNetworkStoreWithDeps(
+	ctx context.Context,
+	deps networkStoreDeps,
+	policy networkStorePolicy,
+) (_ *networkStoreRoot, returnErr error) {
 	retained := make([]int, 0, 5)
 	transferred := false
 	defer func() {
@@ -74,8 +81,15 @@ func openHostResetNetworkStore(ctx context.Context) (_ *networkStoreRoot, return
 			return nil, networkAuthorityEffectError("open host reset network hierarchy", err)
 		}
 		retained = append(retained, child)
-		if err := verifyNetworkStoreDirectory(ctx, deps, child, name, policy,
-			networkStoreDirectoryMode, index >= 2); err != nil {
+		if err := verifyNetworkStoreDirectory(
+			ctx,
+			deps,
+			child,
+			name,
+			policy,
+			networkStoreDirectoryMode,
+			networkStorePathDirectoryClass(index) == networkStorePrivateDirectory,
+		); err != nil {
 			return nil, err
 		}
 		fd = child
@@ -171,7 +185,15 @@ func (inventory *hostResetNetworkInventory) readHistory(
 		returnErr = appendNetworkAuthorityError(returnErr, "close host reset network history",
 			owner.deps.close(context.WithoutCancel(ctx), fd))
 	}()
-	if err := verifyNetworkStoreDirectory(ctx, owner.deps, fd, name, owner.policy, networkStoreDirectoryMode, true); err != nil {
+	if err := verifyNetworkStoreDirectory(
+		ctx,
+		owner.deps,
+		fd,
+		name,
+		owner.policy,
+		networkStoreDirectoryMode,
+		true,
+	); err != nil {
 		return err
 	}
 	names, err := owner.deps.readDirNames(ctx, fd)

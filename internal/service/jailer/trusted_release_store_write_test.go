@@ -73,11 +73,11 @@ func TestOpenTrustedReleaseStoreForWriteRejectsUnsafeManagedBase(t *testing.T) {
 			require.NoError(t, os.Mkdir(target, 0700))
 			require.NoError(t, os.Symlink(target, fixture.binariesPath))
 		},
-		"mvmctl wrong mode": func(t *testing.T, fixture *trustedReleaseStoreFixture) {
-			require.NoError(t, os.Chmod(fixture.mvmctlPath, 0755))
+		"mvmctl writable mode": func(t *testing.T, fixture *trustedReleaseStoreFixture) {
+			require.NoError(t, os.Chmod(fixture.mvmctlPath, 0775))
 		},
 		"binaries wrong mode": func(t *testing.T, fixture *trustedReleaseStoreFixture) {
-			require.NoError(t, os.Chmod(fixture.binariesPath, 0750))
+			require.NoError(t, os.Chmod(fixture.binariesPath, 0755))
 		},
 	}
 	for name, mutate := range tests {
@@ -92,6 +92,71 @@ func TestOpenTrustedReleaseStoreForWriteRejectsUnsafeManagedBase(t *testing.T) {
 			assert.Equal(t, errs.CodeBinaryUntrusted, errs.AsDomainError(err).Code)
 		})
 	}
+}
+
+// Rationale: creation below a shared state base must neither repair it nor bypass its trusted-owner checks.
+func TestOpenTrustedReleaseStoreForWritePreservesSharedStateBase(t *testing.T) {
+	t.Parallel()
+	for _, wrongOwner := range []bool{true, false} {
+		name := "safe shared base"
+		if wrongOwner {
+			name = "unexpected shared owner"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newTrustedReleaseStoreFixture(t)
+			require.NoError(t, os.RemoveAll(fixture.binariesPath))
+			require.NoError(t, os.Chmod(fixture.mvmctlPath, 0755))
+			var before unix.Stat_t
+			require.NoError(t, unix.Lstat(fixture.mvmctlPath, &before))
+			realFstat := fixture.deps.fstat
+			fixture.deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
+				if err := realFstat(ctx, fd, stat); err != nil {
+					return err
+				}
+				if wrongOwner && stat.Ino == before.Ino && stat.Dev == before.Dev {
+					stat.Uid++
+				}
+				return nil
+			}
+			lease, err := openTrustedReleaseStoreForWrite(t.Context(), fixture.deps, fixture.policy)
+			if wrongOwner {
+				require.Error(t, err)
+				assert.Nil(t, lease)
+				assert.NoDirExists(t, fixture.binariesPath)
+			} else {
+				require.NoError(t, err)
+				require.NoError(t, lease.Release(t.Context()))
+				assertExactMode(t, fixture.binariesPath, 0700)
+				assert.NoDirExists(t, fixture.architecturePath)
+			}
+			var after unix.Stat_t
+			require.NoError(t, unix.Lstat(fixture.mvmctlPath, &after))
+			assert.Equal(t, before.Ino, after.Ino)
+			assert.Equal(t, before.Mode, after.Mode)
+			assert.Equal(t, before.Uid, after.Uid)
+			assert.Equal(t, before.Gid, after.Gid)
+		})
+	}
+}
+
+func TestOpenTrustedReleaseStoreForWriteAcceptsConcurrentSharedStateBaseWithoutRepair(t *testing.T) {
+	t.Parallel()
+	fixture := newTrustedReleaseStoreFixture(t)
+	require.NoError(t, os.RemoveAll(fixture.mvmctlPath))
+	realMkdirAt := fixture.deps.mkdirAt
+	fixture.deps.mkdirAt = func(ctx context.Context, parentFD int, name string, mode uint32) error {
+		if name == "mvmctl" {
+			require.NoError(t, os.Mkdir(fixture.mvmctlPath, 0755))
+			return unix.EEXIST
+		}
+		return realMkdirAt(ctx, parentFD, name, mode)
+	}
+	lease, err := openTrustedReleaseStoreForWrite(t.Context(), fixture.deps, fixture.policy)
+	require.NoError(t, err)
+	require.NoError(t, lease.Release(t.Context()))
+	assertExactMode(t, fixture.mvmctlPath, 0755)
+	assertExactMode(t, fixture.binariesPath, 0700)
 }
 
 func TestOpenTrustedReleaseStoreForWriteTreatsEEXISTAsConcurrentCreation(t *testing.T) {
@@ -201,7 +266,7 @@ func TestOpenTrustedReleaseStoreForWriteDoesNotRepairConcurrentUnsafeDirectory(t
 	fixture.deps.mkdirAt = func(ctx context.Context, parentFD int, name string, mode uint32) error {
 		require.NoError(t, realMkdirAt(ctx, parentFD, name, mode))
 		if name == "mvmctl" {
-			require.NoError(t, os.Chmod(fixture.mvmctlPath, 0755))
+			require.NoError(t, os.Chmod(fixture.mvmctlPath, 0775))
 		}
 		return unix.EEXIST
 	}
@@ -210,7 +275,7 @@ func TestOpenTrustedReleaseStoreForWriteDoesNotRepairConcurrentUnsafeDirectory(t
 	assert.Nil(t, lease)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeBinaryUntrusted, errs.AsDomainError(err).Code)
-	assertExactMode(t, fixture.mvmctlPath, 0755)
+	assertExactMode(t, fixture.mvmctlPath, 0775)
 }
 
 func TestOpenTrustedReleaseStoreForWriteSyncsNewChildAndParent(t *testing.T) {
@@ -308,7 +373,7 @@ func TestOpenTrustedReleaseStoreForWritePreservesPrimaryErrorWhenCleanupFails(t 
 	t.Parallel()
 
 	fixture := newTrustedReleaseStoreFixture(t)
-	require.NoError(t, os.Chmod(fixture.mvmctlPath, 0755))
+	require.NoError(t, os.Chmod(fixture.mvmctlPath, 0775))
 	realClose := fixture.deps.close
 	fixture.deps.close = func(ctx context.Context, fd int) error {
 		return errors.Join(realClose(ctx, fd), unix.EIO)

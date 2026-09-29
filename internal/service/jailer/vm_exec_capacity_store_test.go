@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"mvmctl/pkg/errs"
 )
@@ -37,6 +38,84 @@ func TestVMExecCapacityStoreCreatesExactTreeAndRoundTripsRecord(t *testing.T) {
 	assertExactMode(t, filepath.Join(root, "var/lib/mvmctl/allocations"), 0700)
 	assertExactMode(t, directory, 0700)
 	assertExactMode(t, filepath.Join(directory, testVMExecReservationID+".json"), 0600)
+}
+
+// Rationale: global capacity authority remains private even when the common state base also holds guest markers.
+func TestVMExecCapacityStoreSharedStateBaseAndPrivateDirectories(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		baseMode    os.FileMode
+		privateMode os.FileMode
+		wrongOwner  bool
+		wantErr     bool
+	}{
+		"writable shared base":         {baseMode: 0775, wantErr: true},
+		"unexpected shared owner":      {baseMode: 0755, wrongOwner: true, wantErr: true},
+		"permissive private directory": {baseMode: 0755, privateMode: 0755, wantErr: true},
+		"existing shared base":         {baseMode: 0755},
+		"missing shared base":          {},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := prepareInstanceAuthorityTestRoot(t)
+			base := filepath.Join(root, "var/lib/mvmctl")
+			private := filepath.Join(base, "allocations")
+			var before unix.Stat_t
+			if tc.baseMode != 0 {
+				require.NoError(t, os.Mkdir(base, tc.baseMode))
+				require.NoError(t, os.Chmod(base, tc.baseMode))
+				require.NoError(t, unix.Lstat(base, &before))
+			}
+			if tc.privateMode != 0 {
+				require.NoError(t, os.Mkdir(private, tc.privateMode))
+				require.NoError(t, os.Chmod(private, tc.privateMode))
+			}
+			deps := realVMExecCapacityStoreDeps()
+			realStatx := deps.statx
+			deps.statx = func(ctx context.Context, fd, flags, mask int, stat *unix.Statx_t) error {
+				if err := realStatx(ctx, fd, flags, mask, stat); err != nil {
+					return err
+				}
+				if tc.wrongOwner && stat.Ino == before.Ino {
+					stat.Uid++
+				}
+				return nil
+			}
+			store, err := openVMExecCapacityStore(t.Context(), deps, vmExecCapacityStorePolicy{
+				rootPath: root, stateRoot: vmExecCapacityStateRoot,
+				expectedUID: uint32(os.Geteuid()), expectedGID: uint32(os.Getegid()),
+			})
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, store)
+				assert.NoDirExists(t, filepath.Join(private, "exec"))
+				if tc.privateMode == 0 {
+					assert.NoDirExists(t, private)
+				}
+			} else {
+				require.NoError(t, err)
+				require.NoError(t, store.Release(t.Context()))
+				assertExactMode(t, private, 0700)
+				assertExactMode(t, filepath.Join(private, "exec"), 0700)
+			}
+			var after unix.Stat_t
+			require.NoError(t, unix.Lstat(base, &after))
+			if tc.baseMode != 0 {
+				assert.Equal(t, before.Ino, after.Ino)
+				assert.Equal(t, before.Mode, after.Mode)
+				assert.Equal(t, before.Uid, after.Uid)
+				assert.Equal(t, before.Gid, after.Gid)
+			} else {
+				assert.Equal(t, uint32(0700), after.Mode&07777)
+				assert.Equal(t, uint32(os.Geteuid()), after.Uid)
+				assert.Equal(t, uint32(os.Getegid()), after.Gid)
+			}
+			if tc.privateMode != 0 {
+				assertExactMode(t, private, tc.privateMode)
+			}
+		})
+	}
 }
 
 func TestVMExecCapacityStoreRejectsAmbiguousEntriesAndUnsafeRecords(t *testing.T) {

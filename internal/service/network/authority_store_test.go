@@ -422,9 +422,139 @@ func TestNetworkStoreRejectsUnsafeManagedDirectoryWithoutRepair(t *testing.T) {
 	store, err := openNetworkStoreRoot(t.Context(), realNetworkStoreDeps(), policy)
 	assert.Nil(t, store)
 	require.Error(t, err)
-	info, statErr := os.Stat(filepath.Join(root, "var/lib/mvmctl"))
+	info, statErr := os.Stat(filepath.Join(root, "var/lib/mvmctl/networks"))
 	require.NoError(t, statErr)
 	assert.Equal(t, os.FileMode(0755), info.Mode().Perm())
+}
+
+// Rationale: guest completion markers share the state base, while network authority remains private.
+func TestNetworkStoreSharedStateBaseAndPrivateDirectories(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		baseMode    os.FileMode
+		privateMode os.FileMode
+		wrongOwner  bool
+		wantErr     bool
+	}{
+		"writable shared base":         {baseMode: 0775, wantErr: true},
+		"unexpected shared owner":      {baseMode: 0755, wrongOwner: true, wantErr: true},
+		"permissive private directory": {baseMode: 0755, privateMode: 0755, wantErr: true},
+		"existing shared base":         {baseMode: 0755},
+		"missing shared base":          {},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := secureNetworkTestRoot(t)
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib"), 0755))
+			base := filepath.Join(root, "var/lib/mvmctl")
+			private := filepath.Join(base, "networks")
+			var before unix.Stat_t
+			if tc.baseMode != 0 {
+				require.NoError(t, os.Mkdir(base, tc.baseMode))
+				require.NoError(t, os.Chmod(base, tc.baseMode))
+				require.NoError(t, unix.Lstat(base, &before))
+			}
+			if tc.privateMode != 0 {
+				require.NoError(t, os.Mkdir(private, tc.privateMode))
+				require.NoError(t, os.Chmod(private, tc.privateMode))
+			}
+			deps := realNetworkStoreDeps()
+			realFstat := deps.fstat
+			deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
+				if err := realFstat(ctx, fd, stat); err != nil {
+					return err
+				}
+				if tc.wrongOwner && stat.Ino == before.Ino && stat.Dev == before.Dev {
+					stat.Uid++
+				}
+				return nil
+			}
+			store, err := openNetworkStoreRoot(t.Context(), deps, networkStorePolicy{
+				rootPath: root, stateRoot: "/var/lib/mvmctl/networks",
+				expectedUID: uint32(os.Geteuid()), expectedGID: uint32(os.Getegid()),
+			})
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, store)
+			} else {
+				require.NoError(t, err)
+				require.NoError(t, store.Release(t.Context()))
+				info, statErr := os.Lstat(private)
+				require.NoError(t, statErr)
+				assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
+			}
+			var after unix.Stat_t
+			require.NoError(t, unix.Lstat(base, &after))
+			if tc.baseMode != 0 {
+				assert.Equal(t, before.Ino, after.Ino)
+				assert.Equal(t, before.Mode, after.Mode)
+				assert.Equal(t, before.Uid, after.Uid)
+				assert.Equal(t, before.Gid, after.Gid)
+			} else {
+				assert.Equal(t, uint32(0700), after.Mode&07777)
+				assert.Equal(t, uint32(os.Geteuid()), after.Uid)
+				assert.Equal(t, uint32(os.Getegid()), after.Gid)
+			}
+			if tc.wantErr && tc.privateMode == 0 {
+				assert.NoDirExists(t, private)
+			}
+			if tc.privateMode != 0 {
+				info, statErr := os.Lstat(private)
+				require.NoError(t, statErr)
+				assert.Equal(t, tc.privateMode, info.Mode().Perm())
+			}
+		})
+	}
+}
+
+func TestHostResetNetworkStorePreservesSharedBaseAndAbsence(t *testing.T) {
+	t.Parallel()
+	for _, state := range []string{"missing base", "missing private", "existing private", "unsafe private"} {
+		t.Run(state, func(t *testing.T) {
+			t.Parallel()
+			root := secureNetworkTestRoot(t)
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib"), 0755))
+			base := filepath.Join(root, "var/lib/mvmctl")
+			private := filepath.Join(base, "networks")
+			if state != "missing base" {
+				require.NoError(t, os.Mkdir(base, 0755))
+			}
+			if state == "existing private" {
+				require.NoError(t, os.Mkdir(private, 0700))
+			}
+			if state == "unsafe private" {
+				require.NoError(t, os.Mkdir(private, 0755))
+			}
+			store, err := openHostResetNetworkStoreWithDeps(t.Context(), realNetworkStoreDeps(), networkStorePolicy{
+				rootPath: root, stateRoot: "/var/lib/mvmctl/networks",
+				expectedUID: uint32(os.Geteuid()), expectedGID: uint32(os.Getegid()),
+			})
+			if state == "unsafe private" {
+				require.Error(t, err)
+				assert.Nil(t, store)
+				info, statErr := os.Lstat(private)
+				require.NoError(t, statErr)
+				assert.Equal(t, os.FileMode(0755), info.Mode().Perm())
+				return
+			}
+			require.NoError(t, err)
+			if state == "existing private" {
+				require.NotNil(t, store)
+				require.NoError(t, store.Release(t.Context()))
+			} else {
+				assert.Nil(t, store)
+				assert.NoDirExists(t, private)
+			}
+			if state == "missing base" {
+				assert.NoDirExists(t, base)
+			} else {
+				info, statErr := os.Lstat(base)
+				require.NoError(t, statErr)
+				assert.Equal(t, os.FileMode(0755), info.Mode().Perm())
+			}
+		})
+	}
 }
 
 // Rationale: release owns descriptor lifetime and must cache one exact result while closing in reverse acquisition order.

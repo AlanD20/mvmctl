@@ -96,7 +96,8 @@ func TestOpenTrustedReleaseStoreRejectsUnsafeDirectoryMetadata(t *testing.T) {
 		mode  os.FileMode
 	}{
 		"writable ancestor":       {level: "var", mode: 0775},
-		"permissive managed root": {level: "mvmctl", mode: 0755},
+		"writable shared root":    {level: "mvmctl", mode: 0775},
+		"permissive binaries":     {level: "binaries", mode: 0755},
 		"wrong binaries mode":     {level: "binaries", mode: 0750},
 		"wrong architecture mode": {level: "architecture", mode: 0711},
 		"wrong version mode":      {level: "version", mode: 0755},
@@ -117,6 +118,27 @@ func TestOpenTrustedReleaseStoreRejectsUnsafeDirectoryMetadata(t *testing.T) {
 			assert.Equal(t, errs.CodeBinaryUntrusted, errs.AsDomainError(err).Code)
 		})
 	}
+}
+
+func TestOpenTrustedReleaseStoreReadsThroughSharedStateBaseWithoutRepair(t *testing.T) {
+	t.Parallel()
+	fixture := newTrustedReleaseStoreFixture(t)
+	require.NoError(t, os.Chmod(fixture.mvmctlPath, 0755))
+	var before unix.Stat_t
+	require.NoError(t, unix.Lstat(fixture.mvmctlPath, &before))
+	store, err := openTrustedReleaseStoreForRead(t.Context(), fixture.deps, fixture.policy)
+	require.NoError(t, err)
+	directory, err := store.openInstalledSlot(t.Context(), fixture.slot)
+	require.NoError(t, err)
+	require.NoError(t, directory.Release(t.Context()))
+	require.NoError(t, store.Release(t.Context()))
+	var after unix.Stat_t
+	require.NoError(t, unix.Lstat(fixture.mvmctlPath, &after))
+	assert.Equal(t, before.Ino, after.Ino)
+	assert.Equal(t, before.Mode, after.Mode)
+	assert.Equal(t, before.Uid, after.Uid)
+	assert.Equal(t, before.Gid, after.Gid)
+	assertExactMode(t, fixture.binariesPath, 0700)
 }
 
 func TestOpenTrustedReleaseStoreRejectsNonDirectoryComponent(t *testing.T) {

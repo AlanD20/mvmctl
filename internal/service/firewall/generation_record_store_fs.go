@@ -18,6 +18,14 @@ import (
 
 var generationRecordTempNamePattern = regexp.MustCompile(`^\.generation-[a-f0-9]{32}\.tmp$`)
 
+type generationRecordDirectoryClass uint8
+
+const (
+	generationRecordAncestorDirectory generationRecordDirectoryClass = iota
+	generationRecordStateBaseDirectory
+	generationRecordPrivateDirectory
+)
+
 const (
 	generationRecordDirectoryFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	generationRecordReadFlags      = unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
@@ -127,14 +135,15 @@ func openGenerationRecordStore(
 
 	parentFD := rootFD
 	for index, name := range names {
-		managed := index >= 2
+		// NOTE: Guest completion markers share mvmctl; only the firewall authority subtree is private.
+		directoryClass := generationRecordPathDirectoryClass(index)
 		// CRITICAL: /var, /var/lib, and the managed mvmctl root may each be a deliberate local mount boundary.
 		// RESOLVE_NO_XDEV begins only after mvmctl is pinned, so no later firewall authority component can cross it.
 		resolve := uint64(generationRecordTraversalResolve)
 		if index >= 3 {
 			resolve = generationRecordManagedResolve
 		}
-		fd, openErr := openGenerationRecordDirectory(ctx, deps, parentFD, name, managed, resolve, policy)
+		fd, openErr := openGenerationRecordDirectory(ctx, deps, parentFD, name, directoryClass, resolve, policy)
 		if openErr != nil {
 			return nil, openErr
 		}
@@ -144,6 +153,17 @@ func openGenerationRecordStore(
 	return &generationRecordStore{state: &generationRecordStoreState{
 		deps: deps, policy: policy, directory: parentFD, retained: retained, active: true,
 	}}, nil
+}
+
+func generationRecordPathDirectoryClass(index int) generationRecordDirectoryClass {
+	switch {
+	case index < 2:
+		return generationRecordAncestorDirectory
+	case index == 2:
+		return generationRecordStateBaseDirectory
+	default:
+		return generationRecordPrivateDirectory
+	}
 }
 
 func generationRecordPathComponents(value string) ([4]string, error) {
@@ -167,7 +187,7 @@ func openGenerationRecordDirectory(
 	deps generationRecordStoreDeps,
 	parentFD int,
 	name string,
-	managed bool,
+	directoryClass generationRecordDirectoryClass,
 	resolve uint64,
 	policy generationRecordStorePolicy,
 ) (int, error) {
@@ -177,12 +197,14 @@ func openGenerationRecordDirectory(
 	how := &unix.OpenHow{Flags: generationRecordDirectoryFlags, Resolve: resolve}
 	fd, err := deps.openAt2(ctx, parentFD, name, how)
 	if err == nil {
-		if verifyErr := verifyGenerationRecordDirectory(ctx, deps, fd, name, policy, managed); verifyErr != nil {
+		if verifyErr := verifyGenerationRecordDirectory(
+			ctx, deps, fd, name, policy, directoryClass == generationRecordPrivateDirectory,
+		); verifyErr != nil {
 			return -1, closeRejectedGenerationRecordFD(ctx, deps, fd, verifyErr)
 		}
 		return fd, nil
 	}
-	if !managed || !errors.Is(err, unix.ENOENT) {
+	if directoryClass == generationRecordAncestorDirectory || !errors.Is(err, unix.ENOENT) {
 		return -1, generationAuthorityError("open firewall generation directory "+name, err, nil)
 	}
 	if err := ctx.Err(); err != nil {
@@ -198,7 +220,9 @@ func openGenerationRecordDirectory(
 		return -1, generationAuthorityError("open created firewall generation directory "+name, err, nil)
 	}
 	if !created {
-		if verifyErr := verifyGenerationRecordDirectory(ctx, deps, fd, name, policy, true); verifyErr != nil {
+		if verifyErr := verifyGenerationRecordDirectory(
+			ctx, deps, fd, name, policy, directoryClass == generationRecordPrivateDirectory,
+		); verifyErr != nil {
 			return -1, closeRejectedGenerationRecordFD(ctx, deps, fd, verifyErr)
 		}
 		return fd, nil

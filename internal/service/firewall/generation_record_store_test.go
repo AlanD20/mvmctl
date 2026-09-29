@@ -203,7 +203,7 @@ func TestGenerationRecordStoreRejectsWrongManagedDirectoryOwnerWithoutRepair(t *
 				if err := realFstat(ctx, fd, stat); err != nil {
 					return err
 				}
-				if stat.Mode&unix.S_IFMT == unix.S_IFDIR && directories.Add(1) == 4 {
+				if stat.Mode&unix.S_IFMT == unix.S_IFDIR && directories.Add(1) == 5 {
 					mutate(stat)
 				}
 				return nil
@@ -222,8 +222,8 @@ func TestGenerationRecordStoreRejectsUnsafeManagedDirectoryWithoutRepair(t *test
 	t.Parallel()
 
 	root := prepareGenerationRecordTestRoot(t)
-	managedPath := filepath.Join(root, "var/lib/mvmctl")
-	require.NoError(t, os.Mkdir(managedPath, 0755))
+	managedPath := filepath.Join(root, "var/lib/mvmctl/firewall")
+	require.NoError(t, os.MkdirAll(managedPath, 0755))
 
 	store, err := openGenerationRecordStore(
 		t.Context(),
@@ -235,6 +235,120 @@ func TestGenerationRecordStoreRejectsUnsafeManagedDirectoryWithoutRepair(t *test
 	info, statErr := os.Lstat(managedPath)
 	require.NoError(t, statErr)
 	assert.Equal(t, os.FileMode(0755), info.Mode().Perm())
+}
+
+// Rationale: private firewall metadata must coexist with guest markers beneath a safe shared state base.
+func TestGenerationRecordStoreSharedStateBaseAndPrivateDirectories(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		baseMode   os.FileMode
+		wrongOwner bool
+		wantErr    bool
+	}{
+		"writable shared base":    {baseMode: 0775, wantErr: true},
+		"unexpected shared owner": {baseMode: 0755, wrongOwner: true, wantErr: true},
+		"existing shared base":    {baseMode: 0755},
+		"missing shared base":     {},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := prepareGenerationRecordTestRoot(t)
+			base := filepath.Join(root, "var/lib/mvmctl")
+			private := filepath.Join(base, "firewall")
+			var before unix.Stat_t
+			if tc.baseMode != 0 {
+				require.NoError(t, os.Mkdir(base, tc.baseMode))
+				require.NoError(t, os.Chmod(base, tc.baseMode))
+				require.NoError(t, unix.Lstat(base, &before))
+			}
+			deps := realGenerationRecordStoreDeps()
+			realFstat := deps.fstat
+			deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
+				if err := realFstat(ctx, fd, stat); err != nil {
+					return err
+				}
+				if tc.wrongOwner && stat.Ino == before.Ino && stat.Dev == before.Dev {
+					stat.Uid++
+				}
+				return nil
+			}
+			store, err := openGenerationRecordStore(t.Context(), deps, testGenerationRecordStorePolicy(root))
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, store)
+				assert.NoDirExists(t, private)
+			} else {
+				require.NoError(t, err)
+				require.NoError(t, store.Release(t.Context()))
+				assertGenerationRecordExactMode(t, private, 0700)
+			}
+			var after unix.Stat_t
+			require.NoError(t, unix.Lstat(base, &after))
+			if tc.baseMode != 0 {
+				assert.Equal(t, before.Ino, after.Ino)
+				assert.Equal(t, before.Mode, after.Mode)
+				assert.Equal(t, before.Uid, after.Uid)
+				assert.Equal(t, before.Gid, after.Gid)
+			} else {
+				assert.Equal(t, uint32(0700), after.Mode&07777)
+				assert.Equal(t, uint32(os.Geteuid()), after.Uid)
+				assert.Equal(t, uint32(os.Getegid()), after.Gid)
+			}
+		})
+	}
+}
+
+func TestHostResetRecordStorePreservesSharedBaseAndAbsence(t *testing.T) {
+	t.Parallel()
+	for _, state := range []string{"missing base", "missing private", "existing private", "unsafe private"} {
+		t.Run(state, func(t *testing.T) {
+			t.Parallel()
+			root := prepareGenerationRecordTestRoot(t)
+			base := filepath.Join(root, "var/lib/mvmctl")
+			private := filepath.Join(base, "firewall")
+			if state != "missing base" {
+				require.NoError(t, os.Mkdir(base, 0755))
+			}
+			if state == "existing private" {
+				require.NoError(t, os.Mkdir(private, 0700))
+			}
+			if state == "unsafe private" {
+				require.NoError(t, os.Mkdir(private, 0755))
+			}
+			store, absence, err := openHostResetRecordStoreWithDeps(
+				t.Context(), realGenerationRecordStoreDeps(), testGenerationRecordStorePolicy(root),
+			)
+			if state == "unsafe private" {
+				require.Error(t, err)
+				assert.Nil(t, store)
+				assert.Nil(t, absence)
+				assertGenerationRecordExactMode(t, private, 0755)
+				return
+			}
+			require.NoError(t, err)
+			if state == "existing private" {
+				require.NotNil(t, store)
+				assert.Nil(t, absence)
+				require.NoError(t, store.Release(t.Context()))
+			} else {
+				assert.Nil(t, store)
+				require.NotNil(t, absence)
+				wantName := "firewall"
+				if state == "missing base" {
+					wantName = "mvmctl"
+				}
+				assert.Equal(t, wantName, absence.name)
+				require.NoError(t, closeGenerationRecordFDs(t.Context(), absence.deps, absence.retained))
+				assert.NoDirExists(t, private)
+			}
+			if state == "missing base" {
+				assert.NoDirExists(t, base)
+			} else {
+				assertGenerationRecordExactMode(t, base, 0755)
+			}
+		})
+	}
 }
 
 func TestGenerationRecordStoreNeverOverwritesExistingOrRacedState(t *testing.T) {

@@ -21,8 +21,16 @@ type hostResetStoreAbsence struct {
 func openHostResetRecordStore(
 	ctx context.Context,
 ) (_ *generationRecordStore, _ *hostResetStoreAbsence, returnErr error) {
-	deps := realGenerationRecordStoreDeps()
-	policy := productionGenerationRecordStorePolicy()
+	return openHostResetRecordStoreWithDeps(
+		ctx, realGenerationRecordStoreDeps(), productionGenerationRecordStorePolicy(),
+	)
+}
+
+func openHostResetRecordStoreWithDeps(
+	ctx context.Context,
+	deps generationRecordStoreDeps,
+	policy generationRecordStorePolicy,
+) (_ *generationRecordStore, _ *hostResetStoreAbsence, returnErr error) {
 	names, err := generationRecordPathComponents(infra.FirewallGenerationRoot)
 	if err != nil {
 		return nil, nil, err
@@ -77,7 +85,9 @@ func openHostResetRecordStore(
 			return nil, nil, generationAuthorityError("open existing firewall reset directory "+name, err, nil)
 		}
 		retained = append(retained, fd)
-		if err := verifyGenerationRecordDirectory(ctx, deps, fd, name, policy, index >= 2); err != nil {
+		if err := verifyGenerationRecordDirectory(
+			ctx, deps, fd, name, policy, generationRecordPathDirectoryClass(index) == generationRecordPrivateDirectory,
+		); err != nil {
 			return nil, nil, err
 		}
 		parent = fd
