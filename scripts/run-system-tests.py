@@ -428,18 +428,48 @@ def _run_pytest(
 # ============================================================================
 
 
+def _volume_inspect_record(stdout: str, name: str) -> dict[str, object]:
+    """Decode a volume record from the installed controller's JSON response."""
+    try:
+        info = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"volume inspect returned invalid JSON for '{name}': {exc}"
+        ) from exc
+    if not isinstance(info, dict):
+        raise RuntimeError(f"volume inspect response for '{name}' must be an object")
+    envelope_fields = {"schema_version", "status", "data", "error"}
+    if envelope_fields.intersection(info):
+        if set(info) != envelope_fields:
+            raise RuntimeError(
+                f"volume inspect response for '{name}' has incomplete or unknown envelope fields"
+            )
+        if type(info["schema_version"]) is not int or info["schema_version"] != 1:
+            raise RuntimeError(
+                f"volume inspect response for '{name}' has unsupported schema"
+            )
+        if info["status"] != "success" or info["error"] is not None:
+            raise RuntimeError(
+                f"volume inspect response for '{name}' is not successful"
+            )
+        info = info["data"]
+        if not isinstance(info, dict):
+            raise RuntimeError(f"volume inspect data for '{name}' must be an object")
+    volume = info.get("volume")
+    if not isinstance(volume, dict):
+        raise RuntimeError(
+            f"volume inspect response for '{name}' must contain a volume object"
+        )
+    return volume
+
+
 def _inspect_volume_path(name: str) -> tuple[bool, str | None]:
     """Return whether a volume record exists and its recorded backing path."""
     result = mvm("volume", "inspect", name, "--json", check=False, timeout=30)
     if result.returncode != 0:
         return False, None
-    try:
-        info = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"volume inspect returned invalid JSON for '{name}': {exc}"
-        ) from exc
-    path = info.get("volume", {}).get("path")
+    volume = _volume_inspect_record(result.stdout, name)
+    path = volume.get("path")
     return True, path if isinstance(path, str) and path else None
 
 
@@ -2348,10 +2378,8 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
             log(f"  Pull output: {result.stdout[:200] if result.stdout else '(empty)'}")
 
         vol_check = mvm("volume", "inspect", SHARED_VOLUME_NAME, "--json", timeout=15)
-        import json as _json
-
-        vol_info = _json.loads(vol_check.stdout)
-        vol_status = vol_info.get("volume", {}).get("status", "unknown")
+        volume = _volume_inspect_record(vol_check.stdout, SHARED_VOLUME_NAME)
+        vol_status = volume.get("status", "unknown")
 
         log("=== Prepare: ALL STEPS PASSED ===")
         log(f"  Base image: {BASE_IMAGE_NAME}:{mvm_version}")

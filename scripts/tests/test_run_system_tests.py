@@ -2361,6 +2361,152 @@ def test_build_base_image_does_not_remove_existing_builder_on_create_refusal(
     assert not any(args[:2] == ("image", "import") for args in calls)
 
 
+@pytest.mark.parametrize("enveloped", [False, True], ids=["legacy", "schema-1"])
+@pytest.mark.parametrize("path", ["/cache/volumes/asset-mirror.raw", None, "", 7])
+def test_inspect_volume_path_decodes_controller_response(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    enveloped: bool,
+    path: object,
+) -> None:
+    volume = {"status": "available"}
+    if path is not None:
+        volume["path"] = path
+    info = {"volume": volume, "attachment": {}, "disk_info": {}, "timestamps": {}}
+    response = (
+        {"schema_version": 1, "status": "success", "data": info, "error": None}
+        if enveloped
+        else info
+    )
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(response))
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    assert orchestrator._inspect_volume_path("asset-mirror") == (
+        True,
+        path if isinstance(path, str) and path else None,
+    )
+    assert calls == [
+        (
+            ("volume", "inspect", "asset-mirror", "--json"),
+            {"check": False, "timeout": 30},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "response, expected_error",
+    [
+        ("not-json", "invalid JSON"),
+        ("[]", "must be an object"),
+        ("{}", "must contain a volume object"),
+        ('{"volume":[]}', "must contain a volume object"),
+        ('{"status":"success","volume":{"path":"/ignored"}}', "incomplete or unknown"),
+        (
+            '{"schema_version":2,"status":"success","data":{},"error":null}',
+            "unsupported schema",
+        ),
+        (
+            '{"schema_version":true,"status":"success","data":{},"error":null}',
+            "unsupported schema",
+        ),
+        (
+            '{"schema_version":1,"status":"partial","data":{},"error":null}',
+            "not successful",
+        ),
+        (
+            '{"schema_version":1,"status":"error","data":{},"error":null}',
+            "not successful",
+        ),
+        (
+            '{"schema_version":1,"status":"success","data":{},"error":{}}',
+            "not successful",
+        ),
+        (
+            '{"schema_version":1,"status":"success","data":[],"error":null}',
+            "data.*must be an object",
+        ),
+        (
+            '{"schema_version":1,"status":"success","data":{},"error":null}',
+            "must contain a volume object",
+        ),
+        (
+            '{"schema_version":1,"status":"success","data":{},"error":null,"extra":1}',
+            "incomplete or unknown",
+        ),
+    ],
+)
+def test_inspect_volume_path_rejects_malformed_controller_response(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    response: str,
+    expected_error: str,
+) -> None:
+    monkeypatch.setattr(
+        orchestrator,
+        "mvm",
+        lambda *args, **_kwargs: subprocess.CompletedProcess(args, 0, stdout=response),
+    )
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        orchestrator._inspect_volume_path("asset-mirror")
+
+
+@pytest.mark.parametrize(
+    "response, expected_status",
+    [
+        ('{"volume":{"status":"attached"}}', "attached"),
+        ('{"volume":{}}', "unknown"),
+        (
+            '{"schema_version":1,"status":"success","data":{"volume":{"status":"available"}},"error":null}',
+            "available",
+        ),
+        (
+            '{"schema_version":1,"status":"partial","data":{"volume":{"status":"available"}},"error":null}',
+            None,
+        ),
+    ],
+    ids=["legacy-attached", "legacy-missing-status", "schema-1", "refuse-partial"],
+)
+def test_prepare_decodes_volume_status_and_cleans_up_on_response_refusal(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    response: str,
+    expected_status: str | None,
+) -> None:
+    destroyed: list[str] = []
+    monkeypatch.setattr(orchestrator, "_get_mvm_version", lambda: "0.3.0")
+    monkeypatch.setattr(orchestrator, "_unique_name", lambda prefix: prefix)
+    for helper in (
+        "ensure_shared_volume",
+        "ensure_test_network",
+        "_build_base_image",
+        "_initialize_runner_user",
+    ):
+        monkeypatch.setattr(orchestrator, helper, lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(orchestrator, "destroy_vm", destroyed.append)
+
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        stdout = response if args[:2] == ("volume", "inspect") else ""
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    if expected_status is None:
+        with pytest.raises(RuntimeError, match="not successful"):
+            orchestrator.run_prepare()
+        assert "ALL STEPS PASSED" not in capsys.readouterr().out
+    else:
+        orchestrator.run_prepare()
+        assert f"Volume status: {expected_status}" in capsys.readouterr().out
+    assert destroyed == ["prep-t1", "prep-t2"]
+
+
 @pytest.mark.parametrize("backing_kind", ["missing", "directory", "symlink"])
 def test_ensure_shared_volume_rebuilds_stale_volume_records(
     orchestrator: ModuleType,
