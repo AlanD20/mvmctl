@@ -72,6 +72,11 @@ source tree, upstream base config, overlays, or producer invocation. Closing thi
 mirrored-source build with an input/output receipt, followed by a candidate-qualified reusable-base provisioning
 check. Do not rebuild or reboot the current runner merely to repeat its already recorded capability check.
 
+Fresh official-kernel producer receipts must retain the `--debug` event `Kernel base config written`, including
+the consumed base-config digest and URL before configuration mutation, together with the source/spec/toolchain
+and final config/output hashes. Its diagnostic source change passed focused kernel Go/vet/format checks in the
+named runner; a newly compiled kernel and reusable-base image remain separate qualification gates.
+
 Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
 tests run directly on the outer host and therefore require a dedicated clean
 qualification host or disposable outer VM.

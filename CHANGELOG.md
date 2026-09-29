@@ -67,6 +67,9 @@ adversarial firewall and recovery cases remain separate release gates.
 
 ### Added
 
+- Official-kernel debug output now identifies the exact upstream base-config bytes successfully written before
+  configuration mutation. Focused kernel tests, vet and formatting passed in the named runner; this diagnostic
+  does not reconstruct historical provenance or prove a fresh producer build by itself.
 - A focused local reboot experiment captured the exact active jail/mount objects and KVM/TUN identities;
   private-root readlink text is informational, not process authority. Its owned guest prepared successfully before
   one controlled runner reboot, but recovery failed before the single permitted start. Later targeted fixes passed

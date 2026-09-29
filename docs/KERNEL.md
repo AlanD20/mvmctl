@@ -136,6 +136,15 @@ MVM_TEMP_DIR="$PWD/.tmp/kernel-build-run" \
 | 8. Copy & metadata | Copies `vmlinux` to kernels cache and saves metadata JSON |
 | 9. Cleanup | Removes the build directory (unless `--keep-build-dir`) |
 
+For a producer receipt, use `--debug` and retain the build directory. The
+`Kernel base config written` diagnostic identifies the fetched base-config URL,
+SHA-256 of the bytes successfully written, byte length, and source directory
+before `olddefconfig` or overlays change `.config`. Retain that event alongside
+the source archive checksum, embedded spec, invocation, toolchain identities,
+and final `.config`/`vmlinux` hashes. A later fetch of the same URL is not proof
+of the bytes this invocation consumed. If the event is absent or the build falls
+back to `defconfig`, do not claim Firecracker-base-config provenance.
+
 ### Kernel features
 
 `mvm kernel pull` supports enabling feature groups via `--features`:
