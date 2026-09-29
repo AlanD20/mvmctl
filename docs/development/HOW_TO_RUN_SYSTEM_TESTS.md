@@ -85,6 +85,13 @@ and bridge nftables, bridge connection tracking, KVM, TUN and Btrfs. Input/toolc
 This producer pass does not reconstruct the older kernel's provenance, prove the new kernel boots, replace the
 running or mirrored kernel, or qualify a reusable-base image; those remain separate gates.
 
+The stock reusable-base workflow also has its own resource budget: the builder uses 3 GiB RAM and a 12 GiB
+logical disk; T2 provisioning uses 4 GiB RAM and a 9 GiB logical disk. The shared mirror volume is another
+6 GiB logical disk, with physical use determined by its cached contents. These workloads must not be launched
+inside the current 2 GiB named runner simply because smaller focused QA VMs worked there. Check free storage,
+parent memory headroom and preserved state before provisioning; a larger disposable runner requires a separate
+approved replacement. Logical disk sizes alone do not prove that the required physical storage is available.
+
 Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
 tests run directly on the outer host and therefore require a dedicated clean
 qualification host or disposable outer VM.
