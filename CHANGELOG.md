@@ -45,9 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > This proves rejection before attachment, not resistance to endpoint replacement after observation; other hostile
 > endpoint and race faults remain separate gates.
 > Clean administrator/marker-only denial and reset, enabled GuestFS, adversarial recovery/fault checks,
-> reusable-base provisioning and fresh-kernel boot qualification, Tier 3, aarch64 runtime, GitHub CI, and final
+> reusable-base provisioning and fresh-kernel KVM/nftables workload qualification, Tier 3, aarch64 runtime, GitHub CI, and final
 > release approval remain open. A fresh mirrored-source kernel producer completed with retained input/toolchain/
-> config/ELF receipts; it does not reconstruct older artifacts' provenance.
+> config/ELF receipts, followed by a bounded exact-build-ID boot check with KVM device open and TUN/Btrfs evidence.
+> Neither pass reconstructs older artifacts' provenance.
 > No candidate has been installed over the
 > outer controller.
 >
@@ -75,7 +76,9 @@ adversarial firewall and recovery cases remain separate release gates.
 - Official-kernel debug output now identifies the exact upstream base-config bytes successfully written before
   configuration mutation. Focused kernel tests, vet and formatting passed in the named runner. A subsequent fresh
   mirrored-source Linux 7.0.11 producer passed with the consumed base-config digest and final config/ELF hashes
-  retained. New-kernel boot and reusable-base provisioning remain separate gates; older provenance is not reconstructed.
+  retained. A subsequent installed-candidate nested boot case passed with matching live GNU build ID, KVM device
+  read/write open, TUN and Btrfs, and checked cleanup. KVM guest creation, child nftables application and reusable-base
+  provisioning remain separate gates; older provenance is not reconstructed.
 - A focused local reboot experiment captured the exact active jail/mount objects and KVM/TUN identities;
   private-root readlink text is informational, not process authority. Its owned guest prepared successfully before
   one controlled runner reboot, but recovery failed before the single permitted start. Later targeted fixes passed

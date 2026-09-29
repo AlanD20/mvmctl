@@ -85,6 +85,13 @@ and bridge nftables, bridge connection tracking, KVM, TUN and Btrfs. Input/toolc
 This producer pass does not reconstruct the older kernel's provenance, prove the new kernel boots, replace the
 running or mirrored kernel, or qualify a reusable-base image; those remain separate gates.
 
+A subsequent 2026-09-29 bounded boot check passed inside `mvmctl-030-test` using its installed candidate and an
+owned 256 MiB networkless nested VM. The guest reported Linux 7.0.11 and GNU build ID
+`79ee949b4f07aa6b8567741ea49862ab1a4f6b41`, matching the fresh ELF; it opened `/dev/kvm` read/write and exposed
+TUN and Btrfs. The strict one-case report passed with checked typed cleanup and preserved defaults, original assets
+and configuration. This proves boot and device availability, not `KVM_CREATE_VM`, child nftables rule application
+or reusable-base provisioning. Neither the outer runner's selected kernel nor the mirrored default was replaced.
+
 The stock reusable-base workflow also has its own resource budget: the builder uses 3 GiB RAM and a 12 GiB
 logical disk; T2 provisioning uses 4 GiB RAM and a 9 GiB logical disk. The shared mirror volume is another
 6 GiB logical disk, with physical use determined by its cached contents. These workloads must not be launched
