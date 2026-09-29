@@ -1247,6 +1247,9 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Fixed normal initialization rejecting an existing root-owned `0755` `/var/lib/mvmctl` state base. Persistent stores
+  and administrator reset now admit the safe shared base unchanged while retaining exact private-directory and record
+  permissions.
 - Console authority failures without an underlying cause now retain the error code's default internal class instead
   of reporting an unknown class. Cause-bearing errors retain their existing inherited classification. The complete
   affected Jailer Go package passed as root in the named runner, followed by the installed-candidate counterfeit

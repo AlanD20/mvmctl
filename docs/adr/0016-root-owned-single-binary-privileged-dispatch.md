@@ -845,8 +845,9 @@ values. The executable hashes in a successfully decoded manifest are the sole so
 to instance registration; the unprivileged request never supplies them.
 
 Trusted-store traversal starts at a pinned `/` descriptor and opens every fixed component with `O_NOFOLLOW` relative to
-its retained parent. `/`, `/var`, and `/var/lib` must be root-owned directories without group or world write access.
-Managed `/var/lib/mvmctl`, `binaries`, architecture, and version directories are exactly `root:root` mode `0700`.
+its retained parent. `/`, `/var`, `/var/lib`, and the existing shared `/var/lib/mvmctl` state base must be directories
+owned by UID 0 without group or world write access. Existing shared-base metadata is admitted unchanged; the private
+`binaries`, architecture, and version directories are exactly `root:root` mode `0700`.
 `firecracker` and `jailer` are one-link root-owned regular files of mode `0755`; `manifest.json` is a one-link
 root-owned regular file of mode `0600`. A missing architecture or version directory is an ordinary binary-not-found
 result. Once the version directory exists, a missing or unsafe fixed leaf is an incomplete/corrupt trusted release and
@@ -854,12 +855,13 @@ fails as `binary.untrusted`, never as an absent release. Reads retain the versio
 once, compare pre/post-read descriptor identity and metadata, and do not reconstruct a pathname.
 
 Write-side store preparation never creates `/`, `/var`, or `/var/lib`. It may create only the fixed `mvmctl` and
-`binaries` components relative to their already pinned parents, using mode `0700`, followed by descriptor-based owner,
-group, type, and exact-mode verification. A component created by this call is explicitly set to `root:root 0700`; an
-`EEXIST` result is treated as a concurrent creation and is verified without changing its metadata. After a newly
-observed component is admitted, both that directory and its parent are fsynced before traversal continues. Symlink,
-replacement, unsafe metadata, cancellation, and durability failures close all acquired descriptors in reverse order and
-fail closed. This foundation creates no architecture/version slot and writes no archive or executable bytes.
+`binaries` components relative to their already pinned parents. A component created by this call is explicitly set to
+`root:root 0700`; an `EEXIST` result is treated as a concurrent creation and verified without changing its metadata.
+Admission distinguishes the shared `mvmctl` base from the private `binaries` directory using the respective ownership
+and mode rules above. After a newly observed component is admitted, both that directory and its parent are fsynced
+before traversal continues. Symlink, replacement, unsafe metadata, cancellation, and durability failures close all
+acquired descriptors in reverse order and fail closed. This foundation creates no architecture/version slot and writes
+no archive or executable bytes.
 
 Archive staging uses an anonymous regular file created on the pinned trusted-store filesystem with
 `O_TMPFILE|O_EXCL|O_RDWR|O_CLOEXEC` relative to the `binaries` descriptor. It has no pathname and cannot later be linked

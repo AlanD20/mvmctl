@@ -323,6 +323,12 @@ the whole cache VM directory, trust a runtime leaf as authority, or signal a PID
 defines the exact ownership, modes, launch ordering, and
 cleanup contract; `tasks/todo.md` records implementation status.
 
+`/var/lib/mvmctl` is the shared persistent state base. Existing admission requires a directory owned by UID 0 without
+group or world write access; a safe mode such as `0755` is accepted without changing its metadata. When absent, the base
+is created as `root:root 0700`. Private network, firewall, trusted-release, and exec-allocation directories beneath it
+retain exact `root:root 0700` admission, and their records retain exact `root:root 0600` admission. Traversal and
+publication retain their descriptor pinning, no-follow checks, and durability requirements.
+
 The private Jailer runtime-directory foundation now creates the fixed root-owned mode-`0711`
 `/run/mvmctl/runtime/<uid>` hierarchy and exclusively creates one caller-owned mode-`0700` `<vm-id>` directory beneath
 it. It pins the VM directory's device/inode identity, rejects existing VM directories and unsafe parents without
@@ -551,10 +557,11 @@ acquisition for cleanup, and releases the lock before its authority capability.
 
 The private network registration foundation now serializes a global network-ID index and each canonical network. Its
 strict schema-1 record persists only owner UID, network ID, current boot ID, and exact derived bridge
-name/ifindex/host-namespace device and inode at `/var/lib/mvmctl/networks/<uid>/<network-id>.json`. Root-owned mode-`0700`
-directories and one-link mode-`0600` records are admitted descriptor-relatively; a bounded exact codec and atomic
-no-replace publication preserve both created-record and durability-uncertain evidence. Registration releases its
-network, UID/store, index, and root authority in exact reverse order with pointer-shared cached close-once results. The
+name/ifindex/host-namespace device and inode at `/var/lib/mvmctl/networks/<uid>/<network-id>.json`. The private `networks`
+and `<uid>` directories are exact `root:root` mode `0700`, and one-link mode-`0600` records are admitted
+descriptor-relatively; a bounded exact codec and atomic no-replace publication preserve both created-record and
+durability-uncertain evidence. Registration releases its network, UID/store, index, and root authority in exact reverse
+order with pointer-shared cached close-once results. The
 registration entry point remains private and unreferenced, does not receive the Jailer VM-lock lease, and does not
 consume the separate namespace capability.
 
@@ -820,11 +827,11 @@ local errors.
 The root-owned VM-exec capacity substrate is implemented and production-composed only behind the retained authority
 sidecar. Strict schema-1 records live at
 `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json`; they bind the non-root owner, exact source and destination
-VM IDs and launch generations, host boot ID, and creation/expiration times from `CLOCK_BOOTTIME`. The managed
-directories are exact `root:root` mode `0700`, records are one-link exact `root:root` mode `0600`, and the never-unlinked
-global lock is `/run/mvmctl/authority/capacity.lock`. Holding that lock serializes the complete cross-process,
-cross-user scan/prune, ceiling check, and no-replace publication. Corrupt or ambiguous state fails closed before
-canonical pruning; safe crashed temporary files, prior-boot records, and expired records are removed with directory
+VM IDs and launch generations, host boot ID, and creation/expiration times from `CLOCK_BOOTTIME`. The private
+`allocations` and `exec` directories are exact `root:root` mode `0700`, records are one-link exact `root:root` mode `0600`,
+and the never-unlinked global lock is `/run/mvmctl/authority/capacity.lock`. Holding that lock serializes the complete
+cross-process, cross-user scan/prune, ceiling check, and no-replace publication. Corrupt or ambiguous state fails closed
+before canonical pruning; safe crashed temporary files, prior-boot records, and expired records are removed with directory
 sync. Creation, deletion, pruning, durability uncertainty, and cleanup-required outcomes remain explicit error
 evidence.
 
