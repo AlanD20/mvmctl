@@ -43,7 +43,7 @@ const (
 	rootfsAgentOpenRCRunlevelLink   = rootfsAgentOpenRCRunlevelPath + "/mvm-agent"
 	rootfsAgentOpenRCRunlevelTarget = "/etc/init.d/mvm-agent"
 	rootfsSSHConfigPath             = "/etc/ssh/sshd_config.d/mvm.conf"
-	rootfsSudoPolicyPath            = "/etc/sudoers.d/mvm"
+	rootfsSudoPolicyPath            = "/etc/sudoers.d/mvm-guest"
 	rootfsPasswdPath                = "/etc/passwd"
 	rootfsHostnamePath              = "/etc/hostname"
 	rootfsHostsPath                 = "/etc/hosts"
@@ -896,6 +896,7 @@ func applyRootfsProvisionPlan(
 		if _, err := tree.ensureDirectory(ctx, "/etc/sudoers.d", 0750, 0, 0); err != nil {
 			return filesWritten, err
 		}
+		// CRITICAL: Guest administrator grants must leave the host controller's reserved mvm policy intact.
 		if err := write(rootfsProvisionFile{
 			path:    rootfsSudoPolicyPath,
 			content: []byte(*plan.SudoUser + " ALL=(ALL) NOPASSWD: ALL\n"), mode: 0440,

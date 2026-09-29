@@ -868,13 +868,13 @@ func TestApplyRootfsProvisionPlanRejectsUnprovedAgentInitLayoutBeforeWrites(t *t
 }
 
 // Rationale: One combined plan must publish account-scoped SSH, sudo, agent authentication, boot enablement,
-// and bounded hosts and fstab rewrites into the mounted guest tree.
+// and bounded hosts and fstab rewrites while preserving the reserved host-controller sudo policy.
 func TestApplyRootfsProvisionPlanPublishesRequestedContentAndBootEffects(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	for _, directory := range []string{
-		"etc", "etc/ssh", "home/alice", "usr/bin", "usr/lib/systemd", "etc/systemd",
+		"etc", "etc/ssh", "etc/sudoers.d", "home/alice", "usr/bin", "usr/lib/systemd", "etc/systemd",
 	} {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, directory), 0755))
 	}
@@ -898,6 +898,8 @@ func TestApplyRootfsProvisionPlanPublishesRequestedContentAndBootEffects(t *test
 		[]byte("/dev/vda / ext4 defaults 0 1\n/dev/vda1 /boot ext4 defaults 0 2\n"),
 		0644,
 	))
+	reservedSudoPolicy := []byte("%mvm ALL=(root) NOPASSWD: /usr/local/bin/mvm __mvm_privileged_v1 *\n")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "etc/sudoers.d/mvm"), reservedSudoPolicy, 0440))
 	hostname := "vm-a"
 	dns := "192.0.2.53"
 	user := "alice"
@@ -928,7 +930,7 @@ func TestApplyRootfsProvisionPlanPublishesRequestedContentAndBootEffects(t *test
 		{"/root/.ssh/authorized_keys", []byte(strings.Join(keys, "\n") + "\n"), 0600},
 		{"/home/alice/.ssh/authorized_keys", []byte(strings.Join(keys, "\n") + "\n"), 0600},
 		{rootfsSSHConfigPath, rootfsSSHDConfig(user), 0644},
-		{rootfsSudoPolicyPath, []byte("alice ALL=(ALL) NOPASSWD: ALL\n"), 0440},
+		{"/etc/sudoers.d/mvm-guest", []byte("alice ALL=(ALL) NOPASSWD: ALL\n"), 0440},
 		{rootfsAgentBinaryPath, []byte("agent-binary"), 0755},
 		{rootfsAgentTokenPath, []byte(token + "\n"), 0600},
 		{rootfsAgentSystemdPath, rootfsAgentSystemdService(1024), 0644},
@@ -941,6 +943,19 @@ func TestApplyRootfsProvisionPlanPublishesRequestedContentAndBootEffects(t *test
 	for _, expected := range expectedFiles {
 		assertRootfsProvisionedFile(t, root, expected.path, expected.content, expected.mode)
 	}
+	assertRootfsProvisionedFile(t, root, "/etc/sudoers.d/mvm", reservedSudoPolicy, 0440)
+	guestPolicyFD, err := unix.Open(
+		filepath.Join(root, "etc/sudoers.d/mvm-guest"),
+		unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC,
+		0,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, unix.Close(guestPolicyFD)) })
+	var guestPolicyStat unix.Stat_t
+	// The fixture retains requested ownership by inode because these L1 effects run without root.
+	require.NoError(t, tree.deps.fstat(t.Context(), guestPolicyFD, &guestPolicyStat))
+	assert.Zero(t, guestPolicyStat.Uid)
+	assert.Zero(t, guestPolicyStat.Gid)
 	expectedBootFiles := []struct {
 		path     string
 		mode     os.FileMode
