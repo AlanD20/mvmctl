@@ -7,11 +7,13 @@ No asset pulls, default changes, or old-journal adoption occur here.
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import pty
 import select
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -354,6 +356,9 @@ def console_vm(runner_vm: str) -> Generator[dict[str, Any], None, None]:
     finally:
         errors = []
         try:
+            assert owned.get("console_endpoint_restored", True), (
+                f"preserve VM/runtime after uncertain console restoration: {receipt}"
+            )
             matches = [
                 item
                 for item in _inventory(runner_vm, "vm")
@@ -451,6 +456,268 @@ def console_vm(runner_vm: str) -> Generator[dict[str, Any], None, None]:
                 )
             except Exception as exc:
                 errors.append(f"{domain} baseline: {exc}")
+        assert not errors, "; ".join(errors)
+
+
+def test_console_counterfeit_endpoint_rejected_by_discovery(
+    runner_vm: str, console_vm: dict[str, Any]
+) -> None:
+    """A preexisting same-caller listener cannot impersonate the recorded relay.
+
+    This covers observation before attachment, not a replacement race after it.
+    """
+    receipt = console_vm["receipt"]
+    firecracker_task = console_vm["tasks"][0]
+    initial = _console_state(runner_vm, receipt, True)
+    uid, gid = os.getuid(), os.getgid()
+    assert uid == os.geteuid() > 0 and gid == os.getegid() > 0
+    assert os.getpid() not in (initial["pid"], firecracker_task[1])
+    descriptors: list[int] = []
+    bindings: list[tuple[int, str, int, tuple[int, ...]]] = []
+    root_fd = None
+    root_identity = None
+    original_fd = None
+    original_identity = None
+    decoy_fd = None
+    decoy_identity = None
+    listener = None
+    relay_task = None
+    endpoint_started = False
+    exchanged = False
+    decoy_name = f"console-peer-{uuid.uuid4().hex}.sock"
+
+    def assert_runtime_bindings() -> None:
+        for current in (os.fstat(root_fd), os.stat("/", follow_symlinks=False)):
+            assert (
+                current.st_dev, current.st_ino, current.st_mode,
+                current.st_uid, current.st_gid,
+            ) == root_identity, current
+        for parent_fd, name, directory_fd, identity in bindings:
+            for current in (
+                os.fstat(directory_fd),
+                os.stat(name, dir_fd=parent_fd, follow_symlinks=False),
+            ):
+                assert (
+                    current.st_dev, current.st_ino, current.st_mode,
+                    current.st_uid, current.st_gid,
+                ) == identity, (name, current, identity)
+
+    def assert_socket(name: str, descriptor: int, identity: tuple[int, ...]) -> None:
+        for current in (
+            os.fstat(descriptor),
+            os.stat(name, dir_fd=bindings[-1][2], follow_symlinks=False),
+        ):
+            assert (
+                current.st_dev, current.st_ino, current.st_mode,
+                current.st_uid, current.st_gid, current.st_nlink,
+            ) == identity, (name, current, identity)
+
+    def assert_socket_pair() -> None:
+        assert_runtime_bindings()
+        assert_socket(
+            decoy_name if exchanged else "console.sock",
+            original_fd,
+            original_identity,
+        )
+        assert_socket(
+            "console.sock" if exchanged else decoy_name, decoy_fd, decoy_identity
+        )
+
+    def assert_decoy_absent() -> None:
+        try:
+            current = os.stat(
+                decoy_name, dir_fd=bindings[-1][2], follow_symlinks=False
+            )
+        except FileNotFoundError:
+            return
+        raise AssertionError(f"unexpected console decoy leaf: {decoy_name}: {current}")
+
+    try:
+        fields = Path(f"/proc/{initial['pid']}/stat").read_text().rpartition(") ")[
+            2
+        ].split()
+        assert len(fields) >= 20 and int(fields[19]) > 0, fields
+        relay_task = _pin_task(
+            {"pid": initial["pid"], "process_start_time": int(fields[19])}
+        )
+        descriptors.append(relay_task[0])
+        flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        root_fd = os.open("/", flags)
+        descriptors.append(root_fd)
+        directory_fd = root_fd
+        current = os.fstat(root_fd)
+        assert stat.S_ISDIR(current.st_mode) and (current.st_uid, current.st_gid) == (0, 0)
+        assert current.st_mode & 0o022 == 0, current
+        root_identity = (
+            current.st_dev, current.st_ino, current.st_mode,
+            current.st_uid, current.st_gid,
+        )
+        for name in ("run", "mvmctl", "runtime", str(uid), receipt["id"]):
+            parent_fd = directory_fd
+            directory_fd = os.open(name, flags, dir_fd=parent_fd)
+            descriptors.append(directory_fd)
+            current = os.fstat(directory_fd)
+            expected_owner = (uid, gid) if name == receipt["id"] else (0, 0)
+            assert stat.S_ISDIR(current.st_mode), (name, current)
+            assert (current.st_uid, current.st_gid) == expected_owner, (name, current)
+            assert current.st_mode & 0o022 == 0, (name, current)
+            if name != "run":
+                expected_mode = 0o700 if name == receipt["id"] else 0o711
+                assert stat.S_IMODE(current.st_mode) == expected_mode, (name, current)
+            bindings.append(
+                (
+                    parent_fd, name, directory_fd,
+                    (
+                        current.st_dev, current.st_ino, current.st_mode,
+                        current.st_uid, current.st_gid,
+                    ),
+                )
+            )
+        original_fd = os.open(
+            "console.sock", os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=directory_fd,
+        )
+        descriptors.append(original_fd)
+        current = os.fstat(original_fd)
+        assert (
+            stat.S_ISSOCK(current.st_mode)
+            and current.st_mode & 0o077 == 0
+            and current.st_mode & 0o200 != 0
+            and (current.st_uid, current.st_gid) == (uid, gid)
+            and current.st_nlink == 1
+        ), current
+        original_identity = (
+            current.st_dev, current.st_ino, current.st_mode,
+            current.st_uid, current.st_gid, current.st_nlink,
+        )
+        assert_runtime_bindings()
+        assert_socket("console.sock", original_fd, original_identity)
+        assert_decoy_absent()
+        renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
+        renameat2.argtypes = [
+            ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+            ctypes.c_char_p, ctypes.c_uint,
+        ]
+        renameat2.restype = ctypes.c_int
+
+        def exchange_sockets() -> None:
+            if renameat2(
+                directory_fd, b"console.sock", directory_fd,
+                decoy_name.encode(), 2,  # Linux RENAME_EXCHANGE preserves both inodes.
+            ) != 0:
+                error = ctypes.get_errno()
+                raise OSError(error, os.strerror(error), decoy_name)
+
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        endpoint_started = True
+        console_vm["console_endpoint_restored"] = False
+        previous_umask = os.umask(0o177)
+        try:
+            listener.bind(f"/proc/self/fd/{directory_fd}/{decoy_name}")
+        finally:
+            os.umask(previous_umask)
+        decoy_fd = os.open(
+            decoy_name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=directory_fd,
+        )
+        descriptors.append(decoy_fd)
+        current = os.fstat(decoy_fd)
+        assert (
+            stat.S_ISSOCK(current.st_mode)
+            and stat.S_IMODE(current.st_mode) == 0o600
+            and (current.st_uid, current.st_gid) == (uid, gid)
+            and current.st_nlink == 1
+            and (current.st_dev, current.st_ino) != original_identity[:2]
+        ), current
+        decoy_identity = (
+            current.st_dev, current.st_ino, current.st_mode,
+            current.st_uid, current.st_gid, current.st_nlink,
+        )
+        listener.listen(8)
+        assert_socket_pair()
+        for task in (relay_task, firecracker_task):
+            _assert_live(task)
+        exchange_sockets()
+        exchanged = True
+        assert_socket_pair()
+
+        rejected = _run_mvm(
+            runner_vm, "console", receipt["id"], "--state", "--json", check=False
+        )
+        assert rejected.returncode != 0, (rejected.stdout, rejected.stderr)
+        envelope = json.loads(rejected.stdout)
+        assert (
+            envelope["schema_version"] == 1
+            and envelope["status"] == "error"
+            and envelope["data"] is None
+            and envelope["error"]["code"] == "console.relay.failed"
+            and envelope["error"]["class"] == 4
+            and envelope["error"]["entity"] == receipt["id"]
+            and envelope["error"]["message"]
+            == "console endpoint peer differs from relay authority"
+        ), envelope
+        attached = _run_mvm(runner_vm, "console", receipt["id"], check=False)
+        assert attached.returncode != 0, (attached.stdout, attached.stderr)
+        assert "console endpoint peer differs from relay authority" in (
+            attached.stdout + attached.stderr
+        ), (attached.stdout, attached.stderr)
+        assert "Attaching to console" not in attached.stdout + attached.stderr
+        assert_socket_pair()
+        for task in (relay_task, firecracker_task):
+            _assert_live(task)
+        _wait_for_exec(runner_vm, receipt["id"])
+        for task in (relay_task, firecracker_task):
+            _assert_live(task)
+        assert_socket_pair()
+        print(
+            f"console peer original={original_identity} decoy={decoy_identity} "
+            f"leaf={decoy_name} peer_pid={os.getpid()} relay={relay_task[1:]} "
+            f"firecracker={firecracker_task[1:]}",
+            flush=True,
+        )
+    finally:
+        errors = []
+        try:
+            if endpoint_started:
+                # Unknown leaves block both restoration and the fixture's VM removal.
+                if decoy_identity is not None:
+                    assert_socket_pair()
+                    if exchanged:
+                        exchange_sockets()
+                        exchanged = False
+                    assert_socket_pair()
+                    listener.close()
+                    listener = None
+                    assert_socket_pair()
+                    os.unlink(decoy_name, dir_fd=bindings[-1][2])
+                assert_runtime_bindings()
+                assert_socket("console.sock", original_fd, original_identity)
+                assert_decoy_absent()
+                assert _console_state(runner_vm, receipt, True) == initial
+                for task in (relay_task, firecracker_task):
+                    _assert_live(task)
+                console_vm["console_endpoint_restored"] = True
+                print(
+                    f"console endpoint restored={original_identity} "
+                    f"decoy_absent={decoy_name} state={initial}",
+                    flush=True,
+                )
+        except Exception as exc:
+            errors.append(
+                f"owned console endpoint restore failed; preserve receipt={receipt} "
+                f"original={original_identity} decoy={decoy_identity} "
+                f"leaf={decoy_name} exchanged={exchanged}: {exc}"
+            )
+        try:
+            if listener is not None:
+                listener.close()
+        except Exception as exc:
+            errors.append(f"owned console listener close: {exc}")
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except Exception as exc:
+                errors.append(f"owned descriptor {descriptor} close: {exc}")
         assert not errors, "; ".join(errors)
 
 
