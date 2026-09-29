@@ -75,7 +75,15 @@ check. Do not rebuild or reboot the current runner merely to repeat its already 
 Fresh official-kernel producer receipts must retain the `--debug` event `Kernel base config written`, including
 the consumed base-config digest and URL before configuration mutation, together with the source/spec/toolchain
 and final config/output hashes. Its diagnostic source change passed focused kernel Go/vet/format checks in the
-named runner; a newly compiled kernel and reusable-base image remain separate qualification gates.
+named runner. On 2026-09-29 the installed candidate then completed a fresh Linux 7.0.11 build from mirrored
+source using GCC 13.3.0, the bundled spec, and `--features nftables,tuntap,kvm,btrfs --jobs 1 --clean-build
+--keep-build-dir --debug`. Its consumed base-config SHA-256 was
+`153ca1b40f3312bfb40b7587b471ea548a915f98f480f0d0892a1537957a2147`; the final config was
+`86f0a0147b7cafa6d62caad1c6bb52221c8e0ba13100cef1f5791ea2dfc221fd`, and both the built ELF and managed-cache
+copy were `3a7eefcb29812f1b8b58fa1f3d276ee6afe25f97e1f154e4b6f946af9ec3ee0d`. The final config enables inet
+and bridge nftables, bridge connection tracking, KVM, TUN and Btrfs. Input/toolchain/output receipts were retained.
+This producer pass does not reconstruct the older kernel's provenance, prove the new kernel boots, replace the
+running or mirrored kernel, or qualify a reusable-base image; those remain separate gates.
 
 Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
 tests run directly on the outer host and therefore require a dedicated clean
