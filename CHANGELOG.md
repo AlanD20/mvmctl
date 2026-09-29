@@ -39,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > proving relay-only stop preserves Firecracker/vsock and VM restart renews the relay. A later real-PTY
 > attachment journey passed, then both console journeys passed twice (26.42/24.12s), including normal endpoint
 > admission, unique guest serial bytes, detach, terminal restoration and preserved VM liveness. Hostile endpoint
-> faults remain separate gates.
+> faults remain separate gates. An added caller-PID-mirror decoy case subsequently passed, followed by the complete
+> three-case console file (33.19s), proving forged display metadata cannot redirect discovery or relay signaling.
 > Clean administrator/marker-only denial and reset, enabled GuestFS, adversarial recovery/fault checks,
 > kernel producer/reusable-base provenance, Tier 3, aarch64 runtime, GitHub CI, and final release approval remain open.
 > No candidate has been installed over the
@@ -107,6 +108,10 @@ adversarial firewall and recovery cases remain separate release gates.
   Protected history is retained; administrator-level retirement is not qualified by these cases.
 - Both console lifecycle and live-PTY attachment journeys passed twice on the installed runner candidate,
   proving serial delivery, clean detach/terminal restoration and preserved Firecracker/vsock identity.
+- Added an installed-candidate console PID-mirror decoy test. Root-backed discovery and relay stop ignore the
+  caller-written decoy PID; only the recorded relay exits, while the independently pinned decoy and Firecracker
+  survive and fresh guest exec succeeds. The focused case and complete three-case file passed with checked
+  mirror restoration, normal owned cleanup and unchanged configuration.
 - The complete 11-case logs module passed twice on the installed runner candidate with owned cleanup.
   Coverage verifies real guest identity and serial markers, byte-exact LF tails preserving carriage returns,
   VMM logging/follow, identifier lookup and retained logs after root-authoritative stop. It does not qualify

@@ -17,7 +17,7 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Complete current installed-candidate T1/T2 matrix (2026-09-29):** The exact registered selection passed
+**Complete installed-candidate T1/T2 matrix before the added console decoy case (2026-09-29):** The exact registered selection passed
 all 415 cases across 26 files against installed candidate `8a6fb1bf` (`0.3.0-rc.priorboot`) inside only
 `mvmctl-030-test`. Configuration was byte-for-byte unchanged after both tiers; final VM/network/volume/snapshot
 inventories were empty and no runner swap remained. Every file passed strict outcome validation with zero other
@@ -26,6 +26,16 @@ the preserved earlier failed report. Source is the clean `b2c0a1f8` snapshot plu
 as `c43cf9ec`. The outer controller remained unchanged. This closes the registered current T1/T2 matrix,
 not clean-host/Tier 3, remote CI, enabled GuestFS, adversarial fault/recovery, kernel producer/base provenance,
 original incident attribution, aarch64 runtime or release approval.
+
+**Caller PID-mirror console gate (2026-09-29):** Console source `ed288ee6`, integrated as `84ba3730`,
+adds one case against the same installed candidate. The focused case passed in 10.13 seconds and the complete
+three-case console file passed in 33.19 seconds, with strict zero-other outcomes, byte-identical configuration
+and empty VM/network/volume/snapshot inventories afterward. The case changes only the admitted caller-owned
+`/run/mvmctl/runtime/<uid>/<vm-id>/console.pid` contents to a directly spawned decoy's PID: discovery still reports
+the recorded relay, typed stop exits that relay, the independently pinned decoy and Firecracker survive, and guest
+exec succeeds. The original mirror contents are restored through the retained descriptor before normal fixture
+cleanup. Reports are `console-decoy-054d/{focus,full}.{json,xml}`. The earlier 415-case matrix was not rerun;
+this additive file gate does not qualify hostile console socket replacement or other pending fault scenarios.
 
 The binary file initially exposed a QA observer leak after the first seven files passed all 113 cases:
 repeated scans retained historical-journal descriptors and exhausted the unchanged 1,024 soft descriptor limit.
@@ -1720,12 +1730,13 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `console <vm> --state` | ⚡ Shallow | `console/test_console.py` | `TestConsoleState` | L2 owner for successful state observation; the listing group covers only missing-VM rejection. |
-| `console <vm> --kill` | ⚡ Shallow | `console/test_console.py` | `TestConsoleKill` | L1 — state check before/after kill |
+| `console <vm> --state` | ✅ Deep | `console/test_console.py` | `test_console_active_relay_journey`, `test_console_pid_mirror_cannot_redirect_discovery_or_stop` | Installed-candidate L2: root/inspect agreement, relay identity and caller PID-mirror independence. |
+| `console <vm> --kill` | ✅ Deep | `console/test_console.py` | `test_console_active_relay_journey`, `test_console_pid_mirror_cannot_redirect_discovery_or_stop` | Installed-candidate L2: real relay exits; pinned Firecracker and forged-PID decoy survive; fresh exec succeeds. |
 | `console <nonexistent> --state` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_console_state_nonexistent_vm` | Installed-candidate L2 passed schema-1 `vm.not_found` rejection with no result data. |
-| `console <ip> --state` | ⚡ Shallow | `console/test_console.py` | `TestConsoleState` | Resolves by IP |
-| `console lifecycle: state → kill → state` | ⚡ Shallow | `console/test_console.py` | `TestConsoleKill` | Full lifecycle verification |
-| `console on stopped VM` | ⚡ Shallow | `console/test_console.py` | `TestConsoleOnStoppedVM` | Non-zero exit |
+| `console <ip> --state` | ✅ Deep | `console/test_console.py` | `test_console_active_relay_journey` | Real IPv4 selector reports the same relay before and after VM restart. |
+| `console lifecycle: state → kill → state` | ✅ Deep | `console/test_console.py` | `test_console_active_relay_journey` | Relay-only stop, repeated-stop rejection, inactive attach refusal and renewed relay after VM restart. |
+| `console on stopped VM` | ✅ Deep | `console/test_console.py` | `test_console_active_relay_journey` | Root-observed inactive state and actual attachment refusal after typed VM stop. |
+| `console live PTY attachment` | ✅ Deep | `console/test_console.py` | `test_console_tty_attachment_serial_bytes` | Unique guest serial delivery, detach, terminal restoration and preserved VM liveness. |
 
 ---
 
