@@ -99,11 +99,25 @@ mvm kernel pull official:6.19.9
 # Build with parallel jobs (faster)
 mvm kernel pull --type official --jobs 8
 
-# Bypass cache and force a clean build
+# Bypass the compiled-kernel cache
 mvm kernel pull --type official --clean-build
 
 # Keep the build directory after completion (useful for debugging)
 mvm kernel pull --type official --keep-build-dir
+```
+
+An explicit `MVM_TEMP_DIR` places official-kernel build work in
+`<MVM_TEMP_DIR>/kernel-build`, with compiled-cache artifacts beside that directory.
+If the variable is unset or empty, the embedded spec's `build_dir` remains in use.
+This override does not change the spec or the managed output location.
+
+`--clean-build` bypasses the compiled-output cache; it does not remove an existing
+source tree or tarball. For a fresh producer run, select a new task-specific scratch
+directory. `--keep-build-dir` retains the build tree after successful compilation.
+
+```bash
+MVM_TEMP_DIR="$PWD/.tmp/kernel-build-run" \
+  mvm kernel pull official:7.0.11 --jobs 1 --clean-build --keep-build-dir
 ```
 
 ### Build process

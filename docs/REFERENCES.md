@@ -877,7 +877,7 @@ The security model applies to the net cloud-init mode only:
 | `MVM_ASSET_MIRROR` | Local archive mirror; a new Firecracker/Jailer install still fetches the official checksum sidecar for root verification | (not set) |
 | `MVM_WARM_POOL` | Warm image pool backend (`disk` for cache-backed; otherwise under `/tmp/mvmctl-<uid>/ready`, on tmpfs only when `/tmp` is tmpfs) | (not set) |
 | `MVM_ESCALATED` | Set by sudo wrapper to indicate privilege escalation | `1` |
-| `MVM_TEMP_DIR` | Override the per-operator temporary work directory and, when set, the warm-pool location | Managed cache `tmp/` (normally `~/.cache/mvmctl/tmp`) |
+| `MVM_TEMP_DIR` | Override the per-operator temporary work directory, warm-pool location, and official-kernel scratch (`<value>/kernel-build`) | Managed cache `tmp/` for ordinary temporary work; official-kernel build uses embedded `build_dir` when unset or empty |
 | `MVM_SUDO_RESTART` | Set internally when re-running with sudo for host init | (not set) |
 
 ---

@@ -419,9 +419,10 @@ Set to "disk" to use a managed-cache-backed warm pool. Otherwise the pool is
 under /tmp/mvmctl-<uid>/ready (tmpfs only when /tmp is tmpfs).
 .TP
 .BR MVM_TEMP_DIR
-Override per-operator temporary work directory and warm-pool location when
-set (default for temporary work: tmp/ beneath the managed cache, normally
-~/.cache/mvmctl/tmp).
+Override per-operator temporary work directory, warm-pool location and
+official-kernel scratch when set. Kernel builds use <value>/kernel-build;
+unset or empty preserves the embedded spec's build_dir. Ordinary temporary
+work defaults to tmp/ beneath the managed cache, normally ~/.cache/mvmctl/tmp.
 .TP
 .BR MVM_ESCALATED
 Set by sudo wrapper to indicate privilege escalation (default: not set).

@@ -248,7 +248,7 @@ kernel-firecracker:
 | `sha256` / `sha256_url` | Same semantics as images.yaml SHA-256. |
 | `config_fragments` | Paths or URLs to additional kernel config files merged on top of the base config. |
 | `output_name` | Base filename for the compiled or downloaded `vmlinux` binary in the kernels cache. |
-| `build_dir` | Working directory for kernel compilation. Cleaned up automatically unless `--keep-build-dir` is passed. |
+| `build_dir` | Working directory for kernel compilation when `MVM_TEMP_DIR` is unset or empty. An explicit override selects `<MVM_TEMP_DIR>/kernel-build`. Cleaned up after success unless `--keep-build-dir` is passed. |
 | `parallel_jobs` | `make -j` value. `null` defers to `defaults.kernel.build_jobs` (default: `nil`, meaning all available cores). |
 | `default_configs` | Flat map of `CONFIG_OPTION: value` entries. `y` enables the option, `n` disables it, string values set the option to a specific value (e.g. `"4"`). Passed to `scripts/config` during build. |
 | `features` | Named feature groups of kernel config options. Each feature has `desc` and `enforce` (a map of `CONFIG_OPTION: y` values). Activatable via `--features` on `mvm kernel pull`. Use `all` or `*` to enable every feature in the spec. |

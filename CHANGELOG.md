@@ -1218,6 +1218,10 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Official-kernel builds now honor an explicit `MVM_TEMP_DIR` for both build scratch and compiled-cache selection,
+  while unset or empty values preserve the spec's `build_dir`. Existing settings and flags remain. Three behavioral
+  cache-hit cases, the complete kernel/infra packages, formatting and focused vet passed under Go 1.26.3 inside the
+  named runner. This source gate does not qualify a newly compiled kernel or reconstruct historical provenance.
 - Initialization no longer marks administrator setup complete after failed sudo execution. Both wizard paths
   use the fixed system installation for `host init`, without forwarding caller-selected root command paths or
   environment assignments; cancellation and process-start failures leave setup incomplete.
