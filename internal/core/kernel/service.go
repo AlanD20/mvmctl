@@ -1125,7 +1125,16 @@ func (s *Service) downloadFCConfig(
 	if err != nil {
 		return errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to download config: %s", err))
 	}
-	return os.WriteFile(filepath.Join(kernelDir, ".config"), data, 0644)
+	if err := os.WriteFile(filepath.Join(kernelDir, ".config"), data, 0644); err != nil {
+		return err
+	}
+	slog.Debug("Kernel base config written",
+		"url", url,
+		"sha256", crypto.SHA256(data),
+		"size_bytes", len(data),
+		"kernel_dir", kernelDir,
+	)
+	return nil
 }
 
 func (s *Service) applyConfigFragments(
