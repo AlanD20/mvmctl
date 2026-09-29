@@ -504,7 +504,7 @@ tests/system/
 | kernel | 1 | `test_kernel_import.py` | Kernel import — Tier 1 |
 | network | 1 | `test_network.py` | Network creation (TestNetworkEdgeCases class marked `tier2`) |
 | nftables | 2 | `test_nftables.py` | Nftables firewall backend and atomic rule sync — needs nested virt |
-| policies | 2 | `test_policies.py` | Intended 0.3.0 coverage: typed same-/cross-network traffic and directional VM-to-VM exec grants. Existing cases still need contract reconciliation; nested KVM and bridge-family nftables capability are required for network-policy qualification. |
+| policies | 2 | `test_policies.py` | Typed same-/cross-network TCP network-source grants and directional source-VM UDP grants, with exact allow/revoke behavior — needs nested KVM and bridge-family nftables |
 | host | 1 | `test_host.py` | Host info/status |
 | system_install | 1 | `test_system_install.py` | Root-owned system install path, metadata, routing, and failure safety |
 | run | 1 | `test_run.py` | Service subprocesses |
@@ -513,7 +513,7 @@ tests/system/
 | jailer | 2 | `test_jailer.py`, `test_cgroup.py` | Canonical Jailer containment and cgroup-v2 enforcement — needs nested virt |
 | ssh | 2 | `test_ssh.py` | SSH into VMs |
 | console | 2 | `test_console.py` | Root-observed relay lifecycle, live PTY attachment, caller PID-mirror isolation and preexisting counterfeit socket-peer rejection |
-| exec | 2 | `test_exec.py` | Vsock agent command execution — uses module-scoped VM, needs nested virt |
+| exec | 2 | `test_exec.py`, `test_vm_to_vm_exec.py` | Host-to-VM vsock commands and directional VM-to-VM grants, including endpoint renewal, interruption cleanup and redacted audit — needs nested virt |
 | logs | 2 | `test_logs.py` | Log retrieval |
 | full_journeys | 2 | `test_full_journeys.py` | Multi-step scenarios |
 | env | 3 | `test_env.py` | Environment workflow (apply/destroy/diff) — runs host-direct because creating VMs via env spec adds unnecessary nesting |

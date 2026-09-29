@@ -15,10 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > package (7.743s) and all 240 Python orchestrator unit cases (7.41s). Earlier runner candidates passed network/nftables/policy
 > (47/47), volume (37/37), exec (7/7), host (24/24), SSH (9/9), logs (11/11), console (5/5), copy (15/15),
 > kernel import (8/8), Jailer (13/13), and rootfs persistence (1/1) Python domains with strict zero-skip reports at
-> their recorded revisions. The current registered Tier 1/Tier 2 matrix subsequently passed all 415 cases across
-> 26 files against the corrected installed candidate, with unchanged configuration, four empty resource inventories
-> and no remaining runner swap. A QA historical-journal descriptor leak was fixed before the binary file passed;
-> the earlier failed report remains preserved. This is not complete Tier 3 or whole-release qualification.
+> their recorded revisions. The subsequent registered Tier 1/Tier 2 run collected 415 cases across 26 files:
+> 413 passed and two binary-test cases failed. After correcting a QA historical-journal descriptor leak, the complete
+> 11-case binary file passed separately, completing consolidated coverage of those 415 cases across test revisions.
+> Configuration and resource cleanup were checked, and both the failed and corrected reports remain preserved.
+> This is not a single complete run against the latest source/candidate, complete Tier 3 or whole-release qualification.
 > Host-reboot/exec recovery had one device-open failure and one successful controlled repeat; its cause remains
 > unresolved. A later owned-guest reboot check stopped before restart: inspection rejected stale console boot
 > identity, and typed VM/network cleanup refused prior-boot admission. Targeted console and schema-6 absence-proof
