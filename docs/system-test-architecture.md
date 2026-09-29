@@ -139,9 +139,19 @@ count as release evidence; the feature list alone is insufficient.
 ### Creating the Volume (`--prepare` or `ensure_shared_volume`)
 
 The host asset mirror (`~/.cache/mvm-asset-mirror/`) is the source of truth. A shareable read-only volume is created
-once and reused across all test runs. The orchestrator accepts only the exact canonical
-`${MVM_CACHE_DIR:-~/.cache/mvmctl}/volumes/asset-mirror.raw` backing path. Missing stale records are rebuilt; an
-unexpected path fails closed without mutation.
+once and reused across test runs. For a 0.3.0 controller, its fresh source must be the exact canonical
+`${MVM_CACHE_DIR:-~/.cache/mvmctl}/volumes/<volume-id>.raw` path, bound to the inspected 64-character volume ID.
+The older outer controller's bare JSON response and `volumes/asset-mirror.raw` source remain supported by the QA
+orchestrator; this does not add a product-state migration path.
+
+After protection, inspection deliberately hides the source path. The orchestrator reuses backing only when the
+versioned response binds the volume ID to explicit protected accounting; an empty path is not a stale-volume signal.
+It never formats or reseeds that protected backing or the old caller-owned staging file. An explicit `--volume` or
+`--rebuild` requests removal through the controller using the exact inspected volume ID, then creates and seeds a new
+volume only after removal succeeds. Retained root references or uncertain source identity can refuse removal; the
+orchestrator must stop rather than bypass that refusal. Stop and remove test VMs that retain the volume before
+rebuilding. Unprotected stale records can be recreated only after successful cleanup leaves their exact source path
+absent. Unexpected paths and leftover files, directories or symlinks fail closed.
 
 This volume is a point-in-time copy, not a writable cache. The product downloader can fall back to the fixed upstream
 URL after a checksum mismatch, but the system-test runner treats that fallback and HTTP-downloaded mirror

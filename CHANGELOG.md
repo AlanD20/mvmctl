@@ -195,6 +195,18 @@ adversarial firewall and recovery cases remain separate release gates.
 
 #### Implementation-only integration updates
 
+- Protected-kernel removal and explicit same-content import use root-authorized retirement, retained SHA-256 and
+  backing generations. VM or snapshot references refuse removal; ordinary launch cannot resurrect retired content.
+  Reimport persists the candidate before recording its identity, rejects a missing or replaced recorded candidate,
+  and publishes only bytes matching the retained root digest. Focused Go tests, the complete root Jailer package and
+  affected race checks passed inside the named runner; installed-CLI reimport and boot remain unqualified.
+- Typed guest sudo provisioning writes `/etc/sudoers.d/mvm-guest`, leaving the reserved `/etc/sudoers.d/mvm` path
+  available for the nested controller's marker-only host policy. LoopMount behavioral tests passed in the named runner.
+- QA volume inspection decodes the versioned JSON envelope and binds fresh mirror sources to their canonical volume
+  IDs. Protected backing is reused without reseeding obsolete staging files. Explicit mirror rebuild delegates
+  exact-ID removal to the controller and recreates only after success; retained references or uncertain source identity
+  still refuse removal. Stale source objects left behind after cleanup prevent recreation.
+
 - Generated cloud-init ISOs now receive checked `0600` permissions before protected import, rather than inheriting
   group-write access from the caller's umask. Behavioral Go regressions and the previously failing ISO-create case
   passed in the named runner. Retirement of already incomplete imports remains a separate release blocker.

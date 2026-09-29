@@ -930,6 +930,8 @@ Provisioner type resolved ONCE at startup in `api.NewOperation()` by reading `se
 Task 13 now has an activated private LoopMount receiver path for VM provisioning and read-only image inspection in
 `internal/service/loopmount/`. Its named
 `ProvisionVM`, `InspectImage`, and `OptimizeImage` client methods use closed VM/image request, plan, and result types.
+Guest sudo provisioning uses the fixed `/etc/sudoers.d/mvm-guest` policy file, preserving `/etc/sudoers.d/mvm` for
+the controller's marker-only host authorization if the guest later becomes a nested runner.
 VM resize is grow-only relative to the admitted rootfs size. The protocol bounds rootfs and image sizes, guest
 usernames, SSH key count and bytes, agent port, and canonical UUIDv4 token before exchange. A result becomes authority
 only when the privileged process started and the transport observed actual response EOF; otherwise stable transport

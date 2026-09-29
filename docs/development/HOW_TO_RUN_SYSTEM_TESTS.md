@@ -246,13 +246,19 @@ reads the large object from the mirror instead of downloading it again. Small ch
 go to the fixed upstream source so cached content can be verified.
 
 The shared `asset-mirror` volume is a point-in-time, read-only copy. If a pull replaces a stale host object or adds a
-missing one, rebuild the QA volume before continuing:
+missing one, stop and remove test VMs retaining that volume, then rebuild the QA volume before continuing:
 
 ```bash
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
   MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
   python3 scripts/run-system-tests.py --volume
 ```
+
+With a 0.3.0 controller, protected-volume inspection intentionally hides the backing path. Ordinary preparation
+reuses its ID-bound protected accounting; it does not treat that empty path as a stale record. Explicit volume
+rebuild uses controller-mediated removal of the exact inspected ID before creating a new source. If root authority
+refuses removal because references remain or source identity changed, preparation stops; do not delete protected
+files or journals manually. Fresh raw sources use `volumes/<volume-id>.raw` and are seeded through a pinned descriptor.
 
 Do not expect the read-only guest copy to self-heal. The downloader can detect a checksum mismatch and attempt its fixed
 HTTP source, but the system-test runner rejects that fallback and any HTTP-downloaded mirror auto-population. Each
@@ -290,6 +296,8 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
 
 `--rebuild` requires `--candidate-version` unless `HEAD` is one clean checkout with exactly one valid release tag. This
 prevents a release branch from inheriting the previous tag through `git describe`.
+The shared-volume replacement has the same controller-authorized removal requirements as `--volume`; it does not
+force removal past retained root references or uncertain file ownership.
 
 ### 3.4 Verification Checklist
 

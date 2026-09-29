@@ -63,8 +63,8 @@ the isolation prerequisite after previously pausing it for a separate design dec
 
 ### Protected kernel retirement and explicit reimport
 
-Accepted on 2026-09-29; implementation and qualification are pending. Kernel removal currently leaves an unused
-protected copy behind. Applying the mutable-disk tombstone unchanged would instead prevent reimport of the same
+Accepted on 2026-09-29; source integrated, installed-candidate qualification incomplete. Previously kernel removal
+left an unused protected copy behind. Applying the mutable-disk tombstone unchanged would prevent reimport of the same
 content-addressed kernel. The selected solution is a kernel-only, explicitly authorized retirement/import flow,
 not an ordinary-launch fallback or a general resurrection mechanism.
 
@@ -87,6 +87,9 @@ not an ordinary-launch fallback or a general resurrection mechanism.
 
 Focused qualification must cover identical reimport and boot, changed-byte refusal, retained-reference refusal,
 interrupted retirement/reimport, stale-generation rejection and unchanged mutable-backing anti-resurrection behavior.
+The integrated implementation passed focused Go tests, the full root Jailer package and affected race checks in the
+named disposable runner. Those internal-state checks do not prove an installed-CLI reimport-and-boot journey or
+cross-filesystem power-loss recovery.
 
 ## Consequences
 
