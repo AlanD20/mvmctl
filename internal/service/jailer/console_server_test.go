@@ -326,6 +326,7 @@ func TestConsoleObserveSameBootIncompleteLifecycleRemainsUnavailable(t *testing.
 			domainErr := errs.AsDomainError(err)
 			require.NotNil(t, domainErr)
 			assert.Equal(t, errs.CodeConsoleRelayFailed, domainErr.Code)
+			assert.Equal(t, errs.ClassInternal, domainErr.Class)
 			assert.Empty(t, f.signaled)
 			after, err := os.ReadFile(f.path)
 			require.NoError(t, err)

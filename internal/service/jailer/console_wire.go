@@ -139,6 +139,9 @@ func consoleRuntimeSocketPath(ownerUID uint32, vmID string) string {
 }
 
 func consoleAuthorityError(vmID, message string, cause error) *errs.DomainError {
+	if cause == nil {
+		return errs.New(errs.CodeConsoleRelayFailed, message, errs.WithEntity(vmID))
+	}
 	return errs.WrapMsg(errs.CodeConsoleRelayFailed, message, cause, errs.WithEntity(vmID))
 }
 
