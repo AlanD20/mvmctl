@@ -73,9 +73,6 @@ class _KernelImportOwner:
                         if item["type"] == kind and item["is_default"]]
             assert len(selected) == 1, selected
             assert selected[0]["version"] == "1.16.2" and selected[0]["is_present"], selected
-        images = [item for item in self.baseline["image"].values()
-                  if item["type"] == "alpine" and item["version"] == "3.23" and item["is_present"]]
-        assert len(images) == 1, images
         self.source_path = self.kernel_path(self.default_id)
         self.source_identity = _file_identity(self.source_path)
         self.source_digest = _digest(self.source_path)
@@ -175,6 +172,9 @@ class _KernelImportOwner:
                 self.vm_record = record
 
     def create_vm(self, kernel_id):
+        images = [item for item in self.baseline["image"].values()
+                  if item["type"] == "alpine" and item["version"] == "3.23" and item["is_present"]]
+        assert len(images) == 1, images
         assert self.vm_name is None, "maximum one owned VM"
         assert not any(item["status"] not in ("stopped", "failed")
                        for item in self.baseline["vm"].values()), self.baseline["vm"]
