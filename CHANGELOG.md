@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Release status (2026-09-29):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
+> **Release status (2026-09-30):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
 > requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean source snapshot `b2c0a1f8` passed the complete
@@ -62,6 +62,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
+
+The latest installed candidate passed 118 bounded non-VM Python system cases inside `mvmctl-030-test`, with strict
+zero-other-outcome reports and checked cleanup. Kernel-import fixtures now require the Alpine image only when
+creating a VM; all six non-VM import cases passed without an image prerequisite. Success-list fixtures consume
+the structured JSON envelope, and fresh-cache initialization uses the required matching 1.16.2 binaries.
+These results do not qualify VM-dependent imports, fresh kernel production, reusable-base provisioning or the
+complete current-source release matrix. The installed production binary was unchanged by these test-only fixes.
 
 The complete 38-case image module passed twice against the current installed runner candidate, covering mirrored
 Ubuntu tar import and boot, Alpine import and boot, format detection, warm copies, defaults and dependency-aware
