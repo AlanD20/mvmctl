@@ -68,7 +68,7 @@ class TestKernelLifecycle:
         _run_mvm(
             runner_vm,
             "init", "--non-interactive", "--skip-host", "--skip-network",
-            "--binary-version", "1.16.0", timeout=180,
+            "--binary-version", "1.16.2", timeout=180,
         )
         result = _run_mvm(runner_vm, "kernel", "ls", "--json")
         assert _json_success_data(result.stdout, list) == []
@@ -96,8 +96,8 @@ class TestKernelLifecycle:
             f"got stdout: {result.stdout[:200]}, "
             f"stderr: {result.stderr[:200]}"
         )
-        kernels = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
         official = [
             k for k in kernels
@@ -128,7 +128,7 @@ class TestKernelLifecycle:
             f"Remote kernel listing failed in Tier 2 environment "
             f"(should have network): {result.stderr}"
         )
-        data = json.loads(result.stdout)
+        data = _json_success_data(result.stdout, list)
         assert isinstance(data, list), "Expected a list of remote kernels"
         assert len(data) > 0, "Expected at least one remote kernel entry"
         entry = data[0]
@@ -303,8 +303,8 @@ class TestKernelPullWithVersion:
             f"Kernel pull with --version failed in Tier 2 environment: "
             f"{result.stderr.strip()}"
         )
-        kernels = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
         firecracker = [
             k for k in kernels
@@ -333,7 +333,7 @@ class TestKernelPullWithVersion:
         )
 
         result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        kernels = json.loads(result.stdout)
+        kernels = _json_success_data(result.stdout, list)
         firecracker_kernels = [
             k for k in kernels
             if k.get("type") == "firecracker"
@@ -373,8 +373,8 @@ class TestKernelPullArch:
             f"Kernel pull failed in Tier 2 environment: {result.stderr.strip()}"
         )
 
-        kernels = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
         firecracker = [
             k for k in kernels
@@ -426,8 +426,8 @@ class TestKernelBuild:
             f"Kernel build with custom config failed: {result.stderr.strip()}"
         )
 
-        kernels = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
         official = [
             k for k in kernels
@@ -468,8 +468,8 @@ class TestKernelBuild:
         assert result.returncode == 0, (
             f"Kernel clean rebuild failed: {result.stderr.strip()}"
         )
-        kernels = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
         official = [
             k for k in kernels
@@ -532,8 +532,8 @@ class TestKernelBuild:
         assert result.returncode == 0, (
             f"Kernel pull with --jobs failed: {result.stderr.strip()}"
         )
-        kernels = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
         official = [
             k for k in kernels
@@ -561,8 +561,8 @@ class TestKernelBuild:
         assert result.returncode == 0, (
             f"Kernel pull with --keep-build-dir failed: {result.stderr.strip()}"
         )
-        kernels = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
         official = [
             k for k in kernels
@@ -598,8 +598,8 @@ class TestKernelRemoveAndPull:
         assert result.returncode == 0, (
             f"Official kernel pull/build failed: {result.stderr.strip()}"
         )
-        kernels = json.loads(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout
+        kernels = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
         )
         official_default = [
             k for k in kernels
@@ -706,7 +706,7 @@ class TestKernelPullAdvancedFlags:
 
         # L2 verification: confirm the kernel appears in the listing
         ls_result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-        kernels = json.loads(ls_result.stdout)
+        kernels = _json_success_data(ls_result.stdout, list)
         assert isinstance(kernels, list)
         assert any(
             k.get("type") == "official" and k.get("is_present") for k in kernels
