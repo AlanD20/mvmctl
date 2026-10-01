@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Release status (2026-09-30):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
+> **Release status (2026-10-01):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
 > requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean source snapshot `b2c0a1f8` passed the complete
@@ -69,6 +69,12 @@ creating a VM; all six non-VM import cases passed without an image prerequisite.
 the structured JSON envelope, and fresh-cache initialization uses the required matching 1.16.2 binaries.
 These results do not qualify VM-dependent imports, fresh kernel production, reusable-base provisioning or the
 complete current-source release matrix. The installed production binary was unchanged by these test-only fixes.
+
+A subsequent VM-dependent kernel-import case failed before guest launch: Jailer destination traversal incorrectly
+applied the private `root:root 0700` rule to the shared `/var/lib/mvmctl` state base, contrary to its documented
+shared-directory admission. Fixture teardown and normal removal of the owned image/kernel seeds restored the checked
+baseline; the second VM-dependent import case was not run. The focused traversal correction still requires Go and
+installed-candidate lifecycle verification. The earlier non-VM passes do not resolve this launch blocker.
 
 The complete 38-case image module passed twice against the current installed runner candidate, covering mirrored
 Ubuntu tar import and boot, Alpine import and boot, format detection, warm copies, defaults and dependency-aware
