@@ -216,6 +216,13 @@ Use the separate clean-host installation gate in `docs/RC_QA.md` to qualify the 
 Do not omit `--version` for an untagged RC. The build script otherwise uses `git describe`, which can inherit the
 previous release tag and give the new candidate and runner image the wrong version identity.
 
+For candidates built inside a runner, use a clean standalone checkout with a genuine `.git` directory. With the
+pinned Go 1.26.3 toolchain, a linked worktree nested inside another Git checkout can compile the intended source yet
+stamp the enclosing checkout's revision: Go's VCS discovery skips the worktree's `.git` file. Check
+`go version -m <candidate>` for the intended full `vcs.revision` and `vcs.modified=false` before installation.
+Stop on a mismatch; do not disable VCS stamping or override metadata to make the check pass. Source-editing worktrees
+remain useful, but their Git `HEAD` alone does not prove the built candidate's identity.
+
 ---
 
 ## 3. Prepare Shared Assets

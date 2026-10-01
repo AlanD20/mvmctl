@@ -63,27 +63,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
 
-The latest installed candidate passed 118 bounded non-VM Python system cases inside `mvmctl-030-test`, with strict
-zero-other-outcome reports and checked cleanup. Kernel-import fixtures now require the Alpine image only when
-creating a VM; all six non-VM import cases passed without an image prerequisite. Success-list fixtures consume
-the structured JSON envelope, and fresh-cache initialization uses the required matching 1.16.2 binaries.
+Before the shared-state traversal fix, installed candidate `0.3.0-rc.8521b3bc` passed 118 bounded non-VM Python system
+cases inside `mvmctl-030-test`, with strict zero-other-outcome reports and checked cleanup. Kernel-import fixtures
+require the Alpine image only when creating a VM; all six non-VM import cases passed without an image prerequisite.
+Success-list fixtures consume the structured JSON envelope, and fresh-cache initialization uses the required
+matching 1.16.2 binaries.
 These results do not qualify VM-dependent imports, fresh kernel production, reusable-base provisioning or the
 complete current-source release matrix. The installed production binary was unchanged by these test-only fixes.
 
-A subsequent VM-dependent kernel-import case failed before guest launch: Jailer destination traversal incorrectly
+A subsequent VM-dependent kernel-import case failed before guest launch on that candidate: Jailer traversal incorrectly
 applied the private `root:root 0700` rule to the shared `/var/lib/mvmctl` state base, contrary to its documented
 shared-directory admission. Fixture teardown and normal removal of the owned image/kernel seeds restored the checked
-baseline; the second VM-dependent import case was not run. The focused traversal correction still requires Go and
-installed-candidate lifecycle verification. The earlier non-VM passes do not resolve this launch blocker.
+baseline; the second VM-dependent import case was not run in that failed attempt. The integrated correction admits
+safe shared-base metadata without changing it, while preserving exact private-directory permissions and descriptor,
+mount, and identity checks across preparation, retention, launch-child reopening, and stopped-tree cleanup.
+Its regression failed on the old code and passed on the fix; all eight focused Go tests, their race run, vet,
+formatting, and the complete 804-test root Jailer package passed inside the named runner.
 
-The complete 38-case image module passed twice against the current installed runner candidate, covering mirrored
+The corrected `0.3.0-rc.6088c14c` candidate then passed both VM-dependent import cases once each (7.58s and 9.96s),
+with strict zero-other-outcome reports. These cases exercise guest exec, exact imported-kernel selection, stop/start
+with a changed guest boot identity, and normal typed cleanup. Owned image/kernel seeds were removed through normal
+commands, and final checked state matched the original baseline. The earlier failed reports remain preserved.
+This closes the observed shared-base launch failure, not the full current-candidate matrix or whole-release gate.
+The QA guide records a Go 1.26.3 nested-worktree VCS-stamping caveat: the corrected candidate was built from a clean
+standalone checkout, verified with its actual source revision, and installed only inside the disposable runner.
+
+The complete 38-case image module passed twice against an earlier installed runner candidate, covering mirrored
 Ubuntu tar import and boot, Alpine import and boot, format detection, warm copies, defaults and dependency-aware
 removal. Both strict reports have zero non-passing outcomes and checked configuration/inventory cleanup.
 
-The complete 31-case basic network module passed twice against the current installed runner candidate, with exact
+The complete 31-case basic network module passed twice against an earlier installed runner candidate, with exact
 owned cleanup and strict zero-other-outcome reports. This includes an owned missing-bridge administrator fault,
-fail-closed sync and typed removal. Current nftables and traffic-policy modules also passed complete-file repeats;
-adversarial firewall and recovery cases remain separate release gates.
+fail-closed sync and typed removal. The nftables and traffic-policy modules also passed complete-file repeats at their
+recorded revisions; adversarial firewall and recovery cases remain separate release gates.
 
 ### Added
 
