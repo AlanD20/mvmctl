@@ -136,11 +136,11 @@ func retainJailDestination(
 		if mvmctlFD >= 0 {
 			closeLibErr = errors.Join(closeLibErr, deps.close(context.WithoutCancel(ctx), mvmctlFD))
 		}
-		return nil, processAuthorityError(vmID, "open exact mvmctl jail ancestor", errors.Join(err, closeLibErr))
+		return nil, processAuthorityError(vmID, "open shared mvmctl jail ancestor", errors.Join(err, closeLibErr))
 	}
-	if err := inspectExactJailAncestor(ctx, deps, mvmctlFD, "mvmctl"); err != nil {
+	if err := inspectSharedJailStateBase(ctx, deps, mvmctlFD); err != nil {
 		return nil, appendJailDestinationCleanupError(
-			processAuthorityError(vmID, "inspect exact mvmctl jail ancestor", err),
+			processAuthorityError(vmID, "inspect shared mvmctl jail ancestor", err),
 			"close rejected mvmctl jail ancestor",
 			deps.close(context.WithoutCancel(ctx), mvmctlFD),
 			vmID,
@@ -325,6 +325,19 @@ func inspectExactJailAncestor(ctx context.Context, deps jailDestinationDeps, fd 
 	}
 	if stat.Mode != unix.S_IFDIR|0700 || stat.Uid != 0 || stat.Gid != 0 {
 		return fmt.Errorf("trusted jail ancestor %s is not exact root:root mode 0700", name)
+	}
+	return nil
+}
+
+func inspectSharedJailStateBase(ctx context.Context, deps jailDestinationDeps, fd int) error {
+	var stat unix.Stat_t
+	if err := deps.fstat(ctx, fd, &stat); err != nil {
+		return err
+	}
+	// CRITICAL: ADR-0016 admits existing shared-base metadata unchanged; private jail ancestors
+	// retain their exact root:root mode 0700 policy.
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != 0 || stat.Mode&0022 != 0 {
+		return fmt.Errorf("shared jail state base mvmctl has invalid metadata")
 	}
 	return nil
 }

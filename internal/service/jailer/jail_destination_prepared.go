@@ -88,9 +88,14 @@ func prepareJailDestination(
 	for _, leaf := range []string{"mvmctl", "jailer", "firecracker"} {
 		nextFD, openErr := deps.openAt(ctx, currentFD, leaf, directoryFlags, 0)
 		if openErr != nil {
-			return nil, closeCurrent(processAuthorityError(vmID, "open exact jail destination ancestor "+leaf, openErr))
+			return nil, closeCurrent(processAuthorityError(vmID, "open jail destination ancestor "+leaf, openErr))
 		}
-		inspectErr := inspectExactJailAncestor(ctx, deps, nextFD, leaf)
+		var inspectErr error
+		if leaf == "mvmctl" {
+			inspectErr = inspectSharedJailStateBase(ctx, deps, nextFD)
+		} else {
+			inspectErr = inspectExactJailAncestor(ctx, deps, nextFD, leaf)
+		}
 		mount, mountErr := inspectJailDestinationMount(ctx, deps, nextFD)
 		if inspectErr == nil && mountErr != nil {
 			inspectErr = fmt.Errorf("inspect %s mount identity: %w", leaf, mountErr)
@@ -106,7 +111,7 @@ func prepareJailDestination(
 			cleanupErr := deps.close(context.WithoutCancel(ctx), nextFD)
 			return nil, processAuthorityError(
 				vmID,
-				"inspect exact jail destination ancestor "+leaf,
+				"inspect jail destination ancestor "+leaf,
 				errors.Join(inspectErr, closeErr, cleanupErr),
 			)
 		}

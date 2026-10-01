@@ -49,6 +49,86 @@ func TestJailDestinationRetainsExactDescriptorRelativeBindings(t *testing.T) {
 	}
 }
 
+func TestJailDestinationSharedBaseAdmission(t *testing.T) {
+	t.Parallel()
+
+	// Rationale: launch preparation and sealed-tree retention must both admit the shared state base
+	// under ADR-0016 without repairing it or weakening the private Jailer ancestors.
+	tests := map[string]struct {
+		fd      int
+		mode    uint32
+		uid     uint32
+		gid     uint32
+		wantErr bool
+	}{
+		"shared non-root owner":         {fd: 13, mode: unix.S_IFDIR | 0755, uid: 1000, wantErr: true},
+		"shared regular file":           {fd: 13, mode: unix.S_IFREG | 0700, wantErr: true},
+		"shared symlink":                {fd: 13, mode: unix.S_IFLNK | 0777, wantErr: true},
+		"shared group writable":         {fd: 13, mode: unix.S_IFDIR | 0770, wantErr: true},
+		"shared world writable":         {fd: 13, mode: unix.S_IFDIR | 0702, wantErr: true},
+		"private jailer mode 0755":      {fd: 14, mode: unix.S_IFDIR | 0755, wantErr: true},
+		"private firecracker mode 0755": {fd: 15, mode: unix.S_IFDIR | 0755, wantErr: true},
+		"shared mode 0755":              {fd: 13, mode: unix.S_IFDIR | 0755},
+		"shared mode 0700":              {fd: 13, mode: unix.S_IFDIR | 0700},
+		"shared non-root group":         {fd: 13, mode: unix.S_IFDIR | 0755, gid: 1000},
+	}
+	walkers := map[string]func(context.Context, *jailDestinationFixture) (func(context.Context) error, error){
+		"retained": func(ctx context.Context, fixture *jailDestinationFixture) (func(context.Context) error, error) {
+			lease, err := retainJailDestination(ctx, fixture.deps(), testVMID)
+			if err != nil {
+				return nil, err
+			}
+			return lease.Release, nil
+		},
+		"prepared": func(ctx context.Context, fixture *jailDestinationFixture) (func(context.Context) error, error) {
+			prepared, err := prepareJailDestination(ctx, fixture.preparedDeps(), testVMID)
+			if err != nil {
+				return nil, err
+			}
+			return prepared.Release, nil
+		},
+	}
+	for walkerName, walk := range walkers {
+		t.Run(walkerName, func(t *testing.T) {
+			t.Parallel()
+			for name, tc := range tests {
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+
+					fixture := newJailDestinationFixture()
+					stat := fixture.stats[tc.fd]
+					stat.Mode, stat.Uid, stat.Gid = tc.mode, tc.uid, tc.gid
+					fixture.stats[tc.fd] = stat
+					sharedBefore := fixture.stats[13]
+
+					release, err := walk(t.Context(), fixture)
+					if tc.wantErr {
+						require.Error(t, err)
+						assert.Equal(t, errs.CodeProcessError, errs.AsDomainError(err).Code)
+						wantClosed := make([]int, 0, tc.fd-9)
+						for fd := 10; fd <= tc.fd; fd++ {
+							wantClosed = append(wantClosed, fd)
+						}
+						if walkerName == "retained" && tc.fd == 15 {
+							// Retained private bindings close in reverse order after traversal descriptors.
+							wantClosed = []int{10, 11, 12, 13, 15, 14}
+						}
+						if diff := cmp.Diff(wantClosed, fixture.closedSnapshot()); diff != "" {
+							t.Errorf("rejected walker descriptor cleanup mismatch (-want +got):\n%s", diff)
+						}
+						return
+					}
+					require.NoError(t, err)
+					require.NoError(t, release(t.Context()))
+					if diff := cmp.Diff(sharedBefore, fixture.stats[13]); diff != "" {
+						t.Errorf("shared state base metadata changed (-want +got):\n%s", diff)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestJailDestinationRejectsMetadataDriftAndClosesEveryOpenedDescriptor(t *testing.T) {
 	t.Parallel()
 
@@ -121,16 +201,7 @@ func TestPreparedJailDestinationRejectsSubstitutedFixedAncestorMount(t *testing.
 
 			fixture := newJailDestinationFixture()
 			fixture.mounts[fd] = 88
-			deps := fixture.deps()
-			deps.fchmod = func(context.Context, int, uint32) error { return nil }
-			deps.fchown = func(context.Context, int, int, int) error { return nil }
-			openAt := deps.openAt
-			deps.openAt = func(ctx context.Context, parentFD int, leaf string, flags int, mode uint32) (int, error) {
-				if parentFD == 15 && leaf == testVMID {
-					return -1, unix.ENOENT
-				}
-				return openAt(ctx, parentFD, leaf, flags, mode)
-			}
+			deps := fixture.preparedDeps()
 
 			prepared, err := prepareJailDestination(t.Context(), deps, testVMID)
 			assert.Nil(t, prepared)
@@ -207,7 +278,10 @@ func newJailDestinationFixture() *jailDestinationFixture {
 
 func (fixture *jailDestinationFixture) deps() jailDestinationDeps {
 	return jailDestinationDeps{
-		open: func(_ context.Context, name string, _ int, _ uint32) (int, error) {
+		open: func(_ context.Context, name string, flags int, _ uint32) (int, error) {
+			if flags&unix.O_NOFOLLOW == 0 {
+				return -1, errors.New("jail root open must not follow symlinks")
+			}
 			fixture.mu.Lock()
 			defer fixture.mu.Unlock()
 			fd := fixture.nextFD
@@ -215,7 +289,10 @@ func (fixture *jailDestinationFixture) deps() jailDestinationDeps {
 			fixture.opened = append(fixture.opened, "open:"+name)
 			return fd, nil
 		},
-		openAt: func(_ context.Context, directoryFD int, name string, _ int, _ uint32) (int, error) {
+		openAt: func(_ context.Context, directoryFD int, name string, flags int, _ uint32) (int, error) {
+			if flags&unix.O_NOFOLLOW == 0 {
+				return -1, errors.New("jail component open must not follow symlinks")
+			}
 			fixture.mu.Lock()
 			defer fixture.mu.Unlock()
 			fd := fixture.nextFD
@@ -225,6 +302,23 @@ func (fixture *jailDestinationFixture) deps() jailDestinationDeps {
 		},
 		fstat: func(_ context.Context, fd int, stat *unix.Stat_t) error {
 			*stat = fixture.stats[fd]
+			return nil
+		},
+		fchmod: func(_ context.Context, fd int, mode uint32) error {
+			stat := fixture.stats[fd]
+			stat.Mode = stat.Mode&unix.S_IFMT | mode
+			fixture.stats[fd] = stat
+			return nil
+		},
+		fchown: func(_ context.Context, fd, uid, gid int) error {
+			stat := fixture.stats[fd]
+			if uid >= 0 {
+				stat.Uid = uint32(uid)
+			}
+			if gid >= 0 {
+				stat.Gid = uint32(gid)
+			}
+			fixture.stats[fd] = stat
 			return nil
 		},
 		statx: func(_ context.Context, fd int, flags, mask int, stat *unix.Statx_t) error {
@@ -244,6 +338,22 @@ func (fixture *jailDestinationFixture) deps() jailDestinationDeps {
 			return fixture.closeErr[fd]
 		},
 	}
+}
+
+// preparedDeps models the fresh launch's absent VM tree beneath the fixed private parent.
+func (fixture *jailDestinationFixture) preparedDeps() jailDestinationDeps {
+	deps := fixture.deps()
+	openAt := deps.openAt
+	deps.openAt = func(ctx context.Context, parentFD int, leaf string, flags int, mode uint32) (int, error) {
+		if parentFD == 15 && leaf == testVMID {
+			if flags&unix.O_NOFOLLOW == 0 {
+				return -1, errors.New("fresh jail probe must not follow symlinks")
+			}
+			return -1, unix.ENOENT
+		}
+		return openAt(ctx, parentFD, leaf, flags, mode)
+	}
+	return deps
 }
 
 func (fixture *jailDestinationFixture) openEvents() []string {

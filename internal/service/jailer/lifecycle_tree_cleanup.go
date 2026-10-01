@@ -59,6 +59,8 @@ func removeStoppedJailTree(ctx context.Context, record instanceRecord) (returnEr
 		var inspectErr error
 		if name == "var" || name == "lib" {
 			inspectErr = inspectTrustedJailAncestor(ctx, deps, next, name)
+		} else if name == "mvmctl" {
+			inspectErr = inspectSharedJailStateBase(ctx, deps, next)
 		} else {
 			inspectErr = inspectExactJailAncestor(ctx, deps, next, name)
 		}

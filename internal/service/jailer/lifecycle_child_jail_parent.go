@@ -45,7 +45,9 @@ func reopenLaunchChildJailParent(ctx context.Context, retained int) (int, error)
 		if err != nil {
 			return -1, errors.Join(err, unix.Close(current))
 		}
-		if part.exact {
+		if part.name == "mvmctl" {
+			err = inspectSharedJailStateBase(ctx, deps, next)
+		} else if part.exact {
 			err = inspectExactJailAncestor(ctx, deps, next, part.name)
 		} else {
 			err = inspectTrustedJailAncestor(ctx, deps, next, part.name)
