@@ -1290,6 +1290,11 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Image pull/import now return the committed default-selection state instead of a stale `is_default` value,
+  and propagate persistence/default-selection failures before old-image cleanup. A real SQLite regression
+  reproduced the stale result and hidden write failure on the old code; the corrected full API package,
+  vet and formatting passed inside the named runner. Immediate-result Python assertions are added to the
+  existing cold-pull/forced-replacement journey; their installed-candidate execution remains pending.
 - Fixed normal initialization rejecting an existing root-owned `0755` `/var/lib/mvmctl` state base. Persistent stores
   and administrator reset now admit the safe shared base unchanged while retaining exact private-directory and record
   permissions.
