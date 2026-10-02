@@ -85,9 +85,11 @@ evidence, not attribution of the original incident or protection against arbitra
 Historical swap-present and guest-OOM results remain separate from current-candidate matrix qualification.
 
 Enabled GuestFS now has a registered Tier 2 appliance-build/reuse/repair case, and the reusable-base builder
-declares its GuestFS/QEMU tools and an appliance kernel/module tree. Strict-marker collection and focused
-orchestrator checks passed inside the named runner. These are source and collection checks only: actual
-package provisioning and the heavy appliance workflow remain unqualified pending sufficient physical storage.
+declares its GuestFS/QEMU tools and an appliance kernel/module tree. Strict-marker collection, focused
+orchestrator checks and actual named-runner package installation passed. Cold appliance construction failed;
+diagnosis found an unreadable Ubuntu packaged kernel and a separate probe-duration defect. The exact QA kernel
+was made readable through explicit administrator setup; the heavy appliance workflow still requires verification
+against the corrected candidate. Neither identified issue alone proves the whole failure cause.
 
 Before the shared-state traversal fix, installed candidate `0.3.0-rc.8521b3bc` passed 118 bounded non-VM Python system
 cases inside `mvmctl-030-test`, with strict zero-other-outcome reports and checked cleanup. Kernel-import fixtures
@@ -1297,6 +1299,14 @@ composition is described above; the current incomplete-work inventory is under *
   automount cache roots are intentionally unsupported.
 
 ### Fixed
+
+- GuestFS kernel-version probing now uses an explicit five-second timeout instead of a bare duration interpreted
+  as five microseconds. Focused package compilation, vet and formatting passed; installed-candidate appliance
+  qualification remains separate. The ordinary product does not change `/boot` permissions.
+- Reusable QA bases explicitly make verified package-owned GuestFS kernel images readable by the unprivileged
+  runner. Package metadata/checksums and root ownership are checked; the external Firecracker boot kernel is
+  unchanged. Two focused builder checks and an already-readable real-image check passed; fresh provisioning
+  remains a separate gate.
 
 - VM-to-VM exec now checks the session's cancellation state before sending source-retained or ready responses.
   This closes a race while cancellation propagates to the response context. Inside the QA runner, the existing

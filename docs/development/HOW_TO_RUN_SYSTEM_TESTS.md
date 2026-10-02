@@ -168,7 +168,20 @@ The reusable-base builder installs `libguestfs-tools`, `supermin`, `qemu-system-
 and `linux-image-generic` with no recommendations. The packaged kernel/module tree is for the GuestFS
 appliance; it does not change the explicitly selected external runner kernel.
 
-Collection and focused orchestrator checks passed, not the appliance workflow or actual package provisioning.
+The unprivileged appliance builder must also be able to read its packaged kernel. Ubuntu can install that image
+as root-only `0600`; installing the package therefore does not establish appliance readiness. Administrator setup
+may apply the [upstream Ubuntu readability remedy](https://libguestfs.org/guestfs-faq.1.html#Ubuntu), `0644`, to
+the exact verified package-owned image while retaining root ownership and content. Resolve the image from package
+metadata and verify its identity/checksum before changing permissions; do not chmod every file under `/boot`.
+Recheck readability after package replacement. This is an administrator prerequisite, not a product autochmod.
+Reusable-base provisioning now performs this setup for verified package-owned boot images after installing the
+GuestFS dependencies. Its two focused builder checks and the real metadata/checksum/readability recipe passed in
+the named runner; that recipe run was a no-op on an already-readable image, not a fresh-base provisioning pass.
+
+Collection, focused orchestrator checks and actual named-runner package installation passed. The cold-appliance
+attempt then failed; diagnosis found an unreadable packaged kernel and a separate kernel-probe timeout mistakenly
+expressed as 5 microseconds. The exact runner kernel is now readable and the source timeout is corrected to five
+seconds. The corrected-candidate appliance run remains pending; neither correction alone proves the whole failure cause.
 Admit this heavy domain separately: matching supermin/libguestfs sources use a 4 GiB default root and retain
 both cached and fixed copies; a genuine cache rebuild can temporarily retain another root. Allow for installed
 dependencies, extraction, overlays and scratch as well as the free-space floor. Neither a sparse file nor the
