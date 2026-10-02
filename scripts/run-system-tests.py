@@ -531,6 +531,7 @@ TIER1_DOMAINS: dict[str, list[str]] = {
 
 # Tier 2: shared volume + nested virt (VM creation/interaction)
 TIER2_DOMAINS: dict[str, list[str]] = {
+    "guestfs": ["tests/system/cache/test_guestfs_appliance.py"],
     "volume": [
         "tests/system/volume/test_volume.py",
     ],
@@ -1818,6 +1819,9 @@ def _build_base_image(
             "build-essential bc bison flex libncurses-dev "
             "libssl-dev libelf-dev pkg-config git curl dwarves "
             "cloud-image-utils util-linux && "
+            "sudo apt-get install -y -qq --no-install-recommends "
+            "libguestfs-tools supermin qemu-system-x86 file e2fsprogs "
+            "linux-image-generic && "
             "sudo apt-get clean",
             timeout=300,
         )
