@@ -161,6 +161,19 @@ state and processes without requiring GuestFS installation. Those preservation
 cases do not prove that an enabled appliance builds or warms successfully. Cache
 cleanup no longer performs automatic global GuestFS process or orphan cleanup.
 
+The registered Tier 2 `guestfs` domain exercises enabled appliance construction, actual guestfish launch,
+reuse, incomplete-appliance repair and selected-cache pruning while preserving unrelated appliance state.
+The reusable-base builder installs `libguestfs-tools`, `supermin`, `qemu-system-x86`, `file`, `e2fsprogs`
+and `linux-image-generic` with no recommendations. The packaged kernel/module tree is for the GuestFS
+appliance; it does not change the explicitly selected external runner kernel.
+
+Collection and focused orchestrator checks passed, not the appliance workflow or actual package provisioning.
+Admit this heavy domain separately: matching supermin/libguestfs sources use a 4 GiB default root and retain
+both cached and fixed copies; a genuine cache rebuild can temporarily retain another root. Allow for installed
+dependencies, extraction, overlays and scratch as well as the free-space floor. Neither a sparse file nor the
+stock 9 GiB Tier 2 disk proves adequate capacity. Stop before provisioning or testing if the physical budget
+is unresolved; do not turn a missing prerequisite into a skip or a qualification claim.
+
 ### 1.1 Host: Hardware
 
 ```bash

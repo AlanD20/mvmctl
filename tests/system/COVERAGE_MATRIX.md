@@ -1784,6 +1784,7 @@ Specific legacy conflicts that must be rewritten before release:
 |---|---|---|---|---|
 | `cache init` | ⚡ Shallow | `cache/test_cache.py` | `TestCacheInit` | L1 |
 | `cache init` idempotent | ⚡ Shallow | `cache/test_cache.py` | `TestCacheInit` | L1 |
+| Enabled GuestFS appliance build/reuse/repair and selected-cache pruning | 🟡 Partial | `cache/test_guestfs_appliance.py` | `test_enabled_build_reuse_and_incomplete_rebuild` | Registered Tier 2 case; strict-marker collection and focused orchestrator checks pass. Builder prerequisites are declared. Actual package provisioning, appliance construction/launch/reuse/repair and pruning remain unqualified pending physical storage admission. |
 | `cache prune` (no resource) | ⚡ Shallow | `cache/test_cache.py` | `TestCacheEdgeCases` | L1 |
 | `cache prune vm --force` | ⚡ Shallow | `cache/test_cache.py` | `TestCacheEdgeCases` | L2 — VM gone after prune |
 | `cache prune --all --dry-run` | ⚡ Shallow | `cache/test_cache.py` | `TestCachePruneDryRun` | L1 |

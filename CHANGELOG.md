@@ -76,6 +76,11 @@ corrections removed an inapplicable arm64 receipt expectation and restored the t
 umask; neither changed product code. These local gates do not qualify GuestFS, reusable-base provisioning,
 the remaining current-source Python matrix, remote GitHub CI or the release.
 
+Enabled GuestFS now has a registered Tier 2 appliance-build/reuse/repair case, and the reusable-base builder
+declares its GuestFS/QEMU tools and an appliance kernel/module tree. Strict-marker collection and focused
+orchestrator checks passed inside the named runner. These are source and collection checks only: actual
+package provisioning and the heavy appliance workflow remain unqualified pending sufficient physical storage.
+
 Before the shared-state traversal fix, installed candidate `0.3.0-rc.8521b3bc` passed 118 bounded non-VM Python system
 cases inside `mvmctl-030-test`, with strict zero-other-outcome reports and checked cleanup. Kernel-import fixtures
 require the Alpine image only when creating a VM; all six non-VM import cases passed without an image prerequisite.
