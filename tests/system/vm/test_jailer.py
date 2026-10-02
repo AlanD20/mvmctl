@@ -551,6 +551,353 @@ class _JailerReleaseOwnership:
         assert self.process.returncode == 0, error
 
 
+_SNAPSHOT_CAPTURE_FAULT_OBSERVER = r"""
+import grp
+import hashlib
+import json
+import os
+import pwd
+import re
+import resource
+import select
+import signal
+import stat
+import sys
+
+pid, ticks, vm_id, owner = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+cache_path = sys.argv[5]
+assert os.geteuid() == 0 and int(os.environ["SUDO_UID"]) == owner and owner > 0
+assert re.fullmatch(r"[0-9a-f]{32}", vm_id) and pid > 0 and ticks > 0
+fds, pidfd, worker, mutation_possible = [], -1, None, False
+
+def keep(fd):
+    fds.append(fd)
+    return fd
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        assert key not in result, "duplicate authority field"
+        result[key] = value
+    return result
+
+def bounded(fd, maximum):
+    data = b""
+    while len(data) <= maximum:
+        part = os.read(fd, min(65536, maximum + 1 - len(data)))
+        if not part:
+            return data
+        data += part
+    raise AssertionError("oversized observation")
+
+def read_at(parent, name, maximum):
+    fd = os.open(name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    try:
+        return os.fstat(fd), bounded(fd, maximum)
+    finally:
+        os.close(fd)
+
+def directory(parent, name, uid=0, mode=None):
+    fd = keep(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=parent))
+    info = os.fstat(fd)
+    assert info.st_uid == uid and not info.st_mode & 0o022, (name, info)
+    if mode is not None:
+        assert stat.S_IMODE(info.st_mode) == mode
+    return fd
+
+def identity(info):
+    return info.st_dev, info.st_ino
+
+def exited():
+    poller = select.poll()
+    poller.register(pidfd, select.POLLIN)
+    events = poller.poll(0)
+    assert not events or not events[0][1] & (select.POLLERR | select.POLLNVAL)
+    return bool(events)
+
+def require_exit():
+    poller = select.poll()
+    poller.register(pidfd, select.POLLIN)
+    events = poller.poll(10_000)
+    assert len(events) == 1 and events[0][0] == pidfd, "original Firecracker did not exit"
+    assert not events[0][1] & (select.POLLERR | select.POLLNVAL)
+    assert events[0][1] & (select.POLLIN | select.POLLHUP)
+
+def status(parent):
+    _, raw = read_at(parent, "status", 65536)
+    return dict(line.split(":", 1) for line in raw.decode("ascii").splitlines() if ":" in line)
+
+def require_process():
+    assert not exited(), "admitted Firecracker has exited"
+    _, raw_stat = read_at(proc_fd, "stat", 16384)
+    fields = raw_stat.decode("ascii").rpartition(") ")[2].split()
+    assert int(fields[19]) == ticks and fields[0] not in ("Z", "X")
+    values = status(proc_fd)
+    assert [int(value) for value in values["Uid"].split()] == [uid] * 4
+    assert [int(value) for value in values["Gid"].split()] == [gid] * 4
+    assert values["Groups"].split() == []
+    assert active["user_ids"] == dict.fromkeys(("real", "effective", "saved", "filesystem"), uid)
+    assert active["group_ids"] == dict.fromkeys(("real", "effective", "saved", "filesystem"), gid)
+    assert active["supplementary_groups"] == []
+    for name, section in (("root", "jail_root"), ("ns/mnt", "mount_namespace")):
+        info = os.stat(name, dir_fd=proc_fd)
+        assert identity(info) == (active[section]["device"], active[section]["inode"])
+    _, cgroup = read_at(proc_fd, "cgroup", 16384)
+    assert cgroup.decode("ascii") == f"0::/mvmctl/{vm_id}\n"
+    exe_fd = os.open("exe", os.O_RDONLY | os.O_CLOEXEC, dir_fd=proc_fd)
+    try:
+        info = os.fstat(exe_fd)
+        observed = {"device": info.st_dev, "inode": info.st_ino, "size_bytes": info.st_size,
+                    "mode": info.st_mode, "uid": info.st_uid, "gid": info.st_gid, "links": info.st_nlink}
+        assert {key: active["executable"][key] for key in observed} == observed
+        assert active["executable"]["manifest_sha256"] == digest
+        assert hashlib.sha256(bounded(exe_fd, 64 * 1024 * 1024)).hexdigest() == digest
+    finally:
+        os.close(exe_fd)
+    current_info, current_raw = read_at(owner_dir, vm_id + ".json", 16384)
+    assert identity(current_info) == identity(record_info) and current_raw == raw_record
+    with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as boot:
+        assert boot.read().strip() == launch["host_boot_id"]
+    assert not exited()
+
+def require_account_processes(expected):
+    users = [user for user in pwd.getpwall() if user.pw_uid == uid]
+    groups = [group for group in grp.getgrall() if group.gr_gid == gid]
+    assert len(users) == len(groups) == 1
+    assert users[0].pw_gid == gid and users[0].pw_name == groups[0].gr_name
+    assert users[0].pw_shell in ("/usr/sbin/nologin", "/sbin/nologin")
+    observed = set()
+    for name in os.listdir("/proc"):
+        if not name.isdecimal():
+            continue
+        try:
+            process = os.open("/proc/" + name, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            continue
+        try:
+            try:
+                values = status(process)
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            if uid in map(int, values["Uid"].split()) or gid in map(int, values["Gid"].split()):
+                observed.add(int(name))
+        finally:
+            os.close(process)
+    assert observed == expected, ("isolated identity has another process", observed, expected)
+
+def pipe_receipt(fd):
+    assert select.select([fd], [], [], 10)[0], "file-limit worker timed out"
+    raw = os.read(fd, 4097)
+    assert raw and len(raw) <= 4096
+    value = json.loads(raw, object_pairs_hook=unique_object)
+    assert "error" not in value, value
+    return value
+
+def limit_worker(ready_fd, proceed_fd):
+    try:
+        # Keep only anonymous communication pipes. No authority directory, pidfd,
+        # process-root descriptor or root observer stdio reaches the isolated worker.
+        for name in os.listdir("/proc/self/fd"):
+            fd = int(name)
+            if fd not in (ready_fd, proceed_fd):
+                try:
+                    os.close(fd)
+                except OSError as error:
+                    assert error.errno == 9
+        os.setgroups([])
+        os.setresgid(gid, gid, gid)
+        os.setresuid(uid, uid, uid)
+        assert os.getresuid() == (uid, uid, uid) and os.getresgid() == (gid, gid, gid)
+        assert os.getgroups() == []
+        with open("/proc/self/status", encoding="ascii") as source:
+            values = dict(line.split(":", 1) for line in source if ":" in line)
+        assert [int(value) for value in values["Uid"].split()] == [uid] * 4
+        assert [int(value) for value in values["Gid"].split()] == [gid] * 4
+        assert all(int(values[name], 16) == 0 for name in ("CapEff", "CapPrm", "CapInh", "CapAmb"))
+        os.write(ready_fd, json.dumps({"phase": "unprivileged", "pid": os.getpid()}).encode())
+        assert select.select([proceed_fd], [], [], 10)[0] and os.read(proceed_fd, 1) == b"1"
+        # prlimit is numeric-PID based. Matching isolated credentials, no caps,
+        # and exclusive lifecycle ownership exclude effects on a recycled foreign PID.
+        original = resource.prlimit(pid, resource.RLIMIT_FSIZE)
+        assert all(value == resource.RLIM_INFINITY or value >= 256 * 1024 * 1024 for value in original)
+        assert resource.prlimit(pid, resource.RLIMIT_FSIZE, (16 * 1024 * 1024, original[1])) == original
+        applied = resource.prlimit(pid, resource.RLIMIT_FSIZE)
+        assert applied == (16 * 1024 * 1024, original[1])
+        os.write(ready_fd, json.dumps({"phase": "limited", "original": original, "applied": applied}).encode())
+    except BaseException as error:
+        os.write(ready_fd, json.dumps({"error": str(error)}).encode())
+        os._exit(1)
+    os._exit(0)
+
+def observe_capture(snapshot_id):
+    assert re.fullmatch(r"[0-9a-f]{64}", snapshot_id)
+    require_exit()  # A live EFBIG outcome must not pass as the proposed producer crash.
+    directory_fd = root
+    assert cache_path.startswith("/") and ".." not in cache_path.split("/")
+    for component in cache_path.split("/")[1:]:
+        assert component
+        directory_fd = keep(os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                    dir_fd=directory_fd))
+        info = os.fstat(directory_fd)
+        assert info.st_uid in (0, owner) and not info.st_mode & 0o022
+    protected = directory(directory_fd, ".mvm-protected")
+    snapshots = directory(protected, "snapshots", mode=0o700)
+    entry = directory(snapshots, snapshot_id, mode=0o700)
+    info, raw = read_at(entry, "capture-progress.json", 4096)
+    assert info.st_uid == info.st_gid == 0 and info.st_mode == stat.S_IFREG | 0o600 and info.st_nlink == 1
+    progress = json.loads(raw, object_pairs_hook=unique_object)
+    assert progress == {"snapshot_id": snapshot_id, "source_vm_id": vm_id, "owner_uid": owner,
+                        "launch_generation": generation, "stage": "capture_inflight",
+                        "vm_state": "paused", "published": False}, progress
+    assert "capture.json" not in os.listdir(entry)
+    producer = directory(jail_root, "capture-" + snapshot_id, uid=uid, mode=0o700)
+    assert os.fstat(producer).st_gid == gid
+    assert set(os.listdir(producer)) == {"memory", "vmstate"}
+    lengths = {}
+    for name in ("memory", "vmstate"):
+        leaf = os.open(name, os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=producer)
+        try:
+            info = os.fstat(leaf)
+            assert info.st_mode == stat.S_IFREG | 0o600 and info.st_nlink == 1
+            assert (info.st_uid, info.st_gid) == (uid, gid)
+            lengths[name] = info.st_size
+        finally:
+            os.close(leaf)
+    assert 0 < lengths["vmstate"] <= 10_000_000 and 0 <= lengths["memory"] < 256 * 1024 * 1024
+    return {"phase": "interrupted", "progress": progress, "lengths": lengths, "exited": True}
+
+try:
+    pidfd = keep(os.pidfd_open(pid))
+    assert not exited()
+    root = directory(None, "/")
+    var = directory(root, "var")
+    lib = directory(var, "lib")
+    state = directory(lib, "mvmctl")
+    instances = directory(state, "instances", mode=0o700)
+    owner_dir = directory(instances, str(owner), mode=0o700)
+    record_info, raw_record = read_at(owner_dir, vm_id + ".json", 16384)
+    assert record_info.st_mode == stat.S_IFREG | 0o600 and record_info.st_uid == record_info.st_gid == 0
+    assert record_info.st_nlink == 1
+    record = json.loads(raw_record, object_pairs_hook=unique_object)
+    assert set(record) == {"schema_version", "owner_uid", "vm_id", "network_placement", "lifecycle",
+                           "launch_generation", "cleanup_generation", "launch", "active"}
+    assert record["schema_version"] == 6 and record["owner_uid"] == owner and record["vm_id"] == vm_id
+    assert record["network_placement"] == "networkless" and record["lifecycle"] == "active"
+    generation = record["launch_generation"]
+    assert type(generation) is int and generation > record["cleanup_generation"] >= 0
+    launch, active = record["launch"], record["active"]
+    assert launch["pid"] == pid and launch["start_time_ticks"] == ticks
+    assert launch["network_placement"] == "networkless"
+    uid, gid = launch["execution_identity"]["uid"], launch["execution_identity"]["gid"]
+    assert type(uid) is int and uid not in (0, owner)
+    assert type(gid) is int and gid not in (0, int(os.environ["SUDO_GID"]))
+    assert launch["release"]["version"] == "1.16.2" and launch["release"]["architecture"] == "x86_64"
+    digest = launch["release"]["firecracker_sha256"]
+    assert re.fullmatch(r"[0-9a-f]{64}", digest)
+    proc_fd = keep(os.open(f"/proc/{pid}", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW))
+    require_process()
+    jail_root = keep(os.open("root", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=proc_fd))
+    assert identity(os.fstat(jail_root)) == (active["jail_root"]["device"], active["jail_root"]["inode"])
+    require_account_processes({pid})
+    ready_read, ready_write = os.pipe2(os.O_CLOEXEC)
+    proceed_read, proceed_write = os.pipe2(os.O_CLOEXEC)
+    fds.extend((ready_read, ready_write, proceed_read, proceed_write))
+    worker = os.fork()
+    if worker == 0:
+        limit_worker(ready_write, proceed_read)
+    ready = pipe_receipt(ready_read)
+    assert ready == {"phase": "unprivileged", "pid": worker}
+    require_account_processes({pid, worker})
+    require_process()
+    mutation_possible = True
+    os.write(proceed_write, b"1")
+    receipt = pipe_receipt(ready_read)
+    assert receipt["phase"] == "limited"
+    waited, worker_status = os.waitpid(worker, 0)
+    assert waited == worker and os.waitstatus_to_exitcode(worker_status) == 0
+    worker = None
+    require_account_processes({pid})
+    require_process()
+    print(json.dumps({**receipt, "phase": "armed", "vm_id": vm_id, "launch_generation": generation,
+                      "pid": pid, "start_ticks": ticks}), flush=True)
+    assert select.select([sys.stdin], [], [], 240)[0], "capture observer expired"
+    command = sys.stdin.readline(128).strip()
+    if command:
+        assert command.startswith("observe ")
+        print(json.dumps(observe_capture(command.removeprefix("observe "))), flush=True)
+        assert select.select([sys.stdin], [], [], 30)[0], "capture observer release expired"
+        assert sys.stdin.readline(128) == ""
+except BaseException as error:
+    print(json.dumps({"error": str(error)}), flush=True)
+    raise
+finally:
+    # Never restore through a numeric PID. Only the retained original pidfd may
+    # be killed; public CLI cleanup reconciles its exact VM after confirmed exit.
+    if mutation_possible:
+        if not exited():
+            signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+        require_exit()
+    if worker is not None:
+        os.close(proceed_write)
+        fds.remove(proceed_write)
+        os.waitpid(worker, 0)
+    for fd in reversed(fds):
+        os.close(fd)
+"""
+
+
+class _SnapshotCaptureFault:
+    """Own one file-limit fault and its original VMM pidfd until producer exit."""
+
+    def __init__(self, source: dict[str, Any], cache: Path) -> None:
+        assert os.environ.get("MVM_TEST_VM") == "mvmctl-030-test"
+        assert "PYTEST_XDIST_WORKER" not in os.environ, "capture fault requires exclusive lifecycle ownership"
+        self.process = subprocess.Popen(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/bin/python3",
+                "-I",
+                "-u",
+                "-c",
+                _SNAPSHOT_CAPTURE_FAULT_OBSERVER,
+                str(source["pid"]),
+                str(source["process_start_time"]),
+                source["id"],
+                str(os.getuid()),
+                str(cache),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def read(self) -> dict[str, Any]:
+        assert select.select([self.process.stdout], [], [], 30)[0], "capture fault observer timed out"
+        line = self.process.stdout.readline(4097)
+        assert line and len(line) <= 4096, "missing or oversized capture fault receipt"
+        receipt = json.loads(line)
+        assert "error" not in receipt, receipt
+        return receipt
+
+    def observe(self, snapshot_id: str) -> dict[str, Any]:
+        assert re.fullmatch(r"[0-9a-f]{64}", snapshot_id)
+        self.process.stdin.write("observe " + snapshot_id + "\n")
+        self.process.stdin.flush()
+        return self.read()
+
+    def close(self) -> None:
+        if self.process.stdin.closed:
+            return
+        self.process.stdin.close()
+        self.process.wait(timeout=30)
+        diagnostic = self.process.stderr.read(16385)
+        self.process.stdout.close()
+        self.process.stderr.close()
+        assert self.process.returncode == 0, diagnostic
+
+
 def _mirrored_jailer_release(version: str) -> tuple[Path, tuple, dict[str, Any]]:
     assert version in ("1.16.0", "1.16.2") and platform.machine() == "x86_64"
     archive = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser() / f"firecracker-v{version}-x86_64.tgz"
@@ -1457,6 +1804,301 @@ class TestNetworklessJailerLifecycle:
         finally:
             _resources.get().cleanup()
 
+    @pytest.mark.destructive
+    def test_snapshot_capture_file_limit_failure_recovers(
+        self,
+        runner_vm: str,
+        networkless_vm_name: str,
+    ) -> None:
+        """Recover an unpublished producer failure, then restore one complete captured epoch.
+
+        This is filesystem producer interruption, not power loss or root-receiver death.
+        The named runner and this VM's lifecycle are exclusively assigned to this case.
+        """
+        assert os.environ.get("MVM_TEST_VM") == "mvmctl-030-test"
+        assert "PYTEST_XDIST_WORKER" not in os.environ
+        resources = _resources.get()
+        source_name = networkless_vm_name
+        restored_name = f"{source_name}-restore"
+        volume_name = f"sys-capture-fault-vol-{uuid.uuid4().hex[:8]}"
+        fault_name = f"sys-capture-fault-{uuid.uuid4().hex[:8]}"
+        control_name = f"sys-capture-control-{uuid.uuid4().hex[:8]}"
+        initial_epoch, captured_epoch, changed_epoch = (uuid.uuid4().hex for _ in range(3))
+        root_file = f"/root/mvm-capture-{initial_epoch}"
+        memory_mount = f"/mnt/mvm-capture-{initial_epoch}"
+        memory_file = memory_mount + "/epoch"
+        mount_check = f'awk \'$2 == "{memory_mount}" && $3 == "tmpfs" {{found=1}} END {{exit !found}}\' /proc/mounts'
+        fault: _SnapshotCaptureFault | None = None
+        try:
+            original_volume = _json_success_data(
+                _run_mvm(runner_vm, "volume", "create", volume_name, "16M", "--writeback", "--json").stdout,
+                dict,
+            )
+            _run_mvm(
+                runner_vm,
+                "vm",
+                "create",
+                source_name,
+                "--no-network",
+                "--cloud-init-mode",
+                "off",
+                "--skip-deblob",
+                "--no-pci",
+                "-s",
+                "512M",
+                "--mem",
+                "256M",
+                "--vcpu",
+                "1",
+                "--volume",
+                volume_name,
+                "--writeback",
+                "--json",
+                timeout=180,
+            )
+            _run_mvm(
+                runner_vm,
+                "exec",
+                source_name,
+                "--",
+                f"set -e; printf %s {initial_epoch} > {root_file}; "
+                f"printf %s {initial_epoch} | dd of=/dev/vdb bs=1 count=32 conv=fsync,notrunc; sync",
+            )
+            old_boot = _run_mvm(
+                runner_vm,
+                "exec",
+                source_name,
+                "--",
+                "cat",
+                "/proc/sys/kernel/random/boot_id",
+            ).stdout.strip()
+            uuid.UUID(old_boot)
+            initial_hash = _run_mvm(
+                runner_vm,
+                "exec",
+                source_name,
+                "--",
+                "sha256sum",
+                "/dev/vdb",
+            ).stdout.split()[0]
+            _run_mvm(runner_vm, "vm", "pause", source_name)
+            source = _vm_entry(runner_vm, source_name)
+            inspected = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", source_name, "--json").stdout,
+                dict,
+            )
+            assert source["status"] == inspected["vm"]["status"] == "paused"
+            assert source["id"] == inspected["vm"]["id"] and source["pid"] == inspected["vm"]["pid"]
+            cache = Path(inspected["filesystem"]["vm_dir"]).parent.parent
+            fault = _SnapshotCaptureFault(source, cache)
+            armed = fault.read()
+            assert armed["phase"] == "armed" and armed["vm_id"] == source["id"]
+            assert armed["pid"] == source["pid"] and armed["start_ticks"] == source["process_start_time"]
+            assert armed["applied"] == [16 * 1024 * 1024, armed["original"][1]]
+
+            denied = _run_mvm(
+                runner_vm,
+                "snapshot",
+                "create",
+                source_name,
+                "--name",
+                fault_name,
+                "--json",
+                check=False,
+                timeout=180,
+            )
+            # The wrapper registers the full intent even when no local snapshot row exists.
+            intents = [intent for intent in resources.snapshot_intents.values() if intent.name == fault_name]
+            assert len(intents) == 1
+            intent = intents[0]
+            assert intent.source_id == source["id"]
+            assert denied.returncode != 0, (denied.stdout, denied.stderr)
+            response = json.loads(denied.stdout)
+            assert response["schema_version"] == 1 and response["status"] == "error"
+            assert response["data"] is None and response["error"]["code"] == "snapshot.create_failed"
+            observation = fault.observe(intent.identifier)
+            assert observation["phase"] == "interrupted" and observation["exited"] is True
+            assert observation["progress"]["launch_generation"] == armed["launch_generation"]
+            fault.close()
+            fault = None
+
+            assert all(
+                row["id"] != intent.identifier and row["name"] != fault_name for row in resources.rows("snapshot")
+            )
+            unpublished = _run_mvm(
+                runner_vm,
+                "snapshot",
+                "inspect",
+                intent.identifier,
+                "--json",
+                check=False,
+            )
+            assert unpublished.returncode != 0
+            response = json.loads(unpublished.stdout)
+            assert response["schema_version"] == 1 and response["status"] == "error" and response["data"] is None
+            assert response["error"]["code"] == "snapshot.create_failed"
+            details = response["error"]["details"]
+            assert details["snapshot_id"] == intent.identifier and details["source_vm_id"] == source["id"]
+            assert details["snapshot_stage"] == "capture_inflight" and details["publication_state"] == "unpublished"
+            assert details["snapshot_published"] is False and details["vm_state"] == "unknown"
+            assert _vm_entry(runner_vm, source_name)["status"] == "crashed"
+            crashed = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", source_name, "--json").stdout,
+                dict,
+            )
+            assert crashed["vm"]["id"] == source["id"] and crashed["vm"]["status"] == "crashed"
+            assert all(
+                row["id"] != source["id"]
+                for row in _parse_vm_list(
+                    _run_mvm(runner_vm, "vm", "ps", "--json").stdout,
+                )
+            )
+
+            _run_mvm(runner_vm, "vm", "stop", source["id"], "--force", timeout=120)
+            assert _vm_entry(runner_vm, source_name)["status"] == "stopped"
+            assert not resources.path_present(_jail_root(source["id"]))
+            # The normal rm wrapper needs a DB receipt. This exact-ID intent is
+            # instead admitted above and uses the installed public recovery route.
+            for _ in range(2):
+                removed = _installed_mvm(
+                    runner_vm,
+                    "snapshot",
+                    "rm",
+                    intent.identifier,
+                    "--force",
+                    check=False,
+                )
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+                assert not resources.path_present(intent.path)
+            assert all(row["id"] != intent.identifier for row in resources.rows("snapshot"))
+
+            _run_mvm(runner_vm, "vm", "start", source["id"], timeout=120)
+            restarted = _vm_entry(runner_vm, source_name)
+            assert restarted["id"] == source["id"] and restarted["status"] == "running"
+            assert (restarted["pid"], restarted["process_start_time"]) != (source["pid"], source["process_start_time"])
+            recovered = _run_mvm(
+                runner_vm,
+                "exec",
+                source_name,
+                "--",
+                f"set -e; cat {root_file}; echo; dd if=/dev/vdb bs=1 count=32; echo; "
+                "cat /proc/sys/kernel/random/boot_id",
+            ).stdout.splitlines()
+            assert recovered[:2] == [initial_epoch, initial_epoch] and len(recovered) == 3
+            captured_boot = str(uuid.UUID(recovered[2]))
+            assert captured_boot != old_boot
+            assert (
+                _run_mvm(
+                    runner_vm,
+                    "exec",
+                    source_name,
+                    "--",
+                    "sha256sum",
+                    "/dev/vdb",
+                ).stdout.split()[0]
+                == initial_hash
+            )
+
+            _run_mvm(
+                runner_vm,
+                "exec",
+                source_name,
+                "--",
+                f"set -e; mkdir {memory_mount}; mount -t tmpfs -o size=1M mvm-capture {memory_mount}; "
+                f"{mount_check}; printf %s {captured_epoch} > {memory_file}; "
+                f"printf %s {captured_epoch} > {root_file}; "
+                f"printf %s {captured_epoch} | dd of=/dev/vdb bs=1 count=32 conv=fsync,notrunc; sync",
+            )
+            captured_hash = _run_mvm(
+                runner_vm,
+                "exec",
+                source_name,
+                "--",
+                "sha256sum",
+                "/dev/vdb",
+            ).stdout.split()[0]
+            captured = _json_success_data(
+                _run_mvm(
+                    runner_vm,
+                    "snapshot",
+                    "create",
+                    source_name,
+                    "--name",
+                    control_name,
+                    "--json",
+                    timeout=180,
+                ).stdout,
+                dict,
+            )
+            assert captured["source_vm_id"] == source["id"]
+            assert captured["memory_file"] and captured["state_file"] and captured["rootfs_file"]
+            # A full successful capture also proves the replacement process no longer has the injected cap.
+            changed_state = _run_mvm(
+                runner_vm,
+                "exec",
+                source_name,
+                "--",
+                f"set -e; {mount_check}; printf %s {changed_epoch} > {memory_file}; "
+                f"printf %s {changed_epoch} > {root_file}; "
+                f"printf %s {changed_epoch} | dd of=/dev/vdb bs=1 count=32 conv=fsync,notrunc; sync; "
+                f"cat {memory_file}; echo; cat {root_file}; echo; dd if=/dev/vdb bs=1 count=32; echo",
+            ).stdout.splitlines()
+            assert changed_state == [changed_epoch, changed_epoch, changed_epoch]
+            assert (
+                _run_mvm(
+                    runner_vm,
+                    "exec",
+                    source_name,
+                    "--",
+                    "sha256sum",
+                    "/dev/vdb",
+                ).stdout.split()[0]
+                != captured_hash
+            )
+            _run_mvm(runner_vm, "vm", "rm", source_name, "--force", timeout=120)
+            _run_mvm(runner_vm, "volume", "rm", volume_name, "--force")
+            restored = _json_success_data(
+                _run_mvm(
+                    runner_vm,
+                    "snapshot",
+                    "restore",
+                    captured["id"],
+                    restored_name,
+                    "--resume",
+                    "--json",
+                    timeout=180,
+                ).stdout,
+                list,
+            )
+            assert len(restored) == 1 and restored[0]["network_placement"] == "networkless"
+            restored_volumes = [row for row in resources.rows("volume") if row.get("vm_id") == restored[0]["id"]]
+            assert len(restored_volumes) == 1 and restored_volumes[0]["id"] != original_volume["id"]
+            restored_state = _run_mvm(
+                runner_vm,
+                "exec",
+                restored_name,
+                "--",
+                f"set -e; {mount_check}; cat {memory_file}; echo; cat {root_file}; echo; "
+                "cat /proc/sys/kernel/random/boot_id; dd if=/dev/vdb bs=1 count=32; echo",
+            ).stdout.splitlines()
+            assert restored_state == [captured_epoch, captured_epoch, captured_boot, captured_epoch]
+            assert (
+                _run_mvm(
+                    runner_vm,
+                    "exec",
+                    restored_name,
+                    "--",
+                    "sha256sum",
+                    "/dev/vdb",
+                ).stdout.split()[0]
+                == captured_hash
+            )
+        finally:
+            try:
+                if fault is not None:
+                    fault.close()
+            finally:
+                resources.cleanup()
 
     @pytest.mark.destructive
     def test_snapshot_refuses_competing_writable_volume_capture(
