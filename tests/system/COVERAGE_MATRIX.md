@@ -363,14 +363,19 @@ nonempty unrecorded, mounted or foreign-granted files fail closed. Pinned Go 1.2
 vet and root behavioral regressions (0.233 seconds), including interruption replay and actual mount
 refusal, passed in `mvmctl-030-test`; the root race selection passed in 1.522 seconds. Evidence is
 `ci-import-06c6/.tmp/import-06c6-focused-root.log`. Tests construct admitted backing fixtures;
-end-to-end failed-creation/public `VMRemove` and actual power-loss qualification remain open.
+that source checkpoint did not qualify end-to-end failed creation, public `VMRemove` or actual power loss.
 
 The later exact-ID public-removal correction connects this existing root cleanup to forced removal when the
 caller database row was never published. It preserves caller artifacts and ordinary registered resolution.
 Signed integration `5c340074` matches the focused-tested source: inputs/API/CLI packages and vet passed on
 Go 1.26.3 inside the named runner, with formatting and exact source hashes checked.
-Qualification against the retained real interrupted import, including source preservation and denial controls,
-remains pending; source integration alone does not close the end-to-end gap above.
+The installed `0.3.0-rc.fccff661` subsequently passed the exact retained interrupted-import recovery case:
+strict 1/1, with zero other outcomes. Public exact-ID forced removal cleaned root authority and removed
+the verified partial protected copy while retaining caller artifacts; an unknown root ID was denied without
+mutation. Caller identity, extents and bounded content samples, unrelated inventories and configuration were
+preserved. Receipts are `body-03-final-receipt.md` and `body-03-evidence.tar` (SHA-256
+`8859e2f2eafcba0e435b568a7272c2e22d1a657b37a74899812479f0482bbd6e`). This qualifies one retained incident,
+not all failed-creation paths, a complete caller-file hash, actual power loss or the full VM domain.
 
 **Trusted-binary safe repeat gate (2026-09-28):** Commit `f4d7adb1` retains all eleven binary
 cases and exact archive/release identity and live-lease ownership checks. File SHA-256
