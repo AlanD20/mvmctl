@@ -68,13 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
 
-On 2026-10-02, clean tracked source `f91cdf09` passed the complete local Go CI gates inside `mvmctl-030-test`
+On 2026-10-02, clean source `b402c471` passed the complete local Go CI gates inside `mvmctl-030-test`
 with Go 1.26.3: offline tidy, architecture, formatting, golines 0.13, generation, vet and the unprivileged selector,
-with complete atomic coverage artifacts. The full root Jailer result on `6088c14c` (18.194s) was reused only after
-proving identical Go/module/build/CI source. All 262 Python orchestrator tests also passed. Private harness
-corrections removed an inapplicable arm64 receipt expectation and restored the test subprocess's CI-compatible
-umask; neither changed product code. These local gates do not qualify GuestFS, reusable-base provisioning,
-the remaining current-source Python matrix, remote GitHub CI or the release.
+with complete atomic coverage artifacts. The real-agent release build recorded the exact VCS revision and
+`vcs.modified=false`; normal system installation placed the matching `0.3.0-rc.b402c471` candidate only inside
+that runner, preserving its checked configuration and resource baseline. The full root Jailer result on
+`6088c14c` (18.194s) was reused for unchanged Jailer-relevant source, module and build inputs. All 262 Python
+orchestrator tests passed separately at their recorded revision. These local gates do not qualify GuestFS,
+reusable-base provisioning, the remaining current-source Python matrix, remote GitHub CI or the release.
 
 Enabled GuestFS now has a registered Tier 2 appliance-build/reuse/repair case, and the reusable-base builder
 declares its GuestFS/QEMU tools and an appliance kernel/module tree. Strict-marker collection and focused
