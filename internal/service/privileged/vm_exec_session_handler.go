@@ -479,6 +479,9 @@ func deliverVMExecSourceRetained(
 	if err := endpoint.SetWriteDeadline(deadline); err != nil {
 		return vmExecSessionResponseTransportError(err, false)
 	}
+	if err := ctx.Err(); err != nil {
+		return vmExecSessionResponseTransportError(err, false)
+	}
 	writer := &responseStartWriter{writer: endpoint}
 	if err := vmexecsessionwire.EncodeSourceRetained(responseCtx, writer); err != nil {
 		return vmExecSessionResponseTransportError(err, writer.started)
@@ -491,6 +494,9 @@ func deliverVMExecReady(ctx context.Context, endpoint controlEndpoint, deps cont
 	responseCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	if err := endpoint.SetWriteDeadline(deadline); err != nil {
+		return vmExecSessionResponseTransportError(err, false)
+	}
+	if err := ctx.Err(); err != nil {
 		return vmExecSessionResponseTransportError(err, false)
 	}
 	writer := &responseStartWriter{writer: endpoint}
