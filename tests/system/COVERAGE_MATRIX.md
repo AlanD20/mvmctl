@@ -128,8 +128,11 @@ adds `TestCleanHostAdministration::test_clean_enrollment_marker_only_reset_and_r
 `host/test_host_admin.py`. It creates a clean root-user child and then a separate non-root operator, verifies
 first enrollment and usable typed dispatch, denies public administrator/raw-sudo commands, and checks quiescent
 reset, disabled admission and re-init. Cleanup uncertainty is reported if child creation never yields an admitted
-identity. This is authored coverage, not a runtime pass; interrupted init/reset, multioperator enrollment and
-active/ambiguous reset refusal remain separate gaps. The shared runner is never the reset target.
+identity. Signed integration `df69c47e` adds separate password-authenticated second-operator enrollment with
+typed dispatch, active-network reset refusal, and real read-only-filesystem init/reset failure-and-retry cases.
+All three exact nodes collected in the named runner in 0.36 seconds, without fixtures. This is authored coverage,
+not a runtime pass: the first journey failed during child creation, before enrollment. Abrupt interruption and
+ambiguous-runtime reset refusal remain gaps. The shared runner is never the reset target.
 Signed integration `0dcbb418` passed strict one-case collection in the named runner (0.28 seconds); two existing
 registry checks passed separately (0.31 seconds), and lint/format checks passed. No fixture ran during collection.
 
@@ -1258,7 +1261,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
-| Installed system candidate and clean bootstrap | 🟡 Partial | Prepared-host coverage exists. Clean enrollment, marker-only denial and quiescent reset/re-init are authored in `host_admin`, with runtime qualification pending; interrupted rollback and multioperator coverage remain gaps. |
+| Installed system candidate and clean bootstrap | 🟡 Partial | Prepared-host coverage exists. `host_admin` authors clean enrollment, marker-only denial, multioperator typed dispatch, active-network reset refusal and filesystem-failure retries; runtime qualification remains pending. Abrupt interruption and ambiguous-runtime recovery remain gaps. |
 | fd-0 privileged control transport | 🔴 Missing | Go L1 framing/EOF/peer/cancellation abuse coverage plus installed-CLI lifecycle integration. |
 | Root VM authority and cross-UID denial | 🟡 Partial | A focused installed-candidate networkless case denies operator direct connection to the reported Firecracker API socket while `vm stop` succeeds; root-record/process/cache identity checks, constrained two-user denial, tombstone, and zero-leak assertions remain missing. |
 | Independent trusted Firecracker/Jailer releases | 🔴 Missing | Root manifest/ELF/hash authority, atomic failure injection, and installed-CLI release lifecycle. |

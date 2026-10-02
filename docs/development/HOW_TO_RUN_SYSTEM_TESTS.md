@@ -483,7 +483,10 @@ The Tier 2 `host_admin` domain exercises enrollment, marker-only authorization a
 inside its own disposable child VM. It needs nested virtualization and the mirrored launch assets. It never
 resets the shared runner or the outer controller. Collection is not a runtime pass: clean-host execution,
 checked child cleanup and retained administrator-state receipts are required before qualifying this journey.
-Interrupted init/reset and multiple-operator behavior require separate cases.
+The module also contains separate password-authenticated second-operator/typed-dispatch and active-network
+reset-refusal coverage, plus real read-only-filesystem init/reset failure-and-retry journeys. All three cases
+collect successfully; this does not qualify their runtime behavior. Abrupt process interruption and
+ambiguous-runtime recovery still require separate evidence.
 
 ### 4.3 Run Specific Tiers
 

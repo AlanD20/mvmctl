@@ -137,9 +137,11 @@ recorded revisions; adversarial firewall and recovery cases remain separate rele
 
 - Added a registered Tier 2 `host_admin` journey for first enrollment on a clean disposable child, usable
   marker-only authorization, refusal of public administrator/raw-sudo commands, quiescent reset and re-init.
-  The child owns administrator mutations; the shared runner is not reset. Lint, formatting, strict one-case
-  collection and two existing registry checks passed; runtime qualification remains pending. Interrupted
-  enrollment/reset and multioperator coverage are separate remaining cases.
+  Added separate journeys for password-authenticated second-operator enrollment and typed dispatch, active-network
+  reset refusal, and real read-only-filesystem failures with init/reset retries. The child owns administrator
+  mutations; the shared runner is not reset. Lint, formatting and strict three-case collection passed; existing
+  registry checks remain applicable. Runtime qualification remains pending: the first journey failed during child
+  creation, before enrollment. Abrupt process interruption and ambiguous-runtime recovery remain separate gaps.
 - Official-kernel debug output now identifies the exact upstream base-config bytes successfully written before
   configuration mutation. Focused kernel tests, vet and formatting passed in the named runner. A subsequent fresh
   mirrored-source Linux 7.0.11 producer passed with the consumed base-config digest and final config/ELF hashes
