@@ -158,6 +158,17 @@ build inputs, not rerun. All 262 Python orchestrator tests passed separately at 
 These CI results alone do not qualify GuestFS; its later focused runtime result is recorded below.
 Reusable-base and remaining installed-candidate system-matrix qualification remain open.
 
+**Later local CI/build/install checkpoint (2026-10-03):** exact clean source `c723c5b6` completed the pinned
+local Go gates in the named runner. All 68 completed non-Jailer outcomes and earlier passing stages were
+retained; after a private QA sampler correction, only the missing Jailer selection ran (6.512s), with complete
+atomic profiles. The real-agent Go 1.26.3/PIE build and normal `host install-system` passed. Installed
+`0.3.0-rc.c723c5b6` has SHA-256 `b6eaf8b7c207c069e0cb6e00b7cf556ef0c14d785725bc6b28778e0c0ddecbab`,
+root-owned `0755` canonical identity, exact VCS revision and `vcs.modified=false`; the checked runner baseline
+was preserved. Full root-Jailer evidence carries only for verified unchanged relevant source/module/build
+inputs. Failed harness receipts remain retained. This is not the remaining installed-candidate Python matrix,
+fresh reusable-base provisioning, remote GitHub CI or release qualification; do not rerun accepted unchanged
+checks merely because later public Markdown changes.
+
 ### Optional Local GuestFS Qualification
 
 GuestFS remains an optional backend, disabled by default. With

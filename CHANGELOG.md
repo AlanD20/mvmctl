@@ -68,6 +68,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
 
+On 2026-10-03, exact clean source `c723c5b6` completed the local Go CI gates inside `mvmctl-030-test`.
+The 68 completed non-Jailer package outcomes and earlier passing gates were retained; after correcting a QA
+sampler race with deleted Go scratch, only the unfinished Jailer selection ran (6.512s), producing complete
+atomic coverage. The real guest-agent release build passed with Go 1.26.3, PIE, the exact VCS revision and
+`vcs.modified=false`. Normal `host install-system` installed the matching `0.3.0-rc.c723c5b6` candidate only
+inside the named runner, preserving its checked baseline. Accepted full root-Jailer evidence carried forward
+for unchanged relevant source/module/build inputs. The original failed harness runs remain failed evidence;
+this closes the local CI/build/install checkpoint, not reusable-base provisioning, the remaining Python matrix,
+remote GitHub CI or release approval. Subsequent Markdown-only changes do not alter these checked inputs.
+
 On 2026-10-02, clean source `b402c471` passed the complete local Go CI gates inside `mvmctl-030-test`
 with Go 1.26.3: offline tidy, architecture, formatting, golines 0.13, generation, vet and the unprivileged selector,
 with complete atomic coverage artifacts. The real-agent release build recorded the exact VCS revision and
