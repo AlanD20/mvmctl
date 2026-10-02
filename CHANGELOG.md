@@ -1313,11 +1313,18 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Prior-boot VM cleanup no longer rejects a safe root-owned `0755` shared `/var/lib/mvmctl` directory.
+  Private instance directories still require `0700`; record ownership/mode, no-follow traversal and the existing
+  no-cross-mount boundary remain enforced. A real-filesystem regression failed on the original reader and passed
+  after the correction, including unsafe-mode and mount-crossing refusals; the complete root `authorityfs` package,
+  vet and formatting passed inside the named runner. Installed candidate `0.3.0-rc.fccff661` then recovered the
+  retained interrupted creation with a strict one-case pass: the verified partial copy was removed, root authority
+  retired, caller files retained, and unknown-ID removal denied. This does not qualify every recovery fault.
 - Forced removal of one exact VM ID can now reach retained root authority when interrupted creation never
   published a caller database row. Ordinary registered selector/name resolution is preserved; root ownership
   checks remain authoritative. Successful recovery explicitly reports retained caller source, VM-directory and
   staging files rather than silently deleting them. The affected inputs/API/CLI Go packages, vet and formatting
-  passed inside the named runner. Installed-candidate interruption recovery remains a QA gate.
+  passed inside the named runner, followed by the bounded installed-candidate recovery result described above.
 - Reusable-base preparation now uses the supported `network create <name> --subnet <cidr>` invocation,
   removing an obsolete prompt-suppression flag that stopped preparation before builder creation. The existing
   preparation-flow test passed with real network setup orchestration and a fake CLI boundary; actual fresh-base

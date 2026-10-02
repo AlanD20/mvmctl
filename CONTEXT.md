@@ -329,6 +329,10 @@ is created as `root:root 0700`. Private network, firewall, trusted-release, and 
 retain exact `root:root 0700` admission, and their records retain exact `root:root 0600` admission. Traversal and
 publication retain their descriptor pinning, no-follow checks, and durability requirements.
 
+Prior-boot instance recovery also accepts a safe traversable shared state base. Its exact private-mode requirement
+begins at `instances` and the owner directory; this does not move the no-cross-mount boundary below `mvmctl`.
+Unsafe metadata still refuses recovery without repairing directory permissions or discarding retained authority.
+
 The private Jailer runtime-directory foundation now creates the fixed root-owned mode-`0711`
 `/run/mvmctl/runtime/<uid>` hierarchy and exclusively creates one caller-owned mode-`0700` `<vm-id>` directory beneath
 it. It pins the VM directory's device/inode identity, rejects existing VM directories and unsafe parents without
