@@ -142,6 +142,13 @@ cleanup and preparation gates remain required.
 This input binding does not admit the resource budget, qualify the complete Python matrix, or prove nested
 KVM workload behavior by itself. Omit both variables to retain the stock official-kernel workflow.
 
+**Local CI checkpoint (2026-10-02):** clean tracked source `f91cdf09` passed the pinned Go 1.26.3 local CI
+sequence inside `mvmctl-030-test`, including complete atomic coverage from the unprivileged selector. The full
+root Jailer result on `6088c14c` was retained with exact Go/module/build/CI equivalence, not rerun. All 262
+Python orchestrator tests passed separately. Private wrapper corrections concerned an arm64-only generation
+receipt on amd64 and a restrictive umask changing deliberately permissive permission-test fixtures; production
+code was unchanged. This does not close heavy GuestFS, reusable-base or remaining system-matrix qualification.
+
 ### Optional Local GuestFS Qualification
 
 GuestFS remains an optional backend, disabled by default. With

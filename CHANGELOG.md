@@ -68,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
 
+On 2026-10-02, clean tracked source `f91cdf09` passed the complete local Go CI gates inside `mvmctl-030-test`
+with Go 1.26.3: offline tidy, architecture, formatting, golines 0.13, generation, vet and the unprivileged selector,
+with complete atomic coverage artifacts. The full root Jailer result on `6088c14c` (18.194s) was reused only after
+proving identical Go/module/build/CI source. All 262 Python orchestrator tests also passed. Private harness
+corrections removed an inapplicable arm64 receipt expectation and restored the test subprocess's CI-compatible
+umask; neither changed product code. These local gates do not qualify GuestFS, reusable-base provisioning,
+the remaining current-source Python matrix, remote GitHub CI or the release.
+
 Before the shared-state traversal fix, installed candidate `0.3.0-rc.8521b3bc` passed 118 bounded non-VM Python system
 cases inside `mvmctl-030-test`, with strict zero-other-outcome reports and checked cleanup. Kernel-import fixtures
 require the Alpine image only when creating a VM; all six non-VM import cases passed without an image prerequisite.
