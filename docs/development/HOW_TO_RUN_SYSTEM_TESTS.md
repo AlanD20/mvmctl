@@ -92,6 +92,12 @@ TUN and Btrfs. The strict one-case report passed with checked typed cleanup and 
 and configuration. This proves boot and device availability, not `KVM_CREATE_VM`, child nftables rule application
 or reusable-base provisioning. Neither the outer runner's selected kernel nor the mirrored default was replaced.
 
+On 2026-10-02, one bounded case on that exact fresh import also passed actual KVM API 12/empty-VM creation
+and the production readiness probe's disposable bridge/inet nftables rule application, readback and removal.
+An over-strict interphase kernel timestamp guard initially retained the seeds; a narrow guard correction then
+completed normal typed cleanup and restored the exact baseline without rerunning the test. This does not prove
+reusable-base provisioning, traffic isolation or the complete release matrix.
+
 The stock reusable-base workflow also has its own resource budget: the builder uses 3 GiB RAM and a 12 GiB
 logical disk; T2 provisioning uses 4 GiB RAM and a 9 GiB logical disk. The shared mirror volume is another
 6 GiB logical disk, with physical use determined by its cached contents. The replacement `mvmctl-030-test`
@@ -99,13 +105,42 @@ has 6 GiB RAM and a 40 GiB logical disk as verified on 2026-10-01; this is not a
 That day's parent free space was approximately 9.9 GiB, insufficient to admit even the 12 GiB builder under
 the conservative no-sparse-credit budget. Check current physical storage, parent memory headroom and preserved
 state before provisioning; another runner replacement requires separate approval. Logical disk sizes alone
-do not prove that the required physical storage is available. The stock preparation path also selects
-`official:7.0.11`; it cannot bind the separately imported fresh producer artifact merely by changing a default.
-Qualifying that exact artifact through reusable-base provisioning requires an explicit supported binding first.
+do not prove that the required physical storage is available. The stock preparation path selects
+`official:7.0.11`; changing a default does not bind a separately imported fresh producer artifact.
 
 Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
 tests run directly on the outer host and therefore require a dedicated clean
 qualification host or disposable outer VM.
+
+### Using an Already Imported Runner Kernel
+
+For a fresh custom Linux 7.0.11/x86_64 artifact, set both `MVM_RUNNER_KERNEL_ID` and
+`MVM_RUNNER_KERNEL_SHA256` in the controller context that runs the orchestrator. Use the full imported
+64-character ID from `mvm kernel inspect <id> --json` and the SHA-256 of that exact ELF, not its filename,
+version or the kernel ID itself. The artifact must already be present under that controller's managed cache.
+
+```bash
+MVM_ASSET_MIRROR="$HOME/.cache/mvm-asset-mirror" \
+MVM_RUNNER_KERNEL_ID="<full-imported-kernel-id>" \
+MVM_RUNNER_KERNEL_SHA256="<exact-elf-sha256>" \
+python3 scripts/run-system-tests.py --prepare --workers 1 vm_lifecycle
+```
+
+Run this only in the approved disposable qualification environment, with the separate controller/candidate
+paths configured as described below. This selects the imported kernel explicitly for the builder, both preparation
+runners and normal T1/T2 runners. It does not pull, relabel or make that kernel the default. Invalid, missing or
+changed input fails without an official-kernel fallback.
+
+Imported-kernel runs require `--prepare` or `--rebuild` and cannot use `--skip-volume-check`. The `--image`
+action alone builds an image; it does not qualify it. The reusable image key is
+`mvm-test-runner-kernel-<full-imported-id>:<candidate-version>`, separate from the stock image. Its
+`/opt/mvmctl-test/base-inputs.json` records candidate version/content SHA and kernel ID/ELF SHA/version/architecture/
+build ID; reuse requires an exact receipt match. Preparation checks the selected kernel and live GNU build ID against
+the imported ELF, plus installed-candidate nftables readiness and explicit local-mirror reads. Existing typed
+cleanup and preparation gates remain required.
+
+This input binding does not admit the resource budget, qualify the complete Python matrix, or prove nested
+KVM workload behavior by itself. Omit both variables to retain the stock official-kernel workflow.
 
 ### Optional Local GuestFS Qualification
 

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Release status (2026-10-01):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
+> **Release status (2026-10-02):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
 > requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean source snapshot `b2c0a1f8` passed the complete
@@ -46,10 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > This proves rejection before attachment, not resistance to endpoint replacement after observation; other hostile
 > endpoint and race faults remain separate gates.
 > Clean administrator/marker-only denial and reset, enabled GuestFS, adversarial recovery/fault checks,
-> reusable-base provisioning and fresh-kernel KVM/nftables workload qualification, Tier 3, aarch64 runtime, GitHub CI, and final
+> reusable-base provisioning, Tier 3, aarch64 runtime, GitHub CI, and final
 > release approval remain open. A fresh mirrored-source kernel producer completed with retained input/toolchain/
 > config/ELF receipts, followed by a bounded exact-build-ID boot check with KVM device open and TUN/Btrfs evidence.
 > Neither pass reconstructs older artifacts' provenance.
+> On 2026-10-02, one bounded fresh-kernel workload case passed: the exact imported ELF's live build ID matched,
+> KVM reported API version 12 and created an owned empty VM descriptor, and the production readiness probe
+> applied/read back/removed disposable bridge and inet nftables rules. An over-strict QA timestamp guard initially
+> preserved the seeds; its narrow correction then permitted normal typed cleanup and exact baseline restoration,
+> without rerunning the test. This does not qualify reusable-base provisioning, traffic isolation or the full matrix.
 > No candidate has been installed over the
 > outer controller.
 >

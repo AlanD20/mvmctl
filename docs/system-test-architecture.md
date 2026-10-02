@@ -111,6 +111,27 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 - `--rebuild` forces rebuild (removes image first, then recreates).
 - Image is versioned as `mvm-test-runner:<mvm-version>` — multiple versions can coexist.
 
+### Imported Runner-Kernel Binding
+
+The optional paired inputs `MVM_RUNNER_KERNEL_ID` and `MVM_RUNNER_KERNEL_SHA256` bind an already imported
+custom Linux 7.0.11/x86_64 ELF in the controller's managed cache. The orchestrator checks typed inspection,
+canonical no-follow file identity, content SHA and the derived kernel ID before preparation effects and before
+each runner creation. It selects that full ID explicitly in builder, prep T1, prep T2 and normal T1/T2 creation;
+there is no official pull/default fallback on this path.
+
+The imported path uses `mvm-test-runner-kernel-<full-id>:<candidate-version>`, leaving the stock image key
+separate. A closed build-input receipt at `/opt/mvmctl-test/base-inputs.json` binds candidate version/content
+SHA and kernel ID/ELF SHA/version/architecture/build ID. Reused runners must match it before candidate
+initialization. The receipt records inputs, not a qualification verdict.
+
+T1/T2 execution with this binding requires `--prepare` or `--rebuild`; `--skip-volume-check` is rejected.
+Sequential preparation checks the selected kernel, live GNU build ID against the hash-bound ELF, installed
+candidate nftables readiness and explicit local-mirror reads. `--image` alone is not a qualification gate.
+Administrator installation, user initialization, mirror checks and owned cleanup are unchanged. The binding
+does not replace physical resource admission or complete system-test outcomes. Omission retains the stock
+official-kernel workflow. See [the run guide](development/HOW_TO_RUN_SYSTEM_TESTS.md#using-an-already-imported-runner-kernel)
+for the scoped invocation.
+
 ---
 
 ## 3. Three Tiers
