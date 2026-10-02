@@ -525,6 +525,7 @@ class TestImagePullAdvanced:
             ).stdout,
             dict,
         )
+        assert first["is_default"] is True
         # IDs include second-resolution creation time: wait for a distinct creation interval.
         _guest_run(runner_vm, "sleep 1")
         second = _json_success_data(
@@ -540,6 +541,7 @@ class TestImagePullAdvanced:
             ).stdout,
             dict,
         )
+        assert second["is_default"] is True
         assert second["id"] != first["id"]
         assert (
             second["type"] == "alpine"
