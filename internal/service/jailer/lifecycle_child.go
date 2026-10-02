@@ -90,28 +90,28 @@ func RunLaunchChild(ctx context.Context, args []string) (returnErr error) {
 	// This dedicated process exits after this function returns. Never return a thread that has
 	// entered the VM network namespace to Go's scheduler.
 	runtime.LockOSThread()
-	setupCtx, cancel := context.WithTimeout(ctx, launchChildSetupBudget)
-	defer cancel()
-	if err := authenticateLaunchChildParent(setupCtx); err != nil {
+	authenticationCtx, cancelAuthentication := context.WithTimeout(ctx, launchChildSetupBudget)
+	defer cancelAuthentication()
+	if err := authenticateLaunchChildParent(authenticationCtx); err != nil {
 		return err
 	}
-	executable, err := system.PinSystemExecutable(setupCtx)
+	executable, err := system.PinSystemExecutable(authenticationCtx)
 	if err != nil {
 		return err
 	}
-	if err := executable.Release(setupCtx); err != nil {
+	if err := executable.Release(authenticationCtx); err != nil {
 		return err
 	}
 	defer func() {
 		returnErr = errors.Join(returnErr, unix.Close(launchChildGateFD), unix.Close(launchChildSetupFD))
 	}()
-	released, err := awaitBlockedLaunchRelease(setupCtx, realBlockedLaunchGateDeps(), launchChildGateFD)
+	setupCtx, cancelSetup, err := awaitLaunchChildSetup(
+		ctx, authenticationCtx, realBlockedLaunchGateDeps(), launchChildGateFD,
+	)
 	if err != nil {
-		return processAuthorityError("", "await authenticated launch release", err)
+		return err
 	}
-	if !released {
-		return processAuthorityError("", "root launch parent closed the release gate", nil)
-	}
+	defer cancelSetup()
 	plan, descriptors, err := receiveLaunchChildPlan(setupCtx)
 	if err != nil {
 		return err
@@ -130,6 +130,25 @@ func RunLaunchChild(ctx context.Context, args []string) (returnErr error) {
 		return err
 	}
 	return execLaunchChildJailer(setupCtx, plan, descriptors, namespaceFD)
+}
+
+func awaitLaunchChildSetup(
+	ctx context.Context,
+	authenticationCtx context.Context,
+	deps blockedLaunchGateDeps,
+	fd int,
+) (context.Context, context.CancelFunc, error) {
+	// CRITICAL: Protected preparation belongs to the authenticated parent lifetime, not
+	// the child's authentication or post-release setup budget. Parent death closes the gate.
+	released, err := awaitBlockedLaunchRelease(ctx, authenticationCtx, deps, fd)
+	if err != nil {
+		return nil, nil, processAuthorityError("", "await authenticated launch release", err)
+	}
+	if !released {
+		return nil, nil, processAuthorityError("", "root launch parent closed the release gate", nil)
+	}
+	setupCtx, cancel := context.WithTimeout(ctx, launchChildSetupBudget)
+	return setupCtx, cancel, nil
 }
 
 func authenticateLaunchChildParent(ctx context.Context) error {

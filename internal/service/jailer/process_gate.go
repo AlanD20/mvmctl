@@ -154,19 +154,21 @@ func (gate *blockedLaunchGate) Release(ctx context.Context) error {
 
 // awaitBlockedLaunchRelease is the child-side EOF-fails-closed protocol. It returns false unless the parent proves
 // liveness with a fresh challenge and then sends the one exact release byte.
+// Authentication is bounded separately; preparation waits only while the authenticated parent owns the gate.
 func awaitBlockedLaunchRelease(
 	ctx context.Context,
+	authenticationCtx context.Context,
 	deps blockedLaunchGateDeps,
 	fd int,
 ) (bool, error) {
 	challenge := make([]byte, blockedLaunchChallengeBytes)
-	if err := deps.readFull(ctx, fd, challenge); err != nil {
+	if err := deps.readFull(authenticationCtx, fd, challenge); err != nil {
 		if errors.Is(err, unix.EPIPE) || errors.Is(err, unix.ECONNRESET) || errors.Is(err, unix.EBADF) {
 			return false, nil
 		}
 		return false, err
 	}
-	if err := deps.writeFull(ctx, fd, challenge); err != nil {
+	if err := deps.writeFull(authenticationCtx, fd, challenge); err != nil {
 		return false, err
 	}
 	release := []byte{0}
