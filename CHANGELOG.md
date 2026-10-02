@@ -1350,6 +1350,10 @@ composition is described above; the current incomplete-work inventory is under *
 - Fixed normal initialization rejecting an existing root-owned `0755` `/var/lib/mvmctl` state base. Persistent stores
   and administrator reset now admit the safe shared base unchanged while retaining exact private-directory and record
   permissions.
+- Separated launch-child authentication from protected preparation and post-release setup. Slow parent-side disk
+  preparation no longer consumes the child's 30-second setup budget; authenticated release, cancellation and
+  parent-death refusal remain enforced. Behavioral RED/GREEN, the complete root Jailer package, focused race,
+  vet and formatting passed in the named runner. Installed-candidate cold-launch qualification remains pending.
 - Console authority failures without an underlying cause now retain the error code's default internal class instead
   of reporting an unknown class. Cause-bearing errors retain their existing inherited classification. The complete
   affected Jailer Go package passed as root in the named runner, followed by the installed-candidate counterfeit

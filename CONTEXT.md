@@ -1314,6 +1314,11 @@ The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeou
 
 User-facing `--timeout` means **connect/probe timeout only**. Once the target is responsive, the operation runs unbounded. See [ADR-0013](docs/adr/0013-user-facing-timeouts-are-connect-timeouts.md).
 
+The private root launch child separately bounds authentication/challenge admission and post-release setup to
+30 seconds each. Protected preparation waits under the original child context while the authenticated parent
+owns its release gate; parent death or abort closes that gate and fails closed. Only the exact release byte starts
+the fresh setup budget. This is not a new absolute VM-import timeout or a change to public probe semantics.
+
 ### Timeout policy: CLI flags vs test infrastructure
 
 **Two distinct concerns that are NOT the same thing.**
