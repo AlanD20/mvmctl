@@ -33,18 +33,21 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -95,6 +98,380 @@ _RELEASE_VM_STATUSES = frozenset(
 
 # Custom base image built during --prepare
 BASE_IMAGE_NAME = "mvm-test-runner"
+RUNNER_BASE_RECEIPT = "/opt/mvmctl-test/base-inputs.json"
+MAX_RUNNER_BINDING_JSON_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True)
+class ImportedRunnerKernelBinding:
+    id: str
+    sha256: str
+    version: str = "7.0.11"
+    arch: str = "x86_64"
+    build_id: str = ""
+
+
+def _runner_binding_json(stdout: str) -> dict[str, Any]:
+    """Decode bounded binding evidence, refusing ambiguous JSON and envelopes."""
+
+    def unique_fields(pairs):
+        result = {}
+        folded = set()
+        for key, value in pairs:
+            if key.casefold() in folded:
+                raise RuntimeError(f"runner binding JSON has duplicate field: {key}")
+            folded.add(key.casefold())
+            result[key] = value
+        return result
+
+    if len(stdout.encode()) > MAX_RUNNER_BINDING_JSON_BYTES:
+        raise RuntimeError("runner binding JSON exceeds size limit")
+    try:
+        info = json.loads(stdout, object_pairs_hook=unique_fields)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"runner binding returned invalid JSON: {exc}") from exc
+    if not isinstance(info, dict):
+        raise RuntimeError("runner binding JSON must be an object")
+    fields = {"schema_version", "status", "data", "error"}
+    if fields.intersection(info):
+        if set(info) != fields:
+            raise RuntimeError(
+                "runner binding JSON has incomplete or unknown envelope fields"
+            )
+        if type(info["schema_version"]) is not int or info["schema_version"] != 1:
+            raise RuntimeError("runner binding JSON has unsupported schema")
+        if info["status"] != "success" or info["error"] is not None:
+            raise RuntimeError("runner binding JSON is not successful")
+        info = info["data"]
+        if not isinstance(info, dict):
+            raise RuntimeError("runner binding JSON data must be an object")
+    return info
+
+
+def _sha256_runner_input(path: Path) -> str:
+    """Hash a pinned regular input without following any directory or file symlink."""
+    try:
+        parent_fd = _open_directory_without_symlinks(path.parent)
+        try:
+            fd = os.open(
+                path.name,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=parent_fd,
+            )
+        finally:
+            os.close(parent_fd)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise RuntimeError(f"runner input is not a regular file: {path}")
+            digest = hashlib.sha256()
+            while chunk := os.read(fd, 1024 * 1024):
+                digest.update(chunk)
+            after = os.fstat(fd)
+            current = path.lstat()
+
+            def identity(info):
+                return (
+                    info.st_dev,
+                    info.st_ino,
+                    info.st_size,
+                    info.st_mtime_ns,
+                    info.st_ctime_ns,
+                )
+
+            if identity(before) != identity(after) or identity(after) != identity(
+                current
+            ):
+                raise RuntimeError(f"runner input changed while hashing: {path}")
+            return digest.hexdigest()
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise RuntimeError(f"cannot safely hash runner input {path}: {exc}") from exc
+
+
+def _imported_runner_elf_build_id(fd: int, size: int) -> str:
+    """Read one GNU build ID from bounded ELF64 x86_64 section notes."""
+
+    def read_at(offset: int, length: int) -> bytes:
+        if offset < 0 or length < 0 or offset + length > size:
+            raise RuntimeError("imported runner ELF has out-of-bounds note/header")
+        data = os.pread(fd, length, offset)
+        if len(data) != length:
+            raise RuntimeError("imported runner ELF has truncated note/header")
+        return data
+
+    header = struct.unpack("<16sHHIQQQIHHHHHH", read_at(0, 64))
+    if (
+        header[0][:7] != b"\x7fELF\x02\x01\x01"
+        or header[1] != 2
+        or header[2] != 62
+        or header[3] != 1
+        or header[8] != 64
+        or header[11] != 64
+        or not 0 < header[12] <= 4096
+    ):
+        raise RuntimeError(
+            "imported runner ELF requires a bounded ELF64 x86_64 section table"
+        )
+    sections = read_at(header[6], header[11] * header[12])
+    build_ids = []
+    total_notes = 0
+    for index in range(header[12]):
+        section = struct.unpack_from("<IIQQQQIIQQ", sections, index * 64)
+        if section[1] != 7:  # SHT_NOTE
+            continue
+        total_notes += section[5]
+        if total_notes > 1024 * 1024:
+            raise RuntimeError("imported runner ELF notes exceed size limit")
+        notes = read_at(section[4], section[5])
+        offset = 0
+        while offset < len(notes):
+            if len(notes) - offset < 12:
+                raise RuntimeError("imported runner ELF has malformed note header")
+            namesz, descsz, note_type = struct.unpack_from("<III", notes, offset)
+            offset += 12
+            name_end = offset + namesz
+            desc_start = offset + ((namesz + 3) & ~3)
+            desc_end = desc_start + descsz
+            next_offset = desc_start + ((descsz + 3) & ~3)
+            if next_offset > len(notes):
+                raise RuntimeError("imported runner ELF has malformed note lengths")
+            if notes[offset:name_end] == b"GNU\x00" and note_type == 3:
+                if not 0 < descsz <= 64:
+                    raise RuntimeError(
+                        "imported runner ELF has invalid GNU build ID length"
+                    )
+                build_ids.append(notes[desc_start:desc_end].hex())
+            offset = next_offset
+    if len(build_ids) != 1:
+        raise RuntimeError("imported runner ELF requires exactly one GNU build ID note")
+    return build_ids[0]
+
+
+def _imported_runner_elf_identity(path: Path, expected_sha256: str) -> str:
+    """Bind the GNU build ID to the same pinned, stable ELF as the expected hash."""
+    try:
+        parent_fd = _open_directory_without_symlinks(path.parent)
+        try:
+            fd = os.open(
+                path.name,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=parent_fd,
+            )
+        finally:
+            os.close(parent_fd)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise RuntimeError(f"imported runner ELF is not a regular file: {path}")
+            digest = hashlib.sha256()
+            while chunk := os.read(fd, 1024 * 1024):
+                digest.update(chunk)
+            if digest.hexdigest() != expected_sha256:
+                raise RuntimeError(
+                    "imported runner kernel ELF SHA256 does not match binding"
+                )
+            build_id = _imported_runner_elf_build_id(fd, before.st_size)
+            after = os.fstat(fd)
+            current = path.lstat()
+
+            def identity(info):
+                return (
+                    info.st_dev,
+                    info.st_ino,
+                    info.st_size,
+                    info.st_mtime_ns,
+                    info.st_ctime_ns,
+                )
+
+            if identity(before) != identity(after) or identity(after) != identity(
+                current
+            ):
+                raise RuntimeError(
+                    f"imported runner ELF changed while reading identity: {path}"
+                )
+            return build_id
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot safely read imported runner ELF {path}: {exc}"
+        ) from exc
+
+
+def _validate_imported_runner_kernel(binding: ImportedRunnerKernelBinding) -> str:
+    if (
+        re.fullmatch(r"[0-9a-f]{64}", binding.id) is None
+        or re.fullmatch(r"[0-9a-f]{64}", binding.sha256) is None
+        or binding.version != "7.0.11"
+        or binding.arch != "x86_64"
+    ):
+        raise RuntimeError(
+            "imported runner kernel requires canonical full ID/SHA256 and 7.0.11/x86_64"
+        )
+    result = mvm("kernel", "inspect", binding.id, "--json", check=False, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(f"imported runner kernel is missing: {binding.id}")
+    info = _runner_binding_json(result.stdout)
+    kernel, storage = info.get("kernel"), info.get("storage")
+    if not isinstance(kernel, dict) or not isinstance(storage, dict):
+        raise RuntimeError("imported runner kernel inspection lacks kernel/storage")
+    if (
+        kernel.get("id") != binding.id
+        or kernel.get("type") != "custom"
+        or kernel.get("is_present") is not True
+        or kernel.get("version") != binding.version
+        or kernel.get("arch") != binding.arch
+    ):
+        raise RuntimeError("imported runner kernel metadata does not match binding")
+    cache = Path(
+        os.path.abspath(
+            Path(os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")).expanduser()
+        )
+    )
+    expected = cache / "kernels" / binding.id
+    if storage.get("path") != str(expected):
+        raise RuntimeError(
+            f"imported runner kernel has unexpected managed path: {storage.get('path')}"
+        )
+    build_id = _imported_runner_elf_identity(expected, binding.sha256)
+    if binding.build_id and binding.build_id != build_id:
+        raise RuntimeError("imported runner ELF GNU build ID changed from binding")
+    expected_id = hashlib.sha256(
+        f"{binding.sha256}:{binding.version}:{binding.arch}".encode()
+    ).hexdigest()
+    if expected_id != binding.id:
+        raise RuntimeError(
+            "imported runner kernel ID does not match ELF SHA256/version/arch"
+        )
+    return build_id
+
+
+def _resolve_imported_runner_kernel_binding() -> ImportedRunnerKernelBinding | None:
+    kernel_id = os.environ.get("MVM_RUNNER_KERNEL_ID")
+    digest = os.environ.get("MVM_RUNNER_KERNEL_SHA256")
+    if kernel_id is None and digest is None:
+        return None
+    if not kernel_id or not digest:
+        raise RuntimeError(
+            "MVM_RUNNER_KERNEL_ID and MVM_RUNNER_KERNEL_SHA256 must be supplied together"
+        )
+    binding = ImportedRunnerKernelBinding(kernel_id, digest)
+    build_id = _validate_imported_runner_kernel(binding)
+    return ImportedRunnerKernelBinding(kernel_id, digest, build_id=build_id)
+
+
+def _runner_image_key(
+    version: str, binding: ImportedRunnerKernelBinding | None = None
+) -> str:
+    name = (
+        BASE_IMAGE_NAME if binding is None else f"{BASE_IMAGE_NAME}-kernel-{binding.id}"
+    )
+    return f"{name}:{version}"
+
+
+def _runner_base_receipt(
+    version: str, binding: ImportedRunnerKernelBinding
+) -> dict[str, object]:
+    return {
+        "receipt_schema": 1,
+        "candidate_version": version,
+        "candidate_sha256": _sha256_runner_input(Path(MVM_CANDIDATE_BINARY)),
+        "kernel_id": binding.id,
+        "kernel_sha256": binding.sha256,
+        "kernel_version": binding.version,
+        "kernel_arch": binding.arch,
+        "kernel_build_id": binding.build_id,
+    }
+
+
+def _require_runner_base_receipt(
+    vm_name: str, version: str, binding: ImportedRunnerKernelBinding
+) -> None:
+    result = mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        f"head -c 4097 {RUNNER_BASE_RECEIPT}",
+        timeout=30,
+    )
+    if len(result.stdout.encode()) > 4096:
+        raise RuntimeError("runner base input receipt exceeds size limit")
+    receipt = _runner_binding_json(result.stdout)
+    expected = _runner_base_receipt(version, binding)
+    if (
+        set(json.loads(result.stdout)) != set(expected)
+        or receipt != expected
+        or type(receipt.get("receipt_schema")) is not int
+    ):
+        raise RuntimeError(
+            "runner base input receipt does not match candidate/kernel binding"
+        )
+
+
+def _require_imported_runner_smoke(
+    vm_name: str, binding: ImportedRunnerKernelBinding
+) -> None:
+    if re.fullmatch(r"(?:[0-9a-f]{2}){1,64}", binding.build_id) is None:
+        raise RuntimeError("smoke binding lacks a validated GNU build ID")
+    info = _runner_binding_json(
+        mvm("vm", "inspect", vm_name, "--json", timeout=30).stdout
+    )
+    assets = info.get("assets")
+    kernel = assets.get("kernel") if isinstance(assets, dict) else None
+    if not isinstance(kernel, dict) or kernel.get("id") != binding.id:
+        raise RuntimeError("smoke VM did not select the exact imported kernel")
+    # Retain live release/build-ID readback, rather than relying on asset metadata.
+    script = (
+        "import os,struct; from pathlib import Path; "
+        "release=os.uname().release; assert release=='7.0.11',release; "
+        "notes=Path('/sys/kernel/notes').read_bytes(); p=0; ids=[]\n"
+        "while p+12<=len(notes):\n"
+        " n,d,t=struct.unpack_from('<III',notes,p); p+=12\n"
+        " name=notes[p:p+n]; p+=(n+3)&~3\n"
+        " desc=notes[p:p+d]; p+=(d+3)&~3\n"
+        " if name==b'GNU\\x00' and t==3: ids.append(desc.hex())\n"
+        "assert len(ids)==1 and ids[0],ids\n"
+        "print('Linux '+release+' GNU build ID '+ids[0])"
+    )
+    live = mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        shlex.join(["python3", "-c", script]),
+        timeout=30,
+    )
+    log(f"  {vm_name}: {live.stdout.strip()}")
+    if live.stdout.strip() != f"Linux {binding.version} GNU build ID {binding.build_id}":
+        raise RuntimeError("smoke VM live GNU build ID does not match imported ELF")
+    status = mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        "/usr/local/bin/mvm host status --json",
+        timeout=30,
+    )
+    data = _runner_binding_json(status.stdout)
+    resources = data.get("resources")
+    if (
+        not isinstance(resources, dict)
+        or resources.get("nftables_available") is not True
+    ):
+        raise RuntimeError("imported runner smoke requires nftables_available: true")
+
 
 # Root-owned staging location used to exercise the real administrator install
 # flow inside every disposable runner VM.  Tests execute the installed binary
@@ -988,11 +1365,20 @@ def _ensure_builder_key() -> None:
 
 
 def provision_t1(
-    vm_name: str, mvm_version: str, on_created: Callable[[], None]
+    vm_name: str,
+    mvm_version: str,
+    on_created: Callable[[], None],
+    *,
+    binding: ImportedRunnerKernelBinding | None = None,
 ) -> None:
     """Provision a Tier 1 VM from custom base image + shared volume."""
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
     _ensure_builder_key()
-    _ensure_official_kernel_on_host(vm_name)
+    if binding is None:
+        _ensure_official_kernel_on_host(vm_name)
+    else:
+        _validate_imported_runner_kernel(binding)
     log(
         f"  Creating T1 VM '{vm_name}' (from {BASE_IMAGE_NAME}:{mvm_version} + volume)..."
     )
@@ -1001,7 +1387,7 @@ def provision_t1(
         "create",
         vm_name,
         "--image",
-        f"{BASE_IMAGE_NAME}:{mvm_version}",
+        _runner_image_key(mvm_version, binding),
         "--user",
         "runner",
         "--vcpu",
@@ -1011,7 +1397,7 @@ def provision_t1(
         "--disk-size",
         "9G",
         "--kernel",
-        "official:7.0.11",
+        binding.id if binding is not None else "official:7.0.11",
         "--ssh-key",
         BUILDER_KEY_NAME,
         "--nested-virt",
@@ -1022,6 +1408,8 @@ def provision_t1(
         timeout=180,
     )
     on_created()
+    if binding is not None:
+        _require_runner_base_receipt(vm_name, mvm_version, binding)
     _install_system_binary_in_runner(vm_name)
     _initialize_system_binary_in_runner(vm_name)
     # CRITICAL: mvm init MUST run as the unprivileged user (runner), NOT via sudo.
@@ -1073,11 +1461,20 @@ def _ensure_official_kernel_on_host(vm_name: str) -> None:
 
 
 def provision_t2(
-    vm_name: str, mvm_version: str, on_created: Callable[[], None]
+    vm_name: str,
+    mvm_version: str,
+    on_created: Callable[[], None],
+    *,
+    binding: ImportedRunnerKernelBinding | None = None,
 ) -> None:
     """Provision a Tier 2 VM from custom base image + shared volume (binary + tests + deps pre-installed)."""
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
     _ensure_builder_key()
-    _ensure_official_kernel_on_host(vm_name)
+    if binding is None:
+        _ensure_official_kernel_on_host(vm_name)
+    else:
+        _validate_imported_runner_kernel(binding)
     log(
         f"  Creating T2 VM '{vm_name}' (from {BASE_IMAGE_NAME}:{mvm_version} + shared volume)..."
     )
@@ -1086,9 +1483,9 @@ def provision_t2(
         "create",
         vm_name,
         "--image",
-        f"{BASE_IMAGE_NAME}:{mvm_version}",
+        _runner_image_key(mvm_version, binding),
         "--kernel",
-        "official:7.0.11",
+        binding.id if binding is not None else "official:7.0.11",
         "--vcpu",
         "4",
         "--mem",
@@ -1107,6 +1504,8 @@ def provision_t2(
         timeout=300,
     )
     on_created()
+    if binding is not None:
+        _require_runner_base_receipt(vm_name, mvm_version, binding)
     _install_system_binary_in_runner(vm_name)
     _initialize_system_binary_in_runner(vm_name)
 
@@ -1258,24 +1657,7 @@ def _pull_builder_assets(vm_name: str) -> None:
             capture=True,
             check=False,
         )
-        output = f"{result.stdout or ''}\n{result.stderr or ''}"
-        bounded_output = _bounded_builder_pull_output(result)
-        print(f"  {label} output:\n{bounded_output}", flush=True)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"builder asset pull failed for {label}: rc={result.returncode}"
-            )
-        for forbidden_marker in FORBIDDEN_BUILDER_PULL_MARKERS:
-            if forbidden_marker in output:
-                raise RuntimeError(
-                    f"builder asset pull for {label} reported forbidden mirror "
-                    f"event: {forbidden_marker}"
-                )
-        if LOCAL_MIRROR_READ_MARKER not in output:
-            raise RuntimeError(
-                f"builder asset pull for {label} did not prove a local mirror "
-                "artifact read"
-            )
+        _require_local_mirror_pull(result, label)
 
     log(f"  Verifying cached image integrity in '{vm_name}'...")
     mvm(
@@ -1296,7 +1678,32 @@ def _pull_builder_assets(vm_name: str) -> None:
     )
 
 
-def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
+def _require_local_mirror_pull(
+    result: subprocess.CompletedProcess[str], label: str
+) -> None:
+    output = f"{result.stdout or ''}\n{result.stderr or ''}"
+    print(f"  {label} output:\n{_bounded_builder_pull_output(result)}", flush=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"builder asset pull failed for {label}: rc={result.returncode}"
+        )
+    for marker in FORBIDDEN_BUILDER_PULL_MARKERS:
+        if marker in output:
+            raise RuntimeError(
+                f"builder asset pull for {label} reported forbidden mirror event: {marker}"
+            )
+    if LOCAL_MIRROR_READ_MARKER not in output:
+        raise RuntimeError(
+            f"builder asset pull for {label} did not prove a local mirror artifact read"
+        )
+
+
+def _build_base_image(
+    mvm_version: str,
+    *,
+    rebuild: bool = False,
+    binding: ImportedRunnerKernelBinding | None = None,
+) -> str:
     """Build a custom base image with all test dependencies pre-installed.
 
     Creates a VM from ubuntu-minimal:noble, copies in the mvm binary and
@@ -1305,34 +1712,49 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
     Returns the image version tag used.
     """
     img_tag = mvm_version
-    log(f"Building custom base image '{BASE_IMAGE_NAME}:{img_tag}'...")
+    image_key = _runner_image_key(img_tag, binding)
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
+    log(f"Building custom base image '{image_key}'...")
 
     # When rebuilding, remove the existing image first so it's rebuilt fresh.
     if rebuild:
-        mvm(
-            "image",
-            "rm",
-            f"{BASE_IMAGE_NAME}:{img_tag}",
-            "--force",
-            check=False,
-            timeout=15,
+        exists = (
+            binding is None
+            or mvm(
+                "image", "inspect", image_key, "--json", check=False, timeout=15
+            ).returncode
+            == 0
         )
+        if exists:
+            mvm(
+                "image",
+                "rm",
+                image_key,
+                "--force",
+                check=binding is not None,
+                timeout=15,
+            )
 
     # Check if already built (skip check when rebuilding)
     if not rebuild:
         check = mvm(
             "image",
             "inspect",
-            f"{BASE_IMAGE_NAME}:{img_tag}",
+            image_key,
             "--json",
             check=False,
             timeout=15,
         )
         if check.returncode == 0:
-            log(f"  Base image '{BASE_IMAGE_NAME}:{img_tag}' already exists, skipping")
+            log(f"  Base image '{image_key}' already exists, skipping")
             return img_tag
 
     log(f"  Creating builder VM '{BASE_VM_NAME}'...")
+    kernel_args = []
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
+        kernel_args = ["--kernel", binding.id]
     mvm(
         "vm",
         "create",
@@ -1340,6 +1762,7 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         BASE_VM_NAME,
         "--image",
         "ubuntu-minimal:noble",
+        *kernel_args,
         "--user",
         "runner",
         "--vcpu",
@@ -1367,8 +1790,7 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             "--timeout",
             "10",
             "--",
-            f"stat -c%s {RUNNER_SYSTEM_CANDIDATE} && "
-            "stat -c%s /usr/local/bin/mvm",
+            f"stat -c%s {RUNNER_SYSTEM_CANDIDATE} && stat -c%s /usr/local/bin/mvm",
             timeout=20,
         )
         expected = Path(MVM_CANDIDATE_BINARY).stat().st_size
@@ -1453,20 +1875,53 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         # concurrent downloads/decompression can exhaust this 3 GiB builder,
         # while separate streamed sessions preserve the exact failing command.
         _pull_builder_assets(BASE_VM_NAME)
+        if binding is not None:
+            inputs = _runner_base_receipt(mvm_version, binding)
+            installed = mvm(
+                "exec",
+                BASE_VM_NAME,
+                "--user",
+                "runner",
+                "--timeout",
+                "10",
+                "--",
+                "sha256sum /usr/local/bin/mvm",
+                timeout=30,
+            )
+            if installed.stdout.split() != [
+                inputs["candidate_sha256"],
+                "/usr/local/bin/mvm",
+            ]:
+                raise RuntimeError(
+                    "builder installed candidate SHA256 does not match base receipt"
+                )
+            receipt = json.dumps(inputs, sort_keys=True)
+            mvm(
+                "exec",
+                BASE_VM_NAME,
+                "--user",
+                "runner",
+                "--timeout",
+                "10",
+                "--",
+                f"printf '%s' {shlex.quote(receipt)} | sudo tee {RUNNER_BASE_RECEIPT} >/dev/null && "
+                f"sudo chmod 0444 {RUNNER_BASE_RECEIPT}",
+                timeout=30,
+            )
         log(f"  Stopping '{BASE_VM_NAME}'...")
         mvm("vm", "stop", BASE_VM_NAME, timeout=60)
 
-        log(f"  Importing image as '{BASE_IMAGE_NAME}:{img_tag}'...")
+        log(f"  Importing image as '{image_key}'...")
         mvm(
             "image",
             "import",
-            f"{BASE_IMAGE_NAME}:{img_tag}",
+            image_key,
             BASE_VM_NAME,
-            "--default",
+            *(["--default"] if binding is None else []),
             "--skip-optimization",
             timeout=300,
         )
-        log(f"  Base image '{BASE_IMAGE_NAME}:{img_tag}' built successfully")
+        log(f"  Base image '{image_key}' built successfully")
     finally:
         destroy_vm(BASE_VM_NAME)
 
@@ -1647,7 +2102,12 @@ def _run_local_pytest(
 
 
 def run_tier1_domain(
-    domain: str, test_files: list[str], mvm_version: str, push: bool = False
+    domain: str,
+    test_files: list[str],
+    mvm_version: str,
+    push: bool = False,
+    *,
+    binding: ImportedRunnerKernelBinding | None = None,
 ) -> dict[str, Any]:
     """Full lifecycle for one Tier 1 domain. Max 5 minutes per domain."""
     vm_name = _unique_name(f"t1-{domain}")
@@ -1664,7 +2124,12 @@ def run_tier1_domain(
         created = True
 
     try:
-        provision_t1(vm_name, mvm_version, mark_created)
+        provision_t1(
+            vm_name,
+            mvm_version,
+            mark_created,
+            **({"binding": binding} if binding is not None else {}),
+        )
         if push:
             log(f"  Pushing test files into '{vm_name}'...")
             mvm("cp", "-f", "tests/system", f"{vm_name}:/tests/", timeout=60)
@@ -1702,7 +2167,12 @@ def run_tier1_domain(
 
 
 def run_tier2_domain(
-    domain: str, test_files: list[str], mvm_version: str, push: bool = False
+    domain: str,
+    test_files: list[str],
+    mvm_version: str,
+    push: bool = False,
+    *,
+    binding: ImportedRunnerKernelBinding | None = None,
 ) -> dict[str, Any]:
     """Full lifecycle for one Tier 2 domain."""
     vm_name = _unique_name(f"t2-{domain}")
@@ -1719,7 +2189,12 @@ def run_tier2_domain(
         created = True
 
     try:
-        provision_t2(vm_name, mvm_version, mark_created)
+        provision_t2(
+            vm_name,
+            mvm_version,
+            mark_created,
+            **({"binding": binding} if binding is not None else {}),
+        )
         if push:
             log(f"  Pushing test files into '{vm_name}'...")
             mvm("cp", "-f", "tests/system", f"{vm_name}:/tests/", timeout=60)
@@ -1823,6 +2298,8 @@ def run_domains(
     workers: int,
     mvm_version: str,
     push: bool = False,
+    *,
+    binding: ImportedRunnerKernelBinding | None = None,
 ) -> list[dict[str, Any]]:
     """Run a set of domains in parallel using the given runner function."""
     if not domains:
@@ -1837,7 +2314,14 @@ def run_domains(
     pool = ThreadPoolExecutor(max_workers=workers)
     try:
         future_map = {
-            pool.submit(runner_fn, domain, files, mvm_version, push): domain
+            pool.submit(
+                runner_fn,
+                domain,
+                files,
+                mvm_version,
+                push,
+                **({"binding": binding} if binding is not None else {}),
+            ): domain
             for domain, files in domains.items()
         }
         import concurrent.futures
@@ -2359,7 +2843,12 @@ def parse_args() -> argparse.Namespace:
     return _build_parser().parse_args()
 
 
-def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) -> None:
+def run_prepare(
+    *,
+    rebuild_volume: bool = False,
+    rebuild_image: bool = False,
+    binding: ImportedRunnerKernelBinding | None = None,
+) -> None:
     """Smoke-test the provisioning pipeline.
 
     Builds a custom base image from ubuntu-minimal:noble with all test
@@ -2369,6 +2858,8 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
     corresponding flag is True.
     """
     log("=== Prepare: provisioning pipeline ===")
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
 
     # --- Step 1: Get mvm version ---
     log("[1/8] Detecting mvm version...")
@@ -2382,29 +2873,40 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
 
     # --- Step 3: Ensure kernel with nftables support ---
     log("[3/8] Ensuring kernel with nftables support...")
-    mvm(
-        "kernel",
-        "pull",
-        "official:7.0.11",
-        "--default",
-        "--features",
-        "all",
-        timeout=900,
-    )
+    if binding is None:
+        mvm(
+            "kernel",
+            "pull",
+            "official:7.0.11",
+            "--default",
+            "--features",
+            "all",
+            timeout=900,
+        )
+    else:
+        _validate_imported_runner_kernel(binding)
 
     # --- Step 4: Build custom base image ---
     log("[4/8] Building custom base image...")
-    _build_base_image(mvm_version, rebuild=rebuild_image)
+    _build_base_image(
+        mvm_version,
+        rebuild=rebuild_image,
+        **({"binding": binding} if binding is not None else {}),
+    )
+    image_key = _runner_image_key(mvm_version, binding)
 
     # --- Step 5: Create T1 VM from custom image + volume ---
     t1 = _unique_name("prep-t1")
     log(f"[5/8] Creating T1 VM '{t1}' from {BASE_IMAGE_NAME}:{mvm_version} + volume...")
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
     mvm(
         "vm",
         "create",
         t1,
         "--image",
-        f"{BASE_IMAGE_NAME}:{mvm_version}",
+        image_key,
+        *(["--kernel", binding.id] if binding is not None else []),
         "--user",
         "runner",
         "--vcpu",
@@ -2421,8 +2923,12 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
         timeout=180,
     )
     try:
+        if binding is not None:
+            _require_runner_base_receipt(t1, mvm_version, binding)
         log(f"      Running mvm init inside '{t1}'...")
         _initialize_runner_user(t1, timeout=90)
+        if binding is not None:
+            _require_imported_runner_smoke(t1, binding)
     finally:
         destroy_vm(t1)
 
@@ -2431,14 +2937,16 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
     log(
         f"[6/8] Creating T2 VM '{t2}' from {BASE_IMAGE_NAME}:{mvm_version} + shared volume..."
     )
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
     mvm(
         "vm",
         "create",
         t2,
         "--image",
-        f"{BASE_IMAGE_NAME}:{mvm_version}",
+        image_key,
         "--kernel",
-        "official:7.0.11",
+        binding.id if binding is not None else "official:7.0.11",
         "--user",
         "runner",
         "--vcpu",
@@ -2455,10 +2963,14 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
         timeout=300,
     )
     try:
+        if binding is not None:
+            _require_runner_base_receipt(t2, mvm_version, binding)
         log(f"[7/8] Setting up '{t2}' (mount + init)...")
         _initialize_runner_user(t2, timeout=180)
+        if binding is not None:
+            _require_imported_runner_smoke(t2, binding)
 
-        log(f"[8/8] Validating cache hit (pulling 1 asset)...")
+        log("[8/8] Validating cache hit (pulling 1 asset)...")
         result = mvm(
             "exec",
             t2,
@@ -2467,22 +2979,18 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
             "--timeout",
             "10",
             "--",
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull "
-            "alpine:3.23 2>&1 | head -5",
+            "MVM_ASSET_MIRROR=/mnt MVM_LOG_LEVEL=INFO /usr/local/bin/mvm image pull alpine:3.23",
             timeout=150,
             check=False,
         )
-        if "Downloading image" in result.stdout or "Downloading image" in result.stderr:
-            log("  Cache hit confirmed: asset pulled from local mirror")
-        else:
-            log(f"  Pull output: {result.stdout[:200] if result.stdout else '(empty)'}")
+        _require_local_mirror_pull(result, "prepare Alpine image")
 
         vol_check = mvm("volume", "inspect", SHARED_VOLUME_NAME, "--json", timeout=15)
         volume = _volume_inspect_record(vol_check.stdout, SHARED_VOLUME_NAME)
         vol_status = volume.get("status", "unknown")
 
         log("=== Prepare: ALL STEPS PASSED ===")
-        log(f"  Base image: {BASE_IMAGE_NAME}:{mvm_version}")
+        log(f"  Base image: {image_key}")
         log(f"  T1: '{t1}' — created, binary copied, init completed")
         log(f"  T2: '{t2}' — created, volume attached, cache hit verified")
         log(f"  Volume status: {vol_status} (correctly 'available')")
@@ -2515,6 +3023,23 @@ def main() -> None:
     if not test_flags and not prep_flags:
         parser.print_help()
         sys.exit(0)
+
+    try:
+        binding = _resolve_imported_runner_kernel_binding()
+    except RuntimeError as exc:
+        parser.error(str(exc))
+    if binding is not None:
+        if args.skip_volume_check:
+            parser.error("imported runner kernel binding forbids --skip-volume-check")
+        selects_runners = (
+            args.all
+            or (args.tier and any(t in (1, 2) for t in args.tier))
+            or any(d in TIER1_DOMAINS or d in TIER2_DOMAINS for d in args.domains)
+        )
+        if selects_runners and not (args.prepare or args.rebuild):
+            parser.error(
+                "imported runner kernel T1/T2 execution requires --prepare on every invocation"
+            )
 
     if args.release_qualification:
         try:
@@ -2580,20 +3105,32 @@ def main() -> None:
     # Handle prep actions.
     # --rebuild implies --volume + --image + --prepare (in that order).
     if args.rebuild:
-        run_prepare(rebuild_volume=True, rebuild_image=True)
+        run_prepare(
+            rebuild_volume=True,
+            rebuild_image=True,
+            **({"binding": binding} if binding is not None else {}),
+        )
         if not test_flags:
             return
     elif args.prepare or args.image or args.volume:
         rebuild_volume = args.volume
         rebuild_image = args.image
         if args.prepare:
-            run_prepare(rebuild_volume=rebuild_volume, rebuild_image=rebuild_image)
+            run_prepare(
+                rebuild_volume=rebuild_volume,
+                rebuild_image=rebuild_image,
+                **({"binding": binding} if binding is not None else {}),
+            )
         elif args.image:
             # The builder VM attaches the shared volume, so ensure it exists first.
             ensure_shared_volume(rebuild=rebuild_volume)
             ensure_test_network()
             mvm_version = _get_mvm_version()
-            _build_base_image(mvm_version, rebuild=True)
+            _build_base_image(
+                mvm_version,
+                rebuild=True,
+                **({"binding": binding} if binding is not None else {}),
+            )
         elif args.volume:
             ensure_shared_volume(rebuild=True)
 
@@ -2665,12 +3202,24 @@ def main() -> None:
     for tier in run_order:
         if tier == 1 and tier1:
             results = run_domains(
-                tier1, 1, run_tier1_domain, args.workers, mvm_version, push=args.push
+                tier1,
+                1,
+                run_tier1_domain,
+                args.workers,
+                mvm_version,
+                push=args.push,
+                **({"binding": binding} if binding is not None else {}),
             )
             all_results.extend(results)
         elif tier == 2 and tier2:
             results = run_domains(
-                tier2, 2, run_tier2_domain, args.workers, mvm_version, push=args.push
+                tier2,
+                2,
+                run_tier2_domain,
+                args.workers,
+                mvm_version,
+                push=args.push,
+                **({"binding": binding} if binding is not None else {}),
             )
             all_results.extend(results)
         elif tier == 3 and tier3:
