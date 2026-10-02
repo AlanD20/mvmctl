@@ -1290,6 +1290,9 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- VM-to-VM exec now checks the session's cancellation state before sending source-retained or ready responses.
+  This closes a race while cancellation propagates to the response context. Inside the QA runner, the existing
+  two-stage regression passed 50 repetitions; full privileged-package tests and focused race checks also passed.
 - Image pull/import now return the committed default-selection state instead of a stale `is_default` value,
   and propagate persistence/default-selection failures before old-image cleanup. A real SQLite regression
   reproduced the stale result and hidden write failure on the old code; the corrected full API package,
