@@ -456,9 +456,16 @@ func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, forc
 	for _, r := range removeResult.Items {
 		if vm, ok := r.Item.(*model.VMItem); ok && vm != nil {
 			names = append(names, vm.Name)
+		} else if r.IsOK() {
+			common.Cli.Success(r.Message)
+			for _, warning := range r.Warnings {
+				common.Cli.Warning(warning)
+			}
 		}
 	}
-	common.Cli.Success(fmt.Sprintf("Removed: %s", strings.Join(names, ", ")))
+	if len(names) > 0 {
+		common.Cli.Success(fmt.Sprintf("Removed: %s", strings.Join(names, ", ")))
+	}
 	return nil
 }
 

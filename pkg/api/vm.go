@@ -619,6 +619,9 @@ func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuil
 // --- Remove ---
 // Remove removes one or more VMs.
 func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
+	if result := op.vmRemoveUnrecorded(ctx, input); result != nil {
+		return result
+	}
 	vms, err := input.Resolve(ctx, op.Repos.VM)
 	if err != nil {
 		return &errs.BatchResult{
