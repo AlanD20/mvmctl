@@ -205,7 +205,10 @@ func (op *Operation) ImagePull(
 			if _, err := os.Stat(existing.Path); err == nil {
 				slog.Info("Image already exists", "path", existing.Path)
 				if input.SetDefault {
-					_ = op.Repos.Image.SetDefault(ctx, existing.ID)
+					if err := op.Repos.Image.SetDefault(ctx, existing.ID); err != nil {
+						return nil, errs.WrapMsg(errs.CodeImagePullFailed, "failed to set default image", err)
+					}
+					existing.IsDefault = true
 				}
 				return existing, nil
 			}
@@ -315,11 +318,14 @@ func (op *Operation) ImagePull(
 		}
 	}
 	os.Remove(downloadPath)
-	_ = op.Repos.Image.Upsert(ctx, imageItem)
-	if input.SetDefault {
-		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
-	} else if existing != nil && existing.IsDefault {
-		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
+	if err := op.Repos.Image.Upsert(ctx, imageItem); err != nil {
+		return nil, errs.WrapMsg(errs.CodeImagePullFailed, "failed to save image", err)
+	}
+	if input.SetDefault || (existing != nil && existing.IsDefault) {
+		if err := op.Repos.Image.SetDefault(ctx, imageItem.ID); err != nil {
+			return nil, errs.WrapMsg(errs.CodeImagePullFailed, "failed to set default image", err)
+		}
+		imageItem.IsDefault = true
 	}
 	// Clean up old entry of the same version (existing is already looked up by version+type).
 	if existing != nil && existing.ID != imageItem.ID {
@@ -369,7 +375,10 @@ func (op *Operation) ImageImport(
 		if _, err := os.Stat(existing.Path); err == nil {
 			slog.Info("Image already exists", "path", existing.Path)
 			if resolved.SetDefault {
-				_ = op.Repos.Image.SetDefault(ctx, existing.ID)
+				if err := op.Repos.Image.SetDefault(ctx, existing.ID); err != nil {
+					return nil, errs.WrapMsg(errs.CodeImageImportFailed, "failed to set default image", err)
+				}
+				existing.IsDefault = true
 			}
 			return existing, nil
 		}
@@ -450,11 +459,14 @@ func (op *Operation) ImageImport(
 	tl.Stage("optimize")
 
 	imageItem.IsImported = true
-	_ = op.Repos.Image.Upsert(ctx, imageItem)
-	if input.SetDefault {
-		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
-	} else if existing != nil && existing.IsDefault {
-		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
+	if err := op.Repos.Image.Upsert(ctx, imageItem); err != nil {
+		return nil, errs.WrapMsg(errs.CodeImageImportFailed, "failed to save image", err)
+	}
+	if input.SetDefault || (existing != nil && existing.IsDefault) {
+		if err := op.Repos.Image.SetDefault(ctx, imageItem.ID); err != nil {
+			return nil, errs.WrapMsg(errs.CodeImageImportFailed, "failed to set default image", err)
+		}
+		imageItem.IsDefault = true
 	}
 	// Clean up old image files of the same version.
 	if existing != nil && existing.Version == imageItem.Version && existing.ID != imageItem.ID {
