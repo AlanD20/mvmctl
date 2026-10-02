@@ -123,6 +123,16 @@ package (7.147 seconds), 240 Python orchestrator unit cases (7.63 seconds, zero 
 build. Evidence is `go-init-session-focused.log` and `full-ci-build-init-3ae3a89c.log`. These results do not
 qualify the complete current-source Python matrix, remote GitHub CI or the release.
 
+**Clean administrator journey source checkpoint (2026-10-02):** The registered Tier 2 `host_admin` domain
+adds `TestCleanHostAdministration::test_clean_enrollment_marker_only_reset_and_reinit` in
+`host/test_host_admin.py`. It creates a clean root-user child and then a separate non-root operator, verifies
+first enrollment and usable typed dispatch, denies public administrator/raw-sudo commands, and checks quiescent
+reset, disabled admission and re-init. Cleanup uncertainty is reported if child creation never yields an admitted
+identity. This is authored coverage, not a runtime pass; interrupted init/reset, multioperator enrollment and
+active/ambiguous reset refusal remain separate gaps. The shared runner is never the reset target.
+Signed integration `0dcbb418` passed strict one-case collection in the named runner (0.28 seconds); two existing
+registry checks passed separately (0.31 seconds), and lint/format checks passed. No fixture ran during collection.
+
 **Complete nftables repeat gate (2026-09-28):** Source SHA-256
 `5e0105dfeb4fc2ac41bee37fa6c8d0fdfda7497609afda7e7685cc7a61c72133` passed all five cases
 twice (33.15/29.30 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
@@ -343,6 +353,13 @@ vet and root behavioral regressions (0.233 seconds), including interruption repl
 refusal, passed in `mvmctl-030-test`; the root race selection passed in 1.522 seconds. Evidence is
 `ci-import-06c6/.tmp/import-06c6-focused-root.log`. Tests construct admitted backing fixtures;
 end-to-end failed-creation/public `VMRemove` and actual power-loss qualification remain open.
+
+The later exact-ID public-removal correction connects this existing root cleanup to forced removal when the
+caller database row was never published. It preserves caller artifacts and ordinary registered resolution.
+Signed integration `5c340074` matches the focused-tested source: inputs/API/CLI packages and vet passed on
+Go 1.26.3 inside the named runner, with formatting and exact source hashes checked.
+Qualification against the retained real interrupted import, including source preservation and denial controls,
+remains pending; source integration alone does not close the end-to-end gap above.
 
 **Trusted-binary safe repeat gate (2026-09-28):** Commit `f4d7adb1` retains all eleven binary
 cases and exact archive/release identity and live-lease ownership checks. File SHA-256
@@ -1241,7 +1258,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
-| Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
+| Installed system candidate and clean bootstrap | 🟡 Partial | Prepared-host coverage exists. Clean enrollment, marker-only denial and quiescent reset/re-init are authored in `host_admin`, with runtime qualification pending; interrupted rollback and multioperator coverage remain gaps. |
 | fd-0 privileged control transport | 🔴 Missing | Go L1 framing/EOF/peer/cancellation abuse coverage plus installed-CLI lifecycle integration. |
 | Root VM authority and cross-UID denial | 🟡 Partial | A focused installed-candidate networkless case denies operator direct connection to the reported Firecracker API socket while `vm stop` succeeds; root-record/process/cache identity checks, constrained two-user denial, tombstone, and zero-leak assertions remain missing. |
 | Independent trusted Firecracker/Jailer releases | 🔴 Missing | Root manifest/ELF/hash authority, atomic failure injection, and installed-CLI release lifecycle. |
@@ -1777,7 +1794,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `host status --json` | ✅ Deep | `host/test_host.py` | `TestHostStatus`, `TestHostStatusEnhanced` | L2 — schema-1 success envelope; `kvm_accessible`, `missing_binaries`, forwarding, live `resources`, and null `state` rather than a user-SQLite setup claim |
 | `host clean --force` success | 🔴 Gap | — | — | Requires a dedicated clean-host context; the shared runner must not erase its installed candidate or root state. |
 | `host clean` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostMutationGuards` | L2 creates one bounded VM, proves it is live, and checks refusal without deleting it. |
-| `host reset --force` success | 🔴 Gap | — | — | Administrator reset requires separate clean-host qualification; no shared-runner success is claimed. |
+| `host reset --force` success | 🟡 Partial | `host/test_host_admin.py` | `TestCleanHostAdministration` | Authored clean-child quiescent reset/disabled-admission/re-init journey; runtime pending. The shared runner is not reset. |
 | unprivileged `host reset --force` | ⚡ Shallow | `host/test_host.py` | `TestHostMutationGuards` | L2 checks administrator refusal and unchanged host-status fields. |
 | `host install-system` | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | The Python runner stages the RC, invokes the real administrator installer, and then all `_run_mvm` calls use exact `/usr/local/bin/mvm`. L2 verifies root ownership, mode, trusted ancestors, content hash, no temporary sibling, and idempotence. |
 | `host install-system` rejection cases | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | L2 verifies unprivileged and malformed invocations preserve the target, and an existing target symlink is rejected without changing its destination. Symlink-test restoration is mandatory and asserted. |

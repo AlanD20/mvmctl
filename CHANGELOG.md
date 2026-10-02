@@ -135,6 +135,11 @@ recorded revisions; adversarial firewall and recovery cases remain separate rele
 
 ### Added
 
+- Added a registered Tier 2 `host_admin` journey for first enrollment on a clean disposable child, usable
+  marker-only authorization, refusal of public administrator/raw-sudo commands, quiescent reset and re-init.
+  The child owns administrator mutations; the shared runner is not reset. Lint, formatting, strict one-case
+  collection and two existing registry checks passed; runtime qualification remains pending. Interrupted
+  enrollment/reset and multioperator coverage are separate remaining cases.
 - Official-kernel debug output now identifies the exact upstream base-config bytes successfully written before
   configuration mutation. Focused kernel tests, vet and formatting passed in the named runner. A subsequent fresh
   mirrored-source Linux 7.0.11 producer passed with the consumed base-config digest and final config/ELF hashes
@@ -1308,6 +1313,11 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Forced removal of one exact VM ID can now reach retained root authority when interrupted creation never
+  published a caller database row. Ordinary registered selector/name resolution is preserved; root ownership
+  checks remain authoritative. Successful recovery explicitly reports retained caller source, VM-directory and
+  staging files rather than silently deleting them. The affected inputs/API/CLI Go packages, vet and formatting
+  passed inside the named runner. Installed-candidate interruption recovery remains a QA gate.
 - Reusable-base preparation now uses the supported `network create <name> --subnet <cidr>` invocation,
   removing an obsolete prompt-suppression flag that stopped preparation before builder creation. The existing
   preparation-flow test passed with real network setup orchestration and a fake CLI boundary; actual fresh-base

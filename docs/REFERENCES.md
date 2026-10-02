@@ -340,7 +340,14 @@ The VM resolver tries selectors in priority order:
 | `mvm vm ps` | `--json` | List running VMs (active processes) |
 | `mvm vm inspect` | `SELECTOR`, `--json` | Show detailed information about a VM |
 
-VM launch and process control use typed root lifecycle transactions and schema-5 instance records separating operator
+If creation was interrupted before the VM reached the caller database, `mvm vm rm --force <full-id>` can request
+cleanup through the retained root authority. This recovery form accepts exactly one full 32-character lowercase
+hexadecimal ID, not a name or ID prefix; existing registered selectors retain their usual behavior and name precedence.
+Root authorization and ownership checks still apply: a missing or inadmissible root record is not permission to
+delete files. On success, the result reports `caller_artifacts_retained: true`; caller-owned source files, the VM
+directory and staging artifacts are preserved. This is not a filesystem orphan sweep.
+
+VM launch and process control use typed root lifecycle transactions and schema-6 instance records separating operator
 ownership from per-VM execution credentials. PID values in
 output are display projections, never signaling authority. List observes its complete VM selection before filtering
 status and propagates observation failures; inspect/get also propagate them. Paused display state requires an observed

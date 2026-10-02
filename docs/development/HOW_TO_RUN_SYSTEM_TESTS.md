@@ -479,6 +479,12 @@ python3 scripts/run-system-tests.py cli network
 python3 scripts/run-system-tests.py --host-direct fresh_env
 ```
 
+The Tier 2 `host_admin` domain exercises enrollment, marker-only authorization and quiescent reset/re-init
+inside its own disposable child VM. It needs nested virtualization and the mirrored launch assets. It never
+resets the shared runner or the outer controller. Collection is not a runtime pass: clean-host execution,
+checked child cleanup and retained administrator-state receipts are required before qualifying this journey.
+Interrupted init/reset and multiple-operator behavior require separate cases.
+
 ### 4.3 Run Specific Tiers
 
 ```bash
