@@ -148,7 +148,8 @@ release build recorded the exact VCS revision and `vcs.modified=false`; normal `
 `0.3.0-rc.b402c471` only in that runner, with matching SHA-256 and root-owned `0755` canonical binary.
 The earlier full root Jailer result on `6088c14c` was retained for unchanged Jailer-relevant source, module and
 build inputs, not rerun. All 262 Python orchestrator tests passed separately at their recorded revision.
-These results do not close heavy GuestFS, reusable-base or remaining installed-candidate system-matrix qualification.
+These CI results alone do not qualify GuestFS; its later focused runtime result is recorded below.
+Reusable-base and remaining installed-candidate system-matrix qualification remain open.
 
 ### Optional Local GuestFS Qualification
 
@@ -178,10 +179,16 @@ Reusable-base provisioning now performs this setup for verified package-owned bo
 GuestFS dependencies. Its two focused builder checks and the real metadata/checksum/readability recipe passed in
 the named runner; that recipe run was a no-op on an already-readable image, not a fresh-base provisioning pass.
 
-Collection, focused orchestrator checks and actual named-runner package installation passed. The cold-appliance
-attempt then failed; diagnosis found an unreadable packaged kernel and a separate kernel-probe timeout mistakenly
-expressed as 5 microseconds. The exact runner kernel is now readable and the source timeout is corrected to five
-seconds. The corrected-candidate appliance run remains pending; neither correction alone proves the whole failure cause.
+The earlier cold-appliance attempt failed; diagnosis found an unreadable packaged kernel and a separate
+kernel-probe timeout mistakenly expressed as 5 microseconds. After explicit administrator readability setup and
+the five-second timeout correction, installed candidate `0.3.0-rc.562b38de` passed the registered case in
+`mvmctl-030-test`: one pass in 68.18 seconds, with zero failures, errors, skips, deselections, XFAIL or XPASS.
+Cold construction, actual guestfish launches, reuse, incomplete-appliance repair and typed cleanup/preservation
+all passed; independent checks confirmed the owned test process, selected appliance and smoke disk were absent.
+The run reused the 142 installed package versions. This qualifies the focused local case, not a freshly
+provisioned reusable base or the complete release matrix; neither original finding alone establishes the sole
+cause of the earlier failure.
+
 Admit this heavy domain separately: matching supermin/libguestfs sources use a 4 GiB default root and retain
 both cached and fixed copies; a genuine cache rebuild can temporarily retain another root. Allow for installed
 dependencies, extraction, overlays and scratch as well as the free-space floor. Neither a sparse file nor the

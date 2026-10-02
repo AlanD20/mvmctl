@@ -17,6 +17,15 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Enabled GuestFS focused qualification (2026-10-02):** Installed candidate `0.3.0-rc.562b38de` passed
+`cache/test_guestfs_appliance.py::test_enabled_build_reuse_and_incomplete_rebuild` inside `mvmctl-030-test`
+in 68.18 seconds. The strict report contains one pass and zero failures, errors, skips, deselections, XFAIL or
+XPASS. Cold construction, real guestfish launches, warm reuse, incomplete-appliance repair and selected-cache
+pruning/preservation passed. Typed teardown and independent absence checks confirmed cleanup. The corrected
+probe timeout and administrator-prepared kernel readability supersede the earlier cold-build failure; neither
+alone is claimed as its sole cause. This closes the registered local GuestFS case, not fresh reusable-base
+provisioning or the remaining current-candidate matrix.
+
 **Complete installed-candidate T1/T2 matrix before the added console decoy case (2026-09-29):** The exact registered selection passed
 all 415 cases across 26 files against installed candidate `8a6fb1bf` (`0.3.0-rc.priorboot`) inside only
 `mvmctl-030-test`. Configuration was byte-for-byte unchanged after both tiers; final VM/network/volume/snapshot
@@ -1784,7 +1793,7 @@ Specific legacy conflicts that must be rewritten before release:
 |---|---|---|---|---|
 | `cache init` | ⚡ Shallow | `cache/test_cache.py` | `TestCacheInit` | L1 |
 | `cache init` idempotent | ⚡ Shallow | `cache/test_cache.py` | `TestCacheInit` | L1 |
-| Enabled GuestFS appliance build/reuse/repair and selected-cache pruning | 🟡 Partial | `cache/test_guestfs_appliance.py` | `test_enabled_build_reuse_and_incomplete_rebuild` | Registered Tier 2 case; strict-marker collection and focused orchestrator checks pass. Builder prerequisites are declared. Actual package provisioning, appliance construction/launch/reuse/repair and pruning remain unqualified pending physical storage admission. |
+| Enabled GuestFS appliance build/reuse/repair and selected-cache pruning | ✅ Deep | `cache/test_guestfs_appliance.py` | `test_enabled_build_reuse_and_incomplete_rebuild` | Installed 562b38de: strict 1/1 in 68.18s, real construction/launch/reuse/repair, typed cleanup and unrelated-state preservation passed in the named runner. Fresh reusable-base qualification remains separate. |
 | `cache prune` (no resource) | ⚡ Shallow | `cache/test_cache.py` | `TestCacheEdgeCases` | L1 |
 | `cache prune vm --force` | ⚡ Shallow | `cache/test_cache.py` | `TestCacheEdgeCases` | L2 — VM gone after prune |
 | `cache prune --all --dry-run` | ⚡ Shallow | `cache/test_cache.py` | `TestCachePruneDryRun` | L1 |

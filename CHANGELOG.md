@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > file (46.08s) on the corrected installed candidate, with strict zero-other-outcome reports and checked cleanup.
 > This proves rejection before attachment, not resistance to endpoint replacement after observation; other hostile
 > endpoint and race faults remain separate gates.
-> Clean administrator/marker-only denial and reset, enabled GuestFS, adversarial recovery/fault checks,
+> Clean administrator/marker-only denial and reset, adversarial recovery/fault checks,
 > reusable-base provisioning, Tier 3, aarch64 runtime, GitHub CI, and final
 > release approval remain open. A fresh mirrored-source kernel producer completed with retained input/toolchain/
 > config/ELF receipts, followed by a bounded exact-build-ID boot check with KVM device open and TUN/Btrfs evidence.
@@ -84,12 +84,13 @@ process and guest boot identity with no observed leaf/controller OOM-counter inc
 evidence, not attribution of the original incident or protection against arbitrary ancestor/global OOM.
 Historical swap-present and guest-OOM results remain separate from current-candidate matrix qualification.
 
-Enabled GuestFS now has a registered Tier 2 appliance-build/reuse/repair case, and the reusable-base builder
-declares its GuestFS/QEMU tools and an appliance kernel/module tree. Strict-marker collection, focused
-orchestrator checks and actual named-runner package installation passed. Cold appliance construction failed;
-diagnosis found an unreadable Ubuntu packaged kernel and a separate probe-duration defect. The exact QA kernel
-was made readable through explicit administrator setup; the heavy appliance workflow still requires verification
-against the corrected candidate. Neither identified issue alone proves the whole failure cause.
+On installed candidate `0.3.0-rc.562b38de`, the registered enabled-GuestFS case passed inside `mvmctl-030-test`
+in 68.18 seconds: cold appliance construction, actual guestfish launches, warm reuse, incomplete-appliance
+repair and selected-cache cleanup/preservation. The strict report contains one pass and zero other outcomes;
+typed teardown and independent absence checks passed. This follows correction of the probe-duration defect
+and administrator setup of the exact package-owned Ubuntu kernel's readability, retaining the original failure
+evidence without attributing it solely to either finding. Fresh reusable-base provisioning and the complete
+current-candidate matrix remain separate gates.
 
 Before the shared-state traversal fix, installed candidate `0.3.0-rc.8521b3bc` passed 118 bounded non-VM Python system
 cases inside `mvmctl-030-test`, with strict zero-other-outcome reports and checked cleanup. Kernel-import fixtures
@@ -1301,8 +1302,8 @@ composition is described above; the current incomplete-work inventory is under *
 ### Fixed
 
 - GuestFS kernel-version probing now uses an explicit five-second timeout instead of a bare duration interpreted
-  as five microseconds. Focused package compilation, vet and formatting passed; installed-candidate appliance
-  qualification remains separate. The ordinary product does not change `/boot` permissions.
+  as five microseconds. Focused package compilation, vet and formatting passed, followed by the installed-candidate
+  appliance build/launch/reuse/repair case described above. The ordinary product does not change `/boot` permissions.
 - Reusable QA bases explicitly make verified package-owned GuestFS kernel images readable by the unprivileged
   runner. Package metadata/checksums and root ownership are checked; the external Firecracker boot kernel is
   unchanged. Two focused builder checks and an already-readable real-image check passed; fresh provisioning
