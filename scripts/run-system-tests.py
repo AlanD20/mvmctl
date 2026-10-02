@@ -531,6 +531,7 @@ TIER1_DOMAINS: dict[str, list[str]] = {
 
 # Tier 2: shared volume + nested virt (VM creation/interaction)
 TIER2_DOMAINS: dict[str, list[str]] = {
+    "host_admin": ["tests/system/host/test_host_admin.py"],
     "guestfs": ["tests/system/cache/test_guestfs_appliance.py"],
     "volume": [
         "tests/system/volume/test_volume.py",
