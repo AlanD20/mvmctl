@@ -112,6 +112,13 @@ Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
 tests run directly on the outer host and therefore require a dedicated clean
 qualification host or disposable outer VM.
 
+Check the **outer runner's** cgroup limits as well as resources visible inside it. During 2026-10-02 base
+preparation, the legacy controller's 6 GiB QA runner was killed at its finite 6 GiB plus 128 MiB memory limit;
+the outer kernel log and exact cgroup OOM counter established the cause. An inner 0.3 candidate's pressure-only
+policy cannot remove that enclosing limit. Preserve those receipts before lifecycle recovery, and size any
+temporary QA-only adjustment against actual host headroom without changing unrelated VM or global policy.
+Guest `MemAvailable` and free disk alone do not establish outer VMM memory safety.
+
 ### Using an Already Imported Runner Kernel
 
 For a fresh custom Linux 7.0.11/x86_64 artifact, set both `MVM_RUNNER_KERNEL_ID` and

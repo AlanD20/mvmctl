@@ -84,6 +84,13 @@ process and guest boot identity with no observed leaf/controller OOM-counter inc
 evidence, not attribution of the original incident or protection against arbitrary ancestor/global OOM.
 Historical swap-present and guest-OOM results remain separate from current-candidate matrix qualification.
 
+A later reusable-base attempt lost the disposable QA host to its **legacy outer controller's** memory cgroup:
+the kernel identified that runner's Firecracker process and exact cgroup as the OOM victim. Its 6 GiB guest had
+equal `memory.high` and `memory.max` values of 6,576,668,672 bytes (6 GiB plus 128 MiB); its OOM-kill
+counter recorded one kill. This attributes that observed runner failure, not the original historical incident,
+and does not demonstrate a defect in the 0.3 candidate's pressure-only leaf policy inside the runner. Outer
+runner limits remain an independent qualification prerequisite.
+
 On installed candidate `0.3.0-rc.562b38de`, the registered enabled-GuestFS case passed inside `mvmctl-030-test`
 in 68.18 seconds: cold appliance construction, actual guestfish launches, warm reuse, incomplete-appliance
 repair and selected-cache cleanup/preservation. The strict report contains one pass and zero other outcomes;
