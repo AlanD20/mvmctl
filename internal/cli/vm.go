@@ -312,10 +312,10 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 					prog.UpdateText(e.Message)
 				}
 			})
-			common.RecordResult(vms)
 			if err != nil {
 				return fmt.Errorf("create VMs: %w", err)
 			}
+			common.RecordResult(vms)
 
 			if len(vms) == 0 {
 				return fmt.Errorf("no VMs returned")

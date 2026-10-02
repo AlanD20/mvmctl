@@ -133,12 +133,7 @@ func (op *Operation) VMCreate(
 	// Parallel VM creation: one goroutine per VM.
 	batchCtx, batchCancel := context.WithCancel(ctx)
 	defer batchCancel()
-	type vmResult struct {
-		idx int
-		vm  *model.VMItem
-		err error
-	}
-	resultCh := make(chan vmResult, len(names))
+	resultCh := make(chan vmCreateResult, len(names))
 	for idx, name := range names {
 		go func(idx int, name string) {
 			createdAt := time.Now()
@@ -160,7 +155,7 @@ func (op *Operation) VMCreate(
 			}
 			vmInstance, execErr := op.vmBuilderCreate(batchCtx, resolved, progress)
 			if execErr != nil {
-				resultCh <- vmResult{idx: idx, err: execErr}
+				resultCh <- vmCreateResult{idx: idx, vmID: vmID, err: execErr}
 				return
 			}
 			// Handle volumes (per VM, inside goroutine for independence).
@@ -174,41 +169,24 @@ func (op *Operation) VMCreate(
 			}
 			// Audit log per VM.
 			op.AuditLog.LogOperation("vm.create", nil, fmt.Sprintf("name=%s", name))
-			resultCh <- vmResult{idx: idx, vm: vmInstance}
+			resultCh <- vmCreateResult{idx: idx, vmID: vmID, vm: vmInstance}
 		}(idx, name)
 	}
 	// Collect results. On first error in atomic mode, cancel remaining goroutines.
-	createdVMs := make([]*model.VMItem, 0, len(names))
-	var createErrors []string
-	atomicFailed := false
-	for range names {
-		res := <-resultCh
-		if res.err != nil {
-			createErrors = append(createErrors, fmt.Sprintf("%s: %v", names[res.idx], res.err))
-			if input.Atomic {
-				atomicFailed = true
-				batchCancel()
-			}
-			continue
-		}
-		createdVMs = append(createdVMs, res.vm)
-	}
+	outcome := collectVMCreateResults(names, resultCh, input.Atomic, batchCancel)
+	createdVMs := outcome.createdVMs
 	// Atomic rollback: remove all successfully created VMs.
-	if atomicFailed && len(createdVMs) > 0 {
+	if input.Atomic && len(outcome.failures) > 0 && len(createdVMs) > 0 {
 		for _, vm := range createdVMs {
 			_ = op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: true})
 		}
-		return nil, errs.New(
-			errs.CodeVMAtomicFailed,
-			fmt.Sprintf(
-				"Atomic creation failed: %s. All %d created VMs have been removed.",
-				strings.Join(createErrors, "; "),
-				len(createdVMs),
-			),
-		)
+		return nil, outcome.failure(errs.CodeVMAtomicFailed, fmt.Sprintf(
+			"Atomic creation failed: %s. Rollback requested for %d created VMs.",
+			strings.Join(outcome.messages, "; "), len(createdVMs),
+		))
 	}
-	if len(createErrors) > 0 && len(createdVMs) == 0 {
-		return nil, errs.New(errs.CodeVMCreateFailure, strings.Join(createErrors, "; "))
+	if len(outcome.failures) > 0 {
+		return createdVMs, outcome.failure(errs.CodeVMCreateFailure, strings.Join(outcome.messages, "; "))
 	}
 	return createdVMs, nil
 }
