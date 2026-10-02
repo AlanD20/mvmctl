@@ -1,11 +1,16 @@
 package authorityfs
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 // This record is written in the production schema-6 shape independently of
@@ -21,6 +26,80 @@ const priorBootSchemaSixCleaning = `{"schema_version":6,"owner_uid":1000,` +
 	`"release":{"version":"1.16.0","architecture":"x86_64",` +
 	`"firecracker_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",` +
 	`"jailer_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}`
+
+// A child chroots into real root-owned scratch so the actual fixed-path reader is
+// tested without a path hook or changes to the host's retained instance authority.
+func TestReadPriorBootRecordSharedStateBase(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("root-owned prior-boot record admission requires root")
+	}
+	const fixtureMarker = "MVM_TEST_PRIOR_BOOT_RECORD_ROOT"
+	for name, tc := range map[string]struct {
+		baseMode      os.FileMode
+		instancesMode os.FileMode
+		recordMode    os.FileMode
+		refused       bool
+		mountCrossing bool
+	}{
+		"safe_shared_base":         {baseMode: 0755, instancesMode: 0700, recordMode: 0600},
+		"writable_shared_base":     {baseMode: 0777, instancesMode: 0700, recordMode: 0600, refused: true},
+		"nonprivate_instances":     {baseMode: 0700, instancesMode: 0755, recordMode: 0600, refused: true},
+		"nonprivate_record":        {baseMode: 0700, instancesMode: 0700, recordMode: 0644, refused: true},
+		"instances_mount_crossing": {baseMode: 0700, instancesMode: 0700, recordMode: 0600, mountCrossing: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if root := os.Getenv(fixtureMarker); root != "" {
+				if tc.mountCrossing {
+					// The child starts in its own mount namespace; propagation is
+					// private before mounting anything, so no host mount is changed.
+					require.NoError(t, unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""))
+					instances := filepath.Join(root, "var/lib/mvmctl/instances")
+					require.NoError(t, unix.Mount("tmpfs", instances, "tmpfs",
+						unix.MS_NODEV|unix.MS_NOSUID|unix.MS_NOEXEC, "size=1m,mode=700"))
+					require.NoError(t, os.Mkdir(filepath.Join(instances, "1000"), 0700))
+					require.NoError(t, os.WriteFile(filepath.Join(instances,
+						"1000/0123456789abcdef0123456789abcdef.json"), []byte(priorBootSchemaSixCleaning), 0600))
+				}
+				require.NoError(t, unix.Chroot(root))
+				require.NoError(t, os.Chdir("/"))
+				key, err := NewVMKey("0123456789abcdef0123456789abcdef")
+				require.NoError(t, err)
+				got, err := readPriorBootRecord(t.Context(), 1000, key)
+				if tc.mountCrossing {
+					assert.ErrorIs(t, err, unix.EXDEV)
+					return
+				}
+				if tc.refused {
+					assert.ErrorContains(t, err, "metadata is not admitted")
+					return
+				}
+				if !assert.NoError(t, err) {
+					return
+				}
+				assert.Equal(t, "0123456789abcdef0123456789abcdef", got.VMID)
+				assert.Equal(t, "cleaning", got.Lifecycle)
+				assert.Equal(t, uint64(1), got.CleanupGeneration)
+				return
+			}
+			root := t.TempDir()
+			instances := filepath.Join(root, "var/lib/mvmctl/instances")
+			require.NoError(t, os.MkdirAll(filepath.Join(instances, "1000"), 0700))
+			require.NoError(t, os.Chmod(filepath.Dir(instances), tc.baseMode))
+			require.NoError(t, os.Chmod(instances, tc.instancesMode))
+			recordPath := filepath.Join(instances, "1000/0123456789abcdef0123456789abcdef.json")
+			require.NoError(t, os.WriteFile(recordPath, []byte(priorBootSchemaSixCleaning), tc.recordMode))
+			require.NoError(t, os.Chmod(recordPath, tc.recordMode))
+			command := exec.CommandContext(t.Context(), os.Args[0],
+				"-test.run=^TestReadPriorBootRecordSharedStateBase$/^"+name+"$", "-test.v")
+			command.Env = append(os.Environ(), fixtureMarker+"="+root)
+			if tc.mountCrossing {
+				command.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWNS}
+			}
+			output, err := command.CombinedOutput()
+			assert.NoError(t, err, "%s", output)
+		})
+	}
+}
 
 func TestDecodePriorBootSchemaSixCleaning(t *testing.T) {
 	t.Parallel()

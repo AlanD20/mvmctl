@@ -183,7 +183,9 @@ func (proof *PriorBootVMAbsence) verifyEvidence(ctx context.Context) error {
 }
 
 func readPriorBootRecord(ctx context.Context, owner uint32, key VMKey) (_ priorBootRecord, returnErr error) {
-	dir, err := openPriorBootDirectory(ctx, []string{"var", "lib", "mvmctl", "instances", formatUID(owner)}, 2, 0700)
+	// The shared state base may be safely traversable; only instances and its
+	// owner directories are private. Mount crossing stays forbidden below mvmctl.
+	dir, err := openPriorBootDirectory(ctx, []string{"var", "lib", "mvmctl", "instances", formatUID(owner)}, 2, 3, 0700)
 	if err != nil {
 		return priorBootRecord{}, err
 	}
@@ -336,6 +338,7 @@ func openPriorBootDirectory(
 	ctx context.Context,
 	components []string,
 	managedStart int,
+	privateStart int,
 	mode uint32,
 ) (_ int, returnErr error) {
 	fd, err := unix.Open("/", directoryFlags, 0)
@@ -371,7 +374,7 @@ func openPriorBootDirectory(
 			return -1, err
 		}
 		if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != 0 || stat.Gid != 0 || stat.Mode&0022 != 0 ||
-			(index >= managedStart && stat.Mode&07777 != mode) {
+			(index >= privateStart && stat.Mode&07777 != mode) {
 			return -1, fmt.Errorf("authorityfs: prior-boot directory metadata is not admitted")
 		}
 	}
@@ -380,7 +383,7 @@ func openPriorBootDirectory(
 
 func comparePriorBootVMLock(ctx context.Context, owner uint32, key VMKey, held int) (returnErr error) {
 	// /run/mvmctl is 0711; authority and owner directories are 0700.
-	dir, err := openPriorBootDirectory(ctx, []string{"run", "mvmctl", "authority", formatUID(owner)}, 2, 0700)
+	dir, err := openPriorBootDirectory(ctx, []string{"run", "mvmctl", "authority", formatUID(owner)}, 2, 2, 0700)
 	if err != nil {
 		return err
 	}

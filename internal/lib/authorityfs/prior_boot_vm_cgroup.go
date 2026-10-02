@@ -52,7 +52,7 @@ func observePriorBootCgroupAbsence(
 	}()
 	// The cgroup2 mount root may be read-only to ordinary traversal. Its
 	// exact mode is admitted below; parent and VM-leaf checks stay separate.
-	fd, err := openPriorBootDirectory(ctx, []string{"sys", "fs", "cgroup"}, 3, 0755)
+	fd, err := openPriorBootDirectory(ctx, []string{"sys", "fs", "cgroup"}, 3, 3, 0755)
 	if err != nil {
 		return nil, err
 	}
