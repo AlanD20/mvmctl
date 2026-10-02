@@ -2767,6 +2767,8 @@ def test_imported_runner_selects_same_kernel_on_all_five_create_paths(
         stdout = ""
         if args[:2] == ("kernel", "inspect"):
             stdout = json.dumps(info)
+        elif args[:2] == ("network", "inspect"):
+            return subprocess.CompletedProcess(args, 1, stdout="")
         elif args[:2] == ("image", "inspect"):
             return subprocess.CompletedProcess(args, 1, stdout="")
         elif args[0] == "exec":
@@ -2788,7 +2790,6 @@ def test_imported_runner_selects_same_kernel_on_all_five_create_paths(
     monkeypatch.setattr(orchestrator, "_unique_name", lambda prefix: prefix)
     for name in (
         "ensure_shared_volume",
-        "ensure_test_network",
         "_ensure_builder_key",
         "_install_system_binary_in_runner",
         "_initialize_system_binary_in_runner",
@@ -2800,6 +2801,9 @@ def test_imported_runner_selects_same_kernel_on_all_five_create_paths(
     orchestrator.run_prepare(binding=binding)
     orchestrator.provision_t1("normal-t1", "0.3.0", lambda: None, binding=binding)
     orchestrator.provision_t2("normal-t2", "0.3.0", lambda: None, binding=binding)
+    assert [args for args in calls if args[:2] == ("network", "create")] == [
+        ("network", "create", "sys-test-net", "--subnet", "10.88.0.0/24")
+    ]
     creates = [args for args in calls if args[:2] == ("vm", "create")]
     assert len(creates) == 5
     for args in creates:

@@ -1224,7 +1224,6 @@ def ensure_test_network() -> None:
         TEST_NETWORK_NAME,
         "--subnet",
         "10.88.0.0/24",
-        "--non-interactive",
         timeout=30,
     )
 
