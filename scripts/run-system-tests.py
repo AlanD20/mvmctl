@@ -1825,6 +1825,52 @@ def _build_base_image(
             "sudo apt-get clean",
             timeout=300,
         )
+        # Ubuntu packages kernels as 0600; unprivileged supermin must read them.
+        # Only package-owned boot images are adjusted, never the external VM kernel.
+        kernel_readability = r"""
+test ! -L /boot
+test "$(stat -c '%u:%g:%a' /boot)" = '0:0:755'
+packages=$(dpkg-query -W -f='${binary:Package} ${db:Status-Status}\n' 'linux-image-*')
+count=0
+while read -r package status; do
+    case "$package" in linux-image-[0-9]*|linux-image-unsigned-[0-9]*) ;; *) continue ;; esac
+    test "$status" = installed || continue
+    paths=$(dpkg-query -L "$package")
+    while IFS= read -r kernel; do
+        case "$kernel" in /boot/vmlinuz-[0-9]*) ;; *) continue ;; esac
+        test "${kernel%/*}" = /boot
+        test -f "$kernel" && test ! -L "$kernel"
+        test "$(stat -c '%u:%g' "$kernel")" = '0:0'
+        identity=$(stat -c '%d:%i:%u:%g:%s' "$kernel")
+        original_mode=$(stat -c '%a' "$kernel")
+        test "$original_mode" = 600 || test "$original_mode" = 644
+        expected=$(awk -v path="${kernel#/}" '$2 == path {print $1}' "/var/lib/dpkg/info/$package.md5sums")
+        test "${#expected}" = 32
+        checksum=$(md5sum -- "$kernel")
+        test "${checksum%% *}" = "$expected"
+        if test "$original_mode" = 600; then chmod 0644 -- "$kernel"; fi
+        test "$(stat -c '%d:%i:%u:%g:%s' "$kernel")" = "$identity"
+        test "$(stat -c '%a' "$kernel")" = 644
+        test "$(md5sum -- "$kernel")" = "$checksum"
+        runuser -u runner -- test -r "$kernel"
+        printf 'GuestFS kernel readable: %s (mode %s -> 644)\n' "$kernel" "$original_mode"
+        count=$((count + 1))
+    done <<< "$paths"
+done <<< "$packages"
+test "$count" -gt 0
+"""
+        log("  Making packaged GuestFS kernels readable by runner...")
+        mvm(
+            "exec",
+            BASE_VM_NAME,
+            "--user",
+            "runner",
+            "--timeout",
+            "10",
+            "--",
+            "sudo bash -euo pipefail -c " + shlex.quote(kernel_readability),
+            timeout=30,
+        )
         log("  Installing Python test packages...")
         mvm(
             "exec",
