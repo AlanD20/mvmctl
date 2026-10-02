@@ -135,6 +135,10 @@ recorded revisions; adversarial firewall and recovery cases remain separate rele
 
 ### Added
 
+- Added an installed-candidate snapshot producer-interruption journey with unpublished-state recovery and a
+  complete RAM/vmstate/rootfs/data-volume restore control. The named-runner-only fault is bound to the isolated
+  execution identity and retains the original pidfd for cleanup. Review, lint, formatting and exact-node collection
+  passed; runtime remains pending. This does not qualify root-receiver death or power-loss recovery.
 - Added a registered Tier 2 `host_admin` journey for first enrollment on a clean disposable child, usable
   marker-only authorization, refusal of public administrator/raw-sudo commands, quiescent reset and re-init.
   Added separate journeys for password-authenticated second-operator enrollment and typed dispatch, active-network

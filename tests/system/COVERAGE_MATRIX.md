@@ -136,6 +136,14 @@ ambiguous-runtime reset refusal remain gaps. The shared runner is never the rese
 Signed integration `0dcbb418` passed strict one-case collection in the named runner (0.28 seconds); two existing
 registry checks passed separately (0.31 seconds), and lint/format checks passed. No fixture ran during collection.
 
+**Snapshot producer-interruption source checkpoint (2026-10-02):** Signed `d63f8e38` adds
+`TestNetworklessJailerLifecycle::test_snapshot_capture_file_limit_failure_recovers` in `vm/test_jailer.py`.
+The named-runner-only case binds its fault to an isolated-credential worker, retains the original producer pidfd,
+requires an unpublished interrupted capture, and checks public recovery followed by a complete captured
+RAM/vmstate/rootfs/data-volume restore after source mutation and removal. Fixed-diff review, lint, formatting and
+exact-node collection passed (one node, 0.59 seconds, no fixtures). The expected producer termination, recovery
+and restore control are not runtime-qualified; root-receiver death and power loss remain separate gaps.
+
 **Complete nftables repeat gate (2026-09-28):** Source SHA-256
 `5e0105dfeb4fc2ac41bee37fa6c8d0fdfda7497609afda7e7685cc7a61c72133` passed all five cases
 twice (33.15/29.30 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
