@@ -77,6 +77,13 @@ that runner, preserving its checked configuration and resource baseline. The ful
 orchestrator tests passed separately at their recorded revision. These local gates do not qualify GuestFS,
 reusable-base provisioning, the remaining current-source Python matrix, remote GitHub CI or the release.
 
+On the installed `0.3.0-rc.b402c471` candidate, the existing no-host-swap saturation case passed with a strict
+one-case report and verified typed cleanup. A 224 MiB guest sustained 91.2–92.2% occupancy of usable RAM for
+15.55 seconds; the cgroup exceeded `memory.high`, recorded 32 new high events and retained the same Firecracker
+process and guest boot identity with no observed leaf/controller OOM-counter increase. This is bounded survival
+evidence, not attribution of the original incident or protection against arbitrary ancestor/global OOM.
+Historical swap-present and guest-OOM results remain separate from current-candidate matrix qualification.
+
 Enabled GuestFS now has a registered Tier 2 appliance-build/reuse/repair case, and the reusable-base builder
 declares its GuestFS/QEMU tools and an appliance kernel/module tree. Strict-marker collection and focused
 orchestrator checks passed inside the named runner. These are source and collection checks only: actual
