@@ -1301,6 +1301,10 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Reusable-base preparation now uses the supported `network create <name> --subnet <cidr>` invocation,
+  removing an obsolete prompt-suppression flag that stopped preparation before builder creation. The existing
+  preparation-flow test passed with real network setup orchestration and a fake CLI boundary; actual fresh-base
+  provisioning remains a separate runtime gate.
 - GuestFS kernel-version probing now uses an explicit five-second timeout instead of a bare duration interpreted
   as five microseconds. Focused package compilation, vet and formatting passed, followed by the installed-candidate
   appliance build/launch/reuse/repair case described above. The ordinary product does not change `/boot` permissions.
