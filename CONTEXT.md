@@ -747,6 +747,13 @@ and console attachment reject JSON before command effects; finite console state/
 owns rendering and must not infer success from discarded API results. Cache inspection/removal now propagates its
 underlying errors instead of reporting an empty or successful result.
 
+VM creation failures use an error envelope with `data: null`, including mixed non-atomic batches. The API returns
+completed items alongside the error; the CLI exposes their IDs in `error.details.created_vm_ids`, not success data.
+`error.details.failed_vms` preserves each attempted `vm_id`, requested `name`, and structured primary/recovery
+`errors` in request order, even when creation never published a database row. These IDs are diagnostic selectors,
+not proof of current existence or cleanup permission. An atomic rollback request does not guarantee removal;
+exact-ID forced removal still requires the root-owned authority checks.
+
 ### VM-to-VM execution transition
 
 The legacy guest-originated `remote_vm` handler and protocol are removed. The cutover first made every legacy request

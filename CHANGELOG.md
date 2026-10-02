@@ -1319,6 +1319,12 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- VM creation now preserves attempted IDs and structured primary/recovery causes in `error.details.failed_vms`,
+  including failures before database publication. Mixed non-atomic batches return an error rather than hiding failed
+  attempts; completed IDs appear in `created_vm_ids`, while CLI error output retains `data: null`. These selectors
+  grant no cleanup authority, and atomic rollback is no longer described as guaranteed removal. Behavioral
+  regressions, full API/CLI packages, focused race checks, vet and formatting passed inside the named QA runner;
+  updated-candidate runtime qualification remains pending.
 - Prior-boot VM cleanup no longer rejects a safe root-owned `0755` shared `/var/lib/mvmctl` directory.
   Private instance directories still require `0700`; record ownership/mode, no-follow traversal and the existing
   no-cross-mount boundary remain enforced. A real-filesystem regression failed on the original reader and passed
