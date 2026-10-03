@@ -31,9 +31,11 @@ all 415 cases across 26 files against installed candidate `8a6fb1bf` (`0.3.0-rc.
 `mvmctl-030-test`. Configuration was byte-for-byte unchanged after both tiers; final VM/network/volume/snapshot
 inventories were empty and no runner swap remained. Every file passed strict outcome validation with zero other
 outcomes. Reports are retained in `matrix-b2c0a1f8`; the corrected binary file uses `bin-observer-84eb` instead of
-the preserved earlier failed report. Source is the clean `b2c0a1f8` snapshot plus the binary correction integrated
-as `c43cf9ec`. The outer controller remained unchanged. This closes the registered current T1/T2 matrix,
-not clean-host/Tier 3, remote CI, enabled GuestFS, adversarial fault/recovery, kernel producer/base provenance,
+the preserved earlier failed report. Test source is the clean `b2c0a1f8` snapshot plus the binary correction integrated
+as `c43cf9ec`. This identifies the test-source selection, not an independently established VCS revision for
+the historical installed binary. The outer controller remained unchanged. This closes that recorded T1/T2 selection;
+later changed product paths still require scoped current-candidate qualification. It does not qualify
+clean-host/Tier 3, remote CI, enabled GuestFS, adversarial fault/recovery, kernel producer/base provenance,
 original incident attribution, aarch64 runtime or release approval.
 
 **Caller PID-mirror console gate (2026-09-29):** Console source `ed288ee6`, integrated as `84ba3730`,
@@ -77,6 +79,14 @@ passed. Installed `0.3.0-rc.a3d7b8d0`, SHA-256
 root-owned `0755` canonical identity. Later `ff74b015` production Go/build inputs match; its administrator test
 module changed. This does not qualify reusable-base provisioning, the remaining installed Python matrix,
 remote GitHub CI or release approval. Previous failed reports remain failed.
+
+**Current image-result qualification checkpoint (2026-10-03):** Six existing force-pull and default-result
+cases were selected on installed `a3d7b8d0`. The first pull failed before its image/default assertions because
+the QA adapter placed its private cache below a group-writable checkout ancestor; managed-cache admission
+correctly refused it. The remaining five cases did not execute. Independent baseline, backing, candidate,
+mirror, root-authority and source preservation checks passed. A task-only private-workspace correction was
+reviewed without changing product code or admission checks; its invocation was refused by initial resource
+admission before SSH or test effects. These cases remain unqualified; neither refusal is a passing image case.
 
 **Owned host-reboot recovery gate (2026-09-28):** The corrected installed candidate `8a6fb1bf`
 (`0.3.0-rc.priorboot`) passed one fresh, local two-phase Python journey: running projections and guest exec,
