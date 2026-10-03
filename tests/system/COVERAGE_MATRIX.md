@@ -231,6 +231,18 @@ or step. The generic error message therefore does not establish that restoration
 underlying cause remain unknown. Typed cleanup and all twelve preservation checks passed. This narrows the
 diagnosis without qualifying reset/re-init or justifying a restoration fix or weakened guard.
 
+**Reset diagnostic source correction (2026-10-03):** Signed `2e4a05f6` exposes the named failure stage and
+a bounded printable cause in the reset error's message and details, preserving the original failure through
+deferred cleanup without changing reset guards or effects. Both new error-composition Go regressions, the complete
+host package, vet and formatting passed as the unprivileged user inside the named runner. An optional focused
+race check was interrupted by the QA memory-growth guard before a test result; it is not a pass.
+Signed `748dc599` strengthens the existing active-network refusal and real read-only-filesystem reset/retry
+cases while retaining their journal, admission and cleanup checks. Both exact nodes collected in 0.20 seconds
+with no fixtures or test bodies executed. The collection-only outcome hook reports two unrun-item errors with
+exit status zero; this is not a strict runtime pass. The original node-prefix receipt-check failure was corrected
+against retained reports without rerunning pytest. The installed `a3d7b8d0` candidate predates this Go fix;
+updated-candidate reset diagnosis, successful reset/re-init and refreshed coherent CI remain open.
+
 Signed `58165c85` now retains the reset command's full result and immediate root state before assertion and
 fixture cleanup, including bounded administrator-directory metadata. All three exact nodes collected successfully
 in 0.35 seconds with the candidate and baseline preserved. This improves failure evidence; it does not diagnose

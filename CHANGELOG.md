@@ -75,9 +75,10 @@ vet and the full unprivileged selector, with complete atomic coverage. The selec
 The real guest-agent release build passed with Go 1.26.3, PIE, exact VCS revision and `vcs.modified=false`.
 Normal `host install-system` installed the matching `0.3.0-rc.a3d7b8d0` only inside the named runner, with
 matching content SHA, root-owned `0755` canonical identity and checked baseline preservation. Earlier failed
-harness and runtime reports remain failed evidence. This closes the current local CI/build/install checkpoint,
+harness and runtime reports remain failed evidence. This closes the recorded a3d7 local CI/build/install checkpoint,
 not reusable-base provisioning, the remaining installed-candidate Python matrix, remote GitHub CI or release
-approval. Subsequent Markdown-only changes do not alter these checked inputs.
+approval. Markdown-only changes do not alter these checked inputs; the later reset-diagnostic Go change has
+focused verification, not a refreshed complete CI/build/install result.
 
 Subsequent focused checks on that installed candidate passed six VM-free kernel-import cases, guest-OOM survival,
 interrupted snapshot capture with full RAM/vmstate/rootfs/data-volume recovery and restore, cached-image default
@@ -1339,6 +1340,14 @@ composition is described above; the current incomplete-work inventory is under *
   automount cache roots are intentionally unsupported.
 
 ### Fixed
+
+- Administrator reset errors now identify the failing stage and a bounded, printable underlying cause in
+  both human-readable and JSON output. Deferred cleanup preserves the first failure; process-domain messages
+  containing command/output text are omitted. Existing reset guards, restoration order and retry authority are unchanged.
+  Two error-composition regressions, the complete host Go package, vet and formatting passed in the named runner.
+  The optional focused race check was interrupted by a QA resource guard and remains unqualified. The two existing
+  Python reset-refusal/retry cases collected successfully with stronger diagnostic assertions, but their bodies and
+  successful administrator reset remain unqualified; this observability fix does not establish the original cause.
 
 - Host initialization can now reach its existing built-in-KVM admission when a moduleless kernel has no
   `/proc/modules`. Only the first missing-inventory read with an uncancelled context and accessible KVM admits
