@@ -146,6 +146,15 @@ ambiguous-runtime reset refusal remain gaps. The shared runner is never the rese
 Signed integration `0dcbb418` passed strict one-case collection in the named runner (0.28 seconds); two existing
 registry checks passed separately (0.31 seconds), and lint/format checks passed. No fixture ran during collection.
 
+**Administrator runtime checkpoint (2026-10-03):** After the four generated network-prefix corrections in
+`ff74b015`, the single enrollment/marker-only/reset journey ran on installed `a3d7b8d0`. Network lifecycle and
+marker-only denial controls succeeded, but quiescent `host reset --operator hostqa --force --json` returned
+`host.reset.failed` while restoring recorded administrator state, with the journal retained. Strict outcomes
+were collected 1, failed 1, passed 0; JUnit agreed, with no errors, skips or resource guard trips. Typed fixture
+cleanup had no reported errors; independent child jail/runtime/netns and parent bridge/rule absence plus all
+twelve preservation checks passed. The underlying reset cause remains unknown; successful reset/re-init and
+the complete administrator domain are not qualified. Earlier failures remain retained.
+
 **Snapshot producer-interruption source checkpoint (2026-10-02):** Signed `d63f8e38` adds
 `TestNetworklessJailerLifecycle::test_snapshot_capture_file_limit_failure_recovers` in `vm/test_jailer.py`.
 The named-runner-only case binds its fault to an isolated-credential worker, retains the original producer pidfd,
