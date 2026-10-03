@@ -244,7 +244,19 @@ against retained reports without rerunning pytest. Clean `33fc5c1a` subsequently
 amd64/PIE build with exact VCS identity and `vcs.modified=false`, then normal installation as
 `0.3.0-rc.resetdiag-33fc5c1a` only inside the named QA runner. Installed content matched the artifact and
 root-owned `0755` canonical identity; configuration, inventories, authority and mirrors were preserved.
-Updated-candidate reset diagnosis, successful reset/re-init and refreshed coherent CI remain open.
+The first registered administrator journey on that candidate reproduced the quiescent-reset failure and exposed
+the exact Jailer guard stage and directory-mode cause. Strict JSON/JUnit recorded one failure, with no resource
+trips; all twelve preservation checks, owned process/cgroup cleanup and child-resource absence passed.
+
+**Private reset-parent correction:** Signed `84a78139` aligns reset admission with administrator setup and the
+existing VM lifecycle: the shared parent stays exact `0755`, while `jailer` and `firecracker` must be exact
+`0700`. It performs no permission repair or resource deletion. A root filesystem regression failed on the old
+code at the intended private-tree admission check. All four corrected cases then passed, covering legitimate
+private parents, rejection of public-mode parents and residual VM resources, with unchanged metadata/content.
+Jailer vet, gofmt and golines also passed inside the named runner. A verifier-prefix mismatch after RED was
+resolved against the retained output; RED was not rerun. These are focused root checks, not a public reset/re-init
+pass. The installed reset-diagnostic candidate predates this correction; updated-candidate runtime, complete CI
+and the full root-Jailer suite remain open.
 
 Signed `58165c85` now retains the reset command's full result and immediate root state before assertion and
 fixture cleanup, including bounded administrator-directory metadata. All three exact nodes collected successfully

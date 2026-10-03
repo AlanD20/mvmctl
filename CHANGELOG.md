@@ -86,6 +86,13 @@ cached Go 1.26.3, PIE and exact unmodified VCS identity. Normal `host install-sy
 ownership/mode remained `root:root`/`0755`, and configuration, inventories, authority and mirrored assets were
 preserved. This is build/install evidence, not successful reset/re-init or refreshed complete CI qualification.
 
+That candidate's registered administrator journey then identified a reset-admission defect: the guard expected
+`0755` for private Jailer parents that administrator setup and VM lifecycle require to be `0700`. The correction
+keeps the shared parent at `0755` and admits only exact private `0700` parents without changing permissions or
+removing residual resources. Its root regression failed on the old code and passed all four admission/refusal
+cases after the fix inside the named runner; Jailer vet and formatting passed. Updated-candidate reset/re-init,
+complete CI and the full root-Jailer suite still require qualification.
+
 Earlier focused checks on installed `a3d7b8d0` passed six VM-free kernel-import cases, guest-OOM survival,
 interrupted snapshot capture with full RAM/vmstate/rootfs/data-volume recovery and restore, cached-image default
 selection, raw-image import/default selection, and one mirrored forced image replacement. Each result retains its
