@@ -88,6 +88,17 @@ mirror, root-authority and source preservation checks passed. A task-only privat
 reviewed without changing product code or admission checks; its invocation was refused by initial resource
 admission before SSH or test effects. These cases remain unqualified; neither refusal is a passing image case.
 
+**Current VM-free kernel-import gate (2026-10-03):** All six existing VM-free cases in
+`kernel/test_kernel_import.py` passed on installed `a3d7b8d0` inside `mvmctl-030-test`, with test source SHA-256
+`1c246cc0fe8145e70556f6c9995b19d5f024e8d49977741a04ed72298336874e`.
+Strict JSON and JUnit agree on six passes in 6.17 seconds, zero other outcomes. Coverage includes raw import,
+filename-derived version, default selection, missing-path/empty-name refusal and same-byte content-ID reuse.
+Typed fixture cleanup and seven independent preservation checks passed. The prepared kernel's caller backing
+and root-owned record/backing identities, bytes and generation were unchanged; only its public default-selection
+timestamp advanced. The test-owned kernel finished as a removed generation-4 tombstone without disk/pending
+backing. Resource guards did not trip. The two VM-dependent cases, changed-byte refusal and broader retirement
+failure paths are not qualified by this six-case pass; the complete root-Jailer evidence remains separate.
+
 **Owned host-reboot recovery gate (2026-09-28):** The corrected installed candidate `8a6fb1bf`
 (`0.3.0-rc.priorboot`) passed one fresh, local two-phase Python journey: running projections and guest exec,
 one controlled runner reboot, stopped ls/inspect and empty ps, typed stop, exactly one restart, new host/guest
