@@ -1856,10 +1856,13 @@ class TestNetworklessJailerLifecycle:
                 "--json",
                 timeout=180,
             )
+            # Firecracker API readiness does not mean the guest agent has finished booting.
             _run_mvm(
                 runner_vm,
                 "exec",
                 source_name,
+                "--timeout",
+                "30",
                 "--",
                 f"set -e; printf %s {initial_epoch} > {root_file}; "
                 f"printf %s {initial_epoch} | dd of=/dev/vdb bs=1 count=32 conv=fsync,notrunc; sync",
