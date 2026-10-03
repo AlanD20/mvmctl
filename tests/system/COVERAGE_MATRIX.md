@@ -86,12 +86,24 @@ the QA adapter placed its private cache below a group-writable checkout ancestor
 correctly refused it. The remaining five cases did not execute. Independent baseline, backing, candidate,
 mirror, root-authority and source preservation checks passed. A task-only private-workspace correction was
 reviewed without changing product code or admission checks; its invocation was refused by initial resource
-admission before SSH or test effects. These cases remain unqualified; neither refusal is a passing image case.
+admission before SSH or test effects. Neither attempt qualified its selected cases; no refusal is an image pass.
 
 A separate cached-default invocation passed its initial admission, but stopped before pytest when parent
 filesystem free space fell by 146,636,800 bytes, exceeding its 64 MiB job allowance. No memory guard tripped;
 the responsible writer is not established by the receipts. All six independent preservation checks passed,
-including exact post-kernel inventory equality. No cached-default body ran and no image case is qualified.
+including exact post-kernel inventory equality. That attempt did not run the cached-default body.
+
+The subsequent corrected cached-default invocation passed
+`images/test_images.py::TestImagePullAdvanced::test_pull_cached_image_with_default_sets_default`
+on installed `0.3.0-rc.a3d7b8d0`, using module SHA-256
+`3c6979dd330d9c7d02b636e078decd628b96d361fce7b47b965c04fd060349c4`.
+Strict JSON and JUnit agree on one pass, zero other outcomes, in 6.25 seconds. The QA supervisor measures
+the pinned named-runner disk's allocated-byte growth separately from shared-filesystem free-space decline;
+its original own-growth limit, existing shared-space reserve and resource floors remain enforced.
+All six independent preservation checks passed, with unchanged image backing bytes, root authority,
+kernel, candidate and mirror. Only the expected Alpine default-selection timestamp advanced.
+No resource guard tripped. This qualifies the cached-default case only; the four force-pull cases and
+import/default-result case remain open. Earlier failed/refused reports are preserved, not relabeled.
 
 **Current VM-free kernel-import gate (2026-10-03):** All six existing VM-free cases in
 `kernel/test_kernel_import.py` passed on installed `a3d7b8d0` inside `mvmctl-030-test`, with test source SHA-256
