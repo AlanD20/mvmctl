@@ -88,6 +88,11 @@ mirror, root-authority and source preservation checks passed. A task-only privat
 reviewed without changing product code or admission checks; its invocation was refused by initial resource
 admission before SSH or test effects. These cases remain unqualified; neither refusal is a passing image case.
 
+A separate cached-default invocation passed its initial admission, but stopped before pytest when parent
+filesystem free space fell by 146,636,800 bytes, exceeding its 64 MiB job allowance. No memory guard tripped;
+the responsible writer is not established by the receipts. All six independent preservation checks passed,
+including exact post-kernel inventory equality. No cached-default body ran and no image case is qualified.
+
 **Current VM-free kernel-import gate (2026-10-03):** All six existing VM-free cases in
 `kernel/test_kernel_import.py` passed on installed `a3d7b8d0` inside `mvmctl-030-test`, with test source SHA-256
 `1c246cc0fe8145e70556f6c9995b19d5f024e8d49977741a04ed72298336874e`.
