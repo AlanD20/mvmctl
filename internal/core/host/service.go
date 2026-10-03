@@ -149,9 +149,14 @@ func (s *Service) EnsureKVMModules(
 
 	// Detect available vendor modules: check lsmod first, then modprobe --dry-run
 	var vendorModules []string
-	for _, mod := range []string{"kvm_intel", "kvm_amd"} {
+	for index, mod := range []string{"kvm_intel", "kvm_amd"} {
 		loaded, err := administratorModuleLoaded(ctx, mod)
 		if err != nil {
+			// A moduleless kernel has no inventory; admit only already-accessible built-in KVM.
+			if index == 0 && errors.Is(err, os.ErrNotExist) && ctx.Err() == nil && CheckKVMAccess() {
+				slog.Warn("KVM is accessible without a loadable module inventory")
+				return changes, nextOrder, nil
+			}
 			return nil, nextOrder, err
 		}
 		dryRunResult, err := system.DefaultRunner.Run(ctx, []string{"/usr/sbin/modprobe", "--dry-run", mod},
