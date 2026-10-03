@@ -99,8 +99,11 @@ only the test child's umask; the original fixture-permission failures and timeou
 Candidate identity, persistent baseline and resource controls were preserved. The administrator journey now
 passes the reset assertions, but its later assertion incorrectly expected denied network creation to discard
 the deliberately retained pending intent. The test now checks inactive intent retention and same-ID activation
-after re-enrollment; its collection and two existing runner-unit checks passed. The corrected administrator
-journey, current-source complete CI and remaining release matrix are not yet qualified.
+after re-enrollment; its collection and two existing runner-unit checks passed. Exact clean `e034f4e0` then
+passed the complete pinned local Go CI sequence inside the named runner, with both atomic coverage profiles,
+clean source and unchanged candidate/baseline/resource controls; selected Jailer tests passed in 3.243s.
+Later Python-test/Markdown-only changes leave these Go inputs unchanged. The corrected administrator journey,
+reusable-base provisioning and remaining release matrix are not yet qualified.
 
 Earlier focused checks on installed `a3d7b8d0` passed six VM-free kernel-import cases, guest-OOM survival,
 interrupted snapshot capture with full RAM/vmstate/rootfs/data-volume recovery and restore, cached-image default

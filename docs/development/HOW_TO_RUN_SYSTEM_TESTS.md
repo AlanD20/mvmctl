@@ -179,7 +179,11 @@ setup timeout. Keep supervisor/task permissions private, but give the Go test ch
 production permission admission. Candidate, persistent baseline and resource controls were unchanged.
 The reset assertions passed in the installed-candidate administrator journey, but its later stale pending-intent
 assertion failed. The corrected test passed collection and two existing runner-unit checks, not its runtime
-journey. Current-source complete CI, remaining Python matrix and reusable-base qualification remain open.
+journey. Exact clean `e034f4e0` then passed tidy/clean, formatting, generation/clean, vet and the complete
+unprivileged Go CI selector; selected Jailer tests passed in 3.243s. Both nonempty atomic coverage profiles
+and the literal gate log were preserved, source finished clean, and candidate/baseline/resource controls
+remained unchanged. Subsequent Python-test/Markdown-only changes do not change those Go/CI inputs.
+The remaining Python matrix and reusable-base qualification remain open.
 
 ### Optional Local GuestFS Qualification
 
