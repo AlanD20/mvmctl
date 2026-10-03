@@ -78,9 +78,15 @@ matching content SHA, root-owned `0755` canonical identity and checked baseline 
 harness and runtime reports remain failed evidence. This closes the recorded a3d7 local CI/build/install checkpoint,
 not reusable-base provisioning, the remaining installed-candidate Python matrix, remote GitHub CI or release
 approval. Markdown-only changes do not alter these checked inputs; the later reset-diagnostic Go change has
-focused verification, not a refreshed complete CI/build/install result.
+focused verification, not a refreshed complete CI result.
 
-Subsequent focused checks on that installed candidate passed six VM-free kernel-import cases, guest-OOM survival,
+The reset-diagnostic source subsequently built successfully from clean `33fc5c1a` with the real guest agent,
+cached Go 1.26.3, PIE and exact unmodified VCS identity. Normal `host install-system` installed
+`0.3.0-rc.resetdiag-33fc5c1a` only in the named QA runner; installed content matched the artifact, canonical
+ownership/mode remained `root:root`/`0755`, and configuration, inventories, authority and mirrored assets were
+preserved. This is build/install evidence, not successful reset/re-init or refreshed complete CI qualification.
+
+Earlier focused checks on installed `a3d7b8d0` passed six VM-free kernel-import cases, guest-OOM survival,
 interrupted snapshot capture with full RAM/vmstate/rootfs/data-volume recovery and restore, cached-image default
 selection, raw-image import/default selection, and one mirrored forced image replacement. Each result retains its
 own strict outcomes and preservation evidence; these are not a complete current-candidate matrix.

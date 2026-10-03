@@ -240,8 +240,11 @@ Signed `748dc599` strengthens the existing active-network refusal and real read-
 cases while retaining their journal, admission and cleanup checks. Both exact nodes collected in 0.20 seconds
 with no fixtures or test bodies executed. The collection-only outcome hook reports two unrun-item errors with
 exit status zero; this is not a strict runtime pass. The original node-prefix receipt-check failure was corrected
-against retained reports without rerunning pytest. The installed `a3d7b8d0` candidate predates this Go fix;
-updated-candidate reset diagnosis, successful reset/re-init and refreshed coherent CI remain open.
+against retained reports without rerunning pytest. Clean `33fc5c1a` subsequently passed a real-agent Go 1.26.3
+amd64/PIE build with exact VCS identity and `vcs.modified=false`, then normal installation as
+`0.3.0-rc.resetdiag-33fc5c1a` only inside the named QA runner. Installed content matched the artifact and
+root-owned `0755` canonical identity; configuration, inventories, authority and mirrors were preserved.
+Updated-candidate reset diagnosis, successful reset/re-init and refreshed coherent CI remain open.
 
 Signed `58165c85` now retains the reset command's full result and immediate root state before assertion and
 fixture cleanup, including bounded administrator-directory metadata. All three exact nodes collected successfully
