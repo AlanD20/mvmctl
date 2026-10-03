@@ -155,6 +155,11 @@ cleanup had no reported errors; independent child jail/runtime/netns and parent 
 twelve preservation checks passed. The underlying reset cause remains unknown; successful reset/re-init and
 the complete administrator domain are not qualified. Earlier failures remain retained.
 
+Signed `58165c85` now retains the reset command's full result and immediate root state before assertion and
+fixture cleanup, including bounded administrator-directory metadata. All three exact nodes collected successfully
+in 0.35 seconds with the candidate and baseline preserved. This improves failure evidence; it does not diagnose
+the retained reset error or qualify any administrator test body.
+
 **Snapshot producer-interruption source checkpoint (2026-10-02):** Signed `d63f8e38` adds
 `TestNetworklessJailerLifecycle::test_snapshot_capture_file_limit_failure_recovers` in `vm/test_jailer.py`.
 The named-runner-only case binds its fault to an isolated-credential worker, retains the original producer pidfd,
@@ -169,6 +174,14 @@ five seconds. Strict outcomes were collected 1, failed 1, passed 0, exit 1; JUni
 or resource guard trip. Capture interruption, unpublished-capture recovery and the full restore control were
 not reached. Independent exact-owned absence and complete baseline-preservation checks confirmed cleanup.
 The agent-unavailability cause remains unresolved; no snapshot-fault or restore pass is claimed.
+
+A subsequent same-profile observation found the first exec failing within five seconds but succeeding against
+the same VMM at process age 20 seconds, with the guest agent started. This supports startup timing for that
+observation, not attribution to a particular boot service. Signed `9b30573e` gives only the capture case's first
+post-create exec an explicit 30-second connection budget under ADR-0013; all interruption and full-restore
+assertions remain unchanged. Exact-node collection passed in 0.54 seconds with the candidate and baseline
+preserved. The changed runtime invocation was refused by local resource admission before SSH or pytest;
+no snapshot outcome was produced. Capture failure/recovery and full restore remain unqualified.
 
 **Complete nftables repeat gate (2026-09-28):** Source SHA-256
 `5e0105dfeb4fc2ac41bee37fa6c8d0fdfda7497609afda7e7685cc7a61c72133` passed all five cases
