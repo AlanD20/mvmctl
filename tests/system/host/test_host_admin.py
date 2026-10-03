@@ -58,6 +58,28 @@ def receipt(path):
                          stat.S_IMODE(before.st_mode), before.st_nlink],
             "sha256": hashlib.sha256(data).hexdigest(),
             "content": None if path == "/usr/local/bin/mvm" else data.decode()}
+def host_directory_receipt():
+    try:
+        fd = os.open("/var/lib/mvmctl/host", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None
+    try:
+        def identity(info):
+            return [info.st_dev, info.st_ino, info.st_uid, info.st_gid,
+                    info.st_mode, info.st_nlink]
+        before = identity(os.fstat(fd))
+        entries = []
+        with os.scandir(fd) as directory:
+            for entry in directory:
+                assert len(entries) < 64, "host-state directory exceeds receipt bound"
+                assert len(os.fsencode(entry.name)) <= 255
+                info = os.stat(entry.name, dir_fd=fd, follow_symlinks=False)
+                entries.append({"name": entry.name, "identity": identity(info),
+                                "size": info.st_size})
+        assert identity(os.fstat(fd)) == before, "host-state directory identity changed"
+        return {"identity": before, "entries": sorted(entries, key=lambda row: row["name"])}
+    finally:
+        os.close(fd)
 try:
     group = grp.getgrnam("mvm")
     group = {"gid": group.gr_gid, "members": sorted(group.gr_mem)}
@@ -75,6 +97,7 @@ print(json.dumps({"uid": account.pw_uid, "gid": account.pw_gid,
     "groups": sorted(os.getgrouplist(account.pw_name, account.pw_gid)), "group": group,
     "forward": Path("/proc/sys/net/ipv4/ip_forward").read_text().strip(),
     "files": files,
+    "host_directory": host_directory_receipt(),
     "root_user_state": [str(path) for path in
         (Path("/root/.cache/mvmctl"), Path("/root/.config/mvmctl")) if path.exists()]}))
 """
@@ -230,6 +253,7 @@ class _CleanHostCase:
         self.second_states = []
         self.fault_receipts = []
         self.enrollment_policy_receipts = []
+        self.quiescent_reset = None
 
     def root(self, command, *, check=True, timeout=60):
         assert self.child_id, "no owned child administrator channel"
@@ -811,6 +835,7 @@ assert not os.path.lexists(sys.argv[1])
                         "second_states": self.second_states,
                         "sysctl_faults": self.fault_receipts,
                         "enrollment_policy": self.enrollment_policy_receipts,
+                        "quiescent_reset": self.quiescent_reset,
                     },
                     indent=2,
                 ),
@@ -1148,10 +1173,26 @@ class TestCleanHostAdministration:
             _json_success_data(case.operator("network", "ls", "--json").stdout, list)
             == []
         )
-        reset = case.administrator("reset")
+        reset = case.administrator("reset", check=False)
+        case.quiescent_reset = {
+            "returncode": reset.returncode,
+            "stdout": reset.stdout,
+            "stderr": reset.stderr,
+            "state": None,
+            "capture_error": None,
+        }
+        try:
+            restored = case.state()
+            case.quiescent_reset["state"] = restored
+        except Exception as error:
+            case.quiescent_reset["capture_error"] = repr(error)
+        # Preserve a failed reset as primary even if its state observation also fails.
         assert reset.returncode == 0, reset.stdout + reset.stderr
+        assert case.quiescent_reset["capture_error"] is None, (
+            "Quiescent reset state capture unproven: "
+            + case.quiescent_reset["capture_error"]
+        )
         _json_success_data(reset.stdout, type(None))
-        restored = case.state()
         assert restored["group"] is None and restored["groups"] == original["groups"]
         assert restored["forward"] == original["forward"]
         for name in ("canonical", "sudoers", "sysctl"):
