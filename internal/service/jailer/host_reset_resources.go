@@ -64,6 +64,10 @@ func (guard *HostResetGuard) requireNoJailResources(ctx context.Context) error {
 		if index >= 2 {
 			mode = 0755
 		}
+		if index == 3 {
+			// ADR-0016 keeps the Jailer base private after per-VM cleanup.
+			mode = 0700
+		}
 		fd, err := guard.openResetDirectory(ctx, parent, name, mode)
 		if err != nil {
 			return err
@@ -81,7 +85,7 @@ func (guard *HostResetGuard) requireNoJailResources(ctx context.Context) error {
 		if name != "firecracker" {
 			return instanceAtomicError("host reset found an unknown Jailer root entry", nil)
 		}
-		fd, err := guard.openResetDirectory(ctx, parent, name, 0755)
+		fd, err := guard.openResetDirectory(ctx, parent, name, 0700)
 		if err != nil {
 			return err
 		}
