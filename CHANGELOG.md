@@ -1329,6 +1329,13 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- LoopMount now honors cloud-init OFF independently of deblob, including `--skip-deblob`. Fixed guest configuration
+  and supported systemd/OpenRC activation suppression preserve unrelated networking, service and cache settings.
+  Conflicting disable/inject intent and mismatched receiver acknowledgements are rejected. The genuine pre-fix
+  guest-tree regression failed on missing disable content; the fix, affected Go packages, scoped vet and formatting
+  passed inside `mvmctl-030-test`. This does not establish the cause of the observed Alpine agent startup failure
+  or qualify the installed-candidate snapshot fault journey; those runtime gates remain open.
+
 - VM creation now preserves attempted IDs and structured primary/recovery causes in `error.details.failed_vms`,
   including failures before database publication. Mixed non-atomic batches return an error rather than hiding failed
   attempts; completed IDs appear in `created_vm_ids`, while CLI error output retains `data: null`. These selectors

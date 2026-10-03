@@ -72,7 +72,11 @@ or the VM launch authority. See [DEPENDENCIES.md](DEPENDENCIES.md) for required 
 Cloud-init delivery has four modes. `inject` writes seed data into the admitted rootfs before boot. `net` serves
 NoCloud metadata through an ordinary-user service bound to the managed network's root-derived gateway on fixed TCP
 **8000**; a custom port or bind collision is refused. `iso` creates a seed ISO using `cloud-localds` and requires
-that optional package. `off` disables cloud-init delivery. A networkless VM cannot use `net`; it has no guest IP or
+that optional package. `off` disables delivery and independently suppresses the supported guest cloud-init services,
+including when `--skip-deblob` is set. LoopMount writes the fixed disabled marker and datasource configuration,
+masks the four supported systemd units, and removes only the fixed cloud-init OpenRC activation links, including
+Alpine's boot-local and default hotplug services. It does not change unrelated networking, service or cache settings.
+A networkless VM cannot use `net`; it has no guest IP or
 MAC and uses vsock rather than SSH for guest access. The applicable default and input conflicts are documented in
 [REFERENCES.md](REFERENCES.md#mvm-vm).
 

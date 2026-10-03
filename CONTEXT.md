@@ -948,6 +948,11 @@ Provisioner type resolved ONCE at startup in `api.NewOperation()` by reading `se
 Task 13 now has an activated private LoopMount receiver path for VM provisioning and read-only image inspection in
 `internal/service/loopmount/`. Its named
 `ProvisionVM`, `InspectImage`, and `OptimizeImage` client methods use closed VM/image request, plan, and result types.
+VM cloud-init OFF queues independent `DisableCloudInit` intent; it never relies on image import or deblob to
+disable guest services. The receiver writes fixed marker/datasource content, masks the supported systemd cloud-init
+units and removes fixed OpenRC cloud-init activation links beneath the admitted root, without unrelated deblob effects.
+Disable and inject intent together are rejected before authority acquisition. A successful filesystem sync qualifies
+the request-bound `DisableCloudInitApplied` result; the client rejects a missing or unrequested acknowledgement.
 Guest sudo provisioning uses the fixed `/etc/sudoers.d/mvm-guest` policy file, preserving `/etc/sudoers.d/mvm` for
 the controller's marker-only host authorization if the guest later becomes a nested runner.
 VM resize is grow-only relative to the admitted rootfs size. The protocol bounds rootfs and image sizes, guest
