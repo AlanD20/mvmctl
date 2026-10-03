@@ -70,7 +70,7 @@ Go CI selection and its coverage checks under pinned Go 1.26.3. The separate ful
 The unit XML has zero failures, errors or skips. This closes the feasible local source gate at that revision,
 not the complete installed-candidate T1/T2 matrix, remote GitHub CI or release approval.
 
-**Current local CI/build/install checkpoint (2026-10-03):** Clean source `a3d7b8d0` passed the complete
+**Earlier local CI/build/install checkpoint (2026-10-03):** Clean source `a3d7b8d0` passed the complete
 pinned Go 1.26.3 sequence inside `mvmctl-030-test`, including the unprivileged selector and both coverage
 profiles. Selected Jailer tests passed in 5.954 seconds; complete root-Jailer evidence carries only for verified
 unchanged relevant dependency, module and build inputs. The real-agent PIE build and normal system installation
@@ -79,6 +79,20 @@ passed. Installed `0.3.0-rc.a3d7b8d0`, SHA-256
 root-owned `0755` canonical identity. Later `ff74b015` production Go/build inputs match; its administrator test
 module changed. This does not qualify reusable-base provisioning, the remaining installed Python matrix,
 remote GitHub CI or release approval. Previous failed reports remain failed.
+
+**Current Go/reset-candidate checkpoint (2026-10-03):** Clean `e034f4e0` produced the real-agent
+`0.3.0-rc.resetparent-e034f4e0` candidate with Go 1.26.3, PIE and unmodified VCS provenance; normal installation
+changed only the named QA runner. Its root-owned `0755` canonical content SHA-256 is
+`1678ae447fe8bc536e556db9258e375daaa8e14f9f73e9f6ed1747e8e047c689`.
+That clean source passed the complete pinned local Go CI sequence: tidy/clean, gofmt/golines,
+generation/clean, vet and the complete unprivileged selector. Selected Jailer tests passed in 3.243 seconds;
+both atomic coverage profiles and the gate log were preserved. The separate complete root-Jailer package
+passed in 3.545 seconds against hash-checked equivalent Go/module/build inputs. The original root run failed
+because the harness's inherited umask changed exact fixture modes and a race-test setup failure timed out;
+only the Go child's umask was corrected to `022`, without relaxing production admission or private task modes.
+Candidate, persistent baseline and resource controls were preserved. Subsequent Python-test/Markdown-only
+changes do not alter those Go/CI inputs. This closes the current local Go gates, not the corrected administrator
+journey, remaining installed-candidate Python matrix, reusable-base provisioning, GitHub CI or release approval.
 
 **Current image-result qualification checkpoint (2026-10-03):** Six existing force-pull and default-result
 cases were selected on installed `a3d7b8d0`. The first pull failed before its image/default assertions because
@@ -255,8 +269,20 @@ code at the intended private-tree admission check. All four corrected cases then
 private parents, rejection of public-mode parents and residual VM resources, with unchanged metadata/content.
 Jailer vet, gofmt and golines also passed inside the named runner. A verifier-prefix mismatch after RED was
 resolved against the retained output; RED was not rerun. These are focused root checks, not a public reset/re-init
-pass. The installed reset-diagnostic candidate predates this correction; updated-candidate runtime, complete CI
-and the full root-Jailer suite remain open.
+pass. That installed reset-diagnostic candidate predates this correction; the later current Go/reset-candidate
+checkpoint above supersedes the pending build/install, complete CI and full root-Jailer status.
+
+**Administrator pending-intent correction:** The later journey on installed `e034f4e0` passed quiescent reset,
+the complete reset-journal/disabled-admission assertions and restoration checks. It then failed a stale assertion
+expecting denied network creation to leave no caller-cache row. Root state remained unchanged; the inactive
+pending intent is deliberate and allows exact-input retry. Strict JSON/JUnit recorded one failed case, not a
+complete reset/re-init pass; all twelve preservation checks and owned-resource cleanup passed.
+Signed `f5f478f2` now checks inactive intent retention and, after re-enrollment, same-ID activation and typed
+removal. Exact one-node collection passed; its receipt parser correction reused retained output rather than
+recollecting, and two existing runner-unit cases passed. Neither collection nor those units ran this journey.
+A normal named-runner restart preserved the candidate/baseline, but the corrected runtime invocation was
+refused before launch by its unchanged parent-disk prerequisite. The corrected first journey and the separate
+multioperator/refusal/filesystem-retry cases remain unqualified. The shared runner is never the reset target.
 
 Signed `58165c85` now retains the reset command's full result and immediate root state before assertion and
 fixture cleanup, including bounded administrator-directory metadata. All three exact nodes collected successfully
@@ -1427,7 +1453,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
-| Installed system candidate and clean bootstrap | 🟡 Partial | Prepared-host coverage exists. `host_admin` authors clean enrollment, marker-only denial, multioperator typed dispatch, active-network reset refusal and filesystem-failure retries; runtime qualification remains pending. Abrupt interruption and ambiguous-runtime recovery remain gaps. |
+| Installed system candidate and clean bootstrap | 🟡 Partial | Installed e034 candidate reached clean-child quiescent reset and disabled-admission/restoration checks; the complete journey failed its later stale pending-intent assertion. Corrected same-ID retry coverage is authored/collected, not runtime-qualified. Separate multioperator/refusal/filesystem retries, abrupt interruption and ambiguous-runtime recovery remain gaps. |
 | fd-0 privileged control transport | 🔴 Missing | Go L1 framing/EOF/peer/cancellation abuse coverage plus installed-CLI lifecycle integration. |
 | Root VM authority and cross-UID denial | 🟡 Partial | A focused installed-candidate networkless case denies operator direct connection to the reported Firecracker API socket while `vm stop` succeeds; root-record/process/cache identity checks, constrained two-user denial, tombstone, and zero-leak assertions remain missing. |
 | Independent trusted Firecracker/Jailer releases | 🔴 Missing | Root manifest/ELF/hash authority, atomic failure injection, and installed-CLI release lifecycle. |
@@ -1963,7 +1989,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `host status --json` | ✅ Deep | `host/test_host.py` | `TestHostStatus`, `TestHostStatusEnhanced` | L2 — schema-1 success envelope; `kvm_accessible`, `missing_binaries`, forwarding, live `resources`, and null `state` rather than a user-SQLite setup claim |
 | `host clean --force` success | 🔴 Gap | — | — | Requires a dedicated clean-host context; the shared runner must not erase its installed candidate or root state. |
 | `host clean` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostMutationGuards` | L2 creates one bounded VM, proves it is live, and checks refusal without deleting it. |
-| `host reset --force` success | 🟡 Partial | `host/test_host_admin.py` | `TestCleanHostAdministration` | Authored clean-child quiescent reset/disabled-admission/re-init journey; runtime pending. The shared runner is not reset. |
+| `host reset --force` success | 🟡 Partial | `host/test_host_admin.py` | `TestCleanHostAdministration` | Installed e034 candidate passed clean-child quiescent reset, disabled admission and restoration assertions before the case failed its later stale pending-intent assertion. Corrected re-init/same-ID retry journey remains unrun. The shared runner is not reset. |
 | unprivileged `host reset --force` | ⚡ Shallow | `host/test_host.py` | `TestHostMutationGuards` | L2 checks administrator refusal and unchanged host-status fields. |
 | `host install-system` | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | The Python runner stages the RC, invokes the real administrator installer, and then all `_run_mvm` calls use exact `/usr/local/bin/mvm`. L2 verifies root ownership, mode, trusted ancestors, content hash, no temporary sibling, and idempotence. |
 | `host install-system` rejection cases | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | L2 verifies unprivileged and malformed invocations preserve the target, and an existing target symlink is rejected without changing its destination. Symlink-test restoration is mandatory and asserted. |
