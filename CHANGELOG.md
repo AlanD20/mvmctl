@@ -1329,6 +1329,14 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Host initialization can now reach its existing built-in-KVM admission when a moduleless kernel has no
+  `/proc/modules`. Only the first missing-inventory read with an uncancelled context and accessible KVM admits
+  no-change success; other read errors and unavailable KVM remain failures. A real moduleless nested guest proved
+  the pre-fix failure and fixed success after independent KVM API-version-12 admission, with unchanged change order
+  and no module mutations. The affected host package, vet and formatting passed inside the named QA host, and the
+  owned guest was removed with root-verified absence. This is not a full administrator enrollment/reset pass or
+  attribution of the earlier generic initialization error; installed-candidate qualification remains open.
+
 - LoopMount now honors cloud-init OFF independently of deblob, including `--skip-deblob`. Fixed guest configuration
   and supported systemd/OpenRC activation suppression preserve unrelated networking, service and cache settings.
   Conflicting disable/inject intent and mismatched receiver acknowledgements are rejected. The genuine pre-fix

@@ -12,6 +12,11 @@ The installed `/usr/local/bin/mvm` is one root-owned executable. An operator run
 operator in the `mvm` group. The managed sudoers entry grants that group only the versioned, closed privileged entry
 point of the root-owned binary. It does not grant the public CLI, a general shell, `ip`, `nft`, or raw host tools.
 
+Host initialization supports KVM built directly into a kernel without loadable-module support. If the first
+`/proc/modules` read reports that the inventory is absent, setup accepts the existing accessible `/dev/kvm` without
+recording module loads. Missing or inaccessible KVM, cancellation and other inventory-read errors still fail setup;
+the ordinary loadable-module path is unchanged. This does not make an incomplete administrator transaction enrolled.
+
 An ordinary request follows `internal/cli/` → `pkg/api/` → the owning `internal/core/` domain. Public inputs are
 validated in `pkg/api/inputs/`; `pkg/api/` coordinates multiple domains. When an operation requires root, its typed
 client calls the early authenticated dispatcher in `internal/service/privileged/`. The receiver independently checks
