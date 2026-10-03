@@ -95,6 +95,18 @@ fresh exec and allocation succeeded. Observed runner/ancestor OOM counters, conf
 were unchanged. This is separate from the three earlier measured-pressure cases and does not attribute the
 original incident or guarantee safety under arbitrary ancestor/global host pressure.
 
+**Current-candidate guest-global exhaustion gate (2026-10-03):** The same registered guest-OOM case passed
+on installed `0.3.0-rc.a3d7b8d0` inside `mvmctl-030-test`, with test source SHA-256
+`2765445a547affc4e929e2f20f62337d528efae41a976fde0af6e40f675a99ee` integrated as `ce9ea175`.
+Strict JSON and JUnit agree: one pass in 11.03 seconds, zero other outcomes. In the 224 MiB guest,
+the kernel identified the allocator as the global-OOM victim (exit 137); a fresh exec completed a 1 MiB
+allocation with the same guest boot and Firecracker identity. The VM's pressure-only policy and observed
+leaf, visible ancestor and enclosing runner OOM counters were unchanged. Checked typed fixture removal
+and independent configuration, inventories, candidate, boot, mirror, root-pair and source preservation passed.
+The first post-create exec now uses an explicit 30-second connection budget under ADR-0013; allocator,
+survival and cleanup assertions are unchanged. This closes this current-candidate case, not host saturation,
+with-swap variants, historical incident attribution or the complete release matrix.
+
 **Complete Jailer repeat gate (2026-09-28):** Source SHA-256
 `c539b5cfb61623f7e819179e9411d2b101a51b7459f79a639836177d70ace839` passed all fifteen expanded cases
 twice (196.32/201.71 seconds) against installed candidate `886cb7e5` inside only `mvmctl-030-test`.
