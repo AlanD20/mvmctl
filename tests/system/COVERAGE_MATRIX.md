@@ -112,7 +112,17 @@ zero other outcomes, in 0.264 seconds. The case imports a raw ext4 image with `-
 restores the original default. All six independent preservation checks passed; image backing bytes,
 kernel, candidate, mirror and root authority were unchanged. Only the restored Alpine default-selection
 timestamp advanced. No resource guard tripped. This does not prove imported-image boot or every import
-format/failure path. The four force-pull cases remain open; earlier failed/refused reports remain preserved.
+format/failure path. Earlier failed/refused reports remain preserved.
+
+The subsequent `TestImagePullAdvanced::test_pull_cached_image_with_force_redownloads[force]` case passed
+on the same installed candidate and image module. Strict JSON and JUnit agree on one pass, zero other
+outcomes, in 24.85 seconds. It checks a mirrored Alpine replacement's distinct ID, retained sole-default
+selection, new backing and retired old backing. A QA-only task scope used a 512 MiB soft pressure boundary
+with no hard memory ceiling; pressure and direct reclaim counters advanced. The original outer memory,
+owned-disk growth and resource-floor guards stayed clear, and all six shared-preservation checks passed.
+The owned child was reaped and its empty task group removed. This does not establish a hard outer-memory
+bound, every helper's placement, or complete private-workspace cleanup. The `no-cache`, `skip-optimization`
+and `disable-detector` variants remain unqualified; the two earlier interrupted force attempts are not passes.
 
 **Current VM-free kernel-import gate (2026-10-03):** All six existing VM-free cases in
 `kernel/test_kernel_import.py` passed on installed `a3d7b8d0` inside `mvmctl-030-test`, with test source SHA-256
@@ -1761,7 +1771,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
 | `image pull <type>:<version>` | ⏭️ Skip | `images/test_images.py` | `TestImagePull` | L1 — often skips on network |
-| `image pull --force` | ⏭️ Skip | `images/test_images.py` | `TestImagePullAdvanced` | L1 — often skips |
+| `image pull --force` | 🟡 Partial | `images/test_images.py` | `TestImagePullAdvanced::test_pull_cached_image_with_force_redownloads` | Installed a3d7 L2: mirrored replacement, sole-default transfer and old-backing retirement passed for `[force]`; three option variants remain unqualified. |
 | `image pull --default` | ⏭️ Skip | `images/test_images.py` | `TestImagePullAdvanced` | L2 — often skips |
 | `image pull --skip-optimization` | ⏭️ Skip | `images/test_images.py` | `TestImagePullSkipOptimization` | L1 — often skips |
 | `image pull --type override` | ⏭️ Skip | `images/test_images.py` | `TestImagePullAdvanced` | L1 — often skips |
