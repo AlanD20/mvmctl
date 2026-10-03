@@ -568,7 +568,11 @@ the orchestrator rejects path, symlink, and hard-link aliases between them.
 
 **CLI `--timeout` flags** (e.g., `mvm exec --timeout`, `mvm ssh --timeout`):
 
-These are **connect/probe timeouts** only (per ADR-0013). They control how long the CLI waits for the target to establish a connection. Default: **5s**, absolute max: **10s**. Once connected, the operation runs unbounded. See `CONTEXT.md` for the full taxonomy.
+These are **connect/probe timeouts** only (per ADR-0013). Defaults are command-specific: `mvm exec` uses
+`defaults.vm.vsock_probe_timeout` (5 seconds), while `mvm ssh` uses `settings.vm.ssh_timeout_sec` (10 seconds).
+A positive explicit `--timeout` overrides the configured connection budget; there is no universal 10-second maximum.
+For a newly created guest, choose a connection budget that allows guest-agent startup rather than treating Firecracker
+API readiness as guest readiness. Once connected, command execution remains unbounded. See `CONTEXT.md` for the taxonomy.
 
 **Subprocess timeouts in test infrastructure** (`timeout=` parameter of `_run_mvm()` / `_guest_run()`):
 
