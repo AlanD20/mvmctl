@@ -869,10 +869,13 @@ BEGIN {
             assert policy["requested"] == policy["actual"] == expected_policy, policy
             hierarchy_before = _pressure_hierarchy(runner_vm, vm_id)
             record_property("memory_failure_hierarchy_before", json.dumps(hierarchy_before, sort_keys=True))
+            # Firecracker API readiness does not imply fresh guest-agent readiness.
             initial_boot_id = _run_mvm(
                 runner_vm,
                 "exec",
                 vm_id,
+                "--timeout",
+                "30",
                 "--",
                 "cat /proc/sys/kernel/random/boot_id",
             ).stdout.strip()
