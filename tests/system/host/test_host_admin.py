@@ -504,7 +504,7 @@ assert not os.path.lexists(sys.argv[1])
             )
             == []
         )
-        name = f"sys-admin-second-{uuid.uuid4().hex[:16]}"
+        name = f"sys-admin-op2-{uuid.uuid4().hex[:16]}"
         subnet = _unique_subnet(name)
         created = _success_data(
             self.second_operator(
@@ -752,7 +752,7 @@ assert not os.path.lexists(sys.argv[1])
         return state
 
     def network_control(self):
-        name = f"sys-admin-control-{uuid.uuid4().hex[:16]}"
+        name = f"sys-admin-ctl-{uuid.uuid4().hex[:16]}"
         subnet = _unique_subnet(name)
         created = _success_data(
             self.operator(
@@ -1041,7 +1041,7 @@ class TestCleanHostAdministration:
                 "enabled": False,
             }
             _require_error(case.administrator("init", check=False), "host.init.failed")
-            name = f"sys-admin-disabled-{uuid.uuid4().hex[:16]}"
+            name = f"sys-admin-off-{uuid.uuid4().hex[:16]}"
             _require_error(
                 case.operator(
                     "network",
@@ -1166,7 +1166,7 @@ class TestCleanHostAdministration:
             "version": 1,
             "enabled": False,
         }
-        name = f"sys-admin-disabled-{uuid.uuid4().hex[:16]}"
+        name = f"sys-admin-off-{uuid.uuid4().hex[:16]}"
         refused = case.operator(
             "network",
             "create",
