@@ -102,8 +102,17 @@ the pinned named-runner disk's allocated-byte growth separately from shared-file
 its original own-growth limit, existing shared-space reserve and resource floors remain enforced.
 All six independent preservation checks passed, with unchanged image backing bytes, root authority,
 kernel, candidate and mirror. Only the expected Alpine default-selection timestamp advanced.
-No resource guard tripped. This qualifies the cached-default case only; the four force-pull cases and
-import/default-result case remain open. Earlier failed/refused reports are preserved, not relabeled.
+No resource guard tripped. This qualifies the cached-default case only.
+
+The subsequent import/default invocation passed
+`images/test_images.py::TestImageImportSetDefault::test_image_import_with_set_default`
+on the same installed candidate and image-module SHA above. Strict JSON and JUnit agree on one pass,
+zero other outcomes, in 0.264 seconds. The case imports a raw ext4 image with `--default` and
+`--skip-optimization`, checks that its returned ID is the sole default, removes the owned image and
+restores the original default. All six independent preservation checks passed; image backing bytes,
+kernel, candidate, mirror and root authority were unchanged. Only the restored Alpine default-selection
+timestamp advanced. No resource guard tripped. This does not prove imported-image boot or every import
+format/failure path. The four force-pull cases remain open; earlier failed/refused reports remain preserved.
 
 **Current VM-free kernel-import gate (2026-10-03):** All six existing VM-free cases in
 `kernel/test_kernel_import.py` passed on installed `a3d7b8d0` inside `mvmctl-030-test`, with test source SHA-256
@@ -1783,7 +1792,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `image import --format qcow2` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced::test_image_import_with_format_qcow2` | Installed current-candidate L2: cached Alpine raw→QCOW2→ext4 import booted as a networkless VM; guest OS identity read through vsock and checked VM/image/temp-file removal. Other formats and failure paths remain unqualified; QCOW2 data volumes are unsupported. |
 | `image import --root-partition` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — skips on qemu-img |
 | `image import --force` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — may skip |
-| `image import --default` | ⏭️ Skip | `images/test_images.py` | `TestImageImportSetDefault` | L2 — may skip |
+| `image import --default` | ⚡ Shallow | `images/test_images.py` | `TestImageImportSetDefault::test_image_import_with_set_default` | Installed a3d7 L2: raw ext4 import selects the returned ID as the sole default; owned image removal and original-default restoration checked. Does not prove boot. |
 | `image import` arch auto-detection | ⏭️ Skip | `images/test_images.py` | `TestImageImportArch` | L2 — skips on qemu-img. No `--arch` flag — arch is auto-detected by Go CLI. |
 | `image import` auto-detect | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — may skip |
 | `image import --skip-optimization` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced` | L2 — imported with skip-optimization flag, may skip |
