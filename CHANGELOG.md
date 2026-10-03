@@ -90,16 +90,26 @@ That candidate's registered administrator journey then identified a reset-admiss
 `0755` for private Jailer parents that administrator setup and VM lifecycle require to be `0700`. The correction
 keeps the shared parent at `0755` and admits only exact private `0700` parents without changing permissions or
 removing residual resources. Its root regression failed on the old code and passed all four admission/refusal
-cases after the fix inside the named runner; Jailer vet and formatting passed. Updated-candidate reset/re-init,
-complete CI and the full root-Jailer suite still require qualification.
+cases after the fix inside the named runner; Jailer vet and formatting passed.
+
+Clean source `e034f4e0` subsequently produced the real-agent candidate
+`0.3.0-rc.resetparent-e034f4e0`, installed only inside the named QA runner with verified content and
+root-owned canonical identity. Its full root-Jailer package passed in 3.545s with Go 1.26.3 after correcting
+only the test child's umask; the original fixture-permission failures and timeout remain failed evidence.
+Candidate identity, persistent baseline and resource controls were preserved. The administrator journey now
+passes the reset assertions, but its later assertion incorrectly expected denied network creation to discard
+the deliberately retained pending intent. The test now checks inactive intent retention and same-ID activation
+after re-enrollment; its collection and two existing runner-unit checks passed. The corrected administrator
+journey, current-source complete CI and remaining release matrix are not yet qualified.
 
 Earlier focused checks on installed `a3d7b8d0` passed six VM-free kernel-import cases, guest-OOM survival,
 interrupted snapshot capture with full RAM/vmstate/rootfs/data-volume recovery and restore, cached-image default
 selection, raw-image import/default selection, and one mirrored forced image replacement. Each result retains its
 own strict outcomes and preservation evidence; these are not a complete current-candidate matrix.
 The `no-cache` image variant was interrupted by its QA memory-growth guard, not qualified. The administrator
-journey still fails quiescent reset; its immediate state now shows no recorded reset transition, but not the
-underlying cause. See the [coverage matrix](tests/system/COVERAGE_MATRIX.md) for scoped results and remaining gates.
+journey's earlier quiescent-reset failure is superseded by the scoped reset and pending-intent results above;
+the complete corrected journey remains open. See the [coverage matrix](tests/system/COVERAGE_MATRIX.md) for
+scoped results and remaining gates.
 
 On 2026-10-02, clean source `b402c471` passed the complete local Go CI gates inside `mvmctl-030-test`
 with Go 1.26.3: offline tidy, architecture, formatting, golines 0.13, generation, vet and the unprivileged selector,

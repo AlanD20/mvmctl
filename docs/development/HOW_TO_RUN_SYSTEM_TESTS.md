@@ -170,6 +170,17 @@ harness and runtime receipts remain retained. This is not the remaining installe
 fresh reusable-base provisioning, remote GitHub CI or release qualification. Later Markdown-only changes
 do not require repeating accepted checks for unchanged Go/build inputs.
 
+**Later reset-candidate checkpoint:** clean `e034f4e0` produced the real-agent candidate
+`0.3.0-rc.resetparent-e034f4e0`; normal installation changed only the named QA runner. Its canonical SHA-256 is
+`1678ae447fe8bc536e556db9258e375daaa8e14f9f73e9f6ed1747e8e047c689`, with root-owned `0755` identity.
+The complete root-Jailer package passed in 3.545s against equivalent, hash-checked Go/module/build inputs with
+Go 1.26.3. The preceding failed run inherited umask `077`, changing exact fixture modes and causing a race-test
+setup timeout. Keep supervisor/task permissions private, but give the Go test child umask `022`; do not relax
+production permission admission. Candidate, persistent baseline and resource controls were unchanged.
+The reset assertions passed in the installed-candidate administrator journey, but its later stale pending-intent
+assertion failed. The corrected test passed collection and two existing runner-unit checks, not its runtime
+journey. Current-source complete CI, remaining Python matrix and reusable-base qualification remain open.
+
 ### Optional Local GuestFS Qualification
 
 GuestFS remains an optional backend, disabled by default. With
