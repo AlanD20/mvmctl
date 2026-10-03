@@ -1222,24 +1222,47 @@ class TestCleanHostAdministration:
             "enabled": False,
         }
         name = f"sys-admin-off-{uuid.uuid4().hex[:16]}"
-        refused = case.operator(
+        subnet = _unique_subnet(name)
+        gateway = subnet.rsplit(".", 1)[0] + ".1"
+        create_args = (
             "network",
             "create",
             name,
             "--subnet",
-            _unique_subnet(name),
+            subnet,
             "--no-nat",
             "--json",
-            check=False,
         )
+        refused = case.operator(*create_args, check=False)
         assert refused.returncode != 0, refused.stdout + refused.stderr
         assert case.state() == restored
-        assert (
-            _json_success_data(case.operator("network", "ls", "--json").stdout, list)
-            == []
-        )
+        rows = _json_success_data(case.operator("network", "ls", "--json").stdout, list)
+        assert len(rows) == 1, rows
+        pending = rows[0]
+        case.child_networks.append(pending)
+        assert pending["name"] == name and pending["subnet"] == subnet, pending
+        assert pending["ipv4_gateway"] == gateway, pending
+        assert pending["nat_enabled"] is False and pending["is_default"] is False
+        assert pending["bridge"] == "" and pending["bridge_active"] is False
+        assert pending["is_present"] is False
+        assert case.state() == restored
         case.require_network(first, present=False)
         case.require_enrolled(original)
+        retried = _success_data(case.operator(*create_args))
+        case.child_networks[-1] = retried
+        for field in (
+            "id",
+            "name",
+            "subnet",
+            "ipv4_gateway",
+            "nat_enabled",
+            "is_default",
+        ):
+            assert retried[field] == pending[field], (field, retried, pending)
+        assert retried["bridge"] and retried["bridge_active"] is True, retried
+        assert retried["is_present"] is True, retried
+        case.require_network(retried, present=True)
+        case.remove_child_network(retried)
         second = case.network_control()
         case.remove_child_network(second)
         assert (
