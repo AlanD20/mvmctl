@@ -1983,6 +1983,8 @@ class TestNetworklessJailerLifecycle:
                 runner_vm,
                 "exec",
                 source_name,
+                "--timeout",
+                "30",
                 "--",
                 f"set -e; cat {root_file}; echo; dd if=/dev/vdb bs=1 count=32; echo; "
                 "cat /proc/sys/kernel/random/boot_id",
