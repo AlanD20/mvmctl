@@ -79,6 +79,14 @@ harness and runtime reports remain failed evidence. This closes the current loca
 not reusable-base provisioning, the remaining installed-candidate Python matrix, remote GitHub CI or release
 approval. Subsequent Markdown-only changes do not alter these checked inputs.
 
+Subsequent focused checks on that installed candidate passed six VM-free kernel-import cases, guest-OOM survival,
+interrupted snapshot capture with full RAM/vmstate/rootfs/data-volume recovery and restore, cached-image default
+selection, raw-image import/default selection, and one mirrored forced image replacement. Each result retains its
+own strict outcomes and preservation evidence; these are not a complete current-candidate matrix.
+The `no-cache` image variant was interrupted by its QA memory-growth guard, not qualified. The administrator
+journey still fails quiescent reset; its immediate state now shows no recorded reset transition, but not the
+underlying cause. See the [coverage matrix](tests/system/COVERAGE_MATRIX.md) for scoped results and remaining gates.
+
 On 2026-10-02, clean source `b402c471` passed the complete local Go CI gates inside `mvmctl-030-test`
 with Go 1.26.3: offline tidy, architecture, formatting, golines 0.13, generation, vet and the unprivileged selector,
 with complete atomic coverage artifacts. The real-agent release build recorded the exact VCS revision and
@@ -149,14 +157,16 @@ recorded revisions; adversarial firewall and recovery cases remain separate rele
 - Added an installed-candidate snapshot producer-interruption journey with unpublished-state recovery and a
   complete RAM/vmstate/rootfs/data-volume restore control. The named-runner-only fault is bound to the isolated
   execution identity and retains the original pidfd for cleanup. Review, lint, formatting and exact-node collection
-  passed; runtime remains pending. This does not qualify root-receiver death or power-loss recovery.
+  passed. The current installed-candidate case subsequently passed interruption recovery and full restore with
+  checked cleanup in 29.19 seconds. This does not qualify root-receiver death or power-loss recovery.
 - Added a registered Tier 2 `host_admin` journey for first enrollment on a clean disposable child, usable
   marker-only authorization, refusal of public administrator/raw-sudo commands, quiescent reset and re-init.
   Added separate journeys for password-authenticated second-operator enrollment and typed dispatch, active-network
   reset refusal, and real read-only-filesystem failures with init/reset retries. The child owns administrator
   mutations; the shared runner is not reset. Lint, formatting and strict three-case collection passed; existing
-  registry checks remain applicable. Runtime qualification remains pending: the first journey failed during child
-  creation, before enrollment. Abrupt process interruption and ambiguous-runtime recovery remain separate gaps.
+  registry checks remain applicable. Runtime qualification remains pending: later execution reached enrollment
+  and marker-only controls, then failed quiescent reset. Immediate state narrowed the failure to the pre-reset
+  path without identifying its cause. Abrupt process interruption and ambiguous-runtime recovery remain gaps.
 - Official-kernel debug output now identifies the exact upstream base-config bytes successfully written before
   configuration mutation. Focused kernel tests, vet and formatting passed in the named runner. A subsequent fresh
   mirrored-source Linux 7.0.11 producer passed with the consumed base-config digest and final config/ELF hashes

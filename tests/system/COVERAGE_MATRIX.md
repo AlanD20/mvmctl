@@ -218,11 +218,18 @@ registry checks passed separately (0.31 seconds), and lint/format checks passed.
 **Administrator runtime checkpoint (2026-10-03):** After the four generated network-prefix corrections in
 `ff74b015`, the single enrollment/marker-only/reset journey ran on installed `a3d7b8d0`. Network lifecycle and
 marker-only denial controls succeeded, but quiescent `host reset --operator hostqa --force --json` returned
-`host.reset.failed` while restoring recorded administrator state, with the journal retained. Strict outcomes
+the generic `host.reset.failed` restoration message, with the journal retained. Strict outcomes
 were collected 1, failed 1, passed 0; JUnit agreed, with no errors, skips or resource guard trips. Typed fixture
 cleanup had no reported errors; independent child jail/runtime/netns and parent bridge/rule absence plus all
 twelve preservation checks passed. The underlying reset cause remains unknown; successful reset/re-init and
 the complete administrator domain are not qualified. Earlier failures remain retained.
+
+The subsequent diagnostic journey on the same installed candidate reached the same quiescent-reset refusal,
+with strict JSON and JUnit agreeing on one failure and zero other outcomes. No resource guard tripped.
+Its immediate post-error snapshot retained enabled admission and an initialized journal without a reset phase
+or step. The generic error message therefore does not establish that restoration began; the failing call and
+underlying cause remain unknown. Typed cleanup and all twelve preservation checks passed. This narrows the
+diagnosis without qualifying reset/re-init or justifying a restoration fix or weakened guard.
 
 Signed `58165c85` now retains the reset command's full result and immediate root state before assertion and
 fixture cleanup, including bounded administrator-directory metadata. All three exact nodes collected successfully
