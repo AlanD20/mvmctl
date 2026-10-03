@@ -61,12 +61,22 @@ removal recovered the earlier test-created release only after exact equality wit
 original root releases and default identities were preserved. These helper gates do not qualify production fault
 recovery or erase the earlier failed matrix report. Reports are `bin-observer-84eb/bin-{focus1,full11}.{json,xml}`.
 
-**Current coherent local CI gate (2026-09-28):** An isolated clean source snapshot of `b2c0a1f8` passed offline
+**Historical coherent local CI gate (2026-09-28):** An isolated clean source snapshot of `b2c0a1f8` passed offline
 tidy with no tracked changes, whole-tree gofmt/golines, guest-agent generation, full vet, the complete unprivileged
 Go CI selection and its coverage checks under pinned Go 1.26.3. The separate full root Jailer package passed
 (7.743 seconds), followed by all 240 Python orchestrator unit cases (7.41 seconds), inside only `mvmctl-030-test`.
 The unit XML has zero failures, errors or skips. This closes the feasible local source gate at that revision,
 not the complete installed-candidate T1/T2 matrix, remote GitHub CI or release approval.
+
+**Current local CI/build/install checkpoint (2026-10-03):** Clean source `a3d7b8d0` passed the complete
+pinned Go 1.26.3 sequence inside `mvmctl-030-test`, including the unprivileged selector and both coverage
+profiles. Selected Jailer tests passed in 5.954 seconds; complete root-Jailer evidence carries only for verified
+unchanged relevant dependency, module and build inputs. The real-agent PIE build and normal system installation
+passed. Installed `0.3.0-rc.a3d7b8d0`, SHA-256
+`98f44bd2c6a803a78d96d153c10df7bc6e9a11915c65881ae1c15da1e2866bba`, has clean VCS provenance and a
+root-owned `0755` canonical identity. Later `ff74b015` production Go/build inputs match; its administrator test
+module changed. This does not qualify reusable-base provisioning, the remaining installed Python matrix,
+remote GitHub CI or release approval. Previous failed reports remain failed.
 
 **Owned host-reboot recovery gate (2026-09-28):** The corrected installed candidate `8a6fb1bf`
 (`0.3.0-rc.priorboot`) passed one fresh, local two-phase Python journey: running projections and guest exec,
@@ -143,6 +153,13 @@ requires an unpublished interrupted capture, and checks public recovery followed
 RAM/vmstate/rootfs/data-volume restore after source mutation and removal. Fixed-diff review, lint, formatting and
 exact-node collection passed (one node, 0.59 seconds, no fixtures). The expected producer termination, recovery
 and restore control are not runtime-qualified; root-receiver death and power loss remain separate gaps.
+
+**Snapshot interruption runtime checkpoint (2026-10-03):** The registered case ran once on installed
+`a3d7b8d0` and failed at its first guest exec: the agent was unreachable after 50 handshake EOF attempts within
+five seconds. Strict outcomes were collected 1, failed 1, passed 0, exit 1; JUnit agreed, with no other outcomes
+or resource guard trip. Capture interruption, unpublished-capture recovery and the full restore control were
+not reached. Independent exact-owned absence and complete baseline-preservation checks confirmed cleanup.
+The agent-unavailability cause remains unresolved; no snapshot-fault or restore pass is claimed.
 
 **Complete nftables repeat gate (2026-09-28):** Source SHA-256
 `5e0105dfeb4fc2ac41bee37fa6c8d0fdfda7497609afda7e7685cc7a61c72133` passed all five cases
