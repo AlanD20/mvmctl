@@ -32,53 +32,66 @@ func AdministratorReset(ctx context.Context, operator AdministratorOperator) (re
 	if err != nil {
 		return err
 	}
-	defer func() { returnErr = resetFailure(returnErr, admission.Release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		returnErr = resetFailure(
+			"release administrator admission",
+			returnErr,
+			admission.Release(context.WithoutCancel(ctx)),
+		)
+	}()
 	dir, err := openAdministratorDirectory(ctx, []string{"var", "lib", "mvmctl", "host"}, -1)
 	if err != nil {
-		return resetFailure(err, nil)
+		return resetFailure("open administrator state", err, nil)
 	}
-	defer func() { returnErr = resetFailure(returnErr, dir.Close()) }()
+	defer func() { returnErr = resetFailure("close administrator state", returnErr, dir.Close()) }()
 	journal, err := loadAdministratorJournal(dir)
 	if err != nil {
-		return resetFailure(err, nil)
+		return resetFailure("read administrator journal", err, nil)
 	}
 	if journal == nil {
-		return errs.New(errs.CodeHostResetFailed, "no root-owned administrator journal exists")
+		return resetFailure("validate administrator journal",
+			errs.New(errs.CodeHostResetFailed, "no root-owned administrator journal exists"), nil)
 	}
 	if journal.ResetState == "complete" {
-		return admission.Disable(ctx)
+		return resetFailure("disable completed reset admission", admission.Disable(ctx), nil)
 	}
 	if (!journal.Initialized && journal.ResetState != "restoring") || journal.Pending || journal.GroupGID == nil {
-		return errs.New(errs.CodeHostResetFailed, "complete interrupted initialization before host reset")
+		return resetFailure("validate reset journal state",
+			errs.New(errs.CodeHostResetFailed, "complete interrupted initialization before host reset"), nil)
 	}
 	files, err := openResetFiles(ctx, journal)
 	if err != nil {
-		return resetFailure(err, nil)
+		return resetFailure("admit reset files", err, nil)
 	}
-	defer func() { returnErr = resetFailure(returnErr, files.close()) }()
+	defer func() { returnErr = resetFailure("close reset files", returnErr, files.close()) }()
 	vmGuard, err := jailer.AcquireHostResetGuard(ctx)
 	if err != nil {
-		return resetFailure(err, nil)
+		return resetFailure("acquire Jailer reset guard", err, nil)
 	}
-	defer func() { returnErr = resetFailure(returnErr, vmGuard.Release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		returnErr = resetFailure("release Jailer reset guard", returnErr, vmGuard.Release(context.WithoutCancel(ctx)))
+	}()
 	networkGuard, err := network.AcquireHostResetGuard(ctx)
 	if err != nil {
-		return resetFailure(err, nil)
+		return resetFailure("acquire network and firewall reset guard", err, nil)
 	}
-	defer func() { returnErr = resetFailure(returnErr, networkGuard.Release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		returnErr = resetFailure("release network and firewall reset guard", returnErr,
+			networkGuard.Release(context.WithoutCancel(ctx)))
+	}()
 	records, err := loadResetEnrollments(ctx, dir, journal)
 	if err != nil {
-		return resetFailure(err, nil)
+		return resetFailure("read operator enrollments", err, nil)
 	}
 	if err := preflightResetGroup(ctx, journal, records); err != nil {
-		return resetFailure(err, nil)
+		return resetFailure("preflight operator group", err, nil)
 	}
 	if err := admission.Disable(ctx); err != nil {
-		return resetFailure(err, nil)
+		return resetFailure("disable operator admission", err, nil)
 	}
 	journal.ResetState = "restoring"
 	if err := saveAdministratorJournal(context.WithoutCancel(ctx), dir, journal); err != nil {
-		return resetFailure(err, nil)
+		return resetFailure("persist reset intent", err, nil)
 	}
 	for journal.ResetStep < 4 {
 		switch journal.ResetStep {
@@ -92,7 +105,13 @@ func AdministratorReset(ctx context.Context, operator AdministratorOperator) (re
 			err = files.restoreSudoers(ctx, journal)
 		}
 		if err != nil {
-			return resetFailure(err, nil)
+			stage := [...]string{
+				"restore sysctl",
+				"restore operator memberships",
+				"restore operator group",
+				"restore sudoers",
+			}
+			return resetFailure(stage[journal.ResetStep], err, nil)
 		}
 		journal.ResetStep++
 		if journal.ResetStep == 4 {
@@ -100,13 +119,13 @@ func AdministratorReset(ctx context.Context, operator AdministratorOperator) (re
 			journal.Initialized = false
 		}
 		if err := saveAdministratorJournal(context.WithoutCancel(ctx), dir, journal); err != nil {
-			return resetFailure(err, nil)
+			return resetFailure("persist reset progress", err, nil)
 		}
 	}
 	return nil
 }
 
-func resetFailure(primary, cleanup error) error {
+func resetFailure(stage string, primary, cleanup error) error {
 	if primary == nil && cleanup == nil {
 		return nil
 	}
@@ -118,7 +137,21 @@ func resetFailure(primary, cleanup error) error {
 			}
 		}
 	}
-	return errs.WrapMsg(errs.CodeHostResetFailed, "restore recorded administrator host state",
+	cause := primary
+	if cause == nil {
+		cause = cleanup
+	}
+	diagnostic := resetFailureCause(cause)
+	if domain := errs.AsDomainError(primary); domain != nil && domain.Code == errs.CodeHostResetFailed {
+		if retainedStage, ok := domain.Details["reset_failure_stage"].(string); ok {
+			if retainedCause, ok := domain.Details["reset_failure_cause"].(string); ok {
+				stage, diagnostic = retainedStage, retainedCause
+			}
+		}
+	}
+	details["reset_failure_stage"], details["reset_failure_cause"] = stage, diagnostic
+	message := "restore recorded administrator host state: " + stage + ": " + diagnostic
+	return errs.WrapMsg(errs.CodeHostResetFailed, message,
 		errors.Join(primary, cleanup), errs.WithDetails(details))
 }
 
