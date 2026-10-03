@@ -978,7 +978,15 @@ class TestCleanHostAdministration:
         active = case.network_control()
         before_reset = case.state()
         refused = case.administrator("reset", check=False)
-        _require_error(refused, "host.reset.failed")
+        error = _require_error(refused, "host.reset.failed")
+        assert error["details"]["journal_retained"] is True, error
+        stage = error["details"]["reset_failure_stage"]
+        cause = error["details"]["reset_failure_cause"]
+        assert stage == "acquire network and firewall reset guard", error
+        assert "network.error" in cause, error
+        assert "host reset requires all managed networks to be removed" in cause, error
+        assert 0 < len(cause.encode("utf-8")) <= 512 and cause.isprintable(), error
+        assert stage in error["message"] and cause in error["message"], error
         assert case.state() == before_reset
         assert _root_file_data(before_reset, "admission")["enabled"] is True
         case.require_network(active, present=True)
@@ -1049,6 +1057,12 @@ class TestCleanHostAdministration:
             failed = case.administrator("reset", check=False)
             error = _require_error(failed, "host.reset.failed")
             assert error["details"]["journal_retained"] is True, error
+            stage = error["details"]["reset_failure_stage"]
+            cause = error["details"]["reset_failure_cause"]
+            assert stage == "restore sysctl", error
+            assert cause == "read-only file system", error
+            assert 0 < len(cause.encode("utf-8")) <= 512 and cause.isprintable(), error
+            assert stage in error["message"] and cause in error["message"], error
             assert "read-only file system" in (failed.stdout + failed.stderr).lower()
             partial = case.state()
             journal = _root_file_data(partial, "journal")
