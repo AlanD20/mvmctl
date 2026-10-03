@@ -195,6 +195,17 @@ assertions remain unchanged. Exact-node collection passed in 0.54 seconds with t
 preserved. The changed runtime invocation was refused by local resource admission before SSH or pytest;
 no snapshot outcome was produced. Capture failure/recovery and full restore remain unqualified.
 
+**Snapshot interruption and restore gate (2026-10-03):** The next invocation reached the interrupted,
+unpublished capture and its cleanup, but failed at the first exec after a normal source-VM restart using the
+default five-second connection budget. Signed `151a7426` adds the same explicit 30-second connection budget
+only to that cold-start exec. With test source SHA-256
+`d15d4ad3ffe40cdd628d8feeebbdfb2f3ccc85b450687bb029731aa4c905ff1e`, the complete registered case
+passed on installed `a3d7b8d0`: strict JSON and JUnit agree on one pass in 29.19 seconds, zero other outcomes.
+The file-limit interruption, unpublished-capture recovery and subsequent captured RAM/vmstate/rootfs/data-volume
+restore assertions all passed. Typed fixture teardown, independent exact-owned path absence and full baseline
+preservation passed with unchanged resource limits and no observed enclosing OOM increments. Earlier failed
+runs remain failed. This closes this fault/recovery case, not root-receiver death, power loss or the entire matrix.
+
 **Complete nftables repeat gate (2026-09-28):** Source SHA-256
 `5e0105dfeb4fc2ac41bee37fa6c8d0fdfda7497609afda7e7685cc7a61c72133` passed all five cases
 twice (33.15/29.30 seconds) against installed candidate `e23b1261` inside only `mvmctl-030-test`.
