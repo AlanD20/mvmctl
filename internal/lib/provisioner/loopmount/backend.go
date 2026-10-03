@@ -79,7 +79,8 @@ func (b *LoopMountBackend) SetupSudo(ctx context.Context, user string) error {
 }
 
 func (b *LoopMountBackend) DisableCloudInit(ctx context.Context) error {
-	return nil // no-op — cloud-init is disabled during image import, not VM creation
+	b.plan.DisableCloudInit, b.pending = true, true
+	return nil
 }
 
 func (b *LoopMountBackend) InjectCloudInit(ctx context.Context, cloudInitDir string) error {

@@ -464,6 +464,43 @@ func (exchanger *fakeLoopMountExchanger) Exchange(
 	return exchanger.outcome
 }
 
+// Rationale: A legacy/misbound receiver success must not acknowledge OFF merely because its
+// identity and size match. Transport EOF and the independent disable receipt are both required.
+func TestLoopMountClientCloudInitOffBindsIntentAndAcknowledgement(t *testing.T) {
+	tests := map[string]struct {
+		disable bool
+		applied bool
+		wantErr bool
+	}{
+		"missing OFF acknowledgement": {disable: true, wantErr: true},
+		"unrequested acknowledgement": {applied: true, wantErr: true},
+		"OFF acknowledged":            {disable: true, applied: true},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			request := validLoopMountProvisionRequest()
+			request.Plan = VMProvisionPlan{DisableCloudInit: tc.disable, FixFstab: !tc.disable}
+			result := validLoopMountProvisionResult(request)
+			result.DisableCloudInitApplied = tc.applied
+			client := newClientWithExchanger(&fakeLoopMountExchanger{outcome: &fakeLoopMountOutcome{
+				response:    encodeLoopMountSuccess(t, VMProvisionAction, result),
+				responseEOF: true,
+				started:     true,
+			}})
+
+			got, err := client.ProvisionVM(t.Context(), request)
+			if tc.wantErr {
+				assertLoopMountTransportError(t, err, true, true)
+				return
+			}
+			require.NoError(t, err)
+			if diff := cmp.Diff(result, got); diff != "" {
+				t.Errorf("OFF acknowledgement mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // validLoopMountProvisionRequest creates a no-resize request whose unchanged-size result is independently known.
 func validLoopMountProvisionRequest() VMProvisionRequest {
 	return VMProvisionRequest{

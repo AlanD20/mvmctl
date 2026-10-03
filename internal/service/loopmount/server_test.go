@@ -18,12 +18,14 @@ func TestServerProvisionVMReturnsValidatedResultAndReleasesAuthorityInOrder(t *t
 	t.Parallel()
 
 	request := testVMProvisionRequest()
+	request.Plan.DisableCloudInit = true
 	want := VMProvisionResult{
-		VMID:         request.VMID,
-		Filesystem:   request.Filesystem,
-		RootfsBytes:  request.ExpectedRootfsBytes,
-		FilesWritten: 3,
-		CommandsRun:  2,
+		VMID:                    request.VMID,
+		Filesystem:              request.Filesystem,
+		RootfsBytes:             request.ExpectedRootfsBytes,
+		FilesWritten:            3,
+		CommandsRun:             2,
+		DisableCloudInitApplied: true,
 	}
 	events := &serverEventLog{}
 	fixture := newRootfsAuthorityFixture(t, []string{"srv", "cache", "vms", request.VMID, "rootfs.img"})
@@ -36,12 +38,13 @@ func TestServerProvisionVMReturnsValidatedResultAndReleasesAuthorityInOrder(t *t
 	effectLease := &fakeVMProvisionEffectLease{events: events}
 	effects := &fakeServerRootfsEffects{
 		provisionOutcome: vmProvisionEffectOutcome{
-			state:        vmProvisionEffectStateModified,
-			filesystem:   want.Filesystem,
-			rootfsBytes:  want.RootfsBytes,
-			filesWritten: want.FilesWritten,
-			commandsRun:  want.CommandsRun,
-			lease:        effectLease,
+			state:                   vmProvisionEffectStateModified,
+			filesystem:              want.Filesystem,
+			rootfsBytes:             want.RootfsBytes,
+			filesWritten:            want.FilesWritten,
+			commandsRun:             want.CommandsRun,
+			disableCloudInitApplied: want.DisableCloudInitApplied,
+			lease:                   effectLease,
 		},
 	}
 	locks := &fakeServerResourceLocks{
@@ -883,22 +886,39 @@ func TestServerVMGrowReplayPassesActualAdmittedSizeToEffect(t *testing.T) {
 func TestServerRejectsInvalidRequestBeforeAcquiringAuthority(t *testing.T) {
 	t.Parallel()
 
-	request := testVMProvisionRequest()
-	request.VMID = "invalid"
-	fixture := newRootfsAuthorityFixture(t, []string{"srv", "cache", "vms", testVMID, "rootfs.img"})
-	locks := &fakeServerResourceLocks{lease: &fakeServerResourceLockLease{events: &serverEventLog{}}}
-	server := &Server{
-		rootfsAuthority: fixture.deps(),
-		effects:         &fakeServerRootfsEffects{},
-		locks:           locks,
+	tests := map[string]struct {
+		mutate  func(*VMProvisionRequest)
+		wantErr string
+	}{
+		"invalid VM ID": {
+			mutate:  func(request *VMProvisionRequest) { request.VMID = "invalid" },
+			wantErr: "managed VM ID",
+		},
+		"conflicting cloud-init intent": {
+			mutate: func(request *VMProvisionRequest) {
+				request.Plan.DisableCloudInit, request.Plan.InjectCloudInit = true, true
+			},
+			wantErr: "cannot disable and inject",
+		},
 	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			request := testVMProvisionRequest()
+			tc.mutate(&request)
+			fixture := newRootfsAuthorityFixture(t, []string{"srv", "cache", "vms", testVMID, "rootfs.img"})
+			locks := &fakeServerResourceLocks{lease: &fakeServerResourceLockLease{events: &serverEventLog{}}}
+			effects := &fakeServerRootfsEffects{}
+			server := &Server{rootfsAuthority: fixture.deps(), effects: effects, locks: locks}
 
-	_, err := server.ProvisionVM(t.Context(), testRootfsCaller(), request)
-	require.Error(t, err)
-
-	assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
-	assert.Equal(t, 0, locks.acquireCount)
-	assert.Empty(t, fixture.openCalls)
+			_, err := server.ProvisionVM(t.Context(), testRootfsCaller(), request)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tc.wantErr)
+			assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+			assert.Zero(t, locks.acquireCount)
+			assert.Empty(t, fixture.openCalls)
+			assert.Zero(t, effects.provisionCallCount)
+		})
+	}
 }
 
 // assertServerEffectEvidence checks the mandatory receiver-derived partial-state contract on an error.

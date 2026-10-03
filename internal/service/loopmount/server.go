@@ -90,12 +90,13 @@ const (
 )
 
 type vmProvisionEffectOutcome struct {
-	state        vmProvisionEffectState
-	filesystem   Filesystem
-	rootfsBytes  uint64
-	filesWritten uint32
-	commandsRun  uint32
-	lease        vmProvisionEffectCleanup
+	state                   vmProvisionEffectState
+	filesystem              Filesystem
+	rootfsBytes             uint64
+	filesWritten            uint32
+	commandsRun             uint32
+	disableCloudInitApplied bool
+	lease                   vmProvisionEffectCleanup
 }
 
 type imageInspectEffectOutcome struct {
@@ -260,11 +261,12 @@ func (server *Server) ProvisionVM(
 		return VMProvisionResult{}, annotateServerEffectFailure(primary, evidence, stateErr)
 	}
 	result := VMProvisionResult{
-		VMID:         request.VMID,
-		Filesystem:   outcome.filesystem,
-		RootfsBytes:  outcome.rootfsBytes,
-		FilesWritten: outcome.filesWritten,
-		CommandsRun:  outcome.commandsRun,
+		VMID:                    request.VMID,
+		Filesystem:              outcome.filesystem,
+		RootfsBytes:             outcome.rootfsBytes,
+		FilesWritten:            outcome.filesWritten,
+		CommandsRun:             outcome.commandsRun,
+		DisableCloudInitApplied: outcome.disableCloudInitApplied,
 	}
 	if err := result.Validate(request); err != nil {
 		return VMProvisionResult{}, annotateServerEffectFailure(err, evidence, nil)

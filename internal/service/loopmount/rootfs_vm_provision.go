@@ -409,6 +409,7 @@ func (adapter *rootfsVMProvisionAdapter) ProvisionVM(
 		return outcome, rootfsCleanupError("sync provisioned guest filesystem", err)
 	}
 	filesystemSynced = true
+	outcome.disableCloudInitApplied = plan.DisableCloudInit
 	return outcome, nil
 }
 
@@ -784,6 +785,13 @@ func applyRootfsProvisionPlan(
 	}
 	if plan.DeblobOS != nil {
 		written, err := applyRootfsDeblob(ctx, tree, *plan.DeblobOS)
+		filesWritten += written
+		if err != nil {
+			return filesWritten, err
+		}
+	}
+	if plan.DisableCloudInit {
+		written, err := applyRootfsCloudInitDisable(ctx, tree)
 		filesWritten += written
 		if err != nil {
 			return filesWritten, err

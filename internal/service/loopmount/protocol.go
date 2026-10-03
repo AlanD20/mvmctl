@@ -63,15 +63,16 @@ type VMProvisionRequest struct {
 
 // VMProvisionPlan contains only observed, named VM provisioning intent.
 type VMProvisionPlan struct {
-	ResizeBytes     uint64      `json:"resize_bytes"`
-	Hostname        *string     `json:"hostname,omitempty"`
-	DNS             *string     `json:"dns,omitempty"`
-	SSH             *SSHSetup   `json:"ssh,omitempty"`
-	SudoUser        *string     `json:"sudo_user,omitempty"`
-	InjectCloudInit bool        `json:"inject_cloud_init"`
-	DeblobOS        *string     `json:"deblob_os,omitempty"`
-	FixFstab        bool        `json:"fix_fstab"`
-	Agent           *AgentSetup `json:"agent,omitempty"`
+	ResizeBytes      uint64      `json:"resize_bytes"`
+	Hostname         *string     `json:"hostname,omitempty"`
+	DNS              *string     `json:"dns,omitempty"`
+	SSH              *SSHSetup   `json:"ssh,omitempty"`
+	SudoUser         *string     `json:"sudo_user,omitempty"`
+	DisableCloudInit bool        `json:"disable_cloud_init"`
+	InjectCloudInit  bool        `json:"inject_cloud_init"`
+	DeblobOS         *string     `json:"deblob_os,omitempty"`
+	FixFstab         bool        `json:"fix_fstab"`
+	Agent            *AgentSetup `json:"agent,omitempty"`
 }
 
 // SSHSetup is exact guest SSH setup intent.
@@ -94,6 +95,8 @@ type VMProvisionResult struct {
 	RootfsBytes  uint64     `json:"rootfs_bytes"`
 	FilesWritten uint32     `json:"files_written"`
 	CommandsRun  uint32     `json:"commands_run"`
+	// DisableCloudInitApplied acknowledges the independent disable intent, not preexisting image state.
+	DisableCloudInitApplied bool `json:"disable_cloud_init_applied"`
 }
 
 // ImageInspectRequest identifies one fixed images/staging/<image-id>/rootfs.img leaf.
@@ -196,7 +199,10 @@ func (plan VMProvisionPlan) Validate(expectedRootfsBytes uint64) error {
 			return validationError(err.Error())
 		}
 	}
-	if plan.InjectCloudInit {
+	if plan.DisableCloudInit && plan.InjectCloudInit {
+		return validationError("managed VM cannot disable and inject cloud-init in one plan")
+	}
+	if plan.DisableCloudInit || plan.InjectCloudInit {
 		hasOperation = true
 	}
 	if plan.DeblobOS != nil {
@@ -341,6 +347,9 @@ func (result VMProvisionResult) Validate(request VMProvisionRequest) error {
 	}
 	if result.RootfsBytes != expectedRootfsBytes {
 		return validationError("managed VM provision result size does not match request")
+	}
+	if result.DisableCloudInitApplied != request.Plan.DisableCloudInit {
+		return validationError("managed VM cloud-init disable result does not match request")
 	}
 	if result.FilesWritten > maxResultCount || result.CommandsRun > maxResultCount {
 		return validationError("managed VM provision result count exceeds policy")
