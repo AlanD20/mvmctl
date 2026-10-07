@@ -13,13 +13,53 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/klauspost/compress/zstd"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/provisioner"
 	"mvmctl/internal/lib/system"
 )
+
+func TestExtractVMRootfsImage_UnrecognizedWholeImagePreservesExport(t *testing.T) {
+	// Rationale: Failed filesystem/partition detection previously moved the source,
+	// preventing the root authority from releasing its exact independent export.
+	cacheDir := setupHermeticCache(t)
+	sourceDir := filepath.Join(cacheDir, "export")
+	outputDir := filepath.Join(cacheDir, "images")
+	require.NoError(t, os.Mkdir(sourceDir, 0700))
+	require.NoError(t, os.Mkdir(outputDir, 0700))
+	sourcePath := filepath.Join(sourceDir, "disk.raw")
+	data := []byte("independent VM export bytes without a detected partition table\n")
+	require.NoError(t, os.WriteFile(sourcePath, data, 0400))
+	before, err := os.Stat(sourcePath)
+	require.NoError(t, err)
+
+	service := NewService(fakeRepo{})
+	outputPath, err := service.ExtractVMRootfsImage(
+		context.Background(), sourcePath, "test-image", outputDir, 0, nil, provisioner.ProvisionerLoopMount,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(outputDir, "test-image.img"), outputPath)
+	after, err := os.Stat(sourcePath)
+	require.NoError(t, err, "the exact export path must remain available for root release")
+	assert.True(t, os.SameFile(before, after), "extraction must retain the exported inode")
+	assert.Equal(t, before.Mode(), after.Mode(), "extraction must retain the read-only export mode")
+	outputInfo, err := os.Stat(outputPath)
+	require.NoError(t, err)
+	assert.False(t, os.SameFile(after, outputInfo), "the final image must have independent backing")
+
+	for _, path := range []string{sourcePath, outputPath} {
+		got, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		if diff := cmp.Diff(data, got); diff != "" {
+			t.Errorf("%s content mismatch (-want +got):\n%s", path, diff)
+		}
+	}
+}
 
 // fakeRepo is a minimal in-memory implementation of Repository for tests that
 // do not exercise persistence. It avoids a nil interface in NewService while

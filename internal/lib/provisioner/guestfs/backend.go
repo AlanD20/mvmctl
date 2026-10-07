@@ -192,6 +192,16 @@ func (b *GuestfsBackend) ExtractPartition(
 	partition int,
 	disabledDetectors []string,
 ) (string, error) {
+	return b.CopyRootPartition(ctx, rawPath, outputPath, partition, disabledDetectors)
+}
+
+// CopyRootPartition uses the existing read-only GuestFS extraction session.
+func (b *GuestfsBackend) CopyRootPartition(
+	ctx context.Context,
+	rawPath, outputPath string,
+	partition int,
+	disabledDetectors []string,
+) (string, error) {
 	result, err := ExtractPartition(ctx, rawPath, outputPath, partition)
 	if err != nil {
 		return "", fmt.Errorf("guestfs partition extraction failed: %w", err)

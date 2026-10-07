@@ -265,7 +265,15 @@ func (s *Service) OptimizeImage(
 		// Conversion and shrink have separate durable intents. The staging consumer first
 		// converts Btrfs, then binds cleanup/shrink to the exact returned ext4 size.
 		shrink := FSCanShrink[fsType] || fsType == "btrfs"
-		if err := optimizeStagedImage(ctx, imagePath, imageID, fsType, detectedOS, !skipOptimization, shrink); err != nil {
+		if err := optimizeStagedImage(
+			ctx,
+			imagePath,
+			imageID,
+			fsType,
+			detectedOS,
+			!skipOptimization,
+			shrink,
+		); err != nil {
 			slog.Error("managed image optimization failed", "image_id", imageID, "error", err)
 			return nil, warnings, err
 		}
@@ -440,6 +448,19 @@ func (s *Service) ExtractImage(
 	default:
 		return "", errs.New(errs.CodeImageError, fmt.Sprintf("Unknown format: %s", format))
 	}
+}
+
+// ExtractVMRootfsImage copies the root filesystem from an independent raw VM export.
+// The root-owned source remains intact for its named release operation (ADR-0018).
+func (s *Service) ExtractVMRootfsImage(
+	ctx context.Context,
+	sourcePath, imageID, outputDir string,
+	partition int,
+	disabledDetectors []string,
+	provisionerType provisioner.ProvisionerType,
+) (string, error) {
+	finalPath := filepath.Join(outputDir, imageID+".img")
+	return CopyRootPartitionViaBackend(ctx, sourcePath, finalPath, partition, disabledDetectors, provisionerType)
 }
 
 // MaterializeTo performs fast durable copy from warm pool to destination.

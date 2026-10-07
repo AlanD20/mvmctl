@@ -184,29 +184,51 @@ func (b *LoopMountBackend) ExtractPartition(
 	partition int,
 	disabledDetectors []string,
 ) (string, error) {
+	source, err := detectRootPartition(ctx, rawPath, partition, disabledDetectors)
+	if err != nil {
+		return "", err
+	}
+	if source.wholeImage && source.fsType == "" {
+		if err := infra.SafeMove(rawPath, outputPath); err != nil {
+			return "", fmt.Errorf("rename raw to output: %w", err)
+		}
+		return outputPath, nil
+	}
+	return copyRootPartition(ctx, rawPath, outputPath, source)
+}
+
+// CopyRootPartition reads the raw image without renaming, removing, or modifying it.
+func (b *LoopMountBackend) CopyRootPartition(
+	ctx context.Context,
+	rawPath, outputPath string,
+	partition int,
+	disabledDetectors []string,
+) (string, error) {
+	source, err := detectRootPartition(ctx, rawPath, partition, disabledDetectors)
+	if err != nil {
+		return "", err
+	}
+	return copyRootPartition(ctx, rawPath, outputPath, source)
+}
+
+type rootPartitionSource struct {
+	wholeImage bool
+	fsType     string
+	skipBytes  int64
+	countBytes int64
+}
+
+func detectRootPartition(
+	ctx context.Context,
+	rawPath string,
+	partition int,
+	disabledDetectors []string,
+) (rootPartitionSource, error) {
 	fsType := system.DetectFilesystemType(ctx, rawPath)
 	if fsType == "ext4" || fsType == "ext3" || fsType == "ext2" ||
 		fsType == "btrfs" || fsType == "xfs" {
 		slog.Info("Image is filesystem, using as-is", "type", fsType)
-		result, _ := system.DefaultRunner.Run(
-			ctx,
-			[]string{"cp", "--sparse=always", rawPath, outputPath},
-			system.RunCmdOpts{Capture: true, Check: false},
-		)
-		if !result.Success() {
-			if err := system.CopyBytesDD(ctx, rawPath, outputPath, 0, 0); err != nil {
-				return "", err
-			}
-		}
-		ext, ok := infra.FSTypeToExt[fsType]
-		if !ok {
-			ext = ".img"
-		}
-		finalPath := outputPath[:len(outputPath)-len(filepath.Ext(outputPath))] + ext
-		if err := infra.SafeMove(outputPath, finalPath); err != nil {
-			return "", fmt.Errorf("rename output to %s: %w", finalPath, err)
-		}
-		return finalPath, nil
+		return rootPartitionSource{wholeImage: true, fsType: fsType}, nil
 	}
 
 	parsed := parsePartitionsSfdisk(ctx, rawPath, partition)
@@ -214,25 +236,21 @@ func (b *LoopMountBackend) ExtractPartition(
 		parsed = parsePartitionsParted(ctx, rawPath, partition)
 	}
 	if parsed == nil {
-		return "", fmt.Errorf("Failed to parse partition table: neither sfdisk nor parted is available or succeeded")
+		return rootPartitionSource{}, fmt.Errorf(
+			"failed to parse partition table: neither sfdisk nor parted is available or succeeded",
+		)
 	}
 
 	if parsed.noPartitionTable {
 		slog.Info("No partition table found, using image as-is")
-		if err := infra.SafeMove(rawPath, outputPath); err != nil {
-			return "", fmt.Errorf("rename raw to output: %w", err)
-		}
-		return outputPath, nil
+		return rootPartitionSource{wholeImage: true}, nil
 	}
 
 	partitions := parsed.partitions
 	requestedPartition := parsed.requestedPartition
 	if len(partitions) == 0 {
 		slog.Info("No partitions found, using image as-is")
-		if err := infra.SafeMove(rawPath, outputPath); err != nil {
-			return "", fmt.Errorf("rename raw to output: %w", err)
-		}
-		return outputPath, nil
+		return rootPartitionSource{wholeImage: true}, nil
 	}
 
 	var chosen partitionEntry
@@ -255,17 +273,21 @@ func (b *LoopMountBackend) ExtractPartition(
 		detector := disk.NewRootPartitionDetector(disabledDetectors)
 		chosenIdx, err := detector.Detect(diskPartitions)
 		if err != nil {
-			return "", fmt.Errorf("root partition detection: %w", err)
+			return rootPartitionSource{}, fmt.Errorf("root partition detection: %w", err)
 		}
 		if chosenIdx < 1 || chosenIdx > len(partitions) {
-			return "", fmt.Errorf("RootPartitionDetector returned invalid index %d", chosenIdx)
+			return rootPartitionSource{}, fmt.Errorf("root partition detector returned invalid index %d", chosenIdx)
 		}
 		slog.Info("Detector selected partition as root", "partition", chosenIdx)
 		chosen = partitions[chosenIdx-1]
 		partitionNum = chosenIdx
 	} else if requestedPartition > 0 {
 		if requestedPartition > len(partitions) {
-			return "", fmt.Errorf("Partition %d out of range (1-%d)", requestedPartition, len(partitions))
+			return rootPartitionSource{}, fmt.Errorf(
+				"partition %d out of range (1-%d)",
+				requestedPartition,
+				len(partitions),
+			)
 		}
 		chosen = partitions[requestedPartition-1]
 		partitionNum = requestedPartition
@@ -287,15 +309,52 @@ func (b *LoopMountBackend) ExtractPartition(
 
 	rawFileInfo, err := os.Stat(rawPath)
 	if err != nil {
-		return "", fmt.Errorf("stat raw image: %w", err)
+		return rootPartitionSource{}, fmt.Errorf("stat raw image: %w", err)
 	}
 	if skipBytes >= rawFileInfo.Size() {
-		return "", fmt.Errorf("Partition %d start sector (%d) offset (%d bytes) exceeds file size (%d bytes)",
-			partitionNum, startSector, skipBytes, rawFileInfo.Size())
+		return rootPartitionSource{}, fmt.Errorf(
+			"partition %d start sector (%d) offset (%d bytes) exceeds file size (%d bytes)",
+			partitionNum,
+			startSector,
+			skipBytes,
+			rawFileInfo.Size(),
+		)
 	}
 
 	slog.Info("Extracting partition", "partition", partitionNum, "start_sector", startSector, "offset", skipBytes)
-	if err := system.CopyBytesDD(ctx, rawPath, outputPath, skipBytes, countBytes); err != nil {
+	return rootPartitionSource{skipBytes: skipBytes, countBytes: countBytes}, nil
+}
+
+func copyRootPartition(
+	ctx context.Context,
+	rawPath, outputPath string,
+	source rootPartitionSource,
+) (string, error) {
+	if source.wholeImage {
+		result, _ := system.DefaultRunner.Run(
+			ctx,
+			[]string{"cp", "--sparse=always", rawPath, outputPath},
+			system.RunCmdOpts{Capture: true, Check: false},
+		)
+		if !result.Success() {
+			if err := system.CopyBytesDD(ctx, rawPath, outputPath, 0, 0); err != nil {
+				return "", err
+			}
+		}
+		if source.fsType == "" {
+			return outputPath, nil
+		}
+		ext, ok := infra.FSTypeToExt[source.fsType]
+		if !ok {
+			ext = ".img"
+		}
+		finalPath := outputPath[:len(outputPath)-len(filepath.Ext(outputPath))] + ext
+		if err := infra.SafeMove(outputPath, finalPath); err != nil {
+			return "", fmt.Errorf("rename output to %s: %w", finalPath, err)
+		}
+		return finalPath, nil
+	}
+	if err := system.CopyBytesDD(ctx, rawPath, outputPath, source.skipBytes, source.countBytes); err != nil {
 		return "", err
 	}
 	outputPath = detectAndRenameFS(ctx, outputPath)
