@@ -768,6 +768,107 @@ class TestImageImportSetDefault:
 class TestImageImportCreateVM:
     pytestmark = [pytest.mark.tier2, pytest.mark.requires_kvm, pytest.mark.slow]
 
+    @pytest.mark.parametrize("original_status", ["running", "paused", "stopped"])
+    def test_vm_import_preserves_guest_contents_and_source_state(
+        self, runner_vm, image_workspace, original_status
+    ):
+        """VM selectors capture guest-written bytes and restore the source's observed state."""
+        marker = f"/qa-image-import-{uuid.uuid4().hex}"
+        guest_contents = f"guest-{uuid.uuid4().hex}"
+
+        def source_state(source):
+            listed = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
+            matches = [item for item in listed if item["id"] == source["id"]]
+            assert len(matches) == 1 and matches[0]["status"] == original_status
+            inspected = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", source["id"], "--json").stdout,
+                dict,
+            )
+            assert inspected["vm"]["id"] == source["id"]
+            assert inspected["vm"]["status"] == original_status
+            return inspected
+
+        with _booted(runner_vm, _alpine(runner_vm), disk_size_mib=512) as source:
+            assert re.fullmatch(r"[0-9a-f]{32}", source["id"])
+            written = _run_mvm(
+                runner_vm,
+                "exec",
+                source["id"],
+                "--user",
+                "root",
+                "--timeout",
+                "30",
+                "--",
+                "sh",
+                "-c",
+                f"printf '%s' {shlex.quote(guest_contents)} > {shlex.quote(marker)} "
+                f"&& sync && cat {shlex.quote(marker)}",
+            )
+            assert written.stdout == guest_contents
+            if original_status != "running":
+                _run_mvm(
+                    runner_vm,
+                    "vm",
+                    "pause" if original_status == "paused" else "stop",
+                    source["id"],
+                    "--json",
+                )
+            inspected = source_state(source)
+            if original_status == "stopped":
+                # The caller's staging file is not the disk receiving guest writes.
+                # Put contradictory bytes there, without opening protected root storage.
+                cache = Path(
+                    os.environ.get("MVM_CACHE_DIR", str(Path.home() / ".cache/mvmctl"))
+                )
+                staging = cache / "vms" / source["id"] / "rootfs.img"
+                assert staging.is_absolute() and staging.resolve() == staging
+                assert staging == Path(source["rootfs_path"])
+                assert staging == Path(inspected["filesystem"]["rootfs_path"])
+                info = staging.lstat()
+                assert (
+                    staging.is_file()
+                    and info.st_uid == os.getuid()
+                    and info.st_nlink == 1
+                )
+                assert info.st_size == 512 * 1024 * 1024
+                identity = (info.st_dev, info.st_ino, info.st_size)
+                stale_contents = f"caller-staging-{uuid.uuid4().hex}"
+                stale_marker = image_workspace / "staging-marker"
+                stale_marker.write_text(stale_contents, encoding="utf-8")
+                _guest_run(
+                    runner_vm,
+                    f"debugfs -w -R {shlex.quote(f'write {stale_marker} {marker}')} "
+                    f"{shlex.quote(str(staging))}",
+                )
+                stale_readback = _guest_run(
+                    runner_vm,
+                    f"debugfs -R {shlex.quote(f'cat {marker}')} "
+                    f"{shlex.quote(str(staging))}",
+                )
+                assert stale_readback.stdout == stale_contents
+                after = staging.lstat()
+                assert (after.st_dev, after.st_ino, after.st_size) == identity
+
+            with _imported(runner_vm, source["id"], "--skip-optimization") as image:
+                source_state(source)
+                with _booted(runner_vm, image, disk_size_mib=512) as clone:
+                    readback = _run_mvm(
+                        runner_vm,
+                        "exec",
+                        clone["id"],
+                        "--user",
+                        "root",
+                        "--timeout",
+                        "30",
+                        "--",
+                        "cat",
+                        marker,
+                    )
+                    assert readback.stdout == guest_contents
+                source_state(source)
+
     def test_imported_image_vm_creation(self, runner_vm, image_workspace):
         source = _extract_alpine(runner_vm, image_workspace)
         with _imported(
