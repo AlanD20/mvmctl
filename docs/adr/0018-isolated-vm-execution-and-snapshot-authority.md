@@ -86,6 +86,11 @@ Stopping the VM does not copy those changes back to staging. File import remains
 - Pending recovery refuses competing control, capture, or rebind operations while allowing normal termination.
   Termination retires the pending operation without reviving its source. Independent output is accepted only after
   copy and state restoration are complete; failed output cleanup never deletes a changed or unrelated file.
+- Temporary export copies live in root-controlled `/var/lib/mvmctl/vm-rootfs-export-data`, with operator read
+  access and named typed cleanup. A caller-writable parent cannot provide exact deletion through a separate inode
+  check and pathname unlink: the caller can replace the entry between them. Export publication and cleanup must
+  therefore retain a root-controlled namespace. Protected VM disks and final images remain in the selected managed
+  cache; export admission also accounts for space on the `/var/lib` filesystem, even when that is a different mount.
 - This is an export-specific state-restoration contract. It does not change snapshot capture's existing failure
   behavior or introduce a generic privileged API, guest-command route, or arbitrary output-path capability.
 
