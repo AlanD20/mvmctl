@@ -183,7 +183,12 @@ The corrected test subsequently passed its complete registered journey on 2026-1
 enrollment, marker-only success/denials, quiescent reset, disabled admission, re-enrollment and same-ID
 pending-network activation/removal. All twelve preservation checks, owned-child absence and empty/removed
 QA task-group cleanup passed, with no resource-guard trip. The shared runner was not reset or replaced.
-Separate multioperator, active-network refusal and read-only-filesystem retry bodies remain unqualified.
+The separate password-authenticated second-operator/typed-dispatch/active-network reset-refusal journey also
+passed on that installed candidate: strict 1/1, zero other outcomes and matching JUnit, in 95.67 seconds. All
+twelve preservation and five owned-resource absence checks passed, including temporary enrollment-policy
+removal and QA task cleanup. The corrected read-only-filesystem journey timed out during child package
+installation before either fault or retry assertion; cleanup and preservation passed, but that body remains
+unqualified. Do not interpret its timeout as a diagnosed product or filesystem-fault failure.
 Exact clean `e034f4e0` also passed tidy/clean, formatting, generation/clean, vet and the complete
 unprivileged Go CI selector; selected Jailer tests passed in 3.243s. Both nonempty atomic coverage profiles
 and the literal gate log were preserved, source finished clean, and candidate/baseline/resource controls
@@ -525,8 +530,10 @@ resets the shared runner or the outer controller. Collection is not a runtime pa
 checked child cleanup and retained administrator-state receipts are required before qualifying this journey.
 The module also contains separate password-authenticated second-operator/typed-dispatch and active-network
 reset-refusal coverage, plus real read-only-filesystem init/reset failure-and-retry journeys. All three cases
-collect successfully; this does not qualify their runtime behavior. Abrupt process interruption and
-ambiguous-runtime recovery still require separate evidence.
+collect successfully. The first lifecycle journey and separate second-operator/refusal journey have scoped
+installed-candidate runtime passes recorded above; the filesystem-retry body remains unqualified. Collection
+alone does not qualify runtime behavior. Abrupt process interruption and ambiguous-runtime recovery still
+require separate evidence.
 
 ### 4.3 Run Specific Tiers
 

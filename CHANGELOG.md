@@ -105,8 +105,16 @@ same-ID pending-network activation/removal. The shared runner was neither reset 
 resource guards and product policy were unchanged. Exact clean `e034f4e0` also
 passed the complete pinned local Go CI sequence inside the named runner, with both atomic coverage profiles,
 clean source and unchanged candidate/baseline/resource controls; selected Jailer tests passed in 3.243s.
-Later Python-test/Markdown-only changes leave these Go inputs unchanged. Separate multioperator/refusal/
-filesystem-retry bodies, reusable-base provisioning and the remaining release matrix are not yet qualified.
+Later Python-test/Markdown-only changes leave these Go inputs unchanged. The filesystem-retry body,
+reusable-base provisioning and the remaining release matrix are not yet qualified.
+
+The separate password-authenticated second-operator journey passed on the same installed candidate in
+95.67 seconds: strict collected/passed 1/1, zero other outcomes and matching JUnit. It covers second-operator
+enrollment and typed dispatch, repeated-init preservation, active-network reset refusal and eventual quiescent
+reset. All twelve preservation checks and five owned-resource absence checks passed, including removal of the
+temporary enrollment policy and empty QA task group. The corrected filesystem-retry journey subsequently
+timed out during child package installation, before either read-only fault or retry assertion ran; its cleanup
+and preservation passed, but its runtime behavior remains unqualified. Earlier failures remain recorded.
 
 The same installed candidate subsequently passed the registered VM-to-VM exec interruption case in
 21.77 seconds: one pass, zero other outcomes, six preservation checks and verified QA-task cleanup.
@@ -203,8 +211,9 @@ recorded revisions; adversarial firewall and recovery cases remain separate rele
   mutations; the shared runner is not reset. Lint, formatting and strict three-case collection passed; existing
   registry checks remain applicable. The corrected first enrollment/marker-only/reset/re-init journey subsequently
   passed on the installed reset candidate, including same-ID pending-network retry and checked cleanup.
-  The separate multioperator/refusal/filesystem-retry bodies, abrupt process interruption and ambiguous-runtime
-  recovery remain unqualified.
+  The separate password-authenticated second-operator/typed-dispatch/active-network refusal journey also passed
+  with checked cleanup. The filesystem-retry body, abrupt process interruption and ambiguous-runtime recovery
+  remain unqualified.
 - Official-kernel debug output now identifies the exact upstream base-config bytes successfully written before
   configuration mutation. Focused kernel tests, vet and formatting passed in the named runner. A subsequent fresh
   mirrored-source Linux 7.0.11 producer passed with the consumed base-config digest and final config/ELF hashes
