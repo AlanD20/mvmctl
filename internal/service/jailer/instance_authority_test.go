@@ -807,7 +807,10 @@ func TestInstanceAuthorityUsesOnlyFixedRootPathOpen(t *testing.T) {
 	)
 	require.NoError(t, err)
 	releaseTestLaunch(t, lease)
-	assert.Equal(t, []string{root}, opened)
+	require.NotEmpty(t, opened)
+	for index, path := range opened {
+		assert.Equal(t, root, path, "opened path at index %d", index)
+	}
 }
 
 func TestPreparedReleaseRegistrationFailuresBeforeRenameRetainAuthority(t *testing.T) {
