@@ -91,6 +91,20 @@ Stopping the VM does not copy those changes back to staging. File import remains
   check and pathname unlink: the caller can replace the entry between them. Export publication and cleanup must
   therefore retain a root-controlled namespace. Protected VM disks and final images remain in the selected managed
   cache; export admission also accounts for space on the `/var/lib` filesystem, even when that is a different mount.
+- Operator access includes admitted traversal of the root-owned `/var/lib/mvmctl` parent (`0711`), without directory
+  listing or write permission. Admit and pin its ownership and identity before changing the mode. Private authority
+  children remain `0700` and private files `0600`; this does not grant access to protected VM backing. Export-specific
+  directory and file ACLs grant only the authenticated operator read/traversal access to independent copies.
+- Image extraction reads rather than consumes the independent export. Named root cleanup releases it after extraction
+  and before final-image publication, with bounded cancellation-independent cleanup on failure. Cleanup failures remain
+  explicit. Ordinary removal of an image without an export stays local; an unprivileged presence hint is not deletion
+  authority. Root cleanup derives ownership and source bindings from its own record, not a caller path or database row.
+- If the importing CLI dies before creating a public image row, existing `image rm --force <exact-64-character-id>`
+  provides export-only recovery after proving that no ordinary image selector matches. Names, prefixes, multiple
+  selectors and database errors do not authorize that fallback. Root tombstones make retries idempotent. A live
+  exporter is busy rather than forcibly killed; an already-open reader retains immutable bytes after unlink, so cleanup
+  does not promise immediate physical reclamation. Releasing the copy does not clear uncertain source-state intent or
+  claim VM recovery; report the source's pending recovery separately.
 - This is an export-specific state-restoration contract. It does not change snapshot capture's existing failure
   behavior or introduce a generic privileged API, guest-command route, or arbitrary output-path capability.
 
