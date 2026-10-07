@@ -61,6 +61,39 @@ the isolation prerequisite after previously pausing it for a separate design dec
 - Preserve the approved vmstate bound, exact trusted RAM extent, and no-new-storage-quota policy. Source identity,
   immutability, and consistency are additional requirements, not substitutes for those checks.
 
+### VM-to-image import from authoritative backing
+
+Accepted on 2026-10-07; implementation and installed-candidate qualification are pending. The user selected
+running-VM import with pause/resume rather than requiring every source VM to be stopped.
+
+The operator-visible staging rootfs is not the guest's current disk after protected-backing admission. Reading it
+for VM-to-image import can discard guest changes, including packages installed by the reusable test-base builder.
+Stopping the VM does not copy those changes back to staging. File import remains a separate caller-file operation.
+
+- VM import uses a named typed root export operation against the current protected rootfs, not a caller-supplied
+  protected path or a fallback to staging. Root admits the source generation, disk identity, exclusive writer
+  ownership, and current runtime state under retained lifecycle, backing, and authenticated control authority.
+- An originally running VM is paused for the disk copy and restored to running before accepting the output.
+  Originally paused and stopped VMs retain their state. Copy failures and cancellation require bounded,
+  cancellation-independent original-state recovery; extraction or optimization happens only after that recovery.
+- The existing best-effort guest `sync` hint runs before acquiring root export locks. It is neither state authority
+  nor a guarantee of application consistency. Pausing and exclusive disk access provide stable disk bytes, not
+  application transaction atomicity or a Full memory snapshot.
+- Durable root-owned export intent binds the exact source generation and state before a potentially applied pause
+  or resume. After interruption, recovery re-admits that same source and obtains authoritative state before any
+  mutation. It must not blindly replay control requests or resume a replacement or dead VM. Unresolved state is
+  reported and prevents image publication; it is not represented as successful recovery.
+- Pending recovery refuses competing control, capture, or rebind operations while allowing normal termination.
+  Termination retires the pending operation without reviving its source. Independent output is accepted only after
+  copy and state restoration are complete; failed output cleanup never deletes a changed or unrelated file.
+- This is an export-specific state-restoration contract. It does not change snapshot capture's existing failure
+  behavior or introduce a generic privileged API, guest-command route, or arbitrary output-path capability.
+
+Qualification must demonstrate current guest bytes surviving import and boot, running/paused/stopped state
+preservation, stale staging exclusion, copy failure and cancellation recovery, interrupted root-operation recovery,
+competing-control refusal, and exact output cleanup. A source inspection or a passing internal test alone does not
+qualify the installed CLI or reusable-base builder.
+
 ### Protected kernel retirement and explicit reimport
 
 Accepted on 2026-09-29; source integrated, installed-candidate qualification incomplete. Previously kernel removal
