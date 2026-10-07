@@ -63,8 +63,9 @@ the isolation prerequisite after previously pausing it for a separate design dec
 
 ### VM-to-image import from authoritative backing
 
-Accepted on 2026-10-07; implementation and installed-candidate qualification are pending. The user selected
-running-VM import with pause/resume rather than requiring every source VM to be stopped.
+Accepted on 2026-10-07; implementation integrated on 2026-10-08 with focused Go verification. Complete current-source
+CI and installed-candidate qualification remain pending. The user selected running-VM import with pause/resume
+rather than requiring every source VM to be stopped.
 
 The operator-visible staging rootfs is not the guest's current disk after protected-backing admission. Reading it
 for VM-to-image import can discard guest changes, including packages installed by the reusable test-base builder.
@@ -95,6 +96,9 @@ Stopping the VM does not copy those changes back to staging. File import remains
   listing or write permission. Admit and pin its ownership and identity before changing the mode. Private authority
   children remain `0700` and private files `0600`; this does not grant access to protected VM backing. Export-specific
   directory and file ACLs grant only the authenticated operator read/traversal access to independent copies.
+- Quiescent host reset admits the shared base's exact safe modes (`0700`, `0711`, or `0755`) under unchanged
+  root-ownership, identity and no-write checks, without changing its permissions. Private Jailer parents must still
+  be exactly `0700`; export traversal does not relax private-resource admission.
 - Image extraction reads rather than consumes the independent export. Named root cleanup releases it after extraction
   and before final-image publication, with bounded cancellation-independent cleanup on failure. Cleanup failures remain
   explicit. Ordinary removal of an image without an export stays local; an unprivileged presence hint is not deletion

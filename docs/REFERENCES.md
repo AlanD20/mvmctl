@@ -257,6 +257,29 @@ The image resolver tries selectors in priority order:
 | `--skip-optimization` | Skip OS cache cleanup (deblob), keep plain ext4 | `true` |
 | `--disable-detector NAME` | Comma-separated detectors to disable: `type`, `label`, `size`, `filesystem`, `all` | — |
 
+**Importing from a VM:** `mvm image import NAME VM_SELECTOR` reads the VM's current protected root disk through
+the enrolled, typed root dispatcher, not its original operator-visible staging file. A running VM is paused for
+the copy and resumed before extraction; already paused or stopped sources retain their state. This produces a
+disk image, not a memory or attached-data-volume snapshot. The best-effort guest `sync` hint does not guarantee
+application transaction consistency.
+
+Temporary independent copies live under root-controlled `/var/lib/mvmctl/vm-rootfs-export-data/<operator-uid>`
+with operator read access. Allow space on that filesystem as well as the selected managed cache, where protected
+VM disks and final images remain. Typed cleanup releases the temporary copy after extraction and before final
+publication; copy, state-recovery or cleanup failures remain explicit rather than falling back to staging.
+
+If an interrupted import leaves no public image row, `mvm image rm --force EXACT_64_CHARACTER_IMAGE_ID` can
+release its independent export. The read-only `<image-id>.copy` marker in the operator's export directory identifies
+the ID; it is not deletion authority. This recovery requires one full lowercase hexadecimal ID and confirmed
+repository absence: names, prefixes, multiple selectors and database errors cannot authorize it. A live exporter
+reports busy. Copy removal does not clear uncertain source-VM recovery; that condition is reported separately.
+Use the typed command, not manual deletion. An open reader can retain unlinked bytes, so successful cleanup does
+not promise immediate physical reclamation.
+
+The authoritative export and cleanup paths are implemented and have focused Go coverage. Installed-candidate
+VM-import and interruption journeys remain release-qualification gates; see
+[ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md#vm-to-image-import-from-authoritative-backing).
+
 Typed image optimization supports deblob and fstab repair, ext-family offline shrink, and durable Btrfs-to-ext4
 conversion as a separate transaction before shrink. XFS supports inspection, provisioning, deblob, and fstab repair
 at existing capacity; resize/shrink requests fail before mutation.

@@ -68,6 +68,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The detailed entries below retain implementation-stage history; a later entry or the status above supersedes an
 earlier partial-state statement. They are not a substitute for the final release QA report.
 
+On 2026-10-08, VM-to-image import was corrected to read the current protected root disk rather than stale staging.
+Running sources pause for copying and resume before extraction; paused and stopped sources retain their state.
+Root-controlled, operator-readable temporary exports live under `/var/lib/mvmctl/vm-rootfs-export-data`, separately
+from protected disks and final images in the managed cache. Typed cleanup and exact-ID forced image removal provide
+interrupted-import copy recovery without deleting caller files or claiming unresolved source-state recovery is complete.
+Host reset now admits the shared base's safe `0700`/`0711`/`0755` modes while preserving exact private `0700` checks.
+Two signed implementation chunks passed 31 focused Go tests, four intended old-behavior regressions, formatting,
+backend compilation and affected vet inside the named QA runner. Complete CI, full root-Jailer, a real-agent candidate
+build/install and installed import/recovery journeys still require refreshed current-source qualification; earlier
+`e034f4e0` evidence does not qualify these new Go changes. No outer controller installation was performed.
+
 On 2026-10-03, exact clean source `a3d7b8d0`, including the cloud-init OFF and built-in-KVM corrections,
 passed the complete local Go CI sequence inside `mvmctl-030-test`: tidy, architecture, formatting, generation,
 vet and the full unprivileged selector, with complete atomic coverage. The selected Jailer tests passed in
