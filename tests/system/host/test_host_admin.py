@@ -137,10 +137,10 @@ def _root_file_data(state, name):
     return json.loads(receipt["content"])
 
 
-def _require_error(result, code=None):
+def _require_error(result, code=None, *, expected_status="error"):
     assert result.returncode != 0, result.stdout + result.stderr
     envelope = json.loads(result.stdout)
-    assert envelope["schema_version"] == 1 and envelope["status"] == "error"
+    assert envelope["schema_version"] == 1 and envelope["status"] == expected_status
     assert isinstance(envelope["error"]["code"], str) and envelope["error"]["code"]
     if code is not None:
         assert envelope["error"]["code"] == code, envelope
@@ -945,9 +945,33 @@ class TestCleanHostAdministration:
         assert repeated["user_added_to_group"] is False and repeated["changes"] == []
         repeated_first, repeated_second = case.state(), case.second_state()
         for actual, expected in ((repeated_first, both), (repeated_second, second)):
-            assert {key: value for key, value in actual.items() if key != "files"} == {
-                key: value for key, value in expected.items() if key != "files"
+            assert {
+                key: value
+                for key, value in actual.items()
+                if key not in ("files", "host_directory")
+            } == {
+                key: value
+                for key, value in expected.items()
+                if key not in ("files", "host_directory")
             }
+            actual_directory = actual["host_directory"]
+            expected_directory = expected["host_directory"]
+            assert actual_directory["identity"] == expected_directory["identity"]
+            assert [row["name"] for row in actual_directory["entries"]] == [
+                row["name"] for row in expected_directory["entries"]
+            ]
+            # Enable republishes admission atomically even for an enrolled operator.
+            for actual_entry, expected_entry in zip(
+                actual_directory["entries"], expected_directory["entries"]
+            ):
+                if actual_entry["name"] == "admission.json":
+                    assert actual_entry["size"] == expected_entry["size"]
+                    assert (
+                        actual_entry["identity"][:1] + actual_entry["identity"][2:]
+                        == expected_entry["identity"][:1] + expected_entry["identity"][2:]
+                    )
+                else:
+                    assert actual_entry == expected_entry
             assert {
                 key: value
                 for key, value in actual["files"].items()
@@ -957,6 +981,14 @@ class TestCleanHostAdministration:
                 for key, value in expected["files"].items()
                 if key != "admission"
             }
+            actual_admission = actual["files"]["admission"]
+            expected_admission = expected["files"]["admission"]
+            assert actual_admission["sha256"] == expected_admission["sha256"]
+            assert actual_admission["content"] == expected_admission["content"]
+            assert (
+                actual_admission["identity"][:1] + actual_admission["identity"][2:]
+                == expected_admission["identity"][:1] + expected_admission["identity"][2:]
+            )
             assert _root_file_data(actual, "admission") == _root_file_data(
                 expected, "admission"
             )
@@ -1017,12 +1049,28 @@ class TestCleanHostAdministration:
         case.prepare_second_operator()
         with _SysctlReadOnlyFault(case):
             failed = case.administrator("init", check=False)
-            _require_error(failed, "host.init.failed")
+            _require_error(failed, "host.init.failed", expected_status="partial")
             assert "read-only file system" in (failed.stdout + failed.stderr).lower()
             partial = case.state()
             journal = _root_file_data(partial, "journal")
             assert journal["completed"] == 3 and journal["pending"] is True, journal
             assert journal["initialized"] is False and journal["operator"] == _OPERATOR
+            result = json.loads(failed.stdout)["data"]
+            assert isinstance(result, dict), result
+            assert result["user_added_to_group"] is False
+            assert result["session_has_group"] is False
+            changes = result["changes"]
+            assert isinstance(changes, list), result
+            assert len(changes) == journal["completed"] == 3
+            assert [
+                (change["setting"], change["mechanism"], change["applied_value"])
+                for change in changes
+            ] == [
+                ("group:mvm", "groupadd", "mvm"),
+                (f"group_member:{_OPERATOR}", "usermod", f"{_OPERATOR}:mvm"),
+                ("net.ipv4.ip_forward", "sysctl", "1"),
+            ]
+            assert changes[2]["original_value"] == original["forward"]
             assert journal["original_forward"] == original["forward"]
             assert (
                 journal["original_sysctl"] is None
