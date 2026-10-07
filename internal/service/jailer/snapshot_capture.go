@@ -31,6 +31,9 @@ func (server *VMSnapshotServer) Capture(
 	}
 	defer func() { returnErr = errors.Join(returnErr, locked.Release(context.WithoutCancel(ctx))) }()
 	record := locked.record
+	if err := requireVMRootfsExportIdle(ctx, locked.directories, record); err != nil {
+		return model.SnapshotCaptureResult{}, err
+	}
 	if (record.lifecycle != instanceLifecycleActive && record.lifecycle != instanceLifecycleCleaned) ||
 		(record.lifecycle == instanceLifecycleActive && record.launch == nil) {
 		return model.SnapshotCaptureResult{}, instanceStateError(

@@ -38,7 +38,10 @@ func (authority *instanceAuthority) beginLifecycleCleanup(
 		}
 	}()
 	if locked.record.lifecycle == instanceLifecycleCleaned {
-		return nil, nil
+		// Lifecycle cleanup may have committed before export retirement failed.
+		// Retain the VM lock while retrying the independent ImageID cleanup;
+		// a failed retirement must not be mistaken for an already-finished stop.
+		return nil, retireStoppedVMRootfsExport(context.WithoutCancel(ctx), locked.directories, locked.record)
 	}
 	updated, err := beginInstanceCleanup(caller, locked.record)
 	if err != nil {
@@ -205,7 +208,11 @@ func (admission *lifecycleRecoveryAdmission) admit(
 	} else if managed != nil {
 		err = managed.requireLifecycleRecoveryEmpty(ctx)
 	} else {
-		err = requireFreshRecoveryManagedVMCgroupAbsent(ctx, managedVMCgroupReadDepsFrom(admission.cgroupDeps), record.vmID)
+		err = requireFreshRecoveryManagedVMCgroupAbsent(
+			ctx,
+			managedVMCgroupReadDepsFrom(admission.cgroupDeps),
+			record.vmID,
+		)
 	}
 	if err == nil {
 		err = processes.verifyLocators(ctx)

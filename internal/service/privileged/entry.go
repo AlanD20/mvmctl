@@ -302,6 +302,10 @@ func dispatch(
 		return dispatchHandled, handleProtectedKernelRemove(ctx, endpoint, caller, deps.control)
 	case jailer.VMSnapshotCaptureAction:
 		return dispatchHandled, handleVMSnapshotCapture(ctx, endpoint, caller, deps.control)
+	case jailer.VMRootfsExportAction:
+		return dispatchHandled, handleVMRootfsExport(ctx, endpoint, caller, deps.control)
+	case jailer.VMRootfsExportReleaseAction:
+		return dispatchHandled, handleVMRootfsExportRelease(ctx, endpoint, caller, deps.control)
 	case jailer.VMSnapshotInspectAction:
 		return dispatchHandled, handleVMSnapshotInspect(ctx, endpoint, caller, deps.control)
 	case jailer.VMSnapshotRemoveAction:

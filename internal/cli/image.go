@@ -270,7 +270,14 @@ Examples:
 					}
 				}
 				if r.IsOK() {
-					common.Cli.Success(fmt.Sprintf("Removed: %s", itemID))
+					if r.Code == "image.export_removed" {
+						common.Cli.Success(r.Message)
+					} else {
+						common.Cli.Success(fmt.Sprintf("Removed: %s", itemID))
+					}
+					for _, warning := range r.Warnings {
+						common.Cli.Warning(warning)
+					}
 				} else if r.Message != "" {
 					common.Cli.Error(r.Message)
 				} else {
@@ -281,7 +288,8 @@ Examples:
 		},
 	}
 
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "Remove even if referenced by VMs")
+	cmd.Flags().
+		BoolVarP(&force, "force", "f", false, "Remove even if referenced by VMs; exact full ID also cancels an unrecorded image export")
 
 	return cmd
 }

@@ -318,6 +318,9 @@ func (prepared *preparedRelease) registerLaunching(
 		if err := authorizeInstanceRecord(caller, *existing); err != nil {
 			return nil, err
 		}
+		if err := requireVMRootfsExportIdle(ctx, directories, *existing); err != nil {
+			return nil, err
+		}
 		if existing.lifecycle != instanceLifecycleCleaned {
 			return nil, errs.AlreadyExists(
 				errs.CodeVMAlreadyExists,
@@ -456,6 +459,9 @@ func (authority *instanceAuthority) LockActive(
 	if err != nil {
 		return nil, err
 	}
+	if err := requireVMRootfsExportIdle(ctx, locked.directories, locked.record); err != nil {
+		return nil, errors.Join(err, locked.Release(context.WithoutCancel(ctx)))
+	}
 	if locked.record.lifecycle != instanceLifecycleActive {
 		releaseErr := locked.Release(ctx)
 		stateErr := errs.New(
@@ -547,6 +553,9 @@ func (authority *instanceAuthority) LockActivePair(
 			return nil, instanceAtomicError("instance authority record disappeared while locked", nil)
 		}
 		if err := authorizeInstanceRecord(caller, candidate.record); err != nil {
+			return nil, err
+		}
+		if err := requireVMRootfsExportIdle(ctx, candidate.directories, candidate.record); err != nil {
 			return nil, err
 		}
 		if candidate.record.lifecycle != instanceLifecycleActive {
@@ -794,7 +803,7 @@ func (lease *cleanupLease) Complete(ctx context.Context) error {
 		return err
 	}
 	state.record = updated
-	return nil
+	return retireStoppedVMRootfsExport(context.WithoutCancel(ctx), state.directories, updated)
 }
 
 func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLeaseState) error {

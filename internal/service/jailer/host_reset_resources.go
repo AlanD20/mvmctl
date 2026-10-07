@@ -61,9 +61,6 @@ func (guard *HostResetGuard) requireNoJailResources(ctx context.Context) error {
 	parent := guard.state.roots.retained[0]
 	for index, name := range []string{"var", "lib", "mvmctl", "jailer"} {
 		mode := uint32(0)
-		if index >= 2 {
-			mode = 0755
-		}
 		if index == 3 {
 			// ADR-0016 keeps the Jailer base private after per-VM cleanup.
 			mode = 0700
@@ -74,6 +71,20 @@ func (guard *HostResetGuard) requireNoJailResources(ctx context.Context) error {
 		}
 		if fd < 0 {
 			return nil
+		}
+		if index == 2 {
+			var stat unix.Stat_t
+			if err := unix.Fstat(fd, &stat); err != nil {
+				return instanceAtomicError("inspect reset shared state base mode", err)
+			}
+			// CRITICAL: Only the observed shared-base modes are admitted unchanged:
+			// authority creation, export traversal, and existing shared setup.
+			// Private Jailer children retain their exact 0700 admission below.
+			switch stat.Mode & 07777 {
+			case 0700, 0711, 0755:
+			default:
+				return instanceAtomicError("host reset shared state base mode is not admitted", nil)
+			}
 		}
 		parent = fd
 	}

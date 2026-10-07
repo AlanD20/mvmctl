@@ -16,6 +16,7 @@ import (
 	"mvmctl/internal/lib/download"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
+	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
@@ -350,7 +351,7 @@ func (op *Operation) ImageImport(
 	ctx context.Context,
 	input inputs.ImageImportInput,
 	onProgress event.OnProgressCallback,
-) (*model.ImageItem, error) {
+) (_ *model.ImageItem, returnErr error) {
 	// Resolve import input (arch, format, validation)
 	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image, op.Repos.VM)
 	if err != nil {
@@ -360,7 +361,8 @@ func (op *Operation) ImageImport(
 			err,
 		)
 	}
-	// Sync source VM filesystem before copying rootfs (best-effort)
+	// Preserve the pre-export live-input sync hint outside root lifecycle locks.
+	// SQLite status chooses only this hint, never root source/state authority.
 	if resolved.SourceVM != nil && resolved.SourceVM.Status == model.VMStatusRunning {
 		slog.Debug("Syncing filesystem on source VM before import", "vm", resolved.SourceVM.Name)
 		if client, err := op.vsockClient(ctx, resolved.SourceVM); err == nil {
@@ -412,26 +414,75 @@ func (op *Operation) ImageImport(
 
 	timestamp := time.Now().Format(time.RFC3339)
 	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
+	sourcePath := *resolved.Source
+	var exportClient *jailersvc.VMRootfsExportClient
+	var releasePending bool
+	releaseRequest := jailersvc.VMRootfsExportReleaseRequest{ImageID: imageID}
+	if resolved.SourceVM != nil {
+		cacheRoot, err := infra.GetCacheDir()
+		if err != nil {
+			return nil, errs.WrapMsg(errs.CodeImageImportFailed, "resolve VM export cache", err)
+		}
+		exportClient = jailersvc.NewVMRootfsExportClient()
+		releasePending = true
+		defer func() {
+			if releasePending {
+				_, releaseErr := releaseVMImageExport(context.WithoutCancel(ctx), exportClient, releaseRequest)
+				returnErr = errors.Join(returnErr, releaseErr)
+			}
+		}()
+		copy, err := exportClient.Export(ctx, jailersvc.VMRootfsExportRequest{
+			VMID: resolved.SourceVM.ID, CacheRoot: cacheRoot, ImageID: imageID,
+		})
+		if err != nil {
+			return nil, errs.WrapMsg(
+				errs.CodeImageImportFailed,
+				"VM image export failed",
+				err,
+				errs.WithDetails(map[string]any{"image_id": imageID}),
+			)
+		}
+		sourcePath = copy.CopyPath()
+	}
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "extract", Status: "running", Message: "Extracting image...",
 		})
 	}
-	extractedPath, err := op.Services.Image.ExtractImage(
-		ctx,
-		*resolved.Source,
-		imageID,
-		infra.GetImagesDir(),
-		resolved.Format,
-		resolved.Partition,
-		resolved.DisabledDetectors,
-		op.ProvisionerType,
-	)
+	var extractedPath string
+	if resolved.SourceVM != nil {
+		extractedPath, err = op.Services.Image.ExtractVMRootfsImage(
+			ctx,
+			sourcePath,
+			imageID,
+			infra.GetImagesDir(),
+			resolved.Partition,
+			resolved.DisabledDetectors,
+			op.ProvisionerType,
+		)
+	} else {
+		extractedPath, err = op.Services.Image.ExtractImage(
+			ctx,
+			sourcePath,
+			imageID,
+			infra.GetImagesDir(),
+			resolved.Format,
+			resolved.Partition,
+			resolved.DisabledDetectors,
+			op.ProvisionerType,
+		)
+	}
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return nil, errs.WrapMsg(errs.CodeImageImportFailed, err.Error(), err)
 		}
 		return nil, errs.WrapMsg(errs.CodeImageImportFailed, fmt.Sprintf("Extraction failed: %v", err), err)
+	}
+	if releasePending {
+		if _, err := releaseVMImageExport(context.WithoutCancel(ctx), exportClient, releaseRequest); err != nil {
+			return nil, err
+		}
+		releasePending = false
 	}
 	tl.Stage("extract")
 
@@ -539,6 +590,9 @@ func (op *Operation) ImageWarm(
 
 // ImageRemove removes images by input.
 func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult {
+	if result := op.imageRemoveUnrecordedExport(ctx, input, force); result != nil {
+		return result
+	}
 	results := make([]errs.OperationResult, 0)
 	images, err := input.Resolve(ctx, op.Repos.Image)
 	if err != nil {
@@ -563,6 +617,19 @@ func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, f
 				Message:   fmt.Sprintf("Image '%s' is in use by %d VM(s)", img.ID, len(img.VMs)),
 				Exception: fmt.Errorf("image in use by %d VMs", len(img.VMs)),
 			})
+			continue
+		}
+		if err := releasePresentVMImageExport(ctx, img.ID); err != nil {
+			results = append(
+				results,
+				errs.OperationResult{
+					Status:    "error",
+					Code:      string(errs.CodeImageImportFailed),
+					Item:      img,
+					Message:   err.Error(),
+					Exception: err,
+				},
+			)
 			continue
 		}
 		if err := op.Services.Image.RemoveImage(ctx, img, force); err != nil {
