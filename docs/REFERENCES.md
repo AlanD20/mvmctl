@@ -276,8 +276,8 @@ reports busy. Copy removal does not clear uncertain source-VM recovery; that con
 Use the typed command, not manual deletion. An open reader can retain unlinked bytes, so successful cleanup does
 not promise immediate physical reclamation.
 
-The authoritative export and cleanup paths are implemented and have focused Go coverage. Installed-candidate
-VM-import and interruption journeys remain release-qualification gates; see
+The authoritative export and cleanup paths are implemented, with focused Go coverage and passing local Go CI.
+Installed-candidate VM-import and interruption journeys remain release-qualification gates; see
 [ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md#vm-to-image-import-from-authoritative-backing).
 
 Typed image optimization supports deblob and fstab repair, ext-family offline shrink, and durable Btrfs-to-ext4

@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Release status (2026-10-03):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
+> **Current checkpoint (2026-10-08):** protected VM-to-image exports are integrated and local Go CI passed.
+> Consolidated root evidence covers 826 unchanged passes plus the corrected authority-path test's focused pass,
+> not a repeated full-suite run. A real-agent candidate build/install and installed export/recovery journeys remain
+> pending; v0.3.0 is not release-qualified. The outer installed controller remains unchanged.
+
+> **Earlier QA checkpoint (2026-10-03):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
 > traffic/exec policy, protected volume, and consistent snapshot paths are implemented in source. VM launch
 > requires the matching Firecracker/Jailer 1.16.2 pair. Exact clean source snapshot `b2c0a1f8` passed the complete
@@ -75,9 +80,13 @@ from protected disks and final images in the managed cache. Typed cleanup and ex
 interrupted-import copy recovery without deleting caller files or claiming unresolved source-state recovery is complete.
 Host reset now admits the shared base's safe `0700`/`0711`/`0755` modes while preserving exact private `0700` checks.
 Two signed implementation chunks passed 31 focused Go tests, four intended old-behavior regressions, formatting,
-backend compilation and affected vet inside the named QA runner. Complete CI, full root-Jailer, a real-agent candidate
-build/install and installed import/recovery journeys still require refreshed current-source qualification; earlier
-`e034f4e0` evidence does not qualify these new Go changes. No outer controller installation was performed.
+backend compilation and affected vet inside the named QA runner. Clean source `98d1d248` subsequently passed the local
+Go CI sequence with both atomic coverage profiles after restoring the harness's standard `sbin` PATH; passed earlier
+phases were carried by hash rather than repeated. Full root-Jailer recorded 826 passes and one obsolete exact-open-count
+assertion. Its test-only correction now checks that every opened path is the fixed authority root, and passed focused
+format, vet and test checks. The 826 unchanged passes were retained; this is consolidated evidence, not a repeated
+green full-package invocation. A real-agent candidate build/install and installed import/recovery journeys remain
+pending. Original failures and preservation evidence remain recorded. No outer controller installation was performed.
 
 On 2026-10-03, exact clean source `a3d7b8d0`, including the cloud-init OFF and built-in-KVM corrections,
 passed the complete local Go CI sequence inside `mvmctl-030-test`: tidy, architecture, formatting, generation,
