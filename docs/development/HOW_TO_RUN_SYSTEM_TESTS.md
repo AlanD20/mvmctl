@@ -177,9 +177,14 @@ The complete root-Jailer package passed in 3.545s against equivalent, hash-check
 Go 1.26.3. The preceding failed run inherited umask `077`, changing exact fixture modes and causing a race-test
 setup timeout. Keep supervisor/task permissions private, but give the Go test child umask `022`; do not relax
 production permission admission. Candidate, persistent baseline and resource controls were unchanged.
-The reset assertions passed in the installed-candidate administrator journey, but its later stale pending-intent
-assertion failed. The corrected test passed collection and two existing runner-unit checks, not its runtime
-journey. Exact clean `e034f4e0` then passed tidy/clean, formatting, generation/clean, vet and the complete
+The first installed-candidate administrator journey passed reset but failed a stale pending-intent assertion.
+The corrected test subsequently passed its complete registered journey on 2026-10-07: one case passed in
+332.94 seconds, with zero failures, errors, skips, deselections, XFAILs or XPASSes. It exercised clean-child
+enrollment, marker-only success/denials, quiescent reset, disabled admission, re-enrollment and same-ID
+pending-network activation/removal. All twelve preservation checks, owned-child absence and empty/removed
+QA task-group cleanup passed, with no resource-guard trip. The shared runner was not reset or replaced.
+Separate multioperator, active-network refusal and read-only-filesystem retry bodies remain unqualified.
+Exact clean `e034f4e0` also passed tidy/clean, formatting, generation/clean, vet and the complete
 unprivileged Go CI selector; selected Jailer tests passed in 3.243s. Both nonempty atomic coverage profiles
 and the literal gate log were preserved, source finished clean, and candidate/baseline/resource controls
 remained unchanged. Subsequent Python-test/Markdown-only changes do not change those Go/CI inputs.

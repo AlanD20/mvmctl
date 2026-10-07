@@ -96,22 +96,25 @@ Clean source `e034f4e0` subsequently produced the real-agent candidate
 `0.3.0-rc.resetparent-e034f4e0`, installed only inside the named QA runner with verified content and
 root-owned canonical identity. Its full root-Jailer package passed in 3.545s with Go 1.26.3 after correcting
 only the test child's umask; the original fixture-permission failures and timeout remain failed evidence.
-Candidate identity, persistent baseline and resource controls were preserved. The administrator journey now
-passes the reset assertions, but its later assertion incorrectly expected denied network creation to discard
-the deliberately retained pending intent. The test now checks inactive intent retention and same-ID activation
-after re-enrollment; its collection and two existing runner-unit checks passed. Exact clean `e034f4e0` then
+Candidate identity, persistent baseline and resource controls were preserved. The first administrator journey
+passed reset but incorrectly expected denied network creation to discard its deliberately retained pending intent.
+After that assertion was corrected, the complete registered journey passed on 2026-10-07: one case in
+332.94 seconds, zero other outcomes, all twelve preservation checks and verified owned cleanup. This covers
+clean-child enrollment, marker-only success/denials, quiescent reset, disabled admission, re-enrollment and
+same-ID pending-network activation/removal. The shared runner was neither reset nor replaced, and original
+resource guards and product policy were unchanged. Exact clean `e034f4e0` also
 passed the complete pinned local Go CI sequence inside the named runner, with both atomic coverage profiles,
 clean source and unchanged candidate/baseline/resource controls; selected Jailer tests passed in 3.243s.
-Later Python-test/Markdown-only changes leave these Go inputs unchanged. The corrected administrator journey,
-reusable-base provisioning and remaining release matrix are not yet qualified.
+Later Python-test/Markdown-only changes leave these Go inputs unchanged. Separate multioperator/refusal/
+filesystem-retry bodies, reusable-base provisioning and the remaining release matrix are not yet qualified.
 
 Earlier focused checks on installed `a3d7b8d0` passed six VM-free kernel-import cases, guest-OOM survival,
 interrupted snapshot capture with full RAM/vmstate/rootfs/data-volume recovery and restore, cached-image default
 selection, raw-image import/default selection, and one mirrored forced image replacement. Each result retains its
 own strict outcomes and preservation evidence; these are not a complete current-candidate matrix.
 The `no-cache` image variant was interrupted by its QA memory-growth guard, not qualified. The administrator
-journey's earlier quiescent-reset failure is superseded by the scoped reset and pending-intent results above;
-the complete corrected journey remains open. See the [coverage matrix](tests/system/COVERAGE_MATRIX.md) for
+journey's earlier quiescent-reset and stale pending-intent failures are superseded by the complete corrected
+first-journey result above. See the [coverage matrix](tests/system/COVERAGE_MATRIX.md) for
 scoped results and remaining gates.
 
 On 2026-10-02, clean source `b402c471` passed the complete local Go CI gates inside `mvmctl-030-test`
@@ -191,9 +194,10 @@ recorded revisions; adversarial firewall and recovery cases remain separate rele
   Added separate journeys for password-authenticated second-operator enrollment and typed dispatch, active-network
   reset refusal, and real read-only-filesystem failures with init/reset retries. The child owns administrator
   mutations; the shared runner is not reset. Lint, formatting and strict three-case collection passed; existing
-  registry checks remain applicable. Runtime qualification remains pending: later execution reached enrollment
-  and marker-only controls, then failed quiescent reset. Immediate state narrowed the failure to the pre-reset
-  path without identifying its cause. Abrupt process interruption and ambiguous-runtime recovery remain gaps.
+  registry checks remain applicable. The corrected first enrollment/marker-only/reset/re-init journey subsequently
+  passed on the installed reset candidate, including same-ID pending-network retry and checked cleanup.
+  The separate multioperator/refusal/filesystem-retry bodies, abrupt process interruption and ambiguous-runtime
+  recovery remain unqualified.
 - Official-kernel debug output now identifies the exact upstream base-config bytes successfully written before
   configuration mutation. Focused kernel tests, vet and formatting passed in the named runner. A subsequent fresh
   mirrored-source Linux 7.0.11 producer passed with the consumed base-config digest and final config/ELF hashes

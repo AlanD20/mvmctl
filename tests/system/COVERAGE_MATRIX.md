@@ -91,8 +91,9 @@ passed in 3.545 seconds against hash-checked equivalent Go/module/build inputs. 
 because the harness's inherited umask changed exact fixture modes and a race-test setup failure timed out;
 only the Go child's umask was corrected to `022`, without relaxing production admission or private task modes.
 Candidate, persistent baseline and resource controls were preserved. Subsequent Python-test/Markdown-only
-changes do not alter those Go/CI inputs. This closes the current local Go gates, not the corrected administrator
-journey, remaining installed-candidate Python matrix, reusable-base provisioning, GitHub CI or release approval.
+changes do not alter those Go/CI inputs. These Go results alone do not qualify administrator runtime; the later
+first-journey result is recorded below. Remaining installed-candidate Python matrix, reusable-base provisioning,
+GitHub CI and release approval remain separate gates.
 
 **Current image-result qualification checkpoint (2026-10-03):** Six existing force-pull and default-result
 cases were selected on installed `a3d7b8d0`. The first pull failed before its image/default assertions because
@@ -280,9 +281,16 @@ complete reset/re-init pass; all twelve preservation checks and owned-resource c
 Signed `f5f478f2` now checks inactive intent retention and, after re-enrollment, same-ID activation and typed
 removal. Exact one-node collection passed; its receipt parser correction reused retained output rather than
 recollecting, and two existing runner-unit cases passed. Neither collection nor those units ran this journey.
-A normal named-runner restart preserved the candidate/baseline, but the corrected runtime invocation was
-refused before launch by its unchanged parent-disk prerequisite. The corrected first journey and the separate
-multioperator/refusal/filesystem-retry cases remain unqualified. The shared runner is never the reset target.
+A normal named-runner restart preserved the candidate/baseline; the first corrected invocation was refused
+before launch by its unchanged parent-disk prerequisite. After storage became available, the same corrected
+first journey passed on 2026-10-07 against installed `0.3.0-rc.resetparent-e034f4e0`: strict collected/passed 1/1,
+all other outcomes zero, JUnit 1/0/0/0, in 332.94 seconds. This proves clean-child enrollment, marker-only
+success/denials, quiescent reset and restoration, disabled admission, re-enrollment and same-ID pending-network
+activation/removal. All twelve preservation checks passed; owned child jail/runtime/netns and parent network
+effects were absent, the exact pytest worker was reaped and its empty QA task group removed. Resource guards
+did not trip and enclosing controls/OOM counters were unchanged. The shared runner was not reset or replaced.
+Separate multioperator/refusal/filesystem-retry cases remain unqualified; abrupt interruption and ambiguous
+runtime recovery are not covered by this first journey.
 
 Signed `58165c85` now retains the reset command's full result and immediate root state before assertion and
 fixture cleanup, including bounded administrator-directory metadata. All three exact nodes collected successfully
@@ -1453,7 +1461,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
-| Installed system candidate and clean bootstrap | 🟡 Partial | Installed e034 candidate reached clean-child quiescent reset and disabled-admission/restoration checks; the complete journey failed its later stale pending-intent assertion. Corrected same-ID retry coverage is authored/collected, not runtime-qualified. Separate multioperator/refusal/filesystem retries, abrupt interruption and ambiguous-runtime recovery remain gaps. |
+| Installed system candidate and clean bootstrap | 🟡 Partial | Installed e034 candidate passed the corrected clean-child enrollment/marker-only/reset/re-init journey, including disabled admission, same-ID pending-network retry, all preservation checks and owned cleanup. Separate multioperator/refusal/filesystem retries, abrupt interruption and ambiguous-runtime recovery remain gaps. |
 | fd-0 privileged control transport | 🔴 Missing | Go L1 framing/EOF/peer/cancellation abuse coverage plus installed-CLI lifecycle integration. |
 | Root VM authority and cross-UID denial | 🟡 Partial | A focused installed-candidate networkless case denies operator direct connection to the reported Firecracker API socket while `vm stop` succeeds; root-record/process/cache identity checks, constrained two-user denial, tombstone, and zero-leak assertions remain missing. |
 | Independent trusted Firecracker/Jailer releases | 🔴 Missing | Root manifest/ELF/hash authority, atomic failure injection, and installed-CLI release lifecycle. |
@@ -1989,7 +1997,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `host status --json` | ✅ Deep | `host/test_host.py` | `TestHostStatus`, `TestHostStatusEnhanced` | L2 — schema-1 success envelope; `kvm_accessible`, `missing_binaries`, forwarding, live `resources`, and null `state` rather than a user-SQLite setup claim |
 | `host clean --force` success | 🔴 Gap | — | — | Requires a dedicated clean-host context; the shared runner must not erase its installed candidate or root state. |
 | `host clean` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostMutationGuards` | L2 creates one bounded VM, proves it is live, and checks refusal without deleting it. |
-| `host reset --force` success | 🟡 Partial | `host/test_host_admin.py` | `TestCleanHostAdministration` | Installed e034 candidate passed clean-child quiescent reset, disabled admission and restoration assertions before the case failed its later stale pending-intent assertion. Corrected re-init/same-ID retry journey remains unrun. The shared runner is not reset. |
+| `host reset --force` success | ✅ Deep | `host/test_host_admin.py` | `TestCleanHostAdministration` | Installed e034 candidate passed the corrected first clean-child journey: quiescent reset, complete journal, disabled admission/restoration, re-init and same-ID pending-network retry, with checked cleanup and preservation. Separate refusal/filesystem-retry and abrupt-interruption cases remain unqualified. The shared runner is not reset. |
 | unprivileged `host reset --force` | ⚡ Shallow | `host/test_host.py` | `TestHostMutationGuards` | L2 checks administrator refusal and unchanged host-status fields. |
 | `host install-system` | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | The Python runner stages the RC, invokes the real administrator installer, and then all `_run_mvm` calls use exact `/usr/local/bin/mvm`. L2 verifies root ownership, mode, trusted ancestors, content hash, no temporary sibling, and idempotence. |
 | `host install-system` rejection cases | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | L2 verifies unprivileged and malformed invocations preserve the target, and an existing target symlink is rejected without changing its destination. Symlink-test restoration is mandatory and asserted. |
