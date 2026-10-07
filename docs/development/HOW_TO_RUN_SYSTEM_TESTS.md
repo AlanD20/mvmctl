@@ -190,6 +190,14 @@ and the literal gate log were preserved, source finished clean, and candidate/ba
 remained unchanged. Subsequent Python-test/Markdown-only changes do not change those Go/CI inputs.
 The remaining Python matrix and reusable-base qualification remain open.
 
+**VM-to-VM interruption checkpoint (2026-10-07):** the installed reset candidate passed
+`test_vm_to_vm_exec_interrupt_reaps_destination_group`: one case in 21.77 seconds, strict JSON/JUnit
+with zero other outcomes. It interrupts a retained CLI task through its pidfd, checks that the identified
+destination leader/shell/child tasks are no longer live, and proves a fresh authorized relay still works.
+All six independent preservation checks passed; the QA worker was reaped, its empty task group removed,
+and original resource guards/controls remained unchanged. This observer does not independently prove
+complete private-backend cleanup. Other authority, deadline, reboot and restore boundaries remain separate.
+
 ### Optional Local GuestFS Qualification
 
 GuestFS remains an optional backend, disabled by default. With

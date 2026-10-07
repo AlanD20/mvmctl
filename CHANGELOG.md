@@ -108,6 +108,13 @@ clean source and unchanged candidate/baseline/resource controls; selected Jailer
 Later Python-test/Markdown-only changes leave these Go inputs unchanged. Separate multioperator/refusal/
 filesystem-retry bodies, reusable-base provisioning and the remaining release matrix are not yet qualified.
 
+The same installed candidate subsequently passed the registered VM-to-VM exec interruption case in
+21.77 seconds: one pass, zero other outcomes, six preservation checks and verified QA-task cleanup.
+The test interrupts the retained CLI through its pidfd, verifies that the exact destination leader/shell/child
+tasks are no longer live, and successfully opens a fresh authorized relay. Original resource guards and
+controls stayed unchanged. Complete private-backend cleanup, other adversarial authority/deadline cases,
+host reboot and snapshot-restore grants are not established by this case.
+
 Earlier focused checks on installed `a3d7b8d0` passed six VM-free kernel-import cases, guest-OOM survival,
 interrupted snapshot capture with full RAM/vmstate/rootfs/data-volume recovery and restore, cached-image default
 selection, raw-image import/default selection, and one mirrored forced image replacement. Each result retains its
