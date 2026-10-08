@@ -70,7 +70,7 @@ func TestLaunchLeaseReleaseWithTopologyHoldPreservesCompositeAuthority(t *testin
 		return nil
 	}
 	authority := newInstanceAuthorityWithPolicy(
-		realInstanceAuthorityDeps(),
+		testInstanceAuthorityDeps(t, root),
 		testInstanceAuthorityPolicy(root),
 		tree,
 	)
@@ -153,7 +153,7 @@ func TestLaunchLeaseVMReleaseErrorKeepsExactCleanupEvidenceAndCachesResult(t *te
 	tree.lockReleaseErrDescription = "vm"
 	tree.lockReleaseErr = vmReleaseErr
 	authority := newInstanceAuthorityWithPolicy(
-		realInstanceAuthorityDeps(),
+		testInstanceAuthorityDeps(t, root),
 		testInstanceAuthorityPolicy(root),
 		tree,
 	)
