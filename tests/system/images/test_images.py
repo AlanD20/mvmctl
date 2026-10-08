@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import resource
 import select
 import signal
 import stat
@@ -35,7 +36,7 @@ import time
 
 vm_id, owner, source_pid, source_ticks, cache, import_name, fault_mode = sys.argv[1:]
 owner, source_pid, source_ticks = int(owner), int(source_pid), int(source_ticks)
-assert fault_mode in ('death', 'sigint-survivor')
+assert fault_mode in ('death', 'sigint-survivor', 'copy-io')
 assert os.geteuid() == 0 and int(os.environ['SUDO_UID']) == owner > 0
 assert re.fullmatch(r'[0-9a-f]{32}', vm_id)
 assert re.fullmatch(r'sys-image-[0-9a-f]{32}', import_name)
@@ -342,6 +343,57 @@ def observe_sigint_survivor():
         return
     raise AssertionError('SIGINT survivor observation timeout')
 
+def fail_copy_io():
+    suspended_copy_unchanged()
+    descriptor_dir = os.open('fd', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=receiver)
+    try:
+        names = os.listdir(descriptor_dir)
+        assert len(names) <= 256
+        matches = [name for name in names if identity(os.stat(name, dir_fd=descriptor_dir)) ==
+                   (progress_before['output_device'], progress_before['output_inode'])]
+        assert len(matches) == 1
+        # Intentional proc-FD observation: O_PATH retains only the already authenticated
+        # anonymous output inode, never a source disk or writable output capability.
+        output = keep(os.open(matches[0], os.O_PATH | os.O_CLOEXEC, dir_fd=descriptor_dir))
+    finally:
+        os.close(descriptor_dir)
+    before = os.fstat(output)
+    assert identity(before) == (copy_record['file']['device'], copy_record['file']['inode'])
+    assert before.st_mode == stat.S_IFREG | 0o600 and before.st_uid == before.st_gid == 0
+    assert before.st_nlink == 0 and before.st_size == partial_size
+    # Leave bounded authority writes well below the limit and require further real
+    # copy progress after injection, followed by a kernel EFBIG before full extent.
+    limit = max(16 * 1024 * 1024, partial_size + 1024 * 1024)
+    assert partial_size < limit < rootfs['bytes'], 'missed bounded copy-I/O window'
+    original = resource.prlimit(receiver_pid, resource.RLIMIT_FSIZE)
+    assert all(value == resource.RLIM_INFINITY or value >= rootfs['bytes'] for value in original)
+    # prlimit takes a numeric PID. Recheck the retained, stopped receiver and the
+    # request/output binding immediately around this one administrative effect.
+    suspended_copy_unchanged()
+    assert resource.prlimit(receiver_pid, resource.RLIMIT_FSIZE, (limit, original[1])) == original
+    receiver_unchanged()
+    assert process(receiver)['state'] == 'T'
+    assert resource.prlimit(receiver_pid, resource.RLIMIT_FSIZE) == (limit, original[1])
+    signal.pidfd_send_signal(receiver_pidfd, signal.SIGCONT)
+    assert exited(receiver_pidfd, 90000), 'limited copy receiver did not settle'
+    source_unchanged()
+    after = os.fstat(output)
+    assert identity(after) == identity(before) and after.st_nlink == 0
+    assert after.st_size == limit < rootfs['bytes'], 'copy did not reach its kernel file-size limit'
+    entry = directory(copies, image_id)
+    try:
+        _, _, record = authority(entry, 'copy.json')
+    finally:
+        forget(entry)
+    assert record['phase'] == 'released' and record['file'] == copy_record['file']
+    assert record['source'] == copy_record['source']
+    assert image_id not in os.listdir(data_uid), 'failed copy retained a public data directory'
+    assert vm_id + '.json' not in os.listdir(exports), 'failed copy left source recovery pending'
+    forget(output)
+    print(json.dumps({'phase': 'io-failed', 'image_id': image_id, 'receiver_exited': True,
+                      'partial_bytes': partial_size, 'limited_bytes': limit, 'failed_copy_bytes': after.st_size,
+                      'source_generation': generation, 'source_recovery_pending': False}), flush=True)
+
 try:
     root = directory(None, '/')
     var = directory(root, 'var')
@@ -415,6 +467,10 @@ try:
     if fault_mode == 'sigint-survivor':
         assert command == 'interrupted\n'
         observe_sigint_survivor()
+    elif fault_mode == 'copy-io':
+        assert command == 'fail-copy\n'
+        assert not exited(cli_pidfd), 'copy-I/O fault requires a live importing caller'
+        fail_copy_io()
     else:
         assert command == 'kill\n'
         assert exited(cli_pidfd, 5000), 'client must be dead before killing the receiver'
@@ -475,7 +531,7 @@ class _VMImportReceiverDeath:
     def __init__(self, runner_vm, source, *, mode="death"):
         assert os.environ.get("MVM_TEST_VM") == "mvmctl-030-test"
         assert "PYTEST_XDIST_WORKER" not in os.environ
-        assert mode in ("death", "sigint-survivor")
+        assert mode in ("death", "sigint-survivor", "copy-io")
         self.mode = mode
         self.runner_vm = runner_vm
         self.name = f"sys-image-{uuid.uuid4().hex}"
@@ -509,7 +565,7 @@ class _VMImportReceiverDeath:
         )
 
     def read(self):
-        timeout = 95 if self.mode == "sigint-survivor" else 45
+        timeout = 95 if self.mode in ("sigint-survivor", "copy-io") else 45
         assert select.select([self.observer.stdout], [], [], timeout)[0], (
             "import observer timed out"
         )
@@ -606,6 +662,33 @@ class _VMImportReceiverDeath:
         self.observer.wait(timeout=10)
         assert self.observer.returncode == 0, self.observer.stderr.read(16385)
         return receipt
+
+    def fail_copy_io(self):
+        assert self.mode == "copy-io" and self.cli.poll() is None
+        receipt = self.require("fail-copy")
+        assert receipt["phase"] == "io-failed" and receipt["image_id"] == self.image_id
+        assert (
+            0 < receipt["partial_bytes"] < receipt["limited_bytes"] < 512 * 1024 * 1024
+        )
+        assert receipt["failed_copy_bytes"] == receipt["limited_bytes"]
+        assert (
+            receipt["receiver_exited"] is True
+            and receipt["source_recovery_pending"] is False
+        )
+        assert receipt["source_generation"] == self.source_generation
+        stdout, stderr = self.cli.communicate(timeout=45)
+        assert self.cli.returncode > 0, (self.cli.returncode, stdout, stderr)
+        response = json.loads(stdout)
+        assert response["status"] == "error" and response["data"] is None
+        error = response["error"]
+        assert error["code"] == "image.import.failed"
+        # Public wrapping exposes only the image selection. The authenticated
+        # inode growth to the imposed limit proves the copy fault, not JSON errno text.
+        assert error["message"] == "VM image export failed"
+        assert error["details"] == {"image_id": self.image_id}
+        print(f"copy-I/O caller stdout={stdout} stderr={stderr}", flush=True)
+        self.observer.wait(timeout=10)
+        assert self.observer.returncode == 0, self.observer.stderr.read(16385)
 
     def close(self):
         errors = []
@@ -1436,6 +1519,101 @@ class TestImageImportSetDefault:
 
 class TestImageImportCreateVM:
     pytestmark = [pytest.mark.tier2, pytest.mark.requires_kvm, pytest.mark.slow]
+
+    @pytest.mark.destructive
+    def test_vm_import_mid_copy_io_failure_restores_source_and_discards_partial(
+        self, runner_vm, image_workspace
+    ):
+        """A receiver-only kernel file limit rejects a real partial copy and restores the source."""
+        marker = f"/qa-image-import-{uuid.uuid4().hex}"
+        contents = f"copy-io-{uuid.uuid4().hex}"
+
+        def running_source(source, *, pin_process):
+            rows = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
+            matches = [vm for vm in rows if vm["id"] == source["id"]]
+            assert len(matches) == 1 and matches[0]["status"] == "running"
+            observed = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", source["id"], "--json").stdout,
+                dict,
+            )["vm"]
+            assert observed["status"] == "running"
+            for key in ("id", "rootfs_path"):
+                assert observed[key] == matches[0][key] == source[key]
+            for key in ("pid", "process_start_time"):
+                assert observed[key] == matches[0][key] and observed[key] > 0
+                if pin_process:
+                    assert observed[key] == source[key]
+            return matches[0]
+
+        with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
+            written = _run_mvm(
+                runner_vm,
+                "exec",
+                source["id"],
+                "--user",
+                "root",
+                "--timeout",
+                "30",
+                "--",
+                f"printf '%s' {shlex.quote(contents)} > {shlex.quote(marker)} "
+                f"&& sync && cat {shlex.quote(marker)}",
+            )
+            assert written.stdout == contents
+            source = running_source(source, pin_process=False)
+            fault = _VMImportReceiverDeath(runner_vm, source, mode="copy-io")
+            try:
+                fault.arm(source)
+                fault.fail_copy_io()
+                assert all(
+                    image["id"] != fault.image_id and image["type"] != fault.name
+                    for image in _images(runner_vm)
+                )
+                running_source(source, pin_process=True)
+                readback = _run_mvm(
+                    runner_vm,
+                    "exec",
+                    source["id"],
+                    "--user",
+                    "root",
+                    "--timeout",
+                    "30",
+                    "--",
+                    "cat",
+                    marker,
+                )
+                assert readback.stdout == contents
+                for _ in range(2):
+                    removed = _json_success_data(
+                        _run_mvm(
+                            runner_vm,
+                            "image",
+                            "rm",
+                            fault.image_id,
+                            "--force",
+                            "--json",
+                        ).stdout,
+                        dict,
+                    )
+                    assert len(removed["items"]) == 1
+                    item = removed["items"][0]
+                    assert item["error"] is None
+                    result = item["result"]
+                    assert result["status"] == "success"
+                    assert result["code"] == "image.export_removed"
+                    assert result["item"] == fault.image_id and result["warnings"] == []
+                    assert result["metadata"] == {
+                        "export_only": True,
+                        "source_vm_id": source["id"],
+                    }
+                assert all(
+                    image["id"] != fault.image_id and image["type"] != fault.name
+                    for image in _images(runner_vm)
+                )
+                running_source(source, pin_process=True)
+            finally:
+                fault.close()
 
     def test_vm_import_sigint_survivor_refuses_release_then_restores_and_discards(
         self, runner_vm, image_workspace
