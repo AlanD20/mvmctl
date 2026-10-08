@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import time
 import uuid
@@ -137,8 +139,8 @@ def _vm_entry(runner_vm: str, vm_name: str) -> dict[str, Any] | None:
     return next((entry for entry in entries if entry.get("name") == vm_name), None)
 
 
-def _require_preseeded_vm_assets(runner_vm: str) -> None:
-    """Check the existing defaults used by vm create without mutating preparation."""
+def _require_preseeded_vm_assets(runner_vm: str) -> tuple[str, ...]:
+    """Check launch assets and return an optional explicitly bound kernel selector."""
     mirror = os.environ.get("MVM_ASSET_MIRROR")
     assert mirror and Path(mirror).expanduser().is_dir(), "asset mirror directory must be preseeded"
     kernels = _json_success_data(_run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list)
@@ -146,9 +148,57 @@ def _require_preseeded_vm_assets(runner_vm: str) -> None:
     binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
     default_kernels = [kernel for kernel in kernels if kernel.get("is_default")]
     default_images = [image for image in images if image.get("is_default")]
-    assert len(default_kernels) == 1 and default_kernels[0].get("is_present"), kernels
+    kernel_id = os.environ.get("MVM_RUNNER_KERNEL_ID")
+    kernel_sha256 = os.environ.get("MVM_RUNNER_KERNEL_SHA256")
+    kernel_args: tuple[str, ...] = ()
+    if kernel_id is None and kernel_sha256 is None:
+        assert len(default_kernels) == 1 and default_kernels[0].get("is_present"), kernels
+    else:
+        assert kernel_id and kernel_sha256, "imported kernel ID and SHA256 must be supplied together"
+        assert re.fullmatch(r"[0-9a-f]{64}", kernel_id), "imported kernel requires a full canonical ID"
+        assert re.fullmatch(r"[0-9a-f]{64}", kernel_sha256), "imported kernel requires a canonical SHA256"
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "kernel", "inspect", kernel_id, "--json").stdout, dict,
+        )
+        kernel, storage = inspected["kernel"], inspected["storage"]
+        assert kernel["id"] == kernel_id and kernel["type"] == "custom" and kernel["is_present"] is True, inspected
+        cache = Path(os.path.abspath(Path(os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")).expanduser()))
+        path = cache / "kernels" / kernel_id
+        assert storage["path"] == str(path), inspected
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        parent = os.open("/", flags)
+        try:
+            for component in path.parts[1:-1]:
+                child = os.open(component, flags, dir_fd=parent)
+                os.close(parent)
+                parent = child
+            descriptor = os.open(
+                path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=parent,
+            )
+        finally:
+            os.close(parent)
+        try:
+            before = os.fstat(descriptor)
+            assert stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and before.st_size > 0, path
+            digest = hashlib.sha256()
+            read_bytes = 0
+            deadline = time.monotonic() + 10
+            while chunk := os.read(descriptor, 1024 * 1024):
+                read_bytes += len(chunk)
+                assert read_bytes <= before.st_size and time.monotonic() <= deadline, path
+                if read_bytes == len(chunk):
+                    assert chunk.startswith(b"\x7fELF"), "imported kernel is not an ELF"
+                digest.update(chunk)
+            after = os.fstat(descriptor)
+            current = path.lstat()
+            for field in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"):
+                assert getattr(before, field) == getattr(after, field) == getattr(current, field), path
+            assert read_bytes == before.st_size and digest.hexdigest() == kernel_sha256, path
+        finally:
+            os.close(descriptor)
+        kernel_args = ("--kernel", kernel_id)
     assert len(default_images) == 1 and default_images[0].get("is_present"), images
-    # The tests omit --image/--kernel, so validate those defaults rather than choosing a version.
+    # Images and the launch pair retain the existing default-selection contract.
     pair: dict[str, dict[str, Any]] = {}
     for kind in ("firecracker", "jailer"):
         defaults = [binary for binary in binaries if binary.get("type") == kind and binary.get("is_default")]
@@ -157,6 +207,7 @@ def _require_preseeded_vm_assets(runner_vm: str) -> None:
         assert binary.get("is_present") and binary.get("version") == "1.16.2", binary
         pair[kind] = binary
     assert pair["firecracker"].get("architecture") == pair["jailer"].get("architecture"), pair
+    return kernel_args
 
 
 _CONTROL_RESERVE_BYTES = 16 * 1024 * 1024
@@ -491,7 +542,7 @@ def saturation_vm(
     saturation_host_swap: _HostSwap,
 ) -> Iterator[dict[str, Any]]:
     """Remove the bounded VM before its swap prerequisite is torn down."""
-    _require_preseeded_vm_assets(runner_vm)
+    kernel_args = _require_preseeded_vm_assets(runner_vm)
     _run_mvm(runner_vm, "config", "set", "defaults.vm", "cgroup_vmm_headroom_mib", "0")
     _run_mvm(
         runner_vm, "config", "set", "defaults.vm", "cgroup_swap_max_bytes",
@@ -502,7 +553,7 @@ def saturation_vm(
     try:
         created = _json_success_data(
             _run_mvm(
-                runner_vm, "vm", "create", vm_name,
+                runner_vm, "vm", "create", vm_name, *kernel_args,
                 "--no-network", "--cloud-init-mode", "off", "--skip-deblob", "--no-pci",
                 "--disk-size", "512M", "--vcpu", "1", "--mem", "224M", "--json",
                 timeout=180,
@@ -777,7 +828,7 @@ class TestVMCgroupEnvelope:
         record_property: Any,
     ) -> None:
         """Attribute a finite anonymous allocation's failure to guest-global OOM."""
-        _require_preseeded_vm_assets(runner_vm)
+        kernel_args = _require_preseeded_vm_assets(runner_vm)
         token = uuid.uuid4().hex
         vm_name = f"sys-memfail-{token[:8]}"
         directory = f"/run/mvm-memfail-{token}"
@@ -824,6 +875,7 @@ BEGIN {
                     "vm",
                     "create",
                     vm_name,
+                    *kernel_args,
                     "--no-network",
                     "--cloud-init-mode",
                     "off",
@@ -1199,7 +1251,7 @@ BEGIN {
         cgroup_config_overrides: None,
     ) -> None:
         vm_name = f"sys-cgroup-{uuid.uuid4().hex[:8]}"
-        _require_preseeded_vm_assets(runner_vm)
+        kernel_args = _require_preseeded_vm_assets(runner_vm)
         try:
             created = _json_success_data(
                 _run_mvm(
@@ -1207,6 +1259,7 @@ BEGIN {
                     "vm",
                     "create",
                     vm_name,
+                    *kernel_args,
                     "--no-network",
                     "--cloud-init-mode",
                     "off",
