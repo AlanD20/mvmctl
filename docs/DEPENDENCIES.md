@@ -58,6 +58,7 @@ Required for pulling, importing, and converting VM images.
 |--------|---------|---------------|------|
 | `qemu-img` | Image conversion and resize | `qemu-utils` | `qemu-img` |
 | `mkfs.ext4` | Formatting extracted rootfs images | `e2fsprogs` | `e2fsprogs` |
+| `e2fsck` | Journal-only preparation of disposable ext4 VM-import inspection copies with LoopMount | `e2fsprogs` | `e2fsprogs` |
 | `fakeroot` | Preserving tarball ownership during tar-rootfs extraction | `fakeroot` | `fakeroot` |
 | `blkid` | Detecting root partitions and UUIDs | `util-linux` | `util-linux` |
 | `sfdisk` | Partition table manipulation | `util-linux` | `util-linux` |
@@ -98,7 +99,7 @@ below; it does not accept arbitrary host commands or paths from the operator.
 | `blockdev` | Querying partition/device size | `util-linux` | `util-linux` |
 | `mount` | Mounting the root partition | `util-linux` | `util-linux` |
 | `umount` | Unmounting the root partition | `util-linux` | `util-linux` |
-| `e2fsck` | Filesystem check before ext4 resize | `e2fsprogs` | `e2fsprogs` |
+| `e2fsck` | Filesystem check before ext4 resize; journal-only replay on disposable VM-import inspection copies | `e2fsprogs` | `e2fsprogs` |
 | `resize2fs` | Growing and shrinking ext4 filesystems | `e2fsprogs` | `e2fsprogs` |
 | `tune2fs` | Reading ext4 block count for shrink calculation | `e2fsprogs` | `e2fsprogs` |
 | `btrfs` | Growing and shrinking btrfs filesystems | `btrfs-progs` | `btrfs-progs` |
@@ -106,6 +107,12 @@ below; it does not accept arbitrary host commands or paths from the operator.
 | `chroot` | Running commands inside the mounted rootfs | `coreutils` | `coreutils` |
 
 > Most binaries (`util-linux`, `e2fsprogs`) are already required by the image pipeline (§C). Only `btrfs-progs` is unique to this path (and only needed for btrfs images).
+
+LoopMount import from a VM invokes the fixed `/usr/sbin/e2fsck -p -E journal_only` as the ordinary operator,
+against a retained descriptor for a new inspection copy. It does not run filesystem repair on the VM's protected
+disk or grant the operator a new sudoers command. The `e2fsprogs` installation must provide that executable path;
+missing or unsuccessful journal preparation fails import rather than skipping recovery or using a writable root
+inspection mount. Ordinary file imports and the GuestFS path do not select this VM-only preparation.
 
 ### E2. libguestfs (Alternative)
 
@@ -192,7 +199,7 @@ Firecracker/Jailer pair. Users do not invoke an installation service directly; s
 | `mvm network rm` / `sync` | Typed root netlink and nftables-kernel operations; no firewall CLI |
 | `mvm policy traffic/exec` | Typed root policy actions; no firewall CLI |
 | `mvm image pull` | `qemu-img` (may trigger conversion), `fakeroot` (tar-rootfs) |
-| `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `fakeroot` (tar-rootfs), `truncate`, `mkfs.ext4`, `unsquashfs`, `dumpe2fs`, `du`, `dd` |
+| `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `fakeroot` (tar-rootfs), `truncate`, `mkfs.ext4`, `unsquashfs`, `dumpe2fs`, `du`, `dd`; `/usr/sbin/e2fsck` for ext4 VM import with LoopMount |
 | `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
 | `mvm kernel pull --type firecracker` | Download only (no build tools) |
 | `mvm key create` | `ssh-keygen` |

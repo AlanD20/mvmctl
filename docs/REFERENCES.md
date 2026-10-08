@@ -268,6 +268,13 @@ with operator read access. Allow space on that filesystem as well as the selecte
 VM disks and final images remain. Typed cleanup releases the temporary copy after extraction and before final
 publication; copy, state-recovery or cleanup failures remain explicit rather than falling back to staging.
 
+An ext4 disk copied while the source VM is paused can still require filesystem journal replay. With LoopMount,
+import runs fixed unprivileged `/usr/sbin/e2fsck -p -E journal_only` on a new disposable inspection copy before
+the unchanged root read-only OS inspection. This does not modify the protected VM disk, root-controlled export
+or extracted source, and it is not general filesystem repair. Journal preparation failure stops the import;
+it does not enable a writable inspection mount or discard the journal. See the
+[LoopMount dependencies](DEPENDENCIES.md#e1-loop-mount-default).
+
 If an interrupted import leaves no public image row, `mvm image rm --force EXACT_64_CHARACTER_IMAGE_ID` can
 release its independent export. The read-only `<image-id>.copy` marker in the operator's export directory identifies
 the ID; it is not deletion authority. This recovery requires one full lowercase hexadecimal ID and confirmed
@@ -276,10 +283,12 @@ reports busy. Copy removal does not clear uncertain source-VM recovery; that con
 Use the typed command, not manual deletion. An open reader can retain unlinked bytes, so successful cleanup does
 not promise immediate physical reclamation.
 
-The authoritative export and cleanup paths are implemented, with focused Go coverage and passing local Go CI.
-The real-agent candidate built from clean source `497455a6` and its normal installation inside the named QA runner
-passed exact binary-identity and independent preservation checks; the outer controller was not replaced.
-Installed-candidate VM-import and interruption journeys remain release-qualification gates; see
+The authoritative export, cleanup and VM-only journal-preparation paths are implemented. Earlier local Go CI and
+the journal fix's focused Go/API/vet checks passed separately. The real-agent candidate built from clean source
+`1a2506e6` and its normal installation inside the named QA runner passed exact binary-identity and preservation
+checks; the outer controller was not replaced. One installed run completed import and restored its source to
+Running before a safety guard interrupted clone boot. Clone-content, other source states and interruption/fault
+journeys remain release-qualification gates; collection or this partial runtime evidence is not a full pass. See
 [ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md#vm-to-image-import-from-authoritative-backing).
 
 Typed image optimization supports deblob and fstab repair, ext-family offline shrink, and durable Btrfs-to-ext4
