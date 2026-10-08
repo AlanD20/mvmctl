@@ -1458,8 +1458,6 @@ class TestImageImportCreateVM:
                 "--timeout",
                 "30",
                 "--",
-                "sh",
-                "-c",
                 f"printf '%s' {shlex.quote(contents)} > {shlex.quote(marker)} "
                 f"&& sync && cat {shlex.quote(marker)}",
             )
@@ -1587,8 +1585,6 @@ class TestImageImportCreateVM:
                 "--timeout",
                 "30",
                 "--",
-                "sh",
-                "-c",
                 f"printf '%s' {shlex.quote(contents)} > {shlex.quote(marker)} "
                 f"&& sync && cat {shlex.quote(marker)}",
             )
@@ -1717,8 +1713,6 @@ class TestImageImportCreateVM:
                 "--timeout",
                 "30",
                 "--",
-                "sh",
-                "-c",
                 f"printf '%s' {shlex.quote(guest_contents)} > {shlex.quote(marker)} "
                 f"&& sync && cat {shlex.quote(marker)}",
             )
