@@ -32,6 +32,7 @@ type vmExecutionIdentityLeaseState struct {
 	mu         sync.Mutex
 	fd         int
 	record     executionIdentityRecord
+	policy     instanceAuthorityPolicy
 	released   bool
 	releaseErr error
 }
@@ -110,7 +111,7 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 	if state.released || !state.active || state.value == nil || state.ownerUID != caller.uid || state.key != key {
 		return nil, instanceStateError(vmID, "execution identity does not match held VM ownership")
 	}
-	store, err := openExecutionIdentityStore(ctx, create)
+	store, err := openExecutionIdentityStoreWithPolicy(ctx, state.policy, create)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,9 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 				if err != nil {
 					return nil, err
 				}
-				return &vmExecutionIdentityLease{state: &vmExecutionIdentityLeaseState{fd: fd, record: record}}, nil
+				return &vmExecutionIdentityLease{
+					state: &vmExecutionIdentityLeaseState{fd: fd, record: record, policy: state.policy},
+				}, nil
 			}
 		}
 		if record.Phase != executionIdentityReady {
@@ -150,7 +153,7 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 		if expected != nil && (*record.UID != expected.uid || *record.GID != expected.gid) {
 			return nil, instanceStateError(vmID, "execution reservation differs from recorded credentials")
 		}
-		if err := requireExecutionIdentityAccount(ctx, record, caller); err != nil {
+		if err := state.accounts.require(ctx, record, caller); err != nil {
 			return nil, err
 		}
 	} else {
@@ -160,14 +163,14 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 		if !create {
 			return nil, nil
 		}
-		if err := requireExecutionIdentityHostTools(ctx); err != nil {
+		if err := state.accounts.requireHostTools(ctx); err != nil {
 			return nil, err
 		}
 		name, err := executionIdentityAccountName(vmID)
 		if err != nil {
 			return nil, err
 		}
-		if err := requireExecutionIdentityNameAbsent(ctx, name); err != nil {
+		if err := state.accounts.requireNameAbsent(ctx, name); err != nil {
 			return nil, err
 		}
 		nonce := make([]byte, 16)
@@ -183,7 +186,7 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 		if err := store.write(ctx, record, false); err != nil {
 			return nil, err
 		}
-		identity, err := createExecutionIdentityAccount(ctx, record, caller)
+		identity, err := state.accounts.create(ctx, record, caller)
 		if err != nil {
 			return nil, err
 		}
@@ -202,7 +205,9 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 	if err != nil {
 		return nil, err
 	}
-	return &vmExecutionIdentityLease{state: &vmExecutionIdentityLeaseState{fd: fd, record: record}}, nil
+	return &vmExecutionIdentityLease{
+		state: &vmExecutionIdentityLeaseState{fd: fd, record: record, policy: state.policy},
+	}, nil
 }
 
 // Identity returns admitted execution credentials while retaining their durable reservation.
@@ -220,7 +225,7 @@ func (lease *vmExecutionIdentityLease) Identity(ctx context.Context) (vmExecutio
 	if err := ctx.Err(); err != nil {
 		return vmExecutionIdentity{}, err
 	}
-	if err := inspectExecutionIdentityRecordFD(ctx, state.fd); err != nil {
+	if err := inspectExecutionIdentityRecordFD(ctx, state.fd, state.policy); err != nil {
 		return vmExecutionIdentity{}, err
 	}
 	return vmExecutionIdentity{uid: *state.record.UID, gid: *state.record.GID}, nil

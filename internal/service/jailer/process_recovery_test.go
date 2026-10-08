@@ -315,8 +315,8 @@ func TestBeginFreshRecoveryCleanupVerifiesFullIdentityAndTerminatesThroughPIDFDs
 
 	record, fake := activeRecoveryTestRecord(t)
 	// A real launch creates this root-owned inventory before publishing the active record.
-	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), record.ownerUID))
 	authority, recoveryDeps, identityDeps, events := newActiveRecoveryTestAuthority(t, record, fake)
+	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), authority.policy, record.ownerUID))
 	cgroup := newManagedVMCgroupTestFixture(t)
 	cgroup.addVMLeaf(testVMID)
 	authority.cgroupDeps = cgroup.deps()
@@ -396,8 +396,8 @@ func TestBeginFreshRecoveryCleanupBootMismatchCleansWithoutOpeningOrSignalingPID
 
 	record, fake := activeRecoveryTestRecord(t)
 	// This synthetic active record needs the launch-time inventory before cleanup can complete.
-	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), record.ownerUID))
 	authority, recoveryDeps, identityDeps, events := newActiveRecoveryTestAuthority(t, record, fake)
+	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), authority.policy, record.ownerUID))
 	identityDeps.readBootID = func(context.Context) (string, error) { return processOtherBootID, nil }
 	cgroup := newManagedVMCgroupTestFixture(t)
 	cgroupDeps := cgroup.deps()
@@ -449,7 +449,7 @@ func newActiveRecoveryTestAuthority(
 	root := prepareInstanceAuthorityTestRoot(t)
 	writeTestAuthorityRecord(t, root, record)
 	authority := newInstanceAuthorityWithPolicy(
-		realInstanceAuthorityDeps(),
+		testInstanceAuthorityDeps(t, root),
 		testInstanceAuthorityPolicy(root),
 		newTestInstanceAuthorityTree(),
 	)

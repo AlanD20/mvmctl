@@ -344,7 +344,7 @@ func (prepared *preparedRelease) registerLaunching(
 	if err != nil {
 		return nil, err
 	}
-	if err := prepareProtectedVMGrantInventory(ctx, caller.uid); err != nil {
+	if err := prepareProtectedVMGrantInventory(ctx, vmLock.state.policy, caller.uid); err != nil {
 		return nil, err
 	}
 	record, err := registerLaunchingInstanceRecord(caller, intent, locators, release, existing)
@@ -826,6 +826,7 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 	}
 	if err := revokeProtectedVMGrants(
 		cleanupCtx,
+		state.directories.policy,
 		state.record.ownerUID,
 		state.record.vmID,
 		state.record.launch.executionIdentity.uid,

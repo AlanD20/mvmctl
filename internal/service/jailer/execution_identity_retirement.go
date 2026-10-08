@@ -39,7 +39,7 @@ func (lease *vmAuthorityLease) retireExecutionIdentity(
 	if retirement.consumed {
 		return nil
 	}
-	store, err := openExecutionIdentityStore(ctx, false)
+	store, err := openExecutionIdentityStoreWithPolicy(ctx, state.policy, false)
 	if err != nil {
 		return err
 	}
@@ -67,11 +67,11 @@ func (lease *vmAuthorityLease) retireExecutionIdentity(
 			"execution allocation outcome is ambiguous; refusing account removal",
 		)
 	}
-	if err := requireExecutionIdentityProcessAbsence(ctx, retirement.identity); err != nil {
+	if err := state.accounts.requireProcessAbsence(ctx, retirement.identity); err != nil {
 		return err
 	}
 	if record.Phase == executionIdentityReady {
-		if err := requireExecutionIdentityAccountRecord(ctx, record); err != nil {
+		if err := state.accounts.requireRecord(ctx, record); err != nil {
 			return err
 		}
 		record.Phase = executionIdentityRetiring
@@ -79,7 +79,7 @@ func (lease *vmAuthorityLease) retireExecutionIdentity(
 			return err
 		}
 	}
-	if err := removeExecutionIdentityAccount(ctx, record); err != nil {
+	if err := state.accounts.remove(ctx, record); err != nil {
 		return err
 	}
 	record.Phase = executionIdentityRetired

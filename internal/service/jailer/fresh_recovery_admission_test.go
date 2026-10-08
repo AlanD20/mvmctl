@@ -648,8 +648,12 @@ func newFreshRecoveryAdmissionTestFixture(
 ) *freshRecoveryAdmissionTestFixture {
 	t.Helper()
 	// A real launch prepares the root-owned grant inventory before publishing its record.
-	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), testInstanceCaller().uid))
-	return newFreshRecoveryAdmissionWithoutInventoryFixture(t, lifecycle, cgroupPresent)
+	fixture := newFreshRecoveryAdmissionWithoutInventoryFixture(t, lifecycle, cgroupPresent)
+	require.NoError(
+		t,
+		prepareProtectedVMGrantInventory(t.Context(), fixture.authority.policy, testInstanceCaller().uid),
+	)
+	return fixture
 }
 
 func newFreshRecoveryAdmissionWithoutInventoryFixture(

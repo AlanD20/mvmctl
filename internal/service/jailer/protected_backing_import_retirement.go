@@ -71,13 +71,20 @@ func (retirement *protectedImportRetirement) requireLockedAuthority(state *vmAut
 }
 
 func (retirement *protectedImportRetirement) requireAbsence(ctx context.Context) error {
-	if err := requireExecutionIdentityProcessAbsence(ctx, retirement.identity); err != nil {
+	state := retirement.locked.vmLock.state
+	if err := state.accounts.requireProcessAbsence(ctx, retirement.identity); err != nil {
 		return err
 	}
-	if err := requireExecutionRetirementTreesAbsent(ctx, retirement.ownerUID, retirement.vmID); err != nil {
+	if err := requireExecutionRetirementTreesAbsent(ctx, state.policy, retirement.ownerUID, retirement.vmID); err != nil {
 		return err
 	}
-	return requireProtectedVMGrantsAbsent(ctx, retirement.ownerUID, retirement.vmID, retirement.identity.uid)
+	return requireProtectedVMGrantsAbsent(
+		ctx,
+		state.policy,
+		retirement.ownerUID,
+		retirement.vmID,
+		retirement.identity.uid,
+	)
 }
 
 type protectedImportCancellation struct {

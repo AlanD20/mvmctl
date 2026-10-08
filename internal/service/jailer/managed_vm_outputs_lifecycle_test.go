@@ -23,7 +23,7 @@ func TestPersistentOutputsRequireSuccessfulRegistrationReturn(t *testing.T) {
 			fixture := newPersistentOutputResources(t)
 			fixture.write(t, "firecracker.log", "prior log")
 			root := prepareInstanceAuthorityTestRoot(t)
-			deps := realInstanceAuthorityDeps()
+			deps := testInstanceAuthorityDeps(t, root)
 			tree := newTestInstanceAuthorityTree()
 			fault := errors.New("registration did not complete")
 			recordRenamed := false

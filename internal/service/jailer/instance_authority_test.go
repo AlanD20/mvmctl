@@ -38,7 +38,7 @@ func TestPreparedReleaseTransfersToSuccessfulLaunch(t *testing.T) {
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	tree := newTestInstanceAuthorityTree()
 	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	registration := testLaunchIntent(false)
@@ -100,7 +100,7 @@ func TestCleanupLeaseCopiesConcurrentlyReleaseExactlyOnceAndCacheError(t *testin
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	tree := newTestInstanceAuthorityTree()
 	releaseEvents := make(chan string, 3)
 	tree.onRelease = func(_ context.Context, description string) error {
@@ -176,7 +176,7 @@ func TestPreparedReleaseSerializesReleaseAgainstLaunchingTransfer(t *testing.T) 
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	tree := newTestInstanceAuthorityTree()
 	indexAcquire := make(chan struct{})
 	continueRegistration := make(chan struct{})
@@ -241,7 +241,7 @@ func TestPreparedReleaseInvalidLaunchDoesNotConsumeAuthority(t *testing.T) {
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	tree := newTestInstanceAuthorityTree()
 	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	registration := testLaunchIntent(false)
@@ -348,7 +348,7 @@ func TestPreparedReleaseIndexFailureRetainsPreparedAuthority(t *testing.T) {
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	indexErr := errors.New("index lock failed")
 	tree := newTestInstanceAuthorityTree()
 	tree.indexErr = indexErr
@@ -636,7 +636,7 @@ func TestInstanceAuthorityReleaseScanCreatesLockUnderAuthorityRoot(t *testing.T)
 	require.NoError(t, os.MkdirAll(recordDir, 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(recordDir, testVMID+".json"), raw, 0600))
 	authority := newInstanceAuthorityWithPolicy(
-		realInstanceAuthorityDeps(),
+		testInstanceAuthorityDeps(t, root),
 		testInstanceAuthorityPolicy(root),
 		newTestInstanceAuthorityTree(),
 	)
@@ -655,7 +655,7 @@ func TestInstanceAuthorityReleaseSlotLeaseSerializesCompetingIdentities(t *testi
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	tree := newTestInstanceAuthorityTree()
 	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	held, err := authority.lockReleaseSlot(
@@ -706,7 +706,7 @@ func TestInstanceAuthorityReleaseSlotWaitIsCancellableAndOwnerRemainsActive(t *t
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	tree := newTestInstanceAuthorityTree()
 	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	slot := releaseSlotForIdentity(testReleaseIdentity())
@@ -766,7 +766,7 @@ func TestInstanceAuthorityRegisterLockOrder(t *testing.T) {
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	tree := newTestInstanceAuthorityTree()
 	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	registration := testLaunchIntent(false)
@@ -788,7 +788,7 @@ func TestInstanceAuthorityUsesOnlyFixedRootPathOpen(t *testing.T) {
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	realOpen := deps.open
 	opened := make([]string, 0, 1)
 	deps.open = func(ctx context.Context, path string, flags int, mode uint32) (int, error) {
@@ -839,7 +839,7 @@ func TestPreparedReleaseRegistrationFailuresBeforeRenameRetainAuthority(t *testi
 			t.Parallel()
 
 			root := prepareInstanceAuthorityTestRoot(t)
-			deps := realInstanceAuthorityDeps()
+			deps := testInstanceAuthorityDeps(t, root)
 			fault := errors.New("injected " + name + " failure")
 			inject(&deps, fault)
 			authority := newInstanceAuthorityWithPolicy(
@@ -871,7 +871,7 @@ func TestInstanceAuthorityIndexReleaseAfterDurableLaunchReturnsTransferredLease(
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	indexErr := errors.New("index release failed after durable launch")
 	tree := newTestInstanceAuthorityTree()
 	tree.lockReleaseErrDescription = "index"
@@ -939,7 +939,7 @@ func TestInstanceAuthorityPostRenameErrorReturnsLaunchLeaseAndDurableRecord(t *t
 	require.NoError(t, releaseLock.Release(context.Background()))
 	require.NoError(t, uidDirs.Release(context.Background()))
 	require.NoError(t, authorityRoots.Release(context.Background()))
-	deps := realInstanceAuthorityDeps()
+	deps := testInstanceAuthorityDeps(t, root)
 	realFsync := deps.fsync
 	syncErr := errors.New("record directory sync failed")
 	indexErr := errors.New("index release failed")
@@ -1012,7 +1012,11 @@ func TestInstanceAuthorityPostRenameCleanupErrorReturnsCleanupLease(t *testing.T
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	writeTestAuthorityRecord(t, root, testLaunchingInstanceRecord())
-	deps := realInstanceAuthorityDeps()
+	require.NoError(
+		t,
+		prepareProtectedVMGrantInventory(t.Context(), testInstanceAuthorityPolicy(root), testAuthorityUID),
+	)
+	deps := testInstanceAuthorityDeps(t, root)
 	realFsync := deps.fsync
 	syncErr := errors.New("cleanup record directory sync failed")
 	var fileSynced atomic.Bool
@@ -1050,7 +1054,7 @@ func TestInstanceAuthorityPostRenameCleanupErrorReturnsCleanupLease(t *testing.T
 	require.NoError(t, cleanup.Release(context.Background()))
 
 	stableAuthority := newInstanceAuthorityWithPolicy(
-		realInstanceAuthorityDeps(),
+		testInstanceAuthorityDeps(t, root),
 		testInstanceAuthorityPolicy(root),
 		newTestInstanceAuthorityTree(),
 	)
@@ -1111,7 +1115,7 @@ func newTestInstanceAuthority(t *testing.T) (*instanceAuthority, string) {
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	return newInstanceAuthorityWithPolicy(
-		realInstanceAuthorityDeps(),
+		testInstanceAuthorityDeps(t, root),
 		testInstanceAuthorityPolicy(root),
 		newTestInstanceAuthorityTree(),
 	), root
@@ -1250,7 +1254,7 @@ func writeTestAuthorityRecord(t *testing.T, root string, record instanceRecord) 
 
 	roots, err := openInstanceAuthorityRoots(
 		context.Background(),
-		realInstanceAuthorityDeps(),
+		testInstanceAuthorityDeps(t, root),
 		testInstanceAuthorityPolicy(root),
 		newTestInstanceAuthorityTree(),
 	)

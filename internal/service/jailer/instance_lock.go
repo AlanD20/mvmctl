@@ -62,6 +62,7 @@ func (directories *instanceUIDDirectories) acquireVMLock(
 		return nil, err
 	}
 	return &vmAuthorityLease{state: &vmAuthorityLeaseState{
+		accounts: directories.deps.accounts, policy: directories.policy,
 		value: value, ownerUID: directories.uid, key: key, active: true,
 	}}, nil
 }

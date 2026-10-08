@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -117,26 +116,14 @@ func newManagedVMRuntimeRecoveryTestAuthority(
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	caller := managedVMRuntimeRecoveryTestCaller()
-	// These root-only cases use a dedicated UID so their real fixed inventory cannot
-	// satisfy another recovery fixture's missing-inventory check by test ordering.
-	ownerPath := filepath.Join("/var/lib/mvmctl/protected-backing", strconv.FormatUint(uint64(caller.uid), 10))
-	_, err := os.Lstat(ownerPath)
-	require.ErrorIs(t, err, os.ErrNotExist)
-	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), caller.uid))
-	t.Cleanup(func() {
-		for _, kind := range protectedInventoryKinds() {
-			require.NoError(t, os.Remove(filepath.Join(ownerPath, "logical", kind)))
-		}
-		require.NoError(t, os.Remove(filepath.Join(ownerPath, "logical")))
-		require.NoError(t, os.Remove(ownerPath))
-	})
 	record, err := registerLaunchingInstanceRecord(
 		caller, testLaunchIntent(false), testLaunchProcessLocators(false), testReleaseIdentity(), nil,
 	)
 	require.NoError(t, err)
 	writeTestAuthorityRecord(t, root, record)
+	require.NoError(t, prepareProtectedVMGrantInventory(t.Context(), testInstanceAuthorityPolicy(root), caller.uid))
 	authority := newInstanceAuthorityWithPolicy(
-		realInstanceAuthorityDeps(),
+		testInstanceAuthorityDeps(t, root),
 		testInstanceAuthorityPolicy(root),
 		newTestInstanceAuthorityTree(),
 	)

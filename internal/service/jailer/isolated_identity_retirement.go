@@ -54,22 +54,32 @@ func retireRemovedVMExecution(ctx context.Context, locked *lockedInstance, calle
 
 // No directory is created or adopted. Absence is relative to retained trusted
 // parents, including the operator component of the private VMM runtime tree.
-func requireExecutionRetirementTreesAbsent(ctx context.Context, ownerUID uint32, vmID string) error {
+func requireExecutionRetirementTreesAbsent(
+	ctx context.Context,
+	policy instanceAuthorityPolicy,
+	ownerUID uint32,
+	vmID string,
+) error {
 	parents := [][]string{
 		{"var", "lib", "mvmctl", "jailer", "firecracker"},
 		{"run", "mvmctl", "vmm-runtime", strconv.FormatUint(uint64(ownerUID), 10)},
 		{"run", "mvmctl", "runtime", strconv.FormatUint(uint64(ownerUID), 10)},
 	}
 	for _, components := range parents {
-		if err := requireExecutionRetirementTreeAbsent(ctx, components, vmID); err != nil {
+		if err := requireExecutionRetirementTreeAbsent(ctx, policy, components, vmID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func requireExecutionRetirementTreeAbsent(ctx context.Context, components []string, vmID string) (returnErr error) {
-	fd, err := unix.Open("/", instanceDirectoryFlags, 0)
+func requireExecutionRetirementTreeAbsent(
+	ctx context.Context,
+	policy instanceAuthorityPolicy,
+	components []string,
+	vmID string,
+) (returnErr error) {
+	fd, err := unix.Open(policy.rootPath, instanceDirectoryFlags, 0)
 	if err != nil {
 		return instanceAtomicError("open execution retirement filesystem root", err)
 	}

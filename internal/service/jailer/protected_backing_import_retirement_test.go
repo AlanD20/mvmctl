@@ -450,6 +450,9 @@ func TestProtectedImportRetirementLiveTaskRefusesBeforeEffects(t *testing.T) {
 	before := fixture.readRecord(t)
 	retirement := &protectedImportRetirement{
 		ownerUID: 1000, vmID: testVMID,
+		locked: &lockedInstance{vmLock: &vmAuthorityLease{state: &vmAuthorityLeaseState{
+			policy: testInstanceAuthorityPolicy(fixture.root), accounts: realExecutionIdentityAccountDeps(),
+		}}},
 		identity: vmExecutionIdentity{uid: uint32(os.Geteuid()), gid: uint32(os.Getegid())},
 	}
 	assert.Error(t, retirement.requireAbsence(t.Context()))

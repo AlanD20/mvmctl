@@ -15,8 +15,12 @@ import (
 
 // The lifecycle owner calls this before publishing launching. Thereafter a missing family is
 // lost authority, never evidence that the VM has no grants.
-func prepareProtectedVMGrantInventory(ctx context.Context, ownerUID uint32) (returnErr error) {
-	owner, retained, err := openProtectedInventoryOwner(ctx, ownerUID, true)
+func prepareProtectedVMGrantInventory(
+	ctx context.Context,
+	policy instanceAuthorityPolicy,
+	ownerUID uint32,
+) (returnErr error) {
+	owner, retained, err := openProtectedInventoryOwner(ctx, policy, ownerUID, true)
 	if err != nil {
 		return err
 	}
@@ -42,11 +46,16 @@ func protectedInventoryKinds() []string {
 	return []string{protectedBackingCloudInit, protectedBackingKernel, protectedBackingRootfs, protectedBackingVolume}
 }
 
-func openProtectedInventoryOwner(ctx context.Context, ownerUID uint32, create bool) (_ int, _ []int, returnErr error) {
+func openProtectedInventoryOwner(
+	ctx context.Context,
+	policy instanceAuthorityPolicy,
+	ownerUID uint32,
+	create bool,
+) (_ int, _ []int, returnErr error) {
 	if ownerUID == 0 || ownerUID == math.MaxUint32 {
 		return -1, nil, managedVMResourceValidationError("protected inventory owner is invalid")
 	}
-	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	fd, err := unix.Open(policy.rootPath, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return -1, nil, managedVMResourceAtomicError("open protected inventory root", err)
 	}
@@ -76,6 +85,7 @@ type protectedInventoryEntry struct {
 // effect reacquires the object's lock and admits its current record before mutation.
 func inventoryProtectedVMBackings(
 	ctx context.Context,
+	policy instanceAuthorityPolicy,
 	ownerUID uint32,
 	vmID string,
 	executionUID uint32,
@@ -83,7 +93,7 @@ func inventoryProtectedVMBackings(
 	if !isCanonicalManagedResourceID(vmID, 32) {
 		return nil, managedVMResourceValidationError("protected inventory VM identity is invalid")
 	}
-	owner, retained, err := openProtectedInventoryOwner(ctx, ownerUID, false)
+	owner, retained, err := openProtectedInventoryOwner(ctx, policy, ownerUID, false)
 	if err != nil {
 		return nil, err
 	}
@@ -247,8 +257,14 @@ func readProtectedInventoryEntry(
 	return result, true, nil
 }
 
-func requireProtectedVMGrantsAbsent(ctx context.Context, ownerUID uint32, vmID string, executionUID uint32) error {
-	entries, err := inventoryProtectedVMBackings(ctx, ownerUID, vmID, executionUID)
+func requireProtectedVMGrantsAbsent(
+	ctx context.Context,
+	policy instanceAuthorityPolicy,
+	ownerUID uint32,
+	vmID string,
+	executionUID uint32,
+) error {
+	entries, err := inventoryProtectedVMBackings(ctx, policy, ownerUID, vmID, executionUID)
 	if err != nil {
 		return err
 	}
@@ -264,8 +280,14 @@ func requireProtectedVMGrantsAbsent(ctx context.Context, ownerUID uint32, vmID s
 	return nil
 }
 
-func revokeProtectedVMGrants(ctx context.Context, ownerUID uint32, vmID string, executionUID uint32) error {
-	entries, err := inventoryProtectedVMBackings(ctx, ownerUID, vmID, executionUID)
+func revokeProtectedVMGrants(
+	ctx context.Context,
+	policy instanceAuthorityPolicy,
+	ownerUID uint32,
+	vmID string,
+	executionUID uint32,
+) error {
+	entries, err := inventoryProtectedVMBackings(ctx, policy, ownerUID, vmID, executionUID)
 	if err != nil {
 		return err
 	}
@@ -298,7 +320,7 @@ func revokeProtectedVMGrants(ctx context.Context, ownerUID uint32, vmID string, 
 			return err
 		}
 	}
-	return requireProtectedVMGrantsAbsent(ctx, ownerUID, vmID, executionUID)
+	return requireProtectedVMGrantsAbsent(ctx, policy, ownerUID, vmID, executionUID)
 }
 
 func removeProtectedVMBackingArtifacts(ctx context.Context, retirement *protectedImportRetirement) error {
@@ -315,7 +337,7 @@ func removeProtectedVMBackingArtifacts(ctx context.Context, retirement *protecte
 		return err
 	}
 	ownerUID, vmID := retirement.ownerUID, retirement.vmID
-	entries, err := inventoryProtectedVMBackings(ctx, ownerUID, vmID, 0)
+	entries, err := inventoryProtectedVMBackings(ctx, state.policy, ownerUID, vmID, 0)
 	if err != nil {
 		return err
 	}

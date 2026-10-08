@@ -16,20 +16,28 @@ import (
 const executionIdentityRecordLimit = 2048
 
 type executionIdentityStore struct {
+	deps      instanceAuthorityDeps
+	policy    instanceAuthorityPolicy
 	directory int
 	lock      int
 	retained  []int
 }
 
 func openExecutionIdentityStore(ctx context.Context, create bool) (result *executionIdentityStore, returnErr error) {
-	store := &executionIdentityStore{directory: -1, lock: -1}
+	return openExecutionIdentityStoreWithPolicy(ctx, productionInstanceAuthorityPolicy(), create)
+}
+
+func openExecutionIdentityStoreWithPolicy(
+	ctx context.Context, policy instanceAuthorityPolicy, create bool,
+) (result *executionIdentityStore, returnErr error) {
+	deps := realInstanceAuthorityDeps()
+	store := &executionIdentityStore{deps: deps, policy: policy, directory: -1, lock: -1}
 	defer func() {
 		if result == nil {
 			returnErr = errors.Join(returnErr, store.close(context.WithoutCancel(ctx)))
 		}
 	}()
-	deps, policy := realInstanceAuthorityDeps(), productionInstanceAuthorityPolicy()
-	root, err := unix.Open("/", instanceDirectoryFlags, 0)
+	root, err := deps.open(ctx, policy.rootPath, instanceDirectoryFlags, 0)
 	if err != nil {
 		return nil, instanceAtomicError("open execution identity authority root", err)
 	}
@@ -72,7 +80,7 @@ func openExecutionIdentityStore(ctx context.Context, create bool) (result *execu
 	store.retained = append(store.retained, lock)
 	if created {
 		if err := errors.Join(
-			unix.Fchown(lock, 0, 0),
+			unix.Fchown(lock, int(policy.expectedUID), int(policy.expectedGID)),
 			unix.Fchmod(lock, 0600),
 			unix.Fsync(lock),
 			unix.Fsync(parent),
@@ -80,7 +88,7 @@ func openExecutionIdentityStore(ctx context.Context, create bool) (result *execu
 			return nil, instanceAtomicError("persist execution identity allocator lock", err)
 		}
 	}
-	if err := inspectExecutionIdentityRecordFD(ctx, lock); err != nil {
+	if err := inspectExecutionIdentityRecordFD(ctx, lock, policy); err != nil {
 		return nil, err
 	}
 	for {
@@ -119,7 +127,7 @@ func (store *executionIdentityStore) close(ctx context.Context) error {
 	return result
 }
 
-func inspectExecutionIdentityRecordFD(ctx context.Context, fd int) error {
+func inspectExecutionIdentityRecordFD(ctx context.Context, fd int, policy instanceAuthorityPolicy) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -127,8 +135,10 @@ func inspectExecutionIdentityRecordFD(ctx context.Context, fd int) error {
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return instanceAtomicError("inspect execution identity reservation", err)
 	}
-	if stat.Mode != unix.S_IFREG|0600 || stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 ||
-		stat.Size < 0 || stat.Size > executionIdentityRecordLimit {
+	if stat.Mode != unix.S_IFREG|0600 || stat.Uid != policy.expectedUID || stat.Gid != policy.expectedGID ||
+		stat.Nlink != 1 ||
+		stat.Size < 0 ||
+		stat.Size > executionIdentityRecordLimit {
 		return instanceAtomicError("execution identity reservation metadata is unsafe", nil)
 	}
 	return nil
@@ -146,7 +156,7 @@ func (store *executionIdentityStore) read(ctx context.Context, vmID string) (
 	}
 	file := os.NewFile(uintptr(fd), "execution-identity-reservation")
 	defer func() { returnErr = errors.Join(returnErr, file.Close()) }()
-	if err := inspectExecutionIdentityRecordFD(ctx, fd); err != nil {
+	if err := inspectExecutionIdentityRecordFD(ctx, fd, store.policy); err != nil {
 		return record, false, err
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, executionIdentityRecordLimit+1))
@@ -205,10 +215,10 @@ func (store *executionIdentityStore) write(
 	if err != nil {
 		return instanceAtomicError("encode execution identity reservation", err)
 	}
-	deps := realInstanceAuthorityDeps()
+	deps := store.deps
 	directory := &instanceUIDDirectories{
 		deps:    deps,
-		policy:  productionInstanceAuthorityPolicy(),
+		policy:  store.policy,
 		stateFD: store.directory,
 	}
 	name, fd, err := createInstanceRecordTemp(ctx, directory)
@@ -221,7 +231,7 @@ func (store *executionIdentityStore) write(
 			returnErr = errors.Join(returnErr, unix.Unlinkat(store.directory, name, 0))
 		}
 	}()
-	if err := errors.Join(unix.Fchown(fd, 0, 0), unix.Fchmod(fd, 0600)); err != nil {
+	if err := errors.Join(unix.Fchown(fd, int(store.policy.expectedUID), int(store.policy.expectedGID)), unix.Fchmod(fd, 0600)); err != nil {
 		return instanceAtomicError("set execution reservation metadata", err)
 	}
 	if err := writeAllInstanceRecord(ctx, deps, fd, raw); err != nil {
@@ -283,7 +293,7 @@ func (store *executionIdentityStore) pin(ctx context.Context, record executionId
 	if err != nil {
 		return -1, instanceAtomicError("pin execution identity reservation", err)
 	}
-	if err := inspectExecutionIdentityRecordFD(ctx, fd); err != nil {
+	if err := inspectExecutionIdentityRecordFD(ctx, fd, store.policy); err != nil {
 		return -1, errors.Join(err, unix.Close(fd))
 	}
 	return fd, nil

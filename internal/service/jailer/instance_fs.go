@@ -38,6 +38,7 @@ const (
 )
 
 type instanceAuthorityDeps struct {
+	accounts     executionIdentityAccountDeps
 	open         func(context.Context, string, int, uint32) (int, error)
 	openAt       func(context.Context, int, string, int, uint32) (int, error)
 	mkdirAt      func(context.Context, int, string, uint32) error
@@ -510,6 +511,7 @@ func readInstanceDirectoryNames(ctx context.Context, fd int) ([]string, error) {
 
 func realInstanceAuthorityDeps() instanceAuthorityDeps {
 	return instanceAuthorityDeps{
+		accounts: realExecutionIdentityAccountDeps(),
 		open: func(_ context.Context, path string, flags int, mode uint32) (int, error) {
 			return unix.Open(path, flags, mode)
 		},

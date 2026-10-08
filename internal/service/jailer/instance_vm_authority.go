@@ -15,6 +15,8 @@ type vmAuthorityLease struct {
 type vmAuthorityLeaseState struct {
 	// mu guards value and every lifecycle field below. ownerUID and key are immutable.
 	mu         sync.Mutex
+	accounts   executionIdentityAccountDeps
+	policy     instanceAuthorityPolicy
 	value      instanceVMAuthority
 	ownerUID   uint32
 	key        authorityfs.VMKey

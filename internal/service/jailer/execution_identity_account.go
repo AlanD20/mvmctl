@@ -14,6 +14,30 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
+// executionIdentityAccountDeps isolates the account authority from reservation storage.
+// Production binds only the fixed host-account operations; each fixture owns its adapter.
+type executionIdentityAccountDeps struct {
+	requireHostTools      func(context.Context) error
+	requireNameAbsent     func(context.Context, string) error
+	create                func(context.Context, executionIdentityRecord, instanceCaller) (vmExecutionIdentity, error)
+	require               func(context.Context, executionIdentityRecord, instanceCaller) error
+	requireRecord         func(context.Context, executionIdentityRecord) error
+	requireProcessAbsence func(context.Context, vmExecutionIdentity) error
+	remove                func(context.Context, executionIdentityRecord) error
+}
+
+func realExecutionIdentityAccountDeps() executionIdentityAccountDeps {
+	return executionIdentityAccountDeps{
+		requireHostTools:      requireExecutionIdentityHostTools,
+		requireNameAbsent:     requireExecutionIdentityNameAbsent,
+		create:                createExecutionIdentityAccount,
+		require:               requireExecutionIdentityAccount,
+		requireRecord:         requireExecutionIdentityAccountRecord,
+		requireProcessAbsence: requireExecutionIdentityProcessAbsence,
+		remove:                removeExecutionIdentityAccount,
+	}
+}
+
 const executionIdentityAccountFileLimit = 4 * 1024 * 1024
 
 func requireExecutionIdentityHostTools(ctx context.Context) error {
