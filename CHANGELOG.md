@@ -103,6 +103,11 @@ the selected strict-outcome runner unit passed. These VM bodies remain unqualifi
 claim cooperative cancellation of the root context or immediate restoration at CLI return; real copy-I/O
 failure remains a separate coverage gap.
 
+The first Running-state attempt exposed a marker-setup shell-argument error, now corrected in all three affected
+test setups. A corrected attempt was interrupted by the unchanged outer-runner 2 GiB memory-growth guard,
+not an OOM; no test completed and the import phase was not established. Cleanup and independent preservation
+checks passed. This does not qualify export behavior; limits were not increased and the attempt was not repeated.
+
 On 2026-10-03, exact clean source `a3d7b8d0`, including the cloud-init OFF and built-in-KVM corrections,
 passed the complete local Go CI sequence inside `mvmctl-030-test`: tidy, architecture, formatting, generation,
 vet and the full unprivileged selector, with complete atomic coverage. The selected Jailer tests passed in

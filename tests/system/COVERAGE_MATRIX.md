@@ -31,6 +31,15 @@ All five remain **partial/unqualified**, despite the verified real-agent build a
 not cooperative cancellation of its root context or immediate restoration when the CLI returns. Real copy-I/O
 failure remains a separate coverage gap. Independent checks preserved the runner baseline.
 
+The first Running-state execution failed before import at an incorrectly nested shell command in its marker
+setup; the three marker setups were corrected to use the CLI's command-string contract. The corrected module
+(`c42345377509dc24834b12edb4c63ea70e6f52ace4186d49f300eba22c837b8a`) collected the Running case, but the
+unchanged outer-runner 2 GiB memory-growth guard interrupted it after 12.92 seconds: first observed growth was
+2,219,978,752 bytes. No test completed, and the retained quiet output does not establish whether marker writing
+or import was reached. This is **not an export failure or pass**. All six cleanup checks and the independent
+post-check passed; VM/job inventories were empty, bindings and cgroup controls/events were unchanged. No limits
+were raised and no unchanged retry was performed.
+
 **Enabled GuestFS focused qualification (2026-10-02):** Installed candidate `0.3.0-rc.562b38de` passed
 `cache/test_guestfs_appliance.py::test_enabled_build_reuse_and_incomplete_rebuild` inside `mvmctl-030-test`
 in 68.18 seconds. The strict report contains one pass and zero failures, errors, skips, deselections, XFAIL or
