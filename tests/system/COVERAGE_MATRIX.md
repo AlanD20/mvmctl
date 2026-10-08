@@ -17,7 +17,27 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Current coherent Go/build/install checkpoint (2026-10-08):** Clean parent `992d2fd5` passed the nine-phase
+**Latest installed-candidate checkpoint (2026-10-08):** The signed image-selector correction `020cd232`
+passed its intended pre-fix regression, six corrected behavioral cases, the input-package suite and focused
+format/vet checks inside `mvmctl-030-test` (`19cb3d83`). Clean tree `7628b6f5` then passed the production
+real-agent Go 1.26.3/PIE build (`270d8fdc`). Candidate `0.3.0-rc.image-selector-020cd232`, SHA-256
+`cd2b1cdaf5bb84b6858fa4953f09bc8dc3fc1380e74db4d0258d76172b595d47`, was installed through
+`host install-system` only inside the named runner (`5ff322ca`), with exact independent preservation checks.
+The normal orchestrator's mirror-volume preparation also passed (`9e0a7d2f`); reusable-base provisioning did not
+run. Neither result qualifies the memory-pressure cases or the remaining installed T1/T2 matrix. The earlier
+ordinary CI and full-root results below carry only unchanged surfaces; they are not relabeled as complete
+CI/root executions on `020cd232`. The outer installed controller and other VMs remain unchanged.
+
+**Explicit-kernel memory QA preparation (2026-10-08):** `vm/test_cgroup.py` accepts the existing paired
+runner kernel ID/digest and passes the verified kernel explicitly at its three VM-create sites; without the
+pair, the default-kernel requirement is unchanged. Test workloads, runtime assertions and cleanup are unchanged.
+The selected host-swap-absent saturation case collected successfully inside the named runner; the existing
+imported-kernel runner-binding unit passed 1/1 with strict JSON/JUnit outcomes (`df714230`). Collection-only
+items have no runtime call phase and are classified as `errors` by the outcome hook; this is not a collection
+failure or runtime pass. Two failed private-launcher receipts remain failures. The installed pressure case
+itself has not run, so this change does not close memory qualification.
+
+**Earlier coherent Go/build/install checkpoint (2026-10-08):** Clean parent `992d2fd5` passed the nine-phase
 ordinary Go 1.26.3 CI sequence inside `mvmctl-030-test`, with 59 native package passes and ten no-test rows
 (receipt SHA-256 `318efd21`). This is carried evidence for unchanged surfaces, not a complete CI execution on
 `64079c3b`. The separate full root Jailer suite on clean `64079c3b` passed 828 top-level tests and 1,799 child
