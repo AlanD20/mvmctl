@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Current checkpoint (2026-10-08):** protected VM-to-image exports are integrated and local Go CI passed.
 > Consolidated root evidence covers 826 unchanged passes plus the corrected authority-path test's focused pass,
-> not a repeated full-suite run. A real-agent candidate build/install and installed export/recovery journeys remain
-> pending; v0.3.0 is not release-qualified. The outer installed controller remains unchanged.
+> not a repeated full-suite run. Clean source `497455a6` passed the real-agent release build and normal installation
+> inside `mvmctl-030-test`, with independent preservation checks. Installed export/recovery journeys remain pending;
+> v0.3.0 is not release-qualified. The outer installed controller remains unchanged.
 
 > **Earlier QA checkpoint (2026-10-03):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
@@ -85,8 +86,13 @@ Go CI sequence with both atomic coverage profiles after restoring the harness's 
 phases were carried by hash rather than repeated. Full root-Jailer recorded 826 passes and one obsolete exact-open-count
 assertion. Its test-only correction now checks that every opened path is the fixed authority root, and passed focused
 format, vet and test checks. The 826 unchanged passes were retained; this is consolidated evidence, not a repeated
-green full-package invocation. A real-agent candidate build/install and installed import/recovery journeys remain
-pending. Original failures and preservation evidence remain recorded. No outer controller installation was performed.
+green full-package invocation. Clean source `497455a6` then passed the cached Go 1.26.3 real-agent release build,
+with PIE and exact unmodified VCS identity. Normal `host install-system` installed
+`0.3.0-rc.vmexport-497455a6` only inside the named QA runner; installed content matched the verified artifact,
+canonical ownership/mode remained `root:root`/`0755`, and independent checks preserved configuration, inventories,
+root authority and mirrored assets. The previous runner binary was retained and observed OOM counters stayed zero.
+Installed import/recovery journeys remain pending. Original failures and preservation evidence remain recorded.
+No outer controller installation was performed.
 
 On 2026-10-03, exact clean source `a3d7b8d0`, including the cloud-init OFF and built-in-KVM corrections,
 passed the complete local Go CI sequence inside `mvmctl-030-test`: tidy, architecture, formatting, generation,

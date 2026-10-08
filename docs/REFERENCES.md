@@ -277,6 +277,8 @@ Use the typed command, not manual deletion. An open reader can retain unlinked b
 not promise immediate physical reclamation.
 
 The authoritative export and cleanup paths are implemented, with focused Go coverage and passing local Go CI.
+The real-agent candidate built from clean source `497455a6` and its normal installation inside the named QA runner
+passed exact binary-identity and independent preservation checks; the outer controller was not replaced.
 Installed-candidate VM-import and interruption journeys remain release-qualification gates; see
 [ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md#vm-to-image-import-from-authoritative-backing).
 

@@ -64,8 +64,10 @@ the isolation prerequisite after previously pausing it for a separate design dec
 ### VM-to-image import from authoritative backing
 
 Accepted on 2026-10-07; implementation integrated on 2026-10-08 with focused Go verification and passing local Go CI.
-Installed-candidate qualification remains pending. The user selected running-VM import with pause/resume rather
-than requiring every source VM to be stopped.
+Clean source `497455a6` subsequently passed the real-agent release build and normal named-runner installation,
+with exact binary identity and independent preservation checks. Installed VM-import and interruption journeys
+remain unqualified. The user selected running-VM import with pause/resume rather than requiring every source VM
+to be stopped.
 
 The operator-visible staging rootfs is not the guest's current disk after protected-backing admission. Reading it
 for VM-to-image import can discard guest changes, including packages installed by the reusable test-base builder.
