@@ -6,8 +6,11 @@ import hashlib
 import json
 import os
 import re
+import select
 import shlex
 import shutil
+import signal
+import subprocess
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,6 +20,561 @@ import pytest
 from tests.system.conftest import _guest_run, _json_success_data, _run_mvm
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_image]
+
+
+_VM_IMPORT_DEATH_OBSERVER = r"""
+import hashlib
+import json
+import os
+import re
+import select
+import signal
+import stat
+import sys
+import time
+
+vm_id, owner, source_pid, source_ticks, cache, import_name = sys.argv[1:]
+owner, source_pid, source_ticks = int(owner), int(source_pid), int(source_ticks)
+assert os.geteuid() == 0 and int(os.environ['SUDO_UID']) == owner > 0
+assert re.fullmatch(r'[0-9a-f]{32}', vm_id)
+assert re.fullmatch(r'sys-image-[0-9a-f]{32}', import_name)
+fds, receiver, receiver_pidfd, image_id, exports, copies = [], None, None, None, None, None
+exports_parent = None
+receiver_owned = False
+
+def keep(fd):
+    fds.append(fd)
+    return fd
+
+def forget(fd):
+    os.close(fd)
+    fds.remove(fd)
+
+def identity(info):
+    return info.st_dev, info.st_ino
+
+def stable(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+def unique(pairs):
+    value = {}
+    for key, item in pairs:
+        assert key not in value, 'duplicate authority field'
+        value[key] = item
+    return value
+
+def read(parent, name, maximum):
+    fd = os.open(name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    try:
+        before = os.fstat(fd)
+        value = bytearray()
+        while len(value) <= maximum:
+            part = os.read(fd, min(65536, maximum + 1 - len(value)))
+            if not part:
+                break
+            value.extend(part)
+        after = os.fstat(fd)
+        assert len(value) <= maximum and stable(before) == stable(after), 'unstable or oversized observation'
+        return before, bytes(value)
+    finally:
+        os.close(fd)
+
+def directory(parent, name):
+    fd = keep(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=parent))
+    info = os.fstat(fd)
+    assert info.st_uid == info.st_gid == 0 and not info.st_mode & 0o022, (name, info)
+    return fd
+
+def authority(parent, name, maximum=16384, mode=0o600):
+    info, raw = read(parent, name, maximum)
+    assert info.st_mode == stat.S_IFREG | mode and info.st_uid == info.st_gid == 0
+    assert info.st_nlink == 1 and 0 < info.st_size <= maximum
+    value = json.loads(raw, object_pairs_hook=unique)
+    assert json.dumps(value, separators=(',', ':'), ensure_ascii=False).encode() == raw
+    return info, raw, value
+
+def proc(pid):
+    return os.open('/proc/' + str(pid), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+
+def process(fd):
+    _, raw = read(fd, 'stat', 16384)
+    fields = raw.decode().rpartition(') ')[2].split()
+    return {'state': fields[0], 'parent': int(fields[1]), 'group': int(fields[2]), 'ticks': int(fields[19])}
+
+def credentials(fd):
+    _, raw = read(fd, 'status', 65536)
+    values = dict(line.split(':', 1) for line in raw.decode().splitlines() if ':' in line)
+    return [int(x) for x in values['Uid'].split()], [int(x) for x in values['Gid'].split()]
+
+def exited(pidfd, timeout=0):
+    poller = select.poll()
+    poller.register(pidfd, select.POLLIN)
+    events = poller.poll(timeout)
+    assert not events or not events[0][1] & (select.POLLERR | select.POLLNVAL), events
+    return bool(events)
+
+def digest_executable(parent):
+    # /proc/<admitted-pid>/exe is an intentional process-identity read, not a selector.
+    fd = os.open('exe', os.O_RDONLY | os.O_CLOEXEC, dir_fd=parent)
+    try:
+        info = os.fstat(fd)
+        assert stat.S_ISREG(info.st_mode) and info.st_uid == info.st_gid == 0
+        assert stat.S_IMODE(info.st_mode) == 0o755 and info.st_nlink == 1
+        assert 0 < info.st_size <= 64 * 1024 * 1024
+        with os.fdopen(os.dup(fd), 'rb') as value:
+            return identity(info), hashlib.file_digest(value, 'sha256').hexdigest()
+    finally:
+        os.close(fd)
+
+def source_unchanged():
+    assert not exited(source_pidfd)
+    current = process(source_proc)
+    assert current['ticks'] == source_ticks and current['state'] not in ('Z', 'X')
+    assert credentials(source_proc) == ([execution_uid] * 4, [execution_gid] * 4)
+    info, raw, _ = authority(instances, vm_id + '.json')
+    assert identity(info) == identity(source_record_info) and raw == source_record_raw
+    assert identity(os.stat('root', dir_fd=source_proc)) == jail_identity
+    assert identity(os.stat('ns/mnt', dir_fd=source_proc)) == mount_identity
+    _, cgroup = read(source_proc, 'cgroup', 16384)
+    assert cgroup.decode() == '0::/mvmctl/' + vm_id + '\n'
+    _, boot = read(None, '/proc/sys/kernel/random/boot_id', 128)
+    assert boot.decode().strip() == boot_id
+    _, _, current_device = authority(jail, '.mvm-device-authority.json', 262144, 0o400)
+    assert current_device['rootfs'] == rootfs and current_device['launch_generation'] == generation
+    executable = os.open('exe', os.O_RDONLY | os.O_CLOEXEC, dir_fd=source_proc)
+    try:
+        info = os.fstat(executable)
+        observed = {'device': info.st_dev, 'inode': info.st_ino, 'size_bytes': info.st_size,
+                    'mode': info.st_mode, 'uid': info.st_uid, 'gid': info.st_gid, 'links': info.st_nlink}
+        assert {key: active['executable'][key] for key in observed} == observed
+        assert 0 < info.st_size <= 64 * 1024 * 1024
+        with os.fdopen(os.dup(executable), 'rb') as value:
+            assert hashlib.file_digest(value, 'sha256').hexdigest() == launch['release']['firecracker_sha256']
+    finally:
+        os.close(executable)
+
+def receiver_unchanged():
+    assert receiver_pidfd is not None and not exited(receiver_pidfd)
+    current = process(receiver)
+    assert current['ticks'] == receiver_identity['ticks'] and current['state'] not in ('Z', 'X')
+    assert current['group'] == receiver_identity['group']
+    assert credentials(receiver) == ([0] * 4, [0] * 4)
+    assert digest_executable(receiver) == candidate
+    assert read(receiver, 'cmdline', 4096)[1].split(b'\0')[:-1] == receiver_argv
+    assert read(receiver, 'cgroup', 16384)[1] == cli_cgroup
+    assert identity(os.stat('ns/mnt', dir_fd=receiver)) == cli_mount
+
+def children(pid):
+    # Go may fork from any thread: enumerate only this admitted ancestry subtree.
+    task = os.open('/proc/' + str(pid) + '/task', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        names = os.listdir(task)
+        assert len(names) <= 256
+        values = set()
+        for name in names:
+            try:
+                _, raw = read(task, name + '/children', 4096)
+                values.update(int(x) for x in raw.split())
+            except FileNotFoundError:
+                pass
+        return values
+    finally:
+        os.close(task)
+
+def find_receiver(cli_pid):
+    pending, seen, found = [(cli_pid, cli_ticks)], set(), []
+    while pending:
+        pid, ticks = pending.pop()
+        assert pid not in seen and len(seen) < 32, 'ambiguous or oversized CLI ancestry'
+        seen.add(pid)
+        try:
+            parent = proc(pid)
+        except FileNotFoundError:
+            continue
+        try:
+            try:
+                assert process(parent)['ticks'] == ticks
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            for child_pid in children(pid):
+                try:
+                    child = proc(child_pid)
+                except FileNotFoundError:
+                    continue
+                try:
+                    try:
+                        observed = process(child)
+                        argv = read(child, 'cmdline', 4096)[1].split(b'\0')[:-1]
+                    except (FileNotFoundError, ProcessLookupError):
+                        continue
+                    assert observed['parent'] == pid
+                    if argv == receiver_argv:
+                        assert credentials(child) == ([0] * 4, [0] * 4)
+                        assert digest_executable(child) == candidate
+                        found.append((child_pid, observed))
+                    pending.append((child_pid, observed['ticks']))
+                finally:
+                    os.close(child)
+        finally:
+            os.close(parent)
+    assert len(found) <= 1, 'multiple export receivers'
+    return found
+
+def copy_phase():
+    _, _, progress = authority(exports, vm_id + '.json')
+    assert progress['owner_uid'] == owner and progress['vm_id'] == vm_id
+    assert progress['generation'] == generation and progress['boot_id'] == boot_id
+    assert progress['rootfs'] == rootfs and progress['cache_root'] == cache
+    assert progress['original_state'] == 'Running'
+    identifier = progress['image_id']
+    assert re.fullmatch(r'[0-9a-f]{64}', identifier)
+    entry = directory(copies, identifier)
+    try:
+        _, _, record = authority(entry, 'copy.json')
+    finally:
+        forget(entry)
+    bound = record['source']
+    for key in ('owner_uid', 'vm_id', 'generation', 'boot_id', 'rootfs', 'cache_root', 'image_id'):
+        assert bound[key] == progress[key]
+    assert record['file'] == {'device': progress['output_device'], 'inode': progress['output_inode']}
+    assert record['directory'] == {'device': progress['parent_device'], 'inode': progress['parent_inode']}
+    return progress, record
+
+def freeze_copy():
+    global image_id, data_uid, copy_record, progress_before
+    progress, record = copy_phase()
+    if progress['stage'] != 'copying' or record['phase'] != 'allocated':
+        assert progress['stage'] in ('prepared', 'pause_inflight', 'paused'), 'missed mid-copy fault window'
+        return False
+    source_unchanged()
+    receiver_unchanged()
+    signal.pidfd_send_signal(receiver_pidfd, signal.SIGSTOP)
+    deadline = time.monotonic() + 5
+    while process(receiver)['state'] != 'T' and time.monotonic() < deadline:
+        assert not exited(receiver_pidfd)
+        time.sleep(0.001)
+    assert process(receiver)['state'] == 'T', 'receiver did not stop'
+    receiver_unchanged()
+    progress, record = copy_phase()
+    # Retain admitted request ownership even when the fault phase raced past us.
+    image_id = progress['image_id']
+    assert progress['stage'] == 'copying' and record['phase'] == 'allocated', 'missed mid-copy fault window'
+    data_root = directory(state, 'vm-rootfs-export-data')
+    assert identity(os.fstat(data_root)) == (record['data_root']['device'], record['data_root']['inode'])
+    data_uid = directory(data_root, str(owner))
+    assert identity(os.fstat(data_uid)) == (record['uid_directory']['device'], record['uid_directory']['inode'])
+    data = directory(data_uid, image_id)
+    assert identity(os.fstat(data)) == (progress['parent_device'], progress['parent_inode'])
+    assert os.listdir(data) == [], 'partial output must remain anonymous'
+    marker = os.stat(image_id + '.copy', dir_fd=data_uid, follow_symlinks=False)
+    assert identity(marker) == (record['marker']['device'], record['marker']['inode'])
+    assert stat.S_ISREG(marker.st_mode) and marker.st_uid == marker.st_gid == 0 and marker.st_nlink == 1
+    descriptor_dir = os.open('fd', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=receiver)
+    try:
+        names = os.listdir(descriptor_dir)
+        assert len(names) <= 256
+        matches = [os.stat(name, dir_fd=descriptor_dir) for name in names]
+        matches = [info for info in matches if identity(info) == (progress['output_device'], progress['output_inode'])]
+        assert len(matches) == 1
+        info = matches[0]
+        assert info.st_mode == stat.S_IFREG | 0o600 and info.st_uid == info.st_gid == 0 and info.st_nlink == 0
+        assert 0 < info.st_size < rootfs['bytes'], 'copy was not interrupted mid-write'
+    finally:
+        os.close(descriptor_dir)
+    copy_record, progress_before = record, progress
+    print(json.dumps({'phase': 'copying', 'image_id': image_id, 'receiver_pid': receiver_pid,
+                      'receiver_start_ticks': receiver_identity['ticks'], 'partial_bytes': info.st_size,
+                      'source_generation': generation, 'source_rootfs': rootfs}), flush=True)
+    return True
+
+try:
+    root = directory(None, '/')
+    var = directory(root, 'var')
+    lib = directory(var, 'lib')
+    state = directory(lib, 'mvmctl')
+    instances = directory(directory(state, 'instances'), str(owner))
+    source_record_info, source_record_raw, source_record = authority(instances, vm_id + '.json')
+    assert source_record['owner_uid'] == owner and source_record['vm_id'] == vm_id
+    assert source_record['lifecycle'] == 'active' and source_record['network_placement'] == 'networkless'
+    launch, active = source_record['launch'], source_record['active']
+    generation = source_record['launch_generation']
+    assert launch['pid'] == source_pid and launch['start_time_ticks'] == source_ticks
+    execution_uid, execution_gid = launch['execution_identity']['uid'], launch['execution_identity']['gid']
+    assert execution_uid not in (0, owner) and generation > 0
+    source_pidfd = keep(os.pidfd_open(source_pid))
+    source_proc = keep(proc(source_pid))
+    jail = keep(os.open('root', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=source_proc))
+    jail_identity = active['jail_root']['device'], active['jail_root']['inode']
+    mount_identity = active['mount_namespace']['device'], active['mount_namespace']['inode']
+    _, _, device = authority(jail, '.mvm-device-authority.json', 262144, 0o400)
+    rootfs, boot_id = device['rootfs'], device['host_boot_id']
+    assert device['vm_id'] == vm_id and device['owner_uid'] == owner and device['launch_generation'] == generation
+    assert rootfs['kind'] == 'rootfs' and rootfs['logical_id'] == vm_id and rootfs['owner_uid'] == owner
+    assert rootfs['bytes'] == 512 * 1024 * 1024 and rootfs['identity']['size'] == rootfs['bytes']
+    source_unchanged()
+    print(json.dumps({'phase': 'ready', 'source_generation': generation}), flush=True)
+    assert select.select([sys.stdin], [], [], 30)[0], 'CLI arm timeout'
+    command = sys.stdin.readline(256).split()
+    assert len(command) == 3 and command[0] == 'arm'
+    cli_pid, cli_ticks = int(command[1]), int(command[2])
+    cli_pidfd, cli_proc = keep(os.pidfd_open(cli_pid)), keep(proc(cli_pid))
+    assert process(cli_proc)['ticks'] == cli_ticks and not exited(cli_pidfd)
+    assert credentials(cli_proc)[0] == [owner] * 4
+    candidate = digest_executable(cli_proc)
+    assert candidate[0] == identity(os.stat('/usr/local/bin/mvm', follow_symlinks=False))
+    assert read(cli_proc, 'cmdline', 4096)[1].split(b'\0')[:-1] == [
+        b'/usr/local/bin/mvm', b'image', b'import', import_name.encode(), vm_id.encode(),
+        b'--skip-optimization', b'--json',
+    ]
+    cli_cgroup = read(cli_proc, 'cgroup', 16384)[1]
+    cli_mount = identity(os.stat('ns/mnt', dir_fd=cli_proc))
+    receiver_argv = [b'/usr/local/bin/mvm', b'__mvm_privileged_v1', b'jailer-vm-rootfs-export']
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        assert not exited(cli_pidfd), 'CLI exited before the copy fault'
+        if receiver is None:
+            found = find_receiver(cli_pid)
+            if found:
+                receiver_pid, receiver_identity = found[0]
+                receiver_pidfd, receiver = keep(os.pidfd_open(receiver_pid)), keep(proc(receiver_pid))
+                receiver_unchanged()
+                receiver_owned = True
+        if receiver is not None:
+            try:
+                if exports is None:
+                    if exports_parent is None:
+                        exports_parent = directory(state, 'vm-rootfs-exports')
+                    exports = directory(exports_parent, str(owner))
+                if copies is None:
+                    copies = directory(exports, 'copies')
+                if freeze_copy():
+                    break
+            except FileNotFoundError:
+                pass
+        time.sleep(0.002)
+    else:
+        raise AssertionError('no authentic partial-copy fault phase')
+    assert select.select([sys.stdin], [], [], 30)[0], 'receiver fault command timeout'
+    assert sys.stdin.readline(256) == 'kill\n'
+    assert exited(cli_pidfd, 5000), 'client must be dead before killing the receiver'
+    receiver_unchanged()
+    assert process(receiver)['state'] == 'T'
+    signal.pidfd_send_signal(receiver_pidfd, signal.SIGKILL)
+    assert exited(receiver_pidfd, 10000), 'retained receiver did not exit'
+    source_unchanged()
+    progress, record = copy_phase()
+    assert progress == progress_before and record == copy_record
+    assert os.listdir(directory(data_uid, image_id)) == []
+    print(json.dumps({'phase': 'dead', 'image_id': image_id, 'receiver_exited': True,
+                      'source_recovery_pending': True}), flush=True)
+    while select.select([sys.stdin], [], [], 120)[0]:
+        command = sys.stdin.readline(256)
+        if not command:
+            break
+        parts = command.split()
+        assert parts == ['released'] or (
+            len(parts) == 2 and parts[0] == 'recovered' and re.fullmatch(r'[0-9a-f]{64}', parts[1])
+        )
+        source_unchanged()
+        entry = directory(copies, image_id)
+        try:
+            _, _, record = authority(entry, 'copy.json')
+        finally:
+            forget(entry)
+        assert record['phase'] == 'released' and record['file'] == copy_record['file']
+        assert image_id not in os.listdir(data_uid)
+        if command == 'released\n':
+            assert copy_phase()[0] == progress_before, 'copy release falsely cleared pending source'
+        else:
+            _, _, recovered = authority(exports, vm_id + '.json')
+            assert recovered['image_id'] == parts[1] != image_id and recovered['stage'] == 'complete'
+            for key in ('owner_uid', 'vm_id', 'generation', 'boot_id', 'rootfs', 'cache_root', 'original_state'):
+                assert recovered[key] == progress_before[key]
+        print(json.dumps({'phase': parts[0], 'image_id': image_id}), flush=True)
+    else:
+        raise AssertionError('orphan recovery observation timeout')
+except BaseException as error:
+    print(json.dumps({'error': str(error), 'image_id': image_id}), flush=True)
+    # Let the unprivileged owner kill its CLI first, preventing an API cleanup race.
+    if select.select([sys.stdin], [], [], 30)[0]:
+        sys.stdin.readline(256)
+    raise
+finally:
+    if receiver_owned and not exited(receiver_pidfd):
+        signal.pidfd_send_signal(receiver_pidfd, signal.SIGKILL)
+        assert exited(receiver_pidfd, 10000), 'owned receiver cleanup did not finish'
+    for fd in reversed(fds):
+        os.close(fd)
+"""
+
+
+class _VMImportReceiverDeath:
+    """Own only one ordinary importing CLI and its authenticated export receiver."""
+
+    def __init__(self, runner_vm, source):
+        assert os.environ.get("MVM_TEST_VM") == "mvmctl-030-test"
+        assert "PYTEST_XDIST_WORKER" not in os.environ
+        self.runner_vm = runner_vm
+        self.name = f"sys-image-{uuid.uuid4().hex}"
+        self.image_id = None
+        self.cli = None
+        self.cli_pidfd = None
+        self.baseline_ids = {image["id"] for image in _images(runner_vm)}
+        cache = Path(source["rootfs_path"]).parents[2]
+        assert cache.is_absolute() and cache.resolve() == cache
+        self.observer = subprocess.Popen(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/bin/python3",
+                "-I",
+                "-u",
+                "-c",
+                _VM_IMPORT_DEATH_OBSERVER,
+                source["id"],
+                str(os.getuid()),
+                str(source["pid"]),
+                str(source["process_start_time"]),
+                str(cache),
+                self.name,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def read(self):
+        assert select.select([self.observer.stdout], [], [], 45)[0], (
+            "import observer timed out"
+        )
+        line = self.observer.stdout.readline(16385)
+        assert line and len(line) <= 16384, "missing or oversized import fault receipt"
+        receipt = json.loads(line)
+        if receipt.get("image_id") is not None:
+            identifier = receipt["image_id"]
+            assert re.fullmatch(r"[0-9a-f]{64}", identifier)
+            assert identifier not in self.baseline_ids
+            assert self.image_id is None or self.image_id == identifier
+            self.image_id = identifier
+        assert "error" not in receipt, receipt
+        print(f"VM import fault receipt={receipt}", flush=True)
+        return receipt
+
+    def require(self, command):
+        self.observer.stdin.write(command + "\n")
+        self.observer.stdin.flush()
+        return self.read()
+
+    def arm(self, source):
+        assert self.read()["phase"] == "ready"
+        assert all(image["type"] != self.name for image in _images(self.runner_vm))
+        self.cli = subprocess.Popen(
+            [
+                "/usr/local/bin/mvm",
+                "image",
+                "import",
+                self.name,
+                source["id"],
+                "--skip-optimization",
+                "--json",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={**os.environ, "NO_COLOR": "1"},
+            text=True,
+        )
+        self.cli_pidfd = os.pidfd_open(self.cli.pid)
+        fields = (
+            Path(f"/proc/{self.cli.pid}/stat").read_text().rpartition(") ")[2].split()
+        )
+        assert fields[0] not in ("Z", "X") and self.cli.poll() is None
+        receipt = self.require(f"arm {self.cli.pid} {fields[19]}")
+        assert (
+            receipt["phase"] == "copying"
+            and 0 < receipt["partial_bytes"] < 512 * 1024 * 1024
+        )
+
+    def kill(self):
+        assert self.cli.poll() is None and self.image_id is not None
+        signal.pidfd_send_signal(self.cli_pidfd, signal.SIGKILL)
+        stdout, stderr = self.cli.communicate(timeout=10)
+        assert self.cli.returncode == -signal.SIGKILL, (stdout, stderr)
+        assert not stdout, "interrupted import published a success response"
+        print(f"interrupted import stderr={stderr}", flush=True)
+        receipt = self.require("kill")
+        assert receipt == {
+            "phase": "dead",
+            "image_id": self.image_id,
+            "receiver_exited": True,
+            "source_recovery_pending": True,
+        }
+
+    def close(self):
+        errors = []
+        try:
+            if self.cli is not None:
+                if self.cli.poll() is None:
+                    assert self.cli_pidfd is not None
+                    signal.pidfd_send_signal(self.cli_pidfd, signal.SIGKILL)
+                stdout, stderr = self.cli.communicate(timeout=10)
+                if self.cli.returncode == 0:
+                    created = _json_success_data(stdout, dict)
+                    assert (
+                        created["type"] == self.name
+                        and created["id"] not in self.baseline_ids
+                    )
+                    assert self.image_id is None or self.image_id == created["id"]
+                    self.image_id = created["id"]
+                print(
+                    f"import cleanup exit={self.cli.returncode} stdout={stdout} stderr={stderr}",
+                    flush=True,
+                )
+        except Exception as error:
+            errors.append(f"CLI cleanup: {error}")
+        finally:
+            if self.cli_pidfd is not None:
+                os.close(self.cli_pidfd)
+            if self.cli is not None:
+                self.cli.stdout.close()
+                self.cli.stderr.close()
+        try:
+            self.observer.stdin.close()
+            self.observer.wait(timeout=35)
+            diagnostic = self.observer.stderr.read(16385)
+            assert self.observer.returncode == 0, diagnostic
+        except Exception as error:
+            errors.append(f"receiver observer cleanup: {error}")
+        finally:
+            self.observer.stdout.close()
+            self.observer.stderr.close()
+        if self.image_id is not None:
+            try:
+                rows = [
+                    image
+                    for image in _images(self.runner_vm)
+                    if image["id"] == self.image_id
+                ]
+                if rows:
+                    assert len(rows) == 1 and rows[0]["type"] == self.name
+                    rows[0]["_backing_identity"] = _backing_identity(rows[0]["path"])
+                    _remove_image(self.runner_vm, rows[0])
+                else:
+                    _run_mvm(
+                        self.runner_vm,
+                        "image",
+                        "rm",
+                        self.image_id,
+                        "--force",
+                        "--json",
+                    )
+                assert all(
+                    image["id"] != self.image_id for image in _images(self.runner_vm)
+                )
+            except Exception as error:
+                errors.append(f"owned import cleanup: {error}")
+        assert not errors, errors
 
 
 def _images(runner_vm):
@@ -767,6 +1325,139 @@ class TestImageImportSetDefault:
 
 class TestImageImportCreateVM:
     pytestmark = [pytest.mark.tier2, pytest.mark.requires_kvm, pytest.mark.slow]
+
+    def test_vm_import_receiver_death_retires_orphan_and_recovers_source(
+        self, runner_vm, image_workspace
+    ):
+        """Actual client/receiver death leaves public exact-ID recovery, not a partial image."""
+        marker = f"/qa-image-import-{uuid.uuid4().hex}"
+        contents = f"receiver-death-{uuid.uuid4().hex}"
+
+        def observed_source(source, status, *, pin_process=True):
+            rows = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
+            matches = [vm for vm in rows if vm["id"] == source["id"]]
+            assert len(matches) == 1 and matches[0]["status"] == status
+            inspected = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", source["id"], "--json").stdout,
+                dict,
+            )["vm"]
+            for key in ("id", "rootfs_path"):
+                assert inspected[key] == matches[0][key] == source[key]
+            for key in ("pid", "process_start_time"):
+                assert inspected[key] == matches[0][key] and matches[0][key] > 0
+                if pin_process:
+                    assert matches[0][key] == source[key]
+            assert inspected["status"] == status
+            return matches[0]
+
+        with _booted(runner_vm, _alpine(runner_vm), disk_size_mib=512) as source:
+            written = _run_mvm(
+                runner_vm,
+                "exec",
+                source["id"],
+                "--user",
+                "root",
+                "--timeout",
+                "30",
+                "--",
+                "sh",
+                "-c",
+                f"printf '%s' {shlex.quote(contents)} > {shlex.quote(marker)} "
+                f"&& sync && cat {shlex.quote(marker)}",
+            )
+            assert written.stdout == contents
+            source = observed_source(source, "running", pin_process=False)
+            fault = _VMImportReceiverDeath(runner_vm, source)
+            try:
+                fault.arm(source)
+                fault.kill()
+                assert all(
+                    image["id"] != fault.image_id for image in _images(runner_vm)
+                )
+                observed_source(source, "paused")
+                for _ in range(2):
+                    removed = _json_success_data(
+                        _run_mvm(
+                            runner_vm,
+                            "image",
+                            "rm",
+                            fault.image_id,
+                            "--force",
+                            "--json",
+                        ).stdout,
+                        dict,
+                    )
+                    assert len(removed["items"]) == 1
+                    item = removed["items"][0]
+                    assert item["error"] is None
+                    result = item["result"]
+                    assert (
+                        result["status"] == "success"
+                        and result["code"] == "image.export_removed"
+                    )
+                    assert result["item"] == fault.image_id
+                    assert result["metadata"] == {
+                        "export_only": True,
+                        "source_vm_id": source["id"],
+                    }
+                    assert result["warnings"] == [
+                        f"Source VM {source['id']} still requires state recovery or normal termination; "
+                        "only the independent copy was removed."
+                    ]
+                    assert fault.require("released")["phase"] == "released"
+                refused = _run_mvm(
+                    runner_vm, "vm", "resume", source["id"], "--json", check=False
+                )
+                assert refused.returncode != 0
+                response = json.loads(refused.stdout)
+                assert response["status"] == "error" and response["data"] is None
+                assert (
+                    "VM rootfs export requires recovery; repeat image import or stop the VM"
+                    in response["error"]["message"]
+                )
+                observed_source(source, "paused")
+                assert fault.require("released")["phase"] == "released"
+                with _imported(
+                    runner_vm, source["id"], "--skip-optimization"
+                ) as recovered:
+                    assert recovered["id"] != fault.image_id
+                    observed_source(source, "running")
+                    assert (
+                        fault.require(f"recovered {recovered['id']}")["phase"]
+                        == "recovered"
+                    )
+                    source_readback = _run_mvm(
+                        runner_vm,
+                        "exec",
+                        source["id"],
+                        "--user",
+                        "root",
+                        "--timeout",
+                        "30",
+                        "--",
+                        "cat",
+                        marker,
+                    )
+                    assert source_readback.stdout == contents
+                    with _booted(runner_vm, recovered, disk_size_mib=512) as clone:
+                        readback = _run_mvm(
+                            runner_vm,
+                            "exec",
+                            clone["id"],
+                            "--user",
+                            "root",
+                            "--timeout",
+                            "30",
+                            "--",
+                            "cat",
+                            marker,
+                        )
+                        assert readback.stdout == contents
+                    observed_source(source, "running")
+            finally:
+                fault.close()
 
     @pytest.mark.parametrize("original_status", ["running", "paused", "stopped"])
     def test_vm_import_preserves_guest_contents_and_source_state(
