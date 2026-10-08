@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Current checkpoint (2026-10-08):** protected VM-to-image exports are integrated; earlier local Go CI passed.
+> **Current checkpoint (2026-10-08):** protected VM-to-image exports are integrated. Clean journal-fixed source
+> `1a2506e6` passed the complete pinned Go 1.26.3 ordinary local CI sequence inside `mvmctl-030-test`, including
+> vet and the CI-selected tests. Independent preservation checks passed. The separate full root Jailer run was
+> refused before execution by its original post-CI memory admission check; it is not a current full-suite pass.
 > Consolidated root evidence covers 826 unchanged passes plus the corrected authority-path test's focused pass,
 > not a repeated full-suite run. Clean source `497455a6` passed the real-agent release build and normal installation
 > inside `mvmctl-030-test`, with independent preservation checks. Its phase-observed Running import reached

@@ -17,6 +17,20 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current-source Go CI checkpoint (2026-10-08):** Two standalone clean role checkouts bind exact source
+`1a2506e6`/tree `6e0c387f`, with 1,879 source hashes each; their Go/build inputs match release HEAD `3f99e483`.
+The ordinary pinned Go 1.26.3 sequence passed tidy/clean, architecture, gofmt, golines, generation/clean, vet,
+and the complete CI selector. Its literal output has 69 package rows: 59 `ok` and ten packages without tests;
+the selected unprivileged Jailer subset passed in 5.919 seconds. Both atomic coverage profiles are retained.
+Generation used the existing CI compile-only embedded inputs; the installed real-agent candidate was unchanged.
+There was no guard trip. The separate full root Jailer launch failed original admission before SSH or Go:
+current 5,097,504,768 + 2,147,483,648 allowance + 536,870,912 reserve = 7,781,859,328 bytes, exceeding the
+unchanged 6,576,668,672-byte ceiling. Zero root tests executed; no root pass/fail/skip totals can be claimed.
+Independent POST and receipt collection passed, preserving exact candidate/artifact metadata, sources/tools,
+controller/backing and boot/VMM identities, persistent baseline and controls; VM/jobs inventories were empty and
+OOM events remained zero. No restart, reclaim, weaker guard, installation or export body was used. This closes
+the current-source ordinary local Go CI gate only, not the combined full-root gate, Python matrix or release approval.
+
 **VM-to-image export coverage preparation (2026-10-08):** The corrected image module adds
 `TestImageImportCreateVM::test_vm_import_receiver_death_retires_orphan_and_recovers_source` for authenticated
 client/receiver death, exact orphan removal and retry, pending-control refusal, and recovered source/clone bytes.
