@@ -17,7 +17,24 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Current-source Go CI checkpoint (2026-10-08):** Two standalone clean role checkouts bind exact source
+**Current coherent Go/build/install checkpoint (2026-10-08):** Clean parent `992d2fd5` passed the nine-phase
+ordinary Go 1.26.3 CI sequence inside `mvmctl-030-test`, with 59 native package passes and ten no-test rows
+(receipt SHA-256 `318efd21`). This is carried evidence for unchanged surfaces, not a complete CI execution on
+`64079c3b`. The separate full root Jailer suite on clean `64079c3b` passed 828 top-level tests and 1,799 child
+tests, with zero failures/skips, native exit 0 and exact preservation (`39baf49b`). Clean tree `cc100b39`
+then produced the real-agent Go 1.26.3/PIE build with exact revision and `vcs.modified=false` (`f77b5e34`).
+Candidate `0.3.0-rc.integrated-64079c3b`, SHA-256
+`9aa3a92f049f282cc9bbd3b3c631939c1a7828c78ef60ff7f6630c70784ab948`, was installed through normal
+`host install-system` only inside the named runner. Scoped readiness adjudication (`61cb1e01`) confirmed exact
+durable database content/identity/permissions, authority and mounts; only cache-directory mtime/ctime and database
+ctime differed. Native version/status/binary-list checks passed, but the raw timestamp-assertion installation
+failure is retained. This adjudication is a scoped QA expectation correction, not a general timestamp exclusion.
+Earlier CLI/runtime passes retain their original source/candidate bindings. Current-candidate memory,
+reusable-base provisioning and the full installed T1/T2 matrix remain unqualified. Remote GitHub CI, Tier 3,
+aarch64 runtime and final release approval are also unqualified. Build, Go and readiness results do not close
+those gates; the outer controller remains unchanged.
+
+**Earlier journal-fixed Go CI checkpoint (2026-10-08):** Two standalone clean role checkouts bind exact source
 `1a2506e6`/tree `6e0c387f`, with 1,879 source hashes each; their Go/build inputs match release HEAD `3f99e483`.
 The ordinary pinned Go 1.26.3 sequence passed tidy/clean, architecture, gofmt, golines, generation/clean, vet,
 and the complete CI selector. Its literal output has 69 package rows: 59 `ok` and ten packages without tests;

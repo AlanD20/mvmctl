@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Current checkpoint (2026-10-08):** protected VM-to-image exports are integrated. Clean journal-fixed source
+> **Current coherent checkpoint (2026-10-08):** protected VM-to-image exports remain integrated. Clean parent
+> `992d2fd5` passed all nine phases of ordinary Go 1.26.3 CI inside `mvmctl-030-test`: 59 native package passes
+> and ten no-test rows (receipt SHA-256 `318efd21`). This evidence carries for unchanged surfaces; it is not a
+> complete CI run on `64079c3b`. Clean `64079c3b` separately passed the full root Jailer suite: 828 top-level
+> tests and 1,799 child tests, zero failures/skips, native exit 0 and exact preservation (`39baf49b`). Its clean
+> tree `cc100b39` produced the real-agent Go 1.26.3/PIE candidate with unmodified VCS metadata (`f77b5e34`),
+> version `0.3.0-rc.integrated-64079c3b`, SHA-256
+> `9aa3a92f049f282cc9bbd3b3c631939c1a7828c78ef60ff7f6630c70784ab948`.
+> Normal `host install-system` installed it only inside the named runner. Scoped readiness was accepted from
+> exact-JSON adjudication (`61cb1e01`): durable database bytes, identity and permissions, authority and mounts
+> matched; only cache-directory mtime/ctime and database ctime differed. The raw failed install receipt remains
+> retained, rather than relabeled as a passing run. Earlier CLI and runtime results retain their original candidate
+> bindings. Current-candidate memory, reusable-base provisioning and the full installed T1/T2 matrix remain
+> unqualified, as do GitHub CI, Tier 3, aarch64 runtime and final release approval. The outer controller is unchanged;
+> v0.3.0 is not release-qualified. See the [coverage matrix](tests/system/COVERAGE_MATRIX.md).
+
+> **Earlier journal-fixed checkpoint (2026-10-08):** protected VM-to-image exports are integrated. Clean journal-fixed source
 > `1a2506e6` passed the complete pinned Go 1.26.3 ordinary local CI sequence inside `mvmctl-030-test`, including
 > vet and the CI-selected tests. Independent preservation checks passed. The separate full root Jailer run was
 > refused before execution by its original post-CI memory admission check; it is not a current full-suite pass.
