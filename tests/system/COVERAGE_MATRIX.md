@@ -20,12 +20,16 @@ removed, or when test coverage changes.
 **VM-to-image export coverage preparation (2026-10-08):** The corrected image module adds
 `TestImageImportCreateVM::test_vm_import_receiver_death_retires_orphan_and_recovers_source` for authenticated
 client/receiver death, exact orphan removal and retry, pending-control refusal, and recovered source/clone bytes.
-That node and the three existing running/paused/stopped protected-disk import nodes collected successfully inside
+It also adds `TestImageImportCreateVM::test_vm_import_sigint_survivor_refuses_release_then_restores_and_discards`:
+interrupt the retained CLI, prove the authenticated root receiver survives with unchanged copy authority, require
+typed cleanup to refuse while that receiver owns the copy, then verify restoration and temporary-output discard.
+These two nodes and the three existing running/paused/stopped protected-disk import nodes collected successfully inside
 `mvmctl-030-test`; the selected strict-outcome runner unit passed. Module SHA-256 is
-`04e8ab47cde31f11dcd35961b7cff972c002417f71b4e269d344ee5fbcb50e1c`.
-No VM body ran: all four remain **partial/unqualified**, despite the verified real-agent build and installation
-of `0.3.0-rc.vmexport-497455a6`. The receiver-death case does not cover cooperative cancellation or real copy-I/O
-failure; those installed-binary fault journeys remain missing. Independent checks preserved the runner baseline.
+`a7c406e66c19f61a21c9e103708dd880df28e0a87587c5908f48338ac9800947`.
+All five remain **partial/unqualified**, despite the verified real-agent build and installation of
+`0.3.0-rc.vmexport-497455a6`. The SIGINT case targets a surviving receiver's finish/restore/discard behavior,
+not cooperative cancellation of its root context or immediate restoration when the CLI returns. Real copy-I/O
+failure remains a separate coverage gap. Independent checks preserved the runner baseline.
 
 **Enabled GuestFS focused qualification (2026-10-02):** Installed candidate `0.3.0-rc.562b38de` passed
 `cache/test_guestfs_appliance.py::test_enabled_build_reuse_and_incomplete_rebuild` inside `mvmctl-030-test`

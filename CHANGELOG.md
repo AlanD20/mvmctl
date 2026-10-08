@@ -96,9 +96,12 @@ No outer controller installation was performed.
 
 A registered image-import fault case now targets the authenticated client and root export receiver, checks exact
 orphan retirement and idempotent removal, refuses unsafe pending-state resume, and verifies public recovery with
-source and clone marker bytes. It and the three protected-disk state cases passed collection inside the named runner;
-the selected strict-outcome runner unit passed. These VM bodies remain unexecuted, not qualified. Cooperative
-cancellation and real copy-I/O failure remain separate coverage gaps.
+source and clone marker bytes. A second case interrupts the retained CLI while an authenticated root receiver
+survives, checks busy cleanup refusal, then verifies source-state restoration and temporary-output discard.
+Both fault cases and the three protected-disk state cases passed collection inside the named runner;
+the selected strict-outcome runner unit passed. These VM bodies remain unqualified. The SIGINT case does not
+claim cooperative cancellation of the root context or immediate restoration at CLI return; real copy-I/O
+failure remains a separate coverage gap.
 
 On 2026-10-03, exact clean source `a3d7b8d0`, including the cloud-init OFF and built-in-KVM corrections,
 passed the complete local Go CI sequence inside `mvmctl-030-test`: tidy, architecture, formatting, generation,
