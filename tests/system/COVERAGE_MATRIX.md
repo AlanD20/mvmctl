@@ -34,6 +34,16 @@ reusable-base provisioning and the full installed T1/T2 matrix remain unqualifie
 aarch64 runtime and final release approval are also unqualified. Build, Go and readiness results do not close
 those gates; the outer controller remains unchanged.
 
+**Current cached-image prerequisite (2026-10-08):** The same installed `64079c3b` candidate completed a
+mirrored `ubuntu-minimal:noble` pull and subsequent inspection inside `mvmctl-030-test`; both commands exited 0.
+The published image is 143,959,773 bytes compressed and 502,267,904 bytes uncompressed. Before/after VM
+inventories were empty, candidate and boot identities were preserved, and the bounded supervisor completed
+without a guard trip (`df353ca3`). Only this runner's enclosing legacy cgroup received an approved temporary
+8 GiB hard/pressure envelope and a 7.5 GiB QA stop threshold; guest RAM remained 6 GiB. Stored current-memory
+samples peaked at 6,089,854,976 bytes, with zero swap and hard-limit/OOM events. This resolves the earlier
+cached-image watchdog stop, not a diagnosed production OOM defect, a minimum-memory requirement, reusable-base
+provisioning, or the installed system-test matrix. Production pressure-only memory policy is unchanged.
+
 **Earlier journal-fixed Go CI checkpoint (2026-10-08):** Two standalone clean role checkouts bind exact source
 `1a2506e6`/tree `6e0c387f`, with 1,879 source hashes each; their Go/build inputs match release HEAD `3f99e483`.
 The ordinary pinned Go 1.26.3 sequence passed tidy/clean, architecture, gofmt, golines, generation/clean, vet,
