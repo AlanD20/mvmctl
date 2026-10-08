@@ -40,6 +40,15 @@ or import was reached. This is **not an export failure or pass**. All six cleanu
 post-check passed; VM/job inventories were empty, bindings and cgroup controls/events were unchanged. No limits
 were raised and no unchanged retry was performed.
 
+Phase-observed module `7077b51209e46da0c4304d6b923f513555b83d858f19f1700f47ea722a150e2d` subsequently
+proved source boot, marker write and source-state checks before reaching import. A deliberately reviewed QA-only
+hard-cap-minus-reserve guard replaced the earlier relative growth guard; the outer hard cap, reserve and remaining
+protections stayed unchanged. This attempt failed once in 11.97 seconds at mandatory read-only OS inspection,
+with no resource trip. The matching kernel log confirms ext4 journal recovery required writes that the read-only
+loop device refused. The import and clone assertions did not pass. All six cleanup checks and independent POST
+passed with empty VM/job inventories and unchanged baseline/controls. Journal recovery of an independent candidate
+before inspection remains a fix to implement and qualify; skipping replay is not a qualified workaround.
+
 **Enabled GuestFS focused qualification (2026-10-02):** Installed candidate `0.3.0-rc.562b38de` passed
 `cache/test_guestfs_appliance.py::test_enabled_build_reuse_and_incomplete_rebuild` inside `mvmctl-030-test`
 in 68.18 seconds. The strict report contains one pass and zero failures, errors, skips, deselections, XFAIL or
