@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Current checkpoint (2026-10-08):** protected VM-to-image exports are integrated and local Go CI passed.
+> **Current checkpoint (2026-10-08):** protected VM-to-image exports are integrated; earlier local Go CI passed.
 > Consolidated root evidence covers 826 unchanged passes plus the corrected authority-path test's focused pass,
 > not a repeated full-suite run. Clean source `497455a6` passed the real-agent release build and normal installation
-> inside `mvmctl-030-test`, with independent preservation checks. Phase-observed Running import now reaches
-> mandatory OS inspection but fails because its copied ext4 journal needs replay on a read-only loop device.
-> Export/recovery journeys remain unqualified; v0.3.0 is not release-qualified. The outer controller remains unchanged.
+> inside `mvmctl-030-test`, with independent preservation checks. Its phase-observed Running import reached
+> mandatory OS inspection but failed because the copied ext4 journal needed replay on a read-only loop device.
+> Signed `1a2506e6` now prepares only a new disposable VM-import inspection copy with unprivileged journal replay,
+> preserving the exported source and root read-only inspection. Six new behavioral Go tests each passed twice,
+> the selected cached-import API test and focused vet passed, and independent preservation checks passed inside
+> the named runner; nine existing image regressions passed separately. The corrected installed import and recovery
+> journeys remain unqualified; v0.3.0 is not release-qualified. The outer controller remains unchanged.
 
 > **Earlier QA checkpoint (2026-10-03):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,

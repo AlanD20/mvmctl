@@ -46,8 +46,18 @@ hard-cap-minus-reserve guard replaced the earlier relative growth guard; the out
 protections stayed unchanged. This attempt failed once in 11.97 seconds at mandatory read-only OS inspection,
 with no resource trip. The matching kernel log confirms ext4 journal recovery required writes that the read-only
 loop device refused. The import and clone assertions did not pass. All six cleanup checks and independent POST
-passed with empty VM/job inventories and unchanged baseline/controls. Journal recovery of an independent candidate
-before inspection remains a fix to implement and qualify; skipping replay is not a qualified workaround.
+passed with empty VM/job inventories and unchanged baseline/controls.
+
+Signed `1a2506e6` implements unprivileged journal-only replay on a new disposable ext4 VM-import inspection copy,
+using a retained writable descriptor before the unchanged root read-only inspection. Six new Go behavioral tests
+each passed twice inside `mvmctl-030-test`, covering source/copy isolation, partial failure and cancellation cleanup,
+replacement refusal, named inspection cleanup, changed mode/size/link refusal, and unchanged ordinary/non-ext4
+imports. The selected cached-import API test, focused image/API vet, and independent preservation checks passed.
+Nine existing image regressions passed in an earlier run; these separate results are not a fresh consolidated
+15-test package pass. The fixtures use bounded child tests with parent-owned private caches, because cache resolution
+is process-wide; retained refusal-test files stay inside that owned temporary namespace. These Go tests use a fake
+journal subprocess and do not prove actual `e2fsck` descriptor access, root mounting, installed VM import, or clone
+bytes. Corrected installed import/recovery qualification remains open; skipping journal replay is not a workaround.
 
 **Enabled GuestFS focused qualification (2026-10-02):** Installed candidate `0.3.0-rc.562b38de` passed
 `cache/test_guestfs_appliance.py::test_enabled_build_reuse_and_incomplete_rebuild` inside `mvmctl-030-test`

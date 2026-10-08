@@ -105,6 +105,17 @@ Stopping the VM does not copy those changes back to staging. File import remains
   and before final-image publication, with bounded cancellation-independent cleanup on failure. Cleanup failures remain
   explicit. Ordinary removal of an image without an export stays local; an unprivileged presence hint is not deletion
   authority. Root cleanup derives ownership and source bindings from its own record, not a caller path or database row.
+- A paused running VM can leave an ext4 journal requiring replay. For LoopMount VM import, prepare only the new,
+  independent caller-owned inspection staging copy with fixed unprivileged `e2fsck -p -E journal_only` before root
+  read-only inspection. Retain the exact writable inode through the synchronous tool call, admit its owner, mode,
+  link count and extent, and recheck identity afterward. Partial failure or cancellation refreshes metadata only
+  for that same admitted node so owned cleanup remains possible. Unexpected node, ownership, mode, link or extent
+  changes refuse use and cleanup rather than adopting or deleting the changed file.
+  Retained optimization transactions and ordinary file imports do not select this preparation. Protected VM backing,
+  the root-controlled export, extracted source and normal final-image publication are unchanged. Do not suppress
+  recovery with `noload`, introduce a writable root inspection mount, or turn this into general filesystem repair.
+  Signed `1a2506e6` passed focused behavioral Go/API/vet and preservation checks in the named runner; actual tool,
+  installed import and interruption qualification remain incomplete.
 - If the importing CLI dies before creating a public image row, existing `image rm --force <exact-64-character-id>`
   provides export-only recovery after proving that no ordinary image selector matches. Names, prefixes, multiple
   selectors and database errors do not authorize that fallback. Root tombstones make retries idempotent. A live
