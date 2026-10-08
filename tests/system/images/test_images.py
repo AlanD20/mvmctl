@@ -1404,6 +1404,21 @@ class TestImageImportAdvanced:
             assert image["arch"] == _alpine(runner_vm)["arch"]
 
 
+@contextmanager
+def _booted_vm_import(runner_vm, image, *, clone=False):
+    """Observe these import journeys' VM boundaries without changing owned teardown."""
+    role = "clone" if clone else "source"
+    print(f"VM import phase={role}_boot_enter", flush=True)
+    with _booted(runner_vm, image, disk_size_mib=512) as vm:
+        print(f"VM import phase={role}_boot_ready", flush=True)
+        try:
+            yield vm
+        finally:
+            # Enter is diagnostic only: the existing resource owner still checks cleanup.
+            print(f"VM import phase={role}_cleanup_enter", flush=True)
+    print(f"VM import phase={role}_cleanup_returned", flush=True)
+
+
 class TestImageImportSetDefault:
     @pytest.mark.destructive
     def test_image_import_with_set_default(self, runner_vm, image_workspace):
@@ -1430,6 +1445,7 @@ class TestImageImportCreateVM:
         contents = f"sigint-survivor-{uuid.uuid4().hex}"
 
         def running_source(source, *, pin_process):
+            print("VM import phase=source_state_check_enter", flush=True)
             listed = _json_success_data(
                 _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
             )
@@ -1446,9 +1462,11 @@ class TestImageImportCreateVM:
                 assert observed[key] == rows[0][key] and observed[key] > 0
                 if pin_process:
                     assert observed[key] == source[key]
+            print("VM import phase=source_state_check_success", flush=True)
             return rows[0]
 
-        with _booted(runner_vm, _alpine(runner_vm), disk_size_mib=512) as source:
+        with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
+            print("VM import phase=marker_exec_begin", flush=True)
             written = _run_mvm(
                 runner_vm,
                 "exec",
@@ -1462,11 +1480,15 @@ class TestImageImportCreateVM:
                 f"&& sync && cat {shlex.quote(marker)}",
             )
             assert written.stdout == contents
+            print("VM import phase=marker_exec_success", flush=True)
             source = running_source(source, pin_process=False)
             fault = _VMImportReceiverDeath(runner_vm, source, mode="sigint-survivor")
             try:
+                print("VM import phase=import_begin", flush=True)
                 fault.arm(source)
+                print("VM import phase=import_partial_copy", flush=True)
                 fault.interrupt()
+                print("VM import phase=import_sigint_survivor", flush=True)
                 assert all(
                     image["id"] != fault.image_id and image["type"] != fault.name
                     for image in _images(runner_vm)
@@ -1504,7 +1526,9 @@ class TestImageImportCreateVM:
                     for image in _images(runner_vm)
                 )
                 fault.finish_survivor()
+                print("VM import phase=import_survivor_settled", flush=True)
                 running_source(source, pin_process=True)
+                print("VM import phase=source_readback_begin", flush=True)
                 readback = _run_mvm(
                     runner_vm,
                     "exec",
@@ -1518,6 +1542,7 @@ class TestImageImportCreateVM:
                     marker,
                 )
                 assert readback.stdout == contents
+                print("VM import phase=source_readback_success", flush=True)
                 for _ in range(2):
                     removed = _json_success_data(
                         _run_mvm(
@@ -1547,7 +1572,9 @@ class TestImageImportCreateVM:
                 )
                 running_source(source, pin_process=True)
             finally:
+                print("VM import phase=fault_cleanup_enter", flush=True)
                 fault.close()
+                print("VM import phase=fault_cleanup_returned", flush=True)
 
     def test_vm_import_receiver_death_retires_orphan_and_recovers_source(
         self, runner_vm, image_workspace
@@ -1557,6 +1584,7 @@ class TestImageImportCreateVM:
         contents = f"receiver-death-{uuid.uuid4().hex}"
 
         def observed_source(source, status, *, pin_process=True):
+            print("VM import phase=source_state_check_enter", flush=True)
             rows = _json_success_data(
                 _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
             )
@@ -1573,9 +1601,11 @@ class TestImageImportCreateVM:
                 if pin_process:
                     assert matches[0][key] == source[key]
             assert inspected["status"] == status
+            print("VM import phase=source_state_check_success", flush=True)
             return matches[0]
 
-        with _booted(runner_vm, _alpine(runner_vm), disk_size_mib=512) as source:
+        with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
+            print("VM import phase=marker_exec_begin", flush=True)
             written = _run_mvm(
                 runner_vm,
                 "exec",
@@ -1589,11 +1619,15 @@ class TestImageImportCreateVM:
                 f"&& sync && cat {shlex.quote(marker)}",
             )
             assert written.stdout == contents
+            print("VM import phase=marker_exec_success", flush=True)
             source = observed_source(source, "running", pin_process=False)
             fault = _VMImportReceiverDeath(runner_vm, source)
             try:
+                print("VM import phase=import_begin", flush=True)
                 fault.arm(source)
+                print("VM import phase=import_partial_copy", flush=True)
                 fault.kill()
+                print("VM import phase=import_receiver_dead", flush=True)
                 assert all(
                     image["id"] != fault.image_id for image in _images(runner_vm)
                 )
@@ -1640,15 +1674,18 @@ class TestImageImportCreateVM:
                 )
                 observed_source(source, "paused")
                 assert fault.require("released")["phase"] == "released"
+                print("VM import phase=recovery_import_begin", flush=True)
                 with _imported(
                     runner_vm, source["id"], "--skip-optimization"
                 ) as recovered:
                     assert recovered["id"] != fault.image_id
+                    print("VM import phase=recovery_import_success", flush=True)
                     observed_source(source, "running")
                     assert (
                         fault.require(f"recovered {recovered['id']}")["phase"]
                         == "recovered"
                     )
+                    print("VM import phase=source_readback_begin", flush=True)
                     source_readback = _run_mvm(
                         runner_vm,
                         "exec",
@@ -1662,7 +1699,9 @@ class TestImageImportCreateVM:
                         marker,
                     )
                     assert source_readback.stdout == contents
-                    with _booted(runner_vm, recovered, disk_size_mib=512) as clone:
+                    print("VM import phase=source_readback_success", flush=True)
+                    with _booted_vm_import(runner_vm, recovered, clone=True) as clone:
+                        print("VM import phase=clone_readback_begin", flush=True)
                         readback = _run_mvm(
                             runner_vm,
                             "exec",
@@ -1676,9 +1715,14 @@ class TestImageImportCreateVM:
                             marker,
                         )
                         assert readback.stdout == contents
+                        print("VM import phase=clone_readback_success", flush=True)
                     observed_source(source, "running")
+                    print("VM import phase=image_cleanup_enter", flush=True)
+                print("VM import phase=image_cleanup_returned", flush=True)
             finally:
+                print("VM import phase=fault_cleanup_enter", flush=True)
                 fault.close()
+                print("VM import phase=fault_cleanup_returned", flush=True)
 
     @pytest.mark.parametrize("original_status", ["running", "paused", "stopped"])
     def test_vm_import_preserves_guest_contents_and_source_state(
@@ -1689,6 +1733,7 @@ class TestImageImportCreateVM:
         guest_contents = f"guest-{uuid.uuid4().hex}"
 
         def source_state(source):
+            print("VM import phase=source_state_check_enter", flush=True)
             listed = _json_success_data(
                 _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
             )
@@ -1700,10 +1745,12 @@ class TestImageImportCreateVM:
             )
             assert inspected["vm"]["id"] == source["id"]
             assert inspected["vm"]["status"] == original_status
+            print("VM import phase=source_state_check_success", flush=True)
             return inspected
 
-        with _booted(runner_vm, _alpine(runner_vm), disk_size_mib=512) as source:
+        with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
             assert re.fullmatch(r"[0-9a-f]{32}", source["id"])
+            print("VM import phase=marker_exec_begin", flush=True)
             written = _run_mvm(
                 runner_vm,
                 "exec",
@@ -1717,6 +1764,7 @@ class TestImageImportCreateVM:
                 f"&& sync && cat {shlex.quote(marker)}",
             )
             assert written.stdout == guest_contents
+            print("VM import phase=marker_exec_success", flush=True)
             if original_status != "running":
                 _run_mvm(
                     runner_vm,
@@ -1761,9 +1809,12 @@ class TestImageImportCreateVM:
                 after = staging.lstat()
                 assert (after.st_dev, after.st_ino, after.st_size) == identity
 
+            print("VM import phase=import_begin", flush=True)
             with _imported(runner_vm, source["id"], "--skip-optimization") as image:
+                print("VM import phase=import_success", flush=True)
                 source_state(source)
-                with _booted(runner_vm, image, disk_size_mib=512) as clone:
+                with _booted_vm_import(runner_vm, image, clone=True) as clone:
+                    print("VM import phase=clone_readback_begin", flush=True)
                     readback = _run_mvm(
                         runner_vm,
                         "exec",
@@ -1777,7 +1828,10 @@ class TestImageImportCreateVM:
                         marker,
                     )
                     assert readback.stdout == guest_contents
+                    print("VM import phase=clone_readback_success", flush=True)
                 source_state(source)
+                print("VM import phase=image_cleanup_enter", flush=True)
+            print("VM import phase=image_cleanup_returned", flush=True)
 
     def test_imported_image_vm_creation(self, runner_vm, image_workspace):
         source = _extract_alpine(runner_vm, image_workspace)
