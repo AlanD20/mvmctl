@@ -21,16 +21,43 @@ func inspectStagedImage(
 	ctx context.Context,
 	imagePath, imageID, fsType string,
 ) (osType string, err error) {
+	return inspectStagedImageSource(ctx, imagePath, imageID, fsType, imageInspectionOrdinary)
+}
+
+func inspectVMRootfsStagedImage(
+	ctx context.Context,
+	imagePath, imageID, fsType string,
+) (osType string, err error) {
+	return inspectStagedImageSource(ctx, imagePath, imageID, fsType, imageInspectionVMRootfs)
+}
+
+type imageInspectionSource uint8
+
+const (
+	imageInspectionOrdinary imageInspectionSource = iota
+	imageInspectionVMRootfs
+)
+
+func inspectStagedImageSource(
+	ctx context.Context,
+	imagePath, imageID, fsType string,
+	source imageInspectionSource,
+) (osType string, err error) {
 	stage, err := openStagedImage(ctx, imagePath, imageID, fsType, true)
 	if err != nil {
 		return "", err
 	}
 	completed := false
-	defer func() { err = errors.Join(err, stage.close(completed)) }()
+	preparationFailed := false
+	defer func() { err = errors.Join(err, stage.close(completed || preparationFailed)) }()
 	if stage.recovery != nil {
 		// This hint selects the same requested deblob policy on retry. It never establishes
 		// completion: optimization still replays the exact request against root's own receipt.
 		return stage.recovery.OSType, nil
+	}
+	if err := stage.prepareInspectionSource(ctx, source, fsType); err != nil {
+		preparationFailed = true
+		return "", err
 	}
 	stage.cleanupKnown = false
 	result, err := loopmountsvc.NewClient().InspectImage(ctx, stage.request)

@@ -207,6 +207,35 @@ func (s *Service) OptimizeImage(
 	provisionerType provisioner.ProvisionerType,
 	warnings []string,
 ) (*model.ImageItem, []string, error) {
+	return s.optimizeImage(ctx, imagePath, imageID, spec, timestamp, skipOptimization,
+		provisionerType, warnings, imageInspectionOrdinary)
+}
+
+// OptimizeVMRootfsImage prepares only the disposable VM-export inspection copy for journal replay.
+// The extracted source and the normal optimizer's publication remain unchanged.
+func (s *Service) OptimizeVMRootfsImage(
+	ctx context.Context,
+	imagePath, imageID string,
+	spec *model.ImageSpec,
+	timestamp string,
+	skipOptimization bool,
+	provisionerType provisioner.ProvisionerType,
+	warnings []string,
+) (*model.ImageItem, []string, error) {
+	return s.optimizeImage(ctx, imagePath, imageID, spec, timestamp, skipOptimization,
+		provisionerType, warnings, imageInspectionVMRootfs)
+}
+
+func (s *Service) optimizeImage(
+	ctx context.Context,
+	imagePath, imageID string,
+	spec *model.ImageSpec,
+	timestamp string,
+	skipOptimization bool,
+	provisionerType provisioner.ProvisionerType,
+	warnings []string,
+	source imageInspectionSource,
+) (*model.ImageItem, []string, error) {
 	tl := timinglog.Start("optimize", "image_id", imageID)
 	defer tl.Complete()
 
@@ -230,7 +259,11 @@ func (s *Service) OptimizeImage(
 	detectedOS := ""
 	if typedOptimization {
 		var inspectErr error
-		detectedOS, inspectErr = inspectStagedImage(ctx, imagePath, imageID, fsType)
+		if source == imageInspectionVMRootfs {
+			detectedOS, inspectErr = inspectVMRootfsStagedImage(ctx, imagePath, imageID, fsType)
+		} else {
+			detectedOS, inspectErr = inspectStagedImage(ctx, imagePath, imageID, fsType)
+		}
 		if inspectErr != nil {
 			slog.Error("managed image inspection failed", "image_id", imageID, "error", inspectErr)
 			return nil, warnings, inspectErr

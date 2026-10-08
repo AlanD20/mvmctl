@@ -491,16 +491,16 @@ func (op *Operation) ImageImport(
 			Phase: "optimize", Status: "running", Message: "Debloating and shrinking filesystem...",
 		})
 	}
-	imageItem, _, err := op.Services.Image.OptimizeImage(
-		ctx,
-		extractedPath,
-		imageID,
-		spec,
-		timestamp,
-		input.SkipOptimization,
-		op.ProvisionerType,
-		importWarnings,
-	)
+	var imageItem *model.ImageItem
+	if resolved.SourceVM != nil {
+		imageItem, _, err = op.Services.Image.OptimizeVMRootfsImage(
+			ctx, extractedPath, imageID, spec, timestamp, input.SkipOptimization, op.ProvisionerType, importWarnings,
+		)
+	} else {
+		imageItem, _, err = op.Services.Image.OptimizeImage(
+			ctx, extractedPath, imageID, spec, timestamp, input.SkipOptimization, op.ProvisionerType, importWarnings,
+		)
+	}
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return nil, errs.WrapMsg(errs.CodeImageImportFailed, err.Error(), err)
