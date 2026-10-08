@@ -1467,6 +1467,11 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Image lookup accepts imported names and version selectors longer than a 64-character hash, including reusable
+  runner image names containing a full kernel ID. Required identifiers and normal resolver errors are unchanged.
+  The pre-fix rejection, six behavioral regressions, input-package tests, formatting and vet passed in the named
+  QA runner. Installation and reusable-base qualification of this correction remain pending.
+
 - Administrator reset errors now identify the failing stage and a bounded, printable underlying cause in
   both human-readable and JSON output. Deferred cleanup preserves the first failure; process-domain messages
   containing command/output text are omitted. Existing reset guards, restoration order and retry authority are unchanged.
