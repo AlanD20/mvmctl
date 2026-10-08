@@ -33,6 +33,7 @@ and [ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md) for the
 | Location | Owner and purpose |
 |---|---|
 | `/var/lib/mvmctl` | Durable root authority: installation, trusted release, host admission, VM and network records, and Jailer state. |
+| `/var/lib/mvmctl/vm-rootfs-export-data/<operator-uid>` | Root-controlled independent disk copies for VM-to-image import, with operator read access and typed cleanup. Requires space on this filesystem as well as the managed cache; see [VM image import](REFERENCES.md#mvm-image). |
 | `/run/mvmctl/authority` | Root-only transient locks and handshakes; not durable truth. |
 | `/run/mvmctl/runtime/<uid>/<vm-id>` | Ephemeral API/vsock/console sockets and display-only PID mirrors. |
 | `MVM_CACHE_DIR` (normally `~/.cache/mvmctl`) | Operator configuration, SQLite projection, original images, managed disk inputs, and output artifacts. Root-protected active backing and snapshots are pinned under the selected cache but are not made operator-writable. |
