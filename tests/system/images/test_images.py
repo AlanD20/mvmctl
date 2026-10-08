@@ -33,8 +33,9 @@ import stat
 import sys
 import time
 
-vm_id, owner, source_pid, source_ticks, cache, import_name = sys.argv[1:]
+vm_id, owner, source_pid, source_ticks, cache, import_name, fault_mode = sys.argv[1:]
 owner, source_pid, source_ticks = int(owner), int(source_pid), int(source_ticks)
+assert fault_mode in ('death', 'sigint-survivor')
 assert os.geteuid() == 0 and int(os.environ['SUDO_UID']) == owner > 0
 assert re.fullmatch(r'[0-9a-f]{32}', vm_id)
 assert re.fullmatch(r'sys-image-[0-9a-f]{32}', import_name)
@@ -242,7 +243,7 @@ def copy_phase():
     return progress, record
 
 def freeze_copy():
-    global image_id, data_uid, copy_record, progress_before
+    global image_id, data_uid, copy_record, progress_before, partial_size
     progress, record = copy_phase()
     if progress['stage'] != 'copying' or record['phase'] != 'allocated':
         assert progress['stage'] in ('prepared', 'pause_inflight', 'paused'), 'missed mid-copy fault window'
@@ -282,11 +283,64 @@ def freeze_copy():
         assert 0 < info.st_size < rootfs['bytes'], 'copy was not interrupted mid-write'
     finally:
         os.close(descriptor_dir)
-    copy_record, progress_before = record, progress
+    copy_record, progress_before, partial_size = record, progress, info.st_size
     print(json.dumps({'phase': 'copying', 'image_id': image_id, 'receiver_pid': receiver_pid,
                       'receiver_start_ticks': receiver_identity['ticks'], 'partial_bytes': info.st_size,
                       'source_generation': generation, 'source_rootfs': rootfs}), flush=True)
     return True
+
+def suspended_copy_unchanged():
+    source_unchanged()
+    receiver_unchanged()
+    assert process(receiver)['state'] == 'T', 'SIGINT receiver did not survive suspended'
+    progress, record = copy_phase()
+    assert progress == progress_before and record == copy_record
+    data = directory(data_uid, image_id)
+    try:
+        assert identity(os.fstat(data)) == (progress['parent_device'], progress['parent_inode'])
+        assert os.listdir(data) == [], 'suspended copy became public'
+    finally:
+        forget(data)
+    descriptor_dir = os.open('fd', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=receiver)
+    try:
+        names = os.listdir(descriptor_dir)
+        assert len(names) <= 256
+        matches = [os.stat(name, dir_fd=descriptor_dir) for name in names]
+        matches = [info for info in matches if identity(info) == (progress['output_device'], progress['output_inode'])]
+        assert len(matches) == 1
+        info = matches[0]
+        assert info.st_mode == stat.S_IFREG | 0o600 and info.st_uid == info.st_gid == 0
+        assert info.st_nlink == 0 and info.st_size == partial_size
+    finally:
+        os.close(descriptor_dir)
+
+def observe_sigint_survivor():
+    assert exited(cli_pidfd, 5000), 'SIGINT caller did not exit'
+    suspended_copy_unchanged()
+    print(json.dumps({'phase': 'interrupted', 'image_id': image_id,
+                      'receiver_exited': False, 'receiver_stopped': True}), flush=True)
+    while select.select([sys.stdin], [], [], 45)[0]:
+        command = sys.stdin.readline(256)
+        assert command in ('busy\n', 'continue\n'), 'missing survivor command'
+        suspended_copy_unchanged()
+        if command == 'busy\n':
+            print(json.dumps({'phase': 'busy', 'image_id': image_id,
+                              'copy_authority_unchanged': True}), flush=True)
+            continue
+        signal.pidfd_send_signal(receiver_pidfd, signal.SIGCONT)
+        assert exited(receiver_pidfd, 90000), 'surviving receiver did not settle'
+        source_unchanged()
+        progress, record = copy_phase()
+        assert progress['stage'] == 'complete' and progress['original_state'] == 'Running'
+        for key in ('owner_uid', 'vm_id', 'generation', 'boot_id', 'rootfs', 'cache_root',
+                    'image_id', 'output_device', 'output_inode', 'parent_device', 'parent_inode'):
+            assert progress[key] == progress_before[key]
+        assert record['phase'] == 'released' and record['file'] == copy_record['file']
+        assert image_id not in os.listdir(data_uid), 'failed-response copy was not discarded'
+        print(json.dumps({'phase': 'settled', 'image_id': image_id, 'receiver_exited': True,
+                          'source_generation': generation, 'source_recovery_pending': False}), flush=True)
+        return
+    raise AssertionError('SIGINT survivor observation timeout')
 
 try:
     root = directory(None, '/')
@@ -355,45 +409,51 @@ try:
         time.sleep(0.002)
     else:
         raise AssertionError('no authentic partial-copy fault phase')
-    assert select.select([sys.stdin], [], [], 30)[0], 'receiver fault command timeout'
-    assert sys.stdin.readline(256) == 'kill\n'
-    assert exited(cli_pidfd, 5000), 'client must be dead before killing the receiver'
-    receiver_unchanged()
-    assert process(receiver)['state'] == 'T'
-    signal.pidfd_send_signal(receiver_pidfd, signal.SIGKILL)
-    assert exited(receiver_pidfd, 10000), 'retained receiver did not exit'
-    source_unchanged()
-    progress, record = copy_phase()
-    assert progress == progress_before and record == copy_record
-    assert os.listdir(directory(data_uid, image_id)) == []
-    print(json.dumps({'phase': 'dead', 'image_id': image_id, 'receiver_exited': True,
-                      'source_recovery_pending': True}), flush=True)
-    while select.select([sys.stdin], [], [], 120)[0]:
-        command = sys.stdin.readline(256)
-        if not command:
-            break
-        parts = command.split()
-        assert parts == ['released'] or (
-            len(parts) == 2 and parts[0] == 'recovered' and re.fullmatch(r'[0-9a-f]{64}', parts[1])
-        )
-        source_unchanged()
-        entry = directory(copies, image_id)
-        try:
-            _, _, record = authority(entry, 'copy.json')
-        finally:
-            forget(entry)
-        assert record['phase'] == 'released' and record['file'] == copy_record['file']
-        assert image_id not in os.listdir(data_uid)
-        if command == 'released\n':
-            assert copy_phase()[0] == progress_before, 'copy release falsely cleared pending source'
-        else:
-            _, _, recovered = authority(exports, vm_id + '.json')
-            assert recovered['image_id'] == parts[1] != image_id and recovered['stage'] == 'complete'
-            for key in ('owner_uid', 'vm_id', 'generation', 'boot_id', 'rootfs', 'cache_root', 'original_state'):
-                assert recovered[key] == progress_before[key]
-        print(json.dumps({'phase': parts[0], 'image_id': image_id}), flush=True)
+    caller_timeout = 60 if fault_mode == 'sigint-survivor' else 30
+    assert select.select([sys.stdin], [], [], caller_timeout)[0], 'receiver fault command timeout'
+    command = sys.stdin.readline(256)
+    if fault_mode == 'sigint-survivor':
+        assert command == 'interrupted\n'
+        observe_sigint_survivor()
     else:
-        raise AssertionError('orphan recovery observation timeout')
+        assert command == 'kill\n'
+        assert exited(cli_pidfd, 5000), 'client must be dead before killing the receiver'
+        receiver_unchanged()
+        assert process(receiver)['state'] == 'T'
+        signal.pidfd_send_signal(receiver_pidfd, signal.SIGKILL)
+        assert exited(receiver_pidfd, 10000), 'retained receiver did not exit'
+        source_unchanged()
+        progress, record = copy_phase()
+        assert progress == progress_before and record == copy_record
+        assert os.listdir(directory(data_uid, image_id)) == []
+        print(json.dumps({'phase': 'dead', 'image_id': image_id, 'receiver_exited': True,
+                          'source_recovery_pending': True}), flush=True)
+        while select.select([sys.stdin], [], [], 120)[0]:
+            command = sys.stdin.readline(256)
+            if not command:
+                break
+            parts = command.split()
+            assert parts == ['released'] or (
+                len(parts) == 2 and parts[0] == 'recovered' and re.fullmatch(r'[0-9a-f]{64}', parts[1])
+            )
+            source_unchanged()
+            entry = directory(copies, image_id)
+            try:
+                _, _, record = authority(entry, 'copy.json')
+            finally:
+                forget(entry)
+            assert record['phase'] == 'released' and record['file'] == copy_record['file']
+            assert image_id not in os.listdir(data_uid)
+            if command == 'released\n':
+                assert copy_phase()[0] == progress_before, 'copy release falsely cleared pending source'
+            else:
+                _, _, recovered = authority(exports, vm_id + '.json')
+                assert recovered['image_id'] == parts[1] != image_id and recovered['stage'] == 'complete'
+                for key in ('owner_uid', 'vm_id', 'generation', 'boot_id', 'rootfs', 'cache_root', 'original_state'):
+                    assert recovered[key] == progress_before[key]
+            print(json.dumps({'phase': parts[0], 'image_id': image_id}), flush=True)
+        else:
+            raise AssertionError('orphan recovery observation timeout')
 except BaseException as error:
     print(json.dumps({'error': str(error), 'image_id': image_id}), flush=True)
     # Let the unprivileged owner kill its CLI first, preventing an API cleanup race.
@@ -412,9 +472,11 @@ finally:
 class _VMImportReceiverDeath:
     """Own only one ordinary importing CLI and its authenticated export receiver."""
 
-    def __init__(self, runner_vm, source):
+    def __init__(self, runner_vm, source, *, mode="death"):
         assert os.environ.get("MVM_TEST_VM") == "mvmctl-030-test"
         assert "PYTEST_XDIST_WORKER" not in os.environ
+        assert mode in ("death", "sigint-survivor")
+        self.mode = mode
         self.runner_vm = runner_vm
         self.name = f"sys-image-{uuid.uuid4().hex}"
         self.image_id = None
@@ -438,6 +500,7 @@ class _VMImportReceiverDeath:
                 str(source["process_start_time"]),
                 str(cache),
                 self.name,
+                mode,
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -446,7 +509,8 @@ class _VMImportReceiverDeath:
         )
 
     def read(self):
-        assert select.select([self.observer.stdout], [], [], 45)[0], (
+        timeout = 95 if self.mode == "sigint-survivor" else 45
+        assert select.select([self.observer.stdout], [], [], timeout)[0], (
             "import observer timed out"
         )
         line = self.observer.stdout.readline(16385)
@@ -468,7 +532,9 @@ class _VMImportReceiverDeath:
         return self.read()
 
     def arm(self, source):
-        assert self.read()["phase"] == "ready"
+        ready = self.read()
+        assert ready["phase"] == "ready"
+        self.source_generation = ready["source_generation"]
         assert all(image["type"] != self.name for image in _images(self.runner_vm))
         self.cli = subprocess.Popen(
             [
@@ -510,6 +576,36 @@ class _VMImportReceiverDeath:
             "receiver_exited": True,
             "source_recovery_pending": True,
         }
+
+    def interrupt(self):
+        assert self.mode == "sigint-survivor"
+        assert self.cli.poll() is None and self.image_id is not None
+        # Signal only the admitted caller, never its group or privileged receiver.
+        signal.pidfd_send_signal(self.cli_pidfd, signal.SIGINT)
+        stdout, stderr = self.cli.communicate(timeout=45)
+        assert self.cli.returncode > 0, (self.cli.returncode, stdout, stderr)
+        response = json.loads(stdout)
+        assert response["status"] == "error" and response["data"] is None
+        assert "context canceled" in response["error"]["message"]
+        print(f"SIGINT caller stdout={stdout} stderr={stderr}", flush=True)
+        receipt = self.require("interrupted")
+        assert receipt == {
+            "phase": "interrupted",
+            "image_id": self.image_id,
+            "receiver_exited": False,
+            "receiver_stopped": True,
+        }
+
+    def finish_survivor(self):
+        assert self.mode == "sigint-survivor" and self.cli.returncode > 0
+        receipt = self.require("continue")
+        assert receipt["phase"] == "settled" and receipt["image_id"] == self.image_id
+        assert receipt["receiver_exited"] is True
+        assert receipt["source_recovery_pending"] is False
+        assert receipt["source_generation"] == self.source_generation
+        self.observer.wait(timeout=10)
+        assert self.observer.returncode == 0, self.observer.stderr.read(16385)
+        return receipt
 
     def close(self):
         errors = []
@@ -1325,6 +1421,135 @@ class TestImageImportSetDefault:
 
 class TestImageImportCreateVM:
     pytestmark = [pytest.mark.tier2, pytest.mark.requires_kvm, pytest.mark.slow]
+
+    def test_vm_import_sigint_survivor_refuses_release_then_restores_and_discards(
+        self, runner_vm, image_workspace
+    ):
+        """Caller SIGINT leaves a surviving locked receiver to settle, not root cancellation."""
+        marker = f"/qa-image-import-{uuid.uuid4().hex}"
+        contents = f"sigint-survivor-{uuid.uuid4().hex}"
+
+        def running_source(source, *, pin_process):
+            listed = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
+            rows = [item for item in listed if item["id"] == source["id"]]
+            assert len(rows) == 1 and rows[0]["status"] == "running"
+            observed = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", source["id"], "--json").stdout,
+                dict,
+            )["vm"]
+            assert observed["status"] == "running"
+            for key in ("id", "rootfs_path"):
+                assert observed[key] == rows[0][key] == source[key]
+            for key in ("pid", "process_start_time"):
+                assert observed[key] == rows[0][key] and observed[key] > 0
+                if pin_process:
+                    assert observed[key] == source[key]
+            return rows[0]
+
+        with _booted(runner_vm, _alpine(runner_vm), disk_size_mib=512) as source:
+            written = _run_mvm(
+                runner_vm,
+                "exec",
+                source["id"],
+                "--user",
+                "root",
+                "--timeout",
+                "30",
+                "--",
+                "sh",
+                "-c",
+                f"printf '%s' {shlex.quote(contents)} > {shlex.quote(marker)} "
+                f"&& sync && cat {shlex.quote(marker)}",
+            )
+            assert written.stdout == contents
+            source = running_source(source, pin_process=False)
+            fault = _VMImportReceiverDeath(runner_vm, source, mode="sigint-survivor")
+            try:
+                fault.arm(source)
+                fault.interrupt()
+                assert all(
+                    image["id"] != fault.image_id and image["type"] != fault.name
+                    for image in _images(runner_vm)
+                )
+                # No public VM observation while the suspended receiver owns the VM lock.
+                refused = _run_mvm(
+                    runner_vm,
+                    "image",
+                    "rm",
+                    fault.image_id,
+                    "--force",
+                    "--json",
+                    check=False,
+                )
+                assert refused.returncode != 0
+                response = json.loads(refused.stdout)
+                assert response["status"] == "error"
+                assert response["error"]["code"] == "cli.batch.failed"
+                assert len(response["data"]["items"]) == 1
+                item = response["data"]["items"][0]
+                assert item["result"]["status"] == "error"
+                assert item["result"]["item"] == fault.image_id
+                assert item["error"]["code"] == "process.error"
+                assert item["error"]["class"] == "retryable"
+                assert (
+                    "wait for protected backing object lock" in item["error"]["message"]
+                )
+                assert fault.require("busy") == {
+                    "phase": "busy",
+                    "image_id": fault.image_id,
+                    "copy_authority_unchanged": True,
+                }
+                assert all(
+                    image["id"] != fault.image_id and image["type"] != fault.name
+                    for image in _images(runner_vm)
+                )
+                fault.finish_survivor()
+                running_source(source, pin_process=True)
+                readback = _run_mvm(
+                    runner_vm,
+                    "exec",
+                    source["id"],
+                    "--user",
+                    "root",
+                    "--timeout",
+                    "30",
+                    "--",
+                    "cat",
+                    marker,
+                )
+                assert readback.stdout == contents
+                for _ in range(2):
+                    removed = _json_success_data(
+                        _run_mvm(
+                            runner_vm,
+                            "image",
+                            "rm",
+                            fault.image_id,
+                            "--force",
+                            "--json",
+                        ).stdout,
+                        dict,
+                    )
+                    assert len(removed["items"]) == 1
+                    item = removed["items"][0]
+                    assert item["error"] is None
+                    result = item["result"]
+                    assert result["status"] == "success"
+                    assert result["code"] == "image.export_removed"
+                    assert result["item"] == fault.image_id and result["warnings"] == []
+                    assert result["metadata"] == {
+                        "export_only": True,
+                        "source_vm_id": source["id"],
+                    }
+                assert all(
+                    image["id"] != fault.image_id and image["type"] != fault.name
+                    for image in _images(runner_vm)
+                )
+                running_source(source, pin_process=True)
+            finally:
+                fault.close()
 
     def test_vm_import_receiver_death_retires_orphan_and_recovers_source(
         self, runner_vm, image_workspace
