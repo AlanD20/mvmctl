@@ -71,6 +71,25 @@ outer controller, boot and VMM preserved. Actual installed import and Running re
 runtime evidence; clone content, Paused/Stopped and interruption/recovery journeys remain unqualified. The run
 did not emit literal journal-tool arguments, so it is not separate syscall-level proof of the descriptor path.
 
+One normal post-install stop/start preserved the same named runner/candidate/backing/configuration and reduced
+outer charge to 499,208,192 bytes without reclaim commands, cap changes or a rebuild. Fresh admission passed;
+the differentiated cold Running body entered import but stopped at the original fixed 2 GiB host-loss guard:
+available host memory fell by 2,296,807,424 bytes while 6,847,385,600 remained available, and outer charge
+5,063,606,272 stayed below the cap-reserve threshold. Strict outcome was collected 1, passed 0, errors 1, exit 2;
+all six cleanup checks and independent POST passed with unchanged events/swap and preserved state. This is not
+import completion or a reproduced product failure, and it does not erase the earlier partial positive evidence.
+
+The new `test_vm_import_mid_copy_io_failure_restores_source_and_discards_partial` case reuses the authenticated
+stopped-receiver/pidfd bindings, pins its anonymous partial-output inode and applies only that receiver's soft
+file-size limit. It requires real growth to the imposed limit below the source extent, normal receiver settlement,
+Running-state/process/marker preservation, released-copy and absent-source-journal evidence, no public image,
+and twice-idempotent typed exact-ID cleanup. It asserts the actual top-level public import error and image ID,
+not an unavailable nested errno transcript. The reviewed module SHA-256
+`39fa4787d47343a6ddb9c5b85a1f44c2ebb0e24d61b8ae6761f690b3a4f08538` passed static syntax/Ruff checks;
+all six export nodes collected in 0.20 seconds inside the named runner, with zero collection errors and exit 0.
+Independent POST passed all 13 preservation comparisons. No fault body ran: collection's six unexecuted items
+are not runtime passes, and actual file-limit behavior/restoration/cleanup qualification remains open.
+
 **Enabled GuestFS focused qualification (2026-10-02):** Installed candidate `0.3.0-rc.562b38de` passed
 `cache/test_guestfs_appliance.py::test_enabled_build_reuse_and_incomplete_rebuild` inside `mvmctl-030-test`
 in 68.18 seconds. The strict report contains one pass and zero failures, errors, skips, deselections, XFAIL or

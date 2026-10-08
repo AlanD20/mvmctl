@@ -107,9 +107,18 @@ orphan retirement and idempotent removal, refuses unsafe pending-state resume, a
 source and clone marker bytes. A second case interrupts the retained CLI while an authenticated root receiver
 survives, checks busy cleanup refusal, then verifies source-state restoration and temporary-output discard.
 Both fault cases and the three protected-disk state cases passed collection inside the named runner;
-the selected strict-outcome runner unit passed. These VM bodies remain unqualified. The SIGINT case does not
-claim cooperative cancellation of the root context or immediate restoration at CLI return; real copy-I/O
-failure remains a separate coverage gap.
+the selected strict-outcome runner unit passed. A third fault case now targets actual mid-copy file-size-limit
+failure on the authenticated root receiver, checks its retained partial output reaches the imposed limit,
+and requires source restoration, marker preservation, rejected partial publication and idempotent typed cleanup.
+All six export nodes collected in 0.20 seconds after one fixed-diff review and a correction to match the actual
+public JSON error contract; independent preservation checks passed. These fault bodies remain unqualified.
+The SIGINT case does not claim cooperative cancellation of the root context or immediate restoration at CLI return.
+
+A differentiated post-install cold restart preserved the same named runner, candidate, backing and controls.
+Its Running case entered import but was interrupted by the unchanged 2 GiB host-memory-loss guard while host
+available memory remained 6,847,385,600 bytes and the runner stayed below its cap-reserve ceiling. Cleanup and
+independent preservation passed with no OOM events; this interrupted run proves neither import completion nor a
+product failure. It does not revoke the earlier completed-import/source-restoration observation.
 
 The first Running-state attempt exposed a marker-setup shell-argument error, now corrected in all three affected
 test setups. A corrected attempt was interrupted by the unchanged outer-runner 2 GiB memory-growth guard,
