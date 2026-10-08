@@ -15,8 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Signed `1a2506e6` now prepares only a new disposable VM-import inspection copy with unprivileged journal replay,
 > preserving the exported source and root read-only inspection. Six new behavioral Go tests each passed twice,
 > the selected cached-import API test and focused vet passed, and independent preservation checks passed inside
-> the named runner; nine existing image regressions passed separately. The corrected installed import and recovery
-> journeys remain unqualified; v0.3.0 is not release-qualified. The outer controller remains unchanged.
+> the named runner; nine existing image regressions passed separately. The corrected real-agent candidate built
+> and installed inside that runner. Its differentiated Running case completed import and restored the source to
+> Running, then exceeded the unchanged runner memory safety threshold during clone boot. All six cleanup checks
+> and independent preservation checks passed, with no OOM events. Clone content, interruption/recovery and complete
+> import-journey qualification remain open; v0.3.0 is not release-qualified. The outer controller remains unchanged.
 
 > **Earlier QA checkpoint (2026-10-03):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,

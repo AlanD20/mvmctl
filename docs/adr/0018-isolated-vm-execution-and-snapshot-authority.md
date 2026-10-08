@@ -114,8 +114,10 @@ Stopping the VM does not copy those changes back to staging. File import remains
   Retained optimization transactions and ordinary file imports do not select this preparation. Protected VM backing,
   the root-controlled export, extracted source and normal final-image publication are unchanged. Do not suppress
   recovery with `noload`, introduce a writable root inspection mount, or turn this into general filesystem repair.
-  Signed `1a2506e6` passed focused behavioral Go/API/vet and preservation checks in the named runner; actual tool,
-  installed import and interruption qualification remain incomplete.
+  Signed `1a2506e6` passed focused behavioral Go/API/vet and preservation checks in the named runner, then a real-agent
+  build and normal candidate installation. The differentiated installed Running case completed import and restored
+  the source state before a runner memory safety guard interrupted clone boot. Owned cleanup and independent
+  preservation passed with no OOM events; clone bytes and interruption/recovery qualification remain incomplete.
 - If the importing CLI dies before creating a public image row, existing `image rm --force <exact-64-character-id>`
   provides export-only recovery after proving that no ordinary image selector matches. Names, prefixes, multiple
   selectors and database errors do not authorize that fallback. Root tombstones make retries idempotent. A live

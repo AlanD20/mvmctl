@@ -56,8 +56,20 @@ imports. The selected cached-import API test, focused image/API vet, and indepen
 Nine existing image regressions passed in an earlier run; these separate results are not a fresh consolidated
 15-test package pass. The fixtures use bounded child tests with parent-owned private caches, because cache resolution
 is process-wide; retained refusal-test files stay inside that owned temporary namespace. These Go tests use a fake
-journal subprocess and do not prove actual `e2fsck` descriptor access, root mounting, installed VM import, or clone
-bytes. Corrected installed import/recovery qualification remains open; skipping journal replay is not a workaround.
+journal subprocess and alone do not prove actual `e2fsck` descriptor access, root mounting, installed VM import, or
+clone bytes. Skipping journal replay is not a workaround.
+
+The corrected real-agent `0.3.0-rc.vmexport-journal-1a2506e6` candidate (SHA-256
+`d13c2a25fefe65a592e773de099a23e5fcbd2ce3e35cee77948fef4aa967f706`) built and installed only inside the
+named runner, with independent preservation checks. The unchanged image module's differentiated Running body
+completed marker setup, import and source Running-state restoration, then entered clone boot. The safety guard
+interrupted before clone readiness/readback: outer charge 6,083,108,864 bytes exceeded the 6,039,797,760-byte
+hard-cap-minus-reserve threshold. This was not an OOM: swap and all memory events remained zero. Strict outcome
+was collected 1, passed 0, errors 1, pytest exit 2 after KeyboardInterrupt; it is not a complete test pass. All six
+owned cleanup checks and independent POST passed, with baseline, empty VM/job inventories, candidate/source,
+outer controller, boot and VMM preserved. Actual installed import and Running restoration therefore have partial
+runtime evidence; clone content, Paused/Stopped and interruption/recovery journeys remain unqualified. The run
+did not emit literal journal-tool arguments, so it is not separate syscall-level proof of the descriptor path.
 
 **Enabled GuestFS focused qualification (2026-10-02):** Installed candidate `0.3.0-rc.562b38de` passed
 `cache/test_guestfs_appliance.py::test_enabled_build_reuse_and_incomplete_rebuild` inside `mvmctl-030-test`
