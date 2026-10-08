@@ -17,6 +17,16 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**VM-to-image export coverage preparation (2026-10-08):** The corrected image module adds
+`TestImageImportCreateVM::test_vm_import_receiver_death_retires_orphan_and_recovers_source` for authenticated
+client/receiver death, exact orphan removal and retry, pending-control refusal, and recovered source/clone bytes.
+That node and the three existing running/paused/stopped protected-disk import nodes collected successfully inside
+`mvmctl-030-test`; the selected strict-outcome runner unit passed. Module SHA-256 is
+`04e8ab47cde31f11dcd35961b7cff972c002417f71b4e269d344ee5fbcb50e1c`.
+No VM body ran: all four remain **partial/unqualified**, despite the verified real-agent build and installation
+of `0.3.0-rc.vmexport-497455a6`. The receiver-death case does not cover cooperative cancellation or real copy-I/O
+failure; those installed-binary fault journeys remain missing. Independent checks preserved the runner baseline.
+
 **Enabled GuestFS focused qualification (2026-10-02):** Installed candidate `0.3.0-rc.562b38de` passed
 `cache/test_guestfs_appliance.py::test_enabled_build_reuse_and_incomplete_rebuild` inside `mvmctl-030-test`
 in 68.18 seconds. The strict report contains one pass and zero failures, errors, skips, deselections, XFAIL or

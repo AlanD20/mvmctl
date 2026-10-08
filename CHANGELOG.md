@@ -94,6 +94,12 @@ root authority and mirrored assets. The previous runner binary was retained and 
 Installed import/recovery journeys remain pending. Original failures and preservation evidence remain recorded.
 No outer controller installation was performed.
 
+A registered image-import fault case now targets the authenticated client and root export receiver, checks exact
+orphan retirement and idempotent removal, refuses unsafe pending-state resume, and verifies public recovery with
+source and clone marker bytes. It and the three protected-disk state cases passed collection inside the named runner;
+the selected strict-outcome runner unit passed. These VM bodies remain unexecuted, not qualified. Cooperative
+cancellation and real copy-I/O failure remain separate coverage gaps.
+
 On 2026-10-03, exact clean source `a3d7b8d0`, including the cloud-init OFF and built-in-KVM corrections,
 passed the complete local Go CI sequence inside `mvmctl-030-test`: tidy, architecture, formatting, generation,
 vet and the full unprivileged selector, with complete atomic coverage. The selected Jailer tests passed in
