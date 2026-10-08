@@ -971,6 +971,18 @@ and source status stayed clean. Reports `qa-cli-0f95b7bc-pass1.json` and `qa-cli
 This closes the named CLI domain's local repeated-run gate, not global structured-JSON invariants, cache-clean
 failure safety, the other domains, remote CI, or release approval.
 
+**Current-candidate CLI refresh (2026-10-08):** The complete `tests/system/cli/test_cli.py` module passed
+24/24 once in 0.39 seconds inside `mvmctl-030-test`. Installed candidate
+`0.3.0-rc.vmexport-journal-1a2506e6` retained SHA
+`d13c2a25fefe65a592e773de099a23e5fcbd2ce3e35cee77948fef4aa967f706`; the nine current Python module/helper
+inputs matched its clean source checkout byte-for-byte. Strict schema-1 JSON reports collected/passed24 with all
+other outcomes zero; JUnit agrees at 24 tests with no failures, errors or skips. Independent POST and all 21
+preservation checks passed, including candidate/artifact metadata, source cleanliness, persistent baseline,
+controller/backing identity, boot/VMM identity, controls/events and empty VM/jobs inventories. The existing
+contract used PRE/POST snapshots and a 90-second subprocess timeout, not live memory monitoring. No VM creation,
+disk copy, build or installation occurred. This is one refreshed CLI-module pass, not a repeatability refresh,
+global structured-JSON qualification, VM-export recovery, full current-source matrix or release sign-off.
+
 **Measured-memory qualification follow-up (2026-09-28):** The revised three-case draft collected successfully;
 the swap-absent sustained hold passed, but swap-present failed its real-pressure assertion. Guest availability was
 15528 KiB out of 196992 KiB (over 92% occupancy), while actual leaf peak/current was 233127936 bytes, below high

@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Running, then exceeded the unchanged runner memory safety threshold during clone boot. All six cleanup checks
 > and independent preservation checks passed, with no OOM events. Clone content, interruption/recovery and complete
 > import-journey qualification remain open; v0.3.0 is not release-qualified. The outer controller remains unchanged.
+> The complete CLI module subsequently passed 24/24 once in 0.39 seconds against the installed journal-fixed
+> candidate, with strict JSON/JUnit agreement and independent preservation checks. Current CLI/helper bytes
+> matched the candidate's clean source. This refresh does not qualify global structured JSON, export recovery,
+> the complete current-source matrix or release readiness.
 
 > **Earlier QA checkpoint (2026-10-03):** v0.3.0 remains unreleased. The clean-break single-binary/root-dispatch,
 > isolated Jailer, pressure-only cgroup, typed LoopMount, per-VM network namespace, direct-Go nftables,
