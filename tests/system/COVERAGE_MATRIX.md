@@ -190,6 +190,23 @@ SHA-256 `5ef6114ab249f304be268c7f05c82421a5c0a9c0f9eebd5cc860ebbf8a0e9f4c`; outc
 Installed candidate/source remain `d13f8c06`/`bfdece17`; Python test source was clean `0b3762d9`.
 Do not replay the passed SIGINT case or the unchanged failing receiver-death command.
 
+**Resume-authority source correction (2026-10-09):** after the test boundary was corrected to observe actual
+root-authenticated CPU state, the receiver-death singleton reached Paused and released-copy idempotence,
+then failed because public `vm resume` returned success while root export recovery remained pending.
+`1300b64b` removes the cached Running/Starting bypass; the existing root export-idle check now precedes
+authenticated state observation and any resume mutation. Actual Running is an authorized no-op, Paused
+receives one fixed PATCH, and prestart/malformed state is refused. The public ID/Applied result contract is
+unchanged. Test-only `e2fd9881` checks the existing `cli.batch.failed` / item `vm.resume_failed` /
+`image.import.failed` response rather than expecting a data-less error.
+All seven integrated Go files matched the named-runner tested manifest. Focused Go 1.26.3 formatting,
+vet and behavior/race checks passed; controller ordinary and race runs each report 52 test/subtest passes,
+and the root broker race run reports 10 with zero failures/skips, including real pending-export journal
+refusal and unchanged source authority. Literal root log SHA-256
+`db9669a84f9d8c6b770f108651080b1e30fba985d63cd9cf95ddb43ff74d3c89`.
+The Python correction collected one node and passed the existing missing-admission unit separately.
+These are focused source checks, not an installed receiver-death pass: installed `d13f8c06` still lacks
+the correction. Coherent CI/build, normal inner installation and the affected singleton remain pending.
+
 **Current snapshot producer-failure recovery (2026-10-09):**
 `vm/test_jailer.py::TestNetworklessJailerLifecycle::test_snapshot_capture_file_limit_failure_recovers` passed
 strict 1/1 in 18.39 seconds on installed `0.3.0-rc.export-interrupt-bfdece17`, clean `bfdece17` and unchanged

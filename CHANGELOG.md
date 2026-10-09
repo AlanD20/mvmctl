@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
+> **Resume-authority correction (2026-10-09):** `1300b64b` removes the cached Running/Starting success
+> shortcut. Resume must first pass root-owned pending-export admission, then observe the authenticated
+> Firecracker state: Running succeeds without another mutation, Paused receives one resume request, and
+> prestart or malformed state is refused. Refusal leaves the database projection and export intent unchanged.
+> Focused formatting, vet, behavior, race and root checks passed inside `mvmctl-030-test`, including
+> 52 controller and 10 root-broker tests/subtests with zero failures/skips. The matching receiver-death test
+> now checks the existing batch error envelope without weakening its recovery assertions. This correction
+> is integrated but not yet built or installed; coherent CI/build and the affected receiver-death journey remain pending.
+
 > **Current implementation and qualification checkpoint (2026-10-09):** the closed root-dispatch, isolated
 > Jailer, per-VM managed/networkless namespace, direct-Go nftables, typed traffic/exec policy, protected raw-volume
 > and snapshot paths are implemented. Installed QA candidate `0.3.0-rc.export-interrupt-bfdece17` is bound to

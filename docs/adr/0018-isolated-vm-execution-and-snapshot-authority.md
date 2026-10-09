@@ -109,6 +109,10 @@ Stopping the VM does not copy those changes back to staging. File import remains
 - Pending recovery refuses competing control, capture, or rebind operations while allowing normal termination.
   Termination retires the pending operation without reviving its source. Independent output is accepted only after
   copy and state restoration are complete; failed output cleanup never deletes a changed or unrelated file.
+  Resume idempotence also consumes this root admission; cached Running/Starting status cannot authorize success.
+  After admission and peer authentication, actual Running succeeds without mutation, actual Paused is resumed,
+  and prestart or malformed state is refused. The integrated correction passed focused behavioral/race/root
+  checks; installed receiver-death qualification remains pending.
 - Temporary export copies live in root-controlled `/var/lib/mvmctl/vm-rootfs-export-data`, with operator read
   access and named typed cleanup. A caller-writable parent cannot provide exact deletion through a separate inode
   check and pathname unlink: the caller can replace the entry between them. Export publication and cleanup must
