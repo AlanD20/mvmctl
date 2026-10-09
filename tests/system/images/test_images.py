@@ -13,6 +13,7 @@ import signal
 import subprocess
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -525,10 +526,52 @@ finally:
 """
 
 
+@dataclass(frozen=True)
+class _VMImportSource:
+    """Pin list-observed process identity and the explicitly selected managed cache."""
+
+    id: str
+    pid: int
+    process_start_time: int
+    cache: Path
+
+    @classmethod
+    def capture(cls, runner_vm: str, identifier: str, status: str) -> _VMImportSource:
+        print("VM import phase=source_state_check_enter", flush=True)
+        assert re.fullmatch(r"[0-9a-f]{32}", identifier)
+        cache_selection = os.environ["MVM_CACHE_DIR"]
+        cache = Path(cache_selection)
+        assert (
+            cache.is_absolute()
+            and str(cache) == cache_selection
+            and cache.resolve(strict=True) == cache
+            and cache.is_dir()
+        ), "import fault requires an explicit canonical MVM_CACHE_DIR"
+        listed = _json_success_data(
+            _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+        )
+        matches = [vm for vm in listed if vm["id"] == identifier]
+        assert len(matches) == 1 and matches[0]["status"] == status
+        row = matches[0]
+        for key in ("pid", "process_start_time"):
+            assert type(row[key]) is int and row[key] > 0
+        observed = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", identifier, "--json").stdout,
+            dict,
+        )["vm"]
+        for key in ("id", "pid", "status"):
+            assert observed[key] == row[key]
+        print("VM import phase=source_state_check_success", flush=True)
+        return cls(identifier, row["pid"], row["process_start_time"], cache)
+
+    def require_state(self, runner_vm: str, status: str) -> None:
+        assert self.capture(runner_vm, self.id, status) == self
+
+
 class _VMImportReceiverDeath:
     """Own only one ordinary importing CLI and its authenticated export receiver."""
 
-    def __init__(self, runner_vm, source, *, mode="death"):
+    def __init__(self, runner_vm, source: _VMImportSource, *, mode="death"):
         qualification_host = os.environ.get("MVM_TEST_QUALIFICATION_HOST")
         assert (
             qualification_host and qualification_host == os.environ.get("MVM_TEST_VM")
@@ -542,8 +585,6 @@ class _VMImportReceiverDeath:
         self.cli = None
         self.cli_pidfd = None
         self.baseline_ids = {image["id"] for image in _images(runner_vm)}
-        cache = Path(source["rootfs_path"]).parents[2]
-        assert cache.is_absolute() and cache.resolve() == cache
         self.observer = subprocess.Popen(
             [
                 "/usr/bin/sudo",
@@ -553,11 +594,11 @@ class _VMImportReceiverDeath:
                 "-u",
                 "-c",
                 _VM_IMPORT_DEATH_OBSERVER,
-                source["id"],
+                source.id,
                 str(os.getuid()),
-                str(source["pid"]),
-                str(source["process_start_time"]),
-                str(cache),
+                str(source.pid),
+                str(source.process_start_time),
+                str(source.cache),
                 self.name,
                 mode,
             ],
@@ -590,7 +631,7 @@ class _VMImportReceiverDeath:
         self.observer.stdin.flush()
         return self.read()
 
-    def arm(self, source):
+    def arm(self, source: _VMImportSource):
         ready = self.read()
         assert ready["phase"] == "ready"
         self.source_generation = ready["source_generation"]
@@ -601,7 +642,7 @@ class _VMImportReceiverDeath:
                 "image",
                 "import",
                 self.name,
-                source["id"],
+                source.id,
                 "--skip-optimization",
                 "--json",
             ],
@@ -645,7 +686,11 @@ class _VMImportReceiverDeath:
         assert self.cli.returncode > 0, (self.cli.returncode, stdout, stderr)
         response = json.loads(stdout)
         assert response["status"] == "error" and response["data"] is None
-        assert "context canceled" in response["error"]["message"]
+        error = response["error"]
+        assert error["code"] == "image.import.failed"
+        assert error["message"] == "VM image export failed"
+        assert error["op"] == "image"
+        assert error["details"] == {"image_id": self.image_id}
         print(f"SIGINT caller stdout={stdout} stderr={stderr}", flush=True)
         receipt = self.require("interrupted")
         assert receipt == {
@@ -725,6 +770,11 @@ class _VMImportReceiverDeath:
             self.observer.stdin.close()
             self.observer.wait(timeout=35)
             diagnostic = self.observer.stderr.read(16385)
+            print(
+                f"VM import observer cleanup exit={self.observer.returncode} "
+                f"stderr={diagnostic}",
+                flush=True,
+            )
             assert self.observer.returncode == 0, diagnostic
         except Exception as error:
             errors.append(f"receiver observer cleanup: {error}")
@@ -1531,25 +1581,6 @@ class TestImageImportCreateVM:
         marker = f"/qa-image-import-{uuid.uuid4().hex}"
         contents = f"copy-io-{uuid.uuid4().hex}"
 
-        def running_source(source, *, pin_process):
-            rows = _json_success_data(
-                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
-            )
-            matches = [vm for vm in rows if vm["id"] == source["id"]]
-            assert len(matches) == 1 and matches[0]["status"] == "running"
-            observed = _json_success_data(
-                _run_mvm(runner_vm, "vm", "inspect", source["id"], "--json").stdout,
-                dict,
-            )["vm"]
-            assert observed["status"] == "running"
-            for key in ("id", "rootfs_path"):
-                assert observed[key] == matches[0][key] == source[key]
-            for key in ("pid", "process_start_time"):
-                assert observed[key] == matches[0][key] and observed[key] > 0
-                if pin_process:
-                    assert observed[key] == source[key]
-            return matches[0]
-
         with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
             written = _run_mvm(
                 runner_vm,
@@ -1564,16 +1595,16 @@ class TestImageImportCreateVM:
                 f"&& sync && cat {shlex.quote(marker)}",
             )
             assert written.stdout == contents
-            source = running_source(source, pin_process=False)
-            fault = _VMImportReceiverDeath(runner_vm, source, mode="copy-io")
+            source_receipt = _VMImportSource.capture(runner_vm, source["id"], "running")
+            fault = _VMImportReceiverDeath(runner_vm, source_receipt, mode="copy-io")
             try:
-                fault.arm(source)
+                fault.arm(source_receipt)
                 fault.fail_copy_io()
                 assert all(
                     image["id"] != fault.image_id and image["type"] != fault.name
                     for image in _images(runner_vm)
                 )
-                running_source(source, pin_process=True)
+                source_receipt.require_state(runner_vm, "running")
                 readback = _run_mvm(
                     runner_vm,
                     "exec",
@@ -1614,7 +1645,7 @@ class TestImageImportCreateVM:
                     image["id"] != fault.image_id and image["type"] != fault.name
                     for image in _images(runner_vm)
                 )
-                running_source(source, pin_process=True)
+                source_receipt.require_state(runner_vm, "running")
             finally:
                 fault.close()
 
@@ -1624,27 +1655,6 @@ class TestImageImportCreateVM:
         """Caller SIGINT leaves a surviving locked receiver to settle, not root cancellation."""
         marker = f"/qa-image-import-{uuid.uuid4().hex}"
         contents = f"sigint-survivor-{uuid.uuid4().hex}"
-
-        def running_source(source, *, pin_process):
-            print("VM import phase=source_state_check_enter", flush=True)
-            listed = _json_success_data(
-                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
-            )
-            rows = [item for item in listed if item["id"] == source["id"]]
-            assert len(rows) == 1 and rows[0]["status"] == "running"
-            observed = _json_success_data(
-                _run_mvm(runner_vm, "vm", "inspect", source["id"], "--json").stdout,
-                dict,
-            )["vm"]
-            assert observed["status"] == "running"
-            for key in ("id", "rootfs_path"):
-                assert observed[key] == rows[0][key] == source[key]
-            for key in ("pid", "process_start_time"):
-                assert observed[key] == rows[0][key] and observed[key] > 0
-                if pin_process:
-                    assert observed[key] == source[key]
-            print("VM import phase=source_state_check_success", flush=True)
-            return rows[0]
 
         with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
             print("VM import phase=marker_exec_begin", flush=True)
@@ -1662,11 +1672,13 @@ class TestImageImportCreateVM:
             )
             assert written.stdout == contents
             print("VM import phase=marker_exec_success", flush=True)
-            source = running_source(source, pin_process=False)
-            fault = _VMImportReceiverDeath(runner_vm, source, mode="sigint-survivor")
+            source_receipt = _VMImportSource.capture(runner_vm, source["id"], "running")
+            fault = _VMImportReceiverDeath(
+                runner_vm, source_receipt, mode="sigint-survivor"
+            )
             try:
                 print("VM import phase=import_begin", flush=True)
-                fault.arm(source)
+                fault.arm(source_receipt)
                 print("VM import phase=import_partial_copy", flush=True)
                 fault.interrupt()
                 print("VM import phase=import_sigint_survivor", flush=True)
@@ -1693,7 +1705,7 @@ class TestImageImportCreateVM:
                 assert item["result"]["status"] == "error"
                 assert item["result"]["item"] == fault.image_id
                 assert item["error"]["code"] == "process.error"
-                assert item["error"]["class"] == "retryable"
+                assert item["error"]["class"] == 3
                 assert (
                     "wait for protected backing object lock" in item["error"]["message"]
                 )
@@ -1708,7 +1720,7 @@ class TestImageImportCreateVM:
                 )
                 fault.finish_survivor()
                 print("VM import phase=import_survivor_settled", flush=True)
-                running_source(source, pin_process=True)
+                source_receipt.require_state(runner_vm, "running")
                 print("VM import phase=source_readback_begin", flush=True)
                 readback = _run_mvm(
                     runner_vm,
@@ -1751,7 +1763,7 @@ class TestImageImportCreateVM:
                     image["id"] != fault.image_id and image["type"] != fault.name
                     for image in _images(runner_vm)
                 )
-                running_source(source, pin_process=True)
+                source_receipt.require_state(runner_vm, "running")
             finally:
                 print("VM import phase=fault_cleanup_enter", flush=True)
                 fault.close()
@@ -1763,27 +1775,6 @@ class TestImageImportCreateVM:
         """Actual client/receiver death leaves public exact-ID recovery, not a partial image."""
         marker = f"/qa-image-import-{uuid.uuid4().hex}"
         contents = f"receiver-death-{uuid.uuid4().hex}"
-
-        def observed_source(source, status, *, pin_process=True):
-            print("VM import phase=source_state_check_enter", flush=True)
-            rows = _json_success_data(
-                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
-            )
-            matches = [vm for vm in rows if vm["id"] == source["id"]]
-            assert len(matches) == 1 and matches[0]["status"] == status
-            inspected = _json_success_data(
-                _run_mvm(runner_vm, "vm", "inspect", source["id"], "--json").stdout,
-                dict,
-            )["vm"]
-            for key in ("id", "rootfs_path"):
-                assert inspected[key] == matches[0][key] == source[key]
-            for key in ("pid", "process_start_time"):
-                assert inspected[key] == matches[0][key] and matches[0][key] > 0
-                if pin_process:
-                    assert matches[0][key] == source[key]
-            assert inspected["status"] == status
-            print("VM import phase=source_state_check_success", flush=True)
-            return matches[0]
 
         with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
             print("VM import phase=marker_exec_begin", flush=True)
@@ -1801,18 +1792,18 @@ class TestImageImportCreateVM:
             )
             assert written.stdout == contents
             print("VM import phase=marker_exec_success", flush=True)
-            source = observed_source(source, "running", pin_process=False)
-            fault = _VMImportReceiverDeath(runner_vm, source)
+            source_receipt = _VMImportSource.capture(runner_vm, source["id"], "running")
+            fault = _VMImportReceiverDeath(runner_vm, source_receipt)
             try:
                 print("VM import phase=import_begin", flush=True)
-                fault.arm(source)
+                fault.arm(source_receipt)
                 print("VM import phase=import_partial_copy", flush=True)
                 fault.kill()
                 print("VM import phase=import_receiver_dead", flush=True)
                 assert all(
                     image["id"] != fault.image_id for image in _images(runner_vm)
                 )
-                observed_source(source, "paused")
+                source_receipt.require_state(runner_vm, "paused")
                 for _ in range(2):
                     removed = _json_success_data(
                         _run_mvm(
@@ -1853,7 +1844,7 @@ class TestImageImportCreateVM:
                     "VM rootfs export requires recovery; repeat image import or stop the VM"
                     in response["error"]["message"]
                 )
-                observed_source(source, "paused")
+                source_receipt.require_state(runner_vm, "paused")
                 assert fault.require("released")["phase"] == "released"
                 print("VM import phase=recovery_import_begin", flush=True)
                 with _imported(
@@ -1861,7 +1852,7 @@ class TestImageImportCreateVM:
                 ) as recovered:
                     assert recovered["id"] != fault.image_id
                     print("VM import phase=recovery_import_success", flush=True)
-                    observed_source(source, "running")
+                    source_receipt.require_state(runner_vm, "running")
                     assert (
                         fault.require(f"recovered {recovered['id']}")["phase"]
                         == "recovered"
@@ -1897,7 +1888,7 @@ class TestImageImportCreateVM:
                         )
                         assert readback.stdout == contents
                         print("VM import phase=clone_readback_success", flush=True)
-                    observed_source(source, "running")
+                    source_receipt.require_state(runner_vm, "running")
                     print("VM import phase=image_cleanup_enter", flush=True)
                 print("VM import phase=image_cleanup_returned", flush=True)
             finally:
