@@ -17,6 +17,20 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current VM-dependent volume checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
+SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed the nine remaining
+registered `volume/test_volume.py` nodes together on clean signed suite `b73d0462` inside `mvmctl-030-test`:
+strict 9/9, zero other outcomes, native exit 0, 48.49 seconds. These cover attachment-state invariants,
+retention of a changed caller source, three attach/detach/restart journeys, cross-VM attachment refusal,
+running-volume deletion refusal, and nonexistent attach/detach errors. Existing fixtures removed their exact
+owned VM/volume/key/network resources. The wrapper removed only its identity-proven nondefault mirrored
+Alpine image, without force; image defaults stayed unset. Independent literal JSON/JUnit identity checks,
+original public/physical PRE/POST equality and exact preservation of the existing 6 GiB mirror-volume source
+passed, with all source/candidate/boot/default bindings preserved. Together with the separately bound
+26 non-VM and two stopped-operation cases, all 37 currently registered nodes in this file have pass evidence
+across three invocations. This is not one consolidated module invocation, the separate hotplug module,
+reusable-base provisioning, or complete installed T1/T2 qualification. No synthetic RAM guards were used.
+
 **Current VM-options checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
 SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed the complete
 15-node `vm/test_vm_lifecycle.py::TestVMConfigOptions` class together on clean signed suite `b73d0462`
