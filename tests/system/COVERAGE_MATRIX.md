@@ -17,6 +17,19 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current non-VM volume checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
+SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed 26 registered
+`volume/test_volume.py` cases together on clean signed suite `b73d0462` inside `mvmctl-030-test`:
+strict 26/26, zero other outcomes, native exit 0, 9.89 seconds. These cover the 25 non-VM
+`TestVolumeLifecycle` nodes and `TestRawVolumeAuthoritativeStorage::test_create_grow_inspect_and_remove`:
+raw creation and options, list/inspect JSON, duplicate and invalid-input refusals, removed format-flag
+refusals, growth and shrink refusal, exact removal, multiple removal and partial failure.
+Native fixtures cleaned their owned volumes; no VM, image, default or kernel setup was needed.
+Independent literal JSON/JUnit checks proved exact case identities and original public/physical PRE/POST
+equality. The existing 6 GiB asset-mirror volume and its exact source identity were preserved; source,
+candidate and runner-boot bindings matched. No synthetic RAM guards were used. VM-dependent attachment,
+hotplug, broader fault paths, reusable-base provisioning and the complete installed T1/T2 matrix remain separate.
+
 **Current volume/snapshot contract checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
 SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed five registered
 cases together on clean signed suite `b73d0462` inside `mvmctl-030-test`: strict 5/5, zero other outcomes,
