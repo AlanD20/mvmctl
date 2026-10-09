@@ -254,11 +254,20 @@ class NetworkCase:
         self.networks: list[NetworkReceipt] = []
         self.vms: list[VMReceipt] = []
         self.attempts: list[tuple[str, str]] = []
-        defaults = [item for item in _networks(runner_vm) if item["is_default"]]
+        defaults = [item for item in self.before["network"] if item["is_default"]]
         assert len(defaults) <= 1, defaults
-        self.original_default = (
-            _network_receipt(runner_vm, defaults[0]) if defaults else None
-        )
+        self.original_default = defaults[0] if defaults else None
+        self.original_default_active: NetworkReceipt | None = None
+        if self.original_default is not None:
+            original = self.original_default
+            assert re.fullmatch(r"[0-9a-f]{64}", original["id"]), original
+            assert original["name"] and original["created_at"], original
+            assert isinstance(original["is_present"], bool), original
+            assert isinstance(original["bridge_active"], bool), original
+            if original["is_present"] and original["bridge_active"]:
+                self.original_default_active = _network_receipt(runner_vm, original)
+            else:
+                assert not original["is_present"] and not original["bridge_active"], original
         self.default_changed = False
 
     def create_network(
@@ -491,11 +500,26 @@ class NetworkCase:
                 errors.append(f"VM {receipt.id}: {exc}")
         if self.default_changed and self.original_default:
             try:
-                _assert_network_receipt(self.runner_vm, self.original_default)
-                _run_mvm(self.runner_vm, "network", "default", self.original_default.id)
+                original = self.original_default
+                matches = [
+                    item
+                    for item in _networks(self.runner_vm)
+                    if item["id"] == original["id"] or item["name"] == original["name"]
+                ]
+                assert len(matches) == 1, f"refusing ambiguous default restoration: {matches}"
+                assert {
+                    key: value for key, value in matches[0].items()
+                    if key not in {"is_default", "updated_at"}
+                } == {
+                    key: value for key, value in original.items()
+                    if key not in {"is_default", "updated_at"}
+                }, matches
+                if self.original_default_active is not None:
+                    _assert_network_receipt(self.runner_vm, self.original_default_active)
+                _run_mvm(self.runner_vm, "network", "default", original["id"])
             except Exception as exc:
                 errors.append(
-                    f"restore exact default {self.original_default.id}: {exc}"
+                    f"restore exact default {self.original_default['id']}: {exc}"
                 )
         for receipt in reversed(self.networks[:]):
             try:
