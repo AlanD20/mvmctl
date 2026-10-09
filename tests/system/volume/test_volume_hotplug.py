@@ -18,14 +18,18 @@ VIOLATIONS REMOVED:
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 
 from tests.system.conftest import (
     _ensure_image,
+    _json_success_data,
     _run_mvm,
     _unique_subnet,
     cleanup_vm_resources,
@@ -98,7 +102,7 @@ def _require_firecracker_hotplug(runner_vm: str) -> None:
     if result.returncode != 0:
         pytest.fail("Cannot check Firecracker version (bin ls failed)")
 
-    bins = json.loads(result.stdout)
+    bins = _json_success_data(result.stdout, list)
     fc_default = next(
         (b for b in bins
          if b.get("type") == "firecracker" and b.get("is_default")),
@@ -874,66 +878,184 @@ class TestVolumeHotplugDestructive:
         """Fail all hotplug destructive tests if Firecracker is too old."""
         _require_firecracker_hotplug(runner_vm)
 
+    @pytest.mark.destructive
     def test_hotplug_force_remove_attached_volume(
         self,
         runner_vm: str,
-        hotplug_vm: str,
     ) -> None:
-        # Rationale: Needs a real running VM (30-120s) and an attached volume
-        # (1-3s) to test the force-remove path. The volume must be attached
-        # to a running VM so we can verify the guest still sees the device
-        # after CLI-level removal (force-remove does NOT hot-unplug).
-        """Force-remove a volume that is hotplugged to a running VM."""
-        vm_name: str = hotplug_vm
-        vol_name: str = f"sys-hp-{uuid.uuid4().hex[:8]}"
+        """Refuse running force-removal, then remove after stop without detach."""
+        suffix = uuid.uuid4().hex[:8]
+        names = {
+            "vm": f"sys-hp-rm-vm-{suffix}",
+            "volume": f"sys-hp-rm-vol-{suffix}",
+            "key": f"sys-hp-rm-key-{suffix}",
+            "network": f"sys-hp-rm-net-{suffix}",
+        }
 
-        wait_for_ssh(runner_vm, vm_name, "root", 30.0)
+        def inventory(domain: str) -> list[dict]:
+            rows = _json_success_data(
+                _run_mvm(runner_vm, domain, "ls", "--json").stdout, list
+            )
+            if domain == "kernel":
+                # Listing missing recorded kernels refreshes updated_at.
+                rows = [
+                    {key: value for key, value in row.items() if key != "updated_at"}
+                    for row in rows
+                ]
+            return sorted(rows, key=lambda row: json.dumps(row, sort_keys=True))
 
+        baseline = {
+            domain: inventory(domain)
+            for domain in ("vm", "volume", "key", "network", "image", "kernel", "bin")
+        }
+        config = _json_success_data(
+            _run_mvm(runner_vm, "config", "ls", "--json").stdout, dict
+        )
+        for domain, name in names.items():
+            assert all(row["name"] != name for row in baseline[domain])
+        alpine = [
+            row for row in baseline["image"]
+            if row["type"] == "alpine" and row["version"] == "3.23" and row["is_present"]
+        ]
+        assert len(alpine) == 1, alpine
+        assert 0 < alpine[0]["minimum_rootfs_size_mib"] <= 512, alpine
+        kernels = [
+            row for row in baseline["kernel"] if row["is_default"] and row["is_present"]
+        ]
+        assert len(kernels) == 1, kernels
+        for binary_type in ("firecracker", "jailer"):
+            assert any(
+                row["type"] == binary_type and row["version"] == "1.16.2"
+                and row["is_default"] and row["is_present"]
+                for row in baseline["bin"]
+            ), (binary_type, baseline["bin"])
+
+        attempted: set[str] = set()
+        owned_ids: dict[str, str] = {}
+        source: Path | None = None
         try:
-            # -- Phase 1: Create, hotplug, verify presence -----------------
-            _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
+            attempted.add("key")
+            _run_mvm(runner_vm, "key", "create", names["key"], "--algorithm", "ed25519")
+            owned_ids["key"] = next(
+                row["id"] for row in inventory("key") if row["name"] == names["key"]
+            )
+            attempted.add("network")
             _run_mvm(
-                runner_vm,
-                "volume",
-                "attach",
-                vm_name,
-                vol_name,
+                runner_vm, "network", "create", names["network"],
+                "--subnet", _unique_subnet(names["network"]),
             )
-            time.sleep(3.0)
-            assert _wait_for_vdb(runner_vm, vm_name, timeout=10.0), (
-                f"Block device vdb did not appear in guest {vm_name}"
+            owned_ids["network"] = next(
+                row["id"] for row in inventory("network") if row["name"] == names["network"]
             )
+            attempted.add("vm")
+            _run_mvm(
+                runner_vm, "vm", "create", names["vm"],
+                "--image", alpine[0]["id"], "--kernel", kernels[0]["id"],
+                "--network", owned_ids["network"], "--ssh-key", owned_ids["key"],
+                "--user", "root", "--mem", "256M", "--vcpu", "1", "--disk-size", "512M",
+                timeout=180,
+            )
+            owned_ids["vm"] = next(
+                row["id"] for row in inventory("vm") if row["name"] == names["vm"]
+            )
+            attempted.add("volume")
+            _run_mvm(runner_vm, "volume", "create", names["volume"], "512M")
+            volume = next(
+                row for row in inventory("volume") if row["name"] == names["volume"]
+            )
+            owned_ids["volume"] = volume["id"]
+            source = Path(volume["path"])
+            assert source.name == f"{owned_ids['volume']}.raw", source
+            vm_id, vol_id = owned_ids["vm"], owned_ids["volume"]
+            _run_mvm(runner_vm, "volume", "attach", vm_id, vol_id)
+            assert _wait_for_vdb(runner_vm, vm_id), "hotplugged vdb did not appear"
 
-            # -- Phase 2: Force-remove while attached ----------------------
-            _run_mvm(runner_vm, "volume", "rm", vol_name, "--force")
+            attached = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", vol_id, "--json").stdout, dict
+            )
+            assert attached["volume"]["status"] == "attached"
+            assert attached["attachment"]["vm_id"] == vm_id
+            source_before = source.lstat()
+            assert stat.S_ISREG(source_before.st_mode), source
+            assert source_before.st_size == 512 * 1024 * 1024
+            result = _run_mvm(
+                runner_vm, "volume", "rm", vol_id, "--force", check=False
+            )
+            assert result.returncode != 0, result.stdout + result.stderr
+            assert "stop the vm" in (result.stdout + result.stderr).lower()
 
-            # Volume must be gone from the CLI listing
-            vols = json.loads(
-                _run_mvm(runner_vm, "volume", "ls", "--json").stdout
+            retained = _json_success_data(
+                _run_mvm(runner_vm, "volume", "inspect", vol_id, "--json").stdout, dict
             )
-            assert not any(v["name"] == vol_name for v in vols), (
-                f"Volume {vol_name} should be removed from CLI listing "
-                f"after force-remove"
+            assert retained["volume"] == attached["volume"]
+            assert retained["attachment"] == attached["attachment"]
+            assert retained["disk_info"] == attached["disk_info"]
+            source_after = source.lstat()
+            for field in ("st_dev", "st_ino", "st_size", "st_ctime_ns", "st_mtime_ns"):
+                assert getattr(source_after, field) == getattr(source_before, field), field
+            running = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_id, "--json").stdout, dict
             )
+            assert running["vm"]["id"] == vm_id
+            assert running["vm"]["status"] == "running"
+            assert any(row["id"] == vol_id for row in running["volumes"])
+            sectors = _run_mvm(
+                runner_vm, "exec", vm_id, "--user", "root", "--timeout", "10", "--",
+                "cat /sys/block/vdb/size",
+            )
+            assert int(sectors.stdout.strip()) == 512 * 1024 * 1024 // 512
 
-            # -- Phase 3: Guest should still see the device ----------------
-            device_still_present = _wait_for_vdb(
-                runner_vm, vm_name, timeout=10.0
+            _run_mvm(runner_vm, "vm", "stop", vm_id, "--force")
+            stopped = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_id, "--json").stdout, dict
             )
-            assert device_still_present, (
-                "Device vdb should still be visible in the guest "
-                "after CLI-level force-remove (force-remove does not "
-                "hot-unplug)"
+            assert stopped["vm"]["status"] == "stopped"
+            assert any(row["id"] == vol_id for row in stopped["volumes"])
+            _run_mvm(runner_vm, "volume", "rm", vol_id, "--force")
+            assert all(row["id"] != vol_id for row in inventory("volume"))
+            assert not os.path.lexists(source), "removed volume retained its raw source"
+            after = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", vm_id, "--json").stdout, dict
             )
+            assert after["vm"]["id"] == vm_id
+            assert after["vm"]["status"] == "stopped"
+            assert all(row["id"] != vol_id for row in after["volumes"])
         finally:
-            _run_mvm(
-                runner_vm,
-                "volume",
-                "rm",
-                vol_name,
-                "--force",
-                check=False,
-            )
+            failures = []
+            for domain, name in names.items():
+                try:
+                    rows = [row for row in inventory(domain) if row["name"] == name]
+                    assert len(rows) <= 1, rows
+                    if rows:
+                        assert domain in attempted, ("unattempted resource exists", domain, rows)
+                        resource_id = rows[0]["id"]
+                        assert owned_ids.get(domain, resource_id) == resource_id
+                        assert all(row["id"] != resource_id for row in baseline[domain])
+                        flags = () if domain == "key" else ("--force",)
+                        _run_mvm(
+                            runner_vm, domain, "rm", resource_id, *flags,
+                            timeout=120 if domain == "vm" else 60,
+                        )
+                    assert all(
+                        row["name"] != name and row["id"] != owned_ids.get(domain)
+                        for row in inventory(domain)
+                    ), (domain, name)
+                    if domain == "volume" and source is not None:
+                        assert not os.path.lexists(source), source
+                except Exception as error:
+                    failures.append(f"cleanup {domain}/{name}: {error}")
+            for domain, before in baseline.items():
+                try:
+                    assert inventory(domain) == before, domain
+                except Exception as error:
+                    failures.append(f"baseline {domain}: {error}")
+            try:
+                assert _json_success_data(
+                    _run_mvm(runner_vm, "config", "ls", "--json").stdout, dict
+                ) == config, "configuration changed"
+            except Exception as error:
+                failures.append(f"baseline config: {error}")
+            assert not failures, "\n".join(failures)
 
     def test_hotplug_double_attach_fails(
         self,
