@@ -36,6 +36,7 @@ class _KernelPullOwner:
         self.cache_identity = self.directory_identity(cache_dir)
         self.config_identity = self.directory_identity(config_dir)
         self.receipt = None
+        self.output_dir = cache_dir.parent
 
     @staticmethod
     def directory_identity(path):
@@ -92,7 +93,7 @@ class _KernelPullOwner:
         """A failed/ambiguous publication never grants authority by inventory difference."""
         assert self.receipt is None, "only one acquisition is owned per private case"
         for label, output in (("stdout", result.stdout), ("stderr", result.stderr)):
-            (self.cache_dir.parent / f"pull.{label}").write_text(output, encoding="utf-8")
+            (self.output_dir / f"pull.{label}").write_text(output, encoding="utf-8")
         if result.returncode != 0:
             return  # Preserve the original body's failure assertion and uncertain private artifacts.
         item = _json_success_data(result.stdout, dict)
@@ -113,7 +114,7 @@ class _KernelPullOwner:
         self.receipt = item, path, backing, digest
         print(f"owned kernel pull receipt={item}, backing={backing}, sha256={digest}", flush=True)
 
-    def cleanup(self):
+    def retire_kernel(self):
         assert self.receipt is not None, (
             f"No successful exact pull receipt; retain private cache and native output at {self.cache_dir.parent}"
         )
@@ -126,9 +127,10 @@ class _KernelPullOwner:
         )
         self.assert_inspect_receipt(inspected, item)
         assert self.file_receipt(path) == (backing, digest), "owned backing changed; retain cache"
-        removed = _json_success_data(
-            _run_mvm(self.runner_vm, "kernel", "rm", item["id"], "--force", "--json").stdout, dict,
-        )
+        result = _run_mvm(self.runner_vm, "kernel", "rm", item["id"], "--force", "--json", check=False)
+        self.save_native("retirement", result)
+        assert result.returncode == 0, result.stderr
+        removed = _json_success_data(result.stdout, dict)
         assert len(removed["items"]) == 1, removed
         assert removed["items"][0]["result"]["code"] == "kernel.removed", removed
         assert removed["items"][0]["error"] is None, removed
@@ -140,45 +142,205 @@ class _KernelPullOwner:
             _run_mvm(self.runner_vm, "config", "ls", "--json").stdout, dict,
         ) == self.config
         assert self.directory_identity(self.cache_dir) == self.cache_identity
-        cleaned = _json_success_data(
-            _run_mvm(self.runner_vm, "cache", "clean", "--force", "--json", timeout=210).stdout, dict,
-        )
+        self.receipt = None
+
+    def cleanup_cache(self):
+        assert self.receipt is None, "live or uncertain publication; retain cache"
+        assert self.directory_identity(self.cache_dir) == self.cache_identity
+        assert self.directory_identity(self.config_dir) == self.config_identity
+        assert self.inventory() == self.baseline, "private state changed; retain cache"
+        assert _json_success_data(
+            _run_mvm(self.runner_vm, "config", "ls", "--json").stdout, dict,
+        ) == self.config
+        result = _run_mvm(self.runner_vm, "cache", "clean", "--force", "--json", timeout=210, check=False)
+        self.save_native("cache-clean", result)
+        assert result.returncode == 0, result.stderr
+        cleaned = _json_success_data(result.stdout, dict)
         assert cleaned["cache_dir"] == str(self.cache_dir) and cleaned["cache_dir_removed"] is True, cleaned
         assert not cleaned["prune_result"]["failed_ids"] and not cleaned["prune_result"]["had_running_vms"], cleaned
         with pytest.raises(FileNotFoundError):
             self.cache_dir.lstat()
 
+    def save_native(self, label, result):
+        for stream in ("stdout", "stderr"):
+            (self.output_dir / f"{label}.{stream}").write_text(getattr(result, stream), encoding="utf-8")
+        (self.output_dir / f"{label}.exit").write_text(str(result.returncode), encoding="utf-8")
 
-@pytest.fixture
-def kernel_pull_owner(runner_vm, tmp_path, monkeypatch):
-    """Isolate each existing acquisition case; preserve shared originals on every exit."""
+
+class _KernelPullSequence(_KernelPullOwner):
+    """One immutable-kernel store, exact case receipts, one terminal cache retirement."""
+
+    selectors = {
+        "TestKernelPullWithVersion::test_kernel_pull_with_version": "v1.15",
+        "TestKernelPullWithVersion::test_kernel_pull_with_specific_version": "v1.14",
+        "TestKernelPullArch::test_kernel_pull_with_arch": "v1.15",
+    }
+
+    def __init__(self, runner_vm, cache_dir, config_dir, output_dir, selected):
+        super().__init__(runner_vm, cache_dir, config_dir)
+        assert selected and len(selected) == len(set(selected))
+        assert set(selected) <= self.selectors.keys(), selected
+        self.selected = tuple(selected)
+        self.completed = []
+        self.active = None
+        self.aborted = False
+        self.output_root = output_dir
+
+    @classmethod
+    def retained_paths(cls, receipt_path, expected_sha256):
+        """Admit an explicit reviewed handoff, never resources discovered by difference."""
+        raw = receipt_path.read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == expected_sha256, "retained handoff digest mismatch"
+        handoff = json.loads(raw)
+        assert set(handoff) == {
+            "schema_version", "native_handle", "parent", "cache", "config", "protected",
+            "terminal", "failure", "pull", "publication_sha256", "config_files",
+        }, handoff
+        assert handoff["schema_version"] == 1 and handoff["native_handle"] == 84838, handoff
+        documents = {}
+        for label in ("terminal", "failure", "pull"):
+            reference = handoff[label]
+            payload = Path(reference["path"]).read_bytes()
+            assert hashlib.sha256(payload).hexdigest() == reference["sha256"], label
+            documents[label] = payload
+        terminal = json.loads(documents["terminal"])
+        assert terminal["fixture_baseline_preserved"] is True and not terminal["preservation_errors"]
+        assert terminal["passed"] is False
+        commands = [command for command in terminal["commands"]
+                    if command["label"] == "kernel-acquisition-v1.15"]
+        assert len(commands) == 1 and commands[0]["native_exit"] == 1, terminal
+        failure = json.loads(documents["failure"])
+        assert failure["no_mutation"] is True and failure["published_kernel_absent"] is True
+        assert documents["pull"].decode() == failure["pull_stdout"]
+        assert handoff["pull"]["sha256"] == failure["pull_stdout_sha256"]
+        item = _json_success_data(documents["pull"].decode(), dict)
+        digest = handoff["publication_sha256"]
+        assert re.fullmatch(r"[0-9a-f]{64}", digest), digest
+        assert hashlib.sha256(f"{digest}:{item['version']}:{item['arch']}".encode()).hexdigest() == item["id"]
+        paths = {label: Path(handoff[label]["path"]) for label in ("parent", "cache", "config", "protected")}
+        assert all(path.is_absolute() for path in paths.values()), paths
+        assert paths["cache"] == paths["parent"] / "pull-cache"
+        assert paths["config"] == paths["parent"] / "pull-config"
+        assert paths["protected"] == paths["cache"] / ".mvm-protected"
+        assert Path(item["path"]) == paths["cache"] / "kernels" / item["id"]
+        assert Path(handoff["pull"]["path"]) == paths["parent"] / "pull.stdout"
+        for label in ("parent", "cache", "config"):
+            assert cls.directory_identity(paths[label]) == tuple(handoff[label]["identity"]), label
+        for label in ("parent", "cache", "protected"):
+            observed = failure["paths"][str(paths[label])]
+            historical = tuple(observed[key] for key in ("st_dev", "st_ino", "st_uid", "st_gid", "st_mode"))
+            assert historical == tuple(handoff[label]["identity"]), label
+        protected = paths["protected"].lstat()
+        assert (protected.st_dev, protected.st_ino, protected.st_uid,
+                protected.st_gid, protected.st_mode) == tuple(handoff["protected"]["identity"])
+        assert stat.S_ISDIR(protected.st_mode) and protected.st_uid == 0
+        assert stat.S_IMODE(protected.st_mode) == 0o700
+        with pytest.raises(FileNotFoundError):
+            Path(item["path"]).lstat()
+        cls.assert_config_files(paths["config"], handoff["config_files"])
+        return paths["cache"], paths["config"]
+
+    @staticmethod
+    def assert_config_files(config_dir, expected):
+        actual = {}
+        for path in config_dir.rglob("*"):
+            assert not path.is_symlink(), path
+            if path.is_dir():
+                actual[str(path.relative_to(config_dir))] = {
+                    "identity": list(_KernelPullOwner.directory_identity(path)),
+                }
+            else:
+                identity, digest = _KernelPullOwner.file_receipt(path)
+                actual[str(path.relative_to(config_dir))] = {"identity": list(identity), "sha256": digest}
+        assert actual == expected, "retained config changed"
+
+    def initialize_retained(self):
+        # Do not initialize/recreate a historically bound store. Public state must still be empty.
+        self.baseline = self.inventory()
+        assert all(not items for items in self.baseline.values()), self.baseline
+        self.config = _json_success_data(
+            _run_mvm(self.runner_vm, "config", "ls", "--json").stdout, dict,
+        )
+
+    def select_cache(self, environment):
+        environment.setenv("MVM_CACHE_DIR", str(self.cache_dir))
+        environment.setenv("MVM_CONFIG_DIR", str(self.config_dir))
+        environment.setenv("MVM_TEMP_DIR", str(self.cache_dir / "tmp"))
+        environment.setenv("TMPDIR", str(self.cache_dir / "tmp"))
+        environment.delenv("MVM_WARM_POOL", raising=False)
+
+    def begin_case(self, selector):
+        assert not self.aborted and self.active is None and self.receipt is None, "sequence retained/active"
+        assert selector == self.selected[len(self.completed)], "unexpected sequence order"
+        self.active = selector
+        self.output_dir = self.output_root / selector.replace("::", "-")
+        self.output_dir.mkdir(mode=0o700)
+
+    def finish_case(self, failed):
+        assert self.active is not None
+        if failed:
+            self.aborted = True
+            raise AssertionError(f"Failed acquisition case; retain sequence at {self.cache_dir}")
+        try:
+            self.retire_kernel()
+        except BaseException:
+            self.aborted = True
+            raise
+        self.completed.append(self.active)
+        self.active = None
+
+    def cleanup(self):
+        assert not self.aborted and self.active is None, "failed sequence retained"
+        assert tuple(self.completed) == self.selected, "incomplete sequence retained"
+        try:
+            self.cleanup_cache()
+        except BaseException:
+            self.aborted = True
+            raise
+
+
+@pytest.fixture(scope="module")
+def kernel_pull_sequence(runner_vm, tmp_path_factory, request):
+    """Retain one store between cases; preserve shared originals on every exit."""
+    selected = [item.nodeid.split("test_kernel.py::", 1)[1] for item in request.session.items
+                if item.path == request.node.path and
+                item.nodeid.split("test_kernel.py::", 1)[-1] in _KernelPullSequence.selectors]
+    assert request.config.option.maxfail == 1, "kernel acquisition sequences require native pytest -x"
     baseline = {domain: _json_success_data(
         _run_mvm(runner_vm, domain, "ls", "--json").stdout, list,
     ) for domain in _KernelPullOwner.domains}
     config = _json_success_data(_run_mvm(runner_vm, "config", "ls", "--json").stdout, dict)
     sources = {Path(item["path"]): _KernelPullOwner.file_receipt(Path(item["path"]))
                for item in baseline["kernel"] if item["is_present"]}
+    tmp_path = tmp_path_factory.mktemp("kernel-pull-sequence")
     tmp_path.chmod(0o700)
-    cache_dir, config_dir = tmp_path / "pull-cache", tmp_path / "pull-config"
-    cache_dir.mkdir(mode=0o700)
-    config_dir.mkdir(mode=0o700)
+    receipt_path = os.environ.get("MVM_TEST_KERNEL_PULL_RETAINED_RECEIPT")
+    receipt_digest = os.environ.get("MVM_TEST_KERNEL_PULL_RETAINED_SHA256")
+    assert bool(receipt_path) == bool(receipt_digest), "retained handoff needs path and SHA256"
+    if receipt_path:
+        cache_dir, config_dir = _KernelPullSequence.retained_paths(Path(receipt_path), receipt_digest)
+    else:
+        cache_dir, config_dir = tmp_path / "pull-cache", tmp_path / "pull-config"
+        cache_dir.mkdir(mode=0o700)
+        config_dir.mkdir(mode=0o700)
     failures = []
+    owner = _KernelPullSequence(runner_vm, cache_dir, config_dir, tmp_path, selected)
     try:
-        with monkeypatch.context() as selection:
-            selection.setenv("MVM_CACHE_DIR", str(cache_dir))
-            selection.setenv("MVM_CONFIG_DIR", str(config_dir))
-            selection.setenv("MVM_TEMP_DIR", str(cache_dir / "tmp"))
-            selection.setenv("TMPDIR", str(cache_dir / "tmp"))
-            selection.delenv("MVM_WARM_POOL", raising=False)
-            owner = _KernelPullOwner(runner_vm, cache_dir, config_dir)
+        try:
+            with pytest.MonkeyPatch.context() as selection:
+                owner.select_cache(selection)
+                if receipt_path:
+                    owner.initialize_retained()
+                else:
+                    owner.initialize()
+            yield owner
+        finally:
             try:
-                owner.initialize()
-                yield owner
-            finally:
-                try:
+                with pytest.MonkeyPatch.context() as selection:
+                    owner.select_cache(selection)
                     owner.cleanup()
-                except Exception as error:
-                    failures.append(f"private pull cleanup retained {cache_dir}: {error!r}")
+            except Exception as error:
+                failures.append(f"private pull cleanup retained {cache_dir}: {error!r}")
     finally:
         # Run every shared-state check even when private acquisition/cleanup failed.
         for domain, expected in (*baseline.items(), ("config", config)):
@@ -196,6 +358,29 @@ def kernel_pull_owner(runner_vm, tmp_path, monkeypatch):
             except Exception as error:
                 failures.append(f"shared source kernel changed: {path}: {error!r}")
         assert not failures, failures
+
+
+@pytest.fixture
+def kernel_pull_owner(kernel_pull_sequence, request, monkeypatch):
+    """Select only the authentic mirror for this original, unchanged case body."""
+    owner = kernel_pull_sequence
+    selector = request.node.nodeid.split("test_kernel.py::", 1)[1]
+    version = owner.selectors[selector]
+    mirror = os.environ.get("MVM_ASSET_MIRROR")
+    if version == "v1.14":
+        mirror = os.environ.get("MVM_TEST_KERNEL_V114_MIRROR")
+        shared = os.environ.get("MVM_ASSET_MIRROR")
+        assert mirror and shared and not os.path.samefile(mirror, shared), "v1.14 needs its authentic private mirror"
+    assert mirror and Path(mirror).is_absolute() and not Path(mirror).is_symlink(), mirror
+    assert Path(mirror).is_dir(), mirror
+    owner.select_cache(monkeypatch)
+    monkeypatch.setenv("MVM_ASSET_MIRROR", mirror)
+    owner.begin_case(selector)
+    failures_before = request.session.testsfailed
+    try:
+        yield owner
+    finally:
+        owner.finish_case(request.session.testsfailed != failures_before)
 
 
 def _import_test_kernel(runner_vm: str) -> str:
