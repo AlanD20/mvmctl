@@ -25,6 +25,16 @@ manifest exactly. New source is not yet built or installed, and complete CI for 
 installed `f909601d` evidence qualifies only unchanged relevant inputs, not this new live-attachment behavior.
 Readiness detects rather than repairs the separately diagnosed Firecracker BAR relocation failure.
 
+**Current local image import/removal (2026-10-09):** four registered cases passed together, strict 4/4 in
+7.76 seconds with native exit 0 and no other outcomes, on installed `0.3.0-rc.partition-f909601d` and clean
+`b73d0462` inside `mvmctl-030-test`: local cached raw-file import, nonexistent-path refusal, and normal/force
+removal of an unused imported image. JSON/JUnit agree on those exact nodes. Typed owned-image cleanup and
+independent original/prepared public and physical inventory comparisons passed; kernel, defaults, mirror,
+source and candidate identities remained unchanged. No VM launch, download or synthetic memory guard was used.
+The local import checks ext4/Alpine metadata, not boot or guest contents. Force removal here does not prove
+in-use removal. This is bounded unchanged-path evidence, not qualification of new guest readiness or the full
+image domain.
+
 **Current protected-rootfs VM image import (2026-10-09):**
 `images/test_images.py::TestImageImportCreateVM::test_vm_import_preserves_guest_contents_and_source_state[running]`
 passed strict 1/1 in 27.69 seconds, native exit 0 and zero other outcomes, on installed
@@ -2359,14 +2369,14 @@ Specific legacy conflicts that must be rewritten before release:
 | `image inspect --tree` | 🔴 Missing | — | — | Tree-view inspect subcommand does not exist in CLI. Not a valid test target. |
 | `image default` | ⚡ Shallow | `images/test_images.py` | `TestImageDefaults` | Installed rc.7: selected Alpine ID is the sole default in schema-1 listing. |
 | `image default` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageDefaults` | Installed rc.7: `image.not_found` structured error. |
-| `image rm` | ⏭️ Skip | `images/test_images.py` | `TestImageRemove` | L2 — uses imported_prefix cleanup |
-| `image rm --force` | ⏭️ Skip | `images/test_images.py` | `TestImageRemoveForce` | L2 — force remove, verify via ls --json |
+| `image rm` | ⚡ Shallow | `images/test_images.py` | `TestImageRemove::test_image_remove_with_fixture[normal]` | Current installed f909 L2: unused imported image removed; owned backing and inventory cleanup checked. |
+| `image rm --force` | 🟡 Partial | `images/test_images.py` | `TestImageRemove::test_image_remove_with_fixture[force]` | Current installed f909 L2: unused imported image removed with force and checked cleanup; in-use force behavior remains separate. |
 | `image rm` blocked by VM dependency | 🟡 Partial | `images/test_images.py` | `TestImageDependencyDeletion` | L3: rm rejected when image used by stopped/running VM; formerly-default promotes another |
 | `image warm` | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: schema-1 path is a regular ready-pool file of the image's uncompressed size. |
 | `image warm --all` | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: warmed/ready message for cached image. |
 | `image warm` by ID prefix | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: prefix resolves and reports warmed/ready. |
 | `image warm` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: command rejects missing image. |
-| `image import` | ⚡ Shallow | `images/test_images.py` | `TestImageImport` | Installed rc.7: cached Alpine raw import, exact ext4/Alpine record, checked removal; VM boot remains unproved. |
+| `image import` | ⚡ Shallow | `images/test_images.py` | `TestImageImport::test_image_import_local_file` | Current installed f909: cached Alpine raw import, ext4/Alpine record and checked removal; this case does not boot the image. |
 | `image import --format qcow2` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced::test_image_import_with_format_qcow2` | Installed current-candidate L2: cached Alpine raw→QCOW2→ext4 import booted as a networkless VM; guest OS identity read through vsock and checked VM/image/temp-file removal. Other formats and failure paths remain unqualified; QCOW2 data volumes are unsupported. |
 | `image import --root-partition` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — skips on qemu-img |
 | `image import --force` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — may skip |
@@ -2376,7 +2386,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `image import --skip-optimization` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced` | L2 — imported with skip-optimization flag, may skip |
 | `image import --disable-detector` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced` | L2 — imported with --disable-detector arch, may skip on missing cached image |
 | `image import --version` | ⚡ Shallow | `images/test_images.py` | `TestImageImportAdvanced::test_image_import_with_version` | L2 — version field matches in ls --json |
-| `image import` nonexistent path | ⚡ Shallow | `images/test_images.py` | `TestImageImport` | Installed rc.7: structured `image.import.failed`, no image record. |
+| `image import` nonexistent path | ⚡ Shallow | `images/test_images.py` | `TestImageImport::test_import_from_nonexistent_path_fails` | Current installed f909: schema-1 `image.import.failed`, source-not-found message and unchanged image inventory. |
 | Full import→VM-create end-to-end | 🟡 Partial | `images/test_images.py` | `TestImageImportCreateVM` | Current named-runner L2 passed protected-rootfs imports from Running, Paused and Stopped sources, preserved each source state and booted independent clones with exact guest-written bytes. Export interruption/recovery and the remaining class cases are separately unqualified. |
 | Default migrates on force re-pull | ⏭️ Skip | `images/test_images.py` | `TestImageDefaultMigration` | L2 — many skip points |
 

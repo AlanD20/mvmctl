@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > checks passed inside the named runner. This source is not yet built or installed there; it does not fix the
 > diagnosed Firecracker BAR relocation failure or qualify the new behavior at system-test level.
 
+> **Current local image checkpoint (2026-10-09):** four registered cases passed strict 4/4 in 7.76 seconds
+> on installed `0.3.0-rc.partition-f909601d`: cached raw-file import, missing-path rejection, and normal/force
+> removal of an unused imported image. Exact owned cleanup and original inventories passed without synthetic
+> memory guards. This does not qualify boot from that local import, in-use force removal or the full image domain.
+
 > **Current protected-rootfs import checkpoint (2026-10-09):** the Running VM-to-image journey passed
 > strict 1/1 in 27.69 seconds; Paused and Stopped then passed strict 2/2 in 34.59 seconds on the same
 > installed candidate, without artificial QA memory guards.
