@@ -21,7 +21,8 @@ Usage:
 
   # Rebuild and qualify an explicit release candidate
   python3 scripts/run-system-tests.py --release-qualification --all \\
-    --host-direct --rebuild --candidate-version 0.3.0
+    --host-direct --rebuild --candidate-version 0.3.0 \\
+    --host-reboot-task /path/to/closed-host-reboot-task
   python3 scripts/run-system-tests.py --volume --image --prepare
   python3 scripts/run-system-tests.py --volume
   python3 scripts/run-system-tests.py --image
