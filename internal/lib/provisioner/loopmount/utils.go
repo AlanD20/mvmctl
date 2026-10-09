@@ -3,6 +3,7 @@ package loopmount
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
+	"mvmctl/pkg/errs"
 )
 
 // --- Partition table parsing (sfdisk + parted) ---
@@ -27,20 +29,25 @@ type sfdiskTable struct {
 }
 
 // parsePartitionsSfdisk parses partition table using sfdisk --json.
-func parsePartitionsSfdisk(ctx context.Context, rawPath string, partition int) *parseResult {
-	result, _ := system.DefaultRunner.Run(ctx, []string{"sfdisk", "--json", rawPath}, system.RunCmdOpts{
+func parsePartitionsSfdisk(ctx context.Context, rawPath string, partition int) (*parseResult, error) {
+	result, err := system.DefaultRunner.Run(ctx, []string{"sfdisk", "--json", rawPath}, system.RunCmdOpts{
 		Check: false, Capture: true, Timeout: partedTimeout,
 	})
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeProcessError, "sfdisk partition probe failed", err)
+	}
 	if !result.Success() {
-		return noPartitionTableSentinel
+		return nil, errs.New(errs.CodeProcessError, fmt.Sprintf(
+			"sfdisk partition probe failed (exit %d): %s", result.ExitCode, strings.TrimSpace(result.Stderr),
+		))
 	}
 
 	var table sfdiskTable
 	if err := json.Unmarshal([]byte(result.Stdout), &table); err != nil {
-		return nil
+		return nil, errs.WrapMsg(errs.CodeProcessError, "invalid sfdisk partition table", err)
 	}
 	if table.PartitionTable == nil || len(table.PartitionTable.Partitions) == 0 {
-		return noPartitionTableSentinel
+		return noPartitionTableSentinel, nil
 	}
 
 	partitions := make([]partitionEntry, 0, len(table.PartitionTable.Partitions))
@@ -49,25 +56,30 @@ func parsePartitionsSfdisk(ctx context.Context, rawPath string, partition int) *
 			Start: int64(p.Start), Size: int64(p.Size), Type: p.Type, Node: p.Node,
 		})
 	}
-	return &parseResult{partitions: partitions, requestedPartition: partition}
+	return &parseResult{partitions: partitions, requestedPartition: partition}, nil
 }
 
 // parsePartitionsParted parses partition table using parted as fallback.
-func parsePartitionsParted(ctx context.Context, rawPath string, partition int) *parseResult {
-	result, _ := system.DefaultRunner.Run(
+func parsePartitionsParted(ctx context.Context, rawPath string, partition int) (*parseResult, error) {
+	result, err := system.DefaultRunner.Run(
 		ctx,
 		[]string{"parted", "-sm", rawPath, "unit", "B", "print"},
 		system.RunCmdOpts{
 			Check: false, Capture: true, Timeout: partedTimeout,
 		},
 	)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeProcessError, "parted partition probe failed", err)
+	}
 	if !result.Success() {
-		return nil
+		return nil, errs.New(errs.CodeProcessError, fmt.Sprintf(
+			"parted partition probe failed (exit %d): %s", result.ExitCode, strings.TrimSpace(result.Stderr),
+		))
 	}
 
 	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-	if len(lines) == 0 || lines[0] != "BYT;" {
-		return nil
+	if len(lines) < 2 || lines[0] != "BYT;" {
+		return nil, errs.New(errs.CodeProcessError, "invalid parted partition table")
 	}
 
 	var partitions []partitionEntry
@@ -96,9 +108,9 @@ func parsePartitionsParted(ctx context.Context, rawPath string, partition int) *
 	}
 
 	if len(partitions) == 0 {
-		return noPartitionTableSentinel
+		return noPartitionTableSentinel, nil
 	}
-	return &parseResult{partitions: partitions, requestedPartition: partition}
+	return &parseResult{partitions: partitions, requestedPartition: partition}, nil
 }
 
 // --- Post-extraction helpers ---

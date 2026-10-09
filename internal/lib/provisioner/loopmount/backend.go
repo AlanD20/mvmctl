@@ -2,6 +2,7 @@ package loopmount
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -224,21 +225,34 @@ func detectRootPartition(
 	partition int,
 	disabledDetectors []string,
 ) (rootPartitionSource, error) {
+	if err := ctx.Err(); err != nil {
+		return rootPartitionSource{}, err
+	}
 	fsType := system.DetectFilesystemType(ctx, rawPath)
+	if err := ctx.Err(); err != nil {
+		return rootPartitionSource{}, err
+	}
 	if fsType == "ext4" || fsType == "ext3" || fsType == "ext2" ||
 		fsType == "btrfs" || fsType == "xfs" {
 		slog.Info("Image is filesystem, using as-is", "type", fsType)
 		return rootPartitionSource{wholeImage: true, fsType: fsType}, nil
 	}
 
-	parsed := parsePartitionsSfdisk(ctx, rawPath, partition)
-	if parsed == nil {
-		parsed = parsePartitionsParted(ctx, rawPath, partition)
+	parsed, sfdiskErr := parsePartitionsSfdisk(ctx, rawPath, partition)
+	if err := ctx.Err(); err != nil {
+		return rootPartitionSource{}, err
 	}
-	if parsed == nil {
-		return rootPartitionSource{}, fmt.Errorf(
-			"failed to parse partition table: neither sfdisk nor parted is available or succeeded",
-		)
+	if sfdiskErr != nil {
+		var partedErr error
+		parsed, partedErr = parsePartitionsParted(ctx, rawPath, partition)
+		if err := ctx.Err(); err != nil {
+			return rootPartitionSource{}, err
+		}
+		if partedErr != nil {
+			return rootPartitionSource{}, errs.WrapMsg(
+				errs.CodeLoopMountError, "failed to parse partition table", errors.Join(sfdiskErr, partedErr),
+			)
+		}
 	}
 
 	if parsed.noPartitionTable {
