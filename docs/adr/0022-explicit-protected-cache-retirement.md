@@ -51,6 +51,9 @@ retired backing. Cleanup therefore needs explicit root-authorized retirement, no
 - Root leaves the verified empty quarantine sibling rather than performing another check/unlink under a caller-owned
   parent. After confirmed root retirement, the ordinary unprivileged API removes only that fixed empty directory
   before its existing cache removal. Nonempty or otherwise failed ordinary removal reports incomplete cleanup.
+- A later ordinary-removal retry may acknowledge completion without mutation only when validated durable retirement
+  is already `removed` and both fixed store and quarantine entries are absent. This finishes the ordinary suffix;
+  it does not reconstruct missing nonterminal authority, recreate a store or authorize rebinding.
 - Preserve root-owned logical bindings, terminal object records, digests, generations and durable locks outside the
   caller's cache. A cleanup record authorizes only finishing that exact retirement. Ordinary lookup, launch, restore
   and import must still refuse a missing or retired store; cleanup grants no automatic reimport or cache rebinding.

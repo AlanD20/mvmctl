@@ -103,8 +103,9 @@ logical disk; T2 provisioning uses 4 GiB RAM and a 9 GiB logical disk. The share
 6 GiB logical disk, with physical use determined by its cached contents. The replacement `mvmctl-030-test`
 has 6 GiB RAM and a 40 GiB logical disk as verified on 2026-10-01; this is not a provisioning capacity guarantee.
 That day's parent free space was approximately 9.9 GiB, insufficient to admit even the 12 GiB builder under
-the conservative no-sparse-credit budget. Check current physical storage, parent memory headroom and preserved
-state before provisioning; another runner replacement requires separate approval. Logical disk sizes alone
+the conservative no-sparse-credit budget. Check current physical storage and preserved state before provisioning;
+memory readings are observations, not synthetic admission thresholds. Another runner replacement requires separate
+approval. Logical disk sizes alone
 do not prove that the required physical storage is available. The stock preparation path selects
 `official:7.0.11`; changing a default does not bind a separately imported fresh producer artifact.
 
