@@ -17,6 +17,19 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current complete lifecycle/volume node coverage (2026-10-09):** All 69 registered nodes in
+`vm/test_vm_lifecycle.py` and all 37 in `volume/test_volume.py` now have passing installed-candidate
+evidence on clean suite `b73d0462` inside `mvmctl-030-test`. The same `0.3.0-rc.partition-f909601d`
+candidate, SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed the
+last 21 lifecycle/list/SSH/volume and cold-snapshot cases together in 92.75 seconds, then the sole missing
+multi-identifier removal case in 6.29 seconds. Both native invocations exited 0 with strict JSON/JUnit
+outcomes and zero failures, errors, skips or expected failures. Current runner collection matched the
+106 unique passed node identities across eight separately bound batches; no earlier passing node was replayed.
+Exact owned cleanup, original public/physical inventories, configuration, defaults and mirror preservation
+passed. No synthetic RAM-abort guards were used. This completes registered-node coverage for these two files,
+not a consolidated invocation, stronger behavior than their assertions, the separate hotplug module,
+host-reboot/fault journeys, reusable-base provisioning or complete installed T1/T2 release qualification.
+
 **Current stopped-removal hotplug correction (2026-10-09):** The corrected
 `volume/test_volume_hotplug.py::TestVolumeHotplugDestructive::test_hotplug_force_remove_attached_volume`
 collected exactly once and passed strict 1/1 in 5.84 seconds inside `mvmctl-030-test`, with zero other
