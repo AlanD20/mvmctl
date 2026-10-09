@@ -119,6 +119,23 @@ policy cannot remove that enclosing limit. Preserve those receipts before lifecy
 temporary QA-only adjustment against actual host headroom without changing unrelated VM or global policy.
 Guest `MemAvailable` and free disk alone do not establish outer VMM memory safety.
 
+**Current QA resource override and checkpoint (2026-10-09):** The named runner `mvmctl-030-test` has
+6 GiB guest RAM and a 96 GiB logical disk; its approved outer `memory.high` and `memory.max` remain
+8 GiB (8,589,934,592 bytes). Memory measurements and OOM counters are observations only: QA uses no synthetic
+`MemAvailable` floor/reserve, full-envelope admission, host-memory-loss rejection, process-group RSS abort or
+7.5 GiB watchdog. This supersedes earlier synthetic memory-guard instructions and historical runner sizes;
+actual kernel limits, workload assertions, timeouts, physical-disk admission, identity checks and owned cleanup
+remain in force. Production [ADR-0019](../adr/0019-pressure-only-vm-memory-control.md) is unchanged; this QA
+override neither changes the outer kernel envelope nor guarantees survival under host or ancestor OOM.
+
+The installed candidate is `0.3.0-rc.partition-f909601d`, SHA-256
+`13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`. Complete pinned Go CI passed on clean
+`fdae5902`; the full root Jailer suite passed separately on clean `f909601d` with 2,627 test/subtest passes and
+zero failures/skips. Independent preservation passed for both; later documentation and test-only changes carry
+only unchanged relevant inputs. Earlier checkpoints below retain their original source/candidate bindings.
+Reusable-base provisioning and the complete installed Python matrix remain pending; these passes do not qualify
+the full release.
+
 ### Using an Already Imported Runner Kernel
 
 For a fresh custom Linux 7.0.11/x86_64 artifact, set both `MVM_RUNNER_KERNEL_ID` and
