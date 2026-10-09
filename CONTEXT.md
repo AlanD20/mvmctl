@@ -924,8 +924,11 @@ exact directional source/destination/non-root-user policy, constructs the author
 bounded output and cancellation, and writes command-redacted audit records. Unresolved destination denials have a
 separate bounded audit form. `--allow-vm-exec` is required per source command; interactive execution cannot opt in.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
-environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
-Python L2 qualification remains pending. The typed lifecycle now produces eligible schema-6 active identities;
+environment specs, results, and repository persistence; it has no compatibility path into exec policies.
+Installed-candidate Python journeys have passed same-, cross- and networkless directional execution,
+opt-in/audit checks, interruption, endpoint restart/reboot and restored-endpoint grants inside the named runner;
+the exact bindings and remaining release gates are recorded in the system-test coverage matrix.
+The typed lifecycle now produces eligible schema-6 active identities;
 legacy and incomplete records remain ineligible.
 No SQLite VM status,
 guest-supplied source ID, socket path, or process-local semaphore may substitute for root runtime authority.

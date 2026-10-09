@@ -59,8 +59,9 @@ the isolation prerequisite after previously pausing it for a separate design dec
   before guest readiness; projection or guest failures retain root ownership and explicit incomplete status, while
   uncertain root outcomes stay explicit. Do not roll back
   a potentially usable disk, free its backing, or declare success merely because the host API accepted it.
-  Implementation `7a4a99de` passed focused vet, behavioral and race checks inside the named runner; its real-agent
-  build, installed system journeys and the separate Firecracker BAR correction remain unqualified.
+  Implementation `7a4a99de` passed focused vet, behavioral and race checks inside the named runner. Clean
+  `046e8347` subsequently passed ordinary Go CI and the real embedded-agent build; that candidate is not installed.
+  Installed system journeys and the separate Firecracker BAR correction remain unqualified.
 - Require exclusive write ownership during capture. Refuse capture when another VM has writable access to any
   captured volume; coordinated multi-VM capture is not selected. Host writers and retained aliases must also be excluded.
 - Capture one consistent state across Full memory/vmstate, rootfs, and attached data disks. Root metadata binds the
