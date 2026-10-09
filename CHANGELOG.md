@@ -48,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > were removed, restoring the exact original inventory and zero-default state. Remote acquisition, force-repull
 > variants and the complete image domain remain separate.
 
+> **Current image-warming checkpoint (2026-10-09):** all four registered warm selectors/refusal cases
+> passed strict 4/4 in 7.45 seconds on the unchanged installed candidate. Slug, prefix and `--all` warming
+> matched complete independently decompressed bytes and reused the same ready files. `--all` included both
+> Alpine and the retained Ubuntu image. Original backings, defaults and inventories remained unchanged;
+> only newly owned Alpine and task-local warm/readback files were cleaned.
+
 > **Current protected-rootfs import checkpoint (2026-10-09):** the Running VM-to-image journey passed
 > strict 1/1 in 27.69 seconds; Paused and Stopped then passed strict 2/2 in 34.59 seconds on the same
 > installed candidate, without artificial QA memory guards.
@@ -60,9 +66,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Current export copy-failure checkpoint (2026-10-09):** the registered mid-copy I/O-failure case passed
 > strict 1/1 with native exit 0 on the same installed candidate. The authenticated root worker reached its
 > imposed file-size limit; source state and guest marker survived, partial publication was refused, and typed
-> cleanup restored the exact original inventories. This uses a hash-bound, not-yet-integrated test-fixture
-> correction over `b73d0462`. SIGINT survival and abrupt receiver-death recovery are not qualified: their
-> separate attempts failed root-worker survival checks, and a narrowly scoped transport correction is pending.
+> cleanup restored the exact original inventories. The tested fixture correction over `b73d0462` is now
+> integrated unchanged in `bfdece17`. SIGINT survival and abrupt receiver-death recovery are not qualified.
+
+> **Export-interruption correction (2026-10-09):** `3e00e00e` adds an export-only, payload-free transport
+> that starts its privileged worker in a separate session and disconnects without killing it on cancellation.
+> Ordinary actions and export Release retain their existing cancellation behavior. Focused transport/routing
+> tests, vet and race checks passed inside the runner; the new survival regression failed against the old
+> state machine. Root authorization, state restoration and failed-response cleanup are unchanged. The fix
+> has not yet passed a release build, installation or the two installed interruption/recovery journeys.
 
 > **Current bounded memory checkpoint (2026-10-09):** installed `0.3.0-rc.partition-f909601d`
 > passed all three registered bounded memory cases: near-saturation with host swap absent and present, and

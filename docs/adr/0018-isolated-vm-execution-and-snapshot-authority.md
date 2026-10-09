@@ -93,6 +93,12 @@ Stopping the VM does not copy those changes back to staging. File import remains
 - An originally running VM is paused for the disk copy and restored to running before accepting the output.
   Originally paused and stopped VMs retain their state. Copy failures and cancellation require bounded,
   cancellation-independent original-state recovery; extraction or optimization happens only after that recovery.
+- The payload-free export capability starts its fixed privileged worker in a separate session. Caller cancellation
+  disconnects the control socket without killing that worker; abrupt caller death must not deliver an orphaned
+  stopped-group hangup through sudo. The worker retains authority to finish copying, restore the original state
+  and discard output after a failed response. The caller's bounded reaping wait does not promise immediate recovery:
+  without an accepted physical-EOF response, it reports an unknown outcome. Release and other privileged actions
+  retain ordinary process-group cancellation. This exception is export-only, not a caller-selected cancellation mode.
 - The existing best-effort guest `sync` hint runs before acquiring root export locks. It is neither state authority
   nor a guarantee of application consistency. Pausing and exclusive disk access provide stable disk bytes, not
   application transaction atomicity or a Full memory snapshot.

@@ -193,6 +193,7 @@ Documented exceptions for direct `os/exec` / `os/exec.CommandContext`:
 | `internal/service/agent/pty.go` | Guest agent PTY session via `su` with `exec.CommandContext` |
 | `internal/service/agent/destination_process.go` | Closed VM-exec destination execution requires an exact nonzero numeric UID, numeric groups, fixed environment/home, `/bin/sh -c`, and process-group cancellation that `DefaultRunner` cannot express |
 | `internal/lib/archive/archive.go` | xz decompression via pipe-based `exec.CommandContext` |
+| `internal/lib/system/privileged_control.go` | Fixed authenticated dispatcher exchange requires a duplex fd-0 socket, physical EOF and owned reaping; only payload-free VM-rootfs export disconnects without killing its separately sessioned recovery worker |
 | `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of `DefaultRunner.Run()` / `Stream()` / `SpawnService` itself |
 
 **Binary lookup carve-out:** Utility files across the codebase use `exec.LookPath()` (not `exec.Command`/`exec.CommandContext`) solely to check whether a system binary exists before calling it through `DefaultRunner.Run()`. This is NOT a subprocess execution — it's a filesystem existence check. These files are not listed as exceptions above and do not violate the subprocess rule.

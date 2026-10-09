@@ -55,6 +55,18 @@ original public/physical inventories and zero-default state matched without norm
 mirror and candidate pins were preserved. No downloads or artificial memory thresholds were used.
 This does not qualify remote acquisition, force-repull variants, guest boot or the complete image domain.
 
+**Current complete image-warming class (2026-10-09):** all four `TestImageWarm` nodes passed together,
+strict 4/4 in 7.45 seconds with native exit 0 and zero other JSON/JUnit outcomes, on unchanged installed
+`f909601d` and clean `b73d0462` inside `mvmctl-030-test`. Slug, prefix and `--all` checked complete hashes
+against independent decompression and exact ready-file reuse; the missing selector returned `image.not_found`.
+`--all` covered both the newly mirrored 200-MiB Alpine image and the existing 479-MiB Ubuntu image.
+Both full prepared/original public and physical inventories matched without normalization. The original
+Ubuntu compressed backing's metadata and content hash, every default, kernel, mirror and candidate pin
+were preserved. Typed removal deleted only the owned nondefault Alpine; identity-bound cleanup removed
+only fresh task-local warm/readback files. No VM, download, installation or artificial memory guard was used.
+Terminal receipt SHA-256: `e014cdf2b22bdddd5ffb6d2ec0970e56b4d0beaba6aebb9377de093c72c418cd`.
+This completes the current warm class, not remote producers, force-repull, guest boot or the full image domain.
+
 **Current protected-rootfs VM image import (2026-10-09):**
 `images/test_images.py::TestImageImportCreateVM::test_vm_import_preserves_guest_contents_and_source_state[running]`
 passed strict 1/1 in 27.69 seconds, native exit 0 and zero other outcomes, on installed
@@ -80,8 +92,9 @@ not interruption/recovery, reusable-base or full image-domain qualification.
 **Current export copy-I/O failure (2026-10-09):**
 `images/test_images.py::TestImageImportCreateVM::test_vm_import_mid_copy_io_failure_restores_source_and_discards_partial`
 passed strict 1/1, with native exit 0 and zero other JSON/JUnit outcomes, inside `mvmctl-030-test` on the same
-installed `f909601d` candidate. Test inputs were a single-file, uncommitted fixture correction over clean
-`b73d0462`, SHA-256 `026e99baf6d041551824fd212f85a077df1222c963457d75a0d8960ada9b2d3d`.
+installed `f909601d` candidate. Test inputs were a single-file fixture correction over clean `b73d0462`,
+subsequently integrated unchanged in `bfdece17`, SHA-256
+`026e99baf6d041551824fd212f85a077df1222c963457d75a0d8960ada9b2d3d`.
 The observer authenticated the exact root receiver and partial copy, imposed a file-size limit, and proved
 the failed copy reached that limit. The source returned to its original state with its guest marker preserved;
 partial image publication was refused and typed removal was idempotent. The observer exited 0 with empty
@@ -91,7 +104,19 @@ memory guard was used. Literal terminal receipt SHA-256:
 `a6c47d763d47f5a3fbcde0674ed96288a7127dfaa7a81a0e99bb49b3496a91ad`.
 This qualifies this real copy-failure path only. Separate SIGINT and abrupt caller-death attempts failed root
 receiver-survival checks before later recovery assertions; neither is qualified. Source and a bounded
-no-VM process probe support an export-only cancellation/session correction, not a completed runtime fix.
+no-VM process probe support the export-only cancellation/session correction below, not a completed runtime fix.
+
+**Export-interruption source correction (2026-10-09):** `3e00e00e` integrates the named, fixed-action,
+payload-free export transport. Its worker uses `Setsid`, while cancellation closes caller-owned control resources
+without a fatal group signal. Ordinary actions retain `Setpgid` and their existing kill/reap behavior. Physical-EOF
+authority, pre-start refusal, unknown-outcome diagnostics, the bounded caller wait and one eventual owned reaper
+are unchanged; root restoration and failed-response Release are untouched. Focused Go 1.26.3 transport and
+Jailer routing tests, affected vet and race checks passed inside `mvmctl-030-test`; every integrated Go source
+hash matched the tested six-file manifest. One isolated pre-fix survival regression failed because the worker
+was killed; the fixed test proved survival, deliberate later completion and exactly one reaping wait.
+The fixture-only `bfdece17` also passed exact six-node collection and the selected missing-admission runner unit.
+Neither change is installed yet; coherent release build and the installed SIGINT/receiver-death journeys remain
+required. These focused gates are not full CI, full root-Jailer or release qualification.
 
 **Current administrator filesystem recovery (2026-10-09):**
 `host/test_host_admin.py::TestCleanHostAdministration::test_filesystem_failure_preserves_init_and_reset_retry_authority`
