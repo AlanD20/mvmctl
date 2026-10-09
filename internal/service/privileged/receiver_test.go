@@ -617,7 +617,7 @@ func TestRun_RealSocketpairPeerCredentialsAndResponseEOF(t *testing.T) {
 	requireReceiverPoll(t, int(syncParent.Fd()), unix.POLLIN, 2*time.Second)
 	var ready [1]byte
 	_, err = io.ReadFull(syncParent, ready[:])
-	require.NoError(t, err, diagnostic.String())
+	require.NoError(t, err)
 	assert.Equal(t, byte('R'), ready[0])
 	requireReceiverPoll(t, int(parent.Fd()), unix.POLLRDHUP, 2*time.Second)
 	require.NoError(t, unix.Kill(command.Process.Pid, 0), "helper must remain alive after response EOF")
