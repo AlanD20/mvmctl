@@ -31,7 +31,9 @@ import re
 import resource
 import select
 import signal
+import socket
 import stat
+import struct
 import sys
 import time
 
@@ -156,6 +158,67 @@ def source_unchanged():
             assert hashlib.file_digest(value, 'sha256').hexdigest() == launch['release']['firecracker_sha256']
     finally:
         os.close(executable)
+
+def observe_paused_state():
+    # Read only the fixed state endpoint of this retained Firecracker generation.
+    deadline = time.monotonic() + 5
+    source_unchanged()
+    runtime = keep(os.open('vmm-runtime', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                           dir_fd=jail))
+    try:
+        runtime_info = os.fstat(runtime)
+        assert stat.S_ISDIR(runtime_info.st_mode) and stat.S_IMODE(runtime_info.st_mode) == 0o700
+        assert runtime_info.st_uid == execution_uid and runtime_info.st_gid == execution_gid
+        socket_info = os.stat('firecracker.api.socket', dir_fd=runtime, follow_symlinks=False)
+        assert stat.S_ISSOCK(socket_info.st_mode) and socket_info.st_mode & 0o077 == 0
+        assert socket_info.st_mode & 0o200 and socket_info.st_uid == execution_uid
+        assert socket_info.st_gid == execution_gid
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(max(0.001, deadline - time.monotonic()))
+            connection.connect('/proc/self/fd/' + str(runtime) + '/firecracker.api.socket')
+            peer = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i'))
+            assert struct.unpack('3i', peer) == (source_pid, execution_uid, execution_gid)
+            source_unchanged()
+            assert stable(os.fstat(runtime)) == stable(runtime_info)
+            assert stable(os.stat('vmm-runtime', dir_fd=jail, follow_symlinks=False)) == stable(runtime_info)
+            assert stable(os.stat('firecracker.api.socket', dir_fd=runtime,
+                                  follow_symlinks=False)) == stable(socket_info)
+            assert time.monotonic() < deadline, 'state observation admission exceeded its budget'
+            connection.settimeout(deadline - time.monotonic())
+            connection.sendall(b'GET / HTTP/1.1\r\nHost: firecracker\r\nConnection: close\r\n\r\n')
+            response, body_start, content_length = bytearray(), None, None
+            while body_start is None or len(response) - body_start < content_length:
+                assert len(response) < 65536, 'oversized state response'
+                remaining = deadline - time.monotonic()
+                assert remaining > 0, 'state observation timed out'
+                connection.settimeout(remaining)
+                part = connection.recv(min(4096, 65536 - len(response)))
+                assert part, 'incomplete state response'
+                response.extend(part)
+                if body_start is None and b'\r\n\r\n' in response:
+                    header, _ = bytes(response).split(b'\r\n\r\n', 1)
+                    lines = header.decode('ascii').split('\r\n')
+                    assert lines[0].split(' ', 2)[:2] == ['HTTP/1.1', '200'], lines[0]
+                    headers = unique((name.lower(), value.strip()) for name, value in
+                                     (line.split(':', 1) for line in lines[1:]))
+                    assert 'transfer-encoding' not in headers and 'content-length' in headers
+                    assert re.fullmatch(r'[0-9]+', headers['content-length'])
+                    content_length = int(headers['content-length'])
+                    body_start = len(header) + 4
+                    assert 0 < content_length <= 65536 - body_start, 'oversized state body'
+            assert len(response) == body_start + content_length, 'unexpected state response extent'
+            observed = json.loads(bytes(response[body_start:]), object_pairs_hook=unique)
+            assert observed['state'] == 'Paused', observed
+            assert connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')) == peer
+            source_unchanged()
+            assert stable(os.fstat(runtime)) == stable(runtime_info)
+            assert stable(os.stat('vmm-runtime', dir_fd=jail, follow_symlinks=False)) == stable(runtime_info)
+            assert stable(os.stat('firecracker.api.socket', dir_fd=runtime,
+                                  follow_symlinks=False)) == stable(socket_info)
+            assert time.monotonic() < deadline, 'state observation exceeded its budget'
+            return observed['state']
+    finally:
+        forget(runtime)
 
 def receiver_unchanged():
     assert receiver_pidfd is not None and not exited(receiver_pidfd)
@@ -489,6 +552,12 @@ try:
             command = sys.stdin.readline(256)
             if not command:
                 break
+            if command == 'state\n':
+                assert copy_phase()[0] == progress_before, 'state observation requires pending source recovery'
+                observed_state = observe_paused_state()
+                print(json.dumps({'phase': 'state', 'image_id': image_id,
+                                  'source_generation': generation, 'state': observed_state}), flush=True)
+                continue
             parts = command.split()
             assert parts == ['released'] or (
                 len(parts) == 2 and parts[0] == 'recovered' and re.fullmatch(r'[0-9a-f]{64}', parts[1])
@@ -698,6 +767,15 @@ class _VMImportReceiverDeath:
             "image_id": self.image_id,
             "receiver_exited": False,
             "receiver_stopped": True,
+        }
+
+    def require_paused_state(self):
+        assert self.mode == "death"
+        assert self.require("state") == {
+            "phase": "state",
+            "image_id": self.image_id,
+            "source_generation": self.source_generation,
+            "state": "Paused",
         }
 
     def finish_survivor(self):
@@ -1810,7 +1888,9 @@ class TestImageImportCreateVM:
                 assert all(
                     image["id"] != fault.image_id for image in _images(runner_vm)
                 )
-                source_receipt.require_state(runner_vm, "paused")
+                # Public status observes process liveness; root GET independently proves CPU pause.
+                source_receipt.require_state(runner_vm, "running")
+                fault.require_paused_state()
                 for _ in range(2):
                     removed = _json_success_data(
                         _run_mvm(
@@ -1851,7 +1931,8 @@ class TestImageImportCreateVM:
                     "VM rootfs export requires recovery; repeat image import or stop the VM"
                     in response["error"]["message"]
                 )
-                source_receipt.require_state(runner_vm, "paused")
+                source_receipt.require_state(runner_vm, "running")
+                fault.require_paused_state()
                 assert fault.require("released")["phase"] == "released"
                 print("VM import phase=recovery_import_begin", flush=True)
                 with _imported(
