@@ -286,19 +286,22 @@ func (c *Controller) AttachVolume(ctx context.Context, driveConfig model.DriveCo
 	if !stat.Mode().IsRegular() || stat.Size() <= 0 {
 		return errs.New(errs.CodeValidationFailed, "volume attach requires a positive regular raw volume")
 	}
-	return c.AttachManagedVolume(ctx, cacheRoot, &model.VolumeItem{
+	_, err = c.AttachManagedVolume(ctx, cacheRoot, &model.VolumeItem{
 		ID: driveConfig.DriveID, Format: model.VolumeFormatRaw, SizeBytes: stat.Size(),
 		IsReadOnly: driveConfig.IsReadOnly, CacheType: driveConfig.CacheType,
 	})
+	return err
 }
 
 // AttachManagedVolume selects the durable logical volume without requiring its
 // original caller-owned import file to remain present after first protection.
-func (c *Controller) AttachManagedVolume(ctx context.Context, cacheRoot string, volume *model.VolumeItem) error {
+func (c *Controller) AttachManagedVolume(
+	ctx context.Context, cacheRoot string, volume *model.VolumeItem,
+) (jailersvc.VMVolumeResult, error) {
 	if volume == nil || volume.SizeBytes <= 0 {
-		return errs.New(errs.CodeValidationFailed, "managed volume selection is incomplete")
+		return jailersvc.VMVolumeResult{}, errs.New(errs.CodeValidationFailed, "managed volume selection is incomplete")
 	}
-	_, err := jailersvc.NewVMLifecycleClient().AttachVolume(ctx, jailersvc.VMVolumeAttachRequest{
+	result, err := jailersvc.NewVMLifecycleClient().AttachVolume(ctx, jailersvc.VMVolumeAttachRequest{
 		VMID: c.vm.ID, CacheRoot: cacheRoot, Volume: jailersvc.VMLaunchVolume{
 			ID: volume.ID, Format: volume.Format, ExpectedBytes: uint64(volume.SizeBytes),
 			ReadOnly: volume.IsReadOnly, CacheType: volume.CacheType,
@@ -307,7 +310,7 @@ func (c *Controller) AttachManagedVolume(ctx context.Context, cacheRoot string, 
 	if err != nil {
 		slog.Error("failed to attach root-authorized volume", "vm", c.vm.Name, "volume", volume.ID, "error", err)
 	}
-	return err
+	return result, err
 }
 
 // --- DetachVolume ---

@@ -40,6 +40,10 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 		a.handlePCIVolumeConnection(ctx, conn)
 		return
 	}
+	if string(prefix) == PCIVolumeReadyMagic {
+		a.handlePCIVolumeReadyConnection(ctx, conn)
+		return
+	}
 	if string(prefix) == vmexecwire.SourceSessionMagic {
 		sourceDeadline := time.Now().Add(vmexecwire.MaxExecutionDuration)
 		if err := conn.SetDeadline(sourceDeadline); err != nil {

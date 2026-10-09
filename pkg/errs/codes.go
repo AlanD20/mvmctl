@@ -97,6 +97,7 @@ const (
 	CodeVolumeAlreadyExists Code = "volume.already_exists"
 	CodeVolumeError         Code = "volume.error"
 	CodeVolumeResizeFailed  Code = "volume.resize_failed"
+	CodeVolumeGuestNotReady Code = "volume.guest_not_ready"
 
 	// --- Key domain ---
 	CodeKeyNotFound            Code = "key.not_found"

@@ -13,6 +13,7 @@ import (
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/version"
+	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
@@ -383,24 +384,127 @@ func (op *Operation) VolumeAttach(
 				}
 			}
 		}
-		// Attempt hotplug via Firecracker API.
-		controller := vm.NewController(vmItem, op.Repos.VM)
-		if err := controller.AttachManagedVolume(ctx, op.CacheDir, vol); err != nil {
-			return err
-		}
-		client, err := op.vsockClient(ctx, vmItem)
-		if err != nil {
-			slog.Warn("vsock client not available for PCI rescan, device may not appear until reboot",
-				"vm", vmItem.Name, "volume", vol.Name, "error", err)
-		}
-		if client != nil {
-			if err := client.RescanPCI(ctx); err != nil {
-				slog.Warn("guest PCI rescan via vsock failed, device may not appear until reboot",
-					"vm", vmItem.Name, "volume", vol.Name, "error", err)
+	}
+	var controller volumeAttachmentController
+	var guest pciVolumeReadinessClient
+	var guestErr error
+	if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
+		controller = vm.NewController(vmItem, op.Repos.VM)
+		if vmItem.Status == model.VMStatusRunning {
+			client, err := op.vsockClient(ctx, vmItem)
+			guestErr = err
+			if client != nil {
+				guest = client
 			}
 		}
 	}
-	// VolumeController.Attach
+	if err := op.attachVolumeToVM(ctx, vmItem, vol, controller, guest, guestErr); err != nil {
+		return err
+	}
+	op.AuditLog.LogOperation("vm.attach_volume", map[string]any{
+		"vm": vmItem.Name, "volume": vol.Name,
+	}, "")
+	return nil
+}
+
+type volumeAttachmentController interface {
+	AttachManagedVolume(context.Context, string, *model.VolumeItem) (jailersvc.VMVolumeResult, error)
+	ObserveVolume(context.Context, string) (jailersvc.VMVolumeObservation, error)
+}
+
+type pciVolumeReadinessClient interface {
+	EnsurePCIVolumeReady(context.Context, model.PCIVolumeIdentity) error
+}
+
+// attachVolumeToVM retains the configured binding separately from guest readiness.
+func (op *Operation) attachVolumeToVM(
+	ctx context.Context, vmItem *model.VMItem, vol *model.VolumeItem,
+	controller volumeAttachmentController, guest pciVolumeReadinessClient, guestErr error,
+) error {
+	if vmItem.Status != model.VMStatusRunning && vmItem.Status != model.VMStatusPaused {
+		return op.projectVolumeAttachment(ctx, vmItem, vol)
+	}
+	result, attachErr := controller.AttachManagedVolume(ctx, op.CacheDir, vol)
+	if attachErr != nil {
+		observed, observeErr := controller.ObserveVolume(ctx, vol.ID)
+		if observeErr != nil || observed.Validate(vmItem.ID, vol.ID) != nil {
+			return errs.WrapMsg(errs.CodeVolumeGuestNotReady,
+				"VMM attachment outcome is unconfirmed; retry the same attach", errors.Join(attachErr, observeErr),
+				errs.WithClass(errs.ClassRetryable), errs.WithEntity(vol.ID), errs.WithDetails(map[string]any{
+					"vm_id": vmItem.ID, "vmm_outcome_unknown": true, "guest_ready": false,
+				}))
+		}
+		if !observed.Attached {
+			return attachErr
+		}
+	} else if err := result.Validate(vmItem.ID, vol.ID, true); err != nil {
+		return errs.WrapMsg(errs.CodeVolumeGuestNotReady,
+			"VMM attachment response is unconfirmed; retry the same attach", err,
+			errs.WithClass(errs.ClassRetryable), errs.WithEntity(vol.ID), errs.WithDetails(map[string]any{
+				"vm_id": vmItem.ID, "vmm_outcome_unknown": true, "guest_ready": false,
+			}))
+	}
+	// Root completion is retained even if projection, guest discovery, or the caller's context fails.
+	if err := op.projectVolumeAttachment(ctx, vmItem, vol); err != nil {
+		return errs.WrapMsg(errs.CodeDatabaseError,
+			"VMM volume is attached but local projection failed; retry the same attach", errors.Join(attachErr, err),
+			errs.WithEntity(vol.ID), errs.WithDetails(map[string]any{
+				"vm_id": vmItem.ID, "vmm_attached": true, "guest_ready": false, "projection_failed": true,
+			}))
+	}
+	if attachErr != nil {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM volume is attached but attachment acknowledgment failed; retry the same attach", attachErr, false)
+	}
+	if vmItem.Status == model.VMStatusPaused {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"volume staged on paused VM; resume it and retry the same attach to verify guest readiness", nil, true)
+	}
+	observed, err := controller.ObserveVolume(ctx, vol.ID)
+	if err != nil {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM volume was attached but its readiness identity is unavailable; retry the same attach", err, false)
+	}
+	if err := observed.Validate(vmItem.ID, vol.ID); err != nil || !observed.Attached ||
+		observed.LaunchGeneration != result.LaunchGeneration {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM attachment changed before guest readiness; retry the same attach", err, false)
+	}
+	if guestErr != nil || guest == nil {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM volume is attached but the guest agent is unavailable; retry the same attach", guestErr, false)
+	}
+	if err := guest.EnsurePCIVolumeReady(ctx, model.PCIVolumeIdentity{
+		Serial: observed.Serial, ExpectedBytes: observed.ExpectedBytes,
+	}); err != nil {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM volume is attached but guest readiness failed; retry the same attach", err, false)
+	}
+	fresh, err := controller.ObserveVolume(ctx, vol.ID)
+	if err != nil || fresh != observed {
+		return volumeAttachPending(
+			vmItem.ID,
+			vol.ID,
+			"guest readiness was acknowledged but VMM attachment identity is unconfirmed; retry the same attach",
+			err,
+			false,
+		)
+	}
+	if err := ctx.Err(); err != nil {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM volume is attached but completion was cancelled; retry the same attach", err, false)
+	}
+	return nil
+}
+
+func volumeAttachPending(vmID, volumeID, message string, cause error, deferred bool) error {
+	return errs.WrapMsg(errs.CodeVolumeGuestNotReady, message, cause,
+		errs.WithClass(errs.ClassRetryable), errs.WithEntity(volumeID), errs.WithDetails(map[string]any{
+			"vm_id": vmID, "vmm_attached": true, "guest_ready": false, "readiness_deferred": deferred,
+		}))
+}
+
+func (op *Operation) projectVolumeAttachment(ctx context.Context, vmItem *model.VMItem, vol *model.VolumeItem) error {
 	volController := volume.NewController(vol, op.Repos.Volume)
 	if err := volController.Attach(ctx, vmItem.ID); err != nil {
 		slog.Warn("failed to attach volume to VM", "vm", vmItem.Name, "volume", vol.Name, "error", err)
@@ -409,7 +513,7 @@ func (op *Operation) VolumeAttach(
 	// Update VM's volume_ids
 	var vmVolumeIDs []string
 	if len(vmItem.VolumeIDs) > 0 {
-		vmVolumeIDs = vmItem.VolumeIDs
+		vmVolumeIDs = append([]string(nil), vmItem.VolumeIDs...)
 	}
 	found := false
 	for _, id := range vmVolumeIDs {
@@ -421,14 +525,12 @@ func (op *Operation) VolumeAttach(
 	if !found {
 		vmVolumeIDs = append(vmVolumeIDs, vol.ID)
 	}
-	vmItem.VolumeIDs = vmVolumeIDs
-	if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
+	updated := *vmItem
+	updated.VolumeIDs = vmVolumeIDs
+	if err := op.Repos.VM.Upsert(ctx, &updated); err != nil {
 		slog.Warn("failed to update VM volume IDs", "vm", vmItem.Name, "error", err)
 		return err
 	}
-	op.AuditLog.LogOperation("vm.attach_volume", map[string]any{
-		"vm": vmItem.Name, "volume": vol.Name,
-	}, "")
 	return nil
 }
 

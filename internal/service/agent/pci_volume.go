@@ -17,8 +17,28 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// pciVolumeMu serializes agent removal requests; it cannot exclude a privileged guest rescan.
+// pciVolumeMu serializes agent readiness/removal; it cannot exclude privileged guest operations.
 var pciVolumeMu sync.Mutex
+
+func lockPCIVolumes(ctx context.Context) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if pciVolumeMu.TryLock() {
+			if err := ctx.Err(); err != nil {
+				pciVolumeMu.Unlock()
+				return err
+			}
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
 
 type pciVolumeFS struct{ sys, dev, proc string }
 
@@ -187,6 +207,85 @@ func selectPCIVolume(disks []pciVolumeDisk, identity model.PCIVolumeIdentity) (*
 	return selected, nil
 }
 
+func pciVolumeDriverReady(ctx context.Context, fs pciVolumeFS, disk pciVolumeDisk) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	driver, err := filepath.EvalSymlinks(filepath.Join(disk.path, "device/driver"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, errs.WrapMsg(errs.CodeVolumeGuestNotReady, "guest block driver discovery is incomplete", err)
+	}
+	if driver != filepath.Join(fs.sys, "bus/virtio/drivers/virtio_blk") {
+		return false, errs.New(errs.CodeVolumeGuestNotReady, "selected guest disk is not bound to virtio_blk")
+	}
+	return true, nil
+}
+
+func ensurePCIVolumeReady(ctx context.Context, identity model.PCIVolumeIdentity, fs pciVolumeFS) error {
+	if err := identity.Validate(); err != nil {
+		return err
+	}
+	if err := lockPCIVolumes(ctx); err != nil {
+		return errs.WrapMsg(errs.CodeVolumeGuestNotReady, "guest volume readiness cancelled while waiting", err)
+	}
+	defer pciVolumeMu.Unlock()
+	rescan, err := os.OpenFile(filepath.Join(fs.sys, "bus/pci/rescan"), os.O_WRONLY, 0)
+	if err != nil {
+		return errs.WrapMsg(errs.CodeVolumeGuestNotReady, "open guest PCI rescan", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(err, rescan.Close())
+	}
+	_, writeErr := io.WriteString(rescan, "1\n")
+	if err := errors.Join(writeErr, rescan.Close()); err != nil {
+		return errs.WrapMsg(errs.CodeVolumeGuestNotReady, "guest PCI rescan failed", err)
+	}
+	for {
+		disks, err := discoverPCIVolumes(ctx, fs)
+		if err != nil {
+			return err
+		}
+		selected, err := selectPCIVolume(disks, identity)
+		if err != nil {
+			return err
+		}
+		if selected != nil {
+			ready, err := pciVolumeDriverReady(ctx, fs, *selected)
+			if err != nil {
+				return err
+			}
+			if ready {
+				fresh, err := discoverPCIVolumes(ctx, fs)
+				if err != nil {
+					return err
+				}
+				current, err := selectPCIVolume(fresh, identity)
+				if err != nil {
+					return err
+				}
+				if current == nil || *current != *selected {
+					return errs.New(errs.CodeVolumeGuestNotReady, "guest disk identity changed during readiness")
+				}
+				ready, err = pciVolumeDriverReady(ctx, fs, *current)
+				if err != nil {
+					return err
+				}
+				if ready {
+					return ctx.Err()
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return errs.WrapMsg(errs.CodeVolumeGuestNotReady, "guest volume did not become driver-bound", ctx.Err())
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
 func admitIdlePCIVolume(ctx context.Context, fs pciVolumeFS, disk pciVolumeDisk) error {
 	children, err := pciVolumeEntries(ctx, disk.path)
 	if err != nil {
@@ -275,7 +374,9 @@ func removePCIVolume(ctx context.Context, identity model.PCIVolumeIdentity, fs p
 	if err := identity.Validate(); err != nil {
 		return err
 	}
-	pciVolumeMu.Lock()
+	if err := lockPCIVolumes(ctx); err != nil {
+		return pciVolumeError("cancelled while waiting", err)
+	}
 	defer pciVolumeMu.Unlock()
 	disks, err := discoverPCIVolumes(ctx, fs)
 	if err != nil {

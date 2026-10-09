@@ -181,6 +181,7 @@ var codeClassMap = map[Code]Class{
 	CodeVolumeAlreadyExists: ClassConflict,
 	CodeVolumeError:         ClassInternal,
 	CodeVolumeResizeFailed:  ClassInternal,
+	CodeVolumeGuestNotReady: ClassRetryable,
 
 	// --- Key domain ---
 	CodeKeyNotFound:            ClassValidation,
@@ -371,6 +372,7 @@ var codeOpMap = map[Code]string{
 	CodeVolumeAlreadyExists: "volume",
 	CodeVolumeError:         "volume",
 	CodeVolumeResizeFailed:  "volume",
+	CodeVolumeGuestNotReady: "volume",
 
 	CodeKeyNotFound:            "key",
 	CodeKeyAlreadyExists:       "key",

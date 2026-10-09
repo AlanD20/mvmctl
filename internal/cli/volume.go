@@ -243,7 +243,12 @@ func newVolumeAttachCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:   "attach [vm-selector] [volume-selector]",
 		Short: "Attach a volume to a VM.",
-		Long: `Attach a volume to a running VM.
+		Long: `Attach a volume to a VM.
+
+Running VMs require verified guest block-device readiness before success.
+Paused VMs retain a staged attachment and return a deferred-readiness error;
+resume the VM and retry the same attach to verify readiness.
+Stopped VMs record the attachment for the next start.
 
 Arguments:
   vm-selector        VM selector (name, ID prefix, IP, or MAC)
