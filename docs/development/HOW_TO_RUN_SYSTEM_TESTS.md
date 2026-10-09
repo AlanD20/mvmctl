@@ -142,8 +142,9 @@ preservation checked all existing state except the authorized canonical binary r
 and Python-only changes carry only unchanged relevant Go/build inputs. Earlier checkpoints below retain their
 original source/candidate bindings. On the earlier `bfdece17`/`d13f8c06` candidate, the SIGINT export journey
 passed, while receiver death exposed a cached Resume success bypass; that two-case invocation was not a
-passing slice. The new candidate removes that bypass, but its affected receiver-death and public pause/resume
-runtime qualification remains pending. The snapshot capture file-limit failure/recovery case passed separately
+passing slice. The new candidate removes that bypass; its exact affected receiver-death and public pause/resume
+pair passed strict 2/2 with zero other outcomes and checked cleanup/original-state preservation. The old failed
+reports remain failures, and SIGINT was not replayed. The snapshot capture file-limit failure/recovery case passed separately
 on the earlier candidate.
 Reusable-base provisioning and the complete installed Python matrix remain pending; these passes do not qualify
 the full release.

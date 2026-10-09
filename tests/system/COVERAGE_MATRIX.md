@@ -26,7 +26,8 @@ Candidate `0.3.0-rc.resume-1300b64b`, SHA-256
 `vcs.modified=false`, Go 1.26.3, Linux/amd64 and PIE. Normal inner `host install-system` passed; its root-owned
 `0755` canonical binary matches the candidate. Independent preservation proved original state unchanged,
 apart from the admitted clean build source and the authorized canonical replacement. The affected receiver-death
-and public pause/resume journeys remain pending; no earlier installed pass is relabeled as a run on this build.
+and public pause/resume pair subsequently passed, as recorded below; no earlier installed pass is relabeled as
+a run on this build.
 
 **Earlier coherent Go/build checkpoint (2026-10-09):** clean `bfdece17`, tree `84dc90a1`, passed the complete
 ordinary pinned Go 1.26.3 CI sequence, the separate full root Jailer suite and the real embedded-agent amd64
@@ -216,8 +217,20 @@ refusal and unchanged source authority. Literal root log SHA-256
 `db9669a84f9d8c6b770f108651080b1e30fba985d63cd9cf95ddb43ff74d3c89`.
 The Python correction collected one node and passed the existing missing-admission unit separately.
 The later coherent CI/root/build and normal inner installation passed on `1300b64b`, as recorded above.
-The focused checks and installation are not an installed receiver-death pass; that affected singleton and
-the existing public pause/resume process/guest journey remain pending on the new candidate.
+The focused checks and installation are separate from the later affected installed runtime result below.
+
+**Installed Resume correction qualification (2026-10-09):** clean `1300b64b` and installed `81c521ba`
+passed exactly `TestImageImportCreateVM::test_vm_import_receiver_death_retires_orphan_and_recovers_source`
+and `TestVMStateTransitions::test_pause_resume_preserves_process_and_guest`, strict 2/2 in 32.30 seconds,
+with zero failures, errors, skips, deselections, collection errors, XFAILs or XPASSes. The first case killed the
+actual receiver during its partial copy, retained pending recovery, twice observed root-authenticated Paused
+state and proved idempotent copy release. Public resume returned the required batch/item refusal, then public
+import recovery succeeded with source and independent-clone marker readback. The second case proved actual
+Running no-op and Paused resume with unchanged process and guest boot identity. Exact native owned cleanup
+passed; prepared and original raw baselines each matched byte-for-byte, and source, candidate, assets and
+defaults retained their pins. Terminal SHA-256 `9389e068`; JSON `835d953f`; JUnit `1e3a86fd`.
+The old receiver failures remain failures; the passed SIGINT case was not replayed. This qualifies the
+demonstrated correction, not the complete image/lifecycle modules, reusable base or full release.
 
 **Empty kernel-list singleton (2026-10-09):** the previously unqualified registered
 `kernel/test_kernel.py::TestKernelLifecycle::test_kernel_list_empty` passed strict 1/1 with zero other outcomes

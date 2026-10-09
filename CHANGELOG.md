@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > real-agent amd64 build. Candidate `0.3.0-rc.resume-1300b64b`, SHA-256
 > `81c521ba65e82cdec0abc322b080aa3e0c38876d6313f359cf86713792720c57`, was installed only inside the named
 > QA VM; preservation differed only in the authorized binary replacement. The affected receiver-death and
-> public pause/resume runtime journeys remain pending.
+> public pause/resume journeys then passed strict 2/2 with zero other outcomes. Actual receiver death left
+> the source paused; resume was refused until public recovery completed, after which source and clone retained
+> the guest-written marker. Repeated normal resume preserved process/guest identity. Owned cleanup restored
+> the checked original state. This closes the demonstrated Resume defect, not the full release matrix.
 
 > **Current implementation and qualification checkpoint (2026-10-09):** the closed root-dispatch, isolated
 > Jailer, per-VM managed/networkless namespace, direct-Go nftables, typed traffic/exec policy, protected raw-volume
