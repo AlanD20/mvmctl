@@ -17,6 +17,21 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current CLI and atomic-firewall checkpoint (2026-10-09):** Installed candidate
+`0.3.0-rc.partition-f909601d`, SHA-256
+`13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed the complete
+registered `cli/test_cli.py` file inside `mvmctl-030-test`: strict 24/24, zero other outcomes,
+native exit 0 and 0.42 seconds. Public resource/configuration inventories and exact source, binary and boot
+bindings were preserved. The CLI suite created no VM or asset and changed no defaults.
+
+Three registered `network/test_nftables.py::TestAtomicRuleSync` cases passed separately on the same candidate:
+strict 3/3, zero other outcomes, native exit 0 and 2.71 seconds. These prove established/related rule retention,
+repeat-sync rule equality and masquerade preservation. Existing typed fixtures removed their exact owned
+networks; full public and physical PRE/POST inventories, active default, mirror and source/artifact pins matched.
+Both runs used the clean signed Python suite `276fc27c`; its executable inputs match `066a02af`.
+They used no synthetic memory admission or abort thresholds. These are separate installed-candidate slices,
+not normal reusable-base provisioning, VM traffic/exec policy qualification or complete T1/T2 release sign-off.
+
 **Current network fixture checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
 source `f909601d` and candidate SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`,
 passed three existing `network/test_network.py::TestNetworkLifecycle` cases together in `mvmctl-030-test`:
