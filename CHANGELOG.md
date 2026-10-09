@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > files were preserved outside the checkout for the separate build-only continuation. This candidate is not
 > installed or system-qualified and does not fix the diagnosed Firecracker BAR relocation failure.
 
+> **Current installed attachment-readiness checkpoint (2026-10-09):** on installed `bfdece17`/`d13f8c06`,
+> Running attach passed immediate disk/driver/capacity checks and filesystem I/O. After correcting only a test
+> assumption about inspect fields, Paused and Stopped passed separately, strict 2/2 in 19.48 seconds.
+> Paused staging retained its binding and retryable error; resume/same-attach retry and idempotent reattach
+> produced usable guest I/O with unchanged process identity. Stopped attachment proved configuration only.
+> Exact cleanup and original/prepared inventories passed. The earlier failed invocation remains a failure;
+> these three passing cases span two runs and do not repair or qualify live detach/reattach.
+
 > **Current local image checkpoint (2026-10-09):** four registered cases passed strict 4/4 in 7.76 seconds
 > on installed `0.3.0-rc.partition-f909601d`: cached raw-file import, missing-path rejection, and normal/force
 > removal of an unused imported image. Exact owned cleanup and original inventories passed without synthetic
@@ -49,8 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Current cached-image options checkpoint (2026-10-09):** seven further registered cases passed strict 7/7
 > in 18.92 seconds on the unchanged installed candidate: cached slug/version/type selectors, default reselection
 > and refusal, cached pull with `--default`, and raw import with `--default`. Owned temporary defaults and images
-> were removed, restoring the exact original inventory and zero-default state. Remote acquisition, force-repull
-> variants and the complete image domain remain separate.
+> were removed, restoring the exact original inventory and zero-default state. Remote acquisition and the
+> complete image domain remain separate; later force-pull option results are recorded below.
+
+> **Current force-pull options checkpoint (2026-10-09):** the three previously unqualified `--no-cache`,
+> `--skip-optimization`, and `--disable-detector` replacement variants passed together, strict 3/3 in
+> 87.76 seconds on installed `bfdece17`/`d13f8c06`. Mirrored Alpine pulls produced distinct replacement IDs,
+> transferred the private cache's sole default and retired old backing. Typed private-image cleanup and
+> literal original public/physical/administrator-state preservation passed; no shared default was changed.
 
 > **Current image-warming checkpoint (2026-10-09):** all four registered warm selectors/refusal cases
 > passed strict 4/4 in 7.45 seconds on the unchanged installed candidate. Slug, prefix and `--all` warming

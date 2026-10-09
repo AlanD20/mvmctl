@@ -47,6 +47,22 @@ were independently checked. This candidate is not installed or system-qualified.
 the separate earlier full root-Jailer result retains its original source binding.
 Readiness detects rather than repairs the separately diagnosed Firecracker BAR relocation failure.
 
+**Installed live-attachment readiness (2026-10-09):** the new behavior is now exercised on installed
+`0.3.0-rc.export-interrupt-bfdece17`/`d13f8c06`. The Running format/mount case passed immediate block-device,
+`virtio_blk` driver and exact-capacity checks followed by filesystem I/O, without post-success polling.
+Its invocation then failed in the newly added Paused test because inspect does not expose process start time;
+the Stopped node was unexecuted. That failed receipt is retained, not relabeled as a passing three-case run.
+Test-only `06e83dc4` retains full PID/start-time identity via `vm ls` and supported fields via inspect.
+The corrected Paused and previously-unexecuted Stopped cases then passed together, strict 2/2 in 19.48 seconds.
+Paused staging proved its retryable deferred error, retained binding, resume/same-attach retry, immediate
+readiness, real I/O and idempotent reattach without detach, retaining process identity. Stopped proved persisted
+configuration only, not guest readiness. Exact typed cleanup and both literal original/prepared inventories
+matched; candidate/source/kernel/mirror/boot pins passed. No Running replay or Go CI/build replay was needed.
+Terminal SHA-256 `d2b6d1b4bcc73a4bc24acce3cc44449c16cfb56a5f7b57f51143a59fca696b3b`; JSON
+`835d953f295296ceee6e4f837c6d374f3ad8da8b8c6c21668e199081029639cf`; JUnit
+`512078300918183998f4ff5c4fd571aa61334884a5b4f819701df2c4c09ba23c` identifies exactly Paused and Stopped.
+The three readiness cases span two invocations; live detach/reattach remains the separate BAR failure.
+
 **Current local image import/removal (2026-10-09):** four registered cases passed together, strict 4/4 in
 7.76 seconds with native exit 0 and no other outcomes, on installed `0.3.0-rc.partition-f909601d` and clean
 `b73d0462` inside `mvmctl-030-test`: local cached raw-file import, nonexistent-path refusal, and normal/force
@@ -716,8 +732,23 @@ selection, new backing and retired old backing. A QA-only task scope used a 512 
 with no hard memory ceiling; pressure and direct reclaim counters advanced. The original outer memory,
 owned-disk growth and resource-floor guards stayed clear, and all six shared-preservation checks passed.
 The owned child was reaped and its empty task group removed. This does not establish a hard outer-memory
-bound, every helper's placement, or complete private-workspace cleanup. The `no-cache`, `skip-optimization`
-and `disable-detector` variants remain unqualified; the two earlier interrupted force attempts are not passes.
+bound, every helper's placement, or complete private-workspace cleanup. At that checkpoint the `no-cache`,
+`skip-optimization` and `disable-detector` variants remained unqualified; the two earlier interrupted force
+attempts are not passes.
+
+**Later force-pull option qualification (2026-10-09):** those three remaining variants subsequently passed
+together on installed `bfdece17`/`d13f8c06`, with clean Python source `0b3762d9`: exact collection 3, strict
+runtime 3/3, zero other outcomes and native exit 0 in 87.76 seconds. JUnit identifies exactly
+`TestImagePullAdvanced::test_pull_cached_image_with_force_redownloads[no-cache]`, `[skip-optimization]`,
+and `[disable-detector]`. Each private-cache journey proves a distinct mirrored Alpine replacement ID,
+sole-default transfer, new backing and retired old backing. Existing typed cleanup emptied each private image
+inventory; identity-bound task-temp cleanup and complete literal original public/physical/administrator
+baseline preservation passed. Kernel/mirror/boot/source/candidate pins remained unchanged; no global
+Alpine/default setup or VM was needed. Terminal SHA-256
+`456c803a4b98cdae762655e44677526b34ed5e25b0cb23d9d2d4ac844f2d2a64`; JSON
+`ddcb5c2207887984b83208520c14367078a8968718dd93f34541cf37d0166027`; JUnit
+`74fd74e5df60e4e08f55f66cedddbb48be3129c75b1d916ae7748ff636baafdd`.
+The earlier `[force]` evidence retains its original binding; no complete image-domain claim follows.
 
 **Current VM-free kernel-import gate (2026-10-03):** All six existing VM-free cases in
 `kernel/test_kernel_import.py` passed on installed `a3d7b8d0` inside `mvmctl-030-test`, with test source SHA-256
