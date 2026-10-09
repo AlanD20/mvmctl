@@ -211,7 +211,7 @@ Firecracker/Jailer pair. Users do not invoke an installation service directly; s
 | `mvm vm rm` | Typed privileged VM cleanup, with no standalone Jailer cleanup command |
 | `mvm snapshot create/restore` | Typed root snapshot actions and root-brokered Firecracker API access |
 | `mvm volume attach/detach` | `firecracker` |
-| `mvm volume create/rm/resize` | `qemu-img` |
+| `mvm volume create/rm/resize` | Internal raw-file allocation and typed privileged removal/growth; no `qemu-img` |
 | `mvm volume ls/inspect` | Internal only |
 | `mvm kernel import/ls/rm/default/inspect` | Internal only |
 | `mvm cache init/prune/clean` | Internal (filesystem + DB operations) |
