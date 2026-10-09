@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
+> **Focused qualification checkpoint (2026-10-10):** the counterfeit-console endpoint discovery case
+> passed strict 1/1 on the installed Resume candidate. Discovery refused the exchanged decoy socket,
+> restoration preserved the original relay and Firecracker identities, and typed cleanup restored the
+> checked inventories. This is endpoint-discovery coverage, not qualification of every console case.
+> Explicit PRE/POST host-reboot coverage is now implemented; 52 focused checks and a three-variant
+> integration check passed, with both phase nodes collected. Actual reboot runtime qualification is still
+> pending. Full release qualification now requires a closed `--host-reboot-task` proof; ordinary tier batches
+> do not implicitly reboot the runner or qualify that journey. A separate test-only fix removes an unsafe
+> early subprocess-diagnostic read; the full privileged-package race run passed 311 tests/subtests.
+> Kernel acquisition exposed a real teardown failure on root-owned protected cache parents. The failure
+> remains recorded; [ADR-0022](docs/adr/0022-explicit-protected-cache-retirement.md) defines the approved
+> typed retirement fix, whose integration and installed-candidate qualification remain pending.
+> The three acquisition cases now share one receipt-owned store, retire their kernels between cases,
+> and clean that cache once at sequence completion. All three test bodies are unchanged; 13 pure fixture
+> checks and 22-node collection passed. These checks do not qualify acquisition or the production fix.
+
 > **Resume-authority correction (2026-10-09):** `1300b64b` removes the cached Running/Starting success
 > shortcut. Resume must first pass root-owned pending-export admission, then observe the authenticated
 > Firecracker state: Running succeeds without another mutation, Paused receives one resume request, and

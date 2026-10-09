@@ -469,7 +469,8 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
   MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
   python3 scripts/run-system-tests.py \
   --release-qualification --host-direct --rebuild \
-  --candidate-version 0.3.0-rc.1 --all
+  --candidate-version 0.3.0-rc.1 --all \
+  --host-reboot-task /absolute/path/to/closed-host-reboot-task
 ```
 
 `--rebuild` requires `--candidate-version` unless `HEAD` is one clean checkout with exactly one valid release tag. This
@@ -543,7 +544,10 @@ Host (your machine)
 runner requires `--host-direct` before any work. For release evidence,
 `--release-qualification` also requires an unfiltered full matrix, an
 explicit-version rebuild, and exact candidate/controller binary identity before
-resource preparation. Run it only on a dedicated clean qualification host or
+resource preparation. It also requires `--host-reboot-task` with completed strict PRE+reboot+POST evidence
+bound to the same clean source, candidate and controller. This consumes the retained closed proof read-only;
+it does not query a still-running historical runner or weaken the existing quiescent-host admission.
+Run it only on a dedicated clean qualification host or
 disposable outer VM where the candidate is installed at `/usr/local/bin/mvm`.
 On a workstation with state that must be preserved, use focused T1/T2 domains or
 `--tier 1,2`: consent does not prove ownership-safe cleanup.
@@ -553,7 +557,8 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
   MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
   python3 scripts/run-system-tests.py \
   --release-qualification --host-direct --rebuild \
-  --candidate-version 0.3.0-rc.1 --all
+  --candidate-version 0.3.0-rc.1 --all \
+  --host-reboot-task /absolute/path/to/closed-host-reboot-task
 ```
 
 ### 4.2 Run Specific Domains
@@ -608,7 +613,10 @@ python3 scripts/run-system-tests.py --host-direct --all --workers 2
 | _domains_ (positional) | — | Specific domains to test (e.g., `cli network`) |
 | `--all` | `false` | Run all T1 + T2 + host-direct T3 domains; dedicated clean qualification host only |
 | `--host-direct` | `false` | Required acknowledgment before selecting any Tier 3 domain or `--all`; does not guarantee isolation or safe cleanup |
-| `--release-qualification` | `false` | Require the unfiltered full-matrix release identity gate; requires `--all --host-direct --rebuild --candidate-version` |
+| `--release-qualification` | `false` | Require the unfiltered full-matrix release identity gate and closed reboot proof; requires `--all --host-direct --rebuild --candidate-version --host-reboot-task` |
+| `--host-reboot-phase` | — | Explicit `pre` or `post` continuation against existing `mvmctl-030-test`; separate from ordinary tier batches |
+| `--host-reboot-task` | — | Absolute private owned receipt directory for explicit phases; completed strict POST proof is mandatory for full release qualification |
+| `--host-reboot-envelope` | — | POST-only private external administrator receipt binding the fresh runner boot/process and actual approved 8 GiB outer controls |
 | `--tier` | — | Comma-separated tier numbers; executed in given order (e.g., `--tier 1,3`) |
 | `--workers` | `4` | Maximum parallel VMs |
 | `--rebuild` | `false` | Build only `MVM_CANDIDATE_BINARY`, rebuild shared volume/base image, and run prepare; never replace `MVM_BINARY` |
@@ -623,6 +631,45 @@ Choose exactly one test selector: positional domains, `--tier`, or `--all`. Unkn
 selected domains with no registered test files fail before binary probes, builds, or resource mutation. The runner also
 requires every canonical regular `tests/system/**/test_*.py` file to be registered exactly once, so an omitted file or
 duplicate alias cannot produce release evidence.
+
+### 4.7 Explicit Named-Runner Host-Reboot Journey
+
+This journey is deliberately separate from ordinary T1/T2 batches. It operates only on the existing
+`mvmctl-030-test`, pins the configured outer controller without replacing it, and runs pytest inside that
+runner. A full release invocation cannot count a PRE checkpoint or ordinary tier success as a reboot pass.
+Source implementation, focused runner checks and exact phase collection passed on 2026-10-10; actual
+reboot execution remains pending.
+
+Use one clean, fixed source and candidate for both phases. Select the existing imported ELF with
+`MVM_RUNNER_KERNEL_ID` and `MVM_RUNNER_KERNEL_SHA256`; bind `MVM_BINARY` to the installed outer controller
+and `MVM_CANDIDATE_BINARY` to the exact candidate already installed inside the named runner. Set the asset
+mirror as usual. Create an absolute, operator-owned `0700` task directory under ignored project-local storage.
+
+```bash
+python3 scripts/run-system-tests.py --host-reboot-phase pre \
+  --host-reboot-task /absolute/path/to/private-host-reboot-task
+```
+
+PRE creates only its owned nested VM, writes and reads a guest marker, retains source/candidate/inventory
+proof, and reboots the named runner through the unchanged outer controller. A successful PRE exit means
+**phase complete, release incomplete**. Do not repeat it against the same task.
+
+After reconnect, restore the approved QA-only 8 GiB outer envelope through the authorized administrator
+procedure and retain a fresh private receipt for this boot, runner UUID and outer PID/start tick. The POST
+command verifies that receipt against actual controls; it does not guess headroom, add a memory watchdog,
+or modify controls itself. Then continue the same task:
+
+```bash
+python3 scripts/run-system-tests.py --host-reboot-phase post \
+  --host-reboot-task /absolute/path/to/private-host-reboot-task \
+  --host-reboot-envelope /absolute/path/to/fresh-admin-envelope.json
+```
+
+POST must prove changed host boot, stale-running reconciliation, restart and retained-marker exec, exact
+persistent inventory preservation, and typed owned cleanup. Both phases need native exit zero and exact
+singleton JSON/JUnit proof. Only a closed successful POST task can be supplied to full release qualification.
+Changing bound source, candidate or controller invalidates the proof; retained historical results are never
+relabeled as a run on different inputs.
 
 ---
 

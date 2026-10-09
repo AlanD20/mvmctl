@@ -17,6 +17,36 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Focused console and reboot checkpoint (2026-10-10):**
+`test_console_counterfeit_endpoint_rejected_by_discovery` passed alone on installed
+`0.3.0-rc.resume-1300b64b`/`81c521ba`: strict 1/1, zero other outcomes, 7.38 seconds.
+The case exchanged a real same-caller decoy socket, proved discovery/attach refusal, restored the original
+socket and retained relay/Firecracker process identities. Typed cleanup restored byte-identical checked
+original and prepared inventories; source, candidate, kernel, mirror and administrator pins were preserved.
+Terminal SHA-256 `e4a8d97e4b5bda5b2ae55490c447c419f110c3d80deaf93244e5d9ddc8b6e81d`;
+JUnit `deee30bb13a41e5bce734fdb8b388c4792851df9496eee26275a249af18bd8de`.
+This closes the missing counterfeit-discovery node, not all console coverage.
+
+Signed `ac69171f` implements explicit `test_host_reboot_pre`/`test_host_reboot_post` phases and
+closed proof consumption through `--host-reboot-task`. The corrected source passed 52 focused runner
+checks; the integrated source separately passed only the three selection/proof-consumption variants and
+exact two-node collection. Integration JUnit SHA-256
+`e6849035de6f87d22acf1d8833403a79432b10c02ab33416b9ae162567e43e10`.
+No phase body or actual reboot ran in those checks: host-reboot status/start/exec/cleanup remains unqualified.
+Ordinary tier batches exclude explicit phase execution and cannot substitute for completed PRE+reboot+POST.
+
+The first Firecracker acquisition body succeeded, but its teardown failed when ordinary `cache clean`
+encountered root-only protected parents. That invocation remains failed; the other two acquisition bodies
+were not executed. [ADR-0022](../../docs/adr/0022-explicit-protected-cache-retirement.md) records the
+approved typed retirement contract; source integration and installed public cleanup qualification remain
+pending. Permanent snapshot-lock and volume-removal residues are an explicit separate cleanup gap.
+Signed `af285c1b` integrates the reviewed three-case acquisition sequence fixture: one receipt-owned store,
+typed per-case kernel retirement, a single final cache cleanup and per-function cache/mirror environment.
+All three acquisition bodies remain byte-identical; named-QA checks passed 13 pure cases with zero other
+outcomes and collected all 22 kernel nodes. JUnit SHA-256
+`b823c7b3e3e2b2bf061886ba86f00166111a1454dfc6fec5fdb621afaef94aef`.
+No acquisition, download or candidate operation ran during those fixture checks.
+
 **Current coherent Resume Go/build/install checkpoint (2026-10-09):** clean `1300b64b`, tree `1eb819b5`,
 passed complete pinned ordinary Go 1.26.3 CI, the separate full root Jailer suite and the real embedded-agent
 amd64 release build inside `mvmctl-030-test`. Independent literal root JSON counts 2,642 test/subtest passes,
