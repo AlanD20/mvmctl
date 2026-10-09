@@ -17,6 +17,20 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current volume/snapshot contract checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
+SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed five registered
+cases together on clean signed suite `b73d0462` inside `mvmctl-030-test`: strict 5/5, zero other outcomes,
+native exit 0, 52.639 seconds. `TestVolumeRunningVMDependency` proved force removal requires stopping the VM
+and an attached data volume can grow while stopped without detach. `TestNetworklessJailerLifecycle` proved
+independent restored data-volume bytes after both normal source removal and an exact source crash, plus
+refusal while another VM holds writable access and successful capture after that writer is removed.
+Existing fixtures cleaned exact owned VM/snapshot/volume/key/network resources. From an initial zero-default
+image state, the wrapper temporarily selected only its new mirrored Alpine image; exact no-force removal
+restored the original zero-default state. Its warm-image pool was task-local, not shared. Independent original
+public/physical PRE/POST equality, mirror and source/candidate/boot/default-kernel bindings passed. No synthetic
+RAM guards were used. This is not complete volume/snapshot, managed-network restore, interruption/fault,
+reusable-base or installed T1/T2 release qualification.
+
 **Current host-exec checkpoint (2026-10-09):** The same installed `0.3.0-rc.partition-f909601d`
 candidate, SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed all six
 registered `exec/test_exec.py` cases together on clean signed suite `b73d0462` inside `mvmctl-030-test`:
@@ -2094,7 +2108,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `volume inspect --json` | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle::test_volume_inspect_json` | Installed candidate returned schema-1 volume name, size, format, status, and path for one test-owned volume. |
 | `volume inspect` nonexistent | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume rm` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 |
-| `volume rm --force` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 |
+| `volume rm --force` | 🟡 Partial | `volume/test_volume.py` | `TestVolumeLifecycle`, `TestVolumeRunningVMDependency::test_force_remove_requires_stopped_vm` | Current installed-candidate L2 passed running-VM refusal and stopped-VM force removal with checked owned cleanup and baseline preservation. Further volume lifecycle cases remain separately qualified. |
 | `volume rm` nonexistent | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L1 |
 | `volume rm <name1> <name2>` | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 |
 | `volume rm` partial failure | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeLifecycle` | L2 — one exists, one doesn't |
@@ -2105,7 +2119,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Cross-VM attach rejection | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeCrossVM` | L2 — attached volume rejects second VM |
 | Volume rm with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L1 |
 | Volume rm --force with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L2 — refusal while running; stop required before checked force removal. |
-| Volume resize with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L2 — refusal while running; stopped-but-attached volume grows without requiring detach. |
+| Volume resize with running VM | 🟡 Partial | `volume/test_volume.py` | `TestVolumeRunningVMDependency::test_grow_attached_volume_requires_stopped_vm` | Current installed-candidate L2 passed running-VM refusal and successful stopped-but-attached data-volume growth without detach, with checked cleanup and preserved baseline. This does not qualify live resize or root-filesystem growth. |
 | Volume hotplug (attach to running) | 🟡 Partial | `volume/test_volume_hotplug.py` | `TestVolumeHotplug` | L3 — SSH check /dev/vdb appears. Requires firecracker_116 marker (excluded from default run) |
 | Volume hotunplug (detach from running) | 🟡 Partial | `volume/test_volume_hotplug.py` | `TestVolumeHotplug` | L3 — SSH check /dev/vdb disappears. Requires firecracker_116 marker (excluded from default run) |
 | Volume attach/detach lifecycle (stop→detach→reattach→start) | ✅ Deep | `volume/test_volume.py` | `TestVolumeAttachDetach` | L3: full lifecycle including attach-to-stopped-then-start (Bug #7), detach-reattach-verify |
