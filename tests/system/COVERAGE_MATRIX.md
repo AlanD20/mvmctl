@@ -17,6 +17,19 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current directional-exec checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
+SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed the registered
+`exec/test_vm_to_vm_exec.py::test_directional_vm_to_vm_exec_policy` inside `mvmctl-030-test` in
+31.76 seconds: strict 1/1, zero other outcomes and native exit 0. The unchanged signed `276fc27c`
+journey covers same-network, cross-network and networkless placement, proving denied destination effects
+before grant, exact nonroot-user execution after grant, reverse denial and denial after revocation.
+Its exact owned VM/policy/network cleanup passed. The wrapper removed only its identity-proven mirrored
+nondefault Alpine image without force; final public/physical inventory matched the prepared baseline, with
+mirror, source, boot and candidate pins preserved. Before that baseline, typed default selection of the existing
+hash-bound imported kernel was recorded as deliberate retained QA setup; the original nondefault kernel state
+was not restored. This is one registered multi-placement journey, not the complete exec domain, traffic-policy
+qualification, reusable-base provisioning or full T1/T2 release sign-off.
+
 **Exact qualification-runner admission correction (2026-10-09):** `a091b4e6` replaces literal named-runner
 checks at the bridge, image-import receiver and Firecracker fault boundaries with explicit nonempty exact
 `MVM_TEST_QUALIFICATION_HOST` / `MVM_TEST_VM` admission. T1/T2 forwarding binds the value to the provisioned
