@@ -17,9 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > across five batches, all six host-exec cases, and all six VM-to-VM exec nodes across three invocations.
 > All 69 lifecycle and 37 volume nodes match the current 106-node collection across eight separately bound
 > passing batches, with strict zero-other outcomes and checked owned cleanup/preservation; these are not
-> consolidated full-module or full-matrix runs. Reusable-base provisioning, the remaining installed
-> matrix, administrator/reboot/fault journeys and final release approval remain incomplete; aarch64 runtime
-> and Tier 3 are deferred. See the
+> consolidated full-module or full-matrix runs. The real read-only administrator init/reset failure-and-retry
+> case also passed on this candidate. Eight of nine hotplug cases have passing evidence; live reattachment
+> failed because the device did not reappear in the guest and remains unresolved. Reusable-base provisioning,
+> the remaining installed matrix, administrator interruption/reboot/fault journeys and final approval remain
+> incomplete; aarch64 runtime and Tier 3 are deferred. See the
 > [coverage matrix](tests/system/COVERAGE_MATRIX.md); v0.3.0 is not release-qualified.
 
 > **Current bounded memory checkpoint (2026-10-09):** installed `0.3.0-rc.partition-f909601d`
@@ -209,8 +211,9 @@ same-ID pending-network activation/removal. The shared runner was neither reset 
 resource guards and product policy were unchanged. Exact clean `e034f4e0` also
 passed the complete pinned local Go CI sequence inside the named runner, with both atomic coverage profiles,
 clean source and unchanged candidate/baseline/resource controls; selected Jailer tests passed in 3.243s.
-Later Python-test/Markdown-only changes leave these Go inputs unchanged. The filesystem-retry body,
-reusable-base provisioning and the remaining release matrix are not yet qualified.
+Later Python-test/Markdown-only changes leave these Go inputs unchanged. At that checkpoint, filesystem
+retries, reusable-base provisioning and the remaining release matrix were not yet qualified; the later current
+filesystem-retry pass is recorded above.
 
 The separate password-authenticated second-operator journey passed on the same installed candidate in
 95.67 seconds: strict collected/passed 1/1, zero other outcomes and matching JUnit. It covers second-operator
@@ -218,7 +221,8 @@ enrollment and typed dispatch, repeated-init preservation, active-network reset 
 reset. All twelve preservation checks and five owned-resource absence checks passed, including removal of the
 temporary enrollment policy and empty QA task group. The corrected filesystem-retry journey subsequently
 timed out during child package installation, before either read-only fault or retry assertion ran; its cleanup
-and preservation passed, but its runtime behavior remains unqualified. Earlier failures remain recorded.
+and preservation passed. That attempt remains failed evidence; the later current filesystem-retry case passed
+both real faults and their retries. Earlier failures remain recorded.
 
 The same installed candidate subsequently passed the registered VM-to-VM exec interruption case in
 21.77 seconds: one pass, zero other outcomes, six preservation checks and verified QA-task cleanup.
@@ -316,8 +320,9 @@ recorded revisions; adversarial firewall and recovery cases remain separate rele
   registry checks remain applicable. The corrected first enrollment/marker-only/reset/re-init journey subsequently
   passed on the installed reset candidate, including same-ID pending-network retry and checked cleanup.
   The separate password-authenticated second-operator/typed-dispatch/active-network refusal journey also passed
-  with checked cleanup. The filesystem-retry body, abrupt process interruption and ambiguous-runtime recovery
-  remain unqualified.
+  with checked cleanup. The filesystem-retry case subsequently passed on the current partition candidate,
+  including real first-init/reset faults, retries, same-ID pending intent and checked cleanup. Abrupt process
+  interruption and ambiguous-runtime recovery remain unqualified.
 - Official-kernel debug output now identifies the exact upstream base-config bytes successfully written before
   configuration mutation. Focused kernel tests, vet and formatting passed in the named runner. A subsequent fresh
   mirrored-source Linux 7.0.11 producer passed with the consumed base-config digest and final config/ELF hashes

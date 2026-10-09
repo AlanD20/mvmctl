@@ -142,6 +142,14 @@ only unchanged relevant inputs. Earlier checkpoints below retain their original 
 Reusable-base provisioning and the complete installed Python matrix remain pending; these passes do not qualify
 the full release.
 
+**Current administrator filesystem-retry checkpoint (2026-10-09):** The registered
+`test_filesystem_failure_preserves_init_and_reset_retry_authority` case passed strict 1/1 in 44.08 seconds on
+that installed candidate inside `mvmctl-030-test`. It reached both real read-only sysctl faults, retained the
+partial init/reset authority, recovered by explicit administrator retry, and activated the same pending network
+identity after re-enrollment before typed removal. Exact mount restoration, owned-child cleanup and original
+public/physical/administrator-state preservation passed. This supersedes the older package-setup limitation
+for this case, not abrupt interruption, reusable-base provisioning or the complete administrator domain.
+
 ### Using an Already Imported Runner Kernel
 
 For a fresh custom Linux 7.0.11/x86_64 artifact, set both `MVM_RUNNER_KERNEL_ID` and
@@ -210,8 +218,9 @@ The separate password-authenticated second-operator/typed-dispatch/active-networ
 passed on that installed candidate: strict 1/1, zero other outcomes and matching JUnit, in 95.67 seconds. All
 twelve preservation and five owned-resource absence checks passed, including temporary enrollment-policy
 removal and QA task cleanup. The corrected read-only-filesystem journey timed out during child package
-installation before either fault or retry assertion; cleanup and preservation passed, but that body remains
-unqualified. Do not interpret its timeout as a diagnosed product or filesystem-fault failure.
+installation before either fault or retry assertion; cleanup and preservation passed. That attempt remains
+failed evidence, superseded for runtime qualification by the current filesystem-retry pass above. Do not
+interpret its timeout as a diagnosed product or filesystem-fault failure.
 Exact clean `e034f4e0` also passed tidy/clean, formatting, generation/clean, vet and the complete
 unprivileged Go CI selector; selected Jailer tests passed in 3.243s. Both nonempty atomic coverage profiles
 and the literal gate log were preserved, source finished clean, and candidate/baseline/resource controls
@@ -553,10 +562,10 @@ resets the shared runner or the outer controller. Collection is not a runtime pa
 checked child cleanup and retained administrator-state receipts are required before qualifying this journey.
 The module also contains separate password-authenticated second-operator/typed-dispatch and active-network
 reset-refusal coverage, plus real read-only-filesystem init/reset failure-and-retry journeys. All three cases
-collect successfully. The first lifecycle journey and separate second-operator/refusal journey have scoped
-installed-candidate runtime passes recorded above; the filesystem-retry body remains unqualified. Collection
-alone does not qualify runtime behavior. Abrupt process interruption and ambiguous-runtime recovery still
-require separate evidence.
+collect successfully. All three have separately bound installed-candidate runtime passes recorded above;
+the filesystem-retry case passed on the current partition candidate. These are not one consolidated current
+domain invocation, and collection alone does not qualify runtime behavior. Abrupt process interruption and
+ambiguous-runtime recovery still require separate evidence.
 
 ### 4.3 Run Specific Tiers
 
