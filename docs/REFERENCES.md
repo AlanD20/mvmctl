@@ -918,11 +918,18 @@ The security model applies to the net cloud-init mode only:
 | `MVM_CACHE_DIR` | Override the managed cache directory | `~/.cache/mvmctl` |
 | `MVM_CONFIG_DIR` | Override config directory | `~/.config/mvmctl` |
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) | `WARN` |
-| `MVM_ASSET_MIRROR` | Local archive mirror; a new Firecracker/Jailer install still fetches the official checksum sidecar for root verification | (not set) |
+| `MVM_ASSET_MIRROR` | Local artifact mirror; a new Firecracker/Jailer install still fetches the official checksum sidecar for root verification | (not set) |
 | `MVM_WARM_POOL` | Warm image pool backend (`disk` for cache-backed; otherwise under `/tmp/mvmctl-<uid>/ready`, on tmpfs only when `/tmp` is tmpfs) | (not set) |
 | `MVM_ESCALATED` | Set by sudo wrapper to indicate privilege escalation | `1` |
 | `MVM_TEMP_DIR` | Override the per-operator temporary work directory, warm-pool location, and official-kernel scratch (`<value>/kernel-build`) | Managed cache `tmp/` for ordinary temporary work; official-kernel build uses embedded `build_dir` when unset or empty |
 | `MVM_SUDO_RESTART` | Set internally when re-running with sudo for host init | (not set) |
+
+Generic image/kernel downloads look up mirror entries by URL filename, not full origin. Configured checksums are
+verified, but Firecracker CI kernel downloads have no upstream SHA-256 configured. Different CI releases can publish
+different bytes under the same filename (for example, `vmlinux-6.1.155`); those entries are not interchangeable.
+Use separate mirror directories for colliding origins and keep the matching artifact in each. A mirror hit without
+an expected checksum does not prove origin or CI-release identity. This does not relax the official checksum
+verification required for root-owned Firecracker/Jailer installation.
 
 ---
 
