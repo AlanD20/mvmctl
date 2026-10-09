@@ -40,9 +40,20 @@ CLI removal without force restored the original full baseline, mirror and pins. 
 `TestNetworkSyncMissingBridge` case passed in 1.38 seconds using the unchanged signed `f5d6aa1e` module:
 exact owned-bridge deletion made sync fail closed, followed by typed logical retirement and full baseline
 restoration. The reports record strict 3/3 and 1/1 respectively, zero other outcomes and native exit 0.
-These are 30 distinct current-candidate network cases across four batches, separate from the historical
-complete network results. Selectorless sync, reusable-base provisioning, connectivity/policy qualification
-and the full installed Python matrix remain pending; no independent whole-root absence proof is claimed.
+
+The final `TestNetworkSync::test_network_sync_preserves_all_networks` case passed separately in 2.53 seconds:
+strict 1/1, zero other outcomes and native exit 0 on the unchanged candidate and signed `4563e8a7` module.
+Before fixture admission, normal exact-ID sync activated the existing QA default network. Its configured
+identity, non-network inventories, boot, source/candidate pins and mirror were preserved. Full POST matched
+the prepared active baseline; the default intentionally remained active, so the original inactive baseline
+was not restored.
+
+Full current-module collection found 31 nodes in 0.13 seconds; the unique union of the five batch selections
+matches those 31 nodes exactly. All 31 currently registered network nodes therefore have current-candidate
+passes across five separate native batches, with their recorded test-module bindings; this is not one
+consolidated full-module invocation. Historical failures remain retained. Reusable-base provisioning,
+connectivity/policy qualification and the full installed Python matrix remain pending; no independent
+whole-root absence proof is claimed.
 
 **Current bounded memory qualification (2026-10-09):** Installed candidate
 `0.3.0-rc.partition-f909601d`, source `f909601d`, SHA-256
