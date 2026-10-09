@@ -1467,11 +1467,18 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- Root-partition extraction falls back to `parted` when the `sfdisk` probe cannot execute, exits unsuccessfully,
+  or returns malformed output, instead of treating probe failure as proof of an absent partition table. Failed
+  probes retain their causes and diagnostics; cancellation stops extraction. Focused formatting, vet and
+  byte-level extraction/preservation regressions passed in the named QA runner; this correction's candidate
+  rebuild and installed runtime qualification remain pending.
+
 - Image downloads verify SHA-512 sidecars, including Alpine's bare-token format, instead of silently skipping
   their verification. Malformed or unavailable configured checksum metadata fails before artifact destination
   changes. SHA-256 support and the existing valid-checksum stale-mirror fallback remain unchanged. Focused
-  formatting, vet and download/image package regressions passed inside the named QA runner; corrected-candidate
-  installation and catalog-pull system qualification remain pending.
+  formatting, vet and download/image package regressions passed inside the named QA runner. The checksum-fixed
+  candidate was installed there and its normal mirrored Alpine pull, inspection and exact-owned cleanup passed;
+  reusable-base, pressure and full-release qualification remain pending.
 
 - Image lookup accepts imported names and version selectors longer than a 64-character hash, including reusable
   runner image names containing a full kernel ID. Required identifiers and normal resolver errors are unchanged.
