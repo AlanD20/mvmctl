@@ -17,6 +17,20 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current public-create checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
+SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed 27 registered
+`vm/test_vm_lifecycle.py` cases together on clean signed suite `b73d0462` inside `mvmctl-030-test`:
+strict 27/27, zero other outcomes, native exit 0, 96.65 seconds. The selected classes cover advanced
+creation flags and SSH filepath/account setup, cloud-init modes, fixed NoCloud port behavior and custom-port
+refusals, static IP/MAC and named-network behavior, console creation, count/atomic-count and count refusals,
+force creation, and an explicit vsock port. The existing user-data-script case checks generated seed bytes;
+its pass does not prove execution of that script inside the guest. Existing ownership fixtures removed exact
+VM/network/key generations and preserved configuration. The wrapper removed only its identity-proven
+nondefault mirrored Alpine image without force. Independent literal JSON/JUnit node identities and original
+public/physical PRE/POST equality passed, with defaults and source/candidate/boot/mirror bindings preserved.
+No synthetic RAM guards were used. Remaining lifecycle/list/SSH/volume options, host reboot, fault journeys,
+reusable-base provisioning and complete installed T1/T2 qualification remain separate.
+
 **Current VM-dependent volume checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
 SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed the nine remaining
 registered `volume/test_volume.py` nodes together on clean signed suite `b73d0462` inside `mvmctl-030-test`:
