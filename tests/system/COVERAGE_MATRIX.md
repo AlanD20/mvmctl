@@ -54,6 +54,17 @@ importing or changing defaults. Independent JSON/JUnit identities, original publ
 kernel and mirror-volume identity checks passed. These are bounded direct named-runner results, not kernel
 producer, remote registry, full-domain or host-direct Tier 3 qualification.
 
+**Current local kernel import options (2026-10-09):** The remaining auto-version, default-selection and three
+error/idempotency cases passed together, strict 5/5 in 5.56 seconds, native exit 0 and zero other outcomes.
+They used the same installed `0.3.0-rc.partition-f909601d` and clean `b73d0462` suite; the current module SHA-256
+is `1c246cc0fe8145e70556f6c9995b19d5f024e8d49977741a04ed72298336874e`.
+Only the existing cached ELF was consumed, with no download or VM launch. Exact owned imports were removed,
+the original default and kernel file identity were restored, and original public/physical inventories matched.
+Comparison excludes only the existing import fixture's observational kernel `updated_at` field; raw before/after
+timestamps were retained. All other fields, default selection, inode/hash/file timestamps and mirrors remained exact.
+These cases supplement the three separately passed kernel-import lifecycle cases, not remote acquisition,
+kernel builds, full-domain or reusable-base qualification. Previously passed nodes were not replayed.
+
 **Current image/kernel import checkpoint (2026-10-09):** Complete classes
 `images/test_images.py::TestImageImportAdvanced` (eight expanded nodes) and
 `kernel/test_kernel_import.py::TestKernelImportLifecycle` (three nodes) passed together, strict 11/11
