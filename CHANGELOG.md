@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > `kernel.updated_at` display timestamp advanced by default restoration. Kernel acquisition, producer and
 > stopped-VM dependency cases remain separate.
 
+> **Kernel registry and stopped-reference qualification (2026-10-10):** the remote-list singleton and
+> stopped-VM kernel-deletion singleton each passed separately with zero other outcomes on the Resume candidate.
+> Ordinary removal of the stopped VM's kernel returned `kernel.in_use`, preserving both records. Typed owned
+> cleanup and exact original/prepared state preservation passed, including unchanged kernel timestamps.
+> These do not qualify kernel acquisition or builds; those remain pending.
+
 > **Current implementation and qualification checkpoint (2026-10-09):** the closed root-dispatch, isolated
 > Jailer, per-VM managed/networkless namespace, direct-Go nftables, typed traffic/exec policy, protected raw-volume
 > and snapshot paths are implemented. The current installed QA candidate is the Resume build above.

@@ -250,6 +250,22 @@ was unchanged. Native pytest completed in 1.323 seconds. Terminal SHA-256 `6af46
 JUnit `287c4299`. No download, VM launch or accepted-case replay occurred; acquisition, producer and
 stopped-VM dependency qualification remain separate.
 
+**Kernel registry and stopped-reference remainder (2026-10-10):** two separate singleton invocations on
+installed `81c521ba`, clean `1300b64b`, each passed strict 1/1 with zero other outcomes:
+
+- `TestKernelLifecycle::test_kernel_ls_remote`: native pytest 0.946 seconds; the public registry returned
+  nonempty structured metadata. Full original public/physical/administrator state and raw timestamps matched
+  exactly. Terminal SHA-256 `513c9d73`; JSON `d428b33a`; JUnit `0faf30e1`. No asset acquisition occurred.
+- `TestKernelStoppedVMDeletion::test_delete_kernel_used_by_stopped_vm_is_denied`: native pytest 6.416 seconds;
+  a stopped owned VM retained its kernel reference. Ordinary removal returned the expected `kernel.in_use`
+  batch-item error, and both records remained. Typed VM/kernel/network and owned-image cleanup passed;
+  original and prepared raw baselines each matched exactly, including kernel timestamps. Terminal SHA-256
+  `b317358f`; JSON `d428b33a`; JUnit `f4e7e61f`.
+
+The stopped-test private launcher had one stale report filename corrected before execution; only that
+correction received static delta verification, with no failing runtime or test-body replay. These passes do
+not qualify acquisition, official builds, reusable-base provisioning or the complete kernel domain.
+
 **Current snapshot producer-failure recovery (2026-10-09):**
 `vm/test_jailer.py::TestNetworklessJailerLifecycle::test_snapshot_capture_file_limit_failure_recovers` passed
 strict 1/1 in 18.39 seconds on installed `0.3.0-rc.export-interrupt-bfdece17`, clean `bfdece17` and unchanged

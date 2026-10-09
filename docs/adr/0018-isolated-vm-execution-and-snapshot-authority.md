@@ -112,7 +112,9 @@ Stopping the VM does not copy those changes back to staging. File import remains
   Resume idempotence also consumes this root admission; cached Running/Starting status cannot authorize success.
   After admission and peer authentication, actual Running succeeds without mutation, actual Paused is resumed,
   and prestart or malformed state is refused. The integrated correction passed focused behavioral/race/root
-  checks; installed receiver-death qualification remains pending.
+  checks, then complete CI, the separate root suite and normal inner installation. Its exact installed
+  receiver-death recovery and public pause/resume pair passed strict 2/2 with checked cleanup and original-state
+  preservation. Other interruption/snapshot and full-release qualification remain separate; see the coverage matrix.
 - Temporary export copies live in root-controlled `/var/lib/mvmctl/vm-rootfs-export-data`, with operator read
   access and named typed cleanup. A caller-writable parent cannot provide exact deletion through a separate inode
   check and pathname unlink: the caller can replace the entry between them. Export publication and cleanup must
