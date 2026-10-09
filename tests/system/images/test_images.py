@@ -1930,11 +1930,20 @@ class TestImageImportCreateVM:
                 )
                 assert refused.returncode != 0
                 response = json.loads(refused.stdout)
-                assert response["status"] == "error" and response["data"] is None
-                assert (
-                    "VM rootfs export requires recovery; repeat image import or stop the VM"
-                    in response["error"]["message"]
+                assert response["status"] == "error"
+                assert response["error"]["code"] == "cli.batch.failed"
+                assert len(response["data"]["items"]) == 1
+                item = response["data"]["items"][0]
+                assert item["result"]["status"] == "error"
+                assert item["result"]["code"] == "vm.resume_failed"
+                assert item["error"]["code"] == "image.import.failed"
+                assert item["error"]["message"] == (
+                    "VM rootfs export did not complete; source state is unknown"
                 )
+                assert item["error"]["details"] == {
+                    "source_vm_id": source["id"],
+                    "vm_state": "unknown",
+                }
                 source_receipt.require_state(runner_vm, "running")
                 fault.require_paused_state()
                 assert fault.require("released")["phase"] == "released"
