@@ -25,7 +25,7 @@ import (
 )
 
 func TestExtractVMRootfsImage_UnrecognizedWholeImagePreservesExport(t *testing.T) {
-	// Rationale: Failed filesystem/partition detection previously moved the source,
+	// Rationale: Successful negative filesystem/partition probes previously moved the source,
 	// preventing the root authority from releasing its exact independent export.
 	cacheDir := setupHermeticCache(t)
 	sourceDir := filepath.Join(cacheDir, "export")
@@ -37,6 +37,28 @@ func TestExtractVMRootfsImage_UnrecognizedWholeImagePreservesExport(t *testing.T
 	require.NoError(t, os.WriteFile(sourcePath, data, 0400))
 	before, err := os.Stat(sourcePath)
 	require.NoError(t, err)
+	installVMJournalRunner(t, &vmJournalRunner{
+		effect: func(_ context.Context, args []string, _ system.RunCmdOpts) (*system.RunResult, error) {
+			switch args[0] {
+			case "blkid":
+				return &system.RunResult{ExitCode: 2}, nil // No recognized filesystem signature.
+			case "sfdisk":
+				return &system.RunResult{Stdout: `{"partitiontable":{"partitions":[]}}`}, nil
+			case "cp":
+				// Model the copy effect on real fixture bytes, not just successful mock wiring.
+				content, readErr := os.ReadFile(args[len(args)-2])
+				if readErr != nil {
+					return &system.RunResult{ExitCode: 1}, readErr
+				}
+				if writeErr := os.WriteFile(args[len(args)-1], content, 0600); writeErr != nil {
+					return &system.RunResult{ExitCode: 1}, writeErr
+				}
+				return &system.RunResult{}, nil
+			default:
+				return &system.RunResult{ExitCode: -1}, fmt.Errorf("unexpected export fixture command %q", args[0])
+			}
+		},
+	})
 
 	service := NewService(fakeRepo{})
 	outputPath, err := service.ExtractVMRootfsImage(
