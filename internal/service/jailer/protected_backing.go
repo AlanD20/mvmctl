@@ -44,12 +44,13 @@ type protectedBackingCache struct {
 }
 
 type protectedBackingAnchor struct {
-	Version  uint32                   `json:"version"`
-	Owner    uint32                   `json:"owner"`
-	OwnerGID uint32                   `json:"owner_gid"`
-	Cache    protectedBackingCache    `json:"cache"`
-	Locator  string                   `json:"locator"`
-	Store    protectedBackingIdentity `json:"store"`
+	Version    uint32                    `json:"version"`
+	Owner      uint32                    `json:"owner"`
+	OwnerGID   uint32                    `json:"owner_gid"`
+	Cache      protectedBackingCache     `json:"cache"`
+	Locator    string                    `json:"locator"`
+	Store      protectedBackingIdentity  `json:"store"`
+	Retirement *protectedCacheRetirement `json:"retirement,omitempty"`
 }
 
 type protectedBackingReference struct {

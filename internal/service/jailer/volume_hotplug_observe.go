@@ -311,6 +311,11 @@ func openObservedBacking(
 	if cache.identity != binding.cacheIdentity {
 		return nil, instanceValidationError("observed protected cache identity changed")
 	}
+	use, err := acquireProtectedStoreUse(ctx, anchorFD, false)
+	if err != nil {
+		return nil, err
+	}
+	retained = append(retained, use)
 	store, err := pinProtectedStore(ctx, cache, anchorFD, false)
 	if err != nil {
 		return nil, err

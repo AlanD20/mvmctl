@@ -43,6 +43,11 @@ func openProtectedStoreBranch(
 			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
 		}
 	}()
+	use, err := acquireProtectedStoreUse(ctx, anchor, false)
+	if err != nil {
+		return nil, err
+	}
+	retained = append(retained, use)
 	lock, err := acquireProtectedLock(ctx, anchor)
 	if err != nil {
 		return nil, err
@@ -101,7 +106,7 @@ func reopenProtectedCache(
 	if err := readProtectedRecord(ctx, anchor, "store.json", &record); err != nil {
 		return nil, err
 	}
-	if record.Version != 1 || record.Owner != ownerUID || record.OwnerGID == 0 ||
+	if record.Retirement != nil || record.Version != 1 || record.Owner != ownerUID || record.OwnerGID == 0 ||
 		record.Cache != protectedCacheIdentity(expected) {
 		return nil, managedVMResourceValidationError("protected store anchor differs from recorded ownership")
 	}

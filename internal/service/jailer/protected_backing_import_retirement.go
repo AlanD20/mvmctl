@@ -169,6 +169,11 @@ func openProtectedImportCancellation(
 		return nil, err
 	}
 	retained = append(retained, lock)
+	use, err := acquireProtectedStoreUse(ctx, anchor, false)
+	if err != nil {
+		return nil, err
+	}
+	retained = append(retained, use)
 	storeLock, err := openProtectedImportLock(ctx, anchor)
 	if err != nil {
 		return nil, err

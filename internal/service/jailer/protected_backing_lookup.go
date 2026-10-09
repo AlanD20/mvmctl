@@ -44,6 +44,11 @@ func lookupProtectedBacking(
 			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
 		}
 	}()
+	use, err := acquireProtectedStoreUse(ctx, anchor, false)
+	if err != nil {
+		return nil, false, err
+	}
+	retained = append(retained, use)
 	store, err := pinProtectedStore(ctx, cache, anchor, false)
 	if errors.Is(err, unix.ENOENT) {
 		var anchorRecord protectedBackingAnchor

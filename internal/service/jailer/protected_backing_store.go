@@ -46,6 +46,11 @@ func protectBackingWithKernelImport(
 			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
 		}
 	}()
+	use, err := acquireProtectedStoreUse(ctx, anchorFD, false)
+	if err != nil {
+		return nil, err
+	}
+	retained = append(retained, use)
 	cacheLock, err := acquireProtectedLock(ctx, anchorFD)
 	if err != nil {
 		return nil, err
@@ -257,6 +262,9 @@ func pinProtectedStore(
 	}
 	if err != nil {
 		return -1, err
+	}
+	if anchor.Retirement != nil {
+		return -1, managedVMResourceValidationError("protected store has explicit retirement authority")
 	}
 	if anchor.Version != 1 || anchor.Owner != cache.ownerUID ||
 		anchor.Cache != protectedCacheIdentity(cache.identity) ||

@@ -11,11 +11,15 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/provisioner/guestfs"
 	"mvmctl/internal/lib/system"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // CacheAPI defines the public interface for cache operations.
@@ -304,10 +308,51 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) (*model.CleanR
 			return result, err
 		}
 	}
+	return op.completeCacheClean(ctx, dryRun, pruneResult, jailer.NewProtectedCacheClient())
+}
+
+type protectedCacheCleaner interface {
+	Clean(context.Context, jailer.ProtectedCacheCleanRequest) (jailer.ProtectedCacheCleanResult, error)
+}
+
+// completeCacheClean runs only after pruning and root host-clean admission. The named receiver
+// owns protected-parent retirement; ordinary removal never runs after a refused acknowledgement.
+func (op *Operation) completeCacheClean(
+	ctx context.Context, dryRun bool, pruneResult *model.PruneAllResult, cleaner protectedCacheCleaner,
+) (*model.CleanResult, error) {
 	// Step 4: Remove the cache directory itself
 	cacheDirRemoved := false
 	if _, err := os.Stat(op.CacheDir); err == nil {
 		if !dryRun {
+			acknowledgement, err := cleaner.Clean(ctx,
+				jailer.ProtectedCacheCleanRequest{CacheRoot: op.CacheDir})
+			if err != nil {
+				result := &model.CleanResult{CacheDir: op.CacheDir}
+				if pruneResult != nil {
+					result.PruneResult = *pruneResult
+				}
+				return result, errs.Wrap(errs.CodeCacheCleanFailed, err)
+			}
+			if err := acknowledgement.Validate(); err != nil {
+				result := &model.CleanResult{CacheDir: op.CacheDir}
+				if pruneResult != nil {
+					result.PruneResult = *pruneResult
+				}
+				return result, errs.Wrap(errs.CodeCacheCleanFailed, err)
+			}
+			// Root leaves its empty private quarantine in the caller-owned namespace. Only
+			// the ordinary caller removes this fixed suffix; never ask root to unlink it.
+			quarantineErr := unix.Rmdir(filepath.Join(op.CacheDir, jailer.ProtectedCacheQuarantineDirectory))
+			if errors.Is(quarantineErr, unix.ENOENT) {
+				quarantineErr = nil
+			}
+			if err := quarantineErr; err != nil {
+				result := &model.CleanResult{CacheDir: op.CacheDir}
+				if pruneResult != nil {
+					result.PruneResult = *pruneResult
+				}
+				return result, errs.Wrap(errs.CodeCacheCleanFailed, err)
+			}
 			if err := os.RemoveAll(op.CacheDir); err != nil {
 				result := &model.CleanResult{CacheDir: op.CacheDir}
 				if pruneResult != nil {
