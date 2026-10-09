@@ -231,9 +231,9 @@ def receiver_unchanged():
     assert read(receiver, 'cgroup', 16384)[1] == cli_cgroup
     assert identity(os.stat('ns/mnt', dir_fd=receiver)) == cli_mount
 
-def children(pid):
+def children(parent):
     # Go may fork from any thread: enumerate only this admitted ancestry subtree.
-    task = os.open('/proc/' + str(pid) + '/task', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    task = os.open('task', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=parent)
     try:
         names = os.listdir(task)
         assert len(names) <= 256
@@ -263,7 +263,11 @@ def find_receiver(cli_pid):
                 assert process(parent)['ticks'] == ticks
             except (FileNotFoundError, ProcessLookupError):
                 continue
-            for child_pid in children(pid):
+            try:
+                child_pids = children(parent)
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            for child_pid in child_pids:
                 try:
                     child = proc(child_pid)
                 except FileNotFoundError:
