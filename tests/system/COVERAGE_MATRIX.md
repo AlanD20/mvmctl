@@ -77,6 +77,22 @@ kernel, defaults and source pins were preserved; no synthetic memory guards were
 This supersedes the earlier memory-guard-interrupted normal import results for the unchanged data path,
 not interruption/recovery, reusable-base or full image-domain qualification.
 
+**Current export copy-I/O failure (2026-10-09):**
+`images/test_images.py::TestImageImportCreateVM::test_vm_import_mid_copy_io_failure_restores_source_and_discards_partial`
+passed strict 1/1, with native exit 0 and zero other JSON/JUnit outcomes, inside `mvmctl-030-test` on the same
+installed `f909601d` candidate. Test inputs were a single-file, uncommitted fixture correction over clean
+`b73d0462`, SHA-256 `026e99baf6d041551824fd212f85a077df1222c963457d75a0d8960ada9b2d3d`.
+The observer authenticated the exact root receiver and partial copy, imposed a file-size limit, and proved
+the failed copy reached that limit. The source returned to its original state with its guest marker preserved;
+partial image publication was refused and typed removal was idempotent. The observer exited 0 with empty
+stderr. Exact owned cleanup and both complete original/prepared public and physical inventories matched;
+source, candidate, boot, kernel and mirror pins remained unchanged. Assets were mirrored and no artificial
+memory guard was used. Literal terminal receipt SHA-256:
+`a6c47d763d47f5a3fbcde0674ed96288a7127dfaa7a81a0e99bb49b3496a91ad`.
+This qualifies this real copy-failure path only. Separate SIGINT and abrupt caller-death attempts failed root
+receiver-survival checks before later recovery assertions; neither is qualified. Source and a bounded
+no-VM process probe support an export-only cancellation/session correction, not a completed runtime fix.
+
 **Current administrator filesystem recovery (2026-10-09):**
 `host/test_host_admin.py::TestCleanHostAdministration::test_filesystem_failure_preserves_init_and_reset_retry_authority`
 passed strict 1/1 in 44.08 seconds inside `mvmctl-030-test`, with native exit 0 and zero other outcomes.

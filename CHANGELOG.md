@@ -57,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Paused/Stopped source states were preserved, and the Stopped case rejected stale staging contents as
 > an export source. Export-interruption recovery remains a separate qualification requirement.
 
+> **Current export copy-failure checkpoint (2026-10-09):** the registered mid-copy I/O-failure case passed
+> strict 1/1 with native exit 0 on the same installed candidate. The authenticated root worker reached its
+> imposed file-size limit; source state and guest marker survived, partial publication was refused, and typed
+> cleanup restored the exact original inventories. This uses a hash-bound, not-yet-integrated test-fixture
+> correction over `b73d0462`. SIGINT survival and abrupt receiver-death recovery are not qualified: their
+> separate attempts failed root-worker survival checks, and a narrowly scoped transport correction is pending.
+
 > **Current bounded memory checkpoint (2026-10-09):** installed `0.3.0-rc.partition-f909601d`
 > passed all three registered bounded memory cases: near-saturation with host swap absent and present, and
 > guest-global exhaustion with an identified allocator OOM victim and fresh exec survival. Each case records
