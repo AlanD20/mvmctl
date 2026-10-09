@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > the guest-written marker. Repeated normal resume preserved process/guest identity. Owned cleanup restored
 > the checked original state. This closes the demonstrated Resume defect, not the full release matrix.
 
+> **Cached-kernel lifecycle qualification (2026-10-09):** the existing default transfer/restoration and
+> ID-prefix removal cases passed strict 2/2 on the Resume candidate, using the pinned local ELF without
+> downloading or building a kernel. Typed cleanup restored the original default and removed the owned imports.
+> Original backing, administrator state and inventories were preserved, except for the explicitly retained
+> `kernel.updated_at` display timestamp advanced by default restoration. Kernel acquisition, producer and
+> stopped-VM dependency cases remain separate.
+
 > **Current implementation and qualification checkpoint (2026-10-09):** the closed root-dispatch, isolated
 > Jailer, per-VM managed/networkless namespace, direct-Go nftables, typed traffic/exec policy, protected raw-volume
 > and snapshot paths are implemented. The current installed QA candidate is the Resume build above.

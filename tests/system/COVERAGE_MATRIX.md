@@ -240,6 +240,16 @@ the complete original public/physical/administrator baseline matched byte-for-by
 defaults preserved. Terminal SHA-256 `a688c53c`; JSON `d428b33a`; JUnit `ab4f821b`. This does not qualify
 kernel acquisition, producers, the later Resume artifact or the complete kernel domain.
 
+**Cached-kernel default/removal remainder (2026-10-09):** installed `81c521ba`, clean `1300b64b`, passed
+`TestKernelLifecycle::test_kernel_set_default` and `TestKernelRemove::test_kernel_rm_by_id`, strict 2/2 with
+zero other outcomes. Both imported the pinned existing ELF under unique QA versions; default restoration
+and exact typed imported-ID cleanup passed. Normalized before/after public/physical/administrator inventories
+matched exactly, retaining raw timestamp maps: only original `kernel.updated_at` advanced during default
+restoration. Every other original field, default ID, backing identity, mirror, boot, candidate and source pin
+was unchanged. Native pytest completed in 1.323 seconds. Terminal SHA-256 `6af46f48`; JSON `835d953f`;
+JUnit `287c4299`. No download, VM launch or accepted-case replay occurred; acquisition, producer and
+stopped-VM dependency qualification remain separate.
+
 **Current snapshot producer-failure recovery (2026-10-09):**
 `vm/test_jailer.py::TestNetworklessJailerLifecycle::test_snapshot_capture_file_limit_failure_recovers` passed
 strict 1/1 in 18.39 seconds on installed `0.3.0-rc.export-interrupt-bfdece17`, clean `bfdece17` and unchanged
