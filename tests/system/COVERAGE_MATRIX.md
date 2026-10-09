@@ -17,6 +17,35 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current administrator filesystem recovery (2026-10-09):**
+`host/test_host_admin.py::TestCleanHostAdministration::test_filesystem_failure_preserves_init_and_reset_retry_authority`
+passed strict 1/1 in 44.08 seconds inside `mvmctl-030-test`, with native exit 0 and zero other outcomes.
+The hash-bound overlay on clean `b73d0462` is integrated unchanged in `da68d816`; it exercised installed
+`0.3.0-rc.partition-f909601d`, SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`.
+Actual read-only sysctl faults proved partial first-init journal retention and retry, disabled admission during
+failed reset, successful reset retry, same-ID pending-network activation after re-enrollment, and typed removal.
+Both fault mounts restored their exact original identities; child cleanup and independent original
+public/physical/administrator inventories matched. This supersedes the earlier package-setup limitation for
+this case, not the separate administrator journeys, abrupt interruption or complete release qualification.
+
+**Current bounded hotplug results (2026-10-09):** Eight of the nine registered
+`volume/test_volume_hotplug.py` cases have passing evidence on the same installed candidate in the named runner.
+Separate invocations proved initial guest device discovery, format/mount/write/read, live unplug, no-PCI refusal,
+cold attach/detach, stopped-only force removal, and duplicate-attach idempotency. The final singleton passed
+strict 1/1 in 6.35 seconds; the exact ownership-aware test overlay is integrated in `ed8a27dd`.
+Owned-resource removal and original inventories/defaults/mirror preservation were checked independently.
+**Live reattachment failed:** after successful attach, detach and reattach commands, the same-sized guest block
+device did not reappear within ten seconds. This was run with expected-failure handling disabled; it is not a
+passing XFAIL or a proved PCI BAR diagnosis. The module remains unqualified pending diagnosis and correction.
+These direct named-runner slices are not a consolidated module invocation or host-direct Tier 3 qualification.
+
+**Current read-only kernel results (2026-10-09):** Six local cases passed together, strict 6/6 in 0.19 seconds
+on clean `b73d0462` and the same installed candidate: local list/JSON, the complete `TestKernelInspect` class,
+and nonexistent-kernel removal refusal. The existing imported default satisfied prerequisites without pulling,
+importing or changing defaults. Independent JSON/JUnit identities, original public/physical inventories,
+kernel and mirror-volume identity checks passed. These are bounded direct named-runner results, not kernel
+producer, remote registry, full-domain or host-direct Tier 3 qualification.
+
 **Current image/kernel import checkpoint (2026-10-09):** Complete classes
 `images/test_images.py::TestImageImportAdvanced` (eight expanded nodes) and
 `kernel/test_kernel_import.py::TestKernelImportLifecycle` (three nodes) passed together, strict 11/11
@@ -692,7 +721,7 @@ worker was reaped and the empty QA task group removed. Independent POST found no
 candidate, source, controller, backing identity, persistent baseline and unchanged resource controls/OOM counters.
 The earlier stale-inode failure remains failed evidence; its active-network assertions had not been reached.
 
-**Administrator filesystem-retry limitation:** The corrected
+**Earlier administrator filesystem-retry limitation (superseded by the current pass above):** The corrected
 `test_filesystem_failure_preserves_init_and_reset_retry_authority` invocation recorded strict/JUnit one failure
 in 337.21 seconds. Child `apt-get update/install` exceeded its 330-second setup timeout before either read-only
 fault or retry assertion ran; the underlying package timeout cause remains unproven. Fixture states/faults were
@@ -1881,7 +1910,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 
 | v0.3.0 security capability | Status | Required release evidence |
 |---|---|---|
-| Installed system candidate and clean bootstrap | 🟡 Partial | Installed e034 candidate passed the corrected clean-child enrollment/marker-only/reset/re-init journey and the separate password-authenticated second-operator/typed-dispatch/active-network reset-refusal journey, with checked preservation and owned cleanup. Filesystem retries, abrupt interruption and ambiguous-runtime recovery remain gaps; the latest filesystem case timed out in package setup before either fault. |
+| Installed system candidate and clean bootstrap | 🟡 Partial | Installed e034 candidate passed the clean-child enrollment/marker-only/reset/re-init and separate multioperator/active-network-refusal journeys. Current f909 candidate additionally passed real read-only first-init/reset failure, retries, same-ID pending-network activation and exact cleanup. Abrupt interruption, ambiguous-runtime recovery and consolidated current-domain qualification remain separate. |
 | fd-0 privileged control transport | 🔴 Missing | Go L1 framing/EOF/peer/cancellation abuse coverage plus installed-CLI lifecycle integration. |
 | Root VM authority and cross-UID denial | 🟡 Partial | A focused installed-candidate networkless case denies operator direct connection to the reported Firecracker API socket while `vm stop` succeeds; root-record/process/cache identity checks, constrained two-user denial, tombstone, and zero-leak assertions remain missing. |
 | Independent trusted Firecracker/Jailer releases | 🔴 Missing | Root manifest/ELF/hash authority, atomic failure injection, and installed-CLI release lifecycle. |
@@ -2212,12 +2241,12 @@ Specific legacy conflicts that must be rewritten before release:
 | Volume rm with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L1 |
 | Volume rm --force with running VM | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeRunningVMDependency` | L2 — refusal while running; stop required before checked force removal. |
 | Volume resize with running VM | 🟡 Partial | `volume/test_volume.py` | `TestVolumeRunningVMDependency::test_grow_attached_volume_requires_stopped_vm` | Current installed-candidate L2 passed running-VM refusal and successful stopped-but-attached data-volume growth without detach, with checked cleanup and preserved baseline. This does not qualify live resize or root-filesystem growth. |
-| Volume hotplug (attach to running) | 🟡 Partial | `volume/test_volume_hotplug.py` | `TestVolumeHotplug` | L3 — SSH check /dev/vdb appears. Requires firecracker_116 marker (excluded from default run) |
-| Volume hotunplug (detach from running) | 🟡 Partial | `volume/test_volume_hotplug.py` | `TestVolumeHotplug` | L3 — SSH check /dev/vdb disappears. Requires firecracker_116 marker (excluded from default run) |
+| Volume hotplug (attach to running) | 🟡 Partial | `volume/test_volume_hotplug.py` | `TestVolumeHotplug` | Current direct named-runner cases passed initial guest discovery and format/mount/write/read through vsock. Live reattachment failed and remains unqualified; no host-direct Tier 3 claim. |
+| Volume hotunplug (detach from running) | 🟡 Partial | `volume/test_volume_hotplug.py` | `TestVolumeHotplug` | Current direct named-runner live unplug case passed guest device disappearance and attachment-state checks. Subsequent live reattachment failed; no full-module or host-direct Tier 3 claim. |
 | Volume attach/detach lifecycle (stop→detach→reattach→start) | ✅ Deep | `volume/test_volume.py` | `TestVolumeAttachDetach` | L3: full lifecycle including attach-to-stopped-then-start (Bug #7), detach-reattach-verify |
 | Volume attach/detach nonexistent | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeNegativeFailure` | L2: attach/detach nonexistent volume to running VM, verify clear error, no state corruption |
-| Volume cold-attach (stopped VM) | ✅ Deep | `volume/test_volume_hotplug.py` | `TestVolumeHotplugVersionGate` | L3: cold-attach/detach to stopped VM works regardless of Firecracker version |
-| Volume hotplug destructive (force-remove, double-attach) | ✅ Deep | `volume/test_volume_hotplug.py` | `TestVolumeHotplugDestructive` | Current corrected force-removal case passed: guest-visible hotplug, running refusal preserves attachment/backing, stopped removal succeeds without detach. Double-attach and the rest of this module remain separately unqualified. |
+| Volume cold-attach (stopped VM) | ✅ Deep | `volume/test_volume_hotplug.py` | `TestVolumeHotplugVersionGate` | Current direct named-runner cold attach and detach cases passed with exact owned cleanup. The installed release was Firecracker 1.16.2; this does not prove all other versions. |
+| Volume hotplug destructive (force-remove, double-attach) | ✅ Deep | `volume/test_volume_hotplug.py` | `TestVolumeHotplugDestructive` | Current force-removal and duplicate-attach cases passed. Running force-removal preserves backing/attachment until stopped; duplicate attach retains one guest device and one VM volume reference. Live reattachment remains separately failed. |
 
 ---
 
