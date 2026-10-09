@@ -63,6 +63,18 @@ Terminal SHA-256 `d2b6d1b4bcc73a4bc24acce3cc44449c16cfb56a5f7b57f51143a59fca696b
 `512078300918183998f4ff5c4fd571aa61334884a5b4f819701df2c4c09ba23c` identifies exactly Paused and Stopped.
 The three readiness cases span two invocations; live detach/reattach remains the separate BAR failure.
 
+**Current image-dependency deletion (2026-10-09):** the two registered Running/Stopped variants of
+`TestImageDependencyDeletion::test_delete_image_used_by_stopped_vm_fails` passed strict 2/2 in 17.75 seconds,
+native exit 0 and zero other outcomes, on installed `d13f8c06` and frozen clean `10b929f5` inside
+`mvmctl-030-test`. Each used an owned imported Alpine image and networkless VM. Ordinary `image rm`
+returned `image.in_use`, preserving the image row, backing identity and corresponding VM state.
+Exact typed VM/image cleanup and identity-verified removal of the nondefault mirrored seed passed.
+Both prepared and original public/physical/administrator inventories matched byte-for-byte;
+source/candidate/kernel/mirror/boot/default pins were preserved. JSON/JUnit identify exactly these two nodes.
+Terminal SHA-256 `5ded3c87e1376044dc2c5eedbd5ffc8a7380ad7a9a537110f2d02681cd5efa94`; JUnit
+`023d13c5f84b451b07307d0bd7a2a8814c6b776a5e68e20cd90f46f155c9fc4b`.
+This does not qualify referenced-image force removal, deletion/default-promotion behavior or the full image domain.
+
 **Current local image import/removal (2026-10-09):** four registered cases passed together, strict 4/4 in
 7.76 seconds with native exit 0 and no other outcomes, on installed `0.3.0-rc.partition-f909601d` and clean
 `b73d0462` inside `mvmctl-030-test`: local cached raw-file import, nonexistent-path refusal, and normal/force
@@ -2506,7 +2518,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `image default` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageDefaults::test_set_default_nonexistent_image_fails` | Current installed f909: schema-1 image.not_found error, no data and unchanged image listing/defaults. |
 | `image rm` | ⚡ Shallow | `images/test_images.py` | `TestImageRemove::test_image_remove_with_fixture[normal]` | Current installed f909 L2: unused imported image removed; owned backing and inventory cleanup checked. |
 | `image rm --force` | 🟡 Partial | `images/test_images.py` | `TestImageRemove::test_image_remove_with_fixture[force]` | Current installed f909 L2: unused imported image removed with force and checked cleanup; in-use force behavior remains separate. |
-| `image rm` blocked by VM dependency | 🟡 Partial | `images/test_images.py` | `TestImageDependencyDeletion` | L3: rm rejected when image used by stopped/running VM; formerly-default promotes another |
+| `image rm` blocked by VM dependency | ✅ Deep | `images/test_images.py` | `TestImageDependencyDeletion::test_delete_image_used_by_stopped_vm_fails` | Current installed d13 L2: Running/Stopped variants returned image.in_use, preserving record/backing identity/VM state; exact owned cleanup and original/prepared inventories passed. Force removal and default-promotion behavior remain separate. |
 | `image warm` | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: schema-1 path is a regular ready-pool file of the image's uncompressed size. |
 | `image warm --all` | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: warmed/ready message for cached image. |
 | `image warm` by ID prefix | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: prefix resolves and reports warmed/ready. |

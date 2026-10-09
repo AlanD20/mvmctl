@@ -66,6 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > transferred the private cache's sole default and retired old backing. Typed private-image cleanup and
 > literal original public/physical/administrator-state preservation passed; no shared default was changed.
 
+> **Current image-dependency deletion checkpoint (2026-10-09):** both registered Running and Stopped
+> VM-reference cases passed strict 2/2 in 17.75 seconds on the installed `d13f8c06` candidate.
+> Ordinary image removal returned `image.in_use`, preserving the image record, backing identity and VM state.
+> Exact owned cleanup restored the original and prepared inventories byte-for-byte. This does not qualify
+> force removal of a referenced image or deletion/default-promotion behavior.
+
 > **Current image-warming checkpoint (2026-10-09):** all four registered warm selectors/refusal cases
 > passed strict 4/4 in 7.45 seconds on the unchanged installed candidate. Slug, prefix and `--all` warming
 > matched complete independently decompressed bytes and reused the same ready files. `--all` included both
