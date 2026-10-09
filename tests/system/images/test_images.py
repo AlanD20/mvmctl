@@ -529,7 +529,10 @@ class _VMImportReceiverDeath:
     """Own only one ordinary importing CLI and its authenticated export receiver."""
 
     def __init__(self, runner_vm, source, *, mode="death"):
-        assert os.environ.get("MVM_TEST_VM") == "mvmctl-030-test"
+        qualification_host = os.environ.get("MVM_TEST_QUALIFICATION_HOST")
+        assert (
+            qualification_host and qualification_host == os.environ.get("MVM_TEST_VM")
+        ), "administrator fault requires explicit exact qualification-host admission"
         assert "PYTEST_XDIST_WORKER" not in os.environ
         assert mode in ("death", "sigint-survivor", "copy-io")
         self.mode = mode

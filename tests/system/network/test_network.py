@@ -1112,9 +1112,11 @@ class TestNetworkSyncMissingBridge:
     def test_sync_refuses_missing_managed_bridge(self, network_case) -> None:
         """An exact administrator fault is rejected and removed through typed authority."""
         runner_vm = network_case.runner_vm
-        assert runner_vm == "mvmctl-030-test", (
-            "administrator fault requires the named disposable runner"
-        )
+        qualification_host = os.environ.get("MVM_TEST_QUALIFICATION_HOST")
+        assert (
+            qualification_host
+            and qualification_host == os.environ.get("MVM_TEST_VM") == runner_vm
+        ), "administrator fault requires explicit exact qualification-host admission"
         receipt = network_case.create_network()
         boot_id = _guest_run(
             runner_vm, "cat /proc/sys/kernel/random/boot_id"

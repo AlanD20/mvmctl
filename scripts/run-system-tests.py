@@ -2009,6 +2009,7 @@ def _remote_pytest_command(
         (
             "MVM_ASSET_MIRROR=/mnt",
             f"MVM_TEST_VM={shlex.quote(vm_name)}",
+            f"MVM_TEST_QUALIFICATION_HOST={shlex.quote(vm_name)}",
             f"{PYTEST_OUTCOME_REPORT_ENV}={shlex.quote(report_path)}",
         )
     )

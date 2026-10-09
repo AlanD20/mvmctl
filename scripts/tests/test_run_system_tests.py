@@ -15,7 +15,7 @@ import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -1342,6 +1342,7 @@ def test_tier3_domain_requires_complete_local_pytest_outcomes(
     ) -> subprocess.CompletedProcess[str]:
         assert test_files == ["tests/system/env/test_env.py"]
         assert timeout == 600
+        assert "MVM_TEST_QUALIFICATION_HOST" not in extra_env
         report_path = Path(extra_env[orchestrator.PYTEST_OUTCOME_REPORT_ENV])
         report_directories.append(report_path.parent)
         report_path.write_bytes(_complete_pytest_outcome_report(collected=2))
@@ -1508,6 +1509,8 @@ def test_remote_domains_require_retrieved_complete_pytest_outcomes(
     pytest_timeout: int,
 ) -> None:
     vm_name = f"t{tier}-cli-fixed"
+    monkeypatch.setenv("MVM_TEST_VM", "unrelated-runner")
+    monkeypatch.setenv("MVM_TEST_QUALIFICATION_HOST", "unrelated-runner")
     events: list[str] = []
     calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
     monkeypatch.setattr(orchestrator, "_unique_name", lambda _prefix: vm_name)
@@ -1566,6 +1569,9 @@ def test_remote_domains_require_retrieved_complete_pytest_outcomes(
     report_path = f"/tmp/mvmctl-pytest-outcomes-{vm_name}.json"
     pytest_args, pytest_kwargs = calls[0]
     assert pytest_args[:2] == ("exec", vm_name)
+    pytest_command = shlex.split(pytest_args[-1])
+    assert f"MVM_TEST_VM={vm_name}" in pytest_command
+    assert f"MVM_TEST_QUALIFICATION_HOST={vm_name}" in pytest_command
     assert f"MVM_PYTEST_OUTCOME_REPORT={report_path}" in pytest_args[-1]
     assert "/tests/system/cli/test_cli.py" in pytest_args[-1]
     assert pytest_kwargs["timeout"] == pytest_timeout
@@ -1584,6 +1590,55 @@ def test_remote_domains_require_retrieved_complete_pytest_outcomes(
         "cleanup",
         f"destroy:{vm_name}",
     ]
+
+
+@pytest.mark.parametrize("boundary", ["network", "image-import", "vm-crash"])
+@pytest.mark.parametrize(
+    ("test_vm", "qualification_host"),
+    [
+        ("t1-network-fixed", None),
+        (None, "t1-network-fixed"),
+        ("", ""),
+        ("t1-network-fixed", "unrelated-runner"),
+    ],
+    ids=["missing-admission", "missing-runner", "empty", "mismatched"],
+)
+def test_administrator_faults_require_explicit_matching_qualification_host(
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    test_vm: str | None,
+    qualification_host: str | None,
+) -> None:
+    from tests.system.images.test_images import _VMImportReceiverDeath
+    from tests.system.network.test_network import TestNetworkSyncMissingBridge
+    from tests.system.vm.test_vm_lifecycle import _kill_exact_test_firecracker
+
+    for name, value in (
+        ("MVM_TEST_VM", test_vm),
+        ("MVM_TEST_QUALIFICATION_HOST", qualification_host),
+    ):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+
+    def unexpected_fault(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("administrator fault subprocess started before admission")
+
+    monkeypatch.setattr(subprocess, "run", unexpected_fault)
+    monkeypatch.setattr(subprocess, "Popen", unexpected_fault)
+
+    with pytest.raises(
+        AssertionError, match="explicit exact qualification-host admission"
+    ):
+        if boundary == "network":
+            TestNetworkSyncMissingBridge().test_sync_refuses_missing_managed_bridge(
+                SimpleNamespace(runner_vm="t1-network-fixed")
+            )
+        elif boundary == "image-import":
+            _VMImportReceiverDeath("t1-network-fixed", {})
+        else:
+            _kill_exact_test_firecracker(1, 1, "0" * 32)
 
 
 @pytest.mark.parametrize(

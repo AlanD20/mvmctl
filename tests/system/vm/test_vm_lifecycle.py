@@ -39,9 +39,10 @@ def _kill_exact_test_firecracker(
     expected_placement: Literal["managed", "networkless"] = "managed",
 ) -> None:
     """Runner-admin fault injection, admitted from schema-6 authority before signaling."""
-    assert os.environ.get("MVM_TEST_VM") == "mvmctl-030-test", (
-        "crash injection is restricted to the named runner"
-    )
+    qualification_host = os.environ.get("MVM_TEST_QUALIFICATION_HOST")
+    assert (
+        qualification_host and qualification_host == os.environ.get("MVM_TEST_VM")
+    ), "administrator fault requires explicit exact qualification-host admission"
     assert re.fullmatch(r"[0-9a-f]{32}", vm_id) and pid > 0 and start_ticks > 0
     assert expected_placement in ("managed", "networkless")
     script = r"""
