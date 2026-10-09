@@ -17,6 +17,16 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current host-exec checkpoint (2026-10-09):** The same installed `0.3.0-rc.partition-f909601d`
+candidate, SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed all six
+registered `exec/test_exec.py` cases together on clean signed suite `b73d0462` inside `mvmctl-030-test`:
+strict 6/6, zero other outcomes, native exit 0, 4.909 seconds. The existing cases cover basic commands,
+PTY interactive shell, explicit agent port, nonroot user, missing VM and invalid 32-bit port refusal.
+The shared fixture removed its exact owned VM; the wrapper removed only its verified mirrored nondefault
+Alpine image without force. Independent original public/physical PRE/POST equality, defaults and all artifact,
+source, boot and mirror bindings passed. No synthetic RAM guards or default changes were used.
+This completes this registered file, not host-reboot recovery, reusable-base provisioning or full T1/T2 qualification.
+
 **Current lifecycle/status checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`, SHA-256
 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed five registered
 `vm/test_vm_lifecycle.py::TestVMStateTransitions` cases together on clean signed suite `b73d0462`
@@ -1774,7 +1784,7 @@ sequence and the complete root-authority Jailer package in the named runner; rem
 | nftables-only engine | 🟡 Partial | Four installed-candidate fixed-table cases passed in the bridge-capable named runner, covering modeled inet/bridge rules, nested-VM rule lifecycle, repeat sync, and NAT/conntrack readback. Full failure/reconciliation and clean-host qualification remain open. |
 | Reused-IP bridge neighbor invalidation | 🟡 Partial | ADR-0021's owner-bound exact-IP rtnetlink operation is composed before host-veth exposure. Focused Go tests, a disposable real-kernel namespace probe, and the installed-candidate A-to-B stale-IP reuse journey with a concurrent control VM passed. The journey proves fresh gateway reachability and exact cleanup, but guest boot ARP prevents independent attribution of the pre-exposure ordering; spoofing and prior-host-boot recovery remain unqualified. |
 | Typed `traffic` policy | 🟡 Partial | Installed-candidate same-/cross-network source-network TCP cases passed default deny, exact port allow, adjacent-port deny, and revoke. The 2026-09-28 acknowledged same-network source-VM UDP journey also passed exact allow, sibling/adjacent-port/reverse denial and fresh-flow revocation. Spoofing, IP reuse, cross-network UDP and reboot recovery remain unqualified. |
-| Typed VM-to-VM `exec` policy | 🟡 Partial | Historical installed-candidate scopes cover the seven-case exec domain and retained grants across endpoint restarts/destination reboot. Current reset candidate also passed retained-CLI interruption with exact destination tasks no longer live, a fresh authorized relay and six preservation checks. Complete private-backend cleanup, other peer/capacity/deadline/cancellation faults, audit redaction, host reboot and snapshot restore remain unqualified at L2. |
+| Typed VM-to-VM `exec` policy | 🟡 Partial | Current f909 candidate has passes for all six registered VM-to-VM exec nodes across three bound invocations: directional same/cross/networkless placement, retained grants after endpoint restart/destination reboot, exact opt-in/nonroot user, streaming/redacted audit, interruption/destination-group cleanup and restored-endpoint/new-grant behavior. Complete private-backend cleanup, further peer/capacity/deadline/cancellation faults and host reboot remain unqualified; these scoped passes are not full release sign-off. |
 | Cgroup/process identity lifecycle | 🟡 Partial | Isolated credentials and protected policy-v2 inspection are qualified locally. The three-case measured-pressure module passed twice: both swap variants held at least 80% usable guest-RAM occupancy for at least 15 seconds with fresh high events, unchanged task/boot identity and responsive exec. Historical guest-agent EOF/original incident, broader exact-identity cleanup and host-reboot binding remain unresolved; the bounded hold is not an ancestor/global-OOM guarantee. |
 | Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
 
@@ -1920,7 +1930,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Fixed nftables sync | 🟡 Partial | `network/test_nftables.py` | `TestAtomicRuleSync` | Three focused installed-candidate cases passed conntrack, repeated generation equality, and NAT readback; crash/failure paths remain open. |
 | Cross-network typed traffic grant | 🟡 Partial | `network/test_policies.py` | `test_cross_network_traffic_policy_exact_allow_and_revoke` | Focused installed-candidate case passed default deny, TCP port 8080 allow, port 8081 deny, and deny after revoke. Other policy variants remain open. |
 | Same-network typed traffic grant | 🟡 Partial | `network/test_policies.py` | `test_same_network_traffic_policy_exact_allow_and_revoke` | Focused installed-candidate case passed default deny, TCP port 8080 allow, port 8081 deny, and deny after revoke with bridge and inet filtering active. VM-source and UDP remain open. |
-| Directional VM-to-VM exec grant | 🟡 Partial | `exec/test_vm_to_vm_exec.py` | `test_directional_vm_to_vm_exec_policy` | Installed-candidate same-network, cross-network, and networkless journeys passed exact non-root grant, real destination effect, default/reverse/revoked denials, and checked VM/network/policy teardown. Authority-abuse, cancellation, and reboot/restore cases remain open. |
+| Directional VM-to-VM exec grant | 🟡 Partial | `exec/test_vm_to_vm_exec.py` | `test_directional_vm_to_vm_exec_policy` | Current installed-candidate same/cross/networkless journey passed exact nonroot grant, real destination effects and default/reverse/revoked denials. Separate current cases passed retained grants after endpoint restart/destination reboot, interruption cleanup and restored-endpoint/new-grant behavior. Further authority-abuse/capacity/deadline and host-reboot coverage remains open; exact source/outcome boundaries are in the qualification overlay. |
 | Retained VM-to-VM exec interruption | ✅ Deep | `exec/test_vm_to_vm_exec.py` | `test_vm_to_vm_exec_interrupt_reaps_destination_group` | Current reset candidate passed pidfd SIGINT, exact destination tasks no longer live and a fresh authorized relay; strict 1/1, six preservation checks and QA worker/group cleanup. Full private-backend cleanup and other fault boundaries are not established by this case. |
 
 ---
