@@ -8,13 +8,17 @@ All commands execute inside the named disposable runner VM.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import os
 import re
 import shlex
+import stat
+import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -235,6 +239,14 @@ def _assert_network_absent(runner_vm: str, receipt: NetworkReceipt) -> None:
 
 
 @dataclass(frozen=True)
+class VMCreateReceipt:
+    id: str
+    name: str
+    created_at: str
+    network_id: str
+
+
+@dataclass(frozen=True)
 class VMReceipt:
     id: str
     name: str
@@ -252,6 +264,7 @@ class NetworkCase:
         self.runner_vm = runner_vm
         self.before = _inventory(runner_vm)
         self.networks: list[NetworkReceipt] = []
+        self.vm_creates: list[VMCreateReceipt] = []
         self.vms: list[VMReceipt] = []
         self.attempts: list[tuple[str, str]] = []
         defaults = [item for item in self.before["network"] if item["is_default"]]
@@ -328,6 +341,72 @@ class NetworkCase:
         defaults = [item for item in _networks(self.runner_vm) if item["is_default"]]
         assert len(defaults) == 1 and defaults[0]["id"] == receipt.id, defaults
 
+    def _vm_kernel_id(self) -> str:
+        kernel_id = os.environ.get("MVM_RUNNER_KERNEL_ID")
+        kernel_sha256 = os.environ.get("MVM_RUNNER_KERNEL_SHA256")
+        if kernel_id is None and kernel_sha256 is None:
+            kernels = [
+                item for item in self.before["kernel"]
+                if item["is_default"] and item["is_present"]
+            ]
+            assert len(kernels) == 1, "preseed one default kernel"
+            return kernels[0]["id"]
+        assert kernel_id and kernel_sha256, (
+            "imported kernel ID and SHA256 must be supplied together"
+        )
+        assert re.fullmatch(r"[0-9a-f]{64}", kernel_id), (
+            "imported kernel requires a full canonical ID"
+        )
+        assert re.fullmatch(r"[0-9a-f]{64}", kernel_sha256), (
+            "imported kernel requires a canonical SHA256"
+        )
+        kernels = [item for item in self.before["kernel"] if item["id"] == kernel_id]
+        assert len(kernels) == 1 and kernels[0]["is_present"], kernels
+        inspected = _data(self.runner_vm, "kernel", "inspect", kernel_id)
+        kernel, storage = inspected["kernel"], inspected["storage"]
+        assert (
+            kernel["id"] == kernel_id
+            and kernel["type"] == "custom"
+            and kernel["is_present"] is True
+        ), inspected
+        cache = Path(os.path.abspath(
+            Path(os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")).expanduser()
+        ))
+        path = cache / "kernels" / kernel_id
+        assert storage["path"] == str(path), inspected
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        parent = os.open("/", flags)
+        try:
+            for component in path.parts[1:-1]:
+                child = os.open(component, flags, dir_fd=parent)
+                os.close(parent)
+                parent = child
+            descriptor = os.open(
+                path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=parent,
+            )
+        finally:
+            os.close(parent)
+        try:
+            before = os.fstat(descriptor)
+            assert stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and before.st_size > 0, path
+            digest = hashlib.sha256()
+            read_bytes = 0
+            deadline = time.monotonic() + 10
+            while chunk := os.read(descriptor, 1024 * 1024):
+                read_bytes += len(chunk)
+                assert read_bytes <= before.st_size and time.monotonic() <= deadline, path
+                if read_bytes == len(chunk):
+                    assert chunk.startswith(b"\x7fELF"), "imported kernel is not an ELF"
+                digest.update(chunk)
+            after = os.fstat(descriptor)
+            current = path.lstat()
+            for field in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"):
+                assert getattr(before, field) == getattr(after, field) == getattr(current, field), path
+            assert read_bytes == before.st_size and digest.hexdigest() == kernel_sha256, path
+        finally:
+            os.close(descriptor)
+        return kernel_id
+
     def create_vm(
         self, network: NetworkReceipt, *, use_default: bool = False
     ) -> VMReceipt:
@@ -354,12 +433,7 @@ class NetworkCase:
                 and matches[0]["version"] == "1.16.2"
                 and matches[0]["is_present"]
             ), matches
-        kernels = [
-            item
-            for item in self.before["kernel"]
-            if item["is_default"] and item["is_present"]
-        ]
-        assert len(kernels) == 1, "preseed one default kernel"
+        kernel_id = self._vm_kernel_id()
         images = [
             item
             for item in self.before["image"]
@@ -372,10 +446,8 @@ class NetworkCase:
         )
         _assert_network_receipt(self.runner_vm, network)
         name = f"sys-network-vm-{uuid.uuid4().hex}"
-        assert not any(
-            item["name"] == name
-            for item in _data(self.runner_vm, "vm", "ls", kind=list)
-        )
+        vms_before = _data(self.runner_vm, "vm", "ls", kind=list)
+        assert not any(item["name"] == name for item in vms_before)
         if use_default:
             self.set_default(network)
         args = [
@@ -385,7 +457,7 @@ class NetworkCase:
             "--image",
             images[0]["id"],
             "--kernel",
-            kernels[0]["id"],
+            kernel_id,
             "--cloud-init-mode",
             "inject",
             "--no-pci",
@@ -406,7 +478,13 @@ class NetworkCase:
         assert len(created) == 1, created
         item = created[0]
         assert item["name"] == name and re.fullmatch(r"[0-9a-f]{32}", item["id"]), item
-        assert item["created_at"] and item["status"] == "running", item
+        assert not any(previous["id"] == item["id"] for previous in vms_before), item
+        assert isinstance(item["created_at"], str) and item["created_at"], item
+        assert not any(receipt.id == item["id"] for receipt in self.vm_creates), item
+        self.vm_creates.append(
+            VMCreateReceipt(item["id"], name, item["created_at"], network.id)
+        )
+        assert item["status"] == "running", item
         assert (
             item["network_placement"] == "managed" and item["network_id"] == network.id
         ), item
@@ -467,9 +545,73 @@ class NetworkCase:
         assert inspected["networking"]["mac"] == receipt.mac
         return inspected
 
-    def remove_vm(self, receipt: VMReceipt) -> None:
-        assert receipt in self.vms, "no owned VM receipt"
-        self.assert_vm(receipt)
+    def remove_vm(self, receipt: VMReceipt | VMCreateReceipt) -> None:
+        owned = [item for item in self.vm_creates if item.id == receipt.id]
+        assert len(owned) == 1, "no unique owned VM create receipt"
+        created = owned[0]
+        assert receipt == created or receipt in self.vms, "no owned VM receipt"
+        matches = [
+            item for item in _data(self.runner_vm, "vm", "ls", kind=list)
+            if item["id"] == created.id or item["name"] == created.name
+        ]
+        assert len(matches) == 1, f"refusing ambiguous VM cleanup: {matches}"
+        item = matches[0]
+        assert (item["id"], item["name"], item["created_at"], item["network_id"]) == (
+            created.id, created.name, created.created_at, created.network_id,
+        ), item
+        assert item["network_placement"] == "managed", item
+        live = [item for item in self.vms if item.id == created.id]
+        assert len(live) <= 1, live
+        if live:
+            assert (item["ipv4"], item["mac"]) == (live[0].ipv4, live[0].mac), item
+        if item["status"] == "running":
+            if live:
+                self.assert_vm(live[0])
+            else:
+                # No complete live receipt was established; freshly bind the owned process.
+                assert item["pid"] > 0, item
+                path = f"/run/mvmctl/authority/{os.getuid()}/netns/{created.id}"
+                namespace = _namespace(self.runner_vm, path)
+                assert namespace != _namespace(self.runner_vm)
+                assert (
+                    _namespace(self.runner_vm, f"/proc/{item['pid']}/ns/net")
+                    == namespace
+                )
+        else:
+            assert item["status"] == "stopped", (
+                f"refusing unknown VM cleanup state: {item}"
+            )
+            # Root observes absence; an inaccessible path is not proof of absence.
+            script = """
+import os, pathlib, sys
+owner, vm_id, pid, ticks = sys.argv[1:]
+assert os.geteuid() == 0 and int(pid) >= 0
+for path in (f'/run/mvmctl/authority/{owner}/netns/{vm_id}',
+             f'/sys/fs/cgroup/mvmctl/{vm_id}'):
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        pass
+    else:
+        raise AssertionError(('stopped VM retains active namespace/cgroup', path))
+if int(pid) > 0:
+    assert ticks != 'None' and int(ticks) > 0
+    try:
+        fields = pathlib.Path(f'/proc/{pid}/stat').read_text().rpartition(') ')[2].split()
+    except FileNotFoundError:
+        pass
+    else:
+        assert int(fields[19]) != int(ticks), 'stopped VM process is still alive'
+"""
+            _guest_run(
+                self.runner_vm,
+                shlex.join([
+                    "sudo", "-n", "python3", "-I", "-c", script,
+                    str(os.getuid()), created.id, str(item["pid"]),
+                    str(item.get("process_start_time")),
+                ]),
+                timeout=10,
+            )
         # The typed public transaction gracefully stops and removes this exact VM.
         _run_mvm(self.runner_vm, "vm", "rm", receipt.id, timeout=120)
         assert not any(
@@ -489,11 +631,13 @@ class NetworkCase:
         assert (
             leaf.returncode != 0 and "no such file or directory" in leaf.stderr.lower()
         ), leaf
-        self.vms.remove(receipt)
+        if live:
+            self.vms.remove(live[0])
+        self.vm_creates.remove(created)
 
     def finish(self) -> None:
         errors = []
-        for receipt in reversed(self.vms[:]):
+        for receipt in reversed(self.vm_creates[:]):
             try:
                 self.remove_vm(receipt)
             except Exception as exc:
