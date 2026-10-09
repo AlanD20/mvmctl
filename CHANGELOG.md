@@ -70,7 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > strict 1/1 with native exit 0 on the same installed candidate. The authenticated root worker reached its
 > imposed file-size limit; source state and guest marker survived, partial publication was refused, and typed
 > cleanup restored the exact original inventories. The tested fixture correction over `b73d0462` is now
-> integrated unchanged in `bfdece17`. SIGINT survival and abrupt receiver-death recovery are not qualified.
+> integrated unchanged in `bfdece17`. The later SIGINT journey passed; abrupt receiver-death recovery remains
+> unqualified, as detailed below.
 
 > **Export-interruption correction (2026-10-09):** `3e00e00e` adds an export-only, payload-free transport
 > that starts its privileged worker in a separate session and disconnects without killing it on cancellation.
@@ -80,7 +81,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > subsequently passed coherent ordinary CI, the complete root Jailer suite and a real-agent release build on
 > `bfdece17`; normal inner installation also passed. The first installed attempt proved worker survival but
 > failed a stale busy-removal public-envelope assertion. Test-only `0b3762d9` corrects that expectation while
-> preserving every root lock/survival/recovery check. Both complete interruption journeys remain unqualified.
+> preserving every root lock/survival/recovery check. The corrected two-case invocation then recorded one pass
+> and one failure: SIGINT proved busy-copy refusal, worker completion, source recovery and exact cleanup;
+> receiver-death failed because public VM status was `running` where the fixture expected `paused` after the
+> authenticated worker died. Both observers exited cleanly and original inventories were restored. This is not
+> a passing two-case slice or release qualification; the status mismatch requires diagnosis.
 
 > **Current snapshot failure/recovery checkpoint (2026-10-09):** the registered capture file-limit failure,
 > source recovery and full rootfs/RAM/vmstate/data-volume restore case passed strict 1/1 in 18.39 seconds on

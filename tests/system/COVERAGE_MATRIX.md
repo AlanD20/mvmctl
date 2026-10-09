@@ -116,9 +116,9 @@ stderr. Exact owned cleanup and both complete original/prepared public and physi
 source, candidate, boot, kernel and mirror pins remained unchanged. Assets were mirrored and no artificial
 memory guard was used. Literal terminal receipt SHA-256:
 `a6c47d763d47f5a3fbcde0674ed96288a7127dfaa7a81a0e99bb49b3496a91ad`.
-This qualifies this real copy-failure path only. Separate SIGINT and abrupt caller-death attempts failed root
-receiver-survival checks before later recovery assertions; neither is qualified. Source and a bounded
-no-VM process probe support the export-only cancellation/session correction below, not a completed runtime fix.
+This qualifies this real copy-failure path only. Earlier SIGINT and abrupt caller-death attempts failed root
+receiver-survival checks before later recovery assertions. The correction and later installed result are
+recorded below; those earlier failed receipts are not relabeled as passes.
 
 **Export-interruption source correction (2026-10-09):** `3e00e00e` integrates the named, fixed-action,
 payload-free export transport. Its worker uses `Setsid`, while cancellation closes caller-owned control resources
@@ -135,8 +135,21 @@ surviving caller SIGINT, then failed a stale busy-removal public-code assertion.
 also failed after the assertion, although original/prepared inventories were restored exactly. Receiver-death
 was unexecuted because of fail-fast. Test-only `0b3762d9` now asserts the outer `image.import.failed` envelope,
 retryable class, exact message and pending-copy details; every independent root lock/survival/recovery proof
-is unchanged. Exact two-node collection and the selected admission unit passed, not the complete runtime
-journeys. Those installed SIGINT/receiver-death journeys remain required.
+is unchanged. Exact two-node collection and the selected admission unit passed.
+
+The corrected installed invocation subsequently collected and ran both registered nodes: one passed, one
+failed, zero errors/skips/deselections/XFAILs/XPASSes. The SIGINT case passed its complete busy-copy refusal,
+unchanged authority, worker settlement, original-state/marker restoration and typed cleanup journey. The
+receiver-death case failed at `test_images.py:1813`: its authenticated dead-worker receipt retained pending
+source recovery, but public `vm ls` reported `running` instead of the expected `paused`. This observation does
+not establish whether the defect is production behavior or the test boundary; diagnosis remains open.
+Both root observers exited 0 with empty stderr; complete original and prepared inventories matched literally,
+and exact owned-image removal and final pins passed. Native exit was 1, not a passing slice. Terminal receipt
+SHA-256 `5ef6114ab249f304be268c7f05c82421a5c0a9c0f9eebd5cc860ebbf8a0e9f4c`; outcome JSON
+`340bec4558f0fbcc5dec7c2160930ae9e2cd254a0420fe014f26f84d51f365ac`; JUnit
+`c7744d818b3ccd2425b2407a91da4bbad52482b5b3905c6c6b60f72b5b74665e` identifies both exact nodes.
+Installed candidate/source remain `d13f8c06`/`bfdece17`; Python test source was clean `0b3762d9`.
+Do not replay the passed SIGINT case or the unchanged failing receiver-death command.
 
 **Current snapshot producer-failure recovery (2026-10-09):**
 `vm/test_jailer.py::TestNetworklessJailerLifecycle::test_snapshot_capture_file_limit_failure_recovers` passed
