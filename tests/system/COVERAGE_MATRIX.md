@@ -17,6 +17,20 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current stopped-removal hotplug correction (2026-10-09):** The corrected
+`volume/test_volume_hotplug.py::TestVolumeHotplugDestructive::test_hotplug_force_remove_attached_volume`
+collected exactly once and passed strict 1/1 in 5.84 seconds inside `mvmctl-030-test`, with zero other
+outcomes and native exit 0. The installed candidate remained `0.3.0-rc.partition-f909601d`, SHA-256
+`13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`. The frozen test overlay on
+clean base `b73d0462` was explicitly hash/diff bound and is integrated unchanged in `0a4fb4ea`.
+The real hotplugged device remained guest-visible while running force-removal was refused; backing identity,
+attachment and VM state stayed intact. Stopping then permitted exact removal without detach, removing the
+managed source and VM reference. The case cleaned exact owned VM/volume/key/network resources; independent
+original public/physical PRE/POST inventories, defaults and mirror matched after verified nondefault Alpine
+removal. An initial QA source-clone permission mismatch stopped before collection; explicit task-local
+umask 022 corrected that staging cause without changing the test or candidate. No synthetic RAM guards
+were used. This does not qualify the other hotplug cases, full module, reusable base or complete release matrix.
+
 **Current public-create checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
 SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed 27 registered
 `vm/test_vm_lifecycle.py` cases together on clean signed suite `b73d0462` inside `mvmctl-030-test`:
@@ -2179,7 +2193,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Volume attach/detach lifecycle (stop→detach→reattach→start) | ✅ Deep | `volume/test_volume.py` | `TestVolumeAttachDetach` | L3: full lifecycle including attach-to-stopped-then-start (Bug #7), detach-reattach-verify |
 | Volume attach/detach nonexistent | ⚡ Shallow | `volume/test_volume.py` | `TestVolumeNegativeFailure` | L2: attach/detach nonexistent volume to running VM, verify clear error, no state corruption |
 | Volume cold-attach (stopped VM) | ✅ Deep | `volume/test_volume_hotplug.py` | `TestVolumeHotplugVersionGate` | L3: cold-attach/detach to stopped VM works regardless of Firecracker version |
-| Volume hotplug destructive (force-remove, double-attach) | ✅ Deep | `volume/test_volume_hotplug.py` | `TestVolumeHotplugDestructive` | L3: force-remove attached volume, double-attach rejected, guest sees device|
+| Volume hotplug destructive (force-remove, double-attach) | ✅ Deep | `volume/test_volume_hotplug.py` | `TestVolumeHotplugDestructive` | Current corrected force-removal case passed: guest-visible hotplug, running refusal preserves attachment/backing, stopped removal succeeds without detach. Double-attach and the rest of this module remain separately unqualified. |
 
 ---
 
