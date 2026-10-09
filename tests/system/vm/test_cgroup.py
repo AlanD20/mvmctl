@@ -1256,6 +1256,7 @@ BEGIN {
         self,
         runner_vm: str,
         cgroup_config_overrides: None,
+        record_property: Any,
     ) -> None:
         vm_name = f"sys-cgroup-{uuid.uuid4().hex[:8]}"
         kernel_args = _require_preseeded_vm_assets(runner_vm)
@@ -1284,6 +1285,7 @@ BEGIN {
                 list,
             )
             assert len(created) == 1
+            record_property("cgroup_owned_vm", json.dumps({"id": created[0]["id"], "name": vm_name}, sort_keys=True))
             vm = _vm_entry(runner_vm, vm_name)
             assert vm is not None and vm["status"] == "running"
             pid = int(vm["pid"])
