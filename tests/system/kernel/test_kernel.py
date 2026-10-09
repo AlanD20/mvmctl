@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
+import stat
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,6 +22,180 @@ from tests.system.conftest import (
 )
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_kernel]
+
+
+class _KernelPullOwner:
+    """Admit one successful pull receipt in an otherwise empty private cache."""
+
+    domains = ("vm", "network", "volume", "snapshot", "key", "kernel", "image", "bin")
+
+    def __init__(self, runner_vm, cache_dir, config_dir):
+        self.runner_vm = runner_vm
+        self.cache_dir = cache_dir
+        self.config_dir = config_dir
+        self.cache_identity = self.directory_identity(cache_dir)
+        self.config_identity = self.directory_identity(config_dir)
+        self.receipt = None
+
+    @staticmethod
+    def directory_identity(path):
+        info = path.lstat()
+        assert stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid(), path
+        assert stat.S_IMODE(info.st_mode) == 0o700, path
+        return info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode
+
+    @staticmethod
+    def file_receipt(path):
+        assert path.is_absolute(), path
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as source:
+            before = os.fstat(source.fileno())
+            assert stat.S_ISREG(before.st_mode) and before.st_nlink == 1, path
+            assert before.st_uid == os.getuid() and before.st_size > 0, path
+            digest = hashlib.file_digest(source, "sha256").hexdigest()
+            after = os.fstat(source.fileno())
+        fields = ("st_dev", "st_ino", "st_uid", "st_gid", "st_mode", "st_nlink",
+                  "st_size", "st_mtime_ns", "st_ctime_ns")
+        identity = tuple(getattr(before, field) for field in fields)
+        assert tuple(getattr(after, field) for field in fields) == identity, path
+        return identity, digest
+
+    def inventory(self):
+        return {domain: _json_success_data(
+            _run_mvm(self.runner_vm, domain, "ls", "--json").stdout, list,
+        ) for domain in self.domains}
+
+    @staticmethod
+    def assert_inspect_receipt(inspected, item):
+        kernel = {key: item[key] for key in (
+            "id", "name", "base_name", "version", "arch", "type", "is_default", "is_present",
+        )}
+        if item.get("features"):
+            kernel["features"] = item["features"]
+        assert inspected == {
+            "kernel": kernel,
+            "storage": {"path": item["path"]},
+            "timestamps": {key: item[key] for key in ("created_at", "updated_at")},
+        }, inspected
+
+    def initialize(self):
+        initialized = _json_success_data(
+            _run_mvm(self.runner_vm, "cache", "init", "--json").stdout, dict,
+        )
+        assert initialized["cache_dir"] == str(self.cache_dir), initialized
+        self.baseline = self.inventory()
+        assert all(not items for items in self.baseline.values()), self.baseline
+        self.config = _json_success_data(
+            _run_mvm(self.runner_vm, "config", "ls", "--json").stdout, dict,
+        )
+
+    def remember_pull(self, result):
+        """A failed/ambiguous publication never grants authority by inventory difference."""
+        assert self.receipt is None, "only one acquisition is owned per private case"
+        for label, output in (("stdout", result.stdout), ("stderr", result.stderr)):
+            (self.cache_dir.parent / f"pull.{label}").write_text(output, encoding="utf-8")
+        if result.returncode != 0:
+            return  # Preserve the original body's failure assertion and uncertain private artifacts.
+        item = _json_success_data(result.stdout, dict)
+        assert re.fullmatch(r"[0-9a-f]{64}", item["id"]), item
+        assert item["type"] == "firecracker" and item["is_present"], item
+        assert item["version"] and item["arch"] and item["is_default"] is False, item
+        assert item["id"] not in {row["id"] for row in self.baseline["kernel"]}, item
+        path = self.cache_dir / "kernels" / item["id"]
+        assert Path(item["path"]) == path and not path.parent.is_symlink(), item
+        backing, digest = self.file_receipt(path)
+        assert hashlib.sha256(f"{digest}:{item['version']}:{item['arch']}".encode()).hexdigest() == item["id"]
+        inspected = _json_success_data(
+            _run_mvm(self.runner_vm, "kernel", "inspect", item["id"], "--json").stdout, dict,
+        )
+        self.assert_inspect_receipt(inspected, item)
+        assert self.inventory()["kernel"] == [item], item
+        assert self.file_receipt(path) == (backing, digest), path
+        self.receipt = item, path, backing, digest
+        print(f"owned kernel pull receipt={item}, backing={backing}, sha256={digest}", flush=True)
+
+    def cleanup(self):
+        assert self.receipt is not None, (
+            f"No successful exact pull receipt; retain private cache and native output at {self.cache_dir.parent}"
+        )
+        item, path, backing, digest = self.receipt
+        assert self.directory_identity(self.cache_dir) == self.cache_identity
+        assert self.directory_identity(self.config_dir) == self.config_identity
+        assert self.inventory()["kernel"] == [item], "unowned/changed kernel publication; retain cache"
+        inspected = _json_success_data(
+            _run_mvm(self.runner_vm, "kernel", "inspect", item["id"], "--json").stdout, dict,
+        )
+        self.assert_inspect_receipt(inspected, item)
+        assert self.file_receipt(path) == (backing, digest), "owned backing changed; retain cache"
+        removed = _json_success_data(
+            _run_mvm(self.runner_vm, "kernel", "rm", item["id"], "--force", "--json").stdout, dict,
+        )
+        assert len(removed["items"]) == 1, removed
+        assert removed["items"][0]["result"]["code"] == "kernel.removed", removed
+        assert removed["items"][0]["error"] is None, removed
+        with pytest.raises(FileNotFoundError):
+            path.lstat()
+        assert self.inventory() == self.baseline, "private originals/defaults changed; retain cache"
+        assert not list((self.cache_dir / "kernels").iterdir()), "unpublished backing retained"
+        assert _json_success_data(
+            _run_mvm(self.runner_vm, "config", "ls", "--json").stdout, dict,
+        ) == self.config
+        assert self.directory_identity(self.cache_dir) == self.cache_identity
+        cleaned = _json_success_data(
+            _run_mvm(self.runner_vm, "cache", "clean", "--force", "--json", timeout=210).stdout, dict,
+        )
+        assert cleaned["cache_dir"] == str(self.cache_dir) and cleaned["cache_dir_removed"] is True, cleaned
+        assert not cleaned["prune_result"]["failed_ids"] and not cleaned["prune_result"]["had_running_vms"], cleaned
+        with pytest.raises(FileNotFoundError):
+            self.cache_dir.lstat()
+
+
+@pytest.fixture
+def kernel_pull_owner(runner_vm, tmp_path, monkeypatch):
+    """Isolate each existing acquisition case; preserve shared originals on every exit."""
+    baseline = {domain: _json_success_data(
+        _run_mvm(runner_vm, domain, "ls", "--json").stdout, list,
+    ) for domain in _KernelPullOwner.domains}
+    config = _json_success_data(_run_mvm(runner_vm, "config", "ls", "--json").stdout, dict)
+    sources = {Path(item["path"]): _KernelPullOwner.file_receipt(Path(item["path"]))
+               for item in baseline["kernel"] if item["is_present"]}
+    tmp_path.chmod(0o700)
+    cache_dir, config_dir = tmp_path / "pull-cache", tmp_path / "pull-config"
+    cache_dir.mkdir(mode=0o700)
+    config_dir.mkdir(mode=0o700)
+    failures = []
+    try:
+        with monkeypatch.context() as selection:
+            selection.setenv("MVM_CACHE_DIR", str(cache_dir))
+            selection.setenv("MVM_CONFIG_DIR", str(config_dir))
+            selection.setenv("MVM_TEMP_DIR", str(cache_dir / "tmp"))
+            selection.setenv("TMPDIR", str(cache_dir / "tmp"))
+            selection.delenv("MVM_WARM_POOL", raising=False)
+            owner = _KernelPullOwner(runner_vm, cache_dir, config_dir)
+            try:
+                owner.initialize()
+                yield owner
+            finally:
+                try:
+                    owner.cleanup()
+                except Exception as error:
+                    failures.append(f"private pull cleanup retained {cache_dir}: {error!r}")
+    finally:
+        # Run every shared-state check even when private acquisition/cleanup failed.
+        for domain, expected in (*baseline.items(), ("config", config)):
+            try:
+                current = _json_success_data(
+                    _run_mvm(runner_vm, domain, "ls", "--json").stdout,
+                    dict if domain == "config" else list,
+                )
+                assert current == expected, (domain, expected, current)
+            except Exception as error:
+                failures.append(f"shared {domain} baseline changed: {error!r}")
+        for path, expected in sources.items():
+            try:
+                assert _KernelPullOwner.file_receipt(path) == expected, path
+            except Exception as error:
+                failures.append(f"shared source kernel changed: {path}: {error!r}")
+        assert not failures, failures
 
 
 def _import_test_kernel(runner_vm: str) -> str:
@@ -286,7 +464,7 @@ class TestKernelPullWithVersion:
         pytest.mark.domain_kernel,
     ]
 
-    def test_kernel_pull_with_version(self, runner_vm):
+    def test_kernel_pull_with_version(self, runner_vm, kernel_pull_owner):
         """Pull a firecracker kernel with --version flag."""
         result = _run_mvm(
             runner_vm,
@@ -296,9 +474,11 @@ class TestKernelPullWithVersion:
             "firecracker",
             "--version",
             "v1.15",
+            "--json",
             check=False,
             timeout=120,
         )
+        kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Kernel pull with --version failed in Tier 2 environment: "
             f"{result.stderr.strip()}"
@@ -314,7 +494,7 @@ class TestKernelPullWithVersion:
             "No firecracker kernel found in listing after pull with --version"
         )
 
-    def test_kernel_pull_with_specific_version(self, runner_vm):
+    def test_kernel_pull_with_specific_version(self, runner_vm, kernel_pull_owner):
         """Pull a firecracker kernel with a specific version (not 'latest')."""
         result = _run_mvm(
             runner_vm,
@@ -324,9 +504,11 @@ class TestKernelPullWithVersion:
             "firecracker",
             "--version",
             "v1.14",
+            "--json",
             check=False,
             timeout=120,
         )
+        kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Kernel pull with specific version failed in Tier 2 environment: "
             f"{result.stderr.strip()}"
@@ -356,7 +538,7 @@ class TestKernelPullArch:
         pytest.mark.domain_kernel,
     ]
 
-    def test_kernel_pull_with_arch(self, runner_vm):
+    def test_kernel_pull_with_arch(self, runner_vm, kernel_pull_owner):
         """Pull a firecracker kernel (arch detection is automatic in Go CLI)."""
         result = _run_mvm(
             runner_vm,
@@ -366,9 +548,11 @@ class TestKernelPullArch:
             "firecracker",
             "--version",
             "v1.15",
+            "--json",
             check=False,
             timeout=120,
         )
+        kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Kernel pull failed in Tier 2 environment: {result.stderr.strip()}"
         )
