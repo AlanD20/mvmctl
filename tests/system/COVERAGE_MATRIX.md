@@ -17,6 +17,19 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current lifecycle/status checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`, SHA-256
+`13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed five registered
+`vm/test_vm_lifecycle.py::TestVMStateTransitions` cases together on clean signed suite `b73d0462`
+inside `mvmctl-030-test`: strict 5/5, zero other outcomes, native exit 0, 44.740 seconds.
+Pause/resume preserved the process and guest; three stop/start cycles checked idempotence and fresh working
+guest identity; graceful and forced reboots checked changed process/boot identity. The crash journey used
+exact pidfd-bound task admission, proved `crashed` in list/inspect and exclusion from `ps`, then verified
+typed stop/start and working vsock exec. Exact owned VM/network removal passed under the current explicit
+qualification-host admission. Independent full original public/physical PRE/POST equality and verified
+nondefault mirrored-image removal passed, with existing defaults, source/candidate/boot pins and mirror preserved.
+No synthetic RAM guards were used. This does not qualify guest-initiated shutdown, outer-host reboot,
+the remaining lifecycle options, reusable-base provisioning or the complete installed T1/T2 matrix.
+
 **Current exec restart/restore checkpoint (2026-10-09):** Installed
 `0.3.0-rc.partition-f909601d`, SHA-256
 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed five further registered
