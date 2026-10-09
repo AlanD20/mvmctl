@@ -36,7 +36,15 @@ strict 1/1 in 6.35 seconds; the exact ownership-aware test overlay is integrated
 Owned-resource removal and original inventories/defaults/mirror preservation were checked independently.
 **Live reattachment failed:** after successful attach, detach and reattach commands, the same-sized guest block
 device did not reappear within ten seconds. This was run with expected-failure handling disabled; it is not a
-passing XFAIL or a proved PCI BAR diagnosis. The module remains unqualified pending diagnosis and correction.
+passing XFAIL. A subsequent owned-VM diagnostic established a PCI BAR mismatch: initial BAR `0x4000180000`,
+reattached Firecracker BAR `0x4000200000`, and Linux reassignment to the old address. Guest dmesg recorded the
+failed BAR update and `virtio_blk` probe error `-22`. An explicit PCI rescan returned exit 0, but the disk remained
+absent. Five snapshots, command statuses, exact owned cleanup and original inventory restoration were retained;
+successful diagnostic delivery is not successful reattachment.
+The released [Firecracker 1.17.0 BAR relocation implementation](https://github.com/firecracker-microvm/firecracker/blob/v1.17.0/src/vmm/src/devices/virtio/transport/pci/device.rs#L657-L715)
+and [unplug resource retirement](https://github.com/firecracker-microvm/firecracker/blob/v1.17.0/src/vmm/src/device_manager/pci_mngr.rs#L155-L204)
+address those source-level gaps. That pair has not been admitted or runtime-qualified by this project;
+the current exact launch pin remains 1.16.2. The module remains unqualified pending correction.
 These direct named-runner slices are not a consolidated module invocation or host-direct Tier 3 qualification.
 
 **Current read-only kernel results (2026-10-09):** Six local cases passed together, strict 6/6 in 0.19 seconds

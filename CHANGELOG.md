@@ -19,8 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > passing batches, with strict zero-other outcomes and checked owned cleanup/preservation; these are not
 > consolidated full-module or full-matrix runs. The real read-only administrator init/reset failure-and-retry
 > case also passed on this candidate. Eight of nine hotplug cases have passing evidence; live reattachment
-> failed because the device did not reappear in the guest and remains unresolved. Reusable-base provisioning,
-> the remaining installed matrix, administrator interruption/reboot/fault journeys and final approval remain
+> failed because the device did not reappear in the guest. A subsequent diagnostic established a Firecracker/guest
+> PCI BAR address mismatch; a successful explicit rescan did not restore the device. The dependency correction
+> remains unadmitted and unqualified, and the current exact Firecracker/Jailer pin is still 1.16.2.
+> Reusable-base provisioning, the remaining installed matrix, administrator interruption/reboot/fault journeys and final approval remain
 > incomplete; aarch64 runtime and Tier 3 are deferred. See the
 > [coverage matrix](tests/system/COVERAGE_MATRIX.md); v0.3.0 is not release-qualified.
 
