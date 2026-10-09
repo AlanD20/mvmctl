@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
+> **Current implementation and qualification checkpoint (2026-10-09):** the closed root-dispatch, isolated
+> Jailer, per-VM managed/networkless namespace, direct-Go nftables, typed traffic/exec policy, protected raw-volume
+> and snapshot paths are implemented. Installed candidate `0.3.0-rc.partition-f909601d` remains bound to source
+> `f909601d` and SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`.
+> Complete pinned Go CI passed on clean `fdae5902`; the separate full root Jailer suite passed on clean
+> `f909601d` with 2,627 test/subtest passes and zero failures/skips. Later documentation/test-only changes carry
+> only unchanged relevant inputs. Current installed-candidate evidence covers all 31 registered network nodes
+> across five batches, all six host-exec cases, and all six VM-to-VM exec nodes across three invocations.
+> All 69 lifecycle and 37 volume nodes match the current 106-node collection across eight separately bound
+> passing batches, with strict zero-other outcomes and checked owned cleanup/preservation; these are not
+> consolidated full-module or full-matrix runs. Reusable-base provisioning, the remaining installed
+> matrix, administrator/reboot/fault journeys and final release approval remain incomplete; aarch64 runtime
+> and Tier 3 are deferred. See the
+> [coverage matrix](tests/system/COVERAGE_MATRIX.md); v0.3.0 is not release-qualified.
+
 > **Current bounded memory checkpoint (2026-10-09):** installed `0.3.0-rc.partition-f909601d`
 > passed all three registered bounded memory cases: near-saturation with host swap absent and present, and
 > guest-global exhaustion with an identified allocator OOM victim and fresh exec survival. Each case records

@@ -2,11 +2,13 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-27 (isolated TAP execution identity)
+**Last Updated:** 2026-10-09 (networkless implementation and bounded qualification status)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 **No-IP placement:** [ADR-0020: Networkless VM Placement](0020-networkless-vm-placement.md) specifies the separate
-loopback-only namespace variant required for the no-IP exec case; it is not implemented or qualified yet.
+loopback-only namespace variant required for the no-IP exec case. It is implemented, with passing focused
+installed-candidate lifecycle, snapshot and directional-exec evidence. Host-reboot/fault journeys and complete
+release qualification remain separate gates; see the [current coverage overlay](../../tests/system/COVERAGE_MATRIX.md).
 
 ## Context
 
