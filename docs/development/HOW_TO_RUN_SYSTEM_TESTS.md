@@ -134,18 +134,22 @@ exact match while retaining their resource/boot/namespace/process authority chec
 direct run inside `mvmctl-030-test`, set both variables to `mvmctl-030-test` in that guest. This opt-in does not
 authorize host-direct testing or changes to other VMs; the orchestrator never grants it automatically to Tier 3.
 
-The installed candidate is `0.3.0-rc.partition-f909601d`, SHA-256
-`13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`. Complete pinned Go CI passed on clean
-`fdae5902`; the full root Jailer suite passed separately on clean `f909601d` with 2,627 test/subtest passes and
-zero failures/skips. Independent preservation passed for both; later documentation and test-only changes carry
-only unchanged relevant inputs. Earlier checkpoints below retain their original source/candidate bindings.
+The installed candidate is `0.3.0-rc.export-interrupt-bfdece17`, SHA-256
+`d13f8c06335342dab47fc6e5399af7e195992ab16dcf1ad00c3289c692390e42`. Complete pinned Go CI and the separate
+full root Jailer suite passed on clean `bfdece17`, including 2,632 root test/subtest passes and zero failures/skips.
+The real-agent amd64 build and normal `host install-system` also passed inside the named runner; independent
+preservation checked all existing state except the authorized canonical binary replacement. Later documentation
+and Python-only changes carry only unchanged relevant Go/build inputs. Earlier checkpoints below retain their
+original source/candidate bindings. On the current candidate, the SIGINT export journey passed, while the
+receiver-death case failed a public-status expectation and remains under diagnosis; that two-case invocation
+is not a passing slice. The current snapshot capture file-limit failure/recovery case passed separately.
 Reusable-base provisioning and the complete installed Python matrix remain pending; these passes do not qualify
 the full release.
 
 **Current administrator filesystem-retry checkpoint (2026-10-09):** The registered
 `test_filesystem_failure_preserves_init_and_reset_retry_authority` case passed strict 1/1 in 44.08 seconds on
-that installed candidate inside `mvmctl-030-test`. It reached both real read-only sysctl faults, retained the
-partial init/reset authority, recovered by explicit administrator retry, and activated the same pending network
+the earlier installed `f909601d` candidate inside `mvmctl-030-test`. It reached both real read-only sysctl faults,
+retained the partial init/reset authority, recovered by explicit administrator retry, and activated the same pending network
 identity after re-enrollment before typed removal. Exact mount restoration, owned-child cleanup and original
 public/physical/administrator-state preservation passed. This supersedes the older package-setup limitation
 for this case, not abrupt interruption, reusable-base provisioning or the complete administrator domain.

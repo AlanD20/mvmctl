@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > All 69 lifecycle and 37 volume nodes match the current 106-node collection across eight separately bound
 > passing batches, with strict zero-other outcomes and checked owned cleanup/preservation; these are not
 > consolidated full-module or full-matrix runs. The real read-only administrator init/reset failure-and-retry
-> case also passed on this candidate. Eight of nine hotplug cases have passing evidence; live reattachment
+> case also passed on the earlier installed `f909601d` candidate. Eight of nine original hotplug cases have
+> passing evidence; live reattachment
 > failed because the device did not reappear in the guest. A subsequent diagnostic established a Firecracker/guest
 > PCI BAR address mismatch; a successful explicit rescan did not restore the device. The dependency correction
 > remains unadmitted and unqualified, and the current exact Firecracker/Jailer pin is still 1.16.2.
