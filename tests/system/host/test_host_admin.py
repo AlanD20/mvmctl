@@ -1049,8 +1049,9 @@ class TestCleanHostAdministration:
         case.prepare_second_operator()
         with _SysctlReadOnlyFault(case):
             failed = case.administrator("init", check=False)
-            _require_error(failed, "host.init.failed", expected_status="partial")
-            assert "read-only file system" in (failed.stdout + failed.stderr).lower()
+            error = _require_error(failed, "host.init.failed", expected_status="partial")
+            assert error["details"]["journal_retained"] is True, error
+            assert error["op"] == "host", error
             partial = case.state()
             journal = _root_file_data(partial, "journal")
             assert journal["completed"] == 3 and journal["pending"] is True, journal
@@ -1084,10 +1085,7 @@ class TestCleanHostAdministration:
                 and partial["files"]["sudoers"] is None
             )
             assert partial["files"]["enrollment"] is None
-            assert _root_file_data(partial, "admission") == {
-                "version": 1,
-                "enabled": False,
-            }
+            assert partial["files"]["admission"] is None
             competing = case.enroll_second_from_root(check=False)
             _require_error(competing, "host.init.failed")
             assert "original operator" in competing.stdout + competing.stderr
@@ -1129,25 +1127,32 @@ class TestCleanHostAdministration:
             }
             _require_error(case.administrator("init", check=False), "host.init.failed")
             name = f"sys-admin-off-{uuid.uuid4().hex[:16]}"
-            _require_error(
-                case.operator(
-                    "network",
-                    "create",
-                    name,
-                    "--subnet",
-                    _unique_subnet(name),
-                    "--no-nat",
-                    "--json",
-                    check=False,
-                )
+            subnet = _unique_subnet(name)
+            gateway = subnet.rsplit(".", 1)[0] + ".1"
+            create_args = (
+                "network",
+                "create",
+                name,
+                "--subnet",
+                subnet,
+                "--no-nat",
+                "--json",
             )
+            _require_error(case.operator(*create_args, check=False))
             assert case.state() == partial
-            assert (
-                _json_success_data(
-                    case.operator("network", "ls", "--json").stdout, list
-                )
-                == []
+            rows = _json_success_data(
+                case.operator("network", "ls", "--json").stdout, list
             )
+            assert len(rows) == 1, rows
+            pending = rows[0]
+            case.child_networks.append(pending)
+            assert pending["id"] and pending["created_at"], pending
+            assert pending["name"] == name and pending["subnet"] == subnet, pending
+            assert pending["ipv4_gateway"] == gateway, pending
+            assert pending["nat_enabled"] is False and pending["is_default"] is False
+            assert pending["bridge"] == "" and pending["bridge_active"] is False
+            assert pending["is_present"] is False
+            assert case.state() == partial
             case.require_network(control, present=False)
         _json_success_data(case.administrator("reset").stdout, type(None))
         restored = case.state()
@@ -1163,9 +1168,36 @@ class TestCleanHostAdministration:
             "version": 1,
             "enabled": False,
         }
+        rows = _json_success_data(
+            case.operator("network", "ls", "--json").stdout, list
+        )
+        assert rows == [pending], rows
         case.require_enrolled(original)
+        retried = _success_data(case.operator(*create_args))
+        case.child_networks[-1] = retried
+        for field in (
+            "id",
+            "name",
+            "created_at",
+            "subnet",
+            "ipv4_gateway",
+            "nat_enabled",
+            "is_default",
+        ):
+            assert retried[field] == pending[field], (field, retried, pending)
+        assert retried["bridge"] and retried["bridge_active"] is True, retried
+        assert retried["is_present"] is True, retried
+        case.require_network(retried, present=True)
+        case.remove_child_network(retried)
         final = case.network_control()
         case.remove_child_network(final)
+        assert (
+            _json_success_data(
+                case.operator("network", "ls", "--json").stdout, list
+            )
+            == []
+        )
+        assert _root_file_data(case.state(), "admission")["enabled"] is True
 
     def test_clean_enrollment_marker_only_reset_and_reinit(self, clean_host_child):
         case = clean_host_child
