@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > and snapshot paths are implemented. Installed candidate `0.3.0-rc.partition-f909601d` remains bound to source
 > `f909601d` and SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`.
 > Complete pinned Go CI passed on clean `fdae5902`; the separate full root Jailer suite passed on clean
-> `f909601d` with 2,627 test/subtest passes and zero failures/skips. Later documentation/test-only changes carry
-> only unchanged relevant inputs. Current installed-candidate evidence covers all 31 registered network nodes
+> `f909601d` with 2,627 test/subtest passes and zero failures/skips. Those results predate the new live-attachment
+> completion changes below; carry only unchanged relevant inputs. Current installed-candidate evidence covers all 31 registered network nodes
 > across five batches, all six host-exec cases, and all six VM-to-VM exec nodes across three invocations.
 > All 69 lifecycle and 37 volume nodes match the current 106-node collection across eight separately bound
 > passing batches, with strict zero-other outcomes and checked owned cleanup/preservation; these are not
@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Reusable-base provisioning, the remaining installed matrix, administrator interruption/reboot/fault journeys and final approval remain
 > incomplete; aarch64 runtime and Tier 3 are deferred. See the
 > [coverage matrix](tests/system/COVERAGE_MATRIX.md); v0.3.0 is not release-qualified.
+
+> **Live-attachment completion implementation (2026-10-09):** `7a4a99de` adds authenticated guest readiness
+> for the root-derived disk serial/capacity and a final unchanged root attachment check before Running-VM
+> attach succeeds. Paused attachment is staged with an explicit retryable deferred-readiness error; known-applied
+> failures retain the attachment rather than reporting an available volume. Focused vet, behavioral and race
+> checks passed inside the named runner. This source is not yet built or installed there; it does not fix the
+> diagnosed Firecracker BAR relocation failure or qualify the new behavior at system-test level.
 
 > **Current protected-rootfs import checkpoint (2026-10-09):** the Running VM-to-image journey passed
 > strict 1/1 in 27.69 seconds; Paused and Stopped then passed strict 2/2 in 34.59 seconds on the same

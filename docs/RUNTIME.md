@@ -114,6 +114,14 @@ data-volume format. Active writable disks are root-protected rather than reused 
 file. An attached volume can grow while its VM is stopped without detaching it. `volume rm --force` likewise
 requires the attached VM stopped; it does not hot-unplug a running guest.
 
+`volume attach` on a Running VM succeeds only after the authenticated guest agent observes the exact
+root-derived disk serial/capacity bound to `virtio_blk`, followed by an unchanged root attachment identity.
+On a Paused VM it stages the attachment and returns a retryable deferred-readiness error: resume the VM and
+retry the same attach. Stopped VMs record the attachment for their next start. A readiness failure does not
+undo a known-applied attachment or make its volume available; inspect the state and retry the same operation.
+The readiness implementation has focused Go verification but awaits installed-candidate system qualification.
+It detects an unusable attachment; it cannot repair the current Firecracker PCI BAR relocation failure.
+
 A full snapshot captures rootfs, memory/vmstate, and attached data volumes under exclusive write ownership. Its
 artifacts are root-controlled under the selected cache, with CLI-mediated removal. Restore creates independent
 writable disks while retaining immutable captured memory backing; it preserves the recorded release, drive IDs, and

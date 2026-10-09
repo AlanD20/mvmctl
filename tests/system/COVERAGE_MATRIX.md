@@ -17,6 +17,14 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Live-attachment completion source (2026-10-09):** `7a4a99de` integrates authenticated root-derived guest
+disk readiness, retained known-applied attachment projection, explicit paused staging and a final root identity
+recheck. Focused agent/vsock/API behavior checks, supporting VM/error/CLI packages, affected vet and the selected
+agent/vsock/API race checks passed inside `mvmctl-030-test`; the integration's 12 source files matched the tested
+manifest exactly. New source is not yet built or installed, and complete CI for it remains pending. Existing
+installed `f909601d` evidence qualifies only unchanged relevant inputs, not this new live-attachment behavior.
+Readiness detects rather than repairs the separately diagnosed Firecracker BAR relocation failure.
+
 **Current protected-rootfs VM image import (2026-10-09):**
 `images/test_images.py::TestImageImportCreateVM::test_vm_import_preserves_guest_contents_and_source_state[running]`
 passed strict 1/1 in 27.69 seconds, native exit 0 and zero other outcomes, on installed

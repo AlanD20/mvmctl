@@ -52,6 +52,15 @@ the isolation prerequisite after previously pausing it for a separate design dec
   observation proves its VM stopped; ambiguous or missing VM identity refuses removal. The same stopped-VM requirement
   applies to growth of an attached volume, without requiring detach. Unattached volumes may grow normally. Root
   protected-backing reference checks remain the final authority against a concurrent launch or retained writer.
+- Running-VM attachment completion requires authenticated guest readiness for the root-derived serial and capacity,
+  a bound `virtio_blk` device, and a final unchanged root attachment/generation observation. A sysfs rescan's successful
+  exit is not sufficient. Paused attachment is staged with an explicit retryable deferred-readiness result; resume
+  and retry the same attach. Stopped attachment remains next-start configuration. Project known-applied root effects
+  before guest readiness; projection or guest failures retain root ownership and explicit incomplete status, while
+  uncertain root outcomes stay explicit. Do not roll back
+  a potentially usable disk, free its backing, or declare success merely because the host API accepted it.
+  Implementation `7a4a99de` passed focused vet, behavioral and race checks inside the named runner; its real-agent
+  build, installed system journeys and the separate Firecracker BAR correction remain unqualified.
 - Require exclusive write ownership during capture. Refuse capture when another VM has writable access to any
   captured volume; coordinated multi-VM capture is not selected. Host writers and retained aliases must also be excluded.
 - Capture one consistent state across Full memory/vmstate, rootfs, and attached data disks. Root metadata binds the
