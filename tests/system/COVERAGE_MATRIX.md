@@ -17,6 +17,19 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current traffic-policy checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`, SHA-256
+`13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed all three registered
+`network/test_policies.py` nodes together inside `mvmctl-030-test` in 73.20 seconds: strict 3/3, zero other
+outcomes and native exit 0. The same-network and cross-network TCP journeys prove default denial, exact
+grant, adjacent-port denial and revocation; the source-VM UDP journey also checks sibling-source and reverse
+denial with receiver-side delivery evidence. The signed `276fc27c` traffic bodies and used helper functions
+are unchanged through `b73d0462`; this is not a full execution of that later suite. The normal runner-local
+`pytest-timeout` 2.2.0 prerequisite was installed with no package upgrades or removals before fixture admission.
+Public/physical PRE/POST inventories, existing kernel/network defaults, source/candidate/boot pins and mirror
+matched. Registered fixtures cleaned their exact owned resources; only the identity-proven nondefault Alpine
+image was removed without force afterward. No synthetic memory guards were used. Reusable-base provisioning,
+the remaining exec/lifecycle/fault journeys and complete installed T1/T2 qualification remain pending.
+
 **Current directional-exec checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
 SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed the registered
 `exec/test_vm_to_vm_exec.py::test_directional_vm_to_vm_exec_policy` inside `mvmctl-030-test` in
