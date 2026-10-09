@@ -17,7 +17,17 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Latest installed-candidate checkpoint (2026-10-08):** The signed image-selector correction `020cd232`
+**Current bounded memory qualification (2026-10-09):** Installed candidate
+`0.3.0-rc.partition-f909601d`, source `f909601d`, SHA-256
+`13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed both registered
+`test_guest_sustains_near_saturation_under_pressure_only_memory_control` variants inside `mvmctl-030-test`:
+host-swap-absent (36.74 seconds) and host-swap-present (27.02 seconds). The registered guest-global exhaustion
+case also passed (8.996 seconds), identifying the allocator as the guest OOM victim and proving fresh exec
+survival. All three strict reports record one pass, zero other outcomes and native exit 0; checked typed cleanup,
+configuration and inventory preservation passed. This closes those three bounded cases only. Historical
+incident attribution, survival under arbitrary host/ancestor OOM and the full release matrix remain unqualified.
+
+**Earlier installed-candidate checkpoint (2026-10-08):** The signed image-selector correction `020cd232`
 passed its intended pre-fix regression, six corrected behavioral cases, the input-package suite and focused
 format/vet checks inside `mvmctl-030-test` (`19cb3d83`). Clean tree `7628b6f5` then passed the production
 real-agent Go 1.26.3/PIE build (`270d8fdc`). Candidate `0.3.0-rc.image-selector-020cd232`, SHA-256
@@ -34,8 +44,8 @@ pair, the default-kernel requirement is unchanged. Test workloads, runtime asser
 The selected host-swap-absent saturation case collected successfully inside the named runner; the existing
 imported-kernel runner-binding unit passed 1/1 with strict JSON/JUnit outcomes (`df714230`). Collection-only
 items have no runtime call phase and are classified as `errors` by the outcome hook; this is not a collection
-failure or runtime pass. Two failed private-launcher receipts remain failures. The installed pressure case
-itself has not run, so this change does not close memory qualification.
+failure or runtime pass. Two failed private-launcher receipts remain failures. At that checkpoint the installed
+pressure case had not run; the preparation itself did not close memory qualification.
 
 **Earlier coherent Go/build/install checkpoint (2026-10-08):** Clean parent `992d2fd5` passed the nine-phase
 ordinary Go 1.26.3 CI sequence inside `mvmctl-030-test`, with 59 native package passes and ten no-test rows
@@ -49,8 +59,8 @@ Candidate `0.3.0-rc.integrated-64079c3b`, SHA-256
 durable database content/identity/permissions, authority and mounts; only cache-directory mtime/ctime and database
 ctime differed. Native version/status/binary-list checks passed, but the raw timestamp-assertion installation
 failure is retained. This adjudication is a scoped QA expectation correction, not a general timestamp exclusion.
-Earlier CLI/runtime passes retain their original source/candidate bindings. Current-candidate memory,
-reusable-base provisioning and the full installed T1/T2 matrix remain unqualified. Remote GitHub CI, Tier 3,
+Earlier CLI/runtime passes retain their original source/candidate bindings. At that checkpoint, memory,
+reusable-base provisioning and the full installed T1/T2 matrix remained unqualified. Remote GitHub CI, Tier 3,
 aarch64 runtime and final release approval are also unqualified. Build, Go and readiness results do not close
 those gates; the outer controller remains unchanged.
 

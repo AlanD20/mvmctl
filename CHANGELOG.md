@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - Unreleased
 
-> **Current coherent checkpoint (2026-10-08):** protected VM-to-image exports remain integrated. Clean parent
+> **Current bounded memory checkpoint (2026-10-09):** installed `0.3.0-rc.partition-f909601d`
+> passed all three registered bounded memory cases: near-saturation with host swap absent and present, and
+> guest-global exhaustion with an identified allocator OOM victim and fresh exec survival. Each case records
+> one pass, zero other strict outcomes and native exit 0, with checked typed cleanup and configuration/inventory
+> preservation. Historical incident attribution, survival under arbitrary
+> host/ancestor OOM and the full release matrix remain unqualified. See the
+> [coverage matrix](tests/system/COVERAGE_MATRIX.md) for exact candidate binding; v0.3.0 is not release-qualified.
+
+> **Earlier coherent checkpoint (2026-10-08):** protected VM-to-image exports remain integrated. Clean parent
 > `992d2fd5` passed all nine phases of ordinary Go 1.26.3 CI inside `mvmctl-030-test`: 59 native package passes
 > and ten no-test rows (receipt SHA-256 `318efd21`). This evidence carries for unchanged surfaces; it is not a
 > complete CI run on `64079c3b`. Clean `64079c3b` separately passed the full root Jailer suite: 828 top-level
@@ -19,8 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > exact-JSON adjudication (`61cb1e01`): durable database bytes, identity and permissions, authority and mounts
 > matched; only cache-directory mtime/ctime and database ctime differed. The raw failed install receipt remains
 > retained, rather than relabeled as a passing run. Earlier CLI and runtime results retain their original candidate
-> bindings. Current-candidate memory, reusable-base provisioning and the full installed T1/T2 matrix remain
-> unqualified, as do GitHub CI, Tier 3, aarch64 runtime and final release approval. The outer controller is unchanged;
+> bindings. At that checkpoint, memory, reusable-base provisioning and the full installed T1/T2 matrix remained
+> unqualified; GitHub CI, Tier 3, aarch64 runtime and final release approval remain unqualified.
+> The outer controller is unchanged;
 > v0.3.0 is not release-qualified. See the [coverage matrix](tests/system/COVERAGE_MATRIX.md).
 
 > **Earlier journal-fixed checkpoint (2026-10-08):** protected VM-to-image exports are integrated. Clean journal-fixed source
