@@ -540,6 +540,7 @@ def saturation_vm(
     runner_vm: str,
     cgroup_config_overrides: None,
     saturation_host_swap: _HostSwap,
+    record_property: Any,
 ) -> Iterator[dict[str, Any]]:
     """Remove the bounded VM before its swap prerequisite is torn down."""
     kernel_args = _require_preseeded_vm_assets(runner_vm)
@@ -561,7 +562,13 @@ def saturation_vm(
             list,
         )
         assert len(created) == 1
-        yield {"name": vm_name, "id": created[0]["id"]}
+        vm_id = created[0]["id"]
+        assert isinstance(vm_id, str) and re.fullmatch(r"[0-9a-f]{32}", vm_id)
+        assert created[0]["name"] == vm_name
+        record_property("pressure_owned_vm", json.dumps({
+            "id": vm_id, "name": vm_name,
+        }, sort_keys=True))
+        yield {"name": vm_name, "id": vm_id}
     finally:
         remaining = _vm_entry(runner_vm, vm_name)
         if remaining is not None:
