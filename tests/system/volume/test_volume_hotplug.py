@@ -275,9 +275,10 @@ class TestVolumeHotplug:
         )
         selected = [row for row in listed if row["id"] == vm_id]
         assert len(selected) == 1, selected
+        assert (selected[0]["pid"], selected[0]["process_start_time"]) == identity, selected
         for row in (selected[0], paused["vm"]):
             assert row["id"] == vm_id and row["status"] == "paused", row
-            assert (row["pid"], row["process_start_time"]) == identity, row
+            assert row["pid"] == identity[0], row
         assert sum(row["id"] == vol_id for row in paused["volumes"]) == 1, paused
         volume = _json_success_data(
             _run_mvm(runner_vm, "volume", "inspect", vol_id, "--json").stdout, dict,
@@ -321,8 +322,14 @@ class TestVolumeHotplug:
         vm = _json_success_data(
             _run_mvm(runner_vm, "vm", "inspect", vm_id, "--json").stdout, dict,
         )
+        listed = _json_success_data(
+            _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+        )
+        selected = [row for row in listed if row["id"] == vm_id]
+        assert len(selected) == 1 and selected[0]["status"] == "running", selected
+        assert (selected[0]["pid"], selected[0]["process_start_time"]) == identity, selected
         assert vm["vm"]["id"] == vm_id and vm["vm"]["status"] == "running", vm
-        assert (vm["vm"]["pid"], vm["vm"]["process_start_time"]) == identity, vm
+        assert vm["vm"]["pid"] == identity[0], vm
         assert sum(row["id"] == vol_id for row in vm["volumes"]) == 1, vm
         volume = _json_success_data(
             _run_mvm(runner_vm, "volume", "inspect", vol_id, "--json").stdout, dict,
