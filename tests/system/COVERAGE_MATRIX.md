@@ -38,8 +38,10 @@ Ordinary tier batches exclude explicit phase execution and cannot substitute for
 The first Firecracker acquisition body succeeded, but its teardown failed when ordinary `cache clean`
 encountered root-only protected parents. That invocation remains failed; the other two acquisition bodies
 were not executed. [ADR-0022](../../docs/adr/0022-explicit-protected-cache-retirement.md) records the
-approved typed retirement contract; source integration and installed public cleanup qualification remain
-pending. Permanent snapshot-lock and volume-removal residues are an explicit separate cleanup gap.
+approved typed retirement contract. Signed `0469195e` integrates the implementation and accepted capture,
+parent-sync and nonterminal publication-sync corrections; focused API/auth/root-race checks passed.
+Complete integration CI/build and installed public cleanup qualification remain pending.
+Permanent snapshot-lock and volume-removal residues are an explicit separate cleanup gap.
 Signed `af285c1b` integrates the reviewed three-case acquisition sequence fixture: one receipt-owned store,
 typed per-case kernel retirement, a single final cache cleanup and per-function cache/mirror environment.
 All three acquisition bodies remain byte-identical; named-QA checks passed 13 pure cases with zero other

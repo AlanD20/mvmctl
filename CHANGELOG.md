@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > early subprocess-diagnostic read; the full privileged-package race run passed 311 tests/subtests.
 > Kernel acquisition exposed a real teardown failure on root-owned protected cache parents. The failure
 > remains recorded; [ADR-0022](docs/adr/0022-explicit-protected-cache-retirement.md) defines the approved
-> typed retirement fix, whose integration and installed-candidate qualification remain pending.
+> typed retirement fix, now integrated with root-private atomic capture, parent synchronization and a durable
+> nonterminal retry barrier. Focused API, authorization and root-race checks passed inside the named runner.
+> Complete integration CI/build and installed-candidate cleanup qualification remain pending; permanent
+> snapshot-lock and volume-removal branch residues still refuse cleanup and remain a separate release gap.
 > The three acquisition cases now share one receipt-owned store, retire their kernels between cases,
 > and clean that cache once at sequence completion. All three test bodies are unchanged; 13 pure fixture
 > checks and 22-node collection passed. These checks do not qualify acquisition or the production fix.

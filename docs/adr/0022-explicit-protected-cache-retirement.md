@@ -1,6 +1,6 @@
 # Explicit Protected Cache Retirement
 
-**Status:** Accepted; implementation and installed-candidate qualification pending
+**Status:** Accepted; implementation integrated, installed-candidate qualification pending
 **Date:** 2026-10-10
 **Amends:** [ADR-0018](0018-isolated-vm-execution-and-snapshot-authority.md), only for explicit cleanup of a retired protected store
 
@@ -36,6 +36,8 @@ retired backing. Cleanup therefore needs explicit root-authorized retirement, no
   store and quarantine identities; reconcile an interrupted cleanup only from that recorded authority. The final
   store entry has a caller-owned parent, so a separate pathname check and root `rmdir` cannot establish exact removal.
   Capture the store atomically into a pinned root-controlled quarantine before deleting its admitted empty suffix.
+- Before resuming nonterminal effects, synchronize the retained root authority directory. A record rename can be
+  visible after its publication-directory synchronization failed; retry must seal that intent before deleting data.
 - Create and pin the fixed quarantine child inside the already-admitted root-owned store, not directly under the
   caller-owned cache where creation/open could adopt a replacement. Record preparation and the exact child identity
   before atomically promoting it to the fixed `.mvm-protected-retirement` sibling. Both locations are on the selected
@@ -83,7 +85,8 @@ Required behavior evidence includes successful terminal-parent cleanup; refusal 
 referenced or transitional objects; exclusion of held leases; interrupted retirement reconciliation; unchanged
 missing-store and mutable-backing anti-resurrection rules; dry-run preservation; and accurate API failure projection.
 The final capture must refuse namespace substitution without deleting the substitute, and an interrupted or failed
-parent synchronization must be retried before completion. These are concrete defects found in the first fixed-source
-review, not qualified behavior of that source; the correction and its affected checks remain pending.
+parent synchronization must be retried before completion. The integrated correction passes focused namespace,
+parent-sync recovery and publication-sync retry tests inside the named runner; the defective first source is not
+qualified. Complete integration CI and installed-candidate cleanup remain pending.
 Focused Go checks and installed-candidate acquisition/teardown qualification run only in the approved disposable
 runner. Source implementation and internal tests alone do not qualify the public cleanup journey or the release.
