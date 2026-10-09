@@ -212,7 +212,13 @@ class TestVolumeHotplug:
     def test_hotplug_volume_format_and_mount(self, runner_vm: str, hotplug_case: dict) -> None:
         vm_id, vol_id = hotplug_case["vm"], hotplug_case["volume"]
         _run_mvm(runner_vm, "volume", "attach", vm_id, vol_id)
-        assert _wait_for_vdb(runner_vm, vm_id), "hotplugged vdb did not appear"
+        ready = _run_mvm(
+            runner_vm, "exec", vm_id, "--user", "root", "--",
+            "set -e; test -b /dev/vdb; cat /sys/block/vdb/size; "
+            "readlink /sys/block/vdb/device/driver",
+        ).stdout.splitlines()
+        assert len(ready) == 2 and ready[0] == "1048576", ready
+        assert Path(ready[1]).name == "virtio_blk", ready
         _run_mvm(
             runner_vm, "exec", vm_id, "--user", "root", "--",
             "mkfs.ext4 -F /dev/vdb", timeout=120,
@@ -226,6 +232,103 @@ class TestVolumeHotplug:
             runner_vm, "exec", vm_id, "--user", "root", "--", "cat /mnt/test-hotplug.txt",
         )
         assert readback.stdout.strip() == "hotplug test data", readback.stdout
+        _run_mvm(runner_vm, "exec", vm_id, "--user", "root", "--", "umount /mnt")
+
+    def test_hotplug_paused_attach_defers_until_resume_retry(
+        self, runner_vm: str, hotplug_case: dict
+    ) -> None:
+        """Paused attachment retains ownership; success after retry means usable guest I/O."""
+        vm_id, vol_id = hotplug_case["vm"], hotplug_case["volume"]
+        # Establish guest-agent startup before pausing, not after claimed attach readiness.
+        _run_mvm(
+            runner_vm, "exec", vm_id, "--user", "root", "--timeout", "30",
+            "--", "cat /proc/partitions",
+        )
+        initial = _json_success_data(
+            _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+        )
+        selected = [row for row in initial if row["id"] == vm_id]
+        assert len(selected) == 1 and selected[0]["status"] == "running", selected
+        identity = (selected[0]["pid"], selected[0]["process_start_time"])
+        assert identity[0] > 0 and identity[1] > 0, selected
+        _run_mvm(runner_vm, "vm", "pause", vm_id)
+        deferred = _run_mvm(
+            runner_vm, "volume", "attach", vm_id, vol_id, "--json", check=False,
+        )
+        assert deferred.returncode != 0, (deferred.stdout, deferred.stderr)
+        response = json.loads(deferred.stdout)
+        assert set(response) == {"schema_version", "status", "data", "error"}, response
+        assert response["schema_version"] == 1 and response["status"] == "error", response
+        assert response["data"] is None, response
+        error = response["error"]
+        assert error["code"] == "volume.guest_not_ready" and error["class"] == 3, error
+        assert error["entity"] == vol_id, error
+        assert error["details"] == {
+            "vm_id": vm_id, "vmm_attached": True,
+            "guest_ready": False, "readiness_deferred": True,
+        }, error
+        paused = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", vm_id, "--json").stdout, dict,
+        )
+        listed = _json_success_data(
+            _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+        )
+        selected = [row for row in listed if row["id"] == vm_id]
+        assert len(selected) == 1, selected
+        for row in (selected[0], paused["vm"]):
+            assert row["id"] == vm_id and row["status"] == "paused", row
+            assert (row["pid"], row["process_start_time"]) == identity, row
+        assert sum(row["id"] == vol_id for row in paused["volumes"]) == 1, paused
+        volume = _json_success_data(
+            _run_mvm(runner_vm, "volume", "inspect", vol_id, "--json").stdout, dict,
+        )
+        assert volume["volume"]["id"] == vol_id and volume["volume"]["status"] == "attached", volume
+        assert volume["attachment"]["vm_id"] == vm_id, volume
+
+        _run_mvm(runner_vm, "vm", "resume", vm_id)
+        completed = _run_mvm(runner_vm, "volume", "attach", vm_id, vol_id, "--json")
+        assert json.loads(completed.stdout) == {
+            "schema_version": 1, "status": "success", "data": None, "error": None,
+        }, completed.stdout
+        ready = _run_mvm(
+            runner_vm, "exec", vm_id, "--user", "root", "--",
+            "set -e; test -b /dev/vdb; cat /sys/block/vdb/size; "
+            "readlink /sys/block/vdb/device/driver",
+        ).stdout.splitlines()
+        assert len(ready) == 2 and ready[0] == "1048576", ready
+        assert Path(ready[1]).name == "virtio_blk", ready
+        assert _count_virtio_block_devices(runner_vm, vm_id) == 1
+        _run_mvm(
+            runner_vm, "exec", vm_id, "--user", "root", "--",
+            "mkfs.ext4 -F /dev/vdb", timeout=120,
+        )
+        _run_mvm(runner_vm, "exec", vm_id, "--user", "root", "--", "mount /dev/vdb /mnt")
+        marker = f"paused-ready-{uuid.uuid4().hex}"
+        written = _run_mvm(
+            runner_vm, "exec", vm_id, "--user", "root", "--",
+            f"set -e; printf %s {marker} > /mnt/test-hotplug.txt; sync; cat /mnt/test-hotplug.txt",
+        )
+        assert written.stdout.strip() == marker, written.stdout
+        repeated = _run_mvm(runner_vm, "volume", "attach", vm_id, vol_id, "--json")
+        assert json.loads(repeated.stdout) == {
+            "schema_version": 1, "status": "success", "data": None, "error": None,
+        }, repeated.stdout
+        assert _count_virtio_block_devices(runner_vm, vm_id) == 1
+        readback = _run_mvm(
+            runner_vm, "exec", vm_id, "--user", "root", "--", "cat /mnt/test-hotplug.txt",
+        )
+        assert readback.stdout.strip() == marker, readback.stdout
+        vm = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", vm_id, "--json").stdout, dict,
+        )
+        assert vm["vm"]["id"] == vm_id and vm["vm"]["status"] == "running", vm
+        assert (vm["vm"]["pid"], vm["vm"]["process_start_time"]) == identity, vm
+        assert sum(row["id"] == vol_id for row in vm["volumes"]) == 1, vm
+        volume = _json_success_data(
+            _run_mvm(runner_vm, "volume", "inspect", vol_id, "--json").stdout, dict,
+        )
+        assert volume["volume"]["id"] == vol_id and volume["volume"]["status"] == "attached", volume
+        assert volume["attachment"]["vm_id"] == vm_id, volume
         _run_mvm(runner_vm, "exec", vm_id, "--user", "root", "--", "umount /mnt")
 
     def test_hotplug_volume_hot_unplug(self, runner_vm: str, hotplug_case: dict) -> None:
