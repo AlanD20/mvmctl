@@ -68,20 +68,9 @@ func TestController_Pause_stateTransitions(t *testing.T) {
 }
 
 // --- Controller: Resume state machine ---
-// Rationale: Resume must reject invalid transitions and be idempotent when
-// already running.
+// Rationale: Resume rejects these local transitions; running/starting idempotence requires root state.
 
 func TestController_Resume_stateTransitions(t *testing.T) {
-	t.Run("already_running_is_noop", func(t *testing.T) {
-		ctrl := ctrlFor(model.VMStatusRunning)
-		assert.NoError(t, ctrl.Resume(context.Background()))
-	})
-
-	t.Run("starting_is_noop", func(t *testing.T) {
-		ctrl := ctrlFor(model.VMStatusStarting)
-		assert.NoError(t, ctrl.Resume(context.Background()))
-	})
-
 	t.Run("error_state_rejected", func(t *testing.T) {
 		ctrl := ctrlFor(model.VMStatusError)
 		err := ctrl.Resume(context.Background())

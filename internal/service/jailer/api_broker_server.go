@@ -131,7 +131,11 @@ func (server *VMAPIBrokerServer) apply(
 	defer func() {
 		returnErr = appendInstanceOperationError(returnErr, "close VM API peer pidfd", unix.Close(peerPIDFD))
 	}()
-	if operation != vmAPIReady {
+	if operation == vmAPIResume {
+		if err := resumeVMAPI(ctx, connection, request.VMID); err != nil {
+			return VMAPIResult{}, err
+		}
+	} else if operation != vmAPIReady {
 		if err := sendVMAPIOperation(ctx, connection, operation); err != nil {
 			return VMAPIResult{}, err
 		}

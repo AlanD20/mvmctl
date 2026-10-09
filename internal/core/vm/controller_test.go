@@ -52,7 +52,7 @@ func TestController_Pause_stateValidation(t *testing.T) {
 
 // --- Resume state validation ---
 // Rationale: Resume must reject invalid state transitions before any I/O.
-// Already-running and already-starting VMs are no-ops.
+// Cached running/starting states require root authorization, so only rejected transitions are local.
 
 func TestController_Resume_stateValidation(t *testing.T) {
 	tests := map[string]struct {
@@ -64,10 +64,6 @@ func TestController_Resume_stateValidation(t *testing.T) {
 		"crashed":  {status: model.VMStatusCrashed, wantErr: "remove and recreate"},
 		"stopped":  {status: model.VMStatusStopped, wantErr: "use start()"},
 		"stopping": {status: model.VMStatusStopping, wantErr: "shutting down"},
-
-		// Happy paths — idempotent no-ops
-		"running_is_noop":  {status: model.VMStatusRunning},
-		"starting_is_noop": {status: model.VMStatusStarting},
 	}
 
 	for name, tc := range tests {
@@ -121,8 +117,7 @@ func TestController_Start_stateValidation(t *testing.T) {
 }
 
 // --- Context cancellation ---
-// Rationale: Idempotent Pause, Resume, and Start must return without contacting
-// the root API broker, even when the caller's context is already cancelled.
+// Rationale: Pause and Start keep their local no-ops; Resume must obtain root authorization.
 
 func TestController_ContextCancellation(t *testing.T) {
 	t.Run("Pause_paused_noop", func(t *testing.T) {
@@ -133,12 +128,12 @@ func TestController_ContextCancellation(t *testing.T) {
 		assert.NoError(t, err, "no-op must not block on cancelled context")
 	})
 
-	t.Run("Resume_running_noop", func(t *testing.T) {
+	t.Run("Resume_running_requires_authority", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		ctrl := newController(model.VMStatusRunning, 0)
 		err := ctrl.Resume(ctx)
-		assert.NoError(t, err, "no-op must not block on cancelled context")
+		assert.Error(t, err, "cached running state cannot authorize resume success")
 	})
 
 	t.Run("Start_running_noop", func(t *testing.T) {

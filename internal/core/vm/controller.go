@@ -85,12 +85,15 @@ func (c *Controller) Pause(ctx context.Context) error {
 
 // --- Resume ---
 func (c *Controller) Resume(ctx context.Context) error {
-	name := c.vm.Name
+	return c.resume(ctx, jailersvc.NewVMAPIBrokerClient())
+}
 
-	// No-op — already in or moving toward target state (RUNNING)
-	if c.vm.Status == model.VMStatusRunning || c.vm.Status == model.VMStatusStarting {
-		return nil
-	}
+type vmResumeBroker interface {
+	Resume(context.Context, jailersvc.VMAPIRequest) (jailersvc.VMAPIResult, error)
+}
+
+func (c *Controller) resume(ctx context.Context, broker vmResumeBroker) error {
+	name := c.vm.Name
 
 	// Error/crashed state
 	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
@@ -117,7 +120,8 @@ func (c *Controller) Resume(ctx context.Context) error {
 			fmt.Sprintf("VM '%s' is shutting down — use start() after it stops (current state: %s)", name, c.vm.Status))
 	}
 
-	if _, err := jailersvc.NewVMAPIBrokerClient().Resume(ctx, jailersvc.VMAPIRequest{VMID: c.vm.ID}); err != nil {
+	// The cached status cannot authorize a no-op while root export recovery is pending.
+	if _, err := broker.Resume(ctx, jailersvc.VMAPIRequest{VMID: c.vm.ID}); err != nil {
 		return err
 	}
 
