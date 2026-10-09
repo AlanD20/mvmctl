@@ -403,10 +403,6 @@ func (s *Service) DownloadImage(
 ) (string, error) {
 	downloadPath := filepath.Join(outputDir, imageID+".download")
 
-	if force {
-		os.Remove(downloadPath)
-	}
-
 	templateVars := s.getTemplateVariables(spec, ciVersion)
 	source := spec.Source
 	if strings.Contains(spec.Source, "{") {
@@ -417,31 +413,45 @@ func (s *Service) DownloadImage(
 		}
 	}
 
-	var resolvedSHA256 string
+	var checksum imageChecksum
 	if spec.SHA256 != "" {
-		resolvedSHA256 = strings.ToLower(spec.SHA256)
+		var err error
+		checksum.sha256, err = validateImageDigest(spec.SHA256, sha256DigestSize)
+		if err != nil {
+			slog.Error("invalid image checksum", "error", err)
+			return "", err
+		}
 	}
 
 	sha256URL := spec.SHA256URL
 	if sha256URL != "" {
-		if r, err := infra.RenderTemplate(sha256URL, templateVars); err == nil {
-			sha256URL = r
+		r, err := infra.RenderTemplate(sha256URL, templateVars)
+		if err != nil {
+			slog.Error("failed to render image checksum URL", "error", err)
+			return "", errs.WrapMsg(errs.CodeDownloadFailed, "failed to render image checksum URL", err)
+		}
+		sha256URL = r
+	}
+
+	if checksum.sha256 == "" && sha256URL != "" {
+		sourceURL, err := url.Parse(source)
+		if err != nil {
+			slog.Error("failed to parse image source URL", "error", err)
+			return "", errs.WrapMsg(errs.CodeDownloadFailed, "failed to parse image source URL", err)
+		}
+		checksum, err = s.fetchImageChecksum(ctx, sha256URL, filepath.Base(sourceURL.Path))
+		if err != nil {
+			slog.Error("failed to acquire image checksum", "url", sha256URL, "error", err)
+			return "", err
 		}
 	}
 
-	if resolvedSHA256 == "" && sha256URL != "" {
-		sourceBasename := ""
-		if idx := strings.LastIndex(source, "/"); idx >= 0 {
-			sourceBasename = source[idx+1:]
-		}
-		sha, err := s.fetchSHA256FromURL(ctx, sha256URL, sourceBasename)
-		if err == nil && sha != "" {
-			resolvedSHA256 = sha
-		}
+	if force {
+		os.Remove(downloadPath)
 	}
 
 	// Download the file
-	if err := s.downloadFile(ctx, source, downloadPath, resolvedSHA256, progress); err != nil {
+	if err := s.downloadFile(ctx, source, downloadPath, checksum, progress); err != nil {
 		return "", err
 	}
 
@@ -1252,60 +1262,17 @@ func calculateMinimumImageSizeMB(contentBytes int64) int {
 	return calculatedMiB
 }
 
-// SHA256 verification
-
-func (s *Service) fetchSHA256FromURL(ctx context.Context, sha256URL, sourceFilename string) (string, error) {
-	// Use shared HttpDownload.GetContent — provides retry, HTTP caching, and mirror support.
-	// Catches HttpDownloadError → returns empty (no error).
-	content, err := s.dl.GetContent(ctx, download.RequestOpts{
-		URL: sha256URL, Timeout: infra.HTTPTimeoutSha256FetchS,
-	})
-	if err != nil {
-		return "", nil // HttpDownloadError → returns empty
-	}
-
-	content = strings.TrimSpace(content)
-	if sourceFilename == "" {
-		parts := strings.Fields(content)
-		if len(parts) == 0 {
-			return "", nil // empty parts → returns empty
-		}
-		return strings.ToLower(parts[0]), nil
-	}
-
-	sourceBasename := filepath.Base(sourceFilename)
-	for line := range strings.SplitSeq(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		lineParts := strings.Fields(line)
-		if len(lineParts) < 2 {
-			continue
-		}
-		filenameInLine := strings.TrimLeft(lineParts[len(lineParts)-1], "*")
-		filenameInLineBasename := filepath.Base(filenameInLine)
-
-		if filenameInLine == sourceFilename ||
-			filenameInLine == sourceBasename ||
-			filenameInLineBasename == sourceFilename ||
-			filenameInLineBasename == sourceBasename {
-			return strings.ToLower(lineParts[0]), nil
-		}
-	}
-	return "", nil // not found — not an error
-}
-
 func (s *Service) downloadFile(
 	ctx context.Context,
-	url, destPath, expectedSHA256 string,
+	url, destPath string,
+	checksum imageChecksum,
 	progress func(int64, int64),
 ) error {
-	allowMissing := expectedSHA256 == ""
-	if progress == nil {
-		return s.dl.DownloadFile(ctx, url, destPath, expectedSHA256, allowMissing, allowMissing, nil)
+	if checksum.sha512 != "" {
+		return s.dl.DownloadFileSHA512(ctx, url, destPath, checksum.sha512, false, false, progress)
 	}
-	return s.dl.DownloadFile(ctx, url, destPath, expectedSHA256, allowMissing, allowMissing, progress)
+	allowMissing := checksum.sha256 == ""
+	return s.dl.DownloadFile(ctx, url, destPath, checksum.sha256, allowMissing, allowMissing, progress)
 }
 
 func (s *Service) resolveFSType(ctx context.Context, imagePath string) (string, error) {
