@@ -17,6 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current coherent Go/build checkpoint (2026-10-09):** clean `bfdece17`, tree `84dc90a1`, passed the complete
+ordinary pinned Go 1.26.3 CI sequence, the separate full root Jailer suite and the real embedded-agent amd64
+release build inside `mvmctl-030-test`. The literal root JSON independently counts 2,632 test/subtest passes,
+one package pass and zero failures/skips. CI receipt SHA-256 `cea49dfc`; root JSON `b255ba5d`; build receipt
+`424330be`. Candidate `0.3.0-rc.export-interrupt-bfdece17`, SHA-256
+`d13f8c06335342dab47fc6e5399af7e195992ab16dcf1ad00c3289c692390e42`, records that exact revision,
+`vcs.modified=false`, Go 1.26.3, Linux/amd64 and PIE. Independent literal before/after comparisons preserved
+all preexisting runner inventories, administrator state, assets and file/source identities; only the authorized
+fresh task source and manifest were admitted separately. The candidate is not installed or system-qualified.
+Installed `f909601d` evidence below still qualifies only its matching unchanged inputs. Remote GitHub CI,
+remaining installed T1/T2 journeys and final release approval remain separate.
+
 **Live-attachment completion source (2026-10-09):** `7a4a99de` integrates authenticated root-derived guest
 disk readiness, retained known-applied attachment projection, explicit paused staging and a final root identity
 recheck. Focused agent/vsock/API behavior checks, supporting VM/error/CLI packages, affected vet and the selected
@@ -115,8 +127,9 @@ Jailer routing tests, affected vet and race checks passed inside `mvmctl-030-tes
 hash matched the tested six-file manifest. One isolated pre-fix survival regression failed because the worker
 was killed; the fixed test proved survival, deliberate later completion and exactly one reaping wait.
 The fixture-only `bfdece17` also passed exact six-node collection and the selected missing-admission runner unit.
-Neither change is installed yet; coherent release build and the installed SIGINT/receiver-death journeys remain
-required. These focused gates are not full CI, full root-Jailer or release qualification.
+Neither change is installed yet. Coherent ordinary CI, full root-Jailer and real-agent build subsequently passed
+on `bfdece17` as recorded above; the installed SIGINT/receiver-death journeys remain required. The focused
+gates alone do not imply full CI, full root-Jailer or release qualification.
 
 **Current administrator filesystem recovery (2026-10-09):**
 `host/test_host_admin.py::TestCleanHostAdministration::test_filesystem_failure_preserves_init_and_reset_retry_authority`
