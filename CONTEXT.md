@@ -710,6 +710,13 @@ qualified isolation.
 Typed launch accepts the prepared root-owned restore capability; the caller cannot submit snapshot paths, machine
 configuration, or alternate network identity. The public restore path has focused networkless L2 evidence only.
 
+[ADR-0022](docs/adr/0022-explicit-protected-cache-retirement.md) integrates typed retirement of admitted terminal
+protected cache parents, preserving root logical authority. Installed public cleanup remains unqualified and existing
+permanent snapshot-lock/volume-removal residues still refuse cleanup. The accepted fresh-layout extension in
+[ADR-0023](docs/adr/0023-protected-branch-authority-layout.md) puts permanent snapshot locks and volume-source receipts
+in the root anchor while retaining artifact/raw-capture bytes on the cache filesystem. That extension is not yet
+implemented; old layouts are not migrated under the approved clean break.
+
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An
 untagged RC build must pass the intended version explicitly. Otherwise `git describe` can inherit the previous release

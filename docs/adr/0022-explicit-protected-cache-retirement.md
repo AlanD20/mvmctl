@@ -68,6 +68,10 @@ Immutable kernel reimport remains the existing explicit, identical-byte operatio
 This decision does not permit moving a globally bound kernel identity to a different cache. Acquisition QA must
 respect that binding rather than creating a new cache for each use of the same retired kernel ID.
 
+[ADR-0023](0023-protected-branch-authority-layout.md) defines a fresh-layout extension for permanent snapshot locks
+and volume-removal receipts. Its implementation and qualification are pending; this integrated first slice still
+refuses the existing branch residues. It does not migrate them or relax immutable bindings.
+
 ## Alternatives
 
 Making the protected directory operator-writable loses backing isolation. A privileged recursive deletion capability
