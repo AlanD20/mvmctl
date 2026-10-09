@@ -17,7 +17,7 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Current running-VM image import (2026-10-09):**
+**Current protected-rootfs VM image import (2026-10-09):**
 `images/test_images.py::TestImageImportCreateVM::test_vm_import_preserves_guest_contents_and_source_state[running]`
 passed strict 1/1 in 27.69 seconds, native exit 0 and zero other outcomes, on installed
 `0.3.0-rc.partition-f909601d` and clean `b73d0462` inside `mvmctl-030-test`.
@@ -29,8 +29,15 @@ identities, and typed source/clone/imported-image/nondefault-Alpine cleanup were
 Assets came from the existing mirror; no artificial RAM admission or abort guard was used.
 The initial private launcher required a lazily created export directory prematurely and executed no test;
 its seven-line preflight correction left creation to the typed product operation, with no manual root repair.
-This supersedes the earlier memory-guard-interrupted Running result for the unchanged data path, not the
-Paused/Stopped, interruption/recovery, reusable-base or full image-domain qualification.
+The same registered method's `[paused]` and `[stopped]` parameters subsequently passed strict 2/2 in
+34.59 seconds on the same source and installed candidate, with zero other outcomes. Each source retained
+its original state, and each independent clone read the exact guest-written marker. The Stopped case also
+wrote contradictory bytes to its caller-owned staging disk, proving import used protected backing rather
+than that stale copy. Strict JSON/JUnit and original/prepared inventory equality were independently checked;
+typed cleanup removed only each owned VM/image and the wrapper's nondefault Alpine acquisition. Assets,
+kernel, defaults and source pins were preserved; no synthetic memory guards were used.
+This supersedes the earlier memory-guard-interrupted normal import results for the unchanged data path,
+not interruption/recovery, reusable-base or full image-domain qualification.
 
 **Current administrator filesystem recovery (2026-10-09):**
 `host/test_host_admin.py::TestCleanHostAdministration::test_filesystem_failure_preserves_init_and_reset_retry_authority`

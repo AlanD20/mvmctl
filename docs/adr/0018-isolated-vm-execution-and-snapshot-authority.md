@@ -65,9 +65,13 @@ the isolation prerequisite after previously pausing it for a separate design dec
 
 Accepted on 2026-10-07; implementation integrated on 2026-10-08 with focused Go verification and passing local Go CI.
 Clean source `497455a6` subsequently passed the real-agent release build and normal named-runner installation,
-with exact binary identity and independent preservation checks. Installed VM-import and interruption journeys
-remain unqualified. The user selected running-VM import with pause/resume rather than requiring every source VM
-to be stopped.
+with exact binary identity and independent preservation checks. On 2026-10-09, the installed
+`0.3.0-rc.partition-f909601d` candidate passed the registered Running VM-import case (1/1, 27.69 seconds)
+and Paused/Stopped cases (2/2, 34.59 seconds) on unchanged clean `b73d0462` test inputs. Independent clones
+read guest-written bytes, original source states were preserved, and the Stopped case distinguished protected
+backing from contradictory caller staging. Strict reports, exact owned cleanup and original inventory preservation
+passed without synthetic memory guards. Interruption/recovery and full release qualification remain incomplete.
+The user selected running-VM import with pause/resume rather than requiring every source VM to be stopped.
 
 The operator-visible staging rootfs is not the guest's current disk after protected-backing admission. Reading it
 for VM-to-image import can discard guest changes, including packages installed by the reusable test-base builder.
@@ -117,7 +121,8 @@ Stopping the VM does not copy those changes back to staging. File import remains
   Signed `1a2506e6` passed focused behavioral Go/API/vet and preservation checks in the named runner, then a real-agent
   build and normal candidate installation. The differentiated installed Running case completed import and restored
   the source state before a runner memory safety guard interrupted clone boot. Owned cleanup and independent
-  preservation passed with no OOM events; clone bytes and interruption/recovery qualification remain incomplete.
+  preservation passed with no OOM events. That historical guard-interrupted result is superseded for normal import
+  and clone bytes by the three passing source-state cases above; interruption/recovery remains unqualified.
 - If the importing CLI dies before creating a public image row, existing `image rm --force <exact-64-character-id>`
   provides export-only recovery after proving that no ordinary image selector matches. Names, prefixes, multiple
   selectors and database errors do not authorize that fallback. Root tombstones make retries idempotent. A live

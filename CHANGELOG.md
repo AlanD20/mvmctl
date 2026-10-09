@@ -27,11 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [coverage matrix](tests/system/COVERAGE_MATRIX.md); v0.3.0 is not release-qualified.
 
 > **Current protected-rootfs import checkpoint (2026-10-09):** the Running VM-to-image journey passed
-> strict 1/1 in 27.69 seconds on the installed candidate above, without artificial QA memory guards.
+> strict 1/1 in 27.69 seconds; Paused and Stopped then passed strict 2/2 in 34.59 seconds on the same
+> installed candidate, without artificial QA memory guards.
 > Guest-written bytes survived import and boot of an independent clone; the source returned to Running,
 > and exact owned cleanup plus original inventories passed. The five remaining local kernel-import
 > option/default/error cases also passed strict 5/5 in 5.56 seconds using the cached ELF only.
-> Paused/Stopped and export-interruption recovery remain separate qualification requirements.
+> Paused/Stopped source states were preserved, and the Stopped case rejected stale staging contents as
+> an export source. Export-interruption recovery remains a separate qualification requirement.
 
 > **Current bounded memory checkpoint (2026-10-09):** installed `0.3.0-rc.partition-f909601d`
 > passed all three registered bounded memory cases: near-saturation with host swap absent and present, and
