@@ -17,6 +17,15 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Exact qualification-runner admission correction (2026-10-09):** `a091b4e6` replaces literal named-runner
+checks at the bridge, image-import receiver and Firecracker fault boundaries with explicit nonempty exact
+`MVM_TEST_QUALIFICATION_HOST` / `MVM_TEST_VM` admission. T1/T2 forwarding binds the value to the provisioned
+runner; Tier 3 receives no automatic grant. Existing resource authority and cleanup checks remain intact.
+Inside `mvmctl-030-test`, 15 focused Python runner behavior tests passed in 0.91 seconds, including missing,
+empty and mismatched admission refusals at all three boundaries. Collection of the three affected system files
+passed with 144 nodes in 0.59 seconds; collection is not runtime qualification. Earlier fault passes retain
+their original module bindings; the correction does not claim new complete T1/T2 or fault-runtime evidence.
+
 **Current CLI and atomic-firewall checkpoint (2026-10-09):** Installed candidate
 `0.3.0-rc.partition-f909601d`, SHA-256
 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed the complete

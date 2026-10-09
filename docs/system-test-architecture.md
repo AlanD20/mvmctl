@@ -396,6 +396,13 @@ VM. The orchestrator sets `MVM_TEST_VM` to the VM name for test introspection if
 the requested release-candidate artifact, but every T1/T2 assertion runs the artifact installed at
 `/usr/local/bin/mvm`.
 
+T1/T2 remote pytest commands also set `MVM_TEST_QUALIFICATION_HOST` to that exact provisioned runner name.
+Administrator bridge, import-receiver and Firecracker fault helpers require this explicit value to match
+`MVM_TEST_VM`; the bridge helper additionally matches its fixture's runner. This is a test-safety opt-in,
+not a substitute for root-authority, boot, namespace, process and resource-identity checks. Host-direct
+execution receives no automatic opt-in. Direct disposable-runner qualification must explicitly bind both
+variables to the approved runner name; a literal `mvmctl-030-test` restriction is no longer baked into tests.
+
 ---
 
 ## 9. Python Orchestrator (`scripts/run-system-tests.py`)

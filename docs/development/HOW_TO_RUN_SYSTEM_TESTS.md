@@ -128,6 +128,12 @@ actual kernel limits, workload assertions, timeouts, physical-disk admission, id
 remain in force. Production [ADR-0019](../adr/0019-pressure-only-vm-memory-control.md) is unchanged; this QA
 override neither changes the outer kernel envelope nor guarantees survival under host or ancestor OOM.
 
+**Administrator fault-test admission:** Normal T1/T2 orchestration sets both `MVM_TEST_VM` and
+`MVM_TEST_QUALIFICATION_HOST` to the exact disposable runner it provisioned. Fault helpers require a nonempty
+exact match while retaining their resource/boot/namespace/process authority checks. For an explicitly approved
+direct run inside `mvmctl-030-test`, set both variables to `mvmctl-030-test` in that guest. This opt-in does not
+authorize host-direct testing or changes to other VMs; the orchestrator never grants it automatically to Tier 3.
+
 The installed candidate is `0.3.0-rc.partition-f909601d`, SHA-256
 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`. Complete pinned Go CI passed on clean
 `fdae5902`; the full root Jailer suite passed separately on clean `f909601d` with 2,627 test/subtest passes and
