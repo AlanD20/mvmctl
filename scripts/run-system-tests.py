@@ -46,6 +46,7 @@ import sys
 import tempfile
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -554,6 +555,9 @@ TIER2_DOMAINS: dict[str, list[str]] = {
     "policies": ["tests/system/network/test_policies.py"],
 }
 
+# Explicit continuations are registered coverage, not ordinary parallel batch work.
+HOST_REBOOT_PHASE_DOMAINS = {"host_reboot": ["tests/system/host/test_host_reboot.py"]}
+
 # Tier 3: directly on host (no runner VM)
 TIER3_DOMAINS: dict[str, list[str]] = {
     "nested_isolated": ["tests/system/vm/test_vm_nested_isolated.py"],
@@ -573,6 +577,8 @@ TIER_LABELS: dict[str, int] = {}
 for d in TIER1_DOMAINS:
     TIER_LABELS[d] = 1
 for d in TIER2_DOMAINS:
+    TIER_LABELS[d] = 2
+for d in HOST_REBOOT_PHASE_DOMAINS:
     TIER_LABELS[d] = 2
 for d in TIER3_DOMAINS:
     TIER_LABELS[d] = 3
@@ -2152,6 +2158,428 @@ def _run_local_pytest(
     return pytest_result, reason
 
 
+_HOST_REBOOT_RUNNER = "mvmctl-030-test"
+_HOST_REBOOT_FILE = "tests/system/host/test_host_reboot.py"
+_HOST_REBOOT_LIMIT = 128 * 1024
+_HOST_REBOOT_TASK_FIELDS = {
+    "schema_version", "runner", "outer_before", "outer_after", "controller", "source_revision",
+    "test_sha256", "candidate_sha256", "candidate_version", "kernel_id", "kernel_sha256", "guest_task",
+    "before_boot", "after_boot", "pre_sha256", "pre_outcomes_sha256", "source_payload",
+}
+_HOST_REBOOT_SOURCE_FILES = ("tests/__init__.py", "tests/system/__init__.py", "tests/system/conftest.py",
+                           "tests/system/pytest.ini", "tests/system/host/__init__.py", "tests/system/host/test_host.py",
+                           _HOST_REBOOT_FILE, "tests/system/network/__init__.py", "tests/system/network/test_network.py",
+                           "tests/system/vm/__init__.py", "tests/system/vm/test_vm_lifecycle.py")
+
+
+def _host_reboot_json(raw: bytes) -> dict[str, Any]:
+    """Bounded unambiguous JSON for only the closed reboot receipts."""
+    if len(raw) > _HOST_REBOOT_LIMIT:
+        raise RuntimeError("host_reboot receipt exceeds bound")
+    def unique(pairs):
+        values = {}
+        folded = set()
+        for key, value in pairs:
+            if key.casefold() in folded:
+                raise RuntimeError("duplicate host_reboot receipt field")
+            folded.add(key.casefold())
+            values[key] = value
+        return values
+    data = json.loads(raw, object_pairs_hook=unique)
+    if not isinstance(data, dict):
+        raise RuntimeError("host_reboot receipt must be an object")
+    return data
+
+
+def _host_reboot_read(path: Path) -> bytes:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as stream:
+        row = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(row.st_mode) or row.st_nlink != 1 or row.st_uid != os.getuid()
+                or stat.S_IMODE(row.st_mode) != 0o600 or row.st_size > _HOST_REBOOT_LIMIT):
+            raise RuntimeError("host_reboot receipt must be a private owned bounded regular file")
+        raw = stream.read(_HOST_REBOOT_LIMIT + 1)
+        current = os.fstat(stream.fileno())
+        stable = lambda info: (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        if stable(current) != stable(row) or stable(path.lstat()) != stable(row) or len(raw) != row.st_size:
+            raise RuntimeError("host_reboot receipt changed during read")
+        return raw
+
+
+def _host_reboot_write(task: Path, name: str, raw: bytes) -> None:
+    if len(raw) > _HOST_REBOOT_LIMIT:
+        raise RuntimeError("host_reboot retained output exceeds bound")
+    fd = os.open(task / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    fd = os.open(task, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _host_reboot_outer_identity() -> dict[str, Any]:
+    """Observe only the designated outer VM and its exact current process; no control writes."""
+    info = _runner_binding_json(mvm("vm", "inspect", _HOST_REBOOT_RUNNER, "--json", timeout=15).stdout)
+    row = info.get("vm", info)
+    if (row.get("name") != _HOST_REBOOT_RUNNER or row.get("status") != "running"
+            or re.fullmatch(r"[0-9a-f]{32}", row.get("id", "")) is None):
+        raise RuntimeError("host_reboot requires the exact existing running named runner")
+    pid = int(row["pid"])
+    if pid <= 0:
+        raise RuntimeError("host_reboot runner process identity is incomplete")
+    fields = Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()
+    if len(fields) < 20 or fields[0] in ("Z", "X"):
+        raise RuntimeError("host_reboot runner task changed")
+    ticks = int(fields[19])
+    if ticks <= 0 or ("process_start_time" in row and int(row["process_start_time"]) != ticks):
+        raise RuntimeError("host_reboot runner start tick changed")
+    groups = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
+    if groups != [f"0::/mvmctl/{row['id']}"]:
+        raise RuntimeError("host_reboot requires its exact observed runner cgroup")
+    group = Path("/sys/fs/cgroup/mvmctl") / row["id"]
+    controls = {key: (group / leaf).read_text().strip() for key, leaf in
+                (("memory_high", "memory.high"), ("memory_max", "memory.max"))}
+    if (Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()[19] != str(ticks)
+            or Path(f"/proc/{pid}/cgroup").read_text().splitlines() != groups):
+        raise RuntimeError("host_reboot runner task changed while reading controls")
+    if info["resources"]["mem"] != 6144:
+        raise RuntimeError("host_reboot must preserve the approved 6 GiB guest geometry")
+    return dict(runner_id=row["id"], created_at=row["created_at"], pid=pid, start_ticks=ticks,
+                guest_mem_size_mib=info["resources"]["mem"], **controls)
+
+
+class _HostRebootReconnectUnavailable(RuntimeError):
+    """Only transport unavailability permits another bounded read-only probe."""
+
+
+def _host_reboot_probe(bound: dict[str, Any]) -> str:
+    command = "cat /proc/sys/kernel/random/boot_id && sha256sum /usr/local/bin/mvm && /usr/local/bin/mvm --version"
+    try:
+        result = mvm("exec", _HOST_REBOOT_RUNNER, "--user", "runner", "--timeout", "2", "--", command,
+                     check=False, timeout=15)
+    except subprocess.TimeoutExpired as exc:
+        raise _HostRebootReconnectUnavailable("host_reboot reconnect timed out") from exc
+    if result.returncode != 0:
+        raise _HostRebootReconnectUnavailable("host_reboot reconnect unavailable")
+    lines = result.stdout.strip().splitlines()
+    if len(lines) != 3 or str(uuid.UUID(lines[0])) != lines[0]:
+        raise RuntimeError("host_reboot reconnect lacks exact guest boot evidence")
+    if lines[1].split() != [bound["candidate_sha256"], "/usr/local/bin/mvm"] or lines[2] != bound["candidate_version"]:
+        raise RuntimeError("host_reboot installed candidate changed")
+    return lines[0]
+
+
+def _host_reboot_fetch(bound: dict[str, Any], name: str) -> bytes:
+    path = bound["guest_task"] + "/" + name
+    result = mvm("exec", _HOST_REBOOT_RUNNER, "--user", "runner", "--timeout", "10", "--",
+                 f"head -c {_HOST_REBOOT_LIMIT + 1} -- {shlex.quote(path)}", timeout=30)
+    raw = result.stdout.encode()
+    if len(raw) > _HOST_REBOOT_LIMIT:
+        raise RuntimeError("host_reboot remote receipt exceeds bound")
+    return raw
+
+
+def _host_reboot_pytest(bound: dict[str, Any], phase: str, task: Path) -> bytes:
+    """Retain strict phase stdout/stderr/outcomes; do not alter ordinary remote-report cleanup."""
+    source = bound["guest_task"] + "/source"
+    report = bound["guest_task"] + f"/{phase}.outcomes.json"
+    env = {
+        "MVM_TEST_VM": _HOST_REBOOT_RUNNER, "MVM_TEST_QUALIFICATION_HOST": _HOST_REBOOT_RUNNER,
+        "MVM_ASSET_MIRROR": "/home/runner/.cache/mvm-asset-mirror",
+        "MVM_CONFIG_DIR": "/home/runner/.config/mvmctl-030-schema6",
+        "MVM_CACHE_DIR": "/home/runner/.cache/mvmctl-030-release",
+        "MVM_TEMP_DIR": bound["guest_task"] + "/tmp", "TMPDIR": bound["guest_task"] + "/tmp",
+        "MVM_HOST_REBOOT_PHASE": phase, "MVM_HOST_REBOOT_TASK": bound["guest_task"],
+        "MVM_HOST_REBOOT_SOURCE_REVISION": bound["source_revision"],
+        "MVM_HOST_REBOOT_CANDIDATE_SHA256": bound["candidate_sha256"],
+        "MVM_HOST_REBOOT_CANDIDATE_VERSION": bound["candidate_version"],
+        "MVM_RUNNER_KERNEL_ID": bound["kernel_id"], "MVM_RUNNER_KERNEL_SHA256": bound["kernel_sha256"],
+        "PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        PYTEST_OUTCOME_REPORT_ENV: report,
+    }
+    command = (f"cd {shlex.quote(source)} && " + " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
+               + " " + shlex.join(["python3", "-B", "-m", "pytest", "-c", "tests/system/pytest.ini",
+                    "--rootdir=.", "--strict-markers", "-p", "no:cacheprovider", "-p", "pytest_timeout", "--timeout=600",
+                    "--timeout-method=signal", f"--basetemp={bound['guest_task']}/{phase}-tmp",
+                    f"--junitxml={bound['guest_task']}/{phase}.xml", "-x", "-s", "-q",
+                    _HOST_REBOOT_FILE + f"::test_host_reboot_{phase}"]))
+    result = mvm("exec", _HOST_REBOOT_RUNNER, "--user", "runner", "--timeout", "10", "--", command,
+                 check=False, timeout=660)
+    _host_reboot_write(task, f"{phase}.stdout", (result.stdout or "").encode())
+    _host_reboot_write(task, f"{phase}.stderr", (result.stderr or "").encode())
+    _host_reboot_write(task, f"{phase}.native.json", json.dumps(dict(phase=phase, returncode=result.returncode)).encode())
+    raw = _host_reboot_fetch(bound, f"{phase}.outcomes.json")
+    _host_reboot_write(task, f"{phase}.outcomes.json", raw)
+    xml = _host_reboot_fetch(bound, f"{phase}.xml")
+    _host_reboot_write(task, f"{phase}.xml", xml)
+    _host_reboot_require_phase_report(phase, raw, xml, result.returncode)
+    receipt = _host_reboot_fetch(bound, f"{phase}.json")
+    _host_reboot_write(task, f"{phase}.json", receipt)
+    return receipt
+
+
+def _host_reboot_require_phase_report(phase: str, raw: bytes, xml: bytes, returncode: int) -> None:
+    outcomes = require_complete_pytest_outcomes(raw, process_returncode=returncode)
+    if outcomes.collected != 1:
+        raise RuntimeError("host_reboot phase must pass exactly its one registered node")
+    root = ET.fromstring(xml)
+    totals = {key: sum(int(suite.get(key, "0")) for suite in root.iter("testsuite"))
+              for key in ("tests", "failures", "errors", "skipped")}
+    cases = list(root.iter("testcase"))
+    if (totals != dict(tests=1, failures=0, errors=0, skipped=0) or len(cases) != 1
+            or cases[0].get("classname") != "tests.system.host.test_host_reboot"
+            or cases[0].get("name") != f"test_host_reboot_{phase}"
+            or any(list(root.iter(tag)) for tag in ("failure", "error", "skipped"))):
+        raise RuntimeError("host_reboot JUnit does not prove the exact selected phase")
+
+
+def _host_reboot_require_envelope(raw: bytes, bound: dict[str, Any], outer: dict[str, Any]) -> None:
+    receipt = _host_reboot_json(raw)
+    expected = dict(schema_version=1, runner=_HOST_REBOOT_RUNNER, runner_id=outer["runner_id"],
+                    host_boot_id=bound["after_boot"], outer_pid=outer["pid"], outer_start_ticks=outer["start_ticks"],
+                    memory_high=8589934592, memory_max=8589934592, guest_mem_size_mib=outer["guest_mem_size_mib"])
+    if receipt != expected or any(type(receipt[key]) is not int for key in
+                                  ("schema_version", "outer_pid", "outer_start_ticks", "memory_high", "memory_max", "guest_mem_size_mib")):
+        raise RuntimeError("host_reboot POST requires the exact fresh external administrator envelope receipt")
+    if outer["memory_high"] != str(expected["memory_high"]) or outer["memory_max"] != str(expected["memory_max"]):
+        raise RuntimeError("host_reboot actual named-runner envelope differs from the external administrator receipt")
+
+
+def _host_reboot_controller() -> dict[str, Any]:
+    """Pin the configured resolved existing outer executable; never replace it."""
+    path = _controller_executable_path()
+    def identity(row):
+        return [row.st_dev, row.st_ino, row.st_uid, row.st_gid, stat.S_IMODE(row.st_mode),
+                row.st_nlink, row.st_size, row.st_mtime_ns, row.st_ctime_ns]
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or not before.st_mode & 0o111:
+        raise RuntimeError("host_reboot outer controller must be an existing regular executable")
+    digest = _sha256_runner_input(path)
+    if identity(path.lstat()) != identity(before) or _controller_executable_path() != path:
+        raise RuntimeError("host_reboot outer controller changed while pinning")
+    return dict(path=str(path), command=shlex.split(MVM_BINARY), identity=identity(before), sha256=digest)
+
+
+def _host_reboot_read_pre(task: Path, controller: dict) -> tuple[dict, bytes]:
+    """Read exact retained PRE and current release inputs; no runner queries."""
+    bound = _host_reboot_json(_host_reboot_read(task / "task.json"))
+    if (set(bound) != _HOST_REBOOT_TASK_FIELDS or type(bound["schema_version"]) is not int
+            or bound["schema_version"] != 1 or bound["runner"] != _HOST_REBOOT_RUNNER
+            or re.fullmatch(r"/home/runner/\.cache/mvmctl-host-reboot-[0-9a-f]{32}", bound["guest_task"]) is None
+            or bound["before_boot"] == bound["after_boot"] or controller != bound["controller"]
+            or _sha256_runner_input(Path(MVM_CANDIDATE_BINARY)) != bound["candidate_sha256"]
+            or "mvm " + _get_mvm_version() != bound["candidate_version"]
+            or _sha256_runner_input(_REPO_ROOT / _HOST_REBOOT_FILE) != bound["test_sha256"]
+            or {relative: _sha256_runner_input(_REPO_ROOT / relative) for relative in _HOST_REBOOT_SOURCE_FILES}
+               != bound["source_payload"]
+            or subprocess.check_output(["git", "-C", str(_REPO_ROOT), "rev-parse", "HEAD"], text=True).strip()
+               != bound["source_revision"]
+            or subprocess.check_output(["git", "-C", str(_REPO_ROOT), "status", "--porcelain"], text=True)):
+        raise RuntimeError("host_reboot retained PRE binding is invalid or changed")
+    pre = _host_reboot_read(task / "pre.json")
+    outcomes = _host_reboot_read(task / "pre.outcomes.json")
+    if (hashlib.sha256(pre).hexdigest() != bound["pre_sha256"]
+            or hashlib.sha256(outcomes).hexdigest() != bound["pre_outcomes_sha256"]):
+        raise RuntimeError("host_reboot retained PRE proof changed")
+    if require_complete_pytest_outcomes(outcomes, process_returncode=0).collected != 1:
+        raise RuntimeError("host_reboot PRE must prove exactly one passed node")
+    receipt = _host_reboot_json(pre)
+    if (receipt["boot_id"] != bound["before_boot"] or receipt["source"] != dict(revision=bound["source_revision"],
+            test_sha256=bound["test_sha256"], payload=bound["source_payload"])
+            or receipt["candidate"]["sha256"] != bound["candidate_sha256"]
+            or receipt["candidate"]["version"] != bound["candidate_version"]):
+        raise RuntimeError("host_reboot PRE source/candidate/boot proof changed")
+    return bound, pre
+
+
+def _host_reboot_validate_pre(task: Path, controller: dict) -> tuple[dict, bytes, dict]:
+    """POST execution additionally requires the live fresh runner authority."""
+    bound, pre = _host_reboot_read_pre(task, controller)
+    if _host_reboot_fetch(bound, "pre.json") != pre:
+        raise RuntimeError("host_reboot retained PRE proof changed")
+    if _host_reboot_probe(bound) != bound["after_boot"]:
+        raise RuntimeError("host_reboot current runner boot changed again")
+    outer = _host_reboot_outer_identity()
+    if any(outer[key] != bound["outer_after"][key] for key in ("runner_id", "created_at", "pid", "start_ticks")):
+        raise RuntimeError("host_reboot POST outer task identity changed")
+    return bound, pre, outer
+
+
+_HOST_REBOOT_PROOF_FILES = ("task.json", "pre.terminal.json", "admin-envelope.json", "post-authority.json", "preservation.json",
+                          *(f"{phase}.{suffix}" for phase in ("pre", "post")
+                            for suffix in ("json", "outcomes.json", "native.json", "xml", "stdout", "stderr")))
+
+
+def _host_reboot_proof_hashes(task: Path) -> dict[str, str]:
+    return {name: hashlib.sha256(_host_reboot_read(task / name)).hexdigest() for name in _HOST_REBOOT_PROOF_FILES}
+
+
+def _host_reboot_require_preservation(pre: dict, post: dict, raw: bytes) -> None:
+    physical = _host_reboot_json(raw)
+    if physical != dict(before=post["physical_before"], after_boot=post["physical_after_boot"], final=post["physical_after"]):
+        raise RuntimeError("host_reboot raw preservation proof differs from POST")
+    if physical["before"] != pre["physical"]:
+        raise RuntimeError("host_reboot preservation baseline differs from PRE")
+    for domain in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec"):
+        if physical["before"][domain] != physical["after_boot"][domain] or physical["before"][domain] != physical["final"][domain]:
+            raise RuntimeError(f"host_reboot persistent {domain} changed")
+
+
+def require_completed_host_reboot(task: Path) -> dict[str, Any]:
+    """Historical closed runtime proof plus current release inputs; no live runner query.
+
+    Completed POST recorded fresh controls then. Full-release quiescent-host admission
+    remains unchanged; those historical controls are not claimed as current authority.
+    """
+    row = task.lstat()
+    if (not task.is_absolute() or task.resolve() != task or not stat.S_ISDIR(row.st_mode)
+            or row.st_uid != os.getuid() or stat.S_IMODE(row.st_mode) != 0o700):
+        raise RuntimeError("host_reboot release proof task must be a private owned canonical directory")
+    _require_distinct_candidate_controller()
+    controller = _host_reboot_controller()
+    bound, raw_pre = _host_reboot_read_pre(task, controller)
+    terminal = _host_reboot_json(_host_reboot_read(task / "post.terminal.json"))
+    if (set(terminal) != {"domain", "tier", "phase", "phase_complete", "passed", "release_verdict", "output", "proof_sha256"}
+            or terminal["domain"] != "host_reboot" or terminal["tier"] != 2 or terminal["phase"] != "post"
+            or terminal["phase_complete"] is not True or terminal["passed"] is not True
+            or terminal["release_verdict"] != "PASS" or terminal["proof_sha256"] != _host_reboot_proof_hashes(task)):
+        raise RuntimeError("host_reboot release proof lacks exact completed native closure")
+    pre_terminal = _host_reboot_json(_host_reboot_read(task / "pre.terminal.json"))
+    if (pre_terminal["phase"] != "pre" or pre_terminal["phase_complete"] is not True
+            or pre_terminal["passed"] is not False or pre_terminal["release_verdict"] != "INCOMPLETE"):
+        raise RuntimeError("host_reboot release proof lacks the incomplete PRE checkpoint")
+    for phase in ("pre", "post"):
+        native = _host_reboot_json(_host_reboot_read(task / f"{phase}.native.json"))
+        if native != dict(phase=phase, returncode=0) or type(native["returncode"]) is not int:
+            raise RuntimeError("host_reboot release proof has a nonzero or malformed native result")
+        _host_reboot_require_phase_report(phase, _host_reboot_read(task / f"{phase}.outcomes.json"),
+                                         _host_reboot_read(task / f"{phase}.xml"), native["returncode"])
+    authority = _host_reboot_json(_host_reboot_read(task / "post-authority.json"))
+    if (set(authority) != {"schema_version", "runner", "host_boot_id", "outer", "controller"}
+            or type(authority["schema_version"]) is not int or authority["schema_version"] != 1
+            or authority["runner"] != _HOST_REBOOT_RUNNER or authority["host_boot_id"] != bound["after_boot"]
+            or authority["controller"] != controller
+            or authority["outer"]["guest_mem_size_mib"] != 6144
+            or any(authority["outer"][key] != bound["outer_after"][key]
+                   for key in ("runner_id", "created_at", "pid", "start_ticks", "guest_mem_size_mib"))):
+        raise RuntimeError("host_reboot historical POST authority differs from its bound reboot")
+    _host_reboot_require_envelope(_host_reboot_read(task / "admin-envelope.json"), bound, authority["outer"])
+    pre, post = _host_reboot_json(raw_pre), _host_reboot_json(_host_reboot_read(task / "post.json"))
+    if (type(post["schema_version"]) is not int or post["schema_version"] != 1
+            or post["host_boot_id"] != bound["after_boot"] or post["vm_id"] != pre["vm"]["id"]
+            or post["source"] != pre["source"] or post["candidate"] != pre["candidate"] or post["owned_cleanup"] is not True):
+        raise RuntimeError("host_reboot release proof lacks exact source/candidate/owned cleanup")
+    _host_reboot_require_preservation(pre, post, _host_reboot_read(task / "preservation.json"))
+    if _host_reboot_controller() != controller:
+        raise RuntimeError("host_reboot release authority changed during proof consumption")
+    return dict(terminal, output="Completed historical PRE+host reboot+POST proof consumed; live runner controls not asserted")
+
+
+def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None) -> dict[str, Any]:
+    """Closed named-runner continuations; PRE is never aggregate success, no root-control fallback."""
+    result = dict(domain="host_reboot", tier=2, phase=phase, phase_complete=False, passed=False,
+                  release_verdict="INCOMPLETE", output="")
+    task_valid = False
+    try:
+        if phase not in ("pre", "post") or (phase == "post") != (envelope is not None):
+            raise RuntimeError("host_reboot requires an exact PRE or POST continuation")
+        row = task.lstat()
+        if (not task.is_absolute() or task.resolve() != task or not stat.S_ISDIR(row.st_mode)
+                or row.st_uid != os.getuid() or stat.S_IMODE(row.st_mode) != 0o700):
+            raise RuntimeError("host_reboot task must be a private owned canonical directory")
+        task_valid = True
+        _require_distinct_candidate_controller()
+        controller = _host_reboot_controller()
+        if phase == "pre":
+            if (task / "task.json").exists():
+                raise RuntimeError("host_reboot PRE receipt already exists; no replay")
+            kernel_id, kernel_sha = (os.environ.get(key, "") for key in ("MVM_RUNNER_KERNEL_ID", "MVM_RUNNER_KERNEL_SHA256"))
+            if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in (kernel_id, kernel_sha)):
+                raise RuntimeError("host_reboot requires the existing exact imported ELF binding; no fallback")
+            revision = subprocess.check_output(["git", "-C", str(_REPO_ROOT), "rev-parse", "HEAD"], text=True).strip()
+            if subprocess.check_output(["git", "-C", str(_REPO_ROOT), "status", "--porcelain"], text=True):
+                raise RuntimeError("host_reboot requires clean signed suite source")
+            bound = dict(schema_version=1, runner=_HOST_REBOOT_RUNNER, controller=controller,
+                source_revision=revision, test_sha256=_sha256_runner_input(_REPO_ROOT / _HOST_REBOOT_FILE),
+                source_payload={relative: _sha256_runner_input(_REPO_ROOT / relative) for relative in _HOST_REBOOT_SOURCE_FILES},
+                candidate_sha256=_sha256_runner_input(Path(MVM_CANDIDATE_BINARY)), candidate_version="mvm " + _get_mvm_version(),
+                kernel_id=kernel_id, kernel_sha256=kernel_sha,
+                guest_task="/home/runner/.cache/mvmctl-host-reboot-" + uuid.uuid4().hex,
+                outer_before=_host_reboot_outer_identity(), outer_after=None, before_boot=None, after_boot=None,
+                pre_sha256=None, pre_outcomes_sha256=None)
+            bound["before_boot"] = _host_reboot_probe(bound)
+            _host_reboot_write(task, "intent.json", (json.dumps(bound, sort_keys=True) + "\n").encode())
+            guest = bound["guest_task"]
+            mvm("exec", _HOST_REBOOT_RUNNER, "--user", "runner", "--", f"mkdir -m 700 -- {guest} && mkdir -p -- {guest}/source/tests {guest}/tmp", timeout=30)
+            mvm("cp", "tests/__init__.py", f"{_HOST_REBOOT_RUNNER}:{guest}/source/tests/__init__.py", timeout=60)
+            mvm("cp", "tests/system", f"{_HOST_REBOOT_RUNNER}:{guest}/source/tests/", timeout=60)
+            raw = _host_reboot_pytest(bound, "pre", task)
+            pre = _host_reboot_json(raw)
+            if (pre["boot_id"] != bound["before_boot"] or pre["source"] !=
+                    dict(revision=revision, test_sha256=bound["test_sha256"], payload=bound["source_payload"])
+                    or pre["candidate"]["sha256"] != bound["candidate_sha256"]):
+                raise RuntimeError("host_reboot PRE evidence does not match the fixed source/candidate/boot")
+            bound["pre_sha256"] = hashlib.sha256(raw).hexdigest()
+            bound["pre_outcomes_sha256"] = hashlib.sha256(_host_reboot_read(task / "pre.outcomes.json")).hexdigest()
+            current = _host_reboot_outer_identity()
+            if current != bound["outer_before"] or _host_reboot_controller() != controller:
+                raise RuntimeError("host_reboot outer authority changed before lifecycle")
+            mvm("vm", "reboot", _HOST_REBOOT_RUNNER, "--force", timeout=120)
+            deadline = time.monotonic() + 180
+            while True:
+                try:
+                    boot = _host_reboot_probe(bound)
+                    if boot == bound["before_boot"]:
+                        raise RuntimeError("host_reboot did not change runner boot identity")
+                    break
+                except _HostRebootReconnectUnavailable:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(1)
+            bound["after_boot"] = boot
+            bound["outer_after"] = _host_reboot_outer_identity()
+            if any(bound["outer_after"][key] != bound["outer_before"][key] for key in ("runner_id", "created_at")):
+                raise RuntimeError("host_reboot replaced the runner identity")
+            if _host_reboot_controller() != controller:
+                raise RuntimeError("host_reboot changed the outer controller")
+            _host_reboot_write(task, "task.json", (json.dumps(bound, sort_keys=True) + "\n").encode())
+            result.update(phase_complete=True, output="PRE PHASE COMPLETE / RELEASE VERDICT INCOMPLETE; external fresh-boot admin receipt required")
+        else:
+            bound, pre, outer = _host_reboot_validate_pre(task, controller)
+            raw_envelope = _host_reboot_read(envelope)
+            _host_reboot_require_envelope(raw_envelope, bound, outer)
+            _host_reboot_write(task, "admin-envelope.json", raw_envelope)
+            _host_reboot_write(task, "post-authority.json", json.dumps(dict(schema_version=1,
+                runner=_HOST_REBOOT_RUNNER, host_boot_id=bound["after_boot"], outer=outer, controller=controller)).encode())
+            post = _host_reboot_json(_host_reboot_pytest(bound, "post", task))
+            raw_preservation = _host_reboot_fetch(bound, "preservation.json")
+            _host_reboot_write(task, "preservation.json", raw_preservation)
+            _host_reboot_require_preservation(_host_reboot_json(pre), post, raw_preservation)
+            if (post["host_boot_id"] != bound["after_boot"] or post["owned_cleanup"] is not True
+                    or post["vm_id"] != _host_reboot_json(pre)["vm"]["id"]
+                    or post["source"] != _host_reboot_json(pre)["source"]
+                    or post["candidate"] != _host_reboot_json(pre)["candidate"]
+                    or _host_reboot_probe(bound) != bound["after_boot"]
+                    or _host_reboot_outer_identity() != outer
+                    or _host_reboot_controller() != controller):
+                raise RuntimeError("host_reboot POST lacks full journey/cleanup/preservation proof")
+            result.update(phase_complete=True, passed=True, release_verdict="PASS", output="PRE+changed host boot+POST+owned cleanup passed")
+            result["proof_sha256"] = _host_reboot_proof_hashes(task)
+    except Exception as exc:
+        result["output"] = str(exc)
+    if task_valid and not (task / f"{phase}.terminal.json").exists():
+        try:
+            _host_reboot_write(task, f"{phase}.terminal.json", (json.dumps(result, sort_keys=True) + "\n").encode())
+        except Exception as exc:
+            result.update(phase_complete=False, passed=False, release_verdict="INCOMPLETE",
+                          output=result["output"] + f"; host_reboot terminal retention failed: {exc}")
+    return result
+
+
 def run_tier1_domain(
     domain: str,
     test_files: list[str],
@@ -2226,6 +2654,9 @@ def run_tier2_domain(
     binding: ImportedRunnerKernelBinding | None = None,
 ) -> dict[str, Any]:
     """Full lifecycle for one Tier 2 domain."""
+    if domain == "host_reboot":
+        return {"domain": domain, "tier": 2, "passed": False,
+                "output": "host_reboot requires its explicit named-runner PRE/POST continuation; no phase executed"}
     vm_name = _unique_name(f"t2-{domain}")
     result: dict[str, Any] = {
         "domain": domain,
@@ -2491,6 +2922,8 @@ def _validate_release_qualification_args(
             "and an explicit --candidate-version; positional domains, --tier, "
             "and --skip-volume-check are not allowed"
         )
+    if args.host_reboot_task is None:
+        parser.error("--release-qualification requires --host-reboot-task with completed strict POST evidence")
 
 
 def _parse_release_host_vm_list(payload: str) -> list[dict[str, object]]:
@@ -2636,7 +3069,7 @@ def _validate_system_test_registry(parser: argparse.ArgumentParser) -> None:
     duplicate_domains: set[str] = set()
     empty_domains: list[str] = []
     registered_files: list[str] = []
-    for domains in (TIER1_DOMAINS, TIER2_DOMAINS, TIER3_DOMAINS):
+    for domains in (TIER1_DOMAINS, TIER2_DOMAINS, TIER3_DOMAINS, HOST_REBOOT_PHASE_DOMAINS):
         for domain, test_files in domains.items():
             if domain in seen:
                 duplicate_domains.add(domain)
@@ -2741,6 +3174,7 @@ def _validate_test_selection_args(
         **TIER1_DOMAINS,
         **TIER2_DOMAINS,
         **TIER3_DOMAINS,
+        **HOST_REBOOT_PHASE_DOMAINS,
     }
     unknown = list(
         dict.fromkeys(
@@ -2887,6 +3321,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Push test files into each VM before running (overrides baked-in tests). "
         "Use when modifying tests without rebuilding the base image.",
     )
+    parser.add_argument("--host-reboot-phase", choices=("pre", "post"),
+                        help="Explicit host_reboot continuation on mvmctl-030-test only; PRE is not a release verdict.")
+    parser.add_argument("--host-reboot-task", type=Path,
+                        help="Private retained host_reboot receipt directory; also mandatory read-only completed POST input for full release qualification.")
+    parser.add_argument("--host-reboot-envelope", type=Path,
+                        help="POST-only external administrator receipt for the fresh runner boot and actual 8 GiB envelope.")
     return parser
 
 
@@ -3059,6 +3499,20 @@ def main() -> None:
     _validate_system_test_registry(parser)
     _validate_test_selection_args(parser, args)
 
+    if args.host_reboot_phase or args.host_reboot_envelope or "host_reboot" in args.domains:
+        if (args.domains != ["host_reboot"] or not args.host_reboot_phase or not args.host_reboot_task
+                or args.all or args.tier or args.host_direct or args.release_qualification
+                or args.prepare or args.image or args.volume or args.rebuild or args.push
+                or args.candidate_version or args.skip_volume_check
+                or (args.host_reboot_phase == "post") != bool(args.host_reboot_envelope)):
+            parser.error("host_reboot requires only its exact domain, phase/task and POST-only admin envelope receipt")
+        result = run_host_reboot_phase(args.host_reboot_phase, args.host_reboot_task, args.host_reboot_envelope)
+        print(json.dumps(result, sort_keys=True), flush=True)
+        # PRE transport/lifecycle completion is deliberately not aggregate qualification success.
+        sys.exit(0 if result.get("phase_complete") and (args.host_reboot_phase == "pre" or result["passed"]) else 1)
+    if args.host_reboot_task and not args.release_qualification:
+        parser.error("--host-reboot-task requires explicit host_reboot phase or full --release-qualification")
+
     if _selection_requests_tier3(args) and not args.host_direct:
         parser.error(
             "Tier 3 tests run directly on and may mutate the outer host; "
@@ -3155,6 +3609,13 @@ def main() -> None:
 
     # Handle prep actions.
     # --rebuild implies --volume + --image + --prepare (in that order).
+    if args.release_qualification:
+        try:
+            # Historical runtime proof, current inputs; no live runner/lifecycle query.
+            require_completed_host_reboot(args.host_reboot_task)
+        except Exception as exc:
+            log(f"ERROR: completed host_reboot proof refused: {exc}")
+            sys.exit(1)
     if args.rebuild:
         run_prepare(
             rebuild_volume=True,
@@ -3284,6 +3745,15 @@ def main() -> None:
                 if not result["passed"]:
                     _print_failure(domain, result)
 
+    if args.release_qualification:
+        # Revalidate retained evidence/current release inputs after the batch, not runner liveness.
+        try:
+            all_results.append(require_completed_host_reboot(args.host_reboot_task))
+        except Exception as exc:
+            log(f"ERROR: completed host_reboot proof refused after batch: {exc}")
+            sys.exit(1)
+    else:
+        log("BATCH RESULTS ONLY / RELEASE VERDICT INCOMPLETE: explicit host_reboot PRE/POST proof remains mandatory")
     print_summary(all_results)
 
 

@@ -85,6 +85,7 @@ def _configure_test_registry(
     monkeypatch.setattr(orchestrator, "TIER1_DOMAINS", tier1)
     monkeypatch.setattr(orchestrator, "TIER2_DOMAINS", tier2 or {})
     monkeypatch.setattr(orchestrator, "TIER3_DOMAINS", tier3 or {})
+    monkeypatch.setattr(orchestrator, "HOST_REBOOT_PHASE_DOMAINS", {})
 
 
 def _write_system_test(repo_root: Path, relative_path: str) -> None:
@@ -155,6 +156,380 @@ def test_default_outer_controller_is_the_canonical_system_binary(
     spec.loader.exec_module(module)
 
     assert module.MVM_BINARY == "/usr/local/bin/mvm"
+
+
+def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
+    """Closed phase simulator: lifecycle is recorded, never executed."""
+    task = tmp_path / "host-reboot"
+    task.mkdir(mode=0o700)
+    before_boot, after_boot = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+    outer = dict(runner_id="1" * 32, created_at="2026-10-10T00:00:00Z", pid=123, start_ticks=456,
+                 guest_mem_size_mib=6144, memory_high="8589934592", memory_max="8589934592")
+    calls, phases = [], []
+    controller = dict(path="/home/www/.local/bin/mvm", command=["/home/www/.local/bin/mvm"],
+                      identity=[1, 2, 1000, 1000, 0o755, 1, 21586222, 3, 4], sha256="c" * 64)
+    state = dict(pre=None, cleanup=True, outer=outer, probes=0, controller=controller)
+    monkeypatch.setattr(orchestrator, "MVM_BINARY", controller["path"])
+    monkeypatch.setattr(orchestrator, "_host_reboot_controller", lambda: json.loads(json.dumps(state["controller"])))
+    monkeypatch.setattr(orchestrator, "_require_distinct_candidate_controller", lambda: None)
+    monkeypatch.setenv("MVM_RUNNER_KERNEL_ID", "2" * 64)
+    monkeypatch.setenv("MVM_RUNNER_KERNEL_SHA256", "3" * 64)
+    monkeypatch.setattr(orchestrator, "_sha256_runner_input", lambda path: "a" * 64)
+    monkeypatch.setattr(orchestrator, "_get_mvm_version", lambda: "0.3.0-rc.fixture")
+    def git(args, **kwargs):
+        return "f" * 40 + "\n" if args[-1] == "HEAD" else ""
+    monkeypatch.setattr(orchestrator.subprocess, "check_output", git)
+    monkeypatch.setattr(orchestrator, "_host_reboot_outer_identity", lambda: dict(state["outer"]))
+    def probe(bound):
+        state["probes"] += 1
+        return before_boot if state["probes"] == 1 else after_boot
+    monkeypatch.setattr(orchestrator, "_host_reboot_probe", probe)
+    def mvm(*args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+    monkeypatch.setattr(orchestrator, "mvm", mvm)
+    def phase(bound, selected, directory):
+        phases.append(selected)
+        physical = {key: [] for key in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec")}
+        if selected == "pre":
+            receipt = dict(boot_id=before_boot, source=dict(revision=bound["source_revision"],
+                test_sha256=bound["test_sha256"], payload=bound["source_payload"]),
+                candidate=dict(sha256=bound["candidate_sha256"], version=bound["candidate_version"]), vm=dict(id="4" * 32), physical=physical)
+            raw = json.dumps(receipt).encode()
+            state["pre"] = raw
+        else:
+            pre = json.loads(state["pre"])
+            raw = json.dumps(dict(schema_version=1, host_boot_id=after_boot, owned_cleanup=state["cleanup"],
+                vm_id=pre["vm"]["id"], source=pre["source"], candidate=pre["candidate"],
+                physical_before=physical, physical_after_boot=physical, physical_after=physical)).encode()
+        orchestrator._host_reboot_write(directory, f"{selected}.json", raw)
+        orchestrator._host_reboot_write(directory, f"{selected}.outcomes.json", _complete_pytest_outcome_report())
+        for suffix, data in (("stdout", b"literal pytest"), ("stderr", b""),
+            ("native.json", json.dumps(dict(phase=selected, returncode=0)).encode()),
+            ("xml", f'<testsuites><testsuite tests="1" failures="0" errors="0" skipped="0"><testcase classname="tests.system.host.test_host_reboot" name="test_host_reboot_{selected}"/></testsuite></testsuites>'.encode())):
+            orchestrator._host_reboot_write(directory, f"{selected}.{suffix}", data)
+        return raw
+    monkeypatch.setattr(orchestrator, "_host_reboot_pytest", phase)
+    def fetch(bound, name):
+        if name == "preservation.json":
+            pre = json.loads(state["pre"])
+            return json.dumps(dict(before=pre["physical"], after_boot=pre["physical"], final=pre["physical"])).encode()
+        return state["pre"]
+    monkeypatch.setattr(orchestrator, "_host_reboot_fetch", fetch)
+    envelope = tmp_path / "envelope.json"
+    payload = dict(schema_version=1, runner="mvmctl-030-test", runner_id=outer["runner_id"], host_boot_id=after_boot,
+                   outer_pid=outer["pid"], outer_start_ticks=outer["start_ticks"], memory_high=8589934592,
+                   memory_max=8589934592, guest_mem_size_mib=6144)
+    envelope.write_text(json.dumps(payload))
+    envelope.chmod(0o600)
+    return task, envelope, calls, phases, state
+
+
+def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(orchestrator, monkeypatch, tmp_path):
+    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    pre = orchestrator.run_host_reboot_phase("pre", task, None)
+    assert pre["phase_complete"] is True and pre["passed"] is False and pre["release_verdict"] == "INCOMPLETE"
+    assert phases == ["pre"]
+    assert [call for call in calls if call[:2] == ("vm", "reboot")] == [("vm", "reboot", "mvmctl-030-test", "--force")]
+    assert all(call[:2] not in (("vm", "create"), ("vm", "rm"), ("host", "reset")) for call in calls)
+    assert (task / "pre.json").read_bytes() == state["pre"]
+    assert json.loads((task / "task.json").read_bytes())["after_boot"] != json.loads(state["pre"])["boot_id"]
+    assert json.loads((task / "task.json").read_bytes())["controller"] == state["controller"]
+    post = orchestrator.run_host_reboot_phase("post", task, envelope)
+    assert post["passed"] is True and post["release_verdict"] == "PASS" and phases == ["pre", "post"]
+    assert (task / "admin-envelope.json").read_bytes() == envelope.read_bytes()
+    assert len([call for call in calls if call[:2] == ("vm", "reboot")]) == 1
+    def no_live_query(*args, **kwargs):
+        raise AssertionError("historical full-release input cannot query runner liveness")
+    monkeypatch.setattr(orchestrator, "mvm", no_live_query)
+    monkeypatch.setattr(orchestrator, "_host_reboot_probe", no_live_query)
+    monkeypatch.setattr(orchestrator, "_host_reboot_outer_identity", no_live_query)
+    assert orchestrator.require_completed_host_reboot(task)["passed"] is True
+    assert phases == ["pre", "post"] and len([call for call in calls if call[:2] == ("vm", "reboot")]) == 1
+    # Explicit POST execution still requires live authority, unlike receipt consumption.
+    monkeypatch.setattr(orchestrator, "_host_reboot_probe", lambda bound: json.loads((task / "task.json").read_bytes())["after_boot"])
+    monkeypatch.setattr(orchestrator, "_host_reboot_outer_identity", lambda: dict(state["outer"]))
+    replay = orchestrator.run_host_reboot_phase("post", task, envelope)
+    assert replay["passed"] is False and phases == ["pre", "post"]
+
+
+@pytest.mark.parametrize("field,value", [("host_boot_id", "11111111-1111-4111-8111-111111111111"),
+    ("outer_pid", 124), ("runner_id", "9" * 32), ("memory_high", 6576668672), ("schema_version", True)])
+def test_host_reboot_post_refuses_wrong_external_admin_authority_before_body(
+    orchestrator, monkeypatch, tmp_path, field, value,
+):
+    task, envelope, calls, phases, _ = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+    payload = json.loads(envelope.read_bytes())
+    payload[field] = value
+    envelope.write_text(json.dumps(payload))
+    result = orchestrator.run_host_reboot_phase("post", task, envelope)
+    assert not result["passed"] and not result["phase_complete"] and phases == ["pre"]
+    assert "external administrator" in result["output"]
+    assert not (task / "admin-envelope.json").exists()
+
+
+@pytest.mark.parametrize("failure", ["actual-controls", "pre-tampered", "cleanup-unproven"])
+def test_host_reboot_never_aggregates_unproven_control_pre_or_cleanup(
+    orchestrator, monkeypatch, tmp_path, failure,
+):
+    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+    if failure == "actual-controls":
+        state["outer"]["memory_max"] = "6576668672"
+    elif failure == "pre-tampered":
+        (task / "pre.json").write_bytes(b"{}")
+    else:
+        state["cleanup"] = False
+    result = orchestrator.run_host_reboot_phase("post", task, envelope)
+    assert not result["passed"] and result["release_verdict"] == "INCOMPLETE"
+    assert phases == (["pre", "post"] if failure == "cleanup-unproven" else ["pre"])
+    assert len([call for call in calls if call[:2] == ("vm", "reboot")]) == 1
+
+
+def test_host_reboot_stops_before_lifecycle_after_failed_pre(orchestrator, monkeypatch, tmp_path):
+    task, _, calls, _, _ = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    def failed(*args):
+        raise RuntimeError("strict PRE report failed")
+    monkeypatch.setattr(orchestrator, "_host_reboot_pytest", failed)
+    result = orchestrator.run_host_reboot_phase("pre", task, None)
+    assert not result["phase_complete"] and not result["passed"]
+    assert not any(call[:2] == ("vm", "reboot") for call in calls)
+    assert "strict PRE report failed" in (task / "pre.terminal.json").read_text()
+
+
+def test_host_reboot_stops_on_identity_failure_instead_of_retrying(orchestrator, monkeypatch, tmp_path):
+    task, _, calls, _, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    probes = []
+    def probe(bound):
+        probes.append(bound)
+        if len(probes) == 1:
+            return "11111111-1111-4111-8111-111111111111"
+        raise RuntimeError("installed candidate changed")
+    monkeypatch.setattr(orchestrator, "_host_reboot_probe", probe)
+    result = orchestrator.run_host_reboot_phase("pre", task, None)
+    assert not result["phase_complete"] and len(probes) == 2
+    assert "installed candidate changed" in result["output"] and not (task / "task.json").exists()
+
+
+def test_host_reboot_is_not_executed_by_ordinary_tier2(orchestrator, monkeypatch):
+    def unexpected(*args, **kwargs):
+        raise AssertionError("ordinary T2 cannot mutate the named runner")
+    monkeypatch.setattr(orchestrator, "mvm", unexpected)
+    monkeypatch.setattr(orchestrator, "provision_t2", unexpected)
+    assert "host_reboot" not in orchestrator.TIER2_DOMAINS
+    assert orchestrator.HOST_REBOOT_PHASE_DOMAINS == {"host_reboot": ["tests/system/host/test_host_reboot.py"]}
+    result = orchestrator.run_tier2_domain("host_reboot", ["tests/system/host/test_host_reboot.py"], "0.3.0")
+    assert not result["passed"] and "no phase executed" in result["output"]
+
+
+@pytest.mark.parametrize("field", ["path", "identity", "sha256"])
+@pytest.mark.parametrize("checkpoint", ["pre-lifecycle", "post-body"])
+def test_host_reboot_refuses_changed_configured_controller(orchestrator, monkeypatch, tmp_path, field, checkpoint):
+    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    def change():
+        state["controller"][field] = ([1, 999, 1000, 1000, 0o755, 1, 21586222, 3, 4] if field == "identity"
+                                     else "/home/www/other-mvm" if field == "path" else "d" * 64)
+    if checkpoint == "pre-lifecycle":
+        original = orchestrator._host_reboot_pytest
+        def phase(*args):
+            raw = original(*args)
+            change()
+            return raw
+        monkeypatch.setattr(orchestrator, "_host_reboot_pytest", phase)
+        result = orchestrator.run_host_reboot_phase("pre", task, None)
+        assert not any(call[:2] == ("vm", "reboot") for call in calls)
+    else:
+        assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+        change()
+        result = orchestrator.run_host_reboot_phase("post", task, envelope)
+        assert phases == ["pre"]
+    assert not result["passed"] and not result["phase_complete"]
+
+
+def test_host_reboot_pins_resolved_configured_controller_and_refuses_same_bytes_replacement(orchestrator, monkeypatch, tmp_path):
+    pin_controller = orchestrator._host_reboot_controller
+    task, envelope, calls, phases, _ = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    installed = tmp_path / ".local" / "bin" / "mvm"
+    installed.parent.mkdir(parents=True)
+    installed.write_bytes(b"unchanged installed outer controller")
+    installed.chmod(0o755)
+    monkeypatch.setattr(orchestrator, "MVM_BINARY", str(installed))
+    monkeypatch.setattr(orchestrator, "_host_reboot_controller", pin_controller)
+    assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+    bound = json.loads((task / "task.json").read_bytes())
+    assert bound["controller"]["path"] == str(installed.resolve())
+    assert bound["controller"]["identity"][1] == installed.stat().st_ino
+    replacement = installed.parent / "replacement"
+    replacement.write_bytes(installed.read_bytes())
+    replacement.chmod(0o755)
+    replacement.replace(installed)
+    assert installed.stat().st_ino != bound["controller"]["identity"][1]
+    result = orchestrator.run_host_reboot_phase("post", task, envelope)
+    assert not result["passed"] and phases == ["pre"]
+    assert len([call for call in calls if call[:2] == ("vm", "reboot")]) == 1
+
+
+@pytest.mark.parametrize("fault", ["missing", "malformed", "wrong-boot", "source", "controller", "control", "cleanup", "policy", "native", "skipped", "wrong-junit"])
+def test_host_reboot_full_release_refuses_incomplete_or_stale_closed_proof(orchestrator, monkeypatch, tmp_path, fault):
+    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+    assert orchestrator.run_host_reboot_phase("post", task, envelope)["passed"]
+    before_calls = list(calls)
+    def replace(name, mutate):
+        path = task / name
+        value = json.loads(path.read_bytes())
+        mutate(value)
+        path.write_text(json.dumps(value))
+    if fault == "missing":
+        (task / "post.native.json").unlink()
+    elif fault == "malformed":
+        (task / "post.terminal.json").write_bytes(b"{}")
+    elif fault == "wrong-boot":
+        replace("post-authority.json", lambda value: value.update(host_boot_id="33333333-3333-4333-8333-333333333333"))
+    elif fault == "source":
+        replace("task.json", lambda value: value.update(source_revision="e" * 40))
+    elif fault == "controller":
+        state["controller"]["identity"][1] = 999
+    elif fault == "control":
+        replace("post-authority.json", lambda value: value["outer"].update(memory_high="6576668672"))
+    elif fault == "cleanup":
+        replace("post.json", lambda value: value.update(owned_cleanup=False))
+    elif fault == "policy":
+        replace("post.json", lambda value: value["physical_after"].update(exec=[{"id": "changed-policy"}]))
+        replace("preservation.json", lambda value: value["final"].update(exec=[{"id": "changed-policy"}]))
+    elif fault == "native":
+        replace("post.native.json", lambda value: value.update(returncode=1))
+    elif fault == "skipped":
+        replace("post.outcomes.json", lambda value: value.update(passed=0, skipped=1))
+    elif fault == "wrong-junit":
+        path = task / "post.xml"
+        path.write_bytes(path.read_bytes().replace(b"test_host_reboot_post", b"test_host_reboot_pre"))
+    if fault not in ("missing", "malformed"):
+        replace("post.terminal.json", lambda value: value.update(proof_sha256=orchestrator._host_reboot_proof_hashes(task)))
+    with pytest.raises((RuntimeError, FileNotFoundError, KeyError)):
+        orchestrator.require_completed_host_reboot(task)
+    assert phases == ["pre", "post"] and calls == before_calls
+
+
+@pytest.mark.parametrize("selection,release", [(["--tier", "2"], False), (["--all", "--host-direct"], False),
+    (["--release-qualification", "--all", "--host-direct", "--rebuild", "--candidate-version", "0.3.0",
+      "--host-reboot-task", "/tmp/completed-host-reboot"], True)])
+def test_host_reboot_batch_selection_and_full_release_consume_only_explicit_completed_proof(orchestrator, monkeypatch, tmp_path, capsys, selection, release):
+    candidate = tmp_path / "candidate-mvm"
+    candidate.write_bytes(b"candidate")
+    candidate.chmod(0o755)
+    monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_CONFIGURED", candidate)
+    monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_BINARY", str(candidate))
+    monkeypatch.setattr(orchestrator.sys, "argv", ["run-system-tests.py", *selection])
+    monkeypatch.setattr(orchestrator.shutil, "which", lambda binary: "/usr/local/bin/mvm")
+    monkeypatch.setattr(orchestrator, "_resolve_imported_runner_kernel_binding", lambda: None)
+    monkeypatch.setattr(orchestrator, "_require_distinct_candidate_controller", lambda: None)
+    monkeypatch.setattr(orchestrator, "_get_mvm_version", lambda: "0.3.0")
+    monkeypatch.setattr(orchestrator, "ensure_shared_volume", lambda **kwargs: None)
+    monkeypatch.setattr(orchestrator, "ensure_test_network", lambda: None)
+    monkeypatch.setattr(orchestrator, "validate_release_build_paths", lambda **kwargs: None)
+    monkeypatch.setattr(orchestrator, "_resolve_candidate_build_version", lambda version: version)
+    monkeypatch.setattr(orchestrator, "_build_mvm_binary", lambda version: None)
+    monkeypatch.setattr(orchestrator, "verify_release_binary_identity", lambda **kwargs: None)
+    monkeypatch.setattr(orchestrator, "_require_release_host_without_active_vms", lambda: None)
+    events, executed = [], []
+    monkeypatch.setattr(orchestrator, "run_prepare", lambda **kwargs: events.append("prepare"))
+    def batch(domains, tier, *args, **kwargs):
+        executed.extend(domains)
+        return [dict(domain=domain, tier=tier, passed=True, output="mock batch") for domain in domains]
+    monkeypatch.setattr(orchestrator, "run_domains", batch)
+    monkeypatch.setattr(orchestrator, "run_tier3_domain", lambda domain, *args, **kwargs:
+                        dict(domain=domain, tier=3, passed=True, output="mock batch"))
+    monkeypatch.setattr(orchestrator, "run_host_reboot_phase", lambda *args: pytest.fail("batch cannot reboot"))
+    def consume(task):
+        assert release and task == Path("/tmp/completed-host-reboot")
+        events.append("consume-closed-proof")
+        return dict(domain="host_reboot", tier=2, passed=True, output="historical closed proof")
+    monkeypatch.setattr(orchestrator, "require_completed_host_reboot", consume)
+    orchestrator.main()
+    assert executed and "host_reboot" not in executed
+    output = capsys.readouterr().out
+    assert "0 failed" in output
+    if release:
+        assert events == ["consume-closed-proof", "prepare", "consume-closed-proof"]
+        assert "[PASS] Tier 2 host_reboot" in output and "RELEASE VERDICT INCOMPLETE" not in output
+    else:
+        assert events == [] and "BATCH RESULTS ONLY / RELEASE VERDICT INCOMPLETE" in output
+
+
+def test_host_reboot_full_release_requires_completed_task_before_effects(orchestrator, monkeypatch, capsys):
+    _assert_selection_rejected_before_side_effects(orchestrator, monkeypatch, capsys,
+        ["--release-qualification", "--all", "--host-direct", "--rebuild", "--candidate-version", "0.3.0"],
+        "requires --host-reboot-task with completed strict POST evidence")
+
+
+@pytest.mark.parametrize("fault", [None, "snapshot-after_boot", "traffic-after_boot", "exec-after_boot",
+                                   "snapshot-final", "traffic-final", "exec-final"])
+def test_host_reboot_guest_preservation_refuses_persistent_changes_but_allows_boot_physical_changes(monkeypatch, tmp_path, fault):
+    # Execute only the pure preservation assertion, not a registered guest phase body.
+    root = Path(__file__).parents[2]
+    monkeypatch.syspath_prepend(str(root))
+    from tests.system.host.test_host_reboot import _preserve_persistent_inventory
+    before = {key: [] for key in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec")}
+    before.update(namespace=[1, 2], links=[{"ifindex": 3}], addresses=[], routes=[], firewall=[], namespace_mounts={})
+    after_boot, final = json.loads(json.dumps(before)), json.loads(json.dumps(before))
+    after_boot.update(namespace=[5, 6], links=[{"ifindex": 7}])
+    final.update(namespace=[5, 6], links=[{"ifindex": 8}])
+    if fault:
+        domain, point = fault.split("-")
+        (after_boot if point == "after_boot" else final)[domain] = [{"id": "changed"}]
+        with pytest.raises(AssertionError, match=domain):
+            _preserve_persistent_inventory(tmp_path, before, after_boot, final)
+    else:
+        _preserve_persistent_inventory(tmp_path, before, after_boot, final)
+    assert json.loads((tmp_path / "preservation.json").read_bytes()) == dict(before=before, after_boot=after_boot, final=final)
+
+
+@pytest.mark.parametrize("selection", [
+    ["host", "--host-reboot-phase", "pre", "--host-reboot-task", "/tmp/task"],
+    ["host_reboot", "--host-reboot-phase", "post", "--host-reboot-task", "/tmp/task"],
+    ["host_reboot", "--host-reboot-phase", "pre", "--host-reboot-task", "/tmp/task", "--push"],
+    ["host_reboot"],
+])
+def test_host_reboot_mixed_or_incomplete_selection_fails_before_side_effects(
+    orchestrator, monkeypatch, capsys, selection,
+):
+    _assert_selection_rejected_before_side_effects(orchestrator, monkeypatch, capsys, selection,
+        "host_reboot requires only its exact domain")
+
+
+@pytest.mark.parametrize("fault", ["native-failure", "skipped", "wrong-junit", "two-items"])
+def test_host_reboot_retains_literal_reports_and_rejects_incomplete_phase(
+    orchestrator, monkeypatch, tmp_path, fault,
+):
+    task = tmp_path / "phase"
+    task.mkdir(mode=0o700)
+    bound = dict(guest_task="/home/runner/.cache/mvmctl-host-reboot-" + "1" * 32,
+        source_revision="f" * 40, candidate_sha256="a" * 64, candidate_version="mvm 0.3.0",
+        kernel_id="b" * 64, kernel_sha256="c" * 64)
+    calls = []
+    def mvm(*args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 1 if fault == "native-failure" else 0, stdout="literal pytest", stderr="literal diagnostic")
+    monkeypatch.setattr(orchestrator, "mvm", mvm)
+    outcomes = json.loads(_complete_pytest_outcome_report(2 if fault == "two-items" else 1))
+    if fault == "skipped":
+        outcomes.update(passed=0, skipped=1)
+    method = "test_host_reboot_post" if fault == "wrong-junit" else "test_host_reboot_pre"
+    xml = f'<testsuites><testsuite tests="1" failures="0" errors="0" skipped="0"><testcase classname="tests.system.host.test_host_reboot" name="{method}"/></testsuite></testsuites>'.encode()
+    def fetch(bound, name):
+        return xml if name.endswith(".xml") else json.dumps(outcomes).encode()
+    monkeypatch.setattr(orchestrator, "_host_reboot_fetch", fetch)
+    with pytest.raises(RuntimeError):
+        orchestrator._host_reboot_pytest(bound, "pre", task)
+    assert (task / "pre.stdout").read_bytes() == b"literal pytest"
+    assert (task / "pre.stderr").read_bytes() == b"literal diagnostic"
+    assert (task / "pre.outcomes.json").read_bytes() == json.dumps(outcomes).encode()
+    assert (task / "pre.xml").read_bytes() == xml
+    assert len(calls) == 1 and calls[0][1] == "mvmctl-030-test"
+    assert "::test_host_reboot_pre" in calls[0][-1] and "MVM_CONFIG_DIR=/home/runner/.config/mvmctl-030-schema6" in calls[0][-1]
+    assert "--rootdir=." in calls[0][-1]
 
 
 def test_registry_uses_exec_tier2_and_one_canonical_fresh_env_domain(
@@ -688,6 +1063,7 @@ def test_release_qualification_parser_accepts_only_the_full_acknowledged_gate(
             "--rebuild",
             "--candidate-version",
             "0.3.0-rc.1",
+            "--host-reboot-task", "/tmp/completed-reboot",
         ]
     )
 
@@ -716,6 +1092,7 @@ def test_release_identity_runs_after_build_and_before_host_resource_mutation(
             "--rebuild",
             "--candidate-version",
             "0.3.0",
+            "--host-reboot-task", "/tmp/completed-reboot",
         ],
     )
     monkeypatch.setattr(
@@ -787,6 +1164,7 @@ def test_release_host_admission_runs_after_identity_and_before_resource_mutation
             "--rebuild",
             "--candidate-version",
             "0.3.0",
+            "--host-reboot-task", "/tmp/completed-reboot",
         ],
     )
     monkeypatch.setattr(
