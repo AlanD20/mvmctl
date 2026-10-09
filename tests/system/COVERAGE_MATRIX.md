@@ -25,9 +25,14 @@ The corrected inactive-original-default fixture was integrated as `f5d6aa1e`; th
 three passes in 2.83 seconds, zero other outcomes and native exit 0. Fixture PRE/POST existing inventories
 matched, with defaults, configuration, policies, links, routes, mounts, firewall and mirror preserved.
 Cleanup used the existing fixture; this is not independent whole-root absence proof. The original setup
-failure remains failed, and its no-NAT body did not run. These three current-candidate passes are separate
-from the historical complete network results; reusable-base provisioning and the full installed Python
-matrix remain pending.
+failure remains failed, and its no-NAT body did not run.
+
+A separate batch of 23 other existing owned-network CRUD/rejection cases passed on the same installed
+candidate and corrected fixture in 19.12 seconds: strict 23/23, zero other outcomes and native exit 0.
+Fixture PRE/POST full inventories matched; mirror and source/artifact pins were preserved, with no preservation
+errors. These are 26 distinct current-candidate network cases across two batches, separate from the historical
+complete network results. VM-dependent cases, selectorless sync, administrator/fault cases, reusable-base
+provisioning and the full installed Python matrix remain pending.
 
 **Current bounded memory qualification (2026-10-09):** Installed candidate
 `0.3.0-rc.partition-f909601d`, source `f909601d`, SHA-256
