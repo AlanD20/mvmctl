@@ -1696,6 +1696,10 @@ class TestImageImportCreateVM:
                     "--json",
                     check=False,
                 )
+                print(
+                    f"survivor release refusal stdout={refused.stdout} stderr={refused.stderr}",
+                    flush=True,
+                )
                 assert refused.returncode != 0
                 response = json.loads(refused.stdout)
                 assert response["status"] == "error"
@@ -1704,11 +1708,14 @@ class TestImageImportCreateVM:
                 item = response["data"]["items"][0]
                 assert item["result"]["status"] == "error"
                 assert item["result"]["item"] == fault.image_id
-                assert item["error"]["code"] == "process.error"
+                assert item["error"]["code"] == "image.import.failed"
                 assert item["error"]["class"] == 3
-                assert (
-                    "wait for protected backing object lock" in item["error"]["message"]
-                )
+                assert item["error"]["message"] == "VM export copy release did not complete"
+                assert item["error"]["op"] == "image"
+                assert item["error"]["details"] == {
+                    "image_id": fault.image_id,
+                    "rootfs_export_copy_pending": True,
+                }
                 assert fault.require("busy") == {
                     "phase": "busy",
                     "image_id": fault.image_id,
