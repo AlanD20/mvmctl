@@ -2369,7 +2369,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `image import --disable-detector` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced` | L2 — imported with --disable-detector arch, may skip on missing cached image |
 | `image import --version` | ⚡ Shallow | `images/test_images.py` | `TestImageImportAdvanced::test_image_import_with_version` | L2 — version field matches in ls --json |
 | `image import` nonexistent path | ⚡ Shallow | `images/test_images.py` | `TestImageImport` | Installed rc.7: structured `image.import.failed`, no image record. |
-| Full import→VM-create end-to-end | ⏭️ Skip | `images/test_images.py` | `TestImageImportCreateVM` | L2 — many skip points |
+| Full import→VM-create end-to-end | 🟡 Partial | `images/test_images.py` | `TestImageImportCreateVM` | Current named-runner L2 passed protected-rootfs imports from Running, Paused and Stopped sources, preserved each source state and booted independent clones with exact guest-written bytes. Export interruption/recovery and the remaining class cases are separately unqualified. |
 | Default migrates on force re-pull | ⏭️ Skip | `images/test_images.py` | `TestImageDefaultMigration` | L2 — many skip points |
 
 ---
