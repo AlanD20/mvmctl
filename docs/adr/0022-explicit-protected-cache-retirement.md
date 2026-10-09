@@ -32,9 +32,25 @@ retired backing. Cleanup therefore needs explicit root-authorized retirement, no
 - Backing and protected-branch users retain shared store-use authority for their complete lease lifetime. Cleanup
   requires independent, nonblocking exclusive store-use authority. Keep existing logical/object lock ordering and
   reference checks; an initialization-only lock does not exclude retained users.
-- Record durable root-owned retirement intent before removing any admitted protected parent. Bind the exact cache
-  and store identities; reconcile an interrupted cleanup only from that recorded authority. Remove empty directories
-  descriptor-relatively with identity rechecks and parent synchronization. Record completion durably.
+- Record durable root-owned retirement intent before removing any admitted protected parent. Bind the exact cache,
+  store and quarantine identities; reconcile an interrupted cleanup only from that recorded authority. The final
+  store entry has a caller-owned parent, so a separate pathname check and root `rmdir` cannot establish exact removal.
+  Capture the store atomically into a pinned root-controlled quarantine before deleting its admitted empty suffix.
+- Create and pin the fixed quarantine child inside the already-admitted root-owned store, not directly under the
+  caller-owned cache where creation/open could adopt a replacement. Record preparation and the exact child identity
+  before atomically promoting it to the fixed `.mvm-protected-retirement` sibling. Both locations are on the selected
+  cache filesystem; no rename to `/var/lib` or cross-filesystem fallback is authorized.
+- Record promotion/capture stages. Use no-replace atomic capture into the retained quarantine descriptor and verify
+  the captured original store identity before deleting anything. Retry examines only the recorded fixed locations
+  and identities. Changed, missing or ambiguous quarantine authority, or a substituted capture, refuses cleanup and
+  retains evidence; do not scan for renamed directories or overwrite a destination to recover.
+- Remove admitted empty directories only beneath the root-controlled captured store/quarantine, with identity
+  rechecks. Synchronize both rename parents, and synchronize the quarantine and cache parent again before durable
+  completion, including recovery where the captured store is already absent. Visible absence alone is not durable
+  disappearance.
+- Root leaves the verified empty quarantine sibling rather than performing another check/unlink under a caller-owned
+  parent. After confirmed root retirement, the ordinary unprivileged API removes only that fixed empty directory
+  before its existing cache removal. Nonempty or otherwise failed ordinary removal reports incomplete cleanup.
 - Preserve root-owned logical bindings, terminal object records, digests, generations and durable locks outside the
   caller's cache. A cleanup record authorizes only finishing that exact retirement. Ordinary lookup, launch, restore
   and import must still refuse a missing or retired store; cleanup grants no automatic reimport or cache rebinding.
@@ -63,5 +79,8 @@ ordinary filesystem deletion cannot fail.
 Required behavior evidence includes successful terminal-parent cleanup; refusal preserving unknown, changed, live,
 referenced or transitional objects; exclusion of held leases; interrupted retirement reconciliation; unchanged
 missing-store and mutable-backing anti-resurrection rules; dry-run preservation; and accurate API failure projection.
+The final capture must refuse namespace substitution without deleting the substitute, and an interrupted or failed
+parent synchronization must be retried before completion. These are concrete defects found in the first fixed-source
+review, not qualified behavior of that source; the correction and its affected checks remain pending.
 Focused Go checks and installed-candidate acquisition/teardown qualification run only in the approved disposable
 runner. Source implementation and internal tests alone do not qualify the public cleanup journey or the release.
