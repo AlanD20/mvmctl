@@ -30,13 +30,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > for the root-derived disk serial/capacity and a final unchanged root attachment check before Running-VM
 > attach succeeds. Paused attachment is staged with an explicit retryable deferred-readiness error; known-applied
 > failures retain the attachment rather than reporting an available volume. Focused vet, behavioral and race
-> checks passed inside the named runner. This source is not yet built or installed there; it does not fix the
-> diagnosed Firecracker BAR relocation failure or qualify the new behavior at system-test level.
+> checks passed inside the named runner. Complete ordinary Go CI passed on clean `046e8347`; its real
+> embedded-agent amd64 release build then passed as `0.3.0-rc.readiness-046e8347`, SHA-256
+> `70c7ceacefc79c80f2995b0255fd54626a4de96812aa3bcb2fb82425a5871c4f`, with unmodified VCS metadata.
+> CI was not replayed after the initial private wrapper failed before building; its exact generated coverage
+> files were preserved outside the checkout for the separate build-only continuation. This candidate is not
+> installed or system-qualified and does not fix the diagnosed Firecracker BAR relocation failure.
 
 > **Current local image checkpoint (2026-10-09):** four registered cases passed strict 4/4 in 7.76 seconds
 > on installed `0.3.0-rc.partition-f909601d`: cached raw-file import, missing-path rejection, and normal/force
 > removal of an unused imported image. Exact owned cleanup and original inventories passed without synthetic
 > memory guards. This does not qualify boot from that local import, in-use force removal or the full image domain.
+
+> **Current cached-image options checkpoint (2026-10-09):** seven further registered cases passed strict 7/7
+> in 18.92 seconds on the unchanged installed candidate: cached slug/version/type selectors, default reselection
+> and refusal, cached pull with `--default`, and raw import with `--default`. Owned temporary defaults and images
+> were removed, restoring the exact original inventory and zero-default state. Remote acquisition, force-repull
+> variants and the complete image domain remain separate.
 
 > **Current protected-rootfs import checkpoint (2026-10-09):** the Running VM-to-image journey passed
 > strict 1/1 in 27.69 seconds; Paused and Stopped then passed strict 2/2 in 34.59 seconds on the same

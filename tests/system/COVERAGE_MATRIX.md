@@ -21,8 +21,16 @@ removed, or when test coverage changes.
 disk readiness, retained known-applied attachment projection, explicit paused staging and a final root identity
 recheck. Focused agent/vsock/API behavior checks, supporting VM/error/CLI packages, affected vet and the selected
 agent/vsock/API race checks passed inside `mvmctl-030-test`; the integration's 12 source files matched the tested
-manifest exactly. New source is not yet built or installed, and complete CI for it remains pending. Existing
-installed `f909601d` evidence qualifies only unchanged relevant inputs, not this new live-attachment behavior.
+manifest exactly. Complete ordinary Go 1.26.3 CI passed on clean `046e8347` inside the named runner, including
+architecture, formatting, generation, vet and the selected test/coverage gates. The initial private wrapper
+ended before building; its full CI log and both coverage profiles were retained, and a build-only continuation
+preserved the exact generated profiles outside the checkout without replaying CI. The real embedded-agent
+amd64 build then passed as `0.3.0-rc.readiness-046e8347`, SHA-256
+`70c7ceacefc79c80f2995b0255fd54626a4de96812aa3bcb2fb82425a5871c4f`, with Go 1.26.3, PIE and
+`vcs.modified=false` on that exact revision. Native producer traces and source/tool/artifact preservation
+were independently checked. This candidate is not installed or system-qualified. Existing installed
+`f909601d` evidence qualifies only unchanged relevant inputs, not this new live-attachment behavior;
+the separate earlier full root-Jailer result retains its original source binding.
 Readiness detects rather than repairs the separately diagnosed Firecracker BAR relocation failure.
 
 **Current local image import/removal (2026-10-09):** four registered cases passed together, strict 4/4 in
@@ -34,6 +42,18 @@ source and candidate identities remained unchanged. No VM launch, download or sy
 The local import checks ext4/Alpine metadata, not boot or guest contents. Force removal here does not prove
 in-use removal. This is bounded unchanged-path evidence, not qualification of new guest readiness or the full
 image domain.
+
+**Current cached image selectors/defaults (2026-10-09):** seven further registered nodes passed together,
+strict 7/7 in 18.92 seconds with native exit 0 and zero other outcomes, on the unchanged installed `f909601d`
+candidate and clean `b73d0462` suite. Three cached slug/version/type-override selectors returned the exact
+prepared Alpine record. The other cases checked default reselection, missing-default refusal, cached pull
+with `--default`, and selecting a freshly imported raw image as the sole default. The wrapper admitted only
+a newly owned mirrored Alpine as a temporary default after proving the original had none. Existing test
+cleanup restored that prepared default; its `updated_at` display timestamp alone was excluded from the
+prepared comparison, with raw values retained. After exact no-force owned-Alpine removal, the complete
+original public/physical inventories and zero-default state matched without normalization. Source, kernel,
+mirror and candidate pins were preserved. No downloads or artificial memory thresholds were used.
+This does not qualify remote acquisition, force-repull variants, guest boot or the complete image domain.
 
 **Current protected-rootfs VM image import (2026-10-09):**
 `images/test_images.py::TestImageImportCreateVM::test_vm_import_preserves_guest_contents_and_source_state[running]`
@@ -2348,17 +2368,17 @@ Specific legacy conflicts that must be rewritten before release:
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `image pull <type>:<version>` | ⏭️ Skip | `images/test_images.py` | `TestImagePull` | L1 — often skips on network |
+| `image pull <type>:<version>` | ⚡ Shallow | `images/test_images.py` | `TestImagePull::test_image_pull[slug]` | Current installed f909: cached slug returns the exact prepared Alpine record; no remote acquisition. |
 | `image pull --force` | 🟡 Partial | `images/test_images.py` | `TestImagePullAdvanced::test_pull_cached_image_with_force_redownloads` | Installed a3d7 L2: mirrored replacement, sole-default transfer and old-backing retirement passed for `[force]`; three option variants remain unqualified. |
-| `image pull --default` | ⏭️ Skip | `images/test_images.py` | `TestImagePullAdvanced` | L2 — often skips |
+| `image pull --default` | ⚡ Shallow | `images/test_images.py` | `TestImagePullAdvanced::test_pull_cached_image_with_default_sets_default` | Current installed f909: cached pull keeps the exact prepared Alpine as the sole default; checked restoration. |
 | `image pull --skip-optimization` | ⏭️ Skip | `images/test_images.py` | `TestImagePullSkipOptimization` | L1 — often skips |
-| `image pull --type override` | ⏭️ Skip | `images/test_images.py` | `TestImagePullAdvanced` | L1 — often skips |
-| `image pull --version` | ⏭️ Skip | `images/test_images.py` | `TestImagePullAdvanced` | L1 — often skips |
+| `image pull --type override` | ⚡ Shallow | `images/test_images.py` | `TestImagePull::test_image_pull[type-override]` | Current installed f909: type override resolves an unrelated selector to the exact cached Alpine record. |
+| `image pull --version` | ⚡ Shallow | `images/test_images.py` | `TestImagePull::test_image_pull[version]` | Current installed f909: explicit version resolves the exact cached Alpine record. |
 | `image pull nonexistent` | ⚡ Shallow | `images/test_images.py` | `TestImagePullAdvanced` | L1 — no skip |
 | `image pull --disable-detector` | ⏭️ Skip | `images/test_images.py` | `TestImageAdvancedFlags` | L1 — often skips |
 | `image pull` arch auto-detection | ⏭️ Skip | `images/test_images.py` | `TestImagePullArchFlag` | Network-dependent. L1: success message. No `--arch` flag — arch is auto-detected by Go CLI. |
 | `image pull --no-cache` | ⏭️ Skip | `images/test_images.py` | `TestImagePullNoCache` | Network-dependent. L1: success message |
-| `image pull --type <type>` (explicit) | ⚡ Shallow | `images/test_images.py` | `TestImagePullAdvancedFlags` | Explicit type flag |
+| `image pull --type <type>` (explicit) | ⚡ Shallow | `images/test_images.py` | `TestImagePull::test_image_pull[type-override]` | Same current cached type-override case above; not a separate node or remote acquisition proof. |
 | `image ls` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | Installed rc.7 human table: headers plus the seeded Alpine ID and name. |
 | `image ls --json` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | Installed rc.7 schema-1 array and seeded Alpine identity/presence. |
 | `image ls --remote --no-cache` | 🔴 Missing | — | — | The former local `--no-cache` test asserted only exit 0; this flag affects remote resolution only. |
@@ -2367,8 +2387,8 @@ Specific legacy conflicts that must be rewritten before release:
 | `image inspect` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | Installed rc.7 human renderer shows exact seeded Alpine ID, name, and path. |
 | `image inspect --json` | ⚡ Shallow | `images/test_images.py` | `TestImageList` | Installed rc.7 grouped image/storage data matches the list record. |
 | `image inspect --tree` | 🔴 Missing | — | — | Tree-view inspect subcommand does not exist in CLI. Not a valid test target. |
-| `image default` | ⚡ Shallow | `images/test_images.py` | `TestImageDefaults` | Installed rc.7: selected Alpine ID is the sole default in schema-1 listing. |
-| `image default` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageDefaults` | Installed rc.7: `image.not_found` structured error. |
+| `image default` | ⚡ Shallow | `images/test_images.py` | `TestImageDefaults::test_image_set_default` | Current installed f909: reselects the prepared Alpine default and checks it is sole; fresh-image selection is separately covered by import --default. |
+| `image default` nonexistent | ⚡ Shallow | `images/test_images.py` | `TestImageDefaults::test_set_default_nonexistent_image_fails` | Current installed f909: schema-1 image.not_found error, no data and unchanged image listing/defaults. |
 | `image rm` | ⚡ Shallow | `images/test_images.py` | `TestImageRemove::test_image_remove_with_fixture[normal]` | Current installed f909 L2: unused imported image removed; owned backing and inventory cleanup checked. |
 | `image rm --force` | 🟡 Partial | `images/test_images.py` | `TestImageRemove::test_image_remove_with_fixture[force]` | Current installed f909 L2: unused imported image removed with force and checked cleanup; in-use force behavior remains separate. |
 | `image rm` blocked by VM dependency | 🟡 Partial | `images/test_images.py` | `TestImageDependencyDeletion` | L3: rm rejected when image used by stopped/running VM; formerly-default promotes another |
@@ -2380,7 +2400,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `image import --format qcow2` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced::test_image_import_with_format_qcow2` | Installed current-candidate L2: cached Alpine raw→QCOW2→ext4 import booted as a networkless VM; guest OS identity read through vsock and checked VM/image/temp-file removal. Other formats and failure paths remain unqualified; QCOW2 data volumes are unsupported. |
 | `image import --root-partition` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — skips on qemu-img |
 | `image import --force` | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — may skip |
-| `image import --default` | ⚡ Shallow | `images/test_images.py` | `TestImageImportSetDefault::test_image_import_with_set_default` | Installed a3d7 L2: raw ext4 import selects the returned ID as the sole default; owned image removal and original-default restoration checked. Does not prove boot. |
+| `image import --default` | ⚡ Shallow | `images/test_images.py` | `TestImageImportSetDefault::test_image_import_with_set_default` | Current installed f909 L2: fresh raw ext4 import selects the returned ID as sole default; owned image removal and prepared-default restoration checked. Does not prove boot. |
 | `image import` arch auto-detection | ⏭️ Skip | `images/test_images.py` | `TestImageImportArch` | L2 — skips on qemu-img. No `--arch` flag — arch is auto-detected by Go CLI. |
 | `image import` auto-detect | ⏭️ Skip | `images/test_images.py` | `TestImageImportAdvanced` | L2 — may skip |
 | `image import --skip-optimization` | 🟡 Partial | `images/test_images.py` | `TestImageImportAdvanced` | L2 — imported with skip-optimization flag, may skip |
