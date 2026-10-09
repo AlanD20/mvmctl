@@ -17,6 +17,22 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current exec restart/restore checkpoint (2026-10-09):** Installed
+`0.3.0-rc.partition-f909601d`, SHA-256
+`13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed five further registered
+`exec/test_vm_to_vm_exec.py` cases inside `mvmctl-030-test` using clean signed suite `b73d0462`.
+The endpoint restart/destination reboot journey passed strict 1/1 in 24.522 seconds; the opt-in/exact-nonroot-user,
+stream-result/redacted-audit, interruption/reaped-destination-group and restored-endpoint/new-grant cases
+passed together strict 4/4 in 40.975 seconds. Both native invocations exited 0 with zero other outcomes.
+The durable grant admitted fresh endpoint process/boot identities after restart/reboot, while stopped and
+revoked access was denied. Full restore retained guest state but required a new VM identity and grant.
+Registered fixtures removed their exact VM/policy/capture resources, and the wrapper removed only its verified
+nondefault mirrored Alpine image without force. Independent comparisons confirmed exact original public/physical
+PRE/POST inventories, with defaults, mirror and source/candidate/boot bindings preserved. No synthetic RAM
+guards were used. Alongside the separately bound directional journey, all six currently registered VM-to-VM
+exec nodes now have pass evidence across three invocations; this is not one complete-module run, host-to-guest
+exec qualification, host reboot, reusable-base provisioning or full installed T1/T2 release sign-off.
+
 **Current traffic-policy checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`, SHA-256
 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed all three registered
 `network/test_policies.py` nodes together inside `mvmctl-030-test` in 73.20 seconds: strict 3/3, zero other
