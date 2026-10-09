@@ -14,13 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Focused formatting, vet, behavior, race and root checks passed inside `mvmctl-030-test`, including
 > 52 controller and 10 root-broker tests/subtests with zero failures/skips. The matching receiver-death test
 > now checks the existing batch error envelope without weakening its recovery assertions. This correction
-> is integrated but not yet built or installed; coherent CI/build and the affected receiver-death journey remain pending.
+> passed complete pinned CI, the separate full root Jailer suite (2,642 passes, zero failures/skips) and the
+> real-agent amd64 build. Candidate `0.3.0-rc.resume-1300b64b`, SHA-256
+> `81c521ba65e82cdec0abc322b080aa3e0c38876d6313f359cf86713792720c57`, was installed only inside the named
+> QA VM; preservation differed only in the authorized binary replacement. The affected receiver-death and
+> public pause/resume runtime journeys remain pending.
 
 > **Current implementation and qualification checkpoint (2026-10-09):** the closed root-dispatch, isolated
 > Jailer, per-VM managed/networkless namespace, direct-Go nftables, typed traffic/exec policy, protected raw-volume
-> and snapshot paths are implemented. Installed QA candidate `0.3.0-rc.export-interrupt-bfdece17` is bound to
-> `bfdece17` and SHA-256 `d13f8c06335342dab47fc6e5399af7e195992ab16dcf1ad00c3289c692390e42`.
-> Complete pinned Go CI and the separate full root Jailer suite passed on clean `bfdece17`, including the new
+> and snapshot paths are implemented. The current installed QA candidate is the Resume build above.
+> Earlier candidate `0.3.0-rc.export-interrupt-bfdece17` was bound to `bfdece17` and SHA-256
+> `d13f8c06335342dab47fc6e5399af7e195992ab16dcf1ad00c3289c692390e42`.
+> Complete pinned Go CI and the separate full root Jailer suite passed on that clean source, including the new
 > live-attachment and export-interruption changes: 2,632 root tests/subtests, zero failures/skips. Its real-agent
 > amd64 candidate `0.3.0-rc.export-interrupt-bfdece17` built with Go 1.26.3 and unmodified VCS metadata,
 > SHA-256 `d13f8c06335342dab47fc6e5399af7e195992ab16dcf1ad00c3289c692390e42`. Normal system installation

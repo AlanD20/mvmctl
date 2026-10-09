@@ -17,7 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Current coherent Go/build checkpoint (2026-10-09):** clean `bfdece17`, tree `84dc90a1`, passed the complete
+**Current coherent Resume Go/build/install checkpoint (2026-10-09):** clean `1300b64b`, tree `1eb819b5`,
+passed complete pinned ordinary Go 1.26.3 CI, the separate full root Jailer suite and the real embedded-agent
+amd64 release build inside `mvmctl-030-test`. Independent literal root JSON counts 2,642 test/subtest passes,
+one package pass and zero failures/skips. CI log SHA-256 `45b43ff8`; root JSON `02fbaa53`; build log `e8790bf1`.
+Candidate `0.3.0-rc.resume-1300b64b`, SHA-256
+`81c521ba65e82cdec0abc322b080aa3e0c38876d6313f359cf86713792720c57`, records exact VCS revision,
+`vcs.modified=false`, Go 1.26.3, Linux/amd64 and PIE. Normal inner `host install-system` passed; its root-owned
+`0755` canonical binary matches the candidate. Independent preservation proved original state unchanged,
+apart from the admitted clean build source and the authorized canonical replacement. The affected receiver-death
+and public pause/resume journeys remain pending; no earlier installed pass is relabeled as a run on this build.
+
+**Earlier coherent Go/build checkpoint (2026-10-09):** clean `bfdece17`, tree `84dc90a1`, passed the complete
 ordinary pinned Go 1.26.3 CI sequence, the separate full root Jailer suite and the real embedded-agent amd64
 release build inside `mvmctl-030-test`. The literal root JSON independently counts 2,632 test/subtest passes,
 one package pass and zero failures/skips. CI receipt SHA-256 `cea49dfc`; root JSON `b255ba5d`; build receipt
@@ -204,8 +215,17 @@ and the root broker race run reports 10 with zero failures/skips, including real
 refusal and unchanged source authority. Literal root log SHA-256
 `db9669a84f9d8c6b770f108651080b1e30fba985d63cd9cf95ddb43ff74d3c89`.
 The Python correction collected one node and passed the existing missing-admission unit separately.
-These are focused source checks, not an installed receiver-death pass: installed `d13f8c06` still lacks
-the correction. Coherent CI/build, normal inner installation and the affected singleton remain pending.
+The later coherent CI/root/build and normal inner installation passed on `1300b64b`, as recorded above.
+The focused checks and installation are not an installed receiver-death pass; that affected singleton and
+the existing public pause/resume process/guest journey remain pending on the new candidate.
+
+**Empty kernel-list singleton (2026-10-09):** the previously unqualified registered
+`kernel/test_kernel.py::TestKernelLifecycle::test_kernel_list_empty` passed strict 1/1 with zero other outcomes
+on installed `bfdece17`/`d13f8c06`, clean Python source `e2fd9881`, before the Resume installation.
+Private config/cache initialization used the existing trusted 1.16.2 pair. Typed selected-cache cleanup passed;
+the complete original public/physical/administrator baseline matched byte-for-byte, with asset identities and
+defaults preserved. Terminal SHA-256 `a688c53c`; JSON `d428b33a`; JUnit `ab4f821b`. This does not qualify
+kernel acquisition, producers, the later Resume artifact or the complete kernel domain.
 
 **Current snapshot producer-failure recovery (2026-10-09):**
 `vm/test_jailer.py::TestNetworklessJailerLifecycle::test_snapshot_capture_file_limit_failure_recovers` passed
@@ -2573,7 +2593,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
 | `kernel ls --json` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | Installed rc.7: strict schema-1 list with a present registered kernel. |
-| `kernel ls --json` empty | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | Installed rc.7: an isolated initialized cache returns schema-1 success with `data: []`. |
+| `kernel ls --json` empty | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | Named-runner d13/e2fd: registered singleton passed strict1/1; private initialized cache returns schema-1 success with `data: []`, typed cleanup and original-state preservation passed. |
 | `kernel ls --remote` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1: exit 0, non-empty JSON list |
 | `kernel pull --type firecracker` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1 |
 | `kernel pull --type official` | ⏭️ Skip | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1 — marked kernel_build (can skip) |

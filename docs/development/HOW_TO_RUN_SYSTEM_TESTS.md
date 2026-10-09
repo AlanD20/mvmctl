@@ -134,15 +134,17 @@ exact match while retaining their resource/boot/namespace/process authority chec
 direct run inside `mvmctl-030-test`, set both variables to `mvmctl-030-test` in that guest. This opt-in does not
 authorize host-direct testing or changes to other VMs; the orchestrator never grants it automatically to Tier 3.
 
-The installed candidate is `0.3.0-rc.export-interrupt-bfdece17`, SHA-256
-`d13f8c06335342dab47fc6e5399af7e195992ab16dcf1ad00c3289c692390e42`. Complete pinned Go CI and the separate
-full root Jailer suite passed on clean `bfdece17`, including 2,632 root test/subtest passes and zero failures/skips.
+The installed candidate is `0.3.0-rc.resume-1300b64b`, SHA-256
+`81c521ba65e82cdec0abc322b080aa3e0c38876d6313f359cf86713792720c57`. Complete pinned Go CI and the separate
+full root Jailer suite passed on clean `1300b64b`, including 2,642 root test/subtest passes and zero failures/skips.
 The real-agent amd64 build and normal `host install-system` also passed inside the named runner; independent
 preservation checked all existing state except the authorized canonical binary replacement. Later documentation
 and Python-only changes carry only unchanged relevant Go/build inputs. Earlier checkpoints below retain their
-original source/candidate bindings. On the current candidate, the SIGINT export journey passed, while the
-receiver-death case failed a public-status expectation and remains under diagnosis; that two-case invocation
-is not a passing slice. The current snapshot capture file-limit failure/recovery case passed separately.
+original source/candidate bindings. On the earlier `bfdece17`/`d13f8c06` candidate, the SIGINT export journey
+passed, while receiver death exposed a cached Resume success bypass; that two-case invocation was not a
+passing slice. The new candidate removes that bypass, but its affected receiver-death and public pause/resume
+runtime qualification remains pending. The snapshot capture file-limit failure/recovery case passed separately
+on the earlier candidate.
 Reusable-base provisioning and the complete installed Python matrix remain pending; these passes do not qualify
 the full release.
 
