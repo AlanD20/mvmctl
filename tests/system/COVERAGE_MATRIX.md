@@ -30,9 +30,19 @@ failure remains failed, and its no-NAT body did not run.
 A separate batch of 23 other existing owned-network CRUD/rejection cases passed on the same installed
 candidate and corrected fixture in 19.12 seconds: strict 23/23, zero other outcomes and native exit 0.
 Fixture PRE/POST full inventories matched; mirror and source/artifact pins were preserved, with no preservation
-errors. These are 26 distinct current-candidate network cases across two batches, separate from the historical
-complete network results. VM-dependent cases, selectorless sync, administrator/fault cases, reusable-base
-provisioning and the full installed Python matrix remain pending.
+errors.
+
+Three existing `TestNetworkVMDependency` cases passed separately in 34.44 seconds using the explicit kernel
+ID/digest pair, a non-default Alpine image and serial 256 MiB VMs. The tested module (SHA-256 prefix
+`f61ae839`) was subsequently integrated as `4563e8a7`; production candidate identity was unchanged.
+Fixture cleanup and exact owned-image
+CLI removal without force restored the original full baseline, mirror and pins. A separate existing
+`TestNetworkSyncMissingBridge` case passed in 1.38 seconds using the unchanged signed `f5d6aa1e` module:
+exact owned-bridge deletion made sync fail closed, followed by typed logical retirement and full baseline
+restoration. The reports record strict 3/3 and 1/1 respectively, zero other outcomes and native exit 0.
+These are 30 distinct current-candidate network cases across four batches, separate from the historical
+complete network results. Selectorless sync, reusable-base provisioning, connectivity/policy qualification
+and the full installed Python matrix remain pending; no independent whole-root absence proof is claimed.
 
 **Current bounded memory qualification (2026-10-09):** Installed candidate
 `0.3.0-rc.partition-f909601d`, source `f909601d`, SHA-256
