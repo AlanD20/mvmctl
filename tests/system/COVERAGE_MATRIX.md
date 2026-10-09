@@ -75,6 +75,17 @@ Terminal SHA-256 `5ded3c87e1376044dc2c5eedbd5ffc8a7380ad7a9a537110f2d02681cd5efa
 `023d13c5f84b451b07307d0bd7a2a8814c6b776a5e68e20cd90f46f155c9fc4b`.
 This does not qualify referenced-image force removal, deletion/default-promotion behavior or the full image domain.
 
+**Current formerly-default image removal (2026-10-09):**
+`TestImageDependencyDeletion::test_delete_default_image_promotes_other_or_clears` passed separately,
+strict 1/1, native exit 0 and zero other outcomes, on installed `d13f8c06` and clean `47967bc7`.
+Despite its historical name, the body explicitly reselects the replacement before deleting the formerly-default
+owned import; it does not exercise automatic promotion. Exact typed cleanup restored the byte-identical original
+inventory and zero-default state. Raw prepared reports retain the two legitimate `SetDefault` timestamp updates;
+only that newly owned Alpine record's `updated_at` differs, with every other field and backing identity preserved.
+Source/candidate/kernel/mirror/boot/default pins passed. Terminal SHA-256
+`dc56776fdb84086000872e40aa88fa67379b5e364005738a2aef2a4f4766e6e7`; exact-node JUnit
+`276fcfe2933f1d5c6bee51741a831efb6a87bc39d01a156b0800aff78f7cecb5`.
+
 **Current local image import/removal (2026-10-09):** four registered cases passed together, strict 4/4 in
 7.76 seconds with native exit 0 and no other outcomes, on installed `0.3.0-rc.partition-f909601d` and clean
 `b73d0462` inside `mvmctl-030-test`: local cached raw-file import, nonexistent-path refusal, and normal/force
@@ -2519,6 +2530,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `image rm` | ⚡ Shallow | `images/test_images.py` | `TestImageRemove::test_image_remove_with_fixture[normal]` | Current installed f909 L2: unused imported image removed; owned backing and inventory cleanup checked. |
 | `image rm --force` | 🟡 Partial | `images/test_images.py` | `TestImageRemove::test_image_remove_with_fixture[force]` | Current installed f909 L2: unused imported image removed with force and checked cleanup; in-use force behavior remains separate. |
 | `image rm` blocked by VM dependency | ✅ Deep | `images/test_images.py` | `TestImageDependencyDeletion::test_delete_image_used_by_stopped_vm_fails` | Current installed d13 L2: Running/Stopped variants returned image.in_use, preserving record/backing identity/VM state; exact owned cleanup and original/prepared inventories passed. Force removal and default-promotion behavior remain separate. |
+| `image rm` after explicitly replacing its default | ✅ Deep | `images/test_images.py` | `TestImageDependencyDeletion::test_delete_default_image_promotes_other_or_clears` | Current installed d13 L2: replacement selected before deleting the formerly-default owned import; retained replacement and exact original zero-default cleanup passed. Historical test name does not prove automatic promotion. |
 | `image warm` | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: schema-1 path is a regular ready-pool file of the image's uncompressed size. |
 | `image warm --all` | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: warmed/ready message for cached image. |
 | `image warm` by ID prefix | ⚡ Shallow | `images/test_images.py` | `TestImageWarm` | Installed rc.7: prefix resolves and reports warmed/ready. |

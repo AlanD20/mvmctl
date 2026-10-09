@@ -72,6 +72,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Exact owned cleanup restored the original and prepared inventories byte-for-byte. This does not qualify
 > force removal of a referenced image or deletion/default-promotion behavior.
 
+> **Current formerly-default image removal checkpoint (2026-10-09):** the registered explicit-replacement
+> case passed separately, strict 1/1 with native exit 0. It selected and retained the replacement before
+> deleting the formerly-default owned image; typed cleanup restored the exact original zero-default inventory.
+> This does not test automatic default promotion. Prepared reports retain the owned default's timestamp change.
+
 > **Current image-warming checkpoint (2026-10-09):** all four registered warm selectors/refusal cases
 > passed strict 4/4 in 7.45 seconds on the unchanged installed candidate. Slug, prefix and `--all` warming
 > matched complete independently decompressed bytes and reused the same ready files. `--all` included both
