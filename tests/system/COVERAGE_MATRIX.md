@@ -17,6 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current network fixture checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
+source `f909601d` and candidate SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`,
+passed three existing `network/test_network.py::TestNetworkLifecycle` cases together in `mvmctl-030-test`:
+`test_network_create_no_nat`, `test_network_set_default` and `test_network_create_with_default_flag`.
+The corrected inactive-original-default fixture was integrated as `f5d6aa1e`; the strict report records
+three passes in 2.83 seconds, zero other outcomes and native exit 0. Fixture PRE/POST existing inventories
+matched, with defaults, configuration, policies, links, routes, mounts, firewall and mirror preserved.
+Cleanup used the existing fixture; this is not independent whole-root absence proof. The original setup
+failure remains failed, and its no-NAT body did not run. These three current-candidate passes are separate
+from the historical complete network results; reusable-base provisioning and the full installed Python
+matrix remain pending.
+
 **Current bounded memory qualification (2026-10-09):** Installed candidate
 `0.3.0-rc.partition-f909601d`, source `f909601d`, SHA-256
 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed both registered
