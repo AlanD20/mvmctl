@@ -17,6 +17,21 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current running-VM image import (2026-10-09):**
+`images/test_images.py::TestImageImportCreateVM::test_vm_import_preserves_guest_contents_and_source_state[running]`
+passed strict 1/1 in 27.69 seconds, native exit 0 and zero other outcomes, on installed
+`0.3.0-rc.partition-f909601d` and clean `b73d0462` inside `mvmctl-030-test`.
+The unchanged module SHA-256 is `1d0d4fafeced2b22b4e3464762450128ccc4175996d78408ba60e66c75f1ce09`.
+The source guest wrote and synced a unique marker; import captured its protected disk, restored Running state,
+and an independently booted clone read the exact guest-written bytes. Running state was checked again after
+clone removal. Strict JSON/JUnit, original and prepared public/physical inventories, exact source/kernel/mirror
+identities, and typed source/clone/imported-image/nondefault-Alpine cleanup were independently checked.
+Assets came from the existing mirror; no artificial RAM admission or abort guard was used.
+The initial private launcher required a lazily created export directory prematurely and executed no test;
+its seven-line preflight correction left creation to the typed product operation, with no manual root repair.
+This supersedes the earlier memory-guard-interrupted Running result for the unchanged data path, not the
+Paused/Stopped, interruption/recovery, reusable-base or full image-domain qualification.
+
 **Current administrator filesystem recovery (2026-10-09):**
 `host/test_host_admin.py::TestCleanHostAdministration::test_filesystem_failure_preserves_init_and_reset_retry_authority`
 passed strict 1/1 in 44.08 seconds inside `mvmctl-030-test`, with native exit 0 and zero other outcomes.
