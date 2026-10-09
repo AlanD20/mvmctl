@@ -29,14 +29,25 @@ type trustedReleaseExchangeOutcome struct {
 	diagnostic  *errs.DomainError
 }
 
+type trustedReleaseControlTransport interface {
+	Exchange(context.Context, *system.PrivilegedControlRequest) system.PrivilegedControlOutcome
+	ExchangeVMRootfsExport(context.Context, *system.PrivilegedControlRequest) system.PrivilegedControlOutcome
+}
+
 type trustedReleaseSystemExchange struct {
-	transport system.PrivilegedControlTransport
+	transport trustedReleaseControlTransport
 }
 
 func (exchange trustedReleaseSystemExchange) Exchange(
 	ctx context.Context,
 	request trustedReleaseExchangeRequest,
 ) trustedReleaseExchangeOutcome {
+	if request.action == VMRootfsExportAction && (request.payloadLength != 0 || request.payload != nil) {
+		return trustedReleaseExchangeOutcome{diagnostic: trustedReleaseClientPreExchangeError(
+			request.payload,
+			errs.New(errs.CodeValidationFailed, "VM rootfs export does not accept a payload"),
+		)}
+	}
 	controlRequest, err := system.NewPrivilegedControlRequest(
 		request.action,
 		request.frame,
@@ -49,7 +60,12 @@ func (exchange trustedReleaseSystemExchange) Exchange(
 		}
 		return trustedReleaseExchangeOutcome{diagnostic: trustedReleaseClientTransportError(false, err)}
 	}
-	outcome := exchange.transport.Exchange(ctx, controlRequest)
+	var outcome system.PrivilegedControlOutcome
+	if request.action == VMRootfsExportAction {
+		outcome = exchange.transport.ExchangeVMRootfsExport(ctx, controlRequest)
+	} else {
+		outcome = exchange.transport.Exchange(ctx, controlRequest)
+	}
 	return trustedReleaseExchangeOutcome{
 		response:    outcome.Response(),
 		responseEOF: outcome.ResponseEOF(),

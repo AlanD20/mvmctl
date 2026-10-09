@@ -299,6 +299,17 @@ func exchangePrivilegedControlWithHostVsock(
 	policy privilegedControlPolicy,
 	hostVsock *privilegedHostVsockResponseOwner,
 ) PrivilegedControlOutcome {
+	return exchangePrivilegedControlSession(ctx, request, deps, policy, hostVsock, false)
+}
+
+func exchangePrivilegedControlSession(
+	ctx context.Context,
+	request *PrivilegedControlRequest,
+	deps privilegedControlDeps,
+	policy privilegedControlPolicy,
+	hostVsock *privilegedHostVsockResponseOwner,
+	vmRootfsExport bool,
+) PrivilegedControlOutcome {
 	if ctx == nil {
 		return PrivilegedControlOutcome{diagnostic: errs.New(
 			errs.CodeValidationFailed,
@@ -360,6 +371,11 @@ func exchangePrivilegedControlWithHostVsock(
 	command.Dir = "/"
 	command.Env = privilegedControlEnvironment()
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if vmRootfsExport {
+		// CRITICAL: A separate session prevents caller death from delivering
+		// orphaned-process-group SIGHUP to sudo and interrupting root recovery.
+		command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
 	if err := ctx.Err(); err != nil {
 		return closeBeforeStart(err)
 	}
@@ -415,7 +431,7 @@ func exchangePrivilegedControlWithHostVsock(
 				fmt.Errorf("interrupt privileged control socket: %w", shutdownErr),
 			)
 		}
-		if kill && command.Process != nil && command.Process.Pid > 1 {
+		if kill && !vmRootfsExport && command.Process != nil && command.Process.Pid > 1 {
 			if killErr := deps.killGroup(cleanupCtx, command.Process.Pid); killErr != nil &&
 				!errors.Is(killErr, unix.ESRCH) {
 				transportErrors = append(transportErrors, fmt.Errorf("kill privileged process group: %w", killErr))

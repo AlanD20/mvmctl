@@ -3,10 +3,12 @@ package jailer
 import (
 	"path/filepath"
 	"strconv"
+
+	"mvmctl/internal/lib/system"
 )
 
 // VMRootfsExportAction copies one root-authoritative VM disk for image import.
-const VMRootfsExportAction = "jailer-vm-rootfs-export"
+const VMRootfsExportAction = system.PrivilegedVMRootfsExportAction
 
 // VMRootfsExportReleaseAction releases only an owned independent export copy.
 const VMRootfsExportReleaseAction = "jailer-vm-rootfs-export-release"
