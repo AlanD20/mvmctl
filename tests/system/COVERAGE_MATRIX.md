@@ -17,6 +17,19 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current VM-options checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
+SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed the complete
+15-node `vm/test_vm_lifecycle.py::TestVMConfigOptions` class together on clean signed suite `b73d0462`
+inside `mvmctl-030-test`: strict 15/15, zero other outcomes, native exit 0, 43.43 seconds.
+Guest observations proved CPU/RAM/root-disk allocation, config-versus-CLI precedence, custom boot arguments,
+both PCI transport choices, and logging/metrics enablement. Five invalid-resource variants were refused
+with typed errors before a VM projection appeared. The precedence case restored the exact original CPU
+configuration override. Existing fixtures removed exact owned VM generations; the wrapper removed only
+its identity-proven nondefault mirrored Alpine image, without force or default changes. Independent literal
+JSON/JUnit identities and original public/physical PRE/POST equality passed, with source/candidate/boot,
+defaults and mirror bindings preserved. No synthetic RAM guards were used. This completes this class,
+not the remaining lifecycle/host-reboot/fault journeys, reusable-base or complete installed T1/T2 matrix.
+
 **Current non-VM volume checkpoint (2026-10-09):** Installed `0.3.0-rc.partition-f909601d`,
 SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed 26 registered
 `volume/test_volume.py` cases together on clean signed suite `b73d0462` inside `mvmctl-030-test`:
