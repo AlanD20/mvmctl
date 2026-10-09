@@ -25,8 +25,10 @@ one package pass and zero failures/skips. CI receipt SHA-256 `cea49dfc`; root JS
 `d13f8c06335342dab47fc6e5399af7e195992ab16dcf1ad00c3289c692390e42`, records that exact revision,
 `vcs.modified=false`, Go 1.26.3, Linux/amd64 and PIE. Independent literal before/after comparisons preserved
 all preexisting runner inventories, administrator state, assets and file/source identities; only the authorized
-fresh task source and manifest were admitted separately. The candidate is not installed or system-qualified.
-Installed `f909601d` evidence below still qualifies only its matching unchanged inputs. Remote GitHub CI,
+fresh task source and manifest were admitted separately. Normal installation subsequently passed inside the
+named runner: the root-owned canonical binary matches the candidate hash/version, and a second literal
+preservation comparison differs only in the authorized canonical replacement. Installed `f909601d` evidence
+below still qualifies only its matching unchanged inputs; it is not relabeled as a run on this new candidate. Remote GitHub CI,
 remaining installed T1/T2 journeys and final release approval remain separate.
 
 **Live-attachment completion source (2026-10-09):** `7a4a99de` integrates authenticated root-derived guest
@@ -127,9 +129,24 @@ Jailer routing tests, affected vet and race checks passed inside `mvmctl-030-tes
 hash matched the tested six-file manifest. One isolated pre-fix survival regression failed because the worker
 was killed; the fixed test proved survival, deliberate later completion and exactly one reaping wait.
 The fixture-only `bfdece17` also passed exact six-node collection and the selected missing-admission runner unit.
-Neither change is installed yet. Coherent ordinary CI, full root-Jailer and real-agent build subsequently passed
-on `bfdece17` as recorded above; the installed SIGINT/receiver-death journeys remain required. The focused
-gates alone do not imply full CI, full root-Jailer or release qualification.
+Both changes are now installed inside the named runner after coherent ordinary CI, full root-Jailer and
+real-agent build passed on `bfdece17`. The first installed attempt observed the authenticated stopped worker
+surviving caller SIGINT, then failed a stale busy-removal public-code assertion. Its follow-on cleanup observer
+also failed after the assertion, although original/prepared inventories were restored exactly. Receiver-death
+was unexecuted because of fail-fast. Test-only `0b3762d9` now asserts the outer `image.import.failed` envelope,
+retryable class, exact message and pending-copy details; every independent root lock/survival/recovery proof
+is unchanged. Exact two-node collection and the selected admission unit passed, not the complete runtime
+journeys. Those installed SIGINT/receiver-death journeys remain required.
+
+**Current snapshot producer-failure recovery (2026-10-09):**
+`vm/test_jailer.py::TestNetworklessJailerLifecycle::test_snapshot_capture_file_limit_failure_recovers` passed
+strict 1/1 in 18.39 seconds on installed `0.3.0-rc.export-interrupt-bfdece17`, clean `bfdece17` and unchanged
+registered test bytes. This refresh was required by the newer capture-idle admission check, not a replay of
+an unchanged passing path. It proves real file-limit capture failure, source recovery and subsequent full
+rootfs/RAM/vmstate/data-volume restoration. Native exact collection/runtime exited 0; JSON/JUnit identify
+only that node, with zero other outcomes. Independent original/prepared inventories matched literally,
+typed owned cleanup restored zero image defaults, and candidate/source/kernel/mirror/boot pins matched.
+Terminal receipt SHA-256 `49c8b165`; JUnit `4153e709`. This is not whole-snapshot or full-release qualification.
 
 **Current administrator filesystem recovery (2026-10-09):**
 `host/test_host_admin.py::TestCleanHostAdministration::test_filesystem_failure_preserves_init_and_reset_retry_authority`

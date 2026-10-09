@@ -9,13 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Current implementation and qualification checkpoint (2026-10-09):** the closed root-dispatch, isolated
 > Jailer, per-VM managed/networkless namespace, direct-Go nftables, typed traffic/exec policy, protected raw-volume
-> and snapshot paths are implemented. Installed candidate `0.3.0-rc.partition-f909601d` remains bound to source
-> `f909601d` and SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`.
+> and snapshot paths are implemented. Installed QA candidate `0.3.0-rc.export-interrupt-bfdece17` is bound to
+> `bfdece17` and SHA-256 `d13f8c06335342dab47fc6e5399af7e195992ab16dcf1ad00c3289c692390e42`.
 > Complete pinned Go CI and the separate full root Jailer suite passed on clean `bfdece17`, including the new
 > live-attachment and export-interruption changes: 2,632 root tests/subtests, zero failures/skips. Its real-agent
 > amd64 candidate `0.3.0-rc.export-interrupt-bfdece17` built with Go 1.26.3 and unmodified VCS metadata,
-> SHA-256 `d13f8c06335342dab47fc6e5399af7e195992ab16dcf1ad00c3289c692390e42`, but is not installed yet.
-> Independent before/after checks preserved the existing runner state. Current installed-candidate evidence covers all 31 registered network nodes
+> SHA-256 `d13f8c06335342dab47fc6e5399af7e195992ab16dcf1ad00c3289c692390e42`. Normal system installation
+> passed inside the named QA VM only; independent before/after checks preserved existing state except the
+> authorized binary replacement. Earlier installed `f909601d` evidence covers all 31 registered network nodes
 > across five batches, all six host-exec cases, and all six VM-to-VM exec nodes across three invocations.
 > All 69 lifecycle and 37 volume nodes match the current 106-node collection across eight separately bound
 > passing batches, with strict zero-other outcomes and checked owned cleanup/preservation; these are not
@@ -77,7 +78,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > tests, vet and race checks passed inside the runner; the new survival regression failed against the old
 > state machine. Root authorization, state restoration and failed-response cleanup are unchanged. The fix
 > subsequently passed coherent ordinary CI, the complete root Jailer suite and a real-agent release build on
-> `bfdece17`. Installation and the two installed interruption/recovery journeys remain required.
+> `bfdece17`; normal inner installation also passed. The first installed attempt proved worker survival but
+> failed a stale busy-removal public-envelope assertion. Test-only `0b3762d9` corrects that expectation while
+> preserving every root lock/survival/recovery check. Both complete interruption journeys remain unqualified.
+
+> **Current snapshot failure/recovery checkpoint (2026-10-09):** the registered capture file-limit failure,
+> source recovery and full rootfs/RAM/vmstate/data-volume restore case passed strict 1/1 in 18.39 seconds on
+> the new installed candidate. Exact owned cleanup and literal original/prepared inventory restoration passed,
+> including restoration of the original zero-image-default state. This qualifies that current capture path,
+> not the entire snapshot domain or release matrix.
 
 > **Current bounded memory checkpoint (2026-10-09):** installed `0.3.0-rc.partition-f909601d`
 > passed all three registered bounded memory cases: near-saturation with host swap absent and present, and
