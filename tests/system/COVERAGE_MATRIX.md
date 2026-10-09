@@ -17,6 +17,17 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current image/kernel import checkpoint (2026-10-09):** Complete classes
+`images/test_images.py::TestImageImportAdvanced` (eight expanded nodes) and
+`kernel/test_kernel_import.py::TestKernelImportLifecycle` (three nodes) passed together, strict 11/11
+in 33.04 seconds with native exit 0, inside `mvmctl-030-test`. Clean suite `b73d0462` exercised the same
+installed `0.3.0-rc.partition-f909601d`, SHA-256 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`.
+Cases covered QCOW2 conversion and actual boot, force replacement, explicit partition selection and detector
+options, automatic format/version/optimization options, imported-kernel boot and stop/start identity.
+Independent JSON/JUnit checks proved exact case identities and zero other outcomes; exact owned cleanup and
+original public/physical inventories, defaults, existing mirror-volume source and kernel identities matched.
+This completes these two classes, not the entire image/kernel domains, build/export faults or release matrix.
+
 **Current complete lifecycle/volume node coverage (2026-10-09):** All 69 registered nodes in
 `vm/test_vm_lifecycle.py` and all 37 in `volume/test_volume.py` now have passing installed-candidate
 evidence on clean suite `b73d0462` inside `mvmctl-030-test`. The same `0.3.0-rc.partition-f909601d`
