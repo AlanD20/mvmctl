@@ -20,6 +20,9 @@ VMs. The three-tier architecture is documented in
 4. [Run System Tests via Orchestrator](#4-run-system-tests-via-orchestrator)
 5. [Interpret Results](#5-interpret-results)
 6. [Collect Release Evidence](#6-collect-release-evidence)
+   - [Retain the Full Current Collection](#61-retain-the-full-current-collection)
+   - [Record the Exact Selected Remainder](#62-record-the-exact-selected-remainder)
+   - [Join Verified Receipts Read-Only](#63-join-verified-receipts-read-only)
 7. [Reference](#7-reference)
 
 ---
@@ -619,6 +622,11 @@ python3 scripts/run-system-tests.py --host-direct --all --workers 2
 | `--host-reboot-phase` | — | Explicit `pre` or `post` continuation against existing `mvmctl-030-test`; separate from ordinary tier batches |
 | `--host-reboot-task` | — | Absolute private owned receipt directory for explicit phases; completed strict POST proof is mandatory for full release qualification |
 | `--host-reboot-envelope` | — | POST-only private external administrator receipt binding the fresh runner boot/process and truthful current finite outer controls |
+| `--collect-release-nodes` | — | Standalone full-registry collection inside the named runner; retain evidence in an empty private task directory (§6.1) |
+| `--record-evidence` | — | Retain literal reports for a named-runner test selection; does not finalize qualification (§6.2) |
+| `--collection-task` / `--selected-node-file` | — | Bind exact-node execution to retained current collection and an explicit JSON remainder (§6.2) |
+| `--completed-matrix-task` | — | Repeat for verified current receipts to subtract already-proved nodes (§6.2) |
+| `--official-kernel-carry` | — | Optional single sealed historical eight-case proof; exact candidate and relevant source inputs must match (§6.3) |
 | `--tier` | — | Comma-separated tier numbers; executed in given order (e.g., `--tier 1,3`) |
 | `--workers` | `4` | Maximum parallel VMs |
 | `--rebuild` | `false` | Build only `MVM_CANDIDATE_BINARY`, rebuild shared volume/base image, and run prepare; never replace `MVM_BINARY` |
@@ -762,6 +770,94 @@ KVM) is a **release blocker** — fix the environment, not the code.
 ## 6. Collect Release Evidence
 
 See [docs/RC_QA.md](../RC_QA.md) §4 for the evidence collection checklist and archive procedure.
+
+The optional exact-node workflow retains a full current collection, runs only explicitly unproved nodes, then joins
+verified receipts without replaying tests. It does not replace the release gates or the separate
+[host-reboot journey](#47-explicit-named-runner-host-reboot-journey).
+
+### 6.1 Retain the Full Current Collection
+
+Execute collection **inside the existing `mvmctl-030-test`**, from the root of the clean, exact qualified source checkout.
+Set the actual candidate paths and retain the qualification environment, including its cache/config, asset mirror and
+any imported-kernel binding. Here `MVM_BINARY` is the runner's installed candidate, not the outer controller:
+
+```bash
+export MVM_TEST_VM=mvmctl-030-test
+export MVM_TEST_QUALIFICATION_HOST=mvmctl-030-test
+export MVM_BINARY=/usr/local/bin/mvm
+export MVM_CANDIDATE_BINARY=/absolute/path/to/qualified-candidate/mvm
+python3 scripts/run-system-tests.py --collect-release-nodes /absolute/path/to/collection-task
+```
+
+The candidate artifact must be a distinct file with the same trusted bytes/version as the installed runner binary.
+Use an existing, empty, operator-owned `0700` directory at an absolute canonical path. Collection is standalone:
+no domain/tier selectors or preparation/test flags. It collects the entire registered node set without running fixtures
+and retains the binding, literal node list, native output and sealed `terminal.json`. Successful completion means the
+full current registry was collected, not that any test passed. Preserve those files unchanged.
+
+### 6.2 Record the Exact Selected Remainder
+
+Create an explicit selected-node JSON file with exactly these keys. Replace the illustrative values with the actual
+SHA-256 of the retained `terminal.json` bytes and **every** remaining exact selector in the selected domains/tiers:
+
+```json
+{
+  "schema_version": 1,
+  "collection_terminal_sha256": "<actual literal SHA-256 of collection-task/terminal.json>",
+  "nodes": ["tests/system/cli/test_cli.py::TestHelpCommand::test_help_root"]
+}
+```
+
+The selector above illustrates the format, not a complete `cli` selection. Preserve parametrized node IDs exactly.
+The accepted set is the full selected domains minus nodes proved by verified completed receipts (and an explicitly
+accepted kernel carry), excluding the separately proved host-reboot nodes. Unknown, missing, duplicate or already-proved
+nodes are rejected; an empty remainder requires no new run. A file-level or test-count summary is not node proof.
+
+Run the selected batch inside the same named-runner/source/candidate context, using a new empty private task directory:
+
+```bash
+python3 scripts/run-system-tests.py cli \
+  --record-evidence /absolute/path/to/new-matrix-task \
+  --collection-task /absolute/path/to/collection-task \
+  --selected-node-file /absolute/path/to/selected-nodes.json
+```
+
+Add `--completed-matrix-task /absolute/path/to/completed-task` once per actual current receipt used in the subtraction.
+The three selection/evidence flags above are required together; do not combine them with `--release-qualification`,
+`--rebuild` or `--skip-volume-check`. Tier 3 selections still require `--host-direct` and an explicitly authorized clean
+qualification host; retain applicable preparation prerequisites. Preparation-only `--image` does not accept
+`--record-evidence`.
+
+A recorded batch counts only when its literal native, JSON, JUnit and node-phase reports agree on the exact selected
+nodes, all pass, and cleanup closes successfully. Skips, deselections, failures, collection errors, xfails/xpasses,
+missing or extra nodes are not accepted evidence. Preserve the complete task unchanged for verification.
+
+### 6.3 Join Verified Receipts Read-Only
+
+Run the finalizer from the exact clean qualified source, with the same candidate artifact and the **original unchanged
+outer controller** configured as `MVM_BINARY`. Do not inherit the inner runner's `MVM_BINARY`. Supply the retained full
+collection, every completed matrix task and the closed PRE/POST host-reboot task:
+
+```bash
+MVM_BINARY=/absolute/path/to/original-outer-controller \
+MVM_CANDIDATE_BINARY=/absolute/path/to/qualified-candidate/mvm \
+python3 scripts/system_test_evidence.py \
+  --qualified-source /absolute/path/to/qualified-source \
+  --collection-task /absolute/path/to/collection-task \
+  --matrix-task /absolute/path/to/completed-matrix-task \
+  --host-reboot-task /absolute/path/to/closed-host-reboot-task
+```
+
+Repeat `--matrix-task` for additional completed batches. The full current registry remains authoritative: the verifier
+requires exact node coverage without gaps or overlaps and revalidates source/candidate bindings, literal report seals
+and the unchanged outer-controller reboot proof. It does not rebuild, install, execute tests or obtain a fresh reboot
+observation. Exit zero with `verdict: "PASS"` means this evidence join passed; `INCOMPLETE` is not qualification success.
+Neither result alone declares the final release passed or waives other release gates and approval.
+
+Optionally supply `--official-kernel-carry /absolute/path/to/original-sealed-kernel-task` to both selected execution and
+finalization. This verifier accepts only its one sealed historical eight-case proof, the exact original candidate bytes
+and version, and unchanged relevant source hashes. A changed binary or relevant input is rejected: there is no
+retargeting to a newer artifact, and carried nodes remain historical proof rather than a new runtime pass.
 
 ---
 
