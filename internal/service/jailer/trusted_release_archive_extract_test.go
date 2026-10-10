@@ -21,7 +21,7 @@ import (
 func TestTrustedReleaseArchiveStageExtractsSelectedMembersFromCompleteAuditedEnvelope(t *testing.T) {
 	t.Parallel()
 
-	for _, version := range []string{"1.16.1", "1.16.2"} {
+	for _, version := range []string{"1.16.1", "1.16.2", "1.17.0"} {
 		t.Run(version, func(t *testing.T) {
 			t.Parallel()
 			fixture := newTrustedReleaseArchiveFixtureForVersion(t, version)
@@ -70,6 +70,18 @@ func TestTrustedReleaseArchiveStageRejectsReleaseTarProfileMismatch(t *testing.T
 		"current release with local PAX": {
 			version: "1.16.2",
 			mutate:  func(_ *testing.T, fixture *trustedReleaseArchiveFixture) { fixture.plainGNU = false },
+		},
+		"1.17.0 with local PAX": {
+			version: "1.17.0",
+			mutate:  func(_ *testing.T, fixture *trustedReleaseArchiveFixture) { fixture.plainGNU = false },
+		},
+		"1.17.0 with older magic": {
+			version: "1.17.0",
+			mutate: func(_ *testing.T, fixture *trustedReleaseArchiveFixture) {
+				fixture.members[0].mutateHeader = func(raw []byte) {
+					copy(raw[257:265], []byte{'u', 's', 't', 'a', 'r', 0, '0', '0'})
+				}
+			},
 		},
 		"current release with older magic": {
 			version: "1.16.2",
@@ -527,7 +539,7 @@ func newTrustedReleaseArchiveFixtureForVersion(t *testing.T, version string) *tr
 	sort.Strings(names)
 	fixture := &trustedReleaseArchiveFixture{
 		policy:           policy,
-		plainGNU:         version == "1.16.2",
+		plainGNU:         version == "1.16.2" || version == "1.17.0",
 		endBlocks:        2,
 		firecrackerBytes: []byte("selected-firecracker"),
 		jailerBytes:      []byte("selected-jailer"),
@@ -598,7 +610,7 @@ func (fixture *trustedReleaseArchiveFixture) decompressed(t *testing.T) []byte {
 		})
 		if fixture.plainGNU {
 			copy(memberHeader[257:265], []byte{'u', 's', 't', 'a', 'r', ' ', ' ', 0})
-			// NOTE: All official 1.16.2 members encode metadata UID 14133424 with these eight bytes.
+			// NOTE: Official 1.16.2 and 1.17.0 members encode metadata UID 14133424 with these bytes.
 			copy(memberHeader[108:116], []byte{0x80, 0, 0, 0, 0, 0xd7, 0xa8, 0xb0})
 			writeTrustedReleaseTarOctalForTest(t, memberHeader[329:337], member.deviceMajor)
 			writeTrustedReleaseTarOctalForTest(t, memberHeader[337:345], member.deviceMinor)

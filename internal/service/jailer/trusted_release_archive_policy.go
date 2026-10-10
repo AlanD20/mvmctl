@@ -56,7 +56,7 @@ func newTrustedReleaseArchivePolicy(source trustedReleaseSource) (trustedRelease
 	case "1.14.2", "1.14.3", "1.14.4", "1.15.0", "1.15.1", "1.16.0", "1.16.1":
 		cpuTemplates = []string{"C3", "T2A", "T2", "T2S", "V1N1", "T2CL"}
 		tarProfile = trustedReleaseArchiveTarLocalPAX
-	case "1.16.2":
+	case "1.16.2", "1.17.0":
 		cpuTemplates = []string{"C3", "T2A", "T2", "T2S", "V1N1", "T2CL"}
 		tarProfile = trustedReleaseArchiveTarPlainGNU
 	default:

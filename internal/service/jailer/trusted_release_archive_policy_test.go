@@ -28,8 +28,13 @@ func TestTrustedReleaseArchivePolicyMatchesAuditedX8664Layouts(t *testing.T) {
 			cpuTemplates: []string{"C3", "T2A", "T2", "T2S", "V1N1", "T2CL"},
 			tarProfile:   trustedReleaseArchiveTarLocalPAX,
 		},
-		"current upper-case templates": {
+		"1.16.2 plain GNU templates": {
 			version:      "1.16.2",
+			cpuTemplates: []string{"C3", "T2A", "T2", "T2S", "V1N1", "T2CL"},
+			tarProfile:   trustedReleaseArchiveTarPlainGNU,
+		},
+		"1.17.0 plain GNU templates": {
+			version:      "1.17.0",
 			cpuTemplates: []string{"C3", "T2A", "T2", "T2S", "V1N1", "T2CL"},
 			tarProfile:   trustedReleaseArchiveTarPlainGNU,
 		},
@@ -69,6 +74,7 @@ func TestTrustedReleaseArchivePolicyAcceptsOnlyExactAuditedVersions(t *testing.T
 		"1.16.0",
 		"1.16.1",
 		"1.16.2",
+		"1.17.0",
 	} {
 		t.Run(version, func(t *testing.T) {
 			t.Parallel()
@@ -88,9 +94,11 @@ func TestTrustedReleaseArchivePolicyRejectsUnauditedLayouts(t *testing.T) {
 	tests := map[string]releaseSlot{
 		"older x86_64 version": {version: "1.10.0", architecture: "x86_64"},
 		"gap x86_64 version":   {version: "1.14.1", architecture: "x86_64"},
-		"newer x86_64 version": {version: "1.16.3", architecture: "x86_64"},
+		"unaudited 1.16 patch": {version: "1.16.3", architecture: "x86_64"},
+		"newer x86_64 version": {version: "1.17.1", architecture: "x86_64"},
 		"aarch64 archive":      {version: "1.16.1", architecture: "aarch64"},
 		"prerelease archive":   {version: "1.16.1-dev", architecture: "x86_64"},
+		"1.17 prerelease":      {version: "1.17.0-dev", architecture: "x86_64"},
 	}
 	for name, slot := range tests {
 		t.Run(name, func(t *testing.T) {

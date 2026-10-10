@@ -15,7 +15,7 @@ func validVMLaunchRequest() VMLaunchRequest {
 		CacheRoot:        "/home/runner/.cache/mvmctl",
 		KernelID:         strings.Repeat("b", 64),
 		RootfsBytes:      managedVMRootfsMinBytes,
-		Release:          ReleaseSlot{Version: "1.16.2", Architecture: "x86_64"},
+		Release:          ReleaseSlot{Version: "1.17.0", Architecture: "x86_64"},
 		NetworkPlacement: model.VMNetworkPlacementManaged,
 		NetworkID:        strings.Repeat("c", 64),
 		GuestIPv4:        "10.0.0.2",
@@ -95,12 +95,12 @@ func TestVMLaunchRequestRequiresQualifiedRelease(t *testing.T) {
 			if placement == model.VMNetworkPlacementNetworkless {
 				request.NetworkID, request.GuestIPv4, request.GuestMAC = "", "", ""
 			}
-			for _, version := range []string{"1.16.0", "1.16.1", "1.16.3"} {
+			for _, version := range []string{"1.16.0", "1.16.1", "1.16.2", "1.16.3", "1.17.1", "1.18.0", "1.17.0-dev"} {
 				t.Run(version, func(t *testing.T) {
 					candidate := request
 					candidate.Release.Version = version
 					err := candidate.Validate()
-					if err == nil || !strings.Contains(err.Error(), "Firecracker/Jailer 1.16.2") {
+					if err == nil || !strings.Contains(err.Error(), "Firecracker/Jailer 1.17.0") {
 						t.Errorf("unqualified release %s was admitted: %v", version, err)
 					}
 				})

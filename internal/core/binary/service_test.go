@@ -39,10 +39,10 @@ func TestService_ResolvePairFailsClosed(t *testing.T) {
 			wantErr:  "missing or mismatched",
 		},
 		"only_mismatched_jailer_version_exists": {
-			selected: binaryItem("selected", "firecracker", "1.16.0", true),
+			selected: binaryItem("selected", "firecracker", "1.17.0", true),
 			seed: []*model.BinaryItem{
-				binaryItem("selected", "firecracker", "1.16.0", true),
-				binaryItem("jailer", "jailer", "1.15.0", true),
+				binaryItem("selected", "firecracker", "1.17.0", true),
+				binaryItem("jailer", "jailer", "1.16.2", true),
 			},
 			wantErr: "missing or mismatched",
 		},
@@ -103,8 +103,8 @@ func TestService_ResolvePairFailsClosed(t *testing.T) {
 // release pair; resolving its exact repository projection must still succeed.
 func TestService_ResolvePairUsesProtectedReleaseProjection(t *testing.T) {
 	repo := testutil.NewBinaryRepo()
-	firecracker := binaryItem("selected", "firecracker", "1.16.2", true)
-	jailer := binaryItem("jailer", "jailer", "1.16.2", true)
+	firecracker := binaryItem("selected", "firecracker", "1.17.0", true)
+	jailer := binaryItem("jailer", "jailer", "1.17.0", true)
 	for _, item := range []*model.BinaryItem{firecracker, jailer} {
 		item.Path = filepath.Join(infra.TrustedBinaryRoot, item.Architecture, item.Version, item.Type)
 		require.NoError(t, repo.Upsert(t.Context(), item))
@@ -115,9 +115,9 @@ func TestService_ResolvePairUsesProtectedReleaseProjection(t *testing.T) {
 	assert.Equal(t, jailer.ID, pair.Jailer.ID)
 }
 
-// Rationale: a valid older artifact pair must remain manageable but cannot be selected for VM execution.
+// Rationale: launch admission refuses older, future, and prerelease pairs even when their trusted projections match.
 func TestService_ResolvePairRejectsUnqualifiedRelease(t *testing.T) {
-	for _, version := range []string{"1.16.0", "1.16.1", "1.16.3"} {
+	for _, version := range []string{"1.16.0", "1.16.1", "1.16.2", "1.16.3", "1.17.1", "1.18.0", "1.17.0-dev"} {
 		t.Run(version, func(t *testing.T) {
 			repo := testutil.NewBinaryRepo()
 			firecracker := binaryItem("selected", "firecracker", version, true)
@@ -128,7 +128,7 @@ func TestService_ResolvePairRejectsUnqualifiedRelease(t *testing.T) {
 			}
 			pair, err := binary.NewService(repo, "x86_64").ResolvePair(t.Context(), firecracker)
 			require.Error(t, err)
-			assert.ErrorContains(t, err, "Firecracker/Jailer 1.16.2")
+			assert.ErrorContains(t, err, "Firecracker/Jailer 1.17.0")
 			assert.Nil(t, pair)
 		})
 	}
