@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-09-13 (sudoers publication, retained outputs, private status, and raw data volumes)
+**Last Updated:** 2026-10-10 (approved newest-stable Firecracker/Jailer launch policy)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md), and
@@ -704,28 +704,49 @@ enforce them before extraction is accepted. A packaging change must update the r
 fall back to basename matching, caller-selected member names, or permissive extraction.
 
 The v0.3 archive parser accepts only the separately audited x86_64 releases `1.10.1`, `1.14.2`, `1.14.3`, `1.14.4`,
-`1.15.0`, `1.15.1`, `1.16.0`, `1.16.1`, and `1.16.2`. Source derivation and ELF admission also understand `aarch64`, but that does
-not authorize an aarch64 archive: the available asset mirror contains no aarch64 release archive, so extraction for
-that architecture fails closed until an architecture-specific member and format audit updates this decision and its
+`1.15.0`, `1.15.1`, `1.16.0`, `1.16.1`, `1.16.2`, and `1.17.0`. Source derivation and ELF admission also understand
+`aarch64`, but that does not authorize an aarch64 archive: the available asset mirror contains no aarch64 release
+archive, so extraction for that architecture fails closed until an architecture-specific member and format audit updates this decision and its
 tests. Versions outside the exact audited x86_64 set likewise fail closed rather than assuming that a nearby release
 uses the same packaging.
 
 Archive admission is distinct from VM launch support. The v0.3.0 lifecycle admits only a matching
-Firecracker/Jailer `1.16.2` pair for create, start, reboot, and restore. The authenticated launch request and the
+Firecracker/Jailer `1.17.0` pair for create, start, reboot, and restore. The authenticated launch request and the
 unprivileged pair resolver reject another selected version before Jailer execution; audited older archives remain
 available for explicit binary-management operations. Jailer `1.16.0` rejected the launcher's
 `/proc/self/ns/net` handle as a symbolic-link loop; the upstream
 [1.16.1 changelog](https://github.com/firecracker-microvm/firecracker/blob/main/CHANGELOG.md#1161) records the
 reversal of that no-follow behavior.
 
-The user approved replacing the earlier 1.16.1 launch pin with 1.16.2 after installed-candidate pause/resume QA
-reproduced the upstream vsock RX-gate defect while the guest and agent remained alive. The
+Historical 1.16.2 decision: the user approved replacing the earlier 1.16.1 launch pin with 1.16.2 after
+installed-candidate pause/resume QA reproduced the upstream vsock RX-gate defect while the guest and agent remained
+alive. The
 [1.16.2 release notes](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2) record its fix and a
 snapshot-format change incompatible in both directions with 1.16.0/1.16.1. Fresh snapshots are required; older captured
 release identities are not rewritten and no snapshot conversion is provided. The official x86_64 archive digest is
 `32e3cdcd4081f91fe2b024a266f57dcb3b4e5fec5033e0cb22467ad7f7820bda`; its inspected 24 regular-file members match
 the names, modes and ELF admission shape below, but its raw tar encoding differs as specified below. Runtime
 qualification remains a separate release gate.
+
+Approved update policy (2026-10-10): select the newest stable official Firecracker release and its exactly matching
+Jailer release. The official [latest release](https://github.com/firecracker-microvm/firecracker/releases/latest)
+resolved to [v1.17.0](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.17.0) when checked on
+2026-10-10, and the user approved that exact pair. Each update requires inspection of the authentic upstream archive,
+a release-specific closed archive profile and member/ELF admission, review of launch/device/snapshot contracts, and
+installed-candidate runtime qualification before release. A version bump does not inherit older qualification or
+authorize archive repacking, a mixed Firecracker/Jailer pair, or unchecked runtime auto-update. Unsupported release
+and architecture profiles fail closed. Snapshot release identities remain exact; this update supplies no snapshot
+conversion or permission to rewrite older captured identities.
+
+The authentic 1.17.0 x86_64 archive inspected on 2026-10-10 is 7,464,385 compressed bytes with SHA-256
+`06094a1108ae9e82aa4c23a775aa92758f53f1175d422270d9d6162cb9ade558`, matching the official sidecar and release asset
+digest. Its exact 24-member set and modes match the contract below. Its 24,606,720-byte tar stream and maximum member
+size of 3,676,680 bytes remain within the existing 32 MiB tar and 8 MiB member limits. Firecracker is 3,676,680 bytes
+with SHA-256 `99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c786b5de7a5`; Jailer is 2,243,000 bytes with
+SHA-256 `65ef226e96f0ceda55ba643f445801ef2cc0ea667ef67cad8ac4f406c9c8434f`. Both selected executables satisfy the
+existing ELF64/little-endian/x86_64 `ET_DYN` policy. The inspection establishes the reviewed archive profile; production
+import and runtime qualification remain separate gates. Per-member alignment padding was not independently checked
+by this inspection and remains subject to the existing production zero-padding checks.
 
 For an accepted version, let `<root>` be `release-v<version>-x86_64` and `<binary>` be
 `v<version>-x86_64`. The logical archive contains exactly 24 regular-file members, in any order, with this exact set:
@@ -736,7 +757,8 @@ For an accepted version, let `<root>` be `release-v<version>-x86_64` and `<binar
   corresponding exact `.debug` member for each tool; and
 - six CPU-template leaves `<root>/<template>-v<version>.json`, where `<template>` is exactly one of
   `c3`, `t2a`, `t2`, `t2s`, `v1n1`, and `t2cl` for `1.10.1`, or exactly one of `C3`, `T2A`, `T2`, `T2S`, `V1N1`, and
-  `T2CL` for the audited `1.14.2`, `1.14.3`, `1.14.4`, `1.15.0`, `1.15.1`, `1.16.0`, `1.16.1`, and `1.16.2` releases.
+  `T2CL` for the audited `1.14.2`, `1.14.3`, `1.14.4`, `1.15.0`, `1.15.1`, `1.16.0`, `1.16.1`, `1.16.2`, and `1.17.0`
+  releases.
 
 The six non-debug tool binaries are exact mode `0755`. Every other logical member, including every `.debug` member, is
 exact mode `0644`. Member order, archive uid/gid, and archive mtime are not authority. Every logical member is a GNU
@@ -755,12 +777,13 @@ authority. Any malformed record length or value, global PAX header, GNU long-nam
 header is rejected.
 
 The separately audited 1.16.2 x86_64 archive instead uses exactly 24 plain GNU regular-file headers, with no PAX or
-other extension headers. Its magic/version bytes are exactly `75 73 74 61 72 20 20 00` (`ustar`, two spaces, NUL),
+other extension headers. The authentic 1.17.0 x86_64 archive was separately inspected and uses that same closed profile.
+Their magic/version bytes are exactly `75 73 74 61 72 20 20 00` (`ustar`, two spaces, NUL),
 and both eight-byte device fields are exactly seven ASCII zeroes followed by NUL. All bytes from offset 345 through
 the end of each header are zero. The UID metadata is the sole numeric exception: its positive eight-byte GNU
 base-256 encoding represents publisher UID `14133424`, above the seven-octal-digit range. Admit this encoding only
-for 1.16.2 UID metadata, with the marker byte exactly `0x80`, the next three bytes zero, and the remaining unsigned
-32-bit value above `2097151`; representable UID values retain canonical octal encoding. It never sets extracted-file
+for exact 1.16.2 and 1.17.0 UID metadata, with the marker byte exactly `0x80`, the next three bytes zero, and the remaining
+unsigned 32-bit value above `2097151`; representable UID values retain canonical octal encoding. It never sets extracted-file
 ownership. Negative, overflowing, or unnecessarily base-256-encoded values remain rejected. All other numeric fields
 retain the canonical octal encoding, and strings, checksum,
 member names, modes, content bounds and ELF validation retain their existing strict checks. Select this profile only
@@ -770,12 +793,12 @@ demonstrating why adding a member allowlist alone is insufficient and why archiv
 workaround.
 
 The gzip body contains exactly one member and no trailing compressed bytes. The decompressed tar stream is at most
-32 MiB; the audited archives are 20,049,920 through 23,961,600 bytes. Each logical member is at most 8 MiB; the audited
-maximum is 3,539,456 bytes. The logical count is exactly 24, while the compressed-body limit remains 128 MiB and the
+32 MiB; the audited archives are 20,049,920 through 24,606,720 bytes. Each logical member is at most 8 MiB; the audited
+maximum is 3,676,680 bytes. The logical count is exactly 24, while the compressed-body limit remains 128 MiB and the
 selected-executable and manifest limits remain independently enforced. In the older local-PAX profile, mode, uid, gid,
 size, and mtime use canonical octal encoding and unused device-major/minor fields are entirely NUL-filled. That profile
-rejects non-octal/base-256 encoding and any non-NUL device field, including octal zero. The 1.16.2 plain-GNU profile
-uses the separately constrained UID and device encodings above; mode, gid, size and mtime remain octal-only. Both
+rejects non-octal/base-256 encoding and any non-NUL device field, including octal zero. The exact 1.16.2/1.17.0
+plain-GNU profile uses the separately constrained UID and device encodings above; mode, gid, size and mtime remain octal-only. Both
 profiles require the canonical six-octal-digit/NUL/space checksum form and a valid checksum. After the final logical
 member, the stream contains exactly two all-zero tar end blocks followed only by
 all-zero padding through gzip EOF. Non-zero padding, decompressed overflow, truncation, concatenated gzip members,
@@ -827,11 +850,13 @@ or asset-mirror access for this path.
 The fixed `manifest.json` leaf uses schema version 1 and is at most 4 KiB. Its closed JSON schema contains exactly the
 canonical release slot, the archive SHA-256 digest, and separate Firecracker and Jailer objects containing a SHA-256
 digest and `size_bytes`. All digests are exactly 64 lowercase hexadecimal characters. Each executable size is between
-120 bytes (one complete ELF64 header and one program header) and 64 MiB. The current mirrored x86_64 releases use no
-more than 3,527,456 bytes for either selected executable, so the upper bound leaves substantial growth room while
+120 bytes (one complete ELF64 header and one program header) and 64 MiB. The audited x86_64 releases use no
+more than 3,676,680 bytes for either selected executable, so the upper bound leaves substantial growth room while
 preventing a corrupt root manifest from authorizing an unbounded verification pass. An upstream executable exceeding
 the bound fails closed until the policy is reviewed; the bound is architecture-neutral and does not substitute for the
 still-required aarch64 archive-member audit.
+
+Historical 1.16.2 manifest example:
 
 ```json
 {

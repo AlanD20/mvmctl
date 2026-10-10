@@ -85,8 +85,10 @@ by staging the candidate, invoking `host install-system`, and initializing throu
 replays and verifies the administrator install contract. Directly copying onto the canonical path, relying on PATH
 lookup, or aliasing the candidate to the controller does not qualify the installer.
 
-The builder's unprivileged initialization pins the qualified Firecracker/Jailer 1.16.2 pair through
-`mvm init --non-interactive --binary-version 1.16.2`; it must not resolve a moving latest release during qualification.
+The builder's unprivileged initialization pins the approved Firecracker/Jailer 1.17.0 pair through
+`mvm init --non-interactive --binary-version 1.17.0`; it must not resolve a moving latest release during qualification.
+The upstream stable-release selection was checked on 2026-10-10. Archive admission and installed-candidate runtime
+qualification are separate gates; earlier 1.16.2 results do not qualify 1.17.0.
 Base-image preparation no longer removes a pre-existing fixed-name builder VM. If creation reports that the name is
 occupied, preparation fails and leaves that VM untouched; cleanup applies only after this run's create succeeds.
 Every builder artifact pull must also report an explicit local-mirror read. A pull error, checksum fallback, or

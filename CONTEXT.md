@@ -681,7 +681,7 @@ Attached-volume growth likewise requires a stopped VM, not detach. On later VM t
 absent and does not reopen that backing. Transitional records still require the retained backing to revoke access.
 Broader live hotplug and guest-I/O qualification remains open.
 
-Private Firecracker 1.16.1 MMIO admission accounts for the complete device budget: rootfs, network, VMGenID, VMClock,
+The initial private Firecracker 1.16.1 MMIO profile accounts for the complete device budget: rootfs, network, VMGenID, VMClock,
 optional cloud-init and vsock, and ARM RTC/serial where applicable. The PCI profile uses the same exact release
 authority with separate bus-slot and MSI-X accounting; it does not reuse the MMIO interrupt formula. The root child
 persists initial device/volume identity and a configuration digest bound to boot, generation, release, and jail root.
@@ -1479,9 +1479,11 @@ installed controller used only to create, inspect, copy to, and destroy disposab
 image tag comes from an isolated `MVM_CANDIDATE_BINARY --version` probe. Building or testing a candidate must never
 replace `MVM_BINARY`.
 
-Runner initialization requests exact Firecracker 1.16.2 with
-`/usr/local/bin/mvm init --non-interactive --binary-version 1.16.2` when no local pair exists. This avoids a moving
-`latest` dependency while preserving existing local/default selection on already-prepared images.
+Runner initialization requests exact Firecracker/Jailer 1.17.0 with
+`/usr/local/bin/mvm init --non-interactive --binary-version 1.17.0` when no local pair exists. The approved launch
+pair tracks the newest stable upstream release through an explicit reviewed update, with separate archive admission
+and runtime qualification; it is not resolved from a moving `latest` value at launch. Existing local/default selection
+on already-prepared images is preserved, so qualification must verify the selected pair is exactly 1.17.0.
 
 This controller/candidate isolation applies only to T1/T2 runner VMs. Tier 3 is host-direct and may mutate outer-host
 VMs, kernels, images, networks, and volumes. It is allowed only on a clean disposable qualification host where the

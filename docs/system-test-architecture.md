@@ -36,14 +36,14 @@ Host (your machine)
 ├── TIER 1 — One VM per domain from custom base image + shared volume
 │   ├── mvm vm create --image mvm-test-runner:<version> --volume asset-mirror
 │   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init \
-│   │   --non-interactive --binary-version 1.16.2
+│   │   --non-interactive --binary-version 1.17.0
 │   ├── pytest tests/system/<domain>/        ← runs INSIDE the VM
 │   └── mvm vm rm --force
 │
 ├── TIER 2 — Same as T1 + nested-virt + kernel for Firecracker-in-VM tests
 │   ├── mvm vm create --image mvm-test-runner:<version> --nested-virt --volume asset-mirror
 │   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init \
-│   │   --non-interactive --binary-version 1.16.2
+│   │   --non-interactive --binary-version 1.17.0
 │   ├── MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull / image pull / bin pull (cache hits)
 │   ├── pytest tests/system/<domain>/        ← runs INSIDE the VM
 │   └── mvm vm rm --force
@@ -81,7 +81,7 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 5. pip3 install pytest-timeout
 6. Add runner to mvm, kvm groups
 7. Initialize through exact `sudo /usr/local/bin/mvm host init`; chown `/tests` to runner
-8. Mount the shared volume, run unprivileged `/usr/local/bin/mvm init --binary-version 1.16.2`, then pull remaining
+8. Mount the shared volume, run unprivileged `/usr/local/bin/mvm init --binary-version 1.17.0`, then pull remaining
    images and kernels through the same exact installed binary
 9. apt-get clean
 10. mvm vm stop (graceful stop)
@@ -136,9 +136,10 @@ for the scoped invocation.
 
 ## 3. Three Tiers
 
-T1/T2 runner VMs are currently configured as Firecracker microVMs with **Firecracker v1.16** and the
-**`official:7.0.11`** kernel built by mvmctl. The asset advertises `nftables`, `tuntap`, `kvm`, and `btrfs`, but that
-feature list does not prove the bridge-family nftables capability required by the 0.3.0 firewall.
+T1/T2 runner VMs use the installed outer controller's selected Firecracker/Jailer pair and the
+**`official:7.0.11`** kernel built by mvmctl. The candidate inside each runner pins the approved **1.17.0** pair;
+this does not upgrade the outer controller or qualify the new pair. The asset advertises `nftables`, `tuntap`, `kvm`,
+and `btrfs`, but that feature list does not prove the bridge-family nftables capability required by the 0.3.0 firewall.
 
 | Tier | Runs inside VM | Shared volume | Nested KVM | Runner VM kernel | What's tested |
 |------|---------------|---------------|------------|-----------------|---------------|
@@ -203,7 +204,7 @@ Because `asset-mirror` has `IsShareable=true` and `IsReadOnly=true`:
 | `vmlinux-*` (firecracker kernels) | ~30 MB | Default kernel for test VMs |
 | `alpine:3.23` image | ~8 MB | Fast VM creation |
 | `ubuntu:noble` image | ~600 MB | Heavier tests (SSH, nested virt) |
-| `firecracker-v1.16.2` tarball | ~20 MB | Qualified Firecracker/Jailer launch pair |
+| `firecracker-v1.17.0` tarball | ~7.5 MB compressed | Approved Firecracker/Jailer launch pair; runtime qualification required |
 | `firecracker-v1.16.0` tarball | ~20 MB | Audited archive-management tests only; not a VM-launch fallback |
 
 ---
@@ -228,7 +229,7 @@ Because `asset-mirror` has `IsShareable=true` and `IsReadOnly=true`:
 
 All T1 runner VMs use the same Firecracker/kernel as T2 (for consistency — they are built from the same base image and created by the same orchestrator):
 
-- **Hypervisor:** Firecracker v1.16
+- **Hypervisor:** The installed outer controller's selected Firecracker/Jailer pair
 - **Kernel:** `official:7.0.11` (features: `nftables`, `tuntap`, `kvm`, `btrfs`)
 - **Resources:** 2 vCPU, 1024 MB RAM, 9 GB disk
 - **Network:** `sys-test-net` (the outer controller's runner network; do not infer inner-candidate namespace isolation from this attachment)
@@ -247,7 +248,7 @@ mvm vm create <vm-name> --image mvm-test-runner:<version> \
 mvm exec <vm-name> --user runner --timeout 60 -- \
   "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && \
    MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive \
-   --binary-version 1.16.2"
+   --binary-version 1.17.0"
 ```
 
 ### Test Execution
@@ -284,7 +285,7 @@ The feature names in the runner specification do not prove bridge-family nftable
 `mvmctl-030-test` runner now has a rebuilt bridge-capable kernel, but orchestrator-created runners require their own
 capability check before network and policy Tier 2 results can qualify the 0.3.0 firewall.
 
-- **Hypervisor:** Firecracker v1.16
+- **Hypervisor:** The installed outer controller's selected Firecracker/Jailer pair
 - **Kernel:** `official:7.0.11` (features: `nftables`, `tuntap`, `kvm`, `btrfs`)
 - **Resources:** 4 vCPU, 4096 MB RAM, 9 GB disk (more resources for running nested Firecracker VMs).
 - **Network:** `sys-test-net` (the outer controller's runner network; inner-candidate network isolation requires separate Tier 2 evidence).
@@ -312,7 +313,7 @@ mvm exec <vm-name> --user runner --timeout 120 -- \
 mvm exec <vm-name> --user runner --timeout 120 -- \
   "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull ubuntu:noble"
 mvm exec <vm-name> --user runner --timeout 120 -- \
-  "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.2 --default --force"
+  "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.17.0 --default --force"
 ```
 
 ---
