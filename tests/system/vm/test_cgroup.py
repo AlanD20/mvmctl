@@ -139,7 +139,7 @@ def _vm_entry(runner_vm: str, vm_name: str) -> dict[str, Any] | None:
     return next((entry for entry in entries if entry.get("name") == vm_name), None)
 
 
-def _require_preseeded_vm_assets(runner_vm: str) -> tuple[str, ...]:
+def _require_preseeded_vm_assets(runner_vm: str, *, explicit_alpine: bool = False) -> tuple[str, ...]:
     """Check launch assets and return an optional explicitly bound kernel selector."""
     mirror = os.environ.get("MVM_ASSET_MIRROR")
     assert mirror and Path(mirror).expanduser().is_dir(), "asset mirror directory must be preseeded"
@@ -197,8 +197,15 @@ def _require_preseeded_vm_assets(runner_vm: str) -> tuple[str, ...]:
         finally:
             os.close(descriptor)
         kernel_args = ("--kernel", kernel_id)
-    assert len(default_images) == 1 and default_images[0].get("is_present"), images
-    # Images and the launch pair retain the existing default-selection contract.
+    if explicit_alpine:
+        selected_images = [
+            image for image in images
+            if image.get("type") == "alpine" and image.get("version") == "3.23"
+        ]
+        assert len(selected_images) == 1 and selected_images[0].get("is_present"), images
+    else:
+        assert len(default_images) == 1 and default_images[0].get("is_present"), images
+    # The launch pair and callers without an explicit image retain default selection.
     pair: dict[str, dict[str, Any]] = {}
     for kind in ("firecracker", "jailer"):
         defaults = [binary for binary in binaries if binary.get("type") == kind and binary.get("is_default")]
@@ -543,7 +550,7 @@ def saturation_vm(
     record_property: Any,
 ) -> Iterator[dict[str, Any]]:
     """Remove the bounded VM before its swap prerequisite is torn down."""
-    kernel_args = _require_preseeded_vm_assets(runner_vm)
+    kernel_args = _require_preseeded_vm_assets(runner_vm, explicit_alpine=True)
     _run_mvm(runner_vm, "config", "set", "defaults.vm", "cgroup_vmm_headroom_mib", "0")
     _run_mvm(
         runner_vm, "config", "set", "defaults.vm", "cgroup_swap_max_bytes",
@@ -555,6 +562,7 @@ def saturation_vm(
         created = _json_success_data(
             _run_mvm(
                 runner_vm, "vm", "create", vm_name, *kernel_args,
+                "--image", "alpine:3.23",
                 "--no-network", "--cloud-init-mode", "off", "--skip-deblob", "--no-pci",
                 "--disk-size", "512M", "--vcpu", "1", "--mem", "224M", "--json",
                 timeout=180,
