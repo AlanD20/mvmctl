@@ -2316,6 +2316,7 @@ class TestNetworklessJailerLifecycle:
             _run_mvm(
                 runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
                 "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                "--image", "alpine:3.23",
                 "--json", timeout=180,
             ).stdout,
             list,
