@@ -430,6 +430,243 @@ def kernel_pull_owner(kernel_pull_sequence, request, monkeypatch):
         owner.finish_case(request.session.testsfailed != failures_before)
 
 
+class _OfficialKernelPullSequence(_KernelPullOwner):
+    """Closed official cases share one cache; failed evidence is never adopted or removed."""
+
+    selectors = {
+        "TestKernelLifecycle::test_kernel_pull": False,
+        "TestKernelBuild::test_kernel_build_with_custom_config": False,
+        "TestKernelBuild::test_kernel_clean_rebuild": False,
+        "TestKernelBuild::test_kernel_pull_with_features": False,
+        "TestKernelBuild::test_kernel_pull_with_jobs_flag": False,
+        "TestKernelBuild::test_kernel_pull_with_keep_build_dir": False,
+        "TestKernelRemoveAndPull::test_kernel_pull_with_set_default": True,
+        "TestKernelPullAdvancedFlags::test_kernel_pull_with_arch_flag": False,
+    }
+
+    def __init__(self, runner_vm, cache_dir, config_dir, output_dir, selected):
+        super().__init__(runner_vm, cache_dir, config_dir)
+        assert selected and len(selected) == len(set(selected))
+        assert set(selected) <= self.selectors.keys(), selected
+        self.selected = tuple(selected)
+        self.completed = []
+        self.active = None
+        self.aborted = False
+        self.output_root = output_dir
+        self.build_logs = {}
+
+    def select_cache(self, environment):
+        environment.setenv("MVM_CACHE_DIR", str(self.cache_dir))
+        environment.setenv("MVM_CONFIG_DIR", str(self.config_dir))
+        environment.setenv("MVM_TEMP_DIR", str(self.cache_dir / "tmp"))
+        environment.setenv("TMPDIR", str(self.cache_dir / "tmp"))
+        environment.delenv("MVM_WARM_POOL", raising=False)
+
+    def begin_case(self, selector):
+        assert not self.aborted and self.active is None and self.receipt is None, "sequence retained/active"
+        assert selector == self.selected[len(self.completed)], "unexpected official sequence order"
+        assert self.directory_identity(self.cache_dir) == self.cache_identity
+        assert self.directory_identity(self.config_dir) == self.config_identity
+        assert self.inventory() == self.baseline, "private state changed; retain cache"
+        self.assert_build_logs()
+        self.active = selector
+        self.output_dir = self.output_root / selector.replace("::", "-")
+        self.output_dir.mkdir(mode=0o700)
+
+    def remember_pull(self, result):
+        assert self.active is not None and self.receipt is None
+        self.save_native("pull", result)
+        if result.returncode != 0:
+            return  # Never recover a failed publication by inventory difference.
+        item = _json_success_data(result.stdout, dict)
+        assert re.fullmatch(r"[0-9a-f]{64}", item["id"]), item
+        assert item["type"] == "official" and item["is_present"], item
+        assert item["version"] and item["arch"] and item["is_default"] is self.selectors[self.active], item
+        assert item["id"] not in {row["id"] for row in self.baseline["kernel"]}, item
+        path = self.cache_dir / "kernels" / item["id"]
+        assert Path(item["path"]) == path and not path.parent.is_symlink(), item
+        backing, digest = self.file_receipt(path)
+        assert hashlib.sha256(f"{digest}:{item['version']}:{item['arch']}".encode()).hexdigest() == item["id"]
+        inventory = self.inventory()
+        assert len(inventory["kernel"]) == 1, inventory
+        observed = inventory["kernel"][0]
+        expected = item
+        if self.selectors[self.active]:
+            # SetDefault updates the repository timestamp; never accept a stale default boolean.
+            assert observed["is_default"] is True and isinstance(observed["updated_at"], str)
+            assert observed["updated_at"], observed
+            expected = {**item, "updated_at": observed["updated_at"]}
+        assert observed == expected, (item, observed)
+        assert inventory == {**self.baseline, "kernel": [observed]}, inventory
+        inspected = _json_success_data(
+            _run_mvm(self.runner_vm, "kernel", "inspect", item["id"], "--json").stdout, dict,
+        )
+        self.assert_inspect_receipt(inspected, observed)
+        assert self.file_receipt(path) == (backing, digest), path
+        (self.output_dir / "publication.json").write_text(json.dumps({
+            "pull": item, "listed": observed, "inspected": inspected,
+            "backing_identity": backing, "sha256": digest,
+        }, sort_keys=True), encoding="utf-8")
+        self.remember_build_logs(path, result)
+        self.receipt = observed, path, backing, digest
+
+    def assert_build_logs(self, publication=None):
+        directory = self.cache_dir / "kernels"
+        assert not directory.is_symlink(), directory
+        actual = set(directory.iterdir()) if directory.exists() else set()
+        assert actual == set(self.build_logs) | ({publication} if publication else set()), actual
+        for path, receipt in self.build_logs.items():
+            assert self.file_receipt(path) == receipt, "owned build log changed; retain cache"
+
+    def remember_build_logs(self, publication, result):
+        # BuildKernel writes one .mvm-kernel-stage-*.build.log beside its staging output.
+        # These are caller-owned auxiliary files in our initially empty exclusive directory,
+        # not authority to adopt any public/protected kernel publication.
+        directory = publication.parent
+        assert not directory.is_symlink(), directory
+        for path, receipt in self.build_logs.items():
+            assert self.file_receipt(path) == receipt, "prior build log changed; retain cache"
+        new = set(directory.iterdir()) - set(self.build_logs) - {publication}
+        assert len(new) <= 1, "unknown producer artifacts; retain cache"
+        references = []
+        for path in new:
+            assert re.fullmatch(r"\.mvm-kernel-stage-[A-Za-z0-9]+\.build\.log", path.name), path
+            receipt = self.file_receipt(path)
+            assert receipt[0][6] <= 64 * 1024 * 1024, "build log exceeds retained output budget"
+            with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as source:
+                payload = source.read(64 * 1024 * 1024 + 1)
+            assert hashlib.sha256(payload).hexdigest() == receipt[1]
+            assert self.file_receipt(path) == receipt
+            destination = self.output_dir / "compiler.build.log"
+            destination.write_bytes(payload)
+            self.build_logs[path] = receipt
+            references.append({"path": str(path), "retained_path": str(destination),
+                               "identity": receipt[0], "sha256": receipt[1]})
+        (self.output_dir / "build-evidence.json").write_text(json.dumps({
+            "logs": references,
+            "cli_reports_cached_build": "Using cached kernel build (config hash match)" in result.stderr,
+            "jobs_or_keep_flags_are_not_compiler_execution_proof": True,
+        }, sort_keys=True), encoding="utf-8")
+        self.assert_build_logs(publication)
+
+    def retire_kernel(self):
+        assert self.receipt is not None, "No successful exact official receipt; retain cache"
+        item, path, backing, digest = self.receipt
+        assert self.directory_identity(self.cache_dir) == self.cache_identity
+        assert self.directory_identity(self.config_dir) == self.config_identity
+        assert self.inventory() == {**self.baseline, "kernel": [item]}, "private publication changed"
+        inspected = _json_success_data(
+            _run_mvm(self.runner_vm, "kernel", "inspect", item["id"], "--json").stdout, dict,
+        )
+        self.assert_inspect_receipt(inspected, item)
+        assert self.file_receipt(path) == (backing, digest), "owned backing changed; retain cache"
+        self.assert_build_logs(path)
+        result = _run_mvm(self.runner_vm, "kernel", "rm", item["id"], "--force", "--json", check=False)
+        self.save_native("retirement", result)
+        assert result.returncode == 0, result.stderr
+        removed = _json_success_data(result.stdout, dict)
+        assert len(removed["items"]) == 1, removed
+        assert removed["items"][0]["result"]["code"] == "kernel.removed", removed
+        assert removed["items"][0]["error"] is None, removed
+        with pytest.raises(FileNotFoundError):
+            path.lstat()
+        assert self.inventory() == self.baseline, "private defaults/state changed; retain cache"
+        assert _json_success_data(
+            _run_mvm(self.runner_vm, "config", "ls", "--json").stdout, dict,
+        ) == self.config
+        self.assert_build_logs()
+        assert self.directory_identity(self.cache_dir) == self.cache_identity
+        self.receipt = None
+
+    def finish_case(self, failed):
+        assert self.active is not None
+        if failed:
+            self.aborted = True
+            raise AssertionError(f"Failed official case; retain sequence at {self.cache_dir}")
+        try:
+            self.retire_kernel()
+        except BaseException:
+            self.aborted = True
+            raise
+        self.completed.append(self.active)
+        self.active = None
+
+    def cleanup(self):
+        assert not self.aborted and self.active is None, "failed official sequence retained"
+        assert tuple(self.completed) == self.selected, "incomplete official sequence retained"
+        try:
+            self.assert_build_logs()
+            self.cleanup_cache()  # Only typed terminal cleanup removes original owned logs/build trees.
+        except BaseException:
+            self.aborted = True
+            raise
+
+
+@pytest.fixture(scope="module")
+def official_kernel_pull_sequence(runner_vm, tmp_path_factory, request):
+    selected = [item.nodeid.split("test_kernel.py::", 1)[1] for item in request.session.items
+                if item.path == request.node.path and
+                item.nodeid.split("test_kernel.py::", 1)[-1] in _OfficialKernelPullSequence.selectors]
+    assert request.config.option.maxfail == 1, "official acquisition sequences require native pytest -x"
+    baseline = {domain: _json_success_data(
+        _run_mvm(runner_vm, domain, "ls", "--json").stdout, list,
+    ) for domain in _KernelPullOwner.domains}
+    config = _json_success_data(_run_mvm(runner_vm, "config", "ls", "--json").stdout, dict)
+    sources = {Path(item["path"]): _KernelPullOwner.file_receipt(Path(item["path"]))
+               for item in baseline["kernel"] if item["is_present"]}
+    tmp_path = tmp_path_factory.mktemp("official-kernel-pull-sequence")
+    tmp_path.chmod(0o700)
+    cache, private_config = tmp_path / "pull-cache", tmp_path / "pull-config"
+    cache.mkdir(mode=0o700)
+    private_config.mkdir(mode=0o700)
+    owner = _OfficialKernelPullSequence(runner_vm, cache, private_config, tmp_path, selected)
+    failures = []
+    try:
+        try:
+            with pytest.MonkeyPatch.context() as selection:
+                owner.select_cache(selection)
+                owner.initialize()
+            yield owner
+        finally:
+            try:
+                with pytest.MonkeyPatch.context() as selection:
+                    owner.select_cache(selection)
+                    owner.cleanup()
+            except Exception as error:
+                failures.append(f"official cleanup retained {cache}: {error!r}")
+    finally:
+        for domain, expected in (*baseline.items(), ("config", config)):
+            try:
+                current = _json_success_data(
+                    _run_mvm(runner_vm, domain, "ls", "--json").stdout,
+                    dict if domain == "config" else list,
+                )
+                assert current == expected, (domain, expected, current)
+            except Exception as error:
+                failures.append(f"shared {domain} baseline changed: {error!r}")
+        for path, expected in sources.items():
+            try:
+                assert _KernelPullOwner.file_receipt(path) == expected, path
+            except Exception as error:
+                failures.append(f"shared original kernel changed: {path}: {error!r}")
+        assert not failures, failures
+
+
+@pytest.fixture
+def official_kernel_pull_owner(official_kernel_pull_sequence, request, monkeypatch):
+    owner = official_kernel_pull_sequence
+    mirror = os.environ.get("MVM_ASSET_MIRROR")
+    assert mirror and Path(mirror).is_absolute() and Path(mirror).is_dir()
+    assert not Path(mirror).is_symlink(), mirror
+    owner.select_cache(monkeypatch)
+    owner.begin_case(request.node.nodeid.split("test_kernel.py::", 1)[1])
+    failures_before = request.session.testsfailed
+    try:
+        yield owner
+    finally:
+        owner.finish_case(request.session.testsfailed != failures_before)
+
+
 def _import_test_kernel(runner_vm: str) -> str:
     """Register a uniquely versioned copy of a present kernel for removal tests."""
     _ensure_kernel(runner_vm)
@@ -485,7 +722,7 @@ class TestKernelLifecycle:
 
     @pytest.mark.slow
     @pytest.mark.kernel_build
-    def test_kernel_pull(self, runner_vm):
+    def test_kernel_pull(self, runner_vm, official_kernel_pull_owner):
         """Pull official kernel."""
         result = _run_mvm(
             runner_vm,
@@ -493,9 +730,11 @@ class TestKernelLifecycle:
             "pull",
             "--type",
             "official",
+            "--json",
             check=False,
             timeout=300,
         )
+        official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Official kernel pull/build failed in Tier 2 environment: "
             f"{result.stderr.strip()}"
@@ -811,18 +1050,15 @@ class TestKernelBuild:
         pytest.mark.domain_kernel,
     ]
 
-    @pytest.mark.timeout(600)
-    def test_kernel_build_with_custom_config(self, runner_vm):
+    # 1800s CLI + 30s helper grace + 570s bounded receipt/readback/teardown budget.
+    @pytest.mark.timeout(2400)
+    def test_kernel_build_with_custom_config(self, runner_vm, official_kernel_pull_owner):
         """Build official kernel with custom config fragment.
 
         Config fragment created inside the test VM.
         """
-        config_path = f"/tmp/custom-fragment-{uuid.uuid4().hex[:6]}.conf"
-        # Create config fragment inside the VM
-        _guest_run(
-            runner_vm,
-            f"echo 'CONFIG_NET=y' > {config_path} && echo 'CONFIG_INET=y' >> {config_path}",
-        )
+        config_path = official_kernel_pull_owner.output_dir / "custom-fragment.conf"
+        config_path.write_text("CONFIG_NET=y\nCONFIG_INET=y\n", encoding="utf-8")
 
         result = _run_mvm(
             runner_vm,
@@ -831,13 +1067,15 @@ class TestKernelBuild:
             "--type",
             "official",
             "--config",
-            config_path,
+            str(config_path),
             "--jobs",
             "4",
             "--keep-build-dir",
+            "--json",
             check=False,
             timeout=1800,
         )
+        official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Kernel build with custom config failed: {result.stderr.strip()}"
         )
@@ -866,8 +1104,8 @@ class TestKernelBuild:
                 f"Built kernel file not found inside VM at: {full_path}"
             )
 
-    @pytest.mark.timeout(600)
-    def test_kernel_clean_rebuild(self, runner_vm):
+    @pytest.mark.timeout(2400)
+    def test_kernel_clean_rebuild(self, runner_vm, official_kernel_pull_owner):
         """Build official kernel with clean rebuild."""
         result = _run_mvm(
             runner_vm,
@@ -878,9 +1116,11 @@ class TestKernelBuild:
             "--clean-build",
             "--jobs",
             "4",
+            "--json",
             check=False,
             timeout=1800,
         )
+        official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Kernel clean rebuild failed: {result.stderr.strip()}"
         )
@@ -911,8 +1151,8 @@ class TestKernelBuild:
             )
 
     @pytest.mark.kernel_build
-    @pytest.mark.timeout(600)
-    def test_kernel_pull_with_features(self, runner_vm):
+    @pytest.mark.timeout(2400)
+    def test_kernel_pull_with_features(self, runner_vm, official_kernel_pull_owner):
         """Pull official kernel with --features flag."""
         result = _run_mvm(
             runner_vm,
@@ -924,15 +1164,17 @@ class TestKernelBuild:
             "kvm",
             "--jobs",
             "4",
+            "--json",
             check=False,
             timeout=1800,
         )
+        official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Kernel pull with --features failed: {result.stderr.strip()}"
         )
 
     @pytest.mark.kernel_build
-    def test_kernel_pull_with_jobs_flag(self, runner_vm):
+    def test_kernel_pull_with_jobs_flag(self, runner_vm, official_kernel_pull_owner):
         """Pull official kernel with --jobs flag to control parallelism."""
         result = _run_mvm(
             runner_vm,
@@ -942,9 +1184,11 @@ class TestKernelBuild:
             "official",
             "--jobs",
             "2",
+            "--json",
             check=False,
             timeout=1800,
         )
+        official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Kernel pull with --jobs failed: {result.stderr.strip()}"
         )
@@ -960,7 +1204,7 @@ class TestKernelBuild:
         )
 
     @pytest.mark.kernel_build
-    def test_kernel_pull_with_keep_build_dir(self, runner_vm):
+    def test_kernel_pull_with_keep_build_dir(self, runner_vm, official_kernel_pull_owner):
         """Pull official kernel with --keep-build-dir flag."""
         result = _run_mvm(
             runner_vm,
@@ -971,9 +1215,11 @@ class TestKernelBuild:
             "--keep-build-dir",
             "--jobs",
             "2",
+            "--json",
             check=False,
             timeout=1800,
         )
+        official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Kernel pull with --keep-build-dir failed: {result.stderr.strip()}"
         )
@@ -999,7 +1245,7 @@ class TestKernelRemoveAndPull:
     ]
 
     @pytest.mark.kernel_build
-    def test_kernel_pull_with_set_default(self, runner_vm):
+    def test_kernel_pull_with_set_default(self, runner_vm, official_kernel_pull_owner):
         """Pull official kernel and set as default in one command."""
         result = _run_mvm(
             runner_vm,
@@ -1008,9 +1254,11 @@ class TestKernelRemoveAndPull:
             "--type",
             "official",
             "--default",
+            "--json",
             check=False,
             timeout=300,
         )
+        official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Official kernel pull/build failed: {result.stderr.strip()}"
         )
@@ -1102,7 +1350,7 @@ class TestKernelPullAdvancedFlags:
         pytest.mark.slow,
     ]
 
-    def test_kernel_pull_with_arch_flag(self, runner_vm):
+    def test_kernel_pull_with_arch_flag(self, runner_vm, official_kernel_pull_owner):
         """Pull a kernel (arch detection is automatic in Go CLI)."""
         # Rationale: Verifies that kernel pull works. The Go CLI detects
         # host architecture automatically — no --arch flag needed. Kernel
@@ -1113,9 +1361,11 @@ class TestKernelPullAdvancedFlags:
             "pull",
             "--type",
             "official",
+            "--json",
             check=False,
             timeout=600,
         )
+        official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
             f"Kernel pull failed: {result.stderr.strip()}"
         )
