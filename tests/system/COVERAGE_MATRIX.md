@@ -41,9 +41,8 @@ were not executed. [ADR-0022](../../docs/adr/0022-explicit-protected-cache-retir
 approved typed retirement contract. Signed `0469195e` integrates the implementation and accepted capture,
 parent-sync and nonterminal publication-sync corrections; focused API/auth/root-race checks passed.
 Complete integration CI/build and normal inner installation subsequently passed, as recorded below.
-Installed public cleanup qualification remains pending. Permanent snapshot-lock and volume-removal residues
-remain an explicit separate gap; [ADR-0023](../../docs/adr/0023-protected-branch-authority-layout.md)
-records the fresh-layout contract.
+Permanent snapshot-lock and volume-removal residues required the separate fresh-layout contract in
+[ADR-0023](../../docs/adr/0023-protected-branch-authority-layout.md); its focused installed qualification is below.
 The design is now implemented in `b254f010`. Named-runner formatting and vet passed, then 149 focused
 root tests/subtests and the same 149 race checks passed with no failures or skips. Complete integration
 CI/root/build subsequently passed on `4bc51ee7`, as recorded below. Normal fresh-runner installation and
@@ -53,6 +52,17 @@ typed removal, cache absence and stable external authority identities were check
 invocation exited 1 (strict 1 pass, 1 setup error): distinct-filesystem setup used the correctly refused
 writable `/dev/shm` ancestor; its body did not run. This is not a complete paired or release pass. Old
 layouts are refused, not migrated or rebound.
+
+The corrected distinct-filesystem singleton subsequently passed on the same installed candidate:
+pytest native exit 0, strict 1/1 with zero other outcomes, exact JUnit 1/0/0/0, 33.81 seconds. Integrated
+`d245d6a5` preserves the root admission boundary and keeps skipped candidate directories allocated until
+an unused permanent key is selected: the actual first key was reserved, the second unused. Typed cache
+cleanup and exact ext4 mount retirement succeeded; external authority and raw original inventories were
+unchanged. Strict JSON SHA-256 `d428b33a`; JUnit `a81419b6`. Outer wrapper 99918 remains exit 1 because it
+counted pytest's `_current` symlink twice after the successful case. Read-only completion 85088 exited 0,
+verifying one real baseline, current pins, exact preservation and physical mount absence without another
+test or cleanup run. This closes the distinct journey, not the earlier paired invocation or full release.
+
 Signed `af285c1b` integrates the reviewed three-case acquisition sequence fixture: one receipt-owned store,
 typed per-case kernel retirement, a single final cache cleanup and per-function cache/mirror environment.
 All three acquisition bodies remain byte-identical; the original named-QA checks passed 13 pure cases with zero other
@@ -114,8 +124,8 @@ Both atomic coverage profiles and all 48 manifested source inputs were checked. 
 Go 1.26.3, Linux/amd64, CGO disabled, PIE and trimpath. Original state and installed `752110fa` binary
 remained unchanged. No synthetic memory admission/abort guards or Go memory/concurrency throttles were
 used. That build invocation did not install or transition state. Subsequent normal inner installation and
-fresh-store bootstrap passed; the shared-filesystem installed journey is recorded above. Distinct-filesystem
-and complete installed public qualification remain separate requirements.
+fresh-store bootstrap passed; the focused shared- and distinct-filesystem installed journeys are recorded
+above. Complete installed public qualification remains a separate requirement.
 
 **Earlier coherent cache Go/build/install checkpoint (2026-10-10):** clean `752110fa`, tree `02198101`,
 passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent

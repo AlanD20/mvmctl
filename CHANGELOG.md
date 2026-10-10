@@ -23,16 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Clean `752110fa` subsequently passed complete pinned Go CI, all 2,663 root-Jailer test/subtests and
 > the real-agent release build inside `mvmctl-030-test`. Normal inner installation passed and preserved
 > the checked original state except for the authorized canonical binary replacement. The installed candidate
-> is `0.3.0-rc.cache-752110fa` (`ea7bad33`). Installed public cleanup qualification remains pending; permanent
-> snapshot-lock and volume-removal residues still refuse cleanup. [ADR-0023](docs/adr/0023-protected-branch-authority-layout.md)
-> records their fresh-layout design. `b254f010` implements it; formatting, vet, 149 focused root checks
+> at that checkpoint was `0.3.0-rc.cache-752110fa` (`ea7bad33`). Permanent snapshot-lock and volume-removal
+> residues required the fresh-layout contract in [ADR-0023](docs/adr/0023-protected-branch-authority-layout.md).
+> `b254f010` implements it; formatting, vet, 149 focused root checks
 > and the same 149 race checks passed inside the named runner. Clean `4bc51ee7` subsequently passed complete
 > pinned CI, all 2,707 root-Jailer test/subtests and the real-agent release build. Its new layout candidate
 > was subsequently installed normally in a fresh named runner. Shared-filesystem snapshot/volume/cache
-> retirement passed, including independent restored data and unchanged permanent authority. The paired
-> invocation remains failed: distinct-filesystem setup used `/dev/shm`, whose writable ancestor is correctly
-> refused before kernel import. That body remains unqualified; the fixture is being corrected without
-> relaxing production admission. No existing-layout migration or authority rebinding is added.
+> retirement passed, including independent restored data and unchanged permanent authority. The corrected
+> distinct-filesystem case subsequently passed strict 1/1, including terminal cache and exact owned mount
+> retirement. `d245d6a5` integrates the safe fixture without relaxing production admission or reusing reserved
+> cache identities. Earlier failed invocations remain failed. No existing-layout migration or authority
+> rebinding is added.
 > The three acquisition cases now share one receipt-owned store, retire their kernels between cases,
 > and clean that cache once at sequence completion. All three test bodies are unchanged. A subsequent setup
 > failure exposed inventory access before private cache initialization; the fixture now uses normal cache
@@ -42,7 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > wrong-type and unknown entries still refuse. Its twelve affected checks passed. The corrected original
 > three acquisition cases then passed on the installed cache candidate, including per-case kernel retirement
 > and final typed cache cleanup. Checked original inventories were byte-identical afterward. The separate
-> official-build and new-layout branch-cleanup journeys remain pending.
+> official-build journey remains pending; the focused shared/distinct branch-retirement evidence is not a
+> full release pass.
 
 > **Kernel default and official-fixture corrections (2026-10-10):** `4bc51ee7` propagates default-write
 > errors and returns the authoritative persisted kernel row from `kernel pull --default`. Focused format,

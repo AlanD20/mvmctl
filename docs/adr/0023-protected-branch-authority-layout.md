@@ -1,6 +1,6 @@
 # Protected Branch Authority Outside Cache Data
 
-**Status:** Implemented; installed shared-filesystem journey passed, distinct-filesystem qualification pending
+**Status:** Implemented; installed shared- and distinct-filesystem journeys passed, full release qualification pending
 **Date:** 2026-10-10
 **Amends:** [ADR-0018](0018-isolated-vm-execution-and-snapshot-authority.md) and
 [ADR-0022](0022-explicit-protected-cache-retirement.md), for fresh protected-store layouts only
@@ -61,9 +61,12 @@ alone do not qualify the complete package or release build. Clean `4bc51ee7` sub
 ordinary CI, the full root Jailer suite (2,707 test/subtest passes, no failures or skips) and the real-agent
 release build inside the named runner. Normal installation and fresh-store initialization subsequently passed.
 The installed shared-filesystem journey passed snapshot capture, independent RAM/rootfs/data-volume restore,
-typed removal and terminal cache cleanup, preserving external lock/receipt identities. The paired invocation
-remains failed: distinct-filesystem setup selected `/dev/shm`, whose writable ancestor is correctly rejected
-before protected kernel import. Its body did not run; a safe separate-filesystem fixture is still required.
+typed removal and terminal cache cleanup, preserving external lock/receipt identities. The later corrected
+distinct-filesystem singleton passed strict 1/1 in 33.81 seconds, including terminal cache cleanup and exact
+owned ext4 mount retirement. Its fixture selects an unused physical cache key without deleting or rebinding
+permanent authority; external locks and receipts remain unchanged. Earlier failed invocations remain failed.
+An outer report-glob error after the successful singleton was separately resolved by read-only verification
+of the retained evidence, not by rerunning the case or relabeling the failed wrapper.
 Existing stores remain strictly rejected; no migration or authority rebinding was added.
 
 Required evidence covers stable lock identity through snapshot removal/cache retirement; held-worker, restored-reference
