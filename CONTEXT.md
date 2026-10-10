@@ -1032,7 +1032,9 @@ fixed guest-boot SSH setup, embedded agent, fstab, a root-only persistent
 runlevel. [ADR-0024](docs/adr/0024-early-openrc-agent-startup.md) moves only the OpenRC agent before
 network/clock work, requiring local mounts and ordering after module initialization when present. Provisioning
 converges only an identity-verified former default-runlevel agent link, with parent synchronization and safe retry;
-foreign entries refuse before mutation. Focused Go and root checks passed; installed startup qualification is pending.
+foreign entries refuse before mutation. Focused Go and root checks passed, followed by installed-candidate
+cold networkless five-second exec, directional exec-policy and pause/resume cases (strict 3/3 with checked
+cleanup and baseline preservation). Other startup variants and complete release qualification remain open.
 The existing binary admission is required only after both its init-script and default-runlevel directories are
 present. This admits Ubuntu's usrmerged systemd layout without following `/sbin` aliases; complete OpenRC candidates
 still require the confined binary check, and missing or ambiguous init layouts are rejected before agent publication.

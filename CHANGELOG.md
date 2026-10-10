@@ -1282,7 +1282,7 @@ composition is described above; the current incomplete-work inventory is under *
 - Added a private `ProvisionVM` adapter. All guest reads and writes remain descriptor-bound beneath the admitted
   mounted root. Its fixed content set covers hostname/hosts, DNS, existing-account SSH/sudo, fixed SSH service, embedded
   agent, fstab, root-only persistent `/etc/mvmctl/agent.token`, and exactly one admitted systemd `sysinit.target` or
-  OpenRC default-runlevel enablement. Fixed ext-family/Btrfs grow tools have ext4/Btrfs convergence evidence from the
+  OpenRC boot-runlevel enablement. Fixed ext-family/Btrfs grow tools have ext4/Btrfs convergence evidence from the
   exact old or target backing size; `/usr/bin/blkid` is capped at five seconds and grow tools at five minutes, with any
   earlier caller deadline winning. Reverse cleanup preserves the closed mutation, durability-uncertain, and
   unknown-outcome evidence.
@@ -1731,8 +1731,10 @@ composition is described above; the current incomplete-work inventory is under *
 - OpenRC guests enable `mvm-agent` in the boot runlevel before networking, chronyd and cloud-init,
   rather than delaying vsock management behind those services. The confined provisioner safely converges
   only the verified former default-runlevel agent link; SSH, systemd activation, authentication and exec
-  deadlines are unchanged. Focused Go and root loopmount checks passed; installed cold-start and affected
-  directional-exec/pause-resume qualification remain pending. See [ADR-0024](docs/adr/0024-early-openrc-agent-startup.md).
+  deadlines are unchanged. Focused Go and root loopmount checks passed. The installed real-agent candidate
+  subsequently passed cold networkless five-second exec, directional exec-policy and pause/resume cases:
+  strict 3/3 with checked cleanup and baseline preservation. Other variants and the complete matrix remain
+  open. See [ADR-0024](docs/adr/0024-early-openrc-agent-startup.md).
 
 - Root-partition extraction falls back to `parted` when the `sfdisk` probe cannot execute, exits unsuccessfully,
   or returns malformed output, instead of treating probe failure as proof of an absent partition table. Failed

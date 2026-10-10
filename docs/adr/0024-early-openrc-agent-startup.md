@@ -1,6 +1,6 @@
 # Early OpenRC Management-Agent Startup
 
-**Status:** Implemented for v0.3.0; focused Go checks passed, installed qualification pending
+**Status:** Implemented for v0.3.0; focused Go and three affected installed cases passed, full release QA pending
 **Date:** 2026-10-10
 **Supersedes:** Only the OpenRC agent default-runlevel choice in
 [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md)
@@ -53,7 +53,10 @@ systemd and ambiguous-layout refusal. Formatting, line-length, focused vet, affe
 full root loopmount package passed inside the approved named runner on the exact integrated source.
 These are provisioning checks, not evidence of live guest startup or full release qualification.
 
-Installed-candidate QA must exercise unchanged ordinary five-second exec during delayed network/clock
-startup, actual agent and driver readiness, exactly one enablement, networkless management, and the
-previously failing directional and pause/resume cases without weakened assertions. Passing one guest
-variant does not qualify every cloud-init, network or policy variant.
+The real-agent candidate `0.3.0-rc.openrc-c54bfe88` subsequently passed exactly three installed cases
+inside `mvmctl-030-test`: immediate ordinary five-second networkless boot-ID exec before the readiness
+retry, directional VM-to-VM exec policy, and pause/resume process/guest preservation. The invocation
+passed strict 3/3 with zero other outcomes; typed cleanup and the original baseline were preserved.
+The cold case selects its preseeded Alpine image explicitly, without changing defaults or deadlines.
+These cases establish the affected functional paths, not startup timing for every cloud-init, network,
+driver or policy variant, nor the complete release matrix.

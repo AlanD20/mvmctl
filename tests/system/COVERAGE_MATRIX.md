@@ -75,7 +75,19 @@ preservation receipt `288c97a7f735183d9b0a833fe12c063a2eb8abaa5d49ecfb33b81b2f5f
 This qualifies the explicit installed journey only; earlier failed attempts and the remaining release
 matrix retain their own outcomes.
 
-**Current representative network/exec invocation (2026-10-10):** frozen Python `1be44dfc` against
+**Affected early-agent installed qualification (2026-10-10):** production `c54bfe88`, real-agent
+candidate `0.3.0-rc.openrc-c54bfe88`/`57c60574`, and signed Python `bb112926` (identical affected
+test bytes integrated as `ea88db46`) passed exactly cold networkless startup, directional VM-to-VM exec
+policy and pause/resume in 52.68 seconds (native 53.03 seconds). The cold case requires an immediate
+ordinary five-second boot-ID exec before its existing readiness retry and selects preseeded Alpine
+explicitly; deadlines and remaining assertions are unchanged. Strict JSON/JUnit prove 3/3 with zero
+other outcomes; typed cleanup and the exact original public/physical/administrator baseline were
+preserved. JSON SHA-256 `ddcb5c2207887984b83208520c14367078a8968718dd93f34541cf37d0166027`;
+JUnit `b9fb93353034e95ce4125552cff36cd24b2dc2ddf5d76f1ec30b44e9a12a20dd`.
+The preceding missing-default-image attempt failed before VM creation and remains failed evidence.
+This closes these affected cases, not every startup variant or the full installed release matrix.
+
+**Earlier representative network/exec invocation (2026-10-10):** frozen Python `1be44dfc` against
 installed layout candidate `e6ff4283` passed exactly conntrack-after-sync and cross-network TCP
 allow/revoke. Directional exec failed at its first source VM's `runner` account/agent readiness,
 before creating the destination or granting a policy; pause/resume was unexecuted. Machine outcomes
