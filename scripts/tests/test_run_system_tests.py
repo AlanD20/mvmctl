@@ -186,6 +186,16 @@ def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
     monkeypatch.setattr(orchestrator, "_host_reboot_probe", probe)
     def mvm(*args, **kwargs):
         calls.append(args)
+        if args[0] == "ssh" and "sha256sum --" in args[-1]:
+            paths = shlex.split(args[-1])[2:]
+            lines = []
+            for path in paths:
+                relative = path.split("/source/", 1)[1]
+                digest = ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                          if state.get("source_lost") and relative == orchestrator._HOST_REBOOT_FILE
+                          else orchestrator._sha256_runner_input(orchestrator._REPO_ROOT / relative))
+                lines.append(f"{digest}  {path}")
+            return subprocess.CompletedProcess(args, 0, stdout="\n".join(lines) + "\n", stderr="")
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
     monkeypatch.setattr(orchestrator, "mvm", mvm)
     monkeypatch.setattr(orchestrator, "_host_reboot_stage_source", lambda bound: None)
@@ -305,7 +315,7 @@ def test_host_reboot_never_aggregates_unproven_control_pre_or_cleanup(
     assert len([call for call in calls if call[:2] == ("vm", "reboot")]) == 1
 
 
-@pytest.mark.parametrize("failure", ["strict-report", "ssh-mkdir", "ssh-source", "source-changed"])
+@pytest.mark.parametrize("failure", ["strict-report", "ssh-mkdir", "ssh-source", "source-changed", "sync-failure"])
 def test_host_reboot_stops_before_lifecycle_after_failed_pre(orchestrator, monkeypatch, tmp_path, failure):
     stage_source = orchestrator._host_reboot_stage_source
     source_hash = orchestrator._sha256_runner_input
@@ -327,21 +337,44 @@ def test_host_reboot_stops_before_lifecycle_after_failed_pre(orchestrator, monke
             calls.append(args)
             assert args[0] == "ssh", "no vsock fallback or lifecycle after transport failure"
             if ((failure == "ssh-mkdir" and "mkdir -m 700" in args[-1])
-                    or (failure == "ssh-source" and "python3 -c" in args[-1])):
-                raise RuntimeError("SSH setup denied: literal diagnostic")
+                    or (failure == "ssh-source" and "python3 -c" in args[-1])
+                    or (failure == "sync-failure" and "sync -f --" in args[-1])):
+                raise RuntimeError("SSH durability barrier failed" if failure == "sync-failure"
+                                   else "SSH setup denied: literal diagnostic")
             return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         monkeypatch.setattr(orchestrator, "mvm", transport)
         expected = "source changed before staging" if failure == "source-changed" else "SSH setup denied"
+        if failure == "sync-failure":
+            expected = "SSH durability barrier failed"
     result = orchestrator.run_host_reboot_phase("pre", task, None)
     assert not result["phase_complete"] and not result["passed"]
     assert not any(call[:2] == ("vm", "reboot") for call in calls)
     assert expected in (task / "pre.terminal.json").read_text()
     assert not (task / "task.json").exists()
+    if failure == "sync-failure":
+        assert (task / "pre.json").exists() and (task / "pre.outcomes.json").exists()
+        assert json.loads((task / "pre.native.json").read_bytes()) == dict(phase="pre", returncode=0)
 
 
-def test_host_reboot_stops_on_identity_failure_instead_of_retrying(orchestrator, monkeypatch, tmp_path):
+@pytest.mark.parametrize("failure", ["candidate", "source-after-reconnect", "source-before-post"])
+def test_host_reboot_stops_on_identity_failure_instead_of_retrying(orchestrator, monkeypatch, tmp_path, failure):
     actual_probe = orchestrator._host_reboot_probe
-    task, _, calls, _, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    if failure != "candidate":
+        state["source_lost"] = failure == "source-after-reconnect"
+        pre = orchestrator.run_host_reboot_phase("pre", task, None)
+        if failure == "source-before-post":
+            assert pre["phase_complete"] is True
+            state["source_lost"] = True
+            result = orchestrator.run_host_reboot_phase("post", task, envelope)
+        else:
+            result = pre
+            assert not (task / "task.json").exists()
+        assert not result["phase_complete"] and not result["passed"]
+        assert "staged source changed across reboot" in result["output"]
+        assert phases == ["pre"] and len([call for call in calls if call[:2] == ("vm", "reboot")]) == 1
+        assert not (task / "post.json").exists()
+        return
     probes = []
     def probe(bound):
         probes.append(bound)

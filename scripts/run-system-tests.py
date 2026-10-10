@@ -2303,6 +2303,16 @@ def _host_reboot_probe(bound: dict[str, Any]) -> str:
     return lines[0]
 
 
+def _host_reboot_require_source(bound: dict[str, Any]) -> None:
+    """Refuse lost or changed fixed phase inputs; never repair a rebooted task."""
+    paths = [bound["guest_task"] + "/source/" + relative for relative in _HOST_REBOOT_SOURCE_FILES]
+    result = _host_reboot_ssh(shlex.join(["sha256sum", "--", *paths]), connect_timeout=10, timeout=30)
+    expected = [f"{bound['source_payload'][relative]}  {path}"
+                for relative, path in zip(_HOST_REBOOT_SOURCE_FILES, paths)]
+    if result.stdout.splitlines() != expected:
+        raise RuntimeError("host_reboot staged source changed across reboot")
+
+
 def _host_reboot_fetch(bound: dict[str, Any], name: str) -> bytes:
     path = bound["guest_task"] + "/" + name
     result = _host_reboot_ssh(f"head -c {_HOST_REBOOT_LIMIT + 1} -- {shlex.quote(path)}",
@@ -2439,6 +2449,7 @@ def _host_reboot_validate_pre(task: Path, controller: dict) -> tuple[dict, bytes
     outer = _host_reboot_outer_identity()
     if any(outer[key] != bound["outer_after"][key] for key in ("runner_id", "created_at", "pid", "start_ticks")):
         raise RuntimeError("host_reboot POST outer task identity changed")
+    _host_reboot_require_source(bound)
     return bound, pre, outer
 
 
@@ -2558,6 +2569,9 @@ def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None) -> dict
                 raise RuntimeError("host_reboot PRE evidence does not match the fixed source/candidate/boot")
             bound["pre_sha256"] = hashlib.sha256(raw).hexdigest()
             bound["pre_outcomes_sha256"] = hashlib.sha256(_host_reboot_read(task / "pre.outcomes.json")).hexdigest()
+            # Force reboot may discard close-only writes: persist source, reports and
+            # the owned nested VM's marker filesystem before the abrupt boundary.
+            _host_reboot_ssh(shlex.join(["sync", "-f", "--", guest]), connect_timeout=10, timeout=60)
             current = _host_reboot_outer_identity()
             if current != bound["outer_before"] or _host_reboot_controller() != controller:
                 raise RuntimeError("host_reboot outer authority changed before lifecycle")
@@ -2579,6 +2593,7 @@ def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None) -> dict
                 raise RuntimeError("host_reboot replaced the runner identity")
             if _host_reboot_controller() != controller:
                 raise RuntimeError("host_reboot changed the outer controller")
+            _host_reboot_require_source(bound)
             _host_reboot_write(task, "task.json", (json.dumps(bound, sort_keys=True) + "\n").encode())
             result.update(phase_complete=True, output="PRE PHASE COMPLETE / RELEASE VERDICT INCOMPLETE; external fresh-boot admin receipt required")
         else:
