@@ -5,6 +5,9 @@ qualification: the architecture described here is not a claim that the full rele
 installation gate has passed. See [RC_QA.md](RC_QA.md) for the release gates and
 [CONTEXT.md](../CONTEXT.md) for package and domain ownership.
 
+v0.3.0 requires a clean installation and fresh managed state. It does not adopt or migrate old user,
+runtime, or protected-storage layouts.
+
 ## One binary, two authority levels
 
 The installed `/usr/local/bin/mvm` is one root-owned executable. An operator runs its public CLI without `sudo`.
@@ -35,7 +38,8 @@ and [ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md) for the
 | `/var/lib/mvmctl` | Durable root authority: installation, trusted release, host admission, VM and network records, and Jailer state. |
 | `/var/lib/mvmctl/vm-rootfs-export-data/<operator-uid>` | Root-controlled independent disk copies for VM-to-image import, with operator read access and typed cleanup. Requires space on this filesystem as well as the managed cache; see [VM image import](REFERENCES.md#mvm-image). |
 | `/run/mvmctl/authority` | Root-only transient locks and handshakes; not durable truth. |
-| `/run/mvmctl/runtime/<uid>/<vm-id>` | Ephemeral API/vsock/console sockets and display-only PID mirrors. |
+| `/run/mvmctl/runtime/<uid>/<vm-id>` | Caller-facing console endpoints and display-only PID mirrors. |
+| `/run/mvmctl/vmm-runtime/<uid>/<vm-id>` | Private Firecracker API and vsock sockets owned by the isolated VM execution identity; mounted at `/vmm-runtime` inside the jail. |
 | `MVM_CACHE_DIR` (normally `~/.cache/mvmctl`) | Operator configuration, SQLite projection, original images, managed disk inputs, and output artifacts. Root-protected active backing and snapshots are pinned under the selected cache but are not made operator-writable. |
 
 The operator's SQLite rows and PID mirrors are not root authorization. Root effects pin the managed cache and their
@@ -43,6 +47,12 @@ resources by identity; a renamed cache, replaced file, stale process, or conflic
 silently adopted. Listing and inspection use bounded root observation to distinguish live VMs from stale recorded
 PIDs. A reboot does not imply the old Firecracker process survived. Cleanup and relaunch must reconcile retained
 records before effectful reuse, and ambiguous state fails closed rather than being guessed away.
+
+Permanent snapshot locks and volume-source removal receipts live in the root anchor outside the managed cache.
+Snapshot artifacts and temporary raw-volume capture stay on the selected cache filesystem. Typed cache cleanup
+can retire admitted terminal data branches while preserving those permanent authority records; it refuses held
+operations, retained backing or restore references, and unknown or old layouts. See
+[ADR-0023](adr/0023-protected-branch-authority-layout.md).
 
 ## VM launch and resource control
 
@@ -114,6 +124,12 @@ data-volume format. Active writable disks are root-protected rather than reused 
 file. An attached volume can grow while its VM is stopped without detaching it. `volume rm --force` likewise
 requires the attached VM stopped; it does not hot-unplug a running guest.
 
+The attached-volume count is derived from the selected release, architecture, transport, and complete device set.
+MMIO admission subtracts VMGenID, VMClock, rootfs, network, optional cloud-init and vsock, and the applicable ARM
+RTC/serial reservations from the interrupt pool. There is no uniform 13-volume product ceiling. PCI uses separate
+slot and MSI-X accounting. These admission checks do not qualify maximum device counts; aarch64 runtime
+qualification remains deferred.
+
 `volume attach` on a Running VM succeeds only after the authenticated guest agent observes the exact
 root-derived disk serial/capacity bound to `virtio_blk`, followed by an unchanged root attachment identity.
 On a Paused VM it stages the attachment and returns a retryable deferred-readiness error: resume the VM and
@@ -126,8 +142,10 @@ A full snapshot captures rootfs, memory/vmstate, and attached data volumes under
 artifacts are root-controlled under the selected cache, with CLI-mediated removal. Restore creates independent
 writable disks while retaining immutable captured memory backing; it preserves the recorded release, drive IDs, and
 managed network identity. A conflicting writer or unresolved artifact identity blocks capture or restore. The
-approved vmstate limit is 10,000,000 bytes and captured RAM length comes from trusted memory state; v0.3.0 does not
-invent a data-volume size or aggregate-storage quota. See [ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md)
+approved limit for the complete `vmstate` file, including its CRC, is 10,000,000 bytes. The memory artifact must
+have exactly trusted captured RAM in MiB × 1,048,576 bytes of logical length, including sparse extents. v0.3.0 adds
+no data-volume size or aggregate-storage quota and reserves no physical storage. See
+[ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md)
 and [the resource-limit decision](improvements/volume-snapshot-resource-limits.md).
 
 VM stop, remove, reboot, and restore use typed cleanup and reconciliation rather than deleting a PID file as proof

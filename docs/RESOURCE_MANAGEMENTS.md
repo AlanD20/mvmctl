@@ -122,6 +122,11 @@ SHA-256 checksum resolution differs per image type:
 | `vhd` | Microsoft VHD image | `qemu-img convert` (as vpc) → raw → root partition extracted |
 | `vhdx` | Microsoft VHDX image | `qemu-img convert` (as vhdx) → raw → root partition extracted |
 
+These formats describe image acquisition and import. Attached VM data volumes are raw-only;
+`mvm volume create` has no `--format` option, including `--format raw`. QCOW2 image import and
+conversion remain supported. See [Volumes, snapshots, and recovery](RUNTIME.md#volumes-snapshots-and-recovery)
+for volume and snapshot admission.
+
 ### Template variables
 
 URL templates use `{placeholder}` syntax resolved at fetch time:
