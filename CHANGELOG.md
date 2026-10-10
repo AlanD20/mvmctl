@@ -82,6 +82,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > passed inside the named runner; the corrected actual journey remains pending. Neither failure
 > demonstrates a memory-capacity problem or qualifies the complete release.
 
+> **Agent-readiness diagnosis (2026-10-10):** `6af6c511` retains the last exec-readiness command
+> failure without changing its deadline or success criteria. The directional singleton then failed
+> because ordinary exec could not reach the vsock agent, before any destination or policy grant.
+> The separately executed pause/resume singleton failed on its initial guest boot-ID exec, before
+> any pause action. Both restored the exact baseline. These are unresolved agent-startup/transport
+> failures, not passing policy or pause/resume journeys and not demonstrated RAM failures.
+
 > **Standalone export-interruption qualification (2026-10-10):** the SIGINT survivor case passed alone
 > on the installed cache candidate: native exit 0, strict 1/1 with zero other outcomes, 13.37 seconds.
 > It interrupted an authenticated partial copy, refused release while the copy worker survived, preserved

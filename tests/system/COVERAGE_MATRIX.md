@@ -66,7 +66,13 @@ before creating the destination or granting a policy; pause/resume was unexecute
 are four collected, two passed, one failed and one unexecuted error, with no skips or deselections.
 The native invocation failed. Typed cleanup, exact public/physical/administrator baseline equality,
 and source/candidate/kernel/mirror preservation passed. These two case results do not qualify the
-batch, VM-to-VM exec or complete matrix. The discarded readiness command error needs diagnosis.
+batch, VM-to-VM exec or complete matrix. Signed `6af6c511` preserves the last readiness command
+error without changing the deadline or success predicate. Its exact directional singleton failed
+with ordinary vsock agent unreachability before destination creation or policy admission. The
+separate pause/resume singleton also failed at its initial ordinary guest boot-ID exec, before
+pause/resume actions. Both native invocations failed; exact cleanup and original baseline equality
+passed. The shared agent-readiness/transport cause remains unresolved; neither result proves a
+memory-capacity failure or qualifies those features.
 
 The first Firecracker acquisition body succeeded, but its teardown failed when ordinary `cache clean`
 encountered root-only protected parents. That invocation remains failed; the other two acquisition bodies
