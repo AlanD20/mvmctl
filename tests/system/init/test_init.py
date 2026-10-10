@@ -110,7 +110,7 @@ class _OwnedInitCase:
 
     def run_init(self, *, skip_network=False, skip_host=True):
         self.prepare_default_network_expectation(skip_network=skip_network)
-        args = ["init", "--non-interactive", "--binary-version", "1.16.2"]
+        args = ["init", "--non-interactive", "--binary-version", "1.17.0"]
         if skip_host:
             args.append("--skip-host")
         else:
@@ -229,7 +229,7 @@ def owned_init_case(runner_vm):
     for binary_type in ("firecracker", "jailer"):
         assert any(
             row["type"] == binary_type
-            and row["version"] == "1.16.2"
+            and row["version"] == "1.17.0"
             and row["is_default"]
             and row["is_present"]
             for row in before["bin"]
@@ -355,7 +355,7 @@ class TestInitWizard:
                     "init",
                     "--skip-host=false",
                     "--binary-version",
-                    "1.16.2",
+                    "1.17.0",
                 ],
                 input="n\n",
                 capture_output=True,

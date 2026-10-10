@@ -430,7 +430,7 @@ class NetworkCase:
             ]
             assert (
                 len(matches) == 1
-                and matches[0]["version"] == "1.16.2"
+                and matches[0]["version"] == "1.17.0"
                 and matches[0]["is_present"]
             ), matches
         kernel_id = self._vm_kernel_id()

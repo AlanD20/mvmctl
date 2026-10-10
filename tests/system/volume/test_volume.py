@@ -238,7 +238,7 @@ def _require_vm_deps(runner_vm: str) -> None:
     for binary_type in ("firecracker", "jailer"):
         assert any(
             row["type"] == binary_type
-            and row["version"] == "1.16.2"
+            and row["version"] == "1.17.0"
             and row["is_present"]
             and row["is_default"]
             for row in binaries

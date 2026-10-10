@@ -225,7 +225,7 @@ def key_vm_owner(runner_vm):
     binaries = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
     pair = [binary for binary in binaries if binary["is_default"] and binary["is_present"]]
     assert {binary["type"] for binary in pair} == {"firecracker", "jailer"}, pair
-    assert len(pair) == 2 and all(binary["version"] == "1.16.2" for binary in pair), pair
+    assert len(pair) == 2 and all(binary["version"] == "1.17.0" for binary in pair), pair
     before_vms = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
     before_networks = _json_success_data(_run_mvm(runner_vm, "network", "ls", "--json").stdout, list)
     token = uuid.uuid4().hex[:10]

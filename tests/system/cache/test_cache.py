@@ -968,7 +968,7 @@ class _OwnedCachePrune:
         return metadata, digests
 
     def reuse_release(self):
-        pairs = [item for item in self.baseline["bin"] if item["version"] == "1.16.2"]
+        pairs = [item for item in self.baseline["bin"] if item["version"] == "1.17.0"]
         assert len(pairs) == 2 and {item["type"] for item in pairs} == {
             "firecracker",
             "jailer",
@@ -976,14 +976,14 @@ class _OwnedCachePrune:
         assert all(item["is_present"] and item["is_default"] for item in pairs), pairs
         architecture = pairs[0]["architecture"]
         assert all(item["architecture"] == architecture for item in pairs), pairs
-        slot = Path("/var/lib/mvmctl/binaries") / architecture / "1.16.2"
+        slot = Path("/var/lib/mvmctl/binaries") / architecture / "1.17.0"
         paths = [slot, slot / "firecracker", slot / "jailer"]
         assert {item["path"] for item in pairs} == {str(path) for path in paths[1:]}, (
             pairs
         )
         mirror = os.environ.get("MVM_ASSET_MIRROR", "")
         assert mirror, "the preseeded local asset mirror is required"
-        archive = Path(mirror) / f"firecracker-v1.16.2-{architecture}.tgz"
+        archive = Path(mirror) / f"firecracker-v1.17.0-{architecture}.tgz"
         archive_receipt = _prune_backing(archive)
         assert archive_receipt[1] > 0, archive
         # This root read is a prerequisite; never install an absent release slot.
@@ -993,7 +993,7 @@ class _OwnedCachePrune:
                 self.runner_vm,
                 "bin",
                 "pull",
-                "1.16.2",
+                "1.17.0",
                 "--json",
                 timeout=300,
             ).stdout,
@@ -1700,7 +1700,7 @@ class _SnapshotVolumeCacheRetirement(_OwnedCachePrune):
         if self.release is not None:
             try:
                 assert self.release_identity(self.release[0]) == self.release[1]
-                assert _cache_release_receipt(self, "1.16.2") == self.borrowed_release
+                assert _cache_release_receipt(self, "1.17.0") == self.borrowed_release
             except (Exception, pytest.fail.Exception) as error:
                 failures.append(f"borrowed root release: {error!r}")
         return failures
@@ -1802,8 +1802,8 @@ def layout2_retirement_case(runner_vm, tmp_path, monkeypatch, filesystem_layout)
                 same_device = cache.stat().st_dev == fresh["root_device"]
                 assert same_device is (filesystem_layout == "shared-filesystem"), fresh
                 case.initialize()
-                case.borrowed_release = _cache_release_receipt(case, "1.16.2")
-                archive = mirror / f"firecracker-v1.16.2-{os.uname().machine}.tgz"
+                case.borrowed_release = _cache_release_receipt(case, "1.17.0")
+                archive = mirror / f"firecracker-v1.17.0-{os.uname().machine}.tgz"
                 case.mirror_receipts[archive] = _prune_backing(archive)
                 case.reuse_release()  # Final cache clean must not prune the borrowed default root slot.
                 kernel = case.import_kernel("snapshot-retirement", default=True)
@@ -2095,7 +2095,7 @@ class _CacheExternalPreservation:
         self.process.seed()
         self.before = (
             self.appliance.snapshot(), self.process.snapshot(),
-            _cache_release_receipt(self.case, "1.16.2"),
+            _cache_release_receipt(self.case, "1.17.0"),
             _OwnedCachePrune.firewall_snapshot(self),
         )
 
@@ -2105,7 +2105,7 @@ class _CacheExternalPreservation:
         observations = (
             ("global appliance", self.appliance.snapshot, self.before[0]),
             ("unrelated process", self.process.snapshot, self.before[1]),
-            ("default root release", lambda: _cache_release_receipt(self.case, "1.16.2"), self.before[2]),
+            ("default root release", lambda: _cache_release_receipt(self.case, "1.17.0"), self.before[2]),
             ("complete firewall", lambda: _OwnedCachePrune.firewall_snapshot(self), self.before[3]),
         )
         for name, observe, expected in observations:
@@ -2805,7 +2805,7 @@ class TestCachePruneNonDryRun:
         assert removed == [owned_cache_release.version], removed
         owned_cache_release.assert_absent()
         after = case.inventory("bin")
-        assert after == {item_id: row for item_id, row in before.items() if row["version"] == "1.16.2"}
+        assert after == {item_id: row for item_id, row in before.items() if row["version"] == "1.17.0"}
         assert len(after) == 2 and all(row["is_default"] for row in after.values()), after
         owned_cache_preservation.assert_preserved()
         record_property("owned_release_pruned", json.dumps({
@@ -2900,7 +2900,7 @@ class TestCachePruneAll:
         assert _cache_root_directory_receipt(runner_vm, protected) == history_before
         binaries = case.inventory("bin")
         assert len(binaries) == 2 and all(
-            row["version"] == "1.16.2" and row["is_default"] and row["is_present"]
+            row["version"] == "1.17.0" and row["is_default"] and row["is_present"]
             for row in binaries.values()
         ), binaries
         owned_cache_preservation.assert_preserved()
@@ -3200,7 +3200,7 @@ class TestCacheCleanActual:
         ):
             case.check_bindings(domain, row["id"])
         # The recovered owned network intentionally changes only managed firewall state.
-        assert _cache_release_receipt(case, "1.16.2") == owned_cache_preservation.before[2]
+        assert _cache_release_receipt(case, "1.17.0") == owned_cache_preservation.before[2]
         assert owned_cache_preservation.appliance.snapshot() == owned_cache_preservation.before[0]
         assert owned_cache_preservation.process.snapshot() == owned_cache_preservation.before[1]
         record_property("clean_asset_recovery", json.dumps({

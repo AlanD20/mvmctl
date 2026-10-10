@@ -364,11 +364,11 @@ class TestSystemBinaryInstall:
         for member in ("firecracker", "jailer"):
             assert any(
                 row["type"] == member
-                and row["version"] == "1.16.2"
+                and row["version"] == "1.17.0"
                 and row["is_present"]
                 and row["is_default"]
                 for row in binaries
-            ), "preseeded 1.16.2 pair is required; init must not download"
+            ), "preseeded 1.17.0 pair is required; init must not download"
         with tempfile.TemporaryDirectory(
             prefix="system-install-init-", dir=cache_dir
         ) as private_dir:
@@ -383,7 +383,7 @@ class TestSystemBinaryInstall:
                     "--skip-host",
                     "--skip-network",
                     "--binary-version",
-                    "1.16.2",
+                    "1.17.0",
                     check=False,
                     timeout=180,
                 )

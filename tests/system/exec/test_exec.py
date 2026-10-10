@@ -127,7 +127,7 @@ def _require_exec_assets(baseline: dict) -> dict[str, str]:
     selected = {"image_id": images[0]["id"], "kernel_id": kernels[0]["id"]}
     for kind in ("firecracker", "jailer"):
         binaries = [item for item in baseline["bin"] if item["type"] == kind and item["is_default"]]
-        assert len(binaries) == 1 and binaries[0]["is_present"] and binaries[0]["version"] == "1.16.2", binaries
+        assert len(binaries) == 1 and binaries[0]["is_present"] and binaries[0]["version"] == "1.17.0", binaries
         selected["binary_id" if kind == "firecracker" else "jailer_binary_id"] = binaries[0]["id"]
     return selected
 

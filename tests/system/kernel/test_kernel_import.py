@@ -72,7 +72,7 @@ class _KernelImportOwner:
             selected = [item for item in self.baseline["bin"].values()
                         if item["type"] == kind and item["is_default"]]
             assert len(selected) == 1, selected
-            assert selected[0]["version"] == "1.16.2" and selected[0]["is_present"], selected
+            assert selected[0]["version"] == "1.17.0" and selected[0]["is_present"], selected
         self.source_path = self.kernel_path(self.default_id)
         self.source_identity = _file_identity(self.source_path)
         self.source_digest = _digest(self.source_path)

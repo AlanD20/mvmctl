@@ -135,7 +135,7 @@ try:
     execution = launch["execution_identity"]
     assert type(execution["uid"]) is int and execution["uid"] not in (0, owner)
     assert type(execution["gid"]) is int and execution["gid"] > 0
-    assert launch["release"]["version"] == "1.16.2" and launch["release"]["architecture"] == "x86_64"
+    assert launch["release"]["version"] == "1.17.0" and launch["release"]["architecture"] == "x86_64"
     digest = launch["release"]["firecracker_sha256"]
     assert re.fullmatch(r"[0-9a-f]{64}", digest)
     proc_fd = keep(os.open(f"/proc/{pid}", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW))
@@ -302,7 +302,7 @@ def _require_lifecycle_assets(runner_vm: str) -> None:
         assert (
             len(selected) == 1
             and selected[0]["is_present"]
-            and selected[0]["version"] == "1.16.2"
+            and selected[0]["version"] == "1.17.0"
         ), selected
     settings = _json_success_data(
         _run_mvm(runner_vm, "config", "ls", "--json").stdout, dict

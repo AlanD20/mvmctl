@@ -67,10 +67,10 @@ class _HostGuardCase:
         binaries = self.baseline["bin"]
         for member in ("firecracker", "jailer"):
             assert any(
-                row["type"] == member and row["version"] == "1.16.2"
+                row["type"] == member and row["version"] == "1.17.0"
                 and row["is_default"] and row["is_present"]
                 for row in binaries
-            ), f"preseeded default {member} 1.16.2 is required"
+            ), f"preseeded default {member} 1.17.0 is required"
 
     def attempt(self, domain, name):
         assert not any(row["name"] == name for row in self.baseline[domain])
@@ -209,7 +209,7 @@ class TestHostInfo:
                 # config writes must remain private so no global appliance is built.
                 _run_mvm(
                     runner_vm, "init", "--non-interactive", "--skip-host", "--skip-network",
-                    "--binary-version", "1.16.2", timeout=180,
+                    "--binary-version", "1.17.0", timeout=180,
                 )
                 first = _run_mvm(runner_vm, "host", "info", "--json")
             data = _success_data(first)

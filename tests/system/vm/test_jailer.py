@@ -85,7 +85,7 @@ class _JailerResources:
         )
         defaults = {row["type"]: row for row in self.binaries if row["is_default"]}
         assert set(defaults) == {"firecracker", "jailer"}
-        assert all(row["version"] == "1.16.2" and row["is_present"] for row in defaults.values())
+        assert all(row["version"] == "1.17.0" and row["is_present"] for row in defaults.values())
 
     def rows(self, domain: str) -> list[dict[str, Any]]:
         return _json_success_data(_installed_mvm(self.runner_vm, domain, "ls", "--json").stdout, list)
@@ -411,8 +411,8 @@ try:
     state = directory(lib, "mvmctl")
     binaries = directory(state, "binaries")
     architecture = directory(binaries, "x86_64")
-    source = pair("1.16.2")
-    source_baseline = receipt(source, "1.16.2")
+    source = pair("1.17.0")
+    source_baseline = receipt(source, "1.17.0")
     try:
         os.stat("1.16.0", dir_fd=architecture, follow_symlinks=False)
     except FileNotFoundError:
@@ -457,36 +457,36 @@ try:
             value = {"absent": True}
         elif command == "source-verify":
             assert source is not None
-            value = receipt(source, "1.16.2")
+            value = receipt(source, "1.17.0")
         elif command == "source-removed":
             assert source is not None
             forget(source)
             source = None
-            absent("1.16.2")
+            absent("1.17.0")
             value = {"absent": True}
         elif command == "source-observe":
             try:
-                os.stat("1.16.2", dir_fd=architecture, follow_symlinks=False)
+                os.stat("1.17.0", dir_fd=architecture, follow_symlinks=False)
             except FileNotFoundError:
                 if source is not None:
                     forget(source)
                     source = None
-                absent("1.16.2")
+                absent("1.17.0")
                 value = {"absent": True}
             else:
                 if source is None:
-                    source = pair("1.16.2")
-                value = receipt(source, "1.16.2")
+                    source = pair("1.17.0")
+                value = receipt(source, "1.17.0")
                 assert value["manifest"] == source_baseline["manifest"]
         elif command == "source-readmit":
             assert source is None
-            source = pair("1.16.2")
-            value = receipt(source, "1.16.2")
+            source = pair("1.17.0")
+            value = receipt(source, "1.17.0")
             assert value["manifest"] == source_baseline["manifest"]
         else:
             raise AssertionError("unknown Jailer release observation")
         if source is not None:
-            assert receipt(source, "1.16.2")["manifest"] == source_baseline["manifest"]
+            assert receipt(source, "1.17.0")["manifest"] == source_baseline["manifest"]
         if older_baseline is not None:
             assert receipt(older, "1.16.0") == older_baseline
         print(json.dumps(value), flush=True)
@@ -791,7 +791,7 @@ try:
     uid, gid = launch["execution_identity"]["uid"], launch["execution_identity"]["gid"]
     assert type(uid) is int and uid not in (0, owner)
     assert type(gid) is int and gid not in (0, int(os.environ["SUDO_GID"]))
-    assert launch["release"]["version"] == "1.16.2" and launch["release"]["architecture"] == "x86_64"
+    assert launch["release"]["version"] == "1.17.0" and launch["release"]["architecture"] == "x86_64"
     digest = launch["release"]["firecracker_sha256"]
     assert re.fullmatch(r"[0-9a-f]{64}", digest)
     proc_fd = keep(os.open(f"/proc/{pid}", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW))
@@ -899,7 +899,7 @@ class _SnapshotCaptureFault:
 
 
 def _mirrored_jailer_release(version: str) -> tuple[Path, tuple, dict[str, Any]]:
-    assert version in ("1.16.0", "1.16.2") and platform.machine() == "x86_64"
+    assert version in ("1.16.0", "1.17.0") and platform.machine() == "x86_64"
     archive = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser() / f"firecracker-v{version}-x86_64.tgz"
     identity = _file_identity(archive)
     assert 0 < identity[-1] <= 128 * 1024 * 1024, archive
@@ -947,7 +947,7 @@ class _JailerReleases:
         self.resources = _resources.get()
         self.defaults = {row["type"]: row["id"] for row in self.resources.binaries if row["is_default"]}
         self.older_archive = _mirrored_jailer_release("1.16.0")
-        self.source_archive = _mirrored_jailer_release("1.16.2") if remove_source else None
+        self.source_archive = _mirrored_jailer_release("1.17.0") if remove_source else None
         self.older_pull_attempted = False
         self.source_remove_attempted = False
         self.older_receipt: dict[str, Any] | None = None
@@ -996,7 +996,7 @@ class _JailerReleases:
         assert self.ownership.require("source-verify") == self.baseline["source"]
         _require_bin_root_projection(self.resources.rows("bin"), self.baseline["source"])
         self.source_remove_attempted = True
-        result = _installed_mvm(self.runner_vm, "bin", "rm", "1.16.2", "--force", check=False)
+        result = _installed_mvm(self.runner_vm, "bin", "rm", "1.17.0", "--force", check=False)
         observed = self.ownership.require("source-observe")
         assert result.returncode == 0 and observed == {"absent": True}, (
             result.stdout,
@@ -1028,7 +1028,7 @@ class _JailerReleases:
                         self.runner_vm,
                         "bin",
                         "pull",
-                        "1.16.2",
+                        "1.17.0",
                         "--json",
                         check=False,
                         timeout=300,
@@ -1455,7 +1455,7 @@ class TestNetworklessJailerLifecycle:
             assert response["schema_version"] == 1
             assert response["status"] == "error"
             assert response["error"]["code"] == "binary.version.gate"
-            assert "Firecracker/Jailer 1.16.2" in response["error"]["message"]
+            assert "Firecracker/Jailer 1.17.0" in response["error"]["message"]
             listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
             assert all(vm["name"] != networkless_vm_name for vm in listed)
         finally:

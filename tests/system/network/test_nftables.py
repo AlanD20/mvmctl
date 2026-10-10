@@ -167,7 +167,7 @@ def _nft_preseed(runner_vm: str) -> tuple[str, str]:
         ]
         assert (
             len(matches) == 1
-            and matches[0]["version"] == "1.16.2"
+            and matches[0]["version"] == "1.17.0"
             and matches[0]["is_present"]
         ), matches
     kernels = [
@@ -834,7 +834,7 @@ def test_private_namespaces_reused_ip_has_fresh_gateway_neighbor(
                 for kind in ("firecracker", "jailer"):
                     assert any(
                         asset["type"] == kind
-                        and asset["version"] == "1.16.2"
+                        and asset["version"] == "1.17.0"
                         and asset["is_default"]
                         and asset["is_present"]
                         for asset in assets

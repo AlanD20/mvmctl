@@ -958,7 +958,7 @@ def isolated_pull_cache(runner_vm, image_workspace, monkeypatch):
         selection.setenv("MVM_TEMP_DIR", str(cache / "tmp"))
         _run_mvm(runner_vm, "cache", "init", "--json")
         # Project the already installed trusted release into the private database.
-        _run_mvm(runner_vm, "bin", "pull", "1.16.2", "--default", "--json", timeout=300)
+        _run_mvm(runner_vm, "bin", "pull", "1.17.0", "--default", "--json", timeout=300)
         yield cache
         for item in _images(runner_vm):
             _remove_image(runner_vm, item)

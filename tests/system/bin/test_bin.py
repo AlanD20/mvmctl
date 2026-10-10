@@ -31,12 +31,12 @@ def _installed_pair(binaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     assert len(pair) == 2, pair
     assert {item["type"] for item in pair} == {"firecracker", "jailer"}
     for item in pair:
-        assert item["version"] == "1.16.2", item
+        assert item["version"] == "1.17.0", item
         assert item["architecture"] == platform.machine(), item
         assert item["is_present"] is True, item
         assert re.fullmatch(r"[0-9a-f]{64}", item["id"]), item
         assert item["path"] == (
-            f"/var/lib/mvmctl/binaries/{item['architecture']}/1.16.2/{item['type']}"
+            f"/var/lib/mvmctl/binaries/{item['architecture']}/1.17.0/{item['type']}"
         ), item
     return pair
 
@@ -184,7 +184,7 @@ class TestBinaryEdges:
         """An exact mirrored release can be re-admitted without changing its pair or default."""
         before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
         prior_pair = _installed_pair(before)
-        version = "1.16.2"
+        version = "1.17.0"
         prior_ids = {item["type"]: item["id"] for item in prior_pair}
         mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
         archive = mirror / f"firecracker-v{version}-{platform.machine()}.tgz"
@@ -386,8 +386,8 @@ try:
     state = open_directory(lib, "mvmctl")
     binaries = open_directory(state, "binaries")
     architecture = open_directory(binaries, "x86_64")
-    original = open_pair("1.16.2")
-    original_receipt = pair_receipt(original, "1.16.2")
+    original = open_pair("1.17.0")
+    original_receipt = pair_receipt(original, "1.17.0")
     no_live_instances()
     absent_target()
     print(json.dumps({"original": original_receipt, "target_absent": True}), flush=True)
@@ -400,7 +400,7 @@ try:
             assert owned is not None
             # Root removal intentionally unlinks this pinned version directory.
             parents[:] = [entry for entry in parents if entry[2] != owned[0]]
-        assert pair_receipt(original, "1.16.2") == original_receipt
+        assert pair_receipt(original, "1.17.0") == original_receipt
         no_live_instances()
         if command == "absent":
             assert owned is None
@@ -694,7 +694,7 @@ class TestBinaryLiveVMReleaseLease:
         vm_name = unique_vm_name
         before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
         pair = _installed_pair(before)
-        version = "1.16.2"
+        version = "1.17.0"
         mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
         archive = mirror / f"firecracker-v{version}-{platform.machine()}.tgz"
         archive_identity = _file_identity(archive)

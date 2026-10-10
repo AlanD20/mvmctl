@@ -63,13 +63,13 @@ def _require_tcp_preseed(before: dict[str, Any]) -> None:
     assert all(
         any(
             item["type"] == binary_type
-            and item["version"] == "1.16.2"
+            and item["version"] == "1.17.0"
             and item["is_default"]
             and item["is_present"]
             for item in before["bin"]
         )
         for binary_type in ("firecracker", "jailer")
-    ), "preseed the mirrored default Firecracker/Jailer 1.16.2 pair"
+    ), "preseed the mirrored default Firecracker/Jailer 1.17.0 pair"
     assert any(
         item["is_default"] and item["is_present"] for item in before["kernel"]
     ), "preseed a default kernel"
@@ -799,13 +799,13 @@ print('DELIVERED' if nonce.encode('ascii') in payloads else 'ABSENT')
         assert all(
             any(
                 item["type"] == binary_type
-                and item["version"] == "1.16.2"
+                and item["version"] == "1.17.0"
                 and item["is_default"]
                 and item["is_present"]
                 for item in binaries
             )
             for binary_type in ("firecracker", "jailer")
-        ), "preseed the mirrored default Firecracker/Jailer 1.16.2 pair"
+        ), "preseed the mirrored default Firecracker/Jailer 1.17.0 pair"
         assert any(
             item["is_default"] and item["is_present"]
             for item in data("kernel", "ls", kind=list)

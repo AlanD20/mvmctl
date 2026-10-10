@@ -253,11 +253,11 @@ def _require_assets(runner_vm: str) -> dict[str, Any]:
             row
             for row in binaries
             if row["type"] == kind
-            and row["version"] == "1.16.2"
+            and row["version"] == "1.17.0"
             and row["is_default"]
             and row["is_present"]
         ]
-        assert len(matches) == 1, f"preseed the default {kind} 1.16.2 pair"
+        assert len(matches) == 1, f"preseed the default {kind} 1.17.0 pair"
         selected[kind] = matches[0]["id"]
     assert _data(runner_vm, "host", "status")["resources"]["nftables_available"] is True
     assert all(

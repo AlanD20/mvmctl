@@ -117,7 +117,7 @@ def _pair_owner(runner_vm: str) -> dict:
     assets = {"image_id": images[0]["id"], "kernel_id": kernels[0]["id"]}
     for kind in ("firecracker", "jailer"):
         binaries = [item for item in baseline["bin"] if item["type"] == kind and item["is_present"]
-                    and item["is_default"] and item["version"] == "1.16.2"]
+                    and item["is_default"] and item["version"] == "1.17.0"]
         assert len(binaries) == 1, binaries
         assets["binary_id" if kind == "firecracker" else "jailer_binary_id"] = binaries[0]["id"]
     return {"baseline": baseline, "image_id": images[0]["id"], "assets": assets, "vms": {}, "vm_intents": [],
@@ -341,11 +341,11 @@ def _require_exec_lifecycle_assets(runner_vm: str) -> None:
     for kind in ("firecracker", "jailer"):
         assert any(
             item["type"] == kind
-            and item["version"] == "1.16.2"
+            and item["version"] == "1.17.0"
             and item["is_present"]
             and item["is_default"]
             for item in binaries
-        ), f"preseeded default {kind} 1.16.2 required"
+        ), f"preseeded default {kind} 1.17.0 required"
     kernels = _json_success_data(
         _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
     )
@@ -597,7 +597,7 @@ def owned_exec_pair(runner_vm: str):
                 if domain == "image":
                     assert (selected[0]["type"], selected[0]["version"]) == ("alpine", "3.23")
                 if domain == "bin":
-                    assert selected[0]["version"] == "1.16.2", selected
+                    assert selected[0]["version"] == "1.17.0", selected
                 print(f"exec extra asset vm={vm['id']} field={field} "
                       f"id={selected[0]['id']} version={selected[0]['version']}", flush=True)
             _exec_lifecycle_identity(runner_vm, name, vm["id"])

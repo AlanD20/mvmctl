@@ -1,7 +1,7 @@
 """Root-observed console journey with receipted, checked VM/network cleanup.
 
 Requires a disposable Tier 2 runner with fresh root authority state, present
-nondefault Alpine 3.23, a present default kernel and the trusted 1.16.2 pair.
+nondefault Alpine 3.23, a present default kernel and the trusted 1.17.0 pair.
 No asset pulls, default changes, or old-journal adoption occur here.
 """
 
@@ -98,7 +98,7 @@ def _assets(baseline: dict[str, Any]) -> dict[str, str]:
         assert (
             len(binaries) == 1
             and binaries[0]["is_present"]
-            and binaries[0]["version"] == "1.16.2"
+            and binaries[0]["version"] == "1.17.0"
         ), binaries
         selected["binary_id" if kind == "firecracker" else "jailer_binary_id"] = (
             binaries[0]["id"]

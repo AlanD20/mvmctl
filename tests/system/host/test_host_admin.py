@@ -468,7 +468,7 @@ assert not os.path.lexists(sys.argv[1])
             "--skip-host",
             "--skip-network",
             "--binary-version",
-            "1.16.2",
+            "1.17.0",
             "--debug",
             timeout=180,
         )
@@ -514,7 +514,7 @@ assert not os.path.lexists(sys.argv[1])
             "--skip-host",
             "--skip-network",
             "--binary-version",
-            "1.16.2",
+            "1.17.0",
             "--debug",
             timeout=180,
         )
@@ -607,7 +607,7 @@ assert not os.path.lexists(sys.argv[1])
         ]
         assert len(kernels) == 1 and kernels[0]["version"] == "7.0.11", kernels
         archive = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser() / (
-            f"firecracker-v1.16.2-{platform.machine()}.tgz"
+            f"firecracker-v1.17.0-{platform.machine()}.tgz"
         )
         self.archive = archive
         self.archive_receipt = _file_receipt(str(archive))
@@ -1209,7 +1209,7 @@ class TestCleanHostAdministration:
             "--skip-host",
             "--skip-network",
             "--binary-version",
-            "1.16.2",
+            "1.17.0",
             "--debug",
             check=False,
             timeout=180,

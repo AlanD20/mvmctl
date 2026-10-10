@@ -53,10 +53,10 @@ def _require_journey_assets(runner_vm: str) -> None:
     binaries = _listed(runner_vm, "bin")
     for kind in ("firecracker", "jailer"):
         assert any(
-            item["type"] == kind and item["version"] == "1.16.2"
+            item["type"] == kind and item["version"] == "1.17.0"
             and item["is_default"] and item["is_present"]
             for item in binaries
-        ), f"preseed the default {kind} 1.16.2"
+        ), f"preseed the default {kind} 1.17.0"
     host = _data(runner_vm, "host", "status")
     assert host["resources"]["nftables_available"] is True
 

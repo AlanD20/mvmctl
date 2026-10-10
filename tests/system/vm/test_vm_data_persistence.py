@@ -62,7 +62,7 @@ def _require_persistence_assets(runner_vm: str) -> None:
         assert (
             len(selected) == 1
             and selected[0]["is_present"]
-            and selected[0]["version"] == "1.16.2"
+            and selected[0]["version"] == "1.17.0"
         ), selected
     settings = _json_success_data(
         _run_mvm(runner_vm, "config", "ls", "--json").stdout, dict

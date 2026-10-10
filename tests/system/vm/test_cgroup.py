@@ -211,7 +211,7 @@ def _require_preseeded_vm_assets(runner_vm: str, *, explicit_alpine: bool = Fals
         defaults = [binary for binary in binaries if binary.get("type") == kind and binary.get("is_default")]
         assert len(defaults) == 1, (kind, binaries)
         binary = defaults[0]
-        assert binary.get("is_present") and binary.get("version") == "1.16.2", binary
+        assert binary.get("is_present") and binary.get("version") == "1.17.0", binary
         pair[kind] = binary
     assert pair["firecracker"].get("architecture") == pair["jailer"].get("architecture"), pair
     return kernel_args

@@ -166,7 +166,7 @@ def test_host_reboot_pre() -> None:
     assert baseline["network"][0]["bridge_active"] and baseline["network"][0]["is_present"]
     assert os.environ.get("MVM_ASSET_MIRROR") and Path(os.environ["MVM_ASSET_MIRROR"]).is_dir()
     for member in ("firecracker", "jailer"):
-        assert any(row["type"] == member and row["version"] == "1.16.2" and row["is_default"]
+        assert any(row["type"] == member and row["version"] == "1.17.0" and row["is_default"]
                    and row["is_present"] for row in baseline["bin"])
     kernels = [row for row in baseline["kernel"] if row["id"] == os.environ["MVM_RUNNER_KERNEL_ID"]]
     images = [row for row in baseline["image"] if row["type"] == "alpine" and row["version"] == "3.23"
