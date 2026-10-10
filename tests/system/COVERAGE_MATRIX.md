@@ -62,15 +62,26 @@ initialized database when inventory was requested. Signed `7fa57a7b` corrects th
 and key identities before and after initialization. Named-runner checks passed all 22 focused fixture
 cases with native exit 0 and strict zero-other outcomes; all 22 kernel nodes collected. JUnit SHA-256
 `11cced12e8cb7b3dc523d5b8c56925a00555d4e9d20ee93da2c0b0dd1eda3476`.
-The setup failure remains recorded. The corrected three acquisition bodies and final public cache cleanup
-still require runtime qualification; passing fixture checks do not close that gap.
+The setup failure remains recorded. Those fixture checks alone did not qualify acquisition or final public
+cache cleanup; the later runtime checkpoint below provides separate evidence.
 
 A subsequent setup failure followed successful normal initialization: the fixture rejected its audit
 files and schema migration snapshots. Signed `ed16366d` admits only operator-owned regular `audit.log`,
 `audit.log.lock` and database snapshots for schemas 2–8. Wrong ownership/type and unknown entries still
 refuse. Only the twelve affected initialization checks were run; all passed with strict zero-other
 outcomes, and all 22 kernel nodes collected. No acquisition body ran in those checks. The successful
-initialization outputs and the failed runtime receipt are retained; acquisition/cleanup remains pending.
+initialization outputs and the failed runtime receipt were retained for the corrected invocation below.
+
+**Original three-case acquisition/cleanup checkpoint (2026-10-10):** signed Python author `d45bece8`
+ran the unchanged version, specific-version and architecture cases on installed `752110fa`/`ea7bad33`.
+Native session 30218 and case PID 387470 exited 0; strict JSON and exact JUnit report 3/3 passes with zero
+other outcomes, in 6.41 seconds. Three typed kernel retirements and one final typed cache cleanup succeeded.
+The retained cache and protected child are absent; its parent/configuration remain. Raw original public,
+physical and administrator inventories are byte-identical before/after (`ad6901a3`). Source, binary,
+default ELF, shared v1.15 asset, private v1.14 asset, boot and historical receipts retained their pins.
+Terminal SHA-256 `3ba28313`; strict JSON `ddcb5c22`; JUnit `b8d3a6fe`; independent ownership proof `2c68d352`.
+This closes these three acquisition cases and their kernel-only cache retirement, not official builds,
+new-layout snapshot/volume branch cleanup or the complete kernel domain. Earlier failures remain failed.
 
 Signed `5f420009` gives the separate eight official-kernel cases one private cache, strict publication
 receipts, per-case typed kernel retirement and one final typed cache cleanup. Actual default receipts must

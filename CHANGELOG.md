@@ -36,8 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > initialization while preserving the retained cache and authority identities. Its 22 focused fixture checks
 > and exact 22-node collection passed inside the named runner. `ed16366d` additionally admits only normal
 > operator-owned audit files and schema 2–8 database snapshots created by initialization; wrong-owner,
-> wrong-type and unknown entries still refuse. Its twelve affected checks passed. Actual acquisition
-> and cleanup remain pending.
+> wrong-type and unknown entries still refuse. Its twelve affected checks passed. The corrected original
+> three acquisition cases then passed on the installed cache candidate, including per-case kernel retirement
+> and final typed cache cleanup. Checked original inventories were byte-identical afterward. The separate
+> official-build and new-layout branch-cleanup journeys remain pending.
 
 > **Kernel default and official-fixture corrections (2026-10-10):** `4bc51ee7` propagates default-write
 > errors and returns the authoritative persisted kernel row from `kernel pull --default`. Focused format,
