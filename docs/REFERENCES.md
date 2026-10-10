@@ -96,8 +96,8 @@ pattern is:
 ### `mvm init`
 
 First-time operator setup wizard. Coordinates host admission, a default network, cache initialization, and a
-Firecracker/Jailer release pair. Kernel, image, and SSH-key setup are separate commands. VM launch in v0.3.0 requires
-the matching Firecracker/Jailer 1.16.2 pair.
+Firecracker/Jailer release pair. Kernel, image, and SSH-key setup are separate commands. The approved v0.3.0 launch
+contract requires the exact matching Firecracker/Jailer 1.17.0 pair; affected runtime qualification remains pending.
 
 ```
 mvm init [flags]
@@ -111,7 +111,7 @@ mvm init [flags]
 | `--binary-version <version>` | Download this exact Firecracker version when no local pair exists | empty (interactive choice or latest in non-interactive mode) |
 
 `--binary-version` does not replace an existing default pair. To select the v0.3.0 launch pair when another release is
-already installed, run `mvm bin pull 1.16.2 --default` and check `mvm bin ls` before creating a VM.
+already installed, run `mvm bin pull 1.17.0 --default` and check `mvm bin ls` before creating a VM.
 
 ---
 
@@ -320,6 +320,11 @@ Firecracker runtime management — install, list, select, and remove Firecracker
 fetches or accepts the optional exact mirror archive, verifies it, and atomically publishes the pair in the trusted
 release store. Source builds and manually supplied binary paths are unsupported.
 
+The approved VM launch pair is exactly 1.17.0. Binary-management support for an older audited release does not
+authorize VM launch with it. Release updates review and qualify the latest stable matching official pair before
+changing the pin; the installed runtime does not automatically follow upstream `latest`. See
+[runtime guidance](RUNTIME.md#vm-launch-and-resource-control).
+
 #### Selectors
 
 The binary resolver tries selectors in priority order:
@@ -339,8 +344,8 @@ The binary resolver tries selectors in priority order:
 # List local and remote versions
 mvm bin ls --remote
 
-# Install a specific Firecracker release
-mvm bin pull 1.15.0
+# Install and select the required VM launch pair
+mvm bin pull 1.17.0 --default
 
 # Remove the exact architecture-scoped release pair
 mvm bin rm 1.15.0
@@ -463,6 +468,10 @@ retains immutable memory backing, and preserves captured drive IDs and network i
 captured IP before root restore; conflicts fail, and an uncertain root outcome keeps the reservation for recovery.
 Focused installed-candidate networkless and same-network managed restore journeys passed in the named runner; the
 full snapshot fault matrix, interruption reconciliation, and release QA remain open (see ADR-0018).
+
+Those earlier restore results do not qualify the 1.17.0 pair. Create fresh 1.17.0 snapshots and qualify capture and
+restore with the same matching release. Captured versions are preserved; no cross-version conversion or compatibility
+is promised. See [runtime guidance](RUNTIME.md#vm-launch-and-resource-control).
 
 Create, list, inspect, restore, and remove VM snapshots.
 

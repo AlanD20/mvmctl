@@ -64,8 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Changed VM launch to require the exact matching Firecracker/Jailer **1.16.2** pair, fixing the upstream
+- Changed the approved VM launch contract to the exact matching Firecracker/Jailer **1.17.0** pair, selecting the
+  latest stable official release for this dependency update. The earlier 1.16.2 update fixed the upstream
   1.16.1 pause/resume-vsock defect. Older audited pairs remain manageable binary artifacts, not launch fallbacks.
+  Future release updates review and qualify the latest stable matching pair before changing the exact pin.
   Sealed launch supports x86 nested virtualization; ARM nested launch remains refused.
   See [release requirements](docs/RUNTIME.md#vm-launch-and-resource-control).
 - Changed binary pull/remove to use the checksum-verified root release store and architecture-scoped pair
@@ -138,8 +140,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   layouts without adoption. Separate vsock UDS endpoints now permit independent CID namespaces.
 - Rejected FUSE, network, overlay/stacked, and automount cache roots. Custom `MVM_CACHE_DIR` remains supported
   on ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or ZFS.
-- Required fresh snapshots: Firecracker 1.16.2 snapshots are incompatible with 1.16.0/1.16.1 in both directions.
-  Older snapshot state is neither converted nor relabeled. See
+- Required fresh 1.17.0 snapshots and matching-pair restore qualification; earlier snapshot results do not qualify
+  this pair. Historically, Firecracker 1.16.2 snapshots are incompatible with 1.16.0/1.16.1 in both directions.
+  Older snapshot state is neither converted nor relabeled, and cross-version compatibility is not asserted. See
   [upstream release notes](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2).
 
 ### Fixed
@@ -184,8 +187,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installed Python matrix, reusable-base qualification, clean-host Tier 3, remote CI, and
   final approval remain release gates. Earlier focused results bind only their tested inputs; see the
   [coverage matrix](tests/system/COVERAGE_MATRIX.md) for exact evidence.
-- Retained the Firecracker 1.16.2 live PCI detach/reattach blocker: the disk may fail to reappear after BAR relocation.
-  Attachment readiness detects this failure but cannot repair it. A dependency update requires a separate decision.
+- Retained the observed Firecracker 1.16.2 live PCI detach/reattach failure: the disk did not reappear after BAR relocation.
+  The approved 1.17.0 dependency update includes an upstream source remedy; attachment readiness detects failure but
+  cannot repair it. Matching-pair launch, hotplug, pause/resume-vsock, and fresh snapshot qualification remain pending.
 - Deferred aarch64 runtime qualification pending suitable hardware; cross-compilation does not establish runtime support.
 - Retained host/ancestor/global OOM risk under pressure-only memory control. Bounded pressure/guest-exhaustion
   observations neither attribute the original saturation incident nor guarantee survival under arbitrary pressure.

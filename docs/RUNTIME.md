@@ -58,11 +58,21 @@ operations, retained backing or restore references, and unknown or old layouts. 
 
 `mvm bin pull` installs an exact matching Firecracker/Jailer release in root-controlled storage. For a new install, a
 local `MVM_ASSET_MIRROR` can supply the archive, but the root receiver still obtains and checks the official release
-checksum sidecar; a local archive alone is not a trust assertion. v0.3.0 VM launch requires Firecracker/Jailer
-**1.16.2**. Older pairs may be managed as artifacts but cannot launch VMs. This release fixes the upstream
-pause/resume-vsock defect. Its snapshot format is incompatible in both directions with 1.16.0/1.16.1: create fresh
-snapshots after upgrading; mvmctl does not convert older snapshot state. See the
-[upstream release notes](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2).
+checksum sidecar; a local archive alone is not a trust assertion. The approved v0.3.0 launch contract requires the
+exact Firecracker/Jailer **1.17.0** pair, the latest stable upstream release selected for this dependency update.
+Affected installed-candidate runtime qualification remains pending. Older audited pairs may be managed as artifacts
+but cannot launch VMs. See the [1.17.0 release notes](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.17.0).
+
+Release updates select the latest stable official matching pair, review its complete archive and runtime contract,
+and qualify the affected behavior before release. The deployed contract remains an exact version pin; it does not
+automatically advance with upstream releases or admit an unreviewed archive profile or minimum-version range.
+
+The earlier 1.16.2 update fixed the upstream 1.16.1 pause/resume-vsock defect and introduced a snapshot format
+incompatible in both directions with 1.16.0/1.16.1; see the
+[1.16.2 release notes](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2).
+Create fresh 1.17.0 snapshots and prove restore with the matching 1.17.0 pair. Earlier snapshot results do not qualify
+this pair, cross-version compatibility is not asserted, and mvmctl neither converts state nor rewrites captured
+release identities.
 
 Jailer is the only VM launcher. The authenticated root launch path prepares a fresh, pinned jail tree, admits the
 selected kernel and disk resources, installs an isolated per-VM execution identity, and brokers the private
@@ -136,7 +146,11 @@ On a Paused VM it stages the attachment and returns a retryable deferred-readine
 retry the same attach. Stopped VMs record the attachment for their next start. A readiness failure does not
 undo a known-applied attachment or make its volume available; inspect the state and retry the same operation.
 The readiness implementation has focused Go verification but awaits installed-candidate system qualification.
-It detects an unusable attachment; it cannot repair the current Firecracker PCI BAR relocation failure.
+It detects an unusable attachment; it cannot repair the PCI BAR relocation failure observed on Firecracker 1.16.2.
+The approved 1.17.0 dependency update includes upstream
+[BAR/MMIO relocation changes](https://github.com/firecracker-microvm/firecracker/blob/v1.17.0/src/vmm/src/devices/virtio/transport/pci/device.rs#L657-L715)
+selected to address that failure. Successful detach/reattach on the project candidate remains an installed-runtime
+qualification gate.
 
 A full snapshot captures rootfs, memory/vmstate, and attached data volumes under exclusive write ownership. Its
 artifacts are root-controlled under the selected cache, with CLI-mediated removal. Restore creates independent
