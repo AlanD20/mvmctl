@@ -270,3 +270,90 @@ def test_retained_admission_rejects_changed_authority_without_fresh_fallback(
     with pytest.raises(AssertionError):
         kernel_module._KernelPullSequence.retained_paths(path, hashlib.sha256(path.read_bytes()).hexdigest())
     assert sequence.cache_dir.exists() and not sequence.completed
+
+
+@pytest.fixture
+def retained_initialization_handoff(retained_handoff, sequence):
+    path, _, handoff = retained_handoff
+    keys = sequence.config_dir / "keys"
+    keys.mkdir(mode=0o700)
+    historical_key = keys / "historical-key"
+    historical_key.write_bytes(b"historical private key")
+    handoff["config_files"] = sequence.config_files(sequence.config_dir)
+    path.write_text(json.dumps(handoff))
+    return path, hashlib.sha256(path.read_bytes()).hexdigest(), historical_key
+
+
+def test_retained_normal_init_precedes_inventory_and_preserves_historical_authority(
+    kernel_module, retained_initialization_handoff, sequence, monkeypatch,
+):
+    path, digest, historical_key = retained_initialization_handoff
+    original_key = sequence.file_receipt(historical_key)
+    calls = []
+
+    def native(_runner, *args, **kwargs):
+        calls.append(args)
+        if args == ("cache", "init", "--json"):
+            assert kwargs == dict(check=False)
+            assert not (sequence.cache_dir / "mvmdb.db").exists()
+            for name in ("tmp", "vms", "images", "kernels", "bin", "logs"):
+                (sequence.cache_dir / name).mkdir(mode=0o700)
+            (sequence.cache_dir / "mvmdb.db").write_bytes(b"initialized private schema")
+            data = dict(cache_dir=str(sequence.cache_dir))
+        else:
+            assert (sequence.cache_dir / "mvmdb.db").is_file()
+            assert args[1:] == ("ls", "--json")
+            data = {} if args[0] == "config" else []
+        return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps(
+            dict(schema_version=1, status="success", data=data, error=None),
+        ))
+
+    monkeypatch.setattr(kernel_module, "_run_mvm", native)
+    sequence.initialize_retained(path, digest)
+    assert calls == [("cache", "init", "--json"),
+                     *((domain, "ls", "--json") for domain in sequence.domains), ("config", "ls", "--json")]
+    before = json.loads((sequence.output_root / "retained-init.before.json").read_text())
+    after = json.loads((sequence.output_root / "retained-init.after.json").read_text())
+    assert after["identities"] == before["identities"]
+    assert after["config_files"] == before["config_files"]
+    assert after["added_cache_entries"] == ["bin", "images", "kernels", "logs", "mvmdb.db", "tmp", "vms"]
+    assert sequence.file_receipt(historical_key) == original_key
+    assert sequence.inventory() == sequence.baseline
+    assert (sequence.output_root / "retained-init.exit").read_text() == "0"
+    assert not (sequence.cache_dir.parent / "retained-init.stdout").exists()
+
+
+@pytest.mark.parametrize("fault", ["native", "returned_path", "parent", "cache", "config", "protected",
+                                 "historical_key", "unexpected_entry"])
+def test_retained_init_failure_or_changed_authority_retains_evidence_without_inventory_or_fallback(
+    kernel_module, retained_initialization_handoff, sequence, monkeypatch, fault,
+):
+    path, digest, historical_key = retained_initialization_handoff
+    calls = []
+
+    def native(_runner, *args, **kwargs):
+        calls.append(args)
+        assert args == ("cache", "init", "--json") and kwargs == dict(check=False)
+        (sequence.cache_dir / "mvmdb.db").write_bytes(b"initialized private schema")
+        if fault in ("parent", "cache", "config", "protected"):
+            changed = {"parent": sequence.cache_dir.parent, "cache": sequence.cache_dir,
+                       "config": sequence.config_dir, "protected": sequence.cache_dir / ".mvm-protected"}[fault]
+            changed.chmod(0o750)
+        elif fault == "historical_key":
+            historical_key.write_bytes(b"changed historical key")
+        elif fault == "unexpected_entry":
+            (sequence.cache_dir / "unowned").write_bytes(b"unexpected publication")
+        data = dict(cache_dir=str(sequence.cache_dir.parent if fault == "returned_path" else sequence.cache_dir))
+        return SimpleNamespace(returncode=1 if fault == "native" else 0, stderr="native init refused",
+                               stdout=json.dumps(dict(schema_version=1, status="success", data=data, error=None)))
+
+    monkeypatch.setattr(kernel_module, "_run_mvm", native)
+    with pytest.raises(AssertionError):
+        sequence.initialize_retained(path, digest)
+    assert calls == [("cache", "init", "--json")]
+    assert sequence.cache_dir.exists() and historical_key.exists() and not sequence.completed
+    assert (sequence.output_root / "retained-init.stdout").is_file()
+    assert (sequence.output_root / "retained-init.stderr").read_text() == "native init refused"
+    assert (sequence.output_root / "retained-init.exit").read_text() == ("1" if fault == "native" else "0")
+    assert (sequence.output_root / "retained-init.before.json").is_file()
+    assert (sequence.output_root / "retained-init.after.json").is_file()

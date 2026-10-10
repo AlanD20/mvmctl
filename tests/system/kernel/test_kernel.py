@@ -241,7 +241,7 @@ class _KernelPullSequence(_KernelPullOwner):
         return paths["cache"], paths["config"]
 
     @staticmethod
-    def assert_config_files(config_dir, expected):
+    def config_files(config_dir):
         actual = {}
         for path in config_dir.rglob("*"):
             assert not path.is_symlink(), path
@@ -252,10 +252,57 @@ class _KernelPullSequence(_KernelPullOwner):
             else:
                 identity, digest = _KernelPullOwner.file_receipt(path)
                 actual[str(path.relative_to(config_dir))] = {"identity": list(identity), "sha256": digest}
-        assert actual == expected, "retained config changed"
+        return actual
 
-    def initialize_retained(self):
-        # Do not initialize/recreate a historically bound store. Public state must still be empty.
+    @classmethod
+    def assert_config_files(cls, config_dir, expected):
+        assert cls.config_files(config_dir) == expected, "retained config changed"
+
+    def retained_initialization_state(self):
+        paths = {"parent": self.cache_dir.parent, "cache": self.cache_dir,
+                 "config": self.config_dir, "protected": self.cache_dir / ".mvm-protected"}
+        fields = ("st_dev", "st_ino", "st_uid", "st_gid", "st_mode")
+        return {
+            "identities": {label: [getattr(path.lstat(), field) for field in fields]
+                           for label, path in paths.items()},
+            "config_files": self.config_files(self.config_dir),
+            "cache_entries": {path.name: [getattr(path.lstat(), field) for field in fields]
+                              for path in sorted(self.cache_dir.iterdir())},
+        }
+
+    def initialize_retained(self, receipt_path, expected_sha256):
+        # Normal init creates the missing mvmdb.db/schema; it does not rebind or adopt this store.
+        assert self.retained_paths(receipt_path, expected_sha256) == (self.cache_dir, self.config_dir)
+        assert self.directory_identity(self.cache_dir) == self.cache_identity
+        assert self.directory_identity(self.config_dir) == self.config_identity
+        before = self.retained_initialization_state()
+        (self.output_root / "retained-init.before.json").write_text(json.dumps(before), encoding="utf-8")
+        result = _run_mvm(self.runner_vm, "cache", "init", "--json", check=False)
+        for stream in ("stdout", "stderr"):
+            (self.output_root / f"retained-init.{stream}").write_text(getattr(result, stream), encoding="utf-8")
+        (self.output_root / "retained-init.exit").write_text(str(result.returncode), encoding="utf-8")
+        after = self.retained_initialization_state()
+        added = sorted(after["cache_entries"].keys() - before["cache_entries"].keys())
+        (self.output_root / "retained-init.after.json").write_text(
+            json.dumps({**after, "added_cache_entries": added}), encoding="utf-8",
+        )
+        assert result.returncode == 0, result.stderr
+        initialized = _json_success_data(result.stdout, dict)
+        assert initialized["cache_dir"] == str(self.cache_dir), initialized
+        assert after["identities"] == before["identities"], "retained store identity changed during init"
+        assert after["config_files"] == before["config_files"], "retained config changed during init"
+        for name, identity in before["cache_entries"].items():
+            assert after["cache_entries"].get(name) == identity, ("retained cache entry changed", name)
+        # These are the only normal DB/cache entries created by app.NewOperation/CacheInitAll.
+        directories = {"tmp", "vms", "images", "kernels", "bin", "logs"}
+        databases = {"mvmdb.db", "mvmdb.db-wal", "mvmdb.db-shm"}
+        assert set(added) <= directories | databases, ("unexpected cache init entries", added)
+        for name in added:
+            identity = after["cache_entries"][name]
+            assert identity[2] == os.getuid(), (name, identity)
+            assert (stat.S_ISDIR if name in directories else stat.S_ISREG)(identity[4]), (name, identity)
+        self.file_receipt(self.cache_dir / "mvmdb.db")
+        assert self.retained_paths(receipt_path, expected_sha256) == (self.cache_dir, self.config_dir)
         self.baseline = self.inventory()
         assert all(not items for items in self.baseline.values()), self.baseline
         self.config = _json_success_data(
@@ -330,7 +377,7 @@ def kernel_pull_sequence(runner_vm, tmp_path_factory, request):
             with pytest.MonkeyPatch.context() as selection:
                 owner.select_cache(selection)
                 if receipt_path:
-                    owner.initialize_retained()
+                    owner.initialize_retained(Path(receipt_path), receipt_digest)
                 else:
                     owner.initialize()
             yield owner
