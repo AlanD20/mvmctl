@@ -2340,9 +2340,13 @@ def _host_reboot_require_phase_report(phase: str, raw: bytes, xml: bytes, return
 
 def _host_reboot_require_envelope(raw: bytes, bound: dict[str, Any], outer: dict[str, Any]) -> None:
     receipt = _host_reboot_json(raw)
+    if any(type(outer[key]) is not str or re.fullmatch(r"(?:0|[1-9][0-9]*)", outer[key]) is None
+           for key in ("memory_high", "memory_max")):
+        raise RuntimeError("host_reboot external administrator envelope requires finite observed controls")
     expected = dict(schema_version=1, runner=_HOST_REBOOT_RUNNER, runner_id=outer["runner_id"],
                     host_boot_id=bound["after_boot"], outer_pid=outer["pid"], outer_start_ticks=outer["start_ticks"],
-                    memory_high=8589934592, memory_max=8589934592, guest_mem_size_mib=outer["guest_mem_size_mib"])
+                    memory_high=int(outer["memory_high"]), memory_max=int(outer["memory_max"]),
+                    guest_mem_size_mib=outer["guest_mem_size_mib"])
     if receipt != expected or any(type(receipt[key]) is not int for key in
                                   ("schema_version", "outer_pid", "outer_start_ticks", "memory_high", "memory_max", "guest_mem_size_mib")):
         raise RuntimeError("host_reboot POST requires the exact fresh external administrator envelope receipt")
@@ -3327,7 +3331,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host-reboot-task", type=Path,
                         help="Private retained host_reboot receipt directory; also mandatory read-only completed POST input for full release qualification.")
     parser.add_argument("--host-reboot-envelope", type=Path,
-                        help="POST-only external administrator receipt for the fresh runner boot and actual 8 GiB envelope.")
+                        help="POST-only external administrator receipt for the fresh runner boot and truthful current finite controls.")
     return parser
 
 
