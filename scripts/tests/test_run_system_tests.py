@@ -1704,7 +1704,7 @@ def test_runner_user_initialization_uses_the_exact_installed_cli(
                 "--",
                 "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
                 "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive "
-                "--binary-version 1.16.2",
+                "--binary-version 1.17.0",
             ),
             {"timeout": 180, "capture": False},
         )
@@ -1737,7 +1737,7 @@ def test_tier2_provision_pulls_exact_release_with_installed_cli(
     assert calls[-1] == (
         (
             "exec", "focused-runner", "--user", "runner", "--timeout", "10", "--",
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.2 --default --force",
+            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.17.0 --default --force",
         ),
         {"timeout": 150},
     )
@@ -2843,7 +2843,7 @@ def test_build_base_image_cleans_builder_when_asset_pull_fails(
     ) -> None:
         assert timeout == 180
         assert capture is False
-        initialization_order.append("runner-init-1.16.2")
+        initialization_order.append("runner-init-1.17.0")
 
     def fail_asset_pull(_vm_name: str) -> None:
         initialization_order.append("asset-pulls")
@@ -2865,7 +2865,7 @@ def test_build_base_image_cleans_builder_when_asset_pull_fails(
     assert captured.value is original_failure
     assert initialization_order == [
         "host-init",
-        "runner-init-1.16.2",
+        "runner-init-1.17.0",
         "asset-pulls",
     ]
     builder_removals = [

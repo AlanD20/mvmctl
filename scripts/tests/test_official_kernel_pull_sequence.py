@@ -242,11 +242,11 @@ def test_failed_cache_cleanup_keeps_native_receipts_and_known_logs(sequence, ker
 def borrowed_pair(sequence, kernel_module, monkeypatch):
     mirror = sequence.output_root / "mirror"
     mirror.mkdir()
-    archive = mirror / "firecracker-v1.16.2-x86_64.tgz"
+    archive = mirror / "firecracker-v1.17.0-x86_64.tgz"
     archive.write_bytes(b"already authenticated release archive")
     monkeypatch.setenv("MVM_ASSET_MIRROR", str(mirror))
     root = {"directories": {"slot": [1, 2, 0, 0, 0o40755]}, "files": {}, "manifest": {
-        "schema_version": 1, "release": {"version": "1.16.2", "architecture": "x86_64"},
+        "schema_version": 1, "release": {"version": "1.17.0", "architecture": "x86_64"},
         "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
     }}
     pair = []
@@ -256,9 +256,9 @@ def borrowed_pair(sequence, kernel_module, monkeypatch):
                                "sha256": digest}
         root["manifest"][name] = {"sha256": digest, "size_bytes": 20}
         pair.append(dict(id=hashlib.sha256(
-            f"mvmctl:binary-release:v1:{name}:x86_64:1.16.2:{digest}".encode(),
-        ).hexdigest(), type=name, version="1.16.2", architecture="x86_64",
-                         path=f"/var/lib/mvmctl/binaries/x86_64/1.16.2/{name}",
+            f"mvmctl:binary-release:v1:{name}:x86_64:1.17.0:{digest}".encode(),
+        ).hexdigest(), type=name, version="1.17.0", architecture="x86_64",
+                         path=f"/var/lib/mvmctl/binaries/x86_64/1.17.0/{name}",
                          is_default=True, is_present=True, created_at="old", updated_at="old"))
     monkeypatch.setattr(sequence, "root_release_receipt", lambda: root)
     monkeypatch.delattr(sequence, "assert_borrowed_release")
@@ -278,7 +278,7 @@ def private_admission(sequence, kernel_module, monkeypatch, pair, *, result=None
             return success({"cache_dir": str(sequence.cache_dir)})
         if args == ("config", "ls", "--json"):
             return success({})
-        assert args == ("bin", "pull", "1.16.2", "--json")
+        assert args == ("bin", "pull", "1.17.0", "--json")
         assert kwargs == {"timeout": 300, "check": False}
         state["inventory"] = {**empty, "bin": list(reversed(admitted))}
         if root_drift:
@@ -297,7 +297,7 @@ def test_private_pair_projection_keeps_borrowed_root_and_admits_fresh_full_rows(
     calls, admitted = private_admission(sequence, kernel_module, monkeypatch, pair)
     sequence.initialize()
     assert calls == [("cache", "init", "--json"), ("config", "ls", "--json"),
-                     ("bin", "pull", "1.16.2", "--json")]
+                     ("bin", "pull", "1.17.0", "--json")]
     assert sequence.baseline["bin"] == list(reversed(admitted))
     assert all(not sequence.baseline[domain] for domain in sequence.domains if domain != "bin")
     proof = json.loads((sequence.output_root / "borrowed-release.admitted.json").read_text())
@@ -351,7 +351,7 @@ def test_failed_private_pair_admission_retains_native_receipts_without_adoption(
     with pytest.raises(AssertionError, match="failed official"):
         sequence.cleanup()
     assert sequence.cache_dir.exists() and sequence.config_dir.exists()
-    assert calls[-1] == ("bin", "pull", "1.16.2", "--json")
+    assert calls[-1] == ("bin", "pull", "1.17.0", "--json")
 
 
 def test_borrowed_root_drift_prevents_terminal_cache_cleanup(

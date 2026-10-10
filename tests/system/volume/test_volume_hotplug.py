@@ -530,7 +530,7 @@ class TestVolumeHotplugDestructive:
         assert len(kernels) == 1, kernels
         for binary_type in ("firecracker", "jailer"):
             assert any(
-                row["type"] == binary_type and row["version"] == "1.16.2"
+                row["type"] == binary_type and row["version"] == "1.17.0"
                 and row["is_default"] and row["is_present"]
                 for row in baseline["bin"]
             ), (binary_type, baseline["bin"])

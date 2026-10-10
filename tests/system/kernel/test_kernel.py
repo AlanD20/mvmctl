@@ -474,7 +474,7 @@ class _OfficialKernelPullSequence(_KernelPullOwner):
 import hashlib,json,os,stat
 from pathlib import Path
 base=Path('/var/lib/mvmctl/binaries')
-slot=base/'x86_64'/'1.16.2'
+slot=base/'x86_64'/'1.17.0'
 result={'directories':{},'files':{}}
 for path in (base,base/'x86_64',slot):
     info=path.lstat()
@@ -510,22 +510,22 @@ print(json.dumps(result,sort_keys=True))
             root = self.root_release_receipt()
             manifest = root["manifest"]
             assert manifest["schema_version"] == 1 and manifest["release"] == {
-                "version": "1.16.2", "architecture": "x86_64",
+                "version": "1.17.0", "architecture": "x86_64",
             }, manifest
             for item in pair:
                 name = item["type"]
                 member = root["files"][name]
-                assert item["version"] == "1.16.2" and item["architecture"] == "x86_64", item
+                assert item["version"] == "1.17.0" and item["architecture"] == "x86_64", item
                 assert item["is_default"] is True and item["is_present"] is True, item
-                assert item["path"] == f"/var/lib/mvmctl/binaries/x86_64/1.16.2/{name}", item
+                assert item["path"] == f"/var/lib/mvmctl/binaries/x86_64/1.17.0/{name}", item
                 assert manifest[name] == {"sha256": member["sha256"], "size_bytes": member["identity"][6]}
                 expected_id = hashlib.sha256(
-                    f"mvmctl:binary-release:v1:{name}:x86_64:1.16.2:{member['sha256']}".encode(),
+                    f"mvmctl:binary-release:v1:{name}:x86_64:1.17.0:{member['sha256']}".encode(),
                 ).hexdigest()
                 assert item["id"] == expected_id, item
             mirror = Path(os.environ["MVM_ASSET_MIRROR"])
             assert mirror.is_absolute() and mirror.is_dir() and not mirror.is_symlink(), mirror
-            archive = mirror / "firecracker-v1.16.2-x86_64.tgz"
+            archive = mirror / "firecracker-v1.17.0-x86_64.tgz"
             archive_receipt = self.file_receipt(archive)
             assert archive_receipt[1] == manifest["archive_sha256"], archive
             self.borrowed_release = pair, root, archive, archive_receipt
@@ -549,7 +549,7 @@ print(json.dumps(result,sort_keys=True))
             assert self.borrowed_release is not None, "prepare borrowed release before selecting private cache"
             self.assert_borrowed_release()
             super().initialize()  # Preserve the original exact operator cache-init command.
-            result = _run_mvm(self.runner_vm, "bin", "pull", "1.16.2", "--json", timeout=300, check=False)
+            result = _run_mvm(self.runner_vm, "bin", "pull", "1.17.0", "--json", timeout=300, check=False)
             self.save_native("borrowed-release-pull", result)
             assert result.returncode == 0, result.stdout
             admitted = _json_success_data(result.stdout, list)
@@ -954,7 +954,7 @@ class TestKernelLifecycle:
         _run_mvm(
             runner_vm,
             "init", "--non-interactive", "--skip-host", "--skip-network",
-            "--binary-version", "1.16.2", timeout=180,
+            "--binary-version", "1.17.0", timeout=180,
         )
         result = _run_mvm(runner_vm, "kernel", "ls", "--json")
         assert _json_success_data(result.stdout, list) == []
