@@ -49,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > vet and 120 existing API checks passed in the named runner. `5f420009` gives the remaining eight official
 > kernel cases one privately owned cache, exact publication receipts, per-case retirement and final typed
 > cleanup. The combined official/retained-cache fixtures passed 34 focused checks and 22-node collection.
+> `a6047716` initializes that private cache with the matching trusted default Firecracker/Jailer pair
+> through normal `bin pull`, reusing the mirrored archive. Typed cleanup preserves the borrowed pair
+> and original defaults. All 22 affected fixture checks passed inside the named runner with zero failures,
+> errors or skips; this does not qualify the eight real official-kernel acquisition/build cases.
 > Actual official builds and the installed default-result contract remain unqualified.
 
 > **Standalone export-interruption qualification (2026-10-10):** the SIGINT survivor case passed alone

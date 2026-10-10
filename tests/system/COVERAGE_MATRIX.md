@@ -97,6 +97,13 @@ Signed `4bc51ee7` also corrects the API's ignored default-write error and stale 
 vet and 120 existing API checks passed. Official acquisition/build flags and the installed default result
 still need their real system journeys; these focused checks do not qualify them.
 
+Integrated `a6047716` fixes the private official-kernel fixture's missing default Firecracker/Jailer
+projection. Normal `bin pull 1.16.2 --json` reuses the mirrored archive and admits the matching trusted
+pair; cleanup preserves that borrowed pair, the original defaults and checked root/mirror inventories.
+Named-runner native session 45747 exited 0: all 22 focused fixture cases passed with zero failures,
+errors or skips. Strict JSON SHA-256 `c99668f0`; JUnit `c988e72e`. The unchanged eight real official-kernel
+cases remain a separate runtime gate; the earlier missing-default and fixture setup failures remain failed.
+
 **Current coherent branch-layout Go/build checkpoint (2026-10-10):** clean `4bc51ee7`, tree `0be46ce2`,
 passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent
 amd64 release build inside `mvmctl-030-test`. Literal root JSON counts 2,707 test/subtest passes, one package
