@@ -27,8 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > snapshot-lock and volume-removal residues still refuse cleanup. [ADR-0023](docs/adr/0023-protected-branch-authority-layout.md)
 > records their fresh-layout design; its implementation and qualification remain a separate release gap.
 > The three acquisition cases now share one receipt-owned store, retire their kernels between cases,
-> and clean that cache once at sequence completion. All three test bodies are unchanged; 13 pure fixture
-> checks and 22-node collection passed. These checks do not qualify acquisition or the production fix.
+> and clean that cache once at sequence completion. All three test bodies are unchanged. A subsequent setup
+> failure exposed inventory access before private cache initialization; the fixture now uses normal cache
+> initialization while preserving the retained cache and authority identities. Its 22 focused fixture checks
+> and exact 22-node collection passed inside the named runner. Actual acquisition and cleanup remain pending.
 
 > **Standalone export-interruption qualification (2026-10-10):** the SIGINT survivor case passed alone
 > on the installed cache candidate: native exit 0, strict 1/1 with zero other outcomes, 13.37 seconds.

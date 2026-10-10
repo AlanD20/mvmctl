@@ -46,10 +46,19 @@ remain an explicit separate gap; [ADR-0023](../../docs/adr/0023-protected-branch
 records the fresh-layout design, not its implementation or runtime qualification.
 Signed `af285c1b` integrates the reviewed three-case acquisition sequence fixture: one receipt-owned store,
 typed per-case kernel retirement, a single final cache cleanup and per-function cache/mirror environment.
-All three acquisition bodies remain byte-identical; named-QA checks passed 13 pure cases with zero other
+All three acquisition bodies remain byte-identical; the original named-QA checks passed 13 pure cases with zero other
 outcomes and collected all 22 kernel nodes. JUnit SHA-256
 `b823c7b3e3e2b2bf061886ba86f00166111a1454dfc6fec5fdb621afaef94aef`.
 No acquisition, download or candidate operation ran during those fixture checks.
+
+The next three-case invocation failed in setup before any acquisition body: the retained cache had no
+initialized database when inventory was requested. Signed `7fa57a7b` corrects the fixture to use normal
+`cache init` before inventory, checking the same retained parent, cache, configuration, protected-store
+and key identities before and after initialization. Named-runner checks passed all 22 focused fixture
+cases with native exit 0 and strict zero-other outcomes; all 22 kernel nodes collected. JUnit SHA-256
+`11cced12e8cb7b3dc523d5b8c56925a00555d4e9d20ee93da2c0b0dd1eda3476`.
+The setup failure remains recorded. The corrected three acquisition bodies and final public cache cleanup
+still require runtime qualification; passing fixture checks do not close that gap.
 
 **Current coherent cache Go/build/install checkpoint (2026-10-10):** clean `752110fa`, tree `02198101`,
 passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent
