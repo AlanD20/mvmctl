@@ -641,13 +641,20 @@ This journey is deliberately separate from ordinary T1/T2 batches. It operates o
 runner. A full release invocation cannot count a PRE checkpoint or ordinary tier success as a reboot pass.
 Source implementation, focused runner checks and exact phase collection passed on 2026-10-10. A later
 PRE passed and the named runner actually rebooted, but the legacy outer controller's vsock reconnect
-failed; no POST ran. The corrected complete journey remains unqualified.
+failed; no POST ran. That earlier attempt remains incomplete, not a successful journey.
 
-A subsequent SSH-based PRE passed and reconnected after the actual force reboot, but POST collected
+The corrected installed journey subsequently passed on clean `74a916d3` with production source `4bc51ee7`
+and candidate `0.3.0-rc.layout2-4bc51ee7`: PRE and POST each passed their exact singleton with native exit
+zero and no other outcomes. It proved a changed runner boot, durable staged source, stale-running reconciliation,
+empty `vm ps`, refused stopped exec, same-ID restart with a new guest boot and retained-marker exec, typed removal,
+network repair and persistent-state preservation. This is the explicit named-runner journey, not the full release
+matrix or a new run on a later candidate; the subsequent OpenRC change has separate affected qualification.
+
+An earlier SSH-based PRE passed and reconnected after the actual force reboot, but POST collected
 no tests: the staged source files had become zero-length. Retain that failed task rather than repairing
 its files and relabeling it successful. Signed `a90fcfb5` adds a checked guest-filesystem durability
 barrier before force reboot and exact staged-source verification after reconnect and before POST.
-Four focused checks passed inside the named runner; the corrected actual journey remains pending.
+Four focused checks passed inside the named runner; the completed journey above used that checked barrier.
 This is a staging failure, not demonstrated memory exhaustion; do not introduce a RAM guard to address it.
 
 Host-phase orchestration uses the unchanged outer controller's `mvm ssh --cmd` with the runner's attached
