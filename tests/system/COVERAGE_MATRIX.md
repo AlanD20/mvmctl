@@ -114,6 +114,15 @@ Named-runner native session 45747 exited 0: all 22 focused fixture cases passed 
 errors or skips. Strict JSON SHA-256 `c99668f0`; JUnit `c988e72e`. The unchanged eight real official-kernel
 cases remain a separate runtime gate; the earlier missing-default and fixture setup failures remain failed.
 
+Integrated `86f32738` gives only these eight official pulls a 2,400-second CLI allowance and a private
+process group, with identity-checked bounded termination and retained diagnostics on failure. It does not
+change production memory policy or add RAM admission checks. Named-runner session 82530 passed all 30
+affected fixture checks, including long-build and cancellation failure paths, with native exit 0 and zero
+other outcomes. Strict JSON SHA-256 `0d696e53`; JUnit `864b3d75`; terminal `55d134a9`.
+The earlier real-build attempt stopped at its 630-second test deadline while compiling Linux 7.2.9;
+neither an OOM nor successful compiler completion was demonstrated. Its failure remains recorded, and
+the newly cached source is retained for reuse. The eight actual build journeys remain unqualified.
+
 **Current coherent branch-layout Go/build checkpoint (2026-10-10):** clean `4bc51ee7`, tree `0be46ce2`,
 passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent
 amd64 release build inside `mvmctl-030-test`. Literal root JSON counts 2,707 test/subtest passes, one package

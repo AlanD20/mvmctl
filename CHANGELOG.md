@@ -57,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > errors or skips; this does not qualify the eight real official-kernel acquisition/build cases.
 > Actual official builds and the installed default-result contract remain unqualified.
 
+> **Official-build timeout correction (2026-10-10):** the first real build hit the old 630-second QA
+> deadline while compiling Linux 7.2.9; this was not a demonstrated memory failure. `86f32738` gives only
+> the eight official pulls a 2,400-second allowance and identity-checked private process-group cancellation,
+> retaining uncertain outcomes rather than adopting them. All 30 affected fixture checks passed inside
+> the named runner. No production memory policy or artificial QA RAM guard is introduced. Actual build
+> qualification remains pending; the cached Linux source will be reused.
+
 > **Standalone export-interruption qualification (2026-10-10):** the SIGINT survivor case passed alone
 > on the installed cache candidate: native exit 0, strict 1/1 with zero other outcomes, 13.37 seconds.
 > It interrupted an authenticated partial copy, refused release while the copy worker survived, preserved
