@@ -1029,7 +1029,9 @@ evidence from either the exact old or target backing size. Every guest read and 
 admitted mounted root. Its closed content set includes hostname/hosts, DNS, missing-account creation, SSH/sudo,
 fixed guest-boot SSH setup, embedded agent, fstab, a root-only persistent
 `/etc/mvmctl/agent.token`, and exactly one admitted init-system enablement: systemd `sysinit.target` or OpenRC default
-runlevel. OpenRC binary admission is required only after both its init-script and default-runlevel directories are
+runlevel. [ADR-0024](docs/adr/0024-early-openrc-agent-startup.md) accepts moving only the OpenRC agent to
+boot, after filesystem/module initialization and before network/clock work; that correction is not yet implemented
+or qualified. The existing binary admission is required only after both its init-script and default-runlevel directories are
 present. This admits Ubuntu's usrmerged systemd layout without following `/sbin` aliases; complete OpenRC candidates
 still require the confined binary check, and missing or ambiguous init layouts are rejected before agent publication.
 Existing accounts are retained. A missing non-root account receives the first free UID/private GID in

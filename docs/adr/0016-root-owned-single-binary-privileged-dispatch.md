@@ -622,7 +622,10 @@ namespace teardown and loop autoclear contain a receiver crash; cleanup never gu
 
 The adapter persists the canonical agent token only at root-owned mode-`0600` `/etc/mvmctl/agent.token` beneath a
 root-owned mode-`0700` `/etc/mvmctl`, and enables exactly one admitted init system: systemd through `sysinit.target`, or
-OpenRC through its default runlevel. It deliberately does not preserve missing-user creation, cloud-init directory
+OpenRC through its default runlevel. The latter historical runlevel choice is superseded by
+[ADR-0024](0024-early-openrc-agent-startup.md), which accepts early boot activation without changing
+the authentication or confined provisioning boundary; implementation and qualification remain separately recorded.
+The initial subset deliberately does not preserve missing-user creation, cloud-init directory
 copying without its own pinned capability, package-manager or deblob commands, recursive guest cleanup, guest host-key
 generation, arbitrary file/copy/command operations, custom shells, partition-table growth, shrink, conversion, or image
 replacement. These are public-cutover blockers, not permission to silently drop behavior. An explicit scope decision
