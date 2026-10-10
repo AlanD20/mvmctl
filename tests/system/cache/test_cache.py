@@ -1380,6 +1380,695 @@ def _cache_root_directory_receipt(runner_vm, path):
     return metadata
 
 
+_CACHE_RETIREMENT_AUTHORITY = r"""
+import hashlib, json, os, re, stat, sys
+
+request = json.loads(sys.argv[1])
+owner, group = request['owner'], request['group']
+assert os.geteuid() == 0 and int(os.environ['SUDO_UID']) == owner > 0
+device, inode = request['cache_identity']
+key = f'{os.major(device)}-{os.minor(device)}-{inode}'
+cache_binding = dict(major=os.major(device), minor=os.minor(device), inode=inode)
+fds, names = [], []
+
+def identity(info):
+    return [info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode]
+
+def directory(parent, name, managed=True):
+    fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+    fds.append(fd)
+    info = os.fstat(fd)
+    assert info.st_uid == info.st_gid == 0
+    assert stat.S_IMODE(info.st_mode) == 0o700 if managed else not info.st_mode & 0o022
+    names.append((parent, name, fd, identity(info)))
+    return fd
+
+def file(parent, name, *, empty=False):
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=parent)
+    fds.append(fd)
+    info = os.fstat(fd)
+    assert info.st_mode == stat.S_IFREG | 0o600 and info.st_uid == info.st_gid == 0
+    assert info.st_nlink == 1 and 0 <= info.st_size <= 1048576
+    raw = os.read(fd, 1048577)
+    stable = lambda s: identity(s) + [s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns]
+    assert len(raw) == info.st_size and stable(os.fstat(fd)) == stable(info)
+    assert stable(os.stat(name, dir_fd=parent, follow_symlinks=False)) == stable(info)
+    assert not empty or not raw
+    return dict(identity=stable(info), sha256=hashlib.sha256(raw).hexdigest()), raw
+
+def unique(pairs):
+    result = {}
+    for name, value in pairs:
+        assert name not in result
+        result[name] = value
+    return result
+
+def record(parent, name):
+    receipt, raw = file(parent, name)
+    value = json.loads(raw, object_pairs_hook=unique)
+    return receipt, value
+
+try:
+    root = directory(None, '/', False)
+    var = directory(root, 'var', False)
+    lib = directory(var, 'lib', False)
+    state = directory(lib, 'mvmctl', False)
+    if request['phase'] in ('candidate', 'fresh'):
+        if request['phase'] == 'candidate':
+            assert request['runner'] == request['test_vm'] == request['qualification_host'] == os.uname().nodename == 'mvmctl-030-test'
+            assert owner == group == 1000
+            assert request['boot'] == open('/proc/sys/kernel/random/boot_id').read().strip()
+        reserved = False
+        root_device = os.fstat(state).st_dev
+        try:
+            backing = directory(state, 'protected-backing')
+            root_device = os.fstat(backing).st_dev
+            operator = directory(backing, str(owner))
+            root_device = os.fstat(operator).st_dev
+        except FileNotFoundError:
+            pass
+        else:
+            try:
+                os.stat(key, dir_fd=operator, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                reserved = True
+        if request['phase'] == 'fresh':
+            assert not reserved, 'fresh cache identity already has root authority; retain it'
+            result = dict(root_device=root_device, fresh_anchor_absent=True)
+        else:
+            result = dict(cache=cache_binding, reserved=reserved)
+    else:
+        backing = directory(state, 'protected-backing')
+        operator = directory(backing, str(owner))
+        anchor = directory(operator, key)
+        _, store = record(anchor, 'store.json')
+        assert store['version'] == 2 and store['owner'] == owner and store['owner_gid'] == group
+        assert store['cache'] == cache_binding and store['locator'] == request['cache']
+        locks = directory(anchor, 'snapshot-locks')
+        locks_info = os.fstat(locks)
+        assert store['snapshot_locks']['device'] == locks_info.st_dev
+        assert store['snapshot_locks']['inode'] == locks_info.st_ino
+        lock, _ = file(locks, request['snapshot'] + '.lock', empty=True)
+        gate, _ = file(anchor, 'store-use.lock', empty=True)
+        bindings, volumes = {}, {}
+        for kind, ids in request['objects'].items():
+            assert kind in ('kernel', 'rootfs', 'volume')
+            metadata = directory(anchor, kind)
+            logical = directory(directory(operator, 'logical'), kind)
+            for identifier in ids:
+                assert re.fullmatch(r'[0-9a-f]{32}' if kind == 'rootfs' else r'[0-9a-f]{64}', identifier)
+                selected = directory(metadata, identifier)
+                receipt, value = record(selected, 'record.json')
+                assert value['owner'] == owner and value['cache'] == cache_binding
+                assert value['kind'] == kind and value['id'] == identifier and value['version'] == 1
+                logical_item = directory(logical, identifier)
+                binding, index = record(logical_item, 'logical.json')
+                assert index == dict(version=1, owner=owner, kind=kind, id=identifier,
+                                     cache=cache_binding, initialized=True)
+                permanent, _ = file(logical_item, 'lock', empty=True)
+                bindings[kind + ':' + identifier] = dict(record=receipt, value=value,
+                                                        logical=binding, logical_lock=permanent)
+                if kind == 'volume' and identifier == request['source_volume'] and request['phase'] != 'snapshot':
+                    assert value['phase'] == 'removed' and not value['references']
+                    assert not value.get('next_references') and not value['snapshot_source']
+                    removal = value['initial_removal']
+                    assert removal['phase'] == 'removed' and removal['source_absent'] is False
+                    source = request['volume_source']
+                    captured = removal['receipt']
+                    assert captured['volume_id'] == identifier and captured['schema'] == 1
+                    assert (captured['device_major'], captured['device_minor'], captured['inode'],
+                            captured['size'], captured['mode'], captured['uid'], captured['gid']) == (
+                        os.major(source[0]), os.minor(source[0]), source[1], source[2], source[3], owner, group)
+                    assert removal['quarantine']['device'] == device
+                    if request['phase'] != 'terminal':
+                        cache_fd = os.open(request['cache'], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                        fds.append(cache_fd)
+                        cache_info = os.fstat(cache_fd)
+                        assert (cache_info.st_dev, cache_info.st_ino) == (device, inode)
+                        assert cache_info.st_uid == owner and cache_info.st_gid == group
+                        store_fd = directory(cache_fd, '.mvm-protected')
+                        assert store['store']['device'] == os.fstat(store_fd).st_dev
+                        assert store['store']['inode'] == os.fstat(store_fd).st_ino
+                        quarantine = directory(directory(store_fd, 'volume-removals'), identifier)
+                        assert not os.listdir(quarantine)
+                        assert removal['quarantine']['inode'] == os.fstat(quarantine).st_ino
+                        assert not os.path.lexists(request['cache'] + '/volumes/' + identifier + '.raw')
+                    volumes[identifier] = removal
+                if request['phase'] == 'terminal':
+                    assert value['phase'] in ('removed', 'kernel-unprotected-removed')
+                    assert not value['references'] and not value.get('next_references')
+        if request['phase'] == 'terminal':
+            assert store['retirement']['phase'] == 'removed'
+        else:
+            assert 'retirement' not in store
+        result = dict(anchor=identity(os.fstat(anchor)), snapshot_locks=identity(locks_info),
+                      snapshot_lock=lock, store_use_lock=gate, bindings=bindings, volume_removal=volumes,
+                      root_device=os.fstat(anchor).st_dev, store=store)
+    for parent, name, fd, expected in names:
+        assert identity(os.fstat(fd)) == expected
+        assert identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) == expected
+    print(json.dumps(result, sort_keys=True))
+finally:
+    for fd in reversed(fds):
+        os.close(fd)
+"""
+
+
+class _SnapshotVolumeCacheRetirement(_OwnedCachePrune):
+    """One fresh store: public capture/readback, exact retirement, permanent authority preservation."""
+
+    def __init__(self, runner_vm, cache_dir, config_dir, baseline, sources, output):
+        super().__init__(runner_vm, cache_dir, config_dir, baseline, sources)
+        self.output = output
+        self.output.mkdir(mode=0o700)
+        self.sequence = 0
+        self.resources = None
+        self.token = None
+        self.cleaned = False
+        self.terminal_complete = False
+        self.objects = {"kernel": [], "rootfs": [], "volume": []}
+        self.snapshot_id = None
+        self.source_volume = None
+        self.volume_source = None
+        self.authority_after_removal = None
+        self.mirror_receipts = {}
+
+    def native(self, *args, timeout=60, lifecycle=False):
+        from tests.system.vm.test_jailer import _run_mvm as lifecycle_run
+
+        self.sequence += 1
+        label = f"{self.sequence:03d}-{args[0]}-{args[1]}"
+        runner = lifecycle_run if lifecycle else _run_mvm
+        result = runner(self.runner_vm, *args, check=False, timeout=timeout)
+        for stream in ("stdout", "stderr"):
+            (self.output / f"{label}.{stream}").write_text(getattr(result, stream), encoding="utf-8")
+        (self.output / f"{label}.exit").write_text(str(result.returncode), encoding="ascii")
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+        return result
+
+    def authority(self, phase):
+        request = dict(phase=phase, owner=os.getuid(), group=os.getgid(), cache=str(self.cache_dir),
+                       cache_identity=list(self.roots[self.cache_dir][:2]), objects=self.objects,
+                       snapshot=self.snapshot_id, source_volume=self.source_volume,
+                       volume_source=self.volume_source)
+        result = subprocess.run(
+            ["/usr/bin/sudo", "-n", "/usr/bin/python3", "-I", "-c", _CACHE_RETIREMENT_AUTHORITY,
+             json.dumps(request, separators=(",", ":"))],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        self.sequence += 1
+        for stream in ("stdout", "stderr"):
+            (self.output / f"{self.sequence:03d}-authority-{phase}.{stream}").write_text(
+                getattr(result, stream), encoding="utf-8",
+            )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        return json.loads(result.stdout)
+
+    def import_alpine(self, mirror):
+        source = mirror / "aws_alpine-3.23.0-x86_64-bios-cloudinit-r0.vhd"
+        self.mirror_receipts[source] = _prune_backing(source)
+        info = subprocess.run(
+            ["qemu-img", "info", "-f", "vpc", "--output=json", str(source)], capture_output=True, text=True,
+            timeout=30, check=False,
+        )
+        assert info.returncode == 0, info.stderr
+        size = json.loads(info.stdout)["virtual-size"]
+        assert 0 < size <= 512 * 1024 * 1024
+        kernel_size = self.sources["kernel"][2][1]
+        # Simultaneous caller/protected/snapshot rootfs, captured RAM, source/restore volume copies,
+        # extracted/import/warm/scratch image bodies, kernel pair, vmstate and bounded metadata.
+        budget = (3 * 512 + 256 + 4 * 16 + 10 + 128) * 1024 * 1024 + 4 * size + 2 * kernel_size
+        for root in (self.cache_dir, self.output):
+            space = os.statvfs(root)
+            assert space.f_bavail * space.f_frsize >= budget, ("physical filesystem capacity", root, budget)
+        print(json.dumps({"cache_device": self.cache_dir.stat().st_dev,
+                          "whole_effect_physical_bytes": budget}), flush=True)
+        raw = self.cache_dir / f"alpine-{uuid.uuid4().hex}.raw"
+        assert not os.path.lexists(raw)
+        converted = subprocess.run(
+            ["qemu-img", "convert", "-f", "vpc", "-O", "raw", str(source), str(raw)],
+            capture_output=True, text=True, timeout=120, check=False,
+        )
+        assert converted.returncode == 0, converted.stderr
+        self.staging[raw] = (_prune_metadata(raw.lstat()), _prune_backing(raw))
+        assert raw.stat().st_size == size
+        # The public import type/version is Alpine; its UUID-bearing source path makes the ID fresh.
+        # The VHD may contain partitions: never treat its complete converted disk as an ext4 filesystem.
+        name = "alpine 3.23"
+        self.attempted["image"][name] = None
+        try:
+            imported = _json_success_data(self.native(
+                "image", "import", "alpine", str(raw), "--format", "raw", "--skip-optimization",
+                "--version", "3.23", "--default", "--json", timeout=120,
+            ).stdout, dict)
+        finally:
+            self.remember("image", name)
+        assert imported["id"] in self.receipts["image"]
+        assert imported["is_present"] and imported["is_imported"] and imported["is_default"]
+        assert imported["type"] == "alpine" and imported["version"] == "3.23"
+        assert 0 < imported["minimum_rootfs_size_mib"] <= 512
+        assert _prune_backing(source) == self.mirror_receipts[source]
+        return imported
+
+    def start_lifecycle(self):
+        from tests.system.vm.test_jailer import _JailerResources, _resources
+
+        self.resources = _JailerResources(self.runner_vm)
+        self.token = _resources.set(self.resources)
+
+    def remove_assets(self):
+        for domain in ("kernel", "image"):
+            for identifier in self.receipts[domain]:
+                self.check_bindings(domain, identifier)
+                data = _json_success_data(self.native(
+                    domain, "rm", identifier, "--force", "--json", timeout=120,
+                ).stdout, dict)
+                assert len(data["items"]) == 1 and data["items"][0]["error"] is None
+                assert data["items"][0]["result"]["code"] == f"{domain}.removed"
+                self.assert_absent(domain, identifier)
+            assert not self.inventory(domain)
+        for path, (identity, content) in self.staging.items():
+            assert _prune_metadata(path.lstat()) == identity and _prune_backing(path) == content
+            path.unlink()  # Only this exact caller-created conversion, never protected/root data.
+        self.staging.clear()
+
+    def finish(self):
+        self.resources.cleanup()
+        self.remove_assets()
+        self.authority_after_removal = self.authority("removed")
+        result = self.native("cache", "clean", "--force", "--json", timeout=210)
+        data = _json_success_data(result.stdout, dict)
+        assert data["cache_dir"] == str(self.cache_dir) and data["cache_dir_removed"] is True
+        assert not data["prune_result"]["failed_ids"] and not data["prune_result"]["had_running_vms"]
+        self.cleaned = True
+        assert not os.path.lexists(self.cache_dir)
+        assert not os.path.lexists(self.cache_dir / ".mvm-protected")
+        after = self.authority("terminal")
+        for field in ("anchor", "snapshot_locks", "snapshot_lock", "store_use_lock", "bindings", "volume_removal"):
+            assert after[field] == self.authority_after_removal[field], field
+        assert after["store"]["store"] == self.authority_after_removal["store"]["store"]
+        assert after["store"]["snapshot_locks"] == self.authority_after_removal["store"]["snapshot_locks"]
+        self.terminal_complete = True
+
+    def cleanup(self):
+        from tests.system.vm.test_jailer import _resources
+
+        failures = []
+        try:
+            if self.resources is not None and not self.cleaned:
+                self.resources.cleanup()
+        except (Exception, pytest.fail.Exception) as error:
+            failures.append(f"exact lifecycle cleanup: {error!r}")
+        finally:
+            if self.token is not None:
+                _resources.reset(self.token)
+        # Failed journeys keep the selected store, staging and authority: teardown is not a second cache clean.
+        if not self.terminal_complete:
+            failures.append(f"terminal retirement incomplete; retain owned evidence/cache at {self.output}")
+        for domain, (_, path, expected) in self.sources.items():
+            try:
+                assert _prune_backing(path) == expected, domain
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"borrowed {domain}: {error!r}")
+        for path, expected in self.mirror_receipts.items():
+            try:
+                assert _prune_backing(path) == expected, path
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"mirror preserved {path}: {error!r}")
+        if self.release is not None:
+            try:
+                assert self.release_identity(self.release[0]) == self.release[1]
+                assert _cache_release_receipt(self, "1.16.2") == self.borrowed_release
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"borrowed root release: {error!r}")
+        return failures
+
+
+def _retirement_cache_candidate(runner_vm, parent, output):
+    """Keep rejected creation-owned directories until a truly unused physical key is selected."""
+    assert runner_vm == os.uname().nodename == os.environ.get("MVM_TEST_VM") == "mvmctl-030-test"
+    assert os.environ.get("MVM_TEST_QUALIFICATION_HOST") == runner_vm and os.getuid() == os.getgid() == 1000
+    output.mkdir(mode=0o700)
+    candidates = []
+    try:
+        for index in range(16):
+            path = parent / f"retirement-cache-{uuid.uuid4().hex}"
+            path.mkdir(mode=0o700)
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            identity = _prune_metadata(os.fstat(fd))
+            candidates.append((path, identity, fd))
+            assert _prune_metadata(path.lstat()) == identity and not os.listdir(fd)
+            assert identity[2:4] == (1000, 1000) and stat.S_IMODE(identity[4]) == 0o700 and identity[5] == 2
+            request = dict(phase="candidate", owner=1000, group=1000, cache_identity=list(identity[:2]),
+                           runner=runner_vm, test_vm=os.environ["MVM_TEST_VM"],
+                           qualification_host=os.environ["MVM_TEST_QUALIFICATION_HOST"],
+                           boot=Path("/proc/sys/kernel/random/boot_id").read_text().strip())
+            result = subprocess.run(
+                ["/usr/bin/sudo", "-n", "/usr/bin/python3", "-I", "-c", _CACHE_RETIREMENT_AUTHORITY,
+                 json.dumps(request, separators=(",", ":"))],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+            for stream in ("stdout", "stderr"):
+                (output / f"{index:02d}.{stream}").write_text(getattr(result, stream), encoding="utf-8")
+            (output / f"{index:02d}.exit").write_text(str(result.returncode), encoding="ascii")
+            (output / f"{index:02d}.identity.json").write_text(
+                json.dumps(dict(path=str(path), identity=identity), sort_keys=True), encoding="utf-8",
+            )
+            assert len(result.stdout.encode()) + len(result.stderr.encode()) <= 16384
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            receipt = json.loads(result.stdout)
+            assert set(receipt) == {"cache", "reserved"} and type(receipt["reserved"]) is bool
+            assert receipt["cache"] == dict(major=os.major(identity[0]), minor=os.minor(identity[0]), inode=identity[1])
+            assert _prune_metadata(os.fstat(fd)) == _prune_metadata(path.lstat()) == identity and not os.listdir(fd)
+            if not receipt["reserved"]:
+                return path, candidates
+        pytest.fail("all 16 creation-owned cache identities are reserved; retain candidates and mount")
+    except (Exception, pytest.fail.Exception):
+        for _, _, fd in candidates:
+            os.close(fd)
+        raise
+
+
+@pytest.fixture
+def layout2_retirement_case(runner_vm, tmp_path, monkeypatch, filesystem_layout):
+    from tests.system.host.test_host import _host_administrator_state
+    from tests.system.network.test_network import _inventory
+    from tests.system.network.test_policies import _tcp_baseline
+
+    assert os.geteuid() != 0 and os.environ.get("MVM_TEST_QUALIFICATION_HOST") == runner_vm
+    assert runner_vm == os.environ.get("MVM_TEST_VM"), "explicit named disposable runner required"
+    baseline = _cache_inventory(runner_vm)
+    baseline["snapshot"] = _json_success_data(_run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list)
+    original = dict(public=_tcp_baseline(runner_vm), physical=_inventory(runner_vm),
+                    administrator=_host_administrator_state(runner_vm))
+    (tmp_path / "original-baseline.json").write_text(json.dumps(original, sort_keys=True), encoding="utf-8")
+    kernels = [row for row in baseline["kernel"] if row["is_default"] and row["is_present"]]
+    assert len(kernels) == 1
+    inspected = _json_success_data(_run_mvm(runner_vm, "kernel", "inspect", kernels[0]["id"], "--json").stdout, dict)
+    source = Path(inspected["storage"]["path"])
+    sources = {"kernel": (kernels[0], source, _prune_backing(source))}
+    mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser().resolve(strict=True)
+    cache_parent = tmp_path
+    distinct_mount = None
+    if filesystem_layout == "distinct-filesystems":
+        provisioned = _retirement_distinct_mount(runner_vm, tmp_path, "provision")
+        cache_parent, distinct_mount = _retirement_distinct_parent(runner_vm, tmp_path, provisioned)
+    config = tmp_path / "retirement-config"
+    parent_identity = _prune_metadata(cache_parent.lstat())
+    candidates = []
+    if filesystem_layout == "distinct-filesystems":
+        cache, candidates = _retirement_cache_candidate(runner_vm, cache_parent, tmp_path / "cache-candidates")
+    else:
+        cache = cache_parent / "retirement-cache"
+        cache.mkdir(mode=0o700)
+    config.mkdir(mode=0o700)
+    case = _SnapshotVolumeCacheRetirement(runner_vm, cache, config, baseline, sources, tmp_path / "receipts")
+    failures = []
+    candidate_fds_closed = False
+    try:
+        with monkeypatch.context() as selection:
+            selection.setenv("MVM_CACHE_DIR", str(cache))
+            selection.setenv("MVM_CONFIG_DIR", str(config))
+            selection.setenv("MVM_TEMP_DIR", str(cache / "tmp"))
+            selection.delenv("MVM_WARM_POOL", raising=False)
+            try:
+                if candidates:
+                    selected, selected_identity, selected_fd = candidates[-1]
+                    assert selected == cache and _prune_metadata(os.fstat(selected_fd)) == _prune_metadata(cache.lstat()) == selected_identity
+                    assert not os.listdir(selected_fd)
+                fresh = case.authority("fresh")
+                same_device = cache.stat().st_dev == fresh["root_device"]
+                assert same_device is (filesystem_layout == "shared-filesystem"), fresh
+                case.initialize()
+                case.borrowed_release = _cache_release_receipt(case, "1.16.2")
+                archive = mirror / f"firecracker-v1.16.2-{os.uname().machine}.tgz"
+                case.mirror_receipts[archive] = _prune_backing(archive)
+                case.reuse_release()  # Final cache clean must not prune the borrowed default root slot.
+                kernel = case.import_kernel("snapshot-retirement", default=True)
+                case.objects["kernel"].append(kernel["id"])
+                case.image = case.import_alpine(mirror)
+                case.kernel = kernel
+                case.start_lifecycle()
+                yield case
+            finally:
+                failures.extend(case.cleanup())
+    finally:
+        if case.terminal_complete and not failures:
+            try:
+                for path, identity, fd in candidates[:-1]:
+                    assert _prune_metadata(os.fstat(fd)) == _prune_metadata(path.lstat()) == identity and not os.listdir(fd)
+                    path.rmdir()  # Only this still-empty rejected creation-owned cache candidate.
+                if filesystem_layout == "distinct-filesystems":
+                    assert _prune_metadata(cache_parent.lstat()) == parent_identity and not list(cache_parent.iterdir())
+                for _, _, fd in candidates:
+                    os.close(fd)  # Held directories must not keep the owned filesystem busy during unmount.
+                candidate_fds_closed = True
+                if filesystem_layout == "distinct-filesystems":
+                    _retirement_distinct_mount(runner_vm, tmp_path, "retire", distinct_mount)
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"retain uncertain owned distinct mount: {error!r}")
+        if not candidate_fds_closed:
+            for _, _, fd in candidates:
+                os.close(fd)
+        current = dict(public=_tcp_baseline(runner_vm), physical=_inventory(runner_vm),
+                       administrator=_host_administrator_state(runner_vm))
+        (tmp_path / "final-baseline.json").write_text(json.dumps(current, sort_keys=True), encoding="utf-8")
+        assert current == original, "unrelated raw inventory/admin/config/defaults changed"
+        assert not failures, "Retirement journey cleanup failed:\n" + "\n".join(failures)
+
+
+_RETIREMENT_DISTINCT_MOUNT = r'''
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import uuid
+
+request = json.loads(sys.argv[1])
+assert os.geteuid() == 0 and os.environ.get('SUDO_UID') == os.environ.get('SUDO_GID') == '1000'
+assert request['runner'] == request['test_vm'] == request['qualification_host'] == os.uname().nodename == 'mvmctl-030-test'
+assert request['owner'] == 1000 and Path('/proc/sys/kernel/random/boot_id').read_text().strip() == request['boot']
+assert uuid.UUID(hex=request['token']).hex == request['token']
+BOUND = request
+base = Path('/var/lib/mvmctl') / ('qa-cache-retirement-' + BOUND['token'])
+image, mount, receipt = base / 'backing.ext4', base / 'mount', base / 'mount-receipt.json'
+operator = mount / 'operator-1000'
+action = request['action']
+assert action in ('provision', 'retire') and len(sys.argv) == 2
+os.umask(0o077)
+
+
+def identity(path):
+    row = path.lstat()
+    return [row.st_dev, row.st_ino, row.st_uid, row.st_gid, row.st_mode]
+
+
+def root_directory(path, mode=None):
+    row = path.lstat()
+    assert stat.S_ISDIR(row.st_mode) and not path.is_symlink() and row.st_uid == row.st_gid == 0
+    assert stat.S_IMODE(row.st_mode) & 0o022 == 0
+    if mode is not None:
+        assert stat.S_IMODE(row.st_mode) == mode
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    assert identity(path) == [getattr(os.fstat(fd), key) for key in
+                              ('st_dev', 'st_ino', 'st_uid', 'st_gid', 'st_mode')]
+    os.close(fd)
+
+
+def run(label, args, seconds=60):
+    process = subprocess.run(args, capture_output=True, timeout=seconds)
+    assert len(process.stdout) + len(process.stderr) <= 2 * 1024**2
+    print(json.dumps(dict(operation=label, argv=args, exit=process.returncode,
+                          stdout=process.stdout.decode(), stderr=process.stderr.decode())), flush=True)
+    assert process.returncode == 0, ('uncertain owned mount; preserve everything', label)
+    return process.stdout.decode().strip()
+
+
+def mount_entry():
+    rows = [line.split() for line in Path('/proc/self/mountinfo').read_text().splitlines()]
+    rows = [row for row in rows if row[4] == str(mount)]
+    assert len(rows) == 1
+    return rows[0]
+
+
+def loop_binding(loop):
+    assert re.fullmatch(r'/dev/loop[0-9]+', loop)
+    result = json.loads(run('loop-binding', ['/usr/sbin/losetup', '--list', '--json',
+                        '--output', 'NAME,BACK-FILE,BACK-INO,BACK-MAJ:MIN', loop]))['loopdevices']
+    assert len(result) == 1
+    row = result[0]
+    assert row['name'] == loop and row['back-file'] == str(image)
+    assert int(row['back-ino']) == image.lstat().st_ino
+    assert row['back-maj:min'] == f'{os.major(image.stat().st_dev)}:{os.minor(image.stat().st_dev)}'
+    return row
+
+
+for path in (Path('/'), Path('/var'), Path('/var/lib'), Path('/var/lib/mvmctl')):
+    root_directory(path)
+if action == 'provision':
+    assert not os.path.lexists(base), 'never adopt an existing QA mount/backing'
+    space = os.statvfs(base.parent)
+    assert space.f_bavail * space.f_frsize >= 4 * 1024**3 + BOUND['whole_effect_physical_bytes']
+    base.mkdir(mode=0o711)
+    base.chmod(0o711)  # Only this newly created, exact root-owned QA directory.
+    mount.mkdir(mode=0o711)
+    fd = os.open(image, os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_RDWR | os.O_CLOEXEC, 0o600)
+    try:
+        os.posix_fallocate(fd, 0, 4 * 1024**3)
+        os.fsync(fd)
+        row = os.fstat(fd)
+        assert row.st_size == 4 * 1024**3 and row.st_blocks * 512 >= row.st_size
+        assert identity(image) == [row.st_dev, row.st_ino, row.st_uid, row.st_gid, row.st_mode]
+        run('format-owned-ext4', ['/usr/sbin/mkfs.ext4', '-F', '-E',
+            'lazy_itable_init=0,lazy_journal_init=0,nodiscard', str(image)], 180)
+        assert os.fstat(fd).st_ino == image.lstat().st_ino
+        assert os.fstat(fd).st_blocks * 512 >= 4 * 1024**3
+        loop = run('allocate-owned-loop', ['/usr/sbin/losetup', '--find', '--show', '--nooverlap', str(image)])
+        loop_binding(loop)
+        run('mount-owned-ext4', ['/usr/bin/mount', '-t', 'ext4', '-o', 'nodev,nosuid', loop, str(mount)])
+        mount.chmod(0o711)
+        root_directory(base, 0o711)
+        root_directory(mount, 0o711)
+        operator.mkdir(mode=0o700)
+        os.chown(operator, 1000, 1000)
+        entry = mount_entry()
+        assert entry[entry.index('-') + 1:][:2] == ['ext4', loop]
+        assert mount.stat().st_dev != base.parent.stat().st_dev
+        space = os.statvfs(operator)
+        assert space.f_bavail * space.f_frsize >= BOUND['whole_effect_physical_bytes']
+        data = dict(test='snapshot-volume-terminal-retirement-distinct', case_output=request['case_output'],
+                    runner=BOUND['runner'], boot=BOUND['boot'], owner=1000, token=BOUND['token'],
+                    base_identity=identity(base), backing_identity=identity(image), backing_bytes=4 * 1024**3,
+                    mount_identity=identity(mount), operator_identity=identity(operator),
+                    mount_id=int(entry[0]), mount_device=entry[2], loop=loop,
+                    loop_identity=identity(Path(loop)), loop_rdev=Path(loop).stat().st_rdev,
+                    whole_effect_physical_bytes=BOUND['whole_effect_physical_bytes'])
+        with receipt.open('x') as stream:
+            stream.write(json.dumps(data, sort_keys=True) + '\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        receipt.chmod(0o644)
+        print(json.dumps(dict(event='EXACT_OWNED_MOUNT_PROVISIONED', receipt=str(receipt), **data)), flush=True)
+    finally:
+        os.close(fd)
+else:
+    root_directory(base, 0o711)
+    row = receipt.lstat()
+    assert stat.S_ISREG(row.st_mode) and row.st_nlink == 1 and row.st_uid == row.st_gid == 0
+    assert stat.S_IMODE(row.st_mode) == 0o644 and row.st_size <= 16384
+    data = json.loads(receipt.read_bytes())
+    assert data == request['expected']
+    assert data['test'] == 'snapshot-volume-terminal-retirement-distinct' and data['case_output'] == request['case_output']
+    assert data['token'] == BOUND['token'] and data['boot'] == BOUND['boot'] and data['owner'] == 1000
+    assert identity(base) == data['base_identity'] and identity(image) == data['backing_identity']
+    assert image.stat().st_size == 4 * 1024**3 and image.stat().st_blocks * 512 >= 4 * 1024**3
+    assert identity(mount) == data['mount_identity']
+    operator_row = operator.lstat()
+    assert stat.S_ISDIR(operator_row.st_mode) and identity(operator) == data['operator_identity']
+    assert operator_row.st_uid == operator_row.st_gid == 1000
+    assert stat.S_IMODE(operator_row.st_mode) == 0o700 and operator_row.st_nlink == 2
+    assert not list(operator.iterdir())
+    assert {p.name for p in base.iterdir()} == {'backing.ext4', 'mount', 'mount-receipt.json'}
+    assert {p.name for p in mount.iterdir()} == {'lost+found', 'operator-1000'}
+    root_directory(mount / 'lost+found')
+    assert not list((mount / 'lost+found').iterdir())
+    entry = mount_entry()
+    assert int(entry[0]) == data['mount_id'] and entry[2] == data['mount_device']
+    assert entry[entry.index('-') + 1:][:2] == ['ext4', data['loop']]
+    assert identity(Path(data['loop'])) == data['loop_identity']
+    assert Path(data['loop']).stat().st_rdev == data['loop_rdev']
+    loop_binding(data['loop'])
+    operator.rmdir()  # Only the receipt-bound empty child under the nonwritable root mount.
+    run('unmount-owned-ext4', ['/usr/bin/umount', str(mount)])
+    assert mount.stat().st_dev == base.stat().st_dev and not list(mount.iterdir())
+    run('detach-owned-loop', ['/usr/sbin/losetup', '--detach', data['loop']])
+    assert identity(image) == data['backing_identity']
+    image.unlink()
+    receipt.unlink()
+    mount.rmdir()
+    assert not list(base.iterdir())
+    base.rmdir()
+    print(json.dumps(dict(event='EXACT_OWNED_MOUNT_RETIRED', token=BOUND['token'])), flush=True)
+'''
+
+
+def _retirement_distinct_mount(runner_vm, output, action, expected=None):
+    """Closed root QA resource, never an arbitrary path/mount or production root cache operation."""
+    assert runner_vm == os.environ.get("MVM_TEST_VM") == os.environ.get("MVM_TEST_QUALIFICATION_HOST")
+    assert runner_vm == os.uname().nodename == "mvmctl-030-test"
+    assert os.getuid() == os.getgid() == 1000
+    token = uuid.uuid4().hex if expected is None else expected["token"]
+    request = dict(action=action, runner=runner_vm, owner=os.getuid(), token=token,
+                   test_vm=os.environ["MVM_TEST_VM"], qualification_host=os.environ["MVM_TEST_QUALIFICATION_HOST"],
+                   boot=Path("/proc/sys/kernel/random/boot_id").read_text().strip(), case_output=str(output),
+                   whole_effect_physical_bytes=3004177088, expected=expected)
+    result = subprocess.run(
+        ["/usr/bin/sudo", "-n", "/usr/bin/python3", "-I", "-c", _RETIREMENT_DISTINCT_MOUNT,
+         json.dumps(request, separators=(",", ":"))],
+        capture_output=True, text=True, timeout=360, check=False,
+    )
+    assert len(result.stdout.encode()) + len(result.stderr.encode()) <= 2 * 1024**2
+    for stream in ("stdout", "stderr"):
+        (output / f"distinct-mount-{action}.{stream}").write_text(getattr(result, stream), encoding="utf-8")
+    (output / f"distinct-mount-{action}.exit").write_text(str(result.returncode), encoding="ascii")
+    assert result.returncode == 0, ("retain uncertain owned mount", result.stdout, result.stderr)
+    return json.loads(result.stdout.splitlines()[-1])
+
+
+def _retirement_distinct_parent(runner_vm, output, provisioned):
+    """Admit only the closed named-QA ext4 mount's root-owned receipt and private child."""
+    assert runner_vm == os.uname().nodename == "mvmctl-030-test"
+    receipt = Path(provisioned["receipt"])
+    base = receipt.parent
+    assert base.parent == Path("/var/lib/mvmctl") and receipt.name == "mount-receipt.json"
+    prefix = "qa-cache-retirement-"
+    assert base.name.startswith(prefix) and uuid.UUID(hex=base.name[len(prefix):]).hex == base.name[len(prefix):]
+    info = receipt.lstat()
+    assert info.st_uid == info.st_gid == 0 and stat.S_IMODE(info.st_mode) == 0o644
+    assert info.st_size <= 16384
+    receipt_identity = _prune_backing(receipt)
+    mounted = json.loads(receipt.read_bytes())
+    assert mounted == {k: v for k, v in provisioned.items() if k not in ("event", "receipt")}
+    assert _prune_backing(receipt) == receipt_identity
+    assert mounted["runner"] == runner_vm and mounted["owner"] == os.getuid() == os.getgid() == 1000
+    assert mounted["boot"] == Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    mount, parent = base / "mount", base / "mount" / "operator-1000"
+    for path in (Path("/"), Path("/var"), Path("/var/lib"), Path("/var/lib/mvmctl"), base, mount):
+        row = path.lstat()
+        assert stat.S_ISDIR(row.st_mode) and not path.is_symlink() and row.st_uid == row.st_gid == 0
+        assert stat.S_IMODE(row.st_mode) & 0o022 == 0, path
+    assert list(_prune_metadata(base.lstat()))[:5] == mounted["base_identity"]
+    assert list(_prune_metadata(mount.lstat()))[:5] == mounted["mount_identity"]
+    assert list(_prune_metadata(parent.lstat()))[:5] == mounted["operator_identity"]
+    assert stat.S_ISDIR(parent.lstat().st_mode) and not parent.is_symlink()
+    assert parent.lstat().st_uid == parent.lstat().st_gid == 1000
+    assert stat.S_IMODE(parent.lstat().st_mode) == 0o700 and not list(parent.iterdir())
+    assert parent.stat().st_dev != Path("/var/lib/mvmctl").stat().st_dev
+    assert stat.S_IMODE(mount.lstat().st_mode) == 0o711
+    entries = [line.split() for line in Path("/proc/self/mountinfo").read_text().splitlines()]
+    selected = [entry for entry in entries if entry[4] == str(mount)]
+    assert len(selected) == 1 and int(selected[0][0]) == mounted["mount_id"]
+    assert selected[0][2] == mounted["mount_device"]
+    tail = selected[0][selected[0].index("-") + 1:]
+    assert tail[:2] == ["ext4", mounted["loop"]]
+    loop = Path(mounted["loop"])
+    assert loop.parent == Path("/dev") and loop.name.startswith("loop") and loop.name[4:].isdigit()
+    row = loop.lstat()
+    assert stat.S_ISBLK(row.st_mode) and list(_prune_metadata(row))[:5] == mounted["loop_identity"]
+    assert row.st_rdev == mounted["loop_rdev"]
+    capacity = os.statvfs(parent)
+    assert capacity.f_bavail * capacity.f_frsize >= mounted["whole_effect_physical_bytes"]
+    assert mounted["backing_bytes"] == 4 * 1024**3 and mounted["whole_effect_physical_bytes"] == 3004177088
+    (output / "distinct-mount-receipt.json").write_bytes(receipt.read_bytes())
+    return parent, mounted
+
+
 def _cache_release_receipt(case, version):
     """Read the complete fixed root slot, including its authority manifest."""
     slot = Path("/var/lib/mvmctl/binaries") / os.uname().machine / version
@@ -2342,6 +3031,129 @@ class TestCacheEdgeCases:
             row = case.check_bindings(domain, vm[f"{domain}_id"])
             assert row["is_default"] is True and row["is_present"] is True, row
         assert case.release_identity(case.release[0]) == case.release[1]
+
+
+class TestProtectedCacheRetirement:
+    pytestmark = [pytest.mark.tier2, pytest.mark.destructive, pytest.mark.needs_kvm, pytest.mark.slow]
+
+    @pytest.mark.parametrize("filesystem_layout", ["shared-filesystem", "distinct-filesystems"])
+    def test_snapshot_volume_terminal_cache_retirement(
+        self, runner_vm, filesystem_layout, layout2_retirement_case, record_property,
+    ):
+        """Retire captured snapshot/volume bytes without losing external lock or receipt authority."""
+        case = layout2_retirement_case
+        source_name = f"cache-capture-{uuid.uuid4().hex}"
+        restored_name = f"cache-restore-{uuid.uuid4().hex}"
+        volume_name = f"cache-capture-volume-{uuid.uuid4().hex}"
+        snapshot_name = f"cache-capture-snapshot-{uuid.uuid4().hex}"
+        epoch, changed = uuid.uuid4().hex, uuid.uuid4().hex
+        memory_mount = f"/mnt/retirement-{epoch}"
+        memory_file, root_file = f"{memory_mount}/epoch", f"/root/retirement-{epoch}"
+        mount_check = (
+            f"awk '$2 == \"{memory_mount}\" && $3 == \"tmpfs\" {{found=1}} END {{exit !found}}' /proc/mounts"
+        )
+
+        def state(vm):
+            return case.native(
+                "exec", vm, "--user", "root", "--timeout", "30", "--",
+                f"set -e; {mount_check}; cat {memory_file}; echo; cat {root_file}; echo; "
+                f"cat /proc/sys/kernel/random/boot_id; dd if=/dev/vdb bs=1 count={len(epoch)}; echo",
+            ).stdout.splitlines()
+
+        def remove(domain, identifier):
+            removed = _json_success_data(case.native(
+                domain, "rm", identifier, "--force", "--json", timeout=120, lifecycle=True,
+            ).stdout, dict)
+            assert len(removed["items"]) == 1 and removed["items"][0]["error"] is None
+            assert removed["items"][0]["result"]["code"] == f"{domain}.removed"
+
+        volume = _json_success_data(case.native(
+            "volume", "create", volume_name, "16M", "--writeback", "--json", lifecycle=True,
+        ).stdout, dict)
+        case.source_volume = volume["id"]
+        case.objects["volume"].append(volume["id"])
+        source_path = case.cache_dir / "volumes" / f"{volume['id']}.raw"
+        source_info = source_path.lstat()
+        assert stat.S_ISREG(source_info.st_mode) and source_info.st_nlink == 1
+        assert source_info.st_uid == os.getuid() and source_info.st_gid == os.getgid()
+        assert source_info.st_size == 16 * 1024 * 1024 and Path(volume["path"]) == source_path
+        case.volume_source = [source_info.st_dev, source_info.st_ino, source_info.st_size, source_info.st_mode]
+        created = _json_success_data(case.native(
+            "vm", "create", source_name, "--image", case.image["id"], "--kernel", case.kernel["id"],
+            "--no-network", "--cloud-init-mode", "off", "--skip-deblob", "--no-pci", "-s", "512M",
+            "--mem", "256M", "--vcpu", "1", "--volume", volume["id"], "--writeback", "--json",
+            timeout=180, lifecycle=True,
+        ).stdout, list)
+        assert len(created) == 1
+        source = created[0]
+        case.objects["rootfs"].append(source["id"])
+        assert source["network_placement"] == "networkless" and not source["network_id"]
+        assert not source["ipv4"] and not source["mac"]
+        listed = case.resources.rows("vm")
+        live = next(row for row in listed if row["id"] == source["id"])
+        inspected = _json_success_data(case.native("vm", "inspect", source["id"], "--json").stdout, dict)
+        assert inspected["vm"]["id"] == live["id"] and inspected["vm"]["status"] == live["status"] == "running"
+        assert inspected["vm"]["pid"] == live["pid"] > 0 and int(live["process_start_time"]) > 0
+        case.native(
+            "exec", source["id"], "--user", "root", "--timeout", "30", "--",
+            f"set -e; mkdir {memory_mount}; mount -t tmpfs -o size=1M retirement {memory_mount}; "
+            f"{mount_check}; printf %s {epoch} > {memory_file}; printf %s {epoch} > {root_file}; "
+            f"dd if=/dev/urandom of=/dev/vdb bs=4096 count=1 conv=fsync; "
+            f"printf %s {epoch} | dd of=/dev/vdb bs=1 count={len(epoch)} conv=fsync,notrunc; sync",
+        )
+        captured_state = state(source["id"])
+        assert len(captured_state) == 4 and captured_state[:2] == [epoch, epoch] and captured_state[3] == epoch
+        assert str(uuid.UUID(captured_state[2])) == captured_state[2]
+        captured_hash = case.native("exec", source["id"], "--", "sha256sum", "/dev/vdb").stdout.split()[0]
+        snapshot = _json_success_data(case.native(
+            "snapshot", "create", source_name, "--name", snapshot_name, "--json",
+            timeout=180, lifecycle=True,
+        ).stdout, dict)
+        case.snapshot_id = snapshot["id"]
+        assert snapshot["source_vm_id"] == source["id"] and snapshot["name"] == snapshot_name
+        assert snapshot["memory_file"] and snapshot["state_file"] and snapshot["rootfs_file"]
+        created_lock = case.authority("snapshot")
+        case.native(
+            "exec", source["id"], "--", f"set -e; {mount_check}; "
+            f"printf %s {changed} > {memory_file}; printf %s {changed} > {root_file}; "
+            f"dd if=/dev/zero of=/dev/vdb bs=4096 count=1 conv=fsync; "
+            f"printf %s {changed} | dd of=/dev/vdb bs=1 count={len(changed)} conv=fsync,notrunc; sync",
+        )
+        assert state(source["id"]) == [changed, changed, captured_state[2], changed]
+        assert case.native("exec", source["id"], "--", "sha256sum", "/dev/vdb").stdout.split()[0] != captured_hash
+        remove("vm", source["id"])
+        remove("volume", volume["id"])
+        assert not os.path.lexists(source_path)
+        original_lock = case.authority("captured")
+        for field in ("anchor", "snapshot_locks", "snapshot_lock", "store_use_lock"):
+            assert original_lock[field] == created_lock[field], field
+        same_device = case.cache_dir.stat().st_dev == original_lock["root_device"]
+        assert same_device is (filesystem_layout == "shared-filesystem")
+        restored = _json_success_data(case.native(
+            "snapshot", "restore", snapshot["id"], restored_name, "--resume", "--json",
+            timeout=180, lifecycle=True,
+        ).stdout, list)
+        assert len(restored) == 1 and restored[0]["id"] != source["id"]
+        case.objects["rootfs"].append(restored[0]["id"])
+        assert restored[0]["network_placement"] == "networkless" and not restored[0]["network_id"]
+        restored_volumes = [row for row in case.resources.rows("volume") if row.get("vm_id") == restored[0]["id"]]
+        assert len(restored_volumes) == 1 and restored_volumes[0]["id"] != volume["id"]
+        case.resources.checked_id("volume", restored_volumes[0]["id"])
+        case.objects["volume"].append(restored_volumes[0]["id"])
+        assert state(restored[0]["id"]) == captured_state
+        assert case.native("exec", restored[0]["id"], "--", "sha256sum", "/dev/vdb").stdout.split()[0] == captured_hash
+        remove("vm", restored[0]["id"])
+        remove("volume", restored_volumes[0]["id"])
+        remove("snapshot", snapshot["id"])
+        case.resources.cleanup()  # Check exact receipt-owned absence, not inventory-difference cleanup.
+        after_snapshot_removal = case.authority("removed")
+        for field in ("anchor", "snapshot_locks", "snapshot_lock", "store_use_lock", "volume_removal"):
+            assert after_snapshot_removal[field] == original_lock[field], field
+        case.finish()
+        record_property("captured_guest_state", json.dumps(captured_state))
+        record_property("captured_volume_sha256", captured_hash)
+        record_property("filesystem_layout", filesystem_layout)
+        record_property("retirement_receipts", str(case.output))
 
 
 class TestCacheCleanActual:
