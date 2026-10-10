@@ -66,7 +66,11 @@ from system_test_outcomes import (
     read_pytest_outcome_report,
     require_complete_pytest_outcomes,
 )
-from system_test_evidence import DomainEvidence, MatrixEvidence, source_identity
+from system_test_evidence import (
+    DomainEvidence, MatrixEvidence, NODE_REPORT_ENV, MAX_OUTPUT_BYTES,
+    collect_named_runner_nodes, selected_node_remainder, source_identity,
+    verify_collection_task, verify_matrix_task, verify_official_kernel_carry,
+)
 
 # ============================================================================
 # Configuration
@@ -797,9 +801,12 @@ def _run_pytest(
     xdist: bool = False,
     timeout: int = 600,
     extra_env: dict[str, str] | None = None,
+    node_report: Path | None = None,
 ) -> subprocess.CompletedProcess:
     """Run pytest against the given test files on the host (Tier 3)."""
     cmd = ["python3", "-m", "pytest", "--tb=short", "-q"]
+    if node_report is not None:
+        cmd.extend(["-p", "system_test_evidence", "--rootdir=" + str(_REPO_ROOT), "--junitxml=" + str(node_report.parent / "pytest.xml")])
     if xdist:
         cmd.append("-n")
         cmd.append("auto")
@@ -2015,12 +2022,14 @@ def _remote_pytest_command(
     vm_name: str,
     test_files: list[str],
     report_path: str,
+    node_directory: str | None = None,
 ) -> str:
     pytest_command = shlex.join(
         [
             "python3",
             "-m",
             "pytest",
+            *(["-p", "system_test_evidence", "--rootdir=/", "--junitxml=" + node_directory + "/pytest.xml"] if node_directory else []),
             *(f"/{test_file}" for test_file in test_files),
             "--tb=short",
             "-q",
@@ -2032,6 +2041,9 @@ def _remote_pytest_command(
             f"MVM_TEST_VM={shlex.quote(vm_name)}",
             f"MVM_TEST_QUALIFICATION_HOST={shlex.quote(vm_name)}",
             f"{PYTEST_OUTCOME_REPORT_ENV}={shlex.quote(report_path)}",
+            *([f"PYTHONPATH={shlex.quote(node_directory)}", "PYTHONDONTWRITEBYTECODE=1",
+               f"TMPDIR={shlex.quote(node_directory + '/tmp')}",
+               f"{NODE_REPORT_ENV}={shlex.quote(node_directory + '/nodes.json')}"] if node_directory else []),
         )
     )
     return f"cd / && {environment} {pytest_command}"
@@ -2046,13 +2058,20 @@ def _run_remote_pytest(
 ) -> tuple[subprocess.CompletedProcess[str], str | None]:
     """Run pytest in a runner VM and validate its bounded outcome report."""
     report_path = _remote_pytest_report_path(vm_name)
+    node_directory = f"/home/runner/.cache/mvmctl-node-evidence-{vm_name}" if evidence is not None else None
     pytest_result: subprocess.CompletedProcess[str] | None = None
     validation_failures: list[str] = []
     execution_error: Exception | None = None
     try:
         if evidence is not None:
-            expected = {path: digest for path, digest in evidence.source_payload.items() if path.startswith("tests/system/")}
-            probe = "import hashlib,json;from pathlib import Path;print(json.dumps({p:hashlib.sha256(Path('/'+p).read_bytes()).hexdigest() for p in " + repr(list(expected)) + "},sort_keys=True))"
+            mvm("exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+                f"umask 077; mkdir -p -- /home/runner/.cache && mkdir -- {shlex.quote(node_directory)} && mkdir -- {shlex.quote(node_directory + '/tmp')}", timeout=30)
+            for name in ("system_test_evidence.py", "system_test_outcomes.py"):
+                mvm("cp", str(_REPO_ROOT / "scripts" / name), f"{vm_name}:{node_directory}/{name}", timeout=30)
+            expected = {path: digest for path, digest in evidence.source_payload.items()
+                        if path.startswith("tests/system/") or path in ("scripts/system_test_evidence.py", "scripts/system_test_outcomes.py")}
+            actual_paths = {path: (node_directory + "/" + Path(path).name if path.startswith("scripts/") else "/" + path) for path in expected}
+            probe = "import hashlib,json;from pathlib import Path;print(json.dumps({p:hashlib.sha256(Path(actual).read_bytes()).hexdigest() for p,actual in " + repr(actual_paths) + ".items()},sort_keys=True))"
             observed = mvm("exec", vm_name, "--user", "runner", "--timeout", "10", "--",
                            shlex.join(["python3", "-c", probe]), timeout=30)
             evidence.record_runtime_source(observed.stdout.encode(), expected)
@@ -2064,7 +2083,7 @@ def _run_remote_pytest(
             "--timeout",
             "10",
             "--",
-            _remote_pytest_command(vm_name, test_files, report_path),
+            _remote_pytest_command(vm_name, test_files, report_path, node_directory),
             check=False,
             timeout=timeout,
         )
@@ -2090,10 +2109,21 @@ def _run_remote_pytest(
             )
         if evidence is not None:
             evidence.record_outcomes(retrieve_result.stdout.encode())
-        require_complete_pytest_outcomes(
-            retrieve_result.stdout.encode(),
-            process_returncode=pytest_result.returncode,
+        raw_nodes = None
+        if evidence is not None:
+            for name, retain in (("nodes.json", evidence.record_nodes), ("pytest.xml", evidence.record_junit)):
+                retrieved = mvm("exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+                                f"head -c {MAX_OUTPUT_BYTES + 1} -- {shlex.quote(node_directory + '/' + name)}", check=False, timeout=30)
+                if retrieved.returncode != 0:
+                    raise RuntimeError(f"remote literal node/JUnit report is missing: {name}")
+                retain(retrieved.stdout.encode())
+                if name == "nodes.json":
+                    raw_nodes = retrieved.stdout.encode()
+        outcomes = require_complete_pytest_outcomes(
+            retrieve_result.stdout.encode(), process_returncode=pytest_result.returncode,
         )
+        if evidence is not None:
+            evidence.require_nodes(raw_nodes, pytest_result.returncode, outcomes)
     except Exception as exc:
         execution_error = exc
     finally:
@@ -2107,7 +2137,11 @@ def _run_remote_pytest(
                 "10",
                 "--",
                 f"rm -f -- {shlex.quote(report_path)} && "
-                f"test ! -e {shlex.quote(report_path)}",
+                f"test ! -e {shlex.quote(report_path)}" + (
+                    " && rm -f -- " + " ".join(shlex.quote(node_directory + '/' + name) for name in
+                    ("nodes.json", "pytest.xml", "system_test_evidence.py", "system_test_outcomes.py")) +
+                    " && " + " && ".join("test ! -e " + shlex.quote(node_directory + '/' + name) for name in
+                    ("nodes.json", "pytest.xml", "system_test_evidence.py", "system_test_outcomes.py")) if node_directory else ""),
                 check=True,
                 timeout=30,
             )
@@ -2152,7 +2186,8 @@ def _run_local_pytest(
 ) -> tuple[subprocess.CompletedProcess[str], str | None]:
     """Run host-direct pytest with a private report and checked cleanup."""
     report_directory = tempfile.TemporaryDirectory(
-        prefix=f"mvmctl-pytest-{domain}-"
+        prefix=f"mvmctl-pytest-{domain}-",
+        **({"dir": evidence.task} if evidence is not None else {}),
     )
     report_path = Path(report_directory.name) / "outcomes.json"
     pytest_result: subprocess.CompletedProcess[str] | None = None
@@ -2160,23 +2195,32 @@ def _run_local_pytest(
     execution_error: Exception | None = None
     try:
         if evidence is not None:
-            expected = {path: digest for path, digest in evidence.source_payload.items() if path.startswith("tests/system/")}
+            expected = {path: digest for path, digest in evidence.source_payload.items()
+                        if path.startswith("tests/system/") or path in ("scripts/system_test_evidence.py", "scripts/system_test_outcomes.py")}
             observed = {path: _sha256_runner_input(_REPO_ROOT / path) for path in expected}
             evidence.record_runtime_source(json.dumps(observed, sort_keys=True).encode(), expected)
+        node_path = Path(report_directory.name) / "nodes.json" if evidence is not None else None
+        if node_path is not None:
+            (node_path.parent / "tmp").mkdir(mode=0o700)
         pytest_result = _run_pytest(
             test_files,
             timeout=timeout,
-            extra_env={PYTEST_OUTCOME_REPORT_ENV: str(report_path)},
+            extra_env={PYTEST_OUTCOME_REPORT_ENV: str(report_path), **({NODE_REPORT_ENV: str(node_path),
+                "PYTHONPATH": str(_REPO_ROOT / "scripts"), "PYTHONDONTWRITEBYTECODE": "1", "TMPDIR": str(node_path.parent / "tmp")} if evidence is not None else {})},
+            **({"node_report": node_path} if evidence is not None else {}),
         )
         if evidence is not None:
             evidence.record_native(pytest_result)
         payload = read_pytest_outcome_report(report_path)
         if evidence is not None:
             evidence.record_outcomes(payload)
-        require_complete_pytest_outcomes(
+            raw_nodes = evidence.record_local_node_reports(node_path)
+        outcomes = require_complete_pytest_outcomes(
             payload,
             process_returncode=pytest_result.returncode,
         )
+        if evidence is not None:
+            evidence.require_nodes(raw_nodes, pytest_result.returncode, outcomes)
     except Exception as exc:
         execution_error = exc
     finally:
@@ -3374,6 +3418,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--record-evidence", type=Path,
         help="Retain literal named-QA domain reports in an empty private owned directory; does not finalize a release.",
     )
+    parser.add_argument("--collect-release-nodes", type=Path,
+                        help="Collect the entire registered node set in named QA, without executing fixtures; retain an empty private task.")
+    parser.add_argument("--collection-task", type=Path, help="Retained current full-registry collection for selected-node execution.")
+    parser.add_argument("--selected-node-file", type=Path, help="Explicit JSON declaration of the exact unproved nodes in the selected domains/tiers.")
+    parser.add_argument("--completed-matrix-task", type=Path, action="append", default=[], help="Previously completed current-node receipts, verified before subtracting covered nodes.")
+    parser.add_argument("--official-kernel-carry", type=Path, help="Original sealed official8 retained task; exact candidate and reachable inputs must still match.")
     parser.add_argument(
         "--tier",
         type=_parse_tier,
@@ -3614,9 +3664,17 @@ def _start_matrix_evidence(task: Path, args: argparse.Namespace) -> MatrixEviden
     selection = {domain: row for domain, row in registry.items() if domain != "host_reboot"
                  and (not args.domains or domain in args.domains)
                  and (args.tier is None or row["tier"] in args.tier)}
+    source = source_identity(_REPO_ROOT)
+    candidate = dict(sha256=_sha256_runner_input(Path(MVM_CANDIDATE_BINARY)), version="mvm " + _get_mvm_version())
+    if args.selected_node_file:
+        collection = verify_collection_task(args.collection_task, source, candidate, registry)
+        reports = [verify_matrix_task(path, source, candidate, registry) for path in args.completed_matrix_task]
+        carried = verify_official_kernel_carry(args.official_kernel_carry, source, candidate) if args.official_kernel_carry else []
+        remainder = selected_node_remainder(args.selected_node_file, collection, reports, carried, set(selection))
+        selection = {domain: {**registry[domain], "nodes": nodes} for domain, nodes in remainder.items()}
     return MatrixEvidence(task, dict(schema_version=1, host=socket.gethostname(),
-        boot_id=Path("/proc/sys/kernel/random/boot_id").read_text().strip(), source=source_identity(_REPO_ROOT),
-        candidate=dict(sha256=_sha256_runner_input(Path(MVM_CANDIDATE_BINARY)), version="mvm " + _get_mvm_version()),
+        boot_id=Path("/proc/sys/kernel/random/boot_id").read_text().strip(), source=source,
+        candidate=candidate,
         controller=_host_reboot_controller(), registry=registry, selection=selection))
 
 
@@ -3626,7 +3684,16 @@ def main() -> None:
 
     _validate_release_qualification_args(parser, args)
     _validate_system_test_registry(parser)
+    if args.collect_release_nodes:
+        defaults = vars(parser.parse_args([]))
+        if any(value != defaults[key] for key, value in vars(args).items() if key != "collect_release_nodes"):
+            parser.error("--collect-release-nodes is a standalone full-registry observation, without preparation or test execution")
+        collect_named_runner_nodes(sys.modules[__name__], args.collect_release_nodes)
+        return
     _validate_test_selection_args(parser, args)
+    if (args.collection_task or args.selected_node_file or args.completed_matrix_task or args.official_kernel_carry):
+        if not (args.collection_task and args.selected_node_file and args.record_evidence) or args.release_qualification:
+            parser.error("selected-node evidence inputs require --record-evidence, --collection-task and --selected-node-file together")
 
     if args.host_reboot_phase or args.host_reboot_envelope or "host_reboot" in args.domains:
         if (args.domains != ["host_reboot"] or not args.host_reboot_phase or not args.host_reboot_task
@@ -3844,6 +3911,12 @@ def main() -> None:
     if not tier1 and not tier2 and not tier3:
         log("No domains selected. Use --help for options.")
         sys.exit(0)
+
+    if evidence is not None and args.selected_node_file:
+        selected = evidence.binding["selection"]
+        tier1 = {domain: row["nodes"] for domain, row in selected.items() if row["tier"] == 1}
+        tier2 = {domain: row["nodes"] for domain, row in selected.items() if row["tier"] == 2}
+        tier3 = {domain: row["nodes"] for domain, row in selected.items() if row["tier"] == 3}
 
     all_results: list[dict[str, Any]] = []
 

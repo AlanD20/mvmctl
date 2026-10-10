@@ -8,9 +8,11 @@ import importlib.util
 import json
 import os
 import re
+import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -24,6 +26,151 @@ from system_test_outcomes import (
 MAX_RECEIPT_BYTES = 512 * 1024
 MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 NAMED_RUNNER = "mvmctl-030-test"
+NODE_REPORT_ENV = "MVM_PYTEST_NODE_REPORT"
+HOST_NODES = {
+    "tests/system/host/test_host_reboot.py::test_host_reboot_pre",
+    "tests/system/host/test_host_reboot.py::test_host_reboot_post",
+}
+_node_ids: dict[str, str] = {}
+_node_phases: dict[str, dict[str, Any]] = {}
+_node_collection_errors = 0
+_node_deselected = 0
+
+
+def _nodes(values: Any) -> list[str]:
+    if (
+        not isinstance(values, list)
+        or len(values) > 100_000
+        or any(not isinstance(node, str) or len(node) > 4096 for node in values)
+        or len(set(values)) != len(values)
+        or any(
+            re.fullmatch(r"tests/system/[a-zA-Z0-9_/]+\.py::[^\r\n]+", node) is None
+            or ".." in node.split("::", 1)[0].split("/")
+            for node in values
+        )
+    ):
+        raise RuntimeError("invalid or duplicate system node identities")
+    return values
+
+
+def pytest_sessionstart(session):
+    """Opt-in companion to the existing, unchanged strict outcome plugin."""
+    del session
+    global _node_collection_errors, _node_deselected
+    if os.environ.get(NODE_REPORT_ENV):
+        _node_ids.clear()
+        _node_phases.clear()
+        _node_collection_errors = _node_deselected = 0
+
+
+def pytest_collectreport(report):
+    global _node_collection_errors
+    if os.environ.get(NODE_REPORT_ENV) and report.failed:
+        _node_collection_errors += 1
+
+
+def pytest_deselected(items):
+    global _node_deselected
+    if os.environ.get(NODE_REPORT_ENV):
+        _node_deselected += len(items)
+
+
+def pytest_collection_finish(session):
+    if not os.environ.get(NODE_REPORT_ENV):
+        return
+    for item in session.items:
+        path = str(item.path)
+        marker = "tests/system/"
+        if marker not in path or "::" not in item.nodeid:
+            raise RuntimeError("node evidence requires registered system test paths")
+        normalized = (
+            marker + path.rsplit(marker, 1)[1] + "::" + item.nodeid.split("::", 1)[1]
+        )
+        _node_ids[item.nodeid] = normalized
+    _nodes(list(_node_ids.values()))
+
+
+def pytest_runtest_logreport(report):
+    if os.environ.get(NODE_REPORT_ENV):
+        _node_phases.setdefault(report.nodeid, {})[report.when] = dict(
+            outcome=report.outcome, wasxfail=hasattr(report, "wasxfail")
+        )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    configured = os.environ.get(NODE_REPORT_ENV)
+    if not configured:
+        return
+    path = Path(configured)
+    _write(
+        path.parent,
+        path.name,
+        _encode(
+            dict(
+                schema_version=1,
+                collect_only=bool(session.config.option.collectonly),
+                collected=list(_node_ids.values()),
+                phases={
+                    _node_ids.get(node, node): phases
+                    for node, phases in _node_phases.items()
+                },
+                collection_errors=_node_collection_errors,
+                deselected=_node_deselected,
+                exit_status=int(exitstatus),
+            )
+        ),
+        MAX_OUTPUT_BYTES,
+    )
+
+
+def require_node_report(
+    raw: bytes, *, native: int, outcome=None, collect_only=False
+) -> list[str]:
+    report = _json(raw)
+    if (
+        set(report)
+        != {
+            "schema_version",
+            "collect_only",
+            "collected",
+            "phases",
+            "collection_errors",
+            "deselected",
+            "exit_status",
+        }
+        or type(report["schema_version"]) is not int
+        or report["schema_version"] != 1
+        or report["collect_only"] is not collect_only
+        or type(native) is not int
+        or native != 0
+        or type(report["exit_status"]) is not int
+        or report["exit_status"] != native
+        or type(report["collection_errors"]) is not int
+        or report["collection_errors"] != 0
+        or type(report["deselected"]) is not int
+        or report["deselected"] != 0
+    ):
+        raise RuntimeError("node report has incomplete or inconsistent native outcomes")
+    nodes = _nodes(report["collected"])
+    if not nodes or (outcome is not None and len(nodes) != outcome.collected):
+        raise RuntimeError("node collection disagrees with strict outcome count")
+    if collect_only:
+        if report["phases"] != {}:
+            raise RuntimeError("collection receipt contains executed tests")
+    elif (
+        not isinstance(report["phases"], dict)
+        or set(report["phases"]) != set(nodes)
+        or any(
+            phases
+            != {
+                phase: dict(outcome="passed", wasxfail=False)
+                for phase in ("setup", "call", "teardown")
+            }
+            for phases in report["phases"].values()
+        )
+    ):
+        raise RuntimeError("node execution is missing or not strictly all-pass")
+    return nodes
 
 
 def _json(raw: bytes) -> dict[str, Any]:
@@ -200,6 +347,25 @@ class DomainEvidence:
     def record_junit(self, raw: bytes) -> None:
         self._retain("xml", raw, MAX_OUTPUT_BYTES)
 
+    def record_nodes(self, raw: bytes) -> None:
+        self._retain("nodes.json", raw, MAX_OUTPUT_BYTES)
+
+    def record_local_node_reports(self, node_path: Path) -> bytes:
+        raw = _read(node_path, MAX_OUTPUT_BYTES)
+        self.record_nodes(raw)
+        self.record_junit(_read(node_path.parent / "pytest.xml", MAX_OUTPUT_BYTES))
+        return raw
+
+    def require_nodes(self, raw: bytes, native: int, outcome) -> list[str]:
+        nodes = require_node_report(raw, native=native, outcome=outcome)
+        selected = self.files
+        if any("::" in item for item in selected):
+            if set(nodes) != set(_nodes(selected)):
+                raise RuntimeError("executed nodes differ from declared remainder")
+        elif {node.split("::", 1)[0] for node in nodes} != set(selected):
+            raise RuntimeError("executed nodes differ from selected files")
+        return nodes
+
     def close(self, result: dict[str, Any]) -> None:
         self._retain(
             "result.json",
@@ -331,15 +497,26 @@ def verify_matrix_task(
     expected_files = {"binding.json"}
     rows = {}
     for domain, selected in selection.items():
+        node_selection = isinstance(selected, dict) and "nodes" in selected
         if (
             domain == "host_reboot"
             or domain not in registry
-            or selected != registry[domain]
+            or {key: value for key, value in selected.items() if key != "nodes"}
+            != registry[domain]
+            or set(selected)
+            != ({"tier", "files", "nodes"} if node_selection else {"tier", "files"})
         ):
             raise RuntimeError("matrix selection is narrowed or unknown")
-        tier, files = selected["tier"], selected["files"]
-        if any(path not in source["payload"] for path in files):
+        tier = selected["tier"]
+        files = _nodes(selected["nodes"]) if node_selection else selected["files"]
+        if not files or any(
+            path.split("::", 1)[0] not in source["payload"] for path in files
+        ):
             raise RuntimeError("matrix executed file is missing from source binding")
+        if node_selection and any(
+            node.split("::", 1)[0] not in selected["files"] for node in files
+        ):
+            raise RuntimeError("selected node is outside registered domain")
         receipt = _json(_read(task / f"{domain}.result.json"))
         if (
             set(receipt)
@@ -376,6 +553,9 @@ def verify_matrix_task(
             path: digest
             for path, digest in source["payload"].items()
             if path.startswith("tests/system/")
+            or (task / f"{domain}.nodes.json").exists()
+            and path
+            in ("scripts/system_test_evidence.py", "scripts/system_test_outcomes.py")
         }:
             raise RuntimeError(
                 "matrix executed runtime source differs from qualified source"
@@ -392,6 +572,21 @@ def verify_matrix_task(
                 "result.json",
             )
         )
+        if (task / f"{domain}.nodes.json").exists():
+            nodes = require_node_report(
+                _read(task / f"{domain}.nodes.json", MAX_OUTPUT_BYTES),
+                native=native["returncode"],
+                outcome=outcome,
+            )
+            if node_selection and set(nodes) != set(files):
+                raise RuntimeError("actual nodes differ from selected remainder")
+            if not node_selection and {node.split("::", 1)[0] for node in nodes} != set(
+                files
+            ):
+                raise RuntimeError("actual nodes differ from selected files")
+            expected_files.add(f"{domain}.nodes.json")
+        elif node_selection:
+            raise RuntimeError("selected remainder has no actual node receipt")
         if (task / f"{domain}.xml").exists():
             xml = ET.fromstring(_read(task / f"{domain}.xml", MAX_OUTPUT_BYTES))
             cases = list(xml.iter("testcase"))
@@ -401,7 +596,21 @@ def verify_matrix_task(
                 for tag in ("error", "failure", "skipped")
             ):
                 raise RuntimeError("matrix JUnit differs from strict outcomes")
+            if (task / f"{domain}.nodes.json").exists():
+                expected_cases = {_junit_identity(node) for node in nodes}
+                actual_cases = [
+                    (case.get("classname"), case.get("name")) for case in cases
+                ]
+                if (
+                    len(set(actual_cases)) != len(actual_cases)
+                    or set(actual_cases) != expected_cases
+                ):
+                    raise RuntimeError(
+                        "matrix JUnit node identities differ from actual node receipt"
+                    )
             expected_files.add(f"{domain}.xml")
+        elif (task / f"{domain}.nodes.json").exists():
+            raise RuntimeError("actual node receipt has no literal JUnit proof")
     if set(terminal["proof_sha256"]) != expected_files:
         raise RuntimeError("matrix proof files differ from exact selection")
     if set(path.name for path in task.iterdir()) != expected_files | {"terminal.json"}:
@@ -411,13 +620,367 @@ def verify_matrix_task(
             raise RuntimeError(f"matrix proof changed: {name}")
     return dict(
         domains=rows,
+        nodes={
+            domain: require_node_report(
+                _read(task / f"{domain}.nodes.json", MAX_OUTPUT_BYTES), native=0
+            )
+            for domain in rows
+            if (task / f"{domain}.nodes.json").exists()
+        },
         binding=binding,
         terminal_sha256=hashlib.sha256(_read(task / "terminal.json")).hexdigest(),
     )
 
 
+def _junit_identity(node: str) -> tuple[str, str]:
+    path, *parts = node.split("::")
+    return (
+        ".".join([path.removesuffix(".py").replace("/", "."), *parts[:-1]]),
+        parts[-1],
+    )
+
+
+def collect_named_runner_nodes(orchestrator, task: Path) -> None:
+    """Observe the complete registry once, without running fixtures or lifecycle."""
+    if (
+        socket.gethostname() != NAMED_RUNNER
+        or Path.cwd().resolve() != orchestrator._REPO_ROOT
+        or any(
+            os.environ.get(key) != NAMED_RUNNER
+            for key in ("MVM_TEST_VM", "MVM_TEST_QUALIFICATION_HOST")
+        )
+    ):
+        raise RuntimeError(
+            "full registry collection requires the exact named-QA source context"
+        )
+    orchestrator.verify_release_binary_identity(
+        controller_command=orchestrator.MVM_BINARY,
+        configured_candidate=orchestrator.MVM_CANDIDATE_CONFIGURED,
+        candidate=Path(orchestrator.MVM_CANDIDATE_BINARY),
+        requested_version=orchestrator._get_mvm_version(),
+    )
+    source = source_identity(orchestrator._REPO_ROOT)
+    registry = orchestrator._evidence_registry()
+    capture = MatrixEvidence(
+        task,
+        dict(
+            schema_version=1,
+            host=NAMED_RUNNER,
+            boot_id=Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+            source=source,
+            candidate=dict(
+                sha256=orchestrator._sha256_runner_input(
+                    Path(orchestrator.MVM_CANDIDATE_BINARY)
+                ),
+                version="mvm " + orchestrator._get_mvm_version(),
+            ),
+            controller=orchestrator._host_reboot_controller(),
+            registry=registry,
+            selection=registry,
+        ),
+    )
+    with tempfile.TemporaryDirectory(
+        prefix="collection-runtime-", dir=task
+    ) as runtime_tmp:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                "-m",
+                "pytest",
+                "-p",
+                "system_test_evidence",
+                "-p",
+                "no:cacheprovider",
+                "--collect-only",
+                "-q",
+                *[path for row in registry.values() for path in row["files"]],
+            ],
+            cwd=orchestrator._REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env={
+                **os.environ,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "TMPDIR": runtime_tmp,
+                "PYTHONPATH": str(orchestrator._REPO_ROOT / "scripts"),
+                NODE_REPORT_ENV: str(task / "collection-nodes.json"),
+                "MVM_PYTEST_OUTCOME_REPORT": "",
+            },
+        )
+    _write(task, "collection-native.json", _encode(dict(returncode=result.returncode)))
+    _write(task, "collection-stdout", result.stdout.encode(), MAX_OUTPUT_BYTES)
+    _write(task, "collection-stderr", result.stderr.encode(), MAX_OUTPUT_BYTES)
+    require_node_report(
+        _read(task / "collection-nodes.json", MAX_OUTPUT_BYTES),
+        native=result.returncode,
+        collect_only=True,
+    )
+    current = source_identity(orchestrator._REPO_ROOT)
+    if current != source:
+        raise RuntimeError("qualified source changed during full collection")
+    capture.close([dict(domain="full_collection", passed=True)], current)
+
+
+def verify_collection_task(task: Path, source, candidate, registry) -> dict[str, Any]:
+    _private_directory(task)
+    binding = _json(_read(task / "binding.json"))
+    terminal = _json(_read(task / "terminal.json"))
+    if (
+        set(binding)
+        != {
+            "schema_version",
+            "host",
+            "boot_id",
+            "source",
+            "candidate",
+            "controller",
+            "registry",
+            "selection",
+        }
+        or set(terminal)
+        != {
+            "schema_version",
+            "source",
+            "completed",
+            "passed",
+            "domains",
+            "proof_sha256",
+        }
+        or type(binding.get("schema_version")) is not int
+        or type(terminal.get("schema_version")) is not int
+        or terminal["schema_version"] != 1
+        or binding.get("source") != source
+        or binding.get("candidate") != candidate
+        or binding.get("registry") != registry
+        or binding.get("selection") != registry
+        or binding.get("host") != NAMED_RUNNER
+        or binding.get("schema_version") != 1
+        or terminal.get("completed") is not True
+        or terminal.get("passed") is not True
+        or terminal.get("source") != source
+        or terminal.get("domains") != ["full_collection"]
+    ):
+        raise RuntimeError("full collection binding is incomplete or changed")
+    # Use the same installed-controller predicate as matrix receipts.
+    controller = binding.get("controller", {})
+    if (
+        set(controller) != {"path", "command", "sha256", "identity"}
+        or controller.get("path") != "/usr/local/bin/mvm"
+        or controller.get("command") != ["/usr/local/bin/mvm"]
+        or controller.get("sha256") != candidate["sha256"]
+        or not isinstance(controller.get("identity"), list)
+        or len(controller["identity"]) != 9
+        or controller["identity"][2:6] != [0, 0, 0o755, 1]
+    ):
+        raise RuntimeError("full collection controller differs from candidate")
+    if str(uuid.UUID(binding["boot_id"])) != binding["boot_id"]:
+        raise RuntimeError("invalid full collection boot identity")
+    expected = {
+        "binding.json",
+        "collection-native.json",
+        "collection-stdout",
+        "collection-stderr",
+        "collection-nodes.json",
+    }
+    if set(terminal.get("proof_sha256", {})) != expected or {
+        path.name for path in task.iterdir()
+    } != expected | {"terminal.json"}:
+        raise RuntimeError("full collection proof files differ")
+    for name, digest in terminal["proof_sha256"].items():
+        if hashlib.sha256(_read(task / name, MAX_OUTPUT_BYTES)).hexdigest() != digest:
+            raise RuntimeError("full collection proof changed")
+    native = _json(_read(task / "collection-native.json"))
+    if set(native) != {"returncode"}:
+        raise RuntimeError("invalid collection native receipt")
+    nodes = require_node_report(
+        _read(task / "collection-nodes.json", MAX_OUTPUT_BYTES),
+        native=native["returncode"],
+        collect_only=True,
+    )
+    owners = {path: domain for domain, row in registry.items() for path in row["files"]}
+    if {node.split("::", 1)[0] for node in nodes} != set(owners):
+        raise RuntimeError("full collection has missing or unregistered files")
+    by_domain = {
+        domain: [node for node in nodes if owners[node.split("::", 1)[0]] == domain]
+        for domain in registry
+    }
+    if "host_reboot" in registry and set(by_domain["host_reboot"]) != HOST_NODES:
+        raise RuntimeError("full collection host phase nodes changed")
+    return dict(
+        nodes=by_domain,
+        terminal_sha256=hashlib.sha256(_read(task / "terminal.json")).hexdigest(),
+    )
+
+
+# This named carry is one accepted literal journey, not an extensible trust hook.
+OFFICIAL_KERNEL_CANDIDATE = dict(
+    sha256="57c60574b60180fd26322165079f330b4448291925c745e6ec3da8ae54f189e6",
+    version="mvm 0.3.0-rc.openrc-c54bfe88",
+)
+OFFICIAL_KERNEL_SEALS = {
+    "official-eight.json": "b26f751e1f4b1f8cb951b246af3c59643da95c34ea38cee28737ac8fa874bb2d",
+    "official-eight.xml": "a31bf3e7c99fcd0798e67e2aa834aff1bd58f72cef7e3454a3f34cac82d34078",
+    "terminal.json": "bcb372f1a5350c3dcc7b1d07388e6681eefa639041f9c8d58659e5821e909569",
+}
+OFFICIAL_KERNEL_INPUTS = {
+    **{
+        path: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        for path in (
+            "tests/__init__.py",
+            "tests/system/__init__.py",
+            "tests/system/network/__init__.py",
+            "tests/system/kernel/__init__.py",
+        )
+    },
+    "tests/system/network/test_network.py": "baf7a941a8be1f80a2a62dd06b1baa22096609cc81502207f74b4eb79770551b",
+    "tests/system/conftest.py": "f3ae73656f5edcd8931744cc5144478e7213382822a37b451f105803923d5743",
+    "tests/system/pytest.ini": "6a7e8b5e8c12e8f0a532d684dc96c46369164950f28a17e8da044b109822fb16",
+    "scripts/system_test_outcomes.py": "efddfad849a3b9d0b867f08acab4c02f07780bfe48361a2ba4e2e1b0be6a7216",
+    "tests/system/network/test_policies.py": "805d0debbb303ac75aac1b3bb241645232528d8976b686877dadcbda72a03c1e",
+    "tests/system/kernel/test_kernel_import.py": "1c246cc0fe8145e70556f6c9995b19d5f024e8d49977741a04ed72298336874e",
+    "tests/system/kernel/test_kernel.py": "dff12aed2c399fa865f4f3f5ceb2f9bfa5b8b61ea965b4e5c0e4430d8e8ffd59",
+    "tests/system/host/test_host.py": "8ff215defb4a5ce53bd349de6698b5514fb5d6c3e2a13e509e8a03eb1b52f0c4",
+    "scripts/tests/test_official_kernel_pull_sequence.py": "e9c74433211aa08d21a35ea3339949ff97363e7fd93b471026aad444c3fca084",
+}
+
+
+def verify_official_kernel_carry(task: Path, source, candidate) -> list[str]:
+    """Read original native/strict/JUnit proof; never relabel it as current runtime."""
+    if candidate != OFFICIAL_KERNEL_CANDIDATE:
+        raise RuntimeError(
+            "official8 carry candidate changed; all eight nodes require new proof or an approved relevant-input carry"
+        )
+    if any(
+        source["payload"].get(path) != digest
+        for path, digest in OFFICIAL_KERNEL_INPUTS.items()
+    ):
+        raise RuntimeError("official8 carry reachable source inputs changed")
+    if not task.is_absolute() or task.resolve(strict=True) != task:
+        raise RuntimeError("official8 retained task must be canonical")
+    reports = task / "runtime-reports"
+    if reports.resolve(strict=True) != reports:
+        raise RuntimeError("official8 reports directory is not canonical")
+    raw = {
+        name: _read(reports / name, MAX_OUTPUT_BYTES) for name in OFFICIAL_KERNEL_SEALS
+    }
+    if any(
+        hashlib.sha256(raw[name]).hexdigest() != digest
+        for name, digest in OFFICIAL_KERNEL_SEALS.items()
+    ):
+        raise RuntimeError("official8 original sealed report changed")
+    terminal = _json(raw["terminal.json"])
+    if (
+        terminal.get("passed") is not True
+        or terminal.get("failure") is not None
+        or terminal.get("case_native_exit") != 0
+        or terminal.get("fixture_baseline_preserved") is not True
+        or terminal.get("preservation_errors") != []
+    ):
+        raise RuntimeError("official8 original native or preservation proof failed")
+    acquired = terminal.get("acquisition_results", [])
+    if (
+        len(acquired) != 1
+        or acquired[0].get("typed_kernel_retirements") != 8
+        or acquired[0].get("typed_terminal_cache_clean") != 1
+    ):
+        raise RuntimeError("official8 original cleanup proof is incomplete")
+    nodes = _nodes(acquired[0]["nodes"])
+    outcomes = require_complete_pytest_outcomes(
+        raw["official-eight.json"], process_returncode=terminal["case_native_exit"]
+    )
+    cases = list(ET.fromstring(raw["official-eight.xml"]).iter("testcase"))
+    actual = [
+        "tests/system/kernel/test_kernel.py::"
+        + case.attrib["classname"].removeprefix("tests.system.kernel.test_kernel.")
+        + "::"
+        + case.attrib["name"]
+        for case in cases
+    ]
+    if (
+        len(nodes) != 8
+        or outcomes.collected != 8
+        or set(actual) != set(nodes)
+        or len(actual) != 8
+        or any(
+            list(case.iter(tag))
+            for case in cases
+            for tag in ("error", "failure", "skipped")
+        )
+    ):
+        raise RuntimeError(
+            "official8 exact JUnit nodes differ from original strict proof"
+        )
+    return nodes
+
+
+def accounted_nodes(collection, reports, carried=()) -> set[str]:
+    required = {
+        node for nodes in collection["nodes"].values() for node in nodes
+    } - HOST_NODES
+    accounted = set()
+    for nodes in [
+        list(carried),
+        *[nodes for report in reports for nodes in report["nodes"].values()],
+    ]:
+        if set(nodes) - required:
+            raise RuntimeError(
+                "proof contains nodes outside full registered collection"
+            )
+        if accounted.intersection(nodes):
+            raise RuntimeError("duplicate executed or carried node coverage")
+        accounted.update(nodes)
+    if any(set(report["nodes"]) != set(report["domains"]) for report in reports):
+        raise RuntimeError(
+            "matrix proof lacks actual node receipts; file/count summaries are not node coverage"
+        )
+    return accounted
+
+
+def selected_node_remainder(
+    manifest: Path, collection, reports, carried, domains: set[str]
+) -> dict[str, list[str]]:
+    declared = _json(_read(manifest, MAX_OUTPUT_BYTES))
+    if (
+        set(declared) != {"schema_version", "collection_terminal_sha256", "nodes"}
+        or declared["schema_version"] != 1
+        or type(declared["schema_version"]) is not int
+    ):
+        raise RuntimeError("invalid selected-node remainder declaration")
+    selected = _nodes(declared["nodes"])
+    accounted = accounted_nodes(collection, reports, carried)
+    remainder = {
+        node
+        for domain, nodes in collection["nodes"].items()
+        if domain in domains and domain != "host_reboot"
+        for node in nodes
+    } - accounted
+    if (
+        declared["collection_terminal_sha256"] != collection["terminal_sha256"]
+        or set(selected) != remainder
+    ):
+        raise RuntimeError(
+            "declared selected nodes are not the exact unproved registered remainder"
+        )
+    if not remainder:
+        raise RuntimeError(
+            "selected registered remainder is empty; no tests should be replayed"
+        )
+    return {
+        domain: [node for node in collection["nodes"][domain] if node in remainder]
+        for domain in domains
+        if domain != "host_reboot" and set(collection["nodes"][domain]) & remainder
+    }
+
+
 def finalize_named_runner_release_evidence(
-    orchestrator, matrix_tasks: list[Path], host_reboot_task: Path
+    orchestrator,
+    matrix_tasks: list[Path],
+    host_reboot_task: Path,
+    *,
+    collection_task: Path | None = None,
+    official_kernel_carry: Path | None = None,
 ) -> dict[str, Any]:
     """Join exact inner reports with the unchanged outer reboot admission reader."""
 
@@ -434,17 +997,32 @@ def finalize_named_runner_release_evidence(
         version="mvm " + orchestrator._get_mvm_version(),
     )
     registry = orchestrator._evidence_registry()
+    if collection_task is None:
+        raise RuntimeError(
+            "final release requires retained current full-registry node collection"
+        )
+    collection = verify_collection_task(collection_task, source, candidate, registry)
     verified = [
         verify_matrix_task(task, source, candidate, registry) for task in matrix_tasks
     ]
-    domains = {}
-    for report in verified:
-        for domain, collected in report["domains"].items():
-            if domain in domains:
-                raise RuntimeError(f"duplicate matrix coverage: {domain}")
-            domains[domain] = collected
-    if set(domains) != set(registry) - {"host_reboot"}:
-        raise RuntimeError("matrix coverage is incomplete")
+    carried = (
+        verify_official_kernel_carry(official_kernel_carry, source, candidate)
+        if official_kernel_carry
+        else []
+    )
+    accounted = accounted_nodes(collection, verified, carried)
+    missing = sorted(
+        {node for nodes in collection["nodes"].values() for node in nodes}
+        - HOST_NODES
+        - accounted
+    )
+    if missing:
+        raise RuntimeError("matrix node coverage is incomplete: " + ", ".join(missing))
+    domains = {
+        domain: len(nodes)
+        for domain, nodes in collection["nodes"].items()
+        if domain != "host_reboot"
+    }
     reboot = orchestrator.require_completed_host_reboot(host_reboot_task)
     if source_identity(orchestrator._REPO_ROOT) != source:
         raise RuntimeError("qualified source changed during finalization")
@@ -455,6 +1033,9 @@ def finalize_named_runner_release_evidence(
         source=source,
         candidate=candidate,
         domains=domains,
+        executed_nodes=sorted(accounted - set(carried)),
+        carried_nodes=carried,
+        collection_terminal_sha256=collection["terminal_sha256"],
         matrix_terminal_sha256=[report["terminal_sha256"] for report in verified],
         host_reboot=reboot,
     )
@@ -467,6 +1048,8 @@ def main() -> int:
     parser.add_argument("--matrix-task", type=Path, action="append", required=True)
     parser.add_argument("--host-reboot-task", type=Path, required=True)
     parser.add_argument("--qualified-source", type=Path, required=True)
+    parser.add_argument("--collection-task", type=Path, required=True)
+    parser.add_argument("--official-kernel-carry", type=Path)
     args = parser.parse_args()
     try:
         root = args.qualified_source.resolve(strict=True)
@@ -483,7 +1066,11 @@ def main() -> int:
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         result = finalize_named_runner_release_evidence(
-            module, args.matrix_task, args.host_reboot_task
+            module,
+            args.matrix_task,
+            args.host_reboot_task,
+            collection_task=args.collection_task,
+            official_kernel_carry=args.official_kernel_carry,
         )
     except Exception as exc:
         print(
