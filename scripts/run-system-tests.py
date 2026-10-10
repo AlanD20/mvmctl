@@ -42,6 +42,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import stat
 import struct
 import subprocess
@@ -65,6 +66,7 @@ from system_test_outcomes import (
     read_pytest_outcome_report,
     require_complete_pytest_outcomes,
 )
+from system_test_evidence import DomainEvidence, MatrixEvidence, source_identity
 
 # ============================================================================
 # Configuration
@@ -1587,11 +1589,16 @@ def destroy_vm(vm_name: str, *, check: bool = True) -> None:
 def _record_runner_destruction(
     result: dict[str, Any],
     vm_name: str,
+    evidence: DomainEvidence | None = None,
 ) -> None:
     """Make mandatory runner destruction part of the domain result."""
     try:
         destroy_vm(vm_name)
+        if evidence is not None:
+            evidence.runner_cleanup = True
     except Exception as exc:
+        if evidence is not None:
+            evidence.runner_cleanup = False
         result["passed"] = False
         cleanup_failure = f"runner VM destruction failed for {vm_name}: {exc}"
         primary_output = result["output"].rstrip()
@@ -2035,6 +2042,7 @@ def _run_remote_pytest(
     test_files: list[str],
     *,
     timeout: int,
+    evidence: DomainEvidence | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], str | None]:
     """Run pytest in a runner VM and validate its bounded outcome report."""
     report_path = _remote_pytest_report_path(vm_name)
@@ -2042,6 +2050,12 @@ def _run_remote_pytest(
     validation_failures: list[str] = []
     execution_error: Exception | None = None
     try:
+        if evidence is not None:
+            expected = {path: digest for path, digest in evidence.source_payload.items() if path.startswith("tests/system/")}
+            probe = "import hashlib,json;from pathlib import Path;print(json.dumps({p:hashlib.sha256(Path('/'+p).read_bytes()).hexdigest() for p in " + repr(list(expected)) + "},sort_keys=True))"
+            observed = mvm("exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+                           shlex.join(["python3", "-c", probe]), timeout=30)
+            evidence.record_runtime_source(observed.stdout.encode(), expected)
         pytest_result = mvm(
             "exec",
             vm_name,
@@ -2054,6 +2068,8 @@ def _run_remote_pytest(
             check=False,
             timeout=timeout,
         )
+        if evidence is not None:
+            evidence.record_native(pytest_result)
         retrieve_result = mvm(
             "exec",
             vm_name,
@@ -2072,6 +2088,8 @@ def _run_remote_pytest(
             raise RuntimeError(
                 f"remote pytest outcome report is missing: {detail}"
             )
+        if evidence is not None:
+            evidence.record_outcomes(retrieve_result.stdout.encode())
         require_complete_pytest_outcomes(
             retrieve_result.stdout.encode(),
             process_returncode=pytest_result.returncode,
@@ -2093,7 +2111,11 @@ def _run_remote_pytest(
                 check=True,
                 timeout=30,
             )
+            if evidence is not None:
+                evidence.report_cleanup = True
         except Exception as exc:
+            if evidence is not None:
+                evidence.report_cleanup = False
             validation_failures.append(
                 f"remote outcome report cleanup failed: {exc}"
             )
@@ -2126,6 +2148,7 @@ def _run_local_pytest(
     test_files: list[str],
     *,
     timeout: int,
+    evidence: DomainEvidence | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], str | None]:
     """Run host-direct pytest with a private report and checked cleanup."""
     report_directory = tempfile.TemporaryDirectory(
@@ -2136,12 +2159,20 @@ def _run_local_pytest(
     validation_failures: list[str] = []
     execution_error: Exception | None = None
     try:
+        if evidence is not None:
+            expected = {path: digest for path, digest in evidence.source_payload.items() if path.startswith("tests/system/")}
+            observed = {path: _sha256_runner_input(_REPO_ROOT / path) for path in expected}
+            evidence.record_runtime_source(json.dumps(observed, sort_keys=True).encode(), expected)
         pytest_result = _run_pytest(
             test_files,
             timeout=timeout,
             extra_env={PYTEST_OUTCOME_REPORT_ENV: str(report_path)},
         )
+        if evidence is not None:
+            evidence.record_native(pytest_result)
         payload = read_pytest_outcome_report(report_path)
+        if evidence is not None:
+            evidence.record_outcomes(payload)
         require_complete_pytest_outcomes(
             payload,
             process_returncode=pytest_result.returncode,
@@ -2151,7 +2182,11 @@ def _run_local_pytest(
     finally:
         try:
             report_directory.cleanup()
+            if evidence is not None:
+                evidence.report_cleanup = True
         except Exception as exc:
+            if evidence is not None:
+                evidence.report_cleanup = False
             validation_failures.append(
                 f"local outcome report cleanup failed: {exc}"
             )
@@ -2640,6 +2675,7 @@ def run_tier1_domain(
     push: bool = False,
     *,
     binding: ImportedRunnerKernelBinding | None = None,
+    evidence: MatrixEvidence | None = None,
 ) -> dict[str, Any]:
     """Full lifecycle for one Tier 1 domain. Max 5 minutes per domain."""
     vm_name = _unique_name(f"t1-{domain}")
@@ -2650,6 +2686,7 @@ def run_tier1_domain(
         "output": "",
     }
     created = False
+    capture = evidence.domain(domain, 1, test_files) if evidence is not None else None
 
     def mark_created() -> None:
         nonlocal created
@@ -2683,6 +2720,7 @@ def run_tier1_domain(
             vm_name,
             test_files,
             timeout=660,
+            **({"evidence": capture} if capture is not None else {}),
         )
         result["passed"] = validation_failure is None
         result["output"] = _pytest_result_output(
@@ -2693,7 +2731,9 @@ def run_tier1_domain(
         result["output"] = str(e)
     finally:
         if created:
-            _record_runner_destruction(result, vm_name)
+            _record_runner_destruction(result, vm_name, capture)
+        if capture is not None:
+            capture.close(result)
 
     return result
 
@@ -2705,6 +2745,7 @@ def run_tier2_domain(
     push: bool = False,
     *,
     binding: ImportedRunnerKernelBinding | None = None,
+    evidence: MatrixEvidence | None = None,
 ) -> dict[str, Any]:
     """Full lifecycle for one Tier 2 domain."""
     if domain == "host_reboot":
@@ -2718,6 +2759,7 @@ def run_tier2_domain(
         "output": "",
     }
     created = False
+    capture = evidence.domain(domain, 2, test_files) if evidence is not None else None
 
     def mark_created() -> None:
         nonlocal created
@@ -2751,6 +2793,7 @@ def run_tier2_domain(
             vm_name,
             test_files,
             timeout=960,
+            **({"evidence": capture} if capture is not None else {}),
         )
         result["passed"] = validation_failure is None
         result["output"] = _pytest_result_output(
@@ -2761,13 +2804,15 @@ def run_tier2_domain(
         result["output"] = str(e)
     finally:
         if created:
-            _record_runner_destruction(result, vm_name)
+            _record_runner_destruction(result, vm_name, capture)
+        if capture is not None:
+            capture.close(result)
 
     return result
 
 
 def run_tier3_domain(
-    domain: str, test_files: list[str], timeout: int = 600
+    domain: str, test_files: list[str], timeout: int = 600, *, evidence: MatrixEvidence | None = None
 ) -> dict[str, Any]:
     """Run one Tier 3 domain directly on the host."""
     result: dict[str, Any] = {
@@ -2777,11 +2822,13 @@ def run_tier3_domain(
         "output": "",
     }
     log(f"  Running {domain} tests on host (timeout={timeout}s)...")
+    capture = evidence.domain(domain, 3, test_files) if evidence is not None else None
     try:
         pytest_result, validation_failure = _run_local_pytest(
             domain,
             test_files,
             timeout=timeout,
+            **({"evidence": capture} if capture is not None else {}),
         )
         result["passed"] = validation_failure is None
         result["output"] = _pytest_result_output(
@@ -2790,6 +2837,9 @@ def run_tier3_domain(
         )
     except Exception as e:
         result["output"] = str(e)
+    finally:
+        if capture is not None:
+            capture.close(result)
     return result
 
 
@@ -2835,6 +2885,7 @@ def run_domains(
     push: bool = False,
     *,
     binding: ImportedRunnerKernelBinding | None = None,
+    evidence: MatrixEvidence | None = None,
 ) -> list[dict[str, Any]]:
     """Run a set of domains in parallel using the given runner function."""
     if not domains:
@@ -2856,6 +2907,7 @@ def run_domains(
                 mvm_version,
                 push,
                 **({"binding": binding} if binding is not None else {}),
+                **({"evidence": evidence} if evidence is not None else {}),
             ): domain
             for domain, files in domains.items()
         }
@@ -3319,6 +3371,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "explicit --candidate-version.",
     )
     parser.add_argument(
+        "--record-evidence", type=Path,
+        help="Retain literal named-QA domain reports in an empty private owned directory; does not finalize a release.",
+    )
+    parser.add_argument(
         "--tier",
         type=_parse_tier,
         help="Comma-separated tier numbers to run (1, 2, 3). "
@@ -3544,6 +3600,26 @@ def run_prepare(
         destroy_vm(t2)
 
 
+def _evidence_registry() -> dict[str, Any]:
+    return {domain: dict(tier=tier, files=files) for tier, domains in (
+        (1, TIER1_DOMAINS), (2, TIER2_DOMAINS), (3, TIER3_DOMAINS), (2, HOST_REBOOT_PHASE_DOMAINS))
+        for domain, files in domains.items()}
+
+
+def _start_matrix_evidence(task: Path, args: argparse.Namespace) -> MatrixEvidence:
+    verify_release_binary_identity(controller_command=MVM_BINARY, configured_candidate=MVM_CANDIDATE_CONFIGURED,
+                                   candidate=Path(MVM_CANDIDATE_BINARY), requested_version=_get_mvm_version())
+    _require_release_host_without_active_vms()
+    registry = _evidence_registry()
+    selection = {domain: row for domain, row in registry.items() if domain != "host_reboot"
+                 and (not args.domains or domain in args.domains)
+                 and (args.tier is None or row["tier"] in args.tier)}
+    return MatrixEvidence(task, dict(schema_version=1, host=socket.gethostname(),
+        boot_id=Path("/proc/sys/kernel/random/boot_id").read_text().strip(), source=source_identity(_REPO_ROOT),
+        candidate=dict(sha256=_sha256_runner_input(Path(MVM_CANDIDATE_BINARY)), version="mvm " + _get_mvm_version()),
+        controller=_host_reboot_controller(), registry=registry, selection=selection))
+
+
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
@@ -3556,6 +3632,7 @@ def main() -> None:
         if (args.domains != ["host_reboot"] or not args.host_reboot_phase or not args.host_reboot_task
                 or args.all or args.tier or args.host_direct or args.release_qualification
                 or args.prepare or args.image or args.volume or args.rebuild or args.push
+                or args.record_evidence
                 or args.candidate_version or args.skip_volume_check
                 or (args.host_reboot_phase == "post") != bool(args.host_reboot_envelope)):
             parser.error("host_reboot requires only its exact domain, phase/task and POST-only admin envelope receipt")
@@ -3577,6 +3654,12 @@ def main() -> None:
 
     test_flags = args.all or args.domains or args.tier
     prep_flags = args.prepare or args.image or args.volume or args.rebuild
+    if args.record_evidence:
+        if (not test_flags or args.rebuild or args.release_qualification or args.skip_volume_check
+                or socket.gethostname() != _HOST_REBOOT_RUNNER or Path.cwd().resolve() != _REPO_ROOT
+                or os.environ.get("MVM_TEST_VM") != _HOST_REBOOT_RUNNER
+                or os.environ.get("MVM_TEST_QUALIFICATION_HOST") != _HOST_REBOOT_RUNNER):
+            parser.error("--record-evidence requires an exact named-QA installed-candidate test run, without rebuild or narrowed admission")
 
     if not test_flags and not prep_flags:
         parser.print_help()
@@ -3661,6 +3744,7 @@ def main() -> None:
         sys.exit(1)
 
     # Handle prep actions.
+    evidence = _start_matrix_evidence(args.record_evidence, args) if args.record_evidence else None
     # --rebuild implies --volume + --image + --prepare (in that order).
     if args.release_qualification:
         try:
@@ -3774,6 +3858,7 @@ def main() -> None:
                 mvm_version,
                 push=args.push,
                 **({"binding": binding} if binding is not None else {}),
+                **({"evidence": evidence} if evidence is not None else {}),
             )
             all_results.extend(results)
         elif tier == 2 and tier2:
@@ -3785,19 +3870,23 @@ def main() -> None:
                 mvm_version,
                 push=args.push,
                 **({"binding": binding} if binding is not None else {}),
+                **({"evidence": evidence} if evidence is not None else {}),
             )
             all_results.extend(results)
         elif tier == 3 and tier3:
             log(f"Tier 3: running {len(tier3)} domain(s) on host...")
             for domain, files in sorted(tier3.items()):
                 timeout = KERNEL_BUILD_DOMAIN_TIMEOUT if domain == "kernel_build" else 600
-                result = run_tier3_domain(domain, files, timeout=timeout)
+                result = run_tier3_domain(domain, files, timeout=timeout,
+                                         **({"evidence": evidence} if evidence is not None else {}))
                 all_results.append(result)
                 status = "PASS" if result["passed"] else "FAIL"
                 log(f"  [{status}] {domain} (tier 3)")
                 if not result["passed"]:
                     _print_failure(domain, result)
 
+    if evidence is not None:
+        evidence.close(all_results, source_identity(_REPO_ROOT))
     if args.release_qualification:
         # Revalidate retained evidence/current release inputs after the batch, not runner liveness.
         try:
