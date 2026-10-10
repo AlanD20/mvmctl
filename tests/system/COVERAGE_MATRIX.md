@@ -176,15 +176,16 @@ The combined official and retained-cache fixture tests passed 34/34 inside the n
 zero-other outcomes; the unchanged 22 kernel nodes collected. JUnit SHA-256
 `f5b853507354935d3f6fa628704d1cffa16adc070b82013d58debbd7bd61042b`.
 Signed `4bc51ee7` also corrects the API's ignored default-write error and stale pull response; formatting,
-vet and 120 existing API checks passed. Official acquisition/build flags and the installed default result
-still need their real system journeys; these focused checks do not qualify them.
+vet and 120 existing API checks passed. Those fixture checks alone did not qualify official acquisition/build
+flags or the installed default result; the completed runtime sequence below supplies separate evidence.
 
 Integrated `a6047716` fixes the private official-kernel fixture's missing default Firecracker/Jailer
 projection. Normal `bin pull 1.16.2 --json` reuses the mirrored archive and admits the matching trusted
 pair; cleanup preserves that borrowed pair, the original defaults and checked root/mirror inventories.
 Named-runner native session 45747 exited 0: all 22 focused fixture cases passed with zero failures,
 errors or skips. Strict JSON SHA-256 `c99668f0`; JUnit `c988e72e`. The unchanged eight real official-kernel
-cases remain a separate runtime gate; the earlier missing-default and fixture setup failures remain failed.
+cases remained a separate runtime gate at that checkpoint; the earlier missing-default and fixture setup
+failures remain failed.
 
 Integrated `86f32738` gives only these eight official pulls a 2,400-second CLI allowance and a private
 process group, with identity-checked bounded termination and retained diagnostics on failure. It does not
@@ -193,7 +194,27 @@ affected fixture checks, including long-build and cancellation failure paths, wi
 other outcomes. Strict JSON SHA-256 `0d696e53`; JUnit `864b3d75`; terminal `55d134a9`.
 The earlier real-build attempt stopped at its 630-second test deadline while compiling Linux 7.2.9;
 neither an OOM nor successful compiler completion was demonstrated. Its failure remains recorded, and
-the newly cached source is retained for reuse. The eight actual build journeys remain unqualified.
+the newly cached source was retained for reuse. Actual qualification followed in the separate sequence below.
+
+**Completed official-kernel eight-case checkpoint (2026-10-10):** source `bca0ec06`, tree `3f75b238`,
+ran on installed `0.3.0-rc.openrc-c54bfe88`, SHA-256
+`57c60574b60180fd26322165079f330b4448291925c745e6ec3da8ae54f189e6`, produced from `c54bfe88`.
+Native case PID 61463 exited 0 in 2629.848640166 seconds. Strict JSON reports 8 collected/8 passed and
+zero failures, errors, collection errors, skips, deselections, XFAIL or XPASS; JUnit agrees on all eight identities.
+The scope is one Tier 2 official/architecture case plus seven separately required Tier 3 kernel cases,
+executed inside the named runner: ordinary official pull, jobs, keep-build-dir, clean-build, features, custom
+config and set-default. This is not the whole kernel module, a complete Tier 3 run, the applicable Python
+release matrix, current Go/root qualification, or release sign-off.
+
+All eight typed per-case kernel retirements and the single final typed cache cleanup exited 0; the private
+cache was removed with no failed IDs or running VMs. Exact process-group absence and publication receipts
+were retained, including `is_default: true` for the final default-selection case. Raw original public,
+physical and administrator inventories are byte-identical before/after (SHA-256 `194c3169`). Four producer
+log receipts are retained; flag acceptance or cache reuse does not establish a compiler execution for every case.
+The 109 literal retained files match their manifest sizes/hashes beneath
+`.tmp/qa-official-kernel-receipt-path-oct10/retained-final/`; `evidence-manifest.json` binds source, candidate,
+boot and exact publication identities. Terminal SHA-256 `bcb372f1`; strict JSON `b26f751e`; JUnit `a31bf3e7`.
+Earlier timeout/setup failures remain failed and retained; reusable-base and full release gates remain open.
 
 **Current coherent branch-layout Go/build checkpoint (2026-10-10):** clean `4bc51ee7`, tree `0be46ce2`,
 passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent
@@ -773,7 +794,9 @@ consolidated full-module invocation. Historical failures remain retained. Reusab
 connectivity/policy qualification and the full installed Python matrix remain pending; no independent
 whole-root absence proof is claimed.
 
-**Current bounded memory qualification (2026-10-09):** Installed candidate
+**Current host-swap-absent pressure checkpoint (2026-10-10):** signed Python `e3d36ef3` on installed `c54bfe88`/`57c60574` passed only `test_guest_sustains_near_saturation_under_pressure_only_memory_control[host-swap-absent]`: strict JSON/JUnit 1/1, zero other outcomes, native exit 0 in 27.0138398 seconds. All four native commands exited 0 and raw original before/after inventories match (`194c3169`). Retained reports: `.tmp/qa-pressure-explicit-image-oct10/retained-final/`; JSON `d428b33a`, JUnit `23b8bb25`, terminal `e229c4d5`. This singleton does not refresh swap-present/guest-OOM coverage, attribute the original incident, or qualify arbitrary host/ancestor pressure or the release.
+
+**Earlier bounded memory qualification (2026-10-09):** Installed candidate
 `0.3.0-rc.partition-f909601d`, source `f909601d`, SHA-256
 `13425005db12c4c13f34a5ca140ec2979dd8471d2c3e1bd271946d28a4364b35`, passed both registered
 `test_guest_sustains_near_saturation_under_pressure_only_memory_control` variants inside `mvmctl-030-test`:
@@ -2851,15 +2874,16 @@ Specific legacy conflicts that must be rewritten before release:
 | `kernel ls --json` empty | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | Named-runner d13/e2fd: registered singleton passed strict1/1; private initialized cache returns schema-1 success with `data: []`, typed cleanup and original-state preservation passed. |
 | `kernel ls --remote` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1: exit 0, non-empty JSON list |
 | `kernel pull --type firecracker` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1 |
-| `kernel pull --type official` | ⏭️ Skip | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1 — marked kernel_build (can skip) |
+| `kernel pull --type official` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | Installed c54/57c60574: completed official-eight sequence, strict 8/8 zero-other outcomes; this case checks successful official pull and a present listing. Exact owned retirement and baseline preservation passed. |
 | `kernel pull` with `--version` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelPullWithVersion` | L2: pull specific firecracker versions v1.15, v1.14, verify via ls --json |
 | `kernel pull` arch auto-detection | ⏭️ Skip | `kernel/test_kernel.py` | `TestKernelPullArch` | Network-dependent. L2: ls --json. No `--arch` flag — arch is auto-detected by Go CLI. |
-| `kernel pull` advanced flags | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelPullAdvancedFlags` | L2: pull with --type official, verify arch auto-detection |
-| `kernel pull --jobs` | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelBuild` | kernel_build marker, may skip. L1: success |
-| `kernel pull --keep-build-dir` | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelBuild` | kernel_build marker, may skip. L1: success |
-| `kernel pull --clean-build` | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelBuild` | kernel_build marker, may skip. L2: listing check |
-| `kernel pull --config` | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelBuild` | L2 — kernel_build marker, may skip |
-| `kernel pull --features` | 🟡 Partial | `kernel/test_kernel.py` | `TestKernelBuild` | L1 — kernel_build marker, may skip |
+| `kernel pull` advanced flags | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelPullAdvancedFlags` | Official-eight Tier 2 case passed on c54/57c60574: successful official pull, present listing and x86_64 publication receipt. No explicit `--arch` flag or cross-architecture runtime claim. |
+| `kernel pull --jobs` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelBuild` | Official-eight separately required Tier 3 case passed: `--jobs 2`, successful publication/listing and typed retirement. Compiler execution or actual parallelism is not proved by this flag/cache-reuse result. |
+| `kernel pull --keep-build-dir` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelBuild` | Official-eight separately required Tier 3 case passed: flag acceptance, publication/listing and typed retirement. Build-directory retention and compiler execution are not inferred from success alone. |
+| `kernel pull --clean-build` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelBuild` | Official-eight separately required Tier 3 case passed: successful clean-build publication, present backing file and retained producer-log receipt; typed retirement preserved the baseline. No boot qualification. |
+| `kernel pull --config` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelBuild` | Official-eight separately required Tier 3 case passed: custom fragment, publication/backing-file checks and retained producer-log receipt. No booted config/feature assertion. |
+| `kernel pull --features` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelBuild` | Official-eight separately required Tier 3 case passed: `--features kvm`, successful publication and retained producer-log receipt. Guest KVM capability is not established by this pull case. |
+| `kernel pull --default` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelRemoveAndPull` | Official-eight separately required Tier 3 case passed: authoritative publication reports `is_default: true`, the listing contains a present official default, and typed retirement/final cleanup preserve original defaults and inventories. |
 | `kernel ls --no-cache` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelLifecycle` | L1 — exit 0 |
 | `kernel inspect` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelInspect` | Installed rc.7: human output names the selected present kernel and version. |
 | `kernel inspect --json` | ⚡ Shallow | `kernel/test_kernel.py` | `TestKernelInspect` | Installed rc.7: schema-1 inspect identity and storage path match the listed kernel. |

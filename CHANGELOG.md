@@ -181,7 +181,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Known limitations and qualification
 
 - Kept v0.3.0 unreleased and not release-qualified. Full coherent current Go/root checks, the complete applicable
-  installed Python matrix, official-kernel builds/reusable-base qualification, clean-host Tier 3, remote CI, and
+  installed Python matrix, reusable-base qualification, clean-host Tier 3, remote CI, and
   final approval remain release gates. Earlier focused results bind only their tested inputs; see the
   [coverage matrix](tests/system/COVERAGE_MATRIX.md) for exact evidence.
 - Retained the Firecracker 1.16.2 live PCI detach/reattach blocker: the disk may fail to reappear after BAR relocation.
