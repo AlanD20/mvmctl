@@ -1843,7 +1843,7 @@ def _build_base_image(
             "--",
             "sudo apt-get update -qq && "
             "sudo apt-get install -y -qq "
-            "python3-pytest qemu-utils fakeroot nftables iptables zstd htop "
+            "python3-pytest python3-pytest-timeout qemu-utils fakeroot nftables iptables zstd htop "
             "build-essential bc bison flex libncurses-dev "
             "libssl-dev libelf-dev pkg-config git curl dwarves "
             "cloud-image-utils util-linux && "
@@ -1898,18 +1898,6 @@ test "$count" -gt 0
             "--",
             "sudo bash -euo pipefail -c " + shlex.quote(kernel_readability),
             timeout=30,
-        )
-        log("  Installing Python test packages...")
-        mvm(
-            "exec",
-            BASE_VM_NAME,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "pip3 install pytest-timeout --break-system-packages --quiet 2>&1 | tail -3",
-            timeout=90,
         )
         log("  Adding runner to required groups (mvm, kvm)...")
         mvm(
