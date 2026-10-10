@@ -648,7 +648,7 @@ and `MVM_CANDIDATE_BINARY` to the exact candidate already installed inside the n
 mirror as usual. Create an absolute, operator-owned `0700` task directory under ignored project-local storage.
 
 ```bash
-python3 scripts/run-system-tests.py --host-reboot-phase pre \
+python3 scripts/run-system-tests.py host_reboot --host-reboot-phase pre \
   --host-reboot-task /absolute/path/to/private-host-reboot-task
 ```
 
@@ -662,7 +662,7 @@ receipt against actual controls; it does not guess headroom, add a memory watchd
 itself. Then continue the same task:
 
 ```bash
-python3 scripts/run-system-tests.py --host-reboot-phase post \
+python3 scripts/run-system-tests.py host_reboot --host-reboot-phase post \
   --host-reboot-task /absolute/path/to/private-host-reboot-task \
   --host-reboot-envelope /absolute/path/to/fresh-admin-envelope.json
 ```
