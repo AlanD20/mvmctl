@@ -743,8 +743,9 @@ The authentic 1.17.0 x86_64 archive inspected on 2026-10-10 is 7,464,385 compres
 digest. Its exact 24-member set and modes match the contract below. Its 24,606,720-byte tar stream and maximum member
 size of 3,676,680 bytes remain within the existing 32 MiB tar and 8 MiB member limits. Firecracker is 3,676,680 bytes
 with SHA-256 `99ad0f5cd0514a88aad0e9ae8cfdb3cc3b4ab9d190e1194602406c786b5de7a5`; Jailer is 2,243,000 bytes with
-SHA-256 `65ef226e96f0ceda55ba643f445801ef2cc0ea667ef67cad8ac4f406c9c8434f`. Both selected executables satisfy the
-existing ELF64/little-endian/x86_64 `ET_DYN` policy. The inspection establishes the reviewed archive profile; production
+SHA-256 `65ef226e96f0ceda55ba643f445801ef2cc0ea667ef67cad8ac4f406c9c8434f`. Both selected executable headers match the
+existing ELF64/little-endian/x86_64 `ET_DYN` shape; complete production ELF admission remains an import gate.
+The inspection establishes the reviewed archive profile; production
 import and runtime qualification remain separate gates. Per-member alignment padding was not independently checked
 by this inspection and remains subject to the existing production zero-padding checks.
 
