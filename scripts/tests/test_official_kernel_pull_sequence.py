@@ -32,7 +32,7 @@ def kernel_module(monkeypatch):
 
 
 @pytest.fixture
-def sequence(kernel_module, tmp_path):
+def sequence(kernel_module, tmp_path, monkeypatch):
     tmp_path.chmod(0o700)
     cache, config, evidence = (tmp_path / name for name in ("cache", "config", "evidence"))
     for path in (cache, config, evidence):
@@ -44,6 +44,8 @@ def sequence(kernel_module, tmp_path):
     )
     owner.baseline = {domain: [] for domain in owner.domains}
     owner.config = {}
+    # Existing publication/retirement cases isolate the separately tested root prerequisite.
+    monkeypatch.setattr(owner, "assert_borrowed_release", lambda: None)
     return owner
 
 
@@ -233,3 +235,173 @@ def test_failed_cache_cleanup_keeps_native_receipts_and_known_logs(sequence, ker
         sequence.cleanup()
     assert sequence.aborted and sequence.cache_dir.exists() and log.exists()
     assert (sequence.output_dir / "cache-clean.exit").read_text() == "1"
+
+
+@pytest.fixture
+def borrowed_pair(sequence, kernel_module, monkeypatch):
+    mirror = sequence.output_root / "mirror"
+    mirror.mkdir()
+    archive = mirror / "firecracker-v1.16.2-x86_64.tgz"
+    archive.write_bytes(b"already authenticated release archive")
+    monkeypatch.setenv("MVM_ASSET_MIRROR", str(mirror))
+    root = {"directories": {"slot": [1, 2, 0, 0, 0o40755]}, "files": {}, "manifest": {
+        "schema_version": 1, "release": {"version": "1.16.2", "architecture": "x86_64"},
+        "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+    }}
+    pair = []
+    for name in ("firecracker", "jailer"):
+        digest = hashlib.sha256(name.encode()).hexdigest()
+        root["files"][name] = {"identity": [1, len(pair) + 10, 0, 0, 0o100755, 1, 20, 1, 1],
+                               "sha256": digest}
+        root["manifest"][name] = {"sha256": digest, "size_bytes": 20}
+        pair.append(dict(id=hashlib.sha256(
+            f"mvmctl:binary-release:v1:{name}:x86_64:1.16.2:{digest}".encode(),
+        ).hexdigest(), type=name, version="1.16.2", architecture="x86_64",
+                         path=f"/var/lib/mvmctl/binaries/x86_64/1.16.2/{name}",
+                         is_default=True, is_present=True, created_at="old", updated_at="old"))
+    monkeypatch.setattr(sequence, "root_release_receipt", lambda: root)
+    monkeypatch.delattr(sequence, "assert_borrowed_release")
+    return pair, root, archive
+
+
+def private_admission(sequence, kernel_module, monkeypatch, pair, *, result=None, root_drift=False):
+    calls = []
+    admitted = [{**item, "created_at": "fresh", "updated_at": "fresh"} for item in pair]
+    empty = {domain: [] for domain in sequence.domains}
+    state = {"inventory": empty}
+    monkeypatch.setattr(sequence, "inventory", lambda: state["inventory"])
+
+    def native(_runner, *args, **kwargs):
+        calls.append(args)
+        if args == ("cache", "init", "--json"):
+            return success({"cache_dir": str(sequence.cache_dir)})
+        if args == ("config", "ls", "--json"):
+            return success({})
+        assert args == ("bin", "pull", "1.16.2", "--json")
+        assert kwargs == {"timeout": 300, "check": False}
+        state["inventory"] = {**empty, "bin": list(reversed(admitted))}
+        if root_drift:
+            monkeypatch.setattr(sequence, "root_release_receipt", lambda: {"changed": True})
+        return success(admitted) if result is None else result
+
+    monkeypatch.setattr(kernel_module, "_run_mvm", native)
+    return calls, admitted
+
+
+def test_private_pair_projection_keeps_borrowed_root_and_admits_fresh_full_rows(
+    sequence, borrowed_pair, kernel_module, monkeypatch,
+):
+    pair, root, _archive = borrowed_pair
+    sequence.prepare_borrowed_release(pair)
+    calls, admitted = private_admission(sequence, kernel_module, monkeypatch, pair)
+    sequence.initialize()
+    assert calls == [("cache", "init", "--json"), ("config", "ls", "--json"),
+                     ("bin", "pull", "1.16.2", "--json")]
+    assert sequence.baseline["bin"] == list(reversed(admitted))
+    assert all(not sequence.baseline[domain] for domain in sequence.domains if domain != "bin")
+    proof = json.loads((sequence.output_root / "borrowed-release.admitted.json").read_text())
+    assert proof["pull"] == admitted and proof["root"] == root
+    assert proof["upstream_checksum_metadata_read"] is True and proof["archive_download"] is False
+    assert all(item["updated_at"] == "old" for item in pair) and not sequence.aborted
+
+
+@pytest.mark.parametrize("fault", ["missing-pair", "manifest", "archive"])
+def test_borrowed_release_prerequisite_refuses_effects_before_private_init(
+    sequence, borrowed_pair, kernel_module, monkeypatch, fault,
+):
+    pair, root, archive = borrowed_pair
+    calls = []
+    monkeypatch.setattr(kernel_module, "_run_mvm", lambda *args, **kwargs: calls.append(args))
+    if fault == "missing-pair":
+        pair = pair[:1]
+    elif fault == "manifest":
+        root["manifest"]["firecracker"]["sha256"] = "0" * 64
+    else:
+        archive.write_bytes(b"different untrusted archive")
+    with pytest.raises(AssertionError):
+        sequence.prepare_borrowed_release(pair)
+    assert sequence.aborted and sequence.borrowed_release is None and calls == []
+    assert sequence.cache_dir.exists() and sequence.config_dir.exists()
+
+
+@pytest.mark.parametrize("fault", ["native-failure", "default-false", "extra-row", "root-drift"])
+def test_failed_private_pair_admission_retains_native_receipts_without_adoption(
+    sequence, borrowed_pair, kernel_module, monkeypatch, fault,
+):
+    pair, _root, _archive = borrowed_pair
+    sequence.prepare_borrowed_release(pair)
+    result = None
+    if fault == "native-failure":
+        result = SimpleNamespace(returncode=1, stdout="partial root admission", stderr="failure")
+    elif fault == "default-false":
+        result = success([{**item, "is_default": False} for item in pair])
+    elif fault == "extra-row":
+        result = success(pair + [pair[0]])
+    calls, _admitted = private_admission(
+        sequence, kernel_module, monkeypatch, pair, result=result, root_drift=fault == "root-drift",
+    )
+    with pytest.raises(AssertionError):
+        sequence.initialize()
+    assert sequence.aborted and sequence.baseline["bin"] == []
+    assert (sequence.output_root / "borrowed-release-pull.exit").read_text() == (
+        "1" if fault == "native-failure" else "0"
+    )
+    assert not (sequence.output_root / "borrowed-release.admitted.json").exists()
+    with pytest.raises(AssertionError, match="failed official"):
+        sequence.cleanup()
+    assert sequence.cache_dir.exists() and sequence.config_dir.exists()
+    assert calls[-1] == ("bin", "pull", "1.16.2", "--json")
+
+
+def test_borrowed_root_drift_prevents_terminal_cache_cleanup(
+    sequence, borrowed_pair, kernel_module, monkeypatch,
+):
+    pair, _root, _archive = borrowed_pair
+    sequence.prepare_borrowed_release(pair)
+    private_admission(sequence, kernel_module, monkeypatch, pair)
+    sequence.initialize()
+    sequence.completed = list(sequence.selected)
+    monkeypatch.setattr(sequence, "root_release_receipt", lambda: {"changed": True})
+    clean_calls = []
+    monkeypatch.setattr(sequence, "cleanup_cache", lambda: clean_calls.append("clean"))
+    with pytest.raises(AssertionError, match="borrowed root release changed"):
+        sequence.cleanup()
+    assert clean_calls == [] and sequence.aborted and sequence.cache_dir.exists()
+
+
+def test_borrowed_default_pair_survives_eight_retirements_and_single_typed_cache_clean(
+    sequence, borrowed_pair, kernel_module, monkeypatch,
+):
+    pair, root, _archive = borrowed_pair
+    sequence.prepare_borrowed_release(pair)
+    private_admission(sequence, kernel_module, monkeypatch, pair)
+    sequence.initialize()
+    private_pair = sequence.baseline["bin"]
+    effects = []
+
+    def retire():
+        assert sequence.receipt is not None and sequence.inventory()["bin"] == private_pair
+        effects.append(("kernel-retirement", sequence.active))
+        sequence.receipt = None
+
+    monkeypatch.setattr(sequence, "retire_kernel", retire)
+    for selector in sequence.selected:
+        sequence.begin_case(selector)
+        sequence.receipt = object()
+        sequence.finish_case(False)
+
+    def terminal_native(_runner, *args, **kwargs):
+        if args == ("config", "ls", "--json"):
+            return success({})
+        assert args == ("cache", "clean", "--force", "--json")
+        effects.append(("cache-clean",))
+        (sequence.cache_dir / "kernels").rmdir()
+        sequence.cache_dir.rmdir()
+        return success({"cache_dir": str(sequence.cache_dir), "cache_dir_removed": True,
+                        "prune_result": {"failed_ids": [], "had_running_vms": False}})
+
+    monkeypatch.setattr(kernel_module, "_run_mvm", terminal_native)
+    sequence.cleanup()
+    assert [item[0] for item in effects] == ["kernel-retirement"] * 8 + ["cache-clean"]
+    assert sequence.root_release_receipt() == root and sequence.baseline["bin"] == private_pair
+    assert not sequence.cache_dir.exists() and not sequence.aborted

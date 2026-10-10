@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import stat
 import uuid
 from pathlib import Path
@@ -458,6 +459,118 @@ class _OfficialKernelPullSequence(_KernelPullOwner):
         self.aborted = False
         self.output_root = output_dir
         self.build_logs = {}
+        self.borrowed_release = None
+
+    def root_release_receipt(self):
+        """Read only the already trusted, fixed qualification pair and manifest."""
+        script = r'''
+import hashlib,json,os,stat
+from pathlib import Path
+base=Path('/var/lib/mvmctl/binaries')
+slot=base/'x86_64'/'1.16.2'
+result={'directories':{},'files':{}}
+for path in (base,base/'x86_64',slot):
+    info=path.lstat()
+    assert stat.S_ISDIR(info.st_mode) and info.st_uid==info.st_gid==0
+    assert not info.st_mode & 0o022
+    result['directories'][str(path)]=[info.st_dev,info.st_ino,info.st_uid,info.st_gid,info.st_mode]
+for name in ('manifest.json','firecracker','jailer'):
+    path=slot/name
+    with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb') as source:
+        before=os.fstat(source.fileno())
+        assert stat.S_ISREG(before.st_mode) and before.st_uid==before.st_gid==0
+        assert before.st_nlink==1 and before.st_size>0 and not before.st_mode & 0o022
+        if name!='manifest.json': assert before.st_mode & 0o111
+        payload=source.read()
+        after=os.fstat(source.fileno())
+    fields=('st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns')
+    identity=[getattr(before,key) for key in fields]
+    assert identity==[getattr(after,key) for key in fields]
+    result['files'][name]={'identity':identity,'sha256':hashlib.sha256(payload).hexdigest()}
+    if name=='manifest.json': result['manifest']=json.loads(payload)
+print(json.dumps(result,sort_keys=True))
+'''
+        return json.loads(_guest_run(
+            self.runner_vm, "sudo -n python3 -c " + shlex.quote(script),
+        ).stdout)
+
+    def prepare_borrowed_release(self, shared_binaries):
+        """Refuse absent/untrusted prerequisites before any private admission effect."""
+        try:
+            assert os.uname().machine == "x86_64"
+            pair = [item for item in shared_binaries if item["is_default"]]
+            assert len(pair) == 2 and {item["type"] for item in pair} == {"firecracker", "jailer"}, pair
+            root = self.root_release_receipt()
+            manifest = root["manifest"]
+            assert manifest["schema_version"] == 1 and manifest["release"] == {
+                "version": "1.16.2", "architecture": "x86_64",
+            }, manifest
+            for item in pair:
+                name = item["type"]
+                member = root["files"][name]
+                assert item["version"] == "1.16.2" and item["architecture"] == "x86_64", item
+                assert item["is_default"] is True and item["is_present"] is True, item
+                assert item["path"] == f"/var/lib/mvmctl/binaries/x86_64/1.16.2/{name}", item
+                assert manifest[name] == {"sha256": member["sha256"], "size_bytes": member["identity"][6]}
+                expected_id = hashlib.sha256(
+                    f"mvmctl:binary-release:v1:{name}:x86_64:1.16.2:{member['sha256']}".encode(),
+                ).hexdigest()
+                assert item["id"] == expected_id, item
+            mirror = Path(os.environ["MVM_ASSET_MIRROR"])
+            assert mirror.is_absolute() and mirror.is_dir() and not mirror.is_symlink(), mirror
+            archive = mirror / "firecracker-v1.16.2-x86_64.tgz"
+            archive_receipt = self.file_receipt(archive)
+            assert archive_receipt[1] == manifest["archive_sha256"], archive
+            self.borrowed_release = pair, root, archive, archive_receipt
+            (self.output_root / "borrowed-release.before.json").write_text(json.dumps({
+                "shared_pair": pair, "root": root, "archive": str(archive),
+                "archive_receipt": archive_receipt,
+            }), encoding="utf-8")
+        except BaseException:
+            self.aborted = True
+            raise
+
+    def assert_borrowed_release(self):
+        assert self.borrowed_release is not None, "borrowed release was never admitted"
+        _, root, archive, archive_receipt = self.borrowed_release
+        assert self.root_release_receipt() == root, "borrowed root release changed; retain sequence"
+        assert self.file_receipt(archive) == archive_receipt, "borrowed archive changed; retain sequence"
+
+    def initialize(self):
+        try:
+            self.output_dir = self.output_root
+            assert self.borrowed_release is not None, "prepare borrowed release before selecting private cache"
+            self.assert_borrowed_release()
+            super().initialize()  # Preserve the original exact operator cache-init command.
+            result = _run_mvm(self.runner_vm, "bin", "pull", "1.16.2", "--json", timeout=300, check=False)
+            self.save_native("borrowed-release-pull", result)
+            assert result.returncode == 0, result.stdout
+            admitted = _json_success_data(result.stdout, list)
+            shared_pair = self.borrowed_release[0]
+            # Projection timestamps are fresh in this private DB; root identity is not.
+            without_timestamps = lambda item: {key: value for key, value in item.items()
+                                               if key not in ("created_at", "updated_at")}
+            assert sorted(map(without_timestamps, admitted), key=lambda item: item["id"]) == sorted(
+                map(without_timestamps, shared_pair), key=lambda item: item["id"],
+            ), admitted
+            assert len(admitted) == 2 and all(item["is_default"] is True for item in admitted), admitted
+            assert all(isinstance(item.get(key), str) and item[key] for item in admitted
+                       for key in ("created_at", "updated_at")), admitted
+            inventory = self.inventory()
+            assert sorted(inventory["bin"], key=lambda item: item["id"]) == sorted(
+                admitted, key=lambda item: item["id"],
+            ), inventory
+            assert {**inventory, "bin": []} == self.baseline, inventory
+            self.assert_borrowed_release()
+            self.baseline = inventory
+            (self.output_root / "borrowed-release.admitted.json").write_text(json.dumps({
+                "pull": admitted, "inventory": inventory, "root": self.borrowed_release[1],
+                "archive_receipt": self.borrowed_release[3],
+                "upstream_checksum_metadata_read": True, "archive_download": False,
+            }), encoding="utf-8")
+        except BaseException:
+            self.aborted = True
+            raise
 
     def select_cache(self, environment):
         environment.setenv("MVM_CACHE_DIR", str(self.cache_dir))
@@ -599,8 +712,10 @@ class _OfficialKernelPullSequence(_KernelPullOwner):
         assert not self.aborted and self.active is None, "failed official sequence retained"
         assert tuple(self.completed) == self.selected, "incomplete official sequence retained"
         try:
+            self.assert_borrowed_release()
             self.assert_build_logs()
             self.cleanup_cache()  # Only typed terminal cleanup removes original owned logs/build trees.
+            self.assert_borrowed_release()  # Borrowed default pair is never removed by cache cleanup.
         except BaseException:
             self.aborted = True
             raise
@@ -627,6 +742,7 @@ def official_kernel_pull_sequence(runner_vm, tmp_path_factory, request):
     failures = []
     try:
         try:
+            owner.prepare_borrowed_release(baseline["bin"])
             with pytest.MonkeyPatch.context() as selection:
                 owner.select_cache(selection)
                 owner.initialize()
@@ -653,6 +769,11 @@ def official_kernel_pull_sequence(runner_vm, tmp_path_factory, request):
                 assert _KernelPullOwner.file_receipt(path) == expected, path
             except Exception as error:
                 failures.append(f"shared original kernel changed: {path}: {error!r}")
+        if owner.borrowed_release is not None:
+            try:
+                owner.assert_borrowed_release()
+            except Exception as error:
+                failures.append(f"borrowed root pair/archive changed: {error!r}")
         assert not failures, failures
 
 
