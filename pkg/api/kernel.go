@@ -278,7 +278,16 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Failed to persist kernel: %v", err), err)
 	}
 	if resolved.SetDefault {
-		_ = op.Repos.Kernel.SetDefault(ctx, kernelItem.ID)
+		if err := op.Repos.Kernel.SetDefault(ctx, kernelItem.ID); err != nil {
+			return nil, errs.WrapMsg(errs.CodeKernelPullFailed, "failed to set default kernel", err)
+		}
+		kernelItem, err = op.Repos.Kernel.Get(ctx, kernelItem.ID)
+		if err != nil {
+			return nil, errs.WrapMsg(errs.CodeKernelPullFailed, "failed to read default kernel", err)
+		}
+		if kernelItem == nil {
+			return nil, errs.New(errs.CodeKernelPullFailed, "pulled kernel is missing after setting default")
+		}
 	}
 	// Clean up old kernel file if ID changed and path is different
 	// Compare resolved paths before deleting old.
