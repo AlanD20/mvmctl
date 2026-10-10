@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,10 +19,61 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"mvmctl/internal/assets"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
+
+func TestFetchImageChecksumUbuntuMinimalCatalog(t *testing.T) {
+	// Rationale: The real catalog must request the case-sensitive release path and select
+	// the source artifact's checksum, not an unrelated architecture's first manifest row.
+	catalog, err := assets.ReadFile("images.yaml")
+	require.NoError(t, err)
+	configs, err := LoadImageTypesConfig(catalog)
+	require.NoError(t, err)
+	configIndex := -1
+	for i, config := range configs {
+		if config.Type == "ubuntu-minimal" {
+			configIndex = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, configIndex, "Ubuntu Minimal must remain in the embedded catalog")
+	wantDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("Ubuntu Minimal amd64 fixture")))
+	otherDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("Ubuntu Minimal arm64 fixture")))
+	for _, version := range []string{"noble", "24.04"} {
+		t.Run(version, func(t *testing.T) {
+			setupHermeticCache(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/minimal/releases/noble/release/SHA256SUMS" {
+					http.NotFound(w, r)
+					return
+				}
+				_, _ = fmt.Fprintf(w, "%s *ubuntu-24.04-minimal-cloudimg-arm64-root.tar.xz\n"+
+					"%s *ubuntu-24.04-minimal-cloudimg-amd64-root.tar.xz\n", otherDigest, wantDigest)
+			}))
+			defer server.Close()
+			spec, err := ConstructSpecFromTypeConfig(configs[configIndex], version, "x86_64", "")
+			require.NoError(t, err)
+			checksumURL, err := url.Parse(spec.SHA256URL)
+			require.NoError(t, err)
+			origin, err := url.Parse(server.URL)
+			require.NoError(t, err)
+			// Replace only the origin: the catalog's rendered path must reach the fixture unchanged.
+			checksumURL.Scheme, checksumURL.Host = origin.Scheme, origin.Host
+			sourceURL, err := url.Parse(spec.Source)
+			require.NoError(t, err)
+			got, err := NewService(fakeRepo{}).fetchImageChecksum(
+				context.Background(), checksumURL.String(), filepath.Base(sourceURL.Path),
+			)
+			require.NoError(t, err)
+			if diff := cmp.Diff(imageChecksum{sha256: wantDigest}, got, cmp.AllowUnexported(imageChecksum{})); diff != "" {
+				t.Errorf("catalog-resolved image checksum (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
 
 func TestParseImageChecksum(t *testing.T) {
 	sha256Hex := fmt.Sprintf("%x", sha256.Sum256([]byte("fixture image")))
