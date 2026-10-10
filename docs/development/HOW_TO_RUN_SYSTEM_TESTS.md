@@ -120,9 +120,10 @@ policy cannot remove that enclosing limit. Preserve those receipts before lifecy
 temporary QA-only adjustment against actual host headroom without changing unrelated VM or global policy.
 Guest `MemAvailable` and free disk alone do not establish outer VMM memory safety.
 
-**Current QA resource override and checkpoint (2026-10-09):** The named runner `mvmctl-030-test` has
-6 GiB guest RAM and a 96 GiB logical disk; its approved outer `memory.high` and `memory.max` remain
-8 GiB (8,589,934,592 bytes). Memory measurements and OOM counters are observations only: QA uses no synthetic
+**QA resource policy (2026-10-10):** The named runner `mvmctl-030-test` has
+6 GiB guest RAM and a 96 GiB logical disk. The former runner received an approved 8 GiB outer envelope;
+the replacement's last observed `memory.high` and `memory.max` are 6,576,668,672 bytes. Neither value is a
+QA admission requirement. Memory measurements and OOM counters are observations only: QA uses no synthetic
 `MemAvailable` floor/reserve, full-envelope admission, host-memory-loss rejection, process-group RSS abort or
 7.5 GiB watchdog. This supersedes earlier synthetic memory-guard instructions and historical runner sizes;
 actual kernel limits, workload assertions, timeouts, physical-disk admission, identity checks and owned cleanup
@@ -617,7 +618,7 @@ python3 scripts/run-system-tests.py --host-direct --all --workers 2
 | `--release-qualification` | `false` | Require the unfiltered full-matrix release identity gate and closed reboot proof; requires `--all --host-direct --rebuild --candidate-version --host-reboot-task` |
 | `--host-reboot-phase` | — | Explicit `pre` or `post` continuation against existing `mvmctl-030-test`; separate from ordinary tier batches |
 | `--host-reboot-task` | — | Absolute private owned receipt directory for explicit phases; completed strict POST proof is mandatory for full release qualification |
-| `--host-reboot-envelope` | — | POST-only private external administrator receipt binding the fresh runner boot/process and actual approved 8 GiB outer controls |
+| `--host-reboot-envelope` | — | POST-only private external administrator receipt binding the fresh runner boot/process and truthful current finite outer controls |
 | `--tier` | — | Comma-separated tier numbers; executed in given order (e.g., `--tier 1,3`) |
 | `--workers` | `4` | Maximum parallel VMs |
 | `--rebuild` | `false` | Build only `MVM_CANDIDATE_BINARY`, rebuild shared volume/base image, and run prepare; never replace `MVM_BINARY` |
@@ -655,10 +656,10 @@ PRE creates only its owned nested VM, writes and reads a guest marker, retains s
 proof, and reboots the named runner through the unchanged outer controller. A successful PRE exit means
 **phase complete, release incomplete**. Do not repeat it against the same task.
 
-After reconnect, restore the approved QA-only 8 GiB outer envelope through the authorized administrator
-procedure and retain a fresh private receipt for this boot, runner UUID and outer PID/start tick. The POST
-command verifies that receipt against actual controls; it does not guess headroom, add a memory watchdog,
-or modify controls itself. Then continue the same task:
+After reconnect, retain a fresh private receipt of the actual finite outer controls for this boot, runner
+UUID and outer PID/start tick. No 8 GiB adjustment is required to proceed. The POST command verifies that
+receipt against actual controls; it does not guess headroom, add a memory watchdog, or modify controls
+itself. Then continue the same task:
 
 ```bash
 python3 scripts/run-system-tests.py --host-reboot-phase post \
