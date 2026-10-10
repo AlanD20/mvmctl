@@ -516,14 +516,17 @@ def test_host_reboot_batch_selection_and_full_release_consume_only_explicit_comp
     monkeypatch.setattr(orchestrator, "_build_mvm_binary", lambda version: None)
     monkeypatch.setattr(orchestrator, "verify_release_binary_identity", lambda **kwargs: None)
     monkeypatch.setattr(orchestrator, "_require_release_host_without_active_vms", lambda: None)
-    events, executed = [], []
+    events, executed, tier3_timeouts = [], [], []
     monkeypatch.setattr(orchestrator, "run_prepare", lambda **kwargs: events.append("prepare"))
     def batch(domains, tier, *args, **kwargs):
         executed.extend(domains)
         return [dict(domain=domain, tier=tier, passed=True, output="mock batch") for domain in domains]
     monkeypatch.setattr(orchestrator, "run_domains", batch)
-    monkeypatch.setattr(orchestrator, "run_tier3_domain", lambda domain, *args, **kwargs:
-                        dict(domain=domain, tier=3, passed=True, output="mock batch"))
+    def run_tier3(domain, files, *, timeout):
+        assert files == orchestrator.TIER3_DOMAINS[domain]
+        tier3_timeouts.append((domain, timeout))
+        return dict(domain=domain, tier=3, passed=True, output="mock batch")
+    monkeypatch.setattr(orchestrator, "run_tier3_domain", run_tier3)
     monkeypatch.setattr(orchestrator, "run_host_reboot_phase", lambda *args: pytest.fail("batch cannot reboot"))
     def consume(task):
         assert release and task == Path("/tmp/completed-host-reboot")
@@ -532,6 +535,11 @@ def test_host_reboot_batch_selection_and_full_release_consume_only_explicit_comp
     monkeypatch.setattr(orchestrator, "require_completed_host_reboot", consume)
     orchestrator.main()
     assert executed and "host_reboot" not in executed
+    expected_tier3_timeouts = [
+        (domain, 23400 if domain == "kernel_build" else 600)
+        for domain in sorted(orchestrator.TIER3_DOMAINS)
+    ] if "--all" in selection else []
+    assert tier3_timeouts == expected_tier3_timeouts
     output = capsys.readouterr().out
     assert "0 failed" in output
     if release:

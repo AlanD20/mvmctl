@@ -493,6 +493,11 @@ RUNNER_USER_INIT_COMMAND = (
 BASE_VM_NAME = "base-img-builder"
 BASE_VM_DISK = "12G"
 
+# The current kernel module has eight official pulls with 2700s node deadlines.
+# Retain the former 1800s domain allowance for its other fourteen cases and
+# shared fixture setup/teardown; this finite QA budget is not a runtime guarantee.
+KERNEL_BUILD_DOMAIN_TIMEOUT = 8 * 2700 + 1800
+
 # SSH key for provisioning runner user in builder & test VMs
 BUILDER_KEY_NAME = "builder-key"
 _SEMVER_CORE_NUMBER = r"(?:0|[1-9][0-9]*)"
@@ -3785,7 +3790,7 @@ def main() -> None:
         elif tier == 3 and tier3:
             log(f"Tier 3: running {len(tier3)} domain(s) on host...")
             for domain, files in sorted(tier3.items()):
-                timeout = 1800 if domain == "kernel_build" else 600
+                timeout = KERNEL_BUILD_DOMAIN_TIMEOUT if domain == "kernel_build" else 600
                 result = run_tier3_domain(domain, files, timeout=timeout)
                 all_results.append(result)
                 status = "PASS" if result["passed"] else "FAIL"
