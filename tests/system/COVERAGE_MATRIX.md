@@ -40,8 +40,10 @@ encountered root-only protected parents. That invocation remains failed; the oth
 were not executed. [ADR-0022](../../docs/adr/0022-explicit-protected-cache-retirement.md) records the
 approved typed retirement contract. Signed `0469195e` integrates the implementation and accepted capture,
 parent-sync and nonterminal publication-sync corrections; focused API/auth/root-race checks passed.
-Complete integration CI/build and installed public cleanup qualification remain pending.
-Permanent snapshot-lock and volume-removal residues are an explicit separate cleanup gap.
+Complete integration CI/build and normal inner installation subsequently passed, as recorded below.
+Installed public cleanup qualification remains pending. Permanent snapshot-lock and volume-removal residues
+remain an explicit separate gap; [ADR-0023](../../docs/adr/0023-protected-branch-authority-layout.md)
+records the fresh-layout design, not its implementation or runtime qualification.
 Signed `af285c1b` integrates the reviewed three-case acquisition sequence fixture: one receipt-owned store,
 typed per-case kernel retirement, a single final cache cleanup and per-function cache/mirror environment.
 All three acquisition bodies remain byte-identical; named-QA checks passed 13 pure cases with zero other
@@ -49,7 +51,21 @@ outcomes and collected all 22 kernel nodes. JUnit SHA-256
 `b823c7b3e3e2b2bf061886ba86f00166111a1454dfc6fec5fdb621afaef94aef`.
 No acquisition, download or candidate operation ran during those fixture checks.
 
-**Current coherent Resume Go/build/install checkpoint (2026-10-09):** clean `1300b64b`, tree `1eb819b5`,
+**Current coherent cache Go/build/install checkpoint (2026-10-10):** clean `752110fa`, tree `02198101`,
+passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent
+amd64 release build inside `mvmctl-030-test`. Independent literal root JSON counts 2,663 test/subtest passes,
+one package pass and zero failures/skips. CI log SHA-256 `6e7eafcd`; root JSON `de1f2458`;
+root counts `493b8e38`; terminal verification `b83aa2c0`. Both atomic coverage profiles and 36 exact
+committed source inputs were checked. Candidate `0.3.0-rc.cache-752110fa`, SHA-256
+`ea7bad330e625ff6374e34e6c65604266e93d8c524c702945e5e7fa4d74c87f5`, records the exact clean VCS revision,
+Go 1.26.3, Linux/amd64, CGO disabled, PIE and trimpath. Normal inner `host install-system` passed;
+the root-owned `0755` canonical binary matches the candidate. Installation terminal SHA-256 `ba092b7f`;
+actual canonical identity `b1e3e74e`. Independent exact PRE/POST preservation admits only the declared clean
+build source and, separately, that canonical replacement. No earlier installed system pass is relabeled
+as a run on this build. Public cache cleanup, fresh branch-layout handling and full release qualification
+remain separate requirements.
+
+**Earlier coherent Resume Go/build/install checkpoint (2026-10-09):** clean `1300b64b`, tree `1eb819b5`,
 passed complete pinned ordinary Go 1.26.3 CI, the separate full root Jailer suite and the real embedded-agent
 amd64 release build inside `mvmctl-030-test`. Independent literal root JSON counts 2,642 test/subtest passes,
 one package pass and zero failures/skips. CI log SHA-256 `45b43ff8`; root JSON `02fbaa53`; build log `e8790bf1`.

@@ -91,6 +91,11 @@ missing-store and mutable-backing anti-resurrection rules; dry-run preservation;
 The final capture must refuse namespace substitution without deleting the substitute, and an interrupted or failed
 parent synchronization must be retried before completion. The integrated correction passes focused namespace,
 parent-sync recovery and publication-sync retry tests inside the named runner; the defective first source is not
-qualified. Complete integration CI and installed-candidate cleanup remain pending.
+qualified. Clean `752110fa` subsequently passed complete pinned Go CI, the full root Jailer suite
+(2,663 test/subtest passes, no failures/skips), and the real-agent release build. Normal installation inside
+`mvmctl-030-test` passed with exact original-state preservation except the authorized canonical replacement;
+candidate `0.3.0-rc.cache-752110fa` has SHA-256
+`ea7bad330e625ff6374e34e6c65604266e93d8c524c702945e5e7fa4d74c87f5`.
+Installed public cleanup qualification remains pending; these Go/build/install gates do not prove it.
 Focused Go checks and installed-candidate acquisition/teardown qualification run only in the approved disposable
 runner. Source implementation and internal tests alone do not qualify the public cleanup journey or the release.

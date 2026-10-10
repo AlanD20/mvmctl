@@ -20,8 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > remains recorded; [ADR-0022](docs/adr/0022-explicit-protected-cache-retirement.md) defines the approved
 > typed retirement fix, now integrated with root-private atomic capture, parent synchronization and a durable
 > nonterminal retry barrier. Focused API, authorization and root-race checks passed inside the named runner.
-> Complete integration CI/build and installed-candidate cleanup qualification remain pending; permanent
-> snapshot-lock and volume-removal branch residues still refuse cleanup and remain a separate release gap.
+> Clean `752110fa` subsequently passed complete pinned Go CI, all 2,663 root-Jailer test/subtests and
+> the real-agent release build inside `mvmctl-030-test`. Normal inner installation passed and preserved
+> the checked original state except for the authorized canonical binary replacement. The installed candidate
+> is `0.3.0-rc.cache-752110fa` (`ea7bad33`). Installed public cleanup qualification remains pending; permanent
+> snapshot-lock and volume-removal residues still refuse cleanup. [ADR-0023](docs/adr/0023-protected-branch-authority-layout.md)
+> records their fresh-layout design; its implementation and qualification remain a separate release gap.
 > The three acquisition cases now share one receipt-owned store, retire their kernels between cases,
 > and clean that cache once at sequence completion. All three test bodies are unchanged; 13 pure fixture
 > checks and 22-node collection passed. These checks do not qualify acquisition or the production fix.
