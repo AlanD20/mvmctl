@@ -65,6 +65,17 @@ build source and, separately, that canonical replacement. No earlier installed s
 as a run on this build. Public cache cleanup, fresh branch-layout handling and full release qualification
 remain separate requirements.
 
+**Standalone SIGINT survivor checkpoint (2026-10-10):**
+`TestImageImportCreateVM::test_vm_import_sigint_survivor_refuses_release_then_restores_and_discards`
+passed alone on the installed `752110fa`/`ea7bad33` candidate: native exit 0, strict 1/1, zero other
+outcomes, 13.37 seconds. The authenticated copy reached 31,457,280 bytes before caller interruption;
+release was refused while the worker survived, root authority remained unchanged, and settlement/discard
+restored the source state and guest-written bytes. Typed owned-image cleanup passed; both original and
+prepared raw inventory snapshots matched exactly after their respective cleanup phases. Terminal SHA-256
+`72b19993`; JSON `d428b33a`; exact singleton JUnit `70afcf72`. The earlier mixed invocation remains
+native exit 1 and is not relabeled. This closes the standalone SIGINT gap without replaying receiver-death,
+copy-I/O or normal-state cases; full release qualification remains separate.
+
 **Earlier coherent Resume Go/build/install checkpoint (2026-10-09):** clean `1300b64b`, tree `1eb819b5`,
 passed complete pinned ordinary Go 1.26.3 CI, the separate full root Jailer suite and the real embedded-agent
 amd64 release build inside `mvmctl-030-test`. Independent literal root JSON counts 2,642 test/subtest passes,

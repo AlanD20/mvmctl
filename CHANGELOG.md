@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > and clean that cache once at sequence completion. All three test bodies are unchanged; 13 pure fixture
 > checks and 22-node collection passed. These checks do not qualify acquisition or the production fix.
 
+> **Standalone export-interruption qualification (2026-10-10):** the SIGINT survivor case passed alone
+> on the installed cache candidate: native exit 0, strict 1/1 with zero other outcomes, 13.37 seconds.
+> It interrupted an authenticated partial copy, refused release while the copy worker survived, preserved
+> root authority, and restored the source state and guest-written bytes after settlement and discard.
+> Typed owned cleanup and exact original/prepared inventory preservation passed. The earlier mixed
+> invocation remains failed; this new singleton closes its SIGINT qualification gap, not the full release.
+
 > **Resume-authority correction (2026-10-09):** `1300b64b` removes the cached Running/Starting success
 > shortcut. Resume must first pass root-owned pending-export admission, then observe the authenticated
 > Firecracker state: Running succeeds without another mutation, Paused receives one resume request, and
