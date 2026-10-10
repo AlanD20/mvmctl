@@ -299,6 +299,10 @@ def test_retained_normal_init_precedes_inventory_and_preserves_historical_author
             for name in ("tmp", "vms", "images", "kernels", "bin", "logs"):
                 (sequence.cache_dir / name).mkdir(mode=0o700)
             (sequence.cache_dir / "mvmdb.db").write_bytes(b"initialized private schema")
+            for name in ("audit.log", "audit.log.lock", "mvmdb.db.v2.snap", "mvmdb.db.v3.snap",
+                         "mvmdb.db.v4.snap", "mvmdb.db.v5.snap", "mvmdb.db.v6.snap",
+                         "mvmdb.db.v7.snap", "mvmdb.db.v8.snap"):
+                (sequence.cache_dir / name).write_bytes(b"normal init audit or migration snapshot")
             data = dict(cache_dir=str(sequence.cache_dir))
         else:
             assert (sequence.cache_dir / "mvmdb.db").is_file()
@@ -316,7 +320,11 @@ def test_retained_normal_init_precedes_inventory_and_preserves_historical_author
     after = json.loads((sequence.output_root / "retained-init.after.json").read_text())
     assert after["identities"] == before["identities"]
     assert after["config_files"] == before["config_files"]
-    assert after["added_cache_entries"] == ["bin", "images", "kernels", "logs", "mvmdb.db", "tmp", "vms"]
+    assert after["added_cache_entries"] == [
+        "audit.log", "audit.log.lock", "bin", "images", "kernels", "logs", "mvmdb.db",
+        "mvmdb.db.v2.snap", "mvmdb.db.v3.snap", "mvmdb.db.v4.snap", "mvmdb.db.v5.snap",
+        "mvmdb.db.v6.snap", "mvmdb.db.v7.snap", "mvmdb.db.v8.snap", "tmp", "vms",
+    ]
     assert sequence.file_receipt(historical_key) == original_key
     assert sequence.inventory() == sequence.baseline
     assert (sequence.output_root / "retained-init.exit").read_text() == "0"
@@ -324,7 +332,8 @@ def test_retained_normal_init_precedes_inventory_and_preserves_historical_author
 
 
 @pytest.mark.parametrize("fault", ["native", "returned_path", "parent", "cache", "config", "protected",
-                                 "historical_key", "unexpected_entry"])
+                                 "historical_key", "unexpected_entry", "new_file_uid", "new_file_type",
+                                 "unexpected_snapshot"])
 def test_retained_init_failure_or_changed_authority_retains_evidence_without_inventory_or_fallback(
     kernel_module, retained_initialization_handoff, sequence, monkeypatch, fault,
 ):
@@ -343,6 +352,23 @@ def test_retained_init_failure_or_changed_authority_retains_evidence_without_inv
             historical_key.write_bytes(b"changed historical key")
         elif fault == "unexpected_entry":
             (sequence.cache_dir / "unowned").write_bytes(b"unexpected publication")
+        elif fault == "unexpected_snapshot":
+            (sequence.cache_dir / "mvmdb.db.v9.snap").write_bytes(b"unknown schema snapshot")
+        elif fault == "new_file_type":
+            (sequence.cache_dir / "mvmdb.db.v2.snap").mkdir(mode=0o700)
+        elif fault == "new_file_uid":
+            audit = sequence.cache_dir / "audit.log.lock"
+            audit.write_bytes(b"foreign-owned audit lock")
+            original_lstat = Path.lstat
+
+            def foreign_audit_owner(candidate):
+                info = original_lstat(candidate)
+                if candidate == audit:
+                    return SimpleNamespace(st_dev=info.st_dev, st_ino=info.st_ino, st_uid=os.getuid() + 1,
+                                           st_gid=info.st_gid, st_mode=info.st_mode)
+                return info
+
+            monkeypatch.setattr(Path, "lstat", foreign_audit_owner)
         data = dict(cache_dir=str(sequence.cache_dir.parent if fault == "returned_path" else sequence.cache_dir))
         return SimpleNamespace(returncode=1 if fault == "native" else 0, stderr="native init refused",
                                stdout=json.dumps(dict(schema_version=1, status="success", data=data, error=None)))
