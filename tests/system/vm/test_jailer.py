@@ -2328,6 +2328,12 @@ class TestNetworklessJailerLifecycle:
         assert (original["network_id"], original["ipv4"], original["mac"], original["tap_device"]) == (
             "", "", "", "",
         )
+        first_boot_id = _run_mvm(
+            runner_vm, "exec", original["id"], "--timeout", "5", "--",
+            "cat", "/proc/sys/kernel/random/boot_id",
+        ).stdout.strip()
+        assert str(uuid.UUID(first_boot_id)) == first_boot_id, first_boot_id
+
         interfaces = _networkless_guest_interfaces(runner_vm, name)
         assert "lo" in interfaces
         assert "eth0" not in interfaces
