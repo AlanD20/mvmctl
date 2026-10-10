@@ -308,6 +308,99 @@ func (tree rootfsGuestTree) fixedPathHasType(
 	return true, nil
 }
 
+type rootfsLegacyAgentEnablement struct {
+	parentFD int
+	identity unix.Stat_t
+	present  bool
+}
+
+// pinLegacyAgentEnablement admits only the exact former default-runlevel agent link. Its parent
+// remains pinned through provisioning, so removal cannot be redirected by a replaced ancestor.
+func (tree rootfsGuestTree) pinLegacyAgentEnablement(
+	ctx context.Context,
+) (_ *rootfsLegacyAgentEnablement, returnErr error) {
+	parentFD, leaf, err := tree.openParent(ctx, rootfsAgentOpenRCLegacyLink)
+	if err != nil {
+		return nil, err
+	}
+	accepted := false
+	defer func() {
+		if !accepted {
+			returnErr = appendRootfsProvisionCleanupError(returnErr, "close rejected legacy agent directory",
+				tree.deps.close(context.WithoutCancel(ctx), parentFD))
+		}
+	}()
+	legacy := &rootfsLegacyAgentEnablement{parentFD: parentFD}
+	if err := tree.deps.fstatAt(ctx, parentFD, leaf, &legacy.identity, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		if !errors.Is(err, unix.ENOENT) {
+			return nil, rootfsAtomicError("inspect legacy agent enablement", err)
+		}
+	} else {
+		legacy.present = true
+		if err := tree.revalidateLegacyAgentEnablement(ctx, legacy); err != nil {
+			return nil, err
+		}
+	}
+	accepted = true
+	return legacy, nil
+}
+
+func (tree rootfsGuestTree) revalidateLegacyAgentEnablement(
+	ctx context.Context,
+	legacy *rootfsLegacyAgentEnablement,
+) error {
+	equal, err := rootfsGuestSymlinkAlreadyEqual(ctx, tree.deps, legacy.parentFD, "mvm-agent",
+		rootfsAgentOpenRCRunlevelTarget)
+	if err != nil {
+		return err
+	}
+	if !equal {
+		return rootfsAtomicError("legacy agent enablement does not match the fixed agent target", nil)
+	}
+	var current unix.Stat_t
+	if err := tree.deps.fstatAt(ctx, legacy.parentFD, "mvm-agent", &current, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return rootfsAtomicError("reinspect legacy agent enablement", err)
+	}
+	old := legacy.identity
+	if current.Dev != old.Dev || current.Ino != old.Ino || current.Mode != old.Mode ||
+		current.Nlink != old.Nlink || current.Uid != old.Uid || current.Gid != old.Gid ||
+		current.Size != old.Size || current.Ctim != old.Ctim {
+		return rootfsAtomicError("legacy agent enablement identity changed", nil)
+	}
+	return nil
+}
+
+// removeLegacyAgentEnablement is not a general guest-delete operation. Only the pre-admitted,
+// identity-stable legacy agent link may be unlinked, before the sole boot link is published.
+func (tree rootfsGuestTree) removeLegacyAgentEnablement(
+	ctx context.Context,
+	legacy *rootfsLegacyAgentEnablement,
+) (bool, error) {
+	if legacy.present {
+		if err := tree.revalidateLegacyAgentEnablement(ctx, legacy); err != nil {
+			return false, err
+		}
+		tree.tracker.outcomeUnknown = true
+		if err := tree.deps.unlinkAt(ctx, legacy.parentFD, "mvm-agent", 0); err != nil {
+			return false, rootfsAtomicError("remove legacy agent enablement", err)
+		}
+		tree.tracker.completeMutation()
+	} else {
+		var current unix.Stat_t
+		if err := tree.deps.fstatAt(ctx, legacy.parentFD, "mvm-agent", &current, unix.AT_SYMLINK_NOFOLLOW); err == nil {
+			return false, rootfsAtomicError("legacy agent enablement appeared after admission", nil)
+		} else if !errors.Is(err, unix.ENOENT) {
+			return false, rootfsAtomicError("reinspect absent legacy agent enablement", err)
+		}
+	}
+	// Sync even observed absence: a retry after interrupted unlink must not publish boot enablement
+	// before the former default link's removal is durable.
+	if err := tree.deps.fsync(ctx, legacy.parentFD); err != nil {
+		return legacy.present, rootfsCleanupError("sync legacy agent runlevel directory", err)
+	}
+	return legacy.present, nil
+}
+
 func (tree rootfsGuestTree) replaceAgentEnablementLink(
 	ctx context.Context,
 	layout rootfsAgentInitLayout,

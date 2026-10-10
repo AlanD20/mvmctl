@@ -39,9 +39,11 @@ const (
 	rootfsAgentOpenRCPath           = "/etc/init.d/mvm-agent"
 	rootfsAgentOpenRCEvidencePath   = "/sbin/openrc"
 	rootfsAgentOpenRCInitPath       = "/etc/init.d"
-	rootfsAgentOpenRCRunlevelPath   = "/etc/runlevels/default"
+	rootfsAgentOpenRCDefaultPath    = "/etc/runlevels/default"
+	rootfsAgentOpenRCRunlevelPath   = "/etc/runlevels/boot"
 	rootfsAgentOpenRCRunlevelLink   = rootfsAgentOpenRCRunlevelPath + "/mvm-agent"
 	rootfsAgentOpenRCRunlevelTarget = "/etc/init.d/mvm-agent"
+	rootfsAgentOpenRCLegacyLink     = rootfsAgentOpenRCDefaultPath + "/mvm-agent"
 	rootfsSSHConfigPath             = "/etc/ssh/sshd_config.d/mvm.conf"
 	rootfsSudoPolicyPath            = "/etc/sudoers.d/mvm-guest"
 	rootfsPasswdPath                = "/etc/passwd"
@@ -774,8 +776,28 @@ func applyRootfsProvisionPlan(
 	tree rootfsGuestTree,
 	deps rootfsVMProvisionDeps,
 	plan VMProvisionPlan,
-) (uint32, error) {
+) (_ uint32, returnErr error) {
 	var filesWritten uint32
+	var agentLayout rootfsAgentInitLayout
+	var legacyAgent *rootfsLegacyAgentEnablement
+	if plan.Agent != nil {
+		var err error
+		agentLayout, err = detectRootfsAgentInitLayout(ctx, tree)
+		if err != nil {
+			return 0, err
+		}
+		if agentLayout == rootfsAgentInitOpenRC {
+			// CRITICAL: Refuse foreign legacy enablement before deblob or any provisioning write.
+			legacyAgent, err = tree.pinLegacyAgentEnablement(ctx)
+			if err != nil {
+				return 0, err
+			}
+			defer func() {
+				returnErr = appendRootfsProvisionCleanupError(returnErr, "close legacy agent runlevel directory",
+					tree.deps.close(context.WithoutCancel(ctx), legacyAgent.parentFD))
+			}()
+		}
+	}
 	write := func(file rootfsProvisionFile) error {
 		changed, err := tree.replaceFile(ctx, file)
 		if changed {
@@ -916,10 +938,6 @@ func applyRootfsProvisionPlan(
 		}
 	}
 	if plan.Agent != nil {
-		layout, err := detectRootfsAgentInitLayout(ctx, tree)
-		if err != nil {
-			return filesWritten, err
-		}
 		binary, err := deps.agentBinary(ctx)
 		if err != nil || len(binary) == 0 || len(binary) > maxRootfsAgentBytes {
 			return filesWritten, rootfsAtomicError("embedded managed VM agent binary is unavailable or unbounded", err)
@@ -934,7 +952,7 @@ func applyRootfsProvisionPlan(
 			{path: rootfsAgentBinaryPath, content: binary, mode: 0755},
 			{path: rootfsAgentTokenPath, content: []byte(plan.Agent.Token + "\n"), mode: 0600},
 		}
-		switch layout {
+		switch agentLayout {
 		case rootfsAgentInitSystemd:
 			for _, directory := range []string{"/etc/systemd/system", rootfsAgentSystemdWantsPath} {
 				if _, err := tree.ensureDirectory(ctx, directory, 0755, 0, 0); err != nil {
@@ -961,7 +979,16 @@ func applyRootfsProvisionPlan(
 				return filesWritten, err
 			}
 		}
-		changed, err := tree.replaceAgentEnablementLink(ctx, layout)
+		if legacyAgent != nil {
+			changed, err := tree.removeLegacyAgentEnablement(ctx, legacyAgent)
+			if changed {
+				filesWritten++
+			}
+			if err != nil {
+				return filesWritten, err
+			}
+		}
+		changed, err := tree.replaceAgentEnablementLink(ctx, agentLayout)
 		if changed {
 			filesWritten++
 		}
@@ -1010,7 +1037,7 @@ func detectRootfsAgentInitLayout(
 	if err != nil {
 		return rootfsAgentInitUnknown, err
 	}
-	openRCRunlevel, err := tree.fixedPathHasType(ctx, rootfsAgentOpenRCRunlevelPath, unix.S_IFDIR)
+	openRCRunlevel, err := tree.fixedPathHasType(ctx, rootfsAgentOpenRCDefaultPath, unix.S_IFDIR)
 	if err != nil {
 		return rootfsAgentInitUnknown, err
 	}
@@ -1073,6 +1100,8 @@ WantedBy=sysinit.target
 }
 
 func rootfsAgentOpenRCService(port int) []byte {
+	// Management must not wait for IP configuration or clock synchronization. Module ordering is
+	// soft so kernels with built-in virtio-vsock do not require a missing module-loader service.
 	return fmt.Appendf(nil, `#!/sbin/openrc-run
 
 description="MVM Agent"
@@ -1083,6 +1112,8 @@ command_background=true
 
 depend() {
     need localmount
+    after modules
+    before networking chronyd cloud-init-local cloud-init cloud-config cloud-final mvm-ssh-setup
 }
 `, port, rootfsAgentTokenPath)
 }
