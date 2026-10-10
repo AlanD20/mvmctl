@@ -239,10 +239,10 @@ def test_host_reboot_post() -> None:
     original_network = receipt["baseline"]["network"][0]
     networks = _host_inventory(RUNNER, "network")
     assert len(networks) == 1
-    assert {key: value for key, value in networks[0].items() if key != "bridge_active"} == {
-        key: value for key, value in original_network.items() if key != "bridge_active"}
+    assert {key: value for key, value in networks[0].items() if key not in ("bridge_active", "is_present")} == {
+        key: value for key, value in original_network.items() if key not in ("bridge_active", "is_present")}
     # Boot-derived absence only; never repair a same-boot disappearance.
-    assert networks[0]["bridge_active"] is False
+    assert networks[0]["bridge_active"] is False and networks[0]["is_present"] is False
     _run_mvm(RUNNER, "network", "sync", original_network["id"])
     restored_network = _host_inventory(RUNNER, "network")[0]
     assert restored_network["bridge_active"] is True
