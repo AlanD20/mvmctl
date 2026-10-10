@@ -17,7 +17,7 @@ from tests.system.conftest import _json_success_data, _run_mvm
 from tests.system.host.test_host import _host_administrator_state, _host_inventory
 from tests.system.network.test_network import _inventory
 from tests.system.vm.test_vm_lifecycle import (
-    _lifecycle_boot_id, _lifecycle_process_identity, _lifecycle_vm_state,
+    _lifecycle_process_identity, _lifecycle_vm_state,
 )
 
 pytestmark = [pytest.mark.system, pytest.mark.tier2, pytest.mark.domain_host_reboot]
@@ -37,6 +37,15 @@ def _boot() -> str:
     value = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     assert str(uuid.UUID(value)) == value
     return value
+
+
+def _host_reboot_guest_boot_id(name: str) -> str:
+    """Allow the cold guest agent to connect before proving its canonical boot ID."""
+    boot_id = _run_mvm(
+        RUNNER, "exec", name, "--timeout", "30", "--", "cat", "/proc/sys/kernel/random/boot_id",
+    ).stdout.strip()
+    assert str(uuid.UUID(boot_id)) == boot_id, boot_id
+    return boot_id
 
 
 def _phase_task(phase: str) -> Path:
@@ -181,7 +190,7 @@ def test_host_reboot_pre() -> None:
         assert vm["network_placement"] == "networkless" and vm["network_id"] == ""
         assert (vm["vcpu_count"], vm["mem_size_mib"], vm["disk_size_mib"]) == (1, 256, 512)
         state = _lifecycle_vm_state(RUNNER, name, "running")
-        guest_boot = _lifecycle_boot_id(RUNNER, name)
+        guest_boot = _host_reboot_guest_boot_id(name)
         process = _lifecycle_process_identity(state)
         assert any(row["id"] == vm["id"] for row in _json_success_data(_run_mvm(RUNNER, "vm", "ps", "--json").stdout, list))
         _run_mvm(RUNNER, "exec", vm["id"], "--", f"printf %s {marker} > /root/host-reboot-marker && sync")
@@ -217,7 +226,7 @@ def test_host_reboot_post() -> None:
         started = _lifecycle_vm_state(RUNNER, row["name"], "running")
         assert started["id"] == receipt["vm"]["id"]
         process = _lifecycle_process_identity(started)
-        guest_boot = _lifecycle_boot_id(RUNNER, row["name"])
+        guest_boot = _host_reboot_guest_boot_id(row["name"])
         assert guest_boot != receipt["guest_boot_id"]
         assert _run_mvm(RUNNER, "exec", row["id"], "--", "cat", "/root/host-reboot-marker").stdout == receipt["marker"]
     finally:
