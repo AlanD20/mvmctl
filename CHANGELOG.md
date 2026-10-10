@@ -28,8 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > records their fresh-layout design. `b254f010` implements it; formatting, vet, 149 focused root checks
 > and the same 149 race checks passed inside the named runner. Clean `4bc51ee7` subsequently passed complete
 > pinned CI, all 2,707 root-Jailer test/subtests and the real-agent release build. Its new layout candidate
-> is not installed yet; public branch-cleanup qualification remains pending. No existing-layout migration
-> or authority rebinding is added.
+> was subsequently installed normally in a fresh named runner. Shared-filesystem snapshot/volume/cache
+> retirement passed, including independent restored data and unchanged permanent authority. The paired
+> invocation remains failed: distinct-filesystem setup used `/dev/shm`, whose writable ancestor is correctly
+> refused before kernel import. That body remains unqualified; the fixture is being corrected without
+> relaxing production admission. No existing-layout migration or authority rebinding is added.
 > The three acquisition cases now share one receipt-owned store, retire their kernels between cases,
 > and clean that cache once at sequence completion. All three test bodies are unchanged. A subsequent setup
 > failure exposed inventory access before private cache initialization; the fixture now uses normal cache

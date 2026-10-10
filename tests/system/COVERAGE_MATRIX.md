@@ -46,9 +46,13 @@ remain an explicit separate gap; [ADR-0023](../../docs/adr/0023-protected-branch
 records the fresh-layout contract.
 The design is now implemented in `b254f010`. Named-runner formatting and vet passed, then 149 focused
 root tests/subtests and the same 149 race checks passed with no failures or skips. Complete integration
-CI/root/build subsequently passed on `4bc51ee7`, as recorded below. New-candidate installation and public
-snapshot/volume/cache-cleanup journeys remain pending. Old layouts
-are refused, not migrated or rebound.
+CI/root/build subsequently passed on `4bc51ee7`, as recorded below. Normal fresh-runner installation and
+bootstrap passed. The shared-filesystem snapshot/volume/cache-retirement body passed on that installed
+candidate with corrected fixture source `15c3dde6`: capture, independent RAM/rootfs/data-volume restore,
+typed removal, cache absence and stable external authority identities were checked. The paired native
+invocation exited 1 (strict 1 pass, 1 setup error): distinct-filesystem setup used the correctly refused
+writable `/dev/shm` ancestor; its body did not run. This is not a complete paired or release pass. Old
+layouts are refused, not migrated or rebound.
 Signed `af285c1b` integrates the reviewed three-case acquisition sequence fixture: one receipt-owned store,
 typed per-case kernel retirement, a single final cache cleanup and per-function cache/mirror environment.
 All three acquisition bodies remain byte-identical; the original named-QA checks passed 13 pure cases with zero other
@@ -102,7 +106,9 @@ Both atomic coverage profiles and all 48 manifested source inputs were checked. 
 `e6ff428319a6d8ef981b6311c38a4e43b08b9cdfb0da0bc19fdd04f6bb61848e`, records clean exact VCS,
 Go 1.26.3, Linux/amd64, CGO disabled, PIE and trimpath. Original state and installed `752110fa` binary
 remained unchanged. No synthetic memory admission/abort guards or Go memory/concurrency throttles were
-used. No installation or layout transition ran; installed public journeys remain separate requirements.
+used. That build invocation did not install or transition state. Subsequent normal inner installation and
+fresh-store bootstrap passed; the shared-filesystem installed journey is recorded above. Distinct-filesystem
+and complete installed public qualification remain separate requirements.
 
 **Earlier coherent cache Go/build/install checkpoint (2026-10-10):** clean `752110fa`, tree `02198101`,
 passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent
