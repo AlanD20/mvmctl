@@ -32,7 +32,7 @@ closed proof consumption through `--host-reboot-task`. The corrected source pass
 checks; the integrated source separately passed only the three selection/proof-consumption variants and
 exact two-node collection. Integration JUnit SHA-256
 `e6849035de6f87d22acf1d8833403a79432b10c02ab33416b9ae162567e43e10`.
-No phase body or actual reboot ran in those checks: host-reboot status/start/exec/cleanup remains unqualified.
+No phase body or actual reboot ran in those checks; the completed runtime journey is recorded below.
 Ordinary tier batches exclude explicit phase execution and cannot substitute for completed PRE+reboot+POST.
 
 The later layout-candidate PRE passed strict 1/1 and the named runner actually rebooted, but the unchanged
@@ -50,14 +50,30 @@ over unchanged outer SSH. PRE receipt SHA-256
 `9e4972e9bcfc8a19e7067ec7672642aac4d2625d6d79eb16cc332c49efbb0163` retains the original source hashes.
 POST executed zero tests: all eleven staged source files were zero-length after force reboot, so the
 module no longer defined the selected test. This establishes a QA staging-durability gap, not a RAM
-failure. PRE and the failed POST remain literal separate evidence; status/restart/exec/cleanup after
-host reboot is still unqualified. Signed `a90fcfb5` adds a checked filesystem durability barrier before
+failure. PRE and the failed POST remain literal separate evidence. Signed `a90fcfb5` adds a checked
+filesystem durability barrier before
 the force reboot and exact fixed-source verification after reconnect and before POST. Four focused
 named-runner checks passed: sync failure prevents reboot, source loss prevents accepting PRE or
 executing POST, and successful PRE remains release-incomplete. Native exit zero and exact JUnit
 4/0/0/0 were independently checked; JUnit SHA-256
 `7829028c8efe55241dab4f7797f1bf6cd853afe72f1920bf606f8b4ed5731d0c`.
-The tested patch and signed integration have identical two-file hashes. No new actual journey ran.
+The tested patch and signed integration have identical two-file hashes; those focused checks did not
+execute a new actual journey.
+
+**Completed installed host-reboot journey (2026-10-10):** clean `74a916d3` with installed
+`0.3.0-rc.layout2-4bc51ee7`/`e6ff4283` passed PRE strict 1/1 (9.357 seconds) and POST strict 1/1
+(14.692 seconds), each native exit zero with no failures, errors, skips or deselections. The named
+runner's host boot changed and all eleven staged payload hashes survived. POST checked the prior-boot
+VM's stopped projection, absent running-list entry and refused stopped exec; restarted the same VM ID;
+observed a new guest boot; read the retained marker through ordinary exec; removed the exact owned VM
+and its paths; reconstructed the retained default network; and preserved persistent inventories,
+administrator state, candidate, kernel and image. The projection fix requires both boot-derived network
+presence flags false before repair and retains durable-field and restored-presence equality afterward.
+PRE JUnit SHA-256 `cb40bac2051d454fdc935efd784e4bc07fd52c707048d11d751e3bd67aba7571`;
+POST JUnit `2b940d478ec02150ac8dc8504b1eadbc64f9d14ceb06b9fce2cbd19ff7db2452`;
+preservation receipt `288c97a7f735183d9b0a833fe12c063a2eb8abaa5d49ecfb33b81b2f5f09779e`.
+This qualifies the explicit installed journey only; earlier failed attempts and the remaining release
+matrix retain their own outcomes.
 
 **Current representative network/exec invocation (2026-10-10):** frozen Python `1be44dfc` against
 installed layout candidate `e6ff4283` passed exactly conntrack-after-sync and cross-network TCP
@@ -71,8 +87,13 @@ error without changing the deadline or success predicate. Its exact directional 
 with ordinary vsock agent unreachability before destination creation or policy admission. The
 separate pause/resume singleton also failed at its initial ordinary guest boot-ID exec, before
 pause/resume actions. Both native invocations failed; exact cleanup and original baseline equality
-passed. The shared agent-readiness/transport cause remains unresolved; neither result proves a
-memory-capacity failure or qualifies those features.
+passed. Neither result proves a memory-capacity failure or qualifies those features. An independent
+cloud-init-off, network-attached, skip-deblob Alpine diagnostic subsequently observed sequential
+networking/IPv4LL and chronyd startup before `mvm-agent` started around 18 seconds after creation.
+One ordinary five-second exec after 60 seconds of passive console capture succeeded natively in
+0.236 seconds, with one vsock attempt and the agent running in OpenRC's default runlevel. Exact typed
+cleanup restored the diagnostic baseline. This narrows startup delay for that variant only; it is not
+a passing pytest case, a directional-policy diagnosis, or a startup-order implementation change.
 
 The first Firecracker acquisition body succeeded, but its teardown failed when ordinary `cache clean`
 encountered root-only protected parents. That invocation remains failed; the other two acquisition bodies

@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > restoration preserved the original relay and Firecracker identities, and typed cleanup restored the
 > checked inventories. This is endpoint-discovery coverage, not qualification of every console case.
 > Explicit PRE/POST host-reboot coverage is now implemented; 52 focused checks and a three-variant
-> integration check passed, with both phase nodes collected. Actual reboot runtime qualification is still
-> pending. Full release qualification now requires a closed `--host-reboot-task` proof; ordinary tier batches
+> integration check passed, with both phase nodes collected. At that checkpoint, actual reboot qualification
+> was pending; the completed layout-candidate journey is recorded below. Full release qualification requires
+> a closed `--host-reboot-task` proof; ordinary tier batches
 > do not implicitly reboot the runner or qualify that journey. A separate test-only fix removes an unsafe
 > early subprocess-diagnostic read; the full privileged-package race run passed 311 tests/subtests.
 > Kernel acquisition exposed a real teardown failure on root-owned protected cache parents. The failure
@@ -70,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > failure or a release pass. `2a00f3e5` uses the unchanged controller's existing SSH command for only
 > host-phase staging, orchestration and receipt retrieval; candidate-side VM exec/vsock assertions are
 > unchanged. All twelve affected behavioral checks passed inside the named runner, with unchanged
-> candidate and boot pins. The corrected PRE/reboot/POST journey remains unqualified.
+> candidate and boot pins. That checkpoint did not yet qualify the corrected PRE/reboot/POST journey.
 
 > **Subsequent installed-candidate QA (2026-10-10):** on the unchanged layout candidate, conntrack
 > after network sync and cross-network TCP allow/revoke passed. The same invocation then failed at
@@ -79,7 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > passed and reconnected after the real reboot. POST ran no tests because staged source files lost
 > their contents across the force reboot. `a90fcfb5` adds a checked guest-filesystem durability barrier
 > before reboot and exact source-hash refusal after reconnect and before POST. Four focused checks
-> passed inside the named runner; the corrected actual journey remains pending. Neither failure
+> passed inside the named runner; actual runtime qualification followed separately below. Neither failure
 > demonstrates a memory-capacity problem or qualifies the complete release.
 
 > **Agent-readiness diagnosis (2026-10-10):** `6af6c511` retains the last exec-readiness command
@@ -88,6 +89,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > The separately executed pause/resume singleton failed on its initial guest boot-ID exec, before
 > any pause action. Both restored the exact baseline. These are unresolved agent-startup/transport
 > failures, not passing policy or pause/resume journeys and not demonstrated RAM failures.
+
+> **Completed layout-candidate host reboot (2026-10-10):** clean `74a916d3` with installed
+> `0.3.0-rc.layout2-4bc51ee7` (`e6ff4283`) passed both explicit phase bodies: PRE strict 1/1
+> and POST strict 1/1, with zero other outcomes. The named runner actually rebooted and all eleven
+> staged source hashes survived. POST proved prior-boot stopped projection, same-ID restart with a
+> new guest boot, ordinary exec reading the retained marker, exact owned removal and default-network
+> reconstruction. Persistent inventories, administrator state and admitted artifacts were preserved.
+> `74a916d3` fixes only the pre-repair assertion: both boot-derived presence flags must be false;
+> durable network fields and restored presence remain checked. Earlier failed attempts stay failed.
+> This closes that installed reboot journey, not the complete release matrix.
+
+> **Narrowed OpenRC startup diagnosis (2026-10-10):** an independent Alpine diagnostic retained
+> networking/IPv4LL and chronyd startup before `mvm-agent` started around 18 seconds after creation.
+> A single ordinary five-second exec after passive boot observation succeeded immediately, with the
+> agent running in the default runlevel. This supports delayed agent startup for that cloud-init-off,
+> network-attached, skip-deblob guest. It does not qualify directional policy or pause/resume, establish
+> the cause for every guest variant, or change production startup behavior or exec deadlines.
 
 > **Standalone export-interruption qualification (2026-10-10):** the SIGINT survivor case passed alone
 > on the installed cache candidate: native exit 0, strict 1/1 with zero other outcomes, 13.37 seconds.
