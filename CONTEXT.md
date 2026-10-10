@@ -714,8 +714,9 @@ configuration, or alternate network identity. The public restore path has focuse
 protected cache parents, preserving root logical authority. Installed public cleanup remains unqualified and existing
 permanent snapshot-lock/volume-removal residues still refuse cleanup. The accepted fresh-layout extension in
 [ADR-0023](docs/adr/0023-protected-branch-authority-layout.md) puts permanent snapshot locks and volume-source receipts
-in the root anchor while retaining artifact/raw-capture bytes on the cache filesystem. That extension is not yet
-implemented; old layouts are not migrated under the approved clean break.
+in the root anchor while retaining artifact/raw-capture bytes on the cache filesystem. Signed `b254f010` implements
+that extension, with focused root behavior and race checks passed. Complete integration and installed public
+branch-cleanup qualification remain pending; old layouts are not migrated under the approved clean break.
 
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An

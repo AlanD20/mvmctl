@@ -1,6 +1,6 @@
 # Protected Branch Authority Outside Cache Data
 
-**Status:** Accepted; implementation and qualification pending
+**Status:** Implemented; focused checks passed, complete integration and installed qualification pending
 **Date:** 2026-10-10
 **Amends:** [ADR-0018](0018-isolated-vm-execution-and-snapshot-authority.md) and
 [ADR-0022](0022-explicit-protected-cache-retirement.md), for fresh protected-store layouts only
@@ -54,7 +54,11 @@ quarantine. Those existing patterns define the extension, not a new public clean
 
 This relocates authority for newly created stores, not snapshot artifact bytes. The cache and root anchor may be on
 different filesystems. Temporary raw capture therefore cannot target the external anchor. Permanent branch retirement
-is not implemented or qualified merely because this decision is accepted.
+is implemented in `b254f010`, including refusal before new logical authority publication and preserved recovery
+details for interrupted snapshot captures. Named-runner format and vet checks passed, followed by 149 focused
+root tests/subtests and the same 149 under the race detector, with zero failures or skips. These focused checks
+do not qualify the complete package, coherent release build or installed public cleanup journeys. Existing stores
+remain strictly rejected; no migration or authority rebinding was added.
 
 Required evidence covers stable lock identity through snapshot removal/cache retirement; held-worker, restored-reference
 and live-backing refusals; exact volume-source capture and completed-removal idempotence; interrupted publication,

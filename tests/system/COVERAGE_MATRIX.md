@@ -43,7 +43,11 @@ parent-sync and nonterminal publication-sync corrections; focused API/auth/root-
 Complete integration CI/build and normal inner installation subsequently passed, as recorded below.
 Installed public cleanup qualification remains pending. Permanent snapshot-lock and volume-removal residues
 remain an explicit separate gap; [ADR-0023](../../docs/adr/0023-protected-branch-authority-layout.md)
-records the fresh-layout design, not its implementation or runtime qualification.
+records the fresh-layout contract.
+The design is now implemented in `b254f010`. Named-runner formatting and vet passed, then 149 focused
+root tests/subtests and the same 149 race checks passed with no failures or skips. Complete integration,
+new-candidate installation and public snapshot/volume/cache-cleanup journeys remain pending. Old layouts
+are refused, not migrated or rebound.
 Signed `af285c1b` integrates the reviewed three-case acquisition sequence fixture: one receipt-owned store,
 typed per-case kernel retirement, a single final cache cleanup and per-function cache/mirror environment.
 All three acquisition bodies remain byte-identical; the original named-QA checks passed 13 pure cases with zero other
@@ -59,6 +63,16 @@ cases with native exit 0 and strict zero-other outcomes; all 22 kernel nodes col
 `11cced12e8cb7b3dc523d5b8c56925a00555d4e9d20ee93da2c0b0dd1eda3476`.
 The setup failure remains recorded. The corrected three acquisition bodies and final public cache cleanup
 still require runtime qualification; passing fixture checks do not close that gap.
+
+Signed `5f420009` gives the separate eight official-kernel cases one private cache, strict publication
+receipts, per-case typed kernel retirement and one final typed cache cleanup. Actual default receipts must
+report `is_default: true`; failed or ambiguous publications are not adopted by inventory difference.
+The combined official and retained-cache fixture tests passed 34/34 inside the named runner with strict
+zero-other outcomes; the unchanged 22 kernel nodes collected. JUnit SHA-256
+`f5b853507354935d3f6fa628704d1cffa16adc070b82013d58debbd7bd61042b`.
+Signed `4bc51ee7` also corrects the API's ignored default-write error and stale pull response; formatting,
+vet and 120 existing API checks passed. Official acquisition/build flags and the installed default result
+still need their real system journeys; these focused checks do not qualify them.
 
 **Current coherent cache Go/build/install checkpoint (2026-10-10):** clean `752110fa`, tree `02198101`,
 passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent

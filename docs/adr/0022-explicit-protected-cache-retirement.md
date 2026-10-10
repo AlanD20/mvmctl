@@ -69,8 +69,9 @@ This decision does not permit moving a globally bound kernel identity to a diffe
 respect that binding rather than creating a new cache for each use of the same retired kernel ID.
 
 [ADR-0023](0023-protected-branch-authority-layout.md) defines a fresh-layout extension for permanent snapshot locks
-and volume-removal receipts. Its implementation and qualification are pending; this integrated first slice still
-refuses the existing branch residues. It does not migrate them or relax immutable bindings.
+and volume-removal receipts. Signed `b254f010` implements that extension and passes focused root behavior/race
+checks; complete integration and installed qualification remain pending. Existing branch layouts still refuse
+retirement. The extension does not migrate them or relax immutable bindings.
 
 ## Alternatives
 
