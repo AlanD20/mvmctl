@@ -108,30 +108,7 @@ func (server *VMSnapshotServer) Capture(
 		return model.SnapshotCaptureResult{}, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, store.Release(context.WithoutCancel(ctx))) }()
-	entry, err := lockSnapshotStoreEntry(ctx, store, request.SnapshotID, true)
-	if errors.Is(err, unix.EEXIST) {
-		existing, openErr := lockSnapshotStoreEntry(ctx, store, request.SnapshotID, false)
-		if openErr != nil {
-			return model.SnapshotCaptureResult{}, openErr
-		}
-		prior, readErr := existing.readProgress(ctx)
-		closeErr := existing.Release(context.WithoutCancel(ctx))
-		if readErr != nil || closeErr != nil {
-			return model.SnapshotCaptureResult{}, errors.Join(readErr, closeErr)
-		}
-		if prior.SourceVMID != request.VMID || prior.OwnerUID != ownerUID {
-			return model.SnapshotCaptureResult{}, instanceValidationError(
-				"existing snapshot progress belongs to another source",
-			)
-		}
-		prior.VMState = "unknown" // A durable past observation is not current process state.
-		return model.SnapshotCaptureResult{}, snapshotCaptureOutcomeError(
-			prior,
-			instanceValidationError(
-				"snapshot identity already has a capture transaction; inspect or remove it before creating a new capture",
-			),
-		)
-	}
+	entry, err := createSnapshotCaptureEntry(ctx, store, request.SnapshotID, request.VMID, ownerUID)
 	if err != nil {
 		return model.SnapshotCaptureResult{}, err
 	}
@@ -343,6 +320,31 @@ func updateSnapshotDeviceConfig(source *vmLaunchDeviceAuthority) error {
 	digest := sha256.Sum256(encoded)
 	source.ConfigSHA256 = hex.EncodeToString(digest[:])
 	return source.validate()
+}
+
+func createSnapshotCaptureEntry(
+	ctx context.Context, store *protectedSnapshotStoreLease, snapshotID, vmID string, ownerUID uint32,
+) (*snapshotStoreEntry, error) {
+	entry, err := lockSnapshotStoreEntry(ctx, store, snapshotID, true)
+	if !errors.Is(err, unix.EEXIST) {
+		return entry, err
+	}
+	existing, err := lockSnapshotStoreEntry(ctx, store, snapshotID, false)
+	if err != nil {
+		return nil, err
+	}
+	prior, readErr := existing.readProgress(ctx)
+	closeErr := existing.Release(context.WithoutCancel(ctx))
+	if readErr != nil || closeErr != nil {
+		return nil, errors.Join(readErr, closeErr)
+	}
+	if prior.SourceVMID != vmID || prior.OwnerUID != ownerUID {
+		return nil, instanceValidationError("existing snapshot progress belongs to another source")
+	}
+	prior.VMState = "unknown" // A durable past observation is not current process state.
+	return nil, snapshotCaptureOutcomeError(prior, instanceValidationError(
+		"snapshot identity already has a capture transaction; inspect or remove it before creating a new capture",
+	))
 }
 
 func pinSnapshotActiveRoot(ctx context.Context, record instanceRecord) (_ int, returnErr error) {

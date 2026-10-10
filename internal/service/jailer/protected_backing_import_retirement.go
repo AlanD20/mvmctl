@@ -251,6 +251,9 @@ func (cancellation *protectedImportCancellation) readAuthority(
 		return err
 	}
 	record := cancellation.record
+	if err := validateInitialVolumeRemoval(record); err != nil {
+		return err
+	}
 	if record.Version != 1 || record.Owner != ownerUID || record.Kind != kind || record.ID != vmID ||
 		record.Cache != logical.Cache || len(record.References) != 0 || len(record.NextReferences) != 0 {
 		return managedVMResourceValidationError("protected import retirement record conflicts or retains grants")

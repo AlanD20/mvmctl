@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -122,9 +121,6 @@ func requireKernelSnapshotStoreReferencesAbsent(
 	for {
 		names, readErr := file.Readdirnames(128)
 		for _, name := range names {
-			if strings.HasSuffix(name, ".lock") && isCanonicalManagedResourceID(strings.TrimSuffix(name, ".lock"), 64) {
-				continue
-			}
 			if !isCanonicalManagedResourceID(name, 64) {
 				return managedVMResourceValidationError("snapshot inventory contains an unknown entry")
 			}

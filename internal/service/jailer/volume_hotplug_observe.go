@@ -290,6 +290,9 @@ func openObservedBacking(
 	if err := readProtectedRecord(ctx, anchorFD, "store.json", &anchor); err != nil {
 		return nil, err
 	}
+	if err := validateProtectedStoreLayout(ctx, anchorFD, anchor); err != nil {
+		return nil, err
+	}
 	if anchor.Owner != binding.ownerUID || anchor.Cache != protectedCacheIdentity(binding.cacheIdentity) {
 		return nil, instanceValidationError("observed protected anchor differs from lifecycle authority")
 	}
@@ -336,6 +339,9 @@ func openObservedBacking(
 	retained = append(retained, lock)
 	var record protectedBackingRecord
 	if err := readProtectedRecord(ctx, metadata, "record.json", &record); err != nil {
+		return nil, err
+	}
+	if err := validateInitialVolumeRemoval(record); err != nil {
 		return nil, err
 	}
 	if record.Version != 1 || record.Kind != binding.kind || record.ID != binding.logicalID ||

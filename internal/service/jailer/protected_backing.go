@@ -44,13 +44,14 @@ type protectedBackingCache struct {
 }
 
 type protectedBackingAnchor struct {
-	Version    uint32                    `json:"version"`
-	Owner      uint32                    `json:"owner"`
-	OwnerGID   uint32                    `json:"owner_gid"`
-	Cache      protectedBackingCache     `json:"cache"`
-	Locator    string                    `json:"locator"`
-	Store      protectedBackingIdentity  `json:"store"`
-	Retirement *protectedCacheRetirement `json:"retirement,omitempty"`
+	Version       uint32                    `json:"version"`
+	Owner         uint32                    `json:"owner"`
+	OwnerGID      uint32                    `json:"owner_gid"`
+	Cache         protectedBackingCache     `json:"cache"`
+	Locator       string                    `json:"locator"`
+	Store         protectedBackingIdentity  `json:"store"`
+	SnapshotLocks protectedBackingIdentity  `json:"snapshot_locks"`
+	Retirement    *protectedCacheRetirement `json:"retirement,omitempty"`
 }
 
 type protectedBackingReference struct {
@@ -60,23 +61,24 @@ type protectedBackingReference struct {
 }
 
 type protectedBackingRecord struct {
-	Version         uint32                      `json:"version"`
-	Kind            string                      `json:"kind"`
-	ID              string                      `json:"id"`
-	Owner           uint32                      `json:"owner"`
-	Cache           protectedBackingCache       `json:"cache"`
-	Directory       protectedBackingIdentity    `json:"directory"`
-	Source          protectedBackingIdentity    `json:"source"`
-	SourceCTimeSec  int64                       `json:"source_ctime_sec,omitempty"`
-	SourceCTimeNsec int64                       `json:"source_ctime_nsec,omitempty"`
-	Backing         protectedBackingIdentity    `json:"backing"`
-	Phase           string                      `json:"phase"`
-	GrowBytes       uint64                      `json:"grow_bytes,omitempty"`
-	References      []protectedBackingReference `json:"references"`
-	NextReferences  []protectedBackingReference `json:"next_references,omitempty"`
-	SnapshotSource  bool                        `json:"snapshot_source"`
-	KernelDigest    string                      `json:"kernel_digest,omitempty"`
-	Generation      uint64                      `json:"generation,omitempty"`
+	Version         uint32                        `json:"version"`
+	Kind            string                        `json:"kind"`
+	ID              string                        `json:"id"`
+	Owner           uint32                        `json:"owner"`
+	Cache           protectedBackingCache         `json:"cache"`
+	Directory       protectedBackingIdentity      `json:"directory"`
+	Source          protectedBackingIdentity      `json:"source"`
+	SourceCTimeSec  int64                         `json:"source_ctime_sec,omitempty"`
+	SourceCTimeNsec int64                         `json:"source_ctime_nsec,omitempty"`
+	Backing         protectedBackingIdentity      `json:"backing"`
+	Phase           string                        `json:"phase"`
+	GrowBytes       uint64                        `json:"grow_bytes,omitempty"`
+	References      []protectedBackingReference   `json:"references"`
+	NextReferences  []protectedBackingReference   `json:"next_references,omitempty"`
+	SnapshotSource  bool                          `json:"snapshot_source"`
+	KernelDigest    string                        `json:"kernel_digest,omitempty"`
+	Generation      uint64                        `json:"generation,omitempty"`
+	InitialRemoval  *initialVolumeRemovalProgress `json:"initial_removal,omitempty"`
 }
 
 // protectedBackingLease retains the exact protected object and its root-owned logical-object lock.
@@ -247,6 +249,9 @@ func reopenProtectedBacking(
 	defer func() { returnErr = errors.Join(returnErr, closeProtectedFDs(fds)) }()
 	var anchor protectedBackingAnchor
 	if err := readProtectedRecord(ctx, anchorFD, "store.json", &anchor); err != nil {
+		return nil, err
+	}
+	if err := validateProtectedStoreLayout(ctx, anchorFD, anchor); err != nil {
 		return nil, err
 	}
 	if anchor.Owner != binding.ownerUID || anchor.Cache != protectedCacheIdentity(binding.cacheIdentity) {

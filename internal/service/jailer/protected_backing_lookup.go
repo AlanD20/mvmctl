@@ -135,6 +135,9 @@ func lookupProtectedBacking(
 		record.Cache != protectedCacheIdentity(cache.identity) {
 		return nil, true, managedVMResourceValidationError("protected lookup record identity conflicts")
 	}
+	if err := validateInitialVolumeRemoval(record); err != nil {
+		return nil, true, err
+	}
 	if record.Phase == "removed" || record.Phase == "initial-removing" || record.Phase == "kernel-unprotected-removed" {
 		if len(record.References) != 0 || len(record.NextReferences) != 0 {
 			return nil, true, managedVMResourceValidationError("protected removal tombstone retains references")
@@ -172,17 +175,22 @@ func (lease *protectedBackingLease) IsRemoved(ctx context.Context) (bool, error)
 
 // CommitInitialVolumeRemoval follows the consumer's exact initial raw-file unlink and directory
 // sync while this same import lock remains held. The permanent tombstone prevents resurrection.
-func (lease *protectedBackingLease) CommitInitialVolumeRemoval(ctx context.Context) error {
+func (lease *protectedBackingLease) CommitInitialVolumeRemoval(ctx context.Context, sourceAbsent bool) error {
 	lease.mu.Lock()
 	defer lease.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if lease.released || lease.lockFD < 0 || lease.record.Kind != protectedBackingVolume ||
-		(lease.record.Phase != "absent" && lease.record.Phase != "removed" && lease.record.Phase != "initial-removing") {
+		lease.record.Phase != "initial-removing" || lease.record.InitialRemoval == nil ||
+		lease.record.InitialRemoval.Quarantine.Inode == 0 ||
+		(!sourceAbsent && lease.record.InitialRemoval.Phase != "captured") ||
+		(sourceAbsent && lease.record.InitialRemoval.Receipt != nil) {
 		return managedVMResourceValidationError("initial volume removal does not hold an absent protected import lease")
 	}
 	lease.record.Phase = "removed"
+	lease.record.InitialRemoval.Phase = "removed"
+	lease.record.InitialRemoval.SourceAbsent = sourceAbsent
 	if err := markProtectedLogicalInitialized(ctx, lease.logicalFD); err != nil {
 		return err
 	}
@@ -201,7 +209,14 @@ func (lease *protectedBackingLease) BeginInitialVolumeRemoval(ctx context.Contex
 		(lease.record.Phase != "absent" && lease.record.Phase != "initial-removing" && !protectedSource) {
 		return managedVMResourceValidationError("initial volume removal does not hold an admitted source lease")
 	}
+	if lease.record.Phase == "initial-removing" {
+		return validateInitialVolumeRemoval(lease.record)
+	}
+	if lease.record.InitialRemoval != nil {
+		return managedVMResourceValidationError("initial volume removal cannot restart recorded authority")
+	}
 	lease.record.Phase = "initial-removing"
+	lease.record.InitialRemoval = &initialVolumeRemovalProgress{Phase: "preparing"}
 	if err := markProtectedLogicalInitialized(ctx, lease.logicalFD); err != nil {
 		return err
 	}

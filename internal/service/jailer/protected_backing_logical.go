@@ -31,7 +31,31 @@ func openProtectedLogical(
 		}
 	}()
 	// openProtectedAnchor retains the fixed UID directory immediately before its cache child.
-	parent := retained[len(retained)-2]
+	_, logical, err := lockProtectedLogicalInAnchor(
+		ctx,
+		ownerUID,
+		identity,
+		kind,
+		id,
+		create,
+		retained[len(retained)-2],
+	)
+	if err != nil {
+		return -1, nil, err
+	}
+	retained = append(retained, logical...)
+	return anchor, retained, nil
+}
+
+func lockProtectedLogicalInAnchor(
+	ctx context.Context, ownerUID uint32, identity managedCacheIdentity, kind, id string, create bool, parent int,
+) (_ int, _ []int, returnErr error) {
+	var retained []int
+	defer func() {
+		if returnErr != nil {
+			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
+		}
+	}()
 	for _, component := range []string{"logical", kind, id} {
 		fd, err := openProtectedDirectory(ctx, parent, component, create, true)
 		if err != nil {
@@ -60,7 +84,7 @@ func openProtectedLogical(
 		record.ID != wanted.ID || record.Cache != wanted.Cache {
 		return -1, nil, managedVMResourceValidationError("logical backing identity is already bound to another cache")
 	}
-	return anchor, retained, nil
+	return parent, retained, nil
 }
 
 func markProtectedLogicalInitialized(ctx context.Context, directory int) error {

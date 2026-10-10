@@ -189,7 +189,7 @@ func (server *ProtectedVolumeServer) Remove(
 	}
 	managedSource := storage.backing.record.Source.Inode != 0 && !storage.backing.record.SnapshotSource
 	if removed {
-		if managedSource {
+		if managedSource || storage.backing.record.InitialRemoval != nil {
 			if err := storage.removeInitialRaw(ctx, request.VolumeID); err != nil {
 				return ProtectedVolumeRemoveResult{}, err
 			}

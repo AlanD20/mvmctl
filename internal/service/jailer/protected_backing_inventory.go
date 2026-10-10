@@ -200,18 +200,34 @@ func readProtectedInventoryEntry(
 		inode:       selector.Cache.Inode,
 	}
 	parent := owner
-	for _, component := range []string{protectedCacheKey(cache), kind, id} {
+	cacheKey := protectedCacheKey(cache)
+	for _, component := range []string{cacheKey, kind, id} {
 		fd, err := openProtectedDirectory(ctx, parent, component, false, true)
 		if err != nil {
 			return result, false, err
 		}
 		retained = append(retained, fd)
 		parent = fd
+		if component == cacheKey {
+			var anchor protectedBackingAnchor
+			if err := readProtectedRecord(ctx, fd, "store.json", &anchor); err != nil {
+				return result, false, err
+			}
+			if err := validateProtectedStoreLayout(ctx, fd, anchor); err != nil {
+				return result, false, err
+			}
+			if anchor.Owner != ownerUID || anchor.Cache != selector.Cache {
+				return result, false, managedVMResourceValidationError("protected inventory store authority conflicts")
+			}
+		}
 	}
 	if err := readProtectedRecord(ctx, parent, "record.json", &result.record); err != nil {
 		return result, false, err
 	}
 	record := result.record
+	if err := validateInitialVolumeRemoval(record); err != nil {
+		return result, false, err
+	}
 	if record.Version != 1 || record.Owner != ownerUID || record.Kind != kind || record.ID != id ||
 		record.Cache != selector.Cache {
 		return result, false, managedVMResourceValidationError(

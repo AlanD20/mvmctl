@@ -12,11 +12,15 @@ import (
 
 type protectedSnapshotStoreLease struct {
 	// mu guards descriptor ownership and checked close across copied references.
-	mu         sync.Mutex
-	fd         int
-	retained   []int
-	released   bool
-	releaseErr error
+	mu              sync.Mutex
+	fd              int
+	lockAuthorityFD int
+	cacheIdentity   managedCacheIdentity
+	ownerUID        uint32
+	branch          string
+	retained        []int
+	released        bool
+	releaseErr      error
 }
 
 func openProtectedSnapshotStore(
@@ -60,11 +64,20 @@ func openProtectedStoreBranch(
 	if storeErr != nil || closeErr != nil {
 		return nil, errors.Join(storeErr, closeErr)
 	}
+	lockAuthority := -1
+	if branch == "snapshots" {
+		lockAuthority, err = openProtectedSnapshotLockAuthority(ctx, cache, anchor)
+		if err != nil {
+			return nil, err
+		}
+		retained = append(retained, lockAuthority)
+	}
 	fd, err := openProtectedDirectory(ctx, store, branch, create, true)
 	if err != nil {
 		return nil, err
 	}
-	return &protectedSnapshotStoreLease{fd: fd, retained: append(retained, fd)}, nil
+	return &protectedSnapshotStoreLease{fd: fd, lockAuthorityFD: lockAuthority, retained: append(retained, fd),
+		cacheIdentity: cache.identity, ownerUID: cache.ownerUID, branch: branch}, nil
 }
 
 func (lease *protectedSnapshotStoreLease) Release(ctx context.Context) error {
@@ -79,6 +92,7 @@ func (lease *protectedSnapshotStoreLease) Release(ctx context.Context) error {
 	lease.releaseErr = closeProtectedFDs(lease.retained)
 	lease.retained = nil
 	lease.fd = -1
+	lease.lockAuthorityFD = -1
 	lease.released = true
 	return lease.releaseErr
 }
@@ -106,7 +120,10 @@ func reopenProtectedCache(
 	if err := readProtectedRecord(ctx, anchor, "store.json", &record); err != nil {
 		return nil, err
 	}
-	if record.Retirement != nil || record.Version != 1 || record.Owner != ownerUID || record.OwnerGID == 0 ||
+	if err := validateProtectedStoreLayout(ctx, anchor, record); err != nil {
+		return nil, err
+	}
+	if record.Retirement != nil || record.Owner != ownerUID || record.OwnerGID == 0 ||
 		record.Cache != protectedCacheIdentity(expected) {
 		return nil, managedVMResourceValidationError("protected store anchor differs from recorded ownership")
 	}
@@ -129,22 +146,50 @@ func reopenProtectedCache(
 }
 
 func (lease *protectedBackingLease) openInitialVolumeQuarantine(
-	ctx context.Context, cache *managedCacheLease,
+	ctx context.Context, cache *managedCacheLease, store *protectedSnapshotStoreLease,
 ) (_ int, returnErr error) {
 	lease.mu.Lock()
 	defer lease.mu.Unlock()
 	if lease.released || lease.lockFD < 0 || lease.record.Kind != protectedBackingVolume ||
 		lease.record.Phase != "initial-removing" || cache.ownerUID != lease.ownerUID ||
-		protectedCacheIdentity(cache.identity) != protectedCacheIdentity(lease.cacheIdentity) {
+		protectedCacheIdentity(cache.identity) != protectedCacheIdentity(lease.cacheIdentity) ||
+		lease.record.InitialRemoval == nil || store == nil || store.fd < 0 || store.released ||
+		store.branch != "volume-removals" || store.ownerUID != cache.ownerUID || store.cacheIdentity != cache.identity {
 		return -1, managedVMResourceValidationError("initial volume quarantine requires the matching removal lease")
 	}
-	store, err := openProtectedStoreBranch(ctx, cache, "volume-removals", true)
+	progress := lease.record.InitialRemoval
+	fd, err := openProtectedDirectory(ctx, store.fd, lease.record.ID, false, true)
+	if errors.Is(err, unix.ENOENT) && progress.Phase == "preparing" && progress.Quarantine.Inode == 0 {
+		if err := ctx.Err(); err != nil {
+			return -1, err
+		}
+		if err := unix.Mkdirat(store.fd, lease.record.ID, 0700); err != nil {
+			return -1, err
+		}
+		fd, err = openProtectedDirectory(ctx, store.fd, lease.record.ID, false, true)
+	}
 	if err != nil {
 		return -1, err
 	}
-	fd, err := openProtectedDirectory(ctx, store.fd, lease.record.ID, true, true)
-	if err != nil {
-		return -1, errors.Join(err, store.Release(context.WithoutCancel(ctx)))
+	identity, admissionErr := protectedIdentity(fd)
+	if admissionErr == nil && progress.Quarantine.Inode == 0 {
+		var entries map[string]bool
+		entries, admissionErr = initialVolumeRemovalEntries(ctx, fd)
+		if admissionErr == nil && len(entries) != 0 {
+			admissionErr = managedVMResourceValidationError("unrecorded initial volume quarantine is not empty")
+		}
+		if admissionErr == nil {
+			admissionErr = unix.Fsync(store.fd)
+		}
+		if admissionErr == nil {
+			progress.Quarantine = identity
+			admissionErr = writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record)
+		}
+	} else if admissionErr == nil && !sameProtectedNode(progress.Quarantine, identity) {
+		admissionErr = managedVMResourceValidationError("initial volume quarantine identity changed")
+	}
+	if admissionErr != nil {
+		return -1, errors.Join(admissionErr, unix.Close(fd))
 	}
 	lease.retained = append(lease.retained, store.retained...)
 	lease.retained = append(lease.retained, fd)

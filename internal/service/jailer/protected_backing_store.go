@@ -36,11 +36,31 @@ func protectBackingWithKernelImport(
 		expectedBytes > math.MaxInt64 {
 		return nil, managedVMResourceValidationError("protected backing identity or length is invalid")
 	}
-	anchorFD, retained, err := openProtectedLogical(ctx, cache.ownerUID, cache.identity, kind, id, create)
+	anchorFD, retained, err := openProtectedAnchor(ctx, cache.ownerUID, cache.identity, create)
 	if err != nil {
 		return nil, err
 	}
-	logicalFD := retained[len(retained)-2]
+	return protectBackingInAnchor(
+		ctx,
+		cache,
+		kind,
+		id,
+		expectedBytes,
+		create,
+		snapshotFD,
+		explicitKernelImport,
+		anchorFD,
+		retained,
+	)
+}
+
+// The root anchor and owner descriptors are already admitted. Reject existing store layouts
+// before publishing a previously unseen permanent global logical binding.
+func protectBackingInAnchor(
+	ctx context.Context, cache *managedCacheLease, kind, id string, expectedBytes uint64, create bool,
+	snapshotFD int, explicitKernelImport bool, anchorFD int, retained []int,
+) (_ *protectedBackingLease, returnErr error) {
+	ownerFD := retained[len(retained)-2]
 	defer func() {
 		if returnErr != nil {
 			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
@@ -52,6 +72,23 @@ func protectBackingWithKernelImport(
 	}
 	retained = append(retained, use)
 	cacheLock, err := acquireProtectedLock(ctx, anchorFD)
+	if err != nil {
+		return nil, err
+	}
+	admissionErr := admitProtectedStoreBeforeLogical(ctx, cache, anchorFD, create)
+	if err := errors.Join(admissionErr, unix.Close(cacheLock)); err != nil {
+		return nil, err
+	}
+	// Never take the logical lock while holding the cache publication lock. The retained
+	// shared store-use authority prevents retirement between admission and publication.
+	logicalFD, logical, err := lockProtectedLogicalInAnchor(
+		ctx, cache.ownerUID, cache.identity, kind, id, create, ownerFD,
+	)
+	if err != nil {
+		return nil, err
+	}
+	retained = append(retained, logical...)
+	cacheLock, err = acquireProtectedLock(ctx, anchorFD)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +132,9 @@ func protectBackingWithKernelImport(
 		return nil, recordErr
 	}
 	if !newObject {
+		if err := validateInitialVolumeRemoval(record); err != nil {
+			return nil, err
+		}
 		if record.Version != 1 || record.Kind != kind || record.ID != id || record.Owner != cache.ownerUID ||
 			record.Cache != protectedCacheIdentity(
 				cache.identity,
@@ -223,6 +263,26 @@ func protectBackingWithKernelImport(
 	return lease, nil
 }
 
+func admitProtectedStoreBeforeLogical(ctx context.Context, cache *managedCacheLease, anchor int, create bool) error {
+	var record protectedBackingAnchor
+	err := readProtectedRecord(ctx, anchor, "store.json", &record)
+	if errors.Is(err, unix.ENOENT) && create {
+		// Only a genuinely fresh store may proceed to initial logical publication.
+		if err := protectedCacheNameAbsent(ctx, cache.cacheFD, protectedBackingDirectory); err != nil {
+			return err
+		}
+		return protectedCacheNameAbsent(ctx, anchor, protectedSnapshotLockDirectory)
+	}
+	if err != nil {
+		return err
+	}
+	store, err := pinProtectedStore(ctx, cache, anchor, false)
+	if err != nil {
+		return err
+	}
+	return unix.Close(store)
+}
+
 func pinProtectedStore(
 	ctx context.Context, cache *managedCacheLease, metadata int, create bool,
 ) (int, error) {
@@ -238,9 +298,23 @@ func pinProtectedStore(
 		}
 		identity, err := protectedIdentity(store)
 		if err == nil {
+			// Exclusive fresh creation refuses an unrecorded prior authority directory.
+			err = unix.Mkdirat(metadata, protectedSnapshotLockDirectory, 0700)
+		}
+		var locks protectedBackingIdentity
+		if err == nil {
+			var authority int
+			authority, err = openProtectedDirectory(ctx, metadata, protectedSnapshotLockDirectory, false, true)
+			if err == nil {
+				locks, err = protectedIdentity(authority)
+				err = errors.Join(err, unix.Close(authority))
+			}
+		}
+		if err == nil {
 			anchor = protectedBackingAnchor{
-				Version: 1, Owner: cache.ownerUID, OwnerGID: cache.ownerGID,
+				Version: protectedStoreLayoutVersion, Owner: cache.ownerUID, OwnerGID: cache.ownerGID,
 				Cache: protectedCacheIdentity(cache.identity), Locator: protectedLocator(cache), Store: identity,
+				SnapshotLocks: locks,
 			}
 			err = writeProtectedRecord(ctx, metadata, "store.json", anchor)
 		}
@@ -266,7 +340,10 @@ func pinProtectedStore(
 	if anchor.Retirement != nil {
 		return -1, managedVMResourceValidationError("protected store has explicit retirement authority")
 	}
-	if anchor.Version != 1 || anchor.Owner != cache.ownerUID ||
+	if err := validateProtectedStoreLayout(ctx, metadata, anchor); err != nil {
+		return -1, err
+	}
+	if anchor.Owner != cache.ownerUID ||
 		anchor.Cache != protectedCacheIdentity(cache.identity) ||
 		anchor.OwnerGID == 0 ||
 		anchor.Locator == "" {
@@ -282,6 +359,10 @@ func pinProtectedStore(
 			managedVMResourceAtomicError("protected backing store identity changed", err),
 			unix.Close(store),
 		)
+	}
+	// Seal visible fresh-layout publication and the cache entry before admitting consumers.
+	if err := errors.Join(syncProtectedCacheDirectory(ctx, metadata), syncProtectedCacheDirectory(ctx, cache.cacheFD)); err != nil {
+		return -1, errors.Join(err, unix.Close(store))
 	}
 	return store, nil
 }

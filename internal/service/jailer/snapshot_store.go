@@ -51,7 +51,7 @@ func lockSnapshotStoreEntry(
 	snapshotID string,
 	create bool,
 ) (_ *snapshotStoreEntry, returnErr error) {
-	if !isCanonicalManagedResourceID(snapshotID, 64) || store == nil || store.fd < 0 {
+	if !isCanonicalManagedResourceID(snapshotID, 64) || store == nil || store.fd < 0 || store.lockAuthorityFD < 0 {
 		return nil, instanceValidationError("snapshot store selection is incomplete")
 	}
 	entry := &snapshotStoreEntry{store: store, snapshotID: snapshotID, lockFD: -1, directoryFD: -1}
@@ -63,10 +63,31 @@ func lockSnapshotStoreEntry(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	fd, err := unix.Openat2(store.fd, snapshotID+".lock", &unix.OpenHow{
-		Flags: unix.O_RDWR | unix.O_CREAT | unix.O_CLOEXEC | unix.O_NOFOLLOW, Mode: 0600,
-		Resolve: managedVMResourceResolveFlags,
-	})
+	flags := unix.O_RDWR
+	existingData := false
+	if create {
+		var existing unix.Stat_t
+		err := unix.Fstatat(store.fd, snapshotID, &existing, unix.AT_SYMLINK_NOFOLLOW)
+		if err != nil && !errors.Is(err, unix.ENOENT) {
+			return nil, managedVMResourceAtomicError("snapshot capture cannot replace existing data", err)
+		}
+		existingData = err == nil
+		if !existingData {
+			flags |= unix.O_CREAT | unix.O_EXCL
+		}
+	}
+	fd, err := openProtectedFile(ctx, store.lockAuthorityFD, snapshotID+".lock", flags)
+	if create && errors.Is(err, unix.EEXIST) {
+		fd, err = openProtectedFile(ctx, store.lockAuthorityFD, snapshotID+".lock", unix.O_RDWR)
+	}
+	if !create && errors.Is(err, unix.ENOENT) {
+		var existing unix.Stat_t
+		if statErr := unix.Fstatat(store.fd, snapshotID, &existing, unix.AT_SYMLINK_NOFOLLOW); statErr == nil {
+			return nil, instanceValidationError("snapshot data has missing permanent lock authority")
+		} else if !errors.Is(statErr, unix.ENOENT) {
+			return nil, statErr
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +101,13 @@ func lockSnapshotStoreEntry(
 	}
 	if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return nil, managedVMResourceAtomicError("snapshot already has an active operation", err)
+	}
+	if existingData {
+		return nil, managedVMResourceAtomicError("snapshot capture cannot replace existing data", unix.EEXIST)
+	}
+	// Also seal a prior visible creation whose parent synchronization failed.
+	if err := errors.Join(unix.Fsync(fd), unix.Fsync(store.lockAuthorityFD)); err != nil {
+		return nil, err
 	}
 	if create {
 		if err := unix.Mkdirat(store.fd, snapshotID, 0700); err != nil {

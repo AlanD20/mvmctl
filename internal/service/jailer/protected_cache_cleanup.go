@@ -117,6 +117,9 @@ func retireProtectedCacheWithCapture(ctx context.Context, cache *managedCacheLea
 	if err := requireProtectedCleanupCache(ctx, cache, record); err != nil {
 		return err
 	}
+	if err := validateProtectedStoreLayout(ctx, anchor, record); err != nil {
+		return err
+	}
 	plan := &protectedCacheCleanupPlan{
 		cache:      cache,
 		anchor:     anchor,
@@ -161,11 +164,19 @@ func requireProtectedCleanupCache(ctx context.Context, cache *managedCacheLease,
 	if err := unix.Fstat(cache.cacheFD, &stat); err != nil {
 		return err
 	}
-	if record.Version != 1 || record.Owner != cache.ownerUID || record.OwnerGID != cache.ownerGID ||
-		record.Cache != protectedCacheIdentity(cache.identity) || record.Locator != protectedLocator(cache) ||
-		record.Store.Inode == 0 || stat.Uid != cache.ownerUID || stat.Gid != cache.ownerGID ||
-		stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Mode&07022 != 0 ||
-		uint64(stat.Dev) != unix.Mkdev(record.Cache.Major, record.Cache.Minor) || stat.Ino != record.Cache.Inode {
+	if record.Version != protectedStoreLayoutVersion ||
+		record.SnapshotLocks.Inode == 0 ||
+		record.Owner != cache.ownerUID ||
+		record.OwnerGID != cache.ownerGID ||
+		record.Cache != protectedCacheIdentity(cache.identity) ||
+		record.Locator != protectedLocator(cache) ||
+		record.Store.Inode == 0 ||
+		stat.Uid != cache.ownerUID ||
+		stat.Gid != cache.ownerGID ||
+		stat.Mode&unix.S_IFMT != unix.S_IFDIR ||
+		stat.Mode&07022 != 0 ||
+		uint64(stat.Dev) != unix.Mkdev(record.Cache.Major, record.Cache.Minor) ||
+		stat.Ino != record.Cache.Inode {
 		return managedVMResourceValidationError("protected cleanup cache or anchor identity changed")
 	}
 	if record.Retirement != nil {
@@ -200,6 +211,9 @@ func validProtectedCleanupDirectory(directory protectedCacheDirectory) bool {
 		return protectedKindIDLength(directory.Name) != 0 || directory.Name == "snapshots" ||
 			directory.Name == "volume-removals"
 	}
+	if directory.Parent == "volume-removals" {
+		return isCanonicalManagedResourceID(directory.Name, 64)
+	}
 	return isCanonicalManagedResourceID(directory.Name, protectedKindIDLength(directory.Parent)) &&
 		protectedKindIDLength(directory.Parent) != 0
 }
@@ -231,6 +245,9 @@ func protectedCleanupNames(ctx context.Context, fd int) (_ []string, returnErr e
 }
 
 func (plan *protectedCacheCleanupPlan) preflight(ctx context.Context, owner int) error {
+	if err := plan.preflightSnapshotLockAuthority(ctx); err != nil {
+		return err
+	}
 	if err := plan.locate(ctx); err != nil {
 		return err
 	}
@@ -258,7 +275,7 @@ func (plan *protectedCacheCleanupPlan) preflight(ctx context.Context, owner int)
 			}
 		}
 	}
-	for _, branch := range []string{"snapshots", "volume-removals"} {
+	for _, branch := range []string{"snapshots"} {
 		if fd, exists := plan.opened[protectedCleanupKey("", branch)]; exists {
 			names, err := protectedCleanupNames(ctx, fd)
 			if err != nil {
@@ -317,6 +334,9 @@ func (plan *protectedCacheCleanupPlan) preflightKind(ctx context.Context, owner 
 		if _, exists := plan.opened[protectedCleanupKey("", kind)]; exists {
 			return managedVMResourceValidationError("protected cleanup data category has no authority")
 		}
+		if kind == protectedBackingVolume {
+			return plan.preflightVolumeQuarantines(ctx, map[string]protectedBackingIdentity{})
+		}
 		return nil
 	}
 	if err != nil {
@@ -328,6 +348,7 @@ func (plan *protectedCacheCleanupPlan) preflightKind(ctx context.Context, owner 
 		return err
 	}
 	expected := make(map[string]protectedBackingIdentity)
+	expectedQuarantines := make(map[string]protectedBackingIdentity)
 	for _, id := range ids {
 		if !isCanonicalManagedResourceID(id, protectedKindIDLength(kind)) {
 			return managedVMResourceValidationError("protected cleanup metadata contains an unknown object")
@@ -368,6 +389,20 @@ func (plan *protectedCacheCleanupPlan) preflightKind(ctx context.Context, owner 
 			record.Cache != plan.record.Cache || len(record.References) != 0 || len(record.NextReferences) != 0 ||
 			(record.Phase != "removed" && (kind != protectedBackingKernel || record.Phase != "kernel-unprotected-removed")) {
 			return managedVMResourceValidationError("protected cleanup object is not authoritatively retired")
+		}
+		if err := validateInitialVolumeRemoval(record); err != nil {
+			return err
+		}
+		if kind == protectedBackingVolume {
+			if !record.SnapshotSource && record.InitialRemoval == nil {
+				return managedVMResourceValidationError("protected cleanup volume source removal is incomplete")
+			}
+			if record.InitialRemoval != nil {
+				expectedQuarantines[id] = record.InitialRemoval.Quarantine
+				if err := unix.Fsync(metadata); err != nil {
+					return err
+				}
+			}
 		}
 		// These are root's authoritative grants, not a public database projection. Empty snapshot
 		// branches above additionally prove that no snapshot authority retains any backing.
@@ -415,6 +450,90 @@ func (plan *protectedCacheCleanupPlan) preflightKind(ctx context.Context, owner 
 			return managedVMResourceValidationError("protected cleanup recorded object directory is missing")
 		}
 	}
+	if kind == protectedBackingVolume {
+		return plan.preflightVolumeQuarantines(ctx, expectedQuarantines)
+	}
+	return nil
+}
+
+func (plan *protectedCacheCleanupPlan) preflightSnapshotLockAuthority(ctx context.Context) error {
+	authority, err := pinProtectedSnapshotLockAuthority(ctx, plan.anchor, plan.record)
+	if err != nil {
+		return err
+	}
+	plan.retained = append(plan.retained, authority)
+	names, err := protectedCleanupNames(ctx, authority)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		id, canonical := strings.CutSuffix(name, ".lock")
+		if !canonical || !isCanonicalManagedResourceID(id, 64) {
+			return managedVMResourceValidationError("protected snapshot lock inventory contains an unknown entry")
+		}
+		fd, err := openProtectedFile(ctx, authority, name, unix.O_RDWR)
+		if err != nil {
+			return err
+		}
+		plan.retained = append(plan.retained, fd)
+		var stat, named unix.Stat_t
+		if err := unix.Fstat(fd, &stat); err != nil {
+			return err
+		}
+		if stat.Size != 0 || stat.Mode != unix.S_IFREG|0600 {
+			return managedVMResourceValidationError("protected snapshot lock metadata changed")
+		}
+		if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
+			return managedVMResourceAtomicError("snapshot retains an active operation", err)
+		}
+		if err := unix.Fstatat(authority, name, &named, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return err
+		}
+		if stat.Dev != named.Dev || stat.Ino != named.Ino || named.Uid != 0 || named.Gid != 0 ||
+			named.Mode != unix.S_IFREG|0600 || named.Nlink != 1 || named.Size != 0 {
+			return managedVMResourceValidationError("protected snapshot lock identity changed")
+		}
+	}
+	return nil
+}
+
+func (plan *protectedCacheCleanupPlan) preflightVolumeQuarantines(
+	ctx context.Context,
+	expected map[string]protectedBackingIdentity,
+) error {
+	if branch, exists := plan.opened[protectedCleanupKey("", "volume-removals")]; exists {
+		ids, err := protectedCleanupNames(ctx, branch)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			identity, exists := expected[id]
+			if !exists || !isCanonicalManagedResourceID(id, 64) {
+				return managedVMResourceValidationError("volume quarantine has no terminal source-removal authority")
+			}
+			if err := plan.openDirectory(ctx, branch, "volume-removals", id); err != nil {
+				return err
+			}
+			fd := plan.opened[protectedCleanupKey("volume-removals", id)]
+			actual, err := protectedIdentity(fd)
+			if err != nil || !sameProtectedNode(identity, actual) {
+				return managedVMResourceAtomicError("volume quarantine identity changed", err)
+			}
+			leaves, err := protectedCleanupNames(ctx, fd)
+			if err != nil {
+				return err
+			}
+			if len(leaves) != 0 {
+				return managedVMResourceValidationError("volume quarantine is not empty")
+			}
+			delete(expected, id)
+		}
+	}
+	for id, identity := range expected {
+		if !plan.recordedDirectory(protectedCacheDirectory{Parent: "volume-removals", Name: id, Identity: identity}) {
+			return managedVMResourceValidationError("recorded terminal volume quarantine is missing")
+		}
+	}
 	return nil
 }
 
@@ -439,7 +558,9 @@ func (plan *protectedCacheCleanupPlan) removeParents(ctx context.Context) error 
 		}
 	}
 	if plan.store >= 0 {
-		if err := removeProtectedEmptyDirectory(ctx, plan.quarantine, protectedCacheCapturedStore, plan.record.Store); err != nil {
+		if err := removeProtectedEmptyDirectory(
+			ctx, plan.quarantine, protectedCacheCapturedStore, plan.record.Store,
+		); err != nil {
 			return err
 		}
 	}

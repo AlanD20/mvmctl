@@ -97,8 +97,14 @@ func newProtectedImportCancellationFixture(
 	}
 	storeIdentity, err := protectedIdentity(retained[4])
 	require.NoError(t, err)
+	locks, err := openProtectedDirectory(t.Context(), retained[2], protectedSnapshotLockDirectory, true, true)
+	require.NoError(t, err)
+	locksIdentity, err := protectedIdentity(locks)
+	require.NoError(t, err)
+	require.NoError(t, unix.Close(locks))
 	require.NoError(t, writeProtectedRecord(t.Context(), retained[2], "store.json", protectedBackingAnchor{
-		Version: 1, Owner: 1000, OwnerGID: 1000, Cache: record.Cache, Locator: root, Store: storeIdentity,
+		Version: protectedStoreLayoutVersion, Owner: 1000, OwnerGID: 1000, Cache: record.Cache, Locator: root, Store: storeIdentity,
+		SnapshotLocks: locksIdentity,
 	}))
 	require.NoError(t, writeProtectedRecord(t.Context(), retained[2], "record.json", record))
 	require.NoError(t, writeProtectedRecord(t.Context(), retained[3], "logical.json", protectedLogicalRecord{

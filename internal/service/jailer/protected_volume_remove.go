@@ -1,18 +1,14 @@
 package jailer
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"math"
-	"os"
 
 	"golang.org/x/sys/unix"
 )
 
-// The receipt precedes namespace mutation; captured precedes unlink. A crash never permits re-import.
+// Permanent receipt authority lives in the external volume record; raw capture stays on cache FS.
 type initialVolumeRemovalReceipt struct {
 	Schema               int    `json:"schema"`
 	VolumeID             string `json:"volume_id"`
@@ -30,24 +26,82 @@ type initialVolumeRemovalReceipt struct {
 	DirectoryMountID     uint64 `json:"directory_mount_id"`
 }
 
-// protectedSourcePresent admits only the original mvm-created source inode. A caller
-// that replaced or changed it retains that file; root must not remove it by pathname.
+type initialVolumeRemovalProgress struct {
+	Phase        string                       `json:"phase"`
+	Quarantine   protectedBackingIdentity     `json:"quarantine"`
+	Receipt      *initialVolumeRemovalReceipt `json:"receipt,omitempty"`
+	SourceAbsent bool                         `json:"source_absent"`
+}
+
+func validateInitialVolumeRemoval(record protectedBackingRecord) error {
+	progress := record.InitialRemoval
+	if progress == nil {
+		if record.Phase == "initial-removing" {
+			return managedVMResourceValidationError("initial volume removal authority is missing")
+		}
+		return nil
+	}
+	if record.Kind != protectedBackingVolume || record.SnapshotSource ||
+		(record.Phase != "initial-removing" && record.Phase != "removed") ||
+		len(record.References) != 0 || len(record.NextReferences) != 0 {
+		return managedVMResourceValidationError("initial volume removal authority conflicts with backing")
+	}
+	switch progress.Phase {
+	case "preparing":
+		if progress.Receipt != nil || progress.SourceAbsent {
+			return managedVMResourceValidationError("initial volume preparation authority is invalid")
+		}
+	case "prepared", "captured":
+		if progress.Quarantine.Inode == 0 || progress.Receipt == nil || progress.SourceAbsent {
+			return managedVMResourceValidationError("initial volume capture authority is incomplete")
+		}
+	case "removed":
+		if record.Phase != "removed" || progress.Quarantine.Inode == 0 ||
+			(progress.Receipt == nil) != progress.SourceAbsent {
+			return managedVMResourceValidationError("initial volume terminal authority is incomplete")
+		}
+	default:
+		return managedVMResourceValidationError("initial volume removal phase is invalid")
+	}
+	if record.Phase == "removed" && progress.Phase != "removed" {
+		return managedVMResourceValidationError("initial volume backing completed before source removal")
+	}
+	if receipt := progress.Receipt; receipt != nil {
+		if receipt.Schema != 1 || receipt.VolumeID != record.ID || receipt.UID != record.Owner ||
+			receipt.Inode == 0 || receipt.MountID == 0 ||
+			receipt.DirectoryInode == 0 || receipt.DirectoryMountID == 0 || receipt.Size == 0 ||
+			receipt.Size > math.MaxInt64 || receipt.Mode&unix.S_IFMT != unix.S_IFREG ||
+			receipt.Mode&0600 != 0600 || receipt.Mode&07133 != 0 {
+			return managedVMResourceValidationError("initial volume removal receipt is invalid")
+		}
+	}
+	return nil
+}
+
+// Changed/replaced staging remains caller-owned evidence rather than deletion authority.
 func (storage *protectedVolumeStorage) protectedSourcePresent(
-	ctx context.Context, id string,
+	ctx context.Context,
+	id string,
 ) (_ bool, returnErr error) {
 	record := storage.backing.record
 	if record.Source.Inode == 0 || record.SnapshotSource {
 		return false, managedVMResourceValidationError("protected volume has no managed raw source")
 	}
-	directory, err := openManagedVMResourceDirectory(ctx, storage.cache.deps, storage.cache.cacheFD,
-		"volumes", "volume store", storage.cache.ownerUID)
+	directory, err := openManagedVMResourceDirectory(
+		ctx,
+		storage.cache.deps,
+		storage.cache.cacheFD,
+		"volumes",
+		"volume store",
+		storage.cache.ownerUID,
+	)
 	if err != nil {
 		return false, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, unix.Close(directory)) }()
 	var named unix.Stat_t
 	if err := unix.Fstatat(directory, id+".raw", &named, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
-		return false, syncInitialVolumeDirectory(directory)
+		return false, syncInitialVolumeDirectory(ctx, directory)
 	} else if err != nil {
 		return false, err
 	}
@@ -69,103 +123,103 @@ func requireProtectedSourceIdentity(record protectedBackingRecord, raw *initialR
 	if record.SourceCTimeSec == 0 || record.Source.Size <= 0 ||
 		unix.Mkdev(raw.identity.deviceMajor, raw.identity.deviceMinor) != record.Source.Device ||
 		raw.identity.inode != record.Source.Inode || raw.identity.size != uint64(record.Source.Size) ||
-		raw.identity.ctime.Sec != record.SourceCTimeSec ||
-		int64(raw.identity.ctime.Nsec) != record.SourceCTimeNsec {
+		raw.identity.ctime.Sec != record.SourceCTimeSec || int64(raw.identity.ctime.Nsec) != record.SourceCTimeNsec {
 		return managedVMResourceValidationError("managed raw volume source changed after protection")
 	}
 	return nil
 }
 
 func (storage *protectedVolumeStorage) removeInitialRaw(ctx context.Context, id string) (returnErr error) {
+	if err := validateInitialVolumeRemoval(storage.backing.record); err != nil {
+		return err
+	}
+	if progress := storage.backing.record.InitialRemoval; progress != nil && progress.Phase == "removed" {
+		// Seal a visible terminal publication; never inspect/adopt a replacement caller source.
+		return syncProtectedCacheDirectory(ctx, storage.backing.metadataFD)
+	}
+	store, err := openProtectedStoreBranch(ctx, storage.cache, "volume-removals", true)
+	if err != nil {
+		return err
+	}
+	defer func() { returnErr = errors.Join(returnErr, store.Release(context.WithoutCancel(ctx))) }()
+	return storage.removeInitialRawFromStore(ctx, id, store)
+}
+
+// The production coordinator consumes the selected cache's already admitted root branch lease.
+func (storage *protectedVolumeStorage) removeInitialRawFromStore(ctx context.Context, id string,
+	store *protectedSnapshotStoreLease) (returnErr error) {
+	if err := validateInitialVolumeRemoval(storage.backing.record); err != nil {
+		return err
+	}
+	if progress := storage.backing.record.InitialRemoval; progress != nil && progress.Phase == "removed" {
+		return syncProtectedCacheDirectory(ctx, storage.backing.metadataFD)
+	}
+	if storage.backing.record.InitialRemoval == nil {
+		if store == nil || store.fd < 0 || store.released || store.branch != "volume-removals" ||
+			store.cacheIdentity != storage.cache.identity || store.ownerUID != storage.cache.ownerUID {
+			return managedVMResourceValidationError("initial volume removal branch authority conflicts")
+		}
+		if err := protectedCacheNameAbsent(ctx, store.fd, id); err != nil {
+			return err
+		}
+	}
 	if err := storage.backing.BeginInitialVolumeRemoval(ctx); err != nil {
 		return err
 	}
-	quarantine, err := storage.backing.openInitialVolumeQuarantine(ctx, storage.cache)
+	// Seal a prior visible record rename before any resumed nonterminal effect.
+	if err := syncProtectedCacheDirectory(ctx, storage.backing.metadataFD); err != nil {
+		return err
+	}
+	quarantine, err := storage.backing.openInitialVolumeQuarantine(ctx, storage.cache, store)
 	if err != nil {
 		return err
 	}
-	entries, err := initialVolumeRemovalEntries(quarantine)
+	entries, err := initialVolumeRemovalEntries(ctx, quarantine)
 	if err != nil {
 		return err
 	}
-	var receipt initialVolumeRemovalReceipt
-	if entries["receipt.json"] {
-		receipt, err = readInitialVolumeRemovalReceipt(ctx, quarantine, id, storage.cache.ownerUID)
+	progress := storage.backing.record.InitialRemoval
+	if progress.Phase == "preparing" {
+		if len(entries) != 0 {
+			return managedVMResourceValidationError("initial volume preparation retains unrecorded data")
+		}
+		receipt, absent, err := storage.prepareInitialVolumeReceipt(ctx, id)
 		if err != nil {
 			return err
 		}
-	} else {
-		if entries["data.raw"] || entries["captured"] {
-			return managedVMResourceValidationError("initial volume quarantine has no removal receipt")
-		}
-		if storage.backing.record.Source.Inode != 0 {
-			present, err := storage.protectedSourcePresent(ctx, id)
-			if err != nil {
+		if absent {
+			if err := unix.Fsync(quarantine); err != nil {
 				return err
 			}
-			if !present {
-				return storage.backing.CommitInitialVolumeRemoval(ctx)
-			}
+			return storage.backing.CommitInitialVolumeRemoval(ctx, true)
 		}
-		raw, err := storage.openInitialRaw(ctx, id, false)
-		if err != nil {
-			return err
-		}
-		defer func() { returnErr = errors.Join(returnErr, raw.Release()) }()
-		if storage.backing.record.Source.Inode != 0 {
-			if err := requireProtectedSourceIdentity(storage.backing.record, raw); err != nil {
-				return err
-			}
-		}
-		if err := raw.requireCurrentName(ctx, storage.cache); err != nil {
-			return err
-		}
-		directory, err := stableManagedVMConfigStat(ctx, storage.cache.configDeps, raw.directory)
-		if err != nil {
-			return err
-		}
-		directoryMount, err := initialVolumeMountID(raw.directory)
-		if err != nil {
-			return err
-		}
-		receipt = initialVolumeRemovalReceipt{
-			Schema: 1, VolumeID: id, DeviceMajor: raw.identity.deviceMajor, DeviceMinor: raw.identity.deviceMinor,
-			Inode: raw.identity.inode, MountID: raw.mountID, UID: raw.identity.uid, GID: raw.identity.gid,
-			Mode: raw.identity.mode, Size: raw.identity.size,
-			DirectoryDeviceMajor: directory.deviceMajor, DirectoryDeviceMinor: directory.deviceMinor,
-			DirectoryInode: directory.inode, DirectoryMountID: directoryMount,
-		}
-		payload, err := json.Marshal(receipt)
-		if err != nil {
-			return err
-		}
-		if err := writeInitialVolumeRemovalFile(ctx, quarantine, "receipt.json", payload); err != nil {
+		progress.Receipt, progress.Phase = &receipt, "prepared"
+		if err := writeProtectedRecord(ctx, storage.backing.metadataFD, "record.json", storage.backing.record); err != nil {
 			return err
 		}
 	}
-
-	directory, err := openManagedVMResourceDirectory(ctx, storage.cache.deps, storage.cache.cacheFD,
-		"volumes", "volume store", storage.cache.ownerUID)
+	receipt := *progress.Receipt
+	directory, err := storage.openInitialRemovalSourceDirectory(ctx, receipt)
 	if err != nil {
 		return err
 	}
 	defer func() { returnErr = errors.Join(returnErr, unix.Close(directory)) }()
-	directoryStat, err := stableManagedVMConfigStat(ctx, storage.cache.configDeps, directory)
-	if err != nil {
-		return err
-	}
-	directoryMount, err := initialVolumeMountID(directory)
-	if err != nil {
-		return err
-	}
-	if directoryStat.deviceMajor != receipt.DirectoryDeviceMajor ||
-		directoryStat.deviceMinor != receipt.DirectoryDeviceMinor ||
-		directoryStat.inode != receipt.DirectoryInode ||
-		directoryMount != receipt.DirectoryMountID {
-		return managedVMResourceValidationError("initial volume source directory changed during removal")
-	}
-	if !entries["captured"] {
+	if progress.Phase == "prepared" {
 		if !entries["data.raw"] {
+			if storage.backing.record.Source.Inode != 0 {
+				raw, err := storage.openInitialRaw(ctx, id, false)
+				if err != nil {
+					return err
+				}
+				err = errors.Join(
+					requireProtectedSourceIdentity(storage.backing.record, raw),
+					raw.requireCurrentName(ctx, storage.cache),
+					raw.Release(),
+				)
+				if err != nil {
+					return err
+				}
+			}
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -176,17 +230,13 @@ func (storage *protectedVolumeStorage) removeInitialRaw(ctx context.Context, id 
 		if err := matchInitialVolumeQuarantine(ctx, quarantine, receipt); err != nil {
 			return err
 		}
-		if err := syncInitialVolumeDirectory(directory); err != nil {
+		if err := errors.Join(syncInitialVolumeDirectory(ctx, directory), unix.Fsync(quarantine)); err != nil {
 			return err
 		}
-		if err := unix.Fsync(quarantine); err != nil {
+		progress.Phase = "captured"
+		if err := writeProtectedRecord(ctx, storage.backing.metadataFD, "record.json", storage.backing.record); err != nil {
 			return err
 		}
-		if err := writeInitialVolumeRemovalFile(ctx, quarantine, "captured", nil); err != nil {
-			return err
-		}
-	} else if err := requireInitialVolumeCapturedMarker(quarantine); err != nil {
-		return err
 	}
 	if err := matchInitialVolumeQuarantine(ctx, quarantine, receipt); err == nil {
 		if err := ctx.Err(); err != nil {
@@ -201,82 +251,104 @@ func (storage *protectedVolumeStorage) removeInitialRaw(ctx context.Context, id 
 	if err := unix.Fsync(quarantine); err != nil {
 		return err
 	}
-	return storage.backing.CommitInitialVolumeRemoval(ctx)
+	return storage.backing.CommitInitialVolumeRemoval(ctx, false)
 }
 
-func initialVolumeRemovalEntries(directory int) (_ map[string]bool, returnErr error) {
-	fd, err := unix.Openat(directory, ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+func (storage *protectedVolumeStorage) prepareInitialVolumeReceipt(
+	ctx context.Context,
+	id string,
+) (_ initialVolumeRemovalReceipt, _ bool, returnErr error) {
+	directory, err := openManagedVMResourceDirectory(
+		ctx,
+		storage.cache.deps,
+		storage.cache.cacheFD,
+		"volumes",
+		"volume store",
+		storage.cache.ownerUID,
+	)
 	if err != nil {
-		return nil, err
+		return initialVolumeRemovalReceipt{}, false, err
 	}
-	file := os.NewFile(uintptr(fd), "initial volume removal quarantine")
-	defer func() { returnErr = errors.Join(returnErr, file.Close()) }()
-	names, err := file.Readdirnames(4)
-	if err != nil && err != io.EOF {
-		return nil, err
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(directory)) }()
+	var named unix.Stat_t
+	if err := unix.Fstatat(directory, id+".raw", &named, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		return initialVolumeRemovalReceipt{}, true, syncInitialVolumeDirectory(ctx, directory)
+	} else if err != nil {
+		return initialVolumeRemovalReceipt{}, false, err
 	}
-	entries := make(map[string]bool, len(names))
-	for _, name := range names {
-		switch name {
-		case "receipt.json", "data.raw", "captured":
-			entries[name] = true
-		default:
-			return nil, managedVMResourceValidationError("unknown initial volume quarantine entry")
+	raw, err := storage.openInitialRaw(ctx, id, false)
+	if err != nil {
+		return initialVolumeRemovalReceipt{}, false, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, raw.Release()) }()
+	if storage.backing.record.Source.Inode != 0 {
+		if err := requireProtectedSourceIdentity(storage.backing.record, raw); err != nil {
+			return initialVolumeRemovalReceipt{}, false, err
 		}
 	}
-	return entries, nil
+	if err := raw.requireCurrentName(ctx, storage.cache); err != nil {
+		return initialVolumeRemovalReceipt{}, false, err
+	}
+	stat, err := stableManagedVMConfigStat(ctx, storage.cache.configDeps, raw.directory)
+	if err != nil {
+		return initialVolumeRemovalReceipt{}, false, err
+	}
+	mount, err := initialVolumeMountID(raw.directory)
+	if err != nil {
+		return initialVolumeRemovalReceipt{}, false, err
+	}
+	return initialVolumeRemovalReceipt{Schema: 1, VolumeID: id, DeviceMajor: raw.identity.deviceMajor,
+		DeviceMinor: raw.identity.deviceMinor, Inode: raw.identity.inode, MountID: raw.mountID,
+		UID: raw.identity.uid, GID: raw.identity.gid, Mode: raw.identity.mode, Size: raw.identity.size,
+		DirectoryDeviceMajor: stat.deviceMajor, DirectoryDeviceMinor: stat.deviceMinor,
+		DirectoryInode: stat.inode, DirectoryMountID: mount}, false, nil
 }
 
-func readInitialVolumeRemovalReceipt(
-	ctx context.Context, directory int, id string, uid uint32,
-) (_ initialVolumeRemovalReceipt, returnErr error) {
-	if err := ctx.Err(); err != nil {
-		return initialVolumeRemovalReceipt{}, err
-	}
-	fd, err := unix.Openat(directory, "receipt.json", unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NONBLOCK|unix.O_NOFOLLOW, 0)
+func (storage *protectedVolumeStorage) openInitialRemovalSourceDirectory(
+	ctx context.Context,
+	receipt initialVolumeRemovalReceipt,
+) (int, error) {
+	directory, err := openManagedVMResourceDirectory(
+		ctx,
+		storage.cache.deps,
+		storage.cache.cacheFD,
+		"volumes",
+		"volume store",
+		storage.cache.ownerUID,
+	)
 	if err != nil {
-		return initialVolumeRemovalReceipt{}, err
+		return -1, err
 	}
-	file := os.NewFile(uintptr(fd), "initial volume removal receipt")
-	defer func() { returnErr = errors.Join(returnErr, file.Close()) }()
-	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil {
-		return initialVolumeRemovalReceipt{}, err
+	stat, err := stableManagedVMConfigStat(ctx, storage.cache.configDeps, directory)
+	if err != nil {
+		return -1, errors.Join(err, unix.Close(directory))
 	}
-	if stat.Mode != unix.S_IFREG|0600 || stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 || stat.Size <= 0 ||
-		stat.Size > 4096 {
-		return initialVolumeRemovalReceipt{}, managedVMResourceValidationError(
-			"initial volume removal receipt metadata is invalid",
+	mount, err := initialVolumeMountID(directory)
+	if err != nil || stat.deviceMajor != receipt.DirectoryDeviceMajor ||
+		stat.deviceMinor != receipt.DirectoryDeviceMinor ||
+		stat.inode != receipt.DirectoryInode ||
+		mount != receipt.DirectoryMountID {
+		return -1, errors.Join(
+			managedVMResourceAtomicError("initial volume source directory changed during removal", err),
+			unix.Close(directory),
 		)
 	}
-	payload, err := io.ReadAll(io.LimitReader(file, 4097))
+	return directory, nil
+}
+
+func initialVolumeRemovalEntries(ctx context.Context, directory int) (map[string]bool, error) {
+	names, err := protectedCleanupNames(ctx, directory)
 	if err != nil {
-		return initialVolumeRemovalReceipt{}, err
+		return nil, err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.DisallowUnknownFields()
-	var receipt initialVolumeRemovalReceipt
-	if err := decoder.Decode(&receipt); err != nil {
-		return receipt, err
+	entries := make(map[string]bool)
+	for _, name := range names {
+		if name != "data.raw" {
+			return nil, managedVMResourceValidationError("unknown or old-layout initial volume quarantine entry")
+		}
+		entries[name] = true
 	}
-	if _, err := decoder.Token(); err != io.EOF {
-		return receipt, managedVMResourceValidationError("initial volume removal receipt has trailing content")
-	}
-	if receipt.Schema != 1 ||
-		receipt.VolumeID != id ||
-		receipt.UID != uid ||
-		receipt.Inode == 0 ||
-		receipt.MountID == 0 ||
-		receipt.DirectoryInode == 0 ||
-		receipt.DirectoryMountID == 0 ||
-		receipt.Size == 0 ||
-		receipt.Size > math.MaxInt64 ||
-		receipt.Mode&unix.S_IFMT != unix.S_IFREG ||
-		receipt.Mode&0600 != 0600 ||
-		receipt.Mode&07133 != 0 {
-		return receipt, managedVMResourceValidationError("initial volume removal receipt is invalid")
-	}
-	return receipt, nil
+	return entries, nil
 }
 
 func matchInitialVolumeQuarantine(
@@ -284,6 +356,9 @@ func matchInitialVolumeQuarantine(
 	directory int,
 	receipt initialVolumeRemovalReceipt,
 ) (returnErr error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fd, err := unix.Openat(directory, "data.raw", unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return err
@@ -293,70 +368,24 @@ func matchInitialVolumeQuarantine(
 	if err != nil {
 		return err
 	}
-	mountID, err := initialVolumeMountID(fd)
+	mount, err := initialVolumeMountID(fd)
 	if err != nil {
 		return err
 	}
-	if identity.deviceMajor != receipt.DeviceMajor || identity.deviceMinor != receipt.DeviceMinor ||
-		identity.inode != receipt.Inode || identity.uid != receipt.UID || identity.gid != receipt.GID ||
-		identity.mode != receipt.Mode || identity.size != receipt.Size || identity.nlink != 1 || mountID != receipt.MountID {
+	if identity.deviceMajor != receipt.DeviceMajor ||
+		identity.deviceMinor != receipt.DeviceMinor ||
+		identity.inode != receipt.Inode ||
+		identity.uid != receipt.UID ||
+		identity.gid != receipt.GID ||
+		identity.mode != receipt.Mode ||
+		identity.size != receipt.Size ||
+		identity.nlink != 1 ||
+		mount != receipt.MountID {
 		return managedVMResourceValidationError("quarantined volume differs from removal receipt; contents retained")
 	}
 	return nil
 }
 
-func writeInitialVolumeRemovalFile(ctx context.Context, directory int, name string, payload []byte) (returnErr error) {
-	if name != "receipt.json" && name != "captured" {
-		return managedVMResourceValidationError("unknown initial volume removal metadata")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	fd, err := unix.Openat(directory, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
-	if err != nil {
-		return err
-	}
-	defer func() { returnErr = errors.Join(returnErr, unix.Close(fd)) }()
-	for len(payload) > 0 {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		n, err := unix.Write(fd, payload)
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return io.ErrShortWrite
-		}
-		payload = payload[n:]
-	}
-	if err := unix.Fsync(fd); err != nil {
-		return err
-	}
-	return unix.Fsync(directory)
-}
-
-func requireInitialVolumeCapturedMarker(directory int) (returnErr error) {
-	fd, err := unix.Openat(directory, "captured", unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
-	if err != nil {
-		return err
-	}
-	defer func() { returnErr = errors.Join(returnErr, unix.Close(fd)) }()
-	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil {
-		return err
-	}
-	if stat.Mode != unix.S_IFREG|0600 || stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 || stat.Size != 0 {
-		return managedVMResourceValidationError("initial volume captured marker is invalid")
-	}
-	return nil
-}
-
-func syncInitialVolumeDirectory(directory int) (returnErr error) {
-	fd, err := unix.Openat(directory, ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
-	if err != nil {
-		return err
-	}
-	defer func() { returnErr = errors.Join(returnErr, unix.Close(fd)) }()
-	return unix.Fsync(fd)
+func syncInitialVolumeDirectory(ctx context.Context, directory int) error {
+	return syncProtectedCacheDirectory(ctx, directory)
 }

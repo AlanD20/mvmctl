@@ -339,7 +339,11 @@ func TestProtectedKernelRootSnapshotReferences(t *testing.T) {
 			require.NoError(t, os.Chmod(root, 0700))
 			fd, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 			require.NoError(t, err)
-			store := &protectedSnapshotStoreLease{fd: fd, retained: []int{fd}}
+			locks, err := openProtectedDirectory(t.Context(), fd, protectedSnapshotLockDirectory, true, true)
+			require.NoError(t, err)
+			data, err := openProtectedDirectory(t.Context(), fd, "snapshots", true, true)
+			require.NoError(t, err)
+			store := &protectedSnapshotStoreLease{fd: data, lockAuthorityFD: locks, retained: []int{fd, locks, data}}
 			t.Cleanup(func() { require.NoError(t, store.Release(context.Background())) })
 			snapshotID := strings.Repeat("f", 64)
 			entry, err := lockSnapshotStoreEntry(t.Context(), store, snapshotID, true)

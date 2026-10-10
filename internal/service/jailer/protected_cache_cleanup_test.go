@@ -27,6 +27,10 @@ type protectedCacheCleanupFixture struct {
 // The fixture models the real root-owned anchor/logical layout with admitted cache descriptors.
 // Cleanup admission, durable metadata and rmdir effects are production code, confined to QA tmp.
 func newProtectedCacheCleanupFixture(t *testing.T) *protectedCacheCleanupFixture {
+	return newProtectedCacheCleanupFixtureOnFilesystem(t, false)
+}
+
+func newProtectedCacheCleanupFixtureOnFilesystem(t *testing.T, distinct bool) *protectedCacheCleanupFixture {
 	t.Helper()
 	if os.Geteuid() != 0 || os.Getegid() != 0 {
 		t.Skip("protected cache effects require the disposable root-test VM")
@@ -37,6 +41,10 @@ func newProtectedCacheCleanupFixture(t *testing.T) *protectedCacheCleanupFixture
 	f.anchorPath = filepath.Join(f.ownerPath, "cache-anchor")
 	for _, path := range []string{f.cachePath, f.ownerPath, f.anchorPath} {
 		require.NoError(t, os.Mkdir(path, 0700))
+	}
+	if distinct {
+		require.NoError(t, unix.Mount("tmpfs", f.cachePath, "tmpfs", 0, "mode=0700"))
+		t.Cleanup(func() { require.NoError(t, unix.Unmount(f.cachePath, 0)) })
 	}
 	require.NoError(t, os.Chown(f.cachePath, 1000, 1000))
 	var retained []int
@@ -63,8 +71,13 @@ func newProtectedCacheCleanupFixture(t *testing.T) *protectedCacheCleanupFixture
 	require.NoError(t, os.Mkdir(store, 0700))
 	storeIdentity, err := protectedIdentity(open(store))
 	require.NoError(t, err)
-	f.record = protectedBackingAnchor{Version: 1, Owner: 1000, OwnerGID: 1000,
+	locks := filepath.Join(f.anchorPath, protectedSnapshotLockDirectory)
+	require.NoError(t, os.Mkdir(locks, 0700))
+	locksIdentity, err := protectedIdentity(open(locks))
+	require.NoError(t, err)
+	f.record = protectedBackingAnchor{Version: protectedStoreLayoutVersion, Owner: 1000, OwnerGID: 1000,
 		Cache: protectedCacheIdentity(f.cache.identity), Locator: f.cachePath, Store: storeIdentity}
+	f.record.SnapshotLocks = locksIdentity
 	require.NoError(t, writeProtectedRecord(t.Context(), f.anchor, "store.json", f.record))
 	for _, branch := range []string{"snapshots", "volume-removals"} {
 		path := filepath.Join(store, branch)
@@ -100,6 +113,9 @@ func newProtectedCacheCleanupFixture(t *testing.T) *protectedCacheCleanupFixture
 		require.NoError(t, writeProtectedRecord(t.Context(), logicalFD, "logical.json", index))
 		record := protectedBackingRecord{Version: 1, Owner: 1000, Kind: kind, ID: id, Cache: f.record.Cache,
 			Directory: directory, Phase: "removed", References: []protectedBackingReference{}}
+		if kind == protectedBackingVolume {
+			record.SnapshotSource = true
+		}
 		if kind == protectedBackingKernel {
 			// Reproduce actual kernel retirement rather than simply fabricating a terminal phase.
 			content := []byte("same immutable protected kernel bytes")
