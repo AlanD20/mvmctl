@@ -1028,10 +1028,12 @@ grows the admitted ext-family filesystem through fixed `e2fsck`/`resize2fs` or B
 evidence from either the exact old or target backing size. Every guest read and write is descriptor-bound beneath the
 admitted mounted root. Its closed content set includes hostname/hosts, DNS, missing-account creation, SSH/sudo,
 fixed guest-boot SSH setup, embedded agent, fstab, a root-only persistent
-`/etc/mvmctl/agent.token`, and exactly one admitted init-system enablement: systemd `sysinit.target` or OpenRC default
-runlevel. [ADR-0024](docs/adr/0024-early-openrc-agent-startup.md) accepts moving only the OpenRC agent to
-boot, after filesystem/module initialization and before network/clock work; that correction is not yet implemented
-or qualified. The existing binary admission is required only after both its init-script and default-runlevel directories are
+`/etc/mvmctl/agent.token`, and exactly one admitted init-system enablement: systemd `sysinit.target` or OpenRC boot
+runlevel. [ADR-0024](docs/adr/0024-early-openrc-agent-startup.md) moves only the OpenRC agent before
+network/clock work, requiring local mounts and ordering after module initialization when present. Provisioning
+converges only an identity-verified former default-runlevel agent link, with parent synchronization and safe retry;
+foreign entries refuse before mutation. Focused Go and root checks passed; installed startup qualification is pending.
+The existing binary admission is required only after both its init-script and default-runlevel directories are
 present. This admits Ubuntu's usrmerged systemd layout without following `/sbin` aliases; complete OpenRC candidates
 still require the confined binary check, and missing or ambiguous init layouts are rejected before agent publication.
 Existing accounts are retained. A missing non-root account receives the first free UID/private GID in

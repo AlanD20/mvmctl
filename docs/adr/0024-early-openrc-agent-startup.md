@@ -1,6 +1,6 @@
 # Early OpenRC Management-Agent Startup
 
-**Status:** Accepted for v0.3.0; implementation and qualification pending
+**Status:** Implemented for v0.3.0; focused Go checks passed, installed qualification pending
 **Date:** 2026-10-10
 **Supersedes:** Only the OpenRC agent default-runlevel choice in
 [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md)
@@ -46,10 +46,12 @@ would hide this dependency without making network-independent management start i
 
 ## Implementation and qualification boundary
 
-This decision is not a claim that the correction is implemented or works. Behavior-owned Go tests must
-cover boot-only enablement, exact legacy-link convergence, idempotence, unsafe-link refusal and
-interrupted mutation/durability boundaries, while preserving systemd and ambiguous-layout refusal.
-Run focused formatting, vet and Go/root checks inside the approved named runner.
+The confined adapter now implements boot-only enablement and exact legacy-link convergence, including
+pre-mutation admission, retained link identity, removal-parent synchronization and safe retry. Behavior-owned
+tests cover idempotence, unsafe-link refusal and interrupted mutation/durability boundaries while preserving
+systemd and ambiguous-layout refusal. Formatting, line-length, focused vet, affected ordinary tests and the
+full root loopmount package passed inside the approved named runner on the exact integrated source.
+These are provisioning checks, not evidence of live guest startup or full release qualification.
 
 Installed-candidate QA must exercise unchanged ordinary five-second exec during delayed network/clock
 startup, actual agent and driver readiness, exactly one enablement, networkless management, and the

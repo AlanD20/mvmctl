@@ -1728,6 +1728,12 @@ composition is described above; the current incomplete-work inventory is under *
 
 ### Fixed
 
+- OpenRC guests enable `mvm-agent` in the boot runlevel before networking, chronyd and cloud-init,
+  rather than delaying vsock management behind those services. The confined provisioner safely converges
+  only the verified former default-runlevel agent link; SSH, systemd activation, authentication and exec
+  deadlines are unchanged. Focused Go and root loopmount checks passed; installed cold-start and affected
+  directional-exec/pause-resume qualification remain pending. See [ADR-0024](docs/adr/0024-early-openrc-agent-startup.md).
+
 - Root-partition extraction falls back to `parted` when the `sfdisk` probe cannot execute, exits unsuccessfully,
   or returns malformed output, instead of treating probe failure as proof of an absent partition table. Failed
   probes retain their causes and diagnostics; cancellation stops extraction. Focused formatting, vet and
