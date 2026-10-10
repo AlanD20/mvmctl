@@ -34,6 +34,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import base64
+import gzip
 import hashlib
 import json
 import os
@@ -2257,11 +2259,38 @@ class _HostRebootReconnectUnavailable(RuntimeError):
     """Only transport unavailability permits another bounded read-only probe."""
 
 
+def _host_reboot_ssh(
+    command: str, *, connect_timeout: int, timeout: int, check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Use the existing named runner's SSH key; never depend on outer vsock."""
+    return mvm("ssh", _HOST_REBOOT_RUNNER, "--user", "runner", "--key",
+               str(Path.home() / ".config/mvmctl/keys/aland"), "--timeout", str(connect_timeout),
+               "--cmd", command, check=check, timeout=timeout)
+
+
+def _host_reboot_stage_source(bound: dict[str, Any]) -> None:
+    """Copy only the fixed phase inputs over the same SSH transport, without vsock cp."""
+    for relative in _HOST_REBOOT_SOURCE_FILES:
+        raw = (_REPO_ROOT / relative).read_bytes()
+        digest = bound["source_payload"][relative]
+        if hashlib.sha256(raw).hexdigest() != digest:
+            raise RuntimeError("host_reboot source changed before staging")
+        encoded = base64.b64encode(gzip.compress(raw, mtime=0)).decode("ascii")
+        # Compression keeps each fixed source file below the single-argument limit.
+        # The destination is exclusively created in this task, never an existing source.
+        script = ("import base64,gzip,hashlib,pathlib; "
+                  f"raw=gzip.decompress(base64.b64decode({encoded!r})); "
+                  f"assert hashlib.sha256(raw).hexdigest()=={digest!r}; "
+                  f"path=pathlib.Path({(bound['guest_task'] + '/source/' + relative)!r}); "
+                  "path.parent.mkdir(parents=True,exist_ok=True); "
+                  "stream=path.open('xb'); stream.write(raw); stream.close()")
+        _host_reboot_ssh(shlex.join(["python3", "-c", script]), connect_timeout=10, timeout=60)
+
+
 def _host_reboot_probe(bound: dict[str, Any]) -> str:
     command = "cat /proc/sys/kernel/random/boot_id && sha256sum /usr/local/bin/mvm && /usr/local/bin/mvm --version"
     try:
-        result = mvm("exec", _HOST_REBOOT_RUNNER, "--user", "runner", "--timeout", "2", "--", command,
-                     check=False, timeout=15)
+        result = _host_reboot_ssh(command, connect_timeout=2, check=False, timeout=15)
     except subprocess.TimeoutExpired as exc:
         raise _HostRebootReconnectUnavailable("host_reboot reconnect timed out") from exc
     if result.returncode != 0:
@@ -2276,8 +2305,8 @@ def _host_reboot_probe(bound: dict[str, Any]) -> str:
 
 def _host_reboot_fetch(bound: dict[str, Any], name: str) -> bytes:
     path = bound["guest_task"] + "/" + name
-    result = mvm("exec", _HOST_REBOOT_RUNNER, "--user", "runner", "--timeout", "10", "--",
-                 f"head -c {_HOST_REBOOT_LIMIT + 1} -- {shlex.quote(path)}", timeout=30)
+    result = _host_reboot_ssh(f"head -c {_HOST_REBOOT_LIMIT + 1} -- {shlex.quote(path)}",
+                              connect_timeout=10, timeout=30)
     raw = result.stdout.encode()
     if len(raw) > _HOST_REBOOT_LIMIT:
         raise RuntimeError("host_reboot remote receipt exceeds bound")
@@ -2308,8 +2337,7 @@ def _host_reboot_pytest(bound: dict[str, Any], phase: str, task: Path) -> bytes:
                     "--timeout-method=signal", f"--basetemp={bound['guest_task']}/{phase}-tmp",
                     f"--junitxml={bound['guest_task']}/{phase}.xml", "-x", "-s", "-q",
                     _HOST_REBOOT_FILE + f"::test_host_reboot_{phase}"]))
-    result = mvm("exec", _HOST_REBOOT_RUNNER, "--user", "runner", "--timeout", "10", "--", command,
-                 check=False, timeout=660)
+    result = _host_reboot_ssh(command, connect_timeout=10, check=False, timeout=660)
     _host_reboot_write(task, f"{phase}.stdout", (result.stdout or "").encode())
     _host_reboot_write(task, f"{phase}.stderr", (result.stderr or "").encode())
     _host_reboot_write(task, f"{phase}.native.json", json.dumps(dict(phase=phase, returncode=result.returncode)).encode())
@@ -2519,9 +2547,9 @@ def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None) -> dict
             bound["before_boot"] = _host_reboot_probe(bound)
             _host_reboot_write(task, "intent.json", (json.dumps(bound, sort_keys=True) + "\n").encode())
             guest = bound["guest_task"]
-            mvm("exec", _HOST_REBOOT_RUNNER, "--user", "runner", "--", f"mkdir -m 700 -- {guest} && mkdir -p -- {guest}/source/tests {guest}/tmp", timeout=30)
-            mvm("cp", "tests/__init__.py", f"{_HOST_REBOOT_RUNNER}:{guest}/source/tests/__init__.py", timeout=60)
-            mvm("cp", "tests/system", f"{_HOST_REBOOT_RUNNER}:{guest}/source/tests/", timeout=60)
+            _host_reboot_ssh(f"mkdir -m 700 -- {guest} && mkdir -p -- {guest}/source/tests {guest}/tmp",
+                              connect_timeout=10, timeout=30)
+            _host_reboot_stage_source(bound)
             raw = _host_reboot_pytest(bound, "pre", task)
             pre = _host_reboot_json(raw)
             if (pre["boot_id"] != bound["before_boot"] or pre["source"] !=

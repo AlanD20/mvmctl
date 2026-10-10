@@ -188,6 +188,7 @@ def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
     monkeypatch.setattr(orchestrator, "mvm", mvm)
+    monkeypatch.setattr(orchestrator, "_host_reboot_stage_source", lambda bound: None)
     def phase(bound, selected, directory):
         phases.append(selected)
         physical = {key: [] for key in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec")}
@@ -227,7 +228,12 @@ def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("memory_bytes", [8589934592, 6576668672], ids=["retained-8g", "observed-6.125g"])
 def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(orchestrator, monkeypatch, tmp_path, memory_bytes):
+    stage_source = orchestrator._host_reboot_stage_source
+    source_hash = orchestrator._sha256_runner_input
     task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    monkeypatch.setattr(orchestrator, "_host_reboot_stage_source", stage_source)
+    monkeypatch.setattr(orchestrator, "_sha256_runner_input",
+                        lambda path: source_hash(path) if path.is_file() else "a" * 64)
     pre = orchestrator.run_host_reboot_phase("pre", task, None)
     assert pre["phase_complete"] is True and pre["passed"] is False and pre["release_verdict"] == "INCOMPLETE"
     assert phases == ["pre"]
@@ -299,26 +305,58 @@ def test_host_reboot_never_aggregates_unproven_control_pre_or_cleanup(
     assert len([call for call in calls if call[:2] == ("vm", "reboot")]) == 1
 
 
-def test_host_reboot_stops_before_lifecycle_after_failed_pre(orchestrator, monkeypatch, tmp_path):
+@pytest.mark.parametrize("failure", ["strict-report", "ssh-mkdir", "ssh-source", "source-changed"])
+def test_host_reboot_stops_before_lifecycle_after_failed_pre(orchestrator, monkeypatch, tmp_path, failure):
+    stage_source = orchestrator._host_reboot_stage_source
+    source_hash = orchestrator._sha256_runner_input
     task, _, calls, _, _ = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
     def failed(*args):
         raise RuntimeError("strict PRE report failed")
-    monkeypatch.setattr(orchestrator, "_host_reboot_pytest", failed)
+    expected = "strict PRE report failed"
+    if failure == "strict-report":
+        monkeypatch.setattr(orchestrator, "_host_reboot_pytest", failed)
+    else:
+        monkeypatch.setattr(orchestrator, "_sha256_runner_input",
+                            lambda path: source_hash(path) if path.is_file() else "a" * 64)
+        def stage(bound):
+            if failure == "source-changed":
+                bound["source_payload"][orchestrator._HOST_REBOOT_SOURCE_FILES[0]] = "0" * 64
+            stage_source(bound)
+        monkeypatch.setattr(orchestrator, "_host_reboot_stage_source", stage)
+        def transport(*args, **kwargs):
+            calls.append(args)
+            assert args[0] == "ssh", "no vsock fallback or lifecycle after transport failure"
+            if ((failure == "ssh-mkdir" and "mkdir -m 700" in args[-1])
+                    or (failure == "ssh-source" and "python3 -c" in args[-1])):
+                raise RuntimeError("SSH setup denied: literal diagnostic")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        monkeypatch.setattr(orchestrator, "mvm", transport)
+        expected = "source changed before staging" if failure == "source-changed" else "SSH setup denied"
     result = orchestrator.run_host_reboot_phase("pre", task, None)
     assert not result["phase_complete"] and not result["passed"]
     assert not any(call[:2] == ("vm", "reboot") for call in calls)
-    assert "strict PRE report failed" in (task / "pre.terminal.json").read_text()
+    assert expected in (task / "pre.terminal.json").read_text()
+    assert not (task / "task.json").exists()
 
 
 def test_host_reboot_stops_on_identity_failure_instead_of_retrying(orchestrator, monkeypatch, tmp_path):
+    actual_probe = orchestrator._host_reboot_probe
     task, _, calls, _, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
     probes = []
     def probe(bound):
         probes.append(bound)
         if len(probes) == 1:
             return "11111111-1111-4111-8111-111111111111"
-        raise RuntimeError("installed candidate changed")
+        return actual_probe(bound)
     monkeypatch.setattr(orchestrator, "_host_reboot_probe", probe)
+    def transport(*args, **kwargs):
+        calls.append(args)
+        if args[:2] == ("vm", "reboot") or "mkdir -m 700" in args[-1]:
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        assert args[0] == "ssh", "candidate mismatch must not invoke an exec fallback"
+        return subprocess.CompletedProcess(args, 0,
+            stdout="22222222-2222-4222-8222-222222222222\n" + "0" * 64 + "  /usr/local/bin/mvm\nmvm 0.3.0-rc.fixture\n", stderr="")
+    monkeypatch.setattr(orchestrator, "mvm", transport)
     result = orchestrator.run_host_reboot_phase("pre", task, None)
     assert not result["phase_complete"] and len(probes) == 2
     assert "installed candidate changed" in result["output"] and not (task / "task.json").exists()
@@ -511,10 +549,11 @@ def test_host_reboot_mixed_or_incomplete_selection_fails_before_side_effects(
         "host_reboot requires only its exact domain")
 
 
-@pytest.mark.parametrize("fault", ["native-failure", "skipped", "wrong-junit", "two-items"])
+@pytest.mark.parametrize("fault", ["native-failure", "skipped", "wrong-junit", "two-items", "ssh-report-unavailable"])
 def test_host_reboot_retains_literal_reports_and_rejects_incomplete_phase(
     orchestrator, monkeypatch, tmp_path, fault,
 ):
+    actual_fetch = orchestrator._host_reboot_fetch
     task = tmp_path / "phase"
     task.mkdir(mode=0o700)
     bound = dict(guest_task="/home/runner/.cache/mvmctl-host-reboot-" + "1" * 32,
@@ -523,6 +562,9 @@ def test_host_reboot_retains_literal_reports_and_rejects_incomplete_phase(
     calls = []
     def mvm(*args, **kwargs):
         calls.append(args)
+        assert args[0] == "ssh", "phase execution/report retrieval cannot fall back to outer exec"
+        if "head -c" in args[-1]:
+            raise RuntimeError("SSH report unavailable: literal diagnostic")
         return subprocess.CompletedProcess(args, 1 if fault == "native-failure" else 0, stdout="literal pytest", stderr="literal diagnostic")
     monkeypatch.setattr(orchestrator, "mvm", mvm)
     outcomes = json.loads(_complete_pytest_outcome_report(2 if fault == "two-items" else 1))
@@ -531,15 +573,22 @@ def test_host_reboot_retains_literal_reports_and_rejects_incomplete_phase(
     method = "test_host_reboot_post" if fault == "wrong-junit" else "test_host_reboot_pre"
     xml = f'<testsuites><testsuite tests="1" failures="0" errors="0" skipped="0"><testcase classname="tests.system.host.test_host_reboot" name="{method}"/></testsuite></testsuites>'.encode()
     def fetch(bound, name):
+        if fault == "ssh-report-unavailable":
+            return actual_fetch(bound, name)
         return xml if name.endswith(".xml") else json.dumps(outcomes).encode()
     monkeypatch.setattr(orchestrator, "_host_reboot_fetch", fetch)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError) as failure:
         orchestrator._host_reboot_pytest(bound, "pre", task)
     assert (task / "pre.stdout").read_bytes() == b"literal pytest"
     assert (task / "pre.stderr").read_bytes() == b"literal diagnostic"
-    assert (task / "pre.outcomes.json").read_bytes() == json.dumps(outcomes).encode()
-    assert (task / "pre.xml").read_bytes() == xml
-    assert len(calls) == 1 and calls[0][1] == "mvmctl-030-test"
+    assert json.loads((task / "pre.native.json").read_bytes()) == dict(phase="pre", returncode=1 if fault == "native-failure" else 0)
+    if fault == "ssh-report-unavailable":
+        assert "SSH report unavailable: literal diagnostic" in str(failure.value)
+        assert not (task / "pre.outcomes.json").exists() and not (task / "pre.xml").exists()
+    else:
+        assert (task / "pre.outcomes.json").read_bytes() == json.dumps(outcomes).encode()
+        assert (task / "pre.xml").read_bytes() == xml
+    assert len(calls) == (2 if fault == "ssh-report-unavailable" else 1) and calls[0][1] == "mvmctl-030-test"
     assert "::test_host_reboot_pre" in calls[0][-1] and "MVM_CONFIG_DIR=/home/runner/.config/mvmctl-030-schema6" in calls[0][-1]
     assert "--rootdir=." in calls[0][-1]
 
