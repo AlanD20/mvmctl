@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -201,12 +203,26 @@ func openStagedImage(
 	if err != nil {
 		return nil, errors.Join(err, target.Close())
 	}
+	sourceFD, targetFD := source.Fd(), target.Fd()
+	populationStarted := time.Now()
+	slog.Debug("image staging population started", "image_id", imageID,
+		"source_fd", sourceFD, "target_fd", targetFD, "logical_bytes", info.Size())
 	copyErr := copyInspectionImage(ctx, source, target, info.Size())
 	if copyErr == nil {
 		stage.rootfsIdentity, copyErr = stagedFileIdentity(target)
 	}
+	slog.Debug("image staging population closing", "image_id", imageID,
+		"source_fd", sourceFD, "target_fd", targetFD, "copy_error", copyErr,
+		"elapsed_seconds", time.Since(populationStarted).Seconds())
 	closeErr := target.Close()
+	slog.Debug("image staging population closed", "image_id", imageID,
+		"source_fd", sourceFD, "target_fd", targetFD, "close_error", closeErr,
+		"elapsed_seconds", time.Since(populationStarted).Seconds())
 	if err := errors.Join(copyErr, closeErr); err != nil {
+		slog.Error("image staging population failed", "image_id", imageID,
+			"source_fd", sourceFD, "target_fd", targetFD,
+			"copy_error", copyErr, "close_error", closeErr, "context_error", ctx.Err(),
+			"elapsed_seconds", time.Since(populationStarted).Seconds())
 		return nil, errs.WrapMsg(errs.CodeImageError, "populate image staging rootfs", err)
 	}
 	after, err := source.Stat()
@@ -311,34 +327,74 @@ func copyInspectionImage(ctx context.Context, source, target *os.File, size int6
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	started := time.Now()
+	sourceFD, targetFD := source.Fd(), target.Fd()
+	var readBytes, writtenBytes, skippedBytes int64
+	method := "reflink"
+	logState := func(phase string, err error) {
+		slog.Debug("image staging copy", "source_fd", sourceFD, "target_fd", targetFD,
+			"phase", phase, "method", method, "logical_bytes", size,
+			"read_bytes", readBytes, "written_bytes", writtenBytes, "skipped_bytes", skippedBytes,
+			"elapsed_seconds", time.Since(started).Seconds(), "error", err, "context_error", ctx.Err())
+	}
 	// Reflinks preserve sparse images without copying their full logical size.
-	if err := unix.IoctlFileClone(int(target.Fd()), int(source.Fd())); err == nil {
-		return target.Sync()
+	logState("clone", nil)
+	if err := unix.IoctlFileClone(int(targetFD), int(sourceFD)); err == nil {
+		logState("sync_started", nil)
+		err := target.Sync()
+		logState("sync_finished", err)
+		return err
 	} else if !errors.Is(err, unix.EOPNOTSUPP) && !errors.Is(err, unix.EXDEV) &&
 		!errors.Is(err, unix.ENOTTY) && !errors.Is(err, unix.EINVAL) {
+		logState("clone_failed", err)
 		return err
+	} else {
+		method = "sparse"
+		logState("fallback", err)
 	}
 	buffer := make([]byte, 1<<20)
 	zeroes := make([]byte, len(buffer))
+	lastProgress := time.Now()
 	for remaining := size; remaining > 0; {
 		if err := ctx.Err(); err != nil {
+			logState("canceled", err)
 			return err
 		}
 		chunk := buffer[:min(int64(len(buffer)), remaining)]
-		if _, err := io.ReadFull(source, chunk); err != nil {
+		n, err := io.ReadFull(source, chunk)
+		readBytes += int64(n)
+		if err != nil {
+			logState("read_failed", err)
 			return err
 		}
 		if bytes.Equal(chunk, zeroes[:len(chunk)]) {
 			if _, err := target.Seek(int64(len(chunk)), io.SeekCurrent); err != nil {
+				logState("seek_failed", err)
 				return err
 			}
-		} else if _, err := target.Write(chunk); err != nil {
-			return err
+			skippedBytes += int64(len(chunk))
+		} else {
+			n, err := target.Write(chunk)
+			writtenBytes += int64(n)
+			if err != nil {
+				logState("write_failed", err)
+				return err
+			}
 		}
 		remaining -= int64(len(chunk))
+		if now := time.Now(); now.Sub(lastProgress) >= 10*time.Second {
+			logState("progress", nil)
+			lastProgress = now
+		}
 	}
+	logState("truncate_started", nil)
 	if err := target.Truncate(size); err != nil {
+		logState("truncate_finished", err)
 		return err
 	}
-	return target.Sync()
+	logState("truncate_finished", nil)
+	logState("sync_started", nil)
+	err := target.Sync()
+	logState("sync_finished", err)
+	return err
 }
