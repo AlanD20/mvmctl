@@ -216,7 +216,25 @@ The 109 literal retained files match their manifest sizes/hashes beneath
 boot and exact publication identities. Terminal SHA-256 `bcb372f1`; strict JSON `b26f751e`; JUnit `a31bf3e7`.
 Earlier timeout/setup failures remain failed and retained; reusable-base and full release gates remain open.
 
-**Current coherent branch-layout Go/build checkpoint (2026-10-10):** clean `4bc51ee7`, tree `0be46ce2`,
+**Current coherent Go/root checkpoint (2026-10-10):** clean producer `c54bfe88`, tree `c467e446`,
+passed all six pinned Go 1.26.3 ordinary CI gates inside `mvmctl-030-test`: tidy/clean diff, gofmt,
+golines, generation/clean diff, vet and the complete CI-selected Go tests. The separate full root Jailer
+suite also exited 0: literal JSON counts 2,707 test/subtest passes, one package pass, zero failures/skips.
+The first tidy attempt failed on a missing offline dependency; the first selector attempt failed because
+the QA PATH omitted standard sbin tools. Their original failures remain retained. Dependency-cache closure
+and corrected PATH completed those gates; already-passed gates were not replayed.
+
+Post-terminal seals preserve clean source, modules, pinned tools, and the unchanged candidate/canonical
+installation SHA-256 `57c60574b60180fd26322165079f330b4448291925c745e6ec3da8ae54f189e6`.
+The two nonempty atomic coverage profiles were hash-verified (`eb36a46e`, `cbc19a06`); full root log
+SHA-256 `9316d4a2`. Literal exit/log/coverage evidence is retained beneath
+`.tmp/qa-final-go-ci-c54-oct10/retained-reports/`; root JSON counts and both coverage hashes were independently verified.
+Committed Go/module/CI/build inputs have no delta from `c54bfe88` to `84111923`,
+so this evidence carries only those unchanged inputs. This checkpoint adds no rebuild, installation,
+Python pass or runtime qualification; reusable-base, the complete applicable Python matrix, clean-host
+Tier 3, remote CI and final release approval remain open.
+
+**Earlier coherent branch-layout Go/build checkpoint (2026-10-10):** clean `4bc51ee7`, tree `0be46ce2`,
 passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent
 amd64 release build inside `mvmctl-030-test`. Literal root JSON counts 2,707 test/subtest passes, one package
 pass and zero failures/skips. CI log SHA-256 `4211c06c`; root JSON `c72fbcef`; terminal verification `46053ac8`.
