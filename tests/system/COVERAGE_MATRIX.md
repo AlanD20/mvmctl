@@ -51,7 +51,13 @@ over unchanged outer SSH. PRE receipt SHA-256
 POST executed zero tests: all eleven staged source files were zero-length after force reboot, so the
 module no longer defined the selected test. This establishes a QA staging-durability gap, not a RAM
 failure. PRE and the failed POST remain literal separate evidence; status/restart/exec/cleanup after
-host reboot is still unqualified. Durability and post-reconnect hash checks require a scoped correction.
+host reboot is still unqualified. Signed `a90fcfb5` adds a checked filesystem durability barrier before
+the force reboot and exact fixed-source verification after reconnect and before POST. Four focused
+named-runner checks passed: sync failure prevents reboot, source loss prevents accepting PRE or
+executing POST, and successful PRE remains release-incomplete. Native exit zero and exact JUnit
+4/0/0/0 were independently checked; JUnit SHA-256
+`7829028c8efe55241dab4f7797f1bf6cd853afe72f1920bf606f8b4ed5731d0c`.
+The tested patch and signed integration have identical two-file hashes. No new actual journey ran.
 
 **Current representative network/exec invocation (2026-10-10):** frozen Python `1be44dfc` against
 installed layout candidate `e6ff4283` passed exactly conntrack-after-sync and cross-network TCP
