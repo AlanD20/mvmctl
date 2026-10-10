@@ -77,16 +77,15 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 1. Create builder VM from ubuntu-minimal:noble
 2. Stage the release candidate outside `/usr/local/bin` and run `sudo <candidate> host install-system`
 3. mvm cp tests/system/ → /tests/
-4. apt-get install python3-pytest qemu-utils fakeroot nftables iptables zstd htop build-essential bc bison flex libncurses-dev libssl-dev libelf-dev pkg-config git curl dwarves cloud-image-utils util-linux
-5. pip3 install pytest-timeout
-6. Add runner to mvm, kvm groups
-7. Initialize through exact `sudo /usr/local/bin/mvm host init`; chown `/tests` to runner
-8. Mount the shared volume, run unprivileged `/usr/local/bin/mvm init --binary-version 1.17.0`, then pull remaining
+4. apt-get install python3-pytest python3-pytest-timeout qemu-utils fakeroot nftables iptables zstd htop build-essential bc bison flex libncurses-dev libssl-dev libelf-dev pkg-config git curl dwarves cloud-image-utils util-linux
+5. Add runner to mvm, kvm groups
+6. Initialize through exact `sudo /usr/local/bin/mvm host init`; chown `/tests` to runner
+7. Mount the shared volume, run unprivileged `/usr/local/bin/mvm init --binary-version 1.17.0`, then pull remaining
    images and kernels through the same exact installed binary
-9. apt-get clean
-10. mvm vm stop (graceful stop)
-11. mvm image import mvm-test-runner:<version> <builder-vm> --default --skip-optimization
-12. Destroy builder VM
+8. apt-get clean
+9. mvm vm stop (graceful stop)
+10. mvm image import mvm-test-runner:<version> <builder-vm> --default --skip-optimization
+11. Destroy builder VM
 ```
 
 ### Contents
@@ -96,7 +95,7 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 | installed mvm binary | `/usr/local/bin/mvm` | The release candidate installed through the administrator bootstrap route |
 | staged release candidate | `/opt/mvmctl-test/mvm-candidate` | Root-owned source used only to exercise `host install-system`; tests do not use it as the CLI |
 | System tests | `/tests/system/<domain>/` | All `tests/system/` files |
-| python3-pytest, pytest-timeout (pip) | Test runners | Test runner and timeout plugin |
+| python3-pytest, python3-pytest-timeout | System packages | Test runner and timeout plugin, installed through the checked apt command |
 | qemu-utils | System package | Volume/disk operations in T2 tests |
 | fakeroot | System package | Preserving tarball ownership when pulling tar-rootfs images inside the runner VM |
 | nftables, iptables | System packages | Installed by the current runner-image builder for diagnostics and older test tooling; the 0.3.0 candidate applies nftables through the Go library and does not use either CLI as its firewall backend. |
