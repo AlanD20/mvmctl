@@ -70,12 +70,19 @@ def _remote_exec(runner_vm: str, source: str, destination: str, *command: str):
 
 def _wait_for_runner(runner_vm: str, vm_name: str) -> None:
     deadline = time.monotonic() + 30
+    result = None
     while time.monotonic() < deadline:
         result = _guest_exec(runner_vm, vm_name, "id", "-un", check=False)
         if result.returncode == 0 and result.stdout.strip() == "runner":
             return
         time.sleep(0.5)
-    pytest.fail(f"runner account or vsock agent not ready in {vm_name}")
+    last_attempt = None if result is None else {
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+    print(f"last runner readiness exec in {vm_name}: {last_attempt!r}", flush=True)
+    pytest.fail(f"runner account or vsock agent not ready in {vm_name}; last exec: {last_attempt!r}")
 
 
 def _sentinel_absent(runner_vm: str, vm_name: str, path: str) -> None:
