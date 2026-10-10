@@ -1,6 +1,6 @@
 # Protected Branch Authority Outside Cache Data
 
-**Status:** Implemented; focused checks passed, complete integration and installed qualification pending
+**Status:** Implemented; focused and complete integration checks passed, installed qualification pending
 **Date:** 2026-10-10
 **Amends:** [ADR-0018](0018-isolated-vm-execution-and-snapshot-authority.md) and
 [ADR-0022](0022-explicit-protected-cache-retirement.md), for fresh protected-store layouts only
@@ -57,11 +57,15 @@ different filesystems. Temporary raw capture therefore cannot target the externa
 is implemented in `b254f010`, including refusal before new logical authority publication and preserved recovery
 details for interrupted snapshot captures. Named-runner format and vet checks passed, followed by 149 focused
 root tests/subtests and the same 149 under the race detector, with zero failures or skips. These focused checks
-do not qualify the complete package, coherent release build or installed public cleanup journeys. Existing stores
-remain strictly rejected; no migration or authority rebinding was added.
+alone do not qualify the complete package or release build. Clean `4bc51ee7` subsequently passed complete
+ordinary CI, the full root Jailer suite (2,707 test/subtest passes, no failures or skips) and the real-agent
+release build inside the named runner. The new candidate is not installed; public snapshot/volume/cache
+cleanup on shared and distinct filesystems remains unqualified. Existing stores remain strictly rejected;
+no migration or authority rebinding was added.
 
 Required evidence covers stable lock identity through snapshot removal/cache retirement; held-worker, restored-reference
 and live-backing refusals; exact volume-source capture and completed-removal idempotence; interrupted publication,
 rename, parent sync, unlink and terminal commit; changed/unknown/old-layout preservation; dry-run/result projection;
 and terminal snapshot/volume/cache cleanup on both shared and distinct filesystems. Meaningful focused Go checks and
-installed public journeys run inside the approved disposable runner. Complete integration CI remains a separate gate.
+installed public journeys run inside the approved disposable runner. Complete integration CI is passed;
+installed public qualification remains a separate gate.

@@ -45,8 +45,9 @@ Installed public cleanup qualification remains pending. Permanent snapshot-lock 
 remain an explicit separate gap; [ADR-0023](../../docs/adr/0023-protected-branch-authority-layout.md)
 records the fresh-layout contract.
 The design is now implemented in `b254f010`. Named-runner formatting and vet passed, then 149 focused
-root tests/subtests and the same 149 race checks passed with no failures or skips. Complete integration,
-new-candidate installation and public snapshot/volume/cache-cleanup journeys remain pending. Old layouts
+root tests/subtests and the same 149 race checks passed with no failures or skips. Complete integration
+CI/root/build subsequently passed on `4bc51ee7`, as recorded below. New-candidate installation and public
+snapshot/volume/cache-cleanup journeys remain pending. Old layouts
 are refused, not migrated or rebound.
 Signed `af285c1b` integrates the reviewed three-case acquisition sequence fixture: one receipt-owned store,
 typed per-case kernel retirement, a single final cache cleanup and per-function cache/mirror environment.
@@ -64,6 +65,13 @@ cases with native exit 0 and strict zero-other outcomes; all 22 kernel nodes col
 The setup failure remains recorded. The corrected three acquisition bodies and final public cache cleanup
 still require runtime qualification; passing fixture checks do not close that gap.
 
+A subsequent setup failure followed successful normal initialization: the fixture rejected its audit
+files and schema migration snapshots. Signed `ed16366d` admits only operator-owned regular `audit.log`,
+`audit.log.lock` and database snapshots for schemas 2–8. Wrong ownership/type and unknown entries still
+refuse. Only the twelve affected initialization checks were run; all passed with strict zero-other
+outcomes, and all 22 kernel nodes collected. No acquisition body ran in those checks. The successful
+initialization outputs and the failed runtime receipt are retained; acquisition/cleanup remains pending.
+
 Signed `5f420009` gives the separate eight official-kernel cases one private cache, strict publication
 receipts, per-case typed kernel retirement and one final typed cache cleanup. Actual default receipts must
 report `is_default: true`; failed or ambiguous publications are not adopted by inventory difference.
@@ -74,7 +82,18 @@ Signed `4bc51ee7` also corrects the API's ignored default-write error and stale 
 vet and 120 existing API checks passed. Official acquisition/build flags and the installed default result
 still need their real system journeys; these focused checks do not qualify them.
 
-**Current coherent cache Go/build/install checkpoint (2026-10-10):** clean `752110fa`, tree `02198101`,
+**Current coherent branch-layout Go/build checkpoint (2026-10-10):** clean `4bc51ee7`, tree `0be46ce2`,
+passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent
+amd64 release build inside `mvmctl-030-test`. Literal root JSON counts 2,707 test/subtest passes, one package
+pass and zero failures/skips. CI log SHA-256 `4211c06c`; root JSON `c72fbcef`; terminal verification `46053ac8`.
+Both atomic coverage profiles and all 48 manifested source inputs were checked. Candidate
+`0.3.0-rc.layout2-4bc51ee7`, SHA-256
+`e6ff428319a6d8ef981b6311c38a4e43b08b9cdfb0da0bc19fdd04f6bb61848e`, records clean exact VCS,
+Go 1.26.3, Linux/amd64, CGO disabled, PIE and trimpath. Original state and installed `752110fa` binary
+remained unchanged. No synthetic memory admission/abort guards or Go memory/concurrency throttles were
+used. No installation or layout transition ran; installed public journeys remain separate requirements.
+
+**Earlier coherent cache Go/build/install checkpoint (2026-10-10):** clean `752110fa`, tree `02198101`,
 passed complete pinned Go 1.26.3 ordinary CI, the separate full root Jailer suite and the real embedded-agent
 amd64 release build inside `mvmctl-030-test`. Independent literal root JSON counts 2,663 test/subtest passes,
 one package pass and zero failures/skips. CI log SHA-256 `6e7eafcd`; root JSON `de1f2458`;

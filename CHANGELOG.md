@@ -26,13 +26,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > is `0.3.0-rc.cache-752110fa` (`ea7bad33`). Installed public cleanup qualification remains pending; permanent
 > snapshot-lock and volume-removal residues still refuse cleanup. [ADR-0023](docs/adr/0023-protected-branch-authority-layout.md)
 > records their fresh-layout design. `b254f010` implements it; formatting, vet, 149 focused root checks
-> and the same 149 race checks passed inside the named runner. Complete integration and installed public
-> branch-cleanup qualification remain pending; no existing-layout migration or authority rebinding is added.
+> and the same 149 race checks passed inside the named runner. Clean `4bc51ee7` subsequently passed complete
+> pinned CI, all 2,707 root-Jailer test/subtests and the real-agent release build. Its new layout candidate
+> is not installed yet; public branch-cleanup qualification remains pending. No existing-layout migration
+> or authority rebinding is added.
 > The three acquisition cases now share one receipt-owned store, retire their kernels between cases,
 > and clean that cache once at sequence completion. All three test bodies are unchanged. A subsequent setup
 > failure exposed inventory access before private cache initialization; the fixture now uses normal cache
 > initialization while preserving the retained cache and authority identities. Its 22 focused fixture checks
-> and exact 22-node collection passed inside the named runner. Actual acquisition and cleanup remain pending.
+> and exact 22-node collection passed inside the named runner. `ed16366d` additionally admits only normal
+> operator-owned audit files and schema 2–8 database snapshots created by initialization; wrong-owner,
+> wrong-type and unknown entries still refuse. Its twelve affected checks passed. Actual acquisition
+> and cleanup remain pending.
 
 > **Kernel default and official-fixture corrections (2026-10-10):** `4bc51ee7` propagates default-write
 > errors and returns the authoritative persisted kernel row from `kernel pull --default`. Focused format,
