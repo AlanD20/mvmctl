@@ -44,6 +44,24 @@ on clean `2a00f3e5`, with unchanged layout candidate `e6ff4283` and boot. Native
 JUnit SHA-256 `17330a9b0a0557fe45a1f86f8171d409e9f0e0212cf3cd2107c0b3f20fdce65b` records
 12 tests and zero failures, errors or skips. This qualifies the correction checks, not a completed reboot journey.
 
+**Actual SSH reboot continuation (2026-10-10):** clean `2a00f3e5` and installed layout candidate
+`e6ff4283` passed PRE strict 1/1 in 8.65 seconds, actually rebooted the named runner and reconnected
+over unchanged outer SSH. PRE receipt SHA-256
+`9e4972e9bcfc8a19e7067ec7672642aac4d2625d6d79eb16cc332c49efbb0163` retains the original source hashes.
+POST executed zero tests: all eleven staged source files were zero-length after force reboot, so the
+module no longer defined the selected test. This establishes a QA staging-durability gap, not a RAM
+failure. PRE and the failed POST remain literal separate evidence; status/restart/exec/cleanup after
+host reboot is still unqualified. Durability and post-reconnect hash checks require a scoped correction.
+
+**Current representative network/exec invocation (2026-10-10):** frozen Python `1be44dfc` against
+installed layout candidate `e6ff4283` passed exactly conntrack-after-sync and cross-network TCP
+allow/revoke. Directional exec failed at its first source VM's `runner` account/agent readiness,
+before creating the destination or granting a policy; pause/resume was unexecuted. Machine outcomes
+are four collected, two passed, one failed and one unexecuted error, with no skips or deselections.
+The native invocation failed. Typed cleanup, exact public/physical/administrator baseline equality,
+and source/candidate/kernel/mirror preservation passed. These two case results do not qualify the
+batch, VM-to-VM exec or complete matrix. The discarded readiness command error needs diagnosis.
+
 The first Firecracker acquisition body succeeded, but its teardown failed when ordinary `cache clean`
 encountered root-only protected parents. That invocation remains failed; the other two acquisition bodies
 were not executed. [ADR-0022](../../docs/adr/0022-explicit-protected-cache-retirement.md) records the

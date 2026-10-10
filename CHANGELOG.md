@@ -72,6 +72,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > unchanged. All twelve affected behavioral checks passed inside the named runner, with unchanged
 > candidate and boot pins. The corrected PRE/reboot/POST journey remains unqualified.
 
+> **Subsequent installed-candidate QA (2026-10-10):** on the unchanged layout candidate, conntrack
+> after network sync and cross-network TCP allow/revoke passed. The same invocation then failed at
+> guest-user readiness before directional exec grants; pause/resume was unexecuted. Exact cleanup
+> restored the baseline, but this was not a passing four-case batch. Separately, SSH-based reboot PRE
+> passed and reconnected after the real reboot. POST ran no tests because staged source files lost
+> their contents across the force reboot. A guest-filesystem durability correction is pending; neither
+> failure demonstrates a memory-capacity problem or qualifies the complete release.
+
 > **Standalone export-interruption qualification (2026-10-10):** the SIGINT survivor case passed alone
 > on the installed cache candidate: native exit 0, strict 1/1 with zero other outcomes, 13.37 seconds.
 > It interrupted an authenticated partial copy, refused release while the copy worker survived, preserved

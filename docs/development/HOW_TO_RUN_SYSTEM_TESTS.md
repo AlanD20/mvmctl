@@ -643,6 +643,12 @@ Source implementation, focused runner checks and exact phase collection passed o
 PRE passed and the named runner actually rebooted, but the legacy outer controller's vsock reconnect
 failed; no POST ran. The corrected complete journey remains unqualified.
 
+A subsequent SSH-based PRE passed and reconnected after the actual force reboot, but POST collected
+no tests: the staged source files had become zero-length. Retain that failed task rather than repairing
+its files and relabeling it successful. A checked guest-filesystem durability barrier before force reboot
+and exact staged-source verification after reconnect are pending corrections. This is a staging failure,
+not demonstrated memory exhaustion; do not introduce a RAM guard to address it.
+
 Host-phase orchestration uses the unchanged outer controller's `mvm ssh --cmd` with the runner's attached
 `aland` key at `~/.config/mvmctl/keys/aland`. This includes source staging and receipt retrieval, avoiding
 the legacy controller's reboot-time vsock omission. It does not replace that controller, introduce a
