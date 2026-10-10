@@ -28,6 +28,7 @@ def kernel_module(monkeypatch):
         raise AssertionError("pure owner checks must not invoke installed CLI")
 
     monkeypatch.setattr(module, "_run_mvm", no_cli)
+    monkeypatch.setattr(module.subprocess, "Popen", no_cli)
     return module
 
 
@@ -405,3 +406,155 @@ def test_borrowed_default_pair_survives_eight_retirements_and_single_typed_cache
     assert [item[0] for item in effects] == ["kernel-retirement"] * 8 + ["cache-clean"]
     assert sequence.root_release_receipt() == root and sequence.baseline["bin"] == private_pair
     assert not sequence.cache_dir.exists() and not sequence.aborted
+
+
+@pytest.fixture
+def official_process(sequence, kernel_module, monkeypatch):
+    """Model the owned child/clock boundary; never spawn or signal a process."""
+    begin(sequence, monkeypatch, 'TestKernelPullAdvancedFlags::test_kernel_pull_with_arch_flag')
+    sequence.select_cache(monkeypatch)
+    state = SimpleNamespace(now=0.0, events=[], elapsed=[600, 600, 600, 300],
+                            terminal=0, group_absent=True, identity_drift=False,
+                            kill_wait_failure=False, terminated_on_term=False)
+    process = SimpleNamespace(pid=12345, returncode=None)
+    identity = (1000, process.pid, process.pid, 98765)
+
+    def wait(timeout):
+        state.events.append(('wait', timeout))
+        if any(event[0] == 'signal' for event in state.events):
+            if state.kill_wait_failure:
+                raise kernel_module.subprocess.TimeoutExpired('owned official', timeout)
+            process.returncode = -15 if state.terminated_on_term else -9
+            return process.returncode
+        if state.elapsed:
+            state.now += state.elapsed.pop(0)
+            if state.elapsed:
+                raise kernel_module.subprocess.TimeoutExpired('owned official', timeout)
+        process.returncode = state.terminal
+        return process.returncode
+
+    process.wait = wait
+
+    def spawn(argv, **options):
+        state.events.append(('spawn', argv, options['start_new_session']))
+        assert argv == ['/usr/local/bin/mvm', 'kernel', 'pull', '--type', 'official', '--json']
+        options['stdout'].write(b'partial output')
+        options['stdout'].flush()
+        options['stderr'].write(b'compiler phase')
+        options['stderr'].flush()
+        return process
+
+    def observe(pid):
+        assert pid == process.pid
+        state.events.append(('identity', pid))
+        if state.identity_drift and len([row for row in state.events if row[0] == 'identity']) > 1:
+            return (*identity[:-1], identity[-1] + 1)
+        return identity
+
+    def signal_group(pid, sig):
+        assert pid == process.pid
+        state.events.append(('signal', sig.name))
+        # Held leader must not have been waited/reaped before either signal.
+        assert process.returncode is None
+
+    def sleep(seconds):
+        state.now += seconds
+        state.events.append(('sleep', seconds))
+
+    monkeypatch.setattr(kernel_module.subprocess, 'Popen', spawn)
+    monkeypatch.setattr(sequence, 'official_process_identity', observe)
+    monkeypatch.setattr(sequence, 'official_group_absent', lambda pid: state.group_absent)
+    monkeypatch.setattr(kernel_module.os, 'killpg', signal_group)
+    monkeypatch.setattr(kernel_module.time, 'monotonic', lambda: state.now)
+    monkeypatch.setattr(kernel_module.time, 'sleep', sleep)
+    return state, process
+
+
+def test_official_long_build_has_scoped_budget_and_successful_group_receipt(
+    sequence, official_process,
+):
+    state, process = official_process
+    result = sequence.pull_official('kernel', 'pull', '--type', 'official', '--json')
+    assert result.returncode == 0 and result.stdout == 'partial output'
+    assert result.stderr == 'compiler phase' and process.returncode == 0
+    native = json.loads((sequence.output_dir / 'invocation.native.json').read_text())
+    assert native['elapsed_seconds'] == 2100 and native['timeout_seconds'] == 2400
+    assert native['group_absent'] is True and native['signals'] == []
+    assert state.events[0][0] == 'spawn' and state.events[0][-1] is True
+    assert not sequence.aborted and sequence.receipt is None
+
+
+@pytest.mark.parametrize('term_completes', [True, False])
+def test_official_timeout_terminates_held_group_and_retains_unknown_native_outcome(
+    sequence, official_process, kernel_module, term_completes,
+):
+    state, _process = official_process
+    state.elapsed = [800, 800, 800, 800]
+    state.terminated_on_term = term_completes
+    with pytest.raises(kernel_module.subprocess.TimeoutExpired):
+        sequence.pull_official('kernel', 'pull', '--type', 'official', '--json')
+    native = json.loads((sequence.output_dir / 'invocation.native.json').read_text())
+    assert native['signals'] == ['SIGTERM', 'SIGKILL'] and native['group_absent'] is True
+    assert native['native_exit'] == (-15 if term_completes else -9)
+    assert ('sleep', 10) in state.events and ('wait', 10) in state.events
+    assert (sequence.output_dir / 'pull.stdout').read_text() == 'partial output'
+    assert (sequence.output_dir / 'pull.stderr').read_text() == 'compiler phase'
+    assert sequence.aborted and sequence.receipt is None and sequence.cache_dir.exists()
+    with pytest.raises(AssertionError, match='retained/active'):
+        sequence.begin_case(sequence.selected[0])
+    with pytest.raises(AssertionError, match='failed official'):
+        sequence.cleanup()
+
+
+def test_official_timeout_identity_mismatch_never_signals_guessed_group(
+    sequence, official_process, kernel_module,
+):
+    state, process = official_process
+    state.elapsed = [800, 800, 800, 800]
+    state.identity_drift = True
+    with pytest.raises(kernel_module.subprocess.TimeoutExpired):
+        sequence.pull_official('kernel', 'pull', '--type', 'official', '--json')
+    native = json.loads((sequence.output_dir / 'invocation.native.json').read_text())
+    assert native['signals'] == [] and native['group_absent'] is False
+    assert 'identity changed' in native['cleanup_failure']
+    assert native['native_exit'] is None and process.returncode is None
+    assert sequence.aborted and sequence.receipt is None and sequence.cache_dir.exists()
+    assert not (sequence.output_dir / 'pull.exit').exists()
+
+
+@pytest.mark.parametrize('failure', ['wait', 'group-survives'])
+def test_official_timeout_unproved_termination_retains_primary_and_cleanup_failure(
+    sequence, official_process, kernel_module, failure,
+):
+    state, _process = official_process
+    state.elapsed = [800, 800, 800, 800]
+    state.kill_wait_failure = failure == 'wait'
+    state.group_absent = failure != 'group-survives'
+    with pytest.raises(kernel_module.subprocess.TimeoutExpired):
+        sequence.pull_official('kernel', 'pull', '--type', 'official', '--json')
+    native = json.loads((sequence.output_dir / 'invocation.native.json').read_text())
+    assert 'TimeoutExpired' in native['failure'] and native['cleanup_failure']
+    assert native['signals'] == ['SIGTERM', 'SIGKILL'] and native['group_absent'] is False
+    assert sequence.aborted and sequence.cache_dir.exists() and sequence.receipt is None
+
+
+def test_official_success_with_surviving_group_is_not_publication_authority(
+    sequence, official_process,
+):
+    state, process = official_process
+    state.group_absent = False
+    with pytest.raises(AssertionError, match='process group survived'):
+        sequence.pull_official('kernel', 'pull', '--type', 'official', '--json')
+    native = json.loads((sequence.output_dir / 'invocation.native.json').read_text())
+    assert native['native_exit'] == process.returncode == 0
+    assert native['group_absent'] is False and native['signals'] == []
+    assert sequence.aborted and sequence.receipt is None and sequence.cache_dir.exists()
+
+
+def test_official_closed_invocation_rejects_unrelated_cli_before_spawn(
+    sequence, official_process,
+):
+    state, _process = official_process
+    with pytest.raises(AssertionError):
+        sequence.pull_official('cache', 'clean', '--force', '--json')
+    assert state.events == [] and sequence.cache_dir.exists()

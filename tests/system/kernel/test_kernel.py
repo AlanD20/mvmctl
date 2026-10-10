@@ -7,7 +7,10 @@ import json
 import os
 import re
 import shlex
+import signal
 import stat
+import subprocess
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -449,6 +452,10 @@ class _OfficialKernelPullSequence(_KernelPullOwner):
         "TestKernelPullAdvancedFlags::test_kernel_pull_with_arch_flag": False,
     }
 
+    # Finite QA allowance: advertised 30-minute build plus 10-minute preparation.
+    # This is not a product performance guarantee or a global subprocess timeout.
+    pull_seconds = 2400
+
     def __init__(self, runner_vm, cache_dir, config_dir, output_dir, selected):
         super().__init__(runner_vm, cache_dir, config_dir)
         assert selected and len(selected) == len(set(selected))
@@ -589,6 +596,113 @@ print(json.dumps(result,sort_keys=True))
         self.active = selector
         self.output_dir = self.output_root / selector.replace("::", "-")
         self.output_dir.mkdir(mode=0o700)
+
+    @staticmethod
+    def official_process_identity(pid):
+        directory = Path('/proc') / str(pid)
+        fields = (directory / 'stat').read_text().rsplit(')', 1)[1].split()
+        identity = (directory.stat().st_uid, int(fields[2]), int(fields[3]), int(fields[19]))
+        assert identity[:3] == (os.getuid(), pid, pid), identity
+        return identity
+
+    @staticmethod
+    def official_group_absent(pid):
+        try:
+            os.killpg(pid, 0)
+        except ProcessLookupError:
+            return True
+        return False
+
+    def await_official_group_absence(self, pid):
+        deadline = time.monotonic() + 5
+        while not self.official_group_absent(pid):
+            assert time.monotonic() < deadline, 'official private process group survived; retain cache'
+            time.sleep(0.05)
+
+    def stop_official_pull(self, process, identity, native):
+        # Do not poll/wait/reap the leader between signals. Even a terminated
+        # leader remains our held child, preventing numeric PGID reuse here.
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            actual = self.official_process_identity(process.pid)
+            assert actual == identity, ('official child identity changed; no signal', identity, actual)
+            os.killpg(process.pid, sig)
+            native['signals'].append(sig.name)
+            if sig == signal.SIGTERM:
+                time.sleep(10)  # Bounded grace for all ordinary Runner/make descendants.
+        process.wait(timeout=10)
+        self.await_official_group_absence(process.pid)
+        native['group_absent'] = True
+
+    def pull_official(self, *args):
+        """Run only this active official body in a receipt-owned private group."""
+        assert not self.aborted and self.active is not None and self.receipt is None
+        flags = {
+            'TestKernelLifecycle::test_kernel_pull': (),
+            'TestKernelPullAdvancedFlags::test_kernel_pull_with_arch_flag': (),
+            'TestKernelBuild::test_kernel_pull_with_jobs_flag': ('--jobs', '2'),
+            'TestKernelBuild::test_kernel_pull_with_keep_build_dir': ('--keep-build-dir', '--jobs', '2'),
+            'TestKernelBuild::test_kernel_clean_rebuild': ('--clean-build', '--jobs', '4'),
+            'TestKernelBuild::test_kernel_pull_with_features': ('--features', 'kvm', '--jobs', '4'),
+            'TestKernelBuild::test_kernel_build_with_custom_config': (
+                '--config', str(self.output_dir / 'custom-fragment.conf'), '--jobs', '4', '--keep-build-dir',
+            ),
+            'TestKernelRemoveAndPull::test_kernel_pull_with_set_default': ('--default',),
+        }
+        assert args == ('kernel', 'pull', '--type', 'official', *flags[self.active], '--json'), args
+        assert os.environ.get('MVM_CACHE_DIR') == str(self.cache_dir)
+        assert os.environ.get('MVM_CONFIG_DIR') == str(self.config_dir)
+        argv = ['/usr/local/bin/mvm', *args]
+        paths = [self.output_dir / ('invocation.' + suffix) for suffix in ('stdout', 'stderr')]
+        native = dict(argv=argv, timeout_seconds=self.pull_seconds, signals=[], group_absent=False)
+        process = identity = None
+        started = time.monotonic()
+        try:
+            with paths[0].open('xb') as stdout, paths[1].open('xb') as stderr:
+                process = subprocess.Popen(argv, stdout=stdout, stderr=stderr,
+                                           env={**os.environ, 'NO_COLOR': '1'}, start_new_session=True)
+                native['pid'] = native['pgid'] = process.pid
+                identity = self.official_process_identity(process.pid)
+                native['child_identity'] = identity
+                deadline = started + self.pull_seconds
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(argv, self.pull_seconds)
+                    assert sum(path.stat().st_size for path in paths) <= 64 * 1024 * 1024, (
+                        'official captured output exceeds 64MiB; retain cache',
+                    )
+                    try:
+                        process.wait(timeout=min(0.1, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+                self.await_official_group_absence(process.pid)
+                native['group_absent'] = True
+        except BaseException as error:
+            self.aborted = True
+            native['failure'] = repr(error)
+            if process is not None and identity is not None and process.returncode is None:
+                try:
+                    self.stop_official_pull(process, identity, native)
+                except BaseException as cleanup_error:
+                    native['cleanup_failure'] = repr(cleanup_error)
+            raise
+        finally:
+            native['native_exit'] = None if process is None else process.returncode
+            native['elapsed_seconds'] = time.monotonic() - started
+            (self.output_dir / 'invocation.native.json').write_text(json.dumps(native), encoding='utf-8')
+            if self.aborted and process is not None and process.returncode is not None:
+                remaining = 64 * 1024 * 1024
+                payloads = []
+                for path in paths:
+                    with path.open('rb') as source:
+                        payload = source.read(remaining)
+                    remaining -= len(payload)
+                    payloads.append(payload.decode(errors='replace'))
+                self.save_native('pull', subprocess.CompletedProcess(argv, process.returncode, *payloads))
+        assert sum(path.stat().st_size for path in paths) <= 64 * 1024 * 1024
+        payloads = [path.read_text() for path in paths]
+        return subprocess.CompletedProcess(argv, process.returncode, *payloads)
 
     def remember_pull(self, result):
         assert self.active is not None and self.receipt is None
@@ -847,17 +961,15 @@ class TestKernelLifecycle:
 
     @pytest.mark.slow
     @pytest.mark.kernel_build
+    @pytest.mark.timeout(2700)
     def test_kernel_pull(self, runner_vm, official_kernel_pull_owner):
         """Pull official kernel."""
-        result = _run_mvm(
-            runner_vm,
+        result = official_kernel_pull_owner.pull_official(
             "kernel",
             "pull",
             "--type",
             "official",
             "--json",
-            check=False,
-            timeout=300,
         )
         official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
@@ -1175,8 +1287,8 @@ class TestKernelBuild:
         pytest.mark.domain_kernel,
     ]
 
-    # 1800s CLI + 30s helper grace + 570s bounded receipt/readback/teardown budget.
-    @pytest.mark.timeout(2400)
+    # 2400s official CLI + bounded group termination + receipt/readback/teardown.
+    @pytest.mark.timeout(2700)
     def test_kernel_build_with_custom_config(self, runner_vm, official_kernel_pull_owner):
         """Build official kernel with custom config fragment.
 
@@ -1185,8 +1297,7 @@ class TestKernelBuild:
         config_path = official_kernel_pull_owner.output_dir / "custom-fragment.conf"
         config_path.write_text("CONFIG_NET=y\nCONFIG_INET=y\n", encoding="utf-8")
 
-        result = _run_mvm(
-            runner_vm,
+        result = official_kernel_pull_owner.pull_official(
             "kernel",
             "pull",
             "--type",
@@ -1197,8 +1308,6 @@ class TestKernelBuild:
             "4",
             "--keep-build-dir",
             "--json",
-            check=False,
-            timeout=1800,
         )
         official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
@@ -1229,11 +1338,10 @@ class TestKernelBuild:
                 f"Built kernel file not found inside VM at: {full_path}"
             )
 
-    @pytest.mark.timeout(2400)
+    @pytest.mark.timeout(2700)
     def test_kernel_clean_rebuild(self, runner_vm, official_kernel_pull_owner):
         """Build official kernel with clean rebuild."""
-        result = _run_mvm(
-            runner_vm,
+        result = official_kernel_pull_owner.pull_official(
             "kernel",
             "pull",
             "--type",
@@ -1242,8 +1350,6 @@ class TestKernelBuild:
             "--jobs",
             "4",
             "--json",
-            check=False,
-            timeout=1800,
         )
         official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
@@ -1276,11 +1382,10 @@ class TestKernelBuild:
             )
 
     @pytest.mark.kernel_build
-    @pytest.mark.timeout(2400)
+    @pytest.mark.timeout(2700)
     def test_kernel_pull_with_features(self, runner_vm, official_kernel_pull_owner):
         """Pull official kernel with --features flag."""
-        result = _run_mvm(
-            runner_vm,
+        result = official_kernel_pull_owner.pull_official(
             "kernel",
             "pull",
             "--type",
@@ -1290,8 +1395,6 @@ class TestKernelBuild:
             "--jobs",
             "4",
             "--json",
-            check=False,
-            timeout=1800,
         )
         official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
@@ -1299,10 +1402,10 @@ class TestKernelBuild:
         )
 
     @pytest.mark.kernel_build
+    @pytest.mark.timeout(2700)
     def test_kernel_pull_with_jobs_flag(self, runner_vm, official_kernel_pull_owner):
         """Pull official kernel with --jobs flag to control parallelism."""
-        result = _run_mvm(
-            runner_vm,
+        result = official_kernel_pull_owner.pull_official(
             "kernel",
             "pull",
             "--type",
@@ -1310,8 +1413,6 @@ class TestKernelBuild:
             "--jobs",
             "2",
             "--json",
-            check=False,
-            timeout=1800,
         )
         official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
@@ -1329,10 +1430,10 @@ class TestKernelBuild:
         )
 
     @pytest.mark.kernel_build
+    @pytest.mark.timeout(2700)
     def test_kernel_pull_with_keep_build_dir(self, runner_vm, official_kernel_pull_owner):
         """Pull official kernel with --keep-build-dir flag."""
-        result = _run_mvm(
-            runner_vm,
+        result = official_kernel_pull_owner.pull_official(
             "kernel",
             "pull",
             "--type",
@@ -1341,8 +1442,6 @@ class TestKernelBuild:
             "--jobs",
             "2",
             "--json",
-            check=False,
-            timeout=1800,
         )
         official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
@@ -1370,18 +1469,16 @@ class TestKernelRemoveAndPull:
     ]
 
     @pytest.mark.kernel_build
+    @pytest.mark.timeout(2700)
     def test_kernel_pull_with_set_default(self, runner_vm, official_kernel_pull_owner):
         """Pull official kernel and set as default in one command."""
-        result = _run_mvm(
-            runner_vm,
+        result = official_kernel_pull_owner.pull_official(
             "kernel",
             "pull",
             "--type",
             "official",
             "--default",
             "--json",
-            check=False,
-            timeout=300,
         )
         official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
@@ -1475,20 +1572,18 @@ class TestKernelPullAdvancedFlags:
         pytest.mark.slow,
     ]
 
+    @pytest.mark.timeout(2700)
     def test_kernel_pull_with_arch_flag(self, runner_vm, official_kernel_pull_owner):
         """Pull a kernel (arch detection is automatic in Go CLI)."""
         # Rationale: Verifies that kernel pull works. The Go CLI detects
         # host architecture automatically — no --arch flag needed. Kernel
         # builds from source can take several minutes.
-        result = _run_mvm(
-            runner_vm,
+        result = official_kernel_pull_owner.pull_official(
             "kernel",
             "pull",
             "--type",
             "official",
             "--json",
-            check=False,
-            timeout=600,
         )
         official_kernel_pull_owner.remember_pull(result)
         assert result.returncode == 0, (
