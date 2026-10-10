@@ -64,6 +64,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > the named runner. No production memory policy or artificial QA RAM guard is introduced. Actual build
 > qualification remains pending; the cached Linux source will be reused.
 
+> **Named-runner reboot transport correction (2026-10-10):** the layout candidate passed the inner
+> PRE case and the named runner really rebooted, but the legacy outer controller could not reconnect:
+> its fresh Firecracker configuration omitted vsock. That attempt remains incomplete, not a memory
+> failure or a release pass. `2a00f3e5` uses the unchanged controller's existing SSH command for only
+> host-phase staging, orchestration and receipt retrieval; candidate-side VM exec/vsock assertions are
+> unchanged. All twelve affected behavioral checks passed inside the named runner, with unchanged
+> candidate and boot pins. The corrected PRE/reboot/POST journey remains unqualified.
+
 > **Standalone export-interruption qualification (2026-10-10):** the SIGINT survivor case passed alone
 > on the installed cache candidate: native exit 0, strict 1/1 with zero other outcomes, 13.37 seconds.
 > It interrupted an authenticated partial copy, refused release while the copy worker survived, preserved

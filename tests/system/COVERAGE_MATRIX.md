@@ -35,6 +35,15 @@ exact two-node collection. Integration JUnit SHA-256
 No phase body or actual reboot ran in those checks: host-reboot status/start/exec/cleanup remains unqualified.
 Ordinary tier batches exclude explicit phase execution and cannot substitute for completed PRE+reboot+POST.
 
+The later layout-candidate PRE passed strict 1/1 and the named runner actually rebooted, but the unchanged
+legacy outer controller's reconnect failed: its new Firecracker configuration had no vsock device. No POST
+ran and that whole invocation remains incomplete. Signed `2a00f3e5` changes only host-phase orchestration
+to the existing outer `mvm ssh` command, including source staging and receipt retrieval; inner candidate
+exec/vsock assertions are unchanged. Its twelve affected behavioral checks passed in `mvmctl-030-test`
+on clean `2a00f3e5`, with unchanged layout candidate `e6ff4283` and boot. Native exit was zero;
+JUnit SHA-256 `17330a9b0a0557fe45a1f86f8171d409e9f0e0212cf3cd2107c0b3f20fdce65b` records
+12 tests and zero failures, errors or skips. This qualifies the correction checks, not a completed reboot journey.
+
 The first Firecracker acquisition body succeeded, but its teardown failed when ordinary `cache clean`
 encountered root-only protected parents. That invocation remains failed; the other two acquisition bodies
 were not executed. [ADR-0022](../../docs/adr/0022-explicit-protected-cache-retirement.md) records the

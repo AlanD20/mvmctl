@@ -639,8 +639,15 @@ duplicate alias cannot produce release evidence.
 This journey is deliberately separate from ordinary T1/T2 batches. It operates only on the existing
 `mvmctl-030-test`, pins the configured outer controller without replacing it, and runs pytest inside that
 runner. A full release invocation cannot count a PRE checkpoint or ordinary tier success as a reboot pass.
-Source implementation, focused runner checks and exact phase collection passed on 2026-10-10; actual
-reboot execution remains pending.
+Source implementation, focused runner checks and exact phase collection passed on 2026-10-10. A later
+PRE passed and the named runner actually rebooted, but the legacy outer controller's vsock reconnect
+failed; no POST ran. The corrected complete journey remains unqualified.
+
+Host-phase orchestration uses the unchanged outer controller's `mvm ssh --cmd` with the runner's attached
+`aland` key at `~/.config/mvmctl/keys/aland`. This includes source staging and receipt retrieval, avoiding
+the legacy controller's reboot-time vsock omission. It does not replace that controller, introduce a
+production fallback, or weaken candidate-side VM exec/vsock assertions. The twelve affected correction
+checks passed inside the named runner; they do not substitute for actual PRE/reboot/POST evidence.
 
 Use one clean, fixed source and candidate for both phases. Select the existing imported ELF with
 `MVM_RUNNER_KERNEL_ID` and `MVM_RUNNER_KERNEL_SHA256`; bind `MVM_BINARY` to the installed outer controller
