@@ -2015,7 +2015,7 @@ def _build_base_image(
             "libguestfs-tools supermin qemu-system-x86 file e2fsprogs "
             "linux-image-generic && "
             "sudo apt-get clean",
-            timeout=300,
+            timeout=1800,
         )
         # Ubuntu packages kernels as 0600; unprivileged supermin must read them.
         # Only package-owned boot images are adjusted, never the external VM kernel.

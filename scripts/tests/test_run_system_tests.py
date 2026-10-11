@@ -3064,9 +3064,13 @@ def test_build_base_image_cleans_builder_when_asset_pull_fails(
     candidate.write_bytes(b"candidate")
     monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_BINARY", str(candidate))
     calls: list[tuple[str, ...]] = []
+    dependency_timeouts: list[object] = []
 
-    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(args)
+        if args[0] == "exec" and args[-1].startswith("sudo apt-get update -qq && "):
+            dependency_timeouts.append(kwargs["timeout"])
+            assert args[args.index("--timeout") + 1] == "10"
         stdout = ""
         if args[:2] == ("image", "ls"):
             stdout = json.dumps({"schema_version": 1, "status": "success", "data": [], "error": None})
@@ -3109,6 +3113,7 @@ def test_build_base_image_cleans_builder_when_asset_pull_fails(
         orchestrator._build_base_image("0.3.0-test", rebuild=True)
 
     assert captured.value is original_failure
+    assert dependency_timeouts == [1800]
     assert initialization_order == [
         "host-init",
         "runner-init-1.17.0",
