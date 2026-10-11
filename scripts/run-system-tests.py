@@ -42,6 +42,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import socket
 import stat
 import struct
@@ -635,6 +636,31 @@ def _dedupe_adjacent(items: list[int]) -> list[int]:
 # ============================================================================
 
 
+class _MvmCommandTimeout(subprocess.TimeoutExpired):
+    """A deadline remains a failure after the owned caller finishes shutdown."""
+
+    def __init__(self, cmd, timeout, result, cleanup_errors):
+        super().__init__(cmd, timeout, output=result.stdout, stderr=result.stderr)
+        self.returncode = result.returncode
+        self.cleanup_errors = cleanup_errors
+
+    def __str__(self) -> str:
+        stdout = "(not captured)" if self.stdout is None else self.stdout or "(empty)"
+        stderr = "(not captured)" if self.stderr is None else self.stderr or "(empty)"
+        output = f"[stdout]\n{stdout}\n[stderr]\n{stderr}"
+        if len(output) > BUILDER_PULL_OUTPUT_LIMIT:
+            marker = "\n... mvm timeout output truncated ...\n"
+            remaining = BUILDER_PULL_OUTPUT_LIMIT - len(marker)
+            head = remaining // 2
+            output = output[:head] + marker + output[-(remaining - head):]
+        cleanup = "\n".join(self.cleanup_errors)
+        return (
+            f"mvm command timed out after {self.timeout}s: {shlex.join(self.cmd)}\n"
+            f"  caller rc: {self.returncode}\n{output}"
+            + (f"\n  shutdown errors: {cleanup}" if cleanup else "")
+        )
+
+
 def mvm(
     *args: str, check: bool = True, timeout: int = 300, capture: bool = True
 ) -> subprocess.CompletedProcess:
@@ -645,13 +671,67 @@ def mvm(
         cmd = shlex.split(MVM_BINARY) + list(args)
     env = {**os.environ, "NO_COLOR": "1"}
     env.setdefault("MVM_ASSET_MIRROR", ASSET_MIRROR_HOST)
-    result = subprocess.run(
-        cmd,
-        capture_output=capture,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
+    # Regular files avoid waiting for EOF from a surviving privileged descendant.
+    with tempfile.TemporaryFile(mode="w+") as stdout, tempfile.TemporaryFile(mode="w+") as stderr:
+        process = subprocess.Popen(
+            cmd,
+            stdout=stdout if capture else None,
+            stderr=stderr if capture else None,
+            text=True,
+            env=env,
+        )
+        timed_out = False
+        cleanup_errors = []
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            pidfd = None
+            try:
+                # This private Popen child has not been reaped: its PID cannot be reused.
+                # Fast completed commands need no pidfd or shutdown operation.
+                if process.poll() is None:
+                    try:
+                        pidfd = os.pidfd_open(process.pid)
+                    except OSError as exc:
+                        if process.poll() is None:
+                            cleanup_errors.append(f"caller pidfd acquisition failed: {exc}")
+                for sig, grace in ((signal.SIGINT, 45), (signal.SIGKILL, 10)):
+                    if process.poll() is not None:
+                        break
+                    try:
+                        if pidfd is not None:
+                            signal.pidfd_send_signal(pidfd, sig)
+                        else:
+                            # Acquisition failed; Popen still owns this unreaped child only.
+                            process.send_signal(sig)
+                    except OSError as exc:
+                        if process.poll() is None:
+                            cleanup_errors.append(f"caller {sig.name} failed: {exc}")
+                    try:
+                        process.wait(timeout=grace)
+                    except subprocess.TimeoutExpired:
+                        if sig == signal.SIGKILL:
+                            cleanup_errors.append("caller not reaped after bounded SIGKILL wait")
+                    except OSError as exc:
+                        cleanup_errors.append(f"caller {sig.name} wait failed: {exc}")
+            finally:
+                if pidfd is not None:
+                    try:
+                        os.close(pidfd)
+                    except OSError as exc:
+                        cleanup_errors.append(f"caller pidfd close failed: {exc}")
+        captured = []
+        for stream in (stdout, stderr):
+            # Snapshot the extent: a descendant cannot extend this read indefinitely.
+            if capture:
+                raw = os.pread(stream.fileno(), os.fstat(stream.fileno()).st_size, 0)
+                captured.append(raw.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n"))
+            else:
+                captured.append(None)
+        result = subprocess.CompletedProcess(cmd, process.returncode, *captured)
+    if timed_out:
+        raise _MvmCommandTimeout(cmd, timeout, result, cleanup_errors)
     if not capture:
         # Stream output live so the user can see mirror vs HTTP download decision
         if result.stdout:
@@ -1614,6 +1694,14 @@ def _record_runner_destruction(
             if primary_output
             else cleanup_failure
         )
+
+
+def _destroy_prepared_vm(vm_name: str, primary: BaseException | None) -> None:
+    """Retain smoke failure output if destruction of its owned runner also fails."""
+    result = {"passed": True, "output": str(primary) if primary is not None else ""}
+    _record_runner_destruction(result, vm_name)
+    if not result["passed"]:
+        raise RuntimeError(result["output"]) from primary
 
 
 def _bounded_builder_pull_output(
@@ -3558,7 +3646,7 @@ def run_prepare(
         TEST_NETWORK_NAME,
         "--volume",
         SHARED_VOLUME_NAME,
-        timeout=180,
+        timeout=300,
     )
     try:
         if binding is not None:
@@ -3568,7 +3656,7 @@ def run_prepare(
         if binding is not None:
             _require_imported_runner_smoke(t1, binding)
     finally:
-        destroy_vm(t1)
+        _destroy_prepared_vm(t1, sys.exc_info()[1])
 
     # --- Step 5: Create T2 VM from custom image + shared volume ---
     t2 = _unique_name("prep-t2")
@@ -3635,7 +3723,7 @@ def run_prepare(
         log("  Environment is ready for running tests.")
 
     finally:
-        destroy_vm(t2)
+        _destroy_prepared_vm(t2, sys.exc_info()[1])
 
 
 def _evidence_registry() -> dict[str, Any]:

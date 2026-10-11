@@ -7,12 +7,15 @@ import hashlib
 import importlib.util
 import json
 import os
+import select
 import shlex
 import shutil
+import signal
 import struct
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -1785,11 +1788,11 @@ def test_streamed_mvm_failure_preserves_command_and_rc_when_output_is_none(
 
     def failed_stream(
         command: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[None]:
-        assert kwargs["capture_output"] is False
-        return subprocess.CompletedProcess(command, 23, stdout=None, stderr=None)
+    ) -> SimpleNamespace:
+        assert kwargs["stdout"] is None and kwargs["stderr"] is None
+        return SimpleNamespace(returncode=23, wait=lambda **_kwargs: 23)
 
-    monkeypatch.setattr(orchestrator.subprocess, "run", failed_stream)
+    monkeypatch.setattr(orchestrator.subprocess, "Popen", failed_stream)
 
     with pytest.raises(RuntimeError) as captured:
         orchestrator.mvm(
@@ -1806,6 +1809,189 @@ def test_streamed_mvm_failure_preserves_command_and_rc_when_output_is_none(
     ) in message
     assert "rc: 23" in message
     assert "stderr: (streamed; not captured)" in message
+
+
+def _configure_interruptible_mvm_cli(orchestrator, monkeypatch, tmp_path, body):
+    ready = tmp_path / "cli-ready"
+    script = (
+        "import os,signal,sys,time\nfrom pathlib import Path\n"
+        + body
+        + f"\nPath({str(ready)!r}).write_text(str(os.getpid()))\n"
+        + "print('before-out', flush=True)\nprint('before-err', file=sys.stderr, flush=True)\n"
+        + "while True: time.sleep(0.05)\n"
+    )
+    monkeypatch.setattr(orchestrator, "MVM_BINARY", shlex.join([sys.executable, "-u", "-c", script]))
+    popen = subprocess.Popen
+
+    def start_cli(*args, **kwargs):
+        process = popen(*args, **kwargs)
+        deadline = time.monotonic() + 5
+        while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists(), "lightweight CLI did not install its signal handler"
+        return process
+
+    monkeypatch.setattr(orchestrator.subprocess, "Popen", start_cli)
+    return ready
+
+
+@pytest.mark.parametrize("check", [True, False])
+def test_mvm_timeout_interrupts_owned_caller_and_retains_shutdown_streams(
+    orchestrator, monkeypatch, tmp_path, check,
+):
+    ready = _configure_interruptible_mvm_cli(
+        orchestrator, monkeypatch, tmp_path,
+        "def interrupted(sig, frame):\n"
+        "    print('after-out', flush=True)\n"
+        "    print('after-err', file=sys.stderr, flush=True)\n"
+        "    sys.exit(0)\nsignal.signal(signal.SIGINT, interrupted)\n",
+    )
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        orchestrator.mvm("create", timeout=0.1, check=check)
+    error = captured.value
+    assert error.returncode == 0
+    assert error.stdout == "before-out\nafter-out\n"
+    assert error.stderr == "before-err\nafter-err\n"
+    assert error.cleanup_errors == []
+    assert "timed out" in str(error) and "after-err" in str(error)
+    with pytest.raises(ChildProcessError):
+        os.waitpid(int(ready.read_text()), os.WNOHANG)
+
+
+def test_mvm_timeout_kills_only_ignored_interrupt_caller_after_grace(
+    orchestrator, monkeypatch, tmp_path,
+):
+    ready = _configure_interruptible_mvm_cli(
+        orchestrator, monkeypatch, tmp_path, "signal.signal(signal.SIGINT, signal.SIG_IGN)\n",
+    )
+    start_cli = orchestrator.subprocess.Popen
+
+    def shorten_waits(*args, **kwargs):
+        process = start_cli(*args, **kwargs)
+        wait = process.wait
+        process.wait = lambda timeout: wait(timeout=min(timeout, 0.1))
+        return process
+
+    monkeypatch.setattr(orchestrator.subprocess, "Popen", shorten_waits)
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        orchestrator.mvm("create", timeout=0.1)
+    assert captured.value.returncode == -signal.SIGKILL
+    assert captured.value.stdout == "before-out\n"
+    assert captured.value.stderr == "before-err\n"
+    assert captured.value.cleanup_errors == []
+    with pytest.raises(ChildProcessError):
+        os.waitpid(int(ready.read_text()), os.WNOHANG)
+
+
+def test_mvm_timeout_keeps_descendant_alive_without_waiting_for_pipe_eof(
+    orchestrator, monkeypatch, tmp_path,
+):
+    descendant = tmp_path / "descendant"
+    ready = _configure_interruptible_mvm_cli(
+        orchestrator, monkeypatch, tmp_path,
+        "def interrupted(sig, frame):\n"
+        "    print('after-out', flush=True)\n    sys.exit(0)\n"
+        "signal.signal(signal.SIGINT, interrupted)\n"
+        "child = os.fork()\n"
+        "if child == 0:\n"
+        "    signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+        "    time.sleep(10)\n    os._exit(0)\n"
+        + f"Path({str(descendant)!r}).write_text(str(child))\n",
+    )
+    pidfd = None
+    try:
+        with pytest.raises(subprocess.TimeoutExpired) as captured:
+            orchestrator.mvm("create", timeout=0.1)
+        assert captured.value.returncode == 0
+        assert captured.value.stdout == "before-out\nafter-out\n"
+        assert captured.value.stderr == "before-err\n"
+        pidfd = os.pidfd_open(int(descendant.read_text()))
+        poller = select.poll()
+        poller.register(pidfd, select.POLLIN)
+        assert poller.poll(0) == [], "caller timeout killed its unrelated descendant"
+        with pytest.raises(ChildProcessError):
+            os.waitpid(int(ready.read_text()), os.WNOHANG)
+    finally:
+        if pidfd is None and descendant.exists():
+            pidfd = os.pidfd_open(int(descendant.read_text()))
+        if pidfd is not None:
+            signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+            poller = select.poll()
+            poller.register(pidfd, select.POLLIN)
+            assert poller.poll(2000), "owned lightweight descendant did not exit"
+            os.close(pidfd)
+
+
+def test_mvm_pidfd_failure_preserves_timeout_and_cooperative_output(
+    orchestrator, monkeypatch, tmp_path,
+):
+    _configure_interruptible_mvm_cli(
+        orchestrator, monkeypatch, tmp_path,
+        "signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))\n",
+    )
+
+    def refuse_pidfd(_pid):
+        raise OSError("synthetic pidfd refusal")
+
+    monkeypatch.setattr(orchestrator.os, "pidfd_open", refuse_pidfd)
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        orchestrator.mvm("create", timeout=0.1)
+    error = captured.value
+    assert error.returncode == 0
+    assert error.stdout == "before-out\n" and error.stderr == "before-err\n"
+    assert "synthetic pidfd refusal" in str(error)
+
+
+def test_mvm_timeout_retains_signal_and_reap_failures_without_claiming_exit(
+    orchestrator, monkeypatch,
+):
+    signals = []
+
+    def refused(*_args, **_kwargs):
+        raise OSError("synthetic shutdown refusal")
+
+    def start_cli(command, **kwargs):
+        kwargs["stdout"].write("primary-out\n")
+        kwargs["stdout"].flush()
+        kwargs["stderr"].write("primary-err\n")
+        kwargs["stderr"].flush()
+
+        def wait(timeout):
+            if not signals:
+                raise subprocess.TimeoutExpired(command, timeout)
+            raise OSError("synthetic reap failure")
+
+        def send(sig):
+            signals.append(sig)
+            raise OSError("synthetic signal failure")
+
+        return SimpleNamespace(pid=123, returncode=None, poll=lambda: None, wait=wait, send_signal=send)
+
+    monkeypatch.setattr(orchestrator.subprocess, "Popen", start_cli)
+    monkeypatch.setattr(orchestrator.os, "pidfd_open", refused)
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        orchestrator.mvm("create", timeout=0.1)
+    assert signals == [signal.SIGINT, signal.SIGKILL]
+    assert captured.value.returncode is None
+    assert captured.value.stdout == "primary-out\n" and captured.value.stderr == "primary-err\n"
+    for message in ("primary-out", "primary-err", "shutdown refusal", "signal failure", "reap failure"):
+        assert message in str(captured.value)
+
+
+def test_mvm_fast_command_preserves_argv_environment_and_needs_no_pidfd(
+    orchestrator, monkeypatch,
+):
+    script = "import json,os,sys; print(json.dumps([sys.argv[1:],os.environ['NO_COLOR'],os.environ['MVM_ASSET_MIRROR']]))"
+    monkeypatch.setattr(orchestrator, "MVM_BINARY", shlex.join([sys.executable, "-c", script]))
+    monkeypatch.setenv("MVM_ASSET_MIRROR", "/explicit/mirror")
+
+    def unexpected(_pid):
+        raise AssertionError("a completed command must not require pidfd acquisition")
+
+    monkeypatch.setattr(orchestrator.os, "pidfd_open", unexpected)
+    result = orchestrator.mvm("arg with spaces", "--json", timeout=5)
+    assert result.returncode == 0 and result.stderr == ""
+    assert json.loads(result.stdout) == [["arg with spaces", "--json"], "1", "/explicit/mirror"]
 
 
 def test_tier3_domain_requires_complete_local_pytest_outcomes(
@@ -3438,6 +3624,86 @@ def test_imported_prepare_failure_destroys_only_owned_smoke_runner(
     with pytest.raises(RuntimeError, match="refused"):
         orchestrator.run_prepare(binding=binding)
     assert destroyed == ["prep-t1"]
+
+
+@pytest.mark.parametrize("tier", [1, 2])
+@pytest.mark.parametrize("smoke_fails", [True, False], ids=["primary-and-cleanup", "cleanup-only"])
+def test_prepare_keeps_smoke_and_owned_destruction_failure_outputs(
+    orchestrator, monkeypatch, imported_runner_kernel, tier, smoke_fails,
+):
+    binding, _info, _path = imported_runner_kernel
+    target = f"prep-t{tier}"
+    destroyed = []
+    monkeypatch.setattr(orchestrator, "_get_mvm_version", lambda: "0.3.0")
+    monkeypatch.setattr(orchestrator, "_unique_name", lambda prefix: prefix)
+    for name in (
+        "_validate_imported_runner_kernel", "ensure_shared_volume", "ensure_test_network",
+        "_build_base_image", "_initialize_runner_user", "_require_runner_base_receipt",
+    ):
+        monkeypatch.setattr(orchestrator, name, lambda *args, **kwargs: None)
+
+    def smoke(vm_name, _binding):
+        if vm_name == target and smoke_fails:
+            raise RuntimeError("primary smoke stdout and stderr")
+
+    def destroy(vm_name):
+        destroyed.append(vm_name)
+        if vm_name == target:
+            raise RuntimeError("owned cleanup stdout and stderr")
+
+    monkeypatch.setattr(orchestrator, "_require_imported_runner_smoke", smoke)
+    monkeypatch.setattr(orchestrator, "destroy_vm", destroy)
+    monkeypatch.setattr(
+        orchestrator, "mvm",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args, 0, stdout='{"schema_version":1,"status":"success","data":{"volume":{"id":"' + "a" * 64 + '","name":"asset-mirror","status":"available"}},"error":null}', stderr="",
+        ),
+    )
+    monkeypatch.setattr(orchestrator, "_require_local_mirror_pull", lambda *args: None)
+    with pytest.raises(RuntimeError) as captured:
+        orchestrator.run_prepare(binding=binding)
+    message = str(captured.value)
+    assert "owned cleanup stdout and stderr" in message
+    assert ("primary smoke stdout and stderr" in message) is smoke_fails
+    assert destroyed == (["prep-t1"] if tier == 1 else ["prep-t1", "prep-t2"])
+
+
+@pytest.mark.parametrize("tier", [1, 2])
+@pytest.mark.parametrize("timed_out", [True, False], ids=["timeout", "refusal"])
+def test_prepare_failed_create_never_manufactures_destruction_ownership(
+    orchestrator, monkeypatch, imported_runner_kernel, tier, timed_out,
+):
+    binding, _info, _path = imported_runner_kernel
+    target = f"prep-t{tier}"
+    destroyed = []
+    monkeypatch.setattr(orchestrator, "_get_mvm_version", lambda: "0.3.0")
+    monkeypatch.setattr(orchestrator, "_unique_name", lambda prefix: prefix)
+    monkeypatch.setattr(orchestrator, "destroy_vm", destroyed.append)
+    for name in (
+        "_validate_imported_runner_kernel", "ensure_shared_volume", "ensure_test_network",
+        "_build_base_image", "_initialize_runner_user", "_require_runner_base_receipt",
+        "_require_imported_runner_smoke",
+    ):
+        monkeypatch.setattr(orchestrator, name, lambda *args, **kwargs: None)
+
+    def create(*args, **kwargs):
+        if args[:3] == ("vm", "create", target):
+            if timed_out:
+                result = subprocess.CompletedProcess(args, None, stdout="primary create stdout", stderr="primary create stderr")
+                raise orchestrator._MvmCommandTimeout(args, kwargs["timeout"], result, ["cleanup uncertainty"])
+            raise RuntimeError("preexisting runner create refused")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(orchestrator, "mvm", create)
+    with pytest.raises(subprocess.TimeoutExpired if timed_out else RuntimeError) as captured:
+        orchestrator.run_prepare(binding=binding)
+    message = str(captured.value)
+    if timed_out:
+        assert "primary create stdout" in message and "primary create stderr" in message
+        assert "cleanup uncertainty" in message
+    else:
+        assert message == "preexisting runner create refused"
+    assert destroyed == ([] if tier == 1 else ["prep-t1"])
 
 
 @pytest.mark.parametrize(
