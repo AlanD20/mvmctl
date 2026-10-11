@@ -329,12 +329,12 @@ def unique_object(pairs):
         value[key] = item
     return value
 
-def directory(parent, name, managed=True):
+def directory(parent, name, managed=True, mode=0o700):
     fd = os.open(name, directory_flags, dir_fd=parent)
     fds.append(fd)
     info = os.fstat(fd)
     assert info.st_uid == info.st_gid == 0 and stat.S_ISDIR(info.st_mode), name
-    assert stat.S_IMODE(info.st_mode) == 0o700 if managed else not info.st_mode & 0o022, name
+    assert stat.S_IMODE(info.st_mode) == mode if managed else not info.st_mode & 0o022, name
     parents.append((parent, name, fd, identity(info, True)))
     return fd
 
@@ -408,7 +408,7 @@ try:
     root = directory(None, "/", False)
     var = directory(root, "var", False)
     lib = directory(var, "lib", False)
-    state = directory(lib, "mvmctl")
+    state = directory(lib, "mvmctl", mode=0o711)
     binaries = directory(state, "binaries")
     architecture = directory(binaries, "x86_64")
     source = pair("1.17.0")
@@ -850,7 +850,10 @@ class _SnapshotCaptureFault:
     """Own one file-limit fault and its original VMM pidfd until producer exit."""
 
     def __init__(self, source: dict[str, Any], cache: Path) -> None:
-        assert os.environ.get("MVM_TEST_VM") == "mvmctl-030-test"
+        qualification_host = os.environ.get("MVM_TEST_QUALIFICATION_HOST")
+        assert (
+            qualification_host and qualification_host == os.environ.get("MVM_TEST_VM")
+        ), "administrator fault requires explicit exact qualification-host admission"
         assert "PYTEST_XDIST_WORKER" not in os.environ, "capture fault requires exclusive lifecycle ownership"
         self.process = subprocess.Popen(
             [
@@ -1815,7 +1818,11 @@ class TestNetworklessJailerLifecycle:
         This is filesystem producer interruption, not power loss or root-receiver death.
         The named runner and this VM's lifecycle are exclusively assigned to this case.
         """
-        assert os.environ.get("MVM_TEST_VM") == "mvmctl-030-test"
+        qualification_host = os.environ.get("MVM_TEST_QUALIFICATION_HOST")
+        assert (
+            qualification_host
+            and qualification_host == os.environ.get("MVM_TEST_VM") == runner_vm
+        ), "administrator fault requires explicit exact qualification-host admission"
         assert "PYTEST_XDIST_WORKER" not in os.environ
         resources = _resources.get()
         source_name = networkless_vm_name
