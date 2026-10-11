@@ -22,6 +22,12 @@ func (op *Operation) vmRemoveUnrecorded(ctx context.Context, input inputs.VMInpu
 		code = errs.CodeVMCgroupCleanupFailed
 		cleaned, err = jailer.NewVMLifecycleClient().Remove(ctx, jailer.VMCleanupRequest{VMID: vmID})
 	}
+	if err == nil {
+		if leaseErr := op.Repos.Lease.ReleaseByVM(ctx, vmID); leaseErr != nil {
+			err = errs.WrapMsg(errs.CodeDatabaseError, "release unrecorded VM lease", leaseErr,
+				errs.WithEntity(vmID))
+		}
+	}
 	if err != nil {
 		if domainErr := errs.AsDomainError(err); domainErr != nil {
 			code = domainErr.Code
