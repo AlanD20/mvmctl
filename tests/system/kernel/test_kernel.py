@@ -906,6 +906,61 @@ def official_kernel_pull_owner(official_kernel_pull_sequence, request, monkeypat
         owner.finish_case(request.session.testsfailed != failures_before)
 
 
+@pytest.fixture
+def private_kernel_default_cache(runner_vm, tmp_path, monkeypatch):
+    """Borrow shared kernel bytes while keeping default mutations in an owned cache."""
+    baseline = {domain: _json_success_data(
+        _run_mvm(runner_vm, domain, "ls", "--json").stdout, list,
+    ) for domain in _KernelPullOwner.domains}
+    config = _json_success_data(_run_mvm(runner_vm, "config", "ls", "--json").stdout, dict)
+    defaults = [item for item in baseline["kernel"] if item["is_default"] and item["is_present"]]
+    assert len(defaults) == 1, "a present preseeded default kernel is required"
+    source = defaults[0]
+    inspected = _json_success_data(
+        _run_mvm(runner_vm, "kernel", "inspect", source["id"], "--json").stdout, dict,
+    )
+    _KernelPullOwner.assert_inspect_receipt(inspected, source)
+    sources = {Path(item["path"]): _KernelPullOwner.file_receipt(Path(item["path"]))
+               for item in baseline["kernel"] if item["is_present"]}
+    tmp_path.chmod(0o700)
+    cache, private_config = tmp_path / "default-cache", tmp_path / "default-config"
+    cache.mkdir(mode=0o700)
+    private_config.mkdir(mode=0o700)
+    owner = _KernelPullOwner(runner_vm, cache, private_config)
+    failures = []
+    try:
+        with monkeypatch.context() as selection:
+            selection.setenv("MVM_CACHE_DIR", str(cache))
+            selection.setenv("MVM_CONFIG_DIR", str(private_config))
+            selection.setenv("MVM_TEMP_DIR", str(cache / "tmp"))
+            selection.setenv("TMPDIR", str(cache / "tmp"))
+            selection.delenv("MVM_WARM_POOL", raising=False)
+            owner.initialize()
+            try:
+                yield owner, source, sources[Path(source["path"])][1]
+            finally:
+                assert not list((cache / "kernels").iterdir()), "unpublished kernel backing; retain private cache"
+                owner.cleanup_cache()
+    finally:
+        # Compare complete original rows, including updated_at; restoring a shared
+        # default would legitimately advance it and must still fail this guard.
+        for domain, expected in (*baseline.items(), ("config", config)):
+            try:
+                current = _json_success_data(
+                    _run_mvm(runner_vm, domain, "ls", "--json").stdout,
+                    dict if domain == "config" else list,
+                )
+                assert current == expected, (domain, expected, current)
+            except Exception as error:
+                failures.append(f"shared {domain} baseline changed: {error!r}")
+        for path, expected in sources.items():
+            try:
+                assert _KernelPullOwner.file_receipt(path) == expected, path
+            except Exception as error:
+                failures.append(f"shared original kernel changed: {path}: {error!r}")
+        assert not failures, failures
+
+
 def _import_test_kernel(runner_vm: str) -> str:
     """Register a uniquely versioned copy of a present kernel for removal tests."""
     _ensure_kernel(runner_vm)
@@ -1035,31 +1090,42 @@ class TestKernelLifecycle:
             assert entry.get("type") in ("custom", "firecracker", "official")
         assert any(entry["is_present"] for entry in data)
 
-    def test_kernel_set_default(self, runner_vm):
-        """Transfer the default to a test-owned import, then restore it."""
-        _ensure_kernel(runner_vm)
-        kernels = _json_success_data(
-            _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
-        )
-        previous_default = next(kernel for kernel in kernels if kernel["is_default"])
-        inspected = _json_success_data(
-            _run_mvm(runner_vm, "kernel", "inspect", previous_default["id"], "--json").stdout,
-            dict,
-        )
-        import_name = f"sys-test-kernel-default-{uuid.uuid4().hex[:8]}"
-        import_version = f"qa-{uuid.uuid4().hex[:8]}"
+    def test_kernel_set_default(self, runner_vm, private_kernel_default_cache):
+        """Transfer and restore a default using only private test-owned imports."""
+        owner, source, source_digest = private_kernel_default_cache
+        owned = {}
+        previous_default = None
         imported_id = None
-        try:
+
+        def import_owned():
+            suffix = uuid.uuid4().hex[:12]
+            version = f"qa-{suffix}"
+            expected_id = hashlib.sha256(f"{source_digest}:{version}:{source['arch']}".encode()).hexdigest()
+            assert expected_id not in owned and expected_id != source["id"]
             imported = _json_success_data(
                 _run_mvm(
-                    runner_vm,
-                    "kernel", "import", import_name, inspected["storage"]["path"],
-                    "--version", import_version, "--json",
-                ).stdout,
-                dict,
+                    runner_vm, "kernel", "import", f"sys-test-kernel-default-{suffix}", source["path"],
+                    "--version", version, "--json",
+                ).stdout, dict,
             )
-            imported_id = imported["id"]
-            assert imported_id != previous_default["id"]
+            assert imported["id"] == expected_id and imported["type"] == "custom", imported
+            assert imported["is_present"] and imported["is_default"] is False, imported
+            path = owner.cache_dir / "kernels" / expected_id
+            assert Path(imported["path"]) == path and not path.parent.is_symlink(), imported
+            backing, digest = owner.file_receipt(path)
+            assert digest == source_digest, path
+            owned[expected_id] = imported, path, backing, digest
+            return expected_id
+
+        try:
+            previous_default = import_owned()
+            _run_mvm(runner_vm, "kernel", "default", previous_default)
+            kernels = _json_success_data(
+                _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list,
+            )
+            assert [kernel["id"] for kernel in kernels if kernel["is_default"]] == [previous_default]
+            imported_id = import_owned()
+            assert imported_id != previous_default
             _run_mvm(runner_vm, "kernel", "default", imported_id)
             kernels_after = _json_success_data(
                 _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
@@ -1067,15 +1133,35 @@ class TestKernelLifecycle:
             assert [kernel["id"] for kernel in kernels_after if kernel["is_default"]] == [imported_id]
         finally:
             if imported_id is not None:
-                _run_mvm(runner_vm, "kernel", "default", previous_default["id"])
-                _run_mvm(runner_vm, "kernel", "rm", imported_id, "--force")
+                _run_mvm(runner_vm, "kernel", "default", previous_default)
                 kernels_after = _json_success_data(
                     _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
                 )
                 assert [kernel["id"] for kernel in kernels_after if kernel["is_default"]] == [
-                    previous_default["id"]
+                    previous_default
                 ]
-                assert all(kernel["id"] != imported_id for kernel in kernels_after)
+            for kernel_id, (item, path, backing, digest) in reversed(list(owned.items())):
+                inspected = _json_success_data(
+                    _run_mvm(runner_vm, "kernel", "inspect", kernel_id, "--json").stdout, dict,
+                )
+                observed = next(kernel for kernel in owner.inventory()["kernel"] if kernel["id"] == kernel_id)
+                # Only these owned rows may change default status and timestamp.
+                assert observed == {**item, "is_default": observed["is_default"],
+                                    "updated_at": observed["updated_at"]}, observed
+                owner.assert_inspect_receipt(inspected, observed)
+                assert owner.file_receipt(path) == (backing, digest), path
+                removed = _json_success_data(
+                    _run_mvm(runner_vm, "kernel", "rm", kernel_id, "--force", "--json").stdout, dict,
+                )
+                assert len(removed["items"]) == 1 and removed["items"][0]["error"] is None, removed
+                assert removed["items"][0]["result"]["code"] == "kernel.removed", removed
+                with pytest.raises(FileNotFoundError):
+                    path.lstat()
+                remaining = owner.inventory()["kernel"]
+                assert all(kernel["id"] != kernel_id for kernel in remaining)
+                if kernel_id == imported_id:
+                    assert [kernel["id"] for kernel in remaining if kernel["is_default"]] == [previous_default]
+            assert owner.inventory() == owner.baseline
 
 
 class TestKernelInspect:
