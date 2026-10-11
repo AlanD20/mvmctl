@@ -1815,6 +1815,73 @@ def _require_local_mirror_pull(
         )
 
 
+def _runner_base_image_id(
+    version: str, binding: ImportedRunnerKernelBinding | None = None
+) -> str | None:
+    """Admit one present image by exact type/version, never resolver fallback."""
+    result = mvm("image", "ls", "--json", check=False, timeout=15)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"runner base image lookup failed (rc={result.returncode}): {result.stderr}"
+        )
+    if len(result.stdout.encode()) > MAX_RUNNER_BINDING_JSON_BYTES:
+        raise RuntimeError("runner base image list exceeds size limit")
+
+    def unique_fields(pairs):
+        values = {}
+        folded = set()
+        for key, value in pairs:
+            if key.casefold() in folded:
+                raise RuntimeError(f"runner base image list has duplicate field: {key}")
+            folded.add(key.casefold())
+            values[key] = value
+        return values
+
+    def reject_constant(value):
+        raise RuntimeError(f"runner base image list has non-standard JSON value: {value}")
+
+    try:
+        envelope = json.loads(
+            result.stdout, object_pairs_hook=unique_fields, parse_constant=reject_constant
+        )
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"runner base image list returned invalid JSON: {exc}") from exc
+    if not isinstance(envelope, dict) or set(envelope) != {
+        "schema_version", "status", "data", "error"
+    }:
+        raise RuntimeError("runner base image list has incomplete or unknown envelope fields")
+    if type(envelope["schema_version"]) is not int or envelope["schema_version"] != 1:
+        raise RuntimeError("runner base image list has unsupported schema")
+    if envelope["status"] != "success" or envelope["error"] is not None:
+        raise RuntimeError("runner base image list is not successful")
+    images = envelope["data"]
+    if not isinstance(images, list):
+        raise RuntimeError("runner base image list data must be a list")
+    image_type = _runner_image_key(version, binding).rsplit(":", 1)[0]
+    exact = []
+    seen_ids = set()
+    for image in images:
+        if (
+            not isinstance(image, dict)
+            or not isinstance(image.get("id"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", image["id"]) is None
+            or not isinstance(image.get("type"), str)
+            or not image["type"]
+            or not isinstance(image.get("version"), str)
+            or not image["version"]
+            or type(image.get("is_present")) is not bool
+        ):
+            raise RuntimeError("runner base image list has invalid image identity")
+        if image["id"] in seen_ids:
+            raise RuntimeError("runner base image list has duplicate image ID")
+        seen_ids.add(image["id"])
+        if image["type"] == image_type and image["version"] == version:
+            exact.append(image)
+    if len(exact) > 1:
+        raise RuntimeError("runner base image list has ambiguous exact type/version")
+    return exact[0]["id"] if exact and exact[0]["is_present"] else None
+
+
 def _build_base_image(
     mvm_version: str,
     *,
@@ -1834,36 +1901,11 @@ def _build_base_image(
         _validate_imported_runner_kernel(binding)
     log(f"Building custom base image '{image_key}'...")
 
-    # When rebuilding, remove the existing image first so it's rebuilt fresh.
-    if rebuild:
-        exists = (
-            binding is None
-            or mvm(
-                "image", "inspect", image_key, "--json", check=False, timeout=15
-            ).returncode
-            == 0
-        )
-        if exists:
-            mvm(
-                "image",
-                "rm",
-                image_key,
-                "--force",
-                check=binding is not None,
-                timeout=15,
-            )
-
-    # Check if already built (skip check when rebuilding)
-    if not rebuild:
-        check = mvm(
-            "image",
-            "inspect",
-            image_key,
-            "--json",
-            check=False,
-            timeout=15,
-        )
-        if check.returncode == 0:
+    existing_id = _runner_base_image_id(img_tag, binding)
+    if existing_id is not None:
+        if rebuild:
+            mvm("image", "rm", existing_id, "--force", check=True, timeout=15)
+        else:
             log(f"  Base image '{image_key}' already exists, skipping")
             return img_tag
 

@@ -3010,6 +3010,8 @@ def test_build_base_image_cleans_builder_when_asset_pull_fails(
     def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         stdout = ""
+        if args[:2] == ("image", "ls"):
+            stdout = json.dumps({"schema_version": 1, "status": "success", "data": [], "error": None})
         if args[:2] == ("exec", orchestrator.BASE_VM_NAME) and args[-1].startswith("stat -c%s"):
             size = candidate.stat().st_size
             stdout = f"{size}\n{size}\n"
@@ -3071,6 +3073,12 @@ def test_build_base_image_does_not_remove_existing_builder_on_create_refusal(
 
     def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(args)
+        if args[:2] == ("image", "ls"):
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout=json.dumps({"schema_version": 1, "status": "success", "data": [], "error": None}),
+                stderr="",
+            )
         if args[:2] == ("vm", "create"):
             raise RuntimeError("builder VM already exists")
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="not found")
@@ -3082,6 +3090,141 @@ def test_build_base_image_does_not_remove_existing_builder_on_create_refusal(
 
     assert ("vm", "rm", orchestrator.BASE_VM_NAME, "--force") not in calls
     assert not any(args[:2] == ("image", "import") for args in calls)
+
+
+@pytest.mark.parametrize("imported", [False, True], ids=["stock", "imported"])
+@pytest.mark.parametrize(
+    "available,rebuild,reuse",
+    [
+        ("old", False, False),
+        ("old", True, False),
+        ("exact", False, True),
+        ("exact", True, False),
+        ("absent", False, False),
+        ("missing", False, False),
+    ],
+)
+def test_build_base_image_requires_exact_present_identity(
+    orchestrator,
+    monkeypatch,
+    imported,
+    available,
+    rebuild,
+    reuse,
+):
+    binding = orchestrator.ImportedRunnerKernelBinding("d" * 64, "e" * 64) if imported else None
+    monkeypatch.setattr(orchestrator, "_validate_imported_runner_kernel", lambda _binding: None)
+    image_type = orchestrator.BASE_IMAGE_NAME + (f"-kernel-{binding.id}" if binding else "")
+    old = {"id": "a" * 64, "type": image_type, "version": "0.3.0-old", "is_present": True}
+    older = {**old, "id": "c" * 64, "version": "0.3.0-older"}
+    current = {
+        "id": "b" * 64, "type": image_type, "version": "0.3.0-current",
+        "is_present": available != "absent",
+    }
+    images = {} if available == "missing" else {old["id"]: old.copy(), older["id"]: older.copy()}
+    if available in ("exact", "absent"):
+        images[current["id"]] = current.copy()
+    removed = []
+    builders = []
+    builder_reached = RuntimeError("ordinary builder reached")
+
+    def fake_mvm(*args, **kwargs):
+        if args[:2] == ("image", "ls"):
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout=json.dumps({
+                    "schema_version": 1, "status": "success",
+                    "data": list(images.values()), "error": None,
+                }), stderr="",
+            )
+        if args[:2] == ("image", "inspect"):
+            # The public resolver's successful old-version fallback is not exact evidence.
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"image": old}), stderr="")
+        if args[:2] == ("image", "rm"):
+            removed.append(args[2])
+            images.pop(args[2])
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if args[:2] == ("vm", "create"):
+            builders.append(args[3])  # --writeback precedes the owned builder name.
+            raise builder_reached
+        raise AssertionError(f"unexpected preparation effect: {args}")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    if reuse:
+        assert orchestrator._build_base_image("0.3.0-current", rebuild=rebuild, binding=binding) == "0.3.0-current"
+    else:
+        with pytest.raises(RuntimeError) as captured:
+            orchestrator._build_base_image("0.3.0-current", rebuild=rebuild, binding=binding)
+        assert captured.value is builder_reached
+    expected_images = {} if available == "missing" else {old["id"]: old, older["id"]: older}
+    if available == "absent" or (available == "exact" and not rebuild):
+        expected_images[current["id"]] = current
+    assert images == expected_images
+    assert removed == ([current["id"]] if available == "exact" and rebuild else [])
+    assert builders == ([] if reuse else [orchestrator.BASE_VM_NAME])
+
+
+@pytest.mark.parametrize("rebuild", [False, True], ids=["reuse", "rebuild"])
+@pytest.mark.parametrize(
+    "reply,returncode,error",
+    [
+        ("", 0, "invalid JSON"),
+        ('{"schema_version":1,"status":"success","data":[],"error":null,"DATA":[]}', 0, "duplicate field"),
+        ('{"schema_version":1,"status":"success","data":[],"error":null,"extra":1}', 0, "envelope fields"),
+        ('{"schema_version":true,"status":"success","data":[],"error":null}', 0, "unsupported schema"),
+        ('{"schema_version":1,"status":"error","data":[],"error":null}', 0, "not successful"),
+        ('{"schema_version":1,"status":"success","data":{},"error":null}', 0, "must be a list"),
+        ("[]", 0, "envelope fields"),
+        ("unavailable", 23, "lookup failed"),
+    ],
+)
+def test_build_base_image_refuses_failed_or_malformed_image_list(
+    orchestrator, monkeypatch, rebuild, reply, returncode, error,
+):
+    effects = []
+
+    def fake_mvm(*args, **kwargs):
+        if args[:2] != ("image", "ls"):
+            effects.append(args)
+        return subprocess.CompletedProcess(args, returncode, stdout=reply, stderr="inventory unavailable")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    with pytest.raises(RuntimeError, match=error):
+        orchestrator._build_base_image("0.3.0", rebuild=rebuild)
+    assert effects == []
+
+
+@pytest.mark.parametrize("fault", ["duplicate-version", "duplicate-id", "missing-version", "short-id", "invalid-presence"])
+def test_build_base_image_refuses_ambiguous_or_invalid_image_identity(
+    orchestrator, monkeypatch, fault,
+):
+    image = {"id": "a" * 64, "type": orchestrator.BASE_IMAGE_NAME, "version": "0.3.0", "is_present": True}
+    images = [image]
+    if fault == "duplicate-version":
+        images.append({**image, "id": "b" * 64})
+    elif fault == "duplicate-id":
+        images.append({**image, "version": "0.3.0-old"})
+    elif fault == "missing-version":
+        del image["version"]
+    elif fault == "short-id":
+        image["id"] = "a" * 8
+    else:
+        image["is_present"] = 1
+    effects = []
+
+    def fake_mvm(*args, **kwargs):
+        if args[:2] != ("image", "ls"):
+            effects.append(args)
+        return subprocess.CompletedProcess(
+            args, 0,
+            stdout=json.dumps({"schema_version": 1, "status": "success", "data": images, "error": None}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    with pytest.raises(RuntimeError, match="ambiguous|duplicate image ID|invalid image identity"):
+        orchestrator._build_base_image("0.3.0", rebuild=True)
+    assert effects == []
 
 
 @pytest.mark.parametrize("enveloped", [False, True], ids=["legacy", "schema-1"])
@@ -3765,6 +3908,14 @@ def test_imported_image_never_looks_up_or_removes_stock_key(
         calls.append((args, kwargs))
         if args[:2] == ("kernel", "inspect"):
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps(info))
+        if args[:2] == ("image", "ls"):
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps({
+                "schema_version": 1, "status": "success", "error": None,
+                "data": [
+                    {"id": "a" * 64, "type": orchestrator.BASE_IMAGE_NAME, "version": "0.3.0", "is_present": True},
+                    {"id": "b" * 64, "type": f"mvm-test-runner-kernel-{binding.id}", "version": "0.3.0", "is_present": True},
+                ],
+            }), stderr="")
         if args[:2] == ("vm", "create"):
             raise RuntimeError("create refused")
         return subprocess.CompletedProcess(args, 0, stdout="")
@@ -3777,12 +3928,12 @@ def test_imported_image_never_looks_up_or_removes_stock_key(
             orchestrator._build_base_image("0.3.0", rebuild=True, binding=binding)
     images = [(args, kwargs) for args, kwargs in calls if args[0] == "image"]
     assert images
-    assert all(
-        args[2] == f"mvm-test-runner-kernel-{binding.id}:0.3.0" for args, _ in images
-    )
+    assert images[0][0] == ("image", "ls", "--json")
     if phase != "lookup":
-        assert images[-1][0][:2] == ("image", "rm")
+        assert images[-1][0] == ("image", "rm", "b" * 64, "--force")
         assert images[-1][1]["check"] is True
+    else:
+        assert len(images) == 1
     assert not any(args[:2] == ("vm", "rm") for args, _ in calls)
 
 
