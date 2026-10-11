@@ -187,9 +187,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limitations and qualification
 
-- Kept v0.3.0 unreleased and not release-qualified. The complete applicable
-  installed Python matrix, reusable-base qualification, clean-host Tier 3, remote CI, and
-  final approval remain release gates. Earlier focused results bind only their tested inputs; see the
+- Kept v0.3.0 unreleased and not release-qualified. Normal reusable-base preparation passed current-kernel
+  T1/T2 smoke checks and a verified nested mirror read; separate host-Alpine registration also passed from the
+  local mirror. The complete applicable installed Python matrix,
+  current-candidate host reboot, joined release evidence, clean-host Tier 3, remote CI, and final approval
+  remain release gates. Earlier focused results bind only their tested inputs; see the
   [coverage matrix](tests/system/COVERAGE_MATRIX.md) for exact evidence.
 - Retained the observed Firecracker 1.16.2 live PCI detach/reattach failure: the disk did not reappear after BAR relocation.
   The approved 1.17.0 dependency update includes an upstream source remedy; attachment readiness detects failure but

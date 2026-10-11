@@ -17,6 +17,26 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Normal preparation checkpoint (2026-10-11):** clean orchestration source `4f1552f1` with installed
+`0.3.0-rc.api-timeout-8ba5f992` (`cd301c00`) completed all eight preparation steps, native exit 0 in
+364.658 seconds. It reused the exact base image `68a7027c`, passed current imported-kernel T1/T2 smoke
+checks, and verified an actual nested read-only mirror read. Normal typed finally removal completed;
+final public VM and snapshot inventories were empty. No new independent root-journal or tombstone
+witness was captured for those T1/T2 VMs. Terminal SHA-256
+`f797d94c1fab0e3a5f3b56ed0beed10fd553a448599073fcecf9bf3f3faaeb40`; classification SHA-256
+`8e3247fa8ea94c6b67a7b8abc1f4e210c3081dd7c67c390421b14fe2ee473f3d`.
+This establishes preparation, not the full 527-node matrix, current-candidate host reboot, joined release
+evidence, remote CI, aarch64 runtime support, or final release approval. Earlier checkpoints retain their bindings.
+
+**Replacement-runner preparation (2026-10-11):** clean source `0713cd94` with the same installed `cd301c00`
+completed actual normal preparation, native exit 0 in 2034.285 seconds. It published the exact new base `cdf682b6`,
+passed current-kernel T1/T2 smoke checks, and proved a mounted local-mirror Alpine read. Separate host-Alpine
+registration passed with a literal local-mirror hit and exact sole image addition `905d3f2d`; it executed no matrix tests.
+Normal preparation terminal SHA-256 `dd3c89d8f60cb67991ce9b90e3e3836a766f14dba426598b38d0c687659f85f0`;
+host-Alpine terminal SHA-256 `f9b3a49f87b2a3a78a6b3f872eb8c25a1a910f1b63f171b05d249f213592c749`.
+This closes reusable-base preparation and host-Alpine setup only. It adds no independent T1/T2 root-journal or
+tombstone witness; the full matrix, current-candidate host reboot, joined evidence and final release gates remain open.
+
 **Focused console and reboot checkpoint (2026-10-10):**
 `test_console_counterfeit_endpoint_rejected_by_discovery` passed alone on installed
 `0.3.0-rc.resume-1300b64b`/`81c521ba`: strict 1/1, zero other outcomes, 7.38 seconds.
