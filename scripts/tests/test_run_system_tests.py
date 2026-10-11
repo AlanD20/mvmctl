@@ -239,8 +239,13 @@ def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
     return task, envelope, calls, phases, state
 
 
-@pytest.mark.parametrize("memory_bytes", [8589934592, 6576668672], ids=["retained-8g", "observed-6.125g"])
-def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(orchestrator, monkeypatch, tmp_path, memory_bytes):
+@pytest.mark.parametrize("memory_high,memory_max", [
+    (8589934592, 8589934592), (6576668672, 6576668672),
+    (6576668672, "max"), ("max", 6576668672), ("max", "max"),
+], ids=["retained-8g", "observed-6.125g", "observed-max-limit", "observed-max-high", "observed-both-max"])
+def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(
+    orchestrator, monkeypatch, tmp_path, memory_high, memory_max,
+):
     stage_source = orchestrator._host_reboot_stage_source
     source_hash = orchestrator._sha256_runner_input
     task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
@@ -256,9 +261,9 @@ def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(orchestr
     assert json.loads((task / "task.json").read_bytes())["after_boot"] != json.loads(state["pre"])["boot_id"]
     assert json.loads((task / "task.json").read_bytes())["controller"] == state["controller"]
     # POST accepts truthful current controls, not a required setup value or the PRE envelope.
-    state["outer"].update(memory_high=str(memory_bytes), memory_max=str(memory_bytes))
+    state["outer"].update(memory_high=str(memory_high), memory_max=str(memory_max))
     payload = json.loads(envelope.read_bytes())
-    payload.update(memory_high=memory_bytes, memory_max=memory_bytes)
+    payload.update(memory_high=memory_high, memory_max=memory_max)
     envelope.write_text(json.dumps(payload))
     post = orchestrator.run_host_reboot_phase("post", task, envelope)
     assert post["passed"] is True and post["release_verdict"] == "PASS" and phases == ["pre", "post"]
@@ -280,14 +285,23 @@ def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(orchestr
 
 @pytest.mark.parametrize("field,value", [("host_boot_id", "11111111-1111-4111-8111-111111111111"),
     ("outer_pid", 124), ("runner_id", "9" * 32), ("memory_high", 6576668672),
-    ("memory_max", 6576668672), ("schema_version", True)])
+    ("memory_max", 6576668672), ("schema_version", True),
+    ("memory_high", "max"), ("memory_max", "max"),
+    ("memory_high", "8589934592"), ("memory_max", "8589934592"),
+    ("memory_high", True), ("memory_max", True),
+    ("memory_high", 8589934592.0), ("memory_max", 8589934592.0),
+    ("memory_max", "MAX"), ("memory_max", None), ("unexpected", 1),
+    (None, "memory_high"), (None, "memory_max")])
 def test_host_reboot_post_refuses_wrong_external_admin_authority_before_body(
     orchestrator, monkeypatch, tmp_path, field, value,
 ):
     task, envelope, calls, phases, _ = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
     assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
     payload = json.loads(envelope.read_bytes())
-    payload[field] = value
+    if field is None:
+        payload.pop(value)
+    else:
+        payload[field] = value
     envelope.write_text(json.dumps(payload))
     result = orchestrator.run_host_reboot_phase("post", task, envelope)
     assert not result["passed"] and not result["phase_complete"] and phases == ["pre"]
@@ -295,18 +309,23 @@ def test_host_reboot_post_refuses_wrong_external_admin_authority_before_body(
     assert not (task / "admin-envelope.json").exists()
 
 
-@pytest.mark.parametrize("failure", ["actual-controls", "nonfinite-controls", "pre-tampered", "cleanup-unproven"])
+@pytest.mark.parametrize("failure,value", [
+    ("actual-controls", "6576668672"), ("actual-controls", "max"),
+    ("invalid-controls", "MAX"), ("invalid-controls", "01"), ("invalid-controls", "-1"),
+    ("invalid-controls", 8589934592), ("invalid-controls", True), ("invalid-controls", None),
+    ("pre-tampered", None), ("cleanup-unproven", None),
+])
 def test_host_reboot_never_aggregates_unproven_control_pre_or_cleanup(
-    orchestrator, monkeypatch, tmp_path, failure,
+    orchestrator, monkeypatch, tmp_path, failure, value,
 ):
     task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
     assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
     if failure == "actual-controls":
-        state["outer"]["memory_max"] = "6576668672"
-    elif failure == "nonfinite-controls":
-        state["outer"].update(memory_max="max")
+        state["outer"]["memory_max"] = value
+    elif failure == "invalid-controls":
+        state["outer"]["memory_max"] = value
         payload = json.loads(envelope.read_bytes())
-        payload["memory_max"] = "max"
+        payload["memory_max"] = value
         envelope.write_text(json.dumps(payload))
     elif failure == "pre-tampered":
         (task / "pre.json").write_bytes(b"{}")

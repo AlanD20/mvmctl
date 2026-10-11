@@ -2625,15 +2625,17 @@ def _host_reboot_require_phase_report(phase: str, raw: bytes, xml: bytes, return
 
 def _host_reboot_require_envelope(raw: bytes, bound: dict[str, Any], outer: dict[str, Any]) -> None:
     receipt = _host_reboot_json(raw)
-    if any(type(outer[key]) is not str or re.fullmatch(r"(?:0|[1-9][0-9]*)", outer[key]) is None
+    if any(type(outer[key]) is not str or re.fullmatch(r"(?:max|0|[1-9][0-9]*)", outer[key]) is None
            for key in ("memory_high", "memory_max")):
-        raise RuntimeError("host_reboot external administrator envelope requires finite observed controls")
+        raise RuntimeError("host_reboot external administrator envelope requires canonical observed controls")
     expected = dict(schema_version=1, runner=_HOST_REBOOT_RUNNER, runner_id=outer["runner_id"],
                     host_boot_id=bound["after_boot"], outer_pid=outer["pid"], outer_start_ticks=outer["start_ticks"],
-                    memory_high=int(outer["memory_high"]), memory_max=int(outer["memory_max"]),
+                    memory_high="max" if outer["memory_high"] == "max" else int(outer["memory_high"]),
+                    memory_max="max" if outer["memory_max"] == "max" else int(outer["memory_max"]),
                     guest_mem_size_mib=outer["guest_mem_size_mib"])
-    if receipt != expected or any(type(receipt[key]) is not int for key in
-                                  ("schema_version", "outer_pid", "outer_start_ticks", "memory_high", "memory_max", "guest_mem_size_mib")):
+    if (receipt != expected or any(type(receipt[key]) is not int for key in
+                                  ("schema_version", "outer_pid", "outer_start_ticks", "guest_mem_size_mib"))
+            or any(type(receipt[key]) is not type(expected[key]) for key in ("memory_high", "memory_max"))):
         raise RuntimeError("host_reboot POST requires the exact fresh external administrator envelope receipt")
     if outer["memory_high"] != str(expected["memory_high"]) or outer["memory_max"] != str(expected["memory_max"]):
         raise RuntimeError("host_reboot actual named-runner envelope differs from the external administrator receipt")
