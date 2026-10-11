@@ -162,8 +162,12 @@ def test_host_reboot_pre() -> None:
     baseline = {domain: _host_inventory(RUNNER, domain) for domain in
                 ("vm", "network", "image", "kernel", "bin", "key", "volume", "config")}
     assert baseline["vm"] == [], "dedicated quiescent runner required"
-    assert len(baseline["network"]) == 1 and baseline["network"][0]["is_default"]
-    assert baseline["network"][0]["bridge_active"] and baseline["network"][0]["is_present"]
+    assert len(baseline["network"]) == len({row["id"] for row in baseline["network"]}) == 2
+    defaults = [row for row in baseline["network"] if row["is_default"]]
+    runner_networks = [row for row in baseline["network"] if not row["is_default"]]
+    assert len(defaults) == len(runner_networks) == 1
+    assert runner_networks[0]["name"] == "sys-test-net"
+    assert all(row["bridge_active"] and row["is_present"] for row in baseline["network"])
     assert os.environ.get("MVM_ASSET_MIRROR") and Path(os.environ["MVM_ASSET_MIRROR"]).is_dir()
     for member in ("firecracker", "jailer"):
         assert any(row["type"] == member and row["version"] == "1.17.0" and row["is_default"]
@@ -236,18 +240,26 @@ def test_host_reboot_post() -> None:
     assert all(vm["id"] != row["id"] for vm in _json_success_data(_run_mvm(RUNNER, "vm", "ps", "--json").stdout, list))
     for path in (*receipt["vm_paths"].values(), f"/run/mvmctl/runtime/{os.getuid()}/{row['id']}"):
         assert not Path(path).exists()
-    original_network = receipt["baseline"]["network"][0]
+    original_networks = receipt["baseline"]["network"]
+    originals = {item["id"]: item for item in original_networks}
     networks = _host_inventory(RUNNER, "network")
-    assert len(networks) == 1
-    assert {key: value for key, value in networks[0].items() if key not in ("bridge_active", "is_present")} == {
-        key: value for key, value in original_network.items() if key not in ("bridge_active", "is_present")}
+    current = {item["id"]: item for item in networks}
+    assert len(networks) == len(current) == len(original_networks) == len(originals) == 2
+    assert current.keys() == originals.keys()
     # Boot-derived absence only; never repair a same-boot disappearance.
-    assert networks[0]["bridge_active"] is False and networks[0]["is_present"] is False
-    _run_mvm(RUNNER, "network", "sync", original_network["id"])
-    restored_network = _host_inventory(RUNNER, "network")[0]
-    assert restored_network["bridge_active"] is True
-    assert {key: value for key, value in restored_network.items() if key != "updated_at"} == {
-        key: value for key, value in original_network.items() if key != "updated_at"}
+    for network_id, original in originals.items():
+        assert {key: value for key, value in current[network_id].items() if key not in ("bridge_active", "is_present")} == {
+            key: value for key, value in original.items() if key not in ("bridge_active", "is_present")}
+        assert current[network_id]["bridge_active"] is False and current[network_id]["is_present"] is False
+    for network_id in originals:
+        _run_mvm(RUNNER, "network", "sync", network_id)
+    restored_networks = _host_inventory(RUNNER, "network")
+    restored = {item["id"]: item for item in restored_networks}
+    assert len(restored_networks) == len(restored) == len(originals) and restored.keys() == originals.keys()
+    for network_id, original in originals.items():
+        assert restored[network_id]["bridge_active"] is True and restored[network_id]["is_present"] is True
+        assert {key: value for key, value in restored[network_id].items() if key != "updated_at"} == {
+            key: value for key, value in original.items() if key != "updated_at"}
     final = _inventory(RUNNER)
     _preserve_persistent_inventory(task, receipt["physical"], before_post, final)
     for domain, expected in receipt["baseline"].items():
@@ -260,5 +272,5 @@ def test_host_reboot_post() -> None:
     assert _file(Path(alpine["path"])) == receipt["image"]
     _write_receipt(task, "post.json", dict(schema_version=1, host_boot_id=_boot(), vm_id=row["id"],
         source=_source(), candidate=_candidate(), process=list(process), guest_boot_id=guest_boot,
-        owned_cleanup=True, network_before=original_network, network_after=restored_network,
+        owned_cleanup=True, network_before=original_networks, network_after=restored_networks,
         physical_before=receipt["physical"], physical_after_boot=before_post, physical_after=final))
