@@ -52,115 +52,57 @@ resource limits still differ.
   `data.resources.nftables_available: true` before treating network or policy tests as release evidence.
 - Check `sudo` and `docker` availability in the exact runner image. Kernel module loading also depends on that
   image's matching module tree; do not assume every required feature is compiled into the 7.0.11 asset.
-- tmpfs, overlayfs, btrfs, ext4 — all standard Linux facilities
+- Verify the filesystem facilities needed by the selected domains, including tmpfs, overlayfs, Btrfs and ext4.
 
-The older `vmlinux-official-7.0.11-x86_64` image used by `mvmctl-030-test` on 2026-09-26 accepted a bare inet
-nftables table but rejected a bridge-family table. The named runner was replaced on 2026-09-27 with a rebuilt
-bridge-capable 7.0.11 kernel. Its installed 0.3.0 candidate reports `nftables_available: true`, and a bridge-table
-create/list/delete probe passed. This does not qualify the orchestrator's separately provisioned runner images:
-check the capability on each exact runner before using its network or policy results as release evidence.
+Kernel capability must be checked on each exact runner. A bare inet-table probe is insufficient for bridge
+nftables, connection tracking or the modeled production expressions. The bundled `kernel-official` nftables
+feature requests `CONFIG_BRIDGE_NETFILTER`, `CONFIG_NF_TABLES_BRIDGE` and
+`CONFIG_NF_CONNTRACK_BRIDGE`; verify the actual live configuration and readiness result. A rebuilt or
+imported kernel does not replace a differently selected default, mirrored artifact or already-running kernel.
+Do not infer capability from a version or filename, or treat one runner's result as proof for future images.
 
-The bundled `kernel-official` nftables feature now also requests `CONFIG_NF_CONNTRACK_BRIDGE=y`. A fresh
-2026-09-28 readback confirmed that the named runner boots the rebuilt `mvmctl-030-bridge-ct` kernel
-(SHA-256 `5b56e531b3f9621f176289847b1f1a295daea4bf0a4e89fed63a3d182664d4b2`), whose live config has
-`CONFIG_BRIDGE_NETFILTER`, `CONFIG_NF_TABLES_BRIDGE`, and `CONFIG_NF_CONNTRACK_BRIDGE` enabled. Its selected
-inner default and the older mirrored official 7.0.11 file are different bytes and lack both bridge nftables flags.
-Do not infer kernel capability from version or filename, or treat this runner result as proof that the mirror or
-every future runner image has been rebuilt. Historical source/config/toolchain provenance for the retained kernel
-artifacts is incomplete; the flag change does not reconstruct that provenance.
+Kernel producer provenance, boot readiness and reusable-base provisioning are separate gates. Embedded
+compiler versions and GNU build IDs do not identify the actual compiler binaries, source tree, upstream base
+config, overlays or producer invocation. Retain an input/output receipt for a mirrored-source build, including
+source/spec/toolchain identity and final config/output hashes. With `--debug`, retain the event
+`Kernel base config written` and its consumed base-config digest and URL before configuration mutation.
+Retain the actual producer invocation, including selected features, concurrency and clean-build/build-directory
+choices. A fresh build cannot reconstruct another artifact's missing provenance or establish that the new artifact boots.
 
-The retained config and ELF identify GCC `16.2.1 20260810`, GNU assembler/linker `2.47`, and GNU build ID
-`edf249dea9c6b0a5afa1aa47526a1fd9626009b3`. Embedded version strings do not identify the actual compiler binaries,
-source tree, upstream base config, overlays, or producer invocation. Closing this provenance gap requires a fresh
-mirrored-source build with an input/output receipt, followed by a candidate-qualified reusable-base provisioning
-check. Do not rebuild or reboot the current runner merely to repeat its already recorded capability check.
+A bounded boot check should bind the live GNU build ID to the exact ELF and check the required devices.
+Opening `/dev/kvm` does not prove `KVM_CREATE_VM`; an empty-VM creation and the candidate's disposable
+bridge/inet nftables rule application, readback and removal establish additional readiness. Neither readiness
+nor a kernel-producer pass qualifies traffic isolation, reusable-base provisioning or the full release matrix.
+Retain each gate's exact source/artifact binding and cleanup proof.
 
-Fresh official-kernel producer receipts must retain the `--debug` event `Kernel base config written`, including
-the consumed base-config digest and URL before configuration mutation, together with the source/spec/toolchain
-and final config/output hashes. Its diagnostic source change passed focused kernel Go/vet/format checks in the
-named runner. On 2026-09-29 the installed candidate then completed a fresh Linux 7.0.11 build from mirrored
-source using GCC 13.3.0, the bundled spec, and `--features nftables,tuntap,kvm,btrfs --jobs 1 --clean-build
---keep-build-dir --debug`. Its consumed base-config SHA-256 was
-`153ca1b40f3312bfb40b7587b471ea548a915f98f480f0d0892a1537957a2147`; the final config was
-`86f0a0147b7cafa6d62caad1c6bb52221c8e0ba13100cef1f5791ea2dfc221fd`, and both the built ELF and managed-cache
-copy were `3a7eefcb29812f1b8b58fa1f3d276ee6afe25f97e1f154e4b6f946af9ec3ee0d`. The final config enables inet
-and bridge nftables, bridge connection tracking, KVM, TUN and Btrfs. Input/toolchain/output receipts were retained.
-This producer pass does not reconstruct the older kernel's provenance, prove the new kernel boots, replace the
-running or mirrored kernel, or qualify a reusable-base image; those remain separate gates.
+The stock reusable-base builder uses 3 GiB RAM and a 12 GiB logical disk; T2 provisioning uses 4 GiB RAM
+and a 9 GiB logical disk. The shared mirror volume is another 6 GiB logical disk, with physical use determined
+by its cached contents. Check current physical storage, concurrent allocations and preserved state before
+provisioning: logical sizes and sparse files do not establish available storage. The stock preparation path
+selects `official:7.0.11`; changing a default does not bind a separately imported producer artifact. Use the
+explicit imported-kernel binding below when that artifact is required.
 
-A subsequent 2026-09-29 bounded boot check passed inside `mvmctl-030-test` using its installed candidate and an
-owned 256 MiB networkless nested VM. The guest reported Linux 7.0.11 and GNU build ID
-`79ee949b4f07aa6b8567741ea49862ab1a4f6b41`, matching the fresh ELF; it opened `/dev/kvm` read/write and exposed
-TUN and Btrfs. The strict one-case report passed with checked typed cleanup and preserved defaults, original assets
-and configuration. This proves boot and device availability, not `KVM_CREATE_VM`, child nftables rule application
-or reusable-base provisioning. Neither the outer runner's selected kernel nor the mirrored default was replaced.
+Tier 3 exists for cases that cannot be qualified reliably under nesting. Those tests run directly on the outer
+host and require a dedicated clean qualification host or disposable outer VM and explicit authorization.
 
-On 2026-10-02, one bounded case on that exact fresh import also passed actual KVM API 12/empty-VM creation
-and the production readiness probe's disposable bridge/inet nftables rule application, readback and removal.
-An over-strict interphase kernel timestamp guard initially retained the seeds; a narrow guard correction then
-completed normal typed cleanup and restored the exact baseline without rerunning the test. This does not prove
-reusable-base provisioning, traffic isolation or the complete release matrix.
+Check the outer runner's actual cgroup controls as well as the resources visible inside it. An inner
+candidate's pressure-only policy cannot remove a finite enclosing limit. Retain exact kernel OOM/process
+and cgroup-counter evidence before lifecycle recovery; guest `MemAvailable` and free disk alone do not
+establish outer VMM memory safety. Any administrative control adjustment must preserve unrelated VM and
+global policy and remain separate from candidate behavior.
 
-The stock reusable-base workflow also has its own resource budget: the builder uses 3 GiB RAM and a 12 GiB
-logical disk; T2 provisioning uses 4 GiB RAM and a 9 GiB logical disk. The shared mirror volume is another
-6 GiB logical disk, with physical use determined by its cached contents. The replacement `mvmctl-030-test`
-has 6 GiB RAM and a 40 GiB logical disk as verified on 2026-10-01; this is not a provisioning capacity guarantee.
-That day's parent free space was approximately 9.9 GiB, insufficient to admit even the 12 GiB builder under
-the conservative no-sparse-credit budget. Check current physical storage and preserved state before provisioning;
-memory readings are observations, not synthetic admission thresholds. Another runner replacement requires separate
-approval. Logical disk sizes alone
-do not prove that the required physical storage is available. The stock preparation path selects
-`official:7.0.11`; changing a default does not bind a separately imported fresh producer artifact.
-
-Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
-tests run directly on the outer host and therefore require a dedicated clean
-qualification host or disposable outer VM.
-
-Check the **outer runner's** cgroup limits as well as resources visible inside it. During 2026-10-02 base
-preparation, the legacy controller's 6 GiB QA runner was killed at its finite 6 GiB plus 128 MiB memory limit;
-the outer kernel log and exact cgroup OOM counter established the cause. An inner 0.3 candidate's pressure-only
-policy cannot remove that enclosing limit. Preserve those receipts before lifecycle recovery, and size any
-temporary QA-only adjustment against actual host headroom without changing unrelated VM or global policy.
-Guest `MemAvailable` and free disk alone do not establish outer VMM memory safety.
-
-**QA resource policy (2026-10-10):** The named runner `mvmctl-030-test` has
-6 GiB guest RAM and a 96 GiB logical disk. The former runner received an approved 8 GiB outer envelope;
-the replacement's last observed `memory.high` and `memory.max` are 6,576,668,672 bytes. Neither value is a
-QA admission requirement. Memory measurements and OOM counters are observations only: QA uses no synthetic
-`MemAvailable` floor/reserve, full-envelope admission, host-memory-loss rejection, process-group RSS abort or
-7.5 GiB watchdog. This supersedes earlier synthetic memory-guard instructions and historical runner sizes;
-actual kernel limits, workload assertions, timeouts, physical-disk admission, identity checks and owned cleanup
-remain in force. Production [ADR-0019](../adr/0019-pressure-only-vm-memory-control.md) is unchanged; this QA
-override neither changes the outer kernel envelope nor guarantees survival under host or ancestor OOM.
+**QA resource policy:** Memory measurements and OOM counters are observations only. QA uses no synthetic
+`MemAvailable` floor/reserve, full-envelope admission, host-memory-loss rejection, process-group RSS abort
+or fixed memory watchdog. Actual kernel limits, workload assertions, timeouts, physical-disk admission,
+identity checks and owned cleanup remain in force. Production
+[ADR-0019](../adr/0019-pressure-only-vm-memory-control.md) is unchanged; this QA policy neither changes
+the actual outer envelope nor guarantees survival under host or ancestor OOM.
 
 **Administrator fault-test admission:** Normal T1/T2 orchestration sets both `MVM_TEST_VM` and
 `MVM_TEST_QUALIFICATION_HOST` to the exact disposable runner it provisioned. Fault helpers require a nonempty
 exact match while retaining their resource/boot/namespace/process authority checks. For an explicitly approved
 direct run inside `mvmctl-030-test`, set both variables to `mvmctl-030-test` in that guest. This opt-in does not
 authorize host-direct testing or changes to other VMs; the orchestrator never grants it automatically to Tier 3.
-
-The installed candidate is `0.3.0-rc.resume-1300b64b`, SHA-256
-`81c521ba65e82cdec0abc322b080aa3e0c38876d6313f359cf86713792720c57`. Complete pinned Go CI and the separate
-full root Jailer suite passed on clean `1300b64b`, including 2,642 root test/subtest passes and zero failures/skips.
-The real-agent amd64 build and normal `host install-system` also passed inside the named runner; independent
-preservation checked all existing state except the authorized canonical binary replacement. Later documentation
-and Python-only changes carry only unchanged relevant Go/build inputs. Earlier checkpoints below retain their
-original source/candidate bindings. On the earlier `bfdece17`/`d13f8c06` candidate, the SIGINT export journey
-passed, while receiver death exposed a cached Resume success bypass; that two-case invocation was not a
-passing slice. The new candidate removes that bypass; its exact affected receiver-death and public pause/resume
-pair passed strict 2/2 with zero other outcomes and checked cleanup/original-state preservation. The old failed
-reports remain failures, and SIGINT was not replayed. The snapshot capture file-limit failure/recovery case passed separately
-on the earlier candidate.
-Reusable-base provisioning and the complete installed Python matrix remain pending; these passes do not qualify
-the full release.
-
-**Current administrator filesystem-retry checkpoint (2026-10-09):** The registered
-`test_filesystem_failure_preserves_init_and_reset_retry_authority` case passed strict 1/1 in 44.08 seconds on
-the earlier installed `f909601d` candidate inside `mvmctl-030-test`. It reached both real read-only sysctl faults,
-retained the partial init/reset authority, recovered by explicit administrator retry, and activated the same pending network
-identity after re-enrollment before typed removal. Exact mount restoration, owned-child cleanup and original
-public/physical/administrator-state preservation passed. This supersedes the older package-setup limitation
-for this case, not abrupt interruption, reusable-base provisioning or the complete administrator domain.
 
 ### Using an Already Imported Runner Kernel
 
@@ -192,61 +134,6 @@ cleanup and preparation gates remain required.
 This input binding does not admit the resource budget, qualify the complete Python matrix, or prove nested
 KVM workload behavior by itself. Omit both variables to retain the stock official-kernel workflow.
 
-**Local CI checkpoint (2026-10-02):** clean source `b402c471` passed the pinned Go 1.26.3 local CI sequence
-inside `mvmctl-030-test`, including complete atomic coverage from the unprivileged selector. Its real-agent
-release build recorded the exact VCS revision and `vcs.modified=false`; normal `host install-system` then installed
-`0.3.0-rc.b402c471` only in that runner, with matching SHA-256 and root-owned `0755` canonical binary.
-The earlier full root Jailer result on `6088c14c` was retained for unchanged Jailer-relevant source, module and
-build inputs, not rerun. All 262 Python orchestrator tests passed separately at their recorded revision.
-These CI results alone do not qualify GuestFS; its later focused runtime result is recorded below.
-Reusable-base and remaining installed-candidate system-matrix qualification remain open.
-
-**Current local CI/build/install checkpoint (2026-10-03):** exact clean source `a3d7b8d0`, including the
-cloud-init OFF and built-in-KVM fixes, passed the complete pinned Go sequence in the named runner. Tidy,
-architecture, formatting, agent generation, vet and the full unprivileged selector passed, producing complete
-atomic coverage profiles; the selected Jailer tests passed in 5.954s. Full root-Jailer evidence carries only
-for verified unchanged relevant dependency/module/build inputs. The real-agent Go 1.26.3/PIE build and normal
-`host install-system` passed. Installed `0.3.0-rc.a3d7b8d0` has SHA-256
-`98f44bd2c6a803a78d96d153c10df7bc6e9a11915c65881ae1c15da1e2866bba`, root-owned `0755` canonical identity,
-the exact VCS revision and `vcs.modified=false`; the checked runner baseline was preserved. Earlier failed
-harness and runtime receipts remain retained. This is not the remaining installed-candidate Python matrix,
-fresh reusable-base provisioning, remote GitHub CI or release qualification. Later Markdown-only changes
-do not require repeating accepted checks for unchanged Go/build inputs.
-
-**Later reset-candidate checkpoint:** clean `e034f4e0` produced the real-agent candidate
-`0.3.0-rc.resetparent-e034f4e0`; normal installation changed only the named QA runner. Its canonical SHA-256 is
-`1678ae447fe8bc536e556db9258e375daaa8e14f9f73e9f6ed1747e8e047c689`, with root-owned `0755` identity.
-The complete root-Jailer package passed in 3.545s against equivalent, hash-checked Go/module/build inputs with
-Go 1.26.3. The preceding failed run inherited umask `077`, changing exact fixture modes and causing a race-test
-setup timeout. Keep supervisor/task permissions private, but give the Go test child umask `022`; do not relax
-production permission admission. Candidate, persistent baseline and resource controls were unchanged.
-The first installed-candidate administrator journey passed reset but failed a stale pending-intent assertion.
-The corrected test subsequently passed its complete registered journey on 2026-10-07: one case passed in
-332.94 seconds, with zero failures, errors, skips, deselections, XFAILs or XPASSes. It exercised clean-child
-enrollment, marker-only success/denials, quiescent reset, disabled admission, re-enrollment and same-ID
-pending-network activation/removal. All twelve preservation checks, owned-child absence and empty/removed
-QA task-group cleanup passed, with no resource-guard trip. The shared runner was not reset or replaced.
-The separate password-authenticated second-operator/typed-dispatch/active-network reset-refusal journey also
-passed on that installed candidate: strict 1/1, zero other outcomes and matching JUnit, in 95.67 seconds. All
-twelve preservation and five owned-resource absence checks passed, including temporary enrollment-policy
-removal and QA task cleanup. The corrected read-only-filesystem journey timed out during child package
-installation before either fault or retry assertion; cleanup and preservation passed. That attempt remains
-failed evidence, superseded for runtime qualification by the current filesystem-retry pass above. Do not
-interpret its timeout as a diagnosed product or filesystem-fault failure.
-Exact clean `e034f4e0` also passed tidy/clean, formatting, generation/clean, vet and the complete
-unprivileged Go CI selector; selected Jailer tests passed in 3.243s. Both nonempty atomic coverage profiles
-and the literal gate log were preserved, source finished clean, and candidate/baseline/resource controls
-remained unchanged. Subsequent Python-test/Markdown-only changes do not change those Go/CI inputs.
-The remaining Python matrix and reusable-base qualification remain open.
-
-**VM-to-VM interruption checkpoint (2026-10-07):** the installed reset candidate passed
-`test_vm_to_vm_exec_interrupt_reaps_destination_group`: one case in 21.77 seconds, strict JSON/JUnit
-with zero other outcomes. It interrupts a retained CLI task through its pidfd, checks that the identified
-destination leader/shell/child tasks are no longer live, and proves a fresh authorized relay still works.
-All six independent preservation checks passed; the QA worker was reaped, its empty task group removed,
-and original resource guards/controls remained unchanged. This observer does not independently prove
-complete private-backend cleanup. Other authority, deadline, reboot and restore boundaries remain separate.
-
 ### Optional Local GuestFS Qualification
 
 GuestFS remains an optional backend, disabled by default. With
@@ -271,19 +158,9 @@ may apply the [upstream Ubuntu readability remedy](https://libguestfs.org/guestf
 the exact verified package-owned image while retaining root ownership and content. Resolve the image from package
 metadata and verify its identity/checksum before changing permissions; do not chmod every file under `/boot`.
 Recheck readability after package replacement. This is an administrator prerequisite, not a product autochmod.
-Reusable-base provisioning now performs this setup for verified package-owned boot images after installing the
-GuestFS dependencies. Its two focused builder checks and the real metadata/checksum/readability recipe passed in
-the named runner; that recipe run was a no-op on an already-readable image, not a fresh-base provisioning pass.
-
-The earlier cold-appliance attempt failed; diagnosis found an unreadable packaged kernel and a separate
-kernel-probe timeout mistakenly expressed as 5 microseconds. After explicit administrator readability setup and
-the five-second timeout correction, installed candidate `0.3.0-rc.562b38de` passed the registered case in
-`mvmctl-030-test`: one pass in 68.18 seconds, with zero failures, errors, skips, deselections, XFAIL or XPASS.
-Cold construction, actual guestfish launches, reuse, incomplete-appliance repair and typed cleanup/preservation
-all passed; independent checks confirmed the owned test process, selected appliance and smoke disk were absent.
-The run reused the 142 installed package versions. This qualifies the focused local case, not a freshly
-provisioned reusable base or the complete release matrix; neither original finding alone establishes the sole
-cause of the earlier failure.
+Reusable-base provisioning performs this setup for verified package-owned boot images after installing the
+GuestFS dependencies. A no-op readability check on an existing image does not prove fresh-base provisioning;
+qualify the newly provisioned image and actual appliance launch separately.
 
 Admit this heavy domain separately: matching supermin/libguestfs sources use a 4 GiB default root and retain
 both cached and fixed copies; a genuine cache rebuild can temporarily retain another root. Allow for installed
@@ -303,11 +180,11 @@ egrep -c '(vmx|svm)' /proc/cpuinfo
 
 # Memory (total)
 free -g | awk '/Mem:/{print $2 " GB"}'
-# Expected: >= 8 (16 recommended)
+# Observe available RAM and the actual outer cgroup controls; no synthetic QA threshold.
 
 # Disk (free)
 df -h ~/.cache/mvmctl 2>/dev/null || echo "~/.cache/mvmctl does not exist yet"
-# Expected: >= 20 GB free
+# Admit the selected workload against current physical storage and preserved allocations.
 ```
 
 ### 1.2 Host: Software
@@ -398,6 +275,14 @@ stamp the enclosing checkout's revision: Go's VCS discovery skips the worktree's
 `go version -m <candidate>` for the intended full `vcs.revision` and `vcs.modified=false` before installation.
 Stop on a mismatch; do not disable VCS stamping or override metadata to make the check pass. Source-editing worktrees
 remain useful, but their Git `HEAD` alone does not prove the built candidate's identity.
+
+Go CI and system qualification remain separate. Run the pinned CI sequence and selector required by
+`AGENTS.md`; a green unprivileged selector does not prove the complete root-owned Jailer lifecycle.
+Run the full root-Jailer package inside an approved disposable runner. Preserve supervisor/task permissions
+as private, but give the Go test child umask `022` so exact fixture modes are exercised; do not relax
+production permission admission. Carry prior Go/build evidence only for verified unchanged relevant
+source/module/build inputs, preserving its original revision and candidate bindings. Build, unit or focused
+runtime success does not qualify the reusable base or complete installed Python matrix.
 
 ---
 
@@ -578,11 +463,10 @@ inside its own disposable child VM. It needs nested virtualization and the mirro
 resets the shared runner or the outer controller. Collection is not a runtime pass: clean-host execution,
 checked child cleanup and retained administrator-state receipts are required before qualifying this journey.
 The module also contains separate password-authenticated second-operator/typed-dispatch and active-network
-reset-refusal coverage, plus real read-only-filesystem init/reset failure-and-retry journeys. All three cases
-collect successfully. All three have separately bound installed-candidate runtime passes recorded above;
-the filesystem-retry case passed on the current partition candidate. These are not one consolidated current
-domain invocation, and collection alone does not qualify runtime behavior. Abrupt process interruption and
-ambiguous-runtime recovery still require separate evidence.
+reset-refusal coverage, plus real read-only-filesystem init/reset failure-and-retry journeys. Qualify each
+registered case with strict installed-candidate evidence and checked preservation/cleanup. A package-setup
+timeout before fault injection does not diagnose a product fault. Abrupt process interruption and
+ambiguous-runtime recovery require separate evidence.
 
 ### 4.3 Run Specific Tiers
 
@@ -647,29 +531,15 @@ duplicate alias cannot produce release evidence.
 This journey is deliberately separate from ordinary T1/T2 batches. It operates only on the existing
 `mvmctl-030-test`, pins the configured outer controller without replacing it, and runs pytest inside that
 runner. A full release invocation cannot count a PRE checkpoint or ordinary tier success as a reboot pass.
-Source implementation, focused runner checks and exact phase collection passed on 2026-10-10. A later
-PRE passed and the named runner actually rebooted, but the legacy outer controller's vsock reconnect
-failed; no POST ran. That earlier attempt remains incomplete, not a successful journey.
-
-The corrected installed journey subsequently passed on clean `74a916d3` with production source `4bc51ee7`
-and candidate `0.3.0-rc.layout2-4bc51ee7`: PRE and POST each passed their exact singleton with native exit
-zero and no other outcomes. It proved a changed runner boot, durable staged source, stale-running reconciliation,
-empty `vm ps`, refused stopped exec, same-ID restart with a new guest boot and retained-marker exec, typed removal,
-network repair and persistent-state preservation. This is the explicit named-runner journey, not the full release
-matrix or a new run on a later candidate; the subsequent OpenRC change has separate affected qualification.
-
-An earlier SSH-based PRE passed and reconnected after the actual force reboot, but POST collected
-no tests: the staged source files had become zero-length. Retain that failed task rather than repairing
-its files and relabeling it successful. Signed `a90fcfb5` adds a checked guest-filesystem durability
-barrier before force reboot and exact staged-source verification after reconnect and before POST.
-Four focused checks passed inside the named runner; the completed journey above used that checked barrier.
-This is a staging failure, not demonstrated memory exhaustion; do not introduce a RAM guard to address it.
+Retain failed or incomplete tasks unchanged; do not repair their files and relabel them successful.
+The runner checks a guest-filesystem durability barrier before force reboot and exact staged-source
+verification after reconnect, before POST. A staging failure requires source/durability diagnosis; it is
+not evidence of memory exhaustion or a reason to introduce a RAM guard.
 
 Host-phase orchestration uses the unchanged outer controller's `mvm ssh --cmd` with the runner's attached
 `aland` key at `~/.config/mvmctl/keys/aland`. This includes source staging and receipt retrieval, avoiding
 the legacy controller's reboot-time vsock omission. It does not replace that controller, introduce a
-production fallback, or weaken candidate-side VM exec/vsock assertions. The twelve affected correction
-checks passed inside the named runner; they do not substitute for actual PRE/reboot/POST evidence.
+production fallback, or weaken candidate-side VM exec/vsock assertions. Actual PRE/reboot/POST evidence remains required.
 
 Use one clean, fixed source and candidate for both phases. Select the existing imported ELF with
 `MVM_RUNNER_KERNEL_ID` and `MVM_RUNNER_KERNEL_SHA256`; bind `MVM_BINARY` to the installed outer controller
