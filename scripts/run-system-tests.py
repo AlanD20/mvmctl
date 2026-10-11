@@ -3738,7 +3738,7 @@ def run_prepare(
         if binding is not None:
             _require_imported_runner_smoke(t2, binding)
 
-        log("[8/8] Validating cache hit (pulling 1 asset)...")
+        log("[8/8] Validating mounted mirror read (pulling 1 asset)...")
         result = mvm(
             "exec",
             t2,
@@ -3747,7 +3747,7 @@ def run_prepare(
             "--timeout",
             "10",
             "--",
-            "MVM_ASSET_MIRROR=/mnt MVM_LOG_LEVEL=INFO /usr/local/bin/mvm image pull alpine:3.23",
+            "MVM_ASSET_MIRROR=/mnt MVM_LOG_LEVEL=INFO /usr/local/bin/mvm image pull alpine:3.23 --force",
             timeout=150,
             check=False,
         )
