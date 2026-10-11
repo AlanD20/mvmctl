@@ -6,13 +6,12 @@ Every test that creates resources cleans them up in a finally block.
 """
 from __future__ import annotations
 
-import json
 import os
 import random
 import uuid
 
 import pytest
-from tests.system.conftest import _run_mvm_host
+from tests.system.conftest import _json_success_data, _run_mvm_host
 
 
 pytestmark = [
@@ -48,7 +47,7 @@ def _make_spec(tmp_path, *, networks=0, keys=0):
         for _ in range(networks):
             name = f"sys-env-net-{uuid.uuid4().hex[:6]}"
             net_names.append(name)
-            lines.append(f"  - name: {name}")
+            lines.append(f"  {name}:")
             lines.append(f"    subnet: {_unique_subnet(name)}")
     key_names = []
     if keys:
@@ -56,7 +55,7 @@ def _make_spec(tmp_path, *, networks=0, keys=0):
         for _ in range(keys):
             name = f"sys-env-key-{uuid.uuid4().hex[:6]}"
             key_names.append(name)
-            lines.append(f"  - name: {name}")
+            lines.append(f"  {name}:")
             lines.append("    algorithm: ed25519")
     with open(spec_path, "w") as f:
         f.write("\n".join(lines) + "\n")
@@ -118,13 +117,13 @@ class TestEnvApply:
             # Verify resources via JSON output.
             net_out = _run_mvm_host("network", "ls", "--json", timeout=30)
             assert net_out.returncode == 0
-            nets = json.loads(net_out.stdout) if net_out.stdout.strip() else []
+            nets = _json_success_data(net_out.stdout, list)
             found_nets = [n["name"] for n in nets if n["name"] in spec["net_names"]]
             assert len(found_nets) == 1, f"Expected 1 network, got {found_nets}"
 
             key_out = _run_mvm_host("key", "ls", "--json", timeout=30)
             assert key_out.returncode == 0
-            keys = json.loads(key_out.stdout) if key_out.stdout.strip() else []
+            keys = _json_success_data(key_out.stdout, list)
             found_keys = [k["name"] for k in keys if k["name"] in spec["key_names"]]
             assert len(found_keys) == 1, f"Expected 1 key, got {found_keys}"
         finally:
@@ -147,12 +146,12 @@ class TestEnvApply:
 
             # Verify both resources still exist.
             net_out = _run_mvm_host("network", "ls", "--json", timeout=30)
-            nets = json.loads(net_out.stdout) if net_out.stdout.strip() else []
+            nets = _json_success_data(net_out.stdout, list)
             found_nets = [n["name"] for n in nets if n["name"] in spec["net_names"]]
             assert len(found_nets) == 1
 
             key_out = _run_mvm_host("key", "ls", "--json", timeout=30)
-            keys = json.loads(key_out.stdout) if key_out.stdout.strip() else []
+            keys = _json_success_data(key_out.stdout, list)
             found_keys = [k["name"] for k in keys if k["name"] in spec["key_names"]]
             assert len(found_keys) == 1
         finally:
@@ -237,10 +236,10 @@ class TestEnvDiff:
         orig = (
             f'version: "1"\n'
             f"network:\n"
-            f"  - name: {net_name}\n"
+            f"  {net_name}:\n"
             f"    subnet: 10.0.1.0/24\n"
             f"key:\n"
-            f"  - name: {key_name_a}\n"
+            f"  {key_name_a}:\n"
             f"    algorithm: ed25519\n"
         )
         spec_path = _write_spec(tmp_path, "diff-new.yaml", orig)
@@ -251,7 +250,7 @@ class TestEnvDiff:
 
             # Add a second key to the spec.
             key_name_b = f"diff-key-b-{uuid.uuid4().hex[:6]}"
-            modified = orig + f"  - name: {key_name_b}\n    algorithm: ed25519\n"
+            modified = orig + f"  {key_name_b}:\n    algorithm: ed25519\n"
             with open(spec_path, "w") as f:
                 f.write(modified)
 
@@ -271,10 +270,10 @@ class TestEnvDiff:
         orig = (
             f'version: "1"\n'
             f"network:\n"
-            f"  - name: {net_name}\n"
+            f"  {net_name}:\n"
             f"    subnet: 10.0.2.0/24\n"
             f"key:\n"
-            f"  - name: {key_name}\n"
+            f"  {key_name}:\n"
             f"    algorithm: ed25519\n"
         )
         spec_path = _write_spec(tmp_path, "diff-rem.yaml", orig)
@@ -287,7 +286,7 @@ class TestEnvDiff:
             reduced = (
                 f'version: "1"\n'
                 f"network:\n"
-                f"  - name: {net_name}\n"
+                f"  {net_name}:\n"
                 f"    subnet: 10.0.2.0/24\n"
             )
             with open(spec_path, "w") as f:
@@ -328,10 +327,10 @@ class TestEnvDestroy:
 
             # Capture resource names before destroy.
             net_out = _run_mvm_host("network", "ls", "--json", timeout=30)
-            nets = json.loads(net_out.stdout) if net_out.stdout.strip() else []
+            nets = _json_success_data(net_out.stdout, list)
             created_nets = [n["name"] for n in nets if "sys-env-net" in n["name"]]
             key_out = _run_mvm_host("key", "ls", "--json", timeout=30)
-            keys = json.loads(key_out.stdout) if key_out.stdout.strip() else []
+            keys = _json_success_data(key_out.stdout, list)
             created_keys = [k["name"] for k in keys if "sys-env-key" in k["name"]]
 
             result = _run_mvm_host("env", "destroy", spec_path, timeout=60)
@@ -340,14 +339,12 @@ class TestEnvDestroy:
 
             # Verify resources are gone.
             net_after = _run_mvm_host("network", "ls", "--json", timeout=30)
-            if net_after.stdout.strip():
-                remaining_nets = json.loads(net_after.stdout)
-                assert not any(n["name"] in created_nets for n in remaining_nets)
+            remaining_nets = _json_success_data(net_after.stdout, list)
+            assert not any(n["name"] in created_nets for n in remaining_nets)
 
             key_after = _run_mvm_host("key", "ls", "--json", timeout=30)
-            if key_after.stdout.strip():
-                remaining_keys = json.loads(key_after.stdout)
-                assert not any(k["name"] in created_keys for k in remaining_keys)
+            remaining_keys = _json_success_data(key_after.stdout, list)
+            assert not any(k["name"] in created_keys for k in remaining_keys)
 
             # State should be gone — env ls shows empty.
             ls_result = _run_mvm_host("env", "ls", timeout=30)
@@ -375,10 +372,10 @@ class TestEnvDestroy:
 
             # Capture resource names before destroy.
             net_out = _run_mvm_host("network", "ls", "--json", timeout=30)
-            nets = json.loads(net_out.stdout) if net_out.stdout.strip() else []
+            nets = _json_success_data(net_out.stdout, list)
             created_nets = [n["name"] for n in nets if "sys-env-net" in n["name"]]
             key_out = _run_mvm_host("key", "ls", "--json", timeout=30)
-            keys = json.loads(key_out.stdout) if key_out.stdout.strip() else []
+            keys = _json_success_data(key_out.stdout, list)
             created_keys = [k["name"] for k in keys if "sys-env-key" in k["name"]]
 
             result = _run_mvm_host("env", "destroy", wf_id, timeout=60)
@@ -387,9 +384,8 @@ class TestEnvDestroy:
 
             # Verify resources are gone.
             net_after = _run_mvm_host("network", "ls", "--json", timeout=30)
-            if net_after.stdout.strip():
-                remaining = json.loads(net_after.stdout)
-                assert not any(n["name"] in created_nets for n in remaining)
+            remaining = _json_success_data(net_after.stdout, list)
+            assert not any(n["name"] in created_nets for n in remaining)
 
             created_nets = []
             created_keys = []
@@ -413,10 +409,10 @@ class TestEnvDestroy:
 
             # Capture resource names before first destroy.
             net_out = _run_mvm_host("network", "ls", "--json", timeout=30)
-            nets = json.loads(net_out.stdout) if net_out.stdout.strip() else []
+            nets = _json_success_data(net_out.stdout, list)
             created_nets = [n["name"] for n in nets if "sys-env-net" in n["name"]]
             key_out = _run_mvm_host("key", "ls", "--json", timeout=30)
-            keys = json.loads(key_out.stdout) if key_out.stdout.strip() else []
+            keys = _json_success_data(key_out.stdout, list)
             created_keys = [k["name"] for k in keys if "sys-env-key" in k["name"]]
 
             # First destroy must succeed.
@@ -518,14 +514,14 @@ class TestEnvLifecycle:
 
             # --- Verify both resources exist via JSON ---
             net_out = _run_mvm_host("network", "ls", "--json", timeout=30)
-            nets = json.loads(net_out.stdout) if net_out.stdout.strip() else []
+            nets = _json_success_data(net_out.stdout, list)
             net_name = next(
                 (n["name"] for n in nets if n["name"] in spec["net_names"]), None
             )
             assert net_name is not None, "Network not found after apply"
 
             key_out = _run_mvm_host("key", "ls", "--json", timeout=30)
-            keys = json.loads(key_out.stdout) if key_out.stdout.strip() else []
+            keys = _json_success_data(key_out.stdout, list)
             key_name = next(
                 (k["name"] for k in keys if k["name"] in spec["key_names"]), None
             )
@@ -546,18 +542,16 @@ class TestEnvLifecycle:
 
             # --- Verify resources are gone ---
             net_after = _run_mvm_host("network", "ls", "--json", timeout=30)
-            if net_after.stdout.strip():
-                remaining_nets = json.loads(net_after.stdout)
-                assert not any(
-                    n["name"] in spec["net_names"] for n in remaining_nets
-                )
+            remaining_nets = _json_success_data(net_after.stdout, list)
+            assert not any(
+                n["name"] in spec["net_names"] for n in remaining_nets
+            )
 
             key_after = _run_mvm_host("key", "ls", "--json", timeout=30)
-            if key_after.stdout.strip():
-                remaining_keys = json.loads(key_after.stdout)
-                assert not any(
-                    k["name"] in spec["key_names"] for k in remaining_keys
-                )
+            remaining_keys = _json_success_data(key_after.stdout, list)
+            assert not any(
+                k["name"] in spec["key_names"] for k in remaining_keys
+            )
 
             # --- env ls shows empty ---
             ls_result = _run_mvm_host("env", "ls", timeout=30)
