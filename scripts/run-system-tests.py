@@ -1509,7 +1509,7 @@ def provision_t1(
         TEST_NETWORK_NAME,
         "--volume",
         SHARED_VOLUME_NAME,
-        timeout=180,
+        timeout=1800,
     )
     on_created()
     if binding is not None:
@@ -1605,7 +1605,7 @@ def provision_t2(
         "--nested-virt",
         "--volume",
         SHARED_VOLUME_NAME,
-        timeout=300,
+        timeout=1800,
     )
     on_created()
     if binding is not None:

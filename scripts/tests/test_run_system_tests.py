@@ -1815,8 +1815,9 @@ def test_provision_reports_ownership_only_after_successful_create(
     monkeypatch.setattr(orchestrator, "_ensure_builder_key", lambda: None)
     monkeypatch.setattr(orchestrator, "_ensure_official_kernel_on_host", lambda _name: None)
 
-    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert args[:2] == ("vm", "create")
+        assert kwargs["timeout"] == 1800
         events.append("create")
         if create_fails:
             raise RuntimeError("create refused")
