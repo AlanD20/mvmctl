@@ -71,8 +71,17 @@ func verifyRecoveredNetworklessProcessNamespace(ctx context.Context, state *clea
 	if processes.released || processes.verifying {
 		return processVerificationError(state.record.vmID, "recovered process authority is unavailable", nil)
 	}
-	for _, process := range processes.retained {
+	for index := range processes.retained {
+		process := &processes.retained[index]
 		if process.role != "Firecracker" || process.reaped {
+			continue
+		}
+		// Graceful stop may have exited the task after recovery admission.
+		// Only its retained pidfd and successful reap can retire the live namespace check.
+		if err := refreshLifecycleProcess(ctx, processes, process); err != nil {
+			return err
+		}
+		if process.reaped {
 			continue
 		}
 		if state.networkless == nil {
@@ -93,6 +102,15 @@ func verifyRecoveredNetworklessProcessNamespace(ctx context.Context, state *clea
 			ctx, realProcessIdentityVerifierDeps(), state.record.vmID, "recovered Firecracker", process.locator,
 		)
 		if observeErr != nil {
+			// Exit can also race the descriptor-bound /proc observation.
+			if err := refreshLifecycleProcess(ctx, processes, process); err != nil {
+				return appendProcessVerificationError(
+					observeErr, "refresh recovered Firecracker after namespace observation", err, state.record.vmID,
+				)
+			}
+			if process.reaped {
+				continue
+			}
 			return observeErr
 		}
 		if observed.networkNamespace != (instanceObjectIdentity{
