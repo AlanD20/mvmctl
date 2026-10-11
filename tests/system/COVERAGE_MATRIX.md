@@ -27,7 +27,8 @@ scratch cleanup passed. Candidate `0.3.0-rc.cleanup-c9f83f3c` SHA-256
 It includes `1cf2dff6`'s 1,800-second T1/T2 domain-runner creation deadlines and `c9f83f3c`'s retained-pidfd
 exit/reap refresh before networkless namespace cleanup. Earlier preparation receipts remain bound to `cd301c00`.
 New-candidate reusable-base preparation, the full installed matrix, current-candidate host reboot, joined
-evidence, remote CI, aarch64 runtime qualification and final release approval remain open.
+evidence, remote CI and final release approval remain open. Aarch64 runtime qualification is deferred
+for lack of suitable hardware.
 
 **Normal preparation checkpoint (2026-10-11):** clean orchestration source `4f1552f1` with installed
 `0.3.0-rc.api-timeout-8ba5f992` (`cd301c00`) completed all eight preparation steps, native exit 0 in
