@@ -67,6 +67,11 @@ Think "Docker for VMs" — one command to create, start, and connect.
 
 ## Installation
 
+v0.3.0 requires a clean installation and fresh managed state; it does not migrate legacy databases, runtime,
+or protected-storage layouts. Before replacing an older installation, stop/remove its VMs and preserve desired
+artifacts separately. Review the [administrator installation constraints](docs/REFERENCES.md#mvm-host) before
+cleanup: `host clean` and `host reset` are not a supported legacy-state removal procedure.
+
 ### 1. Download a published v0.3.0 binary
 
 v0.3.0 is not released yet. Once published, obtain the `v0.3.0` artifact from [Releases](https://github.com/AlanD20/mvmctl/releases); do not use `releases/latest` while it may still point to an older installation contract. For current development, use the source-build path below in a disposable environment.

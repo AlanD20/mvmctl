@@ -180,6 +180,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `error.details.failed_vms`/`created_vm_ids` with `data: null`; atomic rollback does not promise removal.
   Fixed per-selector volume outcomes, snapshot partial errors, cache error propagation, and exec-port validation.
 - Fixed ambiguous image-prefix errors and human-readable byte sizes in inspection output.
+- Fixed system-test runner base-image reuse to require one present exact type/version match and rebuild removal
+  to use that admitted image's full ID. This tooling change does not alter public image resolver semantics.
+- Fixed system-test command timeouts to interrupt the owned CLI caller first, with bounded kill/reap fallback,
+  retained output and cleanup errors. A timeout remains a failure even if shutdown completes successfully.
 
 ### Known limitations and qualification
 
