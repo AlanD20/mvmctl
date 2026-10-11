@@ -505,7 +505,7 @@ python3 scripts/run-system-tests.py --host-direct --all --workers 2
 | `--release-qualification` | `false` | Require the unfiltered full-matrix release identity gate and closed reboot proof; requires `--all --host-direct --rebuild --candidate-version --host-reboot-task` |
 | `--host-reboot-phase` | — | Explicit `pre` or `post` continuation against existing `mvmctl-030-test`; separate from ordinary tier batches |
 | `--host-reboot-task` | — | Absolute private owned receipt directory for explicit phases; completed strict POST proof is mandatory for full release qualification |
-| `--host-reboot-envelope` | — | POST-only private external administrator receipt binding the fresh runner boot/process and truthful current finite outer controls |
+| `--host-reboot-envelope` | — | POST-only private external administrator receipt binding the fresh runner boot/process and exact observed outer controls (canonical finite integers or literal `"max"`) |
 | `--collect-release-nodes` | — | Standalone full-registry collection inside the named runner; retain evidence in an empty private task directory (§6.1) |
 | `--record-evidence` | — | Retain literal reports for a named-runner test selection; does not finalize qualification (§6.2) |
 | `--collection-task` / `--selected-node-file` | — | Bind exact-node execution to retained current collection and an explicit JSON remainder (§6.2) |
@@ -555,10 +555,11 @@ PRE creates only its owned nested VM, writes and reads a guest marker, retains s
 proof, and reboots the named runner through the unchanged outer controller. A successful PRE exit means
 **phase complete, release incomplete**. Do not repeat it against the same task.
 
-After reconnect, retain a fresh private receipt of the actual finite outer controls for this boot, runner
-UUID and outer PID/start tick. No 8 GiB adjustment is required to proceed. The POST command verifies that
-receipt against actual controls; it does not guess headroom, add a memory watchdog, or modify controls
-itself. Then continue the same task:
+After reconnect, retain a fresh private receipt of the exact observed outer controls for this boot, runner
+UUID and outer PID/start tick. Encode each `memory.high` and `memory.max` value as a canonical nonnegative
+JSON integer when finite, or the literal JSON string `"max"` when observed. POST must match that receipt
+exactly against actual controls and the bound runner identity. No 8 GiB adjustment is required; POST does
+not guess headroom, add a memory watchdog, or modify controls itself. Then continue the same task:
 
 ```bash
 python3 scripts/run-system-tests.py host_reboot --host-reboot-phase post \
