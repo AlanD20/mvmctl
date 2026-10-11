@@ -1985,7 +1985,7 @@ test "$count" -gt 0
             BASE_VM_NAME,
             *(["--default"] if binding is None else []),
             "--skip-optimization",
-            timeout=300,
+            timeout=1800,
         )
         log(f"  Base image '{image_key}' built successfully")
     finally:
