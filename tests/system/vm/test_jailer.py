@@ -408,7 +408,7 @@ try:
     root = directory(None, "/", False)
     var = directory(root, "var", False)
     lib = directory(var, "lib", False)
-    state = directory(lib, "mvmctl", mode=0o711)
+    state = directory(lib, "mvmctl", managed=False)
     binaries = directory(state, "binaries")
     architecture = directory(binaries, "x86_64")
     source = pair("1.17.0")
@@ -1438,6 +1438,8 @@ class TestNetworklessJailerLifecycle:
                 "vm",
                 "create",
                 networkless_vm_name,
+                "--image",
+                "alpine:3.23",
                 "--no-network",
                 "--cloud-init-mode",
                 "off",
@@ -1491,7 +1493,8 @@ class TestNetworklessJailerLifecycle:
         """A launched exact pair is usable by the broker but not directly readable by the operator."""
         name = networkless_vm_name
         _run_mvm(
-            runner_vm, "vm", "create", name, "--no-network", "--cloud-init-mode", "off",
+            runner_vm, "vm", "create", name, "--image", "alpine:3.23",
+            "--no-network", "--cloud-init-mode", "off",
             "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
             timeout=180,
         )
@@ -2256,6 +2259,8 @@ class TestNetworklessJailerLifecycle:
                 "vm",
                 "create",
                 source_name,
+                "--image",
+                "alpine:3.23",
                 "--no-network",
                 "--cloud-init-mode",
                 "off",
