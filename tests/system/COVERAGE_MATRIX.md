@@ -17,6 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Environment contract correction (2026-10-12):** all 22 cases in [env/test_env.py](env/test_env.py) passed
+inside `mvmctl-030-test` on installed cleanup candidate `3b2d6500` (`c9f83f3c`): native exit 0, strict 22/22,
+zero failures, errors, skips, deselections, XFAIL or XPASS. The tested environment file matches `da8e6a6d`,
+which aligns generated specs with named-resource YAML maps and reads structured success-envelope data.
+All 29 retained literal reports and seals were independently checked; exact before/after public, physical,
+administrator, root, source, binary and boot evidence matched. JUnit SHA-256
+`3bd4db6a4e1c02d57373a1187b1140a8e605a30d12449d52907fe76d94024372`; outcomes SHA-256
+`c99668f0e21a155800c81c5d76e3d875bc15b7c645cac107746b9c8eb38bc6c4`.
+Separate 34-node collection was collect-only, not 34 passes. Current `fresh_env`, nested-VM and snapshot
+runtime qualification remains pending. The earlier full 85-node invocation remains failed; CP's 15 and
+snapshot-load's eight passes are component evidence, not a full-matrix pass.
+
 **Coherent cleanup-candidate build (2026-10-11):** clean source `c9f83f3c` passed all six ordinary CI gates
 and the complete root Jailer suite: 2,729 test/subtest PASS, one package PASS, no FAIL or SKIP. These are new
 literal results, not carried counts. Raw root JSON SHA-256
