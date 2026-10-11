@@ -184,12 +184,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to use that admitted image's full ID. This tooling change does not alter public image resolver semantics.
 - Fixed system-test command timeouts to interrupt the owned CLI caller first, with bounded kill/reap fallback,
   retained output and cleanup errors. A timeout remains a failure even if shutdown completes successfully.
+- Aligned T1/T2 domain-runner VM creation deadlines to 1,800 seconds in system-test tooling.
+- Fixed networkless VM cleanup when Firecracker exits after recovery admission: retained pidfd exit and
+  successful reap now retire the live namespace check. Failed reaping and ambiguous live identity still refuse.
 
 ### Known limitations and qualification
 
-- Kept v0.3.0 unreleased and not release-qualified. Normal reusable-base preparation passed current-kernel
-  T1/T2 smoke checks and a verified nested mirror read; separate host-Alpine registration also passed from the
-  local mirror. The complete applicable installed Python matrix,
+- Kept v0.3.0 unreleased and not release-qualified. Normal reusable-base preparation passed on the earlier
+  installed candidate, with current-kernel T1/T2 smoke checks and a verified nested mirror read. Separate
+  host-Alpine registration passed from the local mirror. Those receipts do not qualify the new cleanup candidate,
+  which still needs candidate-bound reusable-base preparation. The complete applicable installed Python matrix,
   current-candidate host reboot, joined release evidence, clean-host Tier 3, remote CI, and final approval
   remain release gates. Earlier focused results bind only their tested inputs; see the
   [coverage matrix](tests/system/COVERAGE_MATRIX.md) for exact evidence.

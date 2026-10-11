@@ -17,6 +17,18 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Coherent cleanup-candidate build (2026-10-11):** clean source `c9f83f3c` passed all six ordinary CI gates
+and the complete root Jailer suite: 2,729 test/subtest PASS, one package PASS, no FAIL or SKIP. These are new
+literal results, not carried counts. Raw root JSON SHA-256
+`1b79dee7a700ffb493940df047be522c489b520937b210dbeb4d2a481068d11a`.
+The real embedded-agent and release builds completed with Go 1.26.3, exact revision and `vcs.modified=false`;
+scratch cleanup passed. Candidate `0.3.0-rc.cleanup-c9f83f3c` SHA-256
+`3b2d65000952d995cba59935c94689e0e4b749ed6a3bac30446b35679b0b0198` was produced; this build did not install it.
+It includes `1cf2dff6`'s 1,800-second T1/T2 domain-runner creation deadlines and `c9f83f3c`'s retained-pidfd
+exit/reap refresh before networkless namespace cleanup. Earlier preparation receipts remain bound to `cd301c00`.
+New-candidate reusable-base preparation, the full installed matrix, current-candidate host reboot, joined
+evidence, remote CI, aarch64 runtime qualification and final release approval remain open.
+
 **Normal preparation checkpoint (2026-10-11):** clean orchestration source `4f1552f1` with installed
 `0.3.0-rc.api-timeout-8ba5f992` (`cd301c00`) completed all eight preparation steps, native exit 0 in
 364.658 seconds. It reused the exact base image `68a7027c`, passed current imported-kernel T1/T2 smoke
