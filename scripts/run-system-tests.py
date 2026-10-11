@@ -2186,6 +2186,17 @@ def _run_remote_pytest(
                 f"umask 077; mkdir -p -- /home/runner/.cache && mkdir -- {shlex.quote(node_directory)} && mkdir -- {shlex.quote(node_directory + '/tmp')}", timeout=30)
             for name in ("system_test_evidence.py", "system_test_outcomes.py"):
                 mvm("cp", str(_REPO_ROOT / "scripts" / name), f"{vm_name}:{node_directory}/{name}", timeout=30)
+            # The root guest agent applies source modes under its own umask.
+            # Keep the directory private while making only these helpers readable by runner.
+            mvm(
+                "exec", vm_name, "--user", "root", "--timeout", "10", "--",
+                shlex.join([
+                    "chmod", "0644", "--",
+                    node_directory + "/system_test_evidence.py",
+                    node_directory + "/system_test_outcomes.py",
+                ]),
+                timeout=30,
+            )
             expected = {path: digest for path, digest in evidence.source_payload.items()
                         if path.startswith("tests/system/") or path in ("scripts/system_test_evidence.py", "scripts/system_test_outcomes.py")}
             actual_paths = {path: (node_directory + "/" + Path(path).name if path.startswith("scripts/") else "/" + path) for path in expected}
