@@ -1641,7 +1641,7 @@ def provision_t2(
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull alpine:3.23",
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull alpine:3.23 --default",
         timeout=150,
     )
     mvm(
@@ -1666,6 +1666,40 @@ def provision_t2(
         "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.17.0 --default --force",
         timeout=150,
     )
+    # VM tests that omit --image require the fast Alpine runner prerequisite.
+    images_result = mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        "/usr/local/bin/mvm image ls --json",
+        timeout=30,
+    )
+    try:
+        envelope = json.loads(images_result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"T2 image defaults returned invalid JSON: {exc}") from exc
+    if (
+        not isinstance(envelope, dict)
+        or type(envelope.get("schema_version")) is not int
+        or envelope.get("schema_version") != 1
+        or envelope.get("status") != "success"
+        or envelope.get("error") is not None
+        or not isinstance(envelope.get("data"), list)
+        or not all(isinstance(image, dict) for image in envelope["data"])
+    ):
+        raise RuntimeError("T2 image defaults returned an invalid success envelope")
+    defaults = [image for image in envelope["data"] if image.get("is_default") is True]
+    if (
+        len(defaults) != 1
+        or defaults[0].get("type") != "alpine"
+        or defaults[0].get("version") != "3.23"
+        or defaults[0].get("is_present") is not True
+    ):
+        raise RuntimeError("T2 runner requires exactly one present Alpine 3.23 default image")
 
 
 def destroy_vm(vm_name: str, *, check: bool = True) -> None:

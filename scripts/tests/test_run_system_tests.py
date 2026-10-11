@@ -1714,16 +1714,37 @@ def test_runner_user_initialization_uses_the_exact_installed_cli(
     ]
 
 
-def test_tier2_provision_pulls_exact_release_with_installed_cli(
+@pytest.mark.parametrize(
+    "fault",
+    ["ready", "missing", "wrong", "absent", "inspection-failed", "alpine-pull-failed"],
+)
+def test_tier2_provision_registers_assets_and_requires_alpine_default(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
+    fault: str,
 ) -> None:
-    """Tier 2 setup must use the current positional trusted-release command."""
+    """Asset registration must establish the default used by image-less VM creation."""
     calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+    images = [{"type": "alpine", "version": "3.23", "is_default": True, "is_present": True}]
+    if fault == "missing":
+        images[0]["is_default"] = False
+    elif fault == "wrong":
+        images[0]["type"] = "ubuntu"
+    elif fault == "absent":
+        images[0]["is_present"] = False
 
     def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        stdout = ""
+        if args[-1] == "/usr/local/bin/mvm image ls --json":
+            if fault == "inspection-failed":
+                raise RuntimeError("image defaults inspection refused")
+            stdout = json.dumps({
+                "schema_version": 1, "status": "success", "data": images, "error": None,
+            })
+        elif fault == "alpine-pull-failed" and "image pull alpine:3.23" in args[-1]:
+            raise RuntimeError("Alpine registration refused")
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
     for helper in (
@@ -1735,15 +1756,32 @@ def test_tier2_provision_pulls_exact_release_with_installed_cli(
     ):
         monkeypatch.setattr(orchestrator, helper, lambda *_args, **_kwargs: None)
 
-    orchestrator.provision_t2("focused-runner", "0.3.0-rc.test", lambda: None)
+    if fault == "ready":
+        orchestrator.provision_t2("focused-runner", "0.3.0-rc.test", lambda: None)
+    else:
+        failure = {
+            "inspection-failed": "image defaults inspection refused",
+            "alpine-pull-failed": "Alpine registration refused",
+        }.get(fault, "exactly one present Alpine 3.23 default image")
+        with pytest.raises(RuntimeError, match=failure):
+            orchestrator.provision_t2("focused-runner", "0.3.0-rc.test", lambda: None)
 
-    assert calls[-1] == (
+    registrations = [
+        ("MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull --type firecracker --version v1.15 --default", 150),
+        ("MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull alpine:3.23 --default", 150),
+        ("MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull ubuntu:noble", 360),
+        ("MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.17.0 --default --force", 150),
+        ("/usr/local/bin/mvm image ls --json", 30),
+    ]
+    if fault == "alpine-pull-failed":
+        registrations = registrations[:2]
+    assert calls[1:] == [
         (
-            "exec", "focused-runner", "--user", "runner", "--timeout", "10", "--",
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.17.0 --default --force",
-        ),
-        {"timeout": 150},
-    )
+            ("exec", "focused-runner", "--user", "runner", "--timeout", "10", "--", command),
+            {"timeout": timeout},
+        )
+        for command, timeout in registrations
+    ]
 
 
 @pytest.mark.parametrize("provision_name", ["provision_t1", "provision_t2"])
@@ -3649,6 +3687,11 @@ def test_imported_runner_selects_same_kernel_on_all_five_create_paths(
                 stdout = json.dumps(receipt)
             elif "image pull alpine:3.23" in args[-1]:
                 stdout = orchestrator.LOCAL_MIRROR_READ_MARKER
+            elif args[-1] == "/usr/local/bin/mvm image ls --json":
+                stdout = json.dumps({
+                    "schema_version": 1, "status": "success", "error": None,
+                    "data": [{"type": "alpine", "version": "3.23", "is_default": True, "is_present": True}],
+                })
         elif args[:2] == ("volume", "inspect"):
             stdout = json.dumps({"volume": {"status": "available"}})
         return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
