@@ -3631,6 +3631,10 @@ def test_imported_runner_selects_same_kernel_on_all_five_create_paths(
         stdout = ""
         if args[:2] == ("kernel", "inspect"):
             stdout = json.dumps(info)
+        elif args[:2] == ("image", "ls"):
+            stdout = json.dumps({
+                "schema_version": 1, "status": "success", "data": [], "error": None,
+            })
         elif args[:2] == ("network", "inspect"):
             return subprocess.CompletedProcess(args, 1, stdout="")
         elif args[:2] == ("image", "inspect"):

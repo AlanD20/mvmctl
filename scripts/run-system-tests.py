@@ -3688,7 +3688,7 @@ def run_prepare(
         TEST_NETWORK_NAME,
         "--volume",
         SHARED_VOLUME_NAME,
-        timeout=300,
+        timeout=1800,
     )
     try:
         if binding is not None:
@@ -3728,7 +3728,7 @@ def run_prepare(
         "--nested-virt",
         "--volume",
         SHARED_VOLUME_NAME,
-        timeout=300,
+        timeout=1800,
     )
     try:
         if binding is not None:
