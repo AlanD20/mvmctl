@@ -224,6 +224,12 @@ creates its row if needed; `--refresh` re-detects and updates it. Root-owned hos
 under `/var/lib/mvmctl/host`. Accordingly, `host info --json` does not report a setup verdict, and the `state` field
 of `host status --json` is null rather than projecting the cache's legacy `initialized` bit as root truth.
 
+`HostStatusCheck(ctx)` returns `(*results.HostStatusCheck, error)`. Its fixed managed-sudoers observation uses
+authenticated root authority when ordinary inspection cannot confirm absence. Permission denial is not absence;
+unsafe policy state or an unavailable, missing or invalid observation returns an error. The interactive `mvm init`
+wizard may request explicit administrator bootstrap with an unknown initial policy state, but must verify policy and group
+state afterward before reporting setup success.
+
 The fresh v0.3.0 schema is version 8 and has no VM-wide `remote_exec` column. Migration `007` retires empty obsolete
 firewall tracking and routed service-access policy tables and selector settings, refusing populated tables rather than
 adopting their state. Pending-migration inspection and migration execution reject an older VM table without the

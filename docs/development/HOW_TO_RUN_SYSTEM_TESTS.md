@@ -75,8 +75,9 @@ bridge/inet nftables rule application, readback and removal establish additional
 nor a kernel-producer pass qualifies traffic isolation, reusable-base provisioning or the full release matrix.
 Retain each gate's exact source/artifact binding and cleanup proof.
 
-The stock reusable-base builder uses 3 GiB RAM and a 12 GiB logical disk; T2 provisioning uses 4 GiB RAM
-and a 9 GiB logical disk. The shared mirror volume is another 6 GiB logical disk, with physical use determined
+The stock reusable-base builder uses 3 GiB RAM and a 12 GiB logical disk. T1 runners use 1 GiB RAM and
+a 9 GiB logical disk, except the `cache` domain, which uses an 11 GiB logical disk. T2 provisioning uses
+4 GiB RAM and a 9 GiB logical disk. The shared mirror volume is another 6 GiB logical disk, with physical use determined
 by its cached contents. Check current physical storage, concurrent allocations and preserved state before
 provisioning: logical sizes and sparse files do not establish available storage. The stock preparation path
 selects `official:7.0.11`; changing a default does not bind a separately imported producer artifact. Use the
@@ -152,6 +153,12 @@ The cache system tests also exercise preservation of unrelated GuestFS appliance
 state and processes without requiring GuestFS installation. Those preservation
 cases do not prove that an enabled appliance builds or warms successfully. Cache
 cleanup no longer performs automatic global GuestFS process or orphan cleanup.
+
+Protected-cache retirement fixtures choose an unused physical cache identity before initializing a protected store.
+A new pathname alone does not prove freshness: the filesystem can reuse an inode already bound to retired root
+authority. Post-clean recovery fixtures likewise select a fresh physical identity after confirmed removal. They
+preserve permanent root records, locks and logical bindings; they do not rebind retired authority or change the
+[protected-cache retirement contract](../adr/0022-explicit-protected-cache-retirement.md).
 
 The registered Tier 2 `guestfs` domain exercises enabled appliance construction, actual guestfish launch,
 reuse, incomplete-appliance repair and selected-cache pruning while preserving unrelated appliance state.

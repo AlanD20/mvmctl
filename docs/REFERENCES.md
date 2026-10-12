@@ -135,6 +135,16 @@ Host configuration commands for one-time, machine-global setup.
 `--refresh`. It does not infer administrator setup from that cache. Structured `host info --json` omits `setup`;
 `host status --json` reports `data.state: null` rather than claiming root admission from the legacy SQLite bit.
 
+`host status` verifies the fixed managed sudoers policy through authenticated root observation when it cannot
+confirm absence directly. Permission denial does not mean the policy is missing. Confirmed absence reports
+`data.sudoers_exists: false`; unsafe policy metadata or content, unavailable observation, and a missing or invalid
+observer response return an error instead of a successful status result.
+
+The interactive `mvm init` wizard can offer explicit administrator setup even when the operator cannot yet observe
+the policy.
+It reports that initial state as unverified, then requires successful host-policy and group verification after setup.
+If the current session lacks the enrolled group, log out and back in or run `newgrp mvm` before retrying.
+
 On a clean host, run `sudo /usr/local/bin/mvm host init`; sudo selects its invoking non-root account. In a direct-root
 session, use `/usr/local/bin/mvm host init --operator USER`. Sudo invocation rejects `--operator`. The early route runs
 before user configuration, cache, SQLite, and ordinary service initialization. Its journal beneath

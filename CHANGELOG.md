@@ -147,6 +147,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed `host status` to verify inaccessible managed sudoers through authenticated root observation instead of
+  treating permission denial as absence. Unconfirmed observation errors propagate; the interactive `mvm init`
+  wizard can request explicit administrator setup with an unknown initial policy state and requires successful
+  verification afterward.
+- Fixed cache system-test fixtures to select unused physical cache identities while preserving retired root
+  authority. The Tier 1 `cache` runner uses an 11 GiB disk; other T1/T2 runner disks and memory are unchanged.
 - Fixed OpenRC agent startup to run before networking, chronyd, and cloud-init, without extending exec deadlines
   or changing authentication. See [ADR-0024](docs/adr/0024-early-openrc-agent-startup.md).
 - Fixed resume to consult root-owned pending-export admission and authenticated Firecracker state before success;
