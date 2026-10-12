@@ -49,6 +49,36 @@ func (server *VMSnapshotServer) Inspect(
 		return model.SnapshotCaptureResult{}, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, entry.Release(context.WithoutCancel(ctx))) }()
+	return readSnapshotProjection(ctx, entry, ownerUID)
+}
+
+// InspectForRestore waits only for exact preflight authority contention before reading
+// immutable metadata. It creates no target, backing, grant or restore reference.
+func (server *VMSnapshotServer) InspectForRestore(
+	ctx context.Context,
+	ownerUID, ownerGID uint32,
+	request VMSnapshotRequest,
+) (_ model.SnapshotCaptureResult, returnErr error) {
+	if err := request.Validate(); err != nil {
+		return model.SnapshotCaptureResult{}, err
+	}
+	cache, err := pinSnapshotCache(ctx, instanceCaller{uid: ownerUID, gid: ownerGID}, request.CacheRoot)
+	if err != nil {
+		return model.SnapshotCaptureResult{}, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, cache.Release(context.WithoutCancel(ctx))) }()
+	store, entry, err := openRestoreSnapshotEntry(ctx, cache, request.SnapshotID)
+	if err != nil {
+		return model.SnapshotCaptureResult{}, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, store.Release(context.WithoutCancel(ctx))) }()
+	defer func() { returnErr = errors.Join(returnErr, entry.Release(context.WithoutCancel(ctx))) }()
+	return readSnapshotProjection(ctx, entry, ownerUID)
+}
+
+func readSnapshotProjection(
+	ctx context.Context, entry *snapshotStoreEntry, ownerUID uint32,
+) (model.SnapshotCaptureResult, error) {
 	record, err := entry.readRecord(ctx, ownerUID)
 	if err != nil {
 		if errors.Is(err, unix.ENOENT) {

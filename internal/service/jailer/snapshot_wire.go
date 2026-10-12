@@ -9,6 +9,8 @@ const (
 	VMSnapshotCaptureAction = "jailer-snapshot-capture"
 	// VMSnapshotInspectAction returns only the root-authenticated display projection.
 	VMSnapshotInspectAction = "jailer-snapshot-inspect"
+	// VMSnapshotInspectForRestoreAction admits restore preflight while another restore owns snapshot authority.
+	VMSnapshotInspectForRestoreAction = "jailer-snapshot-inspect-for-restore"
 	// VMSnapshotRemoveAction removes an unreferenced exact immutable capture.
 	VMSnapshotRemoveAction = "jailer-snapshot-remove"
 	// VMSnapshotRestoreAction launches from one immutable root-authenticated capture.

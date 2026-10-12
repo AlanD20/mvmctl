@@ -63,6 +63,20 @@ func (client *VMSnapshotClient) Inspect(
 		})
 }
 
+// InspectForRestore obtains immutable restore metadata with cancellable authority admission.
+func (client *VMSnapshotClient) InspectForRestore(
+	ctx context.Context,
+	request VMSnapshotRequest,
+) (model.SnapshotCaptureResult, error) {
+	if err := request.Validate(); err != nil {
+		return model.SnapshotCaptureResult{}, err
+	}
+	return exchangeTrustedRelease(ctx, client.transport, VMSnapshotInspectForRestoreAction, request, nil, 0,
+		func(result model.SnapshotCaptureResult) error {
+			return validateSnapshotProjection(result, request.SnapshotID)
+		})
+}
+
 // Remove refuses snapshots retained as immutable memory backing by restored VMs.
 func (client *VMSnapshotClient) Remove(ctx context.Context, request VMSnapshotRequest) (VMSnapshotRemoveResult, error) {
 	if err := request.Validate(); err != nil {

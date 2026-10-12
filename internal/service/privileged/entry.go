@@ -310,6 +310,8 @@ func dispatch(
 		return dispatchHandled, handleVMRootfsExportRelease(ctx, endpoint, caller, deps.control)
 	case jailer.VMSnapshotInspectAction:
 		return dispatchHandled, handleVMSnapshotInspect(ctx, endpoint, caller, deps.control)
+	case jailer.VMSnapshotInspectForRestoreAction:
+		return dispatchHandled, handleVMSnapshotInspectForRestore(ctx, endpoint, caller, deps.control)
 	case jailer.VMSnapshotRemoveAction:
 		return dispatchHandled, handleVMSnapshotRemove(ctx, endpoint, caller, deps.control)
 	case jailer.VMSnapshotRestoreAction:

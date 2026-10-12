@@ -140,7 +140,7 @@ func (op *Operation) SnapshotRestore(
 		return nil, err
 	}
 	projection, err := jailersvc.NewVMSnapshotClient().
-		Inspect(ctx, jailersvc.VMSnapshotRequest{CacheRoot: op.CacheDir, SnapshotID: snapshot.ID})
+		InspectForRestore(ctx, jailersvc.VMSnapshotRequest{CacheRoot: op.CacheDir, SnapshotID: snapshot.ID})
 	if err != nil {
 		return nil, err
 	}

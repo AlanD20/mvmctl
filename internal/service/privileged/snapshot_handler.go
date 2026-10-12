@@ -68,6 +68,36 @@ func handleVMSnapshotInspect(
 	return deliverOperationSuccess(ctx, endpoint, action, result, deps)
 }
 
+func handleVMSnapshotInspectForRestore(
+	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
+) error {
+	const action = jailer.VMSnapshotInspectForRestoreAction
+	reader := newRequestReader(
+		ctx,
+		int(endpoint.Fd()),
+		boundedReadDeadline(ctx, deps.now(), requestHeaderReadTimeout),
+		deps,
+	)
+	request, err := privilegedwire.DecodeRequest[jailer.VMSnapshotRequest](ctx, reader, action, 0)
+	if err != nil {
+		return deliverOperationError(ctx, endpoint, action, err, deps)
+	}
+	if err := request.Body.Validate(); err != nil {
+		return deliverOperationError(ctx, endpoint, action, err, deps)
+	}
+	if err := requireRequestEOF(ctx, reader); err != nil {
+		return deliverOperationError(ctx, endpoint, action, err, deps)
+	}
+	result, err := jailer.NewVMSnapshotServer().InspectForRestore(ctx, caller.uid, caller.gid, request.Body)
+	if err != nil {
+		return deliverOperationError(ctx, endpoint, action, err, deps)
+	}
+	if result.SnapshotID != request.Body.SnapshotID {
+		return deliverOperationError(ctx, endpoint, action, snapshotResultSelectionError(), deps)
+	}
+	return deliverOperationSuccess(ctx, endpoint, action, result, deps)
+}
+
 func handleVMSnapshotRemove(
 	ctx context.Context, endpoint controlEndpoint, caller callerIdentity, deps controlDeps,
 ) error {
