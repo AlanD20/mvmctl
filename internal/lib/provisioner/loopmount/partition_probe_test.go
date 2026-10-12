@@ -18,9 +18,10 @@ import (
 	"mvmctl/internal/lib/provisioner/loopmount"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/testutil"
+	"mvmctl/pkg/errs"
 )
 
-// partitionProbeRunner adds command-specific results and fixture-only dd copying to FakeRunner.
+// partitionProbeRunner adds command-specific results and fixture-only copy effects to FakeRunner.
 // Tests remain serial because DefaultRunner is package-global.
 type partitionProbeRunner struct {
 	testutil.FakeRunner
@@ -28,6 +29,10 @@ type partitionProbeRunner struct {
 	sfdiskErr    error
 	partedResult *system.RunResult
 	partedErr    error
+	fsType       string
+	cpResult     *system.RunResult
+	cpErr        error
+	cpPartial    []byte
 	cancelProbe  string
 	cancel       context.CancelFunc
 }
@@ -38,11 +43,20 @@ func (r *partitionProbeRunner) Run(
 	result, err := &system.RunResult{}, error(nil)
 	switch args[0] {
 	case "blkid":
-		// The fixture is a disk, not a directly usable filesystem.
+		result.Stdout = r.fsType
 	case "sfdisk":
 		result, err = r.sfdiskResult, r.sfdiskErr
 	case "parted":
 		result, err = r.partedResult, r.partedErr
+	case "cp":
+		output := args[len(args)-1]
+		if writeErr := os.WriteFile(output, r.cpPartial, 0o440); writeErr != nil {
+			return &system.RunResult{ExitCode: -1}, writeErr
+		}
+		if chmodErr := os.Chmod(output, 0o440); chmodErr != nil {
+			return &system.RunResult{ExitCode: -1}, chmodErr
+		}
+		result, err = r.cpResult, r.cpErr
 	case "dd":
 		var input, output string
 		var skip, count int64
@@ -270,6 +284,71 @@ func TestExtractPartitionSuccessfulSfdisk(t *testing.T) {
 			require.NoError(t, err)
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("successful sfdisk extraction bytes (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestCopyRootPartitionFailedCopyPreservesFiles(t *testing.T) {
+	// Rationale: Retrying dd against a read-only partial copy masks cp's original failure.
+	diagnostic := "cp: original copy failure: " + strings.Repeat("retained diagnostic ", 8) + "end"
+	tests := map[string]struct {
+		result   *system.RunResult
+		err      error
+		wantText string
+	}{
+		"native copy failure": {
+			result:   &system.RunResult{ExitCode: 1, Stderr: diagnostic + "\n"},
+			wantText: "exit 1",
+		},
+		"runner failure despite successful exit status": {
+			result: &system.RunResult{Stderr: diagnostic + "\n"}, err: context.Canceled,
+			wantText: "cp failed",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			rawPath, outputPath := filepath.Join(dir, "disk.raw"), filepath.Join(dir, "root.img")
+			sourceBytes := []byte("independent VM export bytes must remain intact")
+			partialBytes := sourceBytes[:12]
+			require.NoError(t, os.WriteFile(rawPath, sourceBytes, 0o400))
+			before, err := os.Stat(rawPath)
+			require.NoError(t, err)
+			runner := &partitionProbeRunner{
+				fsType: "ext4", cpResult: tc.result, cpErr: tc.err, cpPartial: partialBytes,
+			}
+			installPartitionProbeRunner(t, runner)
+			backend := loopmount.NewLoopMountBackend(context.Background(), rawPath, "ext4", dir)
+			_, err = backend.CopyRootPartition(context.Background(), rawPath, outputPath, 0, nil)
+			require.Error(t, err)
+			var domainErr *errs.DomainError
+			require.ErrorAs(t, err, &domainErr)
+			assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+			assert.Contains(t, err.Error(), diagnostic)
+			assert.Contains(t, err.Error(), tc.wantText)
+			if tc.err != nil {
+				assert.ErrorIs(t, err, tc.err)
+			}
+			// Read back the failed-copy evidence and the independent source, not only runner calls.
+			for path, want := range map[string][]byte{rawPath: sourceBytes, outputPath: partialBytes} {
+				got, readErr := os.ReadFile(path)
+				require.NoError(t, readErr)
+				if diff := cmp.Diff(want, got); diff != "" {
+					t.Errorf("preserved %s bytes (-want +got):\n%s", filepath.Base(path), diff)
+				}
+			}
+			after, err := os.Stat(rawPath)
+			require.NoError(t, err)
+			assert.True(t, os.SameFile(before, after), "failed extraction must retain the source inode")
+			assert.Equal(t, before.Mode(), after.Mode(), "failed extraction must retain the source mode")
+			partial, err := os.Stat(outputPath)
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0o440), partial.Mode().Perm(), "partial output must remain read-only")
+			_, err = os.Stat(filepath.Join(dir, "root.ext4"))
+			assert.True(t, os.IsNotExist(err), "failed copy must not publish the filesystem image")
+			for _, call := range runner.Calls {
+				assert.NotEqual(t, "dd", call.Args[0], "failed copy must not start a second copy")
 			}
 		})
 	}

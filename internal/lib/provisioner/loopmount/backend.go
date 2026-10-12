@@ -345,15 +345,19 @@ func copyRootPartition(
 	source rootPartitionSource,
 ) (string, error) {
 	if source.wholeImage {
-		result, _ := system.DefaultRunner.Run(
+		result, err := system.DefaultRunner.Run(
 			ctx,
 			[]string{"cp", "--sparse=always", rawPath, outputPath},
 			system.RunCmdOpts{Capture: true, Check: false},
 		)
+		// A failed copy can leave a read-only partial output; retrying dd would mask the original failure.
+		if err != nil {
+			return "", errs.WrapMsg(errs.CodeProcessError, "cp failed: "+strings.TrimSpace(result.Stderr), err)
+		}
 		if !result.Success() {
-			if err := system.CopyBytesDD(ctx, rawPath, outputPath, 0, 0); err != nil {
-				return "", err
-			}
+			return "", errs.New(errs.CodeProcessError, fmt.Sprintf(
+				"cp failed (exit %d): %s", result.ExitCode, strings.TrimSpace(result.Stderr),
+			))
 		}
 		if source.fsType == "" {
 			return outputPath, nil
