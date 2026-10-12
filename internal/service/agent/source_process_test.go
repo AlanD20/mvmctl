@@ -26,6 +26,8 @@ type fakePinnedProcess struct {
 	mu             sync.Mutex
 	aliveErr       error
 	aliveSeq       []error
+	exited         bool
+	exitedSeq      []bool
 	aliveCall      int
 	aliveBarrierAt int
 	aliveReached   chan struct{}
@@ -33,17 +35,30 @@ type fakePinnedProcess struct {
 	aliveOnce      sync.Once
 	closed         bool
 	closes         int
+	closeErr       error
 }
 
-func (pin *fakePinnedProcess) Alive(context.Context) error {
+func (pin *fakePinnedProcess) Alive(ctx context.Context) error {
+	exited, err := pin.Exited(ctx)
+	if err != nil {
+		return err
+	}
+	if exited {
+		return errors.New("process has exited")
+	}
+	return nil
+}
+
+func (pin *fakePinnedProcess) Exited(context.Context) (bool, error) {
 	pin.mu.Lock()
 	if pin.closed {
 		pin.mu.Unlock()
-		return errors.New("pin closed")
+		return false, errors.New("pin closed")
 	}
 	call := pin.aliveCall + 1
 	pin.aliveCall++
 	aliveErr := pin.aliveErr
+	exited := pin.exited
 	if len(pin.aliveSeq) > 0 {
 		index := call - 1
 		if index >= len(pin.aliveSeq) {
@@ -51,13 +66,17 @@ func (pin *fakePinnedProcess) Alive(context.Context) error {
 		}
 		aliveErr = pin.aliveSeq[index]
 	}
+	if len(pin.exitedSeq) > 0 {
+		index := min(call-1, len(pin.exitedSeq)-1)
+		exited = pin.exitedSeq[index]
+	}
 	barrier := call == pin.aliveBarrierAt && pin.aliveReached != nil
 	pin.mu.Unlock()
 	if barrier {
 		pin.aliveOnce.Do(func() { close(pin.aliveReached) })
 		<-pin.aliveRelease
 	}
-	return aliveErr
+	return exited, aliveErr
 }
 
 func (pin *fakePinnedProcess) Close() error {
@@ -65,7 +84,7 @@ func (pin *fakePinnedProcess) Close() error {
 	pin.closed = true
 	pin.closes++
 	pin.mu.Unlock()
-	return nil
+	return pin.closeErr
 }
 
 type fakeSourceProcessEffects struct {
@@ -143,6 +162,14 @@ func (effects *fakeSourceProcessEffects) AdoptProcess(
 		effects.pins[intPID] = pin
 	}
 	return pin, nil
+}
+
+func (effects *fakeSourceProcessEffects) AdoptSourceCommand(
+	ctx context.Context,
+	pid int,
+	pidFD int,
+) (pinnedProcess, error) {
+	return effects.AdoptProcess(ctx, pid, pidFD)
 }
 
 func (effects *fakeSourceProcessEffects) ReadIdentity(

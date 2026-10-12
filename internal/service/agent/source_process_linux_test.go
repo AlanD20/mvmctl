@@ -46,6 +46,58 @@ func TestAdoptPIDFDRequiresCLOEXECAndMatchingPID(t *testing.T) {
 	}
 }
 
+func TestSourceCommandPIDFDAdmissionRetainsIdentityRequirements(t *testing.T) {
+	// Rationale: Completion is eligible only after the atomic child pidfd has passed identity admission.
+	for name, tc := range map[string]struct {
+		flags int
+		info  []byte
+	}{
+		"missing CLOEXEC": {info: []byte("Pid:\t42\n")},
+		"different PID":   {flags: unix.FD_CLOEXEC, info: []byte("Pid:\t41\n")},
+		"malformed PID":   {flags: unix.FD_CLOEXEC, info: []byte("Pid:\t-1\n")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			closed := 0
+			effects := linuxSourceProcessEffects{
+				fdFlags: func(int) (int, error) { return tc.flags, nil },
+				fdInfo:  func(context.Context, int) ([]byte, error) { return tc.info, nil },
+				pollFD:  func(int) (bool, error) { return true, nil },
+				closeFD: func(int) error { closed++; return nil },
+			}
+			_, err := effects.AdoptSourceCommand(t.Context(), 42, 9)
+			assert.Error(t, err)
+			assert.Equal(t, 1, closed)
+		})
+	}
+}
+
+func TestSourcePIDFDExitObservationRejectsInvalidEvents(t *testing.T) {
+	// Rationale: An invalid poll observation must never preserve a command result as proven completion.
+	for name, tc := range map[string]struct {
+		events int16
+		exited bool
+		err    bool
+	}{
+		"bad descriptor":       {events: unix.POLLNVAL, err: true},
+		"poll error":           {events: unix.POLLERR, err: true},
+		"readiness with error": {events: unix.POLLIN | unix.POLLERR, err: true},
+		"hangup alone":         {events: unix.POLLHUP, err: true},
+		"live":                 {},
+		"exited":               {events: unix.POLLIN, exited: true},
+		"exited and reaped":    {events: unix.POLLIN | unix.POLLHUP, exited: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			exited, err := sourcePIDFDExited(tc.events)
+			if tc.err {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.exited, exited)
+		})
+	}
+}
+
 func TestPeerCredentialsFailsClosedWhenSOPEERPIDFDIsUnavailable(t *testing.T) {
 	raw := &fakeRawConn{}
 	conn := &fakeSyscallConn{raw: raw}

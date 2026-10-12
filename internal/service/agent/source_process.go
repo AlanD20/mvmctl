@@ -28,6 +28,7 @@ type processIdentity struct {
 
 type pinnedProcess interface {
 	Alive(ctx context.Context) error
+	Exited(ctx context.Context) (bool, error)
 	Close() error
 }
 
@@ -35,6 +36,7 @@ type sourceProcessEffects interface {
 	ResolveAccount(ctx context.Context, username string) (sourceAccount, error)
 	PeerCredentials(ctx context.Context, conn net.Conn) (peerCredentials, pinnedProcess, error)
 	AdoptProcess(ctx context.Context, pid int, pidFD int) (pinnedProcess, error)
+	AdoptSourceCommand(ctx context.Context, pid int, pidFD int) (pinnedProcess, error)
 	ReadIdentity(ctx context.Context, pid int) (processIdentity, error)
 }
 

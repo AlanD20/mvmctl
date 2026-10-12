@@ -237,7 +237,7 @@ func handleExecCommand(
 		return
 	}
 	if binding != nil {
-		if err := agent.publishSourceBinding(ctx, binding, cmd.Process.Pid, sourcePIDFD); err != nil {
+		if _, err := agent.publishSourceBinding(ctx, binding, cmd.Process.Pid, sourcePIDFD); err != nil {
 			// Publishing failed before ownership transferred; process-group termination is best effort.
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			_ = cmd.Process.Kill()

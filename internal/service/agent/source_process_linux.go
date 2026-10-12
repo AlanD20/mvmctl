@@ -142,6 +142,30 @@ func (effects linuxSourceProcessEffects) AdoptProcess(
 	pid int,
 	pidFD int,
 ) (pinnedProcess, error) {
+	pin, err := effects.adoptPIDFD(ctx, pid, pidFD)
+	if err != nil {
+		return nil, err
+	}
+	if err := pin.Alive(ctx); err != nil {
+		return nil, errors.Join(err, pin.Close())
+	}
+	return pin, nil
+}
+
+// AdoptSourceCommand admits the exact child pidfd before publication observes live or completed state.
+func (effects linuxSourceProcessEffects) AdoptSourceCommand(
+	ctx context.Context,
+	pid int,
+	pidFD int,
+) (pinnedProcess, error) {
+	return effects.adoptPIDFD(ctx, pid, pidFD)
+}
+
+func (effects linuxSourceProcessEffects) adoptPIDFD(
+	ctx context.Context,
+	pid int,
+	pidFD int,
+) (*linuxPinnedProcess, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, effects.rejectPIDFD(pidFD, err)
 	}
@@ -175,9 +199,6 @@ func (effects linuxSourceProcessEffects) AdoptProcess(
 		signalFD: effects.signalPIDFD,
 		closeFD:  effects.closePIDFD,
 	}
-	if err := pin.Alive(ctx); err != nil {
-		return nil, errors.Join(err, pin.Close())
-	}
 	return pin, nil
 }
 
@@ -193,22 +214,33 @@ func (linuxSourceProcessEffects) ReadIdentity(ctx context.Context, pid int) (pro
 }
 
 func (pin *linuxPinnedProcess) Alive(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	pin.mu.Lock()
-	defer pin.mu.Unlock()
-	if pin.fd < 0 {
-		return fmt.Errorf("process pin is closed")
-	}
-	exited, err := pin.pollFD(pin.fd)
+	exited, err := pin.Exited(ctx)
 	if err != nil {
 		return err
 	}
 	if exited {
 		return fmt.Errorf("process has exited or is a zombie")
 	}
-	return pin.signalFD(pin.fd)
+	return nil
+}
+
+func (pin *linuxPinnedProcess) Exited(ctx context.Context) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	pin.mu.Lock()
+	defer pin.mu.Unlock()
+	if pin.fd < 0 {
+		return false, fmt.Errorf("process pin is closed")
+	}
+	exited, err := pin.pollFD(pin.fd)
+	if err != nil {
+		return false, err
+	}
+	if exited {
+		return true, nil
+	}
+	return false, pin.signalFD(pin.fd)
 }
 
 func (pin *linuxPinnedProcess) Close() error {
@@ -277,7 +309,15 @@ func (effects linuxSourceProcessEffects) pollPIDFD(fd int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return fds[0].Revents&(unix.POLLIN|unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0, nil
+	return sourcePIDFDExited(fds[0].Revents)
+}
+
+func sourcePIDFDExited(events int16) (bool, error) {
+	// CRITICAL: Invalid-descriptor and observation failures do not prove child completion.
+	if events & ^int16(unix.POLLIN|unix.POLLHUP) != 0 || events == unix.POLLHUP {
+		return false, fmt.Errorf("unexpected process pidfd poll events: %d", events)
+	}
+	return events&unix.POLLIN != 0, nil
 }
 
 func (effects linuxSourceProcessEffects) signalPIDFD(fd int) error {

@@ -23,6 +23,7 @@ type sourceTransport struct {
 	conn      net.Conn
 	done      chan struct{}
 	closeOnce sync.Once
+	closeErr  error
 	deadline  time.Time
 
 	watchStop      chan struct{}
@@ -42,11 +43,12 @@ func newSourceTransport(conn net.Conn) *sourceTransport {
 	}
 }
 
-func (transport *sourceTransport) close() {
+func (transport *sourceTransport) close() error {
 	transport.closeOnce.Do(func() {
-		_ = transport.conn.Close()
+		transport.closeErr = transport.conn.Close()
 		close(transport.done)
 	})
+	return transport.closeErr
 }
 
 func (transport *sourceTransport) startDisconnectWatch(ctx context.Context) {
@@ -114,6 +116,7 @@ func (transport *sourceTransport) handoffReadOwner() error {
 
 type sourceBinding struct {
 	cleanupOnce sync.Once
+	cleanupErr  error
 
 	sessionID string
 	transport *sourceTransport
@@ -258,29 +261,54 @@ func (a *Agent) publishSourceBinding(
 	binding *sourceBinding,
 	pid int,
 	pidFD int,
-) error {
-	rootPin, err := a.sourceProcesses.AdoptProcess(ctx, pid, pidFD)
+) (bool, error) {
+	rootPin, err := a.sourceProcesses.AdoptSourceCommand(ctx, pid, pidFD)
 	if err != nil {
-		return fmt.Errorf("pin source command: %w", err)
+		return false, fmt.Errorf("pin source command: %w", err)
 	}
-	root, err := stablePinnedIdentity(ctx, a.sourceProcesses, rootPin, pid)
+	root, exited, err := observeStablePinnedIdentity(ctx, a.sourceProcesses, rootPin, pid)
 	if err != nil {
-		_ = rootPin.Close()
-		return fmt.Errorf("identify source command: %w", err)
+		return false, errors.Join(fmt.Errorf("identify source command: %w", err), rootPin.Close())
 	}
 
 	a.sourceMu.Lock()
-	defer a.sourceMu.Unlock()
 	current, exists := a.sourceBindings[binding.sessionID]
-	if !exists || current != binding || binding.rootPin != nil {
-		_ = rootPin.Close()
-		return fmt.Errorf("source command binding is no longer reserved")
+	if !exists || current != binding || binding.rootPin != nil || binding.claimed {
+		a.sourceMu.Unlock()
+		return false, errors.Join(fmt.Errorf("source command binding is no longer reserved"), rootPin.Close())
+	}
+	select {
+	case <-binding.published:
+		a.sourceMu.Unlock()
+		return false, errors.Join(fmt.Errorf("source command binding is already published"), rootPin.Close())
+	default:
+	}
+	select {
+	case <-binding.transport.done:
+		a.sourceMu.Unlock()
+		return false, errors.Join(fmt.Errorf("source command transport is closed"), rootPin.Close())
+	default:
+	}
+	if err := ctx.Err(); err != nil {
+		a.sourceMu.Unlock()
+		return false, errors.Join(err, rootPin.Close())
+	}
+	if exited {
+		// CRITICAL: Completion only retires an unused session. It never publishes process authority.
+		delete(a.sourceBindings, binding.sessionID)
+		a.notifySourceChangeLocked()
+		a.sourceMu.Unlock()
+		if err := errors.Join(rootPin.Close(), a.cleanupSourceBinding(binding), ctx.Err()); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	binding.root = root
 	binding.rootPin = rootPin
 	close(binding.published)
 	a.notifySourceChangeLocked()
-	return nil
+	a.sourceMu.Unlock()
+	return false, nil
 }
 
 func stablePinnedIdentity(
@@ -289,33 +317,49 @@ func stablePinnedIdentity(
 	pin pinnedProcess,
 	pid int,
 ) (processIdentity, error) {
-	if err := pin.Alive(ctx); err != nil {
+	identity, exited, err := observeStablePinnedIdentity(ctx, effects, pin, pid)
+	if err != nil {
 		return processIdentity{}, err
+	}
+	if exited {
+		return processIdentity{}, fmt.Errorf("process has exited or is a zombie")
+	}
+	return identity, nil
+}
+
+func observeStablePinnedIdentity(
+	ctx context.Context,
+	effects sourceProcessEffects,
+	pin pinnedProcess,
+	pid int,
+) (processIdentity, bool, error) {
+	if exited, err := pin.Exited(ctx); exited || err != nil {
+		return processIdentity{}, exited, err
 	}
 	first, err := effects.ReadIdentity(ctx, pid)
 	if err != nil {
-		return processIdentity{}, err
+		return processIdentity{}, false, err
 	}
 	if first.PID != pid {
-		return processIdentity{}, fmt.Errorf("process identity PID mismatch")
+		return processIdentity{}, false, fmt.Errorf("process identity PID mismatch")
 	}
-	if err := pin.Alive(ctx); err != nil {
-		return processIdentity{}, err
+	if exited, err := pin.Exited(ctx); exited || err != nil {
+		return processIdentity{}, exited, err
 	}
 	second, err := effects.ReadIdentity(ctx, pid)
 	if err != nil {
-		return processIdentity{}, err
+		return processIdentity{}, false, err
 	}
 	if first != second {
-		return processIdentity{}, fmt.Errorf("process identity changed during admission")
+		return processIdentity{}, false, fmt.Errorf("process identity changed during admission")
 	}
-	if err := pin.Alive(ctx); err != nil {
-		return processIdentity{}, err
+	if exited, err := pin.Exited(ctx); exited || err != nil {
+		return processIdentity{}, exited, err
 	}
-	return first, nil
+	return first, false, nil
 }
 
-func (a *Agent) cleanupSourceBinding(binding *sourceBinding) {
+func (a *Agent) cleanupSourceBinding(binding *sourceBinding) error {
 	binding.cleanupOnce.Do(func() {
 		a.sourceMu.Lock()
 		if current, exists := a.sourceBindings[binding.sessionID]; exists && current == binding {
@@ -325,13 +369,14 @@ func (a *Agent) cleanupSourceBinding(binding *sourceBinding) {
 		a.sourceMu.Unlock()
 
 		if binding.peerPin != nil {
-			_ = binding.peerPin.Close()
+			binding.cleanupErr = errors.Join(binding.cleanupErr, binding.peerPin.Close())
 		}
 		if binding.rootPin != nil {
-			_ = binding.rootPin.Close()
+			binding.cleanupErr = errors.Join(binding.cleanupErr, binding.rootPin.Close())
 		}
-		binding.transport.close()
+		binding.cleanupErr = errors.Join(binding.cleanupErr, binding.transport.close())
 	})
+	return binding.cleanupErr
 }
 
 func (a *Agent) closeAllSourceSessions() {
