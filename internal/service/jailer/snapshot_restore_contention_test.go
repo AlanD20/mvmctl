@@ -139,7 +139,14 @@ func newSnapshotRestoreBackingFixture(t *testing.T) *snapshotRestoreBackingFixtu
 				continue
 			}
 			require.Equal(t, "ready", record.Phase, "unknown fixture cleanup authority must remain retained")
-			backing, err := protectBacking(context.Background(), f.cache, selection.kind, selection.id, selection.bytes, false)
+			backing, err := protectBacking(
+				context.Background(),
+				f.cache,
+				selection.kind,
+				selection.id,
+				selection.bytes,
+				false,
+			)
 			require.NoError(t, err)
 			require.NoError(t, backing.Remove(context.Background()))
 			require.NoError(t, backing.Release(context.Background()))
@@ -331,8 +338,16 @@ func TestSnapshotRestoreInitialContentionBeforeReference(t *testing.T) {
 				}
 				entry, err = lockSnapshotStoreEntry(t.Context(), f.store, id, false)
 				require.NoError(t, err)
-				refs := os.NewFile(uintptr(openProtectedBranchTestFD(t,
-					filepath.Join(f.cachePath, protectedBackingDirectory, "snapshots", id, "refs"))), "restore-reference-check")
+				refs := os.NewFile(uintptr(openProtectedBranchTestFD(
+					t,
+					filepath.Join(
+						f.cachePath,
+						protectedBackingDirectory,
+						"snapshots",
+						id,
+						"refs",
+					),
+				)), "restore-reference-check")
 				names, err := refs.Readdirnames(1)
 				assert.ErrorIs(t, err, io.EOF)
 				assert.Empty(t, names)

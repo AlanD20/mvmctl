@@ -159,7 +159,11 @@ func (prepared *preparedSnapshotRestore) prepareBackings(
 	if prepared.metadata.Source.CloudInit {
 		items = append(
 			items,
-			restoreBackingSelection{kind: protectedBackingCloudInit, id: prepared.targetVMID, artifact: "cloud-init.iso"},
+			restoreBackingSelection{
+				kind:     protectedBackingCloudInit,
+				id:       prepared.targetVMID,
+				artifact: "cloud-init.iso",
+			},
 		)
 	}
 	for index, volume := range prepared.volumes {
@@ -176,7 +180,10 @@ func (prepared *preparedSnapshotRestore) prepareBackings(
 			},
 		)
 	}
-	slices.SortFunc(items, func(a, b restoreBackingSelection) int { return strings.Compare(a.kind+"/"+a.id, b.kind+"/"+b.id) })
+	slices.SortFunc(
+		items,
+		func(a, b restoreBackingSelection) int { return strings.Compare(a.kind+"/"+a.id, b.kind+"/"+b.id) },
+	)
 	for index := range items {
 		item := &items[index]
 		source, found := prepared.artifacts[item.artifact]
