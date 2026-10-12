@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import re
 import select
 import signal
 import stat
@@ -103,6 +105,56 @@ def _pair_inventory(runner_vm: str, domain: str):
     return sorted(data, key=lambda item: json.dumps(item, sort_keys=True)) if isinstance(data, list) else data
 
 
+def _require_source_kernel(runner_vm: str) -> str:
+    """Select the exact admitted 7.0.11 ELF for guests that serve source sessions."""
+    receipt_path = Path("/opt/mvmctl-test/base-inputs.json")
+    receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else None
+    kernel_id = os.environ.get("MVM_RUNNER_KERNEL_ID")
+    digest = os.environ.get("MVM_RUNNER_KERNEL_SHA256")
+    if kernel_id is not None or digest is not None:
+        assert kernel_id and digest, "runner kernel ID and SHA256 must be supplied together"
+        if receipt is not None:
+            assert (kernel_id, digest) == (receipt["kernel_id"], receipt["kernel_sha256"]), receipt
+    else:
+        assert receipt is not None, "source-session guests require the admitted runner kernel binding"
+        kernel_id, digest = receipt["kernel_id"], receipt["kernel_sha256"]
+    assert re.fullmatch(r"[0-9a-f]{64}", kernel_id) and re.fullmatch(r"[0-9a-f]{64}", digest)
+    assert hashlib.sha256(f"{digest}:7.0.11:x86_64".encode()).hexdigest() == kernel_id
+    inspected = _json_success_data(
+        _run_mvm(runner_vm, "kernel", "inspect", kernel_id, "--json").stdout, dict,
+    )
+    kernel, storage = inspected["kernel"], inspected["storage"]
+    assert (kernel["id"], kernel["type"], kernel["version"], kernel["arch"]) == (
+        kernel_id, "custom", "7.0.11", "x86_64",
+    ) and kernel["is_present"] is True, inspected
+    cache = Path(os.path.abspath(Path(os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")).expanduser()))
+    path = cache / "kernels" / kernel_id
+    assert storage["path"] == str(path), inspected
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    parent = os.open("/", flags)
+    try:
+        for component in path.parts[1:-1]:
+            child = os.open(component, flags, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=parent)
+    finally:
+        os.close(parent)
+    try:
+        before = os.fstat(descriptor)
+        assert stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and before.st_size > 0, path
+        actual = hashlib.sha256()
+        while chunk := os.read(descriptor, 1024 * 1024):
+            actual.update(chunk)
+        after, current = os.fstat(descriptor), path.lstat()
+        for field in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"):
+            assert getattr(before, field) == getattr(after, field) == getattr(current, field), path
+        assert actual.hexdigest() == digest, path
+    finally:
+        os.close(descriptor)
+    return kernel_id
+
+
 def _pair_owner(runner_vm: str) -> dict:
     """Admit mirrored assets and retain unrelated records before either old journey."""
     _require_exec_lifecycle_assets(runner_vm)
@@ -112,9 +164,7 @@ def _pair_owner(runner_vm: str) -> dict:
     images = [item for item in baseline["image"] if item["is_present"]
               and (item["type"], item["version"]) == ("alpine", "3.23")]
     assert len(images) == 1, images
-    kernels = [item for item in baseline["kernel"] if item["is_present"] and item["is_default"]]
-    assert len(kernels) == 1, kernels
-    assets = {"image_id": images[0]["id"], "kernel_id": kernels[0]["id"]}
+    assets = {"image_id": images[0]["id"], "kernel_id": _require_source_kernel(runner_vm)}
     for kind in ("firecracker", "jailer"):
         binaries = [item for item in baseline["bin"] if item["type"] == kind and item["is_present"]
                     and item["is_default"] and item["version"] == "1.17.0"]
@@ -246,6 +296,8 @@ def _exercise_placement(runner_vm: str, placement: str) -> None:
                     vm_name,
                     "--image",
                     owned["image_id"],
+                    "--kernel",
+                    owned["assets"]["kernel_id"],
                     *placement_args,
                     "--cloud-init-mode",
                     "off" if network is None else "inject",
@@ -454,6 +506,7 @@ def test_vm_to_vm_exec_current_peers_after_restart_and_reboot(runner_vm: str) ->
         for name in (source, destination):
             created = _pair_create_vm(
                 runner_vm, owned, name, ["vm", "create", name, "--image", owned["image_id"],
+                    "--kernel", owned["assets"]["kernel_id"],
                     "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
                     "--no-pci", "--disk-size", "512M", "--mem", "256M",
                     "--vcpu", "1", "--user", "runner", "--json"],
@@ -561,6 +614,7 @@ def _extra_retain_vm_receipts(result, owned: dict, name: str, before_ids: set[st
 def owned_exec_pair(runner_vm: str):
     """Own at most two tiny guests, exact policy IDs, and optional capture IDs."""
     _require_exec_lifecycle_assets(runner_vm)
+    kernel_id = _require_source_kernel(runner_vm)
     baseline = _exec_case_baseline(runner_vm)
     suffix = uuid.uuid4().hex[:8]
     owned = {
@@ -573,6 +627,7 @@ def owned_exec_pair(runner_vm: str):
         for name in (owned["source"], owned["destination"]):
             owned["vms"][name] = {}
             args = ["vm", "create", name, "--image", "alpine:3.23",
+                "--kernel", kernel_id,
                 "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
                 "--no-pci", "--disk-size", "512M", "--mem", "256M",
                 "--vcpu", "1", "--user", "runner", "--json"]
@@ -583,6 +638,7 @@ def owned_exec_pair(runner_vm: str):
             created = _json_success_data(result.stdout, list)
             assert len(created) == 1 and created[0]["name"] == name, created
             vm = created[0]
+            assert vm["kernel_id"] == kernel_id, vm
             assert (vm["vcpu_count"], vm["mem_size_mib"], vm["disk_size_mib"]) == (1, 256, 512)
             assert vm["network_placement"] == "networkless" and vm["network_id"] == "", vm
             assert vm["ipv4"] == vm["mac"] == vm["tap_device"] == "", vm

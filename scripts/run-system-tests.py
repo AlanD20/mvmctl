@@ -37,6 +37,7 @@ import argparse
 import base64
 import gzip
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -122,7 +123,7 @@ class ImportedRunnerKernelBinding:
     build_id: str = ""
 
 
-def _runner_binding_json(stdout: str) -> dict[str, Any]:
+def _runner_binding_json(stdout: str, *, expected_data: type = dict) -> Any:
     """Decode bounded binding evidence, refusing ambiguous JSON and envelopes."""
 
     def unique_fields(pairs):
@@ -154,8 +155,8 @@ def _runner_binding_json(stdout: str) -> dict[str, Any]:
         if info["status"] != "success" or info["error"] is not None:
             raise RuntimeError("runner binding JSON is not successful")
         info = info["data"]
-        if not isinstance(info, dict):
-            raise RuntimeError("runner binding JSON data must be an object")
+        if not isinstance(info, expected_data):
+            raise RuntimeError(f"runner binding JSON data must be {expected_data.__name__}")
     return info
 
 
@@ -371,6 +372,112 @@ def _resolve_imported_runner_kernel_binding() -> ImportedRunnerKernelBinding | N
     binding = ImportedRunnerKernelBinding(kernel_id, digest)
     build_id = _validate_imported_runner_kernel(binding)
     return ImportedRunnerKernelBinding(kernel_id, digest, build_id=build_id)
+
+
+def _runner_kernel_file_identity(
+    vm_name: str, path: str, binding: ImportedRunnerKernelBinding
+) -> None:
+    """Apply the same no-follow hash/build-ID proof to copied and managed guest ELF bytes."""
+    program = "import os,stat,struct,hashlib; from pathlib import Path\n"
+    program += "\n".join(inspect.getsource(function) for function in (
+        _open_directory_without_symlinks, _imported_runner_elf_build_id,
+        _imported_runner_elf_identity,
+    ))
+    program += (f"\nprint(_imported_runner_elf_identity(Path({path!r}), {binding.sha256!r}))\n")
+    result = mvm(
+        "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+        shlex.join(["python3", "-c", program]), timeout=30,
+    )
+    if result.stdout.strip() != binding.build_id:
+        raise RuntimeError("runner kernel ELF GNU build ID does not match binding")
+
+
+def _runner_kernel_inventory(vm_name: str) -> list[dict[str, Any]]:
+    result = mvm(
+        "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+        "/usr/local/bin/mvm kernel ls --json", timeout=30,
+    )
+    rows = _runner_binding_json(result.stdout, expected_data=list)
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise RuntimeError("runner kernel inventory must contain kernel objects")
+    return rows
+
+
+def _register_imported_runner_kernel(
+    vm_name: str, binding: ImportedRunnerKernelBinding
+) -> None:
+    """Register only the admitted controller ELF for explicit nested guest selection."""
+    build_id = _validate_imported_runner_kernel(binding)
+    if binding.build_id != build_id:
+        raise RuntimeError("runner kernel registration requires the admitted GNU build ID")
+    cache = Path(os.path.abspath(Path(os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")).expanduser()))
+    source = cache / "kernels" / binding.id
+    before = _runner_kernel_inventory(vm_name)
+    defaults = sorted(row["id"] for row in before if row.get("is_default") is True)
+    matches = [row for row in before if row.get("id") == binding.id]
+    if len(matches) > 1:
+        raise RuntimeError("runner kernel inventory has duplicate admitted identity")
+    if not matches:
+        staging = f"/home/runner/.mvm-kernel-upload-{uuid.uuid4().hex}"
+        mvm(
+            "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+            f"umask 077; mkdir -- {shlex.quote(staging)}", timeout=30,
+        )
+        uploaded = staging + "/vmlinux"
+        # The root guest agent receives cp; grant only this owned upload to runner.
+        mvm("cp", str(source), f"{vm_name}:{uploaded}", timeout=60)
+        readability = "import os,stat; from pathlib import Path\n"
+        readability += inspect.getsource(_open_directory_without_symlinks)
+        readability += (
+            f"\nparent=_open_directory_without_symlinks(Path({staging!r}))\n"
+            "try:\n"
+            " fd=os.open('vmlinux',os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK,dir_fd=parent)\n"
+            "finally:\n os.close(parent)\n"
+            "try:\n"
+            " info=os.fstat(fd)\n"
+            " assert stat.S_ISREG(info.st_mode) and info.st_uid==0 and info.st_nlink==1 and info.st_size>0\n"
+            " os.fchmod(fd,0o644)\n"
+            "finally:\n os.close(fd)\n"
+        )
+        mvm(
+            "exec", vm_name, "--user", "root", "--timeout", "10", "--",
+            shlex.join(["python3", "-c", readability]), timeout=30,
+        )
+        _runner_kernel_file_identity(vm_name, uploaded, binding)
+        imported = _runner_binding_json(mvm(
+            "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+            shlex.join(["/usr/local/bin/mvm", "kernel", "import",
+                        f"runner-kernel-{binding.id}", uploaded, "--version", binding.version, "--json"]),
+            timeout=60,
+        ).stdout)
+        expected = {"id": binding.id, "type": "custom", "version": binding.version, "arch": binding.arch}
+        if (any(imported.get(field) != value for field, value in expected.items())
+                or imported.get("is_present") is not True or imported.get("is_default") is not False):
+            raise RuntimeError("runner kernel import metadata does not match binding")
+        # Retain staging on failure; the owning disposable runner provides cleanup.
+        mvm(
+            "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+            f"rm -- {shlex.quote(uploaded)} && rmdir -- {shlex.quote(staging)}", timeout=30,
+        )
+    info = _runner_binding_json(mvm(
+        "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+        shlex.join(["/usr/local/bin/mvm", "kernel", "inspect", binding.id, "--json"]), timeout=30,
+    ).stdout)
+    kernel, storage = info.get("kernel"), info.get("storage")
+    expected_path = f"/home/runner/.cache/mvmctl/kernels/{binding.id}"
+    if (not isinstance(kernel, dict) or not isinstance(storage, dict)
+            or kernel.get("id") != binding.id or kernel.get("type") != "custom"
+            or kernel.get("is_present") is not True or kernel.get("version") != binding.version
+            or kernel.get("arch") != binding.arch or storage.get("path") != expected_path):
+        raise RuntimeError("registered runner kernel metadata does not match binding")
+    _runner_kernel_file_identity(vm_name, expected_path, binding)
+    after = _runner_kernel_inventory(vm_name)
+    if sorted(row["id"] for row in after if row.get("is_default") is True) != defaults:
+        raise RuntimeError("runner kernel registration changed defaults")
+    if len([row for row in after if row.get("id") == binding.id]) != 1:
+        raise RuntimeError("runner kernel registration is absent or duplicated in inventory")
+    if {row["id"] for row in before} - {row["id"] for row in after}:
+        raise RuntimeError("runner kernel registration removed an existing kernel")
 
 
 def _runner_image_key(
@@ -1523,6 +1630,7 @@ def provision_t1(
     _initialize_runner_user(vm_name, timeout=360)
     if binding is not None:
         _require_imported_runner_smoke(vm_name, binding)
+        _register_imported_runner_kernel(vm_name, binding)
 
 
 def _ensure_official_kernel_on_host(vm_name: str) -> None:
@@ -1705,6 +1813,8 @@ def provision_t2(
         or defaults[0].get("is_present") is not True
     ):
         raise RuntimeError("T2 runner requires exactly one present Alpine 3.23 default image")
+    if binding is not None:
+        _register_imported_runner_kernel(vm_name, binding)
 
 
 def destroy_vm(vm_name: str, *, check: bool = True) -> None:

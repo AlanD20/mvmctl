@@ -3498,6 +3498,119 @@ def imported_runner_kernel(orchestrator, monkeypatch, tmp_path):
     return binding, info, path
 
 
+@pytest.mark.parametrize("fault", [
+    None, "source-missing", "source-bytes", "source-metadata", "transfer-missing", "transfer-bytes",
+    "import-id", "import-version", "import-arch", "import-default", "inspect-path", "inspect-version",
+    "managed-bytes", "changed-default", "removed-existing", "missing-registration",
+])
+def test_register_imported_runner_kernel_preserves_exact_identity_and_defaults(
+    orchestrator, monkeypatch, tmp_path, imported_runner_kernel, fault,
+):
+    binding, source_info, source = imported_runner_kernel
+    if fault == "source-missing":
+        source.unlink()
+    elif fault == "source-bytes":
+        source.write_bytes(b"wrong source")
+    elif fault == "source-metadata":
+        source_info["kernel"]["arch"] = "aarch64"
+    existing = [{"id": "a" * 64, "is_default": True}, {"id": "b" * 64, "is_default": False}]
+    rows = [row.copy() for row in existing]
+    registered = {"id": binding.id, "type": "custom", "version": binding.version,
+                  "arch": binding.arch, "is_present": True, "is_default": False}
+    managed_path = f"/home/runner/.cache/mvmctl/kernels/{binding.id}"
+    managed = tmp_path / "managed-elf"
+    uploads = {}
+    calls, proved = [], []
+
+    def envelope(data):
+        return json.dumps({"schema_version": 1, "status": "success", "data": data, "error": None})
+
+    def file_identity(vm_name, path, selected):
+        assert vm_name == "runner" and selected == binding
+        local = managed if path == managed_path else uploads[path]
+        actual = orchestrator._imported_runner_elf_identity(local, selected.sha256)
+        assert actual == selected.build_id
+        proved.append(path)
+
+    def fake_mvm(*args, **kwargs):
+        calls.append(args)
+        stdout = ""
+        if args[:2] == ("kernel", "inspect"):
+            stdout = envelope(source_info)
+        elif args[0] == "cp":
+            assert args[1] == str(source)
+            uploaded = args[2].split(":", 1)[1]
+            local = tmp_path / "uploaded-elf"
+            uploads[uploaded] = local
+            if fault != "transfer-missing":
+                local.write_bytes(b"wrong transfer" if fault == "transfer-bytes" else source.read_bytes())
+        elif args[0] == "exec":
+            assert args[args.index("--user") + 1] in {"runner", "root"}
+            command = shlex.split(args[-1])
+            if command[:3] == ["/usr/local/bin/mvm", "kernel", "ls"]:
+                stdout = envelope(rows)
+            elif command[:3] == ["/usr/local/bin/mvm", "kernel", "import"]:
+                assert args[args.index("--user") + 1] == "runner"
+                assert "--default" not in command and "--force" not in command
+                assert command[command.index("--version") + 1] == binding.version
+                result = registered.copy()
+                changed = {"import-id": ("id", "c" * 64), "import-version": ("version", "6.1.155"),
+                           "import-arch": ("arch", "aarch64"), "import-default": ("is_default", True)}
+                if fault in changed:
+                    field, value = changed[fault]
+                    result[field] = value
+                rows.append(registered.copy())
+                managed.write_bytes(b"wrong managed" if fault == "managed-bytes" else source.read_bytes())
+                if fault == "changed-default":
+                    rows[0]["is_default"] = False
+                elif fault == "removed-existing":
+                    rows.pop(1)
+                elif fault == "missing-registration":
+                    rows.pop()
+                stdout = envelope(result)
+            elif command[:3] == ["/usr/local/bin/mvm", "kernel", "inspect"]:
+                info = {"kernel": registered.copy(), "storage": {"path": managed_path}}
+                if fault == "inspect-path":
+                    info["storage"]["path"] = "/outside-managed-cache"
+                elif fault == "inspect-version":
+                    info["kernel"]["version"] = "6.1.155"
+                stdout = envelope(info)
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    monkeypatch.setattr(orchestrator, "_runner_kernel_file_identity", file_identity)
+    if fault is not None:
+        with pytest.raises(RuntimeError):
+            orchestrator._register_imported_runner_kernel("runner", binding)
+        if fault.startswith("source-"):
+            assert calls == [("kernel", "inspect", binding.id, "--json")]
+        if fault.startswith("transfer-"):
+            assert not any(call[0] == "exec" and "kernel import" in call[-1] for call in calls)
+    else:
+        orchestrator._register_imported_runner_kernel("runner", binding)
+        assert rows == [*existing, registered]
+        assert len(proved) == 2 and proved[-1] == managed_path
+        assert len([call for call in calls if call[0] == "cp"]) == 1
+        # Reuse validates existing bytes and metadata without importing or changing defaults.
+        calls.clear()
+        proved.clear()
+        orchestrator._register_imported_runner_kernel("runner", binding)
+        assert proved == [managed_path] and rows == [*existing, registered]
+        assert not any(call[0] == "cp" or "kernel import" in call[-1] for call in calls)
+    assert not any(call[:2] in {("kernel", "pull"), ("kernel", "default"), ("kernel", "rm")}
+                   or (call[0] == "exec" and "kernel rm" in call[-1]) for call in calls)
+
+
+def test_runner_kernel_file_identity_requires_exact_admitted_build_id(
+    orchestrator, monkeypatch, imported_runner_kernel,
+):
+    binding, _info, _path = imported_runner_kernel
+    monkeypatch.setattr(orchestrator, "mvm", lambda *args, **kwargs:
+                        subprocess.CompletedProcess(args, 0, stdout="b" * 40 + "\n", stderr=""))
+    with pytest.raises(RuntimeError, match="GNU build ID"):
+        orchestrator._runner_kernel_file_identity("runner", "/home/runner/owned-upload/vmlinux", binding)
+
+
 @pytest.mark.parametrize("enveloped", [False, True])
 def test_imported_runner_binding_resolves_exact_existing_record(
     orchestrator,
@@ -3732,6 +3845,7 @@ def test_imported_runner_selects_same_kernel_on_all_five_create_paths(
         "_initialize_runner_user",
         "_pull_builder_assets",
         "_require_imported_runner_smoke",
+        "_register_imported_runner_kernel",
     ):
         monkeypatch.setattr(orchestrator, name, lambda *args, **kwargs: None)
     orchestrator.run_prepare(binding=binding)
@@ -3872,6 +3986,9 @@ def test_imported_cached_execution_runs_one_owned_ready_runner_without_preparati
         domains if tier == 1 else {}, domains if tier == 2 else {},
     )
     monkeypatch.setattr(orchestrator, "_unique_name", lambda prefix: "owned-runner")
+    registered = []
+    monkeypatch.setattr(orchestrator, "_register_imported_runner_kernel",
+                        lambda vm_name, selected: registered.append((vm_name, selected)))
     versions = []
 
     def candidate_version():
@@ -3932,6 +4049,7 @@ def test_imported_cached_execution_runs_one_owned_ready_runner_without_preparati
     pytest_calls = [i for i, args in enumerate(calls) if args[0] == "exec" and "python3 -m pytest" in args[-1]]
     assert len(pytest_calls) == 1
     assert init < smoke < pytest_calls[0]
+    assert registered == [("owned-runner", binding)]
     if tier == 2:
         assets = next(i for i, args in enumerate(calls) if "kernel pull --type firecracker" in args[-1])
         assert smoke < assets
