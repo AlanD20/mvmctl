@@ -720,8 +720,15 @@ The outer source command may run as root or a non-root account; the destination 
 requires the exact directional grant and root-admitted active source/destination identities, applies bounded wire and
 capacity limits, and writes command-redacted audit records in the user cache. The opt-in outer command and its one
 remote request share an absolute five-minute lifetime; `--timeout` still controls connection/probe time. Ordinary
-exec, shell, and copy do not
-enable this source session. This implementation has not been qualified end to end.
+exec, shell, and copy do not enable this source session. The source guest kernel must provide `SO_PEERPIDFD`; the
+stock upstream `6.1.155` kernel used by the cached Firecracker CI selection lacks it. Select a capable source kernel
+explicitly; see [kernel capability requirements](KERNEL.md#reference). This does not change the default kernel.
+
+If an admitted atomic pidfd proves that an opted-in source command exited before publication, the same binding is
+still reserved, unclaimed, and unused, and cleanup succeeds without cancellation, the unused source session closes
+and ordinary stdout, stderr, and exit status are preserved. Metadata, reservation, cancellation, and cleanup errors
+remain fail-closed. This completion publishes no remote-execution authority.
+Qualification of the corrected source-publication and kernel-selection paths remains pending.
 
 ---
 

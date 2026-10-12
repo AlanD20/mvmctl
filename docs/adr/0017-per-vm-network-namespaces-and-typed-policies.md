@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-10-09 (networkless implementation and bounded qualification status)
+**Last Updated:** 2026-10-13 (source completion and guest-kernel capability clarification)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 **No-IP placement:** [ADR-0020: Networkless VM Placement](0020-networkless-vm-placement.md) specifies the separate
@@ -545,6 +545,13 @@ pidfd, credentials, and stable PID/start identity. A local AF_UNIX peer must pro
 pidfd support, exited/zombie state, identity drift, multiple matches, or an unavailable observation fails closed.
 Admission is capped at eight attempts, the initial local request at two seconds, and ancestry at 64 processes.
 
+The source-publication correction preserves ordinary command completion only when an admitted atomic pidfd proves
+the outer command exited before publication, the same binding remains reserved, unclaimed, and unused, and cleanup
+succeeds without cancellation. It retires that session without publishing process authority, then uses the ordinary
+command wait, output flush, and exit-status path. Metadata, reservation, cancellation, and cleanup errors remain
+fail-closed. A completed command never becomes an authorized source binding; live local-peer admission still requires
+the same credentials, `SO_PEERPIDFD`, and stable ancestry proofs.
+
 After admission, the broker hands the dedicated source transport from disconnect monitoring to the one local request.
 The same `MVMEXEC1` command, output, duration, terminal, cancellation, and EOF limits apply. A terminal closes the
 physical source transport; context cancellation closes blocked reads and writes; the first relay disconnect closes
@@ -851,8 +858,10 @@ capabilities require new typed policy families and explicit enforcement contract
   independent read-only observation path.
 - Existing installations and automation must be recreated for v0.3.0.
 - Troubleshooting must distinguish guest, namespace, host bridge, routed, nftables, and vsock planes.
-- Source-session guests require `SO_PEERPIDFD`; custom kernels without that capability fail closed instead of falling
-  back to numeric PID-only authorization.
+- Source-session guests require `SO_PEERPIDFD`; kernels without that capability fail closed instead of falling back
+  to numeric PID-only authorization. Stock upstream Linux `6.1.155`, used by the cached Firecracker CI selection,
+  lacks it. Source VMs must explicitly select a capable kernel; the QA artifact pin does not change product defaults
+  or impose its version as the capability contract. See [kernel requirements](../KERNEL.md#reference).
 
 ## Release Gate
 
@@ -888,9 +897,11 @@ cancelled and explicitly closed partial control reads, concurrent full-duplex re
 deadlines, cancellation of blocked reads/writes, terminal close/EOF, concurrent-session isolation, bounded local
 admission/read time, host disconnect and shutdown cleanup, root/non-root outer accounts, exact AF_UNIX peer/pidfd
 checks, PID-reuse and zombie rejection, stable bounded process ancestry, one claim, process-group cancellation, binary
-CLI output, and redacted failures. This does not qualify API/root source-VM admission, relay policy enforcement/audit,
-capacity composition, audit integration, detached-descendant cleanup, a kernel lacking `SO_PEERPIDFD`, or a live
-VM-to-VM path.
+CLI output, and redacted failures. The source-publication correction adds focused Go coverage for short-lived unused
+opt-in command results and refusal to publish completed-process authority. This does not qualify API/root source-VM
+admission, relay policy enforcement/audit, capacity composition, audit integration, detached-descendant cleanup, or a
+kernel lacking `SO_PEERPIDFD`. The corrected source-publication and exact capable-kernel selection paths in a live
+VM-to-VM journey still require Python L2 checks; those remain pending.
 
 Destination-session L1 covers the single validated open, request-ID binding and strict response/output limits, binary
 output, one sequential reader, terminal withholding through physical EOF, exact single cancellation, concurrent

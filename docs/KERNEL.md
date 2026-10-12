@@ -312,10 +312,16 @@ Common causes:
 
 > **Note:** The default kernel version (`6.19.9`) is **NOT** an LTS kernel. It is the latest upstream stable at the time of release. Use `--version latest` to resolve the most recent version from the upstream directory listing. If you need long-term support, explicitly pass `--version 6.1.102` or `--version 6.12.21` to `mvm kernel pull --type official`. The LTS versions in the table above are tested and known to work — use them for production deployments.
 
-The dormant v0.3.0 VM-to-VM source-session path additionally requires the guest kernel's `SO_PEERPIDFD` socket
+The v0.3.0 opt-in VM-to-VM source-session path additionally requires the source guest kernel's `SO_PEERPIDFD` socket
 capability. Source-session admission fails closed when that capability is absent; it never falls back to authorizing a
-numeric PID from `SO_PEERCRED` alone. Treat this as a capability requirement for imported or custom kernels rather than
-inferring support from the version label. End-to-end VM-to-VM execution remains unavailable until the host relay and
-Python L2 qualification land.
+numeric PID from `SO_PEERCRED` alone. The configured Firecracker CI kernel series is `6.1`; its cached `6.1.155`
+selection cannot supply this capability from stock upstream Linux, whose
+[socket implementation lacks `SO_PEERPIDFD`](https://github.com/gregkh/linux/blob/v6.1.155/net/core/sock.c).
+Select a capable kernel explicitly with `vm create --kernel <kernel>` when using a VM as an exec source. Imported or
+custom kernels must provide the actual capability; neither a version label nor successful ordinary host-to-VM exec
+proves it. The QA fixture selects an exact capable artifact without changing the default kernel. The configured
+official source-build version remains fixed at `6.19.9`; VM-to-VM exec does not select a moving `latest` version or
+require the QA artifact's version. The relay is implemented, while qualification of the corrected source-publication
+and kernel-selection paths remains pending.
 
 *See also: [RESOURCE_MANAGEMENTS.md](RESOURCE_MANAGEMENTS.md) for the kernel YAML config reference and [Firecracker official documentation](https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md).*
