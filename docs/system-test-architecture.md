@@ -123,10 +123,17 @@ separate. A closed build-input receipt at `/opt/mvmctl-test/base-inputs.json` bi
 SHA and kernel ID/ELF SHA/version/architecture/build ID. Reused runners must match it before candidate
 initialization. The receipt records inputs, not a qualification verdict.
 
-T1/T2 execution with this binding requires `--prepare` or `--rebuild`; `--skip-volume-check` is rejected.
-Sequential preparation checks the selected kernel, live GNU build ID against the hash-bound ELF, installed
-candidate nftables readiness and explicit local-mirror reads. `--image` alone is not a qualification gate.
-Administrator installation, user initialization, mirror checks and owned cleanup are unchanged. The binding
+Explicit `--prepare` or `--rebuild` first creates and qualifies the reusable imported-kernel base. Ordinary T1/T2
+execution may reuse one present cached image with the exact imported-kernel key and candidate version without either
+flag. Missing or stale backing and ambiguous image identity are refused rather than automatically built.
+`--skip-volume-check` remains rejected. Combining `--image` or `--volume` with imported T1/T2 execution still
+requires `--prepare` or `--rebuild`; `--image` alone is not a qualification gate.
+
+Every spawned imported T1/T2 runner validates its closed baked receipt before candidate initialization, then checks
+the selected kernel, live Linux version/GNU build ID against the hash-bound ELF and installed-candidate nftables
+readiness before tests. Explicit preparation retains its two sequential smoke journeys and explicit local-mirror
+reads. Cached execution does not repeat the full preparation workflow or qualify the complete matrix.
+Administrator installation, user initialization, mirror checks and owned cleanup remain required. The binding
 does not replace physical resource admission or complete system-test outcomes. Omission retains the stock
 official-kernel workflow. See [the run guide](development/HOW_TO_RUN_SYSTEM_TESTS.md#using-an-already-imported-runner-kernel)
 for the scoped invocation.

@@ -123,13 +123,20 @@ paths configured as described below. This selects the imported kernel explicitly
 runners and normal T1/T2 runners. It does not pull, relabel or make that kernel the default. Invalid, missing or
 changed input fails without an official-kernel fallback.
 
-Imported-kernel runs require `--prepare` or `--rebuild` and cannot use `--skip-volume-check`. The `--image`
-action alone builds an image; it does not qualify it. The reusable image key is
-`mvm-test-runner-kernel-<full-imported-id>:<candidate-version>`, separate from the stock image. Its
+First create and qualify the reusable imported-kernel base with explicit `--prepare` or `--rebuild`.
+Ordinary T1/T2 execution can then reuse one present cached image matching the exact
+`mvm-test-runner-kernel-<full-imported-id>:<candidate-version>` key without either flag. Missing or stale backing
+and ambiguous image identity are refused instead of automatically building a base; prepare it separately.
+Imported-kernel runs cannot use `--skip-volume-check`. Combining `--image` or `--volume` with imported T1/T2
+execution still requires `--prepare` or `--rebuild`; the `--image` action alone builds an image without qualifying it.
+
+The imported image key is separate from the stock image. Its closed baked receipt at
 `/opt/mvmctl-test/base-inputs.json` records candidate version/content SHA and kernel ID/ELF SHA/version/architecture/
-build ID; reuse requires an exact receipt match. Preparation checks the selected kernel and live GNU build ID against
-the imported ELF, plus installed-candidate nftables readiness and explicit local-mirror reads. Existing typed
-cleanup and preparation gates remain required.
+build ID. Every spawned imported T1/T2 runner requires an exact receipt match before candidate initialization,
+then verifies the selected kernel, live Linux version/GNU build ID against the imported ELF and installed-candidate
+nftables readiness before tests. Explicit preparation retains its two smoke journeys and explicit local-mirror reads;
+cached execution does not repeat the full preparation workflow or qualify the complete matrix. Existing typed
+cleanup and mirror checks remain required.
 
 This input binding does not admit the resource budget, qualify the complete Python matrix, or prove nested
 KVM workload behavior by itself. Omit both variables to retain the stock official-kernel workflow.
