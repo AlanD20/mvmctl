@@ -1473,6 +1473,7 @@ def provision_t1(
     mvm_version: str,
     on_created: Callable[[], None],
     *,
+    disk_size: str = "9G",
     binding: ImportedRunnerKernelBinding | None = None,
 ) -> None:
     """Provision a Tier 1 VM from custom base image + shared volume."""
@@ -1499,7 +1500,7 @@ def provision_t1(
         "--mem",
         "1024",
         "--disk-size",
-        "9G",
+        disk_size,
         "--kernel",
         binding.id if binding is not None else "official:7.0.11",
         "--ssh-key",
@@ -2910,6 +2911,7 @@ def run_tier1_domain(
             vm_name,
             mvm_version,
             mark_created,
+            **({"disk_size": "11G"} if domain == "cache" else {}),
             **({"binding": binding} if binding is not None else {}),
         )
         if push:

@@ -634,6 +634,7 @@ class _OwnedCachePrune:
         self.roots = {
             path: _prune_metadata(path.lstat())[:5] for path in (cache_dir, config_dir)
         }
+        self.recovery_candidates = {}
         self.attempted = {domain: {} for domain in ("vm", "network", "kernel", "image")}
         self.receipts = {domain: {} for domain in self.attempted}
         self.staging = {}
@@ -1300,6 +1301,11 @@ class _OwnedCachePrune:
                 assert _prune_metadata(path.lstat())[:5] == expected, path
             except (Exception, pytest.fail.Exception) as error:
                 failures.append(f"private root binding {path}: {error!r}")
+        for path, expected in self.recovery_candidates.items():
+            try:
+                assert _prune_metadata(path.lstat()) == expected and not list(path.iterdir()), path
+            except (Exception, pytest.fail.Exception) as error:
+                failures.append(f"retained recovery candidate binding {path}: {error!r}")
         return failures
 
 
@@ -1435,7 +1441,9 @@ try:
     state = directory(lib, 'mvmctl', False)
     if request['phase'] in ('candidate', 'fresh'):
         if request['phase'] == 'candidate':
-            assert request['runner'] == request['test_vm'] == request['qualification_host'] == os.uname().nodename == 'mvmctl-030-test'
+            assert request['qualification_host'] and (
+                request['runner'] == request['test_vm'] == request['qualification_host'] == os.uname().nodename
+            ), 'administrator fault requires explicit exact qualification-host admission'
             assert owner == group == 1000
             assert request['boot'] == open('/proc/sys/kernel/random/boot_id').read().strip()
         reserved = False
@@ -1459,6 +1467,30 @@ try:
             result = dict(root_device=root_device, fresh_anchor_absent=True)
         else:
             result = dict(cache=cache_binding, reserved=reserved)
+    elif request['phase'] == 'clean':
+        assert int(os.environ['SUDO_GID']) == group > 0
+        backing = directory(state, 'protected-backing')
+        operator = directory(backing, str(owner))
+        anchor = directory(operator, key)
+        receipt, store = record(anchor, 'store.json')
+        assert store['version'] == 2 and store['owner'] == owner and store['owner_gid'] == group
+        assert store['cache'] == cache_binding and store['locator'] == request['cache']
+        assert 'retirement' not in store
+        cache_fd = os.open(request['cache'], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fds.append(cache_fd)
+        cache_info = os.fstat(cache_fd)
+        assert identity(cache_info) == request['cache_metadata']
+        assert (cache_info.st_dev, cache_info.st_ino) == (device, inode)
+        assert cache_info.st_uid == owner and cache_info.st_gid == group
+        assert stat.S_IMODE(cache_info.st_mode) == 0o700
+        names.append((None, request['cache'], cache_fd, identity(cache_info)))
+        store_fd = directory(cache_fd, '.mvm-protected')
+        store_info = os.fstat(store_fd)
+        assert identity(store_info) == request['protected_metadata']
+        assert (store_info.st_dev, store_info.st_ino) == (store['store']['device'], store['store']['inode'])
+        assert store_info.st_dev == device
+        result = dict(anchor=identity(os.fstat(anchor)), record=receipt, store=store,
+                      protected=identity(store_info))
     else:
         backing = directory(state, 'protected-backing')
         operator = directory(backing, str(owner))
@@ -1708,8 +1740,12 @@ class _SnapshotVolumeCacheRetirement(_OwnedCachePrune):
 
 def _retirement_cache_candidate(runner_vm, parent, output):
     """Keep rejected creation-owned directories until a truly unused physical key is selected."""
-    assert runner_vm == os.uname().nodename == os.environ.get("MVM_TEST_VM") == "mvmctl-030-test"
-    assert os.environ.get("MVM_TEST_QUALIFICATION_HOST") == runner_vm and os.getuid() == os.getgid() == 1000
+    qualification_host = os.environ.get("MVM_TEST_QUALIFICATION_HOST")
+    assert (
+        qualification_host
+        and qualification_host == os.environ.get("MVM_TEST_VM") == runner_vm == os.uname().nodename
+    ), "administrator fault requires explicit exact qualification-host admission"
+    assert os.getuid() == os.getgid() == 1000
     output.mkdir(mode=0o700)
     candidates = []
     try:
@@ -1852,7 +1888,9 @@ import uuid
 
 request = json.loads(sys.argv[1])
 assert os.geteuid() == 0 and os.environ.get('SUDO_UID') == os.environ.get('SUDO_GID') == '1000'
-assert request['runner'] == request['test_vm'] == request['qualification_host'] == os.uname().nodename == 'mvmctl-030-test'
+assert request['qualification_host'] and (
+    request['runner'] == request['test_vm'] == request['qualification_host'] == os.uname().nodename
+), 'administrator fault requires explicit exact qualification-host admission'
 assert request['owner'] == 1000 and Path('/proc/sys/kernel/random/boot_id').read_text().strip() == request['boot']
 assert uuid.UUID(hex=request['token']).hex == request['token']
 BOUND = request
@@ -1914,7 +1952,10 @@ for path in (Path('/'), Path('/var'), Path('/var/lib'), Path('/var/lib/mvmctl'))
 if action == 'provision':
     assert not os.path.lexists(base), 'never adopt an existing QA mount/backing'
     space = os.statvfs(base.parent)
-    assert space.f_bavail * space.f_frsize >= 4 * 1024**3 + BOUND['whole_effect_physical_bytes']
+    available = space.f_bavail * space.f_frsize
+    required = 4 * 1024**3 + BOUND['whole_effect_physical_bytes']
+    assert available >= required, dict(available_bytes=available, required_bytes=required,
+                                      device=base.parent.stat().st_dev, path=str(base.parent))
     base.mkdir(mode=0o711)
     base.chmod(0o711)  # Only this newly created, exact root-owned QA directory.
     mount.mkdir(mode=0o711)
@@ -2000,8 +2041,11 @@ else:
 
 def _retirement_distinct_mount(runner_vm, output, action, expected=None):
     """Closed root QA resource, never an arbitrary path/mount or production root cache operation."""
-    assert runner_vm == os.environ.get("MVM_TEST_VM") == os.environ.get("MVM_TEST_QUALIFICATION_HOST")
-    assert runner_vm == os.uname().nodename == "mvmctl-030-test"
+    qualification_host = os.environ.get("MVM_TEST_QUALIFICATION_HOST")
+    assert (
+        qualification_host
+        and qualification_host == os.environ.get("MVM_TEST_VM") == runner_vm == os.uname().nodename
+    ), "administrator fault requires explicit exact qualification-host admission"
     assert os.getuid() == os.getgid() == 1000
     token = uuid.uuid4().hex if expected is None else expected["token"]
     request = dict(action=action, runner=runner_vm, owner=os.getuid(), token=token,
@@ -2023,7 +2067,11 @@ def _retirement_distinct_mount(runner_vm, output, action, expected=None):
 
 def _retirement_distinct_parent(runner_vm, output, provisioned):
     """Admit only the closed named-QA ext4 mount's root-owned receipt and private child."""
-    assert runner_vm == os.uname().nodename == "mvmctl-030-test"
+    qualification_host = os.environ.get("MVM_TEST_QUALIFICATION_HOST")
+    assert (
+        qualification_host
+        and qualification_host == os.environ.get("MVM_TEST_VM") == runner_vm == os.uname().nodename
+    ), "administrator fault requires explicit exact qualification-host admission"
     receipt = Path(provisioned["receipt"])
     base = receipt.parent
     assert base.parent == Path("/var/lib/mvmctl") and receipt.name == "mount-receipt.json"
@@ -2292,6 +2340,31 @@ def _require_unprotected_clean_case(case):
         (case.cache_dir / ".mvm-protected").lstat()
 
 
+def _require_protected_clean_case(case):
+    """Bind the imported kernel's root-owned store to this exact private cache."""
+    assert not case.receipts["vm"] and not case.inventory("vm")
+    assert not case.inventory("volume") and not case.inventory("snapshot")
+    assert case.cache_dir.resolve() == case.cache_dir
+    cache_metadata = _prune_metadata(case.cache_dir.lstat())[:5]
+    assert cache_metadata == case.roots[case.cache_dir]
+    protected_metadata = _prune_metadata((case.cache_dir / ".mvm-protected").lstat())[:5]
+    request = dict(
+        phase="clean", owner=os.getuid(), group=os.getgid(), cache=str(case.cache_dir),
+        cache_identity=list(cache_metadata[:2]), cache_metadata=list(cache_metadata),
+        protected_metadata=list(protected_metadata),
+    )
+    result = subprocess.run(
+        ["/usr/bin/sudo", "-n", "/usr/bin/python3", "-I", "-c", _CACHE_RETIREMENT_AUTHORITY,
+         json.dumps(request, separators=(",", ":"))],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    observed = json.loads(result.stdout)
+    assert observed["protected"] == list(protected_metadata)
+    assert _prune_metadata(case.cache_dir.lstat())[:5] == cache_metadata
+    assert _prune_metadata((case.cache_dir / ".mvm-protected").lstat())[:5] == protected_metadata
+
+
 def _reinitialize_cleaned_cache(case, data, expected_ids, config_before):
     """Acknowledge checked removal before admitting a fresh cache incarnation."""
     assert data["cache_dir"] == str(case.cache_dir) and data["cache_dir_removed"] is True, data
@@ -2304,6 +2377,27 @@ def _reinitialize_cleaned_cache(case, data, expected_ids, config_before):
     for path in case.staging:
         with pytest.raises(FileNotFoundError):
             path.lstat()
+    chosen, candidates = _retirement_cache_candidate(
+        case.runner_vm, case.cache_dir.parent,
+        case.cache_dir.parent / f"recovery-cache-candidates-{uuid.uuid4().hex}",
+    )
+    try:
+        case.recovery_candidates.update({path: identity for path, identity, _ in candidates})
+        path, identity, fd = candidates[-1]
+        assert path == chosen and _prune_metadata(os.fstat(fd)) == _prune_metadata(chosen.lstat()) == identity
+        assert not os.listdir(fd)
+        with pytest.raises(FileNotFoundError):
+            case.cache_dir.lstat()
+        chosen.rename(case.cache_dir)
+        assert _prune_metadata(os.fstat(fd)) == _prune_metadata(case.cache_dir.lstat()) == identity
+        assert not os.listdir(fd)
+        with pytest.raises(FileNotFoundError):
+            chosen.lstat()
+        case.roots[case.cache_dir] = identity[:5]
+        del case.recovery_candidates[chosen]
+    finally:
+        for _, _, fd in candidates:
+            os.close(fd)
     case.initialize()
     assert not case.inventory("bin")
     for domain, receipts in case.receipts.items():
@@ -2354,27 +2448,73 @@ class TestCachePruneDryRun:
         vm = case.create_vm()
         boot_id = case.guest_boot_id(vm)
         case.preview_marker()
-        before = case.snapshot()
         runtime = case.vm_runtime(vm)
-        data = _json_success_data(
-            _run_mvm(
-                runner_vm,
-                "cache",
-                "prune",
-                "--all",
-                "--dry-run",
-                "--json",
-            ).stdout,
-            dict,
-        )
-        assert data["had_running_vms"] is True and not data["failed_ids"], data
-        assert set(data["pruned_ids"]) == {
-            vm["name"],
-            vm["image_id"],
-            vm["kernel_id"],
-            "warm_images",
-        }, data
-        assert case.snapshot() == before
+        vm_directory, directory_identity = case.receipts["vm"][vm["id"]]["directory"]
+        assert _prune_metadata(vm_directory.lstat()) == directory_identity
+        assert vm_directory == Path(vm["rootfs_path"]).parent
+        console_path = vm_directory / "firecracker.console.log"
+        assert console_path.resolve() == console_path
+        console_info = console_path.lstat()
+        assert stat.S_ISREG(console_info.st_mode) and console_info.st_nlink == 1
+        with os.fdopen(os.open(
+            console_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+        ), "rb") as console:
+            console_identity = _prune_metadata(console_info)
+            assert _prune_metadata(os.fstat(console.fileno())) == console_identity
+            before = case.snapshot()
+            initial_console = before[1][console_path]
+            assert initial_console[0] == console_identity
+            initial_size, initial_prefix_hash = initial_console[1:]
+            assert os.fstat(console.fileno()).st_size >= initial_size
+            assert hashlib.sha256(os.pread(console.fileno(), initial_size, 0)).hexdigest() == initial_prefix_hash
+            data = _json_success_data(
+                _run_mvm(
+                    runner_vm,
+                    "cache",
+                    "prune",
+                    "--all",
+                    "--dry-run",
+                    "--json",
+                ).stdout,
+                dict,
+            )
+            assert data["had_running_vms"] is True and not data["failed_ids"], data
+            assert set(data["pruned_ids"]) == {
+                vm["name"],
+                vm["image_id"],
+                vm["kernel_id"],
+                "warm_images",
+            }, data
+            after = case.snapshot()
+            assert after[1].keys() == before[1].keys(), {
+                "added_paths": sorted(str(path) for path in after[1].keys() - before[1].keys()),
+                "removed_paths": sorted(str(path) for path in before[1].keys() - after[1].keys()),
+            }
+            final_console = after[1][console_path]
+            assert final_console[0] == console_identity and final_console[1] >= initial_size, final_console
+            assert _prune_metadata(os.fstat(console.fileno())) == console_identity
+            assert _prune_metadata(console_path.lstat()) == console_identity
+            assert os.fstat(console.fileno()).st_size >= initial_size
+            assert console_path.lstat().st_size >= initial_size
+            assert hashlib.sha256(os.pread(console.fileno(), initial_size, 0)).hexdigest() == initial_prefix_hash
+            # Only this retained owned console may append; every other binding remains exact.
+            checked_bindings = dict(after[1])
+            checked_bindings[console_path] = initial_console
+            checked_after = after[0], checked_bindings, after[2]
+        differences = {
+            "inventory": {
+                domain: {"before": before[0].get(domain), "after": after[0].get(domain)}
+                for domain in sorted(before[0].keys() | after[0].keys())
+                if before[0].get(domain) != after[0].get(domain)
+            },
+            "paths": {
+                str(path): {"before": before[1].get(path), "after": after[1].get(path)}
+                for path in sorted(before[1].keys() | checked_bindings.keys())
+                if before[1].get(path) != checked_bindings.get(path)
+            },
+            "database": {"before": before[2], "after": after[2]} if before[2] != after[2] else None,
+        }
+        assert checked_after == before, "cache prune dry-run snapshot changed:\n" + json.dumps(differences, indent=2)
         assert case.guest_boot_id(case.inventory("vm")[vm["id"]]) == boot_id
         assert case.vm_runtime(case.inventory("vm")[vm["id"]]) == runtime
         assert case.release_identity(case.release[0]) == case.release[1]
@@ -3170,7 +3310,7 @@ class TestCacheCleanActual:
     def test_cache_clean_actual(
         self, runner_vm, owned_cache_prune, owned_cache_preservation, record_property
     ) -> None:
-        """Clean owned unprotected assets/network and recover from exact local sources."""
+        """Clean owned imported assets/network and recover from exact local sources."""
         case = owned_cache_prune
         case.reuse_release()
         kernel = case.import_kernel("before-clean", default=True)
@@ -3178,7 +3318,7 @@ class TestCacheCleanActual:
         network = case.create_network()
         artifacts = _CacheMiscArtifacts(case)
         artifacts.assert_bound()
-        _require_unprotected_clean_case(case)
+        _require_protected_clean_case(case)
         config_before = _cache_config_receipt(case)
         expected = {kernel["id"], image["id"], network["name"], "appliance"}
         data = _json_success_data(
