@@ -220,14 +220,26 @@ func TestNewHostInitCmd(t *testing.T) {
 // command prevents users from diagnosing host configuration issues.
 
 func TestNewHostStatusCmd(t *testing.T) {
+	t.Run("unavailable_policy_returns_error_before_rendering", func(t *testing.T) {
+		policyErr := errors.New("root policy observation unavailable")
+		mock := &testutil.MockHostAPI{
+			HostStatusCheckFunc: func(context.Context) (*results.HostStatusCheck, error) {
+				return nil, policyErr
+			},
+		}
+		cmd := cli.NewHostCmd(mock)
+		statusCmd, _, err := cmd.Find([]string{"status"})
+		require.NoError(t, err)
+		assert.ErrorIs(t, statusCmd.RunE(statusCmd, nil), policyErr)
+	})
 	t.Run("success_returns_status", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostStatusCheckFunc: func(_ context.Context) *results.HostStatusCheck {
+			HostStatusCheckFunc: func(_ context.Context) (*results.HostStatusCheck, error) {
 				return &results.HostStatusCheck{
 					KVMOK:       true,
 					IPForwardOK: true,
 					IPForward:   "1",
-				}
+				}, nil
 			},
 		}
 		cmd := cli.NewHostCmd(mock)

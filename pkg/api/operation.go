@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/provisioner"
 	"mvmctl/internal/lib/system"
+	"mvmctl/internal/service/hostpolicy"
 	"mvmctl/internal/service/jailer"
 	networkservice "mvmctl/internal/service/network"
 	"mvmctl/pkg/errs"
@@ -48,6 +50,7 @@ type Operation struct {
 
 	hostSystemBinaryInstaller hostSystemBinaryInstaller
 	hostSudoersConfigurer     hostSudoersConfigurer
+	hostPolicyObserver        hostPolicyObserver
 	trustedReleaseClient      trustedReleaseClient
 	consoleClient             consoleAuthorityClient
 	trafficPolicyClient       *networkservice.TrafficPolicyClient
@@ -59,6 +62,10 @@ type hostSystemBinaryInstaller interface {
 
 type hostSudoersConfigurer interface {
 	ConfigureSudoers(ctx context.Context) (bool, error)
+}
+
+type hostPolicyObserver interface {
+	Observe(context.Context) (hostpolicy.ObserveResult, error)
 }
 
 // Repos bundles all database repositories.
@@ -155,6 +162,11 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	if guestfsEnabled {
 		provisionerType = provisioner.ProvisionerGuestFS
 	}
+	var policyObserver hostPolicyObserver = hostpolicy.NewClient()
+	if os.Geteuid() == 0 {
+		// Already-root administration uses local observation, as with firewall readiness.
+		policyObserver = hostpolicy.NewObserver()
+	}
 
 	return &Operation{
 		Connection: conn,
@@ -176,6 +188,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		AuditLog:                  logging.NewAuditLog(ctx),
 		hostSystemBinaryInstaller: s.Host,
 		hostSudoersConfigurer:     s.Host,
+		hostPolicyObserver:        policyObserver,
 		trustedReleaseClient:      jailer.NewTrustedReleaseClient(),
 		trafficPolicyClient:       networkservice.NewTrafficPolicyClient(),
 	}

@@ -20,7 +20,7 @@ type MockHostAPI struct {
 	HostCheckKVMAccessFunc        func() bool
 	HostCheckRequiredBinariesFunc func() []string
 	HostGetIPForwardStatusFunc    func(ctx context.Context) (string, error)
-	HostStatusCheckFunc           func(ctx context.Context) *results.HostStatusCheck
+	HostStatusCheckFunc           func(ctx context.Context) (*results.HostStatusCheck, error)
 	HostCleanFunc                 func(ctx context.Context) ([]string, error)
 	HostResetFunc                 func(ctx context.Context) ([]string, error)
 	HostGetRunningVMsFunc         func(ctx context.Context) ([]*model.VMItem, error)
@@ -98,11 +98,11 @@ func (m *MockHostAPI) HostGetIPForwardStatus(ctx context.Context) (string, error
 	return "", nil
 }
 
-func (m *MockHostAPI) HostStatusCheck(ctx context.Context) *results.HostStatusCheck {
+func (m *MockHostAPI) HostStatusCheck(ctx context.Context) (*results.HostStatusCheck, error) {
 	if m.HostStatusCheckFunc != nil {
 		return m.HostStatusCheckFunc(ctx)
 	}
-	return nil
+	return nil, nil
 }
 
 func (m *MockHostAPI) HostClean(ctx context.Context) ([]string, error) {

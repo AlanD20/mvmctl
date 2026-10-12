@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/user"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,6 +16,7 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/testutil"
+	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
@@ -46,16 +48,16 @@ func TestInitStatePreservesExplicitBinaryVersionAfterSuccessfulSudo(t *testing.T
 			},
 		},
 		hostAPI: &testutil.MockHostAPI{
-			HostStatusCheckFunc: func(context.Context) *results.HostStatusCheck {
+			HostStatusCheckFunc: func(context.Context) (*results.HostStatusCheck, error) {
 				statusCalls++
 				if statusCalls == 1 {
-					return &results.HostStatusCheck{}
+					return &results.HostStatusCheck{}, nil
 				}
 				return &results.HostStatusCheck{
 					GroupExists:   true,
 					SudoersExists: true,
 					UserInGroup:   true,
-				}
+				}, nil
 			},
 		},
 		downloadVersion: "1.15.2",
@@ -69,6 +71,119 @@ func TestInitStatePreservesExplicitBinaryVersionAfterSuccessfulSudo(t *testing.T
 	assert.True(t, state.sudoCompleted)
 	assert.Equal(t, "1.15.2", state.downloadVersion)
 	assert.Equal(t, 2, statusCalls)
+}
+
+func TestInitBootstrapTreatsPrePolicyAsInformationalAndVerifiesAfter(t *testing.T) {
+	policyErr := errs.New(errs.CodePrivilegeRequired, "operator policy observation is unavailable")
+	tests := map[string]struct {
+		preErr        error
+		postErr       error
+		member        bool
+		postMissing   bool
+		wantCompleted bool
+		wantSkip      bool
+		wantSudo      bool
+		wantErr       error
+	}{
+		"new operator can bootstrap":                {preErr: policyErr, wantSudo: true, wantCompleted: true},
+		"inactive enrolled session skips bootstrap": {preErr: policyErr, member: true, wantSkip: true},
+		"cancellation aborts before bootstrap":      {preErr: context.Canceled, wantErr: context.Canceled},
+		"post observation fails with fresh session needed": {
+			preErr: policyErr, postErr: policyErr, wantSudo: true, wantErr: policyErr,
+		},
+		"post confirmed absence cannot succeed": {preErr: policyErr, wantSudo: true, postMissing: true},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			common.BeginOutput(nil)
+			t.Cleanup(func() { common.BeginOutput(nil) })
+			reader, writer, err := os.Pipe()
+			require.NoError(t, err)
+			_, err = writer.WriteString("y\n")
+			require.NoError(t, err)
+			require.NoError(t, writer.Close())
+			originalStdin := os.Stdin
+			os.Stdin = reader
+			t.Cleanup(func() {
+				os.Stdin = originalStdin
+				require.NoError(t, reader.Close())
+			})
+			members := "existing"
+			if tc.member {
+				members = "operator"
+			}
+			runner := &testutil.FakeRunner{StubRunResult: &system.RunResult{
+				Stdout: "mvm:x:42:" + members + "\n",
+			}}
+			originalRunner := system.DefaultRunner
+			system.DefaultRunner = runner
+			t.Cleanup(func() { system.DefaultRunner = originalRunner })
+			originalOS := system.DefaultOS
+			system.DefaultOS = &testutil.FakeOS{
+				GetgidVal: 1000, GetegidVal: 1000,
+				LookupGroupFn: func(string) (*user.Group, error) { return &user.Group{Name: "mvm", Gid: "42"}, nil },
+				CurrentFn:     func() (*user.User, error) { return &user.User{Username: "operator", Gid: "1000"}, nil },
+			}
+			t.Cleanup(func() { system.DefaultOS = originalOS })
+			// Use the real public bootstrap producer: group/session evidence must not need the root observer.
+			_, initErr := (&api.Operation{}).HostInit(t.Context(), nil)
+			var interaction *errs.NeedsInteraction
+			require.ErrorAs(t, initErr, &interaction)
+			preflightCalls := len(runner.Calls)
+			calls := 0
+			state := &initState{
+				initAPI: &testutil.MockInitAPI{
+					InitCheckReadinessFunc: func(context.Context) *model.ProbeResult { return &model.ProbeResult{} },
+				},
+				hostAPI: &testutil.MockHostAPI{
+					HostStatusCheckFunc: func(context.Context) (*results.HostStatusCheck, error) {
+						calls++
+						if calls == 1 {
+							return nil, tc.preErr
+						}
+						return &results.HostStatusCheck{
+							GroupExists: true, UserInGroup: true, SudoersExists: !tc.postMissing,
+						}, tc.postErr
+					},
+				},
+			}
+			err = state.handleSudoRequired(t.Context(), interaction)
+			assert.Equal(t, tc.wantCompleted, state.sudoCompleted)
+			assert.Equal(t, tc.wantSkip, state.skipHost)
+			if tc.wantSudo {
+				assert.Greater(
+					t,
+					len(runner.Calls),
+					preflightCalls,
+					"explicitly confirmed bootstrap must remain reachable",
+				)
+			} else {
+				assert.Equal(
+					t,
+					preflightCalls,
+					len(runner.Calls),
+					"cancellation or inactive session must avoid bootstrap",
+				)
+			}
+			if !tc.wantCompleted {
+				assert.Empty(t, state.hostSetupMsg)
+			}
+			if tc.wantErr != nil {
+				assert.ErrorIs(t, err, tc.wantErr)
+				return
+			}
+			if tc.postMissing {
+				require.Error(t, err)
+				assert.Equal(t, errs.CodeHostInitFailed, errs.AsDomainError(err).Code)
+				return
+			}
+			require.NoError(t, err)
+			if tc.wantCompleted {
+				assert.Equal(t, "Host configuration verified", state.hostSetupMsg)
+				assert.Equal(t, 2, calls, "administrator setup requires a separate post observation")
+			}
+		})
+	}
 }
 
 func TestInitNonInteractiveSudoOutcome(t *testing.T) {
@@ -219,10 +334,10 @@ func TestInitInteractiveRequiresConfirmedInactiveSessionBeforeSkippingHost(t *te
 					},
 				},
 				hostAPI: &testutil.MockHostAPI{
-					HostStatusCheckFunc: func(context.Context) *results.HostStatusCheck {
+					HostStatusCheckFunc: func(context.Context) (*results.HostStatusCheck, error) {
 						return &results.HostStatusCheck{
 							GroupExists: true, SudoersExists: true, UserInGroup: true,
-						}
+						}, nil
 					},
 				},
 			}

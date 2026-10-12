@@ -202,12 +202,29 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		}
 	}
 
-	hostStateBefore := s.hostAPI.HostStatusCheck(ctx)
+	hostStateBefore, statusErr := s.hostAPI.HostStatusCheck(ctx)
+	if statusErr != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if errors.Is(statusErr, context.Canceled) || errors.Is(statusErr, context.DeadlineExceeded) {
+			return statusErr
+		}
+		// Initial operator authorization may be unavailable until the explicit administrator bootstrap.
+		// Keep the policy prestate unknown; it cannot prove absence or a setup change.
+		hostStateBefore = nil
+	}
 
 	sessionHasGroup, sessionKnown := interaction.Context["session_has_group"].(bool)
+	groupExists, groupKnown := interaction.Context["group_exists"].(bool)
+	userInGroup, membershipKnown := interaction.Context["user_in_group"].(bool)
+	if hostStateBefore != nil {
+		groupExists, groupKnown = hostStateBefore.GroupExists, true
+		userInGroup, membershipKnown = hostStateBefore.UserInGroup, true
+	}
 
 	// Group exists, user is member, but session doesn't have it active
-	if sessionKnown && hostStateBefore.GroupExists && hostStateBefore.UserInGroup && !sessionHasGroup {
+	if sessionKnown && groupKnown && membershipKnown && groupExists && userInGroup && !sessionHasGroup {
 		common.Cli.Warning(fmt.Sprintf(
 			"mvm group — session not active (log out and back in, or run: newgrp %s)",
 			infra.MVMUnixGroup,
@@ -221,7 +238,10 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		sudoCmd = fmt.Sprintf("sudo %s host init", infra.CLIName)
 	}
 
-	if hostStateBefore.GroupExists {
+	if hostStateBefore == nil {
+		common.Cli.Warning("current host policy could not be verified before administrator setup")
+		common.Cli.Info(fmt.Sprintf("run:  %s", sudoCmd))
+	} else if groupExists && !hostStateBefore.SudoersExists {
 		common.Cli.Warning("sudoers file is missing")
 		common.Cli.Info(fmt.Sprintf("run:  %s", sudoCmd))
 	} else {
@@ -250,7 +270,22 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		return fmt.Errorf("sudo host init failed")
 	}
 
-	hostStateAfter := s.hostAPI.HostStatusCheck(ctx)
+	hostStateAfter, statusErr := s.hostAPI.HostStatusCheck(ctx)
+	if statusErr != nil {
+		if ctx.Err() == nil {
+			common.Cli.Warning(fmt.Sprintf(
+				"host init completed, but host policy could not be verified; log out and back in, or run: newgrp %s",
+				infra.MVMUnixGroup,
+			))
+		}
+		return statusErr
+	}
+	if !hostStateAfter.GroupExists || !hostStateAfter.UserInGroup || !hostStateAfter.SudoersExists {
+		return errs.New(
+			errs.CodeHostInitFailed,
+			"administrator setup completed but required host configuration is missing",
+		)
+	}
 	s.hostSetupMsg = composeHostSetupMessage(hostStateBefore, hostStateAfter)
 	s.sudoCompleted = true
 	return nil
@@ -338,6 +373,9 @@ func handleInteractiveFlow(
 
 // composeHostSetupMessage composes a human-readable message about what changed.
 func composeHostSetupMessage(before, after *results.HostStatusCheck) string {
+	if before == nil {
+		return "Host configuration verified"
+	}
 	var parts []string
 	if !before.GroupExists && after.GroupExists {
 		parts = append(parts, "group created")

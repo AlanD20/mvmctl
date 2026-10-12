@@ -13,6 +13,7 @@ import (
 	"mvmctl/internal/lib/vmexecsessionwire"
 	"mvmctl/internal/service/agent"
 	"mvmctl/internal/service/firewall"
+	"mvmctl/internal/service/hostpolicy"
 	"mvmctl/internal/service/jailer"
 	"mvmctl/internal/service/loopmount"
 	"mvmctl/internal/service/network"
@@ -32,6 +33,7 @@ type runtimeDeps struct {
 	consoleStop            consoleStop
 	cgroupObservation      cgroupObservationObserve
 	runtimeOwnerInventory  runtimeOwnerInventoryObserve
+	hostPolicy             hostPolicyObserve
 	loopMount              loopMountHandlerEffects
 	vmExecSession          vmExecSessionHandlerEffects
 	vmExecConnectionReader vmExecConnectionReaderDeps
@@ -90,6 +92,7 @@ func Run(ctx context.Context, args []string) error {
 	console := jailer.NewConsoleServer()
 	cgroupObservation := jailer.NewVMCgroupObserveServer()
 	runtimeOwnerInventory := jailer.NewRuntimeOwnerInventoryServer()
+	hostPolicy := hostpolicy.NewObserver()
 	loopMount := loopmount.NewProvisionInspectServer(systemLoopMountAgentBinary)
 	imageShrink := loopmount.NewImageShrinkServer()
 	vmExecSession, err := jailer.NewVMExecSessionServer()
@@ -110,6 +113,7 @@ func Run(ctx context.Context, args []string) error {
 		consoleStop:            console.Stop,
 		cgroupObservation:      cgroupObservation.Observe,
 		runtimeOwnerInventory:  runtimeOwnerInventory.Observe,
+		hostPolicy:             hostPolicy.Observe,
 		trustedRelease: trustedReleaseHandlerEffects{
 			install: trustedRelease.Install,
 			remove:  trustedRelease.Remove,
@@ -268,6 +272,8 @@ func dispatch(
 	deps runtimeDeps,
 ) (dispatchDisposition, error) {
 	switch request.action {
+	case hostpolicy.ObserveAction:
+		return dispatchHandled, handleHostPolicyObserve(ctx, endpoint, deps.hostPolicy, deps.control)
 	case firewall.ReadinessAction:
 		return dispatchHandled, handleFirewallReadiness(ctx, endpoint, deps.control)
 	case network.HostServiceInspectAction:

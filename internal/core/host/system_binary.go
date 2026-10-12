@@ -9,11 +9,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/hostpolicy"
 	"mvmctl/pkg/errs"
 )
 
@@ -511,26 +511,8 @@ func guardSystemBinaryInstallSudoers(deps systemBinaryInstallDeps) error {
 }
 
 func validateSystemBinaryInstallSudoers(content string) error {
-	grant := fmt.Sprintf("%%%s ALL=(root) NOPASSWD: %s %s *",
-		infra.MVMUnixGroup, infra.SystemBinaryPath, infra.PrivilegedProtocolMarker)
-	found := false
-	for index, rawLine := range strings.Split(content, "\n") {
-		line := strings.TrimSpace(rawLine)
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "#") &&
-			!strings.HasPrefix(line, "#include") &&
-			!strings.HasPrefix(line, "#includedir") {
-			continue
-		}
-		if line != grant || found {
-			return unrecognizedSystemBinaryInstallSudoers(index+1, line)
-		}
-		found = true
-	}
-	if !found {
-		return unrecognizedSystemBinaryInstallSudoers(1, "missing marker-only grant")
+	if line, syntax := hostpolicy.InvalidMarkerPolicyLine(content); line != 0 {
+		return unrecognizedSystemBinaryInstallSudoers(line, syntax)
 	}
 	return nil
 }

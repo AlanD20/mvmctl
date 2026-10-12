@@ -14,7 +14,6 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
-	"os"
 	"os/user"
 )
 
@@ -29,7 +28,7 @@ type HostAPI interface {
 	HostCheckKVMAccess() bool
 	HostCheckRequiredBinaries() []string
 	HostGetIPForwardStatus(ctx context.Context) (string, error)
-	HostStatusCheck(ctx context.Context) *results.HostStatusCheck
+	HostStatusCheck(ctx context.Context) (*results.HostStatusCheck, error)
 	HostClean(ctx context.Context) ([]string, error)
 	HostReset(ctx context.Context) ([]string, error)
 	HostGetRunningVMs(ctx context.Context) ([]*model.VMItem, error)
@@ -48,11 +47,21 @@ func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCa
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	groupExists := system.GroupExists(infra.MVMUnixGroup)
+	currentUser, _ := system.DefaultOS.Current()
+	userInGroup := currentUser != nil && system.UserInGroup(ctx, currentUser.Username, infra.MVMUnixGroup)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return nil, &errs.NeedsInteraction{
 		Code:      "privilege.sudo_required",
 		Message:   "run sudo /usr/local/bin/mvm host init; direct root must specify --operator <non-root-user>",
 		InputType: "sudo",
-		Context:   map[string]any{"command": "sudo /usr/local/bin/mvm host init", "operation": "initialize host"},
+		Context: map[string]any{
+			"command": "sudo /usr/local/bin/mvm host init", "operation": "initialize host",
+			"group_exists": groupExists, "user_in_group": userInGroup,
+			"session_has_group": system.SessionHasGroup(),
+		},
 	}
 }
 
@@ -198,7 +207,14 @@ func (op *Operation) HostGetIPForwardStatus(ctx context.Context) (string, error)
 }
 
 // HostStatusCheck returns a consolidated host status with all checks.
-func (op *Operation) HostStatusCheck(ctx context.Context) *results.HostStatusCheck {
+func (op *Operation) HostStatusCheck(ctx context.Context) (*results.HostStatusCheck, error) {
+	policy, err := op.hostPolicyObserver.Observe(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := policy.Validate(); err != nil {
+		return nil, err
+	}
 	kvmOK := op.HostCheckKVMAccess()
 	missing := op.HostCheckRequiredBinaries()
 	ipFwd, _ := op.HostGetIPForwardStatus(ctx)
@@ -208,10 +224,6 @@ func (op *Operation) HostStatusCheck(ctx context.Context) *results.HostStatusChe
 	groupExists := system.GroupExists(infra.MVMUnixGroup)
 	currentUser, _ := user.Current()
 	userInGroup := currentUser != nil && system.UserInGroup(ctx, currentUser.Username, infra.MVMUnixGroup)
-	sudoersExists := false
-	if _, err := os.Stat(fmt.Sprintf("/etc/sudoers.d/%s", infra.MVMUnixGroup)); err == nil {
-		sudoersExists = true
-	}
 	// User-owned SQLite cannot attest to root administrator admission.
 	return &results.HostStatusCheck{
 		KVMOK:           kvmOK,
@@ -219,10 +231,10 @@ func (op *Operation) HostStatusCheck(ctx context.Context) *results.HostStatusChe
 		IPForward:       ipFwd,
 		IPForwardOK:     fwdOK,
 		GroupExists:     groupExists,
-		SudoersExists:   sudoersExists,
+		SudoersExists:   *policy.Exists,
 		UserInGroup:     userInGroup,
 		Resources:       resources,
-	}
+	}, nil
 }
 
 // HostClean removes the caller's registered networks through the named API.

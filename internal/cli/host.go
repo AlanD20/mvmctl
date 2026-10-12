@@ -170,7 +170,10 @@ func newHostStatusCmd(hostAPI api.HostAPI) *cobra.Command {
 		Use:   "status",
 		Short: "Show current host configuration state vs expected",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			status := hostAPI.HostStatusCheck(cmd.Context())
+			status, err := hostAPI.HostStatusCheck(cmd.Context())
+			if err != nil {
+				return err
+			}
 
 			if common.RecordResult(status) {
 				return nil
