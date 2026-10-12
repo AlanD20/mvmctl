@@ -13,9 +13,12 @@ import json
 import os
 import random
 import shlex
+import shutil
+import stat
 import subprocess
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Generator
 
@@ -28,6 +31,129 @@ PYTEST_OUTCOME_SCHEMA_VERSION = 1
 _OUTCOME_REPORTS: dict[str, dict[str, Any]] = {}
 _OUTCOME_COLLECTION_ERRORS = 0
 _OUTCOME_DESELECTED = 0
+
+
+@dataclass
+class _ImageWorkspaceScratch:
+    path: Path
+    parent_fd: int
+    root_fd: int
+    eligible: bool = False
+    phases: dict[str, pytest.TestReport] = field(default_factory=dict)
+
+    def remove(self) -> None:
+        """Remove only the registered directory, without following child symlinks."""
+        parent_fd = _open_image_workspace_directory(self.path.parent)
+        try:
+            assert os.path.samestat(os.fstat(parent_fd), os.fstat(self.parent_fd)), (
+                "image workspace parent was replaced"
+            )
+            assert os.path.samestat(
+                os.stat(self.path.name, dir_fd=parent_fd, follow_symlinks=False),
+                os.fstat(self.root_fd),
+            ), "image workspace root was replaced"
+            assert shutil.rmtree.avoids_symlink_attacks, "fd-safe rmtree required"
+            # Keep the original root pinned: even a root replacement cannot redirect
+            # recursive removal into a different directory.
+            for name in os.listdir(self.root_fd):
+                info = os.stat(name, dir_fd=self.root_fd, follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode):
+                    shutil.rmtree(name, dir_fd=self.root_fd)
+                else:
+                    os.unlink(name, dir_fd=self.root_fd)
+            assert os.path.samestat(
+                os.stat(self.path.name, dir_fd=parent_fd, follow_symlinks=False),
+                os.fstat(self.root_fd),
+            ), "image workspace root was replaced during cleanup"
+            os.rmdir(self.path.name, dir_fd=parent_fd)
+        finally:
+            os.close(parent_fd)
+
+    def close(self) -> None:
+        try:
+            os.close(self.root_fd)
+        finally:
+            os.close(self.parent_fd)
+
+
+_IMAGE_WORKSPACE_SCRATCH = pytest.StashKey[_ImageWorkspaceScratch]()
+
+
+def _open_image_workspace_directory(path: Path) -> int:
+    """Pin an absolute directory through no-follow component traversal."""
+    assert path.is_absolute() and ".." not in path.parts, path
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    fd = os.open("/", flags)
+    try:
+        for name in path.parts[1:]:
+            child_fd = os.open(name, flags, dir_fd=fd)
+            os.close(fd)
+            fd = child_fd
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _register_image_workspace(
+    request: pytest.FixtureRequest, path: Path
+) -> _ImageWorkspaceScratch:
+    """Register exactly this item's private pytest tmp_path before fixture yield."""
+    assert path == request.getfixturevalue("tmp_path"), "outside image workspace"
+    assert _IMAGE_WORKSPACE_SCRATCH not in request.node.stash
+    parent_fd = _open_image_workspace_directory(path.parent)
+    try:
+        root_fd = os.open(
+            path.name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=parent_fd,
+        )
+        try:
+            for fd in (parent_fd, root_fd):
+                info = os.fstat(fd)
+                assert info.st_uid == os.geteuid() and not info.st_mode & 0o077, (
+                    "image workspace must be private and caller-owned"
+                )
+            scratch = _ImageWorkspaceScratch(path, parent_fd, root_fd)
+            request.node.stash[_IMAGE_WORKSPACE_SCRATCH] = scratch
+            return scratch
+        except BaseException:
+            os.close(root_fd)
+            raise
+    except BaseException:
+        os.close(parent_fd)
+        raise
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True, specname="pytest_runtest_makereport")
+def pytest_image_workspace_makereport(item: pytest.Item, call: pytest.CallInfo):
+    """Reclaim image scratch only after the complete, successful teardown report."""
+    del call
+    outcome = yield
+    report = outcome.get_result()
+    scratch = item.stash.get(_IMAGE_WORKSPACE_SCRATCH, None)
+    if scratch is None:
+        return
+    scratch.phases[report.when] = report
+    if report.when != "teardown":
+        return
+    try:
+        try:
+            if scratch.eligible and all(
+                phase in scratch.phases
+                and scratch.phases[phase].passed
+                and not hasattr(scratch.phases[phase], "wasxfail")
+                for phase in ("setup", "call", "teardown")
+            ):
+                scratch.remove()
+        finally:
+            scratch.close()
+    except Exception as error:
+        report.outcome = "failed"
+        report.longrepr = (
+            f"image workspace scratch cleanup failed for {scratch.path}: "
+            f"{type(error).__name__}: {error}"
+        )
 
 
 def _outcome_reporting_enabled() -> bool:

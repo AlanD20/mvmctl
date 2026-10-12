@@ -18,7 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.system.conftest import _guest_run, _json_success_data, _run_mvm
+from tests.system.conftest import (
+    _guest_run,
+    _json_success_data,
+    _register_image_workspace,
+    _run_mvm,
+)
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_image]
 
@@ -933,10 +938,11 @@ def _restore_default(runner_vm, original):
 
 
 @pytest.fixture(autouse=True)
-def image_workspace(runner_vm, tmp_path, monkeypatch):
+def image_workspace(runner_vm, tmp_path, monkeypatch, request):
     """Keep warm files private and prove that prepared image records/backings survive each case."""
     before = _images(runner_vm)
     backing = {i["id"]: _backing_identity(i["path"]) for i in before if i["is_present"]}
+    scratch = _register_image_workspace(request, tmp_path)
     monkeypatch.setenv("MVM_TEMP_DIR", str(tmp_path / "work"))
     monkeypatch.delenv("MVM_WARM_POOL", raising=False)
     yield tmp_path
@@ -946,6 +952,7 @@ def image_workspace(runner_vm, tmp_path, monkeypatch):
     for image in before:
         if image["id"] in backing:
             assert _backing_identity(image["path"]) == backing[image["id"]]
+    scratch.eligible = True
 
 
 @pytest.fixture

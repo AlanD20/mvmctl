@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import ModuleType
 
@@ -151,6 +152,134 @@ def test_pytest_hook_is_inactive_without_fixed_report_environment(
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert not report_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("mode", "enable_report", "expected_outcome", "removed"),
+    [
+        ("success", True, "passed", True),
+        ("success", False, "passed", True),
+        ("call-failure", True, "failed", False),
+        ("late-teardown-failure", True, "errors", False),
+        ("setup-failure", True, "errors", False),
+        ("skip", True, "skipped", False),
+        ("xfail", True, "xfailed", False),
+        ("xpass", True, "xpassed", False),
+        ("preservation-failure", True, "errors", False),
+        ("external-symlink", True, "passed", True),
+        ("replaced-root", True, "errors", False),
+        ("outside-root", True, "errors", False),
+        ("cleanup-failure", True, "errors", False),
+        ("cleanup-failure", False, "errors", False),
+    ],
+)
+def test_image_workspace_cleanup_obeys_final_outcomes(
+    tmp_path: Path,
+    mode: str,
+    enable_report: bool,
+    expected_outcome: str,
+    removed: bool,
+) -> None:
+    source = (
+        f"MODE = {mode!r}\n"
+        + """
+import shutil
+from pathlib import Path
+
+import pytest
+import conftest
+
+
+@pytest.fixture
+def later_teardown():
+    yield
+    if MODE == "late-teardown-failure":
+        raise RuntimeError("another finalizer failed after image preservation")
+
+
+@pytest.fixture(autouse=True)
+def image_workspace(request, tmp_path, later_teardown):
+    Path("workspace-path").write_text(str(tmp_path), encoding="utf-8")
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "artifact.raw").write_bytes(b"diagnostic artifact")
+    outside = Path.cwd() / "outside"
+    outside.mkdir()
+    (outside / "keep").write_bytes(b"external evidence")
+    root = outside if MODE == "outside-root" else tmp_path
+    scratch = conftest._register_image_workspace(request, root)
+    if MODE == "setup-failure":
+        raise RuntimeError("setup failed after registration")
+    if MODE == "cleanup-failure":
+        def fail_cleanup():
+            raise OSError("injected image scratch cleanup failure")
+        scratch.remove = fail_cleanup
+    yield tmp_path
+    if MODE == "preservation-failure":
+        raise AssertionError("image preservation assertion failed")
+    scratch.eligible = True
+
+
+def test_image_case(image_workspace):
+    if MODE == "call-failure":
+        raise AssertionError("image call failed")
+    if MODE == "skip":
+        pytest.skip("synthetic tooling outcome")
+    if MODE == "xfail":
+        pytest.xfail("synthetic tooling outcome")
+    if MODE == "external-symlink":
+        (image_workspace / "work" / "link").symlink_to(
+            Path.cwd() / "outside", target_is_directory=True
+        )
+    if MODE == "replaced-root":
+        image_workspace.rename(Path.cwd() / "original-workspace")
+        shutil.copytree(Path.cwd() / "outside", image_workspace)
+
+
+if MODE == "xpass":
+    test_image_case = pytest.mark.xfail(reason="synthetic tooling outcome")(
+        test_image_case
+    )
+"""
+    )
+    junit_path = tmp_path / "junit.xml"
+    result, report_path = _run_outcome_case(
+        tmp_path,
+        source,
+        enable_report=enable_report,
+        extra_pytest_args=["--junitxml", str(junit_path)],
+    )
+
+    expected_exit = 1 if expected_outcome in ("failed", "errors") else 0
+    assert result.returncode == expected_exit, result.stdout + result.stderr
+    workspace = Path((tmp_path / "workspace-path").read_text(encoding="utf-8"))
+    assert workspace.exists() is not removed
+    if not removed and mode != "replaced-root":
+        assert (workspace / "work" / "artifact.raw").read_bytes() == (
+            b"diagnostic artifact"
+        )
+    assert (tmp_path / "outside" / "keep").read_bytes() == b"external evidence"
+    if mode == "replaced-root":
+        assert (workspace / "keep").read_bytes() == b"external evidence"
+        original_artifact = tmp_path / "original-workspace" / "work" / "artifact.raw"
+        assert original_artifact.read_bytes() == b"diagnostic artifact"
+        assert "image workspace root was replaced" in result.stdout
+    if mode == "cleanup-failure":
+        assert "image workspace scratch cleanup failed" in result.stdout
+        assert "injected image scratch cleanup failure" in result.stdout
+
+    junit_case = ET.parse(junit_path).find(".//testcase[@name='test_image_case']")
+    assert junit_case is not None
+    if expected_outcome == "errors":
+        assert junit_case.find("error") is not None
+    elif expected_outcome == "failed":
+        assert junit_case.find("failure") is not None
+    if enable_report:
+        expected = _valid_outcome_values(
+            **{"passed": 0, expected_outcome: 1, "exit_status": expected_exit}
+        )
+        assert json.loads(report_path.read_text(encoding="utf-8")) == expected
+    else:
+        assert not report_path.exists()
 
 
 @pytest.mark.parametrize(
