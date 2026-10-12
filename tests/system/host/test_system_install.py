@@ -345,7 +345,7 @@ class TestSystemBinaryInstall:
         assert status.returncode == 0, status.stderr
         sudoers = _guest_run(
             runner_vm,
-            "stat -c '%u:%g:%a:%F' /etc/sudoers.d/mvm",
+            "sudo -n stat -c '%u:%g:%a:%F' -- /etc/sudoers.d/mvm",
             check=False,
         )
         assert sudoers.returncode == 0, sudoers.stderr
