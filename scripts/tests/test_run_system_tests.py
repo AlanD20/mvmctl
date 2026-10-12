@@ -3769,15 +3769,15 @@ def test_imported_runner_selects_same_kernel_on_all_five_create_paths(
 @pytest.mark.parametrize(
     "selection,error",
     [
-        (["cli"], "requires --prepare"),
         (["--image", "cli"], "requires --prepare"),
+        (["--volume", "cli"], "requires --prepare"),
         (
             ["--prepare", "--tier", "1,2", "--skip-volume-check"],
             "forbids --skip-volume-check",
         ),
     ],
 )
-def test_imported_runner_requires_prepare_and_mirror_before_effects(
+def test_imported_runner_preserves_prepare_and_mirror_boundaries_before_effects(
     orchestrator,
     monkeypatch,
     capsys,
@@ -3792,6 +3792,149 @@ def test_imported_runner_requires_prepare_and_mirror_before_effects(
     _assert_selection_rejected_before_side_effects(
         orchestrator, monkeypatch, capsys, selection, error
     )
+
+
+@pytest.mark.parametrize("backing", ["missing", "wrong-keys", "absent"])
+def test_imported_cached_admission_refuses_unavailable_exact_image_before_effects(
+    orchestrator, monkeypatch, capsys, imported_runner_kernel, backing,
+):
+    binding, info, _path = imported_runner_kernel
+    candidate = Path(orchestrator.MVM_CANDIDATE_BINARY)
+    candidate.chmod(0o755)
+    monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_CONFIGURED", candidate)
+    monkeypatch.setattr(orchestrator, "MVM_BINARY", sys.executable)
+    monkeypatch.setenv("MVM_RUNNER_KERNEL_ID", binding.id)
+    monkeypatch.setenv("MVM_RUNNER_KERNEL_SHA256", binding.sha256)
+    monkeypatch.setattr(orchestrator, "_get_mvm_version", lambda: "0.3.0")
+    image_type = f"mvm-test-runner-kernel-{binding.id}"
+    rows = []
+    if backing == "wrong-keys":
+        rows = [
+            {"id": "a" * 64, "type": image_type, "version": "0.2.0", "is_present": True},
+            {"id": "b" * 64, "type": orchestrator.BASE_IMAGE_NAME, "version": "0.3.0", "is_present": True},
+            {"id": "c" * 64, "type": "mvm-test-runner-kernel-" + "d" * 64, "version": "0.3.0", "is_present": True},
+        ]
+    elif backing == "absent":
+        rows = [{"id": "a" * 64, "type": image_type, "version": "0.3.0", "is_present": False}]
+    original_rows = json.dumps(rows, sort_keys=True)
+    calls = []
+    effects = []
+
+    def unexpected_effect(*args, **kwargs):
+        effects.append((args, kwargs))
+        raise AssertionError("cached admission must precede preparation and runner effects")
+
+    for name in (
+        "_start_matrix_evidence", "run_prepare", "_build_base_image",
+        "ensure_shared_volume", "ensure_test_network", "run_domains",
+    ):
+        monkeypatch.setattr(orchestrator, name, unexpected_effect)
+
+    def fake_mvm(*args, **kwargs):
+        calls.append(args)
+        if args == ("kernel", "inspect", binding.id, "--json"):
+            stdout = json.dumps(info)
+        elif args == ("image", "ls", "--json"):
+            stdout = json.dumps({"schema_version": 1, "status": "success", "data": rows, "error": None})
+        else:
+            return unexpected_effect(*args, **kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    monkeypatch.setattr(orchestrator.sys, "argv", ["run-system-tests.py", "cli"])
+    with pytest.raises(SystemExit) as captured:
+        orchestrator.main()
+    assert captured.value.code == 2
+    error = capsys.readouterr().err
+    assert orchestrator._runner_image_key("0.3.0", binding) in error
+    assert "prepare it separately with --prepare or --rebuild" in error
+    assert calls == [("kernel", "inspect", binding.id, "--json"), ("image", "ls", "--json")]
+    assert effects == []
+    assert json.dumps(rows, sort_keys=True) == original_rows
+
+
+@pytest.mark.parametrize("tier", [1, 2])
+def test_imported_cached_execution_runs_one_owned_ready_runner_without_preparation(
+    orchestrator, monkeypatch, capsys, tmp_path, imported_runner_kernel, tier,
+):
+    binding, info, _path = imported_runner_kernel
+    candidate = Path(orchestrator.MVM_CANDIDATE_BINARY)
+    candidate.chmod(0o755)
+    monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_CONFIGURED", candidate)
+    monkeypatch.setattr(orchestrator, "MVM_BINARY", sys.executable)
+    monkeypatch.setenv("MVM_RUNNER_KERNEL_ID", binding.id)
+    monkeypatch.setenv("MVM_RUNNER_KERNEL_SHA256", binding.sha256)
+    test_file = "tests/system/cli/test_cli.py"
+    _write_system_test(tmp_path, test_file)
+    domains = {"cli": [test_file]}
+    _configure_test_registry(
+        orchestrator, monkeypatch, tmp_path,
+        domains if tier == 1 else {}, domains if tier == 2 else {},
+    )
+    monkeypatch.setattr(orchestrator, "_unique_name", lambda prefix: "owned-runner")
+    versions = []
+
+    def candidate_version():
+        versions.append("0.3.0")
+        assert len(versions) == 1, "cached dispatch must reuse the admitted candidate version"
+        return "0.3.0"
+
+    monkeypatch.setattr(orchestrator, "_get_mvm_version", candidate_version)
+    for name in ("ensure_shared_volume", "ensure_test_network"):
+        monkeypatch.setattr(orchestrator, name, lambda *args, **kwargs: None)
+    receipt = orchestrator._runner_base_receipt("0.3.0", binding)
+    calls = []
+    live_vm_ids = {"unrelated-vm"}
+
+    def fake_mvm(*args, **kwargs):
+        calls.append(args)
+        stdout = ""
+        if args[:2] == ("kernel", "inspect"):
+            stdout = json.dumps(info)
+        elif args[:2] == ("image", "ls"):
+            stdout = json.dumps({"schema_version": 1, "status": "success", "error": None,
+                "data": [{"id": "a" * 64, "type": f"mvm-test-runner-kernel-{binding.id}",
+                          "version": "0.3.0", "is_present": True}]})
+        elif args[:2] == ("vm", "create"):
+            live_vm_ids.add(args[2])
+        elif args[:2] == ("vm", "rm"):
+            live_vm_ids.remove(args[2])
+        elif args[:2] == ("vm", "inspect"):
+            stdout = json.dumps({"assets": {"kernel": {"id": binding.id}}})
+        elif args[0] == "exec":
+            if args[-1] == f"head -c 4097 {orchestrator.RUNNER_BASE_RECEIPT}":
+                stdout = json.dumps(receipt)
+            elif args[-1].startswith("python3 -c"):
+                stdout = f"Linux 7.0.11 GNU build ID {binding.build_id}\n"
+            elif args[-1] == "/usr/local/bin/mvm host status --json":
+                stdout = json.dumps({"resources": {"nftables_available": True}})
+            elif args[-1] == "/usr/local/bin/mvm image ls --json":
+                stdout = json.dumps({"schema_version": 1, "status": "success", "error": None,
+                    "data": [{"type": "alpine", "version": "3.23", "is_default": True, "is_present": True}]})
+            elif args[-1].startswith("head -c 4097 -- "):
+                stdout = _complete_pytest_outcome_report().decode()
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+    monkeypatch.setattr(orchestrator.sys, "argv", ["run-system-tests.py", "--tier", str(tier), "--workers", "1"])
+    orchestrator.main()
+    assert "RESULTS: 1 passed, 0 failed, 1 total" in capsys.readouterr().out
+    creates = [args for args in calls if args[:2] == ("vm", "create")]
+    assert len(creates) == 1
+    assert creates[0][2] == "owned-runner"
+    assert creates[0][creates[0].index("--kernel") + 1] == binding.id
+    assert creates[0][creates[0].index("--image") + 1] == orchestrator._runner_image_key("0.3.0", binding)
+    assert [args for args in calls if args[:2] == ("vm", "rm")] == [("vm", "rm", "owned-runner", "--force")]
+    assert live_vm_ids == {"unrelated-vm"}
+    assert not any(args[:2] in {("image", "rm"), ("image", "import"), ("kernel", "pull")} for args in calls)
+    init = next(i for i, args in enumerate(calls) if args[-1] == orchestrator.RUNNER_USER_INIT_COMMAND)
+    smoke = next(i for i, args in enumerate(calls) if args[-1] == "/usr/local/bin/mvm host status --json")
+    pytest_calls = [i for i, args in enumerate(calls) if args[0] == "exec" and "python3 -m pytest" in args[-1]]
+    assert len(pytest_calls) == 1
+    assert init < smoke < pytest_calls[0]
+    if tier == 2:
+        assets = next(i for i, args in enumerate(calls) if "kernel pull --type firecracker" in args[-1])
+        assert smoke < assets
 
 
 @pytest.mark.parametrize("fail_at", ["receipt", "smoke", "second-create"])
@@ -4010,36 +4153,73 @@ def test_imported_image_never_looks_up_or_removes_stock_key(
 
 
 @pytest.mark.parametrize("tier", [1, 2])
-def test_imported_domain_receipt_failure_keeps_owned_cleanup_and_stale_import_refusal(
+@pytest.mark.parametrize(
+    "fault,cleanup_fails,error",
+    [
+        ("receipt", False, "receipt does not match"),
+        ("build-id", False, "live GNU build ID does not match"),
+        ("nftables", False, "nftables_available: true"),
+        ("nftables", True, "nftables_available: true"),
+    ],
+    ids=["receipt", "build-id", "nftables", "readiness-and-cleanup"],
+)
+def test_imported_domain_binding_failure_keeps_owned_cleanup_and_stale_import_refusal(
     orchestrator,
     monkeypatch,
     imported_runner_kernel,
     tier,
+    fault,
+    cleanup_fails,
+    error,
 ):
     binding, info, path = imported_runner_kernel
     calls = []
-    destroyed = []
-    monkeypatch.setattr(orchestrator, "_ensure_builder_key", lambda: None)
+    live_vm_ids = {"unrelated-vm"}
+    receipt = orchestrator._runner_base_receipt("0.3.0", binding)
+    if fault == "receipt":
+        receipt["kernel_sha256"] = "b" * 64
     monkeypatch.setattr(orchestrator, "_unique_name", lambda prefix: "owned-runner")
-    monkeypatch.setattr(orchestrator, "destroy_vm", destroyed.append)
 
     def fake_mvm(*args, **kwargs):
         calls.append(args)
-        stdout = json.dumps(info) if args[:2] == ("kernel", "inspect") else "{}"
-        return subprocess.CompletedProcess(args, 0, stdout=stdout)
+        stdout = ""
+        if args[:2] == ("kernel", "inspect"):
+            stdout = json.dumps(info)
+        elif args[:2] == ("vm", "create"):
+            live_vm_ids.add(args[2])
+        elif args[:2] == ("vm", "rm"):
+            if cleanup_fails:
+                raise RuntimeError("owned destruction refused")
+            live_vm_ids.remove(args[2])
+        elif args[:2] == ("vm", "inspect"):
+            stdout = json.dumps({"assets": {"kernel": {"id": binding.id}}})
+        elif args[0] == "exec":
+            if args[-1].startswith("head -c"):
+                stdout = json.dumps(receipt)
+            elif args[-1].startswith("python3 -c"):
+                build_id = "b" * 40 if fault == "build-id" else binding.build_id
+                stdout = f"Linux 7.0.11 GNU build ID {build_id}\n"
+            elif args[-1] == "/usr/local/bin/mvm host status --json":
+                stdout = json.dumps({"resources": {"nftables_available": False}})
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
     run = getattr(orchestrator, f"run_tier{tier}_domain")
     result = run("cli", ["tests/system/cli/test_cli.py"], "0.3.0", binding=binding)
     assert result["passed"] is False
-    assert "receipt does not match" in result["output"]
-    assert destroyed == ["owned-runner"]
+    assert error in result["output"]
+    assert [args for args in calls if args[:2] == ("vm", "rm")] == [("vm", "rm", "owned-runner", "--force")]
+    assert live_vm_ids == ({"unrelated-vm", "owned-runner"} if cleanup_fails else {"unrelated-vm"})
+    assert not any(args[0] == "exec" and "python3 -m pytest" in args[-1] for args in calls)
+    assert not any(args[0] == "exec" and "kernel pull" in args[-1] for args in calls)
+    if cleanup_fails:
+        assert "runner VM destruction failed for owned-runner: owned destruction refused" in result["output"]
     calls.clear()
     path.unlink()
     result = run("cli", ["tests/system/cli/test_cli.py"], "0.3.0", binding=binding)
     assert result["passed"] is False
-    assert destroyed == ["owned-runner"]
     assert calls == [("kernel", "inspect", binding.id, "--json")]
+    assert live_vm_ids == ({"unrelated-vm", "owned-runner"} if cleanup_fails else {"unrelated-vm"})
 
 
 @pytest.mark.parametrize("tier", [1, 2])

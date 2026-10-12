@@ -1520,6 +1520,8 @@ def provision_t1(
     # Running as root creates the cache dir with root ownership — test VMs inherit
     # this state and break with 'permission denied' on /home/runner/.cache/mvmctl.
     _initialize_runner_user(vm_name, timeout=360)
+    if binding is not None:
+        _require_imported_runner_smoke(vm_name, binding)
 
 
 def _ensure_official_kernel_on_host(vm_name: str) -> None:
@@ -1619,6 +1621,8 @@ def provision_t2(
     # this state and break with 'permission denied' on /home/runner/.cache/mvmctl.
     log(f"  Initializing mvm inside '{vm_name}'...")
     _initialize_runner_user(vm_name, timeout=180)
+    if binding is not None:
+        _require_imported_runner_smoke(vm_name, binding)
 
     log(f"  Registering assets in '{vm_name}' (cache hits)...")
     mvm(
@@ -3901,6 +3905,7 @@ def main() -> None:
         binding = _resolve_imported_runner_kernel_binding()
     except RuntimeError as exc:
         parser.error(str(exc))
+    cached_imported_execution = False
     if binding is not None:
         if args.skip_volume_check:
             parser.error("imported runner kernel binding forbids --skip-volume-check")
@@ -3910,9 +3915,12 @@ def main() -> None:
             or any(d in TIER1_DOMAINS or d in TIER2_DOMAINS for d in args.domains)
         )
         if selects_runners and not (args.prepare or args.rebuild):
-            parser.error(
-                "imported runner kernel T1/T2 execution requires --prepare on every invocation"
-            )
+            if args.image or args.volume:
+                parser.error(
+                    "imported runner kernel T1/T2 execution with --image or --volume "
+                    "requires --prepare or --rebuild"
+                )
+            cached_imported_execution = True
 
     if args.release_qualification:
         try:
@@ -3975,6 +3983,19 @@ def main() -> None:
         log(f"ERROR: {exc}")
         sys.exit(1)
 
+    mvm_version = None
+    if cached_imported_execution:
+        try:
+            mvm_version = _get_mvm_version()
+            if _runner_base_image_id(mvm_version, binding) is None:
+                parser.error(
+                    "imported runner base image is missing or not present: "
+                    f"{_runner_image_key(mvm_version, binding)}; "
+                    "prepare it separately with --prepare or --rebuild"
+                )
+        except RuntimeError as exc:
+            parser.error(str(exc))
+
     # Handle prep actions.
     evidence = _start_matrix_evidence(args.record_evidence, args) if args.record_evidence else None
     # --rebuild implies --volume + --image + --prepare (in that order).
@@ -4022,7 +4043,8 @@ def main() -> None:
         return
 
     # Detect mvm version for base image lookup
-    mvm_version = _get_mvm_version()
+    if mvm_version is None:
+        mvm_version = _get_mvm_version()
 
     # Ensure shared volume/network exist unless skipped.
     if not args.skip_volume_check:
