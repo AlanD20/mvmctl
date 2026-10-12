@@ -50,15 +50,11 @@ func prepareSnapshotRestore(
 	cache *managedCacheLease,
 	request VMSnapshotRestoreRequest,
 ) (_ *preparedSnapshotRestore, returnErr error) {
-	store, err := openProtectedSnapshotStore(ctx, cache, false)
+	store, entry, err := openRestoreSnapshotEntry(ctx, cache, request.SnapshotID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, store.Release(context.WithoutCancel(ctx))) }()
-	entry, err := lockSnapshotStoreEntry(ctx, store, request.SnapshotID, false)
-	if err != nil {
-		return nil, err
-	}
 	defer func() { returnErr = errors.Join(returnErr, entry.Release(context.WithoutCancel(ctx))) }()
 	metadata, err := entry.readRecord(ctx, cache.ownerUID)
 	if err != nil {
@@ -156,24 +152,23 @@ func (prepared *preparedSnapshotRestore) prepareBackings(
 			returnErr = errors.Join(returnErr, prepared.releaseBackings(context.WithoutCancel(ctx)))
 		}
 	}()
-	type importSelection struct {
-		kind, id, artifact string
-		volumeIndex        int
-	}
-	items := []importSelection{
+	items := []restoreBackingSelection{
 		{kind: protectedBackingRootfs, id: prepared.targetVMID, artifact: "rootfs.img"},
 		{kind: protectedBackingKernel, id: prepared.metadata.Source.KernelID, artifact: "kernel"},
 	}
 	if prepared.metadata.Source.CloudInit {
 		items = append(
 			items,
-			importSelection{kind: protectedBackingCloudInit, id: prepared.targetVMID, artifact: "cloud-init.iso"},
+			restoreBackingSelection{kind: protectedBackingCloudInit, id: prepared.targetVMID, artifact: "cloud-init.iso"},
 		)
 	}
 	for index, volume := range prepared.volumes {
+		if err := validateVMVolumeResourceSpec(volume.selection.private()); err != nil {
+			return err
+		}
 		items = append(
 			items,
-			importSelection{
+			restoreBackingSelection{
 				kind:        protectedBackingVolume,
 				id:          volume.selection.ID,
 				artifact:    "volume-" + volume.guestDriveID + ".raw",
@@ -181,37 +176,54 @@ func (prepared *preparedSnapshotRestore) prepareBackings(
 			},
 		)
 	}
-	slices.SortFunc(items, func(a, b importSelection) int { return strings.Compare(a.kind+"/"+a.id, b.kind+"/"+b.id) })
-	for _, item := range items {
+	slices.SortFunc(items, func(a, b restoreBackingSelection) int { return strings.Compare(a.kind+"/"+a.id, b.kind+"/"+b.id) })
+	for index := range items {
+		item := &items[index]
 		source, found := prepared.artifacts[item.artifact]
 		if !found {
 			return instanceValidationError("restore backing artifact is absent")
 		}
-		var size uint64
+		item.sourceFD = source
 		for _, artifact := range prepared.metadata.Artifacts {
 			if artifact.Name == item.artifact {
-				size = artifact.Bytes
+				item.bytes = artifact.Bytes
 				break
 			}
 		}
-		var lease *protectedBackingLease
-		var err error
+		minimum, maximum := managedVMRootfsMinBytes, managedVMRootfsMaxBytes
+		switch item.kind {
+		case protectedBackingKernel:
+			minimum, maximum = managedVMKernelMinBytes, managedVMKernelMaxBytes
+		case protectedBackingCloudInit:
+			minimum, maximum = managedVMCloudInitMinBytes, managedVMCloudInitMaxBytes
+		case protectedBackingVolume:
+			minimum, maximum = item.bytes, item.bytes
+		}
+		if !isCanonicalManagedResourceID(item.id, protectedKindIDLength(item.kind)) ||
+			item.bytes < minimum || item.bytes > maximum {
+			return managedVMResourceValidationError("restored backing selection is outside policy")
+		}
+		if err := validateRestoredBackingSource(ctx, source, item.bytes); err != nil {
+			return err
+		}
+	}
+	admissions, err := acquireRestoredBackingSet(ctx, cache, items)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		returnErr = errors.Join(returnErr, releaseRestoredBackingAdmissions(context.WithoutCancel(ctx), admissions))
+	}()
+	for index, item := range items {
+		lease, err := restoreAdmittedBacking(ctx, admissions[index], item.sourceFD, item.bytes)
 		switch item.kind {
 		case protectedBackingRootfs:
-			lease, err = cache.restoreProtectedVMRootfs(ctx, vmResourceID(prepared.targetVMID), source, size)
 			prepared.rootfs = lease
 		case protectedBackingKernel:
-			lease, err = cache.restoreProtectedVMKernel(ctx, kernelResourceID(item.id), source, size)
 			prepared.kernel = lease
 		case protectedBackingCloudInit:
-			lease, err = cache.restoreProtectedVMCloudInit(ctx, vmResourceID(prepared.targetVMID), source, size)
 			prepared.cloudInit = lease
 		case protectedBackingVolume:
-			lease, err = cache.restoreProtectedVMVolume(
-				ctx,
-				prepared.volumes[item.volumeIndex].selection.private(),
-				source,
-			)
 			prepared.volumes[item.volumeIndex].backing = lease
 		}
 		if lease != nil {

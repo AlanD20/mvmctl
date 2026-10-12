@@ -50,23 +50,32 @@ func openProtectedLogical(
 func lockProtectedLogicalInAnchor(
 	ctx context.Context, ownerUID uint32, identity managedCacheIdentity, kind, id string, create bool, parent int,
 ) (_ int, _ []int, returnErr error) {
+	fd, retained, _, err := tryLockProtectedLogicalInAnchor(ctx, ownerUID, identity, kind, id, create, parent)
+	return fd, retained, err
+}
+
+func tryLockProtectedLogicalInAnchor(
+	ctx context.Context, ownerUID uint32, identity managedCacheIdentity, kind, id string, create bool, parent int,
+) (_ int, _ []int, contended bool, returnErr error) {
 	var retained []int
 	defer func() {
 		if returnErr != nil {
-			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
+			closeErr := closeProtectedFDs(retained)
+			contended = contended && closeErr == nil
+			returnErr = errors.Join(returnErr, closeErr)
 		}
 	}()
 	for _, component := range []string{"logical", kind, id} {
 		fd, err := openProtectedDirectory(ctx, parent, component, create, true)
 		if err != nil {
-			return -1, nil, err
+			return -1, nil, false, err
 		}
 		retained = append(retained, fd)
 		parent = fd
 	}
 	lock, err := acquireProtectedLockMode(ctx, parent, create)
 	if err != nil {
-		return -1, nil, err
+		return -1, nil, restoreProtectedLockContention(err), err
 	}
 	retained = append(retained, lock)
 	wanted := protectedLogicalRecord{
@@ -76,15 +85,15 @@ func lockProtectedLogicalInAnchor(
 	err = readProtectedRecord(ctx, parent, "logical.json", &record)
 	if errors.Is(err, unix.ENOENT) && create {
 		if err := writeProtectedRecord(ctx, parent, "logical.json", wanted); err != nil {
-			return -1, nil, err
+			return -1, nil, false, err
 		}
 	} else if err != nil {
-		return -1, nil, err
+		return -1, nil, false, err
 	} else if record.Version != wanted.Version || record.Owner != wanted.Owner || record.Kind != wanted.Kind ||
 		record.ID != wanted.ID || record.Cache != wanted.Cache {
-		return -1, nil, managedVMResourceValidationError("logical backing identity is already bound to another cache")
+		return -1, nil, false, managedVMResourceValidationError("logical backing identity is already bound to another cache")
 	}
-	return parent, retained, nil
+	return parent, retained, false, nil
 }
 
 func markProtectedLogicalInitialized(ctx context.Context, directory int) error {

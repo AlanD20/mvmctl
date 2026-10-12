@@ -51,17 +51,26 @@ func lockSnapshotStoreEntry(
 	snapshotID string,
 	create bool,
 ) (_ *snapshotStoreEntry, returnErr error) {
+	entry, _, err := tryLockSnapshotStoreEntry(ctx, store, snapshotID, create)
+	return entry, err
+}
+
+func tryLockSnapshotStoreEntry(
+	ctx context.Context, store *protectedSnapshotStoreLease, snapshotID string, create bool,
+) (_ *snapshotStoreEntry, contended bool, returnErr error) {
 	if !isCanonicalManagedResourceID(snapshotID, 64) || store == nil || store.fd < 0 || store.lockAuthorityFD < 0 {
-		return nil, instanceValidationError("snapshot store selection is incomplete")
+		return nil, false, instanceValidationError("snapshot store selection is incomplete")
 	}
 	entry := &snapshotStoreEntry{store: store, snapshotID: snapshotID, lockFD: -1, directoryFD: -1}
 	defer func() {
 		if returnErr != nil {
-			returnErr = errors.Join(returnErr, entry.Release(context.WithoutCancel(ctx)))
+			closeErr := entry.Release(context.WithoutCancel(ctx))
+			contended = contended && closeErr == nil
+			returnErr = errors.Join(returnErr, closeErr)
 		}
 	}()
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	flags := unix.O_RDWR
 	existingData := false
@@ -69,7 +78,7 @@ func lockSnapshotStoreEntry(
 		var existing unix.Stat_t
 		err := unix.Fstatat(store.fd, snapshotID, &existing, unix.AT_SYMLINK_NOFOLLOW)
 		if err != nil && !errors.Is(err, unix.ENOENT) {
-			return nil, managedVMResourceAtomicError("snapshot capture cannot replace existing data", err)
+			return nil, false, managedVMResourceAtomicError("snapshot capture cannot replace existing data", err)
 		}
 		existingData = err == nil
 		if !existingData {
@@ -83,38 +92,39 @@ func lockSnapshotStoreEntry(
 	if !create && errors.Is(err, unix.ENOENT) {
 		var existing unix.Stat_t
 		if statErr := unix.Fstatat(store.fd, snapshotID, &existing, unix.AT_SYMLINK_NOFOLLOW); statErr == nil {
-			return nil, instanceValidationError("snapshot data has missing permanent lock authority")
+			return nil, false, instanceValidationError("snapshot data has missing permanent lock authority")
 		} else if !errors.Is(statErr, unix.ENOENT) {
-			return nil, statErr
+			return nil, false, statErr
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	entry.lockFD = fd
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if stat.Mode != unix.S_IFREG|0600 || stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 || stat.Size != 0 {
-		return nil, instanceValidationError("snapshot lock metadata is unsafe")
+		return nil, false, instanceValidationError("snapshot lock metadata is unsafe")
 	}
 	if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		return nil, managedVMResourceAtomicError("snapshot already has an active operation", err)
+		return nil, err == unix.EAGAIN || err == unix.EWOULDBLOCK,
+			managedVMResourceAtomicError("snapshot already has an active operation", err)
 	}
 	if existingData {
-		return nil, managedVMResourceAtomicError("snapshot capture cannot replace existing data", unix.EEXIST)
+		return nil, false, managedVMResourceAtomicError("snapshot capture cannot replace existing data", unix.EEXIST)
 	}
 	// Also seal a prior visible creation whose parent synchronization failed.
 	if err := errors.Join(unix.Fsync(fd), unix.Fsync(store.lockAuthorityFD)); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if create {
 		if err := unix.Mkdirat(store.fd, snapshotID, 0700); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if err := unix.Fsync(store.fd); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	entry.directoryFD, err = unix.Openat2(store.fd, snapshotID, &unix.OpenHow{
@@ -122,23 +132,23 @@ func lockSnapshotStoreEntry(
 		Resolve: managedVMResourceResolveFlags,
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := unix.Fstat(entry.directoryFD, &stat); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if stat.Mode != unix.S_IFDIR|0700 || stat.Uid != 0 || stat.Gid != 0 {
-		return nil, instanceValidationError("snapshot directory is not root protected")
+		return nil, false, instanceValidationError("snapshot directory is not root protected")
 	}
 	if create {
 		if err := unix.Mkdirat(entry.directoryFD, "refs", 0700); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if err := unix.Fsync(entry.directoryFD); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
-	return entry, nil
+	return entry, false, nil
 }
 
 func (entry *snapshotStoreEntry) Release(ctx context.Context) error {

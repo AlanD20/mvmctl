@@ -32,29 +32,38 @@ func openProtectedSnapshotStore(
 func openProtectedStoreBranch(
 	ctx context.Context, cache *managedCacheLease, branch string, create bool,
 ) (_ *protectedSnapshotStoreLease, returnErr error) {
+	store, _, err := tryOpenProtectedStoreBranch(ctx, cache, branch, create)
+	return store, err
+}
+
+func tryOpenProtectedStoreBranch(
+	ctx context.Context, cache *managedCacheLease, branch string, create bool,
+) (_ *protectedSnapshotStoreLease, contended bool, returnErr error) {
 	if branch != "snapshots" && branch != "volume-removals" {
-		return nil, managedVMResourceValidationError("protected store branch is outside closed policy")
+		return nil, false, managedVMResourceValidationError("protected store branch is outside closed policy")
 	}
 	if err := validateActiveManagedCacheLease(cache); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	anchor, retained, err := openProtectedAnchor(ctx, cache.ownerUID, cache.identity, create)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer func() {
 		if returnErr != nil {
-			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
+			closeErr := closeProtectedFDs(retained)
+			contended = contended && closeErr == nil
+			returnErr = errors.Join(returnErr, closeErr)
 		}
 	}()
 	use, err := acquireProtectedStoreUse(ctx, anchor, false)
 	if err != nil {
-		return nil, err
+		return nil, restoreProtectedLockContention(err), err
 	}
 	retained = append(retained, use)
 	lock, err := acquireProtectedLock(ctx, anchor)
 	if err != nil {
-		return nil, err
+		return nil, restoreProtectedLockContention(err), err
 	}
 	store, storeErr := pinProtectedStore(ctx, cache, anchor, create)
 	closeErr := unix.Close(lock)
@@ -62,22 +71,22 @@ func openProtectedStoreBranch(
 		retained = append(retained, store)
 	}
 	if storeErr != nil || closeErr != nil {
-		return nil, errors.Join(storeErr, closeErr)
+		return nil, false, errors.Join(storeErr, closeErr)
 	}
 	lockAuthority := -1
 	if branch == "snapshots" {
 		lockAuthority, err = openProtectedSnapshotLockAuthority(ctx, cache, anchor)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		retained = append(retained, lockAuthority)
 	}
 	fd, err := openProtectedDirectory(ctx, store, branch, create, true)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	return &protectedSnapshotStoreLease{fd: fd, lockAuthorityFD: lockAuthority, retained: append(retained, fd),
-		cacheIdentity: cache.identity, ownerUID: cache.ownerUID, branch: branch}, nil
+		cacheIdentity: cache.identity, ownerUID: cache.ownerUID, branch: branch}, false, nil
 }
 
 func (lease *protectedSnapshotStoreLease) Release(ctx context.Context) error {
@@ -237,27 +246,60 @@ func (cache *managedCacheLease) restoreProtectedVMCloudInit(
 func restoreProtectedBacking(
 	ctx context.Context, cache *managedCacheLease, kind, id string, sourceFD int, size uint64,
 ) (*protectedBackingLease, error) {
-	if size == 0 || size > math.MaxInt64 || sourceFD < 0 {
-		return nil, managedVMResourceValidationError("snapshot backing source is incomplete")
-	}
-	var stat unix.Stat_t
-	if err := unix.Fstat(sourceFD, &stat); err != nil || stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 ||
-		stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Mode&07777 != 0400 || stat.Size != int64(size) {
-		return nil, managedVMResourceAtomicError("snapshot backing source is not root-owned immutable data", err)
-	}
-	flags, err := unix.FcntlInt(uintptr(sourceFD), unix.F_GETFL, 0)
-	if err != nil || flags&unix.O_ACCMODE != unix.O_RDONLY {
-		return nil, managedVMResourceAtomicError("snapshot backing source descriptor is not read-only", err)
+	if err := validateRestoredBackingSource(ctx, sourceFD, size); err != nil {
+		return nil, err
 	}
 	lease, err := protectBackingFromSource(ctx, cache, kind, id, size, true, sourceFD)
 	if err != nil {
 		return nil, err
 	}
+	return finishRestoredBacking(ctx, lease, sourceFD, size)
+}
+
+func validateRestoredBackingSource(ctx context.Context, sourceFD int, size uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if size == 0 || size > math.MaxInt64 || sourceFD < 0 {
+		return managedVMResourceValidationError("snapshot backing source is incomplete")
+	}
+	var stat unix.Stat_t
+	if err := unix.Fstat(sourceFD, &stat); err != nil || stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 ||
+		stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Mode&07777 != 0400 || stat.Size != int64(size) {
+		return managedVMResourceAtomicError("snapshot backing source is not root-owned immutable data", err)
+	}
+	flags, err := unix.FcntlInt(uintptr(sourceFD), unix.F_GETFL, 0)
+	if err != nil || flags&unix.O_ACCMODE != unix.O_RDONLY {
+		return managedVMResourceAtomicError("snapshot backing source descriptor is not read-only", err)
+	}
+	return nil
+}
+
+func restoreAdmittedBacking(
+	ctx context.Context, admission *protectedBackingAdmission, sourceFD int, size uint64,
+) (*protectedBackingLease, error) {
+	if err := validateRestoredBackingSource(ctx, sourceFD, size); err != nil {
+		return nil, err
+	}
+	lease, err := admission.protect(ctx, size, true, sourceFD, false)
+	if err != nil {
+		return nil, err
+	}
+	return finishRestoredBacking(ctx, lease, sourceFD, size)
+}
+
+func finishRestoredBacking(
+	ctx context.Context, lease *protectedBackingLease, sourceFD int, size uint64,
+) (*protectedBackingLease, error) {
+	var stat unix.Stat_t
+	if err := unix.Fstat(sourceFD, &stat); err != nil {
+		return nil, errors.Join(err, lease.Release(context.WithoutCancel(ctx)))
+	}
 	sourceIdentity := protectedBackingIdentity{Device: uint64(stat.Dev), Inode: stat.Ino, Size: stat.Size}
 	if lease.record.SnapshotSource && lease.record.Source == sourceIdentity {
 		return lease, nil
 	}
-	if kind == protectedBackingKernel {
+	if lease.record.Kind == protectedBackingKernel {
 		if err := compareProtectedKernel(ctx, sourceFD, lease.fd, int64(size)); err == nil {
 			return lease, nil
 		} else {

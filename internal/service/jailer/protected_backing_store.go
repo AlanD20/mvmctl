@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
@@ -60,37 +61,62 @@ func protectBackingInAnchor(
 	ctx context.Context, cache *managedCacheLease, kind, id string, expectedBytes uint64, create bool,
 	snapshotFD int, explicitKernelImport bool, anchorFD int, retained []int,
 ) (_ *protectedBackingLease, returnErr error) {
+	admission, _, err := tryAdmitProtectedBackingInAnchor(ctx, cache, kind, id, create, anchorFD, retained)
+	if err != nil {
+		return nil, err
+	}
+	return admission.protect(ctx, expectedBytes, create, snapshotFD, explicitKernelImport)
+}
+
+// protectedBackingAdmission owns only admitted store, logical and object authority.
+// No data object is created or copied until the complete restore set is held.
+type protectedBackingAdmission struct {
+	// mu serializes consuming admission and cached descriptor release.
+	mu                                     sync.Mutex
+	cache                                  *managedCacheLease
+	kind, id                               string
+	logicalFD, storeFD, metadataFD, lockFD int
+	retained                               []int
+	released                               bool
+	releaseErr                             error
+}
+
+func tryAdmitProtectedBackingInAnchor(
+	ctx context.Context, cache *managedCacheLease, kind, id string, create bool, anchorFD int, retained []int,
+) (_ *protectedBackingAdmission, contended bool, returnErr error) {
 	ownerFD := retained[len(retained)-2]
 	defer func() {
 		if returnErr != nil {
-			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
+			closeErr := closeProtectedFDs(retained)
+			contended = contended && closeErr == nil
+			returnErr = errors.Join(returnErr, closeErr)
 		}
 	}()
 	use, err := acquireProtectedStoreUse(ctx, anchorFD, false)
 	if err != nil {
-		return nil, err
+		return nil, restoreProtectedLockContention(err), err
 	}
 	retained = append(retained, use)
 	cacheLock, err := acquireProtectedLock(ctx, anchorFD)
 	if err != nil {
-		return nil, err
+		return nil, restoreProtectedLockContention(err), err
 	}
 	admissionErr := admitProtectedStoreBeforeLogical(ctx, cache, anchorFD, create)
 	if err := errors.Join(admissionErr, unix.Close(cacheLock)); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// Never take the logical lock while holding the cache publication lock. The retained
 	// shared store-use authority prevents retirement between admission and publication.
-	logicalFD, logical, err := lockProtectedLogicalInAnchor(
+	logicalFD, logical, busy, err := tryLockProtectedLogicalInAnchor(
 		ctx, cache.ownerUID, cache.identity, kind, id, create, ownerFD,
 	)
 	if err != nil {
-		return nil, err
+		return nil, busy, err
 	}
 	retained = append(retained, logical...)
 	cacheLock, err = acquireProtectedLock(ctx, anchorFD)
 	if err != nil {
-		return nil, err
+		return nil, restoreProtectedLockContention(err), err
 	}
 	storeFD, storeErr := pinProtectedStore(ctx, cache, anchorFD, create)
 	lockErr := unix.Close(cacheLock)
@@ -98,24 +124,57 @@ func protectBackingInAnchor(
 		if storeFD >= 0 {
 			retained = append(retained, storeFD)
 		}
-		return nil, errors.Join(storeErr, lockErr)
+		return nil, false, errors.Join(storeErr, lockErr)
 	}
 	retained = append(retained, storeFD)
 	metadataKind, err := openProtectedDirectory(ctx, anchorFD, kind, create, true)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	retained = append(retained, metadataKind)
 	metadata, err := openProtectedDirectory(ctx, metadataKind, id, create, true)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	retained = append(retained, metadata)
 	lock, err := acquireProtectedLock(ctx, metadata)
 	if err != nil {
-		return nil, err
+		return nil, restoreProtectedLockContention(err), err
 	}
 	retained = append(retained, lock)
+	return &protectedBackingAdmission{cache: cache, kind: kind, id: id, logicalFD: logicalFD,
+		storeFD: storeFD, metadataFD: metadata, lockFD: lock, retained: retained}, false, nil
+}
+
+func (admission *protectedBackingAdmission) Release(ctx context.Context) error {
+	admission.mu.Lock()
+	defer admission.mu.Unlock()
+	if !admission.released {
+		admission.releaseErr = closeProtectedFDs(admission.retained)
+		admission.retained = nil
+		admission.released = true
+	}
+	return admission.releaseErr
+}
+
+func (admission *protectedBackingAdmission) protect(
+	ctx context.Context, expectedBytes uint64, create bool, snapshotFD int, explicitKernelImport bool,
+) (_ *protectedBackingLease, returnErr error) {
+	admission.mu.Lock()
+	defer admission.mu.Unlock()
+	if admission.released {
+		return nil, managedVMResourceValidationError("protected backing admission is already consumed")
+	}
+	cache, kind, id := admission.cache, admission.kind, admission.id
+	logicalFD, storeFD, metadata, lock := admission.logicalFD, admission.storeFD, admission.metadataFD, admission.lockFD
+	retained := admission.retained
+	admission.retained = nil
+	admission.released = true
+	defer func() {
+		if returnErr != nil {
+			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
+		}
+	}()
 	var record protectedBackingRecord
 	recordErr := readProtectedRecord(ctx, metadata, "record.json", &record)
 	newObject := errors.Is(recordErr, unix.ENOENT)
