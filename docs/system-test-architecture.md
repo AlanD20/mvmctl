@@ -575,6 +575,14 @@ tests/system/
 
 ## 12. Fixture Scoping Strategy
 
+Image cases use a private function-scoped workspace for raw imports and warm-image scratch. After the fixture's
+image-record and backing-preservation assertions succeed, the outcome hook removes that exact workspace only if
+setup, call and the complete teardown all passed. A failure, skip, XFAIL or XPASS retains the scratch for diagnosis;
+another finalizer's failure also prevents removal. Cleanup pins directory identities, refuses a replaced root and
+does not follow symlinks into external directories. A cleanup error fails teardown and appears in native, JSON and
+JUnit outcomes. Successful scratch reclamation does not remove test reports or establish sufficient capacity for
+transient copies; admit the selected workload against actual available storage separately.
+
 Fixture scoping determines trade-offs between test speed and isolation. The following rules govern fixture scope decisions:
 
 | Scope | Use Case | Examples |
