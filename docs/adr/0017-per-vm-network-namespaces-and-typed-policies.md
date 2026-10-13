@@ -1,6 +1,6 @@
 # Per-VM Network Namespaces and Typed Connectivity Policies
 
-**Status:** Accepted — v0.3.0 implementation in progress
+**Status:** Accepted; source integrated, partial installed qualification passed; full release qualification incomplete
 **Date:** 2026-08-23
 **Last Updated:** 2026-10-13 (source completion and guest-kernel capability clarification)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)

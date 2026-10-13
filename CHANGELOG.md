@@ -196,16 +196,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limitations and qualification
 
-- Kept v0.3.0 unreleased and not release-qualified. Normal reusable-base preparation passed on the earlier
-  installed candidate, with current-kernel T1/T2 smoke checks and a verified nested mirror read. Separate
-  host-Alpine registration passed from the local mirror. Those receipts do not qualify the new cleanup candidate,
-  which still needs candidate-bound reusable-base preparation. The complete applicable installed Python matrix,
-  current-candidate host reboot, joined release evidence, clean-host Tier 3, remote CI, and final approval
-  remain release gates. Earlier focused results bind only their tested inputs; see the
-  [coverage matrix](tests/system/COVERAGE_MATRIX.md) for exact evidence.
+- Kept v0.3.0 unreleased and not release-qualified. At the 2026-10-13 checkpoint, installed candidate
+  `0.3.0-rc.source-publication-de46e04f` passed candidate-bound normal reusable-base preparation and
+  source-bound runtime receipts accepted 459 of 525 ordinary Python cases plus both actual host-reboot cases.
+  Complete accepted batches include standard T1 (169), T1 cache (25), standard T2 (191), and T3 copy (15),
+  environment (22), snapshot-load (8), snapshot-rootfs independence (6), volume-hotplug (10), fresh environments (4),
+  GuestFS (1), and isolated nested VMs (8). Collection of all 527 nodes establishes the registry, not 527 passes.
+  The remaining 66 cases are images (44) and kernel builds (22). Completing those cases, joined release
+  evidence, remote CI, and final approval remain release gates. Earlier focused results bind only their tested
+  inputs; see the [coverage matrix](tests/system/COVERAGE_MATRIX.md) for source and candidate identities.
+- Retained the QA-source qualification boundary: newer QA-only source changes image and kernel tests while
+  preserving the installed candidate bytes. Those 66 cases have not passed. Earlier receipts retain their original
+  source bindings; strict joined qualification across mixed QA sources remains unproved, and general receipt
+  carry across those sources is unsupported.
 - Retained the observed Firecracker 1.16.2 live PCI detach/reattach failure: the disk did not reappear after BAR relocation.
-  The approved 1.17.0 dependency update includes an upstream source remedy; attachment readiness detects failure but
-  cannot repair it. Matching-pair launch, hotplug, pause/resume-vsock, and fresh snapshot qualification remain pending.
+  The current matching Firecracker/Jailer 1.17.0 pair passed the complete ten-case volume-hotplug suite,
+  eight snapshot-load cases, and six snapshot-rootfs independence cases. Attachment readiness detects failure
+  but cannot repair it; those accepted suites do not qualify the remaining matrix.
+- Retained the unexplained original exec and cache transient failures. Later complete accepted batches do not
+  establish their causes or a diagnosed production fix; partial failed batches and diagnostic singletons add no credit.
 - Deferred aarch64 runtime qualification pending suitable hardware; cross-compilation does not establish runtime support.
 - Retained host/ancestor/global OOM risk under pressure-only memory control. Bounded pressure/guest-exhaustion
   observations neither attribute the original saturation incident nor guarantee survival under arbitrary pressure.

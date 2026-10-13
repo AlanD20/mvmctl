@@ -17,6 +17,66 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
+**Current qualification checkpoint (2026-10-13):** v0.3.0 remains unreleased and not release-qualified.
+Accepted runtime source is `f50c6c5c23609287ec14e0918943af97a4f71306`, tree
+`064ef047b5ba9ad93d9fdf89d961a7c71609b1a3`. Installed x86_64 candidate
+`0.3.0-rc.source-publication-de46e04f` has SHA-256
+`507110b052a3cca0e86e54a689b6101e89ab3d4110c9f500c95e943f385e7a2b` and uses the exact matching
+Firecracker/Jailer 1.17.0 pair. The candidate was built from `de46e04f`; its 1,234 production build inputs
+are unchanged in the accepted runtime source. The accepted receipts retain that source's 81 Python payload bindings.
+
+The accepted ordinary count is **459/525** across 22 matrix receipts, with both actual host-reboot cases
+accepted separately.
+All 527 nodes were collected; collection is not execution or a full-matrix pass. Complete accepted batches are:
+
+| Batch | Accepted cases |
+|-------|----------------|
+| Standard T1 | 169 |
+| Standard T2 | 191 |
+| T3 copy | 15 |
+| T3 environment | 22 |
+| T1 cache | 25 |
+| Snapshot load | 8 |
+| Snapshot rootfs independence | 6 |
+| Volume hotplug | 10 |
+| Fresh environments | 4 |
+| GuestFS | 1 |
+| Isolated nested VMs | 8 |
+
+The three newly accepted complete batches add 13 cases, each with native exit zero, exact selected
+setup/call/teardown outcomes, strict JSON and JUnit with zero other outcomes, verified source/candidate
+bindings, typed cleanup, and exact parent/root/physical preservation. GuestFS qualifies the selected cold
+construction, reuse, incomplete repair, launch, pruning, and preservation behavior, not universal appliance
+resource requirements. Nested-VM acceptance uses the QA-only 2,400-second whole-domain deadline;
+per-operation limits and all eight assertions remain unchanged, and the original failed attempt adds no credit.
+
+The preceding four complete batches (cache, snapshot load, snapshot rootfs independence, and volume hotplug)
+add 49 cases. Each has native exit zero, exact selected setup/call/teardown outcomes, strict JSON and JUnit,
+zero failures, errors, skips, deselections, XFAIL or XPASS, verified source/candidate bindings, typed cleanup,
+and retained resource/administrator/physical-state preservation. Actual reboot PRE and POST each passed
+one case around a verified host boot change; POST proved same-ID restart, a new guest boot, retained marker
+execution, exact owned removal, two-network recovery, and persistent inventory/administrator preservation.
+POST terminal SHA-256: `fdf7a2a0b3a9000795c52d0dc398675dd239ea4dc1ef5fddbe8d3bb7ebb43eb2`.
+
+Candidate-bound normal reusable-base preparation succeeded; current-source stock runs reused that base.
+Accepted source/build gates include all six ordinary CI gates, 9,943 Go test/subtest PASS with 194 explicit
+SKIP across 71 passing packages, the complete root Jailer suite with 2,743 PASS and zero FAIL/SKIP,
+the pinned embedded-agent/release builds, and 437 focused orchestrator checks. Those focused checks add
+no system-runtime cases; the ordinary Go run is not a zero-skip qualification. Unchanged production inputs
+preserve those accepted receipts without a replay.
+
+**Remaining qualification:** 66 ordinary cases: images 44 and kernel builds 22. Newer QA-only source changes
+only those image and kernel tests while preserving installed candidate bytes; neither remaining batch has passed.
+Earlier accepted receipts remain immutable and bound to their original source. Strict joined qualification
+across mixed QA sources remains unproved; the strict evidence join does not support general receipt carry
+across those sources. Unchanged candidate bytes do not establish source compatibility.
+Joined release evidence, remote CI, and final approval remain open; aarch64
+runtime qualification is deferred for lack of suitable hardware. The original exec/cache transient failures
+remain unexplained; later complete passes are not diagnosed production fixes. Partial failed batches and
+diagnostic singletons contribute no accepted cases. The observed 1.16.2 hotplug failure remains historical;
+the current 1.17.0 ten-case suite passed. Dated receipts below retain their original source/candidate bindings
+and limitations; this checkpoint supersedes their pending status only for the accepted scope above.
+
 **Environment contract correction (2026-10-12):** all 22 cases in [env/test_env.py](env/test_env.py) passed
 inside `mvmctl-030-test` on installed cleanup candidate `3b2d6500` (`c9f83f3c`): native exit 0, strict 22/22,
 zero failures, errors, skips, deselections, XFAIL or XPASS. The tested environment file matches `da8e6a6d`,

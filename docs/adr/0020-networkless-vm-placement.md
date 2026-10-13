@@ -1,7 +1,9 @@
 # Networkless VM Placement with Isolated Namespace
 
-**Status:** Accepted for v0.3.0; partially implemented, not qualified
+**Status:** Accepted for v0.3.0; source integrated, partial installed qualification passed;
+full release qualification incomplete
 **Date:** 2026-09-26
+**Last Updated:** 2026-10-13 (release qualification status)
 **Extends:** [ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md) and [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md)
 
 ## Context

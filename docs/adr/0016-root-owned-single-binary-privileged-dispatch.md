@@ -1,8 +1,8 @@
 # Root-Owned Single-Binary Privileged Dispatch
 
-**Status:** Accepted — implementation in progress
+**Status:** Accepted; source integrated, partial installed qualification passed; full release qualification incomplete
 **Date:** 2026-08-20
-**Last Updated:** 2026-10-10 (approved newest-stable Firecracker/Jailer launch policy)
+**Last Updated:** 2026-10-13 (release qualification status)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md), and
