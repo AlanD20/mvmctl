@@ -622,10 +622,17 @@ class TestVMLogs:
 
 class TestVMLogsByIdentifier:
     def test_logs_by_ip(self, runner_vm, logs_vm):
-        """Running VM lookup by IP returns the same real serial log as its full ID."""
+        """Running VM IP lookup matches its full ID while serial output grows."""
         ip = logs_vm["ipv4"]
-        by_ip = _logs(runner_vm, ip, "--lines", "10000")
-        _assert_boot(by_ip)
-        assert logs_vm["marker"] in by_ip
-        assert by_ip == _logs(runner_vm, logs_vm["id"], "--lines", "10000")
+        inspected = _state(runner_vm, logs_vm)
+        assert inspected["networking"]["ipv4"] == ip
+        by_ip = _logs_bytes(runner_vm, ip, "--lines", "10000")
+        by_id = _logs_bytes(runner_vm, logs_vm["id"], "--lines", "10000")
+        _assert_boot(by_ip.decode("utf-8"))
+        assert logs_vm["marker"].encode("utf-8") in by_ip
+        for output in (by_ip, by_id):
+            assert len(output[:-1].split(b"\n")) < 10000
+        # The CLI prints an LF even for an EOF partial record. Remove only that
+        # framing byte so later serial appends can complete the partial record.
+        assert by_id[:-1].startswith(by_ip[:-1])
         _state(runner_vm, logs_vm)
