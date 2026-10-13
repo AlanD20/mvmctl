@@ -2150,7 +2150,7 @@ class TestNetworklessJailerLifecycle:
                 assert len(created) == 1
                 assert created[0]["status"] == "running"
                 boot_ids[vm_name] = _run_mvm(
-                    runner_vm, "exec", vm_name, "--", "cat", "/proc/sys/kernel/random/boot_id",
+                    runner_vm, "exec", vm_name, "--timeout", "30", "--", "cat", "/proc/sys/kernel/random/boot_id",
                 ).stdout.strip()
             assert boot_ids[source_name] != boot_ids[peer_name]
 
