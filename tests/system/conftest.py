@@ -445,8 +445,12 @@ def ensure_vm_deps(vm_name: str) -> None:
     version). If the binary hasn't been pulled yet, the image pull
     will fail with "No firecracker binary is installed".
     """
-    _run_mvm(vm_name, "config", "set", "settings", "guestfs_enabled",
-             "false", timeout=10, check=False)
+    result = _run_mvm(vm_name, "config", "get", "settings", "guestfs_enabled",
+                      "--json", timeout=10)
+    # Preserve an unset override when the default already selects LoopMount.
+    if _json_success_data(result.stdout, bool):
+        _run_mvm(vm_name, "config", "set", "settings", "guestfs_enabled",
+                 "false", timeout=10, check=False)
     _ensure_binary(vm_name)   # must come before _ensure_image
     _ensure_kernel(vm_name)
     _ensure_image(vm_name)

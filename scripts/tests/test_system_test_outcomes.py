@@ -45,6 +45,87 @@ def outcomes() -> ModuleType:
     return module
 
 
+@pytest.fixture
+def vm_dependency_assets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[ModuleType, list[str]]:
+    from tests.system import conftest
+
+    events: list[str] = []
+    for helper in ("_ensure_binary", "_ensure_kernel", "_ensure_image"):
+        monkeypatch.setattr(
+            conftest, helper,
+            lambda _runner, name=helper: events.append(name),
+        )
+    return conftest, events
+
+
+@pytest.mark.parametrize("override", [None, False, True], ids=["unset", "false", "true"])
+def test_ensure_vm_deps_preserves_false_intent_and_disables_true_before_assets(
+    vm_dependency_assets: tuple[ModuleType, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    override: bool | None,
+) -> None:
+    conftest, events = vm_dependency_assets
+    setting = {"default": False, "override": override}
+    baseline = setting.copy()
+
+    def native(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert cmd[0] == "/usr/local/bin/mvm"
+        if cmd[1:] == ["config", "get", "settings", "guestfs_enabled", "--json"]:
+            events.append("config:get")
+            effective = setting["default"] if setting["override"] is None else setting["override"]
+            output = json.dumps({
+                "schema_version": 1, "status": "success", "data": effective, "error": None,
+            })
+        else:
+            assert cmd[1:] == ["config", "set", "settings", "guestfs_enabled", "false"]
+            events.append("config:set")
+            setting["override"] = False
+            output = ""
+        return subprocess.CompletedProcess(cmd, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(conftest.subprocess, "run", native)
+
+    conftest.ensure_vm_deps("approved-qa-runner")
+
+    expected = ["config:get"]
+    if override is True:
+        expected.append("config:set")
+        assert setting == {**baseline, "override": False}
+    else:
+        assert setting == baseline
+    assert events == expected + ["_ensure_binary", "_ensure_kernel", "_ensure_image"]
+
+
+@pytest.mark.parametrize("output", [
+    "{",
+    *(json.dumps({"schema_version": 1, "status": "success", "data": data, "error": None})
+      for data in ("false", 0, None)),
+], ids=["malformed-json", "string", "integer", "null"])
+def test_ensure_vm_deps_rejects_invalid_config_before_effects(
+    vm_dependency_assets: tuple[ModuleType, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    output: str,
+) -> None:
+    conftest, events = vm_dependency_assets
+
+    def native(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd != [
+            "/usr/local/bin/mvm", "config", "get", "settings", "guestfs_enabled", "--json",
+        ]:
+            raise RuntimeError(f"Unexpected command after invalid config: {cmd}")
+        events.append("config:get")
+        return subprocess.CompletedProcess(cmd, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(conftest.subprocess, "run", native)
+
+    with pytest.raises((json.JSONDecodeError, AssertionError)):
+        conftest.ensure_vm_deps("approved-qa-runner")
+
+    assert events == ["config:get"]
+
+
 def _run_outcome_case(
     tmp_path: Path,
     source: str,
