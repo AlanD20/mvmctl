@@ -2619,6 +2619,46 @@ def test_remote_domain_destroys_only_a_created_runner(
     assert destroyed == (["fixed-runner"] if created else [])
 
 
+def test_tier2_completion_wait_covers_provisioning_pytest_and_cleanup(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle_seconds = 4200 + 960 + 180
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    real_wait = concurrent.futures.wait
+    observed_timeouts: list[int] = []
+
+    def runner(domain: str, _files: list[str], _version: str, _push: bool) -> dict[str, object]:
+        worker_started.set()
+        assert release_worker.wait(timeout=2)
+        return {"domain": domain, "tier": 2, "passed": True, "output": "lifecycle cleanup complete"}
+
+    def lifecycle_wait(futures, *, timeout: int, return_when: str):
+        observed_timeouts.append(timeout)
+        assert return_when == concurrent.futures.FIRST_COMPLETED
+        assert worker_started.wait(timeout=2)
+        release_worker.set()
+        if timeout < lifecycle_seconds:
+            return set(), set(futures)
+        return real_wait(futures, timeout=2, return_when=return_when)
+
+    monkeypatch.setattr(concurrent.futures, "wait", lifecycle_wait)
+
+    results = orchestrator.run_domains(
+        {"vm_lifecycle": ["tests/system/vm/test_vm_lifecycle.py"]},
+        2,
+        runner,
+        1,
+        "0.3.0",
+    )
+
+    assert observed_timeouts == [6000]
+    assert results == [
+        {"domain": "vm_lifecycle", "tier": 2, "passed": True, "output": "lifecycle cleanup complete"}
+    ]
+
+
 def test_timed_out_parallel_worker_is_joined_and_late_failures_are_preserved(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

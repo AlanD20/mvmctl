@@ -3218,8 +3218,9 @@ def run_domains(
 
     log(f"Tier {tier}: running {len(domains)} domain(s) with {workers} worker(s)...")
     results: list[dict[str, Any]] = []
-    # Overall timeout per domain: 15 minutes.
-    domain_timeout = 900
+    # Completion gap includes provisioning, pytest, reporting and cleanup.
+    # T2: 4200s provision/setup + 960s pytest + 840s push/reports/cleanup slack.
+    domain_timeout = 6000 if tier == 2 else 900
     timed_out: dict[Future[dict[str, Any]], str] = {}
 
     pool = ThreadPoolExecutor(max_workers=workers)
