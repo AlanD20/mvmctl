@@ -476,6 +476,13 @@ python3 scripts/run-system-tests.py --tier 2,1
 5. Print summary: X passed, Y failed, Z total
 ```
 
+Parallel scheduling waits up to 900 seconds for the next completed T1 domain, or 6,000 seconds for T2.
+The T2 allowance budgets 4,200 seconds for provisioning/setup, 960 seconds for the remote pytest caller,
+and 840 seconds for pushes, reporting and cleanup. Each wait restarts after a completion: this is a
+completion-gap limit, not an absolute deadline for each worker or the whole batch. On expiry, queued
+work is canceled and active workers are joined before continuing; affected domains remain failed even
+if a worker later returns success. Joining active workers can extend the elapsed time beyond the gap limit.
+
 The pytest hook is inactive outside orchestrated runs. When enabled, it records selected items separately from collection
 errors and deselections and classifies setup/teardown failures as errors. T1/T2 retrieve at most 4,097 bytes from the
 fixed per-runner report path before checked deletion. T3 uses a private temporary directory and no-follow bounded local

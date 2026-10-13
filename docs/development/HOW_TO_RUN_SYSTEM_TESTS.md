@@ -509,6 +509,16 @@ python3 scripts/run-system-tests.py cli --push
 python3 scripts/run-system-tests.py --host-direct --all --workers 2
 ```
 
+The scheduler allows 6,000 seconds without a completed T2 domain (900 seconds for T1), including
+provisioning, tests, reporting and cleanup. The stock T2 remote pytest caller still has a 960-second
+limit. These are separate limits: the scheduler waits again after each completion, so its completion
+gap does not bound the total batch duration. On expiry it cancels queued work and joins active workers;
+affected domains fail even if they finish successfully during that join.
+
+Allow for provisioning, pytest, report retrieval and worker cleanup when setting an external task or
+transport deadline. The scheduler allowance does not extend individual command or external deadlines,
+and joining active workers can outlast the completion-gap limit.
+
 ### 4.6 Orchestrator Flags Reference
 
 | Flag | Default | Description |
