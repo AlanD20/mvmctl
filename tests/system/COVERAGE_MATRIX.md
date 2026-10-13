@@ -18,15 +18,19 @@ removed, or when test coverage changes.
 ## v0.3.0 release-security qualification overlay
 
 **Current qualification checkpoint (2026-10-13):** v0.3.0 remains unreleased and not release-qualified.
-Accepted runtime source is `f50c6c5c23609287ec14e0918943af97a4f71306`, tree
+The original 459 ordinary cases and both reboot cases bind source
+`f50c6c5c23609287ec14e0918943af97a4f71306`, tree
 `064ef047b5ba9ad93d9fdf89d961a7c71609b1a3`. Installed x86_64 candidate
 `0.3.0-rc.source-publication-de46e04f` has SHA-256
 `507110b052a3cca0e86e54a689b6101e89ab3d4110c9f500c95e943f385e7a2b` and uses the exact matching
 Firecracker/Jailer 1.17.0 pair. The candidate was built from `de46e04f`; its 1,234 production build inputs
-are unchanged in the accepted runtime source. The accepted receipts retain that source's 81 Python payload bindings.
+are unchanged in the original accepted runtime source. Those receipts retain that source's 81 Python payload bindings.
 
-The accepted ordinary count is **459/525** across 22 matrix receipts, with both actual host-reboot cases
-accepted separately.
+The complete 44-case image suite passed on newer QA-only source
+`f905f3eada9e98a3dd717ae3b514a90d9d14d722`, tree `03d781fad13c85f1b9a68954d3ff7d69694458d1`,
+with the same installed candidate. The aggregate accepted ordinary count is **503/525** (459 original-source
+cases plus 44 newer-source image cases); both actual reboot cases remain original-source bound.
+This aggregate is not a strict mixed-source evidence join or a full release pass.
 All 527 nodes were collected; collection is not execution or a full-matrix pass. Complete accepted batches are:
 
 | Batch | Accepted cases |
@@ -42,8 +46,24 @@ All 527 nodes were collected; collection is not execution or a full-matrix pass.
 | Fresh environments | 4 |
 | GuestFS | 1 |
 | Isolated nested VMs | 8 |
+| T1 images | 44 |
 
-The three newly accepted complete batches add 13 cases, each with native exit zero, exact selected
+**Complete image checkpoint:** all 44 cases and all 132 setup/call/teardown outcomes passed, with native
+exit zero, strict JSON/JUnit and zero failures, errors, skips, deselections, XFAIL or XPASS; pytest took
+992.912 seconds. Source/candidate proof seals, typed runner/report cleanup, and original public/root/physical
+preservation were independently checked. Matrix terminal SHA-256:
+`911c55d7807ea313d76054bea23cb5dbe0f294e7cd5f0955db2373bdaa1a4579`.
+This actual journey used a 16 GiB runner, a 2,400-second remote pytest limit, and a 3,000-second completion
+gap with the retained original runner. The earlier cutoff remains failed and contributes no partial credit.
+
+The later public runner update gives images the same 16 GiB disk and 2,400-second remote pytest limit,
+with a 6,000-second completion gap. Its eight focused behavioral checks passed inside the named QA VM
+in 0.42 seconds, native exit zero. The complete orchestrator unit module also passed: 441 tests in 14.04 seconds,
+JUnit zero failures, errors or skips, native exit zero, with 118 marker warnings. These checks used a clean
+`f905f3ea` checkout plus the exact runner/unit-file overlay; they do not qualify a clean release source or
+a full stock image journey. The original 44-case receipt retains its tested runner binding.
+
+The earlier three complete batches add 13 cases, each with native exit zero, exact selected
 setup/call/teardown outcomes, strict JSON and JUnit with zero other outcomes, verified source/candidate
 bindings, typed cleanup, and exact parent/root/physical preservation. GuestFS qualifies the selected cold
 construction, reuse, incomplete repair, launch, pruning, and preservation behavior, not universal appliance
@@ -65,8 +85,9 @@ the pinned embedded-agent/release builds, and 437 focused orchestrator checks. T
 no system-runtime cases; the ordinary Go run is not a zero-skip qualification. Unchanged production inputs
 preserve those accepted receipts without a replay.
 
-**Remaining qualification:** 66 ordinary cases: images 44 and kernel builds 22. Newer QA-only source changes
-only those image and kernel tests while preserving installed candidate bytes; neither remaining batch has passed.
+**Remaining qualification:** 22 kernel-build cases. The latest attempt failed on admission of a selected
+kernel already bound to a fully retired cache identity; no accepted complete batch or verified fixture correction
+is recorded. Newer QA-only source changes image and kernel tests while preserving installed candidate bytes.
 Earlier accepted receipts remain immutable and bound to their original source. Strict joined qualification
 across mixed QA sources remains unproved; the strict evidence join does not support general receipt carry
 across those sources. Unchanged candidate bytes do not establish source compatibility.

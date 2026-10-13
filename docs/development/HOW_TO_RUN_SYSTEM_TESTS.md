@@ -76,7 +76,7 @@ nor a kernel-producer pass qualifies traffic isolation, reusable-base provisioni
 Retain each gate's exact source/artifact binding and cleanup proof.
 
 The stock reusable-base builder uses 3 GiB RAM and a 12 GiB logical disk. T1 runners use 1 GiB RAM and
-a 9 GiB logical disk, except the `cache` domain, which uses an 11 GiB logical disk. T2 provisioning uses
+a 9 GiB logical disk, except `images` (16 GiB) and `cache` (11 GiB). T2 provisioning uses
 4 GiB RAM and a 9 GiB logical disk. The shared mirror volume is another 6 GiB logical disk, with physical use determined
 by its cached contents. Check current physical storage, concurrent allocations and preserved state before
 provisioning: logical sizes and sparse files do not establish available storage. The stock preparation path
@@ -509,9 +509,10 @@ python3 scripts/run-system-tests.py cli --push
 python3 scripts/run-system-tests.py --host-direct --all --workers 2
 ```
 
-The scheduler allows 6,000 seconds without a completed T2 domain (900 seconds for T1), including
-provisioning, tests, reporting and cleanup. The stock T2 remote pytest caller still has a 960-second
-limit. These are separate limits: the scheduler waits again after each completion, so its completion
+The scheduler allows 6,000 seconds without a completed domain for T2 or a T1 batch containing `images`;
+other T1 batches allow 900 seconds. This gap includes provisioning, tests, reporting and cleanup. The remote
+pytest caller allows 2,400 seconds for T1 `images`, 660 seconds for other T1 domains, and 960 seconds for T2.
+These are separate limits: the scheduler waits again after each completion, so its completion
 gap does not bound the total batch duration. On expiry it cancels queued work and joins active workers;
 affected domains fail even if they finish successfully during that join.
 
