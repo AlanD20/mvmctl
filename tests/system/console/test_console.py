@@ -1,7 +1,7 @@
 """Root-observed console journey with receipted, checked VM/network cleanup.
 
-Requires a disposable Tier 2 runner with fresh root authority state, present
-nondefault Alpine 3.23, a present default kernel and the trusted 1.17.0 pair.
+Requires a disposable Tier 2 runner with fresh root authority state, a present
+Alpine 3.23 image, a present default kernel and the trusted 1.17.0 pair.
 No asset pulls, default changes, or old-journal adoption occur here.
 """
 
@@ -82,7 +82,6 @@ def _assets(baseline: dict[str, Any]) -> dict[str, str]:
         item
         for item in baseline["image"]
         if item["is_present"]
-        and not item["is_default"]
         and (item["type"], item["version"]) == ("alpine", "3.23")
     ]
     assert len(images) == 1, images
