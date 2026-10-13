@@ -3001,7 +3001,7 @@ def run_tier1_domain(
     binding: ImportedRunnerKernelBinding | None = None,
     evidence: MatrixEvidence | None = None,
 ) -> dict[str, Any]:
-    """Full lifecycle for one Tier 1 domain. Max 5 minutes per domain."""
+    """Full lifecycle for one Tier 1 domain."""
     vm_name = _unique_name(f"t1-{domain}")
     result: dict[str, Any] = {
         "domain": domain,
@@ -3021,7 +3021,11 @@ def run_tier1_domain(
             vm_name,
             mvm_version,
             mark_created,
-            **({"disk_size": "11G"} if domain == "cache" else {}),
+            **(
+                {"disk_size": "16G"} if domain == "images"
+                else {"disk_size": "11G"} if domain == "cache"
+                else {}
+            ),
             **({"binding": binding} if binding is not None else {}),
         )
         if push:
@@ -3044,7 +3048,7 @@ def run_tier1_domain(
         pytest_result, validation_failure = _run_remote_pytest(
             vm_name,
             test_files,
-            timeout=660,
+            timeout=2400 if domain == "images" else 660,
             **({"evidence": capture} if capture is not None else {}),
         )
         result["passed"] = validation_failure is None
@@ -3220,7 +3224,10 @@ def run_domains(
     results: list[dict[str, Any]] = []
     # Completion gap includes provisioning, pytest, reporting and cleanup.
     # T2: 4200s provision/setup + 960s pytest + 840s push/reports/cleanup slack.
+    # T1 images: 1800s create + 2400s pytest + 1800s setup/push/reports/cleanup slack.
     domain_timeout = 6000 if tier == 2 else 900
+    if tier == 1 and "images" in domains:
+        domain_timeout = 6000
     timed_out: dict[Future[dict[str, Any]], str] = {}
 
     pool = ThreadPoolExecutor(max_workers=workers)

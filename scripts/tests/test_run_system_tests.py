@@ -2217,12 +2217,14 @@ def test_tier3_domain_preserves_pytest_output_when_report_cleanup_fails(
 
 
 @pytest.mark.parametrize(
-    ("runner_name", "provision_name", "tier", "pytest_timeout"),
+    ("runner_name", "provision_name", "tier", "domain", "pytest_timeout", "disk_size"),
     [
-        ("run_tier1_domain", "provision_t1", 1, 660),
-        ("run_tier2_domain", "provision_t2", 2, 960),
+        ("run_tier1_domain", "provision_t1", 1, "cli", 660, None),
+        ("run_tier1_domain", "provision_t1", 1, "cache", 660, "11G"),
+        ("run_tier1_domain", "provision_t1", 1, "images", 2400, "16G"),
+        ("run_tier2_domain", "provision_t2", 2, "cli", 960, None),
     ],
-    ids=["tier1", "tier2"],
+    ids=["tier1", "tier1-cache", "tier1-images", "tier2"],
 )
 def test_remote_domains_require_retrieved_complete_pytest_outcomes(
     orchestrator: ModuleType,
@@ -2230,21 +2232,23 @@ def test_remote_domains_require_retrieved_complete_pytest_outcomes(
     runner_name: str,
     provision_name: str,
     tier: int,
+    domain: str,
     pytest_timeout: int,
+    disk_size: str | None,
 ) -> None:
-    vm_name = f"t{tier}-cli-fixed"
+    vm_name = f"t{tier}-{domain}-fixed"
     monkeypatch.setenv("MVM_TEST_VM", "unrelated-runner")
     monkeypatch.setenv("MVM_TEST_QUALIFICATION_HOST", "unrelated-runner")
     events: list[str] = []
     calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
     monkeypatch.setattr(orchestrator, "_unique_name", lambda _prefix: vm_name)
-    monkeypatch.setattr(
-        orchestrator,
-        provision_name,
-        lambda provisioned, version, on_created: (
-            on_created(), events.append(f"provision:{provisioned}:{version}")
-        ),
-    )
+
+    def provision(provisioned: str, version: str, on_created: Callable[[], None], **kwargs: object) -> None:
+        assert kwargs == ({"disk_size": disk_size} if disk_size is not None else {})
+        on_created()
+        events.append(f"provision:{provisioned}:{version}")
+
+    monkeypatch.setattr(orchestrator, provision_name, provision)
     monkeypatch.setattr(
         orchestrator,
         "destroy_vm",
@@ -2279,13 +2283,13 @@ def test_remote_domains_require_retrieved_complete_pytest_outcomes(
 
     runner = getattr(orchestrator, runner_name)
     result = runner(
-        "cli",
-        ["tests/system/cli/test_cli.py"],
+        domain,
+        [f"tests/system/{domain}/test_{domain}.py"],
         "0.3.0",
     )
 
     assert result == {
-        "domain": "cli",
+        "domain": domain,
         "tier": tier,
         "passed": True,
         "output": "pytest stdout\npytest stderr\n",
@@ -2297,7 +2301,7 @@ def test_remote_domains_require_retrieved_complete_pytest_outcomes(
     assert f"MVM_TEST_VM={vm_name}" in pytest_command
     assert f"MVM_TEST_QUALIFICATION_HOST={vm_name}" in pytest_command
     assert f"MVM_PYTEST_OUTCOME_REPORT={report_path}" in pytest_args[-1]
-    assert "/tests/system/cli/test_cli.py" in pytest_args[-1]
+    assert f"/tests/system/{domain}/test_{domain}.py" in pytest_args[-1]
     assert pytest_kwargs["timeout"] == pytest_timeout
     retrieve_args, retrieve_kwargs = calls[1]
     assert retrieve_args[-1] == f"head -c 4097 -- {report_path}"
@@ -2619,11 +2623,19 @@ def test_remote_domain_destroys_only_a_created_runner(
     assert destroyed == (["fixed-runner"] if created else [])
 
 
-def test_tier2_completion_wait_covers_provisioning_pytest_and_cleanup(
+@pytest.mark.parametrize(
+    ("tier", "domain", "lifecycle_seconds", "completion_timeout"),
+    [(1, "images", 1800 + 2400 + 180, 6000), (2, "vm_lifecycle", 4200 + 960 + 180, 6000)],
+    ids=["tier1-images", "tier2"],
+)
+def test_completion_wait_covers_provisioning_pytest_and_cleanup(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
+    tier: int,
+    domain: str,
+    lifecycle_seconds: int,
+    completion_timeout: int,
 ) -> None:
-    lifecycle_seconds = 4200 + 960 + 180
     worker_started = threading.Event()
     release_worker = threading.Event()
     real_wait = concurrent.futures.wait
@@ -2632,7 +2644,7 @@ def test_tier2_completion_wait_covers_provisioning_pytest_and_cleanup(
     def runner(domain: str, _files: list[str], _version: str, _push: bool) -> dict[str, object]:
         worker_started.set()
         assert release_worker.wait(timeout=2)
-        return {"domain": domain, "tier": 2, "passed": True, "output": "lifecycle cleanup complete"}
+        return {"domain": domain, "tier": tier, "passed": True, "output": "lifecycle cleanup complete"}
 
     def lifecycle_wait(futures, *, timeout: int, return_when: str):
         observed_timeouts.append(timeout)
@@ -2646,22 +2658,29 @@ def test_tier2_completion_wait_covers_provisioning_pytest_and_cleanup(
     monkeypatch.setattr(concurrent.futures, "wait", lifecycle_wait)
 
     results = orchestrator.run_domains(
-        {"vm_lifecycle": ["tests/system/vm/test_vm_lifecycle.py"]},
-        2,
+        {domain: [f"{domain}.py"]},
+        tier,
         runner,
         1,
         "0.3.0",
     )
 
-    assert observed_timeouts == [6000]
+    assert observed_timeouts == [completion_timeout]
     assert results == [
-        {"domain": "vm_lifecycle", "tier": 2, "passed": True, "output": "lifecycle cleanup complete"}
+        {"domain": domain, "tier": tier, "passed": True, "output": "lifecycle cleanup complete"}
     ]
 
 
+@pytest.mark.parametrize(
+    ("slow_domain", "completion_timeout"),
+    [("slow", 900), ("images", 6000)],
+    ids=["ordinary-tier1", "tier1-images"],
+)
 def test_timed_out_parallel_worker_is_joined_and_late_failures_are_preserved(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
+    slow_domain: str,
+    completion_timeout: int,
 ) -> None:
     worker_started = threading.Event()
     release_worker = threading.Event()
@@ -2695,7 +2714,7 @@ def test_timed_out_parallel_worker_is_joined_and_late_failures_are_preserved(
         timeout: int,
         return_when: str,
     ) -> tuple[set[concurrent.futures.Future[dict[str, object]]], set[concurrent.futures.Future[dict[str, object]]]]:
-        assert timeout == 900
+        assert timeout == completion_timeout
         assert return_when == concurrent.futures.FIRST_COMPLETED
         assert worker_started.wait(timeout=2)
         return set(), set(futures)
@@ -2710,7 +2729,7 @@ def test_timed_out_parallel_worker_is_joined_and_late_failures_are_preserved(
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as caller_pool:
         invocation = caller_pool.submit(
             orchestrator.run_domains,
-            {"slow": ["slow.py"], "queued": ["queued.py"]},
+            {slow_domain: [f"{slow_domain}.py"], "queued": ["queued.py"]},
             1,
             runner,
             1,
@@ -2722,15 +2741,15 @@ def test_timed_out_parallel_worker_is_joined_and_late_failures_are_preserved(
         results = invocation.result(timeout=2)
 
     assert worker_finished.is_set() is True
-    assert started_domains == ["slow"]
+    assert started_domains == [slow_domain]
     by_domain = {result["domain"]: result for result in results}
-    assert set(by_domain) == {"queued", "slow"}
-    assert by_domain["slow"]["passed"] is False
-    assert "Domain timed out after 900s" in by_domain["slow"]["output"]
-    assert "late primary pytest failure" in by_domain["slow"]["output"]
-    assert "runner VM destruction failed: late cleanup refusal" in by_domain["slow"]["output"]
+    assert set(by_domain) == {"queued", slow_domain}
+    assert by_domain[slow_domain]["passed"] is False
+    assert f"Domain timed out after {completion_timeout}s" in by_domain[slow_domain]["output"]
+    assert "late primary pytest failure" in by_domain[slow_domain]["output"]
+    assert "runner VM destruction failed: late cleanup refusal" in by_domain[slow_domain]["output"]
     assert by_domain["queued"]["passed"] is False
-    assert "Domain timed out after 900s" in by_domain["queued"]["output"]
+    assert f"Domain timed out after {completion_timeout}s" in by_domain["queued"]["output"]
     assert "canceled before it started" in by_domain["queued"]["output"]
 
 
