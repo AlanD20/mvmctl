@@ -85,9 +85,17 @@ the pinned embedded-agent/release builds, and 437 focused orchestrator checks. T
 no system-runtime cases; the ordinary Go run is not a zero-skip qualification. Unchanged production inputs
 preserve those accepted receipts without a replay.
 
-**Remaining qualification:** 22 kernel-build cases. The latest attempt failed on admission of a selected
-kernel already bound to a fully retired cache identity; no accepted complete batch or verified fixture correction
-is recorded. Newer QA-only source changes image and kernel tests while preserving installed candidate bytes.
+**Remaining qualification:** 22 kernel-build cases. The latest complete invocation passed all 22 test bodies
+but ended with one teardown error and native exit one, so the batch is failed and adds no accepted cases.
+The shared dependency fixture changed the GuestFS override from unset to explicit false while its effective
+default remained false, violating exact configuration preservation. The original unset-override regression
+failed before correction; the fixed fixture preserves the unset override when GuestFS is already effectively
+disabled. All seven focused checks and the complete 59-test affected Python owner module passed in 18.03
+seconds, native exit zero and JUnit zero failures, errors or skips. These checks used an exact fixture/unit-file
+overlay over `f905f3ea`; they do not qualify a clean full release source or the still-failed kernel22 runtime batch.
+Immutable kernel admission after terminal cache retirement remains a separate unresolved contract
+decision; the fresh-operator run did not change that retained authority. Newer QA-only source changes image
+and kernel tests while preserving installed candidate bytes.
 Earlier accepted receipts remain immutable and bound to their original source. Strict joined qualification
 across mixed QA sources remains unproved; the strict evidence join does not support general receipt carry
 across those sources. Unchanged candidate bytes do not establish source compatibility.

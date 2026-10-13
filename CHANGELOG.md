@@ -212,7 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unproved, and general receipt carry across those sources is unsupported. The later public image-runner budget
   update passed eight focused behavioral checks and the complete 441-test orchestrator unit module on an exact
   two-file overlay; clean release-source qualification and a full stock-runner journey remain unproved.
-  The kernel fixture correction remains unverified. See
+  The latest kernel batch passed all 22 test bodies but failed with one teardown preservation error after the
+  shared dependency fixture changed an unset GuestFS override to explicit false; it adds no accepted cases. See
   [runner budgets](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#45-limit-parallel-workers).
 - Retained the observed Firecracker 1.16.2 live PCI detach/reattach failure: the disk did not reappear after BAR relocation.
   The current matching Firecracker/Jailer 1.17.0 pair passed the complete ten-case volume-hotplug suite,
