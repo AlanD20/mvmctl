@@ -606,7 +606,7 @@ finally:
 
 @dataclass(frozen=True)
 class _VMImportSource:
-    """Pin list-observed process identity and the explicitly selected managed cache."""
+    """Pin list-observed process identity and the CLI-observed managed cache."""
 
     id: str
     pid: int
@@ -617,14 +617,6 @@ class _VMImportSource:
     def capture(cls, runner_vm: str, identifier: str, status: str) -> _VMImportSource:
         print("VM import phase=source_state_check_enter", flush=True)
         assert re.fullmatch(r"[0-9a-f]{32}", identifier)
-        cache_selection = os.environ["MVM_CACHE_DIR"]
-        cache = Path(cache_selection)
-        assert (
-            cache.is_absolute()
-            and str(cache) == cache_selection
-            and cache.resolve(strict=True) == cache
-            and cache.is_dir()
-        ), "import fault requires an explicit canonical MVM_CACHE_DIR"
         listed = _json_success_data(
             _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
         )
@@ -633,12 +625,23 @@ class _VMImportSource:
         row = matches[0]
         for key in ("pid", "process_start_time"):
             assert type(row[key]) is int and row[key] > 0
-        observed = _json_success_data(
+        inspected = _json_success_data(
             _run_mvm(runner_vm, "vm", "inspect", identifier, "--json").stdout,
             dict,
-        )["vm"]
+        )
+        observed = inspected["vm"]
         for key in ("id", "pid", "status"):
             assert observed[key] == row[key]
+        rootfs_selection = inspected["filesystem"]["rootfs_path"]
+        rootfs = Path(rootfs_selection)
+        assert rootfs.is_absolute() and str(rootfs) == rootfs_selection
+        cache = rootfs.parent.parent.parent
+        assert (
+            rootfs == cache / "vms" / identifier / "rootfs.img"
+            and row["rootfs_path"] == rootfs_selection
+            and cache.resolve(strict=True) == cache
+            and cache.is_dir()
+        ), "import fault requires matching CLI-observed canonical managed cache"
         print("VM import phase=source_state_check_success", flush=True)
         return cls(identifier, row["pid"], row["process_start_time"], cache)
 
@@ -931,9 +934,10 @@ def _image_state(items):
 
 
 def _restore_default(runner_vm, original):
-    # The CLI has no clear-default operation; require a prepared default before changing it.
-    assert len(original) == 1, "runner prerequisite: one original image default"
-    _run_mvm(runner_vm, "image", "default", original[0])
+    # An empty selection is restored by checked removal of the case-owned selected image.
+    assert len(original) <= 1, "multiple original image defaults"
+    if original:
+        _run_mvm(runner_vm, "image", "default", original[0])
     assert _defaults(runner_vm) == original
 
 
@@ -1244,13 +1248,19 @@ class TestImageList:
 
 class TestImageDefaults:
     @pytest.mark.destructive
-    def test_image_set_default(self, runner_vm):
+    def test_image_set_default(self, runner_vm, image_workspace):
         original = _defaults(runner_vm)
-        assert len(original) == 1
+        assert len(original) <= 1
         try:
-            target = _alpine(runner_vm)["id"]
-            _run_mvm(runner_vm, "image", "default", target)
-            assert _defaults(runner_vm) == [target]
+            with _imported(
+                runner_vm,
+                _ext4(runner_vm, image_workspace),
+                "--format",
+                "raw",
+                "--skip-optimization",
+            ) as image:
+                _run_mvm(runner_vm, "image", "default", image["id"])
+                assert _defaults(runner_vm) == [image["id"]]
         finally:
             _restore_default(runner_vm, original)
 
@@ -1362,9 +1372,18 @@ class TestImageImport:
 
 class TestImagePullAdvanced:
     @pytest.mark.destructive
-    def test_pull_cached_image_with_default_sets_default(self, runner_vm):
+    def test_pull_cached_image_with_default_sets_default(
+        self, runner_vm, isolated_pull_cache
+    ):
+        assert _images(runner_vm) == []
         original = _defaults(runner_vm)
-        assert len(original) == 1
+        owned = _json_success_data(
+            _run_mvm(
+                runner_vm, "image", "pull", "alpine:3.23", "--json", timeout=300
+            ).stdout,
+            dict,
+        )
+        owned["_backing_identity"] = _backing_identity(owned["path"])
         try:
             image = _json_success_data(
                 _run_mvm(
@@ -1378,9 +1397,11 @@ class TestImagePullAdvanced:
                 ).stdout,
                 dict,
             )
-            assert image["id"] == _alpine(runner_vm)["id"]
+            assert image["id"] == owned["id"] == _alpine(runner_vm)["id"]
+            assert _backing_identity(image["path"]) == owned["_backing_identity"]
             assert _defaults(runner_vm) == [image["id"]]
         finally:
+            _remove_image(runner_vm, owned)
             _restore_default(runner_vm, original)
 
     @pytest.mark.parametrize(
@@ -1648,7 +1669,7 @@ class TestImageImportSetDefault:
     @pytest.mark.destructive
     def test_image_import_with_set_default(self, runner_vm, image_workspace):
         original = _defaults(runner_vm)
-        assert len(original) == 1
+        assert len(original) <= 1
         source = _ext4(runner_vm, image_workspace)
         try:
             with _imported(
@@ -2236,9 +2257,9 @@ class TestImageDependencyDeletion:
     def test_delete_default_image_promotes_other_or_clears(
         self, runner_vm, image_workspace
     ):
-        """Remove a formerly-default owned image after explicitly selecting its replacement."""
+        """Removing an owned default clears selection or preserves its selected replacement."""
         original = _defaults(runner_vm)
-        assert len(original) == 1
+        assert len(original) <= 1
         with _imported(
             runner_vm,
             _ext4(runner_vm, image_workspace),
@@ -2249,7 +2270,8 @@ class TestImageDependencyDeletion:
             try:
                 _run_mvm(runner_vm, "image", "default", image["id"])
                 assert _defaults(runner_vm) == [image["id"]]
-                _restore_default(runner_vm, original)
+                if original:
+                    _restore_default(runner_vm, original)
                 _remove_image(runner_vm, image)
                 assert _defaults(runner_vm) == original
             finally:
