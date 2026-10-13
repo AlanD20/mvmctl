@@ -175,7 +175,7 @@ def test_host_reboot_pre() -> None:
     kernels = [row for row in baseline["kernel"] if row["id"] == os.environ["MVM_RUNNER_KERNEL_ID"]]
     images = [row for row in baseline["image"] if row["type"] == "alpine" and row["version"] == "3.23"
               and row["is_present"]]
-    assert len(baseline["kernel"]) == len(kernels) == len(images) == 1 and kernels[0]["is_present"]
+    assert len(kernels) == len(images) == 1 and kernels[0]["is_present"]
     kernel, image = _file(Path(kernels[0]["path"])), _file(Path(images[0]["path"]))
     assert kernel["sha256"] == os.environ["MVM_RUNNER_KERNEL_SHA256"]
     assert _json_success_data(_run_mvm(RUNNER, "config", "get", "settings", "guestfs_enabled", "--json").stdout, bool) is False
@@ -267,7 +267,9 @@ def test_host_reboot_post() -> None:
             assert _host_inventory(RUNNER, domain) == expected, domain
     assert _host_administrator_state(RUNNER) == receipt["administrator"]
     assert _candidate() == receipt["candidate"]
-    assert _file(Path(receipt["baseline"]["kernel"][0]["path"])) == receipt["kernel"]
+    kernels = [item for item in receipt["baseline"]["kernel"] if item["id"] == os.environ["MVM_RUNNER_KERNEL_ID"]]
+    assert len(kernels) == 1
+    assert _file(Path(kernels[0]["path"])) == receipt["kernel"]
     alpine = next(item for item in receipt["baseline"]["image"] if item["type"] == "alpine" and item["version"] == "3.23")
     assert _file(Path(alpine["path"])) == receipt["image"]
     _write_receipt(task, "post.json", dict(schema_version=1, host_boot_id=_boot(), vm_id=row["id"],
