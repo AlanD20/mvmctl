@@ -67,17 +67,23 @@ class _KernelImportOwner:
         defaults = [item for item in self.baseline["kernel"].values() if item["is_default"]]
         assert len(defaults) == 1, defaults
         self.default_id = defaults[0]["id"]
-        assert defaults[0]["version"].removeprefix("v") == "7.0.11" and defaults[0]["is_present"], defaults
+        assert defaults[0]["is_present"], defaults
+        sources = [item for item in self.baseline["kernel"].values()
+                   if item["type"] == "firecracker"
+                   and item["version"].removeprefix("v") == "6.1.155"
+                   and item["is_present"]]
+        assert len(sources) == 1, sources
+        source = sources[0]
         for kind in ("firecracker", "jailer"):
             selected = [item for item in self.baseline["bin"].values()
                         if item["type"] == kind and item["is_default"]]
             assert len(selected) == 1, selected
             assert selected[0]["version"] == "1.17.0" and selected[0]["is_present"], selected
-        self.source_path = self.kernel_path(self.default_id)
+        self.source_path = self.kernel_path(source["id"])
         self.source_identity = _file_identity(self.source_path)
         self.source_digest = _digest(self.source_path)
-        self.source_arch = defaults[0]["arch"]
-        assert self.source_arch, defaults
+        self.source_arch = source["arch"]
+        assert self.source_arch, source
         # KernelID excludes type/name: even an absent record of another type can collide.
         self.import_id = hashlib.sha256(
             f"{self.source_digest}:6.1:{self.source_arch}".encode(),

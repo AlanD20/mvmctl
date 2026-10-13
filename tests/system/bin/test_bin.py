@@ -383,7 +383,7 @@ try:
     root = open_directory(None, "/", False)
     var = open_directory(root, "var", False)
     lib = open_directory(var, "lib", False)
-    state = open_directory(lib, "mvmctl")
+    state = open_directory(lib, "mvmctl", False)
     binaries = open_directory(state, "binaries")
     architecture = open_directory(binaries, "x86_64")
     original = open_pair("1.17.0")
