@@ -17,7 +17,7 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Current qualification checkpoint (2026-10-13):** v0.3.0 remains unreleased and not release-qualified.
+**Current qualification checkpoint (2026-10-14):** v0.3.0 remains unreleased and not release-qualified.
 The original 459 ordinary cases and both reboot cases bind source
 `f50c6c5c23609287ec14e0918943af97a4f71306`, tree
 `064ef047b5ba9ad93d9fdf89d961a7c71609b1a3`. Installed x86_64 candidate
@@ -28,8 +28,10 @@ are unchanged in the original accepted runtime source. Those receipts retain tha
 
 The complete 44-case image suite passed on newer QA-only source
 `f905f3eada9e98a3dd717ae3b514a90d9d14d722`, tree `03d781fad13c85f1b9a68954d3ff7d69694458d1`,
-with the same installed candidate. The aggregate accepted ordinary count is **503/525** (459 original-source
-cases plus 44 newer-source image cases); both actual reboot cases remain original-source bound.
+with the same installed candidate. All 22 kernel-build cases subsequently passed on receipt-bound QA source
+`be91fa630d35422caba0c44e1fdcdfad60a34804`, tree `486e4ac573770ca163cf6bcfd9dd1e979450d3cc`.
+The historical aggregate accepted ordinary count is **525/525** (459 original-source cases, 44 image cases,
+and 22 kernel cases); both actual reboot cases remain original-source bound.
 This aggregate is not a strict mixed-source evidence join or a full release pass.
 All 527 nodes were collected; collection is not execution or a full-matrix pass. Complete accepted batches are:
 
@@ -47,6 +49,15 @@ All 527 nodes were collected; collection is not execution or a full-matrix pass.
 | GuestFS | 1 |
 | Isolated nested VMs | 8 |
 | T1 images | 44 |
+| Kernel builds | 22 |
+
+**Complete kernel checkpoint:** all 22 selected installed cases passed on the unchanged candidate, with native
+execution/retrieval exit zero, strict outcomes/JUnit and zero failures, errors, skips, deselections, XFAIL or XPASS.
+All original proof seals were checked against literal reports. Typed cleanup left no owned VMs; exact original
+public inventory, physical topology, administrator controls, original root records, borrowed authority and retained
+source/candidate/assets were preserved. The sole recorded new root instance was cleaned; expected database/cache
+activity is retained literally, not claimed byte-identical. Literal archive SHA-256:
+`ce141d1faf6002b3de4bde2144c5fc8fed8446bb166828fa0ee9bc5ee5f570a5`.
 
 **Complete image checkpoint:** all 44 cases and all 132 setup/call/teardown outcomes passed, with native
 exit zero, strict JSON/JUnit and zero failures, errors, skips, deselections, XFAIL or XPASS; pytest took
@@ -85,17 +96,20 @@ the pinned embedded-agent/release builds, and 437 focused orchestrator checks. T
 no system-runtime cases; the ordinary Go run is not a zero-skip qualification. Unchanged production inputs
 preserve those accepted receipts without a replay.
 
-**Remaining qualification:** 22 kernel-build cases. The latest complete invocation passed all 22 test bodies
-but ended with one teardown error and native exit one, so the batch is failed and adds no accepted cases.
+**Earlier failed kernel invocation:** all 22 test bodies passed, but one teardown error and native exit one
+left that invocation failed with no accepted credit.
 The shared dependency fixture changed the GuestFS override from unset to explicit false while its effective
 default remained false, violating exact configuration preservation. The original unset-override regression
 failed before correction; the fixed fixture preserves the unset override when GuestFS is already effectively
 disabled. All seven focused checks and the complete 59-test affected Python owner module passed in 18.03
 seconds, native exit zero and JUnit zero failures, errors or skips. These checks used an exact fixture/unit-file
-overlay over `f905f3ea`; they do not qualify a clean full release source or the still-failed kernel22 runtime batch.
-Immutable kernel admission after terminal cache retirement remains a separate unresolved contract
-decision; the fresh-operator run did not change that retained authority. Newer QA-only source changes image
-and kernel tests while preserving installed candidate bytes.
+overlay over `f905f3ea`; those checks did not qualify a clean full release source or that failed runtime invocation.
+The later accepted kernel batch is separate evidence and does not change the retained retired-kernel authority.
+
+**Remaining qualification:** the approved source-carry verifier for this exact candidate must prove compatibility and
+provenance for these original receipts, including reboot proof, before a strict joined release PASS. The accepted
+[ADR-0025](../../docs/adr/0025-immutable-kernel-cache-lineage.md) kernel-lineage design still requires implementation,
+a fresh production candidate and affected qualification; historical candidate coverage is not proof for that candidate.
 Earlier accepted receipts remain immutable and bound to their original source. Strict joined qualification
 across mixed QA sources remains unproved; the strict evidence join does not support general receipt carry
 across those sources. Unchanged candidate bytes do not establish source compatibility.
