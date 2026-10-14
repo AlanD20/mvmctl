@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added explicit same-operator identical-kernel reimport into a fresh active cache after terminal kernel removal
   and completed old-store retirement, preserving predecessor records, digests, locks and monotonic generations.
   Requires fresh kernel logical schema 2; existing schema 1 is not adopted and mutable backing rules are unchanged.
-  Source implementation and root Go checks passed; fresh build, installation and runtime qualification remain pending.
+  Coherent Go/release build and normal installation inside the QA runner passed; runtime qualification remains pending.
   See [kernel lineage](docs/adr/0025-immutable-kernel-cache-lineage.md).
 - Added mandatory Jailer launch with isolated per-VM system identities, private API/vsock sockets, and
   authenticated root-brokered control. Create, start, reboot, and restore verify the selected resources and live
@@ -201,7 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limitations and qualification
 
-- Kept v0.3.0 unreleased and not release-qualified. At the 2026-10-14 checkpoint, installed candidate
+- Kept v0.3.0 unreleased and not release-qualified. At the 2026-10-14 checkpoint, the earlier candidate
   `0.3.0-rc.source-publication-de46e04f` passed candidate-bound normal reusable-base preparation and
   source-bound runtime receipts accepted a historical aggregate 525 of 525 ordinary Python cases plus both actual
   host-reboot cases.
@@ -224,9 +224,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verification and the final join remain open. Reboot carry requires unchanged complete reboot-source inputs;
   fixture/network changes prevent carrying the historical reboot proof to the current target, which needs its own
   actual reboot journey. The accepted
-  [kernel-lineage implementation](docs/adr/0025-immutable-kernel-cache-lineage.md) passed root Go verification but
-  still needs a fresh release build, installation and runtime qualification; these historical receipts do not
-  establish it. See
+  [kernel-lineage implementation](docs/adr/0025-immutable-kernel-cache-lineage.md) passed coherent Go/release-build
+  gates and normal installation inside QA as `0.3.0-rc.kernel-lineage-4af8db39`. Its runtime matrix, actual reboot,
+  final join and approval remain pending; earlier candidate receipts do not qualify it. See
   [runner budgets](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#45-limit-parallel-workers).
 - Retained the observed Firecracker 1.16.2 live PCI detach/reattach failure: the disk did not reappear after BAR relocation.
   The current matching Firecracker/Jailer 1.17.0 pair passed the complete ten-case volume-hotplug suite,

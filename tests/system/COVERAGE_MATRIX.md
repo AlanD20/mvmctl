@@ -20,7 +20,7 @@ removed, or when test coverage changes.
 **Current qualification checkpoint (2026-10-14):** v0.3.0 remains unreleased and not release-qualified.
 The original 459 ordinary cases and both reboot cases bind source
 `f50c6c5c23609287ec14e0918943af97a4f71306`, tree
-`064ef047b5ba9ad93d9fdf89d961a7c71609b1a3`. Installed x86_64 candidate
+`064ef047b5ba9ad93d9fdf89d961a7c71609b1a3`. Historical x86_64 candidate
 `0.3.0-rc.source-publication-de46e04f` has SHA-256
 `507110b052a3cca0e86e54a689b6101e89ab3d4110c9f500c95e943f385e7a2b` and uses the exact matching
 Firecracker/Jailer 1.17.0 pair. The candidate was built from `de46e04f`; its 1,234 production build inputs
@@ -33,7 +33,7 @@ with the same installed candidate. All 22 kernel-build cases subsequently passed
 The historical aggregate accepted ordinary count is **525/525** (459 original-source cases, 44 image cases,
 and 22 kernel cases); both actual reboot cases remain original-source bound.
 This aggregate is not a strict mixed-source evidence join or a full release pass.
-All 527 nodes were collected; collection is not execution or a full-matrix pass. Complete accepted batches are:
+All 527 historical nodes were collected; collection is not execution or a full-matrix pass. Accepted historical batches are:
 
 | Batch | Accepted cases |
 |-------|----------------|
@@ -123,13 +123,28 @@ and two explicit auxiliary crash-worker skips. The full root Jailer suite passed
 with the same two auxiliary skips and native exit zero. The earlier 2,776-PASS/3-FAIL run remains failed history.
 Literal root-verification archive SHA-256:
 `cb3059d0e1a5749adf2368e3f4c41c6d5f16d0989c74aac48f6c3e98e0c084bb`.
-These Go results add no installed-system cases. No fresh CLI release build, installation, new candidate or affected
-installed-system qualification has run; the unchanged historical candidate and its 525+2 cases do not qualify lineage.
+Those initial Go results add no installed-system cases and predate the coherent build/install milestone below.
 
-**Remaining qualification:** actual source compatibility/provenance verification, target-source reboot qualification
-and the strict final join remain open. The accepted
-[ADR-0025](../../docs/adr/0025-immutable-kernel-cache-lineage.md) kernel-lineage implementation still requires a fresh
-production candidate and affected qualification; historical candidate coverage is not proof for that candidate.
+**Coherent build and installation checkpoint (2026-10-14):** clean production source `4af8db39` passed all six
+ordinary CI gates: 9,957 Go test/subtest PASS, 234 explicit SKIP, zero FAIL and 71 passing packages. The complete
+root Jailer suite passed 2,795 tests/subtests with zero FAIL and two explicit auxiliary crash-worker skips.
+The real release/embedded-agent build passed with Go 1.26.3, exact revision and `vcs.modified=false`.
+Candidate `0.3.0-rc.kernel-lineage-4af8db39` SHA-256:
+`a996b5b39b4a10ac5f251015706d38b92bc7f397f1fc90a753e17fc38ae99382`.
+Normal installation inside the named QA runner was accepted with original root-authority preservation; the outer
+controller was unchanged. This completes local Go/build/install gates, not new-candidate runtime qualification.
+
+**QA routing checkpoint:** production-identical QA-only source `04df4601`, tree
+`8f49a9f09c55c4947f189cc628e889efbaef1635`, collected 528 unique nodes (526 ordinary plus two reboot cases).
+The new `kernel_successor` selector is Tier 2, separate from `kernel_build`. Fourteen registry-owner checks passed
+with 427 unrelated cases intentionally deselected; all 55 kernel-owner Python unit checks passed. These checks
+executed no system fixtures or installed journeys, and collection is not 528 passes. The candidate retains its
+original `4af8db39` build revision; QA source identity is not substituted for producer provenance.
+
+**Remaining qualification:** the new candidate's installed runtime matrix and actual target-source reboot journey,
+source/provenance verification, strict final join, remote CI and final approval remain open. Historical candidate
+coverage and its closed carry profile do not qualify the new
+[ADR-0025](../../docs/adr/0025-immutable-kernel-cache-lineage.md) kernel-lineage candidate.
 Earlier accepted receipts remain immutable and bound to their original source. Strict joined qualification
 across mixed QA sources remains unproved; the strict evidence join does not support general receipt carry
 across those sources. Unchanged candidate bytes do not establish source compatibility.
