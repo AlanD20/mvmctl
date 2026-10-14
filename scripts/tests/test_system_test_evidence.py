@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import importlib.util
 import json
 import os
 import subprocess
 import sys
+import tarfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -58,6 +60,43 @@ def _binding(source, registry):
             name: row for name, row in registry.items() if name != "host_reboot"
         },
     )
+
+
+@pytest.mark.parametrize("candidate", [
+    {"sha256": "b" * 64, "version": "mvm 0.3.0-rc.kernel-lineage"},
+    {"sha256": "507110b052a3cca0e86e54a689b6101e89ab3d4110c9f500c95e943f385e7a2b",
+     "version": "mvm 0.3.0-rc.different-version"},
+])
+def test_rc030_carry_refuses_new_candidate_before_reading_record(evidence, tmp_path, candidate):
+    with pytest.raises(RuntimeError, match="candidate507 only"):
+        evidence.verify_rc030_candidate507_carry(
+            tmp_path / "absent-record.json", {}, candidate, {},
+        )
+
+
+@pytest.mark.parametrize("milestone", ["f50", "f905", "kernel22"])
+def test_rc030_source_pin_rejects_changed_python_with_original_revision(
+    evidence, monkeypatch, tmp_path, milestone,
+):
+    revision, tree, _digest = evidence.RC030_SOURCES[milestone]
+    source = dict(revision=revision, tree=tree, payload={
+        "tests/system/conftest.py": "0" * 64,
+    })
+    monkeypatch.setattr(evidence, "source_identity", lambda _root: source)
+    with pytest.raises(RuntimeError, match="exhaustive Python delta changed"):
+        evidence._rc030_source(tmp_path, milestone)
+
+
+def test_rc030_helper_proof_refuses_caller_resealed_archive(evidence, tmp_path):
+    archive = tmp_path / "forged-helper.tar"
+    archive.write_bytes(b"caller created helper proof")
+    declared = dict(
+        archive_path=str(archive),
+        archive_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+        baselines={},
+    )
+    with pytest.raises(RuntimeError, match="original/fixed 7\\+59 helper proof changed"):
+        evidence._rc030_helper_proof(declared)
 
 
 def _record(
@@ -172,6 +211,278 @@ def _collection(evidence, tmp_path, source, registry, *, nodes=None):
     evidence._write(task, "collection-stderr", b"")
     capture.close([dict(domain="full_collection", passed=True)], source)
     return task
+
+
+@pytest.fixture
+def rc030_packet(evidence, orchestrator, monkeypatch, tmp_path):
+    """Small sealed-report model; actual artifact pins have separate refusal tests."""
+    cp = "tests/system/cp/test_cp.py"
+    groups = {
+        "cp": (cp, 15),
+        "snapshot_load": ("tests/system/vm/test_vm_snapshot_load.py", 8),
+        "snapshot_rootfs": ("tests/system/vm/test_vm_snapshot_rootfs_independence.py", 6),
+        "fresh_env": ("tests/system/vm/test_vm_fresh_env.py", 4),
+        "other": ("tests/system/other/test_other.py", 426),
+        "images": ("tests/system/images/test_images.py", 44),
+        "kernel_build": ("tests/system/kernel/test_kernel.py", 22),
+    }
+    registry = {name: dict(tier=3, files=[path]) for name, (path, _) in groups.items()}
+    registry["host_reboot"] = dict(tier=2, files=[orchestrator._HOST_REBOOT_FILE])
+    nodes = {name: [f"{path}::TestFixture::test_case_{index}" for index in range(count)]
+             for name, (path, count) in groups.items()}
+    nodes["cp"][-1] = cp + "::TestCpMultiSource::test_cp_multi_source_rejects_non_vm_dest"
+    nodes["kernel_build"][-1] = (
+        "tests/system/kernel/test_kernel.py::TestKernelStoppedVMDeletion::"
+        "test_delete_kernel_used_by_stopped_vm_is_denied"
+    )
+    all_nodes = [node for values in nodes.values() for node in values] + sorted(evidence.HOST_NODES)
+    roots, sources = {}, {}
+    for milestone, (revision, tree, _) in evidence.RC030_SOURCES.items():
+        root = tmp_path / milestone
+        root.mkdir(mode=0o700)
+        roots[milestone] = root
+        payload = {path: "a" * 64 for path in (
+            *[path for path, _ in groups.values()], *orchestrator._HOST_REBOOT_SOURCE_FILES,
+        )}
+        payload["tests/system/conftest.py"] = "b" * 64
+        sources[milestone] = dict(revision=revision, tree=tree, payload=payload)
+    monkeypatch.setattr(evidence, "_rc030_source", lambda root, milestone: sources[milestone])
+    monkeypatch.setattr(evidence, "_rc030_production_inputs", lambda root: {"go.mod": "a" * 64})
+    original_binding = _binding
+
+    def binding(source, registered):
+        value = original_binding(source, registered)
+        value["candidate"] = dict(evidence.RC030_CANDIDATE)
+        value["controller"]["sha256"] = evidence.RC030_CANDIDATE["sha256"]
+        return value
+
+    monkeypatch.setattr(sys.modules[__name__], "_binding", binding)
+    matrices, collections = {}, {}
+    selections = {"f50": set(groups) - {"images", "kernel_build"},
+                  "f905": {"images"}, "kernel22": {"kernel_build"}}
+    for milestone, root in roots.items():
+        collections[milestone] = _collection(evidence, root, sources[milestone], registry, nodes=all_nodes)
+        selection = {name: {**registry[name], "nodes": nodes[name]} for name in selections[milestone]}
+        matrices[milestone], _ = _record(evidence, root, sources[milestone], registry, selection=selection)
+    seals = {name: hashlib.sha256((task / "terminal.json").read_bytes()).hexdigest()
+             for name, task in matrices.items()}
+    monkeypatch.setattr(evidence, "RC030_F50_MATRIX", {seals["f50"]: 459})
+    monkeypatch.setattr(evidence, "RC030_IMAGES_TERMINAL", seals["f905"])
+    monkeypatch.setattr(evidence, "RC030_KERNEL_TERMINAL", seals["kernel22"])
+    monkeypatch.setattr(evidence, "RC030_TARGET_COLLECTION", hashlib.sha256(
+        (collections["kernel22"] / "terminal.json").read_bytes()
+    ).hexdigest())
+
+    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, roots["f50"])
+    monkeypatch.setattr(orchestrator, "_REPO_ROOT", roots["f50"])
+    monkeypatch.setattr(orchestrator, "_get_mvm_version",
+                        lambda: evidence.RC030_CANDIDATE["version"].removeprefix("mvm "))
+
+    def digest(path):
+        path = Path(path)
+        if path == Path(orchestrator.MVM_CANDIDATE_BINARY):
+            return evidence.RC030_CANDIDATE["sha256"]
+        for name, root in roots.items():
+            if path.is_relative_to(root):
+                return sources[name]["payload"].get(str(path.relative_to(root)), "a" * 64)
+        return "a" * 64
+
+    def git(arguments, **kwargs):
+        root = Path(arguments[2])
+        name = next(name for name, path in roots.items() if path == root)
+        return sources[name]["revision"] + "\n" if arguments[-1] == "HEAD" else ""
+
+    monkeypatch.setattr(orchestrator, "_sha256_runner_input", digest)
+    monkeypatch.setattr(orchestrator.subprocess, "check_output", git)
+    assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+    assert orchestrator.run_host_reboot_phase("post", task, envelope)["passed"]
+    reboot_seal = hashlib.sha256((task / "post.terminal.json").read_bytes()).hexdigest()
+    monkeypatch.setattr(evidence, "RC030_REBOOT_TERMINAL", reboot_seal)
+    monkeypatch.setattr(orchestrator, "_REPO_ROOT", roots["kernel22"])
+    monkeypatch.setattr(evidence, "source_identity", lambda root: next(
+        source for name, source in sources.items() if roots[name] == root
+    ))
+    monkeypatch.setattr(orchestrator, "_validate_system_test_registry", lambda parser: None)
+    monkeypatch.setattr(orchestrator, "_evidence_registry", lambda: registry)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("carry verification must not query or mutate a runner")
+
+    for name in ("mvm", "_host_reboot_probe", "_host_reboot_outer_identity", "_build_mvm_binary", "run_prepare"):
+        monkeypatch.setattr(orchestrator, name, forbidden)
+    before = roots["f50"] / "before.json"
+    before.write_text(json.dumps({"public": {"config": {"settings": {"guestfs_enabled": {
+        "default": False, "override": False, "type": "bool",
+    }}}}}))
+    before_seal = hashlib.sha256(before.read_bytes()).hexdigest()
+    monkeypatch.setattr(evidence, "RC030_FALSE_BASELINES", {seals["f50"]: before_seal})
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w") as archive:
+        members = {"reports/original-regression.json": b'{"native_exit":1}'}
+        for label, count in (("fixed-focused", 7), ("affected-owner", 59)):
+            members[f"reports/{label}.json"] = b'{"native_exit":0}'
+            members[f"reports/{label}.xml"] = _junit(evidence, [
+                f"tests/system/proof/test_proof.py::TestProof::test_{index}" for index in range(count)
+            ])
+        for name, raw in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(raw)
+            archive.addfile(info, io.BytesIO(raw))
+    helper = tmp_path / "helper.tar"
+    helper.write_bytes(stream.getvalue())
+    helper_seal = hashlib.sha256(helper.read_bytes()).hexdigest()
+    monkeypatch.setattr(evidence, "RC030_HELPER_ARCHIVE", helper_seal)
+    declaration = dict(
+        schema_version=1, profile="rc030-candidate507-oct14",
+        target=dict(source_path=str(roots["kernel22"]), collection_task=str(collections["kernel22"]),
+                    terminal_sha256=hashlib.sha256((collections["kernel22"] / "terminal.json").read_bytes()).hexdigest()),
+        origins={name: dict(source_path=str(root), collection_task=str(collections[name]),
+                            matrix_tasks=[dict(path=str(matrices[name]), terminal_sha256=seals[name])])
+                 for name, root in roots.items()},
+        delta_proof=dict(archive_path=str(helper), archive_sha256=helper_seal,
+                         baselines={seals["f50"]: dict(path=str(before), sha256=before_seal)}),
+    )
+    declaration["origins"]["f50"].update(reboot_task=str(task), post_terminal_sha256=reboot_seal)
+    record = tmp_path / "carry.json"
+    record.write_text(json.dumps(declaration))
+    original_paths = [task / "task.json", task / "post.terminal.json",
+                      *[matrix / "binding.json" for matrix in matrices.values()]]
+    return dict(record=record, declaration=declaration, matrices=matrices, collections=collections,
+                roots=roots, sources=sources, registry=registry, reboot=task, before=before,
+                original={path: path.read_bytes() for path in original_paths},
+                calls=calls, phases=phases, nodes=nodes, state=state)
+
+
+def test_rc030_complete_join_keeps_original_bindings_and_provenance(evidence, orchestrator, rc030_packet):
+    packet = rc030_packet
+    calls = list(packet["calls"])
+    result = evidence.finalize_named_runner_release_evidence(
+        orchestrator, [], packet["reboot"], collection_task=packet["collections"]["kernel22"],
+        rc030_source_carry=packet["record"],
+    )
+    assert result["passed"] and len(result["carried_nodes"]) == 503 and len(result["executed_nodes"]) == 22
+    assert result["qa_source_carry"]["affected_nodes"] == []
+    assert {entry["source"]["revision"] for entry in result["qa_source_carry"]["provenance"]} == {
+        source["revision"] for source in packet["sources"].values()
+    }
+    assert result["host_reboot"]["original_source"] == packet["sources"]["f50"]
+    assert packet["calls"] == calls and packet["phases"] == ["pre", "post"]
+    assert {path: path.read_bytes() for path in packet["original"]} == packet["original"]
+
+
+@pytest.mark.parametrize("pending", ["kernel22", "helper"])
+def test_rc030_pending_proof_withholds_exact32_and_selected_remainder(
+    evidence, rc030_packet, pending,
+):
+    packet = rc030_packet
+    declared = packet["declaration"]
+    if pending == "kernel22":
+        declared["origins"]["kernel22"]["matrix_tasks"] = []
+    else:
+        declared["delta_proof"] = None
+    packet["record"].write_text(json.dumps(declared))
+    checked = evidence.verify_rc030_candidate507_carry(
+        packet["record"], packet["sources"]["kernel22"], evidence.RC030_CANDIDATE, packet["registry"],
+    )
+    assert len(checked.affected_nodes) == 32 and len(checked.carried_nodes) == 471
+    assert not checked.reboot_admissible
+    selection = packet["record"].parent / "selected.json"
+    expected = packet["nodes"]["kernel_build"] if pending == "kernel22" else list(checked.affected_nodes)
+    domains = {"kernel_build"} if pending == "kernel22" else {"cp", "snapshot_load", "snapshot_rootfs", "fresh_env"}
+    selection.write_text(json.dumps(dict(schema_version=1,
+        collection_terminal_sha256=checked.collection["terminal_sha256"], nodes=expected)))
+    selected = evidence.selected_node_remainder(
+        selection, checked.collection, list(checked.target_reports), list(checked.carried_nodes), domains,
+    )
+    assert {node for values in selected.values() for node in values} == set(expected)
+
+
+def test_rc030_selected_driver_records_only_unproved_kernel22(
+    evidence, orchestrator, monkeypatch, rc030_packet,
+):
+    packet = rc030_packet
+    packet["declaration"]["origins"]["kernel22"]["matrix_tasks"] = []
+    packet["record"].write_text(json.dumps(packet["declaration"]))
+    selection = packet["record"].parent / "selected.json"
+    selection.write_text(json.dumps(dict(schema_version=1,
+        collection_terminal_sha256=packet["declaration"]["target"]["terminal_sha256"],
+        nodes=packet["nodes"]["kernel_build"])))
+    task = packet["record"].parent / "selected-matrix"
+    task.mkdir(mode=0o700)
+    args = orchestrator._build_parser().parse_args([
+        "kernel_build", "--host-direct", "--record-evidence", str(task),
+        "--collection-task", str(packet["collections"]["kernel22"]),
+        "--selected-node-file", str(selection), "--rc030-qa-source-carry", str(packet["record"]),
+    ])
+    monkeypatch.setattr(orchestrator, "source_identity", evidence.source_identity)
+    monkeypatch.setattr(orchestrator, "verify_release_binary_identity", lambda **kwargs: None)
+    monkeypatch.setattr(orchestrator, "_require_release_host_without_active_vms", lambda: None)
+    capture = orchestrator._start_matrix_evidence(task, args)
+    assert capture.binding["selection"] == {
+        "kernel_build": {**packet["registry"]["kernel_build"], "nodes": packet["nodes"]["kernel_build"]},
+    }
+    assert capture.binding["source"] == packet["sources"]["kernel22"]
+
+
+@pytest.mark.parametrize("changed", [
+    "tests/system/conftest.py",
+    "tests/system/network/test_network.py",
+])
+def test_rc030_reboot_carry_refuses_changed_shared_inputs(evidence, orchestrator, rc030_packet, changed):
+    packet = rc030_packet
+    packet["sources"]["kernel22"]["payload"][changed] = "d" * 64
+    with pytest.raises(RuntimeError, match="reboot assertions or staging inputs changed") as error:
+        orchestrator.require_completed_rc030_candidate507_host_reboot(
+            packet["reboot"], packet["roots"]["f50"],
+        )
+    assert str(error.value).endswith(changed)
+
+
+@pytest.mark.parametrize("fault", ["controller", "original-revision"])
+def test_rc030_historical_reboot_reader_keeps_original_authority_checks(
+    evidence, orchestrator, monkeypatch, rc030_packet, fault,
+):
+    packet = rc030_packet
+    if fault == "controller":
+        packet["state"]["controller"]["identity"][1] += 1
+    else:
+        monkeypatch.setattr(orchestrator.subprocess, "check_output",
+                            lambda arguments, **kwargs: "0" * 40 + "\n" if arguments[-1] == "HEAD" else "")
+    with pytest.raises(RuntimeError, match="PRE binding"):
+        orchestrator.require_completed_rc030_candidate507_host_reboot(
+            packet["reboot"], packet["roots"]["f50"],
+        )
+
+
+@pytest.mark.parametrize("fault", ["production", "kernel-teardown", "False-baseline", "retarget", "missing22"])
+def test_rc030_join_refuses_unproved_or_changed_inputs(
+    evidence, orchestrator, monkeypatch, rc030_packet, fault,
+):
+    packet = rc030_packet
+    if fault == "production":
+        monkeypatch.setattr(evidence, "_rc030_production_inputs", lambda root: {
+            "go.mod": "b" * 64 if root == packet["roots"]["f905"] else "a" * 64,
+        })
+    elif fault == "kernel-teardown":
+        path = packet["matrices"]["kernel22"] / "kernel_build.nodes.json"
+        report = json.loads(path.read_bytes())
+        next(iter(report["phases"].values()))["teardown"]["outcome"] = "failed"
+        path.write_text(json.dumps(report))
+    elif fault == "False-baseline":
+        packet["before"].write_text('{"public":{"config":{"settings":{"guestfs_enabled":{"override":null}}}}}')
+    elif fault == "retarget":
+        path = packet["matrices"]["f50"] / "binding.json"
+        binding = json.loads(path.read_bytes())
+        binding["source"] = packet["sources"]["kernel22"]
+        path.write_text(json.dumps(binding))
+    else:
+        packet["declaration"]["origins"]["kernel22"]["matrix_tasks"] = []
+        packet["record"].write_text(json.dumps(packet["declaration"]))
+    with pytest.raises(RuntimeError):
+        evidence.finalize_named_runner_release_evidence(
+            orchestrator, [], packet["reboot"], collection_task=packet["collections"]["kernel22"],
+            rc030_source_carry=packet["record"],
+        )
 
 
 @pytest.fixture

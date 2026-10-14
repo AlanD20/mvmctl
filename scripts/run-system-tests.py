@@ -72,6 +72,8 @@ from system_test_evidence import (
     DomainEvidence, MatrixEvidence, NODE_REPORT_ENV, MAX_OUTPUT_BYTES,
     collect_named_runner_nodes, selected_node_remainder, source_identity,
     verify_collection_task, verify_matrix_task, verify_official_kernel_carry,
+    verify_rc030_candidate507_carry, rc030_candidate507_target,
+    verify_rc030_candidate507_reboot_sources,
 )
 
 # ============================================================================
@@ -2773,6 +2775,11 @@ def _host_reboot_controller() -> dict[str, Any]:
 
 def _host_reboot_read_pre(task: Path, controller: dict) -> tuple[dict, bytes]:
     """Read exact retained PRE and current release inputs; no runner queries."""
+    return _host_reboot_read_pre_for_source(task, controller, _REPO_ROOT)
+
+
+def _host_reboot_read_pre_for_source(task: Path, controller: dict, source_root: Path) -> tuple[dict, bytes]:
+    """Validate original bytes against their original clean source, never relabel them."""
     bound = _host_reboot_json(_host_reboot_read(task / "task.json"))
     if (set(bound) != _HOST_REBOOT_TASK_FIELDS or type(bound["schema_version"]) is not int
             or bound["schema_version"] != 1 or bound["runner"] != _HOST_REBOOT_RUNNER
@@ -2780,12 +2787,12 @@ def _host_reboot_read_pre(task: Path, controller: dict) -> tuple[dict, bytes]:
             or bound["before_boot"] == bound["after_boot"] or controller != bound["controller"]
             or _sha256_runner_input(Path(MVM_CANDIDATE_BINARY)) != bound["candidate_sha256"]
             or "mvm " + _get_mvm_version() != bound["candidate_version"]
-            or _sha256_runner_input(_REPO_ROOT / _HOST_REBOOT_FILE) != bound["test_sha256"]
-            or {relative: _sha256_runner_input(_REPO_ROOT / relative) for relative in _HOST_REBOOT_SOURCE_FILES}
+            or _sha256_runner_input(source_root / _HOST_REBOOT_FILE) != bound["test_sha256"]
+            or {relative: _sha256_runner_input(source_root / relative) for relative in _HOST_REBOOT_SOURCE_FILES}
                != bound["source_payload"]
-            or subprocess.check_output(["git", "-C", str(_REPO_ROOT), "rev-parse", "HEAD"], text=True).strip()
+            or subprocess.check_output(["git", "-C", str(source_root), "rev-parse", "HEAD"], text=True).strip()
                != bound["source_revision"]
-            or subprocess.check_output(["git", "-C", str(_REPO_ROOT), "status", "--porcelain"], text=True)):
+            or subprocess.check_output(["git", "-C", str(source_root), "status", "--porcelain"], text=True)):
         raise RuntimeError("host_reboot retained PRE binding is invalid or changed")
     pre = _host_reboot_read(task / "pre.json")
     outcomes = _host_reboot_read(task / "pre.outcomes.json")
@@ -2843,13 +2850,28 @@ def require_completed_host_reboot(task: Path) -> dict[str, Any]:
     Completed POST recorded fresh controls then. Full-release quiescent-host admission
     remains unchanged; those historical controls are not claimed as current authority.
     """
+    return _require_completed_host_reboot_for_source(task, _REPO_ROOT)
+
+
+def require_completed_rc030_candidate507_host_reboot(task: Path, original_source: Path) -> dict[str, Any]:
+    """Named compatibility caller supplies the checked f50 source; no generic bypass."""
+    source = verify_rc030_candidate507_reboot_sources(
+        original_source, _REPO_ROOT,
+        dict(sha256=_sha256_runner_input(Path(MVM_CANDIDATE_BINARY)), version="mvm " + _get_mvm_version()),
+        _HOST_REBOOT_SOURCE_FILES,
+    )
+    result = _require_completed_host_reboot_for_source(task, original_source)
+    return dict(result, original_source=source, classification="checked-original-source-carry")
+
+
+def _require_completed_host_reboot_for_source(task: Path, source_root: Path) -> dict[str, Any]:
     row = task.lstat()
     if (not task.is_absolute() or task.resolve() != task or not stat.S_ISDIR(row.st_mode)
             or row.st_uid != os.getuid() or stat.S_IMODE(row.st_mode) != 0o700):
         raise RuntimeError("host_reboot release proof task must be a private owned canonical directory")
     _require_distinct_candidate_controller()
     controller = _host_reboot_controller()
-    bound, raw_pre = _host_reboot_read_pre(task, controller)
+    bound, raw_pre = _host_reboot_read_pre_for_source(task, controller, source_root)
     terminal = _host_reboot_json(_host_reboot_read(task / "post.terminal.json"))
     if (set(terminal) != {"domain", "tier", "phase", "phase_complete", "passed", "release_verdict", "output", "proof_sha256"}
             or terminal["domain"] != "host_reboot" or terminal["tier"] != 2 or terminal["phase"] != "post"
@@ -3713,6 +3735,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--selected-node-file", type=Path, help="Explicit JSON declaration of the exact unproved nodes in the selected domains/tiers.")
     parser.add_argument("--completed-matrix-task", type=Path, action="append", default=[], help="Previously completed current-node receipts, verified before subtracting covered nodes.")
     parser.add_argument("--official-kernel-carry", type=Path, help="Original sealed official8 retained task; exact candidate and reachable inputs must still match.")
+    parser.add_argument("--rc030-qa-source-carry", type=Path,
+                        help="Closed candidate507 f50/f905/be91 source-carry record; only checked eligible nodes are subtracted.")
     parser.add_argument(
         "--tier",
         type=_parse_tier,
@@ -3958,7 +3982,14 @@ def _start_matrix_evidence(task: Path, args: argparse.Namespace) -> MatrixEviden
     if args.selected_node_file:
         collection = verify_collection_task(args.collection_task, source, candidate, registry)
         reports = [verify_matrix_task(path, source, candidate, registry) for path in args.completed_matrix_task]
-        carried = verify_official_kernel_carry(args.official_kernel_carry, source, candidate) if args.official_kernel_carry else []
+        if args.rc030_qa_source_carry:
+            checked = verify_rc030_candidate507_carry(args.rc030_qa_source_carry, source, candidate, registry)
+            if checked.collection != collection:
+                raise RuntimeError("rc030 selected execution uses a different target collection")
+            reports.extend(checked.target_reports)
+            carried = list(checked.carried_nodes)
+        else:
+            carried = verify_official_kernel_carry(args.official_kernel_carry, source, candidate) if args.official_kernel_carry else []
         remainder = selected_node_remainder(args.selected_node_file, collection, reports, carried, set(selection))
         selection = {domain: {**registry[domain], "nodes": nodes} for domain, nodes in remainder.items()}
     return MatrixEvidence(task, dict(schema_version=1, host=socket.gethostname(),
@@ -3968,6 +3999,7 @@ def _start_matrix_evidence(task: Path, args: argparse.Namespace) -> MatrixEviden
 
 
 def main() -> None:
+    global _REPO_ROOT
     parser = _build_parser()
     args = parser.parse_args()
 
@@ -3980,9 +4012,14 @@ def main() -> None:
         collect_named_runner_nodes(sys.modules[__name__], args.collect_release_nodes)
         return
     _validate_test_selection_args(parser, args)
-    if (args.collection_task or args.selected_node_file or args.completed_matrix_task or args.official_kernel_carry):
+    if (args.collection_task or args.selected_node_file or args.completed_matrix_task
+            or args.official_kernel_carry or args.rc030_qa_source_carry):
         if not (args.collection_task and args.selected_node_file and args.record_evidence) or args.release_qualification:
             parser.error("selected-node evidence inputs require --record-evidence, --collection-task and --selected-node-file together")
+    if args.rc030_qa_source_carry:
+        if args.official_kernel_carry:
+            parser.error("rc030 candidate507 carry cannot be combined with historical official8 carry")
+        _REPO_ROOT = rc030_candidate507_target(args.rc030_qa_source_carry)
 
     if args.host_reboot_phase or args.host_reboot_envelope or "host_reboot" in args.domains:
         if (args.domains != ["host_reboot"] or not args.host_reboot_phase or not args.host_reboot_task

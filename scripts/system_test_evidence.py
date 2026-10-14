@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -13,8 +14,10 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tarfile
 import uuid
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -915,6 +918,320 @@ def verify_official_kernel_carry(task: Path, source, candidate) -> list[str]:
     return nodes
 
 
+# This closed profile is for the three retained candidate507 QA milestones only.
+# Its hashes are accepted original bytes, never caller-supplied compatibility rules.
+RC030_CANDIDATE = {
+    "sha256": "507110b052a3cca0e86e54a689b6101e89ab3d4110c9f500c95e943f385e7a2b",
+    "version": "mvm 0.3.0-rc.source-publication-de46e04f",
+}
+RC030_SOURCES = {
+    "f50": (
+        "f50c6c5c23609287ec14e0918943af97a4f71306",
+        "064ef047b5ba9ad93d9fdf89d961a7c71609b1a3",
+        "1ef847ca8f8b1434b8fb25a64cde276b7f36035382742c78844aa28b7d01bab9",
+    ),
+    "f905": (
+        "f905f3eada9e98a3dd717ae3b514a90d9d14d722",
+        "03d781fad13c85f1b9a68954d3ff7d69694458d1",
+        "abc9b56c1eec30fc563dc215d5c0027c14fe02a74a75b817b03cd48ddf0b2222",
+    ),
+    "kernel22": (
+        "be91fa630d35422caba0c44e1fdcdfad60a34804",
+        "486e4ac573770ca163cf6bcfd9dd1e979450d3cc",
+        "7a87862fb4f7b7b3c54cfa277f6e43aa22b94b761db7f2bc216f604babdca54d",
+    ),
+}
+RC030_F50_MATRIX = {
+    "025941029dd7ba7233623c0784046fda6147b87addc8c156891220dd66910e81": 3,
+    "0361b24902181ce283acf86472314dfac35e783ab6b17b8f87f1863945992f7b": 22,
+    "07603aea42c777e209c340737b5641601f98eac2aeced7b1e428f65906ff6a4a": 10,
+    "1bfd0d7a42bd32e0c6710f05a829f21d0a5a221e4df72f074dcfba3702f9d87b": 11,
+    "1e4775bd32a32a80488d39a6cb90f9b3449518c0b5c915555cff7ce6ad9f117f": 20,
+    "2ffa3c1a3c6b33805e4411d72c8bf90795e1b16c535c574d412861a61d5db5d1": 1,
+    "3dbc15eb7e85413ff73615d830732447e7f2d4ca1aede6e58d0c4daf932dbcd8": 4,
+    "5d6a58775b4145177e320afc9ff6a2f4548d23d0132ec0efd86975aca0a8e83a": 37,
+    "6fdb5891cb48d418a3f47e345a1e658e0cd2f662e4472b2caa3d6287166686d9": 11,
+    "822f9a3ec84cbb5561243cdd08dcccd30ec033863e4f0424446f21556fd78cc7": 5,
+    "82c0f3dfe014f3be2ab9227a093695fe3ae9d5a64090118e07045516b596079a": 3,
+    "88c34c1c73f5b3339d8c31bcd30ed0b9a11f2df540c1954bd96a9245545b8c63": 1,
+    "8a65fc8ca13920aa62f3e2bc94e03818071c99999cb2222c892e0012f5036633": 8,
+    "8c93e46ed2e1cbe105b9408cde95aa7a2f03ccd7bb944e193a8a84fd3a60cc8c": 25,
+    "926ca46587307d01d09d24f9b6dd749501cce1f631833584e99799bd8a7fbb1a": 69,
+    "9e1fb0ede2d2861a288aa13a79c4578dc28c2270444a9127e53fa159936e59b4": 8,
+    "a14e652924c00bdaf36d9dc9ba95b4f233cb03a0d5f22c509f354d7cfda5c910": 169,
+    "a504df84b5371cd23e76418420a05842ef932a1cbc00978ddd3ac7b7472be335": 15,
+    "bda75913612622b3e3260311fd99150faf610002537214bc8b824b8d5e180173": 12,
+    "c250e3957ab1d75d783ead067daa7fc0a6f64530996de27fbb375977b5277c6b": 4,
+    "d659f67b91bf44fd370f14400337b445cea20a406a05da920bea5ac8421f4ed6": 15,
+    "fabe9e31e424a4a4cdd3ea4029ad43081320b46434f51fdec207c5b21e640856": 6
+}
+RC030_IMAGES_TERMINAL = "911c55d7807ea313d76054bea23cb5dbe0f294e7cd5f0955db2373bdaa1a4579"
+RC030_KERNEL_TERMINAL = "732470f017f883ace35a8d386ba4a595068dda272d76c6d49a8c7b20b4090f1c"
+RC030_TARGET_COLLECTION = "fd912586753d5fd4adf7f91fb257763edb6b829a2c2da9a2a775ea489c4c3a93"
+RC030_HELPER_ARCHIVE = "b4f8db62efa16a793a999b20286cebdc4ab9647b478eac09b27308bfbc6dbe14"
+RC030_REBOOT_TERMINAL = "fdf7a2a0b3a9000795c52d0dc398675dd239ea4dc1ef5fddbe8d3bb7ebb43eb2"
+RC030_FALSE_BASELINES = {
+    "d659f67b91bf44fd370f14400337b445cea20a406a05da920bea5ac8421f4ed6":
+        "563a0447d4d56536165c6fe3d220bcb2408ce7207b6185a736d7edca1eaf118e",
+    "8a65fc8ca13920aa62f3e2bc94e03818071c99999cb2222c892e0012f5036633":
+        "e4a871734ebd2084cdc10523470e9f7a7ac3b68c33f510e8b91e5106bda6e121",
+    "fabe9e31e424a4a4cdd3ea4029ad43081320b46434f51fdec207c5b21e640856":
+        "8e807249c0b1fd6929ff667ecea1a7a660249c121ea08d63bff47765d7effe38",
+    "c250e3957ab1d75d783ead067daa7fc0a6f64530996de27fbb375977b5277c6b":
+        "09fa4e0c86e026dce41fd58c8351f72ed9ed39c268c9b0e0ec5213b3553a75e1",
+}
+
+
+@dataclass(frozen=True)
+class VerifiedRC030Carry:
+    """Original-source proof, not tests relabeled as current runtime."""
+
+    collection: dict[str, Any]
+    reports: tuple[dict[str, Any], ...]
+    provenance: tuple[dict[str, Any], ...]
+    reboot_task: Path
+    reboot_source: Path
+    helper_archive_sha256: str | None
+    carried_nodes: tuple[str, ...]
+    affected_nodes: tuple[str, ...]
+    target_reports: tuple[dict[str, Any], ...]
+    reboot_admissible: bool
+
+
+def _rc030_keys(value: Any, expected: set[str], label: str) -> None:
+    if not isinstance(value, dict) or set(value) != expected:
+        raise RuntimeError(f"invalid rc030 {label} schema")
+
+
+def _rc030_private_read(path: Path, limit: int = MAX_RECEIPT_BYTES) -> bytes:
+    _private_directory(path.parent)
+    return _read(path, limit)
+
+
+def _rc030_source(root: Path, milestone: str) -> dict[str, Any]:
+    if not root.is_absolute() or root.resolve(strict=True) != root:
+        raise RuntimeError("rc030 source must be an absolute canonical checkout")
+    source = source_identity(root)
+    digest = hashlib.sha256(json.dumps(source["payload"], sort_keys=True).encode()).hexdigest()
+    if (source["revision"], source["tree"], digest) != RC030_SOURCES[milestone]:
+        raise RuntimeError(f"rc030 {milestone} source or exhaustive Python delta changed")
+    return source
+
+
+def _rc030_production_inputs(root: Path) -> dict[str, str]:
+    # All embedded/runtime sources and build/workflow inputs are compared as bytes.
+    paths = subprocess.check_output(
+        ["git", "-C", str(root), "ls-files", "-z"], text=True,
+    ).split("\0")
+    return {
+        path: hashlib.sha256(_read(root / path, MAX_OUTPUT_BYTES)).hexdigest()
+        for path in paths if path and (
+            path.startswith(("internal/", "pkg/", "cmd/", "assets/", "tools/", ".github/"))
+            or path.endswith((".go", ".mod", ".sum"))
+            or path in {"Makefile", ".gitmodules", ".goreleaser.yaml", ".goreleaser.yml"}
+            or (path.startswith("scripts/") and not path.startswith("scripts/tests/")
+                and not path.endswith((".py", ".ini", ".md")))
+        )
+    }
+
+
+def _rc030_helper_proof(declared: dict[str, Any]) -> str:
+    _rc030_keys(declared, {"archive_path", "archive_sha256", "baselines"}, "helper proof")
+    raw = _rc030_private_read(Path(declared["archive_path"]), MAX_OUTPUT_BYTES)
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != RC030_HELPER_ARCHIVE or declared["archive_sha256"] != digest:
+        raise RuntimeError("rc030 original/fixed 7+59 helper proof changed")
+    # Read the sealed archive in memory; never extract or execute its contents.
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
+        members = {member.name: member for member in archive.getmembers()}
+        if len(members) != len(archive.getmembers()):
+            raise RuntimeError("rc030 helper archive contains duplicate members")
+        for label, expected in (("fixed-focused", 7), ("affected-owner", 59)):
+            native = _json(archive.extractfile(f"reports/{label}.json").read())
+            cases = list(ET.fromstring(
+                archive.extractfile(f"reports/{label}.xml").read()
+            ).iter("testcase"))
+            if (
+                native.get("native_exit") != 0
+                or type(native.get("native_exit")) is not int
+                or len(cases) != expected
+                or any(list(case.iter(tag)) for case in cases
+                       for tag in ("failure", "error", "skipped"))
+            ):
+                raise RuntimeError("rc030 helper proof is not the complete 7+59 pass")
+        original = _json(archive.extractfile("reports/original-regression.json").read())
+        if original.get("native_exit") != 1 or type(original.get("native_exit")) is not int:
+            raise RuntimeError("rc030 original unset-intent regression proof missing")
+    baselines = declared["baselines"]
+    _rc030_keys(baselines, set(RC030_FALSE_BASELINES), "historical False baselines")
+    for terminal, expected in RC030_FALSE_BASELINES.items():
+        row = baselines[terminal]
+        _rc030_keys(row, {"path", "sha256"}, "historical baseline")
+        raw = _rc030_private_read(Path(row["path"]), MAX_OUTPUT_BYTES)
+        if row["sha256"] != expected or hashlib.sha256(raw).hexdigest() != expected:
+            raise RuntimeError("rc030 affected32 original baseline seal changed")
+        setting = _json(raw)["public"]["config"]["settings"]["guestfs_enabled"]
+        if setting != {"default": False, "override": False, "type": "bool"}:
+            raise RuntimeError("rc030 affected32 lacks original effective/override False")
+    return digest
+
+
+def verify_rc030_candidate507_carry(
+    record: Path, target_source: dict[str, Any],
+    candidate: dict[str, Any], registry: dict[str, Any],
+) -> VerifiedRC030Carry:
+    """Accept only this sealed three-milestone QA compatibility proof."""
+    if candidate != RC030_CANDIDATE:
+        raise RuntimeError("rc030 QA carry is candidate507 only; a new binary requires new proof")
+    declared = _json(_rc030_private_read(record))
+    _rc030_keys(declared, {"schema_version", "profile", "target", "origins", "delta_proof"}, "record")
+    if (
+        type(declared["schema_version"]) is not int
+        or declared["schema_version"] != 1
+        or declared["profile"] != "rc030-candidate507-oct14"
+    ):
+        raise RuntimeError("unsupported rc030 QA carry profile")
+    target = declared["target"]
+    _rc030_keys(target, {"source_path", "collection_task", "terminal_sha256"}, "target")
+    target_root = Path(target["source_path"])
+    if _rc030_source(target_root, "kernel22") != target_source:
+        raise RuntimeError("rc030 qualified target differs from exact be91 execution source")
+    collection = verify_collection_task(
+        Path(target["collection_task"]), target_source, candidate, registry
+    )
+    if (collection["terminal_sha256"] != target["terminal_sha256"]
+            or collection["terminal_sha256"] != RC030_TARGET_COLLECTION):
+        raise RuntimeError("rc030 target collection seal changed")
+    required = {node for nodes in collection["nodes"].values() for node in nodes}
+    if len(required - HOST_NODES) != 525 or required & HOST_NODES != HOST_NODES:
+        raise RuntimeError("rc030 must retain the complete 525+2 registry")
+    _rc030_keys(declared["origins"], set(RC030_SOURCES), "origins")
+    production = _rc030_production_inputs(target_root)
+    reports, provenance = [], []
+    reboot_task = reboot_source = None
+    for milestone in RC030_SOURCES:
+        origin = declared["origins"][milestone]
+        keys = {"source_path", "collection_task", "matrix_tasks"}
+        if milestone == "f50":
+            keys |= {"reboot_task", "post_terminal_sha256"}
+        _rc030_keys(origin, keys, f"{milestone} origin")
+        root = Path(origin["source_path"])
+        source = _rc030_source(root, milestone)
+        if _rc030_production_inputs(root) != production:
+            raise RuntimeError("rc030 production/module/build inputs changed")
+        original = verify_collection_task(Path(origin["collection_task"]), source, candidate, registry)
+        if original["nodes"] != collection["nodes"]:
+            raise RuntimeError("rc030 original registry or parametrized nodes changed")
+        tasks = origin["matrix_tasks"]
+        if not isinstance(tasks, list) or (not tasks and milestone != "kernel22"):
+            raise RuntimeError("rc030 original matrix task list missing")
+        if milestone == "kernel22" and len(tasks) > 1:
+            raise RuntimeError("rc030 kernel22 requires one complete batch, never partial credit")
+        seen = set()
+        for row in tasks:
+            _rc030_keys(row, {"path", "terminal_sha256"}, "matrix task")
+            report = verify_matrix_task(Path(row["path"]), source, candidate, registry)
+            terminal = report["terminal_sha256"]
+            if row["terminal_sha256"] != terminal or terminal in seen:
+                raise RuntimeError("rc030 matrix seal changed or repeated")
+            seen.add(terminal)
+            nodes = [node for values in report["nodes"].values() for node in values]
+            if milestone == "f50" and RC030_F50_MATRIX.get(terminal) != len(nodes):
+                raise RuntimeError("rc030 f50 receipt is not an accepted original batch")
+            if milestone == "f905" and (terminal != RC030_IMAGES_TERMINAL or len(nodes) != 44):
+                raise RuntimeError("rc030 images must be the original complete f90544")
+            if milestone == "kernel22" and (
+                terminal != RC030_KERNEL_TERMINAL
+                or set(report["domains"]) != {"kernel_build"} or len(nodes) != 22
+                or "tests/system/kernel/test_kernel.py::TestKernelStoppedVMDeletion::"
+                   "test_delete_kernel_used_by_stopped_vm_is_denied" not in nodes
+            ):
+                raise RuntimeError("rc030 kernel22 lacks complete teardown/actual installed helper proof")
+            reports.append(report)
+            provenance.append(dict(
+                source=source, terminal_sha256=terminal, nodes=nodes, classification="original-source",
+            ))
+        if milestone == "f50":
+            if seen != set(RC030_F50_MATRIX):
+                raise RuntimeError("rc030 f50 proof must contain the exact original459 receipts")
+            reboot_task, reboot_source = Path(origin["reboot_task"]), root
+            if (origin["post_terminal_sha256"] != RC030_REBOOT_TERMINAL
+                    or hashlib.sha256(_rc030_private_read(reboot_task / "post.terminal.json")).hexdigest()
+                    != RC030_REBOOT_TERMINAL):
+                raise RuntimeError("rc030 original reboot terminal seal changed")
+        elif milestone == "f905" and len(tasks) != 1:
+            raise RuntimeError("rc030 images44/kernel22 each require one complete receipt")
+        if _rc030_source(root, milestone) != source or _rc030_production_inputs(root) != production:
+            raise RuntimeError("rc030 original source changed during proof verification")
+    # All original reports still validate in full. Eligibility never rewrites them.
+    accounted_nodes(collection, reports)
+    historical = [report for report in reports
+                  if report["binding"]["source"]["revision"] != RC030_SOURCES["kernel22"][0]]
+    current = tuple(report for report in reports if report not in historical)
+    helper = (_rc030_helper_proof(declared["delta_proof"])
+              if declared["delta_proof"] is not None else None)
+    compatible = helper is not None and len(current) == 1
+    affected = _rc030_affected32(historical) if not compatible else set()
+    carried = accounted_nodes(collection, historical) - affected
+    for entry in provenance:
+        entry["eligible_nodes"] = [node for node in entry["nodes"] if node not in affected]
+        entry["classification"] = (
+            "executed-at-target" if entry["source"]["revision"] == RC030_SOURCES["kernel22"][0]
+            else "checked-original-source-carry"
+        )
+    return VerifiedRC030Carry(
+        collection, tuple(reports), tuple(provenance), reboot_task, reboot_source, helper,
+        tuple(sorted(carried)), tuple(sorted(affected)), current, compatible,
+    )
+
+
+def _rc030_affected32(reports) -> set[str]:
+    files = {
+        "tests/system/cp/test_cp.py",
+        "tests/system/vm/test_vm_snapshot_load.py",
+        "tests/system/vm/test_vm_snapshot_rootfs_independence.py",
+        "tests/system/vm/test_vm_fresh_env.py",
+    }
+    unaffected_cp = (
+        "tests/system/cp/test_cp.py::TestCpMultiSource::"
+        "test_cp_multi_source_rejects_non_vm_dest"
+    )
+    nodes = {
+        node for report in reports for values in report["nodes"].values() for node in values
+        if node.split("::", 1)[0] in files and node != unaffected_cp
+    }
+    if len(nodes) != 32:
+        raise RuntimeError("rc030 historical helper impact is not the exact affected32 set")
+    return nodes
+
+
+def rc030_candidate507_target(record: Path) -> Path:
+    """Select only the immutable be91 execution checkout; never a free root override."""
+    declared = _json(_rc030_private_read(record))
+    _rc030_keys(declared, {"schema_version", "profile", "target", "origins", "delta_proof"}, "record")
+    if (type(declared["schema_version"]) is not int or declared["schema_version"] != 1
+            or declared["profile"] != "rc030-candidate507-oct14"):
+        raise RuntimeError("unsupported rc030 QA carry profile")
+    target = declared["target"]
+    _rc030_keys(target, {"source_path", "collection_task", "terminal_sha256"}, "target")
+    root = Path(target["source_path"])
+    _rc030_source(root, "kernel22")
+    return root
+
+
+def verify_rc030_candidate507_reboot_sources(original_root: Path, target_root: Path, candidate, files):
+    if candidate != RC030_CANDIDATE:
+        raise RuntimeError("rc030 historical reboot carry is candidate507 only")
+    original = _rc030_source(original_root, "f50")
+    target = _rc030_source(target_root, "kernel22")
+    if _rc030_production_inputs(original_root) != _rc030_production_inputs(target_root):
+        raise RuntimeError("rc030 historical reboot production/build inputs changed")
+    for path in files:
+        if original["payload"].get(path) != target["payload"].get(path):
+            raise RuntimeError(f"rc030 reboot assertions or staging inputs changed: {path}")
+    return original
+
+
 def accounted_nodes(collection, reports, carried=()) -> set[str]:
     required = {
         node for nodes in collection["nodes"].values() for node in nodes
@@ -981,6 +1298,7 @@ def finalize_named_runner_release_evidence(
     *,
     collection_task: Path | None = None,
     official_kernel_carry: Path | None = None,
+    rc030_source_carry: Path | None = None,
 ) -> dict[str, Any]:
     """Join exact inner reports with the unchanged outer reboot admission reader."""
 
@@ -1005,11 +1323,20 @@ def finalize_named_runner_release_evidence(
     verified = [
         verify_matrix_task(task, source, candidate, registry) for task in matrix_tasks
     ]
-    carried = (
-        verify_official_kernel_carry(official_kernel_carry, source, candidate)
-        if official_kernel_carry
-        else []
-    )
+    checked = None
+    if rc030_source_carry:
+        if official_kernel_carry:
+            raise RuntimeError("rc030 candidate507 and historical official8 carries are mutually exclusive")
+        checked = verify_rc030_candidate507_carry(rc030_source_carry, source, candidate, registry)
+        if checked.collection != collection:
+            raise RuntimeError("rc030 finalizer target collection differs from the closed record")
+        verified.extend(checked.target_reports)
+        carried = list(checked.carried_nodes)
+    else:
+        carried = (
+            verify_official_kernel_carry(official_kernel_carry, source, candidate)
+            if official_kernel_carry else []
+        )
     accounted = accounted_nodes(collection, verified, carried)
     missing = sorted(
         {node for nodes in collection["nodes"].values() for node in nodes}
@@ -1023,10 +1350,17 @@ def finalize_named_runner_release_evidence(
         for domain, nodes in collection["nodes"].items()
         if domain != "host_reboot"
     }
-    reboot = orchestrator.require_completed_host_reboot(host_reboot_task)
+    if checked and host_reboot_task == checked.reboot_task:
+        if not checked.reboot_admissible:
+            raise RuntimeError("rc030 original reboot compatibility awaits sealed helper proof and successful full22 teardown")
+        reboot = orchestrator.require_completed_rc030_candidate507_host_reboot(
+            host_reboot_task, checked.reboot_source,
+        )
+    else:
+        reboot = orchestrator.require_completed_host_reboot(host_reboot_task)
     if source_identity(orchestrator._REPO_ROOT) != source:
         raise RuntimeError("qualified source changed during finalization")
-    return dict(
+    result = dict(
         schema_version=1,
         passed=True,
         verdict="PASS",
@@ -1039,17 +1373,26 @@ def finalize_named_runner_release_evidence(
         matrix_terminal_sha256=[report["terminal_sha256"] for report in verified],
         host_reboot=reboot,
     )
+    if checked:
+        result["qa_source_carry"] = dict(
+            profile="rc030-candidate507-oct14",
+            provenance=list(checked.provenance),
+            affected_nodes=list(checked.affected_nodes),
+            helper_archive_sha256=checked.helper_archive_sha256,
+        )
+    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Read-only named-runner release evidence finalization"
     )
-    parser.add_argument("--matrix-task", type=Path, action="append", required=True)
+    parser.add_argument("--matrix-task", type=Path, action="append", default=[])
     parser.add_argument("--host-reboot-task", type=Path, required=True)
     parser.add_argument("--qualified-source", type=Path, required=True)
     parser.add_argument("--collection-task", type=Path, required=True)
     parser.add_argument("--official-kernel-carry", type=Path)
+    parser.add_argument("--rc030-qa-source-carry", type=Path)
     args = parser.parse_args()
     try:
         root = args.qualified_source.resolve(strict=True)
@@ -1057,20 +1400,31 @@ def main() -> int:
             raise RuntimeError(
                 "qualified source must be an absolute canonical directory"
             )
-        if root != Path(__file__).resolve().parent.parent:
+        tool_root = Path(__file__).resolve().parent.parent
+        if args.rc030_qa_source_carry:
+            if args.official_kernel_carry or rc030_candidate507_target(args.rc030_qa_source_carry) != root:
+                raise RuntimeError("rc030 requires only its exact pinned be91 qualified source")
+        elif not args.matrix_task:
+            raise RuntimeError("strict finalization requires at least one completed matrix task")
+        elif root != tool_root:
             raise RuntimeError("run the finalizer from the exact qualified source")
         spec = importlib.util.spec_from_file_location(
-            "mvmctl_evidence_orchestrator", root / "scripts/run-system-tests.py"
+            "mvmctl_evidence_orchestrator",
+            (tool_root if args.rc030_qa_source_carry else root) / "scripts/run-system-tests.py",
         )
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
+        if args.rc030_qa_source_carry:
+            # The validation tool is separate from the immutable executed QA tree.
+            module._REPO_ROOT = root
         result = finalize_named_runner_release_evidence(
             module,
             args.matrix_task,
             args.host_reboot_task,
             collection_task=args.collection_task,
             official_kernel_carry=args.official_kernel_carry,
+            rc030_source_carry=args.rc030_qa_source_carry,
         )
     except Exception as exc:
         print(
