@@ -1517,8 +1517,22 @@ try:
                 assert value['kind'] == kind and value['id'] == identifier and value['version'] == 1
                 logical_item = directory(logical, identifier)
                 binding, index = record(logical_item, 'logical.json')
-                assert index == dict(version=1, owner=owner, kind=kind, id=identifier,
-                                     cache=cache_binding, initialized=True)
+                if kind == 'kernel':
+                    generation = value['generation']
+                    assert type(generation) is int and generation > 0
+                    digest = index['kernel']['current']['digest']
+                    assert re.fullmatch(r'[0-9a-f]{64}', digest)
+                    assert value['phase'] in ('ready', 'removed')
+                    if value['phase'] == 'removed' or 'kernel_digest' in value:
+                        assert value['kernel_digest'] == digest
+                    current = dict(generation=generation, cache=cache_binding, store=store['store'],
+                                   backing=value['backing'], digest=digest, phase=value['phase'])
+                    assert index == dict(version=2, owner=owner, kind=kind, id=identifier,
+                                         cache=cache_binding, initialized=True,
+                                         kernel=dict(last_generation=generation, current=current))
+                else:
+                    assert index == dict(version=1, owner=owner, kind=kind, id=identifier,
+                                         cache=cache_binding, initialized=True)
                 permanent, _ = file(logical_item, 'lock', empty=True)
                 bindings[kind + ':' + identifier] = dict(record=receipt, value=value,
                                                         logical=binding, logical_lock=permanent)
