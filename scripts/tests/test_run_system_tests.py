@@ -2229,6 +2229,7 @@ def test_tier3_domain_preserves_pytest_output_when_report_cleanup_fails(
 def test_remote_domains_require_retrieved_complete_pytest_outcomes(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     runner_name: str,
     provision_name: str,
     tier: int,
@@ -2237,6 +2238,8 @@ def test_remote_domains_require_retrieved_complete_pytest_outcomes(
     disk_size: str | None,
 ) -> None:
     vm_name = f"t{tier}-{domain}-fixed"
+    guest_cache = tmp_path / "runner-cache"
+    pytest_directory = guest_cache / f"mvmctl-pytest-{vm_name}"
     monkeypatch.setenv("MVM_TEST_VM", "unrelated-runner")
     monkeypatch.setenv("MVM_TEST_QUALIFICATION_HOST", "unrelated-runner")
     events: list[str] = []
@@ -2258,8 +2261,29 @@ def test_remote_domains_require_retrieved_complete_pytest_outcomes(
     def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((args, kwargs))
         command = args[-1]
+        if command.startswith("umask 077; mkdir "):
+            events.append("private-tmp")
+            return subprocess.run(
+                ["sh", "-c", "umask 000; " + command.replace(
+                    "/home/runner/.cache", shlex.quote(str(guest_cache)),
+                )],
+                check=True, capture_output=True, text=True,
+            )
         if "python3 -m pytest" in command:
             events.append("pytest")
+            assert pytest_directory.stat().st_mode & 0o777 == 0o700
+            assert (pytest_directory / "tmp").stat().st_mode & 0o777 == 0o700
+            probe = shlex.join([
+                sys.executable, "-c",
+                "import tempfile; print(tempfile.mkdtemp())",
+            ])
+            observed = subprocess.run(
+                ["sh", "-c", command.split("python3 -m pytest", 1)[0].replace(
+                    "/home/runner/.cache", shlex.quote(str(guest_cache)),
+                ) + probe],
+                check=True, capture_output=True, text=True,
+            )
+            assert Path(observed.stdout.strip()).parent == pytest_directory / "tmp"
             return subprocess.CompletedProcess(
                 args,
                 0,
@@ -2295,24 +2319,34 @@ def test_remote_domains_require_retrieved_complete_pytest_outcomes(
         "output": "pytest stdout\npytest stderr\n",
     }
     report_path = f"/tmp/mvmctl-pytest-outcomes-{vm_name}.json"
-    pytest_args, pytest_kwargs = calls[0]
+    setup_args, setup_kwargs = calls[0]
+    assert setup_args[:4] == ("exec", vm_name, "--user", "runner")
+    assert setup_kwargs["timeout"] == 30
+    pytest_args, pytest_kwargs = calls[1]
     assert pytest_args[:2] == ("exec", vm_name)
     pytest_command = shlex.split(pytest_args[-1])
     assert f"MVM_TEST_VM={vm_name}" in pytest_command
     assert f"MVM_TEST_QUALIFICATION_HOST={vm_name}" in pytest_command
     assert f"MVM_PYTEST_OUTCOME_REPORT={report_path}" in pytest_args[-1]
+    assert f"TMPDIR=/home/runner/.cache/mvmctl-pytest-{vm_name}/tmp" in pytest_command
+    assert "-p" not in pytest_command
+    assert not any(
+        part.startswith(("PYTHONPATH=", f"{orchestrator.NODE_REPORT_ENV}="))
+        for part in pytest_command
+    )
     assert f"/tests/system/{domain}/test_{domain}.py" in pytest_args[-1]
     assert pytest_kwargs["timeout"] == pytest_timeout
-    retrieve_args, retrieve_kwargs = calls[1]
+    retrieve_args, retrieve_kwargs = calls[2]
     assert retrieve_args[-1] == f"head -c 4097 -- {report_path}"
     assert retrieve_kwargs["check"] is False
-    cleanup_args, cleanup_kwargs = calls[2]
+    cleanup_args, cleanup_kwargs = calls[3]
     assert cleanup_args[-1] == (
         f"rm -f -- {report_path} && test ! -e {report_path}"
     )
     assert cleanup_kwargs["check"] is True
     assert events == [
         f"provision:{vm_name}:0.3.0",
+        "private-tmp",
         "pytest",
         "retrieve",
         "cleanup",
@@ -2403,6 +2437,8 @@ def test_remote_domain_preserves_pytest_output_and_checked_cleanup_failure(
 
     def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         command = args[-1]
+        if command.startswith("umask 077; mkdir "):
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         if "python3 -m pytest" in command:
             return subprocess.CompletedProcess(
                 args,

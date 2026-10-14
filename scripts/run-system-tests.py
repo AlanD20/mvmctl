@@ -2314,7 +2314,8 @@ def _remote_pytest_command(
             f"{PYTEST_OUTCOME_REPORT_ENV}={shlex.quote(report_path)}",
             *([f"PYTHONPATH={shlex.quote(node_directory)}", "PYTHONDONTWRITEBYTECODE=1",
                f"TMPDIR={shlex.quote(node_directory + '/tmp')}",
-               f"{NODE_REPORT_ENV}={shlex.quote(node_directory + '/nodes.json')}"] if node_directory else []),
+               f"{NODE_REPORT_ENV}={shlex.quote(node_directory + '/nodes.json')}"] if node_directory else
+              [f"TMPDIR={shlex.quote('/home/runner/.cache/mvmctl-pytest-' + vm_name + '/tmp')}"]),
         )
     )
     return f"cd / && {environment} {pytest_command}"
@@ -2330,13 +2331,14 @@ def _run_remote_pytest(
     """Run pytest in a runner VM and validate its bounded outcome report."""
     report_path = _remote_pytest_report_path(vm_name)
     node_directory = f"/home/runner/.cache/mvmctl-node-evidence-{vm_name}" if evidence is not None else None
+    pytest_directory = node_directory or f"/home/runner/.cache/mvmctl-pytest-{vm_name}"
     pytest_result: subprocess.CompletedProcess[str] | None = None
     validation_failures: list[str] = []
     execution_error: Exception | None = None
     try:
+        mvm("exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+            f"umask 077; mkdir -p -- /home/runner/.cache && mkdir -- {shlex.quote(pytest_directory)} && mkdir -- {shlex.quote(pytest_directory + '/tmp')}", timeout=30)
         if evidence is not None:
-            mvm("exec", vm_name, "--user", "runner", "--timeout", "10", "--",
-                f"umask 077; mkdir -p -- /home/runner/.cache && mkdir -- {shlex.quote(node_directory)} && mkdir -- {shlex.quote(node_directory + '/tmp')}", timeout=30)
             for name in ("system_test_evidence.py", "system_test_outcomes.py"):
                 mvm("cp", str(_REPO_ROOT / "scripts" / name), f"{vm_name}:{node_directory}/{name}", timeout=30)
             # The root guest agent applies source modes under its own umask.
