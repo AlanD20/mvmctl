@@ -2,6 +2,8 @@ package jailer
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -47,7 +49,7 @@ func TestProtectedBranchImportRefusesLayoutBeforeBindingUnseenIdentity(t *testin
 			anchor, err := unix.Dup(f.anchor)
 			require.NoError(t, err)
 			_, err = protectBackingInAnchor(t.Context(), f.cache, protectedBackingKernel, id, 6, true,
-				-1, false, anchor, []int{owner, anchor})
+				-1, true, anchor, []int{owner, anchor})
 			require.Error(t, err)
 			if diff := cmp.Diff(before, protectedCacheTestTree(t, f.root)); diff != "" {
 				t.Errorf("refused import published authority or changed bytes (-want +got):\n%s", diff)
@@ -77,7 +79,7 @@ func TestProtectedBranchImportRefusesLayoutBeforeBindingUnseenIdentity(t *testin
 			require.NoError(t, err)
 			anchor = openProtectedBranchTestFD(t, anchorPath)
 			lease, err := protectBackingInAnchor(t.Context(), cache, protectedBackingKernel, id, 6, true,
-				source, false, anchor, []int{owner, anchor})
+				source, true, anchor, []int{owner, anchor})
 			require.NoError(t, err)
 			require.NoError(t, lease.Release(t.Context()))
 			bytes, err := os.ReadFile(
@@ -89,14 +91,29 @@ func TestProtectedBranchImportRefusesLayoutBeforeBindingUnseenIdentity(t *testin
 			require.NoError(t, err)
 			var logical protectedLogicalRecord
 			require.NoError(t, json.Unmarshal(bytes, &logical))
-			want := protectedLogicalRecord{Version: 1, Owner: 1000, Kind: protectedBackingKernel, ID: id,
+			var diskStat, storeStat unix.Stat_t
+			diskPath := filepath.Join(cachePath, protectedBackingDirectory, protectedBackingKernel, id, "disk")
+			require.NoError(t, unix.Stat(diskPath, &diskStat))
+			require.NoError(t, unix.Stat(filepath.Join(cachePath, protectedBackingDirectory), &storeStat))
+			digest := sha256.Sum256([]byte("kernel"))
+			want := protectedLogicalRecord{Version: 2, Owner: 1000, Kind: protectedBackingKernel, ID: id,
 				Cache: protectedBackingCache{
 					Major: unix.Major(uint64(stat.Dev)),
 					Minor: unix.Minor(uint64(stat.Dev)),
 					Inode: stat.Ino,
 				},
-				Initialized: true}
-			if diff := cmp.Diff(want, logical); diff != "" {
+				Initialized: true, Kernel: &protectedKernelLineage{LastGeneration: 1,
+					Current: &protectedKernelIncarnation{Generation: 1,
+						Cache: protectedBackingCache{Major: unix.Major(uint64(stat.Dev)),
+							Minor: unix.Minor(uint64(stat.Dev)), Inode: stat.Ino},
+						Store:   protectedBackingIdentity{Device: uint64(storeStat.Dev), Inode: storeStat.Ino, Size: storeStat.Size},
+						Backing: protectedBackingIdentity{Device: uint64(diskStat.Dev), Inode: diskStat.Ino, Size: diskStat.Size},
+						Digest:  hex.EncodeToString(digest[:]), Phase: "ready"}}}
+			// Store directory size is incidental and may change after pinning. Its node identity
+			// is independently checked below; backing file size remains part of the comparison.
+			assert.Equal(t, uint64(storeStat.Dev), logical.Kernel.Current.Store.Device)
+			assert.Equal(t, storeStat.Ino, logical.Kernel.Current.Store.Inode)
+			if diff := cmp.Diff(want, logical, cmpopts.IgnoreFields(protectedKernelIncarnation{}, "Store")); diff != "" {
 				t.Errorf("successful fresh import logical authority (-want +got):\n%s", diff)
 			}
 		})

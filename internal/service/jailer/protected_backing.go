@@ -84,19 +84,21 @@ type protectedBackingRecord struct {
 // protectedBackingLease retains the exact protected object and its root-owned logical-object lock.
 // THREAD-SAFE: mu guards descriptor ownership, the durable record, and close-once state.
 type protectedBackingLease struct {
-	mu            sync.Mutex
-	fd            int
-	identity      managedVMConfigStat
-	ownerUID      uint32
-	cacheIdentity managedCacheIdentity
-	metadataFD    int
-	logicalFD     int
-	directoryFD   int
-	lockFD        int
-	retained      []int
-	record        protectedBackingRecord
-	released      bool
-	releaseErr    error
+	// kernelGeneration is root-allocated; zero denotes non-lineage backing consumers.
+	kernelGeneration uint64
+	mu               sync.Mutex
+	fd               int
+	identity         managedVMConfigStat
+	ownerUID         uint32
+	cacheIdentity    managedCacheIdentity
+	metadataFD       int
+	logicalFD        int
+	directoryFD      int
+	lockFD           int
+	retained         []int
+	record           protectedBackingRecord
+	released         bool
+	releaseErr       error
 }
 
 func (cache *managedCacheLease) protectVMRootfs(

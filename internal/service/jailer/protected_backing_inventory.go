@@ -187,20 +187,27 @@ func readProtectedInventoryEntry(
 	if err := readProtectedRecord(ctx, logical, "logical.json", &selector); err != nil {
 		return result, false, err
 	}
-	if selector.Version != 1 || selector.Owner != ownerUID || selector.Kind != kind || selector.ID != id ||
-		selector.Cache.Inode == 0 {
-		return result, false, managedVMResourceValidationError("protected logical inventory selector conflicts")
+	if err := validateProtectedLogical(selector, ownerUID, kind, id); err != nil {
+		return result, false, err
 	}
 	if !selector.Initialized {
 		return result, false, nil
 	}
+	selectedCache := selector.Cache
+	if kind == protectedBackingKernel {
+		if selector.Kernel.Current == nil {
+			return result, false, nil // Pending/aborted initial candidates cannot grant VM access.
+		}
+		selectedCache = selector.Kernel.Current.Cache
+	}
 	cache := managedCacheIdentity{
-		deviceMajor: selector.Cache.Major,
-		deviceMinor: selector.Cache.Minor,
-		inode:       selector.Cache.Inode,
+		deviceMajor: selectedCache.Major,
+		deviceMinor: selectedCache.Minor,
+		inode:       selectedCache.Inode,
 	}
 	parent := owner
 	cacheKey := protectedCacheKey(cache)
+	var selectedStore protectedBackingIdentity
 	for _, component := range []string{cacheKey, kind, id} {
 		fd, err := openProtectedDirectory(ctx, parent, component, false, true)
 		if err != nil {
@@ -216,9 +223,10 @@ func readProtectedInventoryEntry(
 			if err := validateProtectedStoreLayout(ctx, fd, anchor); err != nil {
 				return result, false, err
 			}
-			if anchor.Owner != ownerUID || anchor.Cache != selector.Cache {
+			if anchor.Owner != ownerUID || anchor.Cache != selectedCache {
 				return result, false, managedVMResourceValidationError("protected inventory store authority conflicts")
 			}
+			selectedStore = anchor.Store
 		}
 	}
 	if err := readProtectedRecord(ctx, parent, "record.json", &result.record); err != nil {
@@ -229,10 +237,28 @@ func readProtectedInventoryEntry(
 		return result, false, err
 	}
 	if record.Version != 1 || record.Owner != ownerUID || record.Kind != kind || record.ID != id ||
-		record.Cache != selector.Cache {
+		record.Cache != selectedCache {
 		return result, false, managedVMResourceValidationError(
 			"protected inventory record conflicts with logical identity",
 		)
+	}
+	if kind == protectedBackingKernel && selector.Kernel.Pending != nil &&
+		selector.Kernel.Pending.Cache == selectedCache && selector.Kernel.Current.Phase == "removed" &&
+		record.Generation == selector.Kernel.Pending.Generation {
+		if len(record.References) != 0 || len(record.NextReferences) != 0 {
+			return result, false, managedVMResourceValidationError("pending kernel import retains unexpected VM grants")
+		}
+		return result, false, nil
+	}
+	if kind == protectedBackingKernel && record.Phase == "kernel-aborted" {
+		if err := requireProtectedKernelAbortedProjection(ctx, logical, selector, record, selectedStore); err != nil {
+			return result, false, err
+		}
+		return result, false, nil // Exact immutable aborted receipt, never a live VM grant.
+	}
+	if kind == protectedBackingKernel && (record.Generation != selector.Kernel.Current.Generation ||
+		record.Backing != selector.Kernel.Current.Backing) {
+		return result, false, managedVMResourceValidationError("kernel inventory generation differs from logical authority")
 	}
 	switch record.Phase {
 	case "copying", "copied", "cancelling-copy", "cancelling-copied", "initial-removing", "removed", "removing",

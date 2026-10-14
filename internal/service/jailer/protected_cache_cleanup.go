@@ -377,8 +377,10 @@ func (plan *protectedCacheCleanupPlan) preflightKind(ctx context.Context, owner 
 		if err := readProtectedRecord(ctx, logical, "logical.json", &index); err != nil {
 			return err
 		}
-		if index.Version != 1 || index.Owner != plan.cache.ownerUID || index.Kind != kind || index.ID != id ||
-			index.Cache != plan.record.Cache || !index.Initialized {
+		if err := validateProtectedLogical(index, plan.cache.ownerUID, kind, id); err != nil {
+			return err
+		}
+		if kind != protectedBackingKernel && (index.Cache != plan.record.Cache || !index.Initialized) {
 			return managedVMResourceValidationError("protected cleanup logical authority conflicts")
 		}
 		var record protectedBackingRecord
@@ -387,11 +389,24 @@ func (plan *protectedCacheCleanupPlan) preflightKind(ctx context.Context, owner 
 		}
 		if record.Version != 1 || record.Owner != plan.cache.ownerUID || record.Kind != kind || record.ID != id ||
 			record.Cache != plan.record.Cache || len(record.References) != 0 || len(record.NextReferences) != 0 ||
-			(record.Phase != "removed" && (kind != protectedBackingKernel || record.Phase != "kernel-unprotected-removed")) {
+			(record.Phase != "removed" && (kind != protectedBackingKernel ||
+				(record.Phase != "kernel-unprotected-removed" && record.Phase != "kernel-aborted"))) {
 			return managedVMResourceValidationError("protected cleanup object is not authoritatively retired")
 		}
 		if err := validateInitialVolumeRemoval(record); err != nil {
 			return err
+		}
+		if kind == protectedBackingKernel {
+			var terminalErr error
+			if record.Phase == "kernel-aborted" && index.Kernel.Current != nil &&
+				index.Kernel.Current.Cache == record.Cache {
+				terminalErr = requireProtectedKernelAbortedProjection(ctx, logical, index, record, plan.record.Store)
+			} else {
+				terminalErr = requireProtectedKernelTerminal(ctx, logical, index, record, plan.record.Store)
+			}
+			if terminalErr != nil {
+				return terminalErr
+			}
 		}
 		if kind == protectedBackingVolume {
 			if !record.SnapshotSource && record.InitialRemoval == nil {

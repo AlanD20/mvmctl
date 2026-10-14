@@ -154,6 +154,9 @@ func protectedKernelOperationError(operation, id string, cause error) error {
 		return nil
 	}
 	slog.Error("authoritative kernel operation failed", "operation", operation, "kernel_id", id, "error", cause)
+	if domainErr := errs.AsDomainError(cause); domainErr != nil && domainErr.Code == errs.CodeKernelImportFailed {
+		return cause
+	}
 	return errs.WrapMsg(
 		errs.CodeKernelBuildFailed,
 		operation+" authoritative kernel backing",

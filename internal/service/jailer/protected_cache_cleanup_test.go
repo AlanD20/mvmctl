@@ -110,6 +110,12 @@ func newProtectedCacheCleanupFixtureOnFilesystem(t *testing.T, distinct bool) *p
 		}
 		index := protectedLogicalRecord{Version: 1, Owner: 1000, Kind: kind, ID: id,
 			Cache: f.record.Cache, Initialized: true}
+		if kind == protectedBackingKernel {
+			index.Version = protectedKernelLogicalVersion
+			index.Kernel = &protectedKernelLineage{LastGeneration: 1, Pending: &protectedKernelPending{
+				Generation: 1, Cache: f.record.Cache, Store: f.record.Store, Directory: directory, Phase: "copying",
+			}}
+		}
 		require.NoError(t, writeProtectedRecord(t.Context(), logicalFD, "logical.json", index))
 		record := protectedBackingRecord{Version: 1, Owner: 1000, Kind: kind, ID: id, Cache: f.record.Cache,
 			Directory: directory, Phase: "removed", References: []protectedBackingReference{}}
@@ -130,7 +136,9 @@ func newProtectedCacheCleanupFixtureOnFilesystem(t *testing.T, distinct bool) *p
 			lock, err := acquireProtectedLock(t.Context(), metadataFD)
 			require.NoError(t, err)
 			lease := &protectedBackingLease{fd: disk, lockFD: lock, directoryFD: open(data),
-				metadataFD: metadataFD, record: record}
+				metadataFD: metadataFD, logicalFD: logicalFD, ownerUID: 1000, kernelGeneration: 1, record: record}
+			require.NoError(t, writeProtectedRecord(t.Context(), metadataFD, "record.json", record))
+			require.NoError(t, lease.commitKernelGeneration(t.Context()))
 			require.NoError(t, lease.Remove(t.Context()))
 			record = lease.record
 			require.NoError(t, unix.Close(lock))

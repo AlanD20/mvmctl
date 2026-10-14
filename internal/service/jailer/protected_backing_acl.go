@@ -227,7 +227,10 @@ func (lease *protectedBackingLease) Remove(ctx context.Context) error {
 	lease.mu.Lock()
 	defer lease.mu.Unlock()
 	if !lease.released && lease.lockFD >= 0 && lease.record.Phase == "removed" {
-		return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return lease.commitKernelRetirement(ctx)
 	}
 	if err := lease.active(ctx); err != nil {
 		return err
@@ -239,6 +242,17 @@ func (lease *protectedBackingLease) Remove(ctx context.Context) error {
 		digest, err := hashProtectedKernel(ctx, lease.fd, lease.record.Backing)
 		if err != nil {
 			return err
+		}
+		if lease.kernelGeneration != 0 {
+			logical, err := readProtectedKernelLogical(ctx, lease.logicalFD, lease.ownerUID, lease.record.ID)
+			if err != nil {
+				return err
+			}
+			current := logical.Kernel.Current
+			if logical.Kernel.Pending != nil || current == nil || current.Generation != lease.record.Generation ||
+				current.Cache != lease.record.Cache || current.Digest != digest {
+				return managedVMResourceValidationError("protected kernel bytes differ from committed lineage")
+			}
 		}
 		lease.record.KernelDigest = digest
 	}
@@ -290,5 +304,8 @@ func (lease *protectedBackingLease) finishRemoval(ctx context.Context) error {
 		return managedVMResourceAtomicError("sync protected backing removal", err)
 	}
 	lease.record.Phase = "removed"
-	return writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record)
+	if err := writeProtectedRecord(ctx, lease.metadataFD, "record.json", lease.record); err != nil {
+		return err
+	}
+	return lease.commitKernelRetirement(ctx)
 }

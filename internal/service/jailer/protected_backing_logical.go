@@ -14,6 +14,8 @@ type protectedLogicalRecord struct {
 	ID          string                `json:"id"`
 	Cache       protectedBackingCache `json:"cache"`
 	Initialized bool                  `json:"initialized"`
+	// Kernel is required only by fresh kernel schema 2; mutable bindings retain schema 1.
+	Kernel *protectedKernelLineage `json:"kernel,omitempty"`
 }
 
 // openProtectedLogical serializes one logical identity globally for the operator, including
@@ -81,6 +83,10 @@ func tryLockProtectedLogicalInAnchor(
 	wanted := protectedLogicalRecord{
 		Version: 1, Owner: ownerUID, Kind: kind, ID: id, Cache: protectedCacheIdentity(identity),
 	}
+	if kind == protectedBackingKernel {
+		wanted.Version = protectedKernelLogicalVersion
+		wanted.Kernel = &protectedKernelLineage{}
+	}
 	var record protectedLogicalRecord
 	err = readProtectedRecord(ctx, parent, "logical.json", &record)
 	if errors.Is(err, unix.ENOENT) && create {
@@ -89,8 +95,9 @@ func tryLockProtectedLogicalInAnchor(
 		}
 	} else if err != nil {
 		return -1, nil, false, err
-	} else if record.Version != wanted.Version || record.Owner != wanted.Owner || record.Kind != wanted.Kind ||
-		record.ID != wanted.ID || record.Cache != wanted.Cache {
+	} else if err := validateProtectedLogical(record, ownerUID, kind, id); err != nil {
+		return -1, nil, false, err
+	} else if kind != protectedBackingKernel && record.Cache != wanted.Cache {
 		return -1, nil, false, managedVMResourceValidationError("logical backing identity is already bound to another cache")
 	}
 	return parent, retained, false, nil

@@ -216,7 +216,9 @@ func (lease *protectedBackingLease) publishImport(ctx context.Context) (returnEr
 	}
 	completed := lease.record
 	completed.Phase = "ready"
-	if reimport {
+	if lease.kernelGeneration != 0 {
+		completed.Generation = lease.kernelGeneration
+	} else if reimport {
 		completed.Generation++
 	} else if completed.Kind == protectedBackingKernel {
 		completed.Generation = 1

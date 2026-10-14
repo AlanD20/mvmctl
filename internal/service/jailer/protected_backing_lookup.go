@@ -49,6 +49,14 @@ func lookupProtectedBacking(
 		return nil, false, err
 	}
 	retained = append(retained, use)
+	var kernelLogical protectedLogicalRecord
+	if kind == protectedBackingKernel {
+		kernelLogical, err = requireProtectedKernelSelection(ctx, logicalFD, cache.ownerUID, id,
+			protectedCacheIdentity(cache.identity), false)
+		if err != nil {
+			return nil, false, err
+		}
+	}
 	store, err := pinProtectedStore(ctx, cache, anchor, false)
 	if errors.Is(err, unix.ENOENT) {
 		var anchorRecord protectedBackingAnchor
@@ -142,10 +150,14 @@ func lookupProtectedBacking(
 		if len(record.References) != 0 || len(record.NextReferences) != 0 {
 			return nil, true, managedVMResourceValidationError("protected removal tombstone retains references")
 		}
-		return &protectedBackingLease{
+		lease := &protectedBackingLease{
 			fd: -1, ownerUID: cache.ownerUID, cacheIdentity: cache.identity, metadataFD: metadata, logicalFD: logicalFD,
 			directoryFD: -1, lockFD: lock, record: record, retained: retained,
-		}, true, nil
+		}
+		if kind == protectedBackingKernel && kernelLogical.Kernel.Current != nil {
+			lease.kernelGeneration = kernelLogical.Kernel.Current.Generation
+		}
+		return lease, true, nil
 	}
 	if record.Phase == "copying" || record.Phase == "copied" || store < 0 {
 		return nil, true, managedVMResourceValidationError(

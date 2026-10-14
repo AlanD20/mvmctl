@@ -47,7 +47,8 @@ func hashProtectedKernel(ctx context.Context, fd int, expected protectedBackingI
 
 func (lease *protectedBackingLease) beginKernelReimport(ctx context.Context) error {
 	if lease.record.Kind != protectedBackingKernel || lease.record.Phase != "removed" ||
-		!isCanonicalManagedResourceID(lease.record.KernelDigest, 64) || lease.record.Generation == math.MaxUint64 ||
+		!isCanonicalManagedResourceID(lease.record.KernelDigest, 64) ||
+		(lease.kernelGeneration == 0 && lease.record.Generation == math.MaxUint64) ||
 		len(lease.record.References) != 0 || len(lease.record.NextReferences) != 0 {
 		return managedVMResourceValidationError("kernel retirement cannot authorize reimport")
 	}
@@ -66,7 +67,7 @@ func (lease *protectedBackingLease) beginKernelReimport(ctx context.Context) err
 
 func (lease *protectedBackingLease) requireRetiredKernelDigest(ctx context.Context, candidate int) error {
 	if lease.record.Kind != protectedBackingKernel || !isCanonicalManagedResourceID(lease.record.KernelDigest, 64) ||
-		lease.record.Generation == math.MaxUint64 {
+		(lease.kernelGeneration == 0 && lease.record.Generation == math.MaxUint64) {
 		return managedVMResourceValidationError("kernel reimport has no retained root digest or generation")
 	}
 	digest, err := hashProtectedKernel(ctx, candidate, lease.record.Backing)

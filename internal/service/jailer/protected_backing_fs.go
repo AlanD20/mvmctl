@@ -118,7 +118,9 @@ func sameProtectedNode(left, right protectedBackingIdentity) bool {
 	return left.Device == right.Device && left.Inode == right.Inode && left.Inode != 0
 }
 
-func readProtectedRecord[T protectedBackingAnchor | protectedBackingRecord | protectedLogicalRecord](
+func readProtectedRecord[
+	T protectedBackingAnchor | protectedBackingRecord | protectedLogicalRecord | protectedKernelReceipt,
+](
 	ctx context.Context, directory int, name string, record *T,
 ) (returnErr error) {
 	fd, err := openProtectedFile(ctx, directory, name, unix.O_RDONLY)
@@ -164,7 +166,9 @@ func sameProtectedReadStat(before, after unix.Stat_t) bool {
 	return before == after
 }
 
-func writeProtectedRecord[T protectedBackingAnchor | protectedBackingRecord | protectedLogicalRecord](
+func writeProtectedRecord[
+	T protectedBackingAnchor | protectedBackingRecord | protectedLogicalRecord | protectedKernelReceipt,
+](
 	ctx context.Context, directory int, name string, record T,
 ) (returnErr error) {
 	if err := ctx.Err(); err != nil {

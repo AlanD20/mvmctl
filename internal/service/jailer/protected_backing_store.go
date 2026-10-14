@@ -5,8 +5,11 @@ import (
 	"errors"
 	"math"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
+
+	"mvmctl/pkg/errs"
 )
 
 func protectBacking(
@@ -76,6 +79,7 @@ type protectedBackingAdmission struct {
 	cache                                  *managedCacheLease
 	kind, id                               string
 	logicalFD, storeFD, metadataFD, lockFD int
+	ownerFD                                int
 	retained                               []int
 	released                               bool
 	releaseErr                             error
@@ -143,7 +147,7 @@ func tryAdmitProtectedBackingInAnchor(
 	}
 	retained = append(retained, lock)
 	return &protectedBackingAdmission{cache: cache, kind: kind, id: id, logicalFD: logicalFD,
-		storeFD: storeFD, metadataFD: metadata, lockFD: lock, retained: retained}, false, nil
+		storeFD: storeFD, metadataFD: metadata, lockFD: lock, ownerFD: ownerFD, retained: retained}, false, nil
 }
 
 func (admission *protectedBackingAdmission) Release(ctx context.Context) error {
@@ -168,22 +172,73 @@ func (admission *protectedBackingAdmission) protect(
 	cache, kind, id := admission.cache, admission.kind, admission.id
 	logicalFD, storeFD, metadata, lock := admission.logicalFD, admission.storeFD, admission.metadataFD, admission.lockFD
 	retained := admission.retained
+	var kernelLease *protectedBackingLease
 	admission.retained = nil
 	admission.released = true
 	defer func() {
 		if returnErr != nil {
+			if kernelLease != nil {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+				returnErr = errors.Join(returnErr, kernelLease.abortKernelImport(cleanupCtx))
+				if explicitKernelImport {
+					sealErr := syncProtectedCacheDirectory(cleanupCtx, logicalFD)
+					logical, readErr := readProtectedKernelLogical(cleanupCtx, logicalFD, cache.ownerUID, id)
+					unknown := sealErr != nil || readErr != nil || logical.Kernel.Pending != nil
+					imported := !unknown && logical.Kernel.Current != nil &&
+						logical.Kernel.Current.Phase == "ready" &&
+						logical.Kernel.Current.Generation == kernelLease.kernelGeneration
+					returnErr = errs.WrapMsg(errs.CodeKernelImportFailed, "protected kernel import failed",
+						errors.Join(returnErr, sealErr, readErr), errs.WithEntity(id),
+						errs.WithDetails(map[string]any{"outcome_unknown": unknown, "protected_kernel_imported": imported}))
+				}
+				cancel()
+			}
 			returnErr = errors.Join(returnErr, closeProtectedFDs(retained))
 		}
 	}()
 	var record protectedBackingRecord
 	recordErr := readProtectedRecord(ctx, metadata, "record.json", &record)
 	newObject := errors.Is(recordErr, unix.ENOENT)
+	var kernelLogical protectedLogicalRecord
+	kernelProducer := explicitKernelImport
+	var err error
+	if kind == protectedBackingKernel {
+		if recordErr != nil && !newObject {
+			return nil, recordErr
+		}
+		var existing *protectedBackingRecord
+		if !newObject {
+			existing = &record
+		}
+		if snapshotFD >= 0 {
+			kernelLogical, kernelProducer, err = prepareProtectedKernelSnapshot(ctx, cache, admission.ownerFD,
+				logicalFD, storeFD, id, existing, snapshotFD, expectedBytes)
+			if err != nil {
+				return nil, err
+			}
+		} else if explicitKernelImport {
+			var previous []int
+			kernelLogical, previous, err = prepareProtectedKernelImport(ctx, cache, admission.ownerFD,
+				logicalFD, storeFD, id, existing, nil)
+			if err != nil {
+				return nil, err
+			}
+			retained = append(retained, previous...)
+		} else {
+			kernelLogical, err = requireProtectedKernelSelection(ctx, logicalFD, cache.ownerUID, id,
+				protectedCacheIdentity(cache.identity), true)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	if newObject {
 		var logical protectedLogicalRecord
 		if err := readProtectedRecord(ctx, logicalFD, "logical.json", &logical); err != nil {
 			return nil, err
 		}
-		if logical.Initialized {
+		if logical.Initialized && (kind != protectedBackingKernel || !kernelProducer ||
+			kernelLogical.Kernel.Pending == nil || kernelLogical.Kernel.Pending.Phase == "aborting") {
 			return nil, managedVMResourceValidationError("initialized protected backing record is missing")
 		}
 	}
@@ -213,14 +268,20 @@ func (admission *protectedBackingAdmission) protect(
 			newObject = true
 		}
 	}
-	dataKind, err := openProtectedDirectory(ctx, storeFD, kind, newObject, true)
+	newKernelObject := kind == protectedBackingKernel && kernelProducer && kernelLogical.Kernel.Pending != nil &&
+		(kernelLogical.Kernel.Pending.Phase == "preparing" ||
+			(kernelLogical.Kernel.Pending.Phase == "copying" && (newObject ||
+				(record.Phase == "removed" || record.Phase == "kernel-aborted") &&
+					record.Generation != kernelLogical.Kernel.Pending.Generation)))
+	dataKind, err := openProtectedDirectory(ctx, storeFD, kind, newObject || newKernelObject, true)
 	if err != nil {
 		return nil, err
 	}
 	retained = append(retained, dataKind)
-	if newObject {
+	if newObject && (!newKernelObject || kernelLogical.Kernel.Pending.Directory.Inode == 0) {
 		// Exclusive creation prevents an unrecorded former directory from becoming a new import.
-		if err := unix.Mkdirat(dataKind, id, 0700); err != nil {
+		if err := unix.Mkdirat(dataKind, id, 0700); err != nil &&
+			(!newKernelObject || !errors.Is(err, unix.EEXIST)) {
 			return nil, managedVMResourceAtomicError("create exclusive protected backing object", err)
 		}
 		if err := unix.Fsync(dataKind); err != nil {
@@ -236,6 +297,26 @@ func (admission *protectedBackingAdmission) protect(
 	if err != nil {
 		return nil, err
 	}
+	if newKernelObject {
+		pending := kernelLogical.Kernel.Pending
+		if pending.Directory.Inode != 0 && !sameProtectedNode(pending.Directory, directoryIdentity) {
+			return nil, managedVMResourceValidationError("kernel prepared directory identity changed")
+		}
+		leaves, err := protectedCleanupNames(ctx, directory)
+		if err != nil {
+			return nil, err
+		}
+		if len(leaves) != 0 {
+			return nil, managedVMResourceValidationError("kernel preparing directory retains unexpected data")
+		}
+		pending.Directory = directoryIdentity
+		pending.Phase = "copying"
+		if err := writeProtectedRecord(ctx, logicalFD, "logical.json", kernelLogical); err != nil {
+			return nil, err
+		}
+		// Recorded preparation authorizes a fresh record, not replacement of any retained inode.
+		newObject = true
+	}
 	if newObject {
 		if err := markProtectedLogicalInitialized(ctx, logicalFD); err != nil {
 			return nil, err
@@ -246,6 +327,17 @@ func (admission *protectedBackingAdmission) protect(
 			References:     []protectedBackingReference{},
 			SnapshotSource: snapshotFD >= 0,
 		}
+		if kind == protectedBackingKernel {
+			pending := kernelLogical.Kernel.Pending
+			if pending == nil {
+				return nil, managedVMResourceValidationError("new kernel backing has no pending import")
+			}
+			record.Generation = pending.Generation
+			if current := kernelLogical.Kernel.Current; current != nil {
+				record.KernelDigest = current.Digest
+				record.Phase = "kernel-reimport-copying"
+			}
+		}
 		if err := writeProtectedRecord(ctx, metadata, "record.json", record); err != nil {
 			return nil, err
 		}
@@ -255,6 +347,23 @@ func (admission *protectedBackingAdmission) protect(
 	lease := &protectedBackingLease{
 		fd: -1, identity: managedVMConfigStat{}, ownerUID: cache.ownerUID, cacheIdentity: cache.identity,
 		metadataFD: metadata, logicalFD: logicalFD, directoryFD: directory, lockFD: lock, record: record,
+	}
+	if kind == protectedBackingKernel {
+		if pending := kernelLogical.Kernel.Pending; pending != nil {
+			lease.kernelGeneration = pending.Generation
+		} else if current := kernelLogical.Kernel.Current; current != nil {
+			lease.kernelGeneration = current.Generation
+		}
+		if lease.record.Generation != lease.kernelGeneration {
+			return nil, managedVMResourceValidationError("kernel object generation differs from logical authority")
+		}
+		kernelLease = lease
+		if kernelLogical.Kernel.Pending != nil && kernelLogical.Kernel.Pending.Phase == "aborting" {
+			if err := lease.abortKernelImport(ctx); err != nil {
+				return nil, err
+			}
+			return nil, managedVMResourceValidationError("kernel interrupted abort completed; retry explicit import")
+		}
 	}
 	if explicitKernelImport && kind == protectedBackingKernel && lease.record.Phase == "removed" {
 		if err := lease.beginKernelReimport(ctx); err != nil {
@@ -316,6 +425,9 @@ func (admission *protectedBackingAdmission) protect(
 	}
 	if lease.record.Phase != "ready" || (expectedBytes != 0 && uint64(lease.record.Backing.Size) != expectedBytes) {
 		return nil, managedVMResourceValidationError("protected backing size or phase differs from requested state")
+	}
+	if err := lease.commitKernelGeneration(ctx); err != nil {
+		return nil, err
 	}
 	lease.retained = retained
 	retained = nil
