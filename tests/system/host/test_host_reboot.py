@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import pwd
 import re
 import socket
 import stat
@@ -30,6 +31,7 @@ _SOURCE_FILES = ("tests/__init__.py", "tests/system/__init__.py", "tests/system/
 _FIELDS = {
     "schema_version", "source", "candidate", "boot_id", "vm", "process", "guest_boot_id",
     "marker", "baseline", "physical", "administrator", "kernel", "image", "vm_paths",
+    "namespace", "namespace_identity",
 }
 
 
@@ -52,12 +54,50 @@ def _phase_task(phase: str) -> Path:
     assert os.geteuid() != 0 and socket.gethostname() == RUNNER
     assert os.environ.get("MVM_TEST_VM") == os.environ.get("MVM_TEST_QUALIFICATION_HOST") == RUNNER
     assert os.environ.get("MVM_HOST_REBOOT_PHASE") == phase, "explicit host_reboot phase required"
+    namespace, _ = _operator_namespace()
     task = Path(os.environ["MVM_HOST_REBOOT_TASK"])
-    assert re.fullmatch(r"/home/runner/\.cache/mvmctl-host-reboot-[0-9a-f]{32}", str(task))
+    assert re.fullmatch(re.escape(namespace["operator"]["home"] + "/.cache/mvmctl-host-reboot-")
+                        + r"[0-9a-f]{32}", str(task))
+    assert task.resolve(strict=True) == task
     row = task.lstat()
     assert stat.S_ISDIR(row.st_mode) and row.st_uid == os.getuid()
     assert stat.S_IMODE(row.st_mode) == 0o700
     return task
+
+
+def _operator_namespace() -> tuple[dict, dict]:
+    """Bind selected paths to actual passwd credentials, never an arbitrary HOME."""
+    namespace = json.loads(os.environ["MVM_HOST_REBOOT_NAMESPACE"])
+    assert set(namespace) == {"schema_version", "runner", "runner_id", "operator", "paths"}
+    assert type(namespace["schema_version"]) is int and namespace["schema_version"] == 1
+    assert namespace["runner"] == RUNNER and re.fullmatch(r"[0-9a-f]{32}", namespace["runner_id"])
+    account = pwd.getpwuid(os.getuid())
+    operator = dict(user=account.pw_name, uid=account.pw_uid, gid=account.pw_gid, home=account.pw_dir)
+    assert os.getuid() == os.geteuid() != 0 and os.getgid() == os.getegid() == account.pw_gid
+    assert all(type(namespace["operator"][key]) is int for key in ("uid", "gid"))
+    assert pwd.getpwnam(account.pw_name) == account and namespace["operator"] == operator
+    assert os.environ["HOME"] == account.pw_dir
+    assert os.environ["USER"] == os.environ["LOGNAME"] == account.pw_name
+    paths = {key: os.environ[environment] for key, environment in
+             (("cache", "MVM_CACHE_DIR"), ("config", "MVM_CONFIG_DIR"), ("mirror", "MVM_ASSET_MIRROR"))}
+    assert namespace["paths"] == paths
+    identities = {}
+    for key, value in dict(home=account.pw_dir, task_parent=account.pw_dir + "/.cache", **paths).items():
+        path = Path(value)
+        assert path.is_absolute() and str(path) == value and path.resolve(strict=True) == path
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            row = os.fstat(fd)
+            identity = lambda info: [info.st_dev, info.st_ino, info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)]
+            assert stat.S_ISDIR(row.st_mode) and (row.st_uid, row.st_gid) == (account.pw_uid, account.pw_gid)
+            assert row.st_mode & 0o022 == 0
+            assert identity(os.fstat(fd)) == identity(row) == identity(path.lstat())
+            assert path.resolve(strict=True) == path
+            identities[key] = identity(row)
+        finally:
+            os.close(fd)
+    assert identities == json.loads(os.environ["MVM_HOST_REBOOT_NAMESPACE_IDENTITY"])
+    return namespace, identities
 
 
 def _file(path: Path) -> dict:
@@ -125,7 +165,9 @@ def _read_pre(task: Path) -> dict:
         current = os.fstat(stream.fileno())
         assert (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns, current.st_ctime_ns) == (
             row.st_dev, row.st_ino, row.st_size, row.st_mtime_ns, row.st_ctime_ns)
-    assert set(data) == _FIELDS and type(data["schema_version"]) is int and data["schema_version"] == 1
+    assert set(data) == _FIELDS and type(data["schema_version"]) is int and data["schema_version"] == 2
+    namespace, identities = _operator_namespace()
+    assert data["namespace"] == namespace and data["namespace_identity"] == identities
     assert data["source"] == _source() and data["candidate"] == _candidate()
     assert str(uuid.UUID(data["boot_id"])) == data["boot_id"]
     assert str(uuid.UUID(data["guest_boot_id"])) == data["guest_boot_id"]
@@ -157,6 +199,7 @@ def _preserve_persistent_inventory(task: Path, before: dict, after_boot: dict, f
 def test_host_reboot_pre() -> None:
     """Retain one running owned VM; this phase cannot claim reboot success."""
     task = _phase_task("pre")
+    namespace, identities = _operator_namespace()
     assert not (task / "pre.json").exists()
     candidate, source = _candidate(), _source()
     baseline = {domain: _host_inventory(RUNNER, domain) for domain in
@@ -199,7 +242,8 @@ def test_host_reboot_pre() -> None:
         assert any(row["id"] == vm["id"] for row in _json_success_data(_run_mvm(RUNNER, "vm", "ps", "--json").stdout, list))
         _run_mvm(RUNNER, "exec", vm["id"], "--", f"printf %s {marker} > /root/host-reboot-marker && sync")
         inspection = _json_success_data(_run_mvm(RUNNER, "vm", "inspect", vm["id"], "--json").stdout, dict)
-        receipt = dict(schema_version=1, source=source, candidate=candidate, boot_id=_boot(),
+        receipt = dict(schema_version=2, namespace=namespace, namespace_identity=identities,
+                       source=source, candidate=candidate, boot_id=_boot(),
                        vm={key: vm[key] for key in ("id", "name", "created_at")}, process=list(process),
                        guest_boot_id=guest_boot, marker=marker, baseline=baseline, physical=physical,
                        administrator=administrator, kernel=kernel, image=image,
@@ -272,7 +316,9 @@ def test_host_reboot_post() -> None:
     assert _file(Path(kernels[0]["path"])) == receipt["kernel"]
     alpine = next(item for item in receipt["baseline"]["image"] if item["type"] == "alpine" and item["version"] == "3.23")
     assert _file(Path(alpine["path"])) == receipt["image"]
-    _write_receipt(task, "post.json", dict(schema_version=1, host_boot_id=_boot(), vm_id=row["id"],
+    namespace, identities = _operator_namespace()
+    _write_receipt(task, "post.json", dict(schema_version=2, namespace=namespace, namespace_identity=identities,
+        host_boot_id=_boot(), vm_id=row["id"],
         source=_source(), candidate=_candidate(), process=list(process), guest_boot_id=guest_boot,
         owned_cleanup=True, network_before=original_networks, network_after=restored_networks,
         physical_before=receipt["physical"], physical_after_boot=before_post, physical_after=final))

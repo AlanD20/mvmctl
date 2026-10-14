@@ -2536,6 +2536,7 @@ _HOST_REBOOT_TASK_FIELDS = {
     "schema_version", "runner", "outer_before", "outer_after", "controller", "source_revision",
     "test_sha256", "candidate_sha256", "candidate_version", "kernel_id", "kernel_sha256", "guest_task",
     "before_boot", "after_boot", "pre_sha256", "pre_outcomes_sha256", "source_payload",
+    "namespace", "namespace_identity",
 }
 _HOST_REBOOT_SOURCE_FILES = ("tests/__init__.py", "tests/system/__init__.py", "tests/system/conftest.py",
                            "tests/system/pytest.ini", "tests/system/host/__init__.py", "tests/system/host/test_host.py",
@@ -2628,12 +2629,86 @@ class _HostRebootReconnectUnavailable(RuntimeError):
 
 
 def _host_reboot_ssh(
-    command: str, *, connect_timeout: int, timeout: int, check: bool = True,
+    bound: dict[str, Any], command: str, *, connect_timeout: int, timeout: int, check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """Use the existing named runner's SSH key; never depend on outer vsock."""
-    return mvm("ssh", _HOST_REBOOT_RUNNER, "--user", "runner", "--key",
+    operator = bound["namespace"]["operator"]
+    paths = bound["namespace"]["paths"]
+    environment = shlex.join(["env", "HOME=" + operator["home"], "USER=" + operator["user"],
+                              "LOGNAME=" + operator["user"], "MVM_CACHE_DIR=" + paths["cache"],
+                              "MVM_CONFIG_DIR=" + paths["config"], "MVM_ASSET_MIRROR=" + paths["mirror"],
+                              "sh", "-c", command])
+    return mvm("ssh", _HOST_REBOOT_RUNNER, "--user", operator["user"], "--key",
                str(Path.home() / ".config/mvmctl/keys/aland"), "--timeout", str(connect_timeout),
-               "--cmd", command, check=check, timeout=timeout)
+               "--cmd", environment, check=check, timeout=timeout)
+
+
+def _host_reboot_require_namespace(namespace: dict[str, Any]) -> None:
+    """Admit only the closed explicit nonroot guest namespace; never select defaults."""
+    if (set(namespace) != {"schema_version", "runner", "runner_id", "operator", "paths"}
+            or type(namespace["schema_version"]) is not int or namespace["schema_version"] != 1
+            or namespace["runner"] != _HOST_REBOOT_RUNNER
+            or type(namespace["runner_id"]) is not str
+            or re.fullmatch(r"[0-9a-f]{32}", namespace["runner_id"]) is None):
+        raise RuntimeError("host_reboot namespace requires its closed named-runner binding")
+    operator, paths = namespace["operator"], namespace["paths"]
+    if (not isinstance(operator, dict) or set(operator) != {"user", "uid", "gid", "home"}
+            or type(operator["user"]) is not str
+            or operator["user"] == "root"
+            or re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", operator["user"]) is None
+            or any(type(operator[key]) is not int or operator[key] <= 0 for key in ("uid", "gid"))
+            or not isinstance(paths, dict) or set(paths) != {"cache", "config", "mirror"}):
+        raise RuntimeError("host_reboot namespace requires an explicit nonroot operator and selected paths")
+    for value in (operator["home"], *paths.values()):
+        if (type(value) is not str or not value.startswith("/") or value == "/"
+                or str(Path(value)) != value or any(part in (".", "..") for part in value.split("/"))
+                or "\x00" in value):
+            raise RuntimeError("host_reboot namespace paths must be canonical absolute directories")
+
+
+def _host_reboot_namespace_probe(bound: dict[str, Any]) -> dict[str, Any]:
+    """Observe passwd/process identity and existing owned nonsymlink directories over SSH."""
+    namespace = bound["namespace"]
+    script = """import json,os,pathlib,pwd,stat
+expected = json.loads(EXPECTED)
+account = pwd.getpwuid(os.getuid())
+operator = dict(user=account.pw_name,uid=account.pw_uid,gid=account.pw_gid,home=account.pw_dir)
+assert os.getuid() == os.geteuid() != 0 and os.getgid() == os.getegid() == account.pw_gid
+assert operator == expected['operator'] and pwd.getpwnam(account.pw_name) == account
+identities = {}
+for key,value in dict(home=account.pw_dir,task_parent=account.pw_dir+'/.cache',**expected['paths']).items():
+    path = pathlib.Path(value)
+    assert path.resolve(strict=True) == path
+    fd = os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:
+        row = os.fstat(fd)
+        identity = lambda r: [r.st_dev,r.st_ino,r.st_uid,r.st_gid,stat.S_IMODE(r.st_mode)]
+        assert stat.S_ISDIR(row.st_mode) and row.st_uid == account.pw_uid and row.st_gid == account.pw_gid
+        assert row.st_mode & 0o022 == 0
+        assert identity(os.fstat(fd)) == identity(row) == identity(path.lstat())
+        assert path.resolve(strict=True) == path
+        identities[key] = identity(row)
+    finally:
+        os.close(fd)
+print(json.dumps(dict(operator=operator,paths=expected['paths'],identity=identities),sort_keys=True))
+""".replace("EXPECTED", repr(json.dumps(namespace)))
+    result = _host_reboot_ssh(bound, shlex.join(["/usr/bin/python3", "-I", "-S", "-B", "-c", script]),
+                              connect_timeout=10, timeout=30)
+    observed = _host_reboot_json(result.stdout.encode())
+    if (set(observed) != {"operator", "paths", "identity"} or observed["operator"] != namespace["operator"]
+            or observed["paths"] != namespace["paths"] or set(observed["identity"]) !=
+            {"home", "task_parent", "cache", "config", "mirror"}
+            or any(not isinstance(value, list) or len(value) != 5
+                   or any(type(n) is not int for n in value)
+                   or value[2:4] != [namespace["operator"]["uid"], namespace["operator"]["gid"]]
+                   or value[4] & 0o022 for value in observed["identity"].values())):
+        raise RuntimeError("host_reboot guest namespace observation is incomplete")
+    return observed["identity"]
+
+
+def _host_reboot_require_guest_namespace(bound: dict[str, Any]) -> None:
+    if _host_reboot_namespace_probe(bound) != bound["namespace_identity"]:
+        raise RuntimeError("host_reboot guest namespace identity changed")
 
 
 def _host_reboot_stage_source(bound: dict[str, Any]) -> None:
@@ -2652,13 +2727,14 @@ def _host_reboot_stage_source(bound: dict[str, Any]) -> None:
                   f"path=pathlib.Path({(bound['guest_task'] + '/source/' + relative)!r}); "
                   "path.parent.mkdir(parents=True,exist_ok=True); "
                   "stream=path.open('xb'); stream.write(raw); stream.close()")
-        _host_reboot_ssh(shlex.join(["python3", "-c", script]), connect_timeout=10, timeout=60)
+        _host_reboot_ssh(bound, shlex.join(["/usr/bin/python3", "-I", "-S", "-B", "-c", script]),
+                          connect_timeout=10, timeout=60)
 
 
 def _host_reboot_probe(bound: dict[str, Any]) -> str:
     command = "cat /proc/sys/kernel/random/boot_id && sha256sum /usr/local/bin/mvm && /usr/local/bin/mvm --version"
     try:
-        result = _host_reboot_ssh(command, connect_timeout=2, check=False, timeout=15)
+        result = _host_reboot_ssh(bound, command, connect_timeout=2, check=False, timeout=15)
     except subprocess.TimeoutExpired as exc:
         raise _HostRebootReconnectUnavailable("host_reboot reconnect timed out") from exc
     if result.returncode != 0:
@@ -2668,13 +2744,14 @@ def _host_reboot_probe(bound: dict[str, Any]) -> str:
         raise RuntimeError("host_reboot reconnect lacks exact guest boot evidence")
     if lines[1].split() != [bound["candidate_sha256"], "/usr/local/bin/mvm"] or lines[2] != bound["candidate_version"]:
         raise RuntimeError("host_reboot installed candidate changed")
+    _host_reboot_require_guest_namespace(bound)
     return lines[0]
 
 
 def _host_reboot_require_source(bound: dict[str, Any]) -> None:
     """Refuse lost or changed fixed phase inputs; never repair a rebooted task."""
     paths = [bound["guest_task"] + "/source/" + relative for relative in _HOST_REBOOT_SOURCE_FILES]
-    result = _host_reboot_ssh(shlex.join(["sha256sum", "--", *paths]), connect_timeout=10, timeout=30)
+    result = _host_reboot_ssh(bound, shlex.join(["sha256sum", "--", *paths]), connect_timeout=10, timeout=30)
     expected = [f"{bound['source_payload'][relative]}  {path}"
                 for relative, path in zip(_HOST_REBOOT_SOURCE_FILES, paths)]
     if result.stdout.splitlines() != expected:
@@ -2683,7 +2760,7 @@ def _host_reboot_require_source(bound: dict[str, Any]) -> None:
 
 def _host_reboot_fetch(bound: dict[str, Any], name: str) -> bytes:
     path = bound["guest_task"] + "/" + name
-    result = _host_reboot_ssh(f"head -c {_HOST_REBOOT_LIMIT + 1} -- {shlex.quote(path)}",
+    result = _host_reboot_ssh(bound, f"head -c {_HOST_REBOOT_LIMIT + 1} -- {shlex.quote(path)}",
                               connect_timeout=10, timeout=30)
     raw = result.stdout.encode()
     if len(raw) > _HOST_REBOOT_LIMIT:
@@ -2697,9 +2774,11 @@ def _host_reboot_pytest(bound: dict[str, Any], phase: str, task: Path) -> bytes:
     report = bound["guest_task"] + f"/{phase}.outcomes.json"
     env = {
         "MVM_TEST_VM": _HOST_REBOOT_RUNNER, "MVM_TEST_QUALIFICATION_HOST": _HOST_REBOOT_RUNNER,
-        "MVM_ASSET_MIRROR": "/home/runner/.cache/mvm-asset-mirror",
-        "MVM_CONFIG_DIR": "/home/runner/.config/mvmctl-030-schema6",
-        "MVM_CACHE_DIR": "/home/runner/.cache/mvmctl-030-release",
+        "MVM_ASSET_MIRROR": bound["namespace"]["paths"]["mirror"],
+        "MVM_CONFIG_DIR": bound["namespace"]["paths"]["config"],
+        "MVM_CACHE_DIR": bound["namespace"]["paths"]["cache"],
+        "MVM_HOST_REBOOT_NAMESPACE": json.dumps(bound["namespace"], sort_keys=True),
+        "MVM_HOST_REBOOT_NAMESPACE_IDENTITY": json.dumps(bound["namespace_identity"], sort_keys=True),
         "MVM_TEMP_DIR": bound["guest_task"] + "/tmp", "TMPDIR": bound["guest_task"] + "/tmp",
         "MVM_HOST_REBOOT_PHASE": phase, "MVM_HOST_REBOOT_TASK": bound["guest_task"],
         "MVM_HOST_REBOOT_SOURCE_REVISION": bound["source_revision"],
@@ -2715,7 +2794,7 @@ def _host_reboot_pytest(bound: dict[str, Any], phase: str, task: Path) -> bytes:
                     "--timeout-method=signal", f"--basetemp={bound['guest_task']}/{phase}-tmp",
                     f"--junitxml={bound['guest_task']}/{phase}.xml", "-x", "-s", "-q",
                     _HOST_REBOOT_FILE + f"::test_host_reboot_{phase}"]))
-    result = _host_reboot_ssh(command, connect_timeout=10, check=False, timeout=660)
+    result = _host_reboot_ssh(bound, command, connect_timeout=10, check=False, timeout=660)
     _host_reboot_write(task, f"{phase}.stdout", (result.stdout or "").encode())
     _host_reboot_write(task, f"{phase}.stderr", (result.stderr or "").encode())
     _host_reboot_write(task, f"{phase}.native.json", json.dumps(dict(phase=phase, returncode=result.returncode)).encode())
@@ -2786,8 +2865,19 @@ def _host_reboot_read_pre_for_source(task: Path, controller: dict, source_root: 
     """Validate original bytes against their original clean source, never relabel them."""
     bound = _host_reboot_json(_host_reboot_read(task / "task.json"))
     if (set(bound) != _HOST_REBOOT_TASK_FIELDS or type(bound["schema_version"]) is not int
-            or bound["schema_version"] != 1 or bound["runner"] != _HOST_REBOOT_RUNNER
-            or re.fullmatch(r"/home/runner/\.cache/mvmctl-host-reboot-[0-9a-f]{32}", bound["guest_task"]) is None
+            or bound["schema_version"] != 2 or bound["runner"] != _HOST_REBOOT_RUNNER):
+        raise RuntimeError("host_reboot retained PRE binding is invalid or changed")
+    _host_reboot_require_namespace(bound["namespace"])
+    namespace = bound["namespace"]
+    if (namespace["runner_id"] != bound["outer_before"]["runner_id"]
+            or namespace["runner_id"] != bound["outer_after"]["runner_id"]
+            or set(bound["namespace_identity"]) != {"home", "task_parent", "cache", "config", "mirror"}
+            or any(not isinstance(value, list) or len(value) != 5
+                   or any(type(n) is not int for n in value)
+                   or value[2:4] != [namespace["operator"]["uid"], namespace["operator"]["gid"]]
+                   or value[4] & 0o022 for value in bound["namespace_identity"].values())
+            or re.fullmatch(re.escape(namespace["operator"]["home"] + "/.cache/mvmctl-host-reboot-")
+                            + r"[0-9a-f]{32}", bound["guest_task"]) is None
             or bound["before_boot"] == bound["after_boot"] or controller != bound["controller"]
             or _sha256_runner_input(Path(MVM_CANDIDATE_BINARY)) != bound["candidate_sha256"]
             or "mvm " + _get_mvm_version() != bound["candidate_version"]
@@ -2806,7 +2896,9 @@ def _host_reboot_read_pre_for_source(task: Path, controller: dict, source_root: 
     if require_complete_pytest_outcomes(outcomes, process_returncode=0).collected != 1:
         raise RuntimeError("host_reboot PRE must prove exactly one passed node")
     receipt = _host_reboot_json(pre)
-    if (receipt["boot_id"] != bound["before_boot"] or receipt["source"] != dict(revision=bound["source_revision"],
+    if (type(receipt["schema_version"]) is not int or receipt["schema_version"] != 2
+            or receipt["namespace"] != namespace or receipt["namespace_identity"] != bound["namespace_identity"]
+            or receipt["boot_id"] != bound["before_boot"] or receipt["source"] != dict(revision=bound["source_revision"],
             test_sha256=bound["test_sha256"], payload=bound["source_payload"])
             or receipt["candidate"]["sha256"] != bound["candidate_sha256"]
             or receipt["candidate"]["version"] != bound["candidate_version"]):
@@ -2814,9 +2906,15 @@ def _host_reboot_read_pre_for_source(task: Path, controller: dict, source_root: 
     return bound, pre
 
 
-def _host_reboot_validate_pre(task: Path, controller: dict) -> tuple[dict, bytes, dict]:
+def _host_reboot_validate_pre(task: Path, controller: dict, namespace: Path | None) -> tuple[dict, bytes, dict]:
     """POST execution additionally requires the live fresh runner authority."""
     bound, pre = _host_reboot_read_pre(task, controller)
+    if namespace is not None:
+        supplied = _host_reboot_json(_host_reboot_read(namespace))
+        _host_reboot_require_namespace(supplied)
+        if supplied != bound["namespace"]:
+            raise RuntimeError("host_reboot supplied namespace changed from the retained PRE binding")
+    _host_reboot_require_guest_namespace(bound)
     if _host_reboot_fetch(bound, "pre.json") != pre:
         raise RuntimeError("host_reboot retained PRE proof changed")
     if _host_reboot_probe(bound) != bound["after_boot"]:
@@ -2903,7 +3001,8 @@ def _require_completed_host_reboot_for_source(task: Path, source_root: Path) -> 
         raise RuntimeError("host_reboot historical POST authority differs from its bound reboot")
     _host_reboot_require_envelope(_host_reboot_read(task / "admin-envelope.json"), bound, authority["outer"])
     pre, post = _host_reboot_json(raw_pre), _host_reboot_json(_host_reboot_read(task / "post.json"))
-    if (type(post["schema_version"]) is not int or post["schema_version"] != 1
+    if (type(post["schema_version"]) is not int or post["schema_version"] != 2
+            or post["namespace"] != bound["namespace"] or post["namespace_identity"] != bound["namespace_identity"]
             or post["host_boot_id"] != bound["after_boot"] or post["vm_id"] != pre["vm"]["id"]
             or post["source"] != pre["source"] or post["candidate"] != pre["candidate"] or post["owned_cleanup"] is not True):
         raise RuntimeError("host_reboot release proof lacks exact source/candidate/owned cleanup")
@@ -2913,7 +3012,7 @@ def _require_completed_host_reboot_for_source(task: Path, source_root: Path) -> 
     return dict(terminal, output="Completed historical PRE+host reboot+POST proof consumed; live runner controls not asserted")
 
 
-def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None) -> dict[str, Any]:
+def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None, namespace: Path | None = None) -> dict[str, Any]:
     """Closed named-runner continuations; PRE is never aggregate success, no root-control fallback."""
     result = dict(domain="host_reboot", tier=2, phase=phase, phase_complete=False, passed=False,
                   release_verdict="INCOMPLETE", output="")
@@ -2921,39 +3020,51 @@ def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None) -> dict
     try:
         if phase not in ("pre", "post") or (phase == "post") != (envelope is not None):
             raise RuntimeError("host_reboot requires an exact PRE or POST continuation")
+        if phase == "pre" and namespace is None:
+            raise RuntimeError("host_reboot PRE requires --host-reboot-namespace")
+        admitted = _host_reboot_json(_host_reboot_read(namespace)) if phase == "pre" else None
+        if admitted is not None:
+            _host_reboot_require_namespace(admitted)
         row = task.lstat()
         if (not task.is_absolute() or task.resolve() != task or not stat.S_ISDIR(row.st_mode)
                 or row.st_uid != os.getuid() or stat.S_IMODE(row.st_mode) != 0o700):
             raise RuntimeError("host_reboot task must be a private owned canonical directory")
-        task_valid = True
         _require_distinct_candidate_controller()
         controller = _host_reboot_controller()
         if phase == "pre":
             if (task / "task.json").exists():
                 raise RuntimeError("host_reboot PRE receipt already exists; no replay")
+            task_valid = True
             kernel_id, kernel_sha = (os.environ.get(key, "") for key in ("MVM_RUNNER_KERNEL_ID", "MVM_RUNNER_KERNEL_SHA256"))
             if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in (kernel_id, kernel_sha)):
                 raise RuntimeError("host_reboot requires the existing exact imported ELF binding; no fallback")
             revision = subprocess.check_output(["git", "-C", str(_REPO_ROOT), "rev-parse", "HEAD"], text=True).strip()
             if subprocess.check_output(["git", "-C", str(_REPO_ROOT), "status", "--porcelain"], text=True):
                 raise RuntimeError("host_reboot requires clean signed suite source")
-            bound = dict(schema_version=1, runner=_HOST_REBOOT_RUNNER, controller=controller,
+            outer = _host_reboot_outer_identity()
+            if admitted["runner_id"] != outer["runner_id"]:
+                raise RuntimeError("host_reboot namespace names a different outer runner identity")
+            bound = dict(schema_version=2, runner=_HOST_REBOOT_RUNNER, controller=controller,
+                namespace=admitted, namespace_identity=None,
                 source_revision=revision, test_sha256=_sha256_runner_input(_REPO_ROOT / _HOST_REBOOT_FILE),
                 source_payload={relative: _sha256_runner_input(_REPO_ROOT / relative) for relative in _HOST_REBOOT_SOURCE_FILES},
                 candidate_sha256=_sha256_runner_input(Path(MVM_CANDIDATE_BINARY)), candidate_version="mvm " + _get_mvm_version(),
                 kernel_id=kernel_id, kernel_sha256=kernel_sha,
-                guest_task="/home/runner/.cache/mvmctl-host-reboot-" + uuid.uuid4().hex,
-                outer_before=_host_reboot_outer_identity(), outer_after=None, before_boot=None, after_boot=None,
+                guest_task=admitted["operator"]["home"] + "/.cache/mvmctl-host-reboot-" + uuid.uuid4().hex,
+                outer_before=outer, outer_after=None, before_boot=None, after_boot=None,
                 pre_sha256=None, pre_outcomes_sha256=None)
+            bound["namespace_identity"] = _host_reboot_namespace_probe(bound)
             bound["before_boot"] = _host_reboot_probe(bound)
             _host_reboot_write(task, "intent.json", (json.dumps(bound, sort_keys=True) + "\n").encode())
-            guest = bound["guest_task"]
-            _host_reboot_ssh(f"mkdir -m 700 -- {guest} && mkdir -p -- {guest}/source/tests {guest}/tmp",
+            guest = shlex.quote(bound["guest_task"])
+            _host_reboot_ssh(bound, f"mkdir -m 700 -- {guest} && mkdir -p -- {guest}/source/tests {guest}/tmp",
                               connect_timeout=10, timeout=30)
             _host_reboot_stage_source(bound)
             raw = _host_reboot_pytest(bound, "pre", task)
             pre = _host_reboot_json(raw)
-            if (pre["boot_id"] != bound["before_boot"] or pre["source"] !=
+            if (type(pre["schema_version"]) is not int or pre["schema_version"] != 2
+                    or pre["namespace"] != admitted or pre["namespace_identity"] != bound["namespace_identity"]
+                    or pre["boot_id"] != bound["before_boot"] or pre["source"] !=
                     dict(revision=revision, test_sha256=bound["test_sha256"], payload=bound["source_payload"])
                     or pre["candidate"]["sha256"] != bound["candidate_sha256"]):
                 raise RuntimeError("host_reboot PRE evidence does not match the fixed source/candidate/boot")
@@ -2961,7 +3072,8 @@ def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None) -> dict
             bound["pre_outcomes_sha256"] = hashlib.sha256(_host_reboot_read(task / "pre.outcomes.json")).hexdigest()
             # Force reboot may discard close-only writes: persist source, reports and
             # the owned nested VM's marker filesystem before the abrupt boundary.
-            _host_reboot_ssh(shlex.join(["sync", "-f", "--", guest]), connect_timeout=10, timeout=60)
+            _host_reboot_ssh(bound, shlex.join(["sync", "-f", "--", bound["guest_task"]]), connect_timeout=10, timeout=60)
+            _host_reboot_require_guest_namespace(bound)
             current = _host_reboot_outer_identity()
             if current != bound["outer_before"] or _host_reboot_controller() != controller:
                 raise RuntimeError("host_reboot outer authority changed before lifecycle")
@@ -2987,7 +3099,8 @@ def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None) -> dict
             _host_reboot_write(task, "task.json", (json.dumps(bound, sort_keys=True) + "\n").encode())
             result.update(phase_complete=True, output="PRE PHASE COMPLETE / RELEASE VERDICT INCOMPLETE; external fresh-boot admin receipt required")
         else:
-            bound, pre, outer = _host_reboot_validate_pre(task, controller)
+            bound, pre, outer = _host_reboot_validate_pre(task, controller, namespace)
+            task_valid = True
             raw_envelope = _host_reboot_read(envelope)
             _host_reboot_require_envelope(raw_envelope, bound, outer)
             _host_reboot_write(task, "admin-envelope.json", raw_envelope)
@@ -2997,7 +3110,9 @@ def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None) -> dict
             raw_preservation = _host_reboot_fetch(bound, "preservation.json")
             _host_reboot_write(task, "preservation.json", raw_preservation)
             _host_reboot_require_preservation(_host_reboot_json(pre), post, raw_preservation)
-            if (post["host_boot_id"] != bound["after_boot"] or post["owned_cleanup"] is not True
+            if (type(post["schema_version"]) is not int or post["schema_version"] != 2
+                    or post["namespace"] != bound["namespace"] or post["namespace_identity"] != bound["namespace_identity"]
+                    or post["host_boot_id"] != bound["after_boot"] or post["owned_cleanup"] is not True
                     or post["vm_id"] != _host_reboot_json(pre)["vm"]["id"]
                     or post["source"] != _host_reboot_json(pre)["source"]
                     or post["candidate"] != _host_reboot_json(pre)["candidate"]
@@ -3803,6 +3918,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Private retained host_reboot receipt directory; also mandatory read-only completed POST input for full release qualification.")
     parser.add_argument("--host-reboot-envelope", type=Path,
                         help="POST-only external administrator receipt for the fresh runner boot and truthful current finite controls.")
+    parser.add_argument("--host-reboot-namespace", type=Path,
+                        help="Private closed guest operator/path admission required for PRE; POST retains the original binding.")
     return parser
 
 
@@ -4025,15 +4142,17 @@ def main() -> None:
             parser.error("rc030 candidate507 carry cannot be combined with historical official8 carry")
         _REPO_ROOT = rc030_candidate507_target(args.rc030_qa_source_carry)
 
-    if args.host_reboot_phase or args.host_reboot_envelope or "host_reboot" in args.domains:
+    if args.host_reboot_phase or args.host_reboot_envelope or args.host_reboot_namespace or "host_reboot" in args.domains:
         if (args.domains != ["host_reboot"] or not args.host_reboot_phase or not args.host_reboot_task
                 or args.all or args.tier or args.host_direct or args.release_qualification
                 or args.prepare or args.image or args.volume or args.rebuild or args.push
                 or args.record_evidence
                 or args.candidate_version or args.skip_volume_check
+                or (args.host_reboot_phase == "pre" and args.host_reboot_namespace is None)
                 or (args.host_reboot_phase == "post") != bool(args.host_reboot_envelope)):
             parser.error("host_reboot requires only its exact domain, phase/task and POST-only admin envelope receipt")
-        result = run_host_reboot_phase(args.host_reboot_phase, args.host_reboot_task, args.host_reboot_envelope)
+        result = run_host_reboot_phase(args.host_reboot_phase, args.host_reboot_task, args.host_reboot_envelope,
+                                       args.host_reboot_namespace)
         print(json.dumps(result, sort_keys=True), flush=True)
         # PRE transport/lifecycle completion is deliberately not aggregate qualification success.
         sys.exit(0 if result.get("phase_complete") and (args.host_reboot_phase == "pre" or result["passed"]) else 1)

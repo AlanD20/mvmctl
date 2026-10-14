@@ -172,6 +172,18 @@ def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
     controller = dict(path="/home/www/.local/bin/mvm", command=["/home/www/.local/bin/mvm"],
                       identity=[1, 2, 1000, 1000, 0o755, 1, 21586222, 3, 4], sha256="c" * 64)
     state = dict(pre=None, cleanup=True, outer=outer, probes=0, controller=controller)
+    namespace = dict(schema_version=1, runner="mvmctl-030-test", runner_id=outer["runner_id"],
+        operator=dict(user="qaoperator", uid=2107, gid=2107, home="/home/qaoperator"),
+        paths=dict(cache="/home/qaoperator/.cache/release", config="/home/qaoperator/.config/release",
+                   mirror="/home/qaoperator/.cache/mirror"))
+    namespace_path = tmp_path / "namespace.json"
+    namespace_path.write_text(json.dumps(namespace))
+    namespace_path.chmod(0o600)
+    state.update(namespace_path=namespace_path, namespace=namespace,
+        namespace_identity={key: [1, index, 2107, 2107, 0o700] for index, key in
+                            enumerate(("home", "task_parent", "cache", "config", "mirror"), 1)})
+    monkeypatch.setattr(orchestrator, "_host_reboot_namespace_probe",
+                        lambda bound: json.loads(json.dumps(state["namespace_identity"])))
     monkeypatch.setattr(orchestrator, "MVM_BINARY", controller["path"])
     monkeypatch.setattr(orchestrator, "_host_reboot_controller", lambda: json.loads(json.dumps(state["controller"])))
     monkeypatch.setattr(orchestrator, "_require_distinct_candidate_controller", lambda: None)
@@ -190,7 +202,7 @@ def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
     def mvm(*args, **kwargs):
         calls.append(args)
         if args[0] == "ssh" and "sha256sum --" in args[-1]:
-            paths = shlex.split(args[-1])[2:]
+            paths = shlex.split(shlex.split(args[-1])[-1])[2:]
             lines = []
             for path in paths:
                 relative = path.split("/source/", 1)[1]
@@ -206,14 +218,16 @@ def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
         phases.append(selected)
         physical = {key: [] for key in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec")}
         if selected == "pre":
-            receipt = dict(boot_id=before_boot, source=dict(revision=bound["source_revision"],
+            receipt = dict(schema_version=2, namespace=bound["namespace"], namespace_identity=bound["namespace_identity"],
+                boot_id=before_boot, source=dict(revision=bound["source_revision"],
                 test_sha256=bound["test_sha256"], payload=bound["source_payload"]),
                 candidate=dict(sha256=bound["candidate_sha256"], version=bound["candidate_version"]), vm=dict(id="4" * 32), physical=physical)
             raw = json.dumps(receipt).encode()
             state["pre"] = raw
         else:
             pre = json.loads(state["pre"])
-            raw = json.dumps(dict(schema_version=1, host_boot_id=after_boot, owned_cleanup=state["cleanup"],
+            raw = json.dumps(dict(schema_version=2, namespace=bound["namespace"], namespace_identity=bound["namespace_identity"],
+                host_boot_id=after_boot, owned_cleanup=state["cleanup"],
                 vm_id=pre["vm"]["id"], source=pre["source"], candidate=pre["candidate"],
                 physical_before=physical, physical_after_boot=physical, physical_after=physical)).encode()
         orchestrator._host_reboot_write(directory, f"{selected}.json", raw)
@@ -252,7 +266,7 @@ def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(
     monkeypatch.setattr(orchestrator, "_host_reboot_stage_source", stage_source)
     monkeypatch.setattr(orchestrator, "_sha256_runner_input",
                         lambda path: source_hash(path) if path.is_file() else "a" * 64)
-    pre = orchestrator.run_host_reboot_phase("pre", task, None)
+    pre = orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])
     assert pre["phase_complete"] is True and pre["passed"] is False and pre["release_verdict"] == "INCOMPLETE"
     assert phases == ["pre"]
     assert [call for call in calls if call[:2] == ("vm", "reboot")] == [("vm", "reboot", "mvmctl-030-test", "--force")]
@@ -260,6 +274,16 @@ def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(
     assert (task / "pre.json").read_bytes() == state["pre"]
     assert json.loads((task / "task.json").read_bytes())["after_boot"] != json.loads(state["pre"])["boot_id"]
     assert json.loads((task / "task.json").read_bytes())["controller"] == state["controller"]
+    bound = json.loads((task / "task.json").read_bytes())
+    assert bound["schema_version"] == 2 and bound["namespace"] == state["namespace"]
+    assert bound["namespace_identity"] == state["namespace_identity"]
+    assert bound["guest_task"].startswith(state["namespace"]["operator"]["home"] + "/.cache/")
+    for call in calls:
+        if call[0] == "ssh":
+            assert call[call.index("--user") + 1] == state["namespace"]["operator"]["user"]
+            environment = shlex.split(call[-1])
+            assert "HOME=" + state["namespace"]["operator"]["home"] in environment
+            assert "MVM_CACHE_DIR=" + state["namespace"]["paths"]["cache"] in environment
     # POST accepts truthful current controls, not a required setup value or the PRE envelope.
     state["outer"].update(memory_high=str(memory_high), memory_max=str(memory_max))
     payload = json.loads(envelope.read_bytes())
@@ -295,8 +319,8 @@ def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(
 def test_host_reboot_post_refuses_wrong_external_admin_authority_before_body(
     orchestrator, monkeypatch, tmp_path, field, value,
 ):
-    task, envelope, calls, phases, _ = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
-    assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    assert orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])["phase_complete"]
     payload = json.loads(envelope.read_bytes())
     if field is None:
         payload.pop(value)
@@ -319,7 +343,7 @@ def test_host_reboot_never_aggregates_unproven_control_pre_or_cleanup(
     orchestrator, monkeypatch, tmp_path, failure, value,
 ):
     task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
-    assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+    assert orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])["phase_complete"]
     if failure == "actual-controls":
         state["outer"]["memory_max"] = value
     elif failure == "invalid-controls":
@@ -341,7 +365,7 @@ def test_host_reboot_never_aggregates_unproven_control_pre_or_cleanup(
 def test_host_reboot_stops_before_lifecycle_after_failed_pre(orchestrator, monkeypatch, tmp_path, failure):
     stage_source = orchestrator._host_reboot_stage_source
     source_hash = orchestrator._sha256_runner_input
-    task, _, calls, _, _ = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    task, _, calls, _, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
     def failed(*args):
         raise RuntimeError("strict PRE report failed")
     expected = "strict PRE report failed"
@@ -358,8 +382,9 @@ def test_host_reboot_stops_before_lifecycle_after_failed_pre(orchestrator, monke
         def transport(*args, **kwargs):
             calls.append(args)
             assert args[0] == "ssh", "no vsock fallback or lifecycle after transport failure"
+            command = shlex.split(shlex.split(args[-1])[-1])
             if ((failure == "ssh-mkdir" and "mkdir -m 700" in args[-1])
-                    or (failure == "ssh-source" and "python3 -c" in args[-1])
+                    or (failure == "ssh-source" and command[:5] == ["/usr/bin/python3", "-I", "-S", "-B", "-c"])
                     or (failure == "sync-failure" and "sync -f --" in args[-1])):
                 raise RuntimeError("SSH durability barrier failed" if failure == "sync-failure"
                                    else "SSH setup denied: literal diagnostic")
@@ -368,7 +393,7 @@ def test_host_reboot_stops_before_lifecycle_after_failed_pre(orchestrator, monke
         expected = "source changed before staging" if failure == "source-changed" else "SSH setup denied"
         if failure == "sync-failure":
             expected = "SSH durability barrier failed"
-    result = orchestrator.run_host_reboot_phase("pre", task, None)
+    result = orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])
     assert not result["phase_complete"] and not result["passed"]
     assert not any(call[:2] == ("vm", "reboot") for call in calls)
     assert expected in (task / "pre.terminal.json").read_text()
@@ -384,7 +409,7 @@ def test_host_reboot_stops_on_identity_failure_instead_of_retrying(orchestrator,
     task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
     if failure != "candidate":
         state["source_lost"] = failure == "source-after-reconnect"
-        pre = orchestrator.run_host_reboot_phase("pre", task, None)
+        pre = orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])
         if failure == "source-before-post":
             assert pre["phase_complete"] is True
             state["source_lost"] = True
@@ -412,7 +437,7 @@ def test_host_reboot_stops_on_identity_failure_instead_of_retrying(orchestrator,
         return subprocess.CompletedProcess(args, 0,
             stdout="22222222-2222-4222-8222-222222222222\n" + "0" * 64 + "  /usr/local/bin/mvm\nmvm 0.3.0-rc.fixture\n", stderr="")
     monkeypatch.setattr(orchestrator, "mvm", transport)
-    result = orchestrator.run_host_reboot_phase("pre", task, None)
+    result = orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])
     assert not result["phase_complete"] and len(probes) == 2
     assert "installed candidate changed" in result["output"] and not (task / "task.json").exists()
 
@@ -426,6 +451,105 @@ def test_host_reboot_is_not_executed_by_ordinary_tier2(orchestrator, monkeypatch
     assert orchestrator.HOST_REBOOT_PHASE_DOMAINS == {"host_reboot": ["tests/system/host/test_host_reboot.py"]}
     result = orchestrator.run_tier2_domain("host_reboot", ["tests/system/host/test_host_reboot.py"], "0.3.0")
     assert not result["passed"] and "no phase executed" in result["output"]
+
+
+@pytest.mark.parametrize("fault", ["missing", "root", "boolean-uid", "unknown-field", "runner", "relative-path"])
+def test_host_reboot_namespace_admission_refuses_before_effects(orchestrator, monkeypatch, tmp_path, fault):
+    task, _, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    path = state["namespace_path"]
+    namespace = state["namespace"]
+    if fault == "missing":
+        path = None
+    elif fault == "root":
+        namespace["operator"]["uid"] = 0
+    elif fault == "boolean-uid":
+        namespace["operator"]["uid"] = True
+    elif fault == "unknown-field":
+        namespace["adopt"] = True
+    elif fault == "runner":
+        namespace["runner_id"] = "9" * 32
+    else:
+        namespace["paths"]["cache"] = "../old-cache"
+    state["namespace_path"].write_text(json.dumps(namespace))
+    result = orchestrator.run_host_reboot_phase("pre", task, None, path)
+    assert not result["phase_complete"] and "namespace" in result["output"]
+    assert not calls and not phases and not (task / "intent.json").exists()
+
+
+@pytest.mark.parametrize("fault", ["supplied-user", "supplied-path", "directory-replaced", "old-task"])
+def test_host_reboot_post_keeps_original_namespace_and_refuses_changed_binding(
+    orchestrator, monkeypatch, tmp_path, fault,
+):
+    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    assert orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])["phase_complete"]
+    namespace_path = None
+    if fault.startswith("supplied"):
+        namespace_path = state["namespace_path"]
+        supplied = json.loads(namespace_path.read_bytes())
+        if fault == "supplied-user":
+            supplied["operator"]["user"] = "anotheroperator"
+        else:
+            supplied["paths"]["cache"] += "-replacement"
+        namespace_path.write_text(json.dumps(supplied))
+    elif fault == "directory-replaced":
+        state["namespace_identity"]["cache"][1] += 100
+    else:
+        bound = json.loads((task / "task.json").read_bytes())
+        bound["schema_version"] = 1
+        bound.pop("namespace")
+        bound.pop("namespace_identity")
+        (task / "task.json").write_text(json.dumps(bound))
+    original = {path.name: path.read_bytes() for path in task.iterdir()}
+    before_calls = list(calls)
+    result = orchestrator.run_host_reboot_phase("post", task, envelope, namespace_path)
+    assert not result["phase_complete"] and not result["passed"] and phases == ["pre"]
+    assert calls == before_calls
+    assert {path.name: path.read_bytes() for path in task.iterdir()} == original
+
+
+@pytest.mark.parametrize("fault", ["none", "root", "counterfeit-uid", "counterfeit-home", "changed-path", "symlink"])
+def test_host_reboot_guest_namespace_uses_actual_passwd_and_owned_canonical_paths(monkeypatch, tmp_path, fault):
+    from tests.system.host import test_host_reboot as guest
+
+    uid, gid = os.getuid(), os.getgid()
+    home = tmp_path / "operator-home"
+    home.mkdir(mode=0o700)
+    (home / ".cache").mkdir(mode=0o700)
+    paths = {key: str(home / key) for key in ("cache", "config", "mirror")}
+    for path in paths.values():
+        Path(path).mkdir(mode=0o700)
+    account = SimpleNamespace(pw_name="qaoperator", pw_uid=uid, pw_gid=gid, pw_dir=str(home))
+    monkeypatch.setattr(guest.pwd, "getpwuid", lambda selected: account)
+    monkeypatch.setattr(guest.pwd, "getpwnam", lambda selected: account)
+    namespace = dict(schema_version=1, runner=guest.RUNNER, runner_id="1" * 32,
+        operator=dict(user=account.pw_name, uid=uid, gid=gid, home=str(home)), paths=paths)
+    identities = {key: [row.st_dev, row.st_ino, row.st_uid, row.st_gid, row.st_mode & 0o7777]
+                  for key, path in dict(home=str(home), task_parent=str(home / ".cache"), **paths).items()
+                  for row in [Path(path).stat()]}
+    for key, value in {"HOME": str(home), "USER": account.pw_name, "LOGNAME": account.pw_name,
+        "MVM_HOST_REBOOT_NAMESPACE": json.dumps(namespace), "MVM_HOST_REBOOT_NAMESPACE_IDENTITY": json.dumps(identities),
+        "MVM_CACHE_DIR": paths["cache"], "MVM_CONFIG_DIR": paths["config"], "MVM_ASSET_MIRROR": paths["mirror"]}.items():
+        monkeypatch.setenv(key, value)
+    if fault == "root":
+        monkeypatch.setattr(guest.os, "geteuid", lambda: 0)
+    elif fault == "counterfeit-uid":
+        namespace["operator"]["uid"] += 1
+        monkeypatch.setenv("MVM_HOST_REBOOT_NAMESPACE", json.dumps(namespace))
+    elif fault == "counterfeit-home":
+        monkeypatch.setenv("HOME", str(tmp_path))
+    elif fault == "changed-path":
+        original = Path(paths["cache"])
+        original.rename(home / "old-cache")
+        original.mkdir(mode=0o700)
+    elif fault == "symlink":
+        original = Path(paths["cache"])
+        original.rename(home / "old-cache")
+        original.symlink_to(home / "old-cache", target_is_directory=True)
+    if fault == "none":
+        assert guest._operator_namespace() == (namespace, identities)
+    else:
+        with pytest.raises(AssertionError):
+            guest._operator_namespace()
 
 
 @pytest.mark.parametrize("field", ["path", "identity", "sha256"])
@@ -442,10 +566,10 @@ def test_host_reboot_refuses_changed_configured_controller(orchestrator, monkeyp
             change()
             return raw
         monkeypatch.setattr(orchestrator, "_host_reboot_pytest", phase)
-        result = orchestrator.run_host_reboot_phase("pre", task, None)
+        result = orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])
         assert not any(call[:2] == ("vm", "reboot") for call in calls)
     else:
-        assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+        assert orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])["phase_complete"]
         change()
         result = orchestrator.run_host_reboot_phase("post", task, envelope)
         assert phases == ["pre"]
@@ -454,14 +578,14 @@ def test_host_reboot_refuses_changed_configured_controller(orchestrator, monkeyp
 
 def test_host_reboot_pins_resolved_configured_controller_and_refuses_same_bytes_replacement(orchestrator, monkeypatch, tmp_path):
     pin_controller = orchestrator._host_reboot_controller
-    task, envelope, calls, phases, _ = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
     installed = tmp_path / ".local" / "bin" / "mvm"
     installed.parent.mkdir(parents=True)
     installed.write_bytes(b"unchanged installed outer controller")
     installed.chmod(0o755)
     monkeypatch.setattr(orchestrator, "MVM_BINARY", str(installed))
     monkeypatch.setattr(orchestrator, "_host_reboot_controller", pin_controller)
-    assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+    assert orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])["phase_complete"]
     bound = json.loads((task / "task.json").read_bytes())
     assert bound["controller"]["path"] == str(installed.resolve())
     assert bound["controller"]["identity"][1] == installed.stat().st_ino
@@ -478,7 +602,7 @@ def test_host_reboot_pins_resolved_configured_controller_and_refuses_same_bytes_
 @pytest.mark.parametrize("fault", ["missing", "malformed", "wrong-boot", "source", "controller", "control", "cleanup", "policy", "native", "skipped", "wrong-junit"])
 def test_host_reboot_full_release_refuses_incomplete_or_stale_closed_proof(orchestrator, monkeypatch, tmp_path, fault):
     task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
-    assert orchestrator.run_host_reboot_phase("pre", task, None)["phase_complete"]
+    assert orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])["phase_complete"]
     assert orchestrator.run_host_reboot_phase("post", task, envelope)["passed"]
     before_calls = list(calls)
     def replace(name, mutate):
@@ -603,6 +727,8 @@ def test_host_reboot_guest_preservation_refuses_persistent_changes_but_allows_bo
     ["host", "--host-reboot-phase", "pre", "--host-reboot-task", "/tmp/task"],
     ["host_reboot", "--host-reboot-phase", "post", "--host-reboot-task", "/tmp/task"],
     ["host_reboot", "--host-reboot-phase", "pre", "--host-reboot-task", "/tmp/task", "--push"],
+    ["host_reboot", "--host-reboot-phase", "pre", "--host-reboot-task", "/tmp/task"],
+    ["host", "--host-reboot-namespace", "/tmp/namespace.json"],
     ["host_reboot"],
 ])
 def test_host_reboot_mixed_or_incomplete_selection_fails_before_side_effects(
@@ -617,9 +743,13 @@ def test_host_reboot_retains_literal_reports_and_rejects_incomplete_phase(
     orchestrator, monkeypatch, tmp_path, fault,
 ):
     actual_fetch = orchestrator._host_reboot_fetch
+    actual_pytest = orchestrator._host_reboot_pytest
     task = tmp_path / "phase"
     task.mkdir(mode=0o700)
-    bound = dict(guest_task="/home/runner/.cache/mvmctl-host-reboot-" + "1" * 32,
+    _, _, _, _, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    monkeypatch.setattr(orchestrator, "_host_reboot_pytest", actual_pytest)
+    bound = dict(guest_task=state["namespace"]["operator"]["home"] + "/.cache/mvmctl-host-reboot-" + "1" * 32,
+        namespace=state["namespace"], namespace_identity=state["namespace_identity"],
         source_revision="f" * 40, candidate_sha256="a" * 64, candidate_version="mvm 0.3.0",
         kernel_id="b" * 64, kernel_sha256="c" * 64)
     calls = []
@@ -652,7 +782,8 @@ def test_host_reboot_retains_literal_reports_and_rejects_incomplete_phase(
         assert (task / "pre.outcomes.json").read_bytes() == json.dumps(outcomes).encode()
         assert (task / "pre.xml").read_bytes() == xml
     assert len(calls) == (2 if fault == "ssh-report-unavailable" else 1) and calls[0][1] == "mvmctl-030-test"
-    assert "::test_host_reboot_pre" in calls[0][-1] and "MVM_CONFIG_DIR=/home/runner/.config/mvmctl-030-schema6" in calls[0][-1]
+    command = shlex.split(calls[0][-1])[-1]
+    assert "::test_host_reboot_pre" in command and "MVM_CONFIG_DIR=" + state["namespace"]["paths"]["config"] in command
     assert "--rootdir=." in calls[0][-1]
 
 
