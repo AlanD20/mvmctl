@@ -71,8 +71,8 @@ respect that binding rather than creating a new cache for each use of the same r
 [ADR-0025](0025-immutable-kernel-cache-lineage.md), accepted as a v0.3.0 design on 2026-10-14, amends only
 that immutable-kernel cross-cache restriction. Fresh kernel logical schema 2 may publish an identical-byte successor
 after synchronized old kernel removal and completed old-store retirement, preserving old authority and allocating
-a global monotonic generation. Implementation and qualification remain pending; the restriction above remains the
-current runtime behavior. Existing schema 1 is not adopted, and mutable backing and cleanup authority are unchanged.
+a global monotonic generation. Implementation is integrated and root-Go-verified; fresh-candidate and installed
+qualification remain pending. Existing schema 1 is not adopted, and mutable backing and cleanup authority are unchanged.
 
 [ADR-0023](0023-protected-branch-authority-layout.md) defines a fresh-layout extension for permanent snapshot locks
 and volume-removal receipts. Signed `b254f010` implements that extension and passes focused root behavior/race

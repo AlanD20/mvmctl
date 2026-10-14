@@ -1,6 +1,6 @@
 # Immutable Kernel Lineage Across Retired Caches
 
-**Status:** Accepted design for v0.3.0; implementation and qualification pending
+**Status:** Implementation integrated; root Go verification passed, fresh-candidate installed qualification pending
 **Date:** 2026-10-14
 **Amends:** [ADR-0018](0018-isolated-vm-execution-and-snapshot-authority.md) and
 [ADR-0022](0022-explicit-protected-cache-retirement.md), only for immutable kernel succession across caches
@@ -8,9 +8,10 @@
 
 ## Context
 
-Explicit identical-byte kernel reimport currently retains the original cache/store binding. After completed cache
-retirement, the same operator cannot acquire that kernel in a fresh cache: the global logical identity still binds
-the retired cache. That refusal follows ADR-0022; it is not permission to delete or reconstruct the old authority.
+Before this extension, explicit identical-byte kernel reimport retained the original cache/store binding. After
+completed cache retirement, the same operator could not acquire that kernel in a fresh cache: the global logical
+identity still bound the retired cache. That refusal followed ADR-0022; it did not authorize deleting or reconstructing
+the old authority.
 
 The approved extension permits explicit acquisition of identical immutable bytes in a new active cache while
 preserving the old store record, object tombstone, digest and lock identities. Kernel removal alone is insufficient:
@@ -47,6 +48,11 @@ after terminal cleanup. These precedents support a kernel-specific lineage, not 
   the logical current pointer. Kernel lookup, launch and restore require the committed current cache/generation
   and refuse pending succession. A ready object alone cannot expose the successor between these two publications;
   previous retained bindings remain stale.
+- Separate consumers from the trusted initial snapshot producer. VM launch/restore consumers require committed
+  current authority. The producer may finish only its own sealed initial root-owned `0400`, `O_RDONLY` source
+  descriptor, matching its source-owned pending/aborted identity under the full restore locks. This does not reopen
+  removed backing or revive a cross-cache predecessor, and it adds no ordinary lookup fallback. Conversely, explicit
+  operator import of that initial aborted authority is refused before allocating another generation.
 - Before publication, cancellation or failure may remove only the recorded identity-matched candidate beneath its
   root-private directory. Synchronize absence and retain an aborted-attempt receipt without recycling its generation.
   Uncertain publication retains intent for exact typed retry. Retry seals visible record writes, verifies the same
@@ -68,12 +74,20 @@ Cross-filesystem publication spans destination object authority and the global l
 keep reads closed until both are durable; failure recovery cannot infer success from visible files alone. Current and
 pending admission use direct recorded bindings, while digest work remains bounded by kernel size.
 
-Implementation must update kernel import/reimport, logical admission, record codecs, backing copy/lookup/binding and
-cache-retirement consumers coherently. Focused root behavioral verification must cover generation exhaustion,
+Implementation `0a8ff31b` integrates kernel import/reimport, logical admission, record codecs, backing copy/lookup/binding
+and cache-retirement consumers coherently. Focused root behavioral verification must cover generation exhaustion,
 duplicate/competing imports, busy/referenced/transitional refusal, changed bytes/cache/store, stale bindings,
 cancellation and crash points around both publications and synchronization retries, unchanged same-cache reimport,
 and unchanged mutable anti-resurrection behavior. Required engineering gates include focused format, vet, root and
 race checks inside the approved disposable runner.
+
+Root Go verification used the exact 18-file implementation overlay on `f905f3ea`; those reviewed/tested bytes were
+integrated unchanged. Affected vet passed. Focused ordinary and race runs each recorded 147 test/subtest PASS,
+zero FAIL and two explicitly skipped auxiliary crash-worker helpers. The complete root Jailer run recorded 2,795
+PASS, zero FAIL and the same two auxiliary skips, native exit zero. An earlier complete run with 2,776 PASS and
+three FAIL remains failed history. Fault/recovery tests cover corrected publication durability and same-cache
+aborted-inventory handling; producer/consumer regressions include refusal of operator takeover before generation
+allocation. These source/Go results do not establish a zero-skip run, release build or installed qualification.
 
 A fresh candidate built from the implemented source must pass the real same-operator CLI journey: import, boot,
 remove, cache cleanup, identical import into a fresh cache, boot and exact cleanup, with unchanged old records and
@@ -81,6 +95,6 @@ locks. Ordinary CLI import of changed bytes derives a different kernel ID; it do
 refusal. Same-ID changed-byte refusal and cross-filesystem publication/crash guards belong to root behavioral and
 race verification, without public test-only flags. Actual installed succession across distinct filesystems must
 be qualified where available or reported as an explicit gap; a single-filesystem journey does not establish it.
-Full kernel22 remains a separate qualification gate. Earlier candidate evidence predates this implementation and
-does not qualify the new candidate or lineage. Acceptance of this design is neither implementation completion nor
-a release PASS.
+Full kernel22 remains a separate qualification gate. No fresh CLI release build, installation or installed-system
+qualification has run for this implementation. Earlier candidate evidence predates it and does not qualify the new
+candidate or lineage. Integrated source and root Go verification are not a release PASS.

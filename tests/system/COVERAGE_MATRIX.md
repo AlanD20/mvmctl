@@ -93,8 +93,8 @@ Candidate-bound normal reusable-base preparation succeeded; current-source stock
 Accepted source/build gates include all six ordinary CI gates, 9,943 Go test/subtest PASS with 194 explicit
 SKIP across 71 passing packages, the complete root Jailer suite with 2,743 PASS and zero FAIL/SKIP,
 the pinned embedded-agent/release builds, and 437 focused orchestrator checks. Those focused checks add
-no system-runtime cases; the ordinary Go run is not a zero-skip qualification. Unchanged production inputs
-preserve those accepted receipts without a replay.
+no system-runtime cases; the ordinary Go run is not a zero-skip qualification. These receipts retain their historical
+candidate/source bindings and do not qualify the changed kernel-lineage implementation.
 
 **Earlier failed kernel invocation:** all 22 test bodies passed, but one teardown error and native exit one
 left that invocation failed with no accepted credit.
@@ -117,10 +117,19 @@ Reboot carry requires every named reboot-source input to remain unchanged. The f
 dependency-fixture and network-test inputs, so the retained two reboot cases remain historical evidence and cannot
 carry to that target. A target-source actual PRE/reboot/POST journey remains required.
 
+**Kernel-lineage source checkpoint:** implementation `0a8ff31b` integrates the exact reviewed/tested 18-file overlay
+on `f905f3ea`. Affected vet passed; focused ordinary and race checks each passed 147 tests/subtests with zero failures
+and two explicit auxiliary crash-worker skips. The full root Jailer suite passed 2,795 tests/subtests, zero failures,
+with the same two auxiliary skips and native exit zero. The earlier 2,776-PASS/3-FAIL run remains failed history.
+Literal root-verification archive SHA-256:
+`cb3059d0e1a5749adf2368e3f4c41c6d5f16d0989c74aac48f6c3e98e0c084bb`.
+These Go results add no installed-system cases. No fresh CLI release build, installation, new candidate or affected
+installed-system qualification has run; the unchanged historical candidate and its 525+2 cases do not qualify lineage.
+
 **Remaining qualification:** actual source compatibility/provenance verification, target-source reboot qualification
 and the strict final join remain open. The accepted
-[ADR-0025](../../docs/adr/0025-immutable-kernel-cache-lineage.md) kernel-lineage design still requires implementation,
-a fresh production candidate and affected qualification; historical candidate coverage is not proof for that candidate.
+[ADR-0025](../../docs/adr/0025-immutable-kernel-cache-lineage.md) kernel-lineage implementation still requires a fresh
+production candidate and affected qualification; historical candidate coverage is not proof for that candidate.
 Earlier accepted receipts remain immutable and bound to their original source. Strict joined qualification
 across mixed QA sources remains unproved; the strict evidence join does not support general receipt carry
 across those sources. Unchanged candidate bytes do not establish source compatibility.
