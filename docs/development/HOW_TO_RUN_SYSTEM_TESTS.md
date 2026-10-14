@@ -530,6 +530,7 @@ and joining active workers can outlast the completion-gap limit.
 | `--release-qualification` | `false` | Require the unfiltered full-matrix release identity gate and closed reboot proof; requires `--all --host-direct --rebuild --candidate-version --host-reboot-task` |
 | `--host-reboot-phase` | — | Explicit `pre` or `post` continuation against existing `mvmctl-030-test`; separate from ordinary tier batches |
 | `--host-reboot-task` | — | Absolute private owned receipt directory for explicit phases; completed strict POST proof is mandatory for full release qualification |
+| `--host-reboot-namespace` | — | Private JSON binding the exact named-runner ID, non-root guest operator and existing cache/config/mirror directories; required for PRE, optional and unchanged for POST (§4.7) |
 | `--host-reboot-envelope` | — | POST-only private external administrator receipt binding the fresh runner boot/process and exact observed outer controls (canonical finite integers or literal `"max"`) |
 | `--collect-release-nodes` | — | Standalone full-registry collection inside the named runner; retain evidence in an empty private task directory (§6.1) |
 | `--record-evidence` | — | Retain literal reports for a named-runner test selection; does not finalize qualification (§6.2) |
@@ -561,8 +562,8 @@ The runner checks a guest-filesystem durability barrier before force reboot and 
 verification after reconnect, before POST. A staging failure requires source/durability diagnosis; it is
 not evidence of memory exhaustion or a reason to introduce a RAM guard.
 
-Host-phase orchestration uses the unchanged outer controller's `mvm ssh --cmd` with the runner's attached
-`aland` key at `~/.config/mvmctl/keys/aland`. This includes source staging and receipt retrieval, avoiding
+Host-phase orchestration uses the unchanged outer controller's `mvm ssh --cmd` with the original attached
+SSH key and the explicitly selected guest operator. This includes source staging and receipt retrieval, avoiding
 the legacy controller's reboot-time vsock omission. It does not replace that controller, introduce a
 production fallback, or weaken candidate-side VM exec/vsock assertions. Actual PRE/reboot/POST evidence remains required.
 
@@ -570,15 +571,50 @@ Use one clean, fixed source and candidate for both phases. Select the existing i
 `MVM_RUNNER_KERNEL_ID` and `MVM_RUNNER_KERNEL_SHA256`; bind `MVM_BINARY` to the installed outer controller
 and `MVM_CANDIDATE_BINARY` to the exact candidate already installed inside the named runner. Set the asset
 mirror as usual. Create an absolute, operator-owned `0700` task directory under ignored project-local storage.
+All phase pytest execution remains inside the named QA runner.
+
+PRE also requires `--host-reboot-namespace`: an outer-operator-owned, single-link, nonsymlink `0600` JSON file
+of at most 128 KiB. Its closed schema is below; replace the illustrative runner ID, account, numeric IDs and paths with
+observed QA values. Extra or duplicate fields are rejected. This is QA/developer tooling, not a public `mvm` flag.
+
+```json
+{
+  "schema_version": 1,
+  "runner": "mvmctl-030-test",
+  "runner_id": "<observed 32-lowercase-hex runner ID>",
+  "operator": {
+    "user": "qa_runner",
+    "uid": 1001,
+    "gid": 1001,
+    "home": "/home/qa_runner"
+  },
+  "paths": {
+    "cache": "/home/qa_runner/qa-cache",
+    "config": "/home/qa_runner/qa-config",
+    "mirror": "/home/qa_runner/qa-mirror"
+  }
+}
+```
+
+The operator must be non-root with positive numeric UID/GID. SSH admission verifies the actual real/effective
+UID/GID and both passwd lookups against this tuple. Home, `home/.cache` (the guest task parent), cache, config,
+and mirror must already be canonical absolute directories, owned by that UID/GID, without symlink components
+or group/world write access. PRE retains each directory's device, inode, UID, GID and mode; reconnect and POST
+require the same identities. The file selects `HOME`, `USER`, `LOGNAME`, `MVM_CACHE_DIR`, `MVM_CONFIG_DIR` and
+`MVM_ASSET_MIRROR` for the guest phases; the orchestrator does not select a default account or repair directories.
+Explicit selection does not adopt or convert legacy cache state.
 
 ```bash
 python3 scripts/run-system-tests.py host_reboot --host-reboot-phase pre \
-  --host-reboot-task /absolute/path/to/private-host-reboot-task
+  --host-reboot-task /absolute/path/to/private-host-reboot-task \
+  --host-reboot-namespace /absolute/path/to/private-qa-namespace.json
 ```
 
 PRE creates only its owned nested VM, writes and reads a guest marker, retains source/candidate/inventory
 proof, and reboots the named runner through the unchanged outer controller. A successful PRE exit means
 **phase complete, release incomplete**. Do not repeat it against the same task.
+Retained task and PRE/POST receipts use schema 2, carrying the namespace and observed directory identities.
+Schema-1 task/phase records are incompatible and are not adopted or rewritten; start a fresh task and journey.
 
 After reconnect, retain a fresh private receipt of the exact observed outer controls for this boot, runner
 UUID and outer PID/start tick. Encode each `memory.high` and `memory.max` value as a canonical nonnegative
@@ -592,11 +628,14 @@ python3 scripts/run-system-tests.py host_reboot --host-reboot-phase post \
   --host-reboot-envelope /absolute/path/to/fresh-admin-envelope.json
 ```
 
+POST uses the retained PRE namespace when `--host-reboot-namespace` is omitted. If supplied, the private JSON
+must match the original namespace exactly; it cannot switch account, runner or selected directories.
+
 POST must prove changed host boot, stale-running reconciliation, restart and retained-marker exec, exact
 persistent inventory preservation, and typed owned cleanup. Both phases need native exit zero and exact
 singleton JSON/JUnit proof. Only a closed successful POST task can be supplied to full release qualification.
-Changing bound source, candidate or controller invalidates the proof; retained historical results are never
-relabeled as a run on different inputs.
+Changing bound source, candidate, controller or namespace identity invalidates the proof; retained historical
+results are never relabeled as a run on different inputs.
 
 ---
 

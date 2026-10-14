@@ -198,12 +198,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to use that admitted image's full ID. This tooling change does not alter public image resolver semantics.
 - Fixed system-test command timeouts to interrupt the owned CLI caller first, with bounded kill/reap fallback,
   retained output and cleanup errors. A timeout remains a failure even if shutdown completes successfully.
+- Fixed QA host-reboot phases to require an explicit private `--host-reboot-namespace` input for PRE, binding
+  the exact runner, non-root operator and selected directories. POST retains that binding; task and phase receipts
+  require fresh schema 2 without adopting older records or legacy cache state. The original outer controller
+  and attached SSH key remain unchanged. This flag belongs to QA/developer tooling; see the
+  [host-reboot guide](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#47-explicit-named-runner-host-reboot-journey).
 - Aligned T1/T2 domain-runner VM creation deadlines to 1,800 seconds in system-test tooling.
 - Fixed networkless VM cleanup when Firecracker exits after recovery admission: retained pidfd exit and
   successful reap now retire the live namespace check. Failed reaping and ambiguous live identity still refuse.
 
 ### Known limitations and qualification
 
+- The explicit QA host-reboot namespace contract has focused tooling verification and both phase nodes collect,
+  but its fresh PRE/reboot/POST journey has not been qualified. Historical runtime receipts retain their original
+  source/candidate bindings and do not qualify this change; full release qualification remains incomplete.
 - Kept v0.3.0 unreleased and not release-qualified. At the 2026-10-14 checkpoint, the earlier candidate
   `0.3.0-rc.source-publication-de46e04f` passed candidate-bound normal reusable-base preparation and
   source-bound runtime receipts accepted a historical aggregate 525 of 525 ordinary Python cases plus both actual

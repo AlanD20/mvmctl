@@ -29,7 +29,7 @@ A release is **blocked** until ALL of the following pass:
 | CI Go tests | `bash scripts/run-go-ci-tests.sh` | Unprivileged selection passes |
 | Local Jailer Go tests | Full Jailer test binary run as root inside a disposable VM | Entire package passes |
 | System install | `sudo ./dist/mvm host install-system && sudo /usr/local/bin/mvm host init` | Canonical root-owned install succeeds |
-| System tests | `MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm python3 scripts/run-system-tests.py --release-qualification --host-direct --rebuild --candidate-version X.Y.Z --all` | Identity-qualified T1/T2 runners and clean-host T3 all pass |
+| System tests | `MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm python3 scripts/run-system-tests.py --release-qualification --host-direct --rebuild --candidate-version X.Y.Z --all --host-reboot-task /absolute/path/to/closed-host-reboot-task` | Identity-qualified T1/T2 runners, clean-host T3 and strict closed reboot proof all pass |
 | Version check | `/usr/local/bin/mvm --version` | Returns correct version (not `0.0.0-dev`) |
 | Smoke test | `/usr/local/bin/mvm --help` | Shows all commands |
 
@@ -84,6 +84,15 @@ by staging the candidate, invoking `host install-system`, and initializing throu
 `/usr/local/bin/mvm`. T1/T2 runners clone that image and execute the installed path; the focused `system_install` domain
 replays and verifies the administrator install contract. Directly copying onto the canonical path, relying on PATH
 lookup, or aliasing the candidate to the controller does not qualify the installer.
+
+The separate [named-runner host-reboot journey](development/HOW_TO_RUN_SYSTEM_TESTS.md#47-explicit-named-runner-host-reboot-journey)
+requires a private `--host-reboot-namespace` JSON file for PRE. It binds the existing runner ID, an explicit
+non-root guest passwd/process identity, and existing owned home/task-parent/cache/config/mirror directory identities.
+Keep the original outer controller and attached SSH key unchanged; all phase pytest runs inside the QA runner.
+POST may omit the flag and reuse the retained binding, or supply the identical namespace. Task and PRE/POST
+receipts use schema 2; schema-1 records and legacy cache state are not adopted. PRE success, phase collection and
+focused tooling checks do not qualify an actual reboot. Full qualification requires the fresh, completed
+PRE/reboot/POST task on the exact accepted source and candidate; earlier receipts keep their original bindings.
 
 The builder's unprivileged initialization pins the approved Firecracker/Jailer 1.17.0 pair through
 `mvm init --non-interactive --binary-version 1.17.0`; it must not resolve a moving latest release during qualification.
@@ -165,7 +174,7 @@ For every release, collect and archive:
 | Go vet output | `go vet ./... 2>&1` | Zero static analysis warnings |
 | CI Go test output | `bash scripts/run-go-ci-tests.sh` | Unprivileged selection passes |
 | Local Jailer output | Full Jailer test binary run as root inside a disposable VM | Entire package passes |
-| System test results | `MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm python3 scripts/run-system-tests.py --release-qualification --host-direct --rebuild --candidate-version X.Y.Z --all` | Identity-qualified full matrix passes on the clean host |
+| System test results | `MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm python3 scripts/run-system-tests.py --release-qualification --host-direct --rebuild --candidate-version X.Y.Z --all --host-reboot-task /absolute/path/to/closed-host-reboot-task` | Identity-qualified full matrix and closed reboot proof pass on the clean host |
 | Version output | `/usr/local/bin/mvm --version` | Correct version string |
 | Help output | `/usr/local/bin/mvm --help` | All commands listed |
 | Benchmark results | `benchmarks/results.json` | Performance within thresholds |
@@ -212,6 +221,7 @@ MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
   python3 scripts/run-system-tests.py \
   --release-qualification --host-direct --rebuild \
   --candidate-version "$version" --all \
+  --host-reboot-task /absolute/path/to/closed-host-reboot-task \
   2>&1 | tee "$evidence_dir/system-tests.log"
 ```
 
@@ -272,6 +282,7 @@ A regression is **any** of the following:
 - [ ] `./scripts/build.sh release --version X.Y.Z --output dist/mvm` — exact candidate built
 - [ ] Dedicated clean qualification host/outer VM — candidate installed at exact `/usr/local/bin/mvm`
 - [ ] System tests — every required T1/T2/T3 domain passes strict machine outcome validation
+- [ ] Named-runner host reboot — fresh schema-2 PRE/reboot/POST proof passes with the retained operator/directory binding
 - [ ] `/usr/local/bin/mvm --version` — returns exact `mvm X.Y.Z`
 - [ ] `/usr/local/bin/mvm --help` — all commands present
 
