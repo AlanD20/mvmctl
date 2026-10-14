@@ -26,16 +26,28 @@ func prepareProtectedKernelImport(ctx context.Context, cache *managedCacheLease,
 	if pending := record.Kernel.Pending; pending != nil {
 		if (pending.SnapshotSource == nil) != (snapshotSource == nil) ||
 			pending.SnapshotSource != nil && *pending.SnapshotSource != *snapshotSource {
-			return record, nil, managedVMResourceValidationError("kernel pending import belongs to a different producer")
+			return record, nil, managedVMResourceValidationError(
+				"kernel pending import belongs to a different producer",
+			)
 		}
 		if pending.Cache != selected || !sameProtectedNode(pending.Store, store) {
-			return record, nil, managedVMResourceValidationError("kernel pending import selects a different destination")
+			return record, nil, managedVMResourceValidationError(
+				"kernel pending import selects a different destination",
+			)
 		}
 		if err := syncProtectedCacheDirectory(ctx, logicalFD); err != nil {
 			return record, nil, err
 		}
 		if current := record.Kernel.Current; current != nil && current.Cache != selected {
-			previous, err := admitProtectedKernelPredecessor(ctx, cache.ownerUID, ownerFD, logicalFD, id, *current, true)
+			previous, err := admitProtectedKernelPredecessor(
+				ctx,
+				cache.ownerUID,
+				ownerFD,
+				logicalFD,
+				id,
+				*current,
+				true,
+			)
 			return record, previous, err
 		}
 		return record, nil, nil
@@ -52,7 +64,9 @@ func prepareProtectedKernelImport(ctx context.Context, cache *managedCacheLease,
 	}
 	if current == nil && snapshotSource == nil && backing != nil &&
 		backing.Phase == "kernel-aborted" && backing.SnapshotSource {
-		return record, nil, managedVMResourceValidationError("initial snapshot abort requires its original trusted producer")
+		return record, nil, managedVMResourceValidationError(
+			"initial snapshot abort requires its original trusted producer",
+		)
 	}
 	var retained []int
 	defer func() {
@@ -83,7 +97,9 @@ func prepareProtectedKernelImport(ctx context.Context, cache *managedCacheLease,
 			backing.Cache != selected || (backing.Phase != "removed" && backing.Phase != "kernel-aborted" &&
 			backing.Phase != "kernel-unprotected-removed") ||
 			len(backing.References) != 0 || len(backing.NextReferences) != 0 {
-			return record, nil, managedVMResourceValidationError("kernel successor destination retains nonterminal authority")
+			return record, nil, managedVMResourceValidationError(
+				"kernel successor destination retains nonterminal authority",
+			)
 		}
 		directory = backing.Directory
 	}
@@ -102,7 +118,9 @@ func prepareProtectedKernelSnapshot(ctx context.Context, cache *managedCacheLeas
 	id string, backing *protectedBackingRecord, sourceFD int, size uint64,
 ) (protectedLogicalRecord, bool, error) {
 	if size < managedVMKernelMinBytes || size > managedVMKernelMaxBytes {
-		return protectedLogicalRecord{}, false, managedVMResourceValidationError("snapshot kernel source is outside policy")
+		return protectedLogicalRecord{}, false, managedVMResourceValidationError(
+			"snapshot kernel source is outside policy",
+		)
 	}
 	if err := validateRestoredBackingSource(ctx, sourceFD, size); err != nil {
 		return protectedLogicalRecord{}, false, err
@@ -133,20 +151,28 @@ func prepareProtectedKernelSnapshot(ctx context.Context, cache *managedCacheLeas
 	}
 	if pending := logical.Kernel.Pending; pending != nil {
 		if pending.SnapshotSource == nil || *pending.SnapshotSource != source || pending.Predecessor != 0 {
-			return logical, false, managedVMResourceValidationError("snapshot kernel cannot complete another producer's import")
+			return logical, false, managedVMResourceValidationError(
+				"snapshot kernel cannot complete another producer's import",
+			)
 		}
 		if backing != nil && (!backing.SnapshotSource || backing.Source.Inode != 0 && backing.Source != source) {
-			return logical, false, managedVMResourceValidationError("snapshot kernel backing differs from its sealed source")
+			return logical, false, managedVMResourceValidationError(
+				"snapshot kernel backing differs from its sealed source",
+			)
 		}
 	} else if logical.Kernel.LastGeneration == 0 {
 		if logical.Initialized || backing != nil {
-			return logical, false, managedVMResourceValidationError("initial snapshot kernel retains unrelated authority")
+			return logical, false, managedVMResourceValidationError(
+				"initial snapshot kernel retains unrelated authority",
+			)
 		}
 	} else {
 		// A cancelled initial snapshot may retry only its exact source and terminal receipt.
 		if backing == nil || !backing.SnapshotSource || backing.Source != source ||
 			backing.Phase != "kernel-aborted" || backing.Generation != logical.Kernel.LastGeneration {
-			return logical, false, managedVMResourceValidationError("initial snapshot retry has no matching aborted source")
+			return logical, false, managedVMResourceValidationError(
+				"initial snapshot retry has no matching aborted source",
+			)
 		}
 		store, err := protectedIdentity(storeFD)
 		if err != nil {
@@ -156,8 +182,20 @@ func prepareProtectedKernelSnapshot(ctx context.Context, cache *managedCacheLeas
 			return logical, false, err
 		}
 	}
-	logical, previous, err := prepareProtectedKernelImport(ctx, cache, ownerFD, logicalFD, storeFD, id, backing, &source)
-	return logical, true, errors.Join(err, closeProtectedFDs(previous)) // An initial producer has no predecessor leases.
+	logical, previous, err := prepareProtectedKernelImport(
+		ctx,
+		cache,
+		ownerFD,
+		logicalFD,
+		storeFD,
+		id,
+		backing,
+		&source,
+	)
+	return logical, true, errors.Join(
+		err,
+		closeProtectedFDs(previous),
+	) // An initial producer has no predecessor leases.
 }
 
 func requireNewProtectedKernelDirectoryAbsent(ctx context.Context, storeFD int, id string) (returnErr error) {
@@ -175,7 +213,12 @@ func requireNewProtectedKernelDirectoryAbsent(ctx context.Context, storeFD int, 
 func admitProtectedKernelPredecessor(ctx context.Context, owner uint32, ownerFD, logicalFD int, id string,
 	current protectedKernelIncarnation, requireRetiredStore bool) (_ []int, returnErr error) {
 	var receipt protectedKernelReceipt
-	if err := readProtectedRecord(ctx, logicalFD, protectedKernelReceiptLeaf(current.Generation), &receipt); err != nil {
+	if err := readProtectedRecord(
+		ctx,
+		logicalFD,
+		protectedKernelReceiptLeaf(current.Generation),
+		&receipt,
+	); err != nil {
 		return nil, err
 	}
 	want := protectedKernelReceipt{Version: protectedKernelLogicalVersion, Owner: owner, ID: id, Binding: current}
@@ -212,9 +255,13 @@ func admitProtectedKernelPredecessor(ctx context.Context, owner uint32, ownerFD,
 	}
 	if requireRetiredStore && (store.Retirement == nil || store.Retirement.Phase != "removed" ||
 		store.Retirement.Quarantine == nil || store.Retirement.Quarantine.Inode == 0) {
-		return nil, errs.New(errs.CodeKernelImportFailed, "kernel successor requires completed predecessor cache retirement",
-			errs.WithClass(errs.ClassConflict), errs.WithEntity(id),
-			errs.WithDetails(map[string]any{"predecessor_store_retirement_required": true}))
+		return nil, errs.New(
+			errs.CodeKernelImportFailed,
+			"kernel successor requires completed predecessor cache retirement",
+			errs.WithClass(errs.ClassConflict),
+			errs.WithEntity(id),
+			errs.WithDetails(map[string]any{"predecessor_store_retirement_required": true}),
+		)
 	}
 	metadata := anchor
 	for _, component := range []string{protectedBackingKernel, id} {

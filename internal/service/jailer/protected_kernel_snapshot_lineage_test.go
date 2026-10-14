@@ -145,8 +145,11 @@ func TestProtectedKernelSnapshotProducerReceiverDeathResumesOnlyExactInitialSour
 			assert.Equal(t, uint64(1), logical.Kernel.Pending.Generation)
 			var stat unix.Stat_t
 			require.NoError(t, unix.Fstat(source, &stat))
-			assertKernelLineageDiff(t, protectedBackingIdentity{Device: uint64(stat.Dev), Inode: stat.Ino, Size: stat.Size},
-				*logical.Kernel.Pending.SnapshotSource)
+			assertKernelLineageDiff(
+				t,
+				protectedBackingIdentity{Device: uint64(stat.Dev), Inode: stat.Ino, Size: stat.Size},
+				*logical.Kernel.Pending.SnapshotSource,
+			)
 			before := protectedCacheTestTree(t, f.logicalPath())
 			consumer, err := f.importKernel(t, t.Context(), 1, false)
 			require.Nil(t, consumer)

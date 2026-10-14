@@ -258,7 +258,9 @@ func readProtectedInventoryEntry(
 	}
 	if kind == protectedBackingKernel && (record.Generation != selector.Kernel.Current.Generation ||
 		record.Backing != selector.Kernel.Current.Backing) {
-		return result, false, managedVMResourceValidationError("kernel inventory generation differs from logical authority")
+		return result, false, managedVMResourceValidationError(
+			"kernel inventory generation differs from logical authority",
+		)
 	}
 	switch record.Phase {
 	case "copying", "copied", "cancelling-copy", "cancelling-copied", "initial-removing", "removed", "removing",

@@ -142,8 +142,14 @@ func (f *kernelLineageFixture) assertCurrent(t *testing.T, i int, generation uin
 	assertKernelLineageDiff(t, protectedBackingIdentity{Device: uint64(stat.Dev), Inode: stat.Ino, Size: stat.Size},
 		logical.Kernel.Current.Backing)
 	require.NoError(t, unix.Stat(filepath.Join(f.paths[i], protectedBackingDirectory), &stat))
-	assertKernelLineageDiff(t, protectedBackingIdentity{Device: uint64(stat.Dev), Inode: stat.Ino},
-		protectedBackingIdentity{Device: logical.Kernel.Current.Store.Device, Inode: logical.Kernel.Current.Store.Inode})
+	assertKernelLineageDiff(
+		t,
+		protectedBackingIdentity{Device: uint64(stat.Dev), Inode: stat.Ino},
+		protectedBackingIdentity{
+			Device: logical.Kernel.Current.Store.Device,
+			Inode:  logical.Kernel.Current.Store.Inode,
+		},
+	)
 }
 
 func assertKernelLineageDiff(t *testing.T, want, got any) {
@@ -328,7 +334,8 @@ func (ctx kernelLineageCrashContext) Err() error {
 		var backing protectedBackingRecord
 		_ = json.Unmarshal(metadataBytes, &backing)
 		matched := ctx.stage == "intent" && pending.Phase == "preparing" ||
-			ctx.stage == "directory" && pending.Phase == "copying" && pending.Directory.Inode != 0 && len(metadataBytes) == 0 ||
+			ctx.stage == "directory" && pending.Phase == "copying" && pending.Directory.Inode != 0 &&
+				len(metadataBytes) == 0 ||
 			ctx.stage == "candidate" && backing.Backing.Inode != 0 && backing.Phase == "kernel-reimport-copying" ||
 			ctx.stage == "copied" && backing.Phase == "kernel-reimport-copied" ||
 			ctx.stage == "published" && backing.Phase == "ready"
@@ -554,13 +561,25 @@ func TestProtectedKernelSuccessorVisiblePublicationRequiresDirectorySync(t *test
 				require.NoError(t, lease.commitKernelGeneration(t.Context()))
 				current := f.logical(t)
 				require.NoError(t, writeProtectedRecord(t.Context(), lease.logicalFD, "visible-current.json", current))
-				require.NoError(t, unix.Renameat(lease.logicalFD, "visible-current.json", lease.logicalFD, "logical.json"))
+				require.NoError(
+					t,
+					unix.Renameat(lease.logicalFD, "visible-current.json", lease.logicalFD, "logical.json"),
+				)
 			} else {
-				require.NoError(t, writeProtectedRecord(t.Context(), lease.metadataFD, "visible-ready.json", lease.record))
-				require.NoError(t, unix.Renameat(lease.metadataFD, "visible-ready.json", lease.metadataFD, "record.json"))
+				require.NoError(
+					t,
+					writeProtectedRecord(t.Context(), lease.metadataFD, "visible-ready.json", lease.record),
+				)
+				require.NoError(
+					t,
+					unix.Renameat(lease.metadataFD, "visible-ready.json", lease.metadataFD, "record.json"),
+				)
 			}
 			before := protectedCacheTestTree(t, f.logicalPath())
-			metadata := protectedCacheTestTree(t, filepath.Join(f.anchors[1], protectedBackingKernel, lineageTestKernelID))
+			metadata := protectedCacheTestTree(
+				t,
+				filepath.Join(f.anchors[1], protectedBackingKernel, lineageTestKernelID),
+			)
 			fault := errors.New("publication directory fsync failed")
 			deps := realProtectedKernelPublicationDeps()
 			if target == "backing-metadata" {
@@ -570,7 +589,11 @@ func TestProtectedKernelSuccessorVisiblePublicationRequiresDirectorySync(t *test
 			}
 			assert.ErrorIs(t, lease.commitKernelGenerationWithPublication(t.Context(), deps), fault)
 			assertKernelLineageTree(t, before, f.logicalPath())
-			assertKernelLineageTree(t, metadata, filepath.Join(f.anchors[1], protectedBackingKernel, lineageTestKernelID))
+			assertKernelLineageTree(
+				t,
+				metadata,
+				filepath.Join(f.anchors[1], protectedBackingKernel, lineageTestKernelID),
+			)
 			require.NoError(t, lease.commitKernelGeneration(t.Context()))
 			f.assertCurrent(t, 1, 2)
 		})

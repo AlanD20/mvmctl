@@ -37,7 +37,9 @@ func (lease *protectedBackingLease) abortKernelImport(ctx context.Context) error
 		var named unix.Stat_t
 		inspectErr := unix.Fstatat(lease.directoryFD, "pending", &named, unix.AT_SYMLINK_NOFOLLOW)
 		if errors.Is(inspectErr, unix.ENOENT) && lease.record.Backing.Inode != 0 {
-			return managedVMResourceValidationError("recorded kernel candidate is missing; absence is not abort authority")
+			return managedVMResourceValidationError(
+				"recorded kernel candidate is missing; absence is not abort authority",
+			)
 		}
 		if inspectErr != nil && !errors.Is(inspectErr, unix.ENOENT) {
 			return inspectErr

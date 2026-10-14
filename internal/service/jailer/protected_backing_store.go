@@ -187,9 +187,15 @@ func (admission *protectedBackingAdmission) protect(
 					imported := !unknown && logical.Kernel.Current != nil &&
 						logical.Kernel.Current.Phase == "ready" &&
 						logical.Kernel.Current.Generation == kernelLease.kernelGeneration
-					returnErr = errs.WrapMsg(errs.CodeKernelImportFailed, "protected kernel import failed",
-						errors.Join(returnErr, sealErr, readErr), errs.WithEntity(id),
-						errs.WithDetails(map[string]any{"outcome_unknown": unknown, "protected_kernel_imported": imported}))
+					returnErr = errs.WrapMsg(
+						errs.CodeKernelImportFailed,
+						"protected kernel import failed",
+						errors.Join(returnErr, sealErr, readErr),
+						errs.WithEntity(id),
+						errs.WithDetails(
+							map[string]any{"outcome_unknown": unknown, "protected_kernel_imported": imported},
+						),
+					)
 				}
 				cancel()
 			}
@@ -532,7 +538,10 @@ func pinProtectedStore(
 		)
 	}
 	// Seal visible fresh-layout publication and the cache entry before admitting consumers.
-	if err := errors.Join(syncProtectedCacheDirectory(ctx, metadata), syncProtectedCacheDirectory(ctx, cache.cacheFD)); err != nil {
+	if err := errors.Join(
+		syncProtectedCacheDirectory(ctx, metadata),
+		syncProtectedCacheDirectory(ctx, cache.cacheFD),
+	); err != nil {
 		return -1, errors.Join(err, unix.Close(store))
 	}
 	return store, nil

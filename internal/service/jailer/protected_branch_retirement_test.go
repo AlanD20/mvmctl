@@ -103,17 +103,32 @@ func TestProtectedBranchImportRefusesLayoutBeforeBindingUnseenIdentity(t *testin
 					Inode: stat.Ino,
 				},
 				Initialized: true, Kernel: &protectedKernelLineage{LastGeneration: 1,
-					Current: &protectedKernelIncarnation{Generation: 1,
+					Current: &protectedKernelIncarnation{
+						Generation: 1,
 						Cache: protectedBackingCache{Major: unix.Major(uint64(stat.Dev)),
 							Minor: unix.Minor(uint64(stat.Dev)), Inode: stat.Ino},
-						Store:   protectedBackingIdentity{Device: uint64(storeStat.Dev), Inode: storeStat.Ino, Size: storeStat.Size},
-						Backing: protectedBackingIdentity{Device: uint64(diskStat.Dev), Inode: diskStat.Ino, Size: diskStat.Size},
-						Digest:  hex.EncodeToString(digest[:]), Phase: "ready"}}}
+						Store: protectedBackingIdentity{
+							Device: uint64(storeStat.Dev),
+							Inode:  storeStat.Ino,
+							Size:   storeStat.Size,
+						},
+						Backing: protectedBackingIdentity{
+							Device: uint64(diskStat.Dev),
+							Inode:  diskStat.Ino,
+							Size:   diskStat.Size,
+						},
+						Digest: hex.EncodeToString(digest[:]),
+						Phase:  "ready",
+					}}}
 			// Store directory size is incidental and may change after pinning. Its node identity
 			// is independently checked below; backing file size remains part of the comparison.
 			assert.Equal(t, uint64(storeStat.Dev), logical.Kernel.Current.Store.Device)
 			assert.Equal(t, storeStat.Ino, logical.Kernel.Current.Store.Inode)
-			if diff := cmp.Diff(want, logical, cmpopts.IgnoreFields(protectedKernelIncarnation{}, "Store")); diff != "" {
+			if diff := cmp.Diff(
+				want,
+				logical,
+				cmpopts.IgnoreFields(protectedKernelIncarnation{}, "Store"),
+			); diff != "" {
 				t.Errorf("successful fresh import logical authority (-want +got):\n%s", diff)
 			}
 		})
@@ -217,7 +232,10 @@ func TestProtectedBranchSnapshotLockSurvivesRemovalAndRetirement(t *testing.T) {
 	require.NoError(t, entry.Release(t.Context()))
 	locksBefore := protectedCacheTestTree(t, filepath.Join(f.anchorPath, protectedSnapshotLockDirectory))
 	require.NoError(t, retireProtectedCache(t.Context(), f.cache, f.anchor, f.owner))
-	if diff := cmp.Diff(locksBefore, protectedCacheTestTree(t, filepath.Join(f.anchorPath, protectedSnapshotLockDirectory))); diff != "" {
+	if diff := cmp.Diff(
+		locksBefore,
+		protectedCacheTestTree(t, filepath.Join(f.anchorPath, protectedSnapshotLockDirectory)),
+	); diff != "" {
 		t.Errorf("cache retirement changed permanent snapshot lock inode (-want +got):\n%s", diff)
 	}
 	assert.NoDirExists(t, filepath.Join(f.cachePath, protectedBackingDirectory))
@@ -415,7 +433,11 @@ func TestProtectedBranchVolumeRefusesUnrecordedOrChangedQuarantine(t *testing.T)
 				}
 			} else {
 				require.NoError(t, f.storage.backing.BeginInitialVolumeRemoval(t.Context()))
-				quarantine, err := f.storage.backing.openInitialVolumeQuarantine(t.Context(), f.cache.cache, f.branch(t))
+				quarantine, err := f.storage.backing.openInitialVolumeQuarantine(
+					t.Context(),
+					f.cache.cache,
+					f.branch(t),
+				)
 				require.NoError(t, err)
 				if scenario == "recorded inode replaced" {
 					require.NoError(t, os.Rename(path, filepath.Join(f.cache.root, "retained-quarantine")))
@@ -423,12 +445,29 @@ func TestProtectedBranchVolumeRefusesUnrecordedOrChangedQuarantine(t *testing.T)
 				} else {
 					progress := f.storage.backing.record.InitialRemoval
 					progress.Phase, progress.Receipt = "prepared", &f.receipt
-					require.NoError(t, writeProtectedRecord(t.Context(), f.storage.backing.metadataFD, "record.json", f.storage.backing.record))
+					require.NoError(
+						t,
+						writeProtectedRecord(
+							t.Context(),
+							f.storage.backing.metadataFD,
+							"record.json",
+							f.storage.backing.record,
+						),
+					)
 					source := openProtectedBranchTestFD(t, filepath.Dir(f.rawPath))
-					require.NoError(t, unix.Renameat2(source, f.input.ID+".raw", quarantine, "data.raw", unix.RENAME_NOREPLACE))
+					require.NoError(
+						t,
+						unix.Renameat2(source, f.input.ID+".raw", quarantine, "data.raw", unix.RENAME_NOREPLACE),
+					)
 					require.NoError(t, unix.Close(source))
-					require.NoError(t, os.Rename(filepath.Join(path, "data.raw"), filepath.Join(f.cache.root, "retained-raw")))
-					require.NoError(t, os.WriteFile(filepath.Join(path, "data.raw"), []byte("unadmitted replacement"), 0600))
+					require.NoError(
+						t,
+						os.Rename(filepath.Join(path, "data.raw"), filepath.Join(f.cache.root, "retained-raw")),
+					)
+					require.NoError(
+						t,
+						os.WriteFile(filepath.Join(path, "data.raw"), []byte("unadmitted replacement"), 0600),
+					)
 				}
 			}
 			before := protectedCacheTestTree(t, f.cache.root)
