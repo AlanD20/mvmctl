@@ -214,8 +214,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   update passed eight focused behavioral checks and the complete 441-test orchestrator unit module on an exact
   two-file overlay; clean release-source qualification and a full stock-runner journey remain unproved.
   The earlier kernel batch remains failed after a teardown configuration-preservation error; the later complete
-  22-case batch passed with typed cleanup and original-state preservation. The approved source-carry verifier for
-  this exact candidate still must prove compatibility and provenance. The accepted
+  22-case batch passed with typed cleanup and original-state preservation. Source-carry tooling for the exact tested
+  candidate is implemented and unit-qualified; its strict default is unchanged, and actual compatibility/provenance
+  verification and the final join remain open. Reboot carry requires unchanged complete reboot-source inputs;
+  fixture/network changes prevent carrying the historical reboot proof to the current target, which needs its own
+  actual reboot journey. The accepted
   [kernel-lineage design](docs/adr/0025-immutable-kernel-cache-lineage.md) requires a fresh production candidate and
   its own qualification; these historical receipts do not establish it. See
   [runner budgets](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#45-limit-parallel-workers).

@@ -106,8 +106,19 @@ seconds, native exit zero and JUnit zero failures, errors or skips. These checks
 overlay over `f905f3ea`; those checks did not qualify a clean full release source or that failed runtime invocation.
 The later accepted kernel batch is separate evidence and does not change the retained retired-kernel authority.
 
-**Remaining qualification:** the approved source-carry verifier for this exact candidate must prove compatibility and
-provenance for these original receipts, including reboot proof, before a strict joined release PASS. The accepted
+**Source-carry tooling checkpoint:** the verifier is implemented and unit-qualified, with its strict default unchanged.
+Its closed profile applies only to the exact tested `507110b0` candidate and retains original source provenance,
+production/build pins, exact case accounting and original boolean preservation baselines, including false values.
+Initial named-runner verification passed 72 evidence checks and 441 orchestrator tests; the corrected profile passed
+19 focused checks, including refusal of changed reboot-source inputs. These tool checks do not establish actual
+receipt compatibility or a final joined release PASS.
+
+Reboot carry requires every named reboot-source input to remain unchanged. The f50-to-be91 target changes shared
+dependency-fixture and network-test inputs, so the retained two reboot cases remain historical evidence and cannot
+carry to that target. A target-source actual PRE/reboot/POST journey remains required.
+
+**Remaining qualification:** actual source compatibility/provenance verification, target-source reboot qualification
+and the strict final join remain open. The accepted
 [ADR-0025](../../docs/adr/0025-immutable-kernel-cache-lineage.md) kernel-lineage design still requires implementation,
 a fresh production candidate and affected qualification; historical candidate coverage is not proof for that candidate.
 Earlier accepted receipts remain immutable and bound to their original source. Strict joined qualification
