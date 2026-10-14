@@ -822,9 +822,11 @@ print(json.dumps(result,sort_keys=True))
         self.completed.append(self.active)
         self.active = None
 
-    def cleanup(self):
+    def cleanup(self, *, interrupted=False):
         assert not self.aborted and self.active is None, "failed official sequence retained"
-        assert tuple(self.completed) == self.selected, "incomplete official sequence retained"
+        completed = tuple(self.completed)
+        assert completed == self.selected[:len(completed)], "official completion order changed; retain sequence"
+        assert completed == self.selected or interrupted, "incomplete official sequence retained"
         try:
             self.assert_borrowed_release()
             self.assert_build_logs()
@@ -854,6 +856,7 @@ def official_kernel_pull_sequence(runner_vm, tmp_path_factory, request):
     private_config.mkdir(mode=0o700)
     owner = _OfficialKernelPullSequence(runner_vm, cache, private_config, tmp_path, selected)
     failures = []
+    failures_before = request.session.testsfailed
     try:
         try:
             owner.prepare_borrowed_release(baseline["bin"])
@@ -865,7 +868,9 @@ def official_kernel_pull_sequence(runner_vm, tmp_path_factory, request):
             try:
                 with pytest.MonkeyPatch.context() as selection:
                     owner.select_cache(selection)
-                    owner.cleanup()
+                    # Another node's -x failure does not invalidate this owner's completed prefix.
+                    # Active/ambiguous acquisitions and every identity/inventory guard still refuse cleanup.
+                    owner.cleanup(interrupted=request.session.testsfailed > failures_before)
             except Exception as error:
                 failures.append(f"official cleanup retained {cache}: {error!r}")
     finally:
@@ -1220,6 +1225,7 @@ class TestKernelRemove:
     def test_kernel_rm_by_id(self, runner_vm):
         """Remove a uniquely imported kernel by ID prefix, preserving the source."""
         kernel_id = _import_test_kernel(runner_vm)
+        primary_error = None
         try:
             result = _run_mvm(runner_vm, "kernel", "rm", kernel_id[:12], check=False)
             assert result.returncode == 0, result.stderr
@@ -1227,8 +1233,16 @@ class TestKernelRemove:
                 _run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list
             )
             assert all(kernel["id"] != kernel_id for kernel in remaining)
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
-            _remove_test_kernel_if_present(runner_vm, kernel_id)
+            try:
+                _remove_test_kernel_if_present(runner_vm, kernel_id)
+            except Exception as cleanup_error:
+                if primary_error is None:
+                    raise
+                primary_error.add_note(f"Exact kernel {kernel_id} cleanup also failed: {cleanup_error!r}")
 
     def test_kernel_rm_nonexistent(self, runner_vm):
         """Removing a nonexistent kernel returns non-zero error."""
