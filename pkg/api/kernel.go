@@ -336,6 +336,9 @@ func (op *Operation) KernelImport(ctx context.Context, input inputs.KernelImport
 		resolved.SetDefault,
 	)
 	if err != nil {
+		if domainErr := errs.AsDomainError(err); domainErr != nil && domainErr.Code == errs.CodeKernelImportFailed {
+			return nil, err
+		}
 		return nil, errs.WrapMsg(errs.CodeKernelImportFailed, fmt.Sprintf("Kernel import failed: %v", err), err)
 	}
 	op.AuditLog.LogOperation("kernel.import", map[string]any{
