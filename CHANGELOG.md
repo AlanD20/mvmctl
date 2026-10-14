@@ -152,6 +152,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed VM-to-image export to skip source-reported holes without expanding the entire logical disk into allocated
+  zero blocks, while preserving disk contents and length. Focused root and race checks pass; installed-candidate
+  qualification and the previously failed QA-base preparation remain pending.
 - Fixed `host status` to verify inaccessible managed sudoers through authenticated root observation instead of
   treating permission denial as absence. Unconfirmed observation errors propagate; the interactive `mvm init`
   wizard can request explicit administrator setup with an unknown initial policy state and requires successful

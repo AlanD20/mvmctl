@@ -274,7 +274,8 @@ disk image, not a memory or attached-data-volume snapshot. The best-effort guest
 application transaction consistency.
 
 Temporary independent copies live under root-controlled `/var/lib/mvmctl/vm-rootfs-export-data/<operator-uid>`
-with operator read access. Allow space on that filesystem as well as the selected managed cache, where protected
+with operator read access. Export copying skips source-reported holes while preserving the logical disk length
+and contents. Allow space on that filesystem as well as the selected managed cache, where protected
 VM disks and final images remain. Typed cleanup releases the temporary copy after extraction and before final
 publication; copy, state-recovery or cleanup failures remain explicit rather than falling back to staging.
 
