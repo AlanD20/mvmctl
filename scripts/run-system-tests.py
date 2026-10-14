@@ -1486,6 +1486,7 @@ def _get_mvm_version() -> str:
 
 
 def _unique_name(prefix: str = "sys-runner") -> str:
+    prefix = prefix.replace("_", "-")
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
