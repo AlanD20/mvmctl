@@ -658,6 +658,7 @@ TIER1_DOMAINS: dict[str, list[str]] = {
 TIER2_DOMAINS: dict[str, list[str]] = {
     "host_admin": ["tests/system/host/test_host_admin.py"],
     "guestfs": ["tests/system/cache/test_guestfs_appliance.py"],
+    "kernel_successor": ["tests/system/kernel/test_kernel_successor.py"],
     "volume": [
         "tests/system/volume/test_volume.py",
     ],
