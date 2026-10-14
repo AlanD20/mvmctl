@@ -18,6 +18,39 @@ removed, or when test coverage changes.
 ## v0.3.0 release-security qualification overlay
 
 **Current qualification checkpoint (2026-10-14):** v0.3.0 remains unreleased and not release-qualified.
+The installed x86_64 candidate is `0.3.0-rc.kernel-details-ce5b0913`, produced from `ce5b0913`, SHA-256
+`565be5a66432788f405e64337e6902a573da0dafe9efd0f4ef46480c5593060a`.
+Accepted ordinary runtime receipts bind frozen source `7f49cd0a1213b96bbe66c4e5b12454d2d7207f09`, tree
+`3bd36f0353eb794f52b085d40745287ea731b96c`. Full collection contains 528 unique nodes: 526 ordinary
+and two actual host-reboot phases. Collection adds no runtime credit.
+
+| Current scope | Accepted cases | Remaining cases |
+|---|---:|---:|
+| Tier 1 | 238 | 0 |
+| Tier 2 | 36 | 157 |
+| Tier 3 | 61 | 34 |
+| Actual host reboot | 0 | 2 |
+
+The **335 accepted ordinary cases** comprise all Tier 1 domains; Tier 2 kernel successor (1), console (4),
+exec (12), full journeys (15), GuestFS (1) and host administration (3); and Tier 3 environment (22), copy (15),
+snapshot load (8), snapshot rootfs independence (6) and volume hotplug (10). Each accepted slice has native
+exit zero, exact strict JSON/JUnit node accounting, source/candidate seals, retained literal reports and checked
+cleanup/preservation. Failed batches contribute no partial credit.
+Remaining Tier 2 domains are Jailer (20), logs (11), nftables (5), policies (3), SSH (11), VM data persistence (1),
+VM lifecycle (69) and volume (37). Remaining Tier 3 domains are isolated nested VMs (8), fresh environments (4)
+and kernel builds (22).
+
+Reboot-namespace QA source `092cd5c4`, documented in `738d8665`, passed 26 focused correction checks and
+collected both phase nodes; no fresh PRE/reboot/POST journey passed. Ordinary receipts retain their `7f49cd0a`
+binding. Unchanged-input equivalence does not approve a carry profile, mixed-source join or release PASS.
+The interrupted nested Jailer and logs attempts produced no qualifying reports after the old enclosing controller's
+finite `memory.max=6576668672` killed the named QA VM. Neither attempt adds credit or changes the candidate's
+pressure-only production policy. Current Go/build/inner-install and reusable-base receipts remain accepted;
+actual reboot, final source/provenance join, remote CI and final approval remain open. Historical candidate
+receipts and the older closed carry profile do not qualify this candidate.
+
+**Historical source-publication qualification:**
+
 The original 459 ordinary cases and both reboot cases bind source
 `f50c6c5c23609287ec14e0918943af97a4f71306`, tree
 `064ef047b5ba9ad93d9fdf89d961a7c71609b1a3`. Historical x86_64 candidate
@@ -125,7 +158,7 @@ Literal root-verification archive SHA-256:
 `cb3059d0e1a5749adf2368e3f4c41c6d5f16d0989c74aac48f6c3e98e0c084bb`.
 Those initial Go results add no installed-system cases and predate the coherent build/install milestone below.
 
-**Coherent build and installation checkpoint (2026-10-14):** clean production source `4af8db39` passed all six
+**Earlier coherent build and installation checkpoint (2026-10-14):** clean production source `4af8db39` passed all six
 ordinary CI gates: 9,957 Go test/subtest PASS, 234 explicit SKIP, zero FAIL and 71 passing packages. The complete
 root Jailer suite passed 2,795 tests/subtests with zero FAIL and two explicit auxiliary crash-worker skips.
 The real release/embedded-agent build passed with Go 1.26.3, exact revision and `vcs.modified=false`.
@@ -134,16 +167,16 @@ Candidate `0.3.0-rc.kernel-lineage-4af8db39` SHA-256:
 Normal installation inside the named QA runner was accepted with original root-authority preservation; the outer
 controller was unchanged. This completes local Go/build/install gates, not new-candidate runtime qualification.
 
-**QA routing checkpoint:** production-identical QA-only source `04df4601`, tree
+**Earlier QA routing checkpoint:** production-identical QA-only source `04df4601`, tree
 `8f49a9f09c55c4947f189cc628e889efbaef1635`, collected 528 unique nodes (526 ordinary plus two reboot cases).
 The new `kernel_successor` selector is Tier 2, separate from `kernel_build`. Fourteen registry-owner checks passed
 with 427 unrelated cases intentionally deselected; all 55 kernel-owner Python unit checks passed. These checks
 executed no system fixtures or installed journeys, and collection is not 528 passes. The candidate retains its
 original `4af8db39` build revision; QA source identity is not substituted for producer provenance.
 
-**Remaining qualification:** the new candidate's installed runtime matrix and actual target-source reboot journey,
-source/provenance verification, strict final join, remote CI and final approval remain open. Historical candidate
-coverage and its closed carry profile do not qualify the new
+**Historical kernel-lineage qualification boundary:** at that checkpoint, the installed runtime matrix and actual
+target-source reboot journey, source/provenance verification, strict final join, remote CI and final approval remained
+open. Earlier candidate coverage and its closed carry profile did not qualify that
 [ADR-0025](../../docs/adr/0025-immutable-kernel-cache-lineage.md) kernel-lineage candidate.
 Earlier accepted receipts remain immutable and bound to their original source. Strict joined qualification
 across mixed QA sources remains unproved; the strict evidence join does not support general receipt carry

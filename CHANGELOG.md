@@ -209,11 +209,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limitations and qualification
 
-- The explicit QA host-reboot namespace contract has focused tooling verification and both phase nodes collect,
-  but its fresh PRE/reboot/POST journey has not been qualified. Historical runtime receipts retain their original
-  source/candidate bindings and do not qualify this change; full release qualification remains incomplete.
-- Kept v0.3.0 unreleased and not release-qualified. At the 2026-10-14 checkpoint, the earlier candidate
-  `0.3.0-rc.source-publication-de46e04f` passed candidate-bound normal reusable-base preparation and
+- Kept v0.3.0 unreleased and not release-qualified. The current installed x86_64 candidate
+  `0.3.0-rc.kernel-details-ce5b0913` (`565be5a6`, producer `ce5b0913`) has 335 accepted ordinary cases:
+  T1 238, T2 36 and T3 61, bound to frozen QA source `7f49cd0a`/tree `3bd36f03`. The 528-node collection
+  contains 526 ordinary cases and two reboot phases; 157 T2, 34 T3 and both actual reboot cases remain open.
+  Current Go/build/inner-install and reusable-base receipts remain accepted. Interrupted nested Jailer and logs
+  attempts add no credit: the old enclosing controller's finite `memory.max=6576668672` killed the named QA VM
+  before qualifying reports. This does not change the candidate's pressure-only production policy. Final
+  source/provenance join, remote CI and approval remain open; see the [coverage matrix](tests/system/COVERAGE_MATRIX.md).
+- The explicit QA host-reboot namespace contract (`092cd5c4`, documentation `738d8665`) passed 26 focused
+  correction checks and both phase nodes collect, but its fresh PRE/reboot/POST journey has not been qualified.
+  Ordinary receipts retain their original source binding. Unchanged-input equivalence does not approve receipt
+  carry or a release PASS. Historical runtime receipts do not qualify this change.
+- Retained historical qualification for the earlier candidate
+  `0.3.0-rc.source-publication-de46e04f`, which passed candidate-bound normal reusable-base preparation and
   source-bound runtime receipts accepted a historical aggregate 525 of 525 ordinary Python cases plus both actual
   host-reboot cases.
   Complete accepted batches include standard T1 (169), T1 cache (25), standard T2 (191), and T3 copy (15),
@@ -236,8 +245,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture/network changes prevent carrying the historical reboot proof to the current target, which needs its own
   actual reboot journey. The accepted
   [kernel-lineage implementation](docs/adr/0025-immutable-kernel-cache-lineage.md) passed coherent Go/release-build
-  gates and normal installation inside QA as `0.3.0-rc.kernel-lineage-4af8db39`. Its runtime matrix, actual reboot,
-  final join and approval remain pending; earlier candidate receipts do not qualify it. See
+  gates and normal installation inside QA as `0.3.0-rc.kernel-lineage-4af8db39`. At that checkpoint, its runtime
+  matrix, actual reboot, final join and approval remained pending. Those historical receipts and the closed
+  `507110b0` carry profile do not qualify the current `565be5a6` candidate. See
   [runner budgets](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#45-limit-parallel-workers).
 - Retained the observed Firecracker 1.16.2 live PCI detach/reattach failure: the disk did not reappear after BAR relocation.
   The current matching Firecracker/Jailer 1.17.0 pair passed the complete ten-case volume-hotplug suite,
