@@ -115,7 +115,7 @@ func prepareVMRootfsExportOutput(
 	return output, nil
 }
 
-func copyVMRootfsExportBytes(ctx context.Context, source, target int, length uint64) error {
+func copyVMRootfsExportBytes(ctx context.Context, source, target int, length uint64) (returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -129,12 +129,35 @@ func copyVMRootfsExportBytes(ctx context.Context, source, target int, length uin
 	if before.Mode&unix.S_IFMT != unix.S_IFREG || before.Size != int64(length) || before.Nlink != 1 {
 		return instanceValidationError("VM export protected source extent is invalid")
 	}
+	// SEEK_DATA changes the shared descriptor offset; Pread/Pwrite otherwise leave it untouched.
+	sourceOffset, err := unix.Seek(source, 0, unix.SEEK_CUR)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_, restoreErr := unix.Seek(source, sourceOffset, unix.SEEK_SET)
+		returnErr = errors.Join(returnErr, restoreErr)
+	}()
 	if err := unix.Ftruncate(target, 0); err != nil {
 		return err
 	}
 	buffer := make([]byte, 1<<20)
 	for offset := uint64(0); offset < length; {
 		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// Preserve holes in the independent inode instead of allocating the VM's entire capacity.
+		// Filesystems without SEEK_DATA retain the bounded sequential-copy fallback.
+		dataOffset, err := unix.Seek(source, int64(offset), unix.SEEK_DATA)
+		if errors.Is(err, unix.ENXIO) {
+			break
+		}
+		if err == nil {
+			if dataOffset < int64(offset) || dataOffset >= int64(length) {
+				return instanceValidationError("VM export source data extent changed")
+			}
+			offset = uint64(dataOffset)
+		} else if !errors.Is(err, unix.EINVAL) && !errors.Is(err, unix.ENOTSUP) {
 			return err
 		}
 		part := buffer[:min(uint64(len(buffer)), length-offset)]
@@ -153,6 +176,13 @@ func copyVMRootfsExportBytes(ctx context.Context, source, target int, length uin
 			written += count
 		}
 		offset += uint64(n)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Trailing holes still require the exact logical extent, including RLIMIT_FSIZE enforcement.
+	if err := unix.Ftruncate(target, int64(length)); err != nil {
+		return err
 	}
 	var probe [1]byte
 	n, err := unix.Pread(source, probe[:], int64(length))

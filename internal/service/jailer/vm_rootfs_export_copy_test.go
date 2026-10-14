@@ -2,6 +2,8 @@ package jailer
 
 import (
 	"context"
+	"crypto/sha256"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +38,68 @@ func TestVMRootfsExportCopySurvivesSourcePathReplacement(t *testing.T) {
 	require.NoError(t, err)
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("independent protected copy (-want +got):\n%s", diff)
+	}
+}
+
+func TestVMRootfsExportCopyPreservesSparseBytesExtentAndDescriptorOffsets(t *testing.T) {
+	// Rationale: a sparsely grown VM disk must not allocate its entire capacity in
+	// the independent export; the trailing hole is still part of its logical bytes.
+	const length = 16<<20 + 123
+	want := make([]byte, length)
+	directory := t.TempDir()
+	source, err := os.Create(filepath.Join(directory, "source"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, source.Close()) })
+	require.NoError(t, source.Truncate(length))
+	for offset, payload := range map[int64][]byte{
+		128<<10 + 31: []byte("first protected extent\x00\xff"),
+		8<<20 + 73:   []byte("second protected extent\xff\x00"),
+	} {
+		_, err := source.WriteAt(payload, offset)
+		require.NoError(t, err)
+		copy(want[offset:], payload)
+	}
+	require.NoError(t, source.Sync())
+	var sourceBefore unix.Stat_t
+	require.NoError(t, unix.Fstat(int(source.Fd()), &sourceBefore))
+	require.Less(t, sourceBefore.Blocks*512, int64(length/4), "fixture filesystem must represent holes")
+	_, err = unix.Seek(int(source.Fd()), 0, unix.SEEK_DATA)
+	require.NoError(t, err, "fixture filesystem must support the sparse-copy contract")
+	_, err = source.Seek(37, io.SeekStart)
+	require.NoError(t, err)
+	target, err := os.Create(filepath.Join(directory, "target"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, target.Close()) })
+	_, err = target.WriteAt([]byte("old target tail must disappear"), length+4096)
+	require.NoError(t, err)
+	_, err = target.Seek(19, io.SeekStart)
+	require.NoError(t, err)
+
+	require.NoError(t, copyVMRootfsExportBytes(t.Context(), int(source.Fd()), int(target.Fd()), length))
+	got, err := os.ReadFile(target.Name())
+	require.NoError(t, err)
+	// Hashes independently compare the entire logical image, including every hole,
+	// without asking cmp to render a multi-megabyte byte-slice failure.
+	if diff := cmp.Diff(sha256.Sum256(want), sha256.Sum256(got)); diff != "" {
+		t.Errorf("sparse exported bytes (-want +got):\n%s", diff)
+	}
+	var copied unix.Stat_t
+	require.NoError(t, unix.Fstat(int(target.Fd()), &copied))
+	assert.Equal(t, int64(length), copied.Size, "trailing holes must retain the exact logical extent")
+	assert.Less(t, copied.Blocks*512, int64(length/2), "export must not materialize the sparse capacity")
+	assert.NotEqual(t, sourceBefore.Ino, copied.Ino, "the export must be an independent inode")
+	position, err := source.Seek(0, io.SeekCurrent)
+	require.NoError(t, err)
+	assert.Equal(t, int64(37), position, "extent discovery must restore the source descriptor position")
+	position, err = target.Seek(0, io.SeekCurrent)
+	require.NoError(t, err)
+	assert.Equal(t, int64(19), position)
+	_, err = target.WriteAt([]byte("changed only the exported copy"), 128<<10+31)
+	require.NoError(t, err)
+	original, err := os.ReadFile(source.Name())
+	require.NoError(t, err)
+	if diff := cmp.Diff(sha256.Sum256(want), sha256.Sum256(original)); diff != "" {
+		t.Errorf("export mutation changed protected source (-want +got):\n%s", diff)
 	}
 }
 

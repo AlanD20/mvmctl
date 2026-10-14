@@ -28,6 +28,9 @@ func newVMRootfsExportJournalFixture(t *testing.T) (*instanceUIDDirectories, *vm
 		policy: productionInstanceAuthorityPolicy(), uid: 1000}
 	dirs.policy.rootPath = t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dirs.policy.rootPath, "var", "lib"), 0755))
+	// Model host traversal parents regardless of umask; private authority children remain unchanged.
+	require.NoError(t, os.Chmod(filepath.Join(dirs.policy.rootPath, "var"), 0755))
+	require.NoError(t, os.Chmod(filepath.Join(dirs.policy.rootPath, "var", "lib"), 0755))
 	journal, err := openVMRootfsExportJournal(t.Context(), dirs, testVMID, true)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, journal.close(context.Background())) })
