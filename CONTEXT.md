@@ -724,6 +724,17 @@ in the root anchor while retaining artifact/raw-capture bytes on the cache files
 that extension, with focused root behavior and race checks passed. Complete integration and installed public
 branch-cleanup qualification remain pending; old layouts are not migrated under the approved clean break.
 
+[ADR-0025](docs/adr/0025-immutable-kernel-cache-lineage.md) accepts a kernel-only successor lineage for v0.3.0;
+implementation and qualification are pending. The same operator may explicitly import identical immutable kernel
+bytes into a fresh active cache only after synchronized old kernel removal and completed old-store retirement.
+Root must compare against the retained digest, preserve all predecessor authority, and allocate a monotonic global
+generation under the existing permanent kernel-ID lock. Durable pending intent precedes candidate creation; lookup,
+launch and restore refuse succession until the ready object and committed current binding are synchronized.
+The existing typed import request remains cache/ID-only. Fresh kernel logical schema 2 is a clean-break contract,
+not adoption of existing schema 1; mutable backing, missing-authority refusal and cache-retirement safeguards remain
+unchanged. The extension requires a fresh candidate and affected installed qualification; existing
+candidate evidence does not establish it.
+
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An
 untagged RC build must pass the intended version explicitly. Otherwise `git describe` can inherit the previous release

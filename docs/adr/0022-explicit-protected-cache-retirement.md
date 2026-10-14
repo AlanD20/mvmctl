@@ -68,6 +68,12 @@ Immutable kernel reimport remains the existing explicit, identical-byte operatio
 This decision does not permit moving a globally bound kernel identity to a different cache. Acquisition QA must
 respect that binding rather than creating a new cache for each use of the same retired kernel ID.
 
+[ADR-0025](0025-immutable-kernel-cache-lineage.md), accepted as a v0.3.0 design on 2026-10-14, amends only
+that immutable-kernel cross-cache restriction. Fresh kernel logical schema 2 may publish an identical-byte successor
+after synchronized old kernel removal and completed old-store retirement, preserving old authority and allocating
+a global monotonic generation. Implementation and qualification remain pending; the restriction above remains the
+current runtime behavior. Existing schema 1 is not adopted, and mutable backing and cleanup authority are unchanged.
+
 [ADR-0023](0023-protected-branch-authority-layout.md) defines a fresh-layout extension for permanent snapshot locks
 and volume-removal receipts. Signed `b254f010` implements that extension and passes focused root behavior/race
 checks; complete integration and installed qualification remain pending. Existing branch layouts still refuse
