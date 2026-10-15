@@ -188,12 +188,15 @@ def _create_tcp_vm(
     assert (
         isinstance(live["process_start_time"], int) and live["process_start_time"] > 0
     ), live
+    # A running Firecracker process can precede guest-agent startup.
     boot_id = _run_mvm(
         runner_vm,
         "exec",
         receipt["id"],
         "--user",
         "root",
+        "--timeout",
+        "30",
         "--",
         "cat /proc/sys/kernel/random/boot_id",
         timeout=15,
