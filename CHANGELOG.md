@@ -157,6 +157,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the qualification host is retained for reconciliation with release evidence incomplete; process-group
   cleanup does not prove privileged root-helper or VMM quiescence. See
   [system-test timeout guidance](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#45-limit-parallel-workers).
+- Fixed the eight-case nested-isolation QA domain's aggregate deadline to allow its measured per-test
+  VM setup/teardown and nested lifecycle work, without extending individual commands or weakening assertions.
 - Fixed structured kernel-import conflicts to retain their error details and entity identity in API responses.
 - Fixed VM-to-image export to skip source-reported holes without expanding the entire logical disk into allocated
   zero blocks, while preserving disk contents and length.

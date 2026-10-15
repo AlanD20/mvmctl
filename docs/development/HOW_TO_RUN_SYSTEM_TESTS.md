@@ -509,6 +509,11 @@ python3 scripts/run-system-tests.py cli --push
 python3 scripts/run-system-tests.py --host-direct --all --workers 2
 ```
 
+The host-direct `nested_isolated` domain has a 1,800-second aggregate pytest deadline for its eight
+function-owned VM fixtures and test bodies. Measured setup/teardown for one fixture took about 72 seconds;
+eight such cycles nearly exhaust the ordinary 600-second deadline before test bodies, including nested VM
+creation. This domain allowance does not extend individual command deadlines or relax cleanup/assertions.
+
 The scheduler allows 6,000 seconds without a completed domain for T2 or a T1 batch containing `images`;
 other T1 batches allow 900 seconds. This gap includes provisioning, tests, reporting and cleanup. The remote
 pytest caller allows 2,400 seconds for T1 `images`, 660 seconds for other T1 domains, and 960 seconds for T2.
