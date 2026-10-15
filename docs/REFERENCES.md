@@ -429,7 +429,7 @@ captured topology and independent protected disks; the named privileged route is
 | `--ssh-key NAME_OR_PATH` | SSH public key (name from cache or file path) | default keys |
 | `--user USER` | Default SSH user | from config |
 | `--cloud-init-mode MODE` | Cloud-init mode: `inject`, `iso`, `net`, `off` | `off` (effective) |
-| `--writeback` | Use writeback cache mode for drives (guest fsync honored) | from `defaults.firecracker.drive_cache_type` |
+| `--writeback` | Use writeback cache mode for drives (guest fsync honored) | `false` |
 | `--nocloud-net-port N` | Reserved NoCloud TCP port; custom ports are rejected | `8000` |
 | `--cloudinit-config PATH` | Path to custom cloud-init config file | — |
 | `--no-pci` | Disable PCI device support | from config |
