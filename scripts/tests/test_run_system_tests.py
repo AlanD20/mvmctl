@@ -2294,6 +2294,54 @@ def test_tier3_domain_preserves_pytest_output_and_report_failure_reason(
     assert not report_directories[0].exists()
 
 
+@pytest.mark.parametrize("output_kind", ["bytes", "text", "none"])
+def test_tier3_timeout_preserves_bounded_captured_output(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    output_kind: str,
+) -> None:
+    # Rationale: the subprocess deadline must retain diagnostics without inventing a pytest result.
+    report_directories: list[Path] = []
+    stdout = "fixture setup started\n" + "x" * (2 * orchestrator.BUILDER_PULL_OUTPUT_LIMIT)
+    stderr = "last guest command stalled\n"
+    if output_kind == "bytes":
+        stdout, stderr = stdout.encode() + b"\xff", stderr.encode()
+    elif output_kind == "none":
+        stdout, stderr = None, None
+    timeout_error = subprocess.TimeoutExpired(
+        ["python3", "-m", "pytest"], 600, output=stdout, stderr=stderr,
+    )
+
+    def timed_out_pytest(
+        _test_files: list[str],
+        *,
+        timeout: int,
+        extra_env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 600
+        report_directories.append(Path(extra_env[orchestrator.PYTEST_OUTCOME_REPORT_ENV]).parent)
+        raise timeout_error
+
+    monkeypatch.setattr(orchestrator, "_run_pytest", timed_out_pytest)
+    result = orchestrator.run_tier3_domain("env", ["tests/system/env/test_env.py"])
+
+    assert result["passed"] is False
+    prefix = str(timeout_error) + "\n"
+    assert result["output"].startswith(prefix)
+    output = result["output"][len(prefix):]
+    assert len(output) <= orchestrator.BUILDER_PULL_OUTPUT_LIMIT
+    if output_kind == "none":
+        assert output == "(no captured output)"
+    else:
+        assert output.startswith("[stdout]\nfixture setup started\n")
+        assert "local pytest timeout output truncated" in output
+        assert output.endswith("[stderr]\nlast guest command stalled")
+        if output_kind == "bytes":
+            assert "\ufffd\n[stderr]" in output
+    assert len(report_directories) == 1
+    assert not report_directories[0].exists()
+
+
 def test_tier3_domain_preserves_pytest_output_when_report_cleanup_fails(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

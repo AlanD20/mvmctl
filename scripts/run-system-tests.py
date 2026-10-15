@@ -2505,6 +2505,20 @@ def _run_local_pytest(
         )
         if evidence is not None:
             evidence.require_nodes(raw_nodes, pytest_result.returncode, outcomes)
+    except subprocess.TimeoutExpired as exc:
+        # TimeoutExpired can carry bytes even when subprocess.run uses text=True.
+        sections = []
+        for label, raw in (("stdout", exc.stdout), ("stderr", exc.stderr)):
+            text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+            if text:
+                sections.append(f"[{label}]\n{text.rstrip()}")
+        output = "\n".join(sections) or "(no captured output)"
+        if len(output) > BUILDER_PULL_OUTPUT_LIMIT:
+            marker = "\n... local pytest timeout output truncated ...\n"
+            remaining = BUILDER_PULL_OUTPUT_LIMIT - len(marker)
+            head = remaining // 2
+            output = output[:head] + marker + output[-(remaining - head):]
+        execution_error = RuntimeError(f"{exc}\n{output}")
     except Exception as exc:
         execution_error = exc
     finally:
