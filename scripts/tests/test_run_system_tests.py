@@ -1765,6 +1765,7 @@ def test_focused_tier1_and_tier2_do_not_run_release_host_admission(
     )
     monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_CONFIGURED", candidate)
     monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_BINARY", str(candidate))
+    monkeypatch.setattr(orchestrator, "_resolve_imported_runner_kernel_binding", lambda: None)
     monkeypatch.setattr(orchestrator.shutil, "which", lambda _binary: "/usr/local/bin/mvm")
     monkeypatch.setattr(
         orchestrator,
@@ -2527,6 +2528,7 @@ def test_local_pytest_timeout_stops_domains_and_later_tiers_and_closes_failed_ev
     monkeypatch.setenv("MVM_TEST_QUALIFICATION_HOST", orchestrator._HOST_REBOOT_RUNNER)
     source = {"payload": {}}
     task = tmp_path / "evidence"
+    task.mkdir(mode=0o700)
     evidence = orchestrator.MatrixEvidence(task, {"source": source})
     monkeypatch.setattr(orchestrator, "_start_matrix_evidence", lambda *_args: evidence)
     monkeypatch.setattr(orchestrator, "source_identity", lambda _root: source)
