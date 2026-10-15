@@ -497,8 +497,9 @@ for name in ('manifest.json','firecracker','jailer'):
     if name=='manifest.json': result['manifest']=json.loads(payload)
 print(json.dumps(result,sort_keys=True))
 '''
+        fixed_code = "exec(" + repr(script) + ")"
         return json.loads(_guest_run(
-            self.runner_vm, "sudo -n python3 -c " + shlex.quote(script),
+            self.runner_vm, "sudo -n /usr/bin/python3 -I -S -B -c " + shlex.quote(fixed_code),
         ).stdout)
 
     def prepare_borrowed_release(self, shared_binaries):
