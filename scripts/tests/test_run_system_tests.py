@@ -2326,9 +2326,11 @@ def test_tier3_timeout_preserves_bounded_captured_output(
     result = orchestrator.run_tier3_domain("env", ["tests/system/env/test_env.py"])
 
     assert result["passed"] is False
+    assert result["requires_reconciliation"] is True
     prefix = str(timeout_error) + "\n"
     assert result["output"].startswith(prefix)
-    output = result["output"][len(prefix):]
+    output, shutdown = result["output"][len(prefix):].split("\npytest caller rc:", 1)
+    assert "containment uncertain" in shutdown and "Host retained for reconciliation" in shutdown
     assert len(output) <= orchestrator.BUILDER_PULL_OUTPUT_LIMIT
     if output_kind == "none":
         assert output == "(no captured output)"
@@ -2342,10 +2344,235 @@ def test_tier3_timeout_preserves_bounded_captured_output(
     assert not report_directories[0].exists()
 
 
+@pytest.mark.parametrize("returncode", [0, 7])
+def test_local_pytest_normal_result_preserves_launch_and_does_not_signal(
+    orchestrator, monkeypatch, returncode,
+):
+    popen = subprocess.Popen
+    observed = []
+
+    def launch(cmd, **kwargs):
+        observed.append((cmd, kwargs))
+        return popen([sys.executable, "-c", f"import sys; print('native'); sys.exit({returncode})"], **kwargs)
+
+    monkeypatch.setattr(orchestrator.subprocess, "Popen", launch)
+    monkeypatch.setattr(orchestrator.os, "killpg", lambda *_args: pytest.fail("normal pytest cannot signal"))
+    result = orchestrator._run_pytest(["literal::node"], timeout=5, extra_env={"EXPLICIT": "yes"})
+    assert result.returncode == returncode and result.stdout == "native\n" and result.stderr == ""
+    cmd, kwargs = observed[0]
+    assert cmd == ["python3", "-m", "pytest", "--tb=short", "-q", "literal::node"]
+    assert kwargs["start_new_session"] is True
+    assert kwargs["env"]["EXPLICIT"] == "yes" and kwargs["env"]["NO_COLOR"] == "1"
+
+
+@pytest.mark.parametrize("leader_exits", [False, True], ids=["leader-ignores", "leader-exits-zero"])
+def test_local_pytest_timeout_holds_leader_and_kills_live_descendant(
+    orchestrator, monkeypatch, tmp_path, leader_exits,
+):
+    ready, release, marker = (tmp_path / name for name in ("ready", "release", "late-marker"))
+    script = (
+        "import os,signal,sys,time\nfrom pathlib import Path\n"
+        "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+        "child = os.fork()\n"
+        "if child == 0:\n"
+        f"    Path({str(ready) + '.pending'!r}).write_text(str(os.getpid()))\n"
+        f"    Path({str(ready) + '.pending'!r}).rename({str(ready)!r})\n"
+        f"    while not Path({str(release)!r}).exists(): time.sleep(0.01)\n"
+        f"    Path({str(marker)!r}).write_text('late publication')\n"
+        "    os._exit(0)\n"
+        + ("signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))\n" if leader_exits else "")
+        + "print('setup ready', flush=True)\n"
+        + "while True: time.sleep(0.01)\n"
+    )
+    popen, killpg = subprocess.Popen, os.killpg
+    owned_fds, processes, signals, waits = [], [], [], []
+
+    def launch(_cmd, **kwargs):
+        process = popen([sys.executable, "-u", "-c", script], **kwargs)
+        processes.append(process)
+        owned_fds.append(os.pidfd_open(process.pid))
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists(), "descendant readiness barrier was not reached"
+        owned_fds.append(os.pidfd_open(int(ready.read_text())))
+        # The leader handler is installed after the child starts. Observe its
+        # flushed output before beginning the deadline rather than guessing.
+        while os.fstat(kwargs["stdout"].fileno()).st_size == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert os.fstat(kwargs["stdout"].fileno()).st_size
+        original_wait = process.wait
+        def wait(**wait_kwargs):
+            waits.append(tuple(signals))
+            return original_wait(**wait_kwargs)
+        process.wait = wait
+        return process
+
+    def signal_group(pid, sig):
+        if sig == signal.SIGKILL:
+            assert waits == [()], "leader was reaped or waited during interrupt grace"
+            assert processes[0].returncode is None
+            state = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            if leader_exits:
+                assert state is not None and state.si_status == 0
+        signals.append(sig)
+        killpg(pid, sig)
+
+    monkeypatch.setattr(orchestrator.subprocess, "Popen", launch)
+    monkeypatch.setattr(orchestrator.os, "killpg", signal_group)
+    monkeypatch.setattr(orchestrator, "_PYTEST_INTERRUPT_GRACE", 0.2)
+    monkeypatch.setattr(orchestrator, "_PYTEST_KILL_GRACE", 0.3)
+    try:
+        with pytest.raises(orchestrator._PytestTimeout) as captured:
+            orchestrator._run_pytest(["unused"], timeout=0.05)
+        assert signals == [signal.SIGINT, signal.SIGKILL]
+        assert captured.value.returncode == (0 if leader_exits else -signal.SIGKILL)
+        assert captured.value.stdout == "setup ready\n"
+        assert "Host retained for reconciliation" in str(captured.value)
+        for fd in owned_fds:
+            poller = select.poll()
+            poller.register(fd, select.POLLIN)
+            assert poller.poll(1000), "ordinary descendant survived forced escalation"
+        release.write_text("publish now")
+        assert not marker.exists()
+        with pytest.raises(ChildProcessError):
+            os.waitpid(processes[0].pid, os.WNOHANG)
+    finally:
+        for fd in owned_fds:
+            try:
+                signal.pidfd_send_signal(fd, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            os.close(fd)
+        for process in processes:
+            process.wait(timeout=2)
+
+
+@pytest.mark.parametrize("fault", ["startup", "identity", "permission", "observation", "reap", "absent"])
+def test_local_pytest_timeout_preserves_shutdown_diagnostics(orchestrator, monkeypatch, fault):
+    signals, waits, identity_reads = [], [], []
+    identity = ("boot", 123, 456, 123, 123)
+    def read_identity(_pid):
+        identity_reads.append(_pid)
+        if fault == "startup" or fault == "identity" and len(identity_reads) == 3:
+            raise RuntimeError("injected identity refusal")
+        return identity
+    def launch(cmd, **kwargs):
+        kwargs["stdout"].write("before timeout\n")
+        kwargs["stdout"].flush()
+        def wait(**_kwargs):
+            waits.append(True)
+            if len(waits) == 1:
+                raise subprocess.TimeoutExpired(cmd, 0.01)
+            if fault == "reap":
+                raise OSError("injected reap refusal")
+            process.returncode = 0
+            return 0
+        process = SimpleNamespace(pid=123, returncode=None, wait=wait)
+        return process
+    def send(_pid, sig):
+        signals.append(sig)
+        if fault == "permission":
+            raise PermissionError("injected permission refusal")
+        if fault == "absent":
+            raise ProcessLookupError("injected absent group")
+    def observe(_identity, _deadline):
+        if fault == "observation":
+            raise PermissionError("injected observation refusal")
+        return []
+    monkeypatch.setattr(orchestrator.subprocess, "Popen", launch)
+    monkeypatch.setattr(orchestrator, "_pytest_process_identity", read_identity)
+    monkeypatch.setattr(orchestrator.os, "killpg", send)
+    monkeypatch.setattr(orchestrator, "_pytest_group_members", observe)
+    monkeypatch.setattr(orchestrator, "_PYTEST_INTERRUPT_GRACE", 0)
+    with pytest.raises(orchestrator._PytestTimeout) as captured:
+        orchestrator._run_pytest(["unused"], timeout=0.01)
+    assert signals == ([] if fault == "startup" else [signal.SIGINT] if fault == "identity"
+                       else [signal.SIGINT, signal.SIGKILL])
+    assert captured.value.stdout == "before timeout\n"
+    text = str(captured.value)
+    assert "Host retained for reconciliation" in text
+    if fault == "absent":
+        assert text.count("group already absent (ESRCH)") == 2
+        assert "containment uncertain" not in text
+    else:
+        assert "containment uncertain" in text and "injected" in text
+
+
+@pytest.mark.parametrize("timed_out", [True, False], ids=["timeout-stops", "ordinary-failure-continues"])
+def test_local_pytest_timeout_stops_domains_and_later_tiers_and_closes_failed_evidence(
+    orchestrator, monkeypatch, tmp_path, capsys, timed_out,
+):
+    tier1 = {"cli": ["tests/system/cli/test_cli.py"]}
+    tier3 = {"env": ["tests/system/env/test_env.py"], "fresh_env": ["tests/system/vm/test_vm_fresh_env.py"]}
+    _configure_test_registry(orchestrator, monkeypatch, tmp_path, tier1, tier3=tier3)
+    for files in (tier1, tier3):
+        for paths in files.values():
+            for path in paths:
+                _write_system_test(tmp_path, path)
+    candidate = tmp_path / "candidate"
+    candidate.write_bytes(b"candidate")
+    candidate.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_CONFIGURED", candidate)
+    monkeypatch.setattr(orchestrator, "MVM_CANDIDATE_BINARY", str(candidate))
+    monkeypatch.setattr(orchestrator.shutil, "which", lambda _binary: "/outer/controller")
+    monkeypatch.setattr(orchestrator, "_resolve_imported_runner_kernel_binding", lambda: None)
+    monkeypatch.setattr(orchestrator, "_require_distinct_candidate_controller", lambda: None)
+    monkeypatch.setattr(orchestrator, "_get_mvm_version", lambda: "0.3.0")
+    monkeypatch.setattr(orchestrator, "ensure_shared_volume", lambda **_kwargs: None)
+    monkeypatch.setattr(orchestrator, "ensure_test_network", lambda: None)
+    monkeypatch.setattr(orchestrator.socket, "gethostname", lambda: orchestrator._HOST_REBOOT_RUNNER)
+    monkeypatch.setenv("MVM_TEST_VM", orchestrator._HOST_REBOOT_RUNNER)
+    monkeypatch.setenv("MVM_TEST_QUALIFICATION_HOST", orchestrator._HOST_REBOOT_RUNNER)
+    source = {"payload": {}}
+    task = tmp_path / "evidence"
+    evidence = orchestrator.MatrixEvidence(task, {"source": source})
+    monkeypatch.setattr(orchestrator, "_start_matrix_evidence", lambda *_args: evidence)
+    monkeypatch.setattr(orchestrator, "source_identity", lambda _root: source)
+    monkeypatch.setattr(orchestrator.sys, "argv", ["run-system-tests.py", "--tier", "3,1", "--host-direct",
+                                                 "--record-evidence", str(task)])
+    executed = []
+    error = orchestrator._PytestTimeout(["pytest"], 600,
+        subprocess.CompletedProcess(["pytest"], 0, "shutdown output\n", ""),
+        ["SIGINT attempted", "SIGKILL attempted", "ordinary group observed absent"])
+    def pytest_domain(files, **kwargs):
+        executed.append(files)
+        if files == tier3["env"] and timed_out:
+            raise error
+        return subprocess.CompletedProcess(["pytest"], 1, "ordinary failure\n", "")
+    monkeypatch.setattr(orchestrator, "_run_pytest", pytest_domain)
+    def batch(domains, *_args, **_kwargs):
+        executed.append(domains)
+        return [dict(domain="cli", tier=1, passed=True, output="")]
+    monkeypatch.setattr(orchestrator, "run_domains", batch)
+    monkeypatch.setattr(orchestrator, "require_completed_host_reboot",
+                        lambda *_args: pytest.fail("stopped batch cannot validate release success"))
+    with pytest.raises(SystemExit) as captured:
+        orchestrator.main()
+    assert captured.value.code == 1
+    terminal = json.loads((task / "terminal.json").read_text())
+    assert terminal["passed"] is False
+    failed = json.loads((task / "env.result.json").read_text())
+    assert failed["passed"] is False and failed["report_cleanup"] is True
+    assert (task / "env.native.json").exists() is (not timed_out)
+    if timed_out:
+        assert executed == [tier3["env"]]
+        assert terminal["domains"] == ["env"]
+        assert not (task / "fresh_env.result.json").exists()
+        assert "Host retained for reconciliation" in failed["output"]
+        assert "HOST RETAINED FOR RECONCILIATION / RELEASE VERDICT INCOMPLETE" in capsys.readouterr().out
+    else:
+        assert executed == [tier3["env"], tier3["fresh_env"], tier1]
+        assert terminal["domains"] == ["env", "fresh_env", "cli"]
+
+
+@pytest.mark.parametrize("timed_out", [False, True], ids=["native-result", "typed-timeout"])
 def test_tier3_domain_preserves_pytest_output_when_report_cleanup_fails(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    timed_out: bool,
 ) -> None:
     report_directory = tmp_path / "mvmctl-pytest-env-fixed"
     report_directory.mkdir()
@@ -2366,6 +2593,10 @@ def test_tier3_domain_preserves_pytest_output_when_report_cleanup_fails(
         extra_env: dict[str, str],
     ) -> subprocess.CompletedProcess[str]:
         assert timeout == 600
+        if timed_out:
+            raise orchestrator._PytestTimeout(["pytest"], timeout,
+                subprocess.CompletedProcess(["pytest"], 0, "useful pytest stdout\n", "useful pytest stderr\n"),
+                ["ordinary group observed absent"])
         Path(extra_env[orchestrator.PYTEST_OUTCOME_REPORT_ENV]).write_bytes(
             _complete_pytest_outcome_report()
         )
@@ -2393,6 +2624,9 @@ def test_tier3_domain_preserves_pytest_output_when_report_cleanup_fails(
     assert "useful pytest stderr" in result["output"]
     assert "local outcome report cleanup failed" in result["output"]
     assert "synthetic local cleanup refusal" in result["output"]
+    if timed_out:
+        assert result["requires_reconciliation"] is True
+        assert "Host retained for reconciliation" in result["output"]
 
 
 @pytest.mark.parametrize(

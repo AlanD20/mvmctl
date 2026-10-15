@@ -985,6 +985,118 @@ def _require_distinct_candidate_controller() -> None:
         )
 
 
+_PYTEST_INTERRUPT_GRACE = 45
+_PYTEST_KILL_GRACE = 10
+
+
+class _PytestTimeout(subprocess.TimeoutExpired):
+    """A local pytest deadline always retains the host for reconciliation."""
+
+    def __init__(self, cmd, timeout, result, shutdown):
+        super().__init__(cmd, timeout, output=result.stdout, stderr=result.stderr)
+        self.returncode = result.returncode
+        self.shutdown = shutdown
+        self.report_errors = []
+
+    def __str__(self):
+        sections = []
+        for label, raw in (("stdout", self.stdout), ("stderr", self.stderr)):
+            value = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+            if value:
+                sections.append(f"[{label}]\n{value.rstrip()}")
+        output = "\n".join(sections) or "(no captured output)"
+        if len(output) > BUILDER_PULL_OUTPUT_LIMIT:
+            marker = "\n... local pytest timeout output truncated ...\n"
+            remaining = BUILDER_PULL_OUTPUT_LIMIT - len(marker)
+            head = remaining // 2
+            output = output[:head] + marker + output[-(remaining - head):]
+        return (f"{super().__str__()}\n{output}\n"
+                f"pytest caller rc: {self.returncode}; shutdown: {'; '.join(self.shutdown)}\n"
+                "Host retained for reconciliation; ordinary group shutdown does not prove privileged quiescence."
+                + ("\n" + "; ".join(self.report_errors) if self.report_errors else ""))
+
+
+def _pytest_process_identity(pid):
+    """Read the exact private session leader while Popen still owns it unreaped."""
+    fields = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+    identity = (Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+                pid, int(fields[19]), int(fields[2]), int(fields[3]))
+    if identity[3:] != (pid, pid):
+        raise RuntimeError(f"pytest leader is not a private PGID/SID: {identity}")
+    return identity
+
+
+def _pytest_group_members(identity, deadline):
+    """Observe only membership of the owned group; never signal after reaping."""
+    boot, pid, started, _, _ = identity
+    if Path("/proc/sys/kernel/random/boot_id").read_text().strip() != boot:
+        raise RuntimeError("pytest group boot identity changed")
+    members = []
+    for entry in Path("/proc").iterdir():
+        if time.monotonic() >= deadline:
+            raise RuntimeError("pytest group observation exceeded shutdown bound")
+        if not entry.name.isdecimal():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if int(fields[2]) != pid:
+            continue
+        if int(fields[3]) != pid or int(fields[19]) < started:
+            raise RuntimeError(f"pytest group identity mismatch at PID {entry.name}")
+        members.append((int(entry.name), int(fields[19]), fields[0]))
+        if len(members) >= 64:
+            raise RuntimeError(f"pytest group membership exceeds observation bound: {members}")
+    return members
+
+
+def _stop_timed_out_pytest(process, identity, startup_error):
+    shutdown = []
+    if startup_error is not None:
+        shutdown.append(f"containment uncertain: startup identity unavailable: {startup_error}")
+    else:
+        shutdown.append(f"owned group identity (boot, PID, start, PGID, SID): {identity}")
+        # Holding the unreaped leader prevents numeric PID/PGID reuse. Never
+        # poll, wait or communicate between SIGINT and SIGKILL, even on exit zero.
+        for sig in (signal.SIGINT, signal.SIGKILL):
+            try:
+                if _pytest_process_identity(process.pid) != identity:
+                    raise RuntimeError("pytest leader identity changed")
+            except (OSError, ValueError, IndexError, RuntimeError) as exc:
+                shutdown.append(f"containment uncertain: {sig.name} withheld: {exc}")
+                break
+            try:
+                os.killpg(process.pid, sig)
+                shutdown.append(f"{sig.name} attempted: delivered to permitted group members")
+            except ProcessLookupError:
+                shutdown.append(f"{sig.name} attempted: group already absent (ESRCH)")
+            except OSError as exc:
+                shutdown.append(f"containment uncertain: {sig.name} attempted: {exc}")
+            if sig == signal.SIGINT:
+                time.sleep(_PYTEST_INTERRUPT_GRACE)
+    deadline = time.monotonic() + _PYTEST_KILL_GRACE
+    try:
+        process.wait(timeout=max(0, deadline - time.monotonic()))
+        shutdown.append(f"caller reaped: {process.returncode}")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        shutdown.append(f"containment uncertain: bounded caller reap failed: {exc}")
+    if identity is not None:
+        members = None
+        try:
+            members = _pytest_group_members(identity, deadline)
+            while members and time.monotonic() < deadline:
+                time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+                members = _pytest_group_members(identity, deadline)
+            if members:
+                shutdown.append(f"containment uncertain: remaining group members: {members}")
+            else:
+                shutdown.append("ordinary group observed absent")
+        except (OSError, ValueError, IndexError, RuntimeError) as exc:
+            shutdown.append(f"containment uncertain: group observation unavailable: {exc}; last members: {members}")
+    return shutdown
+
+
 def _run_pytest(
     test_files: list[str],
     *,
@@ -1005,13 +1117,39 @@ def _run_pytest(
     env.setdefault("MVM_ASSET_MIRROR", ASSET_MIRROR_HOST)
     if extra_env:
         env.update(extra_env)
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
+    # Files permit bounded snapshots even if a detached descendant keeps an fd.
+    with tempfile.TemporaryFile(mode="w+") as stdout, tempfile.TemporaryFile(mode="w+") as stderr:
+        process = subprocess.Popen(cmd, stdout=stdout, stderr=stderr, text=True, env=env, start_new_session=True)
+        identity = startup_error = None
+        try:
+            identity = _pytest_process_identity(process.pid)
+        except (OSError, ValueError, IndexError, RuntimeError) as exc:
+            startup_error = exc
+        shutdown = None
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            shutdown = _stop_timed_out_pytest(process, identity, startup_error)
+        captured = []
+        for stream in (stdout, stderr):
+            try:
+                size = os.fstat(stream.fileno()).st_size
+                if shutdown is not None and size > 2 * BUILDER_PULL_OUTPUT_LIMIT:
+                    raw = (os.pread(stream.fileno(), BUILDER_PULL_OUTPUT_LIMIT, 0)
+                           + b"\n... local pytest timeout output truncated ...\n"
+                           + os.pread(stream.fileno(), BUILDER_PULL_OUTPUT_LIMIT, size - BUILDER_PULL_OUTPUT_LIMIT))
+                else:
+                    raw = os.pread(stream.fileno(), size, 0)
+            except OSError as exc:
+                if shutdown is None:
+                    raise
+                shutdown.append(f"timeout output snapshot failed: {exc}")
+                raw = b""
+            captured.append(raw.decode(stream.encoding, errors="replace" if shutdown is not None else stream.errors)
+                            .replace("\r\n", "\n").replace("\r", "\n"))
+        result = subprocess.CompletedProcess(cmd, process.returncode, *captured)
+    if shutdown is not None:
+        raise _PytestTimeout(cmd, timeout, result, shutdown)
     return result
 
 
@@ -2506,19 +2644,11 @@ def _run_local_pytest(
         if evidence is not None:
             evidence.require_nodes(raw_nodes, pytest_result.returncode, outcomes)
     except subprocess.TimeoutExpired as exc:
-        # TimeoutExpired can carry bytes even when subprocess.run uses text=True.
-        sections = []
-        for label, raw in (("stdout", exc.stdout), ("stderr", exc.stderr)):
-            text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
-            if text:
-                sections.append(f"[{label}]\n{text.rstrip()}")
-        output = "\n".join(sections) or "(no captured output)"
-        if len(output) > BUILDER_PULL_OUTPUT_LIMIT:
-            marker = "\n... local pytest timeout output truncated ...\n"
-            remaining = BUILDER_PULL_OUTPUT_LIMIT - len(marker)
-            head = remaining // 2
-            output = output[:head] + marker + output[-(remaining - head):]
-        execution_error = RuntimeError(f"{exc}\n{output}")
+        execution_error = exc if isinstance(exc, _PytestTimeout) else _PytestTimeout(
+            exc.cmd, exc.timeout,
+            subprocess.CompletedProcess(exc.cmd, None, exc.stdout, exc.stderr),
+            ["containment uncertain: no owned group shutdown receipt"],
+        )
     except Exception as exc:
         execution_error = exc
     finally:
@@ -2533,6 +2663,9 @@ def _run_local_pytest(
                 f"local outcome report cleanup failed: {exc}"
             )
 
+    if isinstance(execution_error, _PytestTimeout):
+        execution_error.report_errors.extend(validation_failures)
+        raise execution_error
     if pytest_result is None:
         if execution_error is not None:
             validation_failures.insert(0, str(execution_error))
@@ -3319,6 +3452,9 @@ def run_tier3_domain(
             pytest_result,
             validation_failure,
         )
+    except _PytestTimeout as e:
+        result["requires_reconciliation"] = True
+        result["output"] = str(e)
     except Exception as e:
         result["output"] = str(e)
     finally:
@@ -4400,6 +4536,7 @@ def main() -> None:
         tier3 = {domain: row["nodes"] for domain, row in selected.items() if row["tier"] == 3}
 
     all_results: list[dict[str, Any]] = []
+    requires_reconciliation = False
 
     run_order = selected_order if selected_order else [1, 2, 3]
     for tier in run_order:
@@ -4438,9 +4575,18 @@ def main() -> None:
                 log(f"  [{status}] {domain} (tier 3)")
                 if not result["passed"]:
                     _print_failure(domain, result)
+                if result.get("requires_reconciliation"):
+                    requires_reconciliation = True
+                    break
+        if requires_reconciliation:
+            break
 
     if evidence is not None:
         evidence.close(all_results, source_identity(_REPO_ROOT))
+    if requires_reconciliation:
+        log("HOST RETAINED FOR RECONCILIATION / RELEASE VERDICT INCOMPLETE: pytest timed out; scheduling stopped")
+        print_summary(all_results)
+        sys.exit(1)
     if args.release_qualification:
         # Revalidate retained evidence/current release inputs after the batch, not runner liveness.
         try:
