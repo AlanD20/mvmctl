@@ -40,7 +40,8 @@ and [ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md) for the
 | `/run/mvmctl/authority` | Root-only transient locks and handshakes; not durable truth. |
 | `/run/mvmctl/runtime/<uid>/<vm-id>` | Caller-facing console endpoints and display-only PID mirrors. |
 | `/run/mvmctl/vmm-runtime/<uid>/<vm-id>` | Private Firecracker API and vsock sockets owned by the isolated VM execution identity; mounted at `/vmm-runtime` inside the jail. |
-| `MVM_CACHE_DIR` (normally `~/.cache/mvmctl`) | Operator configuration, SQLite projection, original images, managed disk inputs, and output artifacts. Root-protected active backing and snapshots are pinned under the selected cache but are not made operator-writable. |
+| `MVM_CACHE_DIR` (normally `~/.cache/mvmctl`) | SQLite settings/state projection, original images, managed disk inputs, and output artifacts. Root-protected active backing and snapshots are pinned under the selected cache but are not made operator-writable. |
+| `MVM_CONFIG_DIR` (normally `~/.config/mvmctl`) | Operator configuration files, including SSH keys under `keys/`; separate from the managed cache and root authority. |
 
 The operator's SQLite rows and PID mirrors are not root authorization. Root effects pin the managed cache and their
 resources by identity; a renamed cache, replaced file, stale process, or conflicting managed topology must not be
@@ -122,7 +123,8 @@ There are two public policy families:
 | `mvm policy traffic` | Exact source network or source VM to destination VM TCP/UDP ports, after resolving current managed identities. | Vsock command execution or host commands. |
 | `mvm policy exec` | Directional source-VM to destination-VM execution as an exact non-root target user, independent of network membership. | IP connectivity, reverse execution, VM-to-host execution, or destination root execution. |
 
-The host-to-guest `mvm exec` and `mvm cp` paths use the embedded vsock agent. VM-to-VM execution additionally passes
+The host-to-guest `mvm exec` and `mvm cp` paths use the embedded vsock agent. Host-originated `mvm exec` defaults
+to the guest's root user; this does not grant VM-to-VM root execution. VM-to-VM execution additionally passes
 through an authenticated host relay that binds the live source and destination identities and enforces the typed
 exec grant. The relay bounds its command, output, duration, and concurrency and writes a command-redacted audit
 record. See [ADR-0017](adr/0017-per-vm-network-namespaces-and-typed-policies.md).
@@ -145,12 +147,13 @@ root-derived disk serial/capacity bound to `virtio_blk`, followed by an unchange
 On a Paused VM it stages the attachment and returns a retryable deferred-readiness error: resume the VM and
 retry the same attach. Stopped VMs record the attachment for their next start. A readiness failure does not
 undo a known-applied attachment or make its volume available; inspect the state and retry the same operation.
-The readiness implementation has focused Go verification but awaits installed-candidate system qualification.
+Installed-candidate running and paused/resume-retry readiness journeys passed with usable guest I/O; see the
+[coverage matrix](../tests/system/COVERAGE_MATRIX.md) for the accepted source and candidate bindings.
 It detects an unusable attachment; it cannot repair the PCI BAR relocation failure observed on Firecracker 1.16.2.
 The approved 1.17.0 dependency update includes upstream
 [BAR/MMIO relocation changes](https://github.com/firecracker-microvm/firecracker/blob/v1.17.0/src/vmm/src/devices/virtio/transport/pci/device.rs#L657-L715)
-selected to address that failure. Successful detach/reattach on the project candidate remains an installed-runtime
-qualification gate.
+selected to address that failure. Same-volume live detach/reattach passed on the current 1.17.0 project candidate;
+these bounded journeys do not establish compatibility with every guest or complete release qualification.
 
 A full snapshot captures rootfs, memory/vmstate, and attached data volumes under exclusive write ownership. Its
 artifacts are root-controlled under the selected cache, with CLI-mediated removal. Restore creates independent

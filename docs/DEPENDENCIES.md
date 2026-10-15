@@ -210,11 +210,14 @@ Firecracker/Jailer pair. Users do not invoke an installation service directly; s
 | `mvm vm start/stop/reboot/pause/resume` | Trusted `jailer` + `firecracker`; protected API access is root-brokered |
 | `mvm vm rm` | Typed privileged VM cleanup, with no standalone Jailer cleanup command |
 | `mvm snapshot create/restore` | Typed root snapshot actions and root-brokered Firecracker API access |
-| `mvm volume attach/detach` | `firecracker` |
+| `mvm volume attach/detach` | Typed root volume/mount operations and root-brokered Firecracker API access; live attach also checks authenticated guest readiness |
 | `mvm volume create/rm/resize` | Internal raw-file allocation and typed privileged removal/growth; no `qemu-img` |
-| `mvm volume ls/inspect` | Internal only |
-| `mvm kernel import/ls/rm/default/inspect` | Internal only |
-| `mvm cache init/prune/clean` | Internal (filesystem + DB operations) |
+| `mvm volume ls` | Internal SQLite display projection |
+| `mvm volume inspect` | Typed root observation of authoritative volume backing |
+| `mvm kernel import/rm` | Typed root protected-kernel publication/retirement and local projection updates |
+| `mvm kernel ls/default/inspect` | Internal local projection and file inspection |
+| `mvm cache init` | Internal filesystem + DB operations |
+| `mvm cache prune/clean` | Typed resource cleanup and protected-cache retirement, plus local filesystem/DB operations |
 | `mvm config get/set/reset/list` | Internal (DB operations) |
 | `mvm logs` | Internal (file read) |
 | `mvm console` | Internal (Unix socket PTY relay) |
