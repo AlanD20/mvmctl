@@ -1131,7 +1131,7 @@ BEGIN {
         assert int(initial_entry["pid"]) == pid
         assert int(initial_entry["process_start_time"]) == start_ticks
         initial_boot_id = _run_mvm(
-            runner_vm, "exec", vm_name, "--", "cat", "/proc/sys/kernel/random/boot_id",
+            runner_vm, "exec", vm_name, "--timeout", "30", "--", "cat", "/proc/sys/kernel/random/boot_id",
         ).stdout.strip()
         assert re.fullmatch(r"[0-9a-f-]{36}", initial_boot_id)
         hierarchy_before = _pressure_hierarchy(runner_vm, vm_id)

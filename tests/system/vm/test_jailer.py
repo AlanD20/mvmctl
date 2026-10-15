@@ -1257,7 +1257,7 @@ class TestCanonicalJailerLaunch:
         vm_name = jailed_vm["name"]
         marker = f"jailer-{uuid.uuid4().hex}"
         exec_result = _run_mvm(
-            runner_vm, "exec", vm_name, "--", "printf", marker
+            runner_vm, "exec", vm_name, "--timeout", "30", "--", "printf", marker
         )
         assert exec_result.stdout == marker
 
@@ -1321,7 +1321,7 @@ class TestCanonicalJailerLaunch:
             assert attached["volume"]["status"] == "attached"
             _run_mvm(runner_vm, "vm", "start", vm_name)
             partitions = _run_mvm(
-                runner_vm, "exec", vm_name, "--", "cat", "/proc/partitions"
+                runner_vm, "exec", vm_name, "--timeout", "30", "--", "cat", "/proc/partitions"
             )
             assert "vdb" in partitions.stdout
 
@@ -1402,24 +1402,18 @@ def networkless_vm_name(runner_vm: str) -> Generator[str, None, None]:
 
 def _networkless_guest_interfaces(runner_vm: str, name: str) -> set[str]:
     """Wait for the guest agent and read the guest's kernel interface list."""
-    deadline = time.monotonic() + 20
-    last_error = ""
-    while time.monotonic() < deadline:
-        result = _run_mvm(
-            runner_vm,
-            "exec",
-            name,
-            "--",
-            "cat",
-            "/proc/net/dev",
-            check=False,
-            timeout=15,
-        )
-        if result.returncode == 0:
-            return {line.split(":", 1)[0].strip() for line in result.stdout.splitlines() if ":" in line}
-        last_error = result.stderr
-        time.sleep(0.5)
-    raise AssertionError(f"vsock agent did not return guest interfaces: {last_error}")
+    result = _run_mvm(
+        runner_vm,
+        "exec",
+        name,
+        "--timeout",
+        "30",
+        "--",
+        "cat",
+        "/proc/net/dev",
+        timeout=15,
+    )
+    return {line.split(":", 1)[0].strip() for line in result.stdout.splitlines() if ":" in line}
 
 
 class TestNetworklessJailerLifecycle:
@@ -1478,7 +1472,7 @@ class TestNetworklessJailerLifecycle:
         )
         assert _vm_entry(runner_vm, name)["status"] == "running"
         marker = _run_mvm(
-            runner_vm, "exec", name, "--", "cat", "/etc/cloud/cloud-init.disabled",
+            runner_vm, "exec", name, "--timeout", "30", "--", "cat", "/etc/cloud/cloud-init.disabled",
             timeout=30,
         )
         assert marker.stdout.strip() == "disabled by mvmctl"
@@ -1637,7 +1631,7 @@ class TestNetworklessJailerLifecycle:
 
             for attempt in range(2):
                 partitions = _run_mvm(
-                    runner_vm, "exec", name, "--", "cat", "/proc/partitions", timeout=30,
+                    runner_vm, "exec", name, "--timeout", "30", "--", "cat", "/proc/partitions", timeout=30,
                 )
                 assert "vdb" in partitions.stdout
                 if attempt == 0:
@@ -1676,7 +1670,7 @@ class TestNetworklessJailerLifecycle:
                 "END {exit !found}' /proc/mounts"
             )
             _run_mvm(
-                runner_vm, "exec", source_name, "--",
+                runner_vm, "exec", source_name, "--timeout", "30", "--",
                 f"set -e; mkdir {shlex.quote(memory_mount)}; "
                 f"mount -t tmpfs -o size=1M mvm-snapshot {shlex.quote(memory_mount)}; "
                 f"{mount_check}; printf %s {epoch} > {shlex.quote(memory_file)}; "
@@ -2342,7 +2336,7 @@ class TestNetworklessJailerLifecycle:
             "", "", "", "",
         )
         first_boot_id = _run_mvm(
-            runner_vm, "exec", original["id"], "--timeout", "5", "--",
+            runner_vm, "exec", original["id"], "--timeout", "30", "--",
             "cat", "/proc/sys/kernel/random/boot_id",
         ).stdout.strip()
         assert str(uuid.UUID(first_boot_id)) == first_boot_id, first_boot_id
