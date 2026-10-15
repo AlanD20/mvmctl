@@ -210,18 +210,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Known limitations and qualification
 
 - Kept v0.3.0 unreleased and not release-qualified. The current installed x86_64 candidate
-  `0.3.0-rc.kernel-details-ce5b0913` (`565be5a6`, producer `ce5b0913`) has 363 accepted ordinary cases:
-  T1 238, T2 64 and T3 61. Of these, 340 retain frozen QA source `7f49cd0a`/tree `3bd36f03`; corrected policies (3)
-  and Jailer/cgroup (20) bind `0574702f`/tree `6650e09e`. Latest QA source `4764bb08` collected the same 528 nodes
-  (receipt `38ede600`): 526 ordinary and two reboot phases, without runtime fixtures or new passing credit.
-  Remaining scope is 129 T2, 34 T3 and both actual reboot cases; logs (11) is still in progress at this checkpoint.
+  `0.3.0-rc.kernel-details-ce5b0913` (`565be5a6`, producer `ce5b0913`) has 492 accepted ordinary cases:
+  all T1 238 and T2 193, plus T3 61. Of these, 340 retain frozen QA source `7f49cd0a`/tree `3bd36f03`;
+  corrected policies (3), Jailer/cgroup (20) and logs (11) bind `0574702f`/tree `6650e09e`.
+  SSH (11), VM data persistence (1), volume (37) and VM lifecycle (69) bind `4764bb08`/tree `751dd9c5`,
+  collection receipt `38ede600`. That source collected the same 528 nodes: 526 ordinary and two reboot phases.
+  Collection itself executed no runtime fixtures and adds no passing credit. Remaining runtime scope is
+  34 T3 cases (isolated nested VMs 8, fresh environments 4, kernel builds 22) and both actual reboot cases.
   QA corrections give initial agent connections explicit startup budgets; public default timeouts, production/build
   inputs and installed candidate bytes are unchanged. The passing 20-case Jailer/cgroup slice includes actual nested-QA
   exhaustion/saturation scenarios, not a universal host/ancestor OOM guarantee or diagnosed production feature fix.
   Current Go/build/inner-install and reusable-base receipts remain accepted. Earlier interrupted nested Jailer and logs
   attempts add no credit: the old enclosing controller's finite `memory.max=6576668672` killed the named QA VM
-  before qualifying reports. This does not change the candidate's pressure-only production policy. Final
-  source/provenance join, remote CI and approval remain open; see the [coverage matrix](tests/system/COVERAGE_MATRIX.md).
+  before qualifying reports. Successful later tasks do not relabel earlier failed or interrupted tasks.
+  This does not change the candidate's pressure-only production policy. The accepted union is not one full
+  current-source 528-node pass. Final source/provenance join, remote CI and approval remain open;
+  see the [coverage matrix](tests/system/COVERAGE_MATRIX.md).
 - The explicit QA host-reboot namespace contract (`092cd5c4`, documentation `738d8665`) passed 26 focused
   correction checks and both phase nodes collect, but its fresh PRE/reboot/POST journey has not been qualified.
   Ordinary receipts retain their respective source bindings. The accepted union and unchanged-input equivalence
