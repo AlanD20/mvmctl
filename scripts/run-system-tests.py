@@ -613,6 +613,7 @@ BASE_VM_DISK = "12G"
 # Retain the former 1800s domain allowance for its other fourteen cases and
 # shared fixture setup/teardown; this finite QA budget is not a runtime guarantee.
 KERNEL_BUILD_DOMAIN_TIMEOUT = 8 * 2700 + 1800
+NESTED_ISOLATED_DOMAIN_TIMEOUT = 1800
 
 # SSH key for provisioning runner user in builder & test VMs
 BUILDER_KEY_NAME = "builder-key"
@@ -4567,7 +4568,12 @@ def main() -> None:
         elif tier == 3 and tier3:
             log(f"Tier 3: running {len(tier3)} domain(s) on host...")
             for domain, files in sorted(tier3.items()):
-                timeout = KERNEL_BUILD_DOMAIN_TIMEOUT if domain == "kernel_build" else 600
+                if domain == "kernel_build":
+                    timeout = KERNEL_BUILD_DOMAIN_TIMEOUT
+                elif domain == "nested_isolated":
+                    timeout = NESTED_ISOLATED_DOMAIN_TIMEOUT
+                else:
+                    timeout = 600
                 result = run_tier3_domain(domain, files, timeout=timeout,
                                          **({"evidence": evidence} if evidence is not None else {}))
                 all_results.append(result)

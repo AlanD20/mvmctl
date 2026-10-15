@@ -682,7 +682,7 @@ def test_host_reboot_batch_selection_and_full_release_consume_only_explicit_comp
     orchestrator.main()
     assert executed and "host_reboot" not in executed
     expected_tier3_timeouts = [
-        (domain, 23400 if domain == "kernel_build" else 600)
+        (domain, {"kernel_build": 23400, "nested_isolated": 1800}.get(domain, 600))
         for domain in sorted(orchestrator.TIER3_DOMAINS)
     ] if "--all" in selection else []
     assert tier3_timeouts == expected_tier3_timeouts
