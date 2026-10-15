@@ -762,7 +762,7 @@ class TestVMAdvancedCreateFlags:
         )
         assert data["vm"]["ssh_user"] == "customuser"
         assert _run_mvm(
-            runner_vm, "exec", case["name"], "--", "id", "-un", "customuser"
+            runner_vm, "exec", case["name"], "--timeout", "30", "--", "id", "-un", "customuser"
         ).stdout.strip() == ("customuser")
 
     def test_create_with_lsm_flags(self, runner_vm, remaining_lifecycle_case):
@@ -793,7 +793,7 @@ class TestVMAdvancedCreateFlags:
         assert (
             "lsm=landlock"
             in _run_mvm(
-                runner_vm, "exec", case["name"], "--", "cat", "/proc/cmdline"
+                runner_vm, "exec", case["name"], "--timeout", "30", "--", "cat", "/proc/cmdline"
             ).stdout.split()
         )
 
@@ -1168,7 +1168,7 @@ class TestVMConfigOptions:
             512,
         )
         assert (
-            _run_mvm(runner_vm, "exec", config_vm_name, "--", "nproc").stdout.strip()
+            _run_mvm(runner_vm, "exec", config_vm_name, "--timeout", "30", "--", "nproc").stdout.strip()
             == "2"
         )
         memory_info = _run_mvm(
@@ -1273,6 +1273,8 @@ class TestVMConfigOptions:
                     runner_vm,
                     "exec",
                     config_vm_name,
+                    "--timeout",
+                    "30",
                     "--",
                     "nproc",
                 ).stdout.strip()
@@ -1288,6 +1290,8 @@ class TestVMConfigOptions:
                     runner_vm,
                     "exec",
                     explicit_name,
+                    "--timeout",
+                    "30",
                     "--",
                     "nproc",
                 ).stdout.strip()
@@ -1320,6 +1324,8 @@ class TestVMConfigOptions:
             runner_vm,
             "exec",
             config_vm_name,
+            "--timeout",
+            "30",
             "--",
             "cat",
             "/proc/cmdline",
@@ -1338,6 +1344,8 @@ class TestVMConfigOptions:
             runner_vm,
             "exec",
             config_vm_name,
+            "--timeout",
+            "30",
             "--",
             "ls",
             "/sys/bus/pci/devices",
@@ -1350,7 +1358,7 @@ class TestVMConfigOptions:
         flag = "--enable-logging" if enabled else "--disable-logging"
         vm = _create_config_vm(runner_vm, config_vm_name, flag)
         assert vm["enable_logging"] is enabled
-        _run_mvm(runner_vm, "exec", config_vm_name, "--", "uname", "-s")
+        _run_mvm(runner_vm, "exec", config_vm_name, "--timeout", "30", "--", "uname", "-s")
         inspected = _json_success_data(
             _run_mvm(runner_vm, "vm", "inspect", config_vm_name, "--json").stdout,
             dict,
@@ -1515,6 +1523,8 @@ def _lifecycle_boot_id(runner_vm: str, name: str) -> str:
         runner_vm,
         "exec",
         name,
+        "--timeout",
+        "30",
         "--",
         "cat",
         "/proc/sys/kernel/random/boot_id",
@@ -1863,6 +1873,8 @@ class TestVMStateTransitions:
                     runner_vm,
                     "exec",
                     unique_vm_name,
+                    "--timeout",
+                    "30",
                     "--",
                     "printf",
                     "restarted-after-crash",
@@ -2377,6 +2389,8 @@ class TestVMCloudInit:
             runner_vm,
             "exec",
             case["name"],
+            "--timeout",
+            "30",
             "--",
             "cat",
             "/var/lib/cloud/seed/nocloud-net/user-data",
@@ -2409,6 +2423,8 @@ class TestVMCloudInit:
             runner_vm,
             "exec",
             case["name"],
+            "--timeout",
+            "30",
             "--",
             "cat",
             "/var/lib/cloud/seed/nocloud-net/meta-data",
@@ -2504,6 +2520,8 @@ class TestVMCloudInit:
                 runner_vm,
                 "exec",
                 case["name"],
+                "--timeout",
+                "30",
                 "--",
                 "cat",
                 "/var/lib/cloud/seed/nocloud-net/user-data",
@@ -2568,7 +2586,7 @@ class TestVMVolumeIntegration:
         assert data["volume"]["status"] == "attached"
         assert data["attachment"]["vm_id"] == created[0]["id"]
         sectors = _run_mvm(
-            runner_vm, "exec", case["name"], "--", "cat", "/sys/class/block/vdb/size"
+            runner_vm, "exec", case["name"], "--timeout", "30", "--", "cat", "/sys/class/block/vdb/size"
         ).stdout
         assert int(sectors.strip()) * 512 == 512 * 1024 * 1024
 
@@ -2605,7 +2623,7 @@ class TestVMVolumeIntegration:
         assert attached["attachment"]["vm_id"] == created[0]["id"]
         _run_mvm(runner_vm, "vm", "start", case["name"])
         sectors = _run_mvm(
-            runner_vm, "exec", case["name"], "--", "cat", "/sys/class/block/vdb/size"
+            runner_vm, "exec", case["name"], "--timeout", "30", "--", "cat", "/sys/class/block/vdb/size"
         ).stdout
         assert int(sectors.strip()) * 512 == 512 * 1024 * 1024
         _run_mvm(runner_vm, "vm", "stop", case["name"], "--force")
@@ -2694,7 +2712,7 @@ class TestVMVolumeIntegration:
         case["owner"].vm_created(case["name"])
         assert (
             _run_mvm(
-                runner_vm, "exec", case["name"], "--", "test", "-b", "/dev/vdb"
+                runner_vm, "exec", case["name"], "--timeout", "30", "--", "test", "-b", "/dev/vdb"
             ).returncode
             == 0
         )
@@ -2915,7 +2933,7 @@ class TestVMCreateCount:
             )
             assert (
                 _run_mvm(
-                    runner_vm, "exec", vm["name"], "--", "printf", vm["name"]
+                    runner_vm, "exec", vm["name"], "--timeout", "30", "--", "printf", vm["name"]
                 ).stdout
                 == vm["name"]
             )
@@ -2975,7 +2993,7 @@ class TestVMCreateAtomicCount:
             )
             assert (
                 _run_mvm(
-                    runner_vm, "exec", vm["name"], "--", "printf", vm["name"]
+                    runner_vm, "exec", vm["name"], "--timeout", "30", "--", "printf", vm["name"]
                 ).stdout
                 == vm["name"]
             )
@@ -3198,6 +3216,8 @@ class TestVMCreateVsockPort:
                 case["name"],
                 "--port",
                 port,
+                "--timeout",
+                "30",
                 "--",
                 "printf",
                 "custom-port-ready",
