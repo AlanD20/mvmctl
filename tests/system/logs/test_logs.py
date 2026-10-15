@@ -398,7 +398,15 @@ def logs_vm(runner_vm: str, logs_case: _OwnedLogsCase) -> dict[str, Any]:
             break
         time.sleep(0.5)
     else:
-        pytest.fail(f"guest agent not ready: {last}")
+        diagnostics = [f"guest agent not ready: {last}"]
+        for label, flags in (("serial", ()), ("Firecracker", ("--os",))):
+            try:
+                tail = _logs(runner_vm, vm["id"], *flags, "--lines", "40")[-8192:]
+                diagnostics.append(f"{label} log tail: {tail!r}")
+            except Exception as error:
+                # A diagnostic failure must retain the original exec failure.
+                diagnostics.append(f"{label} log unavailable: {str(error)[-8192:]}")
+        pytest.fail("\n".join(diagnostics))
     release = _exec(runner_vm, vm, "cat /etc/os-release").stdout
     release_fields: dict[str, str] = {}
     for line in release.splitlines():
