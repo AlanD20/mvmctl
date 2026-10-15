@@ -429,7 +429,7 @@ captured topology and independent protected disks; the named privileged route is
 | `--ssh-key NAME_OR_PATH` | SSH public key (name from cache or file path) | default keys |
 | `--user USER` | Default SSH user | from config |
 | `--cloud-init-mode MODE` | Cloud-init mode: `inject`, `iso`, `net`, `off` | `off` (effective) |
-| `--writeback` | Use writeback cache mode for drives (guest fsync honored) | `false` |
+| `--writeback` | Use writeback cache mode for drives (guest fsync honored) | from `defaults.firecracker.drive_cache_type` |
 | `--nocloud-net-port N` | Reserved NoCloud TCP port; custom ports are rejected | `8000` |
 | `--cloudinit-config PATH` | Path to custom cloud-init config file | — |
 | `--no-pci` | Disable PCI device support | from config |
@@ -441,7 +441,6 @@ captured topology and independent protected disks; the named privileged route is
 | `--boot-args ARGS` | Kernel boot arguments | from config |
 | `--console` | Enable serial console relay | `false` |
 | `--vsock-port N` | Vsock port for the guest agent | `1024` |
-| `--writeback` | Use writeback cache mode for drives | from config |
 | `--skip-cleanup` | Keep resources on failure for debugging | `false` |
 | `--force, -f` | Skip confirmation prompts | `false` |
 | `--count, -c N` | Create N VMs in batch | `1` |
@@ -689,7 +688,7 @@ mvm exec [VM_SELECTOR] [-- <command>...] [flags]
 | `VM_SELECTOR` | VM name, ID, MAC, or IP (positional, required) | — |
 | (args after `--`) | Command to execute (omit for interactive shell) | — |
 | `--user, -u TEXT` | User to run the command as | `root` |
-| `--timeout, -t N` | Vsock agent connect/probe timeout in seconds | `0` (no timeout) |
+| `--timeout, -t N` | Vsock agent connect/probe timeout in seconds | `0` uses `defaults.vm.vsock_probe_timeout` (built-in: 5 seconds) |
 | `--no-sync` | Skip final `sync()` after command | `false` |
 | `--allow-vm-exec` | Permit this non-interactive source command to request policy-authorized VM-to-VM execution | `false` |
 | `--port, -p N` | Vsock port for the guest agent | `1024` |
@@ -947,9 +946,8 @@ The security model applies to the net cloud-init mode only:
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) | `WARN` |
 | `MVM_ASSET_MIRROR` | Local artifact mirror; a new Firecracker/Jailer install still fetches the official checksum sidecar for root verification | (not set) |
 | `MVM_WARM_POOL` | Warm image pool backend (`disk` for cache-backed; otherwise under `/tmp/mvmctl-<uid>/ready`, on tmpfs only when `/tmp` is tmpfs) | (not set) |
-| `MVM_ESCALATED` | Set by sudo wrapper to indicate privilege escalation | `1` |
+| `MVM_ESCALATED` | Legacy root-warning suppression marker when present; does not grant privileged authority | (not set) |
 | `MVM_TEMP_DIR` | Override the per-operator temporary work directory, warm-pool location, and official-kernel scratch (`<value>/kernel-build`) | Managed cache `tmp/` for ordinary temporary work; official-kernel build uses embedded `build_dir` when unset or empty |
-| `MVM_SUDO_RESTART` | Set internally when re-running with sudo for host init | (not set) |
 
 Generic image/kernel downloads look up mirror entries by URL filename, not full origin. Configured checksums are
 verified, but Firecracker CI kernel downloads have no upstream SHA-256 configured. Different CI releases can publish
@@ -964,7 +962,7 @@ verification required for root-owned Firecracker/Jailer installation.
 
 ```
 ~/.cache/mvmctl/
-├── bin/                  # Source-build and non-launch binary workspace
+├── bin/                  # Legacy non-launch binary workspace
 ├── kernels/              # vmlinux kernel images
 ├── images/               # Root filesystem images (.ext4, .btrfs, .img, .raw, .ext4.zst, .btrfs.zst)
 ├── volumes/              # Persistent disk volume files
@@ -989,7 +987,6 @@ verification required for root-owned Firecracker/Jailer installation.
 │       ├── vmstate                   # Full snapshots only
 │       └── volume-<drive-id>.raw     # Each captured data volume, when present
 ├── logs/                 # Application log files
-├── firecracker-src/      # Firecracker git clone (for building from source)
 ├── mvmdb.db              # SQLite database (canonical asset state)
 ├── mvmctl.log            # Main application log
 ├── timing.log            # Performance/timing log
@@ -1013,6 +1010,6 @@ Canonical launch assets and jail state are outside the user cache:
 
 ```text
 /var/lib/mvmctl/
-├── binaries/<version>/   # Root-owned exact Firecracker/Jailer release pair
+├── binaries/<architecture>/<version>/  # Root-owned exact Firecracker/Jailer release pair
 └── jailer/firecracker/<vm-id>/root/  # Per-VM jail and bind mounts
 ```

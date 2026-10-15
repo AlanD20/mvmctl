@@ -44,7 +44,7 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 **Benefits:**
 
 - Every VM receives Firecracker's supported chroot and privilege-drop path.
-- The canonical Jailer path enforces one finite cgroup-v2 envelope for every VM lifecycle path.
+- The canonical Jailer path enforces one typed cgroup-v2 resource policy for every VM lifecycle path.
 - One canonical launch path avoids a permanent direct-versus-jailed behavior matrix.
 - VM create, start, reboot, and snapshot restore share the same security properties.
 
