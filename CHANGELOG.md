@@ -152,6 +152,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed local host-direct pytest timeouts to retain bounded output and shutdown diagnostics, attempt
+  identity-pinned private process-group shutdown, and stop later domains and tiers. The domain fails and
+  the qualification host is retained for reconciliation with release evidence incomplete; process-group
+  cleanup does not prove privileged root-helper or VMM quiescence. See
+  [system-test timeout guidance](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#45-limit-parallel-workers).
 - Fixed structured kernel-import conflicts to retain their error details and entity identity in API responses.
 - Fixed VM-to-image export to skip source-reported holes without expanding the entire logical disk into allocated
   zero blocks, while preserving disk contents and length.

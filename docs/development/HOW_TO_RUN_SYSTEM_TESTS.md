@@ -520,6 +520,15 @@ Allow for provisioning, pytest, report retrieval and worker cleanup when setting
 transport deadline. The scheduler allowance does not extend individual command or external deadlines,
 and joining active workers can outlast the completion-gap limit.
 
+On a local host-direct Tier 3 pytest timeout, the runner retains bounded stdout/stderr and shutdown
+diagnostics. It checks the private pytest process group's boot, leader PID/start time, PGID and session
+identity before signaling, attempts SIGINT then SIGKILL, and keeps the leader unreaped through escalation
+to prevent PID/group reuse. Unavailable identity or incomplete shutdown is reported as uncertain containment.
+The timed-out domain fails, later domains and tiers are not scheduled, and the orchestrator exits unsuccessfully
+with the release verdict incomplete, retaining available failed evidence and the qualification host for reconciliation.
+Process-group shutdown does not prove that privileged root helpers or VMMs are quiescent. Reconcile the exact
+owned runtime state before another attempt; do not infer safe host cleanup from the pytest caller's exit.
+
 ### 4.6 Orchestrator Flags Reference
 
 | Flag | Default | Description |
