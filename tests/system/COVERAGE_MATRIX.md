@@ -17,33 +17,41 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Current qualification checkpoint (2026-10-15):** v0.3.0 remains unreleased and not release-qualified.
+**Current qualification checkpoint (2026-10-16):** v0.3.0 remains unreleased and not release-qualified.
 The installed x86_64 candidate is `0.3.0-rc.kernel-details-ce5b0913`, produced from `ce5b0913`, SHA-256
 `565be5a66432788f405e64337e6902a573da0dafe9efd0f4ef46480c5593060a`.
-Of the accepted ordinary runtime cases, 340 bind frozen source `7f49cd0a1213b96bbe66c4e5b12454d2d7207f09`, tree
-`3bd36f0353eb794f52b085d40745287ea731b96c`; corrected policies (3), Jailer/cgroup (20) and logs (11) bind
+Of the accepted ordinary runtime cases, 344, including fresh environments (4), bind frozen source
+`7f49cd0a1213b96bbe66c4e5b12454d2d7207f09`, tree `3bd36f0353eb794f52b085d40745287ea731b96c`;
+corrected policies (3), Jailer/cgroup (20) and logs (11) bind
 QA source `0574702f`/tree `6650e09e`, collection receipt `34d66323`. SSH (11), VM data persistence (1),
 volume (37) and VM lifecycle (69) bind QA source `4764bb0871b626695198248bb8369bca4500a4e4`, tree
 `751dd9c5a3856496739a645079b829046849ff4e`, collection receipt `38ede600`.
-That source collected the same 528 unique nodes (526 ordinary and two actual host-reboot phases).
+Isolated nested VMs (8) bind QA source `c4acd1c112f98980cd3c6f2666dd6fe8c08bc7d9`, tree
+`d741eefff2ac4bbcf25e5436c0df7d47d19fa549`, collection receipt `1938de73`.
+The 4764 and c4 sources collected the same 528 unique nodes (526 ordinary and two actual host-reboot phases).
 Collection itself executed no runtime fixtures and does not rebind accepted receipts.
 
 | Current scope | Accepted cases | Remaining cases |
 |---|---:|---:|
 | Tier 1 | 238 | 0 |
 | Tier 2 | 193 | 0 |
-| Tier 3 | 61 | 34 |
+| Tier 3 | 73 | 22 |
 | Actual host reboot | 0 | 2 |
 
-The **492 accepted ordinary cases** comprise all Tier 1 and Tier 2 domains: Tier 2 kernel successor (1),
+The **504 accepted ordinary cases** comprise all Tier 1 and Tier 2 domains: Tier 2 kernel successor (1),
 console (4), exec (12), full journeys (15), GuestFS (1), host administration (3), nftables (5), policies (3),
 Jailer/cgroup (20), logs (11), SSH (11), VM data persistence (1), volume (37) and VM lifecycle (69);
 and Tier 3 environment (22), copy (15),
-snapshot load (8), snapshot rootfs independence (6) and volume hotplug (10). Each accepted slice has native
+snapshot load (8), snapshot rootfs independence (6), volume hotplug (10), fresh environments (4)
+and isolated nested VMs (8). Each accepted slice has native
 exit zero, exact strict JSON/JUnit node accounting, source/candidate seals, retained literal reports and checked
 cleanup/preservation. Failed batches contribute no partial credit.
-Remaining Tier 3 domains are isolated nested VMs (8), fresh environments (4) and kernel builds (22).
-Both actual host-reboot phases remain unaccepted. The 492/528 accepted union is not one full current-source pass.
+The complete isolated-nested suite passed in 870.57 seconds, with strict eight-node JSON/JUnit accounting,
+zero other outcomes and checked cleanup leaving no owned VMs/environments and the borrowed mirror unattached.
+Its 1,800-second aggregate allowance reflects measured fixture-cycle cost; per-command limits, assertions and
+function-owned cleanup remain unchanged. Earlier failed attempts retain their failures and add no credit.
+Only Tier 3 kernel builds (22) and both actual host-reboot phases remain unaccepted.
+The 504/528 accepted union is not one full current-source pass.
 
 The corrected QA source gives initial guest-agent connections explicit startup budgets through the existing CLI
 retry behavior. Public default timeouts and production/build inputs are unchanged; these are test corrections,
@@ -52,13 +60,13 @@ exhaustion and near-saturation scenarios in nested QA; it does not guarantee sur
 
 Reboot-namespace QA source `092cd5c4`, documented in `738d8665`, passed 26 focused correction checks and
 collected both phase nodes; no fresh PRE/reboot/POST journey passed. Ordinary receipts retain their respective
-`7f49cd0a`, `0574702f` or `4764bb08` bindings. This accepted union and unchanged-input equivalence do not approve
-a carry profile, mixed-source final join or release PASS. Earlier interrupted nested Jailer and logs attempts produced
+`7f49cd0a`, `0574702f`, `4764bb08` or `c4acd1c1` bindings. This accepted union and unchanged-input equivalence
+do not approve a carry profile, mixed-source final join or release PASS. Earlier interrupted nested Jailer and logs attempts produced
 no qualifying reports after the old enclosing controller's
 finite `memory.max=6576668672` killed the named QA VM. Neither attempt adds credit or changes the candidate's
 pressure-only production policy. Successful later tasks do not relabel earlier failed or interrupted tasks.
 Current Go/build/inner-install and reusable-base receipts remain accepted;
-actual reboot, final source/provenance join, remote CI and final approval remain open. Historical candidate
+actual reboot, final source/provenance join, final public docs, remote CI and final approval remain open. Historical candidate
 receipts and the older closed carry profile do not qualify this candidate.
 
 **Historical source-publication qualification:**
