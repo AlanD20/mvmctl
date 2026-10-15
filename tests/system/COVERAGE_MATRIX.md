@@ -17,33 +17,42 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Current qualification checkpoint (2026-10-14):** v0.3.0 remains unreleased and not release-qualified.
+**Current qualification checkpoint (2026-10-15):** v0.3.0 remains unreleased and not release-qualified.
 The installed x86_64 candidate is `0.3.0-rc.kernel-details-ce5b0913`, produced from `ce5b0913`, SHA-256
 `565be5a66432788f405e64337e6902a573da0dafe9efd0f4ef46480c5593060a`.
-Accepted ordinary runtime receipts bind frozen source `7f49cd0a1213b96bbe66c4e5b12454d2d7207f09`, tree
-`3bd36f0353eb794f52b085d40745287ea731b96c`. Full collection contains 528 unique nodes: 526 ordinary
-and two actual host-reboot phases. Collection adds no runtime credit.
+Of the accepted ordinary runtime cases, 340 bind frozen source `7f49cd0a1213b96bbe66c4e5b12454d2d7207f09`, tree
+`3bd36f0353eb794f52b085d40745287ea731b96c`; corrected policies (3) and Jailer/cgroup (20) bind QA source
+`0574702f`/tree `6650e09e`, collection receipt `34d66323`. Latest QA source `4764bb08` collected the same
+528 unique nodes (526 ordinary and two actual host-reboot phases), receipt `38ede600`.
+That collection executed no runtime fixtures and does not rebind accepted receipts.
 
 | Current scope | Accepted cases | Remaining cases |
 |---|---:|---:|
 | Tier 1 | 238 | 0 |
-| Tier 2 | 36 | 157 |
+| Tier 2 | 64 | 129 |
 | Tier 3 | 61 | 34 |
 | Actual host reboot | 0 | 2 |
 
-The **335 accepted ordinary cases** comprise all Tier 1 domains; Tier 2 kernel successor (1), console (4),
-exec (12), full journeys (15), GuestFS (1) and host administration (3); and Tier 3 environment (22), copy (15),
+The **363 accepted ordinary cases** comprise all Tier 1 domains; Tier 2 kernel successor (1), console (4),
+exec (12), full journeys (15), GuestFS (1), host administration (3), nftables (5), policies (3) and Jailer/cgroup (20);
+and Tier 3 environment (22), copy (15),
 snapshot load (8), snapshot rootfs independence (6) and volume hotplug (10). Each accepted slice has native
 exit zero, exact strict JSON/JUnit node accounting, source/candidate seals, retained literal reports and checked
 cleanup/preservation. Failed batches contribute no partial credit.
-Remaining Tier 2 domains are Jailer (20), logs (11), nftables (5), policies (3), SSH (11), VM data persistence (1),
+Remaining Tier 2 domains are logs (11), SSH (11), VM data persistence (1),
 VM lifecycle (69) and volume (37). Remaining Tier 3 domains are isolated nested VMs (8), fresh environments (4)
-and kernel builds (22).
+and kernel builds (22). The logs retry is in progress at this checkpoint and adds no accepted credit.
+
+The corrected QA source gives initial guest-agent connections explicit startup budgets through the existing CLI
+retry behavior. Public default timeouts and production/build inputs are unchanged; these are test corrections,
+not diagnosed production feature fixes. The accepted 20-case Jailer/cgroup slice includes actual guest memory
+exhaustion and near-saturation scenarios in nested QA; it does not guarantee survival under every host/ancestor OOM.
 
 Reboot-namespace QA source `092cd5c4`, documented in `738d8665`, passed 26 focused correction checks and
-collected both phase nodes; no fresh PRE/reboot/POST journey passed. Ordinary receipts retain their `7f49cd0a`
-binding. Unchanged-input equivalence does not approve a carry profile, mixed-source join or release PASS.
-The interrupted nested Jailer and logs attempts produced no qualifying reports after the old enclosing controller's
+collected both phase nodes; no fresh PRE/reboot/POST journey passed. Ordinary receipts retain their respective
+`7f49cd0a` or `0574702f` bindings. This accepted union and unchanged-input equivalence do not approve a carry profile,
+mixed-source final join or release PASS. Earlier interrupted nested Jailer and logs attempts produced no qualifying
+reports after the old enclosing controller's
 finite `memory.max=6576668672` killed the named QA VM. Neither attempt adds credit or changes the candidate's
 pressure-only production policy. Current Go/build/inner-install and reusable-base receipts remain accepted;
 actual reboot, final source/provenance join, remote CI and final approval remain open. Historical candidate
