@@ -987,6 +987,8 @@ class TestVolumeLifecycle:
                 runner_vm,
                 "exec",
                 vm_name,
+                "--timeout",
+                "30",
                 "--",
                 "cat",
                 "/proc/partitions",

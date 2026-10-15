@@ -384,6 +384,6 @@ def test_copied_rootfs_data_survives_independent_snapshot_restore(
     )
     assert restored_id != source_id, (restored_id, source_id)
     assert (
-        _run_mvm(runner_vm, "exec", restored_id, "--", "cat", guest_path).stdout
+        _run_mvm(runner_vm, "exec", restored_id, "--timeout", "30", "--", "cat", guest_path).stdout
         == original
     )

@@ -399,7 +399,7 @@ class TestKeyDefaults:
         expected_names = {owner.baseline[key_id]["name"] for key_id in owner.defaults} | set(names)
         assert set(inspected["vm"]["ssh_keys"]) == expected_names, inspected["vm"]
         authorized = _run_mvm(
-            runner_vm, "exec", owned["name"], "--", "cat", "/root/.ssh/authorized_keys",
+            runner_vm, "exec", owned["name"], "--timeout", "30", "--", "cat", "/root/.ssh/authorized_keys",
         ).stdout.splitlines()
         admitted = {tuple(line.split()[:2]) for line in authorized if line.strip()}
         for name in names:
