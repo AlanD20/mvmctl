@@ -808,6 +808,35 @@ finalization. This verifier accepts only its one sealed historical eight-case pr
 and version, and unchanged relevant source hashes. A changed binary or relevant input is rejected: there is no
 retargeting to a newer artifact, and carried nodes remain historical proof rather than a new runtime pass.
 
+The separate `--candidate565-source-join` option admits only the closed `rc030-candidate565-oct16` profile:
+candidate SHA-256 `565be5a66432788f405e64337e6902a573da0dafe9efd0f4ef46480c5593060a`, version
+`mvm 0.3.0-rc.kernel-details-ce5b0913`, and qualified kernel/reboot source
+`a33e6623dfcaf80bfb78a891e6ef84e831f2e496`/tree `32cb1a84de0ef3c5fe803e5813a3e3ae7420df0f`.
+It checks compiled exact source/tree/payload, reviewed-delta, collection and task seals for the original 504 cases
+at `7f49cd0a`, `0574702f`, `4764bb08` and `c4acd1c1`; each receipt keeps its actual execution source.
+A fresh complete kernel22 task and stock successful PRE/reboot/POST proof at the qualified source remain mandatory,
+with exact nonoverlapping coverage of 526 ordinary nodes plus the two reboot nodes. This is not a generic waiver.
+
+Its private schema-1 JSON record has exactly `schema_version`, `profile`, `sources` and `release_source_path`.
+`sources` contains exactly `original`, `startup`, `remaining`, `nested` and `kernel`; each entry has
+`source_path`, `collection_task` and `matrix_tasks`, whose items contain `path` and `terminal_sha256`.
+`release_source_path` selects the separately pinned `df00fc57` documentation checkpoint; it never substitutes
+that checkpoint for an executed receipt's source. Run the supporting verifier checkout separately from the
+immutable qualified source, preserving the original outer-controller and candidate environment shown above:
+
+```bash
+python3 scripts/system_test_evidence.py \
+  --candidate565-source-join /absolute/path/to/private-candidate565-record.json \
+  --qualified-source /absolute/path/to/exact-a33-source \
+  --collection-task /absolute/path/to/a33-collection-task \
+  --host-reboot-task /absolute/path/to/closed-a33-host-reboot-task
+```
+
+Do not combine this option with `--matrix-task` or either historical carry option. Output distinguishes the
+qualified `source`, `verifier_source`, candidate producer revision and `qa_source_join.release_checkpoint`.
+The 22 focused pure helper checks passed inside QA; the actual final join has not run. Those checks do not
+qualify missing runtime evidence, establish a joined PASS, or declare the release passed.
+
 ---
 
 ## 7. Reference

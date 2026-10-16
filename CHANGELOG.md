@@ -216,6 +216,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limitations and qualification
 
+- Added the closed `--candidate565-source-join` evidence profile, preserving original source/receipt bindings
+  and separate qualified-source, verifier and documentation-checkpoint provenance. It requires fresh complete
+  kernel22 and stock reboot proof for exact 526 ordinary plus two reboot-node coverage; it is not a generic waiver.
+  All 22 focused pure helper checks passed inside QA, but the actual final join has not run and adds no runtime
+  qualification credit. See [final evidence join](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#63-join-verified-receipts-read-only).
 - Kept v0.3.0 unreleased and not release-qualified. The current installed x86_64 candidate
   `0.3.0-rc.kernel-details-ce5b0913` (`565be5a6`, producer `ce5b0913`) has 504 accepted ordinary cases:
   all T1 238 and T2 193, plus T3 73. Of these, 344, including fresh environments (4), retain frozen
