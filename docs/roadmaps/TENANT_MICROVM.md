@@ -1,6 +1,6 @@
 # Project Hosting with MicroVMs
 
-**Status:** Draft
+**Status:** Historical roadmap, with current v0.3.0 boundaries noted below
 **Date:** 2026-08-09
 **Audience:** mvmctl contributors and operators using microVMs as isolated project-service runtimes.
 **Related ADRs:** [ADR-0014: Routed Service-Access Policies](../adr/0014-routed-service-access-policies.md), [ADR-0015: Jailer Is the Canonical Firecracker Launcher](../adr/0015-jailer-canonical-launcher.md).
@@ -11,11 +11,13 @@ mvmctl remains a low-level, normal-user VM manager. It does not own projects, te
 
 Shared infrastructure runs in dedicated microVMs on separate mvmctl networks. Workload networks reach an exact shared service only through explicit protocol-and-port policies. The primary example is an application network reaching TCP port 5432 on a shared PostgreSQL VM; the model applies equally to other shared infrastructure.
 
-The microVM is the process, filesystem, and resource-isolation unit. The environment network is the communication trust zone unless a future same-network VM policy narrows it.
+The microVM is the process, filesystem, and resource-isolation unit. Network membership alone grants no VM-to-VM
+connectivity: same-network and cross-network traffic require typed grants under
+[ADR-0017](../adr/0017-per-vm-network-namespaces-and-typed-policies.md).
 
 ## 2. Deployment model
 
-An environment maps to one network. Small environments may run application, worker, scheduler, and cache processes in one Docker-capable microVM. Services move to separate microVMs when they need an independent failure domain, resource envelope, deployment cadence, or stronger isolation. Service VMs on one environment network communicate directly.
+An environment maps to one network. Small environments may run application, worker, scheduler, and cache processes in one Docker-capable microVM. Services move to separate microVMs when they need an independent failure domain, resource envelope, deployment cadence, or stronger isolation. Service VMs on one environment network communicate through explicit traffic grants.
 
 Shared infrastructure uses a separate network and dedicated microVMs with persistent volumes. The host routes between networks, but a default deny permits only persisted service-access policies. Database authentication, role separation, and application-aware backup remain the external orchestrator's responsibility.
 
@@ -25,16 +27,24 @@ Direct inbound ports are not required when the workload VM runs an outbound tunn
 
 | Capability | Current state | Required change |
 |---|---|---|
-| Same-network communication | Works through one bridge; intentionally unfiltered | None for the environment trust-zone model |
-| Cross-network routing | Typed source-network → destination-VM service policies and managed-network default deny are implemented for nftables and iptables; L2 execution remains pending | Complete prepared-runner verification and benchmark reconciliation at scale |
+| Same-network communication | Default-deny with typed traffic grants and per-VM namespaces | Declare the exact required flows |
+| Cross-network routing | Typed traffic grants use the root-owned nftables-only authority | Declare exact source, destination, protocol, and port |
 | VM-to-host traffic | Managed-network INPUT is default-deny after established replies and NoCloud | Add a typed host-service operation only when a concrete host service must be exposed |
-| Firecracker launch | Canonical Jailer launch, exact trusted release pairing, and cgroup-v2 enforcement implemented; L2 execution remains pending | Complete prepared-runner verification |
-| Host resource enforcement | Typed CPU, memory, swap, and PID limits are persisted, applied through Jailer, verified after launch, and shown by inspect | Measure VMM headroom under L2 workloads and add I/O limits after stable backing-device resolution exists |
+| Firecracker launch | Canonical Jailer launch, exact trusted release pairing, namespaces, and cgroup-v2 enforcement | Preserve admitted lifecycle identities |
+| Host resource enforcement | CPU/PID controls and pressure-only memory policy under ADR-0019 | Assess workload and enclosing host limits; no RAM-reservation guarantee |
 | IP identity | Explicit IP assignment and collision-safe IPAM exist | Policies bind to network/VM IDs and resolve current addressing during reconciliation |
 | Persistent storage | Volumes and snapshots exist | External orchestration supplies application-consistent backup and restore procedures |
 | Docker workload | Guest images and kernels are customizable | Validate a versioned Docker-capable image/kernel template |
 
+The [coverage matrix](../../tests/system/COVERAGE_MATRIX.md) records the accepted candidate-bound checkpoint and
+remaining scenario-specific limits. Its mixed-source evidence does not qualify every proposed workload below.
+
 ## 4. Implementation milestones
+
+These dated milestones preserve the original roadmap, not the current implementation sequence. The no-namespace
+initial milestone, dual firewall backends, fixed VMM headroom, and optional same-network segmentation were superseded
+by ADR-0017 and [ADR-0019](../adr/0019-pressure-only-vm-memory-control.md). Their pending-L2 labels are historical;
+use the coverage checkpoint above for accepted evidence.
 
 ### M1 — Canonical jailed launch
 
@@ -113,6 +123,9 @@ The highest-value mvmctl additions are infrastructure diagnostics, not project o
 | Troubleshooting layers | Typed policy checks, resource inspection, and lifecycle audit logs |
 
 ## 7. Non-goals
+
+This list records the original roadmap's scope. Its namespace and same-network sequencing items were superseded as
+described above; the project/application ownership boundary remains unchanged.
 
 - Tenant or project entities in mvmctl.
 - A root-owned mvmctl database, daemon, RBAC, billing, or web UI.

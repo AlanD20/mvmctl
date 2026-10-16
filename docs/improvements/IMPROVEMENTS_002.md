@@ -25,8 +25,11 @@
 
 ## Networking
 
-- [ ] fully isolated bridge networking for VMs
-    - **❌ NOT IMPLEMENTED** — Plain bridge+TAP only. No VLANs, namespaces, ebtables, or isolation mode.
+- [x] per-VM network namespace topology
+    - **IMPLEMENTED** — Managed launch consumes a root-owned per-VM namespace topology. See
+      [ADR-0017](../adr/0017-per-vm-network-namespaces-and-typed-policies.md) and the network authority sections in
+      [CONTEXT.md](../../CONTEXT.md). This replaces the earlier plain bridge/TAP design; it does not establish full
+      runtime qualification or support for arbitrary VLAN/isolation modes.
 - [x] constrain TAP FORWARD rules to bridge subnet
     - ✅ **IMPLEMENTED** — `AddTapFirewallRules()` via `NewTapForwardRules()` constrains FORWARD rules to bridge subnet, matching `EnsureNAT()`.
 

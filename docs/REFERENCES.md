@@ -1,6 +1,9 @@
 # Command Reference & Configuration
 
 This document provides detailed reference for all `mvm` commands, configuration options, and environment variables.
+The [candidate-bound qualification checkpoint](../tests/system/COVERAGE_MATRIX.md#v030-release-security-qualification-overlay)
+records accepted runtime evidence and remaining fault-coverage limits. v0.3.0 remains unreleased; these results do
+not qualify every fault path, aarch64 runtime, remote CI or a different candidate.
 
 ---
 
@@ -97,7 +100,7 @@ pattern is:
 
 First-time operator setup wizard. Coordinates host admission, a default network, cache initialization, and a
 Firecracker/Jailer release pair. Kernel, image, and SSH-key setup are separate commands. The approved v0.3.0 launch
-contract requires the exact matching Firecracker/Jailer 1.17.0 pair; affected runtime qualification remains pending.
+contract requires the exact matching Firecracker/Jailer 1.17.0 pair.
 
 ```
 mvm init [flags]
@@ -294,12 +297,9 @@ reports busy. Copy removal does not clear uncertain source-VM recovery; that con
 Use the typed command, not manual deletion. An open reader can retain unlinked bytes, so successful cleanup does
 not promise immediate physical reclamation.
 
-The authoritative export, cleanup and VM-only journal-preparation paths are implemented. Earlier local Go CI and
-the journal fix's focused Go/API/vet checks passed separately. The real-agent candidate built from clean source
-`1a2506e6` and its normal installation inside the named QA runner passed exact binary-identity and preservation
-checks; the outer controller was not replaced. One installed run completed import and restored its source to
-Running before a safety guard interrupted clone boot. Clone-content, other source states and interruption/fault
-journeys remain release-qualification gates; collection or this partial runtime evidence is not a full pass. See
+VM-to-image import copies the root disk, not RAM or attached data volumes, and does not promise application-consistent
+state across them. Accepted registered journeys and remaining interruption/fault limits are recorded in the
+qualification checkpoint. See
 [ADR-0018](adr/0018-isolated-vm-execution-and-snapshot-authority.md#vm-to-image-import-from-authoritative-backing).
 
 Typed image optimization supports deblob and fstab repair, ext-family offline shrink, and durable Btrfs-to-ext4
@@ -308,8 +308,9 @@ at existing capacity; resize/shrink requests fail before mutation.
 
 Interrupted optimization can resume from exact retained staging intent and resource identities. A checked root result
 is required before publication, which requires atomic exchange and preserves the original until durable completion.
-Unknown or changed remnants remain for recovery rather than being adopted or recursively removed. These paths are
-implemented but unverified; unprivileged archive construction remains separate.
+Unknown or changed remnants remain for recovery rather than being adopted or recursively removed.
+Unprivileged archive construction remains separate; passing registered journeys does not establish every interruption
+or replacement-race outcome.
 
 ```
 # List available remote image types
@@ -407,9 +408,9 @@ connection and waits on the exact process before authoritative cleanup.
 
 Typed launch now includes console relay composition and raw data volumes with release-derived device limits,
 descriptor-only mounts, and no new storage quotas. PCI launch and x86 nested configuration are implemented for the
-pinned release; ARM nested launch is rejected. This development implementation is unverified. Typed live-volume
-operations and snapshot capture/inspect/remove are integrated. Snapshot restore source composition now uses the
-captured topology and independent protected disks; the named privileged route is integrated. Release qualification remains pending.
+pinned release; ARM nested launch is rejected and aarch64 runtime qualification remains open. Typed live-volume
+operations and snapshot capture/inspect/remove use root authority. Snapshot restore uses the captured topology and
+independent protected disks. The qualification checkpoint records the bounded lifecycle and restore evidence.
 
 **`vm create` flags:**
 
@@ -464,22 +465,23 @@ mvm vm create offline-worker --no-network --cloud-init-mode off
 ```
 
 `--no-network` is an explicit choice, not the result of omitting `--network`. It conflicts with `--network`,
-`--ip`, `--mac`, and NoCloud network mode. Focused installed-candidate runner cases passed networkless full
-capture/restore with an attached raw volume and guest exec, plus create/stop/start; the full system suite and
-networked policy matrix remain unqualified.
+`--ip`, `--mac`, and NoCloud network mode. Accepted candidate journeys include networkless full capture/restore
+with an attached raw volume and guest exec, plus create/stop/start. Policy-specific spoofing, IP reuse and fault
+recovery limits remain listed in the qualification checkpoint.
 
 ---
 
 ### `mvm snapshot` (alias: `ss`)
 
-The listed snapshot surface is implemented but not release-qualified. Capture/inspect/remove use root-controlled
+Capture/inspect/remove use root-controlled
 storage and exclusive protected rootfs/data-volume capture. Restore copies disks into independent protected backing,
 retains immutable memory backing, and preserves captured drive IDs and network identity. The public API reserves the
 captured IP before root restore; conflicts fail, and an uncertain root outcome keeps the reservation for recovery.
-Focused installed-candidate networkless and same-network managed restore journeys passed in the named runner; the
-full snapshot fault matrix, interruption reconciliation, and release QA remain open (see ADR-0018).
+The accepted candidate passed registered snapshot journeys, including networkless and same-network managed restore.
+Broader interruption, post-spawn and uncertain-transport recovery remain limited as described in the qualification
+checkpoint and ADR-0018.
 
-Those earlier restore results do not qualify the 1.17.0 pair. Create fresh 1.17.0 snapshots and qualify capture and
+Create fresh 1.17.0 snapshots and qualify capture and
 restore with the same matching release. Captured versions are preserved; no cross-version conversion or compatibility
 is promised. See [runtime guidance](RUNTIME.md#vm-launch-and-resource-control).
 
@@ -581,7 +583,8 @@ endpoint does not create a live network interface.
 
 Execution grants are directional, independent of IP-network placement, and require an exact non-root target user.
 The opt-in API relay now reads and enforces them at runtime. It also requires root-admitted active VM identities;
-creating a grant alone cannot make a transitional VM launch eligible. End-to-end qualification remains pending.
+creating a grant alone cannot make a transitional VM launch eligible. Passing directional execution journeys does
+not establish every peer, capacity, deadline, cancellation or private-backend cleanup outcome.
 
 ---
 
@@ -728,7 +731,7 @@ If an admitted atomic pidfd proves that an opted-in source command exited before
 still reserved, unclaimed, and unused, and cleanup succeeds without cancellation, the unused source session closes
 and ordinary stdout, stderr, and exit status are preserved. Metadata, reservation, cancellation, and cleanup errors
 remain fail-closed. This completion publishes no remote-execution authority.
-Qualification of the corrected source-publication and kernel-selection paths remains pending.
+Accepted source-session journeys and remaining fault limits are recorded in the qualification checkpoint.
 
 ---
 
@@ -913,8 +916,8 @@ existing accounts are retained. Injected seeds contain fixed `meta-data` and `us
 
 Some distro preparation is installed as fixed guest-boot work, including SSH setup, Arch package-key initialization,
 and Btrfs balance. Successful host provisioning means those actions were queued, not that the guest has run them.
-The implementation is unverified. Typed image conversion/recovery is implemented; unprivileged archive construction
-remains separate.
+Typed image conversion/recovery and unprivileged archive construction are separate operations; successful
+provisioning does not imply every guest boot action completed.
 
 ### How Net Mode Works
 
@@ -933,7 +936,7 @@ The security model applies to the net cloud-init mode only:
 - One live NoCloud batch occupies each network gateway listener. A bind collision fails; it neither adopts nor kills the existing listener.
 - The typed privileged request selects only the owned network, never a custom address, port, protocol, or service.
 - The firewall grant represents the fixed gateway TCP `8000` slot; it does not authenticate the current listener process.
-- An interrupted process can leave that reserved-slot grant for a subsequent invocation or network teardown. Live behavior remains unqualified.
+- An interrupted process can leave that reserved-slot grant for a subsequent invocation or network teardown; successful ordinary journeys do not establish every interruption outcome.
 
 ---
 
@@ -946,7 +949,6 @@ The security model applies to the net cloud-init mode only:
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) | `WARN` |
 | `MVM_ASSET_MIRROR` | Local artifact mirror; a new Firecracker/Jailer install still fetches the official checksum sidecar for root verification | (not set) |
 | `MVM_WARM_POOL` | Warm image pool backend (`disk` for cache-backed; otherwise under `/tmp/mvmctl-<uid>/ready`, on tmpfs only when `/tmp` is tmpfs) | (not set) |
-| `MVM_ESCALATED` | Legacy root-warning suppression marker when present; does not grant privileged authority | (not set) |
 | `MVM_TEMP_DIR` | Override the per-operator temporary work directory, warm-pool location, and official-kernel scratch (`<value>/kernel-build`) | Managed cache `tmp/` for ordinary temporary work; official-kernel build uses embedded `build_dir` when unset or empty |
 
 Generic image/kernel downloads look up mirror entries by URL filename, not full origin. Configured checksums are

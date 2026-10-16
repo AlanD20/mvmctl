@@ -20,15 +20,12 @@ The relay performs directional policy enforcement, retained-sidecar admission, b
 cancellation, and command-redacted audit finalization. It requires root-admitted active source and destination
 identities from the schema-5 lifecycle, now composed by typed root launch. A transitional launch or SQLite status
 value cannot supply that authority.
-The implementation-only update added no tests and ran no build, tests, or qualification. Positive end-to-end behavior
-is not qualified.
-The required no-IP-network case is not yet representable through public VM creation: `VMCreateRequest.resolveNetwork`
-in `pkg/api/inputs/vm_create.go` requires a managed network, and `vm create` has no network-omission mode. The exec grant
-does not look up network placement, but that is not evidence that a no-IP VM can be launched. Add an admitted
-networkless VM lifecycle before claiming the no-IP case or its Python L2 test complete. The closed placement and
-root-owned loopback-only namespace contract is [ADR-0020](../adr/0020-networkless-vm-placement.md); the ADR does not
-claim a runnable VM or runtime qualification. The Firecracker config generator has only the no-NIC/no-`ip=` primitive;
-public placement, root namespace lifecycle, restart, and snapshot wiring remain missing.
+Public `vm create --no-network` selects an isolated loopback-only namespace with no guest NIC. Public validation,
+root namespace lifecycle, restart, and snapshot placement are implemented under
+[ADR-0020](../adr/0020-networkless-vm-placement.md). Exec authorization remains directional regardless of placement.
+The [coverage matrix](../../tests/system/COVERAGE_MATRIX.md) records accepted candidate-bound execution evidence,
+including same-network, cross-network, and networkless journeys, and preserves the remaining per-scenario limits.
+Its accepted mixed-source checkpoint is not a claim that every authority-abuse or fault scenario is covered.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration, create path, results,
 persistence, and environment specifications; it is not converted into a directional policy.
 
@@ -263,10 +260,10 @@ lifecycle recovery work and system qualification are separate from the relay imp
 6. The API relay invokes the implemented typed audit sink for every terminal outcome. Cancellation and timeout paths
    use a fresh bounded context derived through `context.WithoutCancel`, and every audit failure is surfaced or joined
    with the relay result.
-7. Python L2 tests prove positive same-network, cross-network, and no-IP-network execution plus missing/reverse policy,
-   foreign owner, stale identity, root target, malformed wire, limit, cancellation, and cleanup denials.
+7. Python L2 coverage and retained receipts distinguish proved same-network, cross-network, and networkless journeys
+   from remaining authority-abuse, capacity, deadline, and fault scenarios; consult the coverage matrix above.
 
-No successful end-to-end execution or release-readiness claim follows from the relay implementation alone. In
+Accepted execution evidence is recorded separately from this implementation description. In
 particular, root active identity cannot be inferred from user state or bypassed to exercise an older launch path.
 
 ## Removed legacy design

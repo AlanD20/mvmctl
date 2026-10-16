@@ -1,6 +1,10 @@
 # Volume and snapshot resource-limit proposal
 
-**Status:** Partially approved for implementation on 2026-09-19; qualification remains pending.
+**Status:** Historical research and approval record from 2026-09-19. Implementation-gap statements below describe
+that checkpoint, not current v0.3.0 behavior. Protected data volumes and root-owned Full/disk-only snapshot capture
+and restore are now implemented; see [Snapshot Functionality](../implementations/SNAPSHOT_DOMAIN.md),
+[ADR-0018](../adr/0018-isolated-vm-execution-and-snapshot-authority.md), and the
+[coverage checkpoint](../../tests/system/COVERAGE_MATRIX.md) for current behavior, accepted evidence, and limits.
 **Evidence checked:** 2026-09-13, Firecracker `v1.16.1`, commit
 [`2038188f145fb81b8d098147a10e9d9f392fd22f`][release].
 
@@ -21,9 +25,9 @@ ownership/identity checks. Absence of a new quota does not guarantee available p
 or arbitrary device-count support. Snapshot authority and qualification gaps stay open.
 Approval records the intended implementation contract, not completed implementation or validation.
 
-The current pass is implementation-only: no tests are written or run, and no validation or
-review passes are performed. Only formatting and linting are permitted. Runtime admission
-checks remain part of the production implementation; qualification is deferred, not waived.
+The recorded September pass was implementation-only: no tests were written or run, and no validation or
+review passes were performed. Only formatting and linting were permitted. Runtime admission
+checks remained part of the production implementation; qualification was deferred, not waived.
 
 ## Existing local contract and implementation gaps
 
@@ -37,7 +41,7 @@ The current [product constants](../../internal/infra/constants.go) admit 128–6
 [Public VM input](../../pkg/api/inputs/vm_create.go) and the
 [private launch builder](../../internal/service/jailer/managed_vm_config.go) enforce those ranges. The private builder
 emits rootfs, one `eth0`, optional cloud-init and optional vsock, without balloon, entropy, hotplug memory, or data
-volumes. It does not enable Firecracker PCI transport. The transitional [Jailer entry](../../internal/service/jailer/entry.go)
+volumes. It does not enable Firecracker PCI transport. The historical transitional Jailer entry (`internal/service/jailer/entry.go`, since removed)
 does pass `--enable-pci` when `PCIEnabled` is selected; [nested virtualization](../../internal/core/vm/firecracker.go)
 forces that selection. Existing public launches therefore are not all MMIO. Those transitional paths are not evidence
 that the corresponding private volume admission and lifecycle contracts exist.

@@ -52,25 +52,27 @@ Each domain in `pkg/api/` exposes a Go interface in its own file. Consumers decl
 
 Each domain in `pkg/api/` has an interface in its existing file:
 
-| File | Interface | Methods |
-|------|-----------|---------|
-| `vm.go` | `VMAPI` | 11 |
-| `image.go` | `ImageAPI` | 9 |
-| `network.go` | `NetworkAPI` | 10 |
-| `volume.go` | `VolumeAPI` | 8 |
-| `kernel.go` | `KernelAPI` | 8 |
-| `key.go` | `KeyAPI` | 10 |
-| `binary.go` | `BinaryAPI` | 8 |
-| `host.go` | `HostAPI` | 15 |
-| `console.go` | `ConsoleAPI` | 4 |
-| `exec.go` | `ExecAPI` | 1 |
-| `ssh.go` | `SSHAPI` | 1 |
-| `config.go` | `ConfigAPI` | 4 |
-| `cache.go` | `CacheAPI` | 11 |
-| `logs.go` | `LogAPI` | 2 |
-| `cp.go` | `CPAPI` | 1 |
-| `init.go` | `InitAPI` | 4 |
-| `snapshot.go` | `SnapshotAPI` | 5 |
+| File | Interface |
+|------|-----------|
+| `vm.go` | `VMAPI` |
+| `image.go` | `ImageAPI` |
+| `network.go` | `NetworkAPI` |
+| `volume.go` | `VolumeAPI` |
+| `kernel.go` | `KernelAPI` |
+| `key.go` | `KeyAPI` |
+| `binary.go` | `BinaryAPI` |
+| `host.go` | `HostAPI` |
+| `console.go` | `ConsoleAPI` |
+| `exec.go` | `ExecAPI` |
+| `ssh.go` | `SSHAPI` |
+| `config.go` | `ConfigAPI` |
+| `cache.go` | `CacheAPI` |
+| `logs.go` | `LogAPI` |
+| `cp.go` | `CPAPI` |
+| `init.go` | `InitAPI` |
+| `snapshot.go` | `SnapshotAPI` |
+| `update.go` | `UpdateAPI` |
+| `policy.go` | `PolicyAPI` |
 
 All interfaces are satisfied by `*Operation` with zero changes to the Operation struct itself.
 
@@ -97,6 +99,8 @@ type API interface {
     CPAPI
     InitAPI
     SnapshotAPI
+    UpdateAPI
+    PolicyAPI
 }
 ```
 
@@ -136,20 +140,22 @@ Default return values are zero/nil. Tests set only the functions they need. `Moc
 | File | Purpose |
 |------|---------|
 | `pkg/api/interfaces.go` | Composite `API` interface embedding all per-domain interfaces |
-| `pkg/api/vm.go` | `VMAPI` interface (11 methods) + `Operation` implementation |
-| `pkg/api/image.go` | `ImageAPI` interface (9 methods) |
-| `pkg/api/network.go` | `NetworkAPI` interface (10 methods) |
-| `pkg/api/volume.go` | `VolumeAPI` interface (8 methods) |
-| `pkg/api/kernel.go` | `KernelAPI` interface (8 methods) |
-| `pkg/api/key.go` | `KeyAPI` interface (10 methods) |
-| `pkg/api/binary.go` | `BinaryAPI` interface (8 methods) |
-| `pkg/api/host.go` | `HostAPI` interface (15 methods) |
-| `pkg/api/console.go` | `ConsoleAPI` interface (4 methods) |
-| `pkg/api/exec.go` | `ExecAPI` interface (1 method) |
-| `pkg/api/ssh.go` | `SSHAPI` interface (1 method) |
-| `pkg/api/config.go` | `ConfigAPI` interface (4 methods) |
-| `pkg/api/cache.go` | `CacheAPI` interface (11 methods) |
-| `pkg/api/logs.go` | `LogAPI` interface (2 methods) |
-| `pkg/api/cp.go` | `CPAPI` interface (1 method) |
-| `pkg/api/init.go` | `InitAPI` interface (4 methods) |
-| `pkg/api/snapshot.go` | `SnapshotAPI` interface (5 methods) |
+| `pkg/api/vm.go` | `VMAPI` interface + `Operation` implementation |
+| `pkg/api/image.go` | `ImageAPI` interface |
+| `pkg/api/network.go` | `NetworkAPI` interface |
+| `pkg/api/volume.go` | `VolumeAPI` interface |
+| `pkg/api/kernel.go` | `KernelAPI` interface |
+| `pkg/api/key.go` | `KeyAPI` interface |
+| `pkg/api/binary.go` | `BinaryAPI` interface |
+| `pkg/api/host.go` | `HostAPI` interface |
+| `pkg/api/console.go` | `ConsoleAPI` interface |
+| `pkg/api/exec.go` | `ExecAPI` interface |
+| `pkg/api/ssh.go` | `SSHAPI` interface |
+| `pkg/api/config.go` | `ConfigAPI` interface |
+| `pkg/api/cache.go` | `CacheAPI` interface |
+| `pkg/api/logs.go` | `LogAPI` interface |
+| `pkg/api/cp.go` | `CPAPI` interface |
+| `pkg/api/init.go` | `InitAPI` interface |
+| `pkg/api/snapshot.go` | `SnapshotAPI` interface |
+| `pkg/api/update.go` | `UpdateAPI` interface |
+| `pkg/api/policy.go` | `PolicyAPI` interface |

@@ -1,9 +1,10 @@
 # Snapshot Functionality
 
 This guide describes the current v0.3.0 snapshot implementation. Capture and restore use root-authenticated VM
-authority and protected storage. Installed-candidate snapshot runtime qualification remains incomplete: the latest
-six-case attempt reported one pass and five failures. Earlier focused results do not qualify the current full matrix;
-see the [coverage matrix](../../tests/system/COVERAGE_MATRIX.md).
+authority and protected storage. The [coverage matrix](../../tests/system/COVERAGE_MATRIX.md) records the accepted
+candidate-bound 528/528 evidence join and the snapshot-specific limits retained below that checkpoint. Earlier failed
+attempts remain historical evidence; the accepted mixed-source join is not a claim that unlisted snapshot fault
+scenarios or aarch64 runtime are qualified.
 
 ## Architecture
 

@@ -5,7 +5,10 @@ Complete reference for the `mvm env` workflow engine YAML spec format.
 ## Table of Contents
 
 - [Overview](#overview)
+- [Compatibility](#compatibility)
+- [Top-Level Fields](#top-level-fields)
 - [Syntax](#syntax)
+  - [Common fields](#common-fields)
 - [Step Types](#step-types)
   - [network](#network)
   - [key](#key)
@@ -19,6 +22,8 @@ Complete reference for the `mvm env` workflow engine YAML spec format.
   - [copy](#copy)
 - [References](#references)
 - [Destroy Behavior](#destroy-behavior)
+  - [Explicit removals (`removes`)](#explicit-removals-removes)
+  - [Ephemeral specs (`ephemeral: true`)](#ephemeral-specs-ephemeral-true)
 - [Full Example](#full-example)
 - [State File](#state-file)
 
@@ -26,7 +31,7 @@ Complete reference for the `mvm env` workflow engine YAML spec format.
 
 ## Overview
 
-An env spec is a YAML file that describes an environment — networks, SSH keys, images, kernels, binaries, VMs, and the commands that configure them. Running `mvm env apply spec.yaml` provisions everything in dependency order.
+An env spec is a YAML file that describes an environment — networks, SSH keys, images, kernels, binaries, VMs, and the commands that configure them. Running `mvm env apply spec.yaml` provisions everything in dependency order. Section examples below are fragments to combine under one `version: "1"` header; the [full example](#full-example) includes its prerequisites.
 
 The format uses **typed top-level sections** (one per step type) with **map keys as step names**:
 
@@ -39,7 +44,7 @@ network:
     subnet: "172.27.0.0/24"
 ```
 
-The map key (`my-net`) IS the step name — used in `depends_on`, `removes`, and the state file. An optional `name` field inside the params overrides the resource name (e.g., the bridge name for a network, the VM name, the key name).
+The map key (`my-net`) is the step name used in `depends_on`, `removes`, and saved state. Keep resource names equal to step names when using cross-step references.
 
 Cross-step references use the **`@type:name`** format:
 
@@ -55,12 +60,24 @@ The `@` sigil makes references visually distinct from literal values.
 
 ---
 
+## Compatibility
+
+Only spec version `"1"` is supported. The available sections are `network`, `key`, `image`, `image_import`, `kernel`, `binary`, `vm`, `exec`, `ssh`, and `copy`. There are no policy, volume, or snapshot creation steps. Create policies and data volumes with their CLI commands before applying a spec that uses them.
+
+VM steps use the current VM creation rules, including networkless placement, raw data volumes, and the Firecracker `1.17.0` launch requirement. `exec.allow_vm_exec` can opt a command into VM-to-VM execution, but it does not create the required directional exec policy. The removed VM-wide `trusted` field grants no authority. Unknown fields are not consistently rejected; a successful parse does not prove that an option took effect.
+
+Declare one VM per step. Although `count` and `atomic` decode as VM creation inputs, workflow state records only the first returned VM. Reapplying skips an existing VM rather than updating its settings. Exec, SSH, and copy steps run again. `mvm env diff spec.yaml` compares the spec with saved state; it does not inspect live configuration drift.
+
+`mvm env apply` and `mvm env destroy` look for `mvmctl.yaml`, then `mvmctl.yml`, when no argument is given. Apply also accepts an HTTP or HTTPS spec URL. `mvm env diff` requires a spec path or workflow ID. The aliases `up` and `down` mean `apply` and `destroy`.
+
+---
+
 ## Top-Level Fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `version` | `string` | — | **Required.** Currently only `"1"`. |
-| `ephemeral` | `bool` | `false` | Auto-run `env destroy` after apply completes (success or failure), removing all resources and the state record. |
+| `ephemeral` | `bool` | `false` | Attempt teardown after pipeline success or failure. Shared assets and pre-existing resources are preserved; cleanup errors can leave resources or state behind. |
 
 ---
 
@@ -78,17 +95,18 @@ key:
     algorithm: ...
 ```
 
-**Every step type section is a map from step name to its params.** No list dashes. An optional `name` field inside the params overrides the resource name (see Common fields below).
+Each section is a map from step name to parameters, not a YAML list. The syntax block above is a template; the [full example](#full-example) is a complete spec.
 
 ### Common fields
 
-Every step supports these fields:
+Every step supports dependency and removal lists:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | `string` | Resource name override. Defaults to the step name (map key). |
 | `depends_on` | `[]string` | List of `"@type:name"` dependencies. |
-| `removes` | `[]string` | List of `"@type:name"` resources to destroy after this step succeeds. |
+| `removes` | `[]string` | Resources to remove after the entire pipeline succeeds. |
+
+`network`, `key`, `vm`, and `image_import` accept a `name` override, defaulting to the step name. `image.name` is an optional image name; omission uses image acquisition naming. Other steps do not use `name` as a resource-name override.
 
 ---
 
@@ -111,7 +129,7 @@ vm:
 
 The `@` prefix distinguishes references from literal string values. The type prefix (`network`, `key`, `image`, etc.) disambiguates steps with the same name under different types.
 
-**Bare names:** Reference fields like `network`, `key`, `image`, `kernel`, `binary`, and `target` accept bare step names (without `@` or `type:`) for convenience. However, `depends_on` and `removes` entries must use the full `@type:name` format because the engine matches them against step identifiers in the DAG.
+References do not create dependencies automatically. Add `depends_on` for every prerequisite; independent steps can run concurrently. Scalar fields such as `network`, `key`, `image`, `kernel`, `binary`, and `target` accept bare names. Use `@type:name` in dependency and removal lists. Use bare key names in `ssh_keys`, existing volume names or IDs in `volumes`, and `vm-name:/path` for copy endpoints.
 
 ---
 
@@ -123,11 +141,12 @@ Create a network for VMs to connect to.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `subnet` | `string` | **Yes** | — | CIDR notation, e.g. `"172.27.0.0/24"`. |
+| `subnet` | `string` | **Yes** | — | Canonical masked IPv4 CIDR wholly inside RFC1918 space, prefix length at most `/30`; e.g. `"172.27.0.0/24"`. |
 | `nat_enabled` | `bool` | No | `true` | Enable NAT for internet access. |
-| `ipv4_gateway` | `string` | No | auto-computed | Gateway IP. |
-| `nat_gateways` | `[]string` | No | auto-detected | Host interfaces for NAT. |
+| `ipv4_gateway` | `string` | No | First usable address | Canonical usable IPv4 address inside the subnet. |
 | `default` | `bool` | No | `false` | Set as default network. |
+
+Omit `nat_gateways`: it is rejected. The privileged network service selects the NAT uplink.
 
 **Example:**
 ```yaml
@@ -142,7 +161,7 @@ network:
 
 ### `key`
 
-Generate or import an SSH key pair.
+Generate an SSH key pair.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -197,7 +216,8 @@ Import a local image file or copy a VM's rootfs.
 | `format` | `string` | No | `""` (auto) | Format override: `raw`, `qcow2`, `tar`. |
 | `version` | `string` | No | `""` | Version tag for the imported image. |
 | `force` | `bool` | No | `false` | Overwrite existing image. |
-| `default` | `bool` | No | `false` | Set as default image. |
+| `set_default` | `bool` | No | `false` | Set as default image. |
+| `partition` | `int` | No | `0` (auto) | Non-negative partition index. |
 | `skip_optimization` | `bool` | No | `false` | Skip filesystem optimization. |
 | `disabled_detectors` | `[]string` | No | `[]` | Disable specific detectors. |
 
@@ -206,6 +226,7 @@ Import a local image file or copy a VM's rootfs.
 image_import:
   capture-base:
     source: "@vm:builder"
+    depends_on: ["@vm:builder"]
     removes:
       - "@vm:builder"
 ```
@@ -219,8 +240,8 @@ Download or build a kernel.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `type` | `string` | **Yes** | — | Kernel type: `firecracker` (pre-built) or `official` (build from source). |
-| `version` | `string` | No | `""` (latest) | Version tag. |
-| `jobs` | `int` | No | CPU count | Build parallelism (official only). |
+| `version` | `string` | No | Configured kernel version | Official build version. Firecracker prebuilt selection ignores this field. |
+| `jobs` | `int` | No | Configured build jobs, then CPU count | Build parallelism (official only). |
 | `keep_build_dir` | `bool` | No | `false` | Keep build directory. |
 | `clean_build` | `bool` | No | `false` | Force clean build. |
 | `kernel_config` | `string` | No | `""` | Path to custom kernel config file. |
@@ -243,8 +264,7 @@ Download Firecracker binaries.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `type` | `string` | No | `"firecracker"` | Binary type. |
-| `version` | `string` | **Yes** | — | Version tag; the approved 0.3.0 VM launch contract requires `"1.17.0"`; runtime qualification remains pending. |
-| `git_ref` | `string` | No | `""` | Build from git ref instead of downloading. |
+| `version` | `string` | No | Latest | Download version; use `"1.17.0"` for VM launch. |
 | `default` | `bool` | No | `false` | Set as default binary. |
 | `force` | `bool` | No | `false` | Force re-download. |
 
@@ -266,30 +286,40 @@ Create a virtual machine.
 |-------|------|----------|---------|-------------|
 | `network` | `string` | No | Default network | Network step reference. |
 | `key` | `string` | No | Default key | SSH key step reference (shorthand for `ssh_keys`). |
-| `ssh_keys` | `[]string` | No | `[]` | List of SSH key step references. |
+| `ssh_keys` | `[]string` | No | Default keys | Existing SSH key names or IDs; use bare names for keys created by this spec. |
 | `image` | `string` | No | Default image | Image step reference. |
 | `kernel` | `string` | No | Default kernel | Kernel step reference. |
 | `binary` | `string` | No | Default binary | Binary step reference. |
 | `vcpu` | `int` | No | Config default | vCPU count. Range: 1-32. |
 | `mem` | `string` | No | Config default | Memory, e.g. `"512M"`, `"1G"`, or bare MiB int. |
-| `disk_size` | `string` | No | Config default | Disk size, e.g. `"10G"`, `"512M"`. |
+| `disk_size` | `string` | No | Image minimum rootfs size | Disk size, e.g. `"10G"`, `"512M"`. |
 | `user` | `string` | No | Config default | SSH user. |
 | `pci_enabled` | `bool` | No | Config default | Enable PCI. |
-| `nested_virt` | `bool` | No | Config default | Enable nested virt (requires PCI). |
+| `nested_virt` | `bool` | No | Config default | Enable nested virtualization. |
 | `cpu_template` | `string` | No | `""` | Path to CPU template JSON. |
+| `cpu_config` | `map` | No | Absent | Inline CPU configuration; mutually exclusive with `cpu_template`. |
 | `console_enable` | `bool` | No | Config default | Enable serial console. |
 | `logging_enable` | `bool` | No | Config default | Enable logging. |
 | `metrics_enable` | `bool` | No | Config default | Enable metrics. |
 | `guest_ip` | `string` | No | `""` | Request specific guest IP. |
 | `guest_mac` | `string` | No | `""` | Request specific MAC. |
 | `boot_args` | `string` | No | Config default | Custom kernel boot args. |
-| `volumes` | `[]string` | No | `[]` | Volume step references to attach. |
-| `count` | `int` | No | `1` | Batch count. |
-| `atomic` | `bool` | No | `false` | Atomic batch (all or nothing). |
+| `lsm_flags` | `string` | No | Config default | Kernel LSM arguments. |
+| `no_network` | `bool` | No | `false` | Create without a network interface. Conflicts with `network`, `guest_ip`, `guest_mac`, network boot arguments, and NET cloud-init. |
+| `skip_ci_network_config` | `bool` | No | `false` | Skip generated cloud-init network configuration. |
+| `custom_cloud_init_config` | `string` | No | Absent | Path to custom cloud-init user data. |
+| `cloud_init_mode` | `string` | No | `off` | One of `off`, `inject`, `net`, `iso`. |
+| `cloud_init_iso_path` | `string` | No | Absent | Existing cloud-init ISO path; also set `cloud_init_mode: iso`. |
+| `keep_cloud_init_iso` | `bool` | No | `false` | Keep a generated cloud-init ISO. |
+| `volumes` | `[]string` | No | `[]` | Existing raw data-volume names or IDs to attach. No volume creation step exists. |
+| `count` | `int` | No | `1` | Keep at `1`: workflow state tracks one VM per step. |
+| `atomic` | `bool` | No | `false` | Batch rollback option; use separate VM steps instead of batches in specs. |
 | `skip_cleanup` | `bool` | No | `false` | Skip cleanup on failure. |
 | `skip_deblob` | `bool` | No | `false` | Skip image deblobbing. |
 | `vsock_port` | `int` | No | Config default | Vsock port. Default: `1024`. |
 | `writeback` | `bool` | No | Config default | Writeback cache mode. |
+
+Omit `nocloud_net_port`: any explicit value is rejected. NET cloud-init uses reserved gateway TCP port `8000`. QCOW2 remains supported for image import; the raw-only restriction applies to attached data volumes.
 
 **Example:**
 ```yaml
@@ -322,17 +352,21 @@ Run a command inside a VM via vsock agent.
 | `target` | `string` | **Yes** | — | VM name, ID, IP, or MAC. |
 | `cmd` | `string` | **Yes** | — | Command to execute. |
 | `user` | `string` | No | Config default | User to run as. |
-| `timeout` | `int` | No | `0` (no timeout) | Command timeout in seconds. |
+| `timeout` | `int` | No | `0` (configured probe timeout) | Positive values override connection/probe timeout in seconds. Command execution has no absolute timeout; cancellation stops it. |
 | `port` | `int` | No | `0` (auto) | Vsock port override. |
 | `env` | `map[string]string` | No | `{}` | Environment variables. |
 | `ignore_errors` | `bool` | No | `false` | Continue on non-zero exit. |
+| `no_sync` | `bool` | No | `false` | Skip guest filesystem sync after the command. |
+| `allow_vm_exec` | `bool` | No | `false` | Allow this command to request VM-to-VM execution under an existing directional exec policy. |
+
+`mvm env apply --env KEY=VALUE` overrides the same key in exec-step `env` maps. It does not alter SSH steps or interpolate YAML fields.
 
 **Example:**
 ```yaml
 exec:
   setup-app:
     target: dev-vm
-    cmd: "./deploy.sh"
+    cmd: "uname -a"
     user: root
     timeout: 30
     depends_on:
@@ -351,9 +385,8 @@ Run a command on a VM via SSH.
 | `user` | `string` | No | Config default | SSH user. |
 | `key` | `string` | No | Config default | Key step reference or file path. |
 | `cmd` | `string` | No | `""` | Command. Empty = interactive shell. |
-| `timeout` | `int` | No | `0` | Timeout in seconds. |
+| `timeout` | `int` | No | Unset | SSH connection timeout in seconds. |
 | `env` | `map[string]string` | No | `{}` | Environment variables. |
-| `ignore_errors` | `bool` | No | `false` | Continue on non-zero exit. |
 
 **Example:**
 ```yaml
@@ -375,8 +408,9 @@ Copy files between host and VM via vsock.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `src` | `string \| []string` | **Yes** | — | Source path(s). Single string auto-normalized to list. |
-| `dest` | `string` | **Yes** | — | Destination in `"vm-name:/remote/path"` format. |
+| `dest` | `string` | **Yes** | — | `"vm-name:/remote/path"` when copying into a VM, or a local path when copying out. |
 | `force` | `bool` | No | `false` | Force overwrite. |
+| `no_sync` | `bool` | No | `false` | Skip guest filesystem sync after an upload. |
 
 **Example:**
 ```yaml
@@ -393,13 +427,13 @@ copy:
 
 ## Destroy Behavior
 
-`mvm env destroy` runs each step's `Destroy()` in reverse dependency order:
+`mvm env destroy` tears down resources created by the workflow in reverse dependency order. Resources that existed before apply are preserved. Exec, SSH, and copy side effects are not undone.
 
 | Step Type | Destroy Behavior |
 |-----------|-----------------|
 | `network` | Deleted — bridge, NAT rules, DB record |
 | `key` | Deleted — key files, DB record |
-| `vm` | Deleted — Firecracker process, console relay, TAP, volumes, DB record |
+| `vm` | Deleted — runtime stopped, TAP removed, data volumes detached, VM record removed |
 | `image` | Preserved — cached asset, not destroyed |
 | `image_import` | Preserved — cached asset, not destroyed |
 | `kernel` | Preserved — cached asset, not destroyed |
@@ -408,47 +442,28 @@ copy:
 | `exec` | No-op — ephemeral side-effect |
 | `copy` | No-op — ephemeral side-effect |
 
-### Mid-pipeline removals (`removes`)
+### Explicit removals (`removes`)
 
-The `removes` field destroys resources immediately after a step completes — useful for freeing builder VMs mid-pipeline:
+The `removes` field requests removal after the whole pipeline succeeds. It does not free resources between steps. For example, this fragment captures a builder image before requesting removal of the builder VM:
 
 ```yaml
 image_import:
   capture-base:
     source: "@vm:builder"
+    depends_on: ["@vm:builder"]
     removes:
       - "@vm:builder"
 ```
 
 ### Ephemeral specs (`ephemeral: true`)
 
-Auto-runs `env destroy` after apply completes (success or failure):
-
-```yaml
-version: "1"
-ephemeral: true
-
-vm:
-  builder:
-    image: "@image:os-image"
-    ...
-
-exec:
-  build-artifact:
-    target: builder
-    cmd: "make build"
-
-copy:
-  retrieve:
-    dest: ./dist/
-    src: "builder:/output/artifact.tar.gz"
-    removes:
-      - "@vm:builder"
-```
+Set `ephemeral: true` beside `version` to attempt teardown after pipeline success or failure. Cached images, kernels, and binaries remain available. Cleanup errors are logged and can leave resources or state behind; inspect `mvm env ls` and retry `mvm env destroy` when necessary.
 
 ---
 
 ## Full Example
+
+Save this spec as `mvmctl.yaml`, then run `mvm env apply`. It creates a VM and runs `uname -a` after the VM step completes. Local KVM and host initialization are prerequisites.
 
 ```yaml
 version: "1"
@@ -497,7 +512,7 @@ vm:
 exec:
   bootstrap:
     target: dev-vm
-    cmd: "curl -sS https://example.com/bootstrap.sh | sh"
+    cmd: "uname -a"
     depends_on:
       - "@vm:dev-vm"
 ```
@@ -538,4 +553,4 @@ resources:
 | `state.meta.was_created` | `true` if created by workflow |
 | `state.meta.spec_hash` | Hash of input spec YAML for drift detection |
 
-State is written after every successful step (crash-resilient). Re-running picks up where it left off.
+State is written after successful steps. Reapplying checks existing resources and reruns command and copy steps; it is not a transactional resume or live configuration reconciliation.

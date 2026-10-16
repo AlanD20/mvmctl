@@ -23,15 +23,23 @@ Three processes participate in console I/O:
                                            └──────────────────┘
 ```
 
-The relay opens a PTY master file descriptor and multiplexes data between three endpoints: the PTY device, a Unix socket at `~/.cache/mvmctl/vms/<vm-id>/console.sock`, and a log file at `~/.cache/mvmctl/vms/<vm-id>/firecracker.console.log`. The relay uses Go channels for multiplexing — data arriving from the PTY is forwarded to the socket and log file; data arriving from the socket is written to the PTY.
+The relay receives a PTY master and pinned runtime-directory and log descriptors from the root launch receiver.
+It binds `console.sock` beneath that admitted directory and multiplexes PTY, socket, and log I/O through Go channels.
+Data arriving from the PTY is forwarded to the socket and log; data arriving from the socket is written to the PTY.
+The relay does not reopen caller-selected cache paths.
 
 **Why a separate subprocess?** The relay must survive the CLI process that created the VM. If it were a goroutine in the parent, it would die when the CLI exits. Running it as an independent daemon with its own PID, Unix socket, and file-based lifecycle means the console stays accessible across terminal sessions.
 
 ## Entry point
 
-The relay is started by the console controller (`internal/core/console/controller.go`) when a VM boots. The controller calls `consolesvc.Spawn()` in `internal/service/console/spawn.go`, which launches the relay subprocess via `system.SpawnService()` and passes the PTY master file descriptor as `ExtraFiles[0]` (inherited as fd 3).
+Managed VM launch starts the relay through `spawnBlockedLaunchConsole()` in
+`internal/service/jailer/lifecycle_console_spawn.go`, called by the root lifecycle server. This boundary creates the
+PTY and private channels and spawns the fixed binary with the admitted caller's UID/GID and no supplementary groups.
+The older console-controller/`SpawnService()` path is not the managed boot entry point.
 
-The subprocess entry point is `Run()` in `internal/service/console/entry.go`, which parses CLI flags, opens the inherited PTY fd, sets up the Unix socket listener, and calls `runRelayIO()`.
+The private child entry, `RunLaunchConsole()` in `internal/service/jailer/lifecycle_console.go`, admits the inherited
+plan and descriptors before calling `console.RunDescriptors()`. That adapter binds the listener through the pinned
+runtime-directory descriptor, acknowledges readiness, and enters `runRelayIO()` in `internal/service/console/entry.go`.
 
 The user attaches to a running relay via `mvm console <vm>`, which triggers `InteractiveAttach()` in `internal/service/console/client.go`.
 
@@ -39,9 +47,13 @@ The user attaches to a running relay via `mvm console <vm>`, which triggers `Int
 
 ### 1. VM start — PTY creation and relay spawn
 
-When a VM boots with console support, the API layer calls `Controller.CreatePTY()` in `internal/core/console/controller.go`. This opens `/dev/ptmx`, gets the slave number via `TIOCGPTN` ioctl, unlocks via `TIOCSPTLCK`, and opens `/dev/pts/<N>` as the slave fd. The slave fd is passed to Firecracker as the serial console backend.
+When a managed VM boots with console support, the root lifecycle receiver creates the PTY through
+`openLaunchConsolePTY()`. It retains the slave for the Firecracker descriptor packet and passes the master to the
+blocked relay child through the closed launch protocol.
 
-`Controller.Start()` then calls `consolesvc.Spawn()` in `spawn.go`, which constructs `system.SpawnService()` with the PTY master fd and the args `["console", "relay", "--vm-id", ..., "--pty-fd", "3"]`. The relay subprocess starts, writes a PID file, then creates a Unix listener socket at `<vm-dir>/console.sock` and enters the I/O loop in `runRelayIO()`.
+The lifecycle receiver prepares the admitted runtime and log descriptors before releasing relay setup.
+`RunDescriptors()` creates the listener and an exclusive PID mirror beneath the pinned runtime directory, then sends
+the readiness acknowledgement. Root lifecycle authority owns process identity and cleanup; the PID file is a mirror.
 
 ### 2. Attach — CLI connects to the relay
 
@@ -65,7 +77,8 @@ The detach sequence (Ctrl+X, byte 0x18, followed by `d`, byte 0x64) is handled e
 
 ### 5. VM stop — relay shutdown
 
-The relay is stopped via `SIGTERM` (graceful) or `SIGKILL` (forced). On graceful shutdown, context cancellation closes the PTY master fd, which unblocks the PTY reader goroutine and exits the main loop. The socket and PID files are cleaned up.
+The relay is stopped via `SIGTERM` (graceful) or `SIGKILL` (forced). On graceful shutdown, context cancellation closes the PTY master fd, which unblocks the PTY reader goroutine and exits the main loop. Root lifecycle cleanup owns the fixed
+socket and PID leaves; the descriptor-based relay closes its listener without automatically unlinking the socket path.
 
 ## Failure modes
 
@@ -89,11 +102,15 @@ PTY output is written to the log file on a best-effort basis. A failed log write
 
 | File | Purpose |
 |------|---------|
-| `internal/service/console/entry.go` | Relay entry point, `Run()` and `runRelayIO()` I/O loop |
+| `internal/service/jailer/lifecycle_console_spawn.go` | Root-owned PTY creation and authenticated relay spawn |
+| `internal/service/jailer/lifecycle_console.go` | Private child entry and descriptor admission |
+| `internal/service/jailer/lifecycle_console_setup.go` | Pinned resource setup and readiness acknowledgement |
+| `internal/service/console/descriptors.go` | `RunDescriptors()` serves admitted inherited resources |
+| `internal/service/console/entry.go` | Shared `runRelayIO()` I/O loop and older path-based `Run()` entry |
 | `internal/service/console/client.go` | CLI client attach, `InteractiveAttach()`, detach detection |
 | `internal/service/console/relay.go` | Relay process management, PID tracking, `Stop()` |
-| `internal/service/console/spawn.go` | `Spawn()` — launches relay subprocess via `system.SpawnService()` |
-| `internal/core/console/controller.go` | VM-side controller, `CreatePTY()`, `Start()`, `Cleanup()` |
+| `internal/service/console/spawn.go` | Older `SpawnService()` adapter; not the managed launch entry |
+| `internal/core/console/controller.go` | Console controller helpers; managed launch uses the root lifecycle boundary |
 | `internal/cli/console.go` | Cobra command for `mvm console` |
 | `pkg/api/console.go` | API orchestration for console relay lifecycle |
 

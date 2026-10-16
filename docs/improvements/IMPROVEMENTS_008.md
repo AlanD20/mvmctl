@@ -1,6 +1,10 @@
 # Snapshot-Based Instant VM Cloning & Next-Level Optimizations
 
-> **STATUS: Snapshot domain implemented (Phase 2), v0.3 hardening incomplete.**
+> **STATUS: Historical optimization proposal.** The phase table records the earlier plan. Current v0.3.0 capture and
+> restore use root-authenticated authority and protected artifacts. The
+> [coverage checkpoint](../../tests/system/COVERAGE_MATRIX.md) records accepted candidate-bound evidence and
+> remaining scenario-specific limits.
+> See [Snapshot Functionality](../implementations/SNAPSHOT_DOMAIN.md) for the implemented contract and its limits.
 > | Phase | Status |
 > |-------|--------|
 > | Phase 1: Foundation (huge pages, cgroup v2, boot args) | ⚠️ Partial |
@@ -10,8 +14,8 @@
 >
 > The snapshot domain (`internal/core/snapshot/`), CLI commands (`internal/cli/snapshot.go`), API layer (`pkg/api/snapshot.go`), and input validation (`pkg/api/inputs/snapshot.go`) are all implemented. The `SnapshotItem` model uses `SnapshotDir`, `MemoryFile`, `StateFile`, `RootfsFile`, `ImageID`, `ExtraConfig` (as `*SnapshotExtraConfig` struct). Firecracker snapshot/resume API is at `internal/lib/firecracker/client.go`. 
 >
-> Fixed artifact naming is implemented. Crash-consistent capture, descriptor-pinned resources, and the private
-> mount-namespace rootfs overlay remain release work under ADR-0016.
+> The original hardening plan below is superseded by
+> [ADR-0018](../adr/0018-isolated-vm-execution-and-snapshot-authority.md) and the implementation guide linked above.
 >
 > **Last verified:** 2026-08-28
 
@@ -25,7 +29,8 @@
 
 ### 1.1 How Firecracker Snapshots Work
 
-When `PUT /snapshot/create` is called on a **paused** microVM, Firecracker produces two files:
+When `PUT /snapshot/create` is called on a **paused** microVM, Firecracker produces memory and vmstate files.
+The following historical layout also shows the separately copied rootfs; it is not the current protected-store layout:
 
 ```
 /home/user/.cache/mvmctl/snapshots/my-snapshot/
@@ -34,9 +39,10 @@ When `PUT /snapshot/create` is called on a **paused** microVM, Firecracker produ
 └── rootfs.img       ← Fixed managed rootfs leaf; filesystem type is metadata
 ```
 
-Snapshot identity and origin metadata are stored in SQLite. The current implementation also carries the transitional
-`phantom-rootfs.img` symlink documented in
-[SNAPSHOT_DOMAIN.md](../implementations/SNAPSHOT_DOMAIN.md); ADR-0016 removes it through a private namespace overlay.
+The earlier implementation stored snapshot identity and origin metadata in SQLite and used a transitional
+`phantom-rootfs.img` symlink. That symlink is no longer part of the implementation. Root-owned capture metadata and
+protected artifacts now provide authority; SQLite retains local projections. See
+[SNAPSHOT_DOMAIN.md](../implementations/SNAPSHOT_DOMAIN.md) for current storage and restore behavior.
 
 **The mmap secret (MAP_PRIVATE):**
 - Pages are NOT read eagerly — they're demand-paged (loaded on first access)

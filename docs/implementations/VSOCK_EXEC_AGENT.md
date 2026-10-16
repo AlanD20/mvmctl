@@ -98,16 +98,17 @@ The agent starts automatically when the VM boots. `Agent.Run()` in `internal/ser
 
 The vsock device is configured in the final Firecracker JSON as `model.VsockConfig` with `guest_cid` and `uds_path`.
 Normal-process launch input carries only the validated CID; the core VM/Jailer path derives the host `vsock.sock` and
-jail `/run/mvm/vsock.sock` leaves before writing the configuration. CID, UDS metadata, agent port, and token are
+jail `/vmm-runtime/vsock.sock` leaves before writing the configuration. CID, UDS metadata, agent port, and token are
 persisted in `vm_vsock_config` via `vsockRepo.Upsert()`.
 
 Start, reboot, and snapshot restore explicitly load a private typed `vmRelaunchState`. A missing vsock row is a valid
 absence, while repository failure, mismatched VM identity, or an invalid CID aborts before respawn. The state preserves
 the CID, port, and token in the normal process. Snapshot restore keeps the CID embedded in vmstate and sends the fixed
 jail-visible UDS override. VM create still uses its existing builder state rather than this common relaunch state, and
-root-built descriptor-pinned `/run/mvm/runtime` activation backed by the host `/run/mvmctl/runtime` tree,
-root-authoritative stale-socket cleanup, host-reboot reconciliation, and L2 `mvm exec` relaunch qualification remain
-pending. This partial implementation is not evidence that the reported restart failure is fully resolved.
+the root-built descriptor-pinned `/vmm-runtime` mount is backed by the private host `/run/mvmctl/runtime` tree.
+Its directory lease transfers through launch, active operation, and cleanup. See
+[the coverage matrix](../../tests/system/COVERAGE_MATRIX.md) for accepted candidate-bound restart/reboot and
+host-reboot evidence, including retained-marker exec, and the remaining scenario-specific limits.
 
 ### 2. Agent startup inside the guest
 
@@ -116,7 +117,7 @@ On VM boot, the init system starts `mvm-agent`. `Agent.Run()` creates a raw AF_V
 ### 3. Host dial and handshake
 
 The host client calls `dialAndHandshake()` in `internal/core/vsock/protocol.go`, which:
-1. Dials the Firecracker UDS (`unix` socket at `<vm-dir>/vsock.sock`)
+1. Dials the selected Firecracker UDS through the managed runtime connection path
 2. Sends `CONNECT <port>\n` (port defaults to 1024)
 3. Reads the response — Firecracker responds with `OK <host-side-port>\n`, where the host-side port is dynamically assigned
 4. On success, clears the read deadline and returns the connection
@@ -127,8 +128,8 @@ The `vsock.Client.Exec()` method sends a JSON frame with type `"exec"`, the comm
 1. Creates an `exec.Cmd` — either `su - <user> -c <command>` for non-root users, or `sh -c <command>` for root
 2. Sets `cmd.Stdout` and `cmd.Stderr` to `streamingWriter` instances, which emit JSON frames ("stdout" / "stderr") as data arrives
 3. Starts the command, waits for completion, flushes remaining output
-4. Sends a `"result"` frame with exit code and duration
-5. Calls `unix.Sync()` unless `NoSync` is set, to flush Firecracker's writeback cache
+4. Calls `unix.Sync()` unless `NoSync` is set, before reporting completion
+5. Sends a `"result"` frame with exit code and duration
 
 The host reads frames in a loop, printing stdout/stderr to the terminal immediately and returning on the `result` frame.
 

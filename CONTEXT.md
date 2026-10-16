@@ -283,8 +283,10 @@ configuration, the user database, Cobra, or plugins, and it replaces its environ
 installation. v0.3.0 is a clean installation: it does not convert, adopt, or preserve old user/runtime state. Remove an
 old managed sudoers file and clean the old installation from an authenticated administrator session before running the
 bootstrap command; the installer refuses unrecognized active syntax rather than guessing how sudo authenticated the
-process. The exact fail-closed cleanup procedure remains a v0.3.0 release blocker until administrator reset/cleanup is
-hardened; this architecture rule is not permission to improvise raw host cleanup.
+process. Typed cleanup and guarded administrator reset are implemented as described below, but do not migrate or
+adopt a pre-v0.3 installation. The [coverage checkpoint](tests/system/COVERAGE_MATRIX.md) records the accepted
+candidate-bound installed-system evidence and its limits; it does not qualify legacy migration or authorize raw host
+cleanup. Final release approval remains separate.
 
 Normal users run `/usr/local/bin/mvm` without sudo. The `mvm` group authorizes the constrained passwordless privileged
 protocol; it never makes a development artifact trusted. Generated sudoers now grants only the fixed root-owned
@@ -1536,7 +1538,7 @@ L2 tests are the **ground truth** — every user-facing feature must have one.
 They run inside a disposable Firecracker VM (runner VM) with nested KVM.
 
 ### Option C verification
-The thoroughness standard for L2 test assertions. Every test verifies system state at the deepest practical level: JSON field assertions from `* ls --json`, file existence/symlink checks, process presence via `/proc`, iptables rule presence, and/or direct SQLite queries. A test that only checks `returncode == 0` is incomplete.
+The thoroughness standard for L2 test assertions. Every test verifies system state at the deepest practical level: JSON field assertions from `* ls --json`, file existence/symlink checks, process presence via `/proc`, nftables generation and rule state, and/or direct SQLite queries. A test that only checks `returncode == 0` is incomplete.
 
 ### Coverage matrix
 `tests/system/COVERAGE_MATRIX.md` tracks command and flag coverage. The authoring guide explains how to classify a

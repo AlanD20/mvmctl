@@ -20,7 +20,9 @@ removed, or when test coverage changes.
 **Checkpoint (2026-10-16):** the candidate-bound **528/528** evidence join passed:
 526 ordinary nodes plus both actual host-reboot phases, with strict native/JSON/JUnit/node accounting
 and checked owned cleanup/preservation. Collection alone and failed attempts add no passing credit.
-v0.3.0 remains unreleased; remote CI, aarch64 runtime qualification and final release approval remain open.
+v0.3.0 remains unreleased. Remote CI for commit `4034eefc` passed
+([run 38852054263](https://github.com/AlanD20/mvmctl/actions/runs/38852054263));
+aarch64 runtime qualification and final release approval remain open.
 
 Candidate: `mvm 0.3.0-rc.kernel-details-ce5b0913`, producer
 `ce5b09131d2bb58d30fca100edf46648a6fbc4bd`, SHA-256
@@ -83,7 +85,7 @@ The CLI tables retain their detailed command/flag evidence and gaps. Additional 
   budgets, the 10,000,000-byte complete vmstate limit and exact trusted-RAM extent still apply; no physical-storage
   reservation or new per-volume/aggregate quota is promised.
 - Performance measurements predating the isolated root-broker runtime do not establish current release timing.
-  Cross-compilation does not qualify aarch64 runtime; remote CI and the final release decision remain separate.
+  Cross-compilation and the passed remote CI run do not qualify aarch64 runtime; the final release decision remains separate.
 
 ## Table of Contents
 

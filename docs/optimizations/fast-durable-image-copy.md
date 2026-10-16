@@ -17,7 +17,10 @@ Naive approaches have issues:
 | `cp --sparse=always` | Medium | ❌ | No durability guarantee without explicit sync |
 | `dd conv=sparse,fsync` | Slowest | ✅ | Sparse-aware but slower than sendfile |
 
-The warm pool images obtained from the cache are already stored on a tmpfs (`$TMPDIR/ready` by default, configurable via `MVM_WARM_POOL=disk`). The copy from tmpfs to the VM's persistent disk is the critical path.
+The warm pool defaults to `/tmp/mvmctl-<uid>/ready`, isolated by operator UID. `MVM_TEMP_DIR` selects a different
+temporary directory with a `ready` child; `MVM_WARM_POOL=disk` selects the image cache's `ready` directory instead.
+`GetWarmImagesDir()` in `internal/infra/warm_images.go` resolves these paths. The pool uses its directory's backing
+filesystem, which is not necessarily tmpfs. Copying from the pool to persistent VM storage is the relevant path here.
 
 ## The Solution ✅ IMPLEMENTED
 
@@ -43,7 +46,7 @@ for {
 }
 ```
 
-This is the **primary** copy path and succeeds in almost all cases since both source (tmpfs) and destination (ext4/XFS/btrfs) are regular files.
+This is the **primary** copy path between regular files. Filesystem or kernel limitations can trigger the fallback below.
 
 ### 2. io.Copy Userspace Fallback ✅ IMPLEMENTED
 
@@ -123,7 +126,8 @@ The Go codebase uses `sendfile(2)` instead of `cp --reflink=auto` (copy-on-write
 1. `sendfile(2)` works across **all** filesystems (tmpfs, ext4, XFS, btrfs, zfs) — not just CoW-capable ones.
 2. `sendfile(2)` is an in-kernel zero-copy operation — no userspace buffer, no context switch overhead per chunk.
 3. No dependency on `cp` binary availability or version.
-4. The warm pool is on tmpfs, so the CoW benefit of reflink (instant metadata-only clone) is inapplicable — tmpfs does not support reflink.
+4. When the warm pool is on tmpfs, reflink is unavailable. A disk-backed pool may have different filesystem capabilities;
+   the current copy chain does not attempt reflink.
 
 ## Performance Characteristics
 
@@ -150,5 +154,5 @@ Only pursue this if profiling shows `fdatasync()` itself is measurably slow (>10
 - `internal/infra/io.go` — `copyViaSendfile()`, `copyViaIO()`, `CopyFile()`
 - `internal/lib/system/block.go` — `CopyBytesDD()`
 - `internal/lib/provisioner/loopmount/backend.go` — `ExtractPartition()`
-- `internal/infra/constants.go` — `GetWarmImagesDir()`
+- `internal/infra/warm_images.go` — `GetWarmImagesDir()`
 - `internal/infra/io.go` — `CopyPreservingMetadata()`

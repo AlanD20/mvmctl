@@ -29,18 +29,9 @@ The `mvm` project is distributed as a single compiled Go binary. It contains the
 
 ### Entry Point (`cmd/mvm/main.go`)
 
-```go
-func main() {
-    os.Exit(run(context.Background(), os.Args[1:], os.Stdin, entrypoints{
-        privileged:    privileged.Run,
-        systemInstall: app.RunHostInstallSystemBinary,
-        normal:        runCLI,
-    }))
-}
-```
-
-`run` recognizes only the reserved versioned privileged protocol and the exact administrator `host install-system`
-bootstrap before ordinary initialization. Both selectors fail closed and cannot enter the public CLI. All ordinary
+`run` selects the private launch-console and launch-child routes, the reserved versioned privileged protocol,
+the exact administrator `host install-system` bootstrap, and administrator `host init`/`host reset` before ordinary
+initialization. These reserved routes fail closed and cannot fall through to the public CLI. All ordinary
 commands then enter `runCLI`, which establishes signals, calls `app.Initialize()`, and executes Cobra. Ordinary-user
 background services remain Cobra subcommands registered in `internal/cli/service.go`; root-requiring LoopMount and
 Jailer operations use the typed privileged actions of ADR-0016.

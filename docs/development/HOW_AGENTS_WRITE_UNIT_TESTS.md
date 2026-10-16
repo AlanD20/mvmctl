@@ -238,6 +238,10 @@ func TestRepo_CountByStatus(t *testing.T) {
 **Use when:** Testing a Service that orchestrates subprocess calls via
 `CommandRunner`. The `FakeRunner` records calls and returns stubbed results.
 
+The following is illustrative pseudocode for a service with an explicit runner dependency. Adapt it to the actual
+constructor and effect boundary. Managed VM lifecycle uses typed root authority; `vm.NewService` has no runner option,
+so this example must not be used to bypass that boundary or treated as a compilable VM test.
+
 **Template:**
 
 ```go
@@ -245,7 +249,7 @@ func TestService_Stop(t *testing.T) {
     ctx := context.Background()
     repo := testutil.NewVMRepo()
     runner := &testutil.FakeRunner{}
-    svc := vm.NewService(repo, vm.WithRunner(runner))
+    svc := newExampleService(repo, runner) // illustrative service, not the managed VM service
 
     t.Run("stop_running_vm_succeeds", func(t *testing.T) {
         vm := &model.VMItem{

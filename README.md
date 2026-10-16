@@ -22,7 +22,7 @@ Think "Docker for VMs" — one command to create, start, and connect.
 - 📋 **Environment as code** — provision full VM topologies from a YAML spec: networks, keys, images, kernels, VMs, and post-boot provisioning via `mvm env apply`
 - 🔌 **Vsock agent** — run commands inside VMs instantly via a lightweight embedded guest agent (`mvm exec`), no SSH daemon required
 - 📁 **File transfer** — copy files between host and VM over vsock with `mvm cp`, no guest dependencies needed
-- 🧩 **Atomic batch creation** — spin up multiple VMs as a unit with `--count N --atomic`. All succeed or all roll back
+- 🧩 **Atomic batch creation** — use `--count N --atomic` to request rollback if creation fails; reported cleanup failures require follow-up
 - 🐳 **Container-like ergonomics** — `mvm vm create myvm --image ubuntu:24.04 && mvm ssh myvm` works like `docker run -it ubuntu bash`, but with real VM isolation
 
 ---
@@ -59,7 +59,7 @@ Think "Docker for VMs" — one command to create, start, and connect.
   ```
   Optional (for ISO cloud-init mode only): `cloud-image-utils` (Ubuntu/Debian) or `cloud-utils` (Arch)
 - **Administrator access for installation and host setup:** install the trusted artifact at `/usr/local/bin/mvm`, then run `host init`; normal commands run without `sudo` after setup. Later system-binary upgrades also require an administrator.
-- **Firecracker/Jailer 1.17.0:** the approved v0.3.0 launch contract requires this exact matching release pair; affected runtime qualification remains pending. Managed networking also requires kernel nftables support for both `inet` and `bridge` families; installing the `nft` CLI does not add missing kernel support.
+- **Firecracker/Jailer 1.17.0:** the v0.3.0 launch contract requires this exact matching release pair. See the [candidate-bound qualification checkpoint](tests/system/COVERAGE_MATRIX.md#v030-release-security-qualification-overlay) for tested behavior and remaining limits. Managed networking also requires kernel nftables support for both `inet` and `bridge` families; installing the `nft` CLI does not add missing kernel support.
 - **Fresh snapshots after upgrade:** create fresh 1.17.0 snapshots and qualify restore with the same pair. Older snapshot state is neither converted nor relabeled. The historical 1.16.2 format is incompatible with 1.16.0/1.16.1 in both directions. See [runtime guidance](docs/RUNTIME.md#vm-launch-and-resource-control).
 - **Environment variables:** Configure runtime behavior via `MVM_*` variables. See [docs/REFERENCES.md](docs/REFERENCES.md#environment-variables) for the full list.
 
@@ -90,7 +90,7 @@ sudo /usr/local/bin/mvm host init
 ### 2. Build from source
 
 ```bash
-git clone https://github.com/AlanD20/mvmctl
+git clone --branch 0.3.0-release https://github.com/AlanD20/mvmctl
 cd mvmctl
 ./scripts/build.sh release --version 0.3.0-rc.1
 sudo ./dist/mvm host install-system

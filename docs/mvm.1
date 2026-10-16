@@ -76,7 +76,10 @@ Network to attach to.
 Create an isolated VM without a guest IP or MAC; use vsock exec rather than SSH.
 .PP
 .B \-\-count
-Create multiple VMs atomically.
+Create multiple VMs.
+.PP
+.B \-\-atomic
+Request rollback of successfully created VMs if batch creation fails. Cleanup failures are reported and may require recovery.
 .RE
 .TP
 .BR vm\ rm
@@ -375,7 +378,9 @@ Skip cache sync before copying.
 Show the mvm version and build information.
 .TP
 .BR self-update
-Check for and apply binary updates from GitHub Releases.
+Check for and apply binary updates from GitHub Releases to a user-owned artifact.
+Apply refuses /usr/local/bin/mvm; upgrade that system installation with administrator host install-system.
+Checks remain available from the system installation.
 .RE
 .TP
 .BR completion
@@ -423,12 +428,6 @@ Override per-operator temporary work directory, warm-pool location and
 official-kernel scratch when set. Kernel builds use <value>/kernel-build;
 unset or empty preserves the embedded spec's build_dir. Ordinary temporary
 work defaults to tmp/ beneath the managed cache, normally ~/.cache/mvmctl/tmp.
-.TP
-.BR MVM_ESCALATED
-Set by sudo wrapper to indicate privilege escalation (default: not set).
-.TP
-.BR MVM_SUDO_RESTART
-Set internally when re-running with sudo for host init (default: not set).
 .SH FILES
 .TP
 .I ~/.cache/mvmctl/
@@ -450,7 +449,7 @@ One-time host setup:
 $ sudo ./dist/mvm host install-system
 $ sudo /usr/local/bin/mvm host init
 # Log out and back in to activate mvm group membership
-$ mvm init --skip-host --non-interactive --binary-version 1.16.1
+$ mvm init --skip-host --non-interactive --binary-version 1.17.0
 .fi
 .RE
 .PP
@@ -501,7 +500,7 @@ KVM access (/dev/kvm) - add user to kvm group
 .IP \(bu 2
 Managed networking needs kernel nftables inet and bridge support; neither nft nor iptables CLI is the firewall backend.
 .IP \(bu 2
-VM launch requires the matching Firecracker/Jailer 1.16.1 pair.
+VM launch requires the matching Firecracker/Jailer 1.17.0 pair.
 .IP \(bu 2
 System packages include iproute2, qemu-utils, e2fsprogs, util-linux, openssh-client, tar, procps, kmod, sudo, passwd, fakeroot.
 .SH NOTES

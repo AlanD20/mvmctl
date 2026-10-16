@@ -1,8 +1,13 @@
 # Root-Owned Single-Binary Privileged Dispatch
 
-**Status:** Accepted; source integrated, partial installed qualification passed; full release qualification incomplete
+**Status:** Accepted; source integrated; candidate-bound installed qualification checkpoint accepted, with documented limits
 **Date:** 2026-08-20
-**Last Updated:** 2026-10-13 (release qualification status)
+**Last Updated:** 2026-10-16 (candidate-bound qualification status)
+
+The [coverage checkpoint](../../tests/system/COVERAGE_MATRIX.md) records the accepted 528/528 mixed-source evidence
+join. Dated foundation and partial-pass notes below remain historical; they are not the current release verdict.
+Unlisted fault scenarios, aarch64 runtime, and final release approval remain outside that checkpoint.
+
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md), and
@@ -1095,8 +1100,9 @@ scoped display projection without statting root-owned paths.
 Release-authority Slice 3 is implemented. The local downloader, source builder, filesystem removal methods, path and
 checksum Jailer installer, `mvm run jailer install/remove-release` actions, and path-bearing legacy install result are
 deleted without compatibility code. The typed trusted-release client/receiver is the sole release mutation path.
-`ResolvePair` and the fixed Jailer launch actions remain only for the explicitly transitional VM launch path. SQLite
-remains untrusted throughout.
+The former transitional VM launch path has been replaced by `VMLaunchRequest` through the typed lifecycle client in
+`internal/core/vm/lifecycle.go`. `ResolvePair` remains a binary-service helper, but production launch does not call it.
+SQLite remains untrusted throughout.
 
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
@@ -1406,9 +1412,12 @@ group authority. The effect rechecks type, no-PI, owner, absent group, down stat
 before final `TUNSETPERSIST`, then verifies the persistent identity through rtnetlink. Host-namespace restoration
 failure retires the contaminated worker.
 
-This remains neither a production topology nor a public action. No production caller constructs the private topology
-service. Jailer VM-lock transfer, route/address and verified link-up stages, firewall application, durable VM-topology
-state, Jailer handoff, runtime mount consumption, public cutover, and live-kernel qualification remain target design.
+Historical foundation status: this was neither a production topology nor a public action. At that stage no production
+caller constructed the private topology service; Jailer VM-lock transfer, route/address and verified link-up stages,
+firewall application, durable VM-topology state, Jailer handoff, runtime mount consumption, public cutover, and
+live-kernel qualification were pending. Current production composition in
+`internal/service/jailer/lifecycle_server.go` prepares topology and completes activation during typed launch.
+The accepted candidate-bound evidence and remaining limits are recorded in the coverage checkpoint above.
 
 The root-owned UID parent prevents the caller from replacing the VM runtime directory. Root creates and pins that
 directory descriptor-relatively after durable launch registration, verifies its owner, mode, device, and inode, and
@@ -1758,12 +1767,15 @@ pinned VM directory into the same fixed-leaf and empty-directory cleanup path. M
 state preserves the `cleaning` record and retained VM lock for retry.
 
 The schema-2 complete-identity experiment was not integrated because it fabricated pre-Jailer final identity and
-compared the trusted-store inode with Jailer's copy. The implemented process graph remains private and uncomposed:
+compared the trusted-store inode with Jailer's copy. Historical foundation status: the process graph was private and
+uncomposed, with the following work pending:
 same-boot dead-process cgroup reconciliation, replacement of `entry.go`'s path-based cgroup preparation/removal,
 production child spawning and launch activation, network/firewall acquisition, final live topology verification,
 stale-tree and mount cleanup, persistent-output consumption, public status composition and complete reconciliation,
-privileged/public create/start/stop wiring, and live L2, Tier 3, and system qualification remain pending. The private
-cgroup capability is not production host enforcement or release evidence.
+privileged/public create/start/stop wiring, and live L2, Tier 3, and system qualification. That private capability alone
+was not production host enforcement or release evidence. Current production launch enters through
+`internal/core/vm/lifecycle.go` and `internal/service/privileged/lifecycle_handler.go`, which compose the root lifecycle
+server. This source integration does not establish complete release qualification.
 
 Live snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only
 that namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain

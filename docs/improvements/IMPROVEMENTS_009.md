@@ -1,6 +1,11 @@
 # Daemonless Production Readiness — Host Capacity Detection, Events & Admission Control
 
-> **STATUS: Partially implemented (host detection ✅, everything else ❌).**
+> **STATUS: Historical proposal and 2026-06-27 status snapshot.** The table and implementation descriptions below
+> retain the earlier design. Current root-authoritative status reconciliation is implemented; host administration
+> uses the typed root-owned boundary rather than the former host service helpers. See [CONTEXT.md](../../CONTEXT.md),
+> [ADR-0016](../adr/0016-root-owned-single-binary-privileged-dispatch.md), and the
+> [coverage checkpoint](../../tests/system/COVERAGE_MATRIX.md). Proposed SQLite capacity reservations and sysctl
+> memory tuning are not the current [pressure-only memory policy](../adr/0019-pressure-only-vm-memory-control.md).
 >
 > | Section | Status |
 > |---------|--------|

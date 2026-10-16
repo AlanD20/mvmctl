@@ -57,8 +57,12 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
 MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
   python3 scripts/run-system-tests.py \
   --release-qualification --host-direct --rebuild \
-  --candidate-version X.Y.Z --all
+  --candidate-version X.Y.Z --all \
+  --host-reboot-task /absolute/path/to/closed-host-reboot-task
 ```
+
+Complete the [named-runner reboot journey](development/HOW_TO_RUN_SYSTEM_TESTS.md#47-explicit-named-runner-host-reboot-journey)
+first and supply its closed task directory for strict POST evidence.
 
 Every gate and every collected test must pass with zero skips/xfails/xpasses. If
 system tests fail or omit a required case, investigate before proceeding. Do not

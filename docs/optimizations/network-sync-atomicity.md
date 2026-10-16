@@ -1,6 +1,17 @@
 # Network Sync Atomicity — Zero-Downtime Firewall Rule Replacement
 
-> **STATUS: Current.** All mechanisms described below are implemented in `internal/lib/firewall/`. The nftables backend is the default (`firewall_backend: "nftables"` at `OverridableDefaults["settings"]["firewall_backend"]`); iptables is the legacy fallback. See also [ADR-0009](../adr/0009-firewall-backend-mutual-exclusion.md) (firewall backend mutual exclusion) and `internal/infra/constants.go` for defaults.
+> **Status: Historical implementation record, superseded in v0.3.0.** The dual-backend trackers, raw firewall
+> subprocesses, database-rule rebuild, and cost estimates below describe the former implementation. They are not
+> instructions for the current `network sync` path.
+>
+> Current `pkg/api/network.go:NetworkSync` calls `EnsureManagedNetwork` for each selected live network, which
+> readmits root-owned identity through the managed-network service. Its counters are per-network acknowledgements
+> (`verified: 1`, `added: 0`, `orphaned: 0`), not per-rule kernel measurements. Same-boot missing bridges are refused;
+> prior-boot recovery uses retained root authority rather than a missing-interface test alone.
+>
+> [ADR-0017](../adr/0017-per-vm-network-namespaces-and-typed-policies.md) defines the current nftables-only,
+> typed network and firewall authorities. See [CONTEXT.md](../../CONTEXT.md) for their implementation and
+> [the coverage checkpoint](../../tests/system/COVERAGE_MATRIX.md) for accepted candidate-bound evidence and limits.
 
 ## Overview
 

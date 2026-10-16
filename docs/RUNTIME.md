@@ -1,8 +1,9 @@
 # mvmctl Runtime Architecture
 
-This document describes the v0.3.0 runtime design for operators and contributors. v0.3.0 is still under
-qualification: the architecture described here is not a claim that the full release test matrix or clean-host
-installation gate has passed. See [RC_QA.md](RC_QA.md) for the release gates and
+This document describes the v0.3.0 runtime design for operators and contributors. The
+[candidate-bound qualification checkpoint](../tests/system/COVERAGE_MATRIX.md#v030-release-security-qualification-overlay)
+records the accepted registered-node results and remaining fault-coverage limits. v0.3.0 remains unreleased;
+CI passed; aarch64 runtime qualification and final release approval remain separate. See [RC_QA.md](RC_QA.md) for release gates and
 [CONTEXT.md](../CONTEXT.md) for package and domain ownership.
 
 v0.3.0 requires a clean installation and fresh managed state. It does not adopt or migrate old user,
@@ -61,7 +62,7 @@ operations, retained backing or restore references, and unknown or old layouts. 
 local `MVM_ASSET_MIRROR` can supply the archive, but the root receiver still obtains and checks the official release
 checksum sidecar; a local archive alone is not a trust assertion. The approved v0.3.0 launch contract requires the
 exact Firecracker/Jailer **1.17.0** pair, the latest stable upstream release selected for this dependency update.
-Affected installed-candidate runtime qualification remains pending. Older audited pairs may be managed as artifacts
+The accepted candidate passed the selected hotplug and snapshot journeys. Older audited pairs may be managed as artifacts
 but cannot launch VMs. See the [1.17.0 release notes](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.17.0).
 
 Release updates select the latest stable official matching pair, review its complete archive and runtime contract,
@@ -168,8 +169,8 @@ and [the resource-limit decision](improvements/volume-snapshot-resource-limits.m
 VM stop, remove, reboot, and restore use typed cleanup and reconciliation rather than deleting a PID file as proof
 of process death. `host clean` is caller-scoped and refuses running or incompletely observed VMs; administrator
 `host reset` is a separate, quiescence-checked operation and is not an old-state migration command. The exact
-host-reboot/exec recovery and sustained memory-saturation journeys remain release QA gates, not guarantees inferred
-from a single successful smoke test.
+host-reboot and bounded memory-pressure results are recorded in the qualification checkpoint. They do not explain
+the original saturation incident or guarantee survival under arbitrary host, ancestor, global or guest OOM.
 
 ## Performance evidence
 

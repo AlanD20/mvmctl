@@ -4,11 +4,14 @@
 >
 > Implementation location: `internal/lib/provisioner/guestfs/`
 >
-> **Note:** The guestfs provisioning path is the **fallback backend** in mvmctl. The primary provisioning backend is the loop-mount subprocess (`mvm provision` via `LoopMountBackend`). Guestfs is used only when the loop-mount binary is unavailable or `guestfs_enabled` is set to `true` in config (`internal/infra/constants.go`).
+> **Note:** GuestFS is an explicitly selected alternative backend. Loop-mount is the default; setting
+> `settings.guestfs_enabled` to `true` selects GuestFS. `provisioner.NewBackend()` has no automatic fallback on
+> loop-mount failure. The former raw provision subprocess is historical; see [CONTEXT.md](../../CONTEXT.md)
+> for the current typed provisioning boundary.
 
 ## Overview
 
-This document describes the boot-time optimizations for the fallback libguestfs provisioning path in mvmctl. These optimizations reduce appliance startup time by configuring the backend directly, minimizing resource allocation, and disabling unnecessary services.
+This document describes the boot-time optimizations for the optional libguestfs provisioning path in mvmctl. These optimizations reduce appliance startup time by configuring the backend directly, minimizing resource allocation, and disabling unnecessary services.
 
 The Go implementation uses `guestfish` CLI as a subprocess (Go has no native guestfs bindings). Environment variables control most backend settings; the remaining handle-level settings are passed as stdin commands to `guestfish`.
 

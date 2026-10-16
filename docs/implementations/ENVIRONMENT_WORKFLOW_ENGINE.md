@@ -56,6 +56,7 @@ type Step interface {
         write StateWriter, onProgress event.OnProgressCallback) error
     StateData() model.ResourceState
     SpecHash() string
+    Removes() []string
 }
 ```
 
@@ -120,9 +121,10 @@ Persistence properties:
 
 ### Workflow ID
 
-`wf_id = sha256(realpath(spec_file))[:16]` — 8 bytes, 16 hex chars.
-- Deterministic per file path
-- Same path on different machines → different IDs (local state, no conflict)
+`WorkflowID` hashes `filepath.Abs(specPath)` and returns the first eight digest bytes as 16 hex characters.
+
+- Deterministic per resolved absolute path; symlinks are not resolved
+- The same absolute path produces the same ID on different machines; workflow state remains local
 - Editing the spec and re-applying → same ID → reconcile (skip existing, create new)
 
 ## The Env Layer — `internal/workflow/env/`
@@ -146,6 +148,7 @@ var Registry = map[string]StepFactory{
     "ssh":     {StepType: "ssh",     FromSpec: newSSHStepFromSpec,     FromState: newSSHStepFromState},
     "exec":    {StepType: "exec",    FromSpec: newExecStepFromSpec,    FromState: newExecStepFromState},
     "copy":    {StepType: "copy",    FromSpec: newCopyStepFromSpec,    FromState: newCopyStepFromState},
+    "image_import": {StepType: "image_import", FromSpec: newImageImportStepFromSpec, FromState: newImageImportStepFromState},
 }
 ```
 
@@ -295,7 +298,7 @@ kernel:
 
 binary:
   fc-bin:
-    version: "1.16.1"
+    version: "1.17.0"
     default: true
 
 vm:
@@ -426,7 +429,7 @@ Destroy reconstructs steps from the saved state file — the original spec file 
 | `internal/lib/model/workflow.go` | `ResourceMap`, `ResourceMeta`, `ResourceState`, `AppliedResource`, `WorkflowState` |
 | `internal/workflow/env/env.go` | `Apply()`, `Destroy()`, `List()`, `Diff()` — standalone orchestration functions |
 | `internal/workflow/env/spec.go` | `EnvSpec`, `UnmarshalYAML()`, `ResolveSpec()` |
-| `internal/workflow/env/factory.go` | `StepFactory`, `Registry` (9 step types) |
+| `internal/workflow/env/factory.go` | `StepFactory`, `Registry` (including `image_import`) |
 | `internal/workflow/env/step_*.go` | Step implementations: network, key, image, kernel, binary, vm, ssh, copy, exec |
 | `internal/workflow/env/utils.go` | `FormatStepName()`, `BareStepName()`, `StateFromMap()`, `InferStepType()` |
 | `internal/cli/env.go` | Cobra commands: `apply`, `ls`, `diff`, `destroy` |
@@ -450,7 +453,7 @@ Destroy reconstructs steps from the saved state file — the original spec file 
 
 | Concern | Why |
 |---|---|
-| **Workflow ID** | `crypto.WorkflowID(url)` hashes the URL string. `filepath.Abs` returns an error for URLs; `WorkflowID` falls back to the raw string. Deterministic per URL. |
+| **Workflow ID** | `crypto.WorkflowID(url)` applies the same `filepath.Abs` handling as local paths; it has no URL-specific branch. Relative-looking URL strings therefore depend on the working directory. Use the saved workflow ID for unambiguous later selection. |
 | **Workflow ID resolution** | `ResolveWorkflowID` treats anything with `/` or `.` as a path (URL has both) and calls `crypto.WorkflowID`. Re-apply and destroy resolve correctly. |
 | **State persistence** | `SpecPath` stores the URL — shown in `env ls`, used as-is on re-apply. |
 | **`env diff`** | No CLI-level `os.Stat` — benefits from `ResolveSpec` fix directly. |
@@ -492,7 +495,7 @@ Destroy reconstructs steps from the saved state file — the original spec file 
 
 ### Step removals (`removes` field)
 
-Every step can declare a `removes` field — a list of `"@type:name"` resources to destroy after the step's `Apply()` succeeds:
+Every step can declare a `removes` field — a list of `"@type:name"` resources to destroy after the entire pipeline succeeds:
 
 ```yaml
 image_import:
@@ -502,9 +505,11 @@ image_import:
       - "@vm:builder"
 ```
 
-After `capture-base` finishes importing, `@vm:builder` is destroyed immediately — before downstream steps start. This frees resources mid-pipeline instead of waiting for the final destroy phase.
+The implementation processes `removes` only after the entire pipeline succeeds. Downstream steps run before these
+removals, so a removal does not release capacity for another step in the same pipeline.
 
-**Why per-step, not global:** Timing matters. The builder VM might hold RAM and disk that a downstream `vm:final` needs. A global cleanup block at the end can't express this ordering. Placing `removes` on the step that creates the need for cleanup makes the intent explicit and keeps the lifecycle declaration with the consumer, not the resource being destroyed.
+**Why per-step declarations:** Placing `removes` on the consuming step keeps cleanup intent next to its use of the
+resource. The declaration does not change the implementation's post-pipeline timing.
 
 **Why not on the removed resource:** Putting `lifespan: [image_import:capture-base]` on the VM couples it to downstream consumers it shouldn't know about. The consumer declaring `removes` is more natural — it's the step that creates the need for cleanup.
 
@@ -514,9 +519,12 @@ After `capture-base` finishes importing, `@vm:builder` is destroyed immediately 
 
 ### Ephemeral specs (`ephemeral: true`)
 
-The top-level `ephemeral: true` field tells `Apply()` to automatically run `Destroy()` after a successful pipeline. This tears down all resources and removes the workflow state — same as calling `mvm env destroy`. Useful for CI/CD pipelines that provision a VM, extract build artifacts, and want zero cleanup burden.
+The top-level `ephemeral: true` field schedules `Destroy()` after pipeline execution, including a failed execution.
+It uses the saved workflow state. Cleanup failures are logged, so ephemeral mode does not guarantee that every
+resource or the state directory has been removed.
 
-The ephemeral destroy runs after the `removes` phase, so mid-pipeline cleanup still happens during the pipeline, and ephemeral handles final sweep + state removal.
+On successful execution, post-pipeline `removes` processing precedes the deferred ephemeral destroy. On execution
+failure, that removal loop is skipped and the deferred destroy still attempts cleanup.
 
 ```yaml
 version: "1"

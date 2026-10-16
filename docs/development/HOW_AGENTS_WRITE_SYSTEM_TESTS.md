@@ -103,7 +103,7 @@ func TestParseDiskSize(t *testing.T) {
 
 ### Level 1: Hermetic Integration Tests (Go)
 
-**Scope:** Tests that use real I/O in a controlled environment — real SQLite (file-based, in t.TempDir()), real filesystem (`t.TempDir()`), `FakeRunner` for subprocess calls that can't run in CI. No network, no KVM, no sudo.
+**Scope:** Tests that use real I/O in a controlled environment — real SQLite (file-based, in t.TempDir()), real filesystem (`t.TempDir()`), `FakeRunner` for subprocess calls that can't run in CI. Local loopback fixtures are allowed; external network, KVM, and sudo are excluded.
 
 ```go
 func TestVMList_JSONOutput(t *testing.T) {
@@ -478,7 +478,10 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 
 ### The Execution Substrate
 
-Every L2 test runs **inside a disposable Firecracker VM** with nested KVM, not directly on the host:
+Tier 1 and Tier 2 L2 tests run inside disposable Firecracker runner VMs; Tier 2 enables nested virtualization.
+Tier 3 runs directly on an explicitly authorized clean qualification host or disposable outer VM. Follow
+[the execution-tier architecture](../system-test-architecture.md) when choosing the substrate. The diagram below
+shows the runner-VM path:
 
 ```
 Outer host (only controller-owned disposable test resources)

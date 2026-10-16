@@ -5,7 +5,8 @@
 ```
 mvm self-update            # check + apply if newer
 mvm self-update check      # check only, print available version
-mvm self-update apply      # force apply (even if same version)
+mvm self-update apply      # check + apply if newer
+mvm self-update apply --force # apply even if same version
 ```
 
 ## Prerequisites — Shared Git Remote client

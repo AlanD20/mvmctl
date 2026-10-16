@@ -219,7 +219,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closed candidate565 evidence join exited zero with PASS. Original source bindings remain literal; this was
   not one full latest-HEAD invocation or a generic source-carry waiver. See the
   [coverage checkpoint and proof identifiers](tests/system/COVERAGE_MATRIX.md#v030-release-security-qualification-overlay).
-- v0.3.0 remains unreleased. Remote CI, aarch64 runtime qualification and final release approval remain open.
+- v0.3.0 remains unreleased. Remote CI passed for `4034eefc`; aarch64 runtime qualification and final release
+  approval remain open. See the [qualification checkpoint](tests/system/COVERAGE_MATRIX.md) for evidence and limits.
 - Original exec/cache transients and the original saturation incident remain unexplained. Bounded pressure/guest
   exhaustion passes neither attribute those failures nor guarantee survival under arbitrary host/ancestor/global OOM.
 - The required matching Firecracker/Jailer 1.17.0 pair passed the selected hotplug/snapshot journeys. Attachment

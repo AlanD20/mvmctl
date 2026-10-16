@@ -301,16 +301,20 @@ Common causes:
 
 ## Reference
 
-### Kernel versions tested with Firecracker
+### Kernel version selection
 
-| Kernel | Status | Notes |
+| Kernel | Selection | Notes |
 |--------|--------|-------|
-| 6.1.x LTS | Supported | Long-term support, recommended for production |
-| 6.6.x LTS | Supported | Newer LTS, recommended for production |
-| 6.12.x LTS | Supported | Latest LTS |
-| 6.19.x | Supported | Default version (`6.19.9`), latest upstream stable at release time |
+| 6.1.x | Explicit version | Also the configured Firecracker CI kernel series |
+| 6.6.x | Explicit version | Select the exact required patch release |
+| 6.12.x | Explicit version | Select the exact required patch release |
+| 6.19.9 | Official source-build default | Fixed embedded default |
 
-> **Note:** The default kernel version (`6.19.9`) is **NOT** an LTS kernel. It is the latest upstream stable at the time of release. Use `--version latest` to resolve the most recent version from the upstream directory listing. If you need long-term support, explicitly pass `--version 6.1.102` or `--version 6.12.21` to `mvm kernel pull --type official`. The LTS versions in the table above are tested and known to work — use them for production deployments.
+The default source-build version is `6.19.9`. Use `--version latest` to resolve the most recent version from the
+upstream directory listing, or pass an exact version for reproducible selection. These selections do not qualify
+every patch release or custom configuration. The
+[candidate-bound qualification checkpoint](../tests/system/COVERAGE_MATRIX.md#v030-release-security-qualification-overlay)
+records accepted runtime evidence and its limits; qualify your selected artifact for its intended workload.
 
 The v0.3.0 opt-in VM-to-VM source-session path additionally requires the source guest kernel's `SO_PEERPIDFD` socket
 capability. Source-session admission fails closed when that capability is absent; it never falls back to authorizing a
@@ -321,7 +325,7 @@ Select a capable kernel explicitly with `vm create --kernel <kernel>` when using
 custom kernels must provide the actual capability; neither a version label nor successful ordinary host-to-VM exec
 proves it. The QA fixture selects an exact capable artifact without changing the default kernel. The configured
 official source-build version remains fixed at `6.19.9`; VM-to-VM exec does not select a moving `latest` version or
-require the QA artifact's version. The relay is implemented, while qualification of the corrected source-publication
-and kernel-selection paths remains pending.
+require the QA artifact's version. Accepted source-session journeys do not establish every peer, cancellation or
+cleanup fault; those limits remain in the qualification checkpoint.
 
 *See also: [RESOURCE_MANAGEMENTS.md](RESOURCE_MANAGEMENTS.md) for the kernel YAML config reference and [Firecracker official documentation](https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md).*

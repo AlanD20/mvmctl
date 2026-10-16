@@ -2,7 +2,10 @@
 
 > **STATUS: Design Proposal — not implemented.** All 15 tracked components remain unstarted. Codebase is fully Firecracker-coupled. No `VMMDriver`, `VMMFactory`, or `vmm_type` field exists anywhere in the Go codebase. `FirecrackerGithubReleasesAPIURL` and `FirecrackerGithubDownloadURL` still hardcoded in `internal/infra/constants.go`. Controller directly imports `internal/lib/firecracker` (was `internal/core/vm/firecracker_client.go`, moved to `internal/lib/firecracker/client.go`). No `--vmm` CLI flags exist.
 >
-> **Last verified:** 2026-06-27
+> **Historical baseline:** 2026-06-27. The coupling map and capability comparisons below are proposal-era research,
+> not a current implementation or upstream support matrix. Current Firecracker-only launch uses typed root-owned
+> Jailer authority; the console relays a pinned PTY rather than reading a serial-output file. See
+> [CONTEXT.md](../../CONTEXT.md) and [Console Relay](../implementations/CONSOLE_RELAY.md) for current boundaries.
 
 ## Implementation Status Summary
 
