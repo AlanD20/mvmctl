@@ -28,30 +28,35 @@ volume (37) and VM lifecycle (69) bind QA source `4764bb0871b626695198248bb8369b
 `751dd9c5a3856496739a645079b829046849ff4e`, collection receipt `38ede600`.
 Isolated nested VMs (8) bind QA source `c4acd1c112f98980cd3c6f2666dd6fe8c08bc7d9`, tree
 `d741eefff2ac4bbcf25e5436c0df7d47d19fa549`, collection receipt `1938de73`.
-The 4764 and c4 sources collected the same 528 unique nodes (526 ordinary and two actual host-reboot phases).
+Kernel builds (22) bind QA source `a33e6623dfcaf80bfb78a891e6ef84e831f2e496`, tree
+`32cb1a84de0ef3c5fe803e5813a3e3ae7420df0f`, collection receipt `285d7ff9`.
+The 4764, c4 and a33 sources collected the same 528 unique nodes (526 ordinary and two actual host-reboot phases).
 Collection itself executed no runtime fixtures and does not rebind accepted receipts.
 
 | Current scope | Accepted cases | Remaining cases |
 |---|---:|---:|
 | Tier 1 | 238 | 0 |
 | Tier 2 | 193 | 0 |
-| Tier 3 | 73 | 22 |
+| Tier 3 | 95 | 0 |
 | Actual host reboot | 0 | 2 |
 
-The **504 accepted ordinary cases** comprise all Tier 1 and Tier 2 domains: Tier 2 kernel successor (1),
+The **526 accepted ordinary cases** comprise all Tier 1 and Tier 2 domains: Tier 2 kernel successor (1),
 console (4), exec (12), full journeys (15), GuestFS (1), host administration (3), nftables (5), policies (3),
 Jailer/cgroup (20), logs (11), SSH (11), VM data persistence (1), volume (37) and VM lifecycle (69);
 and Tier 3 environment (22), copy (15),
-snapshot load (8), snapshot rootfs independence (6), volume hotplug (10), fresh environments (4)
-and isolated nested VMs (8). Each accepted slice has native
+snapshot load (8), snapshot rootfs independence (6), volume hotplug (10), fresh environments (4),
+isolated nested VMs (8) and kernel builds (22). Each accepted slice has native
 exit zero, exact strict JSON/JUnit node accounting, source/candidate seals, retained literal reports and checked
 cleanup/preservation. Failed batches contribute no partial credit.
 The complete isolated-nested suite passed in 870.57 seconds, with strict eight-node JSON/JUnit accounting,
 zero other outcomes and checked cleanup leaving no owned VMs/environments and the borrowed mirror unattached.
 Its 1,800-second aggregate allowance reflects measured fixture-cycle cost; per-command limits, assertions and
 function-owned cleanup remain unchanged. Earlier failed attempts retain their failures and add no credit.
-Only Tier 3 kernel builds (22) and both actual host-reboot phases remain unaccepted.
-The 504/528 accepted union is not one full current-source pass.
+The complete kernel-build suite passed in 1,142.89 seconds (about 19 minutes), with strict 22-node JSON/JUnit
+accounting, zero other outcomes and checked cleanup leaving no owned VMs/environments and the borrowed mirror
+unattached. Source/candidate and literal report hashes were preserved; earlier failed attempts remain failed.
+All 526 ordinary cases are accepted; both actual host-reboot phases remain unaccepted and the final join has not run.
+The 526/528 accepted union is not one full current-source pass.
 
 The corrected QA source gives initial guest-agent connections explicit startup budgets through the existing CLI
 retry behavior. Public default timeouts and production/build inputs are unchanged; these are test corrections,
@@ -60,8 +65,8 @@ exhaustion and near-saturation scenarios in nested QA; it does not guarantee sur
 
 Reboot-namespace QA source `092cd5c4`, documented in `738d8665`, passed 26 focused correction checks and
 collected both phase nodes; no fresh PRE/reboot/POST journey passed. Ordinary receipts retain their respective
-`7f49cd0a`, `0574702f`, `4764bb08` or `c4acd1c1` bindings. This accepted union and unchanged-input equivalence
-do not approve a carry profile, mixed-source final join or release PASS. Earlier interrupted nested Jailer and logs attempts produced
+`7f49cd0a`, `0574702f`, `4764bb08`, `c4acd1c1` or `a33e6623` bindings. This accepted union and unchanged-input
+equivalence do not approve a carry profile, mixed-source final join or release PASS. Earlier interrupted nested Jailer and logs attempts produced
 no qualifying reports after the old enclosing controller's
 finite `memory.max=6576668672` killed the named QA VM. Neither attempt adds credit or changes the candidate's
 pressure-only production policy. Successful later tasks do not relabel earlier failed or interrupted tasks.

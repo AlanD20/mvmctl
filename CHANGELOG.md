@@ -222,17 +222,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   All 22 focused pure helper checks passed inside QA, but the actual final join has not run and adds no runtime
   qualification credit. See [final evidence join](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#63-join-verified-receipts-read-only).
 - Kept v0.3.0 unreleased and not release-qualified. The current installed x86_64 candidate
-  `0.3.0-rc.kernel-details-ce5b0913` (`565be5a6`, producer `ce5b0913`) has 504 accepted ordinary cases:
-  all T1 238 and T2 193, plus T3 73. Of these, 344, including fresh environments (4), retain frozen
+  `0.3.0-rc.kernel-details-ce5b0913` (`565be5a6`, producer `ce5b0913`) has all 526 ordinary cases accepted:
+  T1 238, T2 193 and T3 95. Of these, 344, including fresh environments (4), retain frozen
   QA source `7f49cd0a`/tree `3bd36f03`;
   corrected policies (3), Jailer/cgroup (20) and logs (11) bind `0574702f`/tree `6650e09e`.
   SSH (11), VM data persistence (1), volume (37) and VM lifecycle (69) bind `4764bb08`/tree `751dd9c5`,
   collection receipt `38ede600`. Isolated nested VMs (8) bind `c4acd1c1`/tree `d741eeff`, collection receipt
   `1938de73`, with strict native-zero JSON/JUnit proof in 870.57 seconds, zero other outcomes and checked
   owned cleanup/mirror preservation. The 1,800-second aggregate budget reflects measured fixture-cycle cost;
-  per-command limits and assertions remain unchanged. The 4764 and c4 sources collected the same 528 nodes:
-  526 ordinary and two reboot phases. Collection itself adds no passing credit. Remaining runtime scope is
-  Tier 3 kernel builds (22) and both actual reboot cases.
+  per-command limits and assertions remain unchanged. Kernel builds (22) bind `a33e6623`/tree `32cb1a84`,
+  collection receipt `285d7ff9`, with strict native-zero JSON/JUnit proof in 1,142.89 seconds (about 19 minutes),
+  zero other outcomes, checked owned cleanup and the borrowed mirror unattached. Original source/candidate
+  and report hashes were preserved. The 4764, c4 and a33 sources collected the same 528 nodes:
+  526 ordinary and two reboot phases. Collection itself adds no passing credit. Both actual reboot cases
+  remain unaccepted, and the actual final join has not run.
   QA corrections give initial agent connections explicit startup budgets; public default timeouts, production/build
   inputs and installed candidate bytes are unchanged. The passing 20-case Jailer/cgroup slice includes actual nested-QA
   exhaustion/saturation scenarios, not a universal host/ancestor OOM guarantee or diagnosed production feature fix.
