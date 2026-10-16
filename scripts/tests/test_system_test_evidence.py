@@ -486,6 +486,404 @@ def test_rc030_join_refuses_unproved_or_changed_inputs(
 
 
 @pytest.fixture
+def candidate565_packet(evidence, monkeypatch, tmp_path):
+    """Real sealed reports model the closed 344+34+118+8+22 ownership split.
+
+    Only artifact constants/source observations are substituted. The original
+    strict matrix/collection readers and exact-node accounting remain real.
+    """
+    counts = dict(original=344, startup=34, remaining=118, nested=8, kernel=22)
+    domains = {
+        name: "kernel_build" if name == "kernel" else "ordinary" for name in counts
+    }
+    registry = {
+        domain: dict(tier=3, files=[f"tests/system/{domain}/test_{domain}.py"])
+        for domain in domains.values()
+    }
+    registry["host_reboot"] = dict(
+        tier=2, files=["tests/system/host/test_host_reboot.py"]
+    )
+    nodes = {
+        name: [
+            f"{registry[domain]['files'][0]}::test_{name}_{i}"
+            for i in range(counts[name])
+        ]
+        for name, domain in domains.items()
+    }
+    all_nodes = [node for values in nodes.values() for node in values] + sorted(
+        evidence.HOST_NODES
+    )
+    roots, sources, matrices, collections = {}, {}, {}, {}
+    original_binding = _binding
+
+    def binding(source, registered):
+        value = original_binding(source, registered)
+        value["candidate"] = dict(evidence.CANDIDATE565)
+        value["controller"]["sha256"] = evidence.CANDIDATE565["sha256"]
+        return value
+
+    monkeypatch.setattr(sys.modules[__name__], "_binding", binding)
+    for name, (revision, tree, _) in evidence.CANDIDATE565_SOURCES.items():
+        root = tmp_path / name
+        root.mkdir(mode=0o700)
+        roots[name] = root
+        sources[name] = dict(
+            revision=revision,
+            tree=tree,
+            payload={
+                path: "a" * 64 for row in registry.values() for path in row["files"]
+            },
+        )
+        if name == "release_docs":
+            continue
+        collections[name] = _collection(
+            evidence, root, sources[name], registry, nodes=all_nodes
+        )
+        domain = domains[name]
+        matrices[name], _ = _record(
+            evidence,
+            root,
+            sources[name],
+            registry,
+            selection={
+                domain: {**registry[domain], "nodes": nodes[name]},
+            },
+        )
+    seals = {
+        name: hashlib.sha256((task / "terminal.json").read_bytes()).hexdigest()
+        for name, task in matrices.items()
+    }
+    monkeypatch.setattr(
+        evidence,
+        "CANDIDATE565_COLLECTIONS",
+        {
+            name: hashlib.sha256((task / "terminal.json").read_bytes()).hexdigest()
+            for name, task in collections.items()
+        },
+    )
+    monkeypatch.setattr(
+        evidence,
+        "CANDIDATE565_ACCEPTED",
+        {name: {seals[name]: counts[name]} for name in counts if name != "kernel"},
+    )
+    monkeypatch.setattr(
+        evidence, "_candidate565_source", lambda root, name: sources[name]
+    )
+    monkeypatch.setattr(
+        evidence, "_rc030_production_inputs", lambda root: {"go.mod": "a" * 64}
+    )
+    monkeypatch.setattr(
+        evidence, "_candidate565_relevant_equalities", lambda roots: None
+    )
+    # Git bytes are an external observation, not the admission policy under test.
+    monkeypatch.setattr(
+        evidence,
+        "CANDIDATE565_DELTA",
+        (("original", "kernel", hashlib.sha256(b"reviewed delta").hexdigest()),),
+    )
+    monkeypatch.setattr(
+        evidence.subprocess, "check_output", lambda *args, **kwargs: b"reviewed delta"
+    )
+    declared = dict(
+        schema_version=1,
+        profile=evidence.CANDIDATE565_PROFILE,
+        release_source_path=str(roots["release_docs"]),
+        sources={
+            name: dict(
+                source_path=str(roots[name]),
+                collection_task=str(collections[name]),
+                matrix_tasks=[
+                    dict(path=str(matrices[name]), terminal_sha256=seals[name])
+                ],
+            )
+            for name in counts
+        },
+    )
+    record = tmp_path / "candidate565.json"
+    record.write_text(json.dumps(declared))
+    return dict(
+        record=record,
+        declared=declared,
+        roots=roots,
+        sources=sources,
+        matrices=matrices,
+        collections=collections,
+        registry=registry,
+        nodes=nodes,
+    )
+
+
+def test_candidate565_join_preserves_original_receipts_and_node_provenance(
+    evidence, candidate565_packet
+):
+    packet = candidate565_packet
+    files = {
+        path: path.read_bytes()
+        for task in packet["matrices"].values()
+        for path in task.iterdir()
+    }
+    joined = evidence.verify_candidate565_join(
+        packet["record"],
+        packet["sources"]["kernel"],
+        evidence.CANDIDATE565,
+        packet["registry"],
+    )
+    assert {
+        entry["source"]["revision"]: set(entry["nodes"])
+        for entry in joined["provenance"]
+    } == {
+        packet["sources"][name]["revision"]: set(nodes)
+        for name, nodes in packet["nodes"].items()
+    }
+    assert {
+        entry["source"]["revision"]: entry["classification"]
+        for entry in joined["provenance"]
+    } == {
+        packet["sources"][name]["revision"]: "executed-at-target"
+        if name == "kernel"
+        else "checked-original-source-carry"
+        for name in packet["nodes"]
+    }
+    assert {path: path.read_bytes() for path in files} == files
+
+
+@pytest.mark.parametrize("fault", ["overlap", "outside-collection"])
+def test_candidate565_join_refuses_resealed_overlap_or_gap(
+    evidence, candidate565_packet, tmp_path, fault
+):
+    packet = candidate565_packet
+    nodes = list(packet["nodes"]["startup"])
+    nodes[0] = (
+        packet["nodes"]["original"][0]
+        if fault == "overlap"
+        else "tests/system/ordinary/test_ordinary.py::test_uncollected"
+    )
+    fresh = tmp_path / "resealed"
+    fresh.mkdir(mode=0o700)
+    task, _ = _record(
+        evidence,
+        fresh,
+        packet["sources"]["startup"],
+        packet["registry"],
+        selection={
+            "ordinary": {**packet["registry"]["ordinary"], "nodes": nodes},
+        },
+    )
+    seal = hashlib.sha256((task / "terminal.json").read_bytes()).hexdigest()
+    # A new all-pass, internally sealed receipt still cannot double-credit a
+    # node or fill an unproved registered node with a different node.
+    evidence.CANDIDATE565_ACCEPTED["startup"] = {seal: 34}
+    packet["declared"]["sources"]["startup"]["matrix_tasks"] = [
+        dict(path=str(task), terminal_sha256=seal)
+    ]
+    packet["record"].write_text(json.dumps(packet["declared"]))
+    reason = "duplicate executed" if fault == "overlap" else "outside full registered"
+    with pytest.raises(RuntimeError, match=reason):
+        evidence.verify_candidate565_join(
+            packet["record"],
+            packet["sources"]["kernel"],
+            evidence.CANDIDATE565,
+            packet["registry"],
+        )
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "missing-kernel",
+        "failed-teardown",
+        "retarget",
+        "seal",
+        "registry",
+        "delta",
+        "production",
+    ],
+)
+def test_candidate565_join_rejects_incomplete_changed_or_unproved_inputs(
+    evidence,
+    candidate565_packet,
+    monkeypatch,
+    fault,
+):
+    packet = candidate565_packet
+    if fault == "missing-kernel":
+        packet["declared"]["sources"]["kernel"]["matrix_tasks"] = []
+        packet["record"].write_text(json.dumps(packet["declared"]))
+    elif fault == "failed-teardown":
+        path = packet["matrices"]["kernel"] / "kernel_build.nodes.json"
+        value = json.loads(path.read_bytes())
+        next(iter(value["phases"].values()))["teardown"]["outcome"] = "failed"
+        path.write_text(json.dumps(value))
+    elif fault == "retarget":
+        path = packet["matrices"]["original"] / "binding.json"
+        value = json.loads(path.read_bytes())
+        value["source"] = packet["sources"]["kernel"]
+        path.write_text(json.dumps(value))
+    elif fault == "seal":
+        packet["declared"]["sources"]["original"]["matrix_tasks"][0][
+            "terminal_sha256"
+        ] = "0" * 64
+        packet["record"].write_text(json.dumps(packet["declared"]))
+    elif fault == "registry":
+        packet["registry"]["unproved"] = dict(
+            tier=1, files=["tests/system/new/test_new.py"]
+        )
+    elif fault == "delta":
+        monkeypatch.setattr(
+            evidence.subprocess,
+            "check_output",
+            lambda *args, **kwargs: b"different delta",
+        )
+    else:
+        monkeypatch.setattr(
+            evidence,
+            "_rc030_production_inputs",
+            lambda root: {
+                "go.mod": "b" * 64 if root == packet["roots"]["startup"] else "a" * 64,
+            },
+        )
+    with pytest.raises(RuntimeError):
+        evidence.verify_candidate565_join(
+            packet["record"],
+            packet["sources"]["kernel"],
+            evidence.CANDIDATE565,
+            packet["registry"],
+        )
+
+
+@pytest.mark.parametrize(
+    "milestone",
+    ["original", "startup", "remaining", "nested", "kernel", "release_docs"],
+)
+def test_candidate565_exact_source_rejects_changed_shared_payload(
+    evidence, monkeypatch, tmp_path, milestone
+):
+    revision, tree, _ = evidence.CANDIDATE565_SOURCES[milestone]
+    monkeypatch.setattr(
+        evidence,
+        "source_identity",
+        lambda root: dict(
+            revision=revision,
+            tree=tree,
+            payload={"tests/system/conftest.py": "0" * 64},
+        ),
+    )
+    with pytest.raises(RuntimeError, match="exact source/tree/payload changed"):
+        evidence._candidate565_source(tmp_path, milestone)
+
+
+@pytest.mark.parametrize("fault", [None, "helper-body", "module-initialization"])
+def test_candidate565_shared_seams_check_helpers_and_module_initialization(
+    evidence, monkeypatch, tmp_path, fault
+):
+    path = "test_shared.py"
+    roots = {}
+    original = "registry = 1\ndef helper():\n    return 2\ndef other():\n    return 3\n"
+    for name in ("original", "startup", "remaining", "nested", "kernel"):
+        root = tmp_path / name
+        root.mkdir(mode=0o700)
+        roots[name] = root
+        body = original
+        if name == "remaining":
+            if fault == "helper-body":
+                body = body.replace("return 2", "return 4")
+            elif fault == "module-initialization":
+                body = body.replace("registry = 1", "registry = 4")
+            else:
+                body = body.replace("return 3", "return 4")
+        (root / path).write_text(body)
+    monkeypatch.setattr(evidence, "CANDIDATE565_EQUAL_HELPERS", {path: ("helper",)})
+    monkeypatch.setattr(evidence, "CANDIDATE565_BODY_ONLY_MODULES", (path,))
+    if fault is None:
+        evidence._candidate565_relevant_equalities(roots)
+    else:
+        with pytest.raises(
+            RuntimeError, match="reviewed shared helper|reviewed imports/registration"
+        ):
+            evidence._candidate565_relevant_equalities(roots)
+
+
+@pytest.mark.parametrize("reboot_complete", [False, True])
+def test_candidate565_finalizer_requires_reboot_closure_and_reports_original_sources(
+    evidence,
+    orchestrator,
+    monkeypatch,
+    candidate565_packet,
+    reboot_complete,
+):
+    packet = candidate565_packet
+    source = packet["sources"]["kernel"]
+    monkeypatch.setattr(orchestrator, "_REPO_ROOT", packet["roots"]["kernel"])
+    monkeypatch.setattr(
+        orchestrator, "_validate_system_test_registry", lambda parser: None
+    )
+    monkeypatch.setattr(orchestrator, "_evidence_registry", lambda: packet["registry"])
+    monkeypatch.setattr(
+        orchestrator, "_get_mvm_version", lambda: evidence.CANDIDATE565["version"][4:]
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_sha256_runner_input",
+        lambda path: evidence.CANDIDATE565["sha256"],
+    )
+    monkeypatch.setattr(evidence, "source_identity", lambda root: source)
+    reboot_task = packet["record"].parent / "fresh-reboot"
+
+    def original_reboot_reader(task, root):
+        assert task == reboot_task and root == packet["roots"]["kernel"]
+        if not reboot_complete:
+            raise RuntimeError(
+                "host_reboot release proof lacks exact completed native closure"
+            )
+        return dict(passed=True)
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_require_completed_host_reboot_for_source",
+        original_reboot_reader,
+    )
+    if not reboot_complete:
+        with pytest.raises(RuntimeError, match="completed native closure"):
+            evidence.finalize_named_runner_release_evidence(
+                orchestrator,
+                [],
+                reboot_task,
+                collection_task=packet["collections"]["kernel"],
+                candidate565_source_join=packet["record"],
+            )
+        return
+    result = evidence.finalize_named_runner_release_evidence(
+        orchestrator,
+        [],
+        reboot_task,
+        collection_task=packet["collections"]["kernel"],
+        candidate565_source_join=packet["record"],
+    )
+    assert result["passed"] is True
+    assert set(result["executed_nodes"]) == set(packet["nodes"]["kernel"])
+    assert set(result["carried_nodes"]) == {
+        node
+        for name, nodes in packet["nodes"].items()
+        if name != "kernel"
+        for node in nodes
+    }
+    assert result["host_reboot"]["nodes"] == sorted(evidence.HOST_NODES)
+    assert result["host_reboot"]["original_source"] == source
+    assert {
+        entry["source"]["revision"] for entry in result["qa_source_join"]["provenance"]
+    } == {packet["sources"][name]["revision"] for name in packet["nodes"]}
+
+
+def test_candidate565_join_refuses_other_candidate_before_reading_record(
+    evidence, tmp_path
+):
+    with pytest.raises(RuntimeError, match="exact binary and version"):
+        evidence.verify_candidate565_join(
+            tmp_path / "absent.json", {}, evidence.RC030_CANDIDATE, {}
+        )
+
+
+@pytest.fixture
 def inputs():
     return (
         dict(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import io
 import importlib.util
@@ -1255,6 +1256,362 @@ def accounted_nodes(collection, reports, carried=()) -> set[str]:
     return accounted
 
 
+# Closed, reviewed Oct16 admission. These are executed QA snapshots, not aliases
+# for the validation tool's HEAD. Later documentation commits need a new binding.
+CANDIDATE565 = dict(
+    sha256="565be5a66432788f405e64337e6902a573da0dafe9efd0f4ef46480c5593060a",
+    version="mvm 0.3.0-rc.kernel-details-ce5b0913",
+)
+CANDIDATE565_PROFILE = "rc030-candidate565-oct16"
+CANDIDATE565_SOURCES = {
+    "original": (
+        "7f49cd0a1213b96bbe66c4e5b12454d2d7207f09",
+        "3bd36f0353eb794f52b085d40745287ea731b96c",
+        "c1cb802afa091f18a5dc065cd9f674e46ad92c9a6d3a06049d1f9b2352d3c729",
+    ),
+    "startup": (
+        "0574702f3b6052b78d1996978e2daf2225f6f0cc",
+        "6650e09e49bfb3c4e7c77d42a6d5198f60da4df3",
+        "0b60ae722df244d9223b33ec4c0c868386659d71065a6cbba1db8b2aee382c3d",
+    ),
+    "remaining": (
+        "4764bb0871b626695198248bb8369bca4500a4e4",
+        "751dd9c5a3856496739a645079b829046849ff4e",
+        "059d683974ccb3be034a23d535b06f835c250677086652048c6dbf468872f2d8",
+    ),
+    "nested": (
+        "c4acd1c112f98980cd3c6f2666dd6fe8c08bc7d9",
+        "d741eefff2ac4bbcf25e5436c0df7d47d19fa549",
+        "bb990e84651288ad07f264a9ae0a3060121f088f61ac765b0cffd4764adb2b0f",
+    ),
+    "kernel": (
+        "a33e6623dfcaf80bfb78a891e6ef84e831f2e496",
+        "32cb1a84de0ef3c5fe803e5813a3e3ae7420df0f",
+        "472778673c39ecfb92f0f0a85c018b991ac2b2a06459e123494c679ee89c6234",
+    ),
+    # This exact docs checkpoint has c4's full Python/INI payload. It is not
+    # an execution source for any receipt and is never substituted into one.
+    "release_docs": (
+        "df00fc57f0a21d2209d84ec34685f125026b5f96",
+        "c802f501dcac6846d75bba234faae8222a599be8",
+        "bb990e84651288ad07f264a9ae0a3060121f088f61ac765b0cffd4764adb2b0f",
+    ),
+}
+CANDIDATE565_COLLECTIONS = dict(
+    original="45567a445aab4b249ccdc4b93c0d5bc31554a2c3ab081e2cd78029c960894e17",
+    startup="34d66323a6f006a84ba577480d0d964bd826c61aac0679f16ac5fc9af632d028",
+    remaining="38ede6000d17f51417913072f8a5e9685c1ed8dd7f1d979b87ad1ecfa1d185f0",
+    nested="1938de73c0de0d8d4fe42f1476c5de417b5a2696a6bcfadc18e74f39cbc9ff6c",
+    kernel="285d7ff904d665c7f89579fa5f020bb26088a46b2f07ee5c036085094a94897f",
+)
+CANDIDATE565_ACCEPTED = {
+    "original": {
+        "ffb269dde77d88c65474ad93be9575157a45f62a4c6bc0556acd1b90e04ad7e5": 238,
+        "ed25f02917c7be379de5a9a10724e92228f1f70d9ca13933ed11eed1143184ba": 1,
+        "26d7284ce1f0aacb2291002c70c96f9fabb8ef34200abcab0afebd1fe8924b05": 4,
+        "df3dc305e5e92ce72aabe5d146cb10f2060bcc95e2c55bde414c2090d2babe84": 12,
+        "14db14fd263833f996dfa621bc1363622363609ec75c96f812405560f606fc14": 15,
+        "2ac4c4bf67b663e2f2000e12314ee05b2008ea4e07b27f8ad919e494effd71c0": 1,
+        "908eab07cf315b4fd5066a92c71ac09f228930dd29cf5b67d3db1ae8d380169b": 3,
+        "433a0355b46e5bc9e9ee3a28275381d03b443cbee84a59652fe596cf03fdd4be": 5,
+        "ee5c8cc316e69bffc5c7ac309d7fb66e70ff5367fbb1af9c0189773d8e9d3315": 22,
+        "42a4f69c037cb3daa93d4a7d9bd689e7a473a31bf4719cbc47dcf98003420c22": 15,
+        "e84f38c57d772e654db44dcebf38f7a461244961914f66e05d89a3d79cbb9402": 8,
+        "23e2a153ce465a659b442ebd5e6d45ed32224e2c3131e5a248de2c0477248c91": 6,
+        "e2795349fba98939b0b2c8de2055d113dfc8b0e07e11c76ce819022a669eebec": 10,
+        "940c1d06c4600a705d623fff6c35b33ac73b2a46892d06fac9a8606a071f445d": 4,
+    },
+    "startup": {
+        "10566a8376fac69914724a2df878c6c11ea605f15c8fdf6b08beba41a984915e": 3,
+        "bcf23df747f5b1cd685bf8330f1e19b5966d04305288f3feedc35466373ce10d": 20,
+        "408ec33d4ac7a232115939e157f592a596e66efe8e33b033206e433cffd422e5": 11,
+    },
+    "remaining": {
+        "c7c0761f2e8bd989751280663f1143091afa026c2ae875f25418a73443c03696": 11,
+        "bd0843c9726f50e13cc4529354eae91bedb66e1b9c6c9f0cf907cc2332f09366": 1,
+        "65fd97137cf0bac5e3cad1983d85b68ec4f68939a9e036a311d55c1111b40fe9": 69,
+        "891bb5feee455089445401580383bc96c2537cbe919bf2cd858fa2d6d44a22cf": 37,
+    },
+    "nested": {
+        "6cae1f214e829e7c3ce27713543c9545e5fc691c132b6300d9bd01ea7cf9806c": 8,
+    },
+}
+# The bounded direct call review is part of this profile, not caller policy.
+# original->remaining: cache/successor use unchanged Jailer _run_mvm,
+# _JailerResources/_resources and policies _tcp_baseline/_tcp_data; hotplug
+# uses unchanged lifecycle _LifecycleOwner/_require_lifecycle_assets; Jailer
+# uses unchanged _kill_exact_test_firecracker. Imports/registration are equal.
+# Changed test bodies/fixtures are covered by their later original-source
+# receipts above. No failed 193-node batch or partial result is admissible.
+# remaining->nested changes successful local launch/output too, not just
+# timeouts. Its strict outcomes are unchanged; old T3 remains original proof.
+# nested->kernel changes _OfficialKernelPullSequence.root_release_receipt:
+# all eight official selectors need the fresh full kernel22 receipt. The
+# successor imports unchanged _KernelPullOwner, not that derived fixture.
+CANDIDATE565_DELTA = (
+    (
+        "original",
+        "startup",
+        "b3ff055ba8452378ea001dcdc1965d770af91acc2a70431d15f0d44836e4c970",
+    ),
+    (
+        "startup",
+        "remaining",
+        "f62e6d2cd76552af767e9239c9f6532694cad869266f649bf8acdf4be61c3c90",
+    ),
+    (
+        "remaining",
+        "nested",
+        "013a1f408dc540419f206aa65ffacff4ba914a4e2873cd600337199b534203bd",
+    ),
+    (
+        "nested",
+        "kernel",
+        "91a085cef67760c1cdbd9319bc6daca8e4e6d7b26dea309c9c5b313eac35c1f6",
+    ),
+)
+CANDIDATE565_EQUAL_HELPERS = {
+    "tests/system/vm/test_jailer.py": ("_run_mvm", "_JailerResources"),
+    "tests/system/network/test_policies.py": ("_tcp_baseline", "_tcp_data"),
+    "tests/system/vm/test_vm_lifecycle.py": (
+        "_LifecycleOwner",
+        "_require_lifecycle_assets",
+        "_kill_exact_test_firecracker",
+        "_lifecycle_process_identity",
+        "_lifecycle_vm_state",
+    ),
+    "tests/system/kernel/test_kernel.py": ("_KernelPullOwner",),
+}
+CANDIDATE565_BODY_ONLY_MODULES = (
+    "tests/system/logs/test_logs.py",
+    "tests/system/network/test_policies.py",
+    "tests/system/ssh/test_ssh.py",
+    "tests/system/vm/test_cgroup.py",
+    "tests/system/vm/test_jailer.py",
+    "tests/system/vm/test_vm_data_persistence.py",
+    "tests/system/vm/test_vm_lifecycle.py",
+    "tests/system/volume/test_volume.py",
+)
+
+
+def _candidate565_relevant_equalities(roots: dict[str, Path]) -> None:
+    """Check only the named, reviewed call seams; never discover dependencies."""
+
+    def module(milestone, path):
+        return ast.parse(
+            _read(roots[milestone] / path, MAX_OUTPUT_BYTES), filename=path
+        )
+
+    for path, names in CANDIDATE565_EQUAL_HELPERS.items():
+        original = {
+            node.name: ast.dump(node, include_attributes=False)
+            for node in module("original", path).body
+            if hasattr(node, "name")
+        }
+        for milestone in ("startup", "remaining", "nested", "kernel"):
+            current = {
+                node.name: ast.dump(node, include_attributes=False)
+                for node in module(milestone, path).body
+                if hasattr(node, "name")
+            }
+            if any(
+                name not in original or original[name] != current.get(name)
+                for name in names
+            ):
+                raise RuntimeError(
+                    f"candidate565 reviewed shared helper changed: {path}"
+                )
+    # Compare imports, decorators, registration, defaults and module/class
+    # statements too, including _resources. Only function bodies are excluded.
+    for path in CANDIDATE565_BODY_ONLY_MODULES:
+        shells = []
+        for milestone in ("original", "remaining"):
+            parsed = module(milestone, path)
+            for node in ast.walk(parsed):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    node.body = [ast.Pass()]
+            shells.append(ast.dump(parsed, include_attributes=False))
+        if shells[0] != shells[1]:
+            raise RuntimeError(
+                f"candidate565 reviewed imports/registration changed: {path}"
+            )
+
+
+def _candidate565_source(root: Path, milestone: str) -> dict[str, Any]:
+    if not root.is_absolute() or root.resolve(strict=True) != root:
+        raise RuntimeError("candidate565 source must be an absolute canonical checkout")
+    source = source_identity(root)
+    digest = hashlib.sha256(
+        json.dumps(source["payload"], sort_keys=True).encode()
+    ).hexdigest()
+    if (source["revision"], source["tree"], digest) != CANDIDATE565_SOURCES[milestone]:
+        raise RuntimeError(
+            f"candidate565 {milestone} exact source/tree/payload changed"
+        )
+    return source
+
+
+def _candidate565_record(record: Path) -> dict[str, Any]:
+    declared = _json(_rc030_private_read(record))
+    _rc030_keys(
+        declared,
+        {"schema_version", "profile", "sources", "release_source_path"},
+        "candidate565 record",
+    )
+    if (
+        type(declared["schema_version"]) is not int
+        or declared["schema_version"] != 1
+        or declared["profile"] != CANDIDATE565_PROFILE
+    ):
+        raise RuntimeError("unsupported candidate565 admission profile")
+    _rc030_keys(
+        declared["sources"], set(CANDIDATE565_COLLECTIONS), "candidate565 sources"
+    )
+    for row in declared["sources"].values():
+        _rc030_keys(
+            row,
+            {"source_path", "collection_task", "matrix_tasks"},
+            "candidate565 source",
+        )
+    return declared
+
+
+def candidate565_target(record: Path) -> Path:
+    root = Path(_candidate565_record(record)["sources"]["kernel"]["source_path"])
+    _candidate565_source(root, "kernel")
+    return root
+
+
+def verify_candidate565_join(
+    record: Path, source, candidate, registry
+) -> dict[str, Any]:
+    """Verify original receipts before admitting the exact reviewed 526-node union."""
+    if candidate != CANDIDATE565:
+        raise RuntimeError(
+            "candidate565 admission requires the exact binary and version"
+        )
+    declared = _candidate565_record(record)
+    roots = {
+        name: Path(row["source_path"]) for name, row in declared["sources"].items()
+    }
+    roots["release_docs"] = Path(declared["release_source_path"])
+    sources = {name: _candidate565_source(root, name) for name, root in roots.items()}
+    if sources["kernel"] != source:
+        raise RuntimeError(
+            "candidate565 target must be the original a33 kernel/reboot source"
+        )
+    production = _rc030_production_inputs(roots["kernel"])
+    if any(_rc030_production_inputs(root) != production for root in roots.values()):
+        raise RuntimeError("candidate565 production/module/build inputs changed")
+    _candidate565_relevant_equalities(roots)
+    # Read fixed Git objects only; this checks the literal reviewed complete
+    # deltas as well as the full checked-out Python/INI payloads above.
+    for before, after, digest in CANDIDATE565_DELTA:
+        raw = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(roots["kernel"]),
+                "diff",
+                "--no-ext-diff",
+                "--binary",
+                "--full-index",
+                sources[before]["revision"],
+                sources[after]["revision"],
+            ]
+        )
+        if hashlib.sha256(raw).hexdigest() != digest:
+            raise RuntimeError("candidate565 reviewed exact delta changed")
+    collections, reports, provenance = {}, [], []
+    for name, row in declared["sources"].items():
+        original = verify_collection_task(
+            Path(row["collection_task"]), sources[name], candidate, registry
+        )
+        if original["terminal_sha256"] != CANDIDATE565_COLLECTIONS[name]:
+            raise RuntimeError("candidate565 original collection seal changed")
+        collections[name] = original
+        tasks = row["matrix_tasks"]
+        expected = CANDIDATE565_ACCEPTED.get(name)
+        if not isinstance(tasks, list) or len(tasks) != (
+            len(expected) if expected is not None else 1
+        ):
+            raise RuntimeError(
+                "candidate565 requires every original batch and one fresh complete kernel22"
+            )
+        seen = set()
+        for task in tasks:
+            _rc030_keys(task, {"path", "terminal_sha256"}, "candidate565 matrix task")
+            report = verify_matrix_task(
+                Path(task["path"]), sources[name], candidate, registry
+            )
+            terminal = report["terminal_sha256"]
+            nodes = [node for values in report["nodes"].values() for node in values]
+            if terminal != task["terminal_sha256"] or terminal in seen:
+                raise RuntimeError(
+                    "candidate565 original task seal changed or repeated"
+                )
+            if expected is not None and expected.get(terminal) != len(nodes):
+                raise RuntimeError(
+                    "candidate565 receipt is not an accepted original complete batch"
+                )
+            if name == "kernel" and (
+                set(report["domains"]) != {"kernel_build"} or len(nodes) != 22
+            ):
+                raise RuntimeError(
+                    "candidate565 fresh kernel evidence must prove the complete kernel22"
+                )
+            seen.add(terminal)
+            reports.append(report)
+            provenance.append(
+                dict(
+                    source=sources[name],
+                    collection_terminal_sha256=original["terminal_sha256"],
+                    terminal_sha256=terminal,
+                    nodes=nodes,
+                    classification="executed-at-target"
+                    if name == "kernel"
+                    else "checked-original-source-carry",
+                )
+            )
+        if expected is not None and seen != set(expected):
+            raise RuntimeError("candidate565 accepted original batch set changed")
+    collection = collections["kernel"]
+    required = {node for nodes in collection["nodes"].values() for node in nodes}
+    if len(required) != 528 or required & HOST_NODES != HOST_NODES:
+        raise RuntimeError(
+            "candidate565 requires the exact 526 ordinary plus two reboot registry"
+        )
+    if any(
+        {domain: set(nodes) for domain, nodes in other["nodes"].items()}
+        != {domain: set(nodes) for domain, nodes in collection["nodes"].items()}
+        for other in collections.values()
+    ):
+        raise RuntimeError(
+            "candidate565 original full registries or parametrized nodes differ"
+        )
+    accounted = accounted_nodes(collection, reports)
+    if accounted != required - HOST_NODES:
+        raise RuntimeError(
+            "candidate565 exact registered ordinary node coverage is incomplete"
+        )
+    for name, root in roots.items():
+        if (
+            _candidate565_source(root, name) != sources[name]
+            or _rc030_production_inputs(root) != production
+        ):
+            raise RuntimeError("candidate565 source changed during admission")
+    return dict(
+        collection=collection,
+        reports=reports,
+        provenance=provenance,
+        source_root=roots["kernel"],
+        release_source=sources["release_docs"],
+        reviewed_delta_sha256=[
+            dict(before=a, after=b, sha256=d) for a, b, d in CANDIDATE565_DELTA
+        ],
+    )
+
+
 def selected_node_remainder(
     manifest: Path, collection, reports, carried, domains: set[str]
 ) -> dict[str, list[str]]:
@@ -1299,6 +1656,7 @@ def finalize_named_runner_release_evidence(
     collection_task: Path | None = None,
     official_kernel_carry: Path | None = None,
     rc030_source_carry: Path | None = None,
+    candidate565_source_join: Path | None = None,
 ) -> dict[str, Any]:
     """Join exact inner reports with the unchanged outer reboot admission reader."""
 
@@ -1315,6 +1673,67 @@ def finalize_named_runner_release_evidence(
         version="mvm " + orchestrator._get_mvm_version(),
     )
     registry = orchestrator._evidence_registry()
+    if candidate565_source_join:
+        if rc030_source_carry or official_kernel_carry or matrix_tasks:
+            raise RuntimeError("candidate565 admission requires only its closed original-source record")
+        joined = verify_candidate565_join(candidate565_source_join, source, candidate, registry)
+        collection = joined["collection"]
+        if (
+            collection_task is None
+            or verify_collection_task(collection_task, source, candidate, registry)
+            != collection
+        ):
+            raise RuntimeError(
+                "candidate565 final collection differs from its pinned target collection"
+            )
+        # Preserve the stock PRE/POST validator and its original candidate,
+        # controller, namespace, native, strict outcome and preservation checks.
+        reboot = orchestrator._require_completed_host_reboot_for_source(
+            host_reboot_task,
+            joined["source_root"],
+        )
+        if source_identity(orchestrator._REPO_ROOT) != source:
+            raise RuntimeError("qualified source changed during finalization")
+        return dict(
+            schema_version=1,
+            passed=True,
+            verdict="PASS",
+            source=source,
+            candidate=candidate,
+            domains={
+                domain: len(nodes)
+                for domain, nodes in collection["nodes"].items()
+                if domain != "host_reboot"
+            },
+            executed_nodes=sorted(
+                node
+                for entry in joined["provenance"]
+                if entry["classification"] == "executed-at-target"
+                for node in entry["nodes"]
+            ),
+            carried_nodes=sorted(
+                node
+                for entry in joined["provenance"]
+                if entry["classification"] == "checked-original-source-carry"
+                for node in entry["nodes"]
+            ),
+            collection_terminal_sha256=collection["terminal_sha256"],
+            matrix_terminal_sha256=[
+                report["terminal_sha256"] for report in joined["reports"]
+            ],
+            host_reboot=dict(
+                reboot,
+                original_source=source,
+                nodes=sorted(HOST_NODES),
+                classification="executed-at-target",
+            ),
+            qa_source_join=dict(
+                profile=CANDIDATE565_PROFILE,
+                provenance=joined["provenance"],
+                release_source=joined["release_source"],
+                reviewed_delta_sha256=joined["reviewed_delta_sha256"],
+            ),
+        )
     if collection_task is None:
         raise RuntimeError(
             "final release requires retained current full-registry node collection"
@@ -1393,6 +1812,7 @@ def main() -> int:
     parser.add_argument("--collection-task", type=Path, required=True)
     parser.add_argument("--official-kernel-carry", type=Path)
     parser.add_argument("--rc030-qa-source-carry", type=Path)
+    parser.add_argument("--candidate565-source-join", type=Path)
     args = parser.parse_args()
     try:
         root = args.qualified_source.resolve(strict=True)
@@ -1401,7 +1821,11 @@ def main() -> int:
                 "qualified source must be an absolute canonical directory"
             )
         tool_root = Path(__file__).resolve().parent.parent
-        if args.rc030_qa_source_carry:
+        if args.candidate565_source_join:
+            if (args.rc030_qa_source_carry or args.official_kernel_carry
+                    or candidate565_target(args.candidate565_source_join) != root):
+                raise RuntimeError("candidate565 requires only its exact pinned a33 qualified source")
+        elif args.rc030_qa_source_carry:
             if args.official_kernel_carry or rc030_candidate507_target(args.rc030_qa_source_carry) != root:
                 raise RuntimeError("rc030 requires only its exact pinned be91 qualified source")
         elif not args.matrix_task:
@@ -1410,12 +1834,13 @@ def main() -> int:
             raise RuntimeError("run the finalizer from the exact qualified source")
         spec = importlib.util.spec_from_file_location(
             "mvmctl_evidence_orchestrator",
-            (tool_root if args.rc030_qa_source_carry else root) / "scripts/run-system-tests.py",
+            (tool_root if args.rc030_qa_source_carry or args.candidate565_source_join else root)
+            / "scripts/run-system-tests.py",
         )
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
-        if args.rc030_qa_source_carry:
+        if args.rc030_qa_source_carry or args.candidate565_source_join:
             # The validation tool is separate from the immutable executed QA tree.
             module._REPO_ROOT = root
         result = finalize_named_runner_release_evidence(
@@ -1425,6 +1850,7 @@ def main() -> int:
             collection_task=args.collection_task,
             official_kernel_carry=args.official_kernel_carry,
             rc030_source_carry=args.rc030_qa_source_carry,
+            candidate565_source_join=args.candidate565_source_join,
         )
     except Exception as exc:
         print(
