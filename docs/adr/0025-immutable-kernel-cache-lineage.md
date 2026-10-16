@@ -1,6 +1,6 @@
 # Immutable Kernel Lineage Across Retired Caches
 
-**Status:** Implementation integrated; root Go verification passed, fresh-candidate installed qualification pending
+**Status:** Implemented; root Go verification, release build and installed successor journey passed
 **Date:** 2026-10-14
 **Amends:** [ADR-0018](0018-isolated-vm-execution-and-snapshot-authority.md) and
 [ADR-0022](0022-explicit-protected-cache-retirement.md), only for immutable kernel succession across caches
@@ -95,6 +95,10 @@ locks. Ordinary CLI import of changed bytes derives a different kernel ID; it do
 refusal. Same-ID changed-byte refusal and cross-filesystem publication/crash guards belong to root behavioral and
 race verification, without public test-only flags. Actual installed succession across distinct filesystems must
 be qualified where available or reported as an explicit gap; a single-filesystem journey does not establish it.
-Full kernel22 remains a separate qualification gate. No fresh CLI release build, installation or installed-system
-qualification has run for this implementation. Earlier candidate evidence predates it and does not qualify the new
-candidate or lineage. Integrated source and root Go verification are not a release PASS.
+The fresh Go 1.26.3 release build and normal inner installation subsequently passed for
+`0.3.0-rc.kernel-details-ce5b0913` (candidate SHA-256 `565be5a6…`). Its installed same-operator successor journey
+passed with strict native/JSON/JUnit accounting and owned cleanup. The complete 22-case kernel batch later passed
+at source `a33e6623` against those unchanged candidate bytes. Both are included with their original source bindings
+in the [528-node evidence join](../../tests/system/COVERAGE_MATRIX.md#v030-release-security-qualification-overlay).
+These results do not imply distinct-filesystem kernel succession or exhaustive crash qualification; the branch
+retirement journey in ADR-0023 is a different contract. Remote CI and the final release decision remain separate.

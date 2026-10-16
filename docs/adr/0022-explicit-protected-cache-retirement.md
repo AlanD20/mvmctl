@@ -1,6 +1,6 @@
 # Explicit Protected Cache Retirement
 
-**Status:** Accepted; implementation integrated, installed-candidate qualification pending
+**Status:** Accepted; implemented, installed public cleanup journeys passed
 **Date:** 2026-10-10
 **Amends:** [ADR-0018](0018-isolated-vm-execution-and-snapshot-authority.md), only for explicit cleanup of a retired protected store
 
@@ -71,13 +71,14 @@ respect that binding rather than creating a new cache for each use of the same r
 [ADR-0025](0025-immutable-kernel-cache-lineage.md), accepted as a v0.3.0 design on 2026-10-14, amends only
 that immutable-kernel cross-cache restriction. Fresh kernel logical schema 2 may publish an identical-byte successor
 after synchronized old kernel removal and completed old-store retirement, preserving old authority and allocating
-a global monotonic generation. Implementation is integrated and root-Go-verified; fresh-candidate and installed
-qualification remain pending. Existing schema 1 is not adopted, and mutable backing and cleanup authority are unchanged.
+a global monotonic generation. Implementation, root Go verification and the installed successor journey passed;
+see ADR-0025 for qualification scope. Existing schema 1 is not adopted, and mutable backing and cleanup authority
+are unchanged.
 
 [ADR-0023](0023-protected-branch-authority-layout.md) defines a fresh-layout extension for permanent snapshot locks
 and volume-removal receipts. Signed `b254f010` implements that extension and passes focused root behavior/race
-checks; complete integration and installed qualification remain pending. Existing branch layouts still refuse
-retirement. The extension does not migrate them or relax immutable bindings.
+checks; installed shared- and distinct-filesystem retirement journeys subsequently passed as recorded there.
+Existing branch layouts still refuse retirement. The extension does not migrate them or relax immutable bindings.
 
 ## Alternatives
 
@@ -103,6 +104,10 @@ qualified. Clean `752110fa` subsequently passed complete pinned Go CI, the full 
 `mvmctl-030-test` passed with exact original-state preservation except the authorized canonical replacement;
 candidate `0.3.0-rc.cache-752110fa` has SHA-256
 `ea7bad330e625ff6374e34e6c65604266e93d8c524c702945e5e7fa4d74c87f5`.
-Installed public cleanup qualification remains pending; these Go/build/install gates do not prove it.
+Installed public cleanup subsequently passed through the shared- and distinct-filesystem journeys recorded in
+ADR-0023 and the candidate-bound kernel successor journey recorded in ADR-0025. The
+[current coverage checkpoint](../../tests/system/COVERAGE_MATRIX.md#v030-release-security-qualification-overlay)
+records the accepted source-bound evidence join and remaining fault-coverage limits; it is not exhaustive proof
+of every interruption or namespace race above.
 Focused Go checks and installed-candidate acquisition/teardown qualification run only in the approved disposable
 runner. Source implementation and internal tests alone do not qualify the public cleanup journey or the release.
