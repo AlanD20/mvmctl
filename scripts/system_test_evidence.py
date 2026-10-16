@@ -1700,6 +1700,8 @@ def finalize_named_runner_release_evidence(
             verdict="PASS",
             source=source,
             candidate=candidate,
+            candidate_producer_revision="ce5b09131d2bb58d30fca100edf46648a6fbc4bd",
+            verifier_source=source_identity(Path(__file__).resolve().parent.parent),
             domains={
                 domain: len(nodes)
                 for domain, nodes in collection["nodes"].items()
@@ -1730,7 +1732,7 @@ def finalize_named_runner_release_evidence(
             qa_source_join=dict(
                 profile=CANDIDATE565_PROFILE,
                 provenance=joined["provenance"],
-                release_source=joined["release_source"],
+                release_checkpoint=joined["release_source"],
                 reviewed_delta_sha256=joined["reviewed_delta_sha256"],
             ),
         )

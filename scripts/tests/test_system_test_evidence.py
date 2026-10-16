@@ -869,6 +869,9 @@ def test_candidate565_finalizer_requires_reboot_closure_and_reports_original_sou
     }
     assert result["host_reboot"]["nodes"] == sorted(evidence.HOST_NODES)
     assert result["host_reboot"]["original_source"] == source
+    assert result["candidate_producer_revision"] == "ce5b09131d2bb58d30fca100edf46648a6fbc4bd"
+    assert result["qa_source_join"]["release_checkpoint"] == packet["sources"]["release_docs"]
+    assert "verifier_source" in result
     assert {
         entry["source"]["revision"] for entry in result["qa_source_join"]["provenance"]
     } == {packet["sources"][name]["revision"] for name in packet["nodes"]}
