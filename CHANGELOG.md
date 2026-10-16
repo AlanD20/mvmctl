@@ -12,8 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added explicit same-operator identical-kernel reimport into a fresh active cache after terminal kernel removal
   and completed old-store retirement, preserving predecessor records, digests, locks and monotonic generations.
   Requires fresh kernel logical schema 2; existing schema 1 is not adopted and mutable backing rules are unchanged.
-  Coherent Go/release build, normal installation and the installed identical-kernel successor/reimport-and-boot
-  journey passed inside QA; its original receipt is included in the accepted candidate-bound evidence join.
   See [kernel lineage](docs/adr/0025-immutable-kernel-cache-lineage.md).
 - Added mandatory Jailer launch with isolated per-VM system identities, private API/vsock sockets, and
   authenticated root-brokered control. Create, start, reboot, and restore verify the selected resources and live
@@ -217,86 +215,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limitations and qualification
 
-- Added the closed `--candidate565-source-join` evidence profile, preserving original source/receipt bindings
-  and separate qualified-source, verifier and documentation-checkpoint provenance. It requires fresh complete
-  kernel22 and stock reboot proof for exact 526 ordinary plus two reboot-node coverage; it is not a generic waiver.
-  All 22 focused pure helper checks passed inside QA. The actual finalizer subsequently exited zero with PASS
-  for 504 source-bound original cases, 22 fresh kernel cases and both stock reboot phases; this is a verified
-  mixed-source join, not one full latest-HEAD runtime invocation or final release approval.
-  See [final evidence join](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#63-join-verified-receipts-read-only).
-- Kept v0.3.0 unreleased, with remote CI and final release approval still open. The current installed x86_64 candidate
-  `0.3.0-rc.kernel-details-ce5b0913` (`565be5a6`, producer `ce5b0913`) has all 526 ordinary cases accepted:
-  T1 238, T2 193 and T3 95. Of these, 344, including fresh environments (4), retain frozen
-  QA source `7f49cd0a`/tree `3bd36f03`;
-  corrected policies (3), Jailer/cgroup (20) and logs (11) bind `0574702f`/tree `6650e09e`.
-  SSH (11), VM data persistence (1), volume (37) and VM lifecycle (69) bind `4764bb08`/tree `751dd9c5`,
-  collection receipt `38ede600`. Isolated nested VMs (8) bind `c4acd1c1`/tree `d741eeff`, collection receipt
-  `1938de73`, with strict native-zero JSON/JUnit proof in 870.57 seconds, zero other outcomes and checked
-  owned cleanup/mirror preservation. The 1,800-second aggregate budget reflects measured fixture-cycle cost;
-  per-command limits and assertions remain unchanged. Kernel builds (22) bind `a33e6623`/tree `32cb1a84`,
-  collection receipt `285d7ff9`, with strict native-zero JSON/JUnit proof in 1,142.89 seconds (about 19 minutes),
-  zero other outcomes, checked owned cleanup and the borrowed mirror unattached. Original source/candidate
-  and report hashes were preserved. The 4764, c4 and a33 sources collected the same 528 nodes:
-  526 ordinary and two reboot phases. Collection itself adds no passing credit. Both actual reboot phases
-  now passed at a33 with a changed host boot, strict singleton reports, checked owned cleanup and preservation.
-  The complete 528/528 evidence join passed; execution-source bindings remain literal.
-  QA corrections give initial agent connections explicit startup budgets; public default timeouts, production/build
-  inputs and installed candidate bytes are unchanged. The passing 20-case Jailer/cgroup slice includes actual nested-QA
-  exhaustion/saturation scenarios, not a universal host/ancestor OOM guarantee or diagnosed production feature fix.
-  Current Go/build/inner-install and reusable-base receipts remain accepted. Earlier interrupted nested Jailer and logs
-  attempts add no credit: the old enclosing controller's finite `memory.max=6576668672` killed the named QA VM
-  before qualifying reports. Successful later tasks do not relabel earlier failed or interrupted tasks.
-  This does not change the candidate's pressure-only production policy. The accepted union is not one full
-  current-source 528-node invocation. Verifier source `1122be66`, qualified source `a33e6623` and documentation
-  checkpoint `df00fc57` remain distinct. Remote CI, aarch64 runtime and final release approval remain open;
-  see the [coverage matrix](tests/system/COVERAGE_MATRIX.md).
-- The explicit QA host-reboot namespace contract passed actual PRE/reboot/POST on a33 and the unchanged candidate.
-  Both strict phase nodes passed with zero other outcomes; POST proved stale-running reconciliation, restart,
-  retained-marker exec, inventory preservation and typed cleanup. Earlier failed attempts remain failed.
-  The accepted mixed-source join does not qualify a different candidate/source profile or declare the release passed.
-- Retained historical qualification for the earlier candidate
-  `0.3.0-rc.source-publication-de46e04f`, which passed candidate-bound normal reusable-base preparation and
-  source-bound runtime receipts accepted a historical aggregate 525 of 525 ordinary Python cases plus both actual
-  host-reboot cases.
-  Complete accepted batches include standard T1 (169), T1 cache (25), standard T2 (191), and T3 copy (15),
-  environment (22), snapshot-load (8), snapshot-rootfs independence (6), volume-hotplug (10), fresh environments (4),
-  GuestFS (1), isolated nested VMs (8), T1 images (44), and kernel builds (22). These passes retain their original
-  source bindings; they are not a strict joined release PASS. Source-carry verification, joined release
-  evidence, remote CI, and final approval remain release gates. Earlier focused results bind only their tested
-  inputs; see the [coverage matrix](tests/system/COVERAGE_MATRIX.md) for source and candidate identities.
-- Retained the QA-source qualification boundary: 459 ordinary cases and both reboot cases remain bound to
-  the original source; the 44 image and 22 kernel cases passed on their respective newer QA-only sources with
-  unchanged candidate bytes.
-  Earlier receipts retain their original bindings; strict joined qualification across mixed QA sources remains
-  unproved, and general receipt carry across those sources is unsupported. The later public image-runner budget
-  update passed eight focused behavioral checks and the complete 441-test orchestrator unit module on an exact
-  two-file overlay; clean release-source qualification and a full stock-runner journey remain unproved.
-  The earlier kernel batch remains failed after a teardown configuration-preservation error; the later complete
-  22-case batch passed with typed cleanup and original-state preservation. Source-carry tooling for the exact tested
-  candidate is implemented and unit-qualified; its strict default is unchanged, and actual compatibility/provenance
-  verification and the final join remain open. Reboot carry requires unchanged complete reboot-source inputs;
-  fixture/network changes prevent carrying the historical reboot proof to the current target, which needs its own
-  actual reboot journey. The accepted
-  [kernel-lineage implementation](docs/adr/0025-immutable-kernel-cache-lineage.md) passed coherent Go/release-build
-  gates and normal installation inside QA as `0.3.0-rc.kernel-lineage-4af8db39`. At that checkpoint, its runtime
-  matrix, actual reboot, final join and approval remained pending. Those historical receipts and the closed
-  `507110b0` carry profile do not qualify the current `565be5a6` candidate. See
-  [runner budgets](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#45-limit-parallel-workers).
-- Retained the observed Firecracker 1.16.2 live PCI detach/reattach failure: the disk did not reappear after BAR relocation.
-  The current matching Firecracker/Jailer 1.17.0 pair passed the complete ten-case volume-hotplug suite,
-  eight snapshot-load cases, and six snapshot-rootfs independence cases. Attachment readiness detects failure
-  but cannot repair it; those accepted suites do not qualify the remaining matrix.
-- Retained the unexplained original exec and cache transient failures. Later complete accepted batches do not
-  establish their causes or a diagnosed production fix; partial failed batches and diagnostic singletons add no credit.
-- Deferred aarch64 runtime qualification pending suitable hardware; cross-compilation does not establish runtime support.
-- Retained host/ancestor/global OOM risk under pressure-only memory control. Bounded pressure/guest-exhaustion
-  observations neither attribute the original saturation incident nor guarantee survival under arbitrary pressure.
-- Retained failure visibility for ambiguous ownership, interrupted effects, and durability/cleanup errors.
-  Unknown state is preserved rather than adopted or deleted. Snapshot projection recovery may require the emitted
-  full ID; VM image import is a root-disk copy, not an application-consistent RAM/data-volume snapshot.
-- Kept release-derived device budgets, the 10,000,000-byte complete vmstate limit, and trusted captured-RAM length.
-  No new per-data-volume or aggregate storage quota is promised; operators must budget capture, restore, and recovery
-  space. See [resource-limit decisions](docs/improvements/volume-snapshot-resource-limits.md).
+- Candidate-bound x86_64 QA passed all 528 registered nodes (526 ordinary plus actual reboot PRE/POST), and the
+  closed candidate565 evidence join exited zero with PASS. Original source bindings remain literal; this was
+  not one full latest-HEAD invocation or a generic source-carry waiver. See the
+  [coverage checkpoint and proof identifiers](tests/system/COVERAGE_MATRIX.md#v030-release-security-qualification-overlay).
+- v0.3.0 remains unreleased. Remote CI, aarch64 runtime qualification and final release approval remain open.
+- Original exec/cache transients and the original saturation incident remain unexplained. Bounded pressure/guest
+  exhaustion passes neither attribute those failures nor guarantee survival under arbitrary host/ancestor/global OOM.
+- The required matching Firecracker/Jailer 1.17.0 pair passed the selected hotplug/snapshot journeys. Attachment
+  readiness detects unusable devices; it cannot repair the BAR relocation failure observed with 1.16.2.
+- Ambiguous ownership, interrupted effects and durability/cleanup errors remain explicit rather than authorizing
+  adoption or deletion. Snapshot projection recovery may require the emitted full ID; VM image import is a root-disk
+  copy, not an application-consistent RAM/data-volume snapshot.
+- Release-derived device budgets, the 10,000,000-byte complete vmstate limit and trusted captured-RAM length remain.
+  No per-data-volume/aggregate quota or physical-space reservation is promised; operators must budget capture,
+  restore and recovery space. See [resource-limit decisions](docs/improvements/volume-snapshot-resource-limits.md).
+- Registered-node completion does not establish every authority-abuse, replacement-race, policy fault, cancellation
+  or failure-recovery case. The coverage matrix retains those limits and all command-level Partial/Missing entries.
 
 ## [0.2.0] - 2026-07-10
 
