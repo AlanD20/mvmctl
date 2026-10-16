@@ -17,7 +17,8 @@ removed, or when test coverage changes.
 
 ## v0.3.0 release-security qualification overlay
 
-**Current qualification checkpoint (2026-10-16):** v0.3.0 remains unreleased and not release-qualified.
+**Current qualification checkpoint (2026-10-16):** the candidate-bound 528/528 evidence join passed.
+v0.3.0 remains unreleased; remote CI, aarch64 runtime qualification and final release approval remain open.
 The installed x86_64 candidate is `0.3.0-rc.kernel-details-ce5b0913`, produced from `ce5b0913`, SHA-256
 `565be5a66432788f405e64337e6902a573da0dafe9efd0f4ef46480c5593060a`.
 Of the accepted ordinary runtime cases, 344, including fresh environments (4), bind frozen source
@@ -38,7 +39,7 @@ Collection itself executed no runtime fixtures and does not rebind accepted rece
 | Tier 1 | 238 | 0 |
 | Tier 2 | 193 | 0 |
 | Tier 3 | 95 | 0 |
-| Actual host reboot | 0 | 2 |
+| Actual host reboot | 2 | 0 |
 
 The **526 accepted ordinary cases** comprise all Tier 1 and Tier 2 domains: Tier 2 kernel successor (1),
 console (4), exec (12), full journeys (15), GuestFS (1), host administration (3), nftables (5), policies (3),
@@ -55,23 +56,34 @@ function-owned cleanup remain unchanged. Earlier failed attempts retain their fa
 The complete kernel-build suite passed in 1,142.89 seconds (about 19 minutes), with strict 22-node JSON/JUnit
 accounting, zero other outcomes and checked cleanup leaving no owned VMs/environments and the borrowed mirror
 unattached. Source/candidate and literal report hashes were preserved; earlier failed attempts remain failed.
-All 526 ordinary cases are accepted; both actual host-reboot phases remain unaccepted and the final join has not run.
-The 526/528 accepted union is not one full current-source pass.
+Both actual host-reboot phases passed at a33 on the unchanged candidate: host boot changed from
+`73615c91-fa9b-4c4a-b7e0-a80d8e74f4e4` to `d2d0adee-3039-4903-b35c-d56dc9345c0f`.
+Each phase has native exit zero, one strict JSON/JUnit node and zero other outcomes; POST proves stale-running
+reconciliation, restart/retained-marker exec, inventory preservation and typed owned cleanup.
+Temporary QA read authority was removed afterward without changing production authorization.
+POST terminal SHA-256: `f0783c8e9508fc60a2c4042f62090b23733f21b20a97060e04876e3a64a8c4ad`.
+All 526 ordinary plus two reboot cases are accepted. The finalizer exited zero with `verdict: PASS`, verifying
+the nonoverlapping union of 504 original-source cases, 22 fresh a33 kernel cases and two stock a33 reboot nodes.
+Verifier source `1122be660dbf112c172bcf16b33ee73cac9d9c9f`, qualified source a33 and documentation checkpoint
+`df00fc57f0a21d2209d84ec34685f125026b5f96` remain distinct; no receipt is relabeled as a latest-HEAD execution.
+Finalizer output SHA-256: `b63c505097e7e7699b41b3c4d78f8efe00f8b4ce48ad1f247f00d99ee3f981c0`.
+This is a verified mixed-source 528/528 join, not one full current-source runtime invocation or final release approval.
 
 The corrected QA source gives initial guest-agent connections explicit startup budgets through the existing CLI
 retry behavior. Public default timeouts and production/build inputs are unchanged; these are test corrections,
 not diagnosed production feature fixes. The accepted 20-case Jailer/cgroup slice includes actual guest memory
 exhaustion and near-saturation scenarios in nested QA; it does not guarantee survival under every host/ancestor OOM.
 
-Reboot-namespace QA source `092cd5c4`, documented in `738d8665`, passed 26 focused correction checks and
-collected both phase nodes; no fresh PRE/reboot/POST journey passed. Ordinary receipts retain their respective
-`7f49cd0a`, `0574702f`, `4764bb08`, `c4acd1c1` or `a33e6623` bindings. This accepted union and unchanged-input
-equivalence do not approve a carry profile, mixed-source final join or release PASS. Earlier interrupted nested Jailer and logs attempts produced
+The explicit reboot namespace contract is qualified by the actual a33 PRE/reboot/POST journey above.
+Ordinary receipts retain their respective `7f49cd0a`, `0574702f`, `4764bb08`, `c4acd1c1` or `a33e6623` bindings.
+The closed candidate565 profile admits only the exact checked sources/artifact/seals, not general source carry or
+a final release PASS. Earlier interrupted nested Jailer and logs attempts produced
 no qualifying reports after the old enclosing controller's
 finite `memory.max=6576668672` killed the named QA VM. Neither attempt adds credit or changes the candidate's
 pressure-only production policy. Successful later tasks do not relabel earlier failed or interrupted tasks.
 Current Go/build/inner-install and reusable-base receipts remain accepted;
-actual reboot, final source/provenance join, final public docs, remote CI and final approval remain open. Historical candidate
+the candidate-bound runtime union and final source/provenance join are now closed. Remote CI, aarch64 runtime
+qualification and final release approval remain open. Historical candidate
 receipts and the older closed carry profile do not qualify this candidate.
 
 **Historical source-publication qualification:**
@@ -2915,13 +2927,13 @@ Specific legacy conflicts that must be rewritten before release:
 | `vm create` with `--nested-virt` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — cpu-config in Firecracker JSON, boot args validated |
 | `vm create` with `--cpu-template` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — merged cpu-config in Firecracker JSON |
 | `vm create` with `--no-nested-virt` | ✅ Deep | `vm/test_vm_nested_isolated.py` | `TestNestedIsolated` | L3 — no cpu-config, no nested boot args |
-| `vm ls` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMStateTransitions` | Root-authority running/stopped projection and confirmed external Firecracker exit (`crashed`) passed in focused installed-candidate cases. Guest-initiated exit and complete host-reboot qualification remain open. |
+| `vm ls` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py`, `host/test_host_reboot.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMStateTransitions`, `test_host_reboot_post` | Root-authority running/stopped projection and confirmed external Firecracker exit (`crashed`) passed. Actual host-reboot stale-running reconciliation and restart also passed. Guest-initiated exit remains open. |
 | `vm ls --json` | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_listing_json[ls]`, `TestVMStateTransitions::test_crashed_vm_status_and_restart` | Installed-candidate L2 proves schema-1 running identity/resource fields and `crashed` projection after pidfd-confirmed exit. Guest-initiated exit remains open. |
 | `vm ls --json` empty | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListEmpty` | Installed-candidate L2 passed a read-only versioned empty-list assertion on the clean runner; no global deletion. |
 | `vm ps` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_listing_text[ps]` | Installed-candidate L2 passed actual human output containing the exact VM name, IPv4, and headers. |
-| `vm ps --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMStateTransitions` | Focused installed-candidate cases prove inclusion while running and after restart, exclusion after CLI stop and confirmed external Firecracker exit. Guest-initiated exit and complete host-reboot qualification remain open. |
+| `vm ps --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py`, `host/test_host_reboot.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMStateTransitions`, `test_host_reboot_post` | Installed cases prove inclusion while running and after restart, exclusion after CLI stop and confirmed external Firecracker exit. Actual host-reboot stale-state exclusion and restart passed. Guest-initiated exit remains open. |
 | `vm inspect <name>` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py` | `TestVMListInspect::test_inspect_tree`, `TestNetworklessJailerLifecycle` | Installed-candidate L2 passed the actual text route with exact name, full ID, IPv4, and running status. Root-brokered cgroup detail is qualified through `--json` below. |
-| `vm inspect <name> --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py`, `vm/test_cgroup.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMCgroupEnvelope`, `TestVMStateTransitions` | Focused installed-candidate cases prove running/stopped/running and confirmed-exit `crashed` projection, plus root-brokered cgroup limits/usage. Guest-initiated exit and complete host-reboot qualification remain open. |
+| `vm inspect <name> --json` | 🟡 Partial | `vm/test_vm_lifecycle.py`, `vm/test_jailer.py`, `vm/test_cgroup.py`, `host/test_host_reboot.py` | `TestVMListInspect`, `TestNetworklessJailerLifecycle`, `TestVMCgroupEnvelope`, `TestVMStateTransitions`, `test_host_reboot_post` | Installed cases prove running/stopped/running and confirmed-exit `crashed` projection, plus root-brokered cgroup limits/usage. Actual host-reboot reconciliation and same-ID restart passed. Guest-initiated exit remains open. |
 | `vm inspect` by IP | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_inspect_json[ipv4]` | Installed-candidate L2 passed the direct IPv4 selector with exact VM ID, allocation, and networking readback. |
 | `vm inspect` by ID prefix | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect::test_inspect_json[id_prefix]` | Installed-candidate L2 passed the direct unique ID-prefix selector with exact full-ID readback; ambiguous-prefix behavior is not proved here. |
 | `vm start` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions` | L3 — PID alive in /proc after start |
@@ -2948,7 +2960,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `volume detach` on running | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L1 — non-zero |
 | `volume detach` nonexistent | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L1 — non-zero |
 | vm rm with attached volume | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L2 — status=available after rm |
-| Crashed firecracker recovery | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMStateTransitions::test_crashed_vm_status_and_restart` | Installed-candidate L2 proves exact pidfd-bound crash/exit, public ls/ps/inspect reconciliation, typed stop/start, vsock exec, and checked removal. Guest poweroff and complete host-reboot qualification remain open. |
+| Crashed firecracker recovery | 🟡 Partial | `vm/test_vm_lifecycle.py`, `host/test_host_reboot.py` | `TestVMStateTransitions::test_crashed_vm_status_and_restart`, `test_host_reboot_post` | Installed-candidate L2 proves exact pidfd-bound crash/exit, public ls/ps/inspect reconciliation, typed stop/start, vsock exec, and checked removal. Separate actual host-reboot recovery passed; guest poweroff remains open. |
 | Config chain precedence | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_config_chain_precedence` | L2 — guest inherits configured two CPUs, then explicit one-CPU CLI value wins; prior override or override absence restored exactly. |
 | Volume persists stop/start | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L3 — SSH in, check /dev/vdb |
 | Volume mountable in guest | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMVolumeIntegration` | L3 — mkfs.ext4 + mount + write + read |
@@ -3329,7 +3341,7 @@ Specific legacy conflicts that must be rewritten before release:
 | `run nocloudnet serve --help` and missing required flags | ⚡ Shallow | `run/test_run.py` | `TestRunEntryPoints` | L2 — installed CLI help and required-identity rejection |
 | `run console relay --help` and missing required flags | ⚡ Shallow | `run/test_run.py` | `TestRunEntryPoints` | L2 — installed CLI help and required-identity rejection |
 | Retired `run provision` absent | ⚡ Shallow | `run/test_run.py` | `TestRunEntryPoints::test_run_help` | L2 — public command listing omits the removed route |
-| Jailer launch/cleanup through public VM lifecycle | 🟡 Partial | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle` | The full 13-case Jailer module passed in the bridge-capable named runner, including managed launch, isolated process identity, stop/start/reboot, and networkless restore. Host-reboot and broader failure-path reconciliation remain open. |
+| Jailer launch/cleanup through public VM lifecycle | 🟡 Partial | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle` | The full 13-case Jailer module passed in the bridge-capable named runner, including managed launch, isolated process identity, stop/start/reboot, and networkless restore. The separate actual host-reboot journey passed; broader failure-path reconciliation remains open. |
 
 > Internal service subprocesses are tested indirectly through VM operations (console relay, nocloudnet HTTP, volume provisioning).
 
@@ -3352,7 +3364,7 @@ Specific legacy conflicts that must be rewritten before release:
 | Stress create/destroy | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestStressCreateDestroy` | L2: 5 sequential create→destroy cycles |
 | Export/import config journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestExportImport` | L2: inspect --json schema verification |
 | Concurrent VM creation | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestConcurrentVMCreation` | Installed-candidate L2: ten distinct creations in concurrent cohorts of 3/3/3/1, running-ID convergence and keyed SSH for every VM, checked cohort removal before reuse. This does not prove ten simultaneous live guests. |
-| Canonical Jailer lifecycle | 🟡 Partial | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle` | Canonical cases are selected once in the Jailer domain, not re-exported by full_journeys. The full 13-case Jailer module passed in the bridge-capable named runner, covering managed launch/stop/start/reboot and networkless identity, volume, snapshot, and missing-release checks. Host-reboot and broader failure-path reconciliation remain open. |
+| Canonical Jailer lifecycle | 🟡 Partial | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestNetworklessJailerLifecycle` | Canonical cases are selected once in the Jailer domain, not re-exported by full_journeys. The full 13-case Jailer module passed in the bridge-capable named runner, covering managed launch/stop/start/reboot and networkless identity, volume, snapshot, and missing-release checks. The separate actual host-reboot journey passed; broader failure-path reconciliation remains open. |
 | Typed cgroup-v2 envelope | 🟡 Partial | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | Installed-candidate L2: protected policy-v2 inspection, direct-read denial and sustained measured-pressure survival with host swap absent/present; complete cgroup module passed twice with exact cleanup. Literal memory.max=max and unchanged other controls. Snapshot policy, controller-unavailable admission, guest allocation failure, host/global OOM safety and broader identity cleanup remain unqualified. |
 
 ---

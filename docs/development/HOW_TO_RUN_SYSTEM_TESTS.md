@@ -834,8 +834,12 @@ python3 scripts/system_test_evidence.py \
 
 Do not combine this option with `--matrix-task` or either historical carry option. Output distinguishes the
 qualified `source`, `verifier_source`, candidate producer revision and `qa_source_join.release_checkpoint`.
-The 22 focused pure helper checks passed inside QA; the actual final join has not run. Those checks do not
-qualify missing runtime evidence, establish a joined PASS, or declare the release passed.
+The 22 focused pure helper checks passed inside QA. The actual candidate565 finalizer subsequently exited zero
+with `verdict: PASS`, verifying 504 original-source cases, 22 fresh a33 kernel cases and both stock a33 reboot phases.
+The literal output SHA-256 is `b63c505097e7e7699b41b3c4d78f8efe00f8b4ce48ad1f247f00d99ee3f981c0`.
+That result records verifier `1122be66`, qualified source a33 and checkpoint `df00fc57` separately. It is a
+candidate-bound mixed-source evidence join, not one full latest-HEAD runtime invocation; remote CI and final release
+approval remain separate, and aarch64 runtime is not qualified.
 
 ---
 

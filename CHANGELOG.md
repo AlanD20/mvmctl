@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added explicit same-operator identical-kernel reimport into a fresh active cache after terminal kernel removal
   and completed old-store retirement, preserving predecessor records, digests, locks and monotonic generations.
   Requires fresh kernel logical schema 2; existing schema 1 is not adopted and mutable backing rules are unchanged.
-  Coherent Go/release build and normal installation inside the QA runner passed; runtime qualification remains pending.
+  Coherent Go/release build, normal installation and the installed identical-kernel successor/reimport-and-boot
+  journey passed inside QA; its original receipt is included in the accepted candidate-bound evidence join.
   See [kernel lineage](docs/adr/0025-immutable-kernel-cache-lineage.md).
 - Added mandatory Jailer launch with isolated per-VM system identities, private API/vsock sockets, and
   authenticated root-brokered control. Create, start, reboot, and restore verify the selected resources and live
@@ -219,9 +220,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the closed `--candidate565-source-join` evidence profile, preserving original source/receipt bindings
   and separate qualified-source, verifier and documentation-checkpoint provenance. It requires fresh complete
   kernel22 and stock reboot proof for exact 526 ordinary plus two reboot-node coverage; it is not a generic waiver.
-  All 22 focused pure helper checks passed inside QA, but the actual final join has not run and adds no runtime
-  qualification credit. See [final evidence join](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#63-join-verified-receipts-read-only).
-- Kept v0.3.0 unreleased and not release-qualified. The current installed x86_64 candidate
+  All 22 focused pure helper checks passed inside QA. The actual finalizer subsequently exited zero with PASS
+  for 504 source-bound original cases, 22 fresh kernel cases and both stock reboot phases; this is a verified
+  mixed-source join, not one full latest-HEAD runtime invocation or final release approval.
+  See [final evidence join](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#63-join-verified-receipts-read-only).
+- Kept v0.3.0 unreleased, with remote CI and final release approval still open. The current installed x86_64 candidate
   `0.3.0-rc.kernel-details-ce5b0913` (`565be5a6`, producer `ce5b0913`) has all 526 ordinary cases accepted:
   T1 238, T2 193 and T3 95. Of these, 344, including fresh environments (4), retain frozen
   QA source `7f49cd0a`/tree `3bd36f03`;
@@ -234,8 +237,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collection receipt `285d7ff9`, with strict native-zero JSON/JUnit proof in 1,142.89 seconds (about 19 minutes),
   zero other outcomes, checked owned cleanup and the borrowed mirror unattached. Original source/candidate
   and report hashes were preserved. The 4764, c4 and a33 sources collected the same 528 nodes:
-  526 ordinary and two reboot phases. Collection itself adds no passing credit. Both actual reboot cases
-  remain unaccepted, and the actual final join has not run.
+  526 ordinary and two reboot phases. Collection itself adds no passing credit. Both actual reboot phases
+  now passed at a33 with a changed host boot, strict singleton reports, checked owned cleanup and preservation.
+  The complete 528/528 evidence join passed; execution-source bindings remain literal.
   QA corrections give initial agent connections explicit startup budgets; public default timeouts, production/build
   inputs and installed candidate bytes are unchanged. The passing 20-case Jailer/cgroup slice includes actual nested-QA
   exhaustion/saturation scenarios, not a universal host/ancestor OOM guarantee or diagnosed production feature fix.
@@ -243,13 +247,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attempts add no credit: the old enclosing controller's finite `memory.max=6576668672` killed the named QA VM
   before qualifying reports. Successful later tasks do not relabel earlier failed or interrupted tasks.
   This does not change the candidate's pressure-only production policy. The accepted union is not one full
-  current-source 528-node pass. Final source/provenance join, final public docs, remote CI and approval remain open;
+  current-source 528-node invocation. Verifier source `1122be66`, qualified source `a33e6623` and documentation
+  checkpoint `df00fc57` remain distinct. Remote CI, aarch64 runtime and final release approval remain open;
   see the [coverage matrix](tests/system/COVERAGE_MATRIX.md).
-- The explicit QA host-reboot namespace contract (`092cd5c4`, documentation `738d8665`) passed 26 focused
-  correction checks and both phase nodes collect, but its fresh PRE/reboot/POST journey has not been qualified.
-  Ordinary receipts retain their respective source bindings. The accepted union and unchanged-input equivalence
-  do not approve receipt carry, a final mixed-source join or a release PASS. Historical runtime receipts do not qualify
-  this change.
+- The explicit QA host-reboot namespace contract passed actual PRE/reboot/POST on a33 and the unchanged candidate.
+  Both strict phase nodes passed with zero other outcomes; POST proved stale-running reconciliation, restart,
+  retained-marker exec, inventory preservation and typed cleanup. Earlier failed attempts remain failed.
+  The accepted mixed-source join does not qualify a different candidate/source profile or declare the release passed.
 - Retained historical qualification for the earlier candidate
   `0.3.0-rc.source-publication-de46e04f`, which passed candidate-bound normal reusable-base preparation and
   source-bound runtime receipts accepted a historical aggregate 525 of 525 ordinary Python cases plus both actual
