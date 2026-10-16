@@ -11,7 +11,7 @@ import (
 )
 
 func newBinary(id, typ, version string) *model.BinaryItem {
-	return &model.BinaryItem{ID: id, Type: typ, Version: version, IsPresent: true}
+	return &model.BinaryItem{ID: id, Type: typ, Architecture: "x86_64", Version: version, IsPresent: true}
 }
 
 func seedBin(t *testing.T, repo *testutil.BinaryRepo, b *model.BinaryItem) {
@@ -42,7 +42,7 @@ func TestBinaryRepo_FindByPrefix(t *testing.T) {
 	seedBin(t, repo, newBinary("abc-1", "firecracker", "1.15.0"))
 	seedBin(t, repo, newBinary("xyz-9", "jailer", "1.15.0"))
 
-	got, err := repo.FindByPrefix(ctx, "abc")
+	got, err := repo.FindByPrefix(ctx, "abc", "x86_64")
 	require.NoError(t, err)
 	assert.Len(t, got, 1)
 }
@@ -52,8 +52,8 @@ func TestBinaryRepo_SetDefault(t *testing.T) {
 	seedBin(t, repo, newBinary("b-1", "firecracker", "1.15.0"))
 	seedBin(t, repo, newBinary("b-2", "firecracker", "1.14.0"))
 
-	require.NoError(t, repo.SetDefault(ctx, "firecracker", "b-1"))
-	found, _ := repo.GetDefault(ctx, "firecracker")
+	require.NoError(t, repo.SetDefault(ctx, "firecracker", "x86_64", "b-1"))
+	found, _ := repo.GetDefault(ctx, "firecracker", "x86_64")
 	require.NotNil(t, found)
 	assert.Equal(t, "b-1", found.ID)
 
@@ -63,7 +63,7 @@ func TestBinaryRepo_ListAll(t *testing.T) {
 	repo := testutil.NewBinaryRepo()
 	seedBin(t, repo, newBinary("b-1", "firecracker", "1.15.0"))
 
-	got, err := repo.ListAll(ctx)
+	got, err := repo.ListAll(ctx, "x86_64")
 	require.NoError(t, err)
 	assert.Len(t, got, 1)
 }
@@ -74,11 +74,11 @@ func TestBinaryRepo_ListByType(t *testing.T) {
 	seedBin(t, repo, newBinary("b-2", "firecracker", "1.14.0"))
 	seedBin(t, repo, newBinary("b-3", "jailer", "1.15.0"))
 
-	fc, err := repo.ListByType(ctx, "firecracker")
+	fc, err := repo.ListByType(ctx, "firecracker", "x86_64")
 	require.NoError(t, err)
 	assert.Len(t, fc, 2)
 
-	j, err := repo.ListByType(ctx, "jailer")
+	j, err := repo.ListByType(ctx, "jailer", "x86_64")
 	require.NoError(t, err)
 	assert.Len(t, j, 1)
 }

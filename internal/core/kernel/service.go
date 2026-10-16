@@ -25,6 +25,7 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 
 	"mvmctl/internal/assets"
@@ -88,20 +89,87 @@ func applyConfigOption(ctx context.Context, configScriptPath, kernelDir, option,
 
 // Service provides stateless kernel operations.
 type Service struct {
-	repo     Repository
-	cacheDir string
-	dl       *download.Downloader
-	resolver *download.HttpDirVersionResolver
-	specs    map[string]*model.KernelSpec
+	repo               Repository
+	kernelsDir         string
+	copyImportedKernel func(context.Context, string, string) error
+	protectedKernels   protectedKernelStorage
+	dl                 *download.Downloader
+	resolver           *download.HttpDirVersionResolver
+	specs              map[string]*model.KernelSpec
 }
 
-func NewService(repo Repository, cacheDir string) *Service {
+type protectedKernelStorage interface {
+	Import(context.Context, jailer.ProtectedKernelImportRequest) (jailer.ProtectedKernelImportResult, error)
+	Remove(context.Context, jailer.ProtectedKernelRemoveRequest) (jailer.ProtectedKernelRemoveResult, error)
+}
+
+func NewService(repo Repository, kernelsDir string) *Service {
 	return &Service{
-		repo:     repo,
-		cacheDir: cacheDir,
+		repo:             repo,
+		kernelsDir:       kernelsDir,
+		protectedKernels: jailer.NewProtectedKernelClient(),
+		copyImportedKernel: func(ctx context.Context, sourcePath, destinationPath string) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return infra.CopyPreservingMetadata(sourcePath, destinationPath)
+		},
 		dl:       download.New(),
 		resolver: download.NewHttpDirVersionResolver(),
 	}
+}
+
+func (s *Service) ensureKernelsDir(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return errs.WrapMsg(errs.CodeKernelBuildFailed, "create managed kernels directory", err)
+	}
+	if err := os.MkdirAll(s.kernelsDir, infra.DirPerm); err != nil {
+		return errs.WrapMsg(errs.CodeKernelBuildFailed, "create managed kernels directory", err)
+	}
+	return nil
+}
+
+func (s *Service) createKernelStagingPath(ctx context.Context) (string, error) {
+	if err := s.ensureKernelsDir(ctx); err != nil {
+		return "", err
+	}
+	stagingFile, err := os.CreateTemp(s.kernelsDir, ".mvm-kernel-stage-*")
+	if err != nil {
+		return "", errs.WrapMsg(errs.CodeKernelBuildFailed, "create managed kernel staging file", err)
+	}
+	stagingPath := stagingFile.Name()
+	if err := stagingFile.Close(); err != nil {
+		cleanupErr := os.Remove(stagingPath)
+		return "", errs.WrapMsg(
+			errs.CodeKernelBuildFailed,
+			"close managed kernel staging file",
+			errors.Join(err, cleanupErr),
+		)
+	}
+	return stagingPath, nil
+}
+
+func appendKernelStagingCleanupError(primary error, cleanupErr error) error {
+	if cleanupErr == nil || errors.Is(cleanupErr, os.ErrNotExist) {
+		return primary
+	}
+	if primary == nil {
+		return errs.WrapMsg(
+			errs.CodeKernelBuildFailed,
+			"remove managed kernel staging file",
+			cleanupErr,
+		)
+	}
+	if domainErr := errs.AsDomainError(primary); domainErr != nil {
+		domainErr.Message += "; remove managed kernel staging file: " + cleanupErr.Error()
+		domainErr.Err = errors.Join(domainErr.Err, cleanupErr)
+		return domainErr
+	}
+	return errs.WrapMsg(
+		errs.CodeKernelBuildFailed,
+		primary.Error()+"; remove managed kernel staging file: "+cleanupErr.Error(),
+		errors.Join(primary, cleanupErr),
+	)
 }
 
 // --- Firecracker Kernel Download ---
@@ -110,9 +178,9 @@ func NewService(repo Repository, cacheDir string) *Service {
 func (s *Service) FetchFirecrackerKernel(
 	ctx context.Context,
 	spec *model.KernelSpec,
-	ciVersion, arch, outputDir string,
+	ciVersion, arch string,
 	onProgress event.OnDownloadCallback,
-) (*model.KernelPullResult, error) {
+) (_ *model.KernelPullResult, returnErr error) {
 	if spec.ListURLTemplate == nil || *spec.ListURLTemplate == "" {
 		return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
 			"Missing 'list_url_template' in kernels.yaml for %s", spec.Name))
@@ -149,19 +217,16 @@ func (s *Service) FetchFirecrackerKernel(
 
 	kernelVersion := versions[0]
 	chosenKey := fmt.Sprintf(KernelS3KeyPattern, ciVersion, arch, kernelVersion)
-	outputPath := filepath.Join(outputDir, fmt.Sprintf(KernelOutputPattern, spec.OutputName, kernelVersion, arch))
-
-	if _, err := os.Stat(outputPath); err == nil {
-		slog.Info("Firecracker CI kernel already cached", "path", outputPath)
-		return &model.KernelPullResult{
-			Path:         outputPath,
-			Version:      kernelVersion,
-			Arch:         arch,
-			KernelType:   infra.KernelTypeFirecracker,
-			Warnings:     []string{},
-			InfoMessages: []string{fmt.Sprintf("Firecracker kernel ready: %s", outputPath)},
-		}, nil
+	outputPath, err := s.createKernelStagingPath(ctx)
+	if err != nil {
+		return nil, err
 	}
+	stagingOwned := true
+	defer func() {
+		if stagingOwned {
+			returnErr = appendKernelStagingCleanupError(returnErr, os.Remove(outputPath))
+		}
+	}()
 
 	intentionalNoChecksum := spec.SHA256 == "" && spec.SHA256URL == ""
 	templateVars["kernel_version"] = kernelVersion
@@ -203,9 +268,12 @@ func (s *Service) FetchFirecrackerKernel(
 			fmt.Sprintf("Failed to download Firecracker CI kernel: %s", err),
 		)
 	}
-	os.Chmod(outputPath, infra.ExecutablePerm)
+	if err := os.Chmod(outputPath, infra.ExecutablePerm); err != nil {
+		return nil, errs.WrapMsg(errs.CodeKernelBuildFailed, "set downloaded kernel mode", err)
+	}
 
 	slog.Info("Firecracker CI kernel saved", "path", outputPath)
+	stagingOwned = false
 	return &model.KernelPullResult{
 		Path:         outputPath,
 		Version:      kernelVersion,
@@ -222,7 +290,7 @@ func (s *Service) FetchFirecrackerKernel(
 func (s *Service) BuildOfficialKernel(
 	ctx context.Context,
 	spec *model.KernelSpec,
-	arch, outputDir string,
+	arch string,
 	jobs int,
 	keepBuildDir bool,
 	useCache bool,
@@ -231,11 +299,20 @@ func (s *Service) BuildOfficialKernel(
 	featureEnforces map[string]string,
 	onDownload event.OnDownloadCallback,
 	onProgress event.OnProgressCallback,
-) (*model.KernelPullResult, error) {
+) (_ *model.KernelPullResult, returnErr error) {
 	if err := checkBuildDependencies(ctx); err != nil {
 		return nil, err
 	}
-	outputPath := filepath.Join(outputDir, fmt.Sprintf(KernelOutputPattern, spec.OutputName, spec.Version, arch))
+	outputPath, err := s.createKernelStagingPath(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stagingOwned := true
+	defer func() {
+		if stagingOwned {
+			returnErr = appendKernelStagingCleanupError(returnErr, os.Remove(outputPath))
+		}
+	}()
 
 	buildResult, err := s.buildFromSource(ctx, BuildConfig{
 		Spec:            spec,
@@ -269,6 +346,7 @@ func (s *Service) BuildOfficialKernel(
 	}
 	infoMessages = append(infoMessages, fmt.Sprintf("Kernel built: %s", outputPath))
 
+	stagingOwned = false
 	return &model.KernelPullResult{
 		Path:         outputPath,
 		Version:      spec.Version,
@@ -282,6 +360,9 @@ func (s *Service) BuildOfficialKernel(
 // buildFromSource orchestrates download → extract → configure → build.
 func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*KernelPipelineResult, error) {
 	buildDir := cfg.Spec.BuildDir
+	if override, _ := infra.EnvGet("TEMP_DIR"); override != "" {
+		buildDir = filepath.Join(infra.GetTempDir(), "kernel-build")
+	}
 	if buildDir == "" {
 		buildDir = "."
 	}
@@ -540,15 +621,21 @@ func (s *Service) Remove(ctx context.Context, kernel *model.KernelItem, force bo
 		)
 	}
 
+	if hasVMs || hasSnapshots {
+		return kernel, s.repo.SoftDelete(ctx, kernel.ID)
+	}
+	if _, err := s.protectedKernels.Remove(ctx, jailer.ProtectedKernelRemoveRequest{
+		CacheRoot: filepath.Dir(s.kernelsDir), KernelID: kernel.ID,
+	}); err != nil {
+		slog.Error("failed to retire protected kernel", "kernel_id", kernel.ID, "error", err)
+		return nil, err
+	}
 	if _, statErr := os.Stat(kernel.Path); statErr == nil {
 		if err := os.Remove(kernel.Path); err != nil {
 			slog.Warn("Failed to remove kernel file", "error", err)
 		}
 	}
 
-	if hasVMs || hasSnapshots {
-		return kernel, s.repo.SoftDelete(ctx, kernel.ID)
-	}
 	return kernel, s.repo.Delete(ctx, kernel.ID)
 }
 
@@ -1052,7 +1139,16 @@ func (s *Service) downloadFCConfig(
 	if err != nil {
 		return errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to download config: %s", err))
 	}
-	return os.WriteFile(filepath.Join(kernelDir, ".config"), data, 0644)
+	if err := os.WriteFile(filepath.Join(kernelDir, ".config"), data, 0644); err != nil {
+		return err
+	}
+	slog.Debug("Kernel base config written",
+		"url", url,
+		"sha256", crypto.SHA256(data),
+		"size_bytes", len(data),
+		"kernel_dir", kernelDir,
+	)
+	return nil
 }
 
 func (s *Service) applyConfigFragments(
@@ -1211,7 +1307,7 @@ func (s *Service) ImportKernel(
 	version string,
 	arch string,
 	setDefault bool,
-) (*model.KernelItem, error) {
+) (_ *model.KernelItem, returnErr error) {
 	resolvedPath, err := system.ExpandAndResolve(sourcePath)
 	if err != nil {
 		return nil, errs.New(
@@ -1220,32 +1316,43 @@ func (s *Service) ImportKernel(
 		)
 	}
 
-	kernelsDir := filepath.Join(s.cacheDir, "kernels")
-	if err := os.MkdirAll(kernelsDir, infra.DirPerm); err != nil {
+	stagingPath, err := s.createKernelStagingPath(ctx)
+	if err != nil {
 		return nil, err
 	}
+	stagingOwned := true
+	defer func() {
+		if stagingOwned {
+			returnErr = appendKernelStagingCleanupError(returnErr, os.Remove(stagingPath))
+		}
+	}()
 
-	destFilename := fmt.Sprintf(KernelOutputPattern, name, version, arch)
-	destPath := filepath.Join(kernelsDir, destFilename)
-
-	if err := infra.CopyPreservingMetadata(resolvedPath, destPath); err != nil {
-		return nil, errs.New(
-			errs.CodeKernelBuildFailed,
-			fmt.Sprintf("Failed to copy kernel file to %s: %s", destPath, err),
-		)
+	if err := s.copyImportedKernel(ctx, resolvedPath, stagingPath); err != nil {
+		return nil, errs.WrapMsg(errs.CodeKernelBuildFailed, "copy imported kernel", err)
 	}
-	os.Chmod(destPath, 0755)
+	if err := os.Chmod(stagingPath, infra.ExecutablePerm); err != nil {
+		return nil, errs.WrapMsg(errs.CodeKernelBuildFailed, "set imported kernel mode", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, errs.WrapMsg(errs.CodeKernelBuildFailed, "hash imported kernel", err)
+	}
 
-	// Compute deterministic ID from the copied file (no timestamp)
-	kernelID, err := crypto.KernelID(destPath, version, arch)
+	// The identity is computed from the receiver-owned staged bytes, so a caller
+	// cannot change the source between hashing and copying to the managed store.
+	kernelID, err := crypto.KernelID(stagingPath, version, arch)
 	if err != nil {
-		return nil, fmt.Errorf("compute kernel ID: %w", err)
+		return nil, errs.WrapMsg(errs.CodeKernelBuildFailed, "compute imported kernel ID", err)
 	}
-
-	// Rename file to content-addressed kernel ID
-	kernelPath := filepath.Join(kernelsDir, kernelID)
-	if err := os.Rename(destPath, kernelPath); err != nil {
-		return nil, fmt.Errorf("rename kernel file: %w", err)
+	if err := ctx.Err(); err != nil {
+		return nil, errs.WrapMsg(errs.CodeKernelBuildFailed, "install imported kernel", err)
+	}
+	kernelPath := filepath.Join(s.kernelsDir, kernelID)
+	if err := os.Rename(stagingPath, kernelPath); err != nil {
+		return nil, errs.WrapMsg(errs.CodeKernelBuildFailed, "install imported kernel", err)
+	}
+	stagingOwned = false
+	if err := s.ImportProtected(ctx, kernelID); err != nil {
+		return nil, err
 	}
 
 	now := time.Now().Format(time.RFC3339)
@@ -1276,6 +1383,17 @@ func (s *Service) ImportKernel(
 	shortID, _ := crypto.ShortenID(kernelID)
 	slog.Info("Imported kernel", "name", kernelItem.Name, "version", version, "arch", arch, "id", shortID)
 	return kernelItem, nil
+}
+
+// ImportProtected explicitly authorizes the published ID leaf before caller database projection.
+func (s *Service) ImportProtected(ctx context.Context, kernelID string) error {
+	_, err := s.protectedKernels.Import(ctx, jailer.ProtectedKernelImportRequest{
+		CacheRoot: filepath.Dir(s.kernelsDir), KernelID: kernelID,
+	})
+	if err != nil {
+		slog.Error("failed to import protected kernel", "kernel_id", kernelID, "error", err)
+	}
+	return err
 }
 
 // --- Version Resolution ---

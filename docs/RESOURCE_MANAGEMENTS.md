@@ -122,6 +122,11 @@ SHA-256 checksum resolution differs per image type:
 | `vhd` | Microsoft VHD image | `qemu-img convert` (as vpc) → raw → root partition extracted |
 | `vhdx` | Microsoft VHDX image | `qemu-img convert` (as vhdx) → raw → root partition extracted |
 
+These formats describe image acquisition and import. Attached VM data volumes are raw-only;
+`mvm volume create` has no `--format` option, including `--format raw`. QCOW2 image import and
+conversion remain supported. See [Volumes, snapshots, and recovery](RUNTIME.md#volumes-snapshots-and-recovery)
+for volume and snapshot admission.
+
 ### Template variables
 
 URL templates use `{placeholder}` syntax resolved at fetch time:
@@ -248,7 +253,7 @@ kernel-firecracker:
 | `sha256` / `sha256_url` | Same semantics as images.yaml SHA-256. |
 | `config_fragments` | Paths or URLs to additional kernel config files merged on top of the base config. |
 | `output_name` | Base filename for the compiled or downloaded `vmlinux` binary in the kernels cache. |
-| `build_dir` | Working directory for kernel compilation. Cleaned up automatically unless `--keep-build-dir` is passed. |
+| `build_dir` | Working directory for kernel compilation when `MVM_TEMP_DIR` is unset or empty. An explicit override selects `<MVM_TEMP_DIR>/kernel-build`. Cleaned up after success unless `--keep-build-dir` is passed. |
 | `parallel_jobs` | `make -j` value. `null` defers to `defaults.kernel.build_jobs` (default: `nil`, meaning all available cores). |
 | `default_configs` | Flat map of `CONFIG_OPTION: value` entries. `y` enables the option, `n` disables it, string values set the option to a specific value (e.g. `"4"`). Passed to `scripts/config` during build. |
 | `features` | Named feature groups of kernel config options. Each feature has `desc` and `enforce` (a map of `CONFIG_OPTION: y` values). Activatable via `--features` on `mvm kernel pull`. Use `all` or `*` to enable every feature in the spec. |
@@ -263,24 +268,37 @@ kernel-firecracker:
 
 **Location:** `internal/infra/constants.go` — `OverridableDefaults` map
 
-This map is the single authoritative source for all built-in defaults. Hardcoded values anywhere else in the codebase are a bug.
+This map is the authoritative source for user-configurable built-in defaults. Security-sensitive managed artifact
+basenames are compile-time constants in the same file and intentionally do not appear in `OverridableDefaults`.
 
 ### Structure overview
 
 | Category path | Description |
 |---------------|-------------|
-| `defaults.vm` | Default vCPU count, RAM, SSH user, boot args, LSM flags, PCI, nested virt, logging, console, vsock port |
+| `defaults.vm` | Default vCPU count, RAM, SSH user, boot args, LSM flags, PCI, nested virt, logging, console, vsock port, and typed cgroup policy inputs |
 | `defaults.network` | Default bridge name, CIDR, NAT enabled |
 | `defaults.image` | Import format, remote listing limit and cache TTL |
 | `defaults.kernel` | Default kernel version, build jobs, remote listing limit and cache TTL |
-| `defaults.firecracker` | Log filenames, socket filenames, log level, PID filenames |
-| `defaults.cloudinit` | ISO name, nocloud-net port range, max retries, kill-after duration |
+| `defaults.firecracker` | Firecracker log level |
+| `defaults.cloudinit` | NoCloud service kill-after duration; the gateway service port is fixed at TCP 8000 |
 | `defaults.binary` | Remote version limit |
 | `defaults.volume` | Cache type (default: `Unsafe`) |
-| `settings` | General settings: guestfs_enabled, firewall_backend |
-| `settings.firewall` | iptables_xtcomment flag |
+| `settings` | General settings: guestfs_enabled; nftables is the only firewall backend |
 | `settings.vm` | log_lines, log_follow, max_vms, ssh_timeout_sec |
 | `cli` | Listing style (default: `short`) |
+
+### `defaults.vm` cgroup policy
+
+These settings derive the persisted envelope when a VM is created. Existing and snapshot-restored VMs retain their persisted limits.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `cgroup_vmm_headroom_mib` | `128` | Host-memory allowance added to guest-visible RAM for `memory.high`; the VM leaf's `memory.max` is `max`, not a configurable hard ceiling |
+| `cgroup_cpu_weight` | `100` | cgroup-v2 CPU weight; accepted range is 1–10000 |
+| `cgroup_pids_max` | `256` | Maximum processes in the VM's cgroup |
+| `cgroup_swap_max_bytes` | `0` | Maximum cgroup swap usage in bytes; zero disables swap |
+
+CPU quota is the VM's vCPU count multiplied by a fixed 100000 µs period. Raw cgroup file names and arbitrary controller values are not configuration interfaces.
 
 ### `defaults.kernel`
 

@@ -43,6 +43,24 @@ func (i *VolumeInput) Resolve(ctx context.Context, repo volume.Repository) ([]*m
 	return result.Volumes, nil
 }
 
+// ResolveRaw resolves the complete input and rejects unsupported data-volume formats.
+// Partial resolution must not allow a VM to launch with missing drives.
+func (i *VolumeInput) ResolveRaw(ctx context.Context, repo volume.Repository) ([]*model.VolumeItem, error) {
+	volumes, err := i.Resolve(ctx, repo)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeVolumeNotFound, "failed to resolve data volumes", err)
+	}
+	for _, vol := range volumes {
+		if vol.Format != model.VolumeFormatRaw {
+			return nil, errs.New(errs.CodeValidationFailed,
+				fmt.Sprintf("volume '%s' has unsupported data-volume format %q; only raw is supported",
+					vol.Name, vol.Format),
+				errs.WithClass(errs.ClassValidation))
+		}
+	}
+	return volumes, nil
+}
+
 // ResolveVM resolves the VMIdentifier to a single VMItem.
 // Delegates to vm.Resolver.Resolve which tries name, IP, MAC, or ID prefix.
 func (i *VolumeInput) ResolveVM(ctx context.Context, repo vm.Repository) (*model.VMItem, error) {

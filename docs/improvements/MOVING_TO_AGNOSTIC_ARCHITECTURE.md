@@ -57,7 +57,7 @@ This coupling creates several problems:
 | `internal/lib/model/firecracker.go` | `FirecrackerConfig` struct — Firecracker-specific fields | Becomes internal to `FirecrackerDriver`. |
 | `internal/core/vm/controller.go` | Direct `FirecrackerClient` imports for pause/resume/start/snapshot | Controller accepts `VMMDriver` instead. |
 | `pkg/api/vm.go` | `buildFirecrackerConfig()`, `FirecrackerSpawner` usage | Replace with `buildVMMConfig()`, factory-based driver creation. |
-| `internal/infra/constants.go` | `OverridableDefaults["defaults.firecracker"]` (8 filenames + log_level) | Move to `FirecrackerDriver`. |
+| `internal/infra/constants.go` | Fixed Firecracker artifact vocabulary plus `defaults.firecracker.log_level` | Move driver-specific fixed names and settings to `FirecrackerDriver`. |
 | `internal/infra/constants.go` | `FirecrackerGithubReleasesAPIURL`, `FirecrackerGithubDownloadURL` | Move into `FirecrackerDriver`. |
 | `internal/cli/vm.go` | No `--vmm` or `--vmm-bin` flags | Add `--vmm` + `--vmm-bin` flags. |
 
@@ -319,7 +319,7 @@ func (f *VMMFactory) CreateDriver(vmmType VMMType, vm *model.VM, repo vm.Reposit
 | **PCIe** | ❌ (limited PCI) | ✅ | ✅ |
 | **Boot speed** | Very fast | Fast | Slower (BIOS/EFI) |
 | **Memory overhead** | ~5MB per VM | ~15-30MB per VM | ~30-100MB per VM |
-| **Process isolation** | Single process (+optional jailer) | Process-per-device (minijail) | Single process (+optional) |
+| **Process isolation** | Canonical Firecracker Jailer | Process-per-device (minijail) | Single process (+optional) |
 | **Architectures** | x86_64, aarch64 | x86_64, aarch64, riscv64 | x86_64, aarch64, riscv64, arm, mips, ppc, s390x |
 
 ---
@@ -385,7 +385,7 @@ func (f *VMMFactory) CreateDriver(vmmType VMMType, vm *model.VM, repo vm.Reposit
 | Core/VM | `internal/lib/provisioner/` | VMM-aware block device naming | ❌ |
 | API | `pkg/api/vm.go`, `pkg/api/inputs/*` | VMM-agnostic config building, factory usage | ❌ |
 | CLI | `internal/cli/vm.go` | `--vmm`/`--vmm-bin` flags, generic help text | ❌ |
-| Constants | `internal/infra/constants.go` | Remove Firecracker-specific URLs/filenames | ❌ |
+| Constants | `internal/infra/constants.go` | Move Firecracker-specific URLs and fixed artifact names behind the driver | ❌ |
 | DB | `db/migrations/NNN_vmm_agnostic.sql` | New migration | ❌ |
 | Services | `internal/service/console/` | Console source abstraction | ❌ |
 

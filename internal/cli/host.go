@@ -3,15 +3,10 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/lib/model"
-	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/errs"
 
@@ -23,8 +18,6 @@ import (
 // formatChange returns a concise one-line description of a host change.
 func formatChange(mechanism, setting, appliedValue, originalValue string) string {
 	switch mechanism {
-	case "iptables_save":
-		return fmt.Sprintf("iptables rules saved → %s", appliedValue)
 	case "file_create", "file_remove":
 		return fmt.Sprintf("%s: created %s", setting, appliedValue)
 	case "groupadd":
@@ -45,10 +38,6 @@ func formatChange(mechanism, setting, appliedValue, originalValue string) string
 			originalValue = "0"
 		}
 		return fmt.Sprintf("%s: %s → %s", setting, originalValue, appliedValue)
-	case "noop":
-		if setting == "iptables_chains" && appliedValue == "MVM chains already exist" {
-			return "iptables chains already exist — keeping existing chain state"
-		}
 	case "modprobe":
 		if setting == "kernel_module_load" {
 			return fmt.Sprintf("loaded kernel module '%s'", appliedValue)
@@ -68,7 +57,7 @@ func formatChange(mechanism, setting, appliedValue, originalValue string) string
 func abortIfVMsRunning(ctx context.Context, hostAPI api.HostAPI) error {
 	running, err := hostAPI.HostGetRunningVMs(ctx)
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(running) > 0 {
 		names := make([]string, 0, len(running))
@@ -90,6 +79,7 @@ func NewHostCmd(hostAPI api.HostAPI) *cobra.Command {
 Requires root privileges for most operations. Run with: sudo mvm host <command>`,
 	}
 
+	cmd.AddCommand(newHostInstallSystemCmd(hostAPI))
 	cmd.AddCommand(newHostInitCmd(hostAPI))
 	cmd.AddCommand(newHostStatusCmd(hostAPI))
 	cmd.AddCommand(newHostInfoCmd(hostAPI))
@@ -99,179 +89,93 @@ Requires root privileges for most operations. Run with: sudo mvm host <command>`
 	return cmd
 }
 
-func newHostInitCmd(hostAPI api.HostAPI) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "init",
-		Short: "Apply host configuration changes. Idempotent.",
-		Long: fmt.Sprintf(`Apply host configuration changes. Idempotent.
+func newHostInstallSystemCmd(hostAPI api.HostAPI) *cobra.Command {
+	return &cobra.Command{
+		Use:   "install-system",
+		Short: "Install or upgrade the trusted system mvm binary",
+		Long: fmt.Sprintf(`Install or upgrade the trusted system mvm binary at %s.
 
-This command must be run with sudo the first time. It performs the
-following steps:
+This is an explicit administrator bootstrap operation. Run the trusted
+artifact you intend to install with sudo:
 
-- Creates the '%s' system group and adds the current user to it.
-- Installs a sudoers drop-in so group members can manage TAP devices,
-  bridges, and iptables rules without a password.
-- Enables IP forwarding (net.ipv4.ip_forward=1).
-- Snapshots the pre-change host state so '%s host reset' can roll back.
-- Creates the default network bridge.
-
-After running, log out and back in (or run "newgrp mvm") for group
-membership to take effect.
-
-Examples:
-  sudo mvm host init`, infra.MVMUnixGroup, infra.CLIName),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			rawResult, err := hostAPI.HostInit(cmd.Context(), nil)
+  sudo <trusted-mvm-binary> host install-system`, infra.SystemBinaryPath),
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			changed, err := hostAPI.HostInstallSystemBinary(cmd.Context())
+			if common.RecordResult(changed) {
+				return err
+			}
 			if err != nil {
-				// NeedsInteraction flows through the error return
-				var ni *errs.NeedsInteraction
-				if errors.As(err, &ni) {
-					if ni.Code == "privilege.sudo_required" {
-						common.Cli.Warning("Root privileges required for: mvm host init")
-						common.Cli.Info("Run with sudo: sudo mvm host init")
-						confirmed, pErr := common.Cli.PromptConfirm(
-							cmd.Context(),
-							"Run 'sudo mvm host init' now?",
-							false,
-						)
-						if pErr != nil {
-							return pErr
-						}
-						if confirmed {
-							if sudoRestart, _ := infra.EnvGet("SUDO_RESTART"); sudoRestart != "" {
-								common.Cli.Error("Recursive sudo restart detected. Aborting to prevent lockout.")
-								common.Cli.Info("Please run 'sudo mvm host init' manually.")
-								return fmt.Errorf("recursive sudo restart")
-							}
-
-							envAssignments := []string{}
-							for _, env := range os.Environ() {
-								if strings.HasPrefix(env, "MVM_") {
-									envAssignments = append(envAssignments, env)
-								}
-							}
-							for _, key := range []string{"HOME", "PATH"} {
-								if val, ok := os.LookupEnv(key); ok {
-									envAssignments = append(envAssignments, key+"="+val)
-								}
-							}
-							envAssignments = append(envAssignments,
-								infra.EnvKey("SUDO_RESTART")+"=1",
-								infra.EnvKey("ESCALATED")+"=1",
-							)
-
-							sudoArgs := append([]string{"env"}, append(envAssignments, os.Args...)...)
-							result, err := system.DefaultRunner.Run(
-								cmd.Context(),
-								append([]string{"sudo"}, sudoArgs...),
-								system.RunCmdOpts{
-									Capture: false,
-									Check:   false,
-								},
-							)
-							if err != nil {
-								common.Cli.Error(fmt.Sprintf("sudo command failed: %s", err.Error()))
-								if result.Stderr != "" {
-									common.Cli.Warning(result.Stderr)
-								}
-								return err
-							}
-							if !result.Success() {
-								return fmt.Errorf("sudo command failed with exit code %d", result.ExitCode)
-							}
-							common.Cli.Success("Host init completed successfully.")
-						}
-						return fmt.Errorf("needs sudo")
-					}
-
-					// Other NeedsInteraction (not sudo_required)
-					common.Cli.Error(ni.Message)
-					if detailsCtx, ok := ni.Context["details"].(map[string]any); ok {
-						if detailMsg, ok := detailsCtx["message"].(string); ok && detailMsg != "" {
-							common.Cli.Warning(fmt.Sprintf("Details: %s", detailMsg))
-						}
-						if suggestions, ok := detailsCtx["suggestions"].([]string); ok && len(suggestions) > 0 {
-							common.Cli.Info("Options:")
-							for _, s := range suggestions {
-								common.Cli.Info(fmt.Sprintf("  - %s", s))
-							}
-						}
-					}
-					return fmt.Errorf("%s", ni.Message)
+				if changed {
+					common.Cli.Warning(systemInstallPartialWarning(err))
 				}
 				return err
 			}
-
-			// nil result = skipped (no changes)
-			if rawResult == nil {
-				common.Cli.Info("Host already configured — nothing to do.")
+			if !changed {
+				common.Cli.Info(fmt.Sprintf("System binary already current at %s.", infra.SystemBinaryPath))
 				return nil
 			}
-
-			// NeedsInteraction in result path (not error)
-			if ni, ok := rawResult.(*errs.NeedsInteraction); ok {
-				if ni.Code == "privilege.sudo_required" {
-					common.Cli.Warning("Root privileges required for: mvm host init")
-					common.Cli.Info("Run with sudo: sudo mvm host init")
-					return fmt.Errorf("needs sudo")
-				}
-				common.Cli.Error(ni.Message)
-				return fmt.Errorf("%s", ni.Message)
-			}
-
-			// Success case - rawResult is a map of metadata
-			meta, ok := rawResult.(map[string]any)
-			if !ok {
-				return fmt.Errorf("unexpected result type: %T", rawResult)
-			}
-
-			changes, _ := meta["changes"].([]*model.HostStateChangeItem)
-			appliedChanges := 0
-			for _, change := range changes {
-				origVal := ""
-				if change.OriginalValue != nil {
-					origVal = *change.OriginalValue
-				}
-				if change.Mechanism == "noop" && change.Setting == "iptables_chains" {
-					common.Cli.Warning(
-						formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal),
-					)
-					continue
-				}
-				appliedChanges++
-				common.Cli.Success(formatChange(change.Mechanism, change.Setting, change.AppliedValue, origVal))
-			}
-
-			if appliedChanges == 0 {
-				common.Cli.Info("Host already configured — nothing to do.")
-			} else {
-				common.Cli.Success(fmt.Sprintf("Initialized: host (%d change(s) applied)", appliedChanges))
-			}
-
-			if wasUserAdded, ok := meta["user_added_to_group"].(bool); ok && wasUserAdded {
-				common.Cli.Warning("Log out and back in for group membership to take effect")
-				common.Cli.Info(fmt.Sprintf("Or run immediately: newgrp %s", infra.MVMUnixGroup))
-			}
-
+			common.Cli.Success(fmt.Sprintf("Installed trusted system binary at %s.", infra.SystemBinaryPath))
 			return nil
 		},
 	}
+}
 
-	return cmd
+func systemInstallPartialWarning(err error) string {
+	if domainErr := errs.AsDomainError(err); domainErr != nil {
+		if durabilityUncertain, _ := domainErr.Details["durability_uncertain"].(bool); durabilityUncertain {
+			return fmt.Sprintf(
+				"System binary was replaced at %s, but directory durability could not be confirmed.",
+				infra.SystemBinaryPath,
+			)
+		}
+	}
+	return fmt.Sprintf(
+		"System binary was replaced at %s, but final completion checks failed.",
+		infra.SystemBinaryPath,
+	)
+}
+
+func newHostInitCmd(hostAPI api.HostAPI) *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Initialize the host through the administrator entry",
+		Long:  "Run sudo /usr/local/bin/mvm host init. Direct root must add --operator <non-root-user>.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := hostAPI.HostInit(cmd.Context(), nil)
+			if err != nil {
+				return err
+			}
+			if common.RecordResult(result) {
+				return nil
+			}
+			for _, change := range result.Changes {
+				original := ""
+				if change.OriginalValue != nil {
+					original = *change.OriginalValue
+				}
+				common.Cli.Success(formatChange(change.Mechanism, change.Setting, change.AppliedValue, original))
+			}
+			if result.UserAddedToGroup {
+				common.Cli.Warning("Log out and back in for group membership to take effect")
+			}
+			return nil
+		},
+	}
 }
 
 func newHostStatusCmd(hostAPI api.HostAPI) *cobra.Command {
-	var jsonOutput bool
-
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show current host configuration state vs expected",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			status := hostAPI.HostStatusCheck(cmd.Context())
+			status, err := hostAPI.HostStatusCheck(cmd.Context())
+			if err != nil {
+				return err
+			}
 
-			if jsonOutput {
-				b, _ := json.MarshalIndent(status, "", "  ")
-				fmt.Println(string(b))
+			if common.RecordResult(status) {
 				return nil
 			}
 
@@ -336,13 +240,11 @@ func newHostStatusCmd(hostAPI api.HostAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 
 func newHostInfoCmd(hostAPI api.HostAPI) *cobra.Command {
 	var refresh bool
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:   "info",
@@ -370,19 +272,16 @@ Use --refresh to re-detect hardware and limits before displaying.`,
 				return fmt.Errorf("no host info available")
 			}
 
-			if jsonOutput {
-				b, _ := json.MarshalIndent(result, "", "  ")
-				fmt.Println(string(b))
-			} else {
-				printHostInfo(result)
+			if common.RecordResult(result) {
+				return nil
 			}
+			printHostInfo(result)
 
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "Re-detect host hardware and limits")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 
@@ -391,10 +290,13 @@ func newHostCleanCmd(hostAPI api.HostAPI) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "clean",
-		Short: "Remove all VM networking config (bridges, TAPs, iptables)",
-		Long: fmt.Sprintf(`Remove all VM networking config (bridges, TAPs, iptables). Does not touch sysctl or group.
+		Short: "Remove all VM networking config (managed networks and firewall policy)",
+		Long: fmt.Sprintf(
+			`Remove all VM networking config (managed networks and firewall policy). Does not touch sysctl or group.
 
-Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUnixGroup),
+Sysctl settings, sudoers, and the '%s' group will NOT be affected.`,
+			infra.MVMUnixGroup,
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := abortIfVMsRunning(cmd.Context(), hostAPI); err != nil {
 				return err
@@ -402,7 +304,7 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 
 			if !force {
 				common.Cli.Warning(
-					"This will remove all VM networking: bridges, TAP devices, iptables rules, and the default network configuration.",
+					"This will remove all VM networking: managed networks, firewall policy, and the default network configuration.",
 				)
 				common.Cli.Info(
 					fmt.Sprintf(
@@ -422,6 +324,9 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 			}
 
 			summary, err := hostAPI.HostClean(cmd.Context())
+			if common.RecordResult(summary) {
+				return err
+			}
 			if err != nil {
 				return err
 			}
@@ -455,7 +360,7 @@ func newHostResetCmd(hostAPI api.HostAPI) *cobra.Command {
 
 Reverts every change made by '%s host init':
 
-- Tears down all network bridges, TAP devices, and iptables rules.
+- Tears down managed network bridges, namespaces, and firewall policy.
 - Restores the original sysctl ip_forward value.
 - Removes the sudoers drop-in file.
 - Removes the '%s' system group.
@@ -485,6 +390,9 @@ Examples:
 			}
 
 			summary, err := hostAPI.HostReset(cmd.Context())
+			if common.RecordResult(summary) {
+				return err
+			}
 			if err != nil {
 				return err
 			}

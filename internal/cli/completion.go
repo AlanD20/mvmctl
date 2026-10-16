@@ -34,6 +34,83 @@ func completeNetworkNames(cmd *cobra.Command, args []string, toComplete string) 
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 
+// completePolicyIDs completes IDs from both traffic-policy families.
+func completePolicyIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if opRef == nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	networkPolicies, err := opRef.NetworkToVMTrafficPolicyList(cmd.Context())
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var results []string
+	for _, policy := range networkPolicies {
+		short := crypto.Truncate(policy.ID, 12)
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
+			results = append(results, short)
+		}
+	}
+	vmPolicies, err := opRef.VMToVMTrafficPolicyList(cmd.Context())
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	for _, policy := range vmPolicies {
+		short := crypto.Truncate(policy.ID, 12)
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
+			results = append(results, short)
+		}
+	}
+	return results, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeExecPolicyIDs completes directional execution-policy IDs only.
+func completeExecPolicyIDs(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if opRef == nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	policies, err := opRef.ExecPolicyList(cmd.Context())
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var results []string
+	for _, policy := range policies {
+		short := crypto.Truncate(policy.ID, 12)
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
+			results = append(results, short)
+		}
+	}
+	return results, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeExecPolicyCreate completes the source and destination VM positions.
+func completeExecPolicyCreate(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	if len(args) < 2 {
+		return completeVMNames(cmd, args, toComplete)
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completePolicyCreate completes source network, destination VM, and protocol positionally.
+func completePolicyCreate(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	switch len(args) {
+	case 0:
+		return completeNetworkNames(cmd, args, toComplete)
+	case 1:
+		return completeVMNames(cmd, args, toComplete)
+	case 2:
+		protocols := []string{"tcp", "udp"}
+		return slices.DeleteFunc(protocols, func(protocol string) bool {
+			return !strings.HasPrefix(protocol, toComplete)
+		}), cobra.ShellCompDirectiveNoFileComp
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
 // completeImageIDs completes with local image types and short IDs.
 func completeImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if opRef == nil {
@@ -95,6 +172,27 @@ func completeBinaryVersions(cmd *cobra.Command, args []string, toComplete string
 		}
 	}
 	return results, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeInstalledBinaryReleaseVersions completes exact installed release slots without exposing pair members or IDs.
+func completeInstalledBinaryReleaseVersions(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	if opRef == nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	binaries, _, _ := opRef.BinaryList(cmd.Context(), false, nil, nil)
+	versions := make([]string, 0, len(binaries)/2)
+	for _, item := range binaries {
+		if item.Version != "" && strings.HasPrefix(item.Version, toComplete) &&
+			!slices.Contains(versions, item.Version) {
+			versions = append(versions, item.Version)
+		}
+	}
+	sort.Strings(versions)
+	return versions, cobra.ShellCompDirectiveNoFileComp
 }
 
 // completeKeyNames completes with key names, fingerprints (with and without SHA256: prefix).

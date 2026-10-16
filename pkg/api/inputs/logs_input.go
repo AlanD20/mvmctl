@@ -19,11 +19,9 @@ type LogInput struct {
 
 // ResolvedLogInput specifies resolved log input.
 type ResolvedLogInput struct {
-	LogType              string
-	Lines                int
-	Follow               bool
-	LogFilename          string
-	SerialOutputFilename string
+	LogType string
+	Lines   int
+	Follow  bool
 
 	VM *model.VMItem
 }
@@ -69,14 +67,10 @@ func (i *LogInput) Resolve(ctx context.Context, cfg *config.Service, vmRepo vm.R
 	} else {
 		follow, _ = cfg.GetBool(ctx, "settings.vm", "log_follow")
 	}
-	logFilenameStr, _ := cfg.GetString(ctx, "defaults.firecracker", "log_filename")
-	serialOutputFilenameStr, _ := cfg.GetString(ctx, "defaults.firecracker", "serial_output_filename")
 	return &ResolvedLogInput{
-		VM:                   vmEntity,
-		LogType:              logType,
-		Lines:                lines,
-		Follow:               follow,
-		LogFilename:          logFilenameStr,
-		SerialOutputFilename: serialOutputFilenameStr,
+		VM:      vmEntity,
+		LogType: logType,
+		Lines:   lines,
+		Follow:  follow,
 	}, nil
 }

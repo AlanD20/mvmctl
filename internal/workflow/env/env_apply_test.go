@@ -37,7 +37,7 @@ func writeApplySpec(t *testing.T, content string) string {
 // noopFactory returns a StepFactory that creates a no-op step whose Apply calls
 // write to trigger state persistence. This lets tests verify the state file
 // output without performing real provisioning.
-func noopFactory(stepType string) StepFactory {
+func noopFactory(stepType string, removes ...string) StepFactory {
 	return StepFactory{
 		StepType: stepType,
 		FromSpec: func(stepType, name string, spec model.ResourceMap, op api.API) (workflow.Step, error) {
@@ -46,7 +46,7 @@ func noopFactory(stepType string) StepFactory {
 				stepType,
 				stepName,
 				nil,
-				nil,
+				removes,
 				func(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 					if write != nil {
 						return write(ctx, model.ResourceState{
@@ -185,6 +185,21 @@ network:
 	assert.Equal(t, "network", state.Resources[0].Type)
 	assert.NotEmpty(t, state.CreatedAt)
 	assert.NotEmpty(t, state.UpdatedAt)
+}
+
+// Rationale: Binary lifecycle belongs to the trusted release API. The generic removes alias must not dispatch an
+// immediate binary deletion or dereference an otherwise-unused API operation.
+func TestApply_DoesNotDispatchBinaryImmediateRemovalAlias(t *testing.T) {
+	replaceAndRestore(t, "network", noopFactory("network", "binary:1.16.1"))
+
+	specPath := writeApplySpec(t, `version: "1"
+network:
+  test-net:
+    subnet: 10.0.0.0/24
+`)
+	defer cleanupState(t, specPath)
+
+	require.NoError(t, Apply(context.Background(), nil, specPath, nil, nil))
 }
 
 // Rationale: A spec with two independent resource types must produce a state

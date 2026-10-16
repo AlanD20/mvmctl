@@ -3,28 +3,24 @@ package inputs
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"slices"
+	"sort"
+	"strings"
+
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/kernel"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
-	"os"
-	"runtime"
-	"slices"
-	"sort"
-	"strings"
 )
 
 // KernelPullInput specifies kernel pull input.
 type KernelPullInput struct {
 	KernelType   string `json:"type"                    yaml:"type"`
 	Version      string `json:"version,omitempty"       yaml:"version,omitempty"`
-	OutputDir    string `json:"output_dir,omitempty"`
-	OutputName   string `json:"name,omitempty"          yaml:"name,omitempty"`
-	OutputPath   string `json:"output_path,omitempty"`
 	Jobs         int    `json:"jobs,omitempty"          yaml:"jobs,omitempty"`
 	KeepBuildDir bool   `json:"keep_build_dir"          yaml:"keep_build_dir"`
 	CleanBuild   bool   `json:"clean_build"             yaml:"clean_build"`
@@ -38,7 +34,6 @@ type KernelPullInput struct {
 type ResolvedKernelPullRequest struct {
 	KernelType   string
 	Arch         string
-	OutputDir    string
 	Jobs         int
 	KeepBuildDir bool
 	CleanBuild   bool
@@ -125,11 +120,6 @@ func (i *KernelPullInput) Resolve(ctx context.Context, cfg *config.Service) (*Re
 			featuresList = append([]string{"kvm"}, featuresList...)
 		}
 	}
-	// Resolve output directory — use explicit input or the default kernels dir.
-	outputDir := infra.GetKernelsDir()
-	if i.OutputDir != "" {
-		outputDir = i.OutputDir
-	}
 	var kernelConfig *string
 	if i.KernelConfig != "" {
 		kernelConfig = &i.KernelConfig
@@ -138,7 +128,6 @@ func (i *KernelPullInput) Resolve(ctx context.Context, cfg *config.Service) (*Re
 		KernelType:   i.KernelType,
 		Version:      version,
 		Arch:         arch,
-		OutputDir:    outputDir,
 		Jobs:         jobs,
 		KeepBuildDir: i.KeepBuildDir,
 		CleanBuild:   i.CleanBuild,
@@ -158,17 +147,6 @@ func (i *KernelPullInput) Resolve(ctx context.Context, cfg *config.Service) (*Re
 			),
 			errs.WithClass(errs.ClassValidation),
 		)
-	}
-	// Validate output directory (must exist or be creatable) —
-	// if output_dir.exists() and not output_dir.is_dir():
-	if result.OutputDir != "" {
-		if fi, err := os.Stat(result.OutputDir); err == nil && !fi.IsDir() {
-			return nil, errs.New(
-				errs.CodeKernelBuildFailed,
-				fmt.Sprintf("Output path exists but is not a directory: %s", result.OutputDir),
-				errs.WithClass(errs.ClassValidation),
-			)
-		}
 	}
 	// Validate build jobs (positive integer) —
 	// if jobs <= 0:

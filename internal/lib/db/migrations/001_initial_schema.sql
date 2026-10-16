@@ -55,7 +55,8 @@ CREATE INDEX idx_kernels_version ON kernels(version);
 -- JSON mappings: package_version -> version
 CREATE TABLE binaries (
     id TEXT PRIMARY KEY,
-    type TEXT NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('firecracker', 'jailer')),
+    architecture TEXT NOT NULL CHECK(architecture IN ('x86_64', 'aarch64')),
     version TEXT NOT NULL,
     full_version TEXT NOT NULL,
     ci_version TEXT,
@@ -67,7 +68,13 @@ CREATE TABLE binaries (
     deleted_at TIMESTAMP NULL
 );
 CREATE INDEX idx_binaries_type ON binaries(type);
-CREATE INDEX idx_binaries_version ON binaries(version);
+CREATE INDEX idx_binaries_version ON binaries(architecture, version);
+CREATE UNIQUE INDEX idx_binaries_active_release_member
+    ON binaries(type, architecture, version)
+    WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_binaries_active_default
+    ON binaries(type, architecture)
+    WHERE is_default = 1 AND deleted_at IS NULL;
 
 -- VOLUMES: Persistent data disks attachable to VMs
 CREATE TABLE volumes (
@@ -95,7 +102,6 @@ CREATE TABLE networks (
     bridge TEXT NOT NULL,
     ipv4_gateway TEXT NOT NULL,
     bridge_active INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
-    nat_gateways TEXT NULL,
     nat_enabled INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
     is_default INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
     is_present INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0=bridge missing, 1=bridge exists
@@ -129,17 +135,26 @@ CREATE TABLE vm_instances (
     status TEXT NOT NULL,
     pid INTEGER NOT NULL,
     process_start_time INTEGER NULL,
-    ipv4 TEXT NOT NULL CHECK(ipv4 IS NULL OR ipv4 GLOB '[0-9]*.[0-9]*.[0-9]*.[0-9]*'),
-    mac TEXT NOT NULL CHECK(mac IS NULL OR mac GLOB '[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]'),
-    network_id TEXT NOT NULL,
-    tap_device TEXT NOT NULL,
+    network_placement TEXT NOT NULL DEFAULT 'managed' CHECK(network_placement IN ('managed', 'networkless')),
+    ipv4 TEXT NOT NULL CHECK(
+        (network_placement = 'managed' AND ipv4 GLOB '[0-9]*.[0-9]*.[0-9]*.[0-9]*') OR
+        (network_placement = 'networkless' AND ipv4 = '')
+    ),
+    mac TEXT NOT NULL CHECK(
+        (network_placement = 'managed' AND mac GLOB '[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]') OR
+        (network_placement = 'networkless' AND mac = '')
+    ),
+    network_id TEXT CHECK(
+        (network_placement = 'managed' AND network_id IS NOT NULL AND network_id != '') OR
+        (network_placement = 'networkless' AND network_id IS NULL)
+    ),
+    tap_device TEXT NOT NULL CHECK(network_placement = 'managed' OR tap_device = ''),
     image_id TEXT NOT NULL,
     kernel_id TEXT NOT NULL,
     binary_id TEXT NOT NULL,
-    api_socket_path TEXT NOT NULL,
     relay_socket_path TEXT NULL,
     config_path TEXT NOT NULL,
-    cloud_init_mode TEXT NOT NULL,
+    cloud_init_mode TEXT NOT NULL CHECK(network_placement = 'managed' OR cloud_init_mode != 'net'),
     nocloud_net_port INTEGER NULL,
     nocloud_net_pid INTEGER NULL,
     relay_pid INTEGER NULL,
@@ -153,7 +168,6 @@ CREATE TABLE vm_instances (
     rootfs_suffix TEXT NOT NULL,
     pci_enabled INTEGER NOT NULL,  -- Boolean: 0 or 1
     nested_virt INTEGER NOT NULL DEFAULT 0,  -- Boolean: 0 or 1
-    remote_exec INTEGER NOT NULL DEFAULT 0,  -- Boolean: 0 or 1
     cpu_config TEXT NULL,  -- JSON: merged CPU template config
     lsm_flags TEXT NOT NULL DEFAULT '',
     enable_logging INTEGER NOT NULL,  -- Boolean: 0 or 1
@@ -364,7 +378,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_nftables_rules_unique_active
 CREATE TABLE vm_vsock_config (
     id TEXT PRIMARY KEY,
     vm_id TEXT NOT NULL UNIQUE,
-    guest_cid INTEGER NOT NULL UNIQUE,
+    guest_cid INTEGER NOT NULL,
     uds_path TEXT NOT NULL,
     port INTEGER NOT NULL,
     token TEXT NOT NULL,

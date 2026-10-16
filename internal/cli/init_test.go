@@ -1,13 +1,16 @@
 package cli_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/cli"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/testutil"
+	"mvmctl/pkg/api/results"
 )
 
 // --- NewInitCmd ---
@@ -31,6 +34,7 @@ func TestNewInitCmd(t *testing.T) {
 		{name: "non-interactive", shorthand: ""},
 		{name: "skip-host", shorthand: ""},
 		{name: "skip-network", shorthand: ""},
+		{name: "binary-version", shorthand: ""},
 	}
 
 	for _, f := range expectedFlags {
@@ -55,4 +59,56 @@ func TestNewInitCmd(t *testing.T) {
 	skipNetwork := cmd.Flags().Lookup("skip-network")
 	require.NotNil(t, skipNetwork)
 	assert.Equal(t, "false", skipNetwork.Value.String(), "--skip-network defaults to false")
+
+	binaryVersion := cmd.Flags().Lookup("binary-version")
+	require.NotNil(t, binaryVersion)
+	assert.Empty(t, binaryVersion.Value.String(), "--binary-version defaults to empty")
+}
+
+func TestInitCommandForwardsBinaryVersion(t *testing.T) {
+	tests := map[string]struct {
+		args               []string
+		wantVersion        string
+		wantNonInteractive bool
+	}{
+		"explicit_version": {
+			args:        []string{"--skip-host", "--skip-network", "--binary-version", "1.15.2"},
+			wantVersion: "1.15.2",
+		},
+		"non_interactive": {
+			args: []string{
+				"--non-interactive", "--skip-host", "--skip-network", "--binary-version", "latest",
+			},
+			wantVersion:        "latest",
+			wantNonInteractive: true,
+		},
+		"no_version_flag": {
+			args: []string{"--skip-host", "--skip-network"},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			mock := &testutil.MockInitAPI{
+				InitRunFullFunc: func(
+					_ context.Context,
+					_, _, nonInteractive, _ bool,
+					_ string,
+					downloadVersion string,
+					_ *bool,
+					_ event.OnProgressCallback,
+				) *results.InitResult {
+					calls++
+					assert.Equal(t, tc.wantVersion, downloadVersion)
+					assert.Equal(t, tc.wantNonInteractive, nonInteractive)
+					return &results.InitResult{HostReady: true}
+				},
+			}
+			cmd := cli.NewInitCmd(mock, &testutil.MockHostAPI{})
+			cmd.SetArgs(tc.args)
+
+			require.NoError(t, cmd.ExecuteContext(context.Background()))
+			assert.Equal(t, 1, calls)
+		})
+	}
 }

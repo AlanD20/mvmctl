@@ -16,13 +16,13 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 	"net"
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -32,12 +32,11 @@ type VMCreateInput struct {
 	Name    string   `json:"name"               yaml:"name"`
 	SSHKeys []string `json:"ssh_keys,omitempty" yaml:"ssh_keys,omitempty"`
 	// Optional fields with CLI-layer defaults resolved in Build()
-	VCPUCount       *int    `json:"vcpu,omitempty"        yaml:"vcpu,omitempty"`
-	MemSizeMib      string  `json:"mem,omitempty"         yaml:"mem,omitempty"`
-	User            *string `json:"user,omitempty"        yaml:"user,omitempty"`
-	PCIEnabled      *bool   `json:"pci_enabled,omitempty"      yaml:"pci_enabled,omitempty"`
-	NestedVirt      *bool   `json:"nested_virt,omitempty"      yaml:"nested_virt,omitempty"`
-	AllowRemoteExec *bool   `json:"allow_remote_exec,omitempty" yaml:"allow_remote_exec,omitempty"`
+	VCPUCount  *int    `json:"vcpu,omitempty"        yaml:"vcpu,omitempty"`
+	MemSizeMib string  `json:"mem,omitempty"         yaml:"mem,omitempty"`
+	User       *string `json:"user,omitempty"        yaml:"user,omitempty"`
+	PCIEnabled *bool   `json:"pci_enabled,omitempty"      yaml:"pci_enabled,omitempty"`
+	NestedVirt *bool   `json:"nested_virt,omitempty"      yaml:"nested_virt,omitempty"`
 	// CPUTemplate is a file path to a CPU template JSON file.
 	CPUTemplate         string         `json:"cpu_template,omitempty"   yaml:"cpu_template,omitempty"`
 	CPUConfig           map[string]any `json:"cpu_config,omitempty"     yaml:"cpu_config,omitempty"`
@@ -53,6 +52,7 @@ type VMCreateInput struct {
 	BootArgs            string         `json:"boot_args,omitempty"      yaml:"boot_args,omitempty"`
 	LSMFlags            string         `json:"lsm_flags,omitempty"      yaml:"lsm_flags,omitempty"`
 	NetworkID           *string        `json:"network,omitempty"        yaml:"network,omitempty"`
+	NoNetwork           bool           `json:"no_network,omitempty"    yaml:"no_network,omitempty"`
 	RequestedGuestMAC   *string        `json:"guest_mac,omitempty"      yaml:"guest_mac,omitempty"`
 	// CustomCloudInitConfig is a file path to a custom cloud-init user-data config.
 	CustomCloudInitConfig *string  `json:"custom_cloud_init_config,omitempty" yaml:"custom_cloud_init_config,omitempty"`
@@ -83,16 +83,17 @@ type ResolvedVMCreateInput struct {
 	UserUID             int
 	UserGID             int
 	GuestMACPrefix      string
+	NetworkPlacement    model.VMNetworkPlacement
 	Network             *model.NetworkItem
 	Image               *model.ImageItem
 	Kernel              *model.KernelItem
 	Binary              *model.BinaryItem
+	Jailer              *model.BinaryItem
 	NetworkPrefixLen    int
 	CloudInitMode       model.CloudInitMode
 	SkipCINetworkConfig bool
 	PCIEnabled          bool
 	NestedVirt          bool
-	AllowRemoteExec     bool
 	EnableConsole       bool
 	EnableLogging       bool
 	EnableMetrics       bool
@@ -104,21 +105,8 @@ type ResolvedVMCreateInput struct {
 	DiskSizeMib         int
 	LSMFlags            string
 	// Firecracker
-	LogLevel              string
-	LogFilename           string
-	SerialOutputFilename  string
-	MetricsFilename       string
-	APISocketFilename     string
-	PIDFilename           string
-	ConfigFilename        string
-	ConsoleSocketFilename string
-	ConsolePIDFilename    string
-	VsockFilename         string
+	LogLevel string
 	// Cloud-init
-	CloudInitISOName      string
-	NocloudPortRangeStart int
-	NocloudPortRangeEnd   int
-	NocloudMaxPortRetries int
 	RequestedGuestIP      *string
 	RequestedGuestMAC     *string
 	NocloudNetPort        *int
@@ -139,6 +127,7 @@ type ResolvedVMCreateInput struct {
 	Volumes          []*model.VolumeItem
 	VsockPort        int  // vsock port (0 = disabled / no vsock)
 	Writeback        bool // cache type override: when true, use "Writeback" for rootfs + volumes
+	CgroupLimits     model.VMCgroupLimits
 }
 
 // VMCreateRequest resolves all DB-backed defaults and validates VM creation inputs.
@@ -154,7 +143,7 @@ type VMCreateRequest struct {
 	networkResolver *network.Resolver
 	binaryResolver  *binary.Resolver
 	keyResolver     *key.Resolver
-	volumeResolver  *volume.Resolver
+	volumeRepo      volume.Repository
 	leaseRepo       network.LeaseRepository
 }
 
@@ -181,9 +170,9 @@ func NewVMCreateRequest(
 		imageResolver:   image.NewResolver(imageRepo),
 		kernelResolver:  kernel.NewResolver(kernelRepo, nil),
 		networkResolver: network.NewResolver(networkRepo, nil),
-		binaryResolver:  binary.NewResolver(binaryRepo),
+		binaryResolver:  binary.NewResolver(binaryRepo, system.RuntimeArch()),
 		keyResolver:     key.NewResolver(keyRepo),
-		volumeResolver:  volume.NewResolver(volumeRepo),
+		volumeRepo:      volumeRepo,
 		leaseRepo:       leaseRepo,
 	}
 }
@@ -319,11 +308,8 @@ func (r *VMCreateRequest) resolveVolumes(ctx context.Context, input *VMCreateInp
 	if len(input.Volumes) == 0 {
 		return nil, nil
 	}
-	result := r.volumeResolver.ResolveMany(ctx, input.Volumes)
-	if len(result.Errors) > 0 && len(result.Volumes) == 0 {
-		return nil, errs.NotFound(errs.CodeVolumeNotFound, result.Errors[0])
-	}
-	return result.Volumes, nil
+	volumeInput := VolumeInput{Identifiers: input.Volumes}
+	return volumeInput.ResolveRaw(ctx, r.volumeRepo)
 }
 
 // resolveMemory resolves mem_size_mib from input or defaults to setting.
@@ -343,14 +329,41 @@ func (r *VMCreateRequest) resolveMemory(ctx context.Context, input *VMCreateInpu
 	return int(bytes / disk.MebibyteBytes), nil
 }
 
+// Validate rejects conflicting raw create choices without resolving dependencies.
+func (input VMCreateInput) Validate() error {
+	if input.NocloudNetPort != nil {
+		return errs.New(errs.CodeValidationFailed,
+			"custom NoCloud ports are unsupported; omit nocloud_net_port to use reserved gateway TCP 8000")
+	}
+	if err := validators.VMName(input.Name); err != nil {
+		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid VM name: %s", err.Error()))
+	}
+	if !input.NoNetwork {
+		return nil
+	}
+	if input.NetworkID != nil || input.RequestedGuestIP != nil || input.RequestedGuestMAC != nil {
+		return errs.New(errs.CodeValidationFailed,
+			"--no-network cannot be combined with --network, --ip, or --mac")
+	}
+	if input.CloudInitMode != nil && *input.CloudInitMode == string(model.CloudInitModeNET) {
+		return errs.New(errs.CodeValidationFailed, "--no-network cannot use NoCloud NET mode")
+	}
+	for argument := range strings.FieldsSeq(input.BootArgs) {
+		if strings.HasPrefix(argument, "ip=") || strings.HasPrefix(argument, "ds=") {
+			return errs.New(errs.CodeValidationFailed,
+				"--no-network cannot use network boot arguments")
+		}
+	}
+	return nil
+}
+
 // Resolve resolves all inputs to explicit values and validates.
 func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, error) {
 	input := &r.input
-	// Validate VM name early
-	if err := validators.VMName(input.Name); err != nil {
-		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid VM name: %s", err.Error()))
+	if err := input.Validate(); err != nil {
+		return nil, err
 	}
-	// Resolve image, kernel, network, binary, keys, volumes
+	// Resolve image, kernel, optional managed network, binary, keys, volumes.
 	img, err := r.resolveImage(ctx, input)
 	if err != nil {
 		return nil, err
@@ -359,9 +372,15 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if err != nil {
 		return nil, err
 	}
-	netw, err := r.resolveNetwork(ctx, input)
-	if err != nil {
-		return nil, err
+	placement := model.VMNetworkPlacementManaged
+	var netw *model.NetworkItem
+	if input.NoNetwork {
+		placement = model.VMNetworkPlacementNetworkless
+	} else {
+		netw, err = r.resolveNetwork(ctx, input)
+		if err != nil {
+			return nil, err
+		}
 	}
 	fcBinary, err := r.resolveBinary(ctx, input)
 	if err != nil {
@@ -384,13 +403,17 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		writeback = *input.Writeback
 	}
 	extraDrives := volume.VolumesToDrives(vols)
-	// Validate and parse network subnet.
-	_, ipv4Net, parseErr := net.ParseCIDR(netw.Subnet)
-	if parseErr != nil {
-		return nil, errs.New(errs.CodeNetworkNotFound, fmt.Sprintf("Invalid network subnet: %s", netw.Subnet))
+	// A networkless VM has no prefix or netmask to infer from defaults.
+	var networkPrefixLen int
+	var networkNetmask string
+	if netw != nil {
+		_, ipv4Net, parseErr := net.ParseCIDR(netw.Subnet)
+		if parseErr != nil {
+			return nil, errs.New(errs.CodeNetworkNotFound, fmt.Sprintf("Invalid network subnet: %s", netw.Subnet))
+		}
+		networkPrefixLen, _ = ipv4Net.Mask.Size()
+		networkNetmask = net.IP(ipv4Net.Mask).String()
 	}
-	networkPrefixLen, _ := ipv4Net.Mask.Size()
-	networkNetmask := net.IP(ipv4Net.Mask).String()
 	// Resolve disk size
 	var rootfsDiskSizeMib int
 	if input.DiskSize != "" {
@@ -420,6 +443,28 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if input.VCPUCount != nil && *input.VCPUCount > 0 {
 		vcpuCount = *input.VCPUCount
 	}
+	cgroupHeadroomMiB, err := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_vmm_headroom_mib")
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeConfigError, "resolve defaults.vm.cgroup_vmm_headroom_mib", err)
+	}
+	cgroupCPUWeight, err := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_cpu_weight")
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeConfigError, "resolve defaults.vm.cgroup_cpu_weight", err)
+	}
+	cgroupPIDsMax, err := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_pids_max")
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeConfigError, "resolve defaults.vm.cgroup_pids_max", err)
+	}
+	cgroupSwapMaxBytes, err := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_swap_max_bytes")
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeConfigError, "resolve defaults.vm.cgroup_swap_max_bytes", err)
+	}
+	cgroupLimits := model.NewVMCgroupLimits(vcpuCount, memMib, model.VMCgroupPolicy{
+		VMMHeadroomMiB: int64(cgroupHeadroomMiB),
+		CPUWeight:      int64(cgroupCPUWeight),
+		PIDsMax:        int64(cgroupPIDsMax),
+		SwapMaxBytes:   int64(cgroupSwapMaxBytes),
+	})
 	// Resolve cloud-init mode
 	// Default to "off" when no explicit mode is set — the provisioner injects
 	// SSH keys directly into the rootfs regardless of cloud-init mode.
@@ -432,15 +477,13 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		return nil, err
 	}
 	ciMode := ciResult.Mode
+	if input.NoNetwork && ciMode == model.CloudInitModeNET {
+		return nil, errs.New(errs.CodeValidationFailed, "--no-network cannot use NoCloud NET mode")
+	}
 	// Resolve nested_virt
 	nestedVirt, _ := r.cfg.GetBool(ctx, "defaults.vm", "nested_virt")
 	if input.NestedVirt != nil {
 		nestedVirt = *input.NestedVirt
-	}
-	// Resolve allow_remote_exec
-	allowRemoteExec, _ := r.cfg.GetBool(ctx, "defaults.vm", "allow_remote_exec")
-	if input.AllowRemoteExec != nil {
-		allowRemoteExec = *input.AllowRemoteExec
 	}
 	// Resolve CPU config
 	var cpuConfig map[string]any
@@ -491,6 +534,14 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		defaultBootArgs, _ := r.cfg.GetString(ctx, "defaults.vm", "boot_args")
 		bootArgs = defaultBootArgs + " root=UUID=" + img.FSUUID
 	}
+	if input.NoNetwork {
+		for argument := range strings.FieldsSeq(bootArgs) {
+			if strings.HasPrefix(argument, "ip=") || strings.HasPrefix(argument, "ds=") {
+				return nil, errs.New(errs.CodeValidationFailed,
+					"--no-network cannot use network boot arguments from input or defaults")
+			}
+		}
+	}
 	// Resolve lsm_flags
 	lsmFlags := input.LSMFlags
 	if lsmFlags == "" {
@@ -524,19 +575,6 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	userGID, _ := r.cfg.GetInt(ctx, "defaults.vm", "user_gid")
 	guestMACPrefix, _ := r.cfg.GetString(ctx, "defaults.vm", "guest_mac_prefix")
 	logLevel, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_level")
-	logFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_filename")
-	serialOutputFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "serial_output_filename")
-	metricsFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "metrics_filename")
-	apiSocketFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "api_socket_filename")
-	pidFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "pid_filename")
-	configFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "config_filename")
-	consoleSocketFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "console_socket_filename")
-	consolePIDFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "console_pid_filename")
-	vsockFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "vsock_filename")
-	ciIsoName, _ := r.cfg.GetString(ctx, "defaults.cloudinit", "iso_name")
-	nocloudPortStart, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_start")
-	nocloudPortEnd, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_end")
-	nocloudMaxRetries, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_max_port_retries")
 	nocloudKillAfter, _ := r.cfg.GetDuration(ctx, "defaults.cloudinit", "nocloud_kill_after")
 	vsockPort := 0
 	if r.input.VsockPort != nil && *r.input.VsockPort > 0 {
@@ -558,16 +596,16 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		UserUID:               userUID,
 		UserGID:               userGID,
 		GuestMACPrefix:        guestMACPrefix,
+		NetworkPlacement:      placement,
 		Network:               netw,
 		Image:                 img,
 		Kernel:                krnl,
 		Binary:                fcBinary,
 		NetworkPrefixLen:      networkPrefixLen,
 		CloudInitMode:         ciMode,
-		SkipCINetworkConfig:   input.SkipCINetworkConfig,
+		SkipCINetworkConfig:   input.SkipCINetworkConfig || input.NoNetwork,
 		PCIEnabled:            pciEnabled,
 		NestedVirt:            nestedVirt,
-		AllowRemoteExec:       allowRemoteExec,
 		CPUConfig:             infra.MapToStruct[model.CpuConfig](cpuConfig),
 		EnableConsole:         enableConsole,
 		EnableLogging:         enableLogging,
@@ -589,24 +627,12 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		Volumes:               vols,
 		ExtraDrives:           extraDrives,
 		// Firecracker defaults
-		LogLevel:              logLevel,
-		LogFilename:           logFilename,
-		SerialOutputFilename:  serialOutputFilename,
-		MetricsFilename:       metricsFilename,
-		APISocketFilename:     apiSocketFilename,
-		PIDFilename:           pidFilename,
-		ConfigFilename:        configFilename,
-		ConsoleSocketFilename: consoleSocketFilename,
-		ConsolePIDFilename:    consolePIDFilename,
-		VsockFilename:         vsockFilename,
+		LogLevel: logLevel,
 		// Cloud-init defaults
-		CloudInitISOName:      ciIsoName,
-		NocloudPortRangeStart: nocloudPortStart,
-		NocloudPortRangeEnd:   nocloudPortEnd,
-		NocloudMaxPortRetries: nocloudMaxRetries,
-		NoCloudKillAfter:      nocloudKillAfter,
-		VsockPort:             vsockPort,
-		Writeback:             writeback,
+		NoCloudKillAfter: nocloudKillAfter,
+		VsockPort:        vsockPort,
+		Writeback:        writeback,
+		CgroupLimits:     cgroupLimits,
 	}
 	// Validate
 	if err := r.ensureValidate(ctx, result); err != nil {
@@ -654,6 +680,19 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
+	switch result.NetworkPlacement {
+	case model.VMNetworkPlacementManaged:
+		if result.Network == nil {
+			return errs.New(errs.CodeValidationFailed, "managed VM creation requires a network")
+		}
+	case model.VMNetworkPlacementNetworkless:
+		if result.Network != nil || result.NetworkPrefixLen != 0 || result.NetworkNetmask != "" ||
+			!result.SkipCINetworkConfig || result.CloudInitMode == model.CloudInitModeNET {
+			return errs.New(errs.CodeValidationFailed, "networkless VM creation contains managed network state")
+		}
+	default:
+		return errs.New(errs.CodeValidationFailed, "VM creation network placement is invalid")
+	}
 	kernelPath := result.Kernel.Path
 	if _, err := os.Stat(kernelPath); os.IsNotExist(err) {
 		return errs.New(
@@ -662,21 +701,9 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-	binPath := result.Binary.Path
-	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		return errs.New(
-			errs.CodeVMCreateFailed,
-			fmt.Sprintf("Firecracker binary not found: %s", binPath),
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	if err := syscall.Access(binPath, 1); err != nil {
-		return errs.New(
-			errs.CodeVMCreateFailed,
-			fmt.Sprintf("Firecracker binary not executable: %s", binPath),
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
+	// The selected Firecracker binary lives in a root-only release store. The
+	// unprivileged caller cannot traverse that store; root launch admission pins
+	// and verifies the installed release before executing it.
 	if result.CustomCloudInitConfig != nil && *result.CustomCloudInitConfig != "" {
 		if _, err := os.Stat(*result.CustomCloudInitConfig); os.IsNotExist(err) {
 			return errs.New(

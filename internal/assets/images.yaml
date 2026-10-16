@@ -29,7 +29,7 @@ image_types:
     version_name_template: "Ubuntu {codename} ({version}) Minimal"
     versions_url: "https://cloud-images.ubuntu.com/minimal/releases/"
     download_url: "https://cloud-images.ubuntu.com/minimal/releases/{codename}/release/ubuntu-{version}-minimal-cloudimg-{arch}-root.tar.xz"
-    sha256_url: "https://cloud-images.ubuntu.com/minimal/releases/{codename}/RELEASE/SHA256SUMS"
+    sha256_url: "https://cloud-images.ubuntu.com/minimal/releases/{codename}/release/SHA256SUMS"
     format: tar-rootfs
     options:
       codename_mapping:

@@ -146,16 +146,16 @@ func (i *ImageImportInput) Resolve(
 		vmResolver := vm.NewResolver(vmRepo)
 		vmItem, vmErr := vmResolver.Resolve(ctx, source)
 		if vmErr == nil && vmItem != nil {
-			source = vmItem.RootfsPath
+			source = vmItem.ID // Provenance only; root export selects the protected bytes.
 			resolvedVM = vmItem
 			i.Format = "raw"          // force raw for VM rootfs
 			i.SkipOptimization = true // skip deblob for VM imports
-			slog.Debug("Importing from VM", "vm", vmItem.Name, "rootfs", source)
+			slog.Debug("Importing from VM", "vm", vmItem.Name)
 		}
 	}
 
 	// --- 2. If NOT a VM, validate source file exists ---
-	if source == i.Source { // still original = not resolved as VM
+	if resolvedVM == nil {
 		if _, err := os.Stat(source); os.IsNotExist(err) {
 			return nil, errs.New(errs.CodeImageImportFailed,
 				fmt.Sprintf("source not found: %s", source))
@@ -174,6 +174,9 @@ func (i *ImageImportInput) Resolve(
 	if format == "" {
 		format, _ = cfg.GetString(ctx, "defaults.image", "import_format")
 	}
+	if format == "auto" {
+		format = ""
+	}
 	// Extension-based auto-detect
 	if format == "" {
 		fname := strings.ToLower(filepath.Base(source))
@@ -187,7 +190,10 @@ func (i *ImageImportInput) Resolve(
 		}
 	}
 	// Magic-byte fallback detection
-	detected := disk.DetectImageFormat(source)
+	detected := ""
+	if resolvedVM == nil {
+		detected = disk.DetectImageFormat(source)
+	}
 	if detected != "" && format == "" {
 		format = detected
 	}

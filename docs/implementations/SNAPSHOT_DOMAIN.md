@@ -1,213 +1,148 @@
 # Snapshot Functionality
 
-## Problem
-
-Firecracker snapshots are a raw API passthrough. Without a managed snapshot domain, there is no way to list available snapshots, track which VM a snapshot came from, or restore a snapshot into a new VM with proper network identity. The user must specify raw file paths for memory and state dumps with no directory management, no rootfs tracking, and no metadata persistence.
+This guide describes the current v0.3.0 snapshot implementation. Capture and restore use root-authenticated VM
+authority and protected storage. Installed-candidate snapshot runtime qualification remains incomplete: the latest
+six-case attempt reported one pass and five failures. Earlier focused results do not qualify the current full matrix;
+see the [coverage matrix](../../tests/system/COVERAGE_MATRIX.md).
 
 ## Architecture
 
-The snapshot domain has its own DB table (`snapshots`), cache directory (`~/.cache/mvm/snapshots/<id>/`), CLI commands, and API layer. Snapshots are managed entities — captured atomically, stored in a known location, restorable by name.
+The unprivileged CLI calls `pkg/api`; the API resolves public selectors and coordinates local bookkeeping through
+the VM controller. `VMSnapshotClient` sends named Capture, Inspect, Restore, and Remove requests to the authenticated
+privileged dispatcher. Its root receiver, `VMSnapshotServer`, owns process admission, capture, protected artifacts,
+and restore composition with the Jailer lifecycle.
 
-### Key characteristics
+The core snapshot domain owns only repository and selector resolution. It has no snapshot Controller or Service.
+SQLite rows and returned capture results are display/bookkeeping projections, not authority to select disk files,
+machine configuration, or network state. The closed root requests carry cache and snapshot identities, the source or
+target VM ID where applicable, and pause/resume intent; they accept no caller-selected artifact paths.
 
-- **No Controller** — snapshots are immutable after creation, so no state machine is needed. The repository handles DB CRUD, and filesystem operations are handled directly by the API layer.
-- **Self-contained domain** — the snapshot domain imports `internal/lib/firecracker` to call Pause/CreateSnapshot/Resume/LoadSnapshot directly. No cross-core package imports.
-- **Orchestration in API layer** — the API layer's `Operation` methods coordinate VM pausing, rootfs copying, network allocation, and Firecracker spawn. This matches the existing pattern where the API layer orchestrates multiple domains.
+[ADR-0018](../adr/0018-isolated-vm-execution-and-snapshot-authority.md) defines protected backing and consistent
+capture. [ADR-0017](../adr/0017-per-vm-network-namespaces-and-typed-policies.md#snapshot-restore-endpoint-identity)
+defines captured endpoint identity, and [ADR-0020](../adr/0020-networkless-vm-placement.md) defines networkless restore.
 
-## Entry point
+## Entry points
 
-Snapshot operations are triggered from the CLI commands in `internal/cli/snapshot.go`:
+| Command | API operation | Behavior |
+|---------|---------------|----------|
+| `mvm snapshot create VM [--name NAME] [--pause]` | `SnapshotCreate` | Full capture of an active VM; disk-only capture of a fully cleaned stopped VM |
+| `mvm snapshot ls` | `SnapshotList` | List local projections with best-effort relation enrichment |
+| `mvm snapshot inspect SELECTOR` | `SnapshotInspect` | Inspect local metadata, or root metadata for an exact full ID missing locally |
+| `mvm snapshot restore SELECTOR NAME [--resume]` | `SnapshotRestore` | Restore exactly one target VM from an indexed capture |
+| `mvm snapshot rm SELECTOR... [--force]` | `SnapshotRemove` | Root removal before deleting local projections |
 
-- `mvm snapshot create <vm>` — calls `op.SnapshotCreate()` in `pkg/api/snapshot.go`
-- `mvm snapshot restore <id> <name>` — calls `op.SnapshotRestore()`
-- `mvm snapshot ls` — calls `op.SnapshotList()`
-- `mvm snapshot inspect <id>` — calls `op.SnapshotInspect()`
-- `mvm snapshot rm <id>` — calls `op.SnapshotRemove()`
+The CLI still exposes `--count` and `--network` on restore. The API requires `Count == 1`; a supplied network may
+only resolve to the captured managed network. It cannot move a networkless capture onto a managed network.
+`--resume` defaults to false. `--force` on removal skips confirmation and cannot bypass root reference checks.
+See the [command reference](../REFERENCES.md#mvm-snapshot-alias-ss).
 
-The API layer orchestrates all cross-domain operations (VM pause/resume, rootfs copy, network allocation, Firecracker spawn). The snapshot repository in `internal/core/snapshot/` handles DB CRUD. There is no service layer — snapshots are immutable after creation.
+## Capture
 
-## Happy path: Snapshot create
+1. The API validates/resolves the source, generates `crypto.SnapshotID(sourceVMID, createdAt)`, and publishes the
+   full request ID through the progress callback before root effects. The CLI prints it to stderr even with `--json`.
+2. Root locks the owned VM, rejects an outstanding rootfs export, and admits either its active process/device
+   authority or its fully cleaned stopped device archive. Active capture pins and verifies the exact Firecracker
+   process, jail root, current attached-volume inventory, and private API peer.
+3. Root admits the cache and protected backing graph, then locks the captured backings in canonical order.
+   Each backing must pass exclusive active-source or stopped-source capture checks. Competing writable access
+   refuses capture; pausing only one VM does not authorize coordinated multi-VM capture.
+4. Root creates an exclusive snapshot entry and records capture progress before pause/copy/publication effects.
+   For a Running source it requests pause through the admitted API session; an already Paused source stays paused.
+5. An active source produces a Firecracker `Full` memory/vmstate snapshot in an isolated, disk-backed directory
+   beneath its admitted jail root. While the source remains paused and backing leases remain held, root copies
+   rootfs, attached data volumes, kernel, optional cloud-init seed, memory, and vmstate into protected artifacts.
+   A fully cleaned stopped source produces mode `disks`, with no memory or vmstate.
+6. Root publishes `capture.json` binding the source, exact release, machine/device configuration, network placement,
+   captured IP/MAC, guest drive IDs, and artifact identities/extents/digests. Only after publication and producer
+   cleanup does it resume an originally Running source, unless `--pause` was requested. An originally Paused
+   source remains paused; a stopped source remains stopped.
+7. The VM controller updates its local status projection. The API then upserts the snapshot projection.
+   A database failure after root publication preserves the durable capture and reports its full ID.
 
-### 1. Resolve and enrich
+The Full capture policy coordinates one paused guest's RAM, rootfs, and attached disks. It does not promise
+application transaction consistency or complete release qualification. Memory length must equal trusted captured RAM
+in MiB × 1,048,576. The complete vmstate file is limited to 10,000,000 bytes. Storage admission reserves no physical
+space and adds no per-data-volume or aggregate storage quota.
 
-`op.SnapshotCreate()` resolves the VM by identifier and enriches it with all relations (kernel, image, binary, network) via the enricher.
+## Protected storage and projections
 
-### 2. Generate snapshot ID
+Artifacts live beneath the admitted cache at `.mvm-protected/snapshots/<snapshot-id>/`, bound to the root-owned
+protected-store anchor. Snapshot operations use a permanent root-owned identity lock outside the removable entry.
+Replacing an artifact directory cannot create a second lock for the same snapshot ID.
 
-A deterministic snapshot ID is generated via `crypto.SnapshotID(sourceVMID, timestamp)` — SHA of the source VM ID concatenated with the timestamp.
+| Leaf | Purpose |
+|------|---------|
+| `capture.json` | Root-owned immutable source/configuration and artifact record |
+| `capture-progress.json` | Durable stage, publication, and source-state recovery evidence |
+| `rootfs.img`, `volume-<guest-drive-id>.raw` | Captured protected disks |
+| `kernel`, optional `cloud-init.iso` | Captured boot resources |
+| `memory`, `vmstate` | Immutable Full-capture state; absent for disk-only captures |
+| `refs/<target-vm-id>.json` | Root-owned restore references |
 
-### 3. Create snapshot directory
+The `snapshots` SQLite table stores names, source/display identities, resource sizes, derived display paths, and
+`extra_config` bookkeeping such as guest-agent information. Restore obtains authoritative configuration and artifact
+selection from root metadata, not these path/configuration columns. Listing does not discover unindexed root captures.
+Keep the emitted full ID: inspect/remove can recover that exact selection without a local row; restore currently
+resolves through the local snapshot repository.
 
-The snapshot cache directory is created at `~/.cache/mvm/snapshots/<id>/`.
+## Restore
 
-### 4. Copy rootfs
+1. The API rejects multiple targets, resolves the snapshot, and obtains its root-authenticated projection.
+   It checks the destination name and any explicit network selection before creating a fresh target ID.
+2. A managed restore reserves the captured IP in the local lease repository before local VM publication or root
+   launch. Root endpoint authority separately enforces the exact captured network, IPv4, and MAC. Conflicts,
+   including a source that still owns the endpoint, refuse restoration. No fresh guest address/MAC is allocated.
+3. Root locks the immutable capture, verifies its owner/cache/artifacts, and creates a durable target reference.
+   The prepared restore capability derives launch intent from the capture. The captured release identity must
+   remain supported; the current launch contract requires exact Firecracker/Jailer 1.17.0. Captures are not converted
+   across versions, and vCPU/RAM configuration is not replaced by caller input.
+4. The Jailer lifecycle registers the blocked target before mutable launch effects. Under that authority it
+   creates independent protected rootfs and data-volume backing, preserving each guest-visible drive ID and access/cache
+   intent while assigning target-specific logical volume IDs. Launch grants access to the isolated execution identity,
+   seals configuration, and mounts only admitted resources.
+5. After activation, root verifies the target process/release/placement and opens its authenticated API session.
+   Full restore loads `/snapshot/vmstate` and immutable `/snapshot/memory`. A root-derived TAP override reconnects
+   the captured NIC to new host topology while preserving guest IP/MAC. Vsock uses the fixed private runtime UDS
+   override and retains its captured guest CID.
+6. A networkless capture remains networkless: a fresh isolated loopback-only namespace, no managed endpoint,
+   TAP, NIC, IP/MAC, or lease allocation. Full restore sends no network override.
+7. Full restore keeps immutable memory backing and its reference until verified process cleanup releases them.
+   Disk-only restore cold-boots the independent disks and releases its capture reference after successful setup.
+   Without `--resume`, Full restore remains paused; disk-only restore pauses its cold boot after the API is ready.
+8. The controller projects the root result into the VM row; the API projects new attached volume rows. Projection
+   failures do not authorize deleting an already launched VM or reusing its endpoint.
 
-The source VM's rootfs is copied to `snapDir/rootfs.ext4` via `infra.CopyFile()` (file-level copy with sparse support). This gives a point-in-time consistent rootfs — the source VM continues running, so referencing the original path risks inconsistency.
+## Failure ownership and removal
 
-### 5. Create phantom symlink
+Capture progress records distinguish unpublished, unknown publication, and published outcomes, with the source VM
+state and exact request ID. An uncertain or failed capture does not automatically resume the source or erase partial
+root evidence. Reusing that capture ID refuses; inspect/remove the retained transaction before a new capture.
+Historical pause progress is not proof of current VM state. Stopped VM cleanup removes only admitted producer
+temporary outputs after verified process absence.
 
-A symlink `snapDir/phantom-rootfs.ext4` → `rootfs.ext4` is created. This symlink is critical for making snapshots independent of the source VM's rootfs path.
+Before root restore is attempted, the API may unwind its new local rows, directory, and endpoint lease.
+After an attempt, it retains the target identity and reservation unless an authoritative root response proves
+`restore_no_commit`. That proof requires no committed VM authority, no surviving launch child, and completed
+pre-registration reference cleanup. Transport failure alone cannot establish it. Once target registration transfers
+ownership, lifecycle cleanup owns backing, process, topology, and snapshot-reference recovery.
 
-### 6. Pause VM and patch drive path
-
-The API layer calls `firecracker.PauseVM()` to pause the source VM. It then calls `PATCH /drives/rootfs` to change the running VM's drive path to the phantom symlink. Because the VM is paused, no I/O is in flight.
-
-### 7. Create snapshot
-
-The API layer calls `firecracker.CreateSnapshot(memPath, statePath)`. The vmstate file captures the phantom symlink path (not the source VM's original rootfs path).
-
-### 8. Restore original drive path and resume
-
-The API layer calls `PATCH /drives/rootfs` to restore the original path, then resumes the VM (unless `--pause` is specified).
-
-### 9. Insert DB record
-
-The snapshot metadata is inserted into the `snapshots` table via `snapshotRepo.Upsert()`.
-
-If any step fails, the snapshot directory is cleaned up and no DB record is created — atomic create.
-
-## Happy path: Snapshot restore
-
-### 1. Resolve snapshot
-
-The snapshot is resolved by ID (supports prefix matching, errors on ambiguity).
-
-### 2. Load metadata
-
-Snapshot metadata is loaded from the DB, including kernel/network/binary IDs.
-
-### 3. For each VM to restore
-
-For each clone (controlled by `--count`, default 1):
-
-1. Generate new VM ID
-2. Copy `snapDir/rootfs.ext4` → `vms/<new-id>/rootfs.ext4`
-3. Acquire exclusive flock on `snapDir/.restore.lock` (serializes concurrent restores from the same snapshot)
-4. Replace `snapDir/phantom-rootfs.ext4` → symlink → new VM's rootfs
-5. Create VM record with Stopped status, wired kernel/binary/network
-6. Create VM directory and Firecracker config
-7. Spawn Firecracker in snapshot mode
-8. Call `firecracker.LoadSnapshot()` with mem/state paths, network overrides, and vsock override
-9. Release flock on `.restore.lock`
-
-### Phantom symlink
-
-The phantom symlink makes snapshots independent of the source VM:
-
-- **During create**: PATCH the running VM's drive to point to the symlink before taking the snapshot. The vmstate captures the snapshot-local symlink path.
-- **During restore**: Replace the symlink to point to the new VM's rootfs copy. LoadSnapshot follows the symlink and finds the correct backing file.
-
-Firecracker's `PUT /snapshot/load` does not support a block-device-path override — the backing file path recorded in the vmstate is used directly. The phantom symlink works around this constraint.
-
-### Concurrent restore safety
-
-The `.restore.lock` file serializes concurrent `mvm snapshot restore` invocations from the same snapshot. The lock is acquired before the phantom symlink is updated and released after LoadSnapshot completes. `flock()` is used because it is automatically released on process exit.
-
-### Vsock override
-
-Firecracker's `PUT /snapshot/load` supports `vsock_override` to change the vsock UDS path at load time. Without it, the vmstate's recorded UDS path would collide with the source VM's socket. The vsock guest CID is set via a separate `PUT /vsock` call after LoadSnapshot.
-
-### Network identity
-
-Each clone gets a fresh MAC and IP from the target network (specified via `--network`, defaulting to the snapshot's original network). The guest's in-memory network config from the snapshot will be stale (it remembers the old IP), but DHCP/cloud-init guest-side scripts can re-apply.
-
-## DB schema
-
-The `snapshots` table (in `001_initial_schema.sql`) stores:
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | TEXT PRIMARY KEY | `crypto.SnapshotID(source_vm_id, timestamp)` |
-| `name` | TEXT | User-provided name (defaults to `<source-vm>-<timestamp>`) |
-| `source_vm_id` | TEXT | Source VM ID |
-| `source_vm_name` | TEXT | Source VM name (denormalized for display) |
-| `snapshot_dir` | TEXT | Absolute path to `cache/snapshots/<id>/` |
-| `memory_file` | TEXT | Path to memory dump file within snapshot dir |
-| `state_file` | TEXT | Path to vmstate file within snapshot dir |
-| `rootfs_file` | TEXT | Path to rootfs copy within snapshot dir |
-| `kernel_id` | TEXT | Kernel ID used at snapshot time |
-| `network_id` | TEXT | Network ID used at snapshot time |
-| `binary_id` | TEXT | Firecracker binary ID used at snapshot time |
-| `vcpu_count` | INTEGER | vCPU count from source VM |
-| `mem_size_mib` | INTEGER | Memory size from source VM |
-| `disk_size_mib` | INTEGER | Rootfs size from source VM |
-| `image_id` | TEXT | Image ID |
-| `ssh_keys` | TEXT | SSH key names (JSON array) |
-| `ssh_user` | TEXT | SSH user (nullable) |
-| `extra_config` | TEXT | Full Firecracker boot config (JSON blob) |
-| `created_at` | TEXT | ISO 8601 timestamp |
-| `updated_at` | TEXT | ISO 8601 timestamp |
-
-## Snapshot config structs
-
-Defined in `internal/lib/model/snapshot.go`:
-
-```go
-type SnapshotCreateConfig struct {
-    MemFile           string
-    StateFile         string
-    PauseOnly         bool
-    PhantomRootfsPath string // symlink path for vmstate (empty = skip PATCH)
-    RootfsPath        string // original path to restore after snapshot
-}
-
-type SnapshotRestoreConfig struct {
-    MemFile          string
-    StateFile        string
-    Resume           bool
-    NetworkOverrides map[string]string // iface_id → host_dev_name
-    VsockUDSPath     string            // vsock_override UDS path
-    RootfsPath       string            // rootfs path for post-Load PATCH
-}
-```
-
-## Failure modes
-
-### Firecracker constraints on restore
-
-**vCPU and memory cannot be changed when restoring a snapshot.** The snapshot captures complete KVM vCPU register state and guest memory layout. Loading into a differently configured Firecracker would be an incompatible state restore. The machine config must be set before `/snapshot/load` and must match what was captured.
-
-**Block device path is hardcoded in vmstate.** Firecracker does not support a block-device-path override on `PUT /snapshot/load` (unlike `network_overrides` and `vsock_override`). The phantom symlink works around this by ensuring the vmstate always references the symlink path in the snapshot directory.
-
-### Partial failure on create
-
-If any step fails during snapshot creation, the snapshot directory is removed and no DB record is inserted. The operation is atomic.
-
-### Stale restore lock
-
-The `.restore.lock` file uses `flock()` which is automatically released on process exit. There are no orphaned lock files.
-
-### Snapshot removal does not affect VMs
-
-`mvm snapshot rm` removes the snapshot directory and DB record. It does not touch any running VM. Snapshots and VMs are independent entities.
-
-### Reference counting for delete protection
-
-Before deleting a kernel, network, or binary, the API layer checks `snapshotRepo.CountByKernelID()` / `CountByNetworkID()` / `CountByBinaryID()` to see if any snapshot references the entity. If references exist, the entity is soft-deleted. This check happens in the API layer because the snapshot repository cannot be imported by other core domains (core domains never import other core packages).
+Snapshot removal locks the exact protected entry and refuses any retained restore reference. Full restored VMs can
+still depend on captured memory despite having independent writable disks. Root removes only admitted fixed leaves
+and syncs the protected store; absent entries and safe interrupted removal suffixes converge on retry. Unexpected
+entries or ambiguous ownership remain errors. Only a successful root removal permits the API to delete its local row;
+a later database error is reported and can be retried. `--force` does not remove references or terminate VMs.
 
 ## Key files
 
-| File | Purpose |
-|------|---------|
-| `internal/core/snapshot/repository.go` | Repository interface: CRUD + reference counting |
-| `internal/core/snapshot/sqlite.go` | SQLite implementation of snapshot repository |
-| `internal/core/snapshot/resolver.go` | Entity resolution by identifier |
-| `internal/lib/model/snapshot.go` | `SnapshotItem`, `SnapshotCreateConfig`, `SnapshotRestoreConfig` |
-| `pkg/api/snapshot.go` | API orchestration: `SnapshotCreate()`, `SnapshotRestore()`, `SnapshotList()`, `SnapshotInspect()`, `SnapshotRemove()` |
-| `pkg/api/inputs/snapshot_input.go` | Input structs: `SnapshotCreateInput`, `SnapshotRestoreInput`, `SnapshotInput` |
-| `internal/lib/firecracker/client.go` | Firecracker HTTP client: `PauseVM()`, `CreateSnapshot()`, `ResumeVM()`, `LoadSnapshot()` |
-| `internal/cli/snapshot.go` | Cobra commands: `mvm snapshot create\|ls\|inspect\|restore\|rm` |
-
-## Design decisions
-
-**No Controller — snapshots are immutable.** Snapshots have no state machine (they cannot be modified after creation). A Controller adds complexity for no benefit. The API layer handles orchestration directly.
-
-**Phantom symlink over source VM rootfs reference.** The phantom symlink makes the snapshot self-contained and restorable without the source VM. During restore, the symlink is updated to point to the new VM's rootfs copy. The `flock` serializes the update + LoadSnapshot window.
-
-**DB over filesystem for config storage.** The Firecracker boot config is stored in the `extra_config` DB column rather than as a `config.json` file. The enricher enriches it at restore time. This avoids file management complexity.
-
-**`infra.CopyFile()` for rootfs copy.** Uses file-level copy with sparse support. A new subprocess call is unnecessary for this operation.
-
-**Snapshots don't pin images.** A snapshot stores `image_id`, `kernel_id`, `network_id`, and `binary_id` for metadata and enrichment, but the rootfs is copied at snapshot time — the snapshot can be restored without the original image.
-
-**Vsock override + separate CID update.** The vsock UDS path is overridable via `vsock_override` on `/snapshot/load`, but the guest CID requires a separate `PUT /vsock` call after load.
+| File | Responsibility |
+|------|----------------|
+| [internal/cli/snapshot.go](../../internal/cli/snapshot.go) | Commands, flags, progress, structured output |
+| [pkg/api/snapshot.go](../../pkg/api/snapshot.go) | Public orchestration, endpoint reservation, projection/recovery |
+| [pkg/api/inputs/snapshot.go](../../pkg/api/inputs/snapshot.go) | Public validation and selector resolution |
+| [internal/core/snapshot/](../../internal/core/snapshot/) | Repository and resolver |
+| [internal/core/vm/controller.go](../../internal/core/vm/controller.go) | Typed capture/restore client and VM projection |
+| [snapshot_wire.go](../../internal/service/jailer/snapshot_wire.go), [snapshot_handler.go](../../internal/service/privileged/snapshot_handler.go) | Closed requests and authenticated root dispatch |
+| [snapshot_capture.go](../../internal/service/jailer/snapshot_capture.go), [snapshot_api.go](../../internal/service/jailer/snapshot_api.go), [snapshot_producer.go](../../internal/service/jailer/snapshot_producer.go) | Admitted source capture and private producer outputs |
+| [snapshot_store.go](../../internal/service/jailer/snapshot_store.go), [snapshot_progress.go](../../internal/service/jailer/snapshot_progress.go), [snapshot_references.go](../../internal/service/jailer/snapshot_references.go) | Protected publication, progress, locks, and references |
+| [snapshot_restore.go](../../internal/service/jailer/snapshot_restore.go), [snapshot_load.go](../../internal/service/jailer/snapshot_load.go), [lifecycle_restore.go](../../internal/service/jailer/lifecycle_restore.go) | Immutable restore preparation, independent backing, and typed lifecycle load |
+| [snapshot.go](../../internal/lib/model/snapshot.go) | Local projections and path-free controller configuration |

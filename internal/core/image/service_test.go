@@ -13,13 +13,75 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/klauspost/compress/zstd"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/provisioner"
 	"mvmctl/internal/lib/system"
 )
+
+func TestExtractVMRootfsImage_UnrecognizedWholeImagePreservesExport(t *testing.T) {
+	// Rationale: Successful negative filesystem/partition probes previously moved the source,
+	// preventing the root authority from releasing its exact independent export.
+	cacheDir := setupHermeticCache(t)
+	sourceDir := filepath.Join(cacheDir, "export")
+	outputDir := filepath.Join(cacheDir, "images")
+	require.NoError(t, os.Mkdir(sourceDir, 0700))
+	require.NoError(t, os.Mkdir(outputDir, 0700))
+	sourcePath := filepath.Join(sourceDir, "disk.raw")
+	data := []byte("independent VM export bytes without a detected partition table\n")
+	require.NoError(t, os.WriteFile(sourcePath, data, 0400))
+	before, err := os.Stat(sourcePath)
+	require.NoError(t, err)
+	installVMJournalRunner(t, &vmJournalRunner{
+		effect: func(_ context.Context, args []string, _ system.RunCmdOpts) (*system.RunResult, error) {
+			switch args[0] {
+			case "blkid":
+				return &system.RunResult{ExitCode: 2}, nil // No recognized filesystem signature.
+			case "sfdisk":
+				return &system.RunResult{Stdout: `{"partitiontable":{"partitions":[]}}`}, nil
+			case "cp":
+				// Model the copy effect on real fixture bytes, not just successful mock wiring.
+				content, readErr := os.ReadFile(args[len(args)-2])
+				if readErr != nil {
+					return &system.RunResult{ExitCode: 1}, readErr
+				}
+				if writeErr := os.WriteFile(args[len(args)-1], content, 0600); writeErr != nil {
+					return &system.RunResult{ExitCode: 1}, writeErr
+				}
+				return &system.RunResult{}, nil
+			default:
+				return &system.RunResult{ExitCode: -1}, fmt.Errorf("unexpected export fixture command %q", args[0])
+			}
+		},
+	})
+
+	service := NewService(fakeRepo{})
+	outputPath, err := service.ExtractVMRootfsImage(
+		context.Background(), sourcePath, "test-image", outputDir, 0, nil, provisioner.ProvisionerLoopMount,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(outputDir, "test-image.img"), outputPath)
+	after, err := os.Stat(sourcePath)
+	require.NoError(t, err, "the exact export path must remain available for root release")
+	assert.True(t, os.SameFile(before, after), "extraction must retain the exported inode")
+	assert.Equal(t, before.Mode(), after.Mode(), "extraction must retain the read-only export mode")
+	outputInfo, err := os.Stat(outputPath)
+	require.NoError(t, err)
+	assert.False(t, os.SameFile(after, outputInfo), "the final image must have independent backing")
+
+	for _, path := range []string{sourcePath, outputPath} {
+		got, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		if diff := cmp.Diff(data, got); diff != "" {
+			t.Errorf("%s content mismatch (-want +got):\n%s", path, diff)
+		}
+	}
+}
 
 // fakeRepo is a minimal in-memory implementation of Repository for tests that
 // do not exercise persistence. It avoids a nil interface in NewService while
@@ -48,12 +110,13 @@ func (fakeRepo) UpdateManyIsPresent(_ context.Context, _ []string, _ bool) error
 
 func ptr(s string) *string { return &s }
 
-// setupHermeticCache points the warm-image cache and image directory at a
-// per-test temporary directory so EnsureCached never touches the host cache.
+// setupHermeticCache keeps the warm-image cache, image directory, and fakeroot
+// scratch files under a per-test directory instead of host cache or temp paths.
 func setupHermeticCache(t *testing.T) string {
 	t.Helper()
 	cacheDir := t.TempDir()
 	t.Setenv(infra.EnvKey("CACHE_DIR"), cacheDir)
+	t.Setenv(infra.EnvKey("TEMP_DIR"), cacheDir)
 	t.Setenv(infra.EnvKey("WARM_POOL"), "disk")
 	return cacheDir
 }
@@ -100,7 +163,7 @@ func concurrentEnsureCached(t *testing.T, s *Service, image *model.ImageItem, wo
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			paths, err := s.EnsureCached([]*model.ImageItem{image})
+			paths, err := s.EnsureCached(context.Background(), []*model.ImageItem{image})
 			results <- result{paths: paths, err: err}
 		}()
 	}

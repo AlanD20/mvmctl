@@ -21,14 +21,17 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.3"
           cache: true
 
       - name: Tidy
         run: go mod tidy && git diff --exit-code
 
+      - name: Check core domain imports
+        run: go test ./internal/architecture -count=1
+
       - name: Install golines
-        run: go install github.com/segmentio/golines@latest
+        run: go install github.com/segmentio/golines@v0.13.0
 
       - name: Check formatting (gofmt)
         run: test -z "$(gofmt -l .)"
@@ -44,12 +47,14 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test
-        run: go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
+      - name: Test unprivileged Go packages and Jailer contracts
+        run: bash scripts/run-go-ci-tests.sh
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
-          path: coverage.out
+          path: |
+            coverage.out
+            coverage-jailer.out
           retention-days: 3

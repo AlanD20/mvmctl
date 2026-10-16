@@ -44,22 +44,29 @@ type EnrichFunc func(ctx context.Context, binaries []*model.BinaryItem, include 
 // Resolver resolves binary identifiers (ID prefix, name, [name, version] pair)
 // to BinaryItem instances.
 type Resolver struct {
-	repo       Repository
-	include    []string
-	enrichFunc EnrichFunc
+	repo         Repository
+	architecture string
+	include      []string
+	enrichFunc   EnrichFunc
 }
 
 // NewResolver creates a new Resolver without enrichment.
-func NewResolver(repo Repository) *Resolver {
-	return &Resolver{repo: repo}
+func NewResolver(repo Repository, architecture string) *Resolver {
+	return &Resolver{repo: repo, architecture: architecture}
 }
 
 // NewBinaryResolverWithEnrichFunc creates a new Resolver with enrichment support.
-func NewBinaryResolverWithEnrichFunc(repo Repository, enrichFunc EnrichFunc, include []string) *Resolver {
+func NewBinaryResolverWithEnrichFunc(
+	repo Repository,
+	architecture string,
+	enrichFunc EnrichFunc,
+	include []string,
+) *Resolver {
 	return &Resolver{
-		repo:       repo,
-		enrichFunc: enrichFunc,
-		include:    include,
+		repo:         repo,
+		architecture: architecture,
+		enrichFunc:   enrichFunc,
+		include:      include,
 	}
 }
 
@@ -79,7 +86,7 @@ func (r *Resolver) enrich(ctx context.Context, binaries []*model.BinaryItem) []*
 
 // ByID resolves a binary by ID prefix.
 func (r *Resolver) ByID(ctx context.Context, binaryID string, includeDeleted ...bool) (*model.BinaryItem, error) {
-	matches, err := r.repo.FindByPrefix(ctx, binaryID, includeDeleted...)
+	matches, err := r.repo.FindByPrefix(ctx, binaryID, r.architecture, includeDeleted...)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +104,7 @@ func (r *Resolver) ByID(ctx context.Context, binaryID string, includeDeleted ...
 
 // ByTypeVersion resolves a binary by type and version (both required).
 func (r *Resolver) ByTypeVersion(ctx context.Context, typ, version string) (*model.BinaryItem, error) {
-	binary, err := r.repo.GetByTypeAndVersion(ctx, typ, version)
+	binary, err := r.repo.GetByTypeAndVersion(ctx, typ, r.architecture, version)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +118,7 @@ func (r *Resolver) ByTypeVersion(ctx context.Context, typ, version string) (*mod
 
 // ByTypeLatest resolves a binary by type — returns the highest local version.
 func (r *Resolver) ByTypeLatest(ctx context.Context, typ string) (*model.BinaryItem, error) {
-	matches, err := r.repo.ListByType(ctx, typ)
+	matches, err := r.repo.ListByType(ctx, typ, r.architecture)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +141,7 @@ func (r *Resolver) ByTypeLatest(ctx context.Context, typ string) (*model.BinaryI
 
 // GetDefault resolves the default binary for a given type, or nil if not set.
 func (r *Resolver) GetDefault(ctx context.Context, typ string) (*model.BinaryItem, error) {
-	binary, err := r.repo.GetDefault(ctx, typ)
+	binary, err := r.repo.GetDefault(ctx, typ, r.architecture)
 	if err != nil {
 		return nil, err
 	}

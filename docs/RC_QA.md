@@ -21,14 +21,23 @@ A release is **blocked** until ALL of the following pass:
 
 | Gate | Command | Must Pass |
 |------|---------|-----------|
-| Compile | `go build ./...` | Zero errors |
+| Tidy | `go mod tidy && git diff --exit-code` | Module files unchanged |
+| Format | `test -z "$(gofmt -l .)"` | Entire Go tree formatted |
+| Line length | `golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/` | No listed files |
+| Generate | `go generate ./internal/service/agent/...` | Generated assets current |
 | Vet | `go vet ./...` | Zero warnings |
-| Unit tests | `go test ./...` | All pass |
-| System tests | `python3 scripts/run-system-tests.py --all` | All pass, zero skips on required tests |
-| Version check | `./scripts/build.sh release && ./dist/mvm --version` | Returns correct version (not `0.0.0-dev`) |
-| Smoke test | `./dist/mvm --help` | Shows all commands |
+| CI Go tests | `bash scripts/run-go-ci-tests.sh` | Unprivileged selection passes |
+| Local Jailer Go tests | Full Jailer test binary run as root inside a disposable VM | Entire package passes |
+| System install | `sudo ./dist/mvm host install-system && sudo /usr/local/bin/mvm host init` | Canonical root-owned install succeeds |
+| System tests | `MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm python3 scripts/run-system-tests.py --release-qualification --host-direct --rebuild --candidate-version X.Y.Z --all --host-reboot-task /absolute/path/to/closed-host-reboot-task` | Identity-qualified T1/T2 runners, clean-host T3 and strict closed reboot proof all pass |
+| Version check | `/usr/local/bin/mvm --version` | Returns correct version (not `0.0.0-dev`) |
+| Smoke test | `/usr/local/bin/mvm --help` | Shows all commands |
 
 **No gate is optional.** A single failure blocks the release.
+
+The system-install, version, and smoke gates run on a dedicated clean qualification host or disposable outer VM. Do not
+replace a developer workstation's active controller to satisfy them. During iterative QA, the existing outer controller
+creates disposable nested runners and the candidate is installed only inside those runners.
 
 ---
 
@@ -47,7 +56,8 @@ System tests run inside a Firecracker VM with nested KVM enabled. This provides:
 
 See [docs/development/HOW_TO_RUN_SYSTEM_TESTS.md](development/HOW_TO_RUN_SYSTEM_TESTS.md)
 for the full walkthrough: host prerequisites, building the binary, setting up the
-asset mirror, running the orchestrator (`--prepare`, `--all`, `--tier`, `--push`),
+asset mirror, running the orchestrator (`--prepare`, `--all`, `--tier`, `--host-direct`,
+`--release-qualification`, `--push`),
 interpreting results, and troubleshooting common failures.
 
 The orchestrator script flags are documented there. For the architecture overview
@@ -60,9 +70,55 @@ The orchestrator script flags are documented there. For the architecture overvie
 
 ### 3.1 System Test Execution
 
-System tests run inside disposable Firecracker VMs with nested KVM, providing
-full isolation. The orchestrator creates one VM per domain, runs tests via
-`mvm exec`, and destroys the VM after.
+T1/T2 system tests run inside disposable Firecracker VMs with nested KVM. The
+orchestrator creates one VM per T1/T2 domain, runs tests via `mvm exec`, and
+destroys the VM after. Tier 3 is host-direct and has the separate restrictions
+below.
+For T1/T2, a failed pre-create provision step does not authorize VM deletion. The orchestrator records ownership only
+after its `vm create` command succeeds, then includes checked destruction in the domain result even if later setup fails.
+An ambiguous create failure remains a failed domain needing operator inspection; the runner does not guess ownership.
+
+For T1/T2, release qualification keeps the outer controller (`MVM_BINARY`) separate from `./dist/mvm`
+(`MVM_CANDIDATE_BINARY`). The controller manages disposable test resources. The candidate-qualified base image is built
+by staging the candidate, invoking `host install-system`, and initializing through the resulting exact
+`/usr/local/bin/mvm`. T1/T2 runners clone that image and execute the installed path; the focused `system_install` domain
+replays and verifies the administrator install contract. Directly copying onto the canonical path, relying on PATH
+lookup, or aliasing the candidate to the controller does not qualify the installer.
+
+The separate [named-runner host-reboot journey](development/HOW_TO_RUN_SYSTEM_TESTS.md#47-explicit-named-runner-host-reboot-journey)
+requires a private `--host-reboot-namespace` JSON file for PRE. It binds the existing runner ID, an explicit
+non-root guest passwd/process identity, and existing owned home/task-parent/cache/config/mirror directory identities.
+Keep the original outer controller and attached SSH key unchanged; all phase pytest runs inside the QA runner.
+POST may omit the flag and reuse the retained binding, or supply the identical namespace. Task and PRE/POST
+receipts use schema 2; schema-1 records and legacy cache state are not adopted. PRE success, phase collection and
+focused tooling checks do not qualify an actual reboot. Full qualification requires the fresh, completed
+PRE/reboot/POST task on the exact accepted source and candidate; earlier receipts keep their original bindings.
+
+The builder's unprivileged initialization pins the approved Firecracker/Jailer 1.17.0 pair through
+`mvm init --non-interactive --binary-version 1.17.0`; it must not resolve a moving latest release during qualification.
+The upstream stable-release selection was checked on 2026-10-10. Archive admission and installed-candidate runtime
+qualification are separate gates; earlier 1.16.2 results do not qualify 1.17.0.
+Base-image preparation no longer removes a pre-existing fixed-name builder VM. If creation reports that the name is
+occupied, preparation fails and leaves that VM untouched; cleanup applies only after this run's create succeeds.
+Every builder artifact pull must also report an explicit local-mirror read. A pull error, checksum fallback, or
+HTTP-downloaded mirror auto-population fails qualification; bounded stdout/stderr remains in the evidence log. Fixed
+checksum/version metadata may still use its upstream source.
+
+Tier 3 is different: those tests run directly on the outer host and may create or destroy host resources. The runner
+rejects Tier 3 and `--all` before any work unless `--host-direct` acknowledges that mutation. For release evidence,
+`--release-qualification` additionally requires an unfiltered `--all`, an explicit-version rebuild, exact canonical
+root-owned `/usr/local/bin/mvm`, safe ancestors, and matching candidate/controller SHA-256 and strict version before
+resource preparation.
+
+These gates still do not prove that the host started empty or that every Tier 3 resource belongs to the current run.
+Until the remaining Task 17 inventory and cleanup gates land, run full qualification only on a dedicated clean host or
+disposable outer VM. On a development workstation, use focused T1/T2 domains or `--tier 1,2`; `--host-direct` is consent,
+not isolation or an ownership-safe cleanup guarantee.
+
+The release preflight rejects non-stopped VMs in the invoking operator's versioned `vm ls --json` projection, but that
+projection begins with the operator's SQLite rows. It cannot prove another user's VMs or a root-owned record without
+a user row are absent. This defense-in-depth check is **not** host-wide quiescence or completion of Task 17; independent
+clean-host assurance and the remaining authority/cleanup gates are still required.
 
 Tests are organized into three tiers:
 
@@ -112,32 +168,67 @@ For every release, collect and archive:
 
 | Evidence | How to Collect | Purpose |
 |----------|----------------|---------|
-| Go build output | `go build ./... 2>&1` | Zero compilation errors |
+| Tidy output | `go mod tidy && git diff --exit-code` | Module files unchanged |
+| Format output | `test -z "$(gofmt -l .)"` | Entire Go tree formatted |
+| Generate output | `go generate ./internal/service/agent/...` | Generated assets current |
 | Go vet output | `go vet ./... 2>&1` | Zero static analysis warnings |
-| Go test output | `go test ./... 2>&1` | All unit tests pass |
-| System test results | `python3 scripts/run-system-tests.py --all` | All system tests pass |
-| Version output | `./dist/mvm --version` | Correct version string |
-| Help output | `./dist/mvm --help` | All commands listed |
+| CI Go test output | `bash scripts/run-go-ci-tests.sh` | Unprivileged selection passes |
+| Local Jailer output | Full Jailer test binary run as root inside a disposable VM | Entire package passes |
+| System test results | `MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm python3 scripts/run-system-tests.py --release-qualification --host-direct --rebuild --candidate-version X.Y.Z --all --host-reboot-task /absolute/path/to/closed-host-reboot-task` | Identity-qualified full matrix and closed reboot proof pass on the clean host |
+| Version output | `/usr/local/bin/mvm --version` | Correct version string |
+| Help output | `/usr/local/bin/mvm --help` | All commands listed |
 | Benchmark results | `benchmarks/results.json` | Performance within thresholds |
 | Binary checksum | `sha256sum dist/mvm` | Reproducibility |
 
 ### 4.1 Evidence Archive
 
 ```bash
-# Create evidence directory
-mkdir -p release-evidence/vX.Y.Z
+set -euo pipefail
+
+version=X.Y.Z
+evidence_dir="release-evidence/v${version}"
+mkdir -p "$evidence_dir"
+exec > >(tee -a "$evidence_dir/qualification.log") 2>&1
 
 # Collect evidence
-go build ./... > release-evidence/vX.Y.Z/build.log 2>&1
-go vet ./... > release-evidence/vX.Y.Z/vet.log 2>&1
-go test ./... > release-evidence/vX.Y.Z/test.log 2>&1
-./dist/mvm --version > release-evidence/vX.Y.Z/version.txt 2>&1
-./dist/mvm --help > release-evidence/vX.Y.Z/help.txt 2>&1
-sha256sum dist/mvm > release-evidence/vX.Y.Z/checksum.sha256
+./scripts/build.sh release --version "$version" --output dist/mvm
+go mod tidy
+git diff --exit-code
+test -z "$(gofmt -l .)"
+test -z "$(golines --max-len=120 --no-reformat-tags --list-files \
+  ./internal/ ./pkg/ ./cmd/)"
+go generate ./internal/service/agent/...
+git diff --exit-code
+go vet ./... > "$evidence_dir/vet.log" 2>&1
+bash scripts/run-go-ci-tests.sh \
+  > "$evidence_dir/test.log" 2>&1
+
+# Archive the separate full-Jailer root-test result from a disposable local VM
+# before release sign-off. Do not run that binary as root on this host.
+
+# The following gates mutate the outer host. Run them only on the dedicated
+# clean qualification host or disposable outer VM.
+sudo ./dist/mvm host install-system
+sudo /usr/local/bin/mvm host init
+test "$(/usr/local/bin/mvm --version)" = "mvm ${version}"
+/usr/local/bin/mvm --version > "$evidence_dir/version.txt" 2>&1
+/usr/local/bin/mvm --help > "$evidence_dir/help.txt" 2>&1
+sha256sum dist/mvm > "$evidence_dir/checksum.sha256"
 
 # System test results (full suite with orchestrator)
-python3 scripts/run-system-tests.py --all 2>&1 | tee release-evidence/vX.Y.Z/system-tests.log
+MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
+  MVM_ASSET_MIRROR="$HOME/.cache/mvm-asset-mirror" \
+  python3 scripts/run-system-tests.py \
+  --release-qualification --host-direct --rebuild \
+  --candidate-version "$version" --all \
+  --host-reboot-task /absolute/path/to/closed-host-reboot-task \
+  2>&1 | tee "$evidence_dir/system-tests.log"
 ```
+
+The orchestrator accepts a domain-level `PASS` only after validating a strict bounded pytest outcome report: collection
+is non-empty, process/report exit status matches, every selected item passed, and failures, errors, collection errors,
+deselections, skips, XFAIL, and XPASS are all zero. Missing, malformed, duplicate-field, oversized, inconsistent, or
+uncleared reports fail the domain and preserve pytest output plus the validation reason in the archived log.
 
 ---
 
@@ -160,7 +251,7 @@ A regression is **any** of the following:
 | Category | Definition |
 |----------|-----------|
 | **Expected behavior change** | A feature was intentionally changed (documented in CHANGELOG.md) |
-| **New test failure** | A new test was added that reveals a pre-existing bug (file a bug, don't block release) |
+| **New test exposing an old bug** | Not classified as a regression, but the revealed defect still blocks the release until fixed or the requirement is explicitly removed |
 | **Performance improvement** | A benchmark is faster than before |
 | **Test environment issue** | Missing dependency, wrong permissions, stale state (fix environment, not code) |
 
@@ -181,16 +272,25 @@ A regression is **any** of the following:
 ## Release vX.Y.Z — QA Sign-off
 
 ### Gates
-- [ ] `go build ./...` — zero errors
+- [ ] `go mod tidy && git diff --exit-code` — module files and generated tree unchanged
+- [ ] `test -z "$(gofmt -l .)"` — entire Go tree formatted
+- [ ] `golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/` — no files listed
+- [ ] `go generate ./internal/service/agent/... && git diff --exit-code` — generated assets current
 - [ ] `go vet ./...` — zero warnings
-- [ ] `go test ./...` — all pass
-- [ ] System tests — all pass inside runner VM (see evidence archive)
-- [ ] `./dist/mvm --version` — returns vX.Y.Z
-- [ ] `./dist/mvm --help` — all commands present
+- [ ] `bash scripts/run-go-ci-tests.sh` — unprivileged Go selection passes
+- [ ] Full Jailer Go test binary — passes as root in a disposable local VM
+- [ ] `./scripts/build.sh release --version X.Y.Z --output dist/mvm` — exact candidate built
+- [ ] Dedicated clean qualification host/outer VM — candidate installed at exact `/usr/local/bin/mvm`
+- [ ] System tests — every required T1/T2/T3 domain passes strict machine outcome validation
+- [ ] Named-runner host reboot — fresh schema-2 PRE/reboot/POST proof passes with the retained operator/directory binding
+- [ ] `/usr/local/bin/mvm --version` — returns exact `mvm X.Y.Z`
+- [ ] `/usr/local/bin/mvm --help` — all commands present
 
 ### Evidence
 - [ ] Build log archived
+- [ ] Tidy, format, line-length, generate, vet, and Go-test logs archived
 - [ ] System test log archived
+- [ ] System-test log archives the strict per-domain outcome gate and every failure reason
 - [ ] Binary checksum archived
 - [ ] Benchmark results within thresholds
 

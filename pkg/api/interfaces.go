@@ -22,4 +22,5 @@ type API interface {
 	InitAPI
 	SnapshotAPI
 	UpdateAPI
+	PolicyAPI
 }

@@ -12,13 +12,6 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// SyncResult holds the result of a SyncIPTablesRules operation.
-type SyncResult struct {
-	Added    int // Rules added to host iptables
-	Verified int // Rules already present in host iptables
-	Orphaned int // Host rules not tracked in DB
-}
-
 // --- Network utilities ---
 
 // ComputeBridgeAddress returns gateway IP with subnet prefix.

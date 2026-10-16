@@ -392,11 +392,11 @@ func TestNetworkCreateInput_Validate(t *testing.T) {
 	}{
 		"empty name": {
 			input:   NetworkCreateInput{Subnet: "10.0.0.0/24"},
-			wantErr: "Network name is required",
+			wantErr: "invalid network name: cannot be empty",
 		},
 		"empty subnet": {
 			input:   NetworkCreateInput{Name: "testnet"},
-			wantErr: "Subnet is required",
+			wantErr: "network subnet must be a canonical masked IPv4 prefix no longer than /30",
 		},
 		"valid input": {
 			input: NetworkCreateInput{Name: "testnet", Subnet: "10.0.0.0/24"},

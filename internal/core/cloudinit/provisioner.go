@@ -5,13 +5,11 @@ package cloudinit
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/lib/firewall"
 	"mvmctl/internal/lib/model"
 	nocloudnetsvc "mvmctl/internal/service/nocloudnet"
 	"mvmctl/pkg/errs"
@@ -22,19 +20,15 @@ const defaultNocloudKillAfter = 5 * time.Minute
 
 // Provisioner handles all cloud-init provisioning modes.
 type Provisioner struct {
-	config          *Config
-	manager         *Manager
-	firewallTracker *firewall.FirewallTracker
+	config  *Config
+	manager *Manager
 }
 
 // NewProvisioner creates a new CloudInitProvisioner.
-// The tracker parameter is a pre-configured firewall tracker. If nil,
-// firewall operations in NET mode are skipped.
-func NewProvisioner(config *Config, tracker *firewall.FirewallTracker) *Provisioner {
+func NewProvisioner(config *Config) *Provisioner {
 	return &Provisioner{
-		config:          config,
-		manager:         NewManager(config),
-		firewallTracker: tracker,
+		config:  config,
+		manager: NewManager(config),
 	}
 }
 
@@ -69,42 +63,18 @@ func (p *Provisioner) Provision(ctx context.Context) (*model.CloudInitResult, er
 
 // provisionOff handles OFF mode — cloud-init disabled.
 func (p *Provisioner) provisionOff(_ context.Context) *model.CloudInitResult {
-	return &model.CloudInitResult{Mode: model.CloudInitModeOFF, NocloudNetRules: []model.FirewallRule{}}
+	return &model.CloudInitResult{Mode: model.CloudInitModeOFF}
 }
 
-// provisionNet handles NET mode firewall rules for a single VM.
-// Uses the pre-allocated server from config (NoCloudURL/NoCloudPort/NoCloudPID),
-// or spawns anew via nocloudnetsvc.Spawn if not pre-allocated.
+// provisionNet consumes a batch listener or starts an independently owned NoCloud listener.
 func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult, error) {
-
-	// --- Firewall rule creation ---
-	if p.firewallTracker == nil {
-		slog.Warn("No firewall tracker available, skipping NET mode firewall rules",
-			"vm_name", p.config.VMName)
-		return &model.CloudInitResult{
-			Mode:            model.CloudInitModeNET,
-			NocloudURL:      &p.config.NoCloudURL,
-			NocloudPort:     p.config.NoCloudPort,
-			NocloudPID:      &p.config.NoCloudPID,
-			NocloudNetRules: []model.FirewallRule{},
-		}, nil
+	if p.config.NocloudNetPort != nil {
+		return nil, errs.New(
+			errs.CodeCloudInitNetModeFailed,
+			"custom NoCloud ports are unsupported; the managed gateway reserves TCP 8000",
+		)
 	}
-
-	// Spawn nocloud-net server if not pre-allocated
 	if p.config.NoCloudURL == "" {
-		port := p.config.NocloudNetPort
-		if port == nil || *port == 0 {
-			freePort, err := infra.FindFreePort(
-				p.config.IPv4Gateway,
-				p.config.NocloudPortRangeStart,
-				p.config.NocloudPortRangeEnd,
-			)
-			if err != nil {
-				return nil, err
-			}
-			port = &freePort
-		}
-
 		killAfter := p.config.KillAfter
 		if killAfter == 0 {
 			killAfter = defaultNocloudKillAfter
@@ -112,8 +82,7 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult,
 
 		result, err := nocloudnetsvc.Spawn(ctx, nocloudnetsvc.Config{
 			CloudInitDir: p.config.CloudInitDir,
-			Port:         *port,
-			Host:         p.config.IPv4Gateway,
+			NetworkID:    p.config.NetworkID,
 			LogFile:      filepath.Join(p.config.VMDir, "nocloud-server.log"),
 			KillAfter:    killAfter,
 		})
@@ -127,48 +96,15 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult,
 		p.config.NoCloudPID = result.PID
 	}
 
-	_ = p.firewallTracker.EnsureChain(
-		ctx,
-		model.FirewallChainMVMNocloudNetIn,
-		model.FirewallTableFilter,
-		"INPUT",
-		0,
-	)
-
-	commentTag := fmt.Sprintf("# nocloudnet:%s:%d", p.config.VMName, p.config.NoCloudPort)
-
-	rule := model.FirewallRule{
-		TableName:    model.FirewallTableFilter,
-		ChainName:    model.FirewallChainMVMNocloudNetIn,
-		RuleType:     model.FirewallRuleTypeNocloudNetInput,
-		Target:       model.FirewallTargetAccept,
-		NetworkID:    p.config.NetworkID,
-		Protocol:     model.FirewallProtocolTCP,
-		Source:       p.config.GuestIP,
-		Destination:  p.config.IPv4Gateway,
-		InInterface:  p.config.TapName,
-		OutInterface: string(model.FirewallWildcardAnyInterface),
-		SPort:        model.FirewallPortAny,
-		DPort:        p.config.NoCloudPort,
-		NetworkName:  &p.config.NetworkName,
-		CommentTag:   &commentTag,
-		IsActive:     true,
-	}
-	if fwResult := p.firewallTracker.EnsureRule(ctx, rule, "nocloud-net"); !fwResult.Success {
-		msg := ""
-		if fwResult.ErrorMessage != nil {
-			msg = *fwResult.ErrorMessage
-		}
-		return nil, errs.New(errs.CodeCloudInitNetModeFailed,
-			fmt.Sprintf("Nocloud-net provisioning failed: %s", msg))
+	if p.config.NoCloudPort != infra.NoCloudNetPort {
+		return nil, errs.New(errs.CodeCloudInitNetModeFailed, "NoCloud listener must use the reserved gateway port")
 	}
 
 	return &model.CloudInitResult{
-		Mode:            model.CloudInitModeNET,
-		NocloudURL:      &p.config.NoCloudURL,
-		NocloudPort:     p.config.NoCloudPort,
-		NocloudPID:      &p.config.NoCloudPID,
-		NocloudNetRules: []model.FirewallRule{rule},
+		Mode:        model.CloudInitModeNET,
+		NocloudURL:  &p.config.NoCloudURL,
+		NocloudPort: p.config.NoCloudPort,
+		NocloudPID:  &p.config.NoCloudPID,
 	}, nil
 }
 
@@ -176,21 +112,41 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult,
 func (p *Provisioner) provisionISO(ctx context.Context) (*model.CloudInitResult, error) {
 	// Check for pre-existing custom ISO path
 	if p.config.CloudInitISOPath != nil {
-		isoPath := *p.config.CloudInitISOPath
-		if _, err := os.Stat(isoPath); os.IsNotExist(err) {
+		sourcePath := *p.config.CloudInitISOPath
+		sourceInfo, err := os.Stat(sourcePath)
+		if os.IsNotExist(err) {
 			return nil, errs.New(errs.CodeCloudInitISOModeFailed,
-				fmt.Sprintf("Custom cloud-init ISO not found: %s", isoPath),
+				fmt.Sprintf("custom cloud-init ISO not found: %s", sourcePath),
+			)
+		}
+		if err != nil {
+			return nil, errs.New(
+				errs.CodeCloudInitISOModeFailed,
+				fmt.Sprintf("inspect custom cloud-init ISO: %s", err),
+			)
+		}
+
+		isoPath := filepath.Join(p.config.VMDir, infra.VMCloudInitISOFilename)
+		if destinationInfo, statErr := os.Stat(isoPath); statErr == nil && os.SameFile(sourceInfo, destinationInfo) {
+			return &model.CloudInitResult{
+				Mode:    model.CloudInitModeISO,
+				ISOPath: &isoPath,
+			}, nil
+		}
+		if err := infra.CopyFile(sourcePath, isoPath); err != nil {
+			return nil, errs.New(
+				errs.CodeCloudInitISOModeFailed,
+				fmt.Sprintf("copy custom cloud-init ISO to managed path: %s", err),
 			)
 		}
 		return &model.CloudInitResult{
-			Mode:            model.CloudInitModeISO,
-			ISOPath:         p.config.CloudInitISOPath,
-			NocloudNetRules: []model.FirewallRule{},
+			Mode:    model.CloudInitModeISO,
+			ISOPath: &isoPath,
 		}, nil
 	}
 
 	// Generate ISO from seed directory
-	isoPath := filepath.Join(p.config.VMDir, p.config.CloudInitISOName)
+	isoPath := filepath.Join(p.config.VMDir, infra.VMCloudInitISOFilename)
 	if err := p.manager.CreateSeedISO(ctx, p.config.CloudInitDir, isoPath); err != nil {
 		return nil, errs.New(errs.CodeCloudInitISOModeFailed,
 			fmt.Sprintf("Failed to create cloud-init ISO: %s", err),
@@ -198,13 +154,12 @@ func (p *Provisioner) provisionISO(ctx context.Context) (*model.CloudInitResult,
 	}
 
 	return &model.CloudInitResult{
-		Mode:            model.CloudInitModeISO,
-		ISOPath:         &isoPath,
-		NocloudNetRules: []model.FirewallRule{},
+		Mode:    model.CloudInitModeISO,
+		ISOPath: &isoPath,
 	}, nil
 }
 
 // provisionInject handles INJECT mode — config files already written.
 func (p *Provisioner) provisionInject(_ context.Context) (*model.CloudInitResult, error) {
-	return &model.CloudInitResult{Mode: model.CloudInitModeINJECT, NocloudNetRules: []model.FirewallRule{}}, nil
+	return &model.CloudInitResult{Mode: model.CloudInitModeINJECT}, nil
 }

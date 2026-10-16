@@ -3,14 +3,17 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/version"
+	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
@@ -58,11 +61,11 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 		ID:          volumeID,
 		Name:        resolved.Name,
 		SizeBytes:   resolved.SizeBytes,
-		Format:      resolved.Format,
+		Format:      model.VolumeFormatRaw,
 		IsReadOnly:  resolved.IsReadOnly,
 		IsShareable: resolved.IsShareable,
 		CacheType:   cacheType,
-		Path:        resolved.Path,
+		Path:        infra.GetVolumePath(volumeID),
 		Status:      model.VolumeStatusAvailable,
 		CreatedAt:   timestamp,
 		UpdatedAt:   timestamp,
@@ -75,39 +78,61 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 }
 
 // VolumeRemove removes volumes by name or ID.
-// Handles partial-match error reporting, VM volume_ids cleanup, and hot-unplug.
+// Handles partial-match error reporting and stopped-VM volume_ids cleanup.
 func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput, force bool) *errs.BatchResult {
-	volumes, err := input.Resolve(ctx, op.Repos.Volume)
-	if err != nil && len(volumes) == 0 {
+	if err := input.Validate(); err != nil {
+		inputErr := errs.WrapMsg(errs.CodeVolumeNotFound, err.Error(), err, errs.WithClass(errs.ClassValidation))
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
 				{
 					Status:    "error",
-					Code:      "volume.not_found",
-					Message:   err.Error(),
-					Exception: err,
+					Code:      string(errs.CodeVolumeNotFound),
+					Message:   inputErr.Error(),
+					Exception: inputErr,
 				},
 			},
 		}
 	}
-	// Log partial failures but continue with resolved volumes
-	if err != nil && len(volumes) > 0 {
-		slog.Warn("volume remove: partial resolve failures", "error", err)
-	}
-	results := make([]errs.OperationResult, 0)
-	if len(volumes) == 0 && len(results) == 0 {
-		return &errs.BatchResult{
-			Items: []errs.OperationResult{
-				{
-					Status:  "error",
-					Code:    "volume.not_found",
-					Message: "No volumes found matching the given identifiers",
-				},
-			},
+	selectorResults := make([]errs.OperationResult, len(input.Identifiers))
+	selectorVolumeIndexes := make([]int, len(input.Identifiers))
+	volumes := make([]*model.VolumeItem, 0, len(input.Identifiers))
+	volumeIndexes := make(map[string]int, len(input.Identifiers))
+	resolver := volume.NewResolver(op.Repos.Volume)
+	for i, identifier := range input.Identifiers {
+		vol, resolveErr := resolver.Resolve(ctx, identifier)
+		if resolveErr != nil {
+			slog.Warn("volume remove: failed to resolve selector", "identifier", identifier, "error", resolveErr)
+			code := errs.CodeVolumeError
+			var domainErr *errs.DomainError
+			failureOptions := []errs.ErrorOption{errs.WithEntity(identifier), errs.WithClass(errs.ClassInternal)}
+			if errors.As(resolveErr, &domainErr) {
+				code = domainErr.Code
+				failureOptions = []errs.ErrorOption{errs.WithEntity(identifier)}
+			}
+			failure := errs.WrapMsg(code,
+				fmt.Sprintf("Failed to resolve volume '%s': %v", identifier, resolveErr), resolveErr, failureOptions...)
+			selectorResults[i] = errs.OperationResult{
+				Status:    "error",
+				Code:      string(code),
+				Message:   failure.Error(),
+				Item:      identifier,
+				Exception: failure,
+			}
+			continue
 		}
+		index, found := volumeIndexes[vol.ID]
+		if !found {
+			index = len(volumes)
+			volumeIndexes[vol.ID] = index
+			volumes = append(volumes, vol)
+		}
+		selectorVolumeIndexes[i] = index
 	}
+	results := make([]errs.OperationResult, 0, len(volumes))
 	// Batch-enrich with VM references for VM attachment check
-	op.Enr.EnrichVolume(ctx, volumes, "vm")
+	if len(volumes) > 0 {
+		op.Enr.EnrichVolume(ctx, volumes, "vm")
+	}
 	for _, vol := range volumes {
 		// Shareable read-only volumes are treated as not attached
 		// since we can't track individual VM attachments for them.
@@ -121,11 +146,40 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			})
 			continue
 		}
-		// When force-removing attached volume, clean up the VM's volume_ids reference,
-		// hot-unplug if running, and update config on disk.
-		if vol.Status == model.VolumeStatusAttached && force && vol.VMID != nil {
-			vmItem, _ := op.Repos.VM.Get(ctx, *vol.VMID)
-			if vmItem != nil && vmItem.VolumeIDs != nil {
+		// Force permits removal of an attached volume only after the authoritative
+		// runtime observation proves its VM stopped. It does not hot-unplug a guest.
+		if vol.Status == model.VolumeStatusAttached && force {
+			if vol.VMID == nil || *vol.VMID == "" {
+				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+					Message: "attached volume has no VM identity", Item: vol})
+				continue
+			}
+			vmItem, resolveErr := op.Repos.VM.Get(ctx, *vol.VMID)
+			if resolveErr != nil {
+				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+					Message: "failed to resolve attached VM", Item: vol, Exception: resolveErr})
+				continue
+			}
+			if vmItem == nil {
+				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+					Message: "attached VM is missing", Item: vol})
+				continue
+			}
+			if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
+				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+					Message: "failed to admit attached VM runtime", Item: vol, Exception: err})
+				continue
+			}
+			if vmItem.Status != model.VMStatusStopped {
+				results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+					Message: fmt.Sprintf(
+						"volume '%s' is attached to a VM that is not stopped. Stop the VM before removing it.",
+						vol.Name,
+					),
+					Item: vol})
+				continue
+			}
+			if vmItem.VolumeIDs != nil {
 				// Remove this volume from VM's volume_ids
 				var newIDs []string
 				for _, vid := range vmItem.VolumeIDs {
@@ -134,9 +188,11 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 					}
 				}
 				vmItem.VolumeIDs = newIDs
-				_ = op.Repos.VM.Upsert(ctx, vmItem)
-				vmCtrl := vm.NewController(vmItem, op.Repos.VM)
-				_ = vmCtrl.DetachVolume(ctx, vol.ID)
+				if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
+					results = append(results, errs.OperationResult{Status: "error", Code: "volume.remove_failed",
+						Message: "failed to persist detached VM volume list", Item: vol, Exception: err})
+					continue
+				}
 			}
 		}
 		if err := op.Services.Volume.Remove(ctx, vol); err != nil {
@@ -157,7 +213,13 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			Message: fmt.Sprintf("Volume '%s' removed", vol.Name),
 		})
 	}
-	return &errs.BatchResult{Items: results}
+	for i := range selectorResults {
+		if selectorResults[i].IsError() {
+			continue
+		}
+		selectorResults[i] = results[selectorVolumeIndexes[i]]
+	}
+	return &errs.BatchResult{Items: selectorResults}
 }
 
 // VolumeInspect returns detailed volume info as a raw dictionary.
@@ -168,7 +230,14 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 	if err != nil {
 		return nil, err
 	}
-	diskInfo, _ := volume.GetDiskInfo(ctx, vol.Path)
+	diskInfo, err := op.Services.Volume.InspectDisk(ctx, vol)
+	if err != nil {
+		return nil, err
+	}
+	displayPath := vol.Path
+	if diskInfo.Protected {
+		displayPath = ""
+	}
 	vmName := ""
 	if vol.VMID != nil && *vol.VMID != "" {
 		vm, _ := op.Repos.VM.Get(ctx, *vol.VMID)
@@ -178,9 +247,9 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 	}
 	return &results.VolumeInspect{
 		Volume: results.VolumeItemInfo{
-			ID: vol.ID, Name: vol.Name, SizeBytes: vol.SizeBytes,
+			ID: vol.ID, Name: vol.Name, SizeBytes: int64(diskInfo.LogicalBytes),
 			Format: string(vol.Format), IsReadOnly: vol.IsReadOnly,
-			CacheType: vol.CacheType, Path: vol.Path, Status: string(vol.Status),
+			CacheType: vol.CacheType, Path: displayPath, Status: string(vol.Status),
 		},
 		Attachment: results.VolumeAttachmentInfo{
 			VMID: vol.VMID, VMName: vmName,
@@ -192,17 +261,42 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 	}, nil
 }
 
-// VolumeResize resizes a volume.
+// VolumeResize grows an unattached volume or one attached to a stopped VM.
 func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreateInput) error {
 	volInput := inputs.VolumeInput{Identifiers: []string{input.Name}}
-	volumes, err := volInput.Resolve(ctx, op.Repos.Volume)
+	volumes, err := volInput.ResolveRaw(ctx, op.Repos.Volume)
 	if err != nil {
-		return errs.WrapMsg(errs.CodeVolumeNotFound, err.Error(), err)
+		return err
 	}
 	vol := volumes[0]
 	sizeBytes, err := disk.ParseDiskSizeToBytes(input.Size)
 	if err != nil {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid size: %v", err))
+	}
+	if vol.Status == model.VolumeStatusAttached {
+		if vol.VMID == nil || *vol.VMID == "" {
+			return errs.New(errs.CodeVolumeResizeFailed, "attached volume has no VM identity")
+		}
+		vmItem, err := op.Repos.VM.Get(ctx, *vol.VMID)
+		if err != nil {
+			return errs.WrapMsg(errs.CodeVolumeResizeFailed, "failed to resolve attached VM", err)
+		}
+		if vmItem == nil {
+			return errs.New(errs.CodeVolumeResizeFailed, "attached VM is missing")
+		}
+		if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
+			return errs.WrapMsg(errs.CodeVolumeResizeFailed, "failed to admit attached VM runtime", err)
+		}
+		if vmItem.Status != model.VMStatusStopped {
+			return errs.New(
+				errs.CodeVolumeResizeFailed,
+				fmt.Sprintf(
+					"volume '%s' is attached to a VM that is not stopped. Stop the VM before growing it.",
+					vol.Name,
+				),
+				errs.WithClass(errs.ClassValidation),
+			)
+		}
 	}
 	_, err = op.Services.Volume.ResizeDisk(ctx, vol, sizeBytes)
 	if err != nil {
@@ -234,16 +328,19 @@ func (op *Operation) VolumeAttach(
 	if err != nil {
 		return err
 	}
-	// Resolve volume using VolumeInput.Resolve (uses ResolveMany).
-	volumes, resolveErr := input.Resolve(ctx, op.Repos.Volume)
+	volumes, resolveErr := input.ResolveRaw(ctx, op.Repos.Volume)
 	if resolveErr != nil {
-		return errs.NotFound(errs.CodeVolumeNotFound, fmt.Sprintf("Volume not found: %v", resolveErr))
+		return resolveErr
 	}
 	if len(volumes) != 1 {
 		return errs.NotFound(errs.CodeVolumeNotFound, "Expected exactly one volume identifier")
 	}
+	if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
+		return err
+	}
 	vol := volumes[0]
-	if vol.Status == model.VolumeStatusAttached {
+	alreadyAttachedHere := vol.Status == model.VolumeStatusAttached && vol.VMID != nil && *vol.VMID == vmItem.ID
+	if vol.Status == model.VolumeStatusAttached && !alreadyAttachedHere {
 		return errs.New(
 			errs.CodeVMCreateFailed,
 			fmt.Sprintf("Volume '%s' is already attached", vol.Name),
@@ -252,7 +349,7 @@ func (op *Operation) VolumeAttach(
 	}
 	// Check volume status.
 	// Shareable read-only volumes are always attachable regardless of status.
-	if vol.Status != model.VolumeStatusAvailable && !(vol.IsShareable && vol.IsReadOnly) {
+	if vol.Status != model.VolumeStatusAvailable && !alreadyAttachedHere && !(vol.IsShareable && vol.IsReadOnly) {
 		return errs.New(
 			errs.CodeVMCreateFailed,
 			fmt.Sprintf("Volume '%s' is not available", vol.Name),
@@ -260,7 +357,7 @@ func (op *Operation) VolumeAttach(
 		)
 	}
 	// Hotplug on running VM
-	if vmItem.Status == model.VMStatusRunning {
+	if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
 		if !vmItem.PCIEnabled {
 			return errs.New(
 				errs.CodeVMCreateFailed,
@@ -287,42 +384,136 @@ func (op *Operation) VolumeAttach(
 				}
 			}
 		}
-		// Attempt hotplug via Firecracker API.
-		controller := vm.NewController(vmItem, op.Repos.VM)
-		if err := controller.AttachVolume(ctx, model.DriveConfig{
-			DriveID:      vol.ID,
-			PathOnHost:   vol.Path,
-			IsRootDevice: false,
-			IsReadOnly:   vol.IsReadOnly,
-			CacheType:    vol.CacheType,
-			IOEngine:     "Sync",
-		}); err != nil {
-			return errs.New(
-				errs.CodeFirecrackerClientError,
-				fmt.Sprintf("Hotplug failed: %v", err),
-			)
-		}
-		client, err := op.vsockClient(ctx, vmItem)
-		if err != nil {
-			slog.Warn("vsock client not available for PCI rescan, device may not appear until reboot",
-				"vm", vmItem.Name, "volume", vol.Name, "error", err)
-		}
-		if client != nil {
-			if err := client.RescanPCI(ctx); err != nil {
-				slog.Warn("guest PCI rescan via vsock failed, device may not appear until reboot",
-					"vm", vmItem.Name, "volume", vol.Name, "error", err)
+	}
+	var controller volumeAttachmentController
+	var guest pciVolumeReadinessClient
+	var guestErr error
+	if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
+		controller = vm.NewController(vmItem, op.Repos.VM)
+		if vmItem.Status == model.VMStatusRunning {
+			client, err := op.vsockClient(ctx, vmItem)
+			guestErr = err
+			if client != nil {
+				guest = client
 			}
 		}
 	}
-	// VolumeController.Attach
+	if err := op.attachVolumeToVM(ctx, vmItem, vol, controller, guest, guestErr); err != nil {
+		return err
+	}
+	op.AuditLog.LogOperation("vm.attach_volume", map[string]any{
+		"vm": vmItem.Name, "volume": vol.Name,
+	}, "")
+	return nil
+}
+
+type volumeAttachmentController interface {
+	AttachManagedVolume(context.Context, string, *model.VolumeItem) (jailersvc.VMVolumeResult, error)
+	ObserveVolume(context.Context, string) (jailersvc.VMVolumeObservation, error)
+}
+
+type pciVolumeReadinessClient interface {
+	EnsurePCIVolumeReady(context.Context, model.PCIVolumeIdentity) error
+}
+
+// attachVolumeToVM retains the configured binding separately from guest readiness.
+func (op *Operation) attachVolumeToVM(
+	ctx context.Context, vmItem *model.VMItem, vol *model.VolumeItem,
+	controller volumeAttachmentController, guest pciVolumeReadinessClient, guestErr error,
+) error {
+	if vmItem.Status != model.VMStatusRunning && vmItem.Status != model.VMStatusPaused {
+		return op.projectVolumeAttachment(ctx, vmItem, vol)
+	}
+	result, attachErr := controller.AttachManagedVolume(ctx, op.CacheDir, vol)
+	if attachErr != nil {
+		observed, observeErr := controller.ObserveVolume(ctx, vol.ID)
+		if observeErr != nil || observed.Validate(vmItem.ID, vol.ID) != nil {
+			return errs.WrapMsg(errs.CodeVolumeGuestNotReady,
+				"VMM attachment outcome is unconfirmed; retry the same attach", errors.Join(attachErr, observeErr),
+				errs.WithClass(errs.ClassRetryable), errs.WithEntity(vol.ID), errs.WithDetails(map[string]any{
+					"vm_id": vmItem.ID, "vmm_outcome_unknown": true, "guest_ready": false,
+				}))
+		}
+		if !observed.Attached {
+			return attachErr
+		}
+	} else if err := result.Validate(vmItem.ID, vol.ID, true); err != nil {
+		return errs.WrapMsg(errs.CodeVolumeGuestNotReady,
+			"VMM attachment response is unconfirmed; retry the same attach", err,
+			errs.WithClass(errs.ClassRetryable), errs.WithEntity(vol.ID), errs.WithDetails(map[string]any{
+				"vm_id": vmItem.ID, "vmm_outcome_unknown": true, "guest_ready": false,
+			}))
+	}
+	// Root completion is retained even if projection, guest discovery, or the caller's context fails.
+	if err := op.projectVolumeAttachment(ctx, vmItem, vol); err != nil {
+		return errs.WrapMsg(errs.CodeDatabaseError,
+			"VMM volume is attached but local projection failed; retry the same attach", errors.Join(attachErr, err),
+			errs.WithEntity(vol.ID), errs.WithDetails(map[string]any{
+				"vm_id": vmItem.ID, "vmm_attached": true, "guest_ready": false, "projection_failed": true,
+			}))
+	}
+	if attachErr != nil {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM volume is attached but attachment acknowledgment failed; retry the same attach", attachErr, false)
+	}
+	if vmItem.Status == model.VMStatusPaused {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"volume staged on paused VM; resume it and retry the same attach to verify guest readiness", nil, true)
+	}
+	observed, err := controller.ObserveVolume(ctx, vol.ID)
+	if err != nil {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM volume was attached but its readiness identity is unavailable; retry the same attach", err, false)
+	}
+	if err := observed.Validate(vmItem.ID, vol.ID); err != nil || !observed.Attached ||
+		observed.LaunchGeneration != result.LaunchGeneration {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM attachment changed before guest readiness; retry the same attach", err, false)
+	}
+	if guestErr != nil || guest == nil {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM volume is attached but the guest agent is unavailable; retry the same attach", guestErr, false)
+	}
+	if err := guest.EnsurePCIVolumeReady(ctx, model.PCIVolumeIdentity{
+		Serial: observed.Serial, ExpectedBytes: observed.ExpectedBytes,
+	}); err != nil {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM volume is attached but guest readiness failed; retry the same attach", err, false)
+	}
+	fresh, err := controller.ObserveVolume(ctx, vol.ID)
+	if err != nil || fresh != observed {
+		return volumeAttachPending(
+			vmItem.ID,
+			vol.ID,
+			"guest readiness was acknowledged but VMM attachment identity is unconfirmed; retry the same attach",
+			err,
+			false,
+		)
+	}
+	if err := ctx.Err(); err != nil {
+		return volumeAttachPending(vmItem.ID, vol.ID,
+			"VMM volume is attached but completion was cancelled; retry the same attach", err, false)
+	}
+	return nil
+}
+
+func volumeAttachPending(vmID, volumeID, message string, cause error, deferred bool) error {
+	return errs.WrapMsg(errs.CodeVolumeGuestNotReady, message, cause,
+		errs.WithClass(errs.ClassRetryable), errs.WithEntity(volumeID), errs.WithDetails(map[string]any{
+			"vm_id": vmID, "vmm_attached": true, "guest_ready": false, "readiness_deferred": deferred,
+		}))
+}
+
+func (op *Operation) projectVolumeAttachment(ctx context.Context, vmItem *model.VMItem, vol *model.VolumeItem) error {
 	volController := volume.NewController(vol, op.Repos.Volume)
 	if err := volController.Attach(ctx, vmItem.ID); err != nil {
 		slog.Warn("failed to attach volume to VM", "vm", vmItem.Name, "volume", vol.Name, "error", err)
+		return err
 	}
 	// Update VM's volume_ids
 	var vmVolumeIDs []string
 	if len(vmItem.VolumeIDs) > 0 {
-		vmVolumeIDs = vmItem.VolumeIDs
+		vmVolumeIDs = append([]string(nil), vmItem.VolumeIDs...)
 	}
 	found := false
 	for _, id := range vmVolumeIDs {
@@ -334,13 +525,12 @@ func (op *Operation) VolumeAttach(
 	if !found {
 		vmVolumeIDs = append(vmVolumeIDs, vol.ID)
 	}
-	vmItem.VolumeIDs = vmVolumeIDs
-	if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
+	updated := *vmItem
+	updated.VolumeIDs = vmVolumeIDs
+	if err := op.Repos.VM.Upsert(ctx, &updated); err != nil {
 		slog.Warn("failed to update VM volume IDs", "vm", vmItem.Name, "error", err)
+		return err
 	}
-	op.AuditLog.LogOperation("vm.attach_volume", map[string]any{
-		"vm": vmItem.Name, "volume": vol.Name,
-	}, "")
 	return nil
 }
 
@@ -353,6 +543,9 @@ func (op *Operation) VolumeDetach(
 	if err != nil {
 		return err
 	}
+	if err := op.reconcileVMRuntimeStatus(ctx, []*model.VMItem{vmItem}); err != nil {
+		return err
+	}
 	// Resolve volume using VolumeInput.Resolve (uses ResolveMany).
 	volumes, resolveErr := input.Resolve(ctx, op.Repos.Volume)
 	if resolveErr != nil {
@@ -362,8 +555,11 @@ func (op *Operation) VolumeDetach(
 		return errs.NotFound(errs.CodeVolumeNotFound, "Expected exactly one volume identifier")
 	}
 	vol := volumes[0]
+	if vol.VMID != nil && *vol.VMID != vmItem.ID {
+		return errs.New(errs.CodeValidationFailed, "volume belongs to a different VM")
+	}
 	// Hot-unplug if running
-	if vmItem.Status == model.VMStatusRunning {
+	if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
 		// Version gate: hot-unplug requires Firecracker v1.16+
 		if vmItem.BinaryID != "" {
 			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
@@ -380,36 +576,47 @@ func (op *Operation) VolumeDetach(
 				}
 			}
 		}
-		client, err := op.vsockClient(ctx, vmItem)
-		if err != nil {
-			slog.Warn("vsock client not available for PCI device removal",
-				"vm", vmItem.Name, "volume", vol.Name, "error", err)
-		}
-		if client != nil {
-			if err := client.RemoveHotpluggedPCIDevice(ctx); err != nil {
-				slog.Warn("failed to remove PCI device from guest via sysfs",
-					"vm", vmItem.Name, "volume", vol.Name, "error", err)
-			}
-		}
-
-		// Attempt hot-unplug via Firecracker API.
 		ctrl := vm.NewController(vmItem, op.Repos.VM)
-		if err := ctrl.DetachVolume(ctx, vol.ID); err != nil {
-			slog.Warn("Hot-unplug failed for drive", "volume", vol.ID, "error", err)
+		observed, err := ctrl.ObserveVolume(ctx, vol.ID)
+		if err != nil {
+			return err
 		}
-
-		// Post-detach PCI rescan so the guest kernel reclaims the device slot.
-		if client != nil {
-			if err := client.RescanPCI(ctx); err != nil {
-				slog.Warn("guest PCI rescan after hot-unplug failed",
-					"vm", vmItem.Name, "volume", vol.Name, "error", err)
+		if observed.Attached {
+			if vmItem.Status == model.VMStatusPaused {
+				return errs.New(
+					errs.CodeVMStateInvalid,
+					"live detach requires a responsive guest; resume the VM or stop it before detaching",
+				)
 			}
+			client, err := op.vsockClient(ctx, vmItem)
+			if err != nil {
+				return errs.WrapMsg(
+					errs.CodeVsockConnectionFailed,
+					"guest unavailable; stop the VM before detaching",
+					err,
+				)
+			}
+			if err := client.RemovePCIVolume(
+				ctx,
+				model.PCIVolumeIdentity{Serial: observed.Serial, ExpectedBytes: observed.ExpectedBytes},
+			); err != nil {
+				return errs.WrapMsg(
+					errs.CodeVMStateInvalid,
+					"guest volume release failed; retry or stop the VM before detaching",
+					err,
+				)
+			}
+		}
+		if err := ctrl.DetachVolume(ctx, observed); err != nil {
+			slog.Warn("Hot-unplug failed for drive", "volume", vol.ID, "error", err)
+			return err
 		}
 	}
 	// VolumeController.Detach
 	volController := volume.NewController(vol, op.Repos.Volume)
 	if err := volController.Detach(ctx); err != nil {
 		slog.Warn("failed to detach volume from VM", "vm", vmItem.Name, "volume", vol.Name, "error", err)
+		return err
 	}
 	// Update VM's volume_ids
 	var vmVolumeIDs []string
@@ -425,6 +632,7 @@ func (op *Operation) VolumeDetach(
 	vmItem.VolumeIDs = newIDs
 	if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
 		slog.Warn("failed to update VM volume IDs", "vm", vmItem.Name, "error", err)
+		return err
 	}
 	op.AuditLog.LogOperation("vm.detach_volume", map[string]any{
 		"vm": vmItem.Name, "volume": vol.Name,

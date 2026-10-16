@@ -86,10 +86,11 @@ func TestController_Attach(t *testing.T) {
 			vmID: "vm-123",
 			want: model.VolumeStatusAttached,
 		},
-		"attach_preserves_cache_type": {
+		"attach_preserves_options": {
 			pre: func(vol *model.VolumeItem) {
 				vol.Status = model.VolumeStatusAvailable
-				vol.CacheType = model.CacheTypeUnsafe
+				vol.IsReadOnly = true
+				vol.CacheType = model.CacheTypeWriteback
 			},
 			vmID: "vm-789",
 			want: model.VolumeStatusAttached,
@@ -122,6 +123,7 @@ func TestController_Attach(t *testing.T) {
 				tc.pre(vol)
 			}
 			require.NoError(t, baseRepo.Upsert(ctx, vol))
+			original := *vol
 
 			// Save expected state before the operation for error assertions
 			wantStatus := vol.Status
@@ -166,21 +168,42 @@ func TestController_Attach(t *testing.T) {
 			require.NotNil(t, fromRepo)
 
 			want := &model.VolumeItem{
-				ID:         vol.ID,
-				Name:       vol.Name,
-				SizeBytes:  vol.SizeBytes,
-				Format:     vol.Format,
-				Path:       vol.Path,
-				Status:     tc.want,
-				VMID:       ptr.Ptr(tc.vmID),
-				CreatedAt:  vol.CreatedAt,
-				UpdatedAt:  vol.UpdatedAt,
-				IsReadOnly: vol.IsReadOnly,
-				CacheType:  vol.CacheType,
+				ID:          original.ID,
+				Name:        original.Name,
+				SizeBytes:   original.SizeBytes,
+				Format:      original.Format,
+				Path:        original.Path,
+				Status:      tc.want,
+				VMID:        ptr.Ptr(tc.vmID),
+				CreatedAt:   original.CreatedAt,
+				UpdatedAt:   original.UpdatedAt,
+				IsReadOnly:  original.IsReadOnly,
+				IsShareable: original.IsShareable,
+				CacheType:   original.CacheType,
 			}
 			assert.Empty(t, cmp.Diff(want, fromRepo))
 		})
 	}
+
+	// Rationale: a shareable read-only volume has no single VM owner to record.
+	// Attach leaves its availability and options unchanged for other VMs.
+	t.Run("shareable_read_only_remains_available", func(t *testing.T) {
+		repo := testutil.NewVolumeRepo()
+		vol := &model.VolumeItem{
+			ID: "shared-raw", Name: "shared", Format: model.VolumeFormatRaw,
+			Status: model.VolumeStatusAvailable, IsReadOnly: true,
+			IsShareable: true, CacheType: model.CacheTypeWriteback,
+		}
+		require.NoError(t, repo.Upsert(ctx, vol))
+		want := *vol
+		require.NoError(t, volume.NewController(vol, repo).Attach(ctx, "vm-123"))
+		stored, err := repo.Get(ctx, vol.ID)
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		if diff := cmp.Diff(&want, stored); diff != "" {
+			t.Errorf("shareable volume after attach (-want +got):\n%s", diff)
+		}
+	})
 }
 
 // --- Controller.Detach ---

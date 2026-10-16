@@ -91,9 +91,13 @@ allArgs = append(allArgs, "--no-sync")
 
 `BuildAppliance()` at `internal/lib/provisioner/guestfs/utils.go` builds the libguestfs fixed appliance during `mvm cache init`. It runs `libguestfs-make-fixed-appliance` if available on the system. If the tool is not installed, it silently skips the build (returns `nil`).
 
-Before building, it calls `CleanStaleState()` in `utils.go` to kill abandoned QEMU/guestfish processes, remove stale lock files, daemon sockets, and cached appliance directories that could cause the appliance build to hang.
+In 0.3.0, appliance building and miscellaneous pruning no longer clean up global libguestfs processes, locks,
+sockets, or temporary appliances. Same-user paths and command lines do not establish mvm ownership. Normal
+GuestFS operations remain available; `PruneAppliance()` removes only the selected cache's appliance directory.
+Interrupted GuestFS operations may leave global state that requires manual cleanup after independently proving
+ownership. `cache prune misc --json` retains `guestfs_state: false`; it does not report global orphan recovery.
 
-**Code reference:** `internal/lib/provisioner/guestfs/utils.go` — `BuildAppliance()`, `CleanStaleState()`, `PruneAppliance()`, `EnsureAppliance()`.
+**Code reference:** `internal/lib/provisioner/guestfs/utils.go` — `BuildAppliance()`, `PruneAppliance()`, `EnsureAppliance()`.
 
 ### 10. Retry Logic (3 attempts, backoff) ✅ IMPLEMENTED
 
@@ -154,7 +158,7 @@ The `RunDeferred()` function (`provisioner.go:52-135`) executes provisioning in 
 - `internal/lib/provisioner/guestfs/backend.go` — `GuestfsBackend` builder
 - `internal/lib/provisioner/guestfs/provisioner.go` — `RunDeferred()`, `buildScript()`
 - `internal/lib/provisioner/guestfs/scripts.go` — Shell script templates (hostname, DNS, SSH, cloud-init, deblob)
-- `internal/lib/provisioner/guestfs/utils.go` — `BuildAppliance()`, `CleanStaleState()`, `PruneAppliance()`
+- `internal/lib/provisioner/guestfs/utils.go` — `BuildAppliance()`, `PruneAppliance()`
 - `internal/lib/provisioner/guestfs/kernel_detector.go` — `KernelDetector`
 - `internal/lib/provisioner/backend.go` — Backend factory (guestfs vs loopmount selection)
 - `internal/infra/constants.go` — `guestfs_enabled` default

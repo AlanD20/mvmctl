@@ -97,3 +97,5 @@ legacy/python/docs/analyses/
 MagicMock/
 .prompts/
 /coverage.out
+
+/.tmp/

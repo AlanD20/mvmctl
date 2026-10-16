@@ -8,41 +8,73 @@ Usage:
 
   # Run all domains (T1 + T2 + T3)
   MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \\
-    python3 scripts/run-system-tests.py --all
+    python3 scripts/run-system-tests.py --all --host-direct
 
   # Run specific domains
-  python3 scripts/run-system-tests.py cli network vm_nested_virt
+  python3 scripts/run-system-tests.py cli network exec
 
   # Run specific tiers (comma-separated, executed in the given order)
   python3 scripts/run-system-tests.py --tier 1
   python3 scripts/run-system-tests.py --tier 2,1
-  python3 scripts/run-system-tests.py --tier 1,3
-  python3 scripts/run-system-tests.py --tier 3,2,1
+  python3 scripts/run-system-tests.py --tier 1,3 --host-direct
+  python3 scripts/run-system-tests.py --tier 3,2,1 --host-direct
 
-  # Rebuild shared assets and (optionally) run tests
-  python3 scripts/run-system-tests.py --rebuild --all
+  # Rebuild and qualify an explicit release candidate
+  python3 scripts/run-system-tests.py --release-qualification --all \\
+    --host-direct --rebuild --candidate-version 0.3.0 \\
+    --host-reboot-task /path/to/closed-host-reboot-task
   python3 scripts/run-system-tests.py --volume --image --prepare
   python3 scripts/run-system-tests.py --volume
   python3 scripts/run-system-tests.py --image
 
   # Limit parallel workers (default: 4)
-  python3 scripts/run-system-tests.py --all --workers 2
+  python3 scripts/run-system-tests.py --all --host-direct --workers 2
 """
 
 from __future__ import annotations
 
 import argparse
-import getpass
+import base64
+import gzip
+import hashlib
+import inspect
 import json
 import os
+import re
 import shlex
+import shutil
+import signal
+import socket
+import stat
+import struct
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+import xml.etree.ElementTree as ET
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+from system_test_release import (
+    validate_release_build_paths,
+    verify_release_binary_identity,
+)
+from system_test_outcomes import (
+    MAX_PYTEST_OUTCOME_REPORT_BYTES,
+    PYTEST_OUTCOME_REPORT_ENV,
+    read_pytest_outcome_report,
+    require_complete_pytest_outcomes,
+)
+from system_test_evidence import (
+    DomainEvidence, MatrixEvidence, NODE_REPORT_ENV, MAX_OUTPUT_BYTES,
+    collect_named_runner_nodes, selected_node_remainder, source_identity,
+    verify_collection_task, verify_matrix_task, verify_official_kernel_carry,
+    verify_rc030_candidate507_carry, rc030_candidate507_target,
+    verify_rc030_candidate507_reboot_sources,
+)
 
 # ============================================================================
 # Configuration
@@ -51,23 +83,560 @@ from typing import Any
 ASSET_MIRROR_HOST = os.path.expanduser("~/.cache/mvm-asset-mirror")
 if os.environ.get("MVM_ASSET_MIRROR"):
     ASSET_MIRROR_HOST = os.environ["MVM_ASSET_MIRROR"]
-MVM_BINARY = os.environ.get("MVM_BINARY", os.path.expanduser("~/.local/bin/mvm"))
+MVM_BINARY = os.environ.get("MVM_BINARY", "/usr/local/bin/mvm")
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+MVM_CANDIDATE_CONFIGURED = Path(
+    os.environ.get("MVM_CANDIDATE_BINARY", _REPO_ROOT / "dist" / "mvm")
+).expanduser()
+MVM_CANDIDATE_BINARY = str(
+    MVM_CANDIDATE_CONFIGURED.resolve()
+)
 SHARED_VOLUME_NAME = "asset-mirror"
 SHARED_VOLUME_SIZE = "6G"
 TEST_NETWORK_NAME = "sys-test-net"
+# These markers qualify DownloadFile artifact bytes. Fixed checksum metadata
+# fetched through GetBody may still use its configured upstream origin.
+LOCAL_MIRROR_READ_MARKER = "Using local mirror for download"
+FORBIDDEN_BUILDER_PULL_MARKERS = (
+    "Mirror checksum mismatch, falling back to HTTP download",
+    "Copied to asset mirror",
+)
+BUILDER_PULL_OUTPUT_LIMIT = 8 * 1024
+MAX_RELEASE_HOST_VM_LIST_BYTES = 1024 * 1024
+MAX_RELEASE_HOST_VM_LIST_ENTRIES = 4096
+MAX_RELEASE_HOST_VM_FIELD_LENGTH = 1024
+_RELEASE_VM_FIELDS = frozenset(("id", "name", "status"))
+_RELEASE_VM_STATUSES = frozenset(
+    ("starting", "running", "paused", "stopping", "stopped", "crashed", "error")
+)
 
 # Custom base image built during --prepare
 BASE_IMAGE_NAME = "mvm-test-runner"
+RUNNER_BASE_RECEIPT = "/opt/mvmctl-test/base-inputs.json"
+MAX_RUNNER_BINDING_JSON_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True)
+class ImportedRunnerKernelBinding:
+    id: str
+    sha256: str
+    version: str = "7.0.11"
+    arch: str = "x86_64"
+    build_id: str = ""
+
+
+def _runner_binding_json(stdout: str, *, expected_data: type = dict) -> Any:
+    """Decode bounded binding evidence, refusing ambiguous JSON and envelopes."""
+
+    def unique_fields(pairs):
+        result = {}
+        folded = set()
+        for key, value in pairs:
+            if key.casefold() in folded:
+                raise RuntimeError(f"runner binding JSON has duplicate field: {key}")
+            folded.add(key.casefold())
+            result[key] = value
+        return result
+
+    if len(stdout.encode()) > MAX_RUNNER_BINDING_JSON_BYTES:
+        raise RuntimeError("runner binding JSON exceeds size limit")
+    try:
+        info = json.loads(stdout, object_pairs_hook=unique_fields)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"runner binding returned invalid JSON: {exc}") from exc
+    if not isinstance(info, dict):
+        raise RuntimeError("runner binding JSON must be an object")
+    fields = {"schema_version", "status", "data", "error"}
+    if fields.intersection(info):
+        if set(info) != fields:
+            raise RuntimeError(
+                "runner binding JSON has incomplete or unknown envelope fields"
+            )
+        if type(info["schema_version"]) is not int or info["schema_version"] != 1:
+            raise RuntimeError("runner binding JSON has unsupported schema")
+        if info["status"] != "success" or info["error"] is not None:
+            raise RuntimeError("runner binding JSON is not successful")
+        info = info["data"]
+        if not isinstance(info, expected_data):
+            raise RuntimeError(f"runner binding JSON data must be {expected_data.__name__}")
+    return info
+
+
+def _sha256_runner_input(path: Path) -> str:
+    """Hash a pinned regular input without following any directory or file symlink."""
+    try:
+        parent_fd = _open_directory_without_symlinks(path.parent)
+        try:
+            fd = os.open(
+                path.name,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=parent_fd,
+            )
+        finally:
+            os.close(parent_fd)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise RuntimeError(f"runner input is not a regular file: {path}")
+            digest = hashlib.sha256()
+            while chunk := os.read(fd, 1024 * 1024):
+                digest.update(chunk)
+            after = os.fstat(fd)
+            current = path.lstat()
+
+            def identity(info):
+                return (
+                    info.st_dev,
+                    info.st_ino,
+                    info.st_size,
+                    info.st_mtime_ns,
+                    info.st_ctime_ns,
+                )
+
+            if identity(before) != identity(after) or identity(after) != identity(
+                current
+            ):
+                raise RuntimeError(f"runner input changed while hashing: {path}")
+            return digest.hexdigest()
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise RuntimeError(f"cannot safely hash runner input {path}: {exc}") from exc
+
+
+def _imported_runner_elf_build_id(fd: int, size: int) -> str:
+    """Read one GNU build ID from bounded ELF64 x86_64 section notes."""
+
+    def read_at(offset: int, length: int) -> bytes:
+        if offset < 0 or length < 0 or offset + length > size:
+            raise RuntimeError("imported runner ELF has out-of-bounds note/header")
+        data = os.pread(fd, length, offset)
+        if len(data) != length:
+            raise RuntimeError("imported runner ELF has truncated note/header")
+        return data
+
+    header = struct.unpack("<16sHHIQQQIHHHHHH", read_at(0, 64))
+    if (
+        header[0][:7] != b"\x7fELF\x02\x01\x01"
+        or header[1] != 2
+        or header[2] != 62
+        or header[3] != 1
+        or header[8] != 64
+        or header[11] != 64
+        or not 0 < header[12] <= 4096
+    ):
+        raise RuntimeError(
+            "imported runner ELF requires a bounded ELF64 x86_64 section table"
+        )
+    sections = read_at(header[6], header[11] * header[12])
+    build_ids = []
+    total_notes = 0
+    for index in range(header[12]):
+        section = struct.unpack_from("<IIQQQQIIQQ", sections, index * 64)
+        if section[1] != 7:  # SHT_NOTE
+            continue
+        total_notes += section[5]
+        if total_notes > 1024 * 1024:
+            raise RuntimeError("imported runner ELF notes exceed size limit")
+        notes = read_at(section[4], section[5])
+        offset = 0
+        while offset < len(notes):
+            if len(notes) - offset < 12:
+                raise RuntimeError("imported runner ELF has malformed note header")
+            namesz, descsz, note_type = struct.unpack_from("<III", notes, offset)
+            offset += 12
+            name_end = offset + namesz
+            desc_start = offset + ((namesz + 3) & ~3)
+            desc_end = desc_start + descsz
+            next_offset = desc_start + ((descsz + 3) & ~3)
+            if next_offset > len(notes):
+                raise RuntimeError("imported runner ELF has malformed note lengths")
+            if notes[offset:name_end] == b"GNU\x00" and note_type == 3:
+                if not 0 < descsz <= 64:
+                    raise RuntimeError(
+                        "imported runner ELF has invalid GNU build ID length"
+                    )
+                build_ids.append(notes[desc_start:desc_end].hex())
+            offset = next_offset
+    if len(build_ids) != 1:
+        raise RuntimeError("imported runner ELF requires exactly one GNU build ID note")
+    return build_ids[0]
+
+
+def _imported_runner_elf_identity(path: Path, expected_sha256: str) -> str:
+    """Bind the GNU build ID to the same pinned, stable ELF as the expected hash."""
+    try:
+        parent_fd = _open_directory_without_symlinks(path.parent)
+        try:
+            fd = os.open(
+                path.name,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=parent_fd,
+            )
+        finally:
+            os.close(parent_fd)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise RuntimeError(f"imported runner ELF is not a regular file: {path}")
+            digest = hashlib.sha256()
+            while chunk := os.read(fd, 1024 * 1024):
+                digest.update(chunk)
+            if digest.hexdigest() != expected_sha256:
+                raise RuntimeError(
+                    "imported runner kernel ELF SHA256 does not match binding"
+                )
+            build_id = _imported_runner_elf_build_id(fd, before.st_size)
+            after = os.fstat(fd)
+            current = path.lstat()
+
+            def identity(info):
+                return (
+                    info.st_dev,
+                    info.st_ino,
+                    info.st_size,
+                    info.st_mtime_ns,
+                    info.st_ctime_ns,
+                )
+
+            if identity(before) != identity(after) or identity(after) != identity(
+                current
+            ):
+                raise RuntimeError(
+                    f"imported runner ELF changed while reading identity: {path}"
+                )
+            return build_id
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot safely read imported runner ELF {path}: {exc}"
+        ) from exc
+
+
+def _validate_imported_runner_kernel(binding: ImportedRunnerKernelBinding) -> str:
+    if (
+        re.fullmatch(r"[0-9a-f]{64}", binding.id) is None
+        or re.fullmatch(r"[0-9a-f]{64}", binding.sha256) is None
+        or binding.version != "7.0.11"
+        or binding.arch != "x86_64"
+    ):
+        raise RuntimeError(
+            "imported runner kernel requires canonical full ID/SHA256 and 7.0.11/x86_64"
+        )
+    result = mvm("kernel", "inspect", binding.id, "--json", check=False, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(f"imported runner kernel is missing: {binding.id}")
+    info = _runner_binding_json(result.stdout)
+    kernel, storage = info.get("kernel"), info.get("storage")
+    if not isinstance(kernel, dict) or not isinstance(storage, dict):
+        raise RuntimeError("imported runner kernel inspection lacks kernel/storage")
+    if (
+        kernel.get("id") != binding.id
+        or kernel.get("type") != "custom"
+        or kernel.get("is_present") is not True
+        or kernel.get("version") != binding.version
+        or kernel.get("arch") != binding.arch
+    ):
+        raise RuntimeError("imported runner kernel metadata does not match binding")
+    cache = Path(
+        os.path.abspath(
+            Path(os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")).expanduser()
+        )
+    )
+    expected = cache / "kernels" / binding.id
+    if storage.get("path") != str(expected):
+        raise RuntimeError(
+            f"imported runner kernel has unexpected managed path: {storage.get('path')}"
+        )
+    build_id = _imported_runner_elf_identity(expected, binding.sha256)
+    if binding.build_id and binding.build_id != build_id:
+        raise RuntimeError("imported runner ELF GNU build ID changed from binding")
+    expected_id = hashlib.sha256(
+        f"{binding.sha256}:{binding.version}:{binding.arch}".encode()
+    ).hexdigest()
+    if expected_id != binding.id:
+        raise RuntimeError(
+            "imported runner kernel ID does not match ELF SHA256/version/arch"
+        )
+    return build_id
+
+
+def _resolve_imported_runner_kernel_binding() -> ImportedRunnerKernelBinding | None:
+    kernel_id = os.environ.get("MVM_RUNNER_KERNEL_ID")
+    digest = os.environ.get("MVM_RUNNER_KERNEL_SHA256")
+    if kernel_id is None and digest is None:
+        return None
+    if not kernel_id or not digest:
+        raise RuntimeError(
+            "MVM_RUNNER_KERNEL_ID and MVM_RUNNER_KERNEL_SHA256 must be supplied together"
+        )
+    binding = ImportedRunnerKernelBinding(kernel_id, digest)
+    build_id = _validate_imported_runner_kernel(binding)
+    return ImportedRunnerKernelBinding(kernel_id, digest, build_id=build_id)
+
+
+def _runner_kernel_file_identity(
+    vm_name: str, path: str, binding: ImportedRunnerKernelBinding
+) -> None:
+    """Apply the same no-follow hash/build-ID proof to copied and managed guest ELF bytes."""
+    program = "import os,stat,struct,hashlib; from pathlib import Path\n"
+    program += "\n".join(inspect.getsource(function) for function in (
+        _open_directory_without_symlinks, _imported_runner_elf_build_id,
+        _imported_runner_elf_identity,
+    ))
+    program += (f"\nprint(_imported_runner_elf_identity(Path({path!r}), {binding.sha256!r}))\n")
+    result = mvm(
+        "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+        shlex.join(["python3", "-c", program]), timeout=30,
+    )
+    if result.stdout.strip() != binding.build_id:
+        raise RuntimeError("runner kernel ELF GNU build ID does not match binding")
+
+
+def _runner_kernel_inventory(vm_name: str) -> list[dict[str, Any]]:
+    result = mvm(
+        "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+        "/usr/local/bin/mvm kernel ls --json", timeout=30,
+    )
+    rows = _runner_binding_json(result.stdout, expected_data=list)
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise RuntimeError("runner kernel inventory must contain kernel objects")
+    return rows
+
+
+def _register_imported_runner_kernel(
+    vm_name: str, binding: ImportedRunnerKernelBinding
+) -> None:
+    """Register only the admitted controller ELF for explicit nested guest selection."""
+    build_id = _validate_imported_runner_kernel(binding)
+    if binding.build_id != build_id:
+        raise RuntimeError("runner kernel registration requires the admitted GNU build ID")
+    cache = Path(os.path.abspath(Path(os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")).expanduser()))
+    source = cache / "kernels" / binding.id
+    before = _runner_kernel_inventory(vm_name)
+    defaults = sorted(row["id"] for row in before if row.get("is_default") is True)
+    matches = [row for row in before if row.get("id") == binding.id]
+    if len(matches) > 1:
+        raise RuntimeError("runner kernel inventory has duplicate admitted identity")
+    if not matches:
+        staging = f"/home/runner/.mvm-kernel-upload-{uuid.uuid4().hex}"
+        mvm(
+            "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+            f"umask 077; mkdir -- {shlex.quote(staging)}", timeout=30,
+        )
+        uploaded = staging + "/vmlinux"
+        # The root guest agent receives cp; grant only this owned upload to runner.
+        mvm("cp", str(source), f"{vm_name}:{uploaded}", timeout=60)
+        readability = "import os,stat; from pathlib import Path\n"
+        readability += inspect.getsource(_open_directory_without_symlinks)
+        readability += (
+            f"\nparent=_open_directory_without_symlinks(Path({staging!r}))\n"
+            "try:\n"
+            " fd=os.open('vmlinux',os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK,dir_fd=parent)\n"
+            "finally:\n os.close(parent)\n"
+            "try:\n"
+            " info=os.fstat(fd)\n"
+            " assert stat.S_ISREG(info.st_mode) and info.st_uid==0 and info.st_nlink==1 and info.st_size>0\n"
+            " os.fchmod(fd,0o644)\n"
+            "finally:\n os.close(fd)\n"
+        )
+        mvm(
+            "exec", vm_name, "--user", "root", "--timeout", "10", "--",
+            shlex.join(["python3", "-c", readability]), timeout=30,
+        )
+        _runner_kernel_file_identity(vm_name, uploaded, binding)
+        imported = _runner_binding_json(mvm(
+            "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+            shlex.join(["/usr/local/bin/mvm", "kernel", "import",
+                        f"runner-kernel-{binding.id}", uploaded, "--version", binding.version, "--json"]),
+            timeout=60,
+        ).stdout)
+        expected = {"id": binding.id, "type": "custom", "version": binding.version, "arch": binding.arch}
+        if (any(imported.get(field) != value for field, value in expected.items())
+                or imported.get("is_present") is not True or imported.get("is_default") is not False):
+            raise RuntimeError("runner kernel import metadata does not match binding")
+        # Retain staging on failure; the owning disposable runner provides cleanup.
+        mvm(
+            "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+            f"rm -- {shlex.quote(uploaded)} && rmdir -- {shlex.quote(staging)}", timeout=30,
+        )
+    info = _runner_binding_json(mvm(
+        "exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+        shlex.join(["/usr/local/bin/mvm", "kernel", "inspect", binding.id, "--json"]), timeout=30,
+    ).stdout)
+    kernel, storage = info.get("kernel"), info.get("storage")
+    expected_path = f"/home/runner/.cache/mvmctl/kernels/{binding.id}"
+    if (not isinstance(kernel, dict) or not isinstance(storage, dict)
+            or kernel.get("id") != binding.id or kernel.get("type") != "custom"
+            or kernel.get("is_present") is not True or kernel.get("version") != binding.version
+            or kernel.get("arch") != binding.arch or storage.get("path") != expected_path):
+        raise RuntimeError("registered runner kernel metadata does not match binding")
+    _runner_kernel_file_identity(vm_name, expected_path, binding)
+    after = _runner_kernel_inventory(vm_name)
+    if sorted(row["id"] for row in after if row.get("is_default") is True) != defaults:
+        raise RuntimeError("runner kernel registration changed defaults")
+    if len([row for row in after if row.get("id") == binding.id]) != 1:
+        raise RuntimeError("runner kernel registration is absent or duplicated in inventory")
+    if {row["id"] for row in before} - {row["id"] for row in after}:
+        raise RuntimeError("runner kernel registration removed an existing kernel")
+
+
+def _runner_image_key(
+    version: str, binding: ImportedRunnerKernelBinding | None = None
+) -> str:
+    name = (
+        BASE_IMAGE_NAME if binding is None else f"{BASE_IMAGE_NAME}-kernel-{binding.id}"
+    )
+    return f"{name}:{version}"
+
+
+def _runner_base_receipt(
+    version: str, binding: ImportedRunnerKernelBinding
+) -> dict[str, object]:
+    return {
+        "receipt_schema": 1,
+        "candidate_version": version,
+        "candidate_sha256": _sha256_runner_input(Path(MVM_CANDIDATE_BINARY)),
+        "kernel_id": binding.id,
+        "kernel_sha256": binding.sha256,
+        "kernel_version": binding.version,
+        "kernel_arch": binding.arch,
+        "kernel_build_id": binding.build_id,
+    }
+
+
+def _require_runner_base_receipt(
+    vm_name: str, version: str, binding: ImportedRunnerKernelBinding
+) -> None:
+    result = mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        f"head -c 4097 {RUNNER_BASE_RECEIPT}",
+        timeout=30,
+    )
+    if len(result.stdout.encode()) > 4096:
+        raise RuntimeError("runner base input receipt exceeds size limit")
+    receipt = _runner_binding_json(result.stdout)
+    expected = _runner_base_receipt(version, binding)
+    if (
+        set(json.loads(result.stdout)) != set(expected)
+        or receipt != expected
+        or type(receipt.get("receipt_schema")) is not int
+    ):
+        raise RuntimeError(
+            "runner base input receipt does not match candidate/kernel binding"
+        )
+
+
+def _require_imported_runner_smoke(
+    vm_name: str, binding: ImportedRunnerKernelBinding
+) -> None:
+    if re.fullmatch(r"(?:[0-9a-f]{2}){1,64}", binding.build_id) is None:
+        raise RuntimeError("smoke binding lacks a validated GNU build ID")
+    info = _runner_binding_json(
+        mvm("vm", "inspect", vm_name, "--json", timeout=30).stdout
+    )
+    assets = info.get("assets")
+    kernel = assets.get("kernel") if isinstance(assets, dict) else None
+    if not isinstance(kernel, dict) or kernel.get("id") != binding.id:
+        raise RuntimeError("smoke VM did not select the exact imported kernel")
+    # Retain live release/build-ID readback, rather than relying on asset metadata.
+    script = (
+        "import os,struct; from pathlib import Path; "
+        "release=os.uname().release; assert release=='7.0.11',release; "
+        "notes=Path('/sys/kernel/notes').read_bytes(); p=0; ids=[]\n"
+        "while p+12<=len(notes):\n"
+        " n,d,t=struct.unpack_from('<III',notes,p); p+=12\n"
+        " name=notes[p:p+n]; p+=(n+3)&~3\n"
+        " desc=notes[p:p+d]; p+=(d+3)&~3\n"
+        " if name==b'GNU\\x00' and t==3: ids.append(desc.hex())\n"
+        "assert len(ids)==1 and ids[0],ids\n"
+        "print('Linux '+release+' GNU build ID '+ids[0])"
+    )
+    live = mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        shlex.join(["python3", "-c", script]),
+        timeout=30,
+    )
+    log(f"  {vm_name}: {live.stdout.strip()}")
+    if live.stdout.strip() != f"Linux {binding.version} GNU build ID {binding.build_id}":
+        raise RuntimeError("smoke VM live GNU build ID does not match imported ELF")
+    status = mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        "/usr/local/bin/mvm host status --json",
+        timeout=30,
+    )
+    data = _runner_binding_json(status.stdout)
+    resources = data.get("resources")
+    if (
+        not isinstance(resources, dict)
+        or resources.get("nftables_available") is not True
+    ):
+        raise RuntimeError("imported runner smoke requires nftables_available: true")
+
+
+# Root-owned staging location used to exercise the real administrator install
+# flow inside every disposable runner VM.  Tests execute the installed binary
+# at /usr/local/bin/mvm; they never treat this candidate path as the CLI.
+RUNNER_SYSTEM_CANDIDATE_DIR = "/opt/mvmctl-test"
+RUNNER_SYSTEM_CANDIDATE = f"{RUNNER_SYSTEM_CANDIDATE_DIR}/mvm-candidate"
+RUNNER_SYSTEM_UPLOAD = "/home/runner/.mvm-system-candidate.upload"
+RUNNER_USER_INIT_COMMAND = (
+    "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
+    "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive "
+    "--binary-version 1.17.0"
+)
 
 # Base VM used to build the custom image
 BASE_VM_NAME = "base-img-builder"
 BASE_VM_DISK = "12G"
 
+# The current kernel module has eight official pulls with 2700s node deadlines.
+# Retain the former 1800s domain allowance for its other fourteen cases and
+# shared fixture setup/teardown; this finite QA budget is not a runtime guarantee.
+KERNEL_BUILD_DOMAIN_TIMEOUT = 8 * 2700 + 1800
+NESTED_ISOLATED_DOMAIN_TIMEOUT = 1800
+
 # SSH key for provisioning runner user in builder & test VMs
 BUILDER_KEY_NAME = "builder-key"
+_SEMVER_CORE_NUMBER = r"(?:0|[1-9][0-9]*)"
+_SEMVER_PRERELEASE_ID = (
+    r"(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+)
+_SEMVER_BUILD_ID = r"[0-9A-Za-z-]+"
+_CANDIDATE_VERSION_PATTERN = re.compile(
+    rf"^v?(?P<version>{_SEMVER_CORE_NUMBER}\."
+    rf"{_SEMVER_CORE_NUMBER}\.{_SEMVER_CORE_NUMBER}"
+    rf"(?:-{_SEMVER_PRERELEASE_ID}(?:\.{_SEMVER_PRERELEASE_ID})*)?"
+    rf"(?:\+{_SEMVER_BUILD_ID}(?:\.{_SEMVER_BUILD_ID})*)?)$"
+)
+
+
+class _UnsafeVolumeBackingPath(RuntimeError):
+    """The volume record points outside the one runner-managed backing path."""
+
 
 # Tier 1: shared volume, host-level CLI operations (no nested virt needed)
 TIER1_DOMAINS: dict[str, list[str]] = {
+    "system_install": ["tests/system/host/test_system_install.py"],
     "cli": ["tests/system/cli/test_cli.py"],
     "config": ["tests/system/config/test_config.py"],
     "init": ["tests/system/init/test_init.py"],
@@ -88,21 +657,35 @@ TIER1_DOMAINS: dict[str, list[str]] = {
 
 # Tier 2: shared volume + nested virt (VM creation/interaction)
 TIER2_DOMAINS: dict[str, list[str]] = {
+    "host_admin": ["tests/system/host/test_host_admin.py"],
+    "guestfs": ["tests/system/cache/test_guestfs_appliance.py"],
+    "kernel_successor": ["tests/system/kernel/test_kernel_successor.py"],
     "volume": [
         "tests/system/volume/test_volume.py",
     ],
     "vm_lifecycle": ["tests/system/vm/test_vm_lifecycle.py"],
     "vm_data_persistence": ["tests/system/vm/test_vm_data_persistence.py"],
+    "jailer": [
+        "tests/system/vm/test_jailer.py",
+        "tests/system/vm/test_cgroup.py",
+    ],
+    "exec": [
+        "tests/system/exec/test_exec.py",
+        "tests/system/exec/test_vm_to_vm_exec.py",
+    ],
     "ssh": ["tests/system/ssh/test_ssh.py"],
     "console": ["tests/system/console/test_console.py"],
     "logs": ["tests/system/logs/test_logs.py"],
     "full_journeys": ["tests/system/full_journeys/test_full_journeys.py"],
     "nftables": ["tests/system/network/test_nftables.py"],
+    "policies": ["tests/system/network/test_policies.py"],
 }
+
+# Explicit continuations are registered coverage, not ordinary parallel batch work.
+HOST_REBOOT_PHASE_DOMAINS = {"host_reboot": ["tests/system/host/test_host_reboot.py"]}
 
 # Tier 3: directly on host (no runner VM)
 TIER3_DOMAINS: dict[str, list[str]] = {
-    "nested_virt": ["tests/system/vm/test_vm_fresh_env.py"],
     "nested_isolated": ["tests/system/vm/test_vm_nested_isolated.py"],
     "fresh_env": ["tests/system/vm/test_vm_fresh_env.py"],
     "snapshot_load": ["tests/system/vm/test_vm_snapshot_load.py"],
@@ -120,6 +703,8 @@ TIER_LABELS: dict[str, int] = {}
 for d in TIER1_DOMAINS:
     TIER_LABELS[d] = 1
 for d in TIER2_DOMAINS:
+    TIER_LABELS[d] = 2
+for d in HOST_REBOOT_PHASE_DOMAINS:
     TIER_LABELS[d] = 2
 for d in TIER3_DOMAINS:
     TIER_LABELS[d] = 3
@@ -162,6 +747,31 @@ def _dedupe_adjacent(items: list[int]) -> list[int]:
 # ============================================================================
 
 
+class _MvmCommandTimeout(subprocess.TimeoutExpired):
+    """A deadline remains a failure after the owned caller finishes shutdown."""
+
+    def __init__(self, cmd, timeout, result, cleanup_errors):
+        super().__init__(cmd, timeout, output=result.stdout, stderr=result.stderr)
+        self.returncode = result.returncode
+        self.cleanup_errors = cleanup_errors
+
+    def __str__(self) -> str:
+        stdout = "(not captured)" if self.stdout is None else self.stdout or "(empty)"
+        stderr = "(not captured)" if self.stderr is None else self.stderr or "(empty)"
+        output = f"[stdout]\n{stdout}\n[stderr]\n{stderr}"
+        if len(output) > BUILDER_PULL_OUTPUT_LIMIT:
+            marker = "\n... mvm timeout output truncated ...\n"
+            remaining = BUILDER_PULL_OUTPUT_LIMIT - len(marker)
+            head = remaining // 2
+            output = output[:head] + marker + output[-(remaining - head):]
+        cleanup = "\n".join(self.cleanup_errors)
+        return (
+            f"mvm command timed out after {self.timeout}s: {shlex.join(self.cmd)}\n"
+            f"  caller rc: {self.returncode}\n{output}"
+            + (f"\n  shutdown errors: {cleanup}" if cleanup else "")
+        )
+
+
 def mvm(
     *args: str, check: bool = True, timeout: int = 300, capture: bool = True
 ) -> subprocess.CompletedProcess:
@@ -172,13 +782,67 @@ def mvm(
         cmd = shlex.split(MVM_BINARY) + list(args)
     env = {**os.environ, "NO_COLOR": "1"}
     env.setdefault("MVM_ASSET_MIRROR", ASSET_MIRROR_HOST)
-    result = subprocess.run(
-        cmd,
-        capture_output=capture,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
+    # Regular files avoid waiting for EOF from a surviving privileged descendant.
+    with tempfile.TemporaryFile(mode="w+") as stdout, tempfile.TemporaryFile(mode="w+") as stderr:
+        process = subprocess.Popen(
+            cmd,
+            stdout=stdout if capture else None,
+            stderr=stderr if capture else None,
+            text=True,
+            env=env,
+        )
+        timed_out = False
+        cleanup_errors = []
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            pidfd = None
+            try:
+                # This private Popen child has not been reaped: its PID cannot be reused.
+                # Fast completed commands need no pidfd or shutdown operation.
+                if process.poll() is None:
+                    try:
+                        pidfd = os.pidfd_open(process.pid)
+                    except OSError as exc:
+                        if process.poll() is None:
+                            cleanup_errors.append(f"caller pidfd acquisition failed: {exc}")
+                for sig, grace in ((signal.SIGINT, 45), (signal.SIGKILL, 10)):
+                    if process.poll() is not None:
+                        break
+                    try:
+                        if pidfd is not None:
+                            signal.pidfd_send_signal(pidfd, sig)
+                        else:
+                            # Acquisition failed; Popen still owns this unreaped child only.
+                            process.send_signal(sig)
+                    except OSError as exc:
+                        if process.poll() is None:
+                            cleanup_errors.append(f"caller {sig.name} failed: {exc}")
+                    try:
+                        process.wait(timeout=grace)
+                    except subprocess.TimeoutExpired:
+                        if sig == signal.SIGKILL:
+                            cleanup_errors.append("caller not reaped after bounded SIGKILL wait")
+                    except OSError as exc:
+                        cleanup_errors.append(f"caller {sig.name} wait failed: {exc}")
+            finally:
+                if pidfd is not None:
+                    try:
+                        os.close(pidfd)
+                    except OSError as exc:
+                        cleanup_errors.append(f"caller pidfd close failed: {exc}")
+        captured = []
+        for stream in (stdout, stderr):
+            # Snapshot the extent: a descendant cannot extend this read indefinitely.
+            if capture:
+                raw = os.pread(stream.fileno(), os.fstat(stream.fileno()).st_size, 0)
+                captured.append(raw.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n"))
+            else:
+                captured.append(None)
+        result = subprocess.CompletedProcess(cmd, process.returncode, *captured)
+    if timed_out:
+        raise _MvmCommandTimeout(cmd, timeout, result, cleanup_errors)
     if not capture:
         # Stream output live so the user can see mirror vs HTTP download decision
         if result.stdout:
@@ -186,10 +850,14 @@ def mvm(
         if result.stderr:
             print(result.stderr, end="", flush=True, file=sys.stderr)
     if check and result.returncode != 0:
+        if result.stderr is None:
+            stderr = "(streamed; not captured)" if not capture else "(not available)"
+        else:
+            stderr = result.stderr.strip() or "(empty)"
         raise RuntimeError(
-            f"mvm command failed: {' '.join(args)}\n"
+            f"mvm command failed: {shlex.join(cmd)}\n"
             f"  rc: {result.returncode}\n"
-            f"  stderr: {result.stderr.strip()}"
+            f"  stderr: {stderr}"
         )
     return result
 
@@ -200,26 +868,234 @@ def log(msg: str) -> None:
     print(f"[{ts}] {msg}", flush=True)
 
 
-def _build_mvm_binary() -> None:
-    """Build the mvm release binary and install it to ~/.local/bin/mvm."""
-    log("Building mvm binary...")
+def _parse_candidate_version(value: str) -> str:
+    """Parse one explicit release identity accepted by the build script."""
+    match = _CANDIDATE_VERSION_PATTERN.fullmatch(value.strip())
+    if match is None:
+        raise argparse.ArgumentTypeError(
+            "candidate version must be X.Y.Z with optional prerelease/build metadata"
+        )
+    return match.group("version")
+
+
+def _resolve_candidate_build_version(explicit_version: str | None) -> str:
+    """Resolve an explicit version or one clean, exact release tag at HEAD."""
+    if explicit_version is not None:
+        try:
+            return _parse_candidate_version(explicit_version)
+        except argparse.ArgumentTypeError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    tags = subprocess.run(
+        ["git", "tag", "--points-at", "HEAD", "--list", "v[0-9]*"],
+        cwd=str(_REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if tags.returncode != 0:
+        raise RuntimeError(
+            "cannot inspect release tags; pass --candidate-version with --rebuild"
+        )
+    exact_versions: list[str] = []
+    for tag in tags.stdout.splitlines():
+        try:
+            exact_versions.append(_parse_candidate_version(tag))
+        except argparse.ArgumentTypeError:
+            continue
+    if len(exact_versions) != 1:
+        raise RuntimeError(
+            "--rebuild requires --candidate-version unless HEAD has exactly "
+            "one valid release tag"
+        )
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=str(_REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if status.returncode != 0 or status.stdout.strip():
+        raise RuntimeError(
+            "--rebuild requires --candidate-version when the release-tagged "
+            "checkout has uncommitted files"
+        )
+    return exact_versions[0]
+
+
+def _build_mvm_binary(candidate_version: str) -> None:
+    """Build the release candidate without replacing the outer controller."""
+    try:
+        version = _parse_candidate_version(candidate_version)
+    except argparse.ArgumentTypeError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if MVM_CANDIDATE_CONFIGURED.is_symlink():
+        raise RuntimeError(
+            "MVM_CANDIDATE_BINARY build target must not be a symlink: "
+            f"{MVM_CANDIDATE_CONFIGURED}"
+        )
+    _require_distinct_candidate_controller()
+    log(f"Building mvm release candidate at {MVM_CANDIDATE_BINARY}...")
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parent
     build_script = repo_root / "scripts" / "build.sh"
-    output_path = Path("~/.local/bin/mvm").expanduser()
+    output_path = Path(MVM_CANDIDATE_BINARY)
     result = subprocess.run(
         [
             str(build_script),
             "release",
+            "--version",
+            version,
             "--output",
             str(output_path),
         ],
         cwd=str(repo_root),
     )
     if result.returncode != 0:
-        log("ERROR: mvm binary build failed")
-        sys.exit(1)
+        raise RuntimeError(f"mvm binary build failed with rc={result.returncode}")
+    reported_version = _get_mvm_version()
+    if reported_version != version:
+        raise RuntimeError(
+            "built candidate version mismatch: "
+            f"requested {version}, reported {reported_version}"
+        )
     log("Build complete")
+
+
+def _controller_executable_path() -> Path:
+    """Resolve the executable used only to manage outer host resources."""
+    command = shlex.split(MVM_BINARY)
+    if not command:
+        raise RuntimeError("MVM_BINARY must contain an executable path")
+    executable = shutil.which(command[0]) or command[0]
+    return Path(executable).expanduser().resolve()
+
+
+def _require_distinct_candidate_controller() -> None:
+    """Reject path and inode aliases before a candidate build can overwrite mvm."""
+    candidate = Path(MVM_CANDIDATE_BINARY).expanduser().resolve()
+    controller = _controller_executable_path()
+    aliases = candidate == controller
+    if not aliases and candidate.exists() and controller.exists():
+        aliases = os.path.samefile(candidate, controller)
+    if aliases:
+        raise RuntimeError(
+            "MVM_CANDIDATE_BINARY must not alias the outer controller "
+            f"MVM_BINARY ({controller})"
+        )
+
+
+_PYTEST_INTERRUPT_GRACE = 45
+_PYTEST_KILL_GRACE = 10
+
+
+class _PytestTimeout(subprocess.TimeoutExpired):
+    """A local pytest deadline always retains the host for reconciliation."""
+
+    def __init__(self, cmd, timeout, result, shutdown):
+        super().__init__(cmd, timeout, output=result.stdout, stderr=result.stderr)
+        self.returncode = result.returncode
+        self.shutdown = shutdown
+        self.report_errors = []
+
+    def __str__(self):
+        sections = []
+        for label, raw in (("stdout", self.stdout), ("stderr", self.stderr)):
+            value = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+            if value:
+                sections.append(f"[{label}]\n{value.rstrip()}")
+        output = "\n".join(sections) or "(no captured output)"
+        if len(output) > BUILDER_PULL_OUTPUT_LIMIT:
+            marker = "\n... local pytest timeout output truncated ...\n"
+            remaining = BUILDER_PULL_OUTPUT_LIMIT - len(marker)
+            head = remaining // 2
+            output = output[:head] + marker + output[-(remaining - head):]
+        return (f"{super().__str__()}\n{output}\n"
+                f"pytest caller rc: {self.returncode}; shutdown: {'; '.join(self.shutdown)}\n"
+                "Host retained for reconciliation; ordinary group shutdown does not prove privileged quiescence."
+                + ("\n" + "; ".join(self.report_errors) if self.report_errors else ""))
+
+
+def _pytest_process_identity(pid):
+    """Read the exact private session leader while Popen still owns it unreaped."""
+    fields = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+    identity = (Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+                pid, int(fields[19]), int(fields[2]), int(fields[3]))
+    if identity[3:] != (pid, pid):
+        raise RuntimeError(f"pytest leader is not a private PGID/SID: {identity}")
+    return identity
+
+
+def _pytest_group_members(identity, deadline):
+    """Observe only membership of the owned group; never signal after reaping."""
+    boot, pid, started, _, _ = identity
+    if Path("/proc/sys/kernel/random/boot_id").read_text().strip() != boot:
+        raise RuntimeError("pytest group boot identity changed")
+    members = []
+    for entry in Path("/proc").iterdir():
+        if time.monotonic() >= deadline:
+            raise RuntimeError("pytest group observation exceeded shutdown bound")
+        if not entry.name.isdecimal():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if int(fields[2]) != pid:
+            continue
+        if int(fields[3]) != pid or int(fields[19]) < started:
+            raise RuntimeError(f"pytest group identity mismatch at PID {entry.name}")
+        members.append((int(entry.name), int(fields[19]), fields[0]))
+        if len(members) >= 64:
+            raise RuntimeError(f"pytest group membership exceeds observation bound: {members}")
+    return members
+
+
+def _stop_timed_out_pytest(process, identity, startup_error):
+    shutdown = []
+    if startup_error is not None:
+        shutdown.append(f"containment uncertain: startup identity unavailable: {startup_error}")
+    else:
+        shutdown.append(f"owned group identity (boot, PID, start, PGID, SID): {identity}")
+        # Holding the unreaped leader prevents numeric PID/PGID reuse. Never
+        # poll, wait or communicate between SIGINT and SIGKILL, even on exit zero.
+        for sig in (signal.SIGINT, signal.SIGKILL):
+            try:
+                if _pytest_process_identity(process.pid) != identity:
+                    raise RuntimeError("pytest leader identity changed")
+            except (OSError, ValueError, IndexError, RuntimeError) as exc:
+                shutdown.append(f"containment uncertain: {sig.name} withheld: {exc}")
+                break
+            try:
+                os.killpg(process.pid, sig)
+                shutdown.append(f"{sig.name} attempted: delivered to permitted group members")
+            except ProcessLookupError:
+                shutdown.append(f"{sig.name} attempted: group already absent (ESRCH)")
+            except OSError as exc:
+                shutdown.append(f"containment uncertain: {sig.name} attempted: {exc}")
+            if sig == signal.SIGINT:
+                time.sleep(_PYTEST_INTERRUPT_GRACE)
+    deadline = time.monotonic() + _PYTEST_KILL_GRACE
+    try:
+        process.wait(timeout=max(0, deadline - time.monotonic()))
+        shutdown.append(f"caller reaped: {process.returncode}")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        shutdown.append(f"containment uncertain: bounded caller reap failed: {exc}")
+    if identity is not None:
+        members = None
+        try:
+            members = _pytest_group_members(identity, deadline)
+            while members and time.monotonic() < deadline:
+                time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+                members = _pytest_group_members(identity, deadline)
+            if members:
+                shutdown.append(f"containment uncertain: remaining group members: {members}")
+            else:
+                shutdown.append("ordinary group observed absent")
+        except (OSError, ValueError, IndexError, RuntimeError) as exc:
+            shutdown.append(f"containment uncertain: group observation unavailable: {exc}; last members: {members}")
+    return shutdown
 
 
 def _run_pytest(
@@ -228,9 +1104,12 @@ def _run_pytest(
     xdist: bool = False,
     timeout: int = 600,
     extra_env: dict[str, str] | None = None,
+    node_report: Path | None = None,
 ) -> subprocess.CompletedProcess:
     """Run pytest against the given test files on the host (Tier 3)."""
     cmd = ["python3", "-m", "pytest", "--tb=short", "-q"]
+    if node_report is not None:
+        cmd.extend(["-p", "system_test_evidence", "--rootdir=" + str(_REPO_ROOT), "--junitxml=" + str(node_report.parent / "pytest.xml")])
     if xdist:
         cmd.append("-n")
         cmd.append("auto")
@@ -239,13 +1118,39 @@ def _run_pytest(
     env.setdefault("MVM_ASSET_MIRROR", ASSET_MIRROR_HOST)
     if extra_env:
         env.update(extra_env)
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
+    # Files permit bounded snapshots even if a detached descendant keeps an fd.
+    with tempfile.TemporaryFile(mode="w+") as stdout, tempfile.TemporaryFile(mode="w+") as stderr:
+        process = subprocess.Popen(cmd, stdout=stdout, stderr=stderr, text=True, env=env, start_new_session=True)
+        identity = startup_error = None
+        try:
+            identity = _pytest_process_identity(process.pid)
+        except (OSError, ValueError, IndexError, RuntimeError) as exc:
+            startup_error = exc
+        shutdown = None
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            shutdown = _stop_timed_out_pytest(process, identity, startup_error)
+        captured = []
+        for stream in (stdout, stderr):
+            try:
+                size = os.fstat(stream.fileno()).st_size
+                if shutdown is not None and size > 2 * BUILDER_PULL_OUTPUT_LIMIT:
+                    raw = (os.pread(stream.fileno(), BUILDER_PULL_OUTPUT_LIMIT, 0)
+                           + b"\n... local pytest timeout output truncated ...\n"
+                           + os.pread(stream.fileno(), BUILDER_PULL_OUTPUT_LIMIT, size - BUILDER_PULL_OUTPUT_LIMIT))
+                else:
+                    raw = os.pread(stream.fileno(), size, 0)
+            except OSError as exc:
+                if shutdown is None:
+                    raise
+                shutdown.append(f"timeout output snapshot failed: {exc}")
+                raw = b""
+            captured.append(raw.decode(stream.encoding, errors="replace" if shutdown is not None else stream.errors)
+                            .replace("\r\n", "\n").replace("\r", "\n"))
+        result = subprocess.CompletedProcess(cmd, process.returncode, *captured)
+    if shutdown is not None:
+        raise _PytestTimeout(cmd, timeout, result, shutdown)
     return result
 
 
@@ -254,23 +1159,310 @@ def _run_pytest(
 # ============================================================================
 
 
-def _get_volume_path(name: str) -> str | None:
-    """Get the on-disk path of a volume, or None if it doesn't exist."""
+def _volume_inspect_response(stdout: str, name: str) -> tuple[dict[str, object], bool]:
+    """Decode inspection data and whether the controller uses the versioned protocol."""
+    try:
+        info = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"volume inspect returned invalid JSON for '{name}': {exc}"
+        ) from exc
+    if not isinstance(info, dict):
+        raise RuntimeError(f"volume inspect response for '{name}' must be an object")
+    envelope_fields = {"schema_version", "status", "data", "error"}
+    versioned = bool(envelope_fields.intersection(info))
+    if versioned:
+        if set(info) != envelope_fields:
+            raise RuntimeError(
+                f"volume inspect response for '{name}' has incomplete or unknown envelope fields"
+            )
+        if type(info["schema_version"]) is not int or info["schema_version"] != 1:
+            raise RuntimeError(
+                f"volume inspect response for '{name}' has unsupported schema"
+            )
+        if info["status"] != "success" or info["error"] is not None:
+            raise RuntimeError(
+                f"volume inspect response for '{name}' is not successful"
+            )
+        info = info["data"]
+        if not isinstance(info, dict):
+            raise RuntimeError(f"volume inspect data for '{name}' must be an object")
+    volume = info.get("volume")
+    if not isinstance(volume, dict):
+        raise RuntimeError(
+            f"volume inspect response for '{name}' must contain a volume object"
+        )
+    return info, versioned
+
+
+def _volume_inspect_record(stdout: str, name: str) -> dict[str, object]:
+    """Decode a volume record from the installed controller's JSON response."""
+    info, _versioned = _volume_inspect_response(stdout, name)
+    return info["volume"]
+
+
+def _inspect_volume_path(name: str) -> tuple[bool, str | None]:
+    """Return whether a volume record exists and its recorded backing path."""
     result = mvm("volume", "inspect", name, "--json", check=False, timeout=30)
     if result.returncode != 0:
-        return None
+        return False, None
+    volume = _volume_inspect_record(result.stdout, name)
+    path = volume.get("path")
+    return True, path if isinstance(path, str) and path else None
+
+
+def _get_volume_path(name: str) -> str | None:
+    """Get the recorded on-disk path of a volume, or None if absent."""
+    _exists, path = _inspect_volume_path(name)
+    return path
+
+
+def _inspect_shared_volume() -> tuple[bool, str | None, str | None, bool]:
+    """Inspect the mirror source or its authoritative protected backing."""
+    result = mvm(
+        "volume", "inspect", SHARED_VOLUME_NAME, "--json", check=False, timeout=30
+    )
+    if result.returncode != 0:
+        return False, None, None, False
     try:
-        info = json.loads(result.stdout)
-        return info.get("volume", {}).get("path")
-    except (json.JSONDecodeError, KeyError):
-        return None
+        info, versioned = _volume_inspect_response(result.stdout, SHARED_VOLUME_NAME)
+    except RuntimeError as exc:
+        raise _UnsafeVolumeBackingPath(
+            f"cannot establish shared volume identity: {exc}"
+        ) from exc
+    volume = info["volume"]
+    if volume.get("name") != SHARED_VOLUME_NAME:
+        raise _UnsafeVolumeBackingPath(
+            "shared volume inspection returned a different name"
+        )
+    path = volume.get("path")
+    if not versioned:
+        disk = info.get("disk_info")
+        if isinstance(disk, dict) and {
+            "volume_id",
+            "logical_bytes",
+            "protected",
+        }.intersection(disk):
+            raise _UnsafeVolumeBackingPath(
+                "authoritative shared volume inspection requires a versioned response"
+            )
+        return True, path if isinstance(path, str) and path else None, None, False
+
+    volume_id = volume.get("id")
+    if (
+        not isinstance(volume_id, str)
+        or re.fullmatch(r"[0-9a-f]{64}", volume_id) is None
+    ):
+        raise _UnsafeVolumeBackingPath(
+            "shared volume inspection returned an invalid volume ID"
+        )
+    disk = info.get("disk_info")
+    if not isinstance(disk, dict) or disk.get("volume_id") != volume_id:
+        raise _UnsafeVolumeBackingPath(
+            "shared volume accounting does not match its volume ID"
+        )
+    if type(disk.get("protected")) is not bool:
+        raise _UnsafeVolumeBackingPath(
+            "shared volume inspection has no explicit protection state"
+        )
+    logical_bytes = disk.get("logical_bytes")
+    if type(logical_bytes) is not int or not 0 < logical_bytes <= sys.maxsize:
+        raise _UnsafeVolumeBackingPath(
+            "shared volume accounting has an invalid logical size"
+        )
+    if volume.get("format") != "raw" or volume.get("is_read_only") is not True:
+        raise _UnsafeVolumeBackingPath("shared volume must be raw and read-only")
+    if disk["protected"]:
+        if path != "":
+            raise _UnsafeVolumeBackingPath(
+                "protected shared volume must hide its backing path"
+            )
+        return True, None, volume_id, True
+    if not isinstance(path, str) or not path:
+        raise _UnsafeVolumeBackingPath("unprotected shared volume has no source path")
+    return True, path, volume_id, False
+
+
+def _expected_shared_volume_path(volume_id: str | None = None) -> Path:
+    """Return the lexical managed path without following any symlinks."""
+    if volume_id is not None and re.fullmatch(r"[0-9a-f]{64}", volume_id) is None:
+        raise _UnsafeVolumeBackingPath(
+            "shared volume source requires a canonical volume ID"
+        )
+    cache_root = Path(os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")).expanduser()
+    return Path(
+        os.path.abspath(
+            cache_root / "volumes" / f"{volume_id or SHARED_VOLUME_NAME}.raw"
+        )
+    )
+
+
+def _validated_volume_backing_path(
+    raw_path: str | os.PathLike[str],
+    volume_id: str | None = None,
+) -> Path:
+    """Require the exact regular, non-symlink runner volume backing file."""
+    path = Path(os.path.abspath(Path(raw_path).expanduser()))
+    expected = _expected_shared_volume_path(volume_id)
+    if path != expected:
+        raise _UnsafeVolumeBackingPath(
+            f"unexpected shared volume backing path: expected {expected}, got {path}"
+        )
+    try:
+        info = path.lstat()
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"volume backing file is missing: {path}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"cannot inspect volume backing file {path}: {exc}") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise RuntimeError(f"volume backing path must not be a symlink: {path}")
+    if not stat.S_ISREG(info.st_mode):
+        raise RuntimeError(f"volume backing path is not a regular file: {path}")
+    return path
+
+
+def _open_directory_without_symlinks(path: Path) -> int:
+    """Open an absolute directory path one pinned, no-follow component at a time."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    current_fd = os.open(os.sep, flags)
+    try:
+        for component in path.parts[1:]:
+            next_fd = os.open(component, flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except BaseException:
+        os.close(current_fd)
+        raise
+
+
+def _require_shared_volume_path_absent_before_create(
+    volume_id: str | None = None,
+) -> None:
+    """Refuse create if old cleanup left any object at the canonical path."""
+    expected = _expected_shared_volume_path(volume_id)
+    try:
+        expected.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot verify shared volume path before create {expected}: {exc}"
+        ) from exc
+    raise _UnsafeVolumeBackingPath(
+        f"shared volume backing path still exists before volume create: {expected}"
+    )
+
+
+def _populate_volume_image(
+    volume_path: Path,
+    mirror_path: Path,
+    volume_id: str | None = None,
+) -> None:
+    """Format and populate one ext4 image without sudo or loop mounts."""
+    backing = _validated_volume_backing_path(volume_path, volume_id)
+    mirror = mirror_path.expanduser().resolve()
+    if not mirror.is_dir():
+        raise RuntimeError(f"asset mirror is not a directory: {mirror}")
+
+    path_info = backing.lstat()
+    try:
+        parent_fd = _open_directory_without_symlinks(backing.parent)
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot safely open shared volume directory {backing.parent}: {exc}"
+        ) from exc
+    try:
+        try:
+            backing_fd = os.open(
+                backing.name,
+                os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=parent_fd,
+            )
+        except OSError as exc:
+            raise RuntimeError(
+                f"cannot safely open shared volume backing file {backing}: {exc}"
+            ) from exc
+    finally:
+        os.close(parent_fd)
+
+    try:
+        pinned_before = os.fstat(backing_fd)
+        if not stat.S_ISREG(pinned_before.st_mode):
+            raise RuntimeError(
+                f"shared volume backing descriptor is not a regular file: {backing}"
+            )
+        if (pinned_before.st_dev, pinned_before.st_ino) != (
+            path_info.st_dev,
+            path_info.st_ino,
+        ):
+            raise RuntimeError(
+                f"shared volume backing file changed before population: {backing}"
+            )
+        try:
+            result = subprocess.run(
+                [
+                    "mkfs.ext4",
+                    "-F",
+                    "-d",
+                    str(mirror),
+                    f"/proc/self/fd/{backing_fd}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=900,
+                pass_fds=(backing_fd,),
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "mkfs.ext4 is required to populate the shared asset volume"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                "mkfs.ext4 timed out while populating the volume"
+            ) from exc
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            raise RuntimeError(f"mkfs.ext4 failed to populate {backing}: {detail}")
+
+        pinned_after = os.fstat(backing_fd)
+        try:
+            current = backing.lstat()
+        except OSError as exc:
+            raise RuntimeError(
+                f"shared volume backing path was replaced during population: {backing}"
+            ) from exc
+        if not stat.S_ISREG(current.st_mode) or (
+            current.st_dev,
+            current.st_ino,
+        ) != (pinned_after.st_dev, pinned_after.st_ino):
+            raise RuntimeError(
+                f"shared volume backing path was replaced during population: {backing}"
+            )
+        if (pinned_after.st_uid, pinned_after.st_gid) != (
+            pinned_before.st_uid,
+            pinned_before.st_gid,
+        ):
+            raise RuntimeError(
+                "mkfs.ext4 changed shared volume backing ownership: "
+                f"expected {pinned_before.st_uid}:{pinned_before.st_gid}, "
+                f"got {pinned_after.st_uid}:{pinned_after.st_gid}"
+            )
+    finally:
+        os.close(backing_fd)
 
 
 def _create_and_seed_volume() -> None:
     """Create the shared asset volume and seed it with asset mirror contents.
 
-    This requires sudo for loop mount. Prompts the user for a password.
+    ``mkfs.ext4 -d`` copies the mirror directly into the image, so this never
+    needs sudo, a loop device, or a host mount.
     """
+    mirror_path = Path(ASSET_MIRROR_HOST).expanduser().resolve()
+    if not mirror_path.is_dir():
+        raise RuntimeError(f"asset mirror is not a directory: {mirror_path}")
+
+    _require_shared_volume_path_absent_before_create()
     log(f"Creating shared volume '{SHARED_VOLUME_NAME}' ({SHARED_VOLUME_SIZE})...")
     mvm(
         "volume",
@@ -280,77 +1472,52 @@ def _create_and_seed_volume() -> None:
         "--shareable",
         "--read-only",
         "--writeback",
-        "--format",
-        "raw",
         timeout=30,
     )
 
-    vol_path = _get_volume_path(SHARED_VOLUME_NAME)
-    if not vol_path:
-        log("ERROR: Failed to find volume path after creation")
-        sys.exit(1)
-
-    # Check if asset mirror has content
-    mirror_path = Path(ASSET_MIRROR_HOST).expanduser()
-    if not mirror_path.exists() or not any(mirror_path.iterdir()):
-        log(f"WARNING: Asset mirror at {mirror_path} is empty or missing.")
-        log(
-            "Populating volume with empty filesystem. Tests that need assets will fail."
-        )
-
-    # Need sudo for loop mount
-    log("Populating volume with asset mirror contents (requires sudo)...")
-    password = getpass.getpass("sudo password: ")
-
-    def sudo_run(cmd_args: list[str], input_data: str | None = None) -> None:
-        full_cmd = ["sudo", "-S"] + cmd_args
-        subprocess.run(
-            full_cmd,
-            input=input_data or "",
-            text=True,
-            capture_output=True,
-            check=True,
-            timeout=120,
-        )
-
-    mount_point = "/mnt/.mvm-asset-populate"
+    volume_id = None
     try:
-        sudo_run(["mkfs.ext4", "-F", vol_path], password)
-        Path(mount_point).mkdir(parents=True, exist_ok=True)
-        sudo_run(["mount", "-o", "loop", vol_path, mount_point], password)
-        sudo_run(
-            ["cp", "-r"]
-            + [str(p) for p in mirror_path.glob("*")]
-            + [f"{mount_point}/"],
-            password,
-        )
-        sudo_run(["chmod", "-R", "a+rX", mount_point], password)
-        log(f"Seeded volume with contents from {mirror_path}")
-    except subprocess.CalledProcessError as e:
-        log(f"ERROR: Failed to populate volume: {e.stderr if e.stderr else e}")
-        # Clean up mount if it succeeded
-        subprocess.run(
-            ["sudo", "-S", "umount", mount_point],
-            input=password,
-            text=True,
-            capture_output=True,
+        record_exists, raw_path, volume_id, protected = _inspect_shared_volume()
+        if protected:
+            raise _UnsafeVolumeBackingPath(
+                "created shared volume is already protected; refusing to reseed"
+            )
+        if not record_exists or not raw_path:
+            raise RuntimeError("created shared volume has no recorded backing path")
+        vol_path = _validated_volume_backing_path(raw_path, volume_id)
+
+        if not any(mirror_path.iterdir()):
+            log(f"WARNING: Asset mirror at {mirror_path} is empty.")
+            log(
+                "Populating volume with empty filesystem. "
+                "Tests that need assets will fail."
+            )
+        _populate_volume_image(vol_path, mirror_path, volume_id)
+    except _UnsafeVolumeBackingPath:
+        raise
+    except RuntimeError as primary:
+        cleanup = mvm(
+            "volume",
+            "rm",
+            volume_id or SHARED_VOLUME_NAME,
+            "--force",
             check=False,
             timeout=30,
         )
-        sys.exit(1)
-    finally:
-        sudo_run(["umount", mount_point], password)
-        try:
-            Path(mount_point).rmdir()
-        except OSError:
-            pass
+        if cleanup.returncode != 0:
+            raise RuntimeError(
+                f"{primary}; failed to remove incomplete shared volume: "
+                f"{cleanup.stderr.strip()}"
+            ) from primary
+        raise
+    log(f"Seeded volume with contents from {mirror_path}")
 
 
 def ensure_shared_volume(*, rebuild: bool = False) -> None:
     """Ensure the shared asset volume exists and is populated.
 
-    If the volume doesn't exist (or --rebuild is passed), remove it,
-    recreate it, and populate it with the host asset mirror contents.
+    Reuse authoritative protected backing without accessing its old source.
+    Explicit rebuild removes the selected volume through the controller before recreation.
     """
     mirror_path = Path(ASSET_MIRROR_HOST).expanduser()
     if not mirror_path.exists():
@@ -359,14 +1526,38 @@ def ensure_shared_volume(*, rebuild: bool = False) -> None:
             "Create it first by pulling images/kernels/binaries with MVM_ASSET_MIRROR set."
         )
 
-    existing_path = _get_volume_path(SHARED_VOLUME_NAME)
-    if existing_path and not rebuild:
+    record_exists, raw_path, volume_id, protected = _inspect_shared_volume()
+    if protected:
+        if rebuild:
+            mvm("volume", "rm", volume_id, "--force", check=True, timeout=30)
+            _create_and_seed_volume()
+            return
+        log(
+            f"Shared volume '{SHARED_VOLUME_NAME}' already has protected backing ({volume_id})"
+        )
+        return
+    existing_path: Path | None = None
+    if record_exists:
+        try:
+            if raw_path is None:
+                raise RuntimeError("volume record has no backing path")
+            existing_path = _validated_volume_backing_path(raw_path, volume_id)
+        except _UnsafeVolumeBackingPath:
+            raise
+        except RuntimeError as exc:
+            log(
+                f"Shared volume '{SHARED_VOLUME_NAME}' is stale ({exc}); "
+                "removing its record before recreation"
+            )
+
+    if existing_path is not None and not rebuild:
         log(f"Shared volume '{SHARED_VOLUME_NAME}' already exists at {existing_path}")
         return
 
-    if existing_path and rebuild:
+    if record_exists:
         log(f"Rebuilding: removing existing volume '{SHARED_VOLUME_NAME}'...")
-        mvm("volume", "rm", SHARED_VOLUME_NAME, "--force", check=False, timeout=30)
+        mvm("volume", "rm", volume_id or SHARED_VOLUME_NAME, "--force", timeout=30)
+        _require_shared_volume_path_absent_before_create(volume_id)
 
     _create_and_seed_volume()
 
@@ -386,7 +1577,6 @@ def ensure_test_network() -> None:
         TEST_NETWORK_NAME,
         "--subnet",
         "10.88.0.0/24",
-        "--non-interactive",
         timeout=30,
     )
 
@@ -397,20 +1587,120 @@ def ensure_test_network() -> None:
 
 
 def _get_mvm_version() -> str:
-    """Get the mvm binary version string (e.g. '0.1.0' or '0.1.0-7-gdeadbeef').
-
-    Strips the ``-dirty`` suffix if present — the base image was built from a
-    clean tree and uses the version without ``-dirty``.
-    """
-    result = mvm("--version", timeout=10)
+    """Get the candidate version without consulting or touching host state."""
+    with tempfile.TemporaryDirectory(prefix="mvm-candidate-version-") as root:
+        isolation_root = Path(root)
+        cache_dir = isolation_root / "cache"
+        config_dir = isolation_root / "config"
+        temp_dir = isolation_root / "tmp"
+        cache_dir.mkdir()
+        config_dir.mkdir()
+        temp_dir.mkdir()
+        env = {
+            **os.environ,
+            "NO_COLOR": "1",
+            "MVM_CACHE_DIR": str(cache_dir),
+            "MVM_CONFIG_DIR": str(config_dir),
+            "MVM_TEMP_DIR": str(temp_dir),
+        }
+        result = subprocess.run(
+            [MVM_CANDIDATE_BINARY, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+        )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "candidate version probe failed: "
+            f"{result.stderr.strip() or f'rc={result.returncode}'}"
+        )
     # "mvm 0.1.0" → "0.1.0"
     parts = result.stdout.strip().split()
-    version = parts[-1] if len(parts) >= 2 else "latest"
-    return version.removesuffix("-dirty")
+    if len(parts) < 2 or parts[0] != "mvm" or not parts[-1]:
+        raise RuntimeError(
+            f"candidate returned an invalid version response: {result.stdout!r}"
+        )
+    return parts[-1]
 
 
 def _unique_name(prefix: str = "sys-runner") -> str:
+    prefix = prefix.replace("_", "-")
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+def _install_system_binary_in_runner(vm_name: str) -> None:
+    """Stage the RC and install it through ``host install-system``.
+
+    Copying directly onto /usr/local/bin/mvm would bypass the administrator
+    bootstrap path that the system-install L2 domain exists to qualify.
+    """
+    mvm(
+        "cp",
+        "-f",
+        MVM_CANDIDATE_BINARY,
+        f"{vm_name}:{RUNNER_SYSTEM_UPLOAD}",
+        timeout=60,
+    )
+    mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        f"test -f {RUNNER_SYSTEM_UPLOAD} && "
+        f"test ! -L {RUNNER_SYSTEM_UPLOAD} && "
+        f"sudo test ! -L {RUNNER_SYSTEM_CANDIDATE_DIR} && "
+        f"sudo install -d -o root -g root -m 0755 {RUNNER_SYSTEM_CANDIDATE_DIR} && "
+        f"sudo test ! -L {RUNNER_SYSTEM_CANDIDATE_DIR} && "
+        f"sudo test ! -L {RUNNER_SYSTEM_CANDIDATE} && "
+        f"sudo install -o root -g root -m 0755 "
+        f"{RUNNER_SYSTEM_UPLOAD} {RUNNER_SYSTEM_CANDIDATE} && "
+        f"rm -f {RUNNER_SYSTEM_UPLOAD} && "
+        f"test ! -L {RUNNER_SYSTEM_CANDIDATE} && "
+        f"test \"$(stat -c '%u:%g:%a' {RUNNER_SYSTEM_CANDIDATE})\" = '0:0:755' && "
+        f"sudo {RUNNER_SYSTEM_CANDIDATE} host install-system && "
+        "test \"$(stat -c '%u:%g:%a' /usr/local/bin/mvm)\" = '0:0:755'",
+        timeout=90,
+    )
+
+
+def _initialize_system_binary_in_runner(vm_name: str) -> None:
+    """Run host initialization through the canonical installed executable."""
+    mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        "sudo /usr/local/bin/mvm host init",
+        timeout=180,
+    )
+
+
+def _initialize_runner_user(
+    vm_name: str,
+    *,
+    timeout: int,
+    capture: bool = True,
+) -> None:
+    """Initialize runner-owned state with the release-pinned Firecracker pair."""
+    mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        RUNNER_USER_INIT_COMMAND,
+        timeout=timeout,
+        capture=capture,
+    )
 
 
 def _ensure_builder_key() -> None:
@@ -428,10 +1718,22 @@ def _ensure_builder_key() -> None:
         )
 
 
-def provision_t1(vm_name: str, mvm_version: str) -> None:
+def provision_t1(
+    vm_name: str,
+    mvm_version: str,
+    on_created: Callable[[], None],
+    *,
+    disk_size: str = "9G",
+    binding: ImportedRunnerKernelBinding | None = None,
+) -> None:
     """Provision a Tier 1 VM from custom base image + shared volume."""
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
     _ensure_builder_key()
-    _ensure_official_kernel_on_host(vm_name)
+    if binding is None:
+        _ensure_official_kernel_on_host(vm_name)
+    else:
+        _validate_imported_runner_kernel(binding)
     log(
         f"  Creating T1 VM '{vm_name}' (from {BASE_IMAGE_NAME}:{mvm_version} + volume)..."
     )
@@ -440,7 +1742,7 @@ def provision_t1(vm_name: str, mvm_version: str) -> None:
         "create",
         vm_name,
         "--image",
-        f"{BASE_IMAGE_NAME}:{mvm_version}",
+        _runner_image_key(mvm_version, binding),
         "--user",
         "runner",
         "--vcpu",
@@ -448,9 +1750,9 @@ def provision_t1(vm_name: str, mvm_version: str) -> None:
         "--mem",
         "1024",
         "--disk-size",
-        "9G",
+        disk_size,
         "--kernel",
-        "official:7.0.11",
+        binding.id if binding is not None else "official:7.0.11",
         "--ssh-key",
         BUILDER_KEY_NAME,
         "--nested-virt",
@@ -458,23 +1760,20 @@ def provision_t1(vm_name: str, mvm_version: str) -> None:
         TEST_NETWORK_NAME,
         "--volume",
         SHARED_VOLUME_NAME,
-        timeout=180,
+        timeout=1800,
     )
+    on_created()
+    if binding is not None:
+        _require_runner_base_receipt(vm_name, mvm_version, binding)
+    _install_system_binary_in_runner(vm_name)
+    _initialize_system_binary_in_runner(vm_name)
     # CRITICAL: mvm init MUST run as the unprivileged user (runner), NOT via sudo.
     # Running as root creates the cache dir with root ownership — test VMs inherit
     # this state and break with 'permission denied' on /home/runner/.cache/mvmctl.
-    mvm(
-        "exec",
-        vm_name,
-        "--user",
-        "runner",
-        "--timeout",
-        "10",
-        "--",
-        "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-        "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
-        timeout=360,
-    )
+    _initialize_runner_user(vm_name, timeout=360)
+    if binding is not None:
+        _require_imported_runner_smoke(vm_name, binding)
+        _register_imported_runner_kernel(vm_name, binding)
 
 
 def _ensure_official_kernel_on_host(vm_name: str) -> None:
@@ -519,10 +1818,21 @@ def _ensure_official_kernel_on_host(vm_name: str) -> None:
             fcntl.flock(lf, fcntl.LOCK_UN)
 
 
-def provision_t2(vm_name: str, mvm_version: str) -> None:
+def provision_t2(
+    vm_name: str,
+    mvm_version: str,
+    on_created: Callable[[], None],
+    *,
+    binding: ImportedRunnerKernelBinding | None = None,
+) -> None:
     """Provision a Tier 2 VM from custom base image + shared volume (binary + tests + deps pre-installed)."""
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
     _ensure_builder_key()
-    _ensure_official_kernel_on_host(vm_name)
+    if binding is None:
+        _ensure_official_kernel_on_host(vm_name)
+    else:
+        _validate_imported_runner_kernel(binding)
     log(
         f"  Creating T2 VM '{vm_name}' (from {BASE_IMAGE_NAME}:{mvm_version} + shared volume)..."
     )
@@ -531,9 +1841,9 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "create",
         vm_name,
         "--image",
-        f"{BASE_IMAGE_NAME}:{mvm_version}",
+        _runner_image_key(mvm_version, binding),
         "--kernel",
-        "official:7.0.11",
+        binding.id if binding is not None else "official:7.0.11",
         "--vcpu",
         "4",
         "--mem",
@@ -549,26 +1859,22 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "--nested-virt",
         "--volume",
         SHARED_VOLUME_NAME,
-        timeout=300,
+        timeout=1800,
     )
+    on_created()
+    if binding is not None:
+        _require_runner_base_receipt(vm_name, mvm_version, binding)
+    _install_system_binary_in_runner(vm_name)
+    _initialize_system_binary_in_runner(vm_name)
 
     # Inside VM: mount shared volume, init, register assets
     # CRITICAL: mvm init MUST run as the unprivileged user (runner), NOT via sudo.
     # Running as root creates the cache dir with root ownership — test VMs inherit
     # this state and break with 'permission denied' on /home/runner/.cache/mvmctl.
     log(f"  Initializing mvm inside '{vm_name}'...")
-    mvm(
-        "exec",
-        vm_name,
-        "--user",
-        "runner",
-        "--timeout",
-        "10",
-        "--",
-        "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-        "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
-        timeout=180,
-    )
+    _initialize_runner_user(vm_name, timeout=180)
+    if binding is not None:
+        _require_imported_runner_smoke(vm_name, binding)
 
     log(f"  Registering assets in '{vm_name}' (cache hits)...")
     mvm(
@@ -579,7 +1885,7 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt mvm kernel pull --type firecracker "
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull --type firecracker "
         "--version v1.15 --default",
         timeout=150,
     )
@@ -591,7 +1897,7 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23",
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull alpine:3.23 --default",
         timeout=150,
     )
     mvm(
@@ -602,7 +1908,7 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu:noble",
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull ubuntu:noble",
         timeout=360,
     )
     mvm(
@@ -613,18 +1919,267 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt mvm bin pull firecracker "
-        "--version 1.16.0 --default --force",
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.17.0 --default --force",
         timeout=150,
+    )
+    # VM tests that omit --image require the fast Alpine runner prerequisite.
+    images_result = mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        "/usr/local/bin/mvm image ls --json",
+        timeout=30,
+    )
+    try:
+        envelope = json.loads(images_result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"T2 image defaults returned invalid JSON: {exc}") from exc
+    if (
+        not isinstance(envelope, dict)
+        or type(envelope.get("schema_version")) is not int
+        or envelope.get("schema_version") != 1
+        or envelope.get("status") != "success"
+        or envelope.get("error") is not None
+        or not isinstance(envelope.get("data"), list)
+        or not all(isinstance(image, dict) for image in envelope["data"])
+    ):
+        raise RuntimeError("T2 image defaults returned an invalid success envelope")
+    defaults = [image for image in envelope["data"] if image.get("is_default") is True]
+    if (
+        len(defaults) != 1
+        or defaults[0].get("type") != "alpine"
+        or defaults[0].get("version") != "3.23"
+        or defaults[0].get("is_present") is not True
+    ):
+        raise RuntimeError("T2 runner requires exactly one present Alpine 3.23 default image")
+    if binding is not None:
+        _register_imported_runner_kernel(vm_name, binding)
+
+
+def destroy_vm(vm_name: str, *, check: bool = True) -> None:
+    """Destroy a runner VM."""
+    mvm("vm", "rm", vm_name, "--force", timeout=60, check=check)
+
+
+def _record_runner_destruction(
+    result: dict[str, Any],
+    vm_name: str,
+    evidence: DomainEvidence | None = None,
+) -> None:
+    """Make mandatory runner destruction part of the domain result."""
+    try:
+        destroy_vm(vm_name)
+        if evidence is not None:
+            evidence.runner_cleanup = True
+    except Exception as exc:
+        if evidence is not None:
+            evidence.runner_cleanup = False
+        result["passed"] = False
+        cleanup_failure = f"runner VM destruction failed for {vm_name}: {exc}"
+        primary_output = result["output"].rstrip()
+        result["output"] = (
+            f"{primary_output}\n{cleanup_failure}"
+            if primary_output
+            else cleanup_failure
+        )
+
+
+def _destroy_prepared_vm(vm_name: str, primary: BaseException | None) -> None:
+    """Retain smoke failure output if destruction of its owned runner also fails."""
+    result = {"passed": True, "output": str(primary) if primary is not None else ""}
+    _record_runner_destruction(result, vm_name)
+    if not result["passed"]:
+        raise RuntimeError(result["output"]) from primary
+
+
+def _bounded_builder_pull_output(
+    result: subprocess.CompletedProcess[str],
+) -> str:
+    """Render captured pull output without flooding the qualification log."""
+    sections = []
+    if result.stdout:
+        sections.append(f"[stdout]\n{result.stdout.rstrip()}")
+    if result.stderr:
+        sections.append(f"[stderr]\n{result.stderr.rstrip()}")
+    output = "\n".join(sections) or "(no captured output)"
+    if len(output) <= BUILDER_PULL_OUTPUT_LIMIT:
+        return output
+
+    marker = "\n... builder pull output truncated ...\n"
+    remaining = BUILDER_PULL_OUTPUT_LIMIT - len(marker)
+    head = remaining // 2
+    return f"{output[:head]}{marker}{output[-(remaining - head):]}"
+
+
+def _pull_builder_assets(vm_name: str) -> None:
+    """Pull base-image assets serially and require local-mirror evidence."""
+    pulls = (
+        (
+            "Firecracker kernel",
+            (
+                "kernel",
+                "pull",
+                "--type",
+                "firecracker",
+                "--version",
+                "v1.15",
+                "--default",
+            ),
+        ),
+        (
+            "Alpine image",
+            ("image", "pull", "alpine:3.23"),
+        ),
+        (
+            "Ubuntu Minimal image",
+            ("image", "pull", "ubuntu-minimal:24.04"),
+        ),
+        (
+            "Ubuntu image",
+            ("image", "pull", "ubuntu", "--version", "24.04"),
+        ),
+    )
+    for label, pull_args in pulls:
+        log(f"  Pulling {label} into '{vm_name}'...")
+        command = shlex.join(
+            (
+                "MVM_ASSET_MIRROR=/mnt",
+                "MVM_LOG_LEVEL=INFO",
+                "/usr/local/bin/mvm",
+                *pull_args,
+            )
+        )
+        result = mvm(
+            "exec",
+            vm_name,
+            "--user",
+            "runner",
+            "--timeout",
+            "10",
+            "--",
+            command,
+            timeout=600,
+            capture=True,
+            check=False,
+        )
+        _require_local_mirror_pull(result, label)
+
+    log(f"  Verifying cached image integrity in '{vm_name}'...")
+    mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        "echo 'Verifying cached image integrity...' && "
+        "for f in /home/runner/.cache/mvmctl/images/*.zst; do "
+        'zstd -t "$f" || exit 1; '
+        "done && "
+        "echo 'All images verified OK'",
+        timeout=180,
+        capture=False,
     )
 
 
-def destroy_vm(vm_name: str) -> None:
-    """Destroy a runner VM."""
-    mvm("vm", "rm", vm_name, "--force", timeout=60, check=False)
+def _require_local_mirror_pull(
+    result: subprocess.CompletedProcess[str], label: str
+) -> None:
+    output = f"{result.stdout or ''}\n{result.stderr or ''}"
+    print(f"  {label} output:\n{_bounded_builder_pull_output(result)}", flush=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"builder asset pull failed for {label}: rc={result.returncode}"
+        )
+    for marker in FORBIDDEN_BUILDER_PULL_MARKERS:
+        if marker in output:
+            raise RuntimeError(
+                f"builder asset pull for {label} reported forbidden mirror event: {marker}"
+            )
+    if LOCAL_MIRROR_READ_MARKER not in output:
+        raise RuntimeError(
+            f"builder asset pull for {label} did not prove a local mirror artifact read"
+        )
 
 
-def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
+def _runner_base_image_id(
+    version: str, binding: ImportedRunnerKernelBinding | None = None
+) -> str | None:
+    """Admit one present image by exact type/version, never resolver fallback."""
+    result = mvm("image", "ls", "--json", check=False, timeout=15)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"runner base image lookup failed (rc={result.returncode}): {result.stderr}"
+        )
+    if len(result.stdout.encode()) > MAX_RUNNER_BINDING_JSON_BYTES:
+        raise RuntimeError("runner base image list exceeds size limit")
+
+    def unique_fields(pairs):
+        values = {}
+        folded = set()
+        for key, value in pairs:
+            if key.casefold() in folded:
+                raise RuntimeError(f"runner base image list has duplicate field: {key}")
+            folded.add(key.casefold())
+            values[key] = value
+        return values
+
+    def reject_constant(value):
+        raise RuntimeError(f"runner base image list has non-standard JSON value: {value}")
+
+    try:
+        envelope = json.loads(
+            result.stdout, object_pairs_hook=unique_fields, parse_constant=reject_constant
+        )
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"runner base image list returned invalid JSON: {exc}") from exc
+    if not isinstance(envelope, dict) or set(envelope) != {
+        "schema_version", "status", "data", "error"
+    }:
+        raise RuntimeError("runner base image list has incomplete or unknown envelope fields")
+    if type(envelope["schema_version"]) is not int or envelope["schema_version"] != 1:
+        raise RuntimeError("runner base image list has unsupported schema")
+    if envelope["status"] != "success" or envelope["error"] is not None:
+        raise RuntimeError("runner base image list is not successful")
+    images = envelope["data"]
+    if not isinstance(images, list):
+        raise RuntimeError("runner base image list data must be a list")
+    image_type = _runner_image_key(version, binding).rsplit(":", 1)[0]
+    exact = []
+    seen_ids = set()
+    for image in images:
+        if (
+            not isinstance(image, dict)
+            or not isinstance(image.get("id"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", image["id"]) is None
+            or not isinstance(image.get("type"), str)
+            or not image["type"]
+            or not isinstance(image.get("version"), str)
+            or not image["version"]
+            or type(image.get("is_present")) is not bool
+        ):
+            raise RuntimeError("runner base image list has invalid image identity")
+        if image["id"] in seen_ids:
+            raise RuntimeError("runner base image list has duplicate image ID")
+        seen_ids.add(image["id"])
+        if image["type"] == image_type and image["version"] == version:
+            exact.append(image)
+    if len(exact) > 1:
+        raise RuntimeError("runner base image list has ambiguous exact type/version")
+    return exact[0]["id"] if exact and exact[0]["is_present"] else None
+
+
+def _build_base_image(
+    mvm_version: str,
+    *,
+    rebuild: bool = False,
+    binding: ImportedRunnerKernelBinding | None = None,
+) -> str:
     """Build a custom base image with all test dependencies pre-installed.
 
     Creates a VM from ubuntu-minimal:noble, copies in the mvm binary and
@@ -633,37 +2188,24 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
     Returns the image version tag used.
     """
     img_tag = mvm_version
-    log(f"Building custom base image '{BASE_IMAGE_NAME}:{img_tag}'...")
+    image_key = _runner_image_key(img_tag, binding)
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
+    log(f"Building custom base image '{image_key}'...")
 
-    # When rebuilding, remove the existing image first so it's rebuilt fresh.
-    if rebuild:
-        mvm(
-            "image",
-            "rm",
-            f"{BASE_IMAGE_NAME}:{img_tag}",
-            "--force",
-            check=False,
-            timeout=15,
-        )
-
-    # Check if already built (skip check when rebuilding)
-    if not rebuild:
-        check = mvm(
-            "image",
-            "inspect",
-            f"{BASE_IMAGE_NAME}:{img_tag}",
-            "--json",
-            check=False,
-            timeout=15,
-        )
-        if check.returncode == 0:
-            log(f"  Base image '{BASE_IMAGE_NAME}:{img_tag}' already exists, skipping")
+    existing_id = _runner_base_image_id(img_tag, binding)
+    if existing_id is not None:
+        if rebuild:
+            mvm("image", "rm", existing_id, "--force", check=True, timeout=15)
+        else:
+            log(f"  Base image '{image_key}' already exists, skipping")
             return img_tag
 
-    # Clean up any leftover builder VM from a previous aborted run
-    destroy_vm(BASE_VM_NAME)
-
     log(f"  Creating builder VM '{BASE_VM_NAME}'...")
+    kernel_args = []
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
+        kernel_args = ["--kernel", binding.id]
     mvm(
         "vm",
         "create",
@@ -671,6 +2213,7 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         BASE_VM_NAME,
         "--image",
         "ubuntu-minimal:noble",
+        *kernel_args,
         "--user",
         "runner",
         "--vcpu",
@@ -687,8 +2230,8 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         timeout=180,
     )
     try:
-        log(f"  Copying mvm binary and system tests into '{BASE_VM_NAME}'...")
-        mvm("cp", MVM_BINARY, f"{BASE_VM_NAME}:/usr/local/bin/mvm", timeout=60)
+        log(f"  Installing mvm system binary and tests into '{BASE_VM_NAME}'...")
+        _install_system_binary_in_runner(BASE_VM_NAME)
         # Verify the binary transferred correctly
         verify = mvm(
             "exec",
@@ -698,14 +2241,16 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             "--timeout",
             "10",
             "--",
-            "stat -c%s /usr/local/bin/mvm",
+            f"stat -c%s {RUNNER_SYSTEM_CANDIDATE} && stat -c%s /usr/local/bin/mvm",
             timeout=20,
         )
-        expected = Path(shlex.split(MVM_BINARY)[0]).expanduser().stat().st_size
-        actual = int(verify.stdout.strip())
-        if actual != expected:
+        expected = Path(MVM_CANDIDATE_BINARY).stat().st_size
+        installed_sizes = [int(value) for value in verify.stdout.splitlines()]
+        if installed_sizes != [expected, expected]:
             raise RuntimeError(
-                f"mvm binary size mismatch in builder VM: expected {expected}, got {actual}"
+                "mvm binary size mismatch in builder VM: "
+                f"expected candidate and system sizes {[expected, expected]}, "
+                f"got {installed_sizes}"
             )
         mvm("cp", "tests/system", f"{BASE_VM_NAME}:/tests/", timeout=60)
 
@@ -720,14 +2265,51 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             "--",
             "sudo apt-get update -qq && "
             "sudo apt-get install -y -qq "
-            "python3-pytest qemu-utils fakeroot nftables iptables zstd htop "
+            "python3-pytest python3-pytest-timeout qemu-utils fakeroot nftables iptables zstd htop "
             "build-essential bc bison flex libncurses-dev "
-            "libssl-dev libelf-dev git curl dwarves "
-            "cloud-image-utils && "
+            "libssl-dev libelf-dev pkg-config git curl dwarves "
+            "cloud-image-utils util-linux && "
+            "sudo apt-get install -y -qq --no-install-recommends "
+            "libguestfs-tools supermin qemu-system-x86 file e2fsprogs "
+            "linux-image-generic && "
             "sudo apt-get clean",
-            timeout=300,
+            timeout=1800,
         )
-        log("  Installing Python test packages...")
+        # Ubuntu packages kernels as 0600; unprivileged supermin must read them.
+        # Only package-owned boot images are adjusted, never the external VM kernel.
+        kernel_readability = r"""
+test ! -L /boot
+test "$(stat -c '%u:%g:%a' /boot)" = '0:0:755'
+packages=$(dpkg-query -W -f='${binary:Package} ${db:Status-Status}\n' 'linux-image-*')
+count=0
+while read -r package status; do
+    case "$package" in linux-image-[0-9]*|linux-image-unsigned-[0-9]*) ;; *) continue ;; esac
+    test "$status" = installed || continue
+    paths=$(dpkg-query -L "$package")
+    while IFS= read -r kernel; do
+        case "$kernel" in /boot/vmlinuz-[0-9]*) ;; *) continue ;; esac
+        test "${kernel%/*}" = /boot
+        test -f "$kernel" && test ! -L "$kernel"
+        test "$(stat -c '%u:%g' "$kernel")" = '0:0'
+        identity=$(stat -c '%d:%i:%u:%g:%s' "$kernel")
+        original_mode=$(stat -c '%a' "$kernel")
+        test "$original_mode" = 600 || test "$original_mode" = 644
+        expected=$(awk -v path="${kernel#/}" '$2 == path {print $1}' "/var/lib/dpkg/info/$package.md5sums")
+        test "${#expected}" = 32
+        checksum=$(md5sum -- "$kernel")
+        test "${checksum%% *}" = "$expected"
+        if test "$original_mode" = 600; then chmod 0644 -- "$kernel"; fi
+        test "$(stat -c '%d:%i:%u:%g:%s' "$kernel")" = "$identity"
+        test "$(stat -c '%a' "$kernel")" = 644
+        test "$(md5sum -- "$kernel")" = "$checksum"
+        runuser -u runner -- test -r "$kernel"
+        printf 'GuestFS kernel readable: %s (mode %s -> 644)\n' "$kernel" "$original_mode"
+        count=$((count + 1))
+    done <<< "$paths"
+done <<< "$packages"
+test "$count" -gt 0
+"""
+        log("  Making packaged GuestFS kernels readable by runner...")
         mvm(
             "exec",
             BASE_VM_NAME,
@@ -736,8 +2318,8 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             "--timeout",
             "10",
             "--",
-            "pip3 install pytest-timeout --break-system-packages --quiet 2>&1 | tail -3",
-            timeout=90,
+            "sudo bash -euo pipefail -c " + shlex.quote(kernel_readability),
+            timeout=30,
         )
         log("  Adding runner to required groups (mvm, kvm)...")
         mvm(
@@ -753,6 +2335,8 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             "sudo usermod -aG kvm runner",
             timeout=30,
         )
+        log(f"  Initializing host through the system binary in '{BASE_VM_NAME}'...")
+        _initialize_system_binary_in_runner(BASE_VM_NAME)
         log("  Changing ownership of /tests to runner user...")
         mvm(
             "exec",
@@ -772,63 +2356,60 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         # need /home/runner/.cache/mvmctl owned by runner. Permission denied = broken.
         # Asset pulls are pre-baked into the base image so each test VM doesn't
         # re-pull them (saves ~3 min per T1 VM).
-        mvm(
-            "exec",
-            BASE_VM_NAME,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "sudo mkdir -p /mnt && "
-            "sudo mount /dev/vdb /mnt && "
-            "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
-            timeout=180,
-            capture=False,
-        )
+        _initialize_runner_user(BASE_VM_NAME, timeout=180, capture=False)
 
-        log(f"  Pulling assets into '{BASE_VM_NAME}' in parallel from mirror...")
         # Asset pulls are pre-baked into the base image so each test VM doesn't
-        # re-pull them (saves ~3 min per T1 VM). Run them in parallel inside one
-        # exec; wait on each PID so any failure propagates to the exec exit code.
-        mvm(
-            "exec",
-            BASE_VM_NAME,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "set -e && "
-            'pids="" && '
-            'MVM_ASSET_MIRROR=/mnt mvm binary pull firecracker --default --force --version 1.16.0 & pids="$pids $!" && '
-            'MVM_ASSET_MIRROR=/mnt mvm kernel pull --type firecracker --version v1.15 --default & pids="$pids $!" && '
-            'MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23 & pids="$pids $!" && '
-            'MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu-minimal:24.04 & pids="$pids $!" && '
-            'MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu --version 24.04 & pids="$pids $!" && '
-            'for pid in $pids; do wait "$pid" || exit $?; done && '
-            "echo 'Verifying cached image integrity...' && "
-            "for f in /home/runner/.cache/mvmctl/images/*.zst; do "
-            'zstd -t "$f" || exit 1; '
-            "done && "
-            "echo 'All images verified OK'",
-            timeout=360,
-            capture=False,
-        )
+        # re-pull them (saves ~3 min per T1 VM). Keep each pull in its own exec:
+        # concurrent downloads/decompression can exhaust this 3 GiB builder,
+        # while separate streamed sessions preserve the exact failing command.
+        _pull_builder_assets(BASE_VM_NAME)
+        if binding is not None:
+            inputs = _runner_base_receipt(mvm_version, binding)
+            installed = mvm(
+                "exec",
+                BASE_VM_NAME,
+                "--user",
+                "runner",
+                "--timeout",
+                "10",
+                "--",
+                "sha256sum /usr/local/bin/mvm",
+                timeout=30,
+            )
+            if installed.stdout.split() != [
+                inputs["candidate_sha256"],
+                "/usr/local/bin/mvm",
+            ]:
+                raise RuntimeError(
+                    "builder installed candidate SHA256 does not match base receipt"
+                )
+            receipt = json.dumps(inputs, sort_keys=True)
+            mvm(
+                "exec",
+                BASE_VM_NAME,
+                "--user",
+                "runner",
+                "--timeout",
+                "10",
+                "--",
+                f"printf '%s' {shlex.quote(receipt)} | sudo tee {RUNNER_BASE_RECEIPT} >/dev/null && "
+                f"sudo chmod 0444 {RUNNER_BASE_RECEIPT}",
+                timeout=30,
+            )
         log(f"  Stopping '{BASE_VM_NAME}'...")
         mvm("vm", "stop", BASE_VM_NAME, timeout=60)
 
-        log(f"  Importing image as '{BASE_IMAGE_NAME}:{img_tag}'...")
+        log(f"  Importing image as '{image_key}'...")
         mvm(
             "image",
             "import",
-            f"{BASE_IMAGE_NAME}:{img_tag}",
+            image_key,
             BASE_VM_NAME,
-            "--default",
+            *(["--default"] if binding is None else []),
             "--skip-optimization",
-            timeout=300,
+            timeout=1800,
         )
-        log(f"  Base image '{BASE_IMAGE_NAME}:{img_tag}' built successfully")
+        log(f"  Base image '{image_key}' built successfully")
     finally:
         destroy_vm(BASE_VM_NAME)
 
@@ -840,10 +2421,876 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
 # ============================================================================
 
 
+def _remote_pytest_report_path(vm_name: str) -> str:
+    """Return one fixed report receiver derived from the unique runner VM."""
+    if re.fullmatch(r"[A-Za-z0-9_-]+", vm_name) is None:
+        raise RuntimeError(f"unsafe runner VM name for outcome report: {vm_name!r}")
+    return f"/tmp/mvmctl-pytest-outcomes-{vm_name}.json"
+
+
+def _remote_pytest_command(
+    vm_name: str,
+    test_files: list[str],
+    report_path: str,
+    node_directory: str | None = None,
+) -> str:
+    pytest_command = shlex.join(
+        [
+            "python3",
+            "-m",
+            "pytest",
+            *(["-p", "system_test_evidence", "--rootdir=/", "--junitxml=" + node_directory + "/pytest.xml"] if node_directory else []),
+            *(f"/{test_file}" for test_file in test_files),
+            "--tb=short",
+            "-q",
+        ]
+    )
+    environment = " ".join(
+        (
+            "MVM_ASSET_MIRROR=/mnt",
+            f"MVM_TEST_VM={shlex.quote(vm_name)}",
+            f"MVM_TEST_QUALIFICATION_HOST={shlex.quote(vm_name)}",
+            f"{PYTEST_OUTCOME_REPORT_ENV}={shlex.quote(report_path)}",
+            *([f"PYTHONPATH={shlex.quote(node_directory)}", "PYTHONDONTWRITEBYTECODE=1",
+               f"TMPDIR={shlex.quote(node_directory + '/tmp')}",
+               f"{NODE_REPORT_ENV}={shlex.quote(node_directory + '/nodes.json')}"] if node_directory else
+              [f"TMPDIR={shlex.quote('/home/runner/.cache/mvmctl-pytest-' + vm_name + '/tmp')}"]),
+        )
+    )
+    return f"cd / && {environment} {pytest_command}"
+
+
+def _run_remote_pytest(
+    vm_name: str,
+    test_files: list[str],
+    *,
+    timeout: int,
+    evidence: DomainEvidence | None = None,
+) -> tuple[subprocess.CompletedProcess[str], str | None]:
+    """Run pytest in a runner VM and validate its bounded outcome report."""
+    report_path = _remote_pytest_report_path(vm_name)
+    node_directory = f"/home/runner/.cache/mvmctl-node-evidence-{vm_name}" if evidence is not None else None
+    pytest_directory = node_directory or f"/home/runner/.cache/mvmctl-pytest-{vm_name}"
+    pytest_result: subprocess.CompletedProcess[str] | None = None
+    validation_failures: list[str] = []
+    execution_error: Exception | None = None
+    try:
+        mvm("exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+            f"umask 077; mkdir -p -- /home/runner/.cache && mkdir -- {shlex.quote(pytest_directory)} && mkdir -- {shlex.quote(pytest_directory + '/tmp')}", timeout=30)
+        if evidence is not None:
+            for name in ("system_test_evidence.py", "system_test_outcomes.py"):
+                mvm("cp", str(_REPO_ROOT / "scripts" / name), f"{vm_name}:{node_directory}/{name}", timeout=30)
+            # The root guest agent applies source modes under its own umask.
+            # Keep the directory private while making only these helpers readable by runner.
+            mvm(
+                "exec", vm_name, "--user", "root", "--timeout", "10", "--",
+                shlex.join([
+                    "chmod", "0644", "--",
+                    node_directory + "/system_test_evidence.py",
+                    node_directory + "/system_test_outcomes.py",
+                ]),
+                timeout=30,
+            )
+            expected = {path: digest for path, digest in evidence.source_payload.items()
+                        if path.startswith("tests/system/") or path in ("scripts/system_test_evidence.py", "scripts/system_test_outcomes.py")}
+            actual_paths = {path: (node_directory + "/" + Path(path).name if path.startswith("scripts/") else "/" + path) for path in expected}
+            probe = "import hashlib,json;from pathlib import Path;print(json.dumps({p:hashlib.sha256(Path(actual).read_bytes()).hexdigest() for p,actual in " + repr(actual_paths) + ".items()},sort_keys=True))"
+            observed = mvm("exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+                           shlex.join(["python3", "-c", probe]), timeout=30)
+            evidence.record_runtime_source(observed.stdout.encode(), expected)
+        pytest_result = mvm(
+            "exec",
+            vm_name,
+            "--user",
+            "runner",
+            "--timeout",
+            "10",
+            "--",
+            _remote_pytest_command(vm_name, test_files, report_path, node_directory),
+            check=False,
+            timeout=timeout,
+        )
+        if evidence is not None:
+            evidence.record_native(pytest_result)
+        retrieve_result = mvm(
+            "exec",
+            vm_name,
+            "--user",
+            "runner",
+            "--timeout",
+            "10",
+            "--",
+            f"head -c {MAX_PYTEST_OUTCOME_REPORT_BYTES + 1} -- "
+            f"{shlex.quote(report_path)}",
+            check=False,
+            timeout=30,
+        )
+        if retrieve_result.returncode != 0:
+            detail = (retrieve_result.stderr or "").strip() or "report read failed"
+            raise RuntimeError(
+                f"remote pytest outcome report is missing: {detail}"
+            )
+        if evidence is not None:
+            evidence.record_outcomes(retrieve_result.stdout.encode())
+        raw_nodes = None
+        if evidence is not None:
+            for name, retain in (("nodes.json", evidence.record_nodes), ("pytest.xml", evidence.record_junit)):
+                retrieved = mvm("exec", vm_name, "--user", "runner", "--timeout", "10", "--",
+                                f"head -c {MAX_OUTPUT_BYTES + 1} -- {shlex.quote(node_directory + '/' + name)}", check=False, timeout=30)
+                if retrieved.returncode != 0:
+                    raise RuntimeError(f"remote literal node/JUnit report is missing: {name}")
+                retain(retrieved.stdout.encode())
+                if name == "nodes.json":
+                    raw_nodes = retrieved.stdout.encode()
+        outcomes = require_complete_pytest_outcomes(
+            retrieve_result.stdout.encode(), process_returncode=pytest_result.returncode,
+        )
+        if evidence is not None:
+            evidence.require_nodes(raw_nodes, pytest_result.returncode, outcomes)
+    except Exception as exc:
+        execution_error = exc
+    finally:
+        try:
+            mvm(
+                "exec",
+                vm_name,
+                "--user",
+                "runner",
+                "--timeout",
+                "10",
+                "--",
+                f"rm -f -- {shlex.quote(report_path)} && "
+                f"test ! -e {shlex.quote(report_path)}" + (
+                    " && rm -f -- " + " ".join(shlex.quote(node_directory + '/' + name) for name in
+                    ("nodes.json", "pytest.xml", "system_test_evidence.py", "system_test_outcomes.py")) +
+                    " && " + " && ".join("test ! -e " + shlex.quote(node_directory + '/' + name) for name in
+                    ("nodes.json", "pytest.xml", "system_test_evidence.py", "system_test_outcomes.py")) if node_directory else ""),
+                check=True,
+                timeout=30,
+            )
+            if evidence is not None:
+                evidence.report_cleanup = True
+        except Exception as exc:
+            if evidence is not None:
+                evidence.report_cleanup = False
+            validation_failures.append(
+                f"remote outcome report cleanup failed: {exc}"
+            )
+
+    if pytest_result is None:
+        if execution_error is not None:
+            validation_failures.insert(0, str(execution_error))
+        raise RuntimeError("; ".join(validation_failures))
+    if execution_error is not None:
+        validation_failures.insert(0, str(execution_error))
+    reason = "; ".join(validation_failures) or None
+    return pytest_result, reason
+
+
+def _pytest_result_output(
+    pytest_result: subprocess.CompletedProcess[str],
+    validation_failure: str | None,
+) -> str:
+    output = (pytest_result.stdout or "") + (pytest_result.stderr or "")
+    if validation_failure is not None:
+        output += (
+            "\npytest outcome validation failed: "
+            f"{validation_failure}\n"
+        )
+    return output
+
+
+def _run_local_pytest(
+    domain: str,
+    test_files: list[str],
+    *,
+    timeout: int,
+    evidence: DomainEvidence | None = None,
+) -> tuple[subprocess.CompletedProcess[str], str | None]:
+    """Run host-direct pytest with a private report and checked cleanup."""
+    report_directory = tempfile.TemporaryDirectory(
+        prefix=f"mvmctl-pytest-{domain}-",
+        **({"dir": evidence.task} if evidence is not None else {}),
+    )
+    report_path = Path(report_directory.name) / "outcomes.json"
+    pytest_result: subprocess.CompletedProcess[str] | None = None
+    validation_failures: list[str] = []
+    execution_error: Exception | None = None
+    try:
+        if evidence is not None:
+            expected = {path: digest for path, digest in evidence.source_payload.items()
+                        if path.startswith("tests/system/") or path in ("scripts/system_test_evidence.py", "scripts/system_test_outcomes.py")}
+            observed = {path: _sha256_runner_input(_REPO_ROOT / path) for path in expected}
+            evidence.record_runtime_source(json.dumps(observed, sort_keys=True).encode(), expected)
+        node_path = Path(report_directory.name) / "nodes.json" if evidence is not None else None
+        if node_path is not None:
+            (node_path.parent / "tmp").mkdir(mode=0o700)
+        pytest_result = _run_pytest(
+            test_files,
+            timeout=timeout,
+            extra_env={PYTEST_OUTCOME_REPORT_ENV: str(report_path), **({NODE_REPORT_ENV: str(node_path),
+                "PYTHONPATH": str(_REPO_ROOT / "scripts"), "PYTHONDONTWRITEBYTECODE": "1", "TMPDIR": str(node_path.parent / "tmp")} if evidence is not None else {})},
+            **({"node_report": node_path} if evidence is not None else {}),
+        )
+        if evidence is not None:
+            evidence.record_native(pytest_result)
+        payload = read_pytest_outcome_report(report_path)
+        if evidence is not None:
+            evidence.record_outcomes(payload)
+            raw_nodes = evidence.record_local_node_reports(node_path)
+        outcomes = require_complete_pytest_outcomes(
+            payload,
+            process_returncode=pytest_result.returncode,
+        )
+        if evidence is not None:
+            evidence.require_nodes(raw_nodes, pytest_result.returncode, outcomes)
+    except subprocess.TimeoutExpired as exc:
+        execution_error = exc if isinstance(exc, _PytestTimeout) else _PytestTimeout(
+            exc.cmd, exc.timeout,
+            subprocess.CompletedProcess(exc.cmd, None, exc.stdout, exc.stderr),
+            ["containment uncertain: no owned group shutdown receipt"],
+        )
+    except Exception as exc:
+        execution_error = exc
+    finally:
+        try:
+            report_directory.cleanup()
+            if evidence is not None:
+                evidence.report_cleanup = True
+        except Exception as exc:
+            if evidence is not None:
+                evidence.report_cleanup = False
+            validation_failures.append(
+                f"local outcome report cleanup failed: {exc}"
+            )
+
+    if isinstance(execution_error, _PytestTimeout):
+        execution_error.report_errors.extend(validation_failures)
+        raise execution_error
+    if pytest_result is None:
+        if execution_error is not None:
+            validation_failures.insert(0, str(execution_error))
+        raise RuntimeError("; ".join(validation_failures))
+    if execution_error is not None:
+        validation_failures.insert(0, str(execution_error))
+    reason = "; ".join(validation_failures) or None
+    return pytest_result, reason
+
+
+_HOST_REBOOT_RUNNER = "mvmctl-030-test"
+_HOST_REBOOT_FILE = "tests/system/host/test_host_reboot.py"
+_HOST_REBOOT_LIMIT = 128 * 1024
+_HOST_REBOOT_TASK_FIELDS = {
+    "schema_version", "runner", "outer_before", "outer_after", "controller", "source_revision",
+    "test_sha256", "candidate_sha256", "candidate_version", "kernel_id", "kernel_sha256", "guest_task",
+    "before_boot", "after_boot", "pre_sha256", "pre_outcomes_sha256", "source_payload",
+    "namespace", "namespace_identity",
+}
+_HOST_REBOOT_SOURCE_FILES = ("tests/__init__.py", "tests/system/__init__.py", "tests/system/conftest.py",
+                           "tests/system/pytest.ini", "tests/system/host/__init__.py", "tests/system/host/test_host.py",
+                           _HOST_REBOOT_FILE, "tests/system/network/__init__.py", "tests/system/network/test_network.py",
+                           "tests/system/vm/__init__.py", "tests/system/vm/test_vm_lifecycle.py")
+
+
+def _host_reboot_json(raw: bytes) -> dict[str, Any]:
+    """Bounded unambiguous JSON for only the closed reboot receipts."""
+    if len(raw) > _HOST_REBOOT_LIMIT:
+        raise RuntimeError("host_reboot receipt exceeds bound")
+    def unique(pairs):
+        values = {}
+        folded = set()
+        for key, value in pairs:
+            if key.casefold() in folded:
+                raise RuntimeError("duplicate host_reboot receipt field")
+            folded.add(key.casefold())
+            values[key] = value
+        return values
+    data = json.loads(raw, object_pairs_hook=unique)
+    if not isinstance(data, dict):
+        raise RuntimeError("host_reboot receipt must be an object")
+    return data
+
+
+def _host_reboot_read(path: Path) -> bytes:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as stream:
+        row = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(row.st_mode) or row.st_nlink != 1 or row.st_uid != os.getuid()
+                or stat.S_IMODE(row.st_mode) != 0o600 or row.st_size > _HOST_REBOOT_LIMIT):
+            raise RuntimeError("host_reboot receipt must be a private owned bounded regular file")
+        raw = stream.read(_HOST_REBOOT_LIMIT + 1)
+        current = os.fstat(stream.fileno())
+        stable = lambda info: (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        if stable(current) != stable(row) or stable(path.lstat()) != stable(row) or len(raw) != row.st_size:
+            raise RuntimeError("host_reboot receipt changed during read")
+        return raw
+
+
+def _host_reboot_write(task: Path, name: str, raw: bytes) -> None:
+    if len(raw) > _HOST_REBOOT_LIMIT:
+        raise RuntimeError("host_reboot retained output exceeds bound")
+    fd = os.open(task / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    fd = os.open(task, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _host_reboot_outer_identity() -> dict[str, Any]:
+    """Observe only the designated outer VM and its exact current process; no control writes."""
+    info = _runner_binding_json(mvm("vm", "inspect", _HOST_REBOOT_RUNNER, "--json", timeout=15).stdout)
+    row = info.get("vm", info)
+    if (row.get("name") != _HOST_REBOOT_RUNNER or row.get("status") != "running"
+            or re.fullmatch(r"[0-9a-f]{32}", row.get("id", "")) is None):
+        raise RuntimeError("host_reboot requires the exact existing running named runner")
+    pid = int(row["pid"])
+    if pid <= 0:
+        raise RuntimeError("host_reboot runner process identity is incomplete")
+    fields = Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()
+    if len(fields) < 20 or fields[0] in ("Z", "X"):
+        raise RuntimeError("host_reboot runner task changed")
+    ticks = int(fields[19])
+    if ticks <= 0 or ("process_start_time" in row and int(row["process_start_time"]) != ticks):
+        raise RuntimeError("host_reboot runner start tick changed")
+    groups = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
+    if groups != [f"0::/mvmctl/{row['id']}"]:
+        raise RuntimeError("host_reboot requires its exact observed runner cgroup")
+    group = Path("/sys/fs/cgroup/mvmctl") / row["id"]
+    controls = {key: (group / leaf).read_text().strip() for key, leaf in
+                (("memory_high", "memory.high"), ("memory_max", "memory.max"))}
+    if (Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()[19] != str(ticks)
+            or Path(f"/proc/{pid}/cgroup").read_text().splitlines() != groups):
+        raise RuntimeError("host_reboot runner task changed while reading controls")
+    if info["resources"]["mem"] != 6144:
+        raise RuntimeError("host_reboot must preserve the approved 6 GiB guest geometry")
+    return dict(runner_id=row["id"], created_at=row["created_at"], pid=pid, start_ticks=ticks,
+                guest_mem_size_mib=info["resources"]["mem"], **controls)
+
+
+class _HostRebootReconnectUnavailable(RuntimeError):
+    """Only transport unavailability permits another bounded read-only probe."""
+
+
+def _host_reboot_ssh(
+    bound: dict[str, Any], command: str, *, connect_timeout: int, timeout: int, check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Use the existing named runner's SSH key; never depend on outer vsock."""
+    operator = bound["namespace"]["operator"]
+    paths = bound["namespace"]["paths"]
+    environment = shlex.join(["env", "HOME=" + operator["home"], "USER=" + operator["user"],
+                              "LOGNAME=" + operator["user"], "MVM_CACHE_DIR=" + paths["cache"],
+                              "MVM_CONFIG_DIR=" + paths["config"], "MVM_ASSET_MIRROR=" + paths["mirror"],
+                              "sh", "-c", command])
+    return mvm("ssh", _HOST_REBOOT_RUNNER, "--user", operator["user"], "--key",
+               str(Path.home() / ".config/mvmctl/keys/aland"), "--timeout", str(connect_timeout),
+               "--cmd", environment, check=check, timeout=timeout)
+
+
+def _host_reboot_require_namespace(namespace: dict[str, Any]) -> None:
+    """Admit only the closed explicit nonroot guest namespace; never select defaults."""
+    if (set(namespace) != {"schema_version", "runner", "runner_id", "operator", "paths"}
+            or type(namespace["schema_version"]) is not int or namespace["schema_version"] != 1
+            or namespace["runner"] != _HOST_REBOOT_RUNNER
+            or type(namespace["runner_id"]) is not str
+            or re.fullmatch(r"[0-9a-f]{32}", namespace["runner_id"]) is None):
+        raise RuntimeError("host_reboot namespace requires its closed named-runner binding")
+    operator, paths = namespace["operator"], namespace["paths"]
+    if (not isinstance(operator, dict) or set(operator) != {"user", "uid", "gid", "home"}
+            or type(operator["user"]) is not str
+            or operator["user"] == "root"
+            or re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", operator["user"]) is None
+            or any(type(operator[key]) is not int or operator[key] <= 0 for key in ("uid", "gid"))
+            or not isinstance(paths, dict) or set(paths) != {"cache", "config", "mirror"}):
+        raise RuntimeError("host_reboot namespace requires an explicit nonroot operator and selected paths")
+    for value in (operator["home"], *paths.values()):
+        if (type(value) is not str or not value.startswith("/") or value == "/"
+                or str(Path(value)) != value or any(part in (".", "..") for part in value.split("/"))
+                or "\x00" in value):
+            raise RuntimeError("host_reboot namespace paths must be canonical absolute directories")
+
+
+def _host_reboot_namespace_probe(bound: dict[str, Any]) -> dict[str, Any]:
+    """Observe passwd/process identity and existing owned nonsymlink directories over SSH."""
+    namespace = bound["namespace"]
+    script = """import json,os,pathlib,pwd,stat
+expected = json.loads(EXPECTED)
+account = pwd.getpwuid(os.getuid())
+operator = dict(user=account.pw_name,uid=account.pw_uid,gid=account.pw_gid,home=account.pw_dir)
+assert os.getuid() == os.geteuid() != 0 and os.getgid() == os.getegid() == account.pw_gid
+assert operator == expected['operator'] and pwd.getpwnam(account.pw_name) == account
+identities = {}
+for key,value in dict(home=account.pw_dir,task_parent=account.pw_dir+'/.cache',**expected['paths']).items():
+    path = pathlib.Path(value)
+    assert path.resolve(strict=True) == path
+    fd = os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:
+        row = os.fstat(fd)
+        identity = lambda r: [r.st_dev,r.st_ino,r.st_uid,r.st_gid,stat.S_IMODE(r.st_mode)]
+        assert stat.S_ISDIR(row.st_mode) and row.st_uid == account.pw_uid and row.st_gid == account.pw_gid
+        assert row.st_mode & 0o022 == 0
+        assert identity(os.fstat(fd)) == identity(row) == identity(path.lstat())
+        assert path.resolve(strict=True) == path
+        identities[key] = identity(row)
+    finally:
+        os.close(fd)
+print(json.dumps(dict(operator=operator,paths=expected['paths'],identity=identities),sort_keys=True))
+""".replace("EXPECTED", repr(json.dumps(namespace)))
+    result = _host_reboot_ssh(bound, shlex.join(["/usr/bin/python3", "-I", "-S", "-B", "-c", script]),
+                              connect_timeout=10, timeout=30)
+    observed = _host_reboot_json(result.stdout.encode())
+    if (set(observed) != {"operator", "paths", "identity"} or observed["operator"] != namespace["operator"]
+            or observed["paths"] != namespace["paths"] or set(observed["identity"]) !=
+            {"home", "task_parent", "cache", "config", "mirror"}
+            or any(not isinstance(value, list) or len(value) != 5
+                   or any(type(n) is not int for n in value)
+                   or value[2:4] != [namespace["operator"]["uid"], namespace["operator"]["gid"]]
+                   or value[4] & 0o022 for value in observed["identity"].values())):
+        raise RuntimeError("host_reboot guest namespace observation is incomplete")
+    return observed["identity"]
+
+
+def _host_reboot_require_guest_namespace(bound: dict[str, Any]) -> None:
+    if _host_reboot_namespace_probe(bound) != bound["namespace_identity"]:
+        raise RuntimeError("host_reboot guest namespace identity changed")
+
+
+def _host_reboot_stage_source(bound: dict[str, Any]) -> None:
+    """Copy only the fixed phase inputs over the same SSH transport, without vsock cp."""
+    for relative in _HOST_REBOOT_SOURCE_FILES:
+        raw = (_REPO_ROOT / relative).read_bytes()
+        digest = bound["source_payload"][relative]
+        if hashlib.sha256(raw).hexdigest() != digest:
+            raise RuntimeError("host_reboot source changed before staging")
+        encoded = base64.b64encode(gzip.compress(raw, mtime=0)).decode("ascii")
+        # Compression keeps each fixed source file below the single-argument limit.
+        # The destination is exclusively created in this task, never an existing source.
+        script = ("import base64,gzip,hashlib,pathlib; "
+                  f"raw=gzip.decompress(base64.b64decode({encoded!r})); "
+                  f"assert hashlib.sha256(raw).hexdigest()=={digest!r}; "
+                  f"path=pathlib.Path({(bound['guest_task'] + '/source/' + relative)!r}); "
+                  "path.parent.mkdir(parents=True,exist_ok=True); "
+                  "stream=path.open('xb'); stream.write(raw); stream.close()")
+        _host_reboot_ssh(bound, shlex.join(["/usr/bin/python3", "-I", "-S", "-B", "-c", script]),
+                          connect_timeout=10, timeout=60)
+
+
+def _host_reboot_probe(bound: dict[str, Any]) -> str:
+    command = "cat /proc/sys/kernel/random/boot_id && sha256sum /usr/local/bin/mvm && /usr/local/bin/mvm --version"
+    try:
+        result = _host_reboot_ssh(bound, command, connect_timeout=2, check=False, timeout=15)
+    except subprocess.TimeoutExpired as exc:
+        raise _HostRebootReconnectUnavailable("host_reboot reconnect timed out") from exc
+    if result.returncode != 0:
+        raise _HostRebootReconnectUnavailable("host_reboot reconnect unavailable")
+    lines = result.stdout.strip().splitlines()
+    if len(lines) != 3 or str(uuid.UUID(lines[0])) != lines[0]:
+        raise RuntimeError("host_reboot reconnect lacks exact guest boot evidence")
+    if lines[1].split() != [bound["candidate_sha256"], "/usr/local/bin/mvm"] or lines[2] != bound["candidate_version"]:
+        raise RuntimeError("host_reboot installed candidate changed")
+    _host_reboot_require_guest_namespace(bound)
+    return lines[0]
+
+
+def _host_reboot_require_source(bound: dict[str, Any]) -> None:
+    """Refuse lost or changed fixed phase inputs; never repair a rebooted task."""
+    paths = [bound["guest_task"] + "/source/" + relative for relative in _HOST_REBOOT_SOURCE_FILES]
+    result = _host_reboot_ssh(bound, shlex.join(["sha256sum", "--", *paths]), connect_timeout=10, timeout=30)
+    expected = [f"{bound['source_payload'][relative]}  {path}"
+                for relative, path in zip(_HOST_REBOOT_SOURCE_FILES, paths)]
+    if result.stdout.splitlines() != expected:
+        raise RuntimeError("host_reboot staged source changed across reboot")
+
+
+def _host_reboot_fetch(bound: dict[str, Any], name: str) -> bytes:
+    path = bound["guest_task"] + "/" + name
+    result = _host_reboot_ssh(bound, f"head -c {_HOST_REBOOT_LIMIT + 1} -- {shlex.quote(path)}",
+                              connect_timeout=10, timeout=30)
+    raw = result.stdout.encode()
+    if len(raw) > _HOST_REBOOT_LIMIT:
+        raise RuntimeError("host_reboot remote receipt exceeds bound")
+    return raw
+
+
+def _host_reboot_pytest(bound: dict[str, Any], phase: str, task: Path) -> bytes:
+    """Retain strict phase stdout/stderr/outcomes; do not alter ordinary remote-report cleanup."""
+    source = bound["guest_task"] + "/source"
+    report = bound["guest_task"] + f"/{phase}.outcomes.json"
+    env = {
+        "MVM_TEST_VM": _HOST_REBOOT_RUNNER, "MVM_TEST_QUALIFICATION_HOST": _HOST_REBOOT_RUNNER,
+        "MVM_ASSET_MIRROR": bound["namespace"]["paths"]["mirror"],
+        "MVM_CONFIG_DIR": bound["namespace"]["paths"]["config"],
+        "MVM_CACHE_DIR": bound["namespace"]["paths"]["cache"],
+        "MVM_HOST_REBOOT_NAMESPACE": json.dumps(bound["namespace"], sort_keys=True),
+        "MVM_HOST_REBOOT_NAMESPACE_IDENTITY": json.dumps(bound["namespace_identity"], sort_keys=True),
+        "MVM_TEMP_DIR": bound["guest_task"] + "/tmp", "TMPDIR": bound["guest_task"] + "/tmp",
+        "MVM_HOST_REBOOT_PHASE": phase, "MVM_HOST_REBOOT_TASK": bound["guest_task"],
+        "MVM_HOST_REBOOT_SOURCE_REVISION": bound["source_revision"],
+        "MVM_HOST_REBOOT_CANDIDATE_SHA256": bound["candidate_sha256"],
+        "MVM_HOST_REBOOT_CANDIDATE_VERSION": bound["candidate_version"],
+        "MVM_RUNNER_KERNEL_ID": bound["kernel_id"], "MVM_RUNNER_KERNEL_SHA256": bound["kernel_sha256"],
+        "PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        PYTEST_OUTCOME_REPORT_ENV: report,
+    }
+    command = (f"cd {shlex.quote(source)} && " + " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
+               + " " + shlex.join(["python3", "-B", "-m", "pytest", "-c", "tests/system/pytest.ini",
+                    "--rootdir=.", "--strict-markers", "-p", "no:cacheprovider", "-p", "pytest_timeout", "--timeout=600",
+                    "--timeout-method=signal", f"--basetemp={bound['guest_task']}/{phase}-tmp",
+                    f"--junitxml={bound['guest_task']}/{phase}.xml", "-x", "-s", "-q",
+                    _HOST_REBOOT_FILE + f"::test_host_reboot_{phase}"]))
+    result = _host_reboot_ssh(bound, command, connect_timeout=10, check=False, timeout=660)
+    _host_reboot_write(task, f"{phase}.stdout", (result.stdout or "").encode())
+    _host_reboot_write(task, f"{phase}.stderr", (result.stderr or "").encode())
+    _host_reboot_write(task, f"{phase}.native.json", json.dumps(dict(phase=phase, returncode=result.returncode)).encode())
+    raw = _host_reboot_fetch(bound, f"{phase}.outcomes.json")
+    _host_reboot_write(task, f"{phase}.outcomes.json", raw)
+    xml = _host_reboot_fetch(bound, f"{phase}.xml")
+    _host_reboot_write(task, f"{phase}.xml", xml)
+    _host_reboot_require_phase_report(phase, raw, xml, result.returncode)
+    receipt = _host_reboot_fetch(bound, f"{phase}.json")
+    _host_reboot_write(task, f"{phase}.json", receipt)
+    return receipt
+
+
+def _host_reboot_require_phase_report(phase: str, raw: bytes, xml: bytes, returncode: int) -> None:
+    outcomes = require_complete_pytest_outcomes(raw, process_returncode=returncode)
+    if outcomes.collected != 1:
+        raise RuntimeError("host_reboot phase must pass exactly its one registered node")
+    root = ET.fromstring(xml)
+    totals = {key: sum(int(suite.get(key, "0")) for suite in root.iter("testsuite"))
+              for key in ("tests", "failures", "errors", "skipped")}
+    cases = list(root.iter("testcase"))
+    if (totals != dict(tests=1, failures=0, errors=0, skipped=0) or len(cases) != 1
+            or cases[0].get("classname") != "tests.system.host.test_host_reboot"
+            or cases[0].get("name") != f"test_host_reboot_{phase}"
+            or any(list(root.iter(tag)) for tag in ("failure", "error", "skipped"))):
+        raise RuntimeError("host_reboot JUnit does not prove the exact selected phase")
+
+
+def _host_reboot_require_envelope(raw: bytes, bound: dict[str, Any], outer: dict[str, Any]) -> None:
+    receipt = _host_reboot_json(raw)
+    if any(type(outer[key]) is not str or re.fullmatch(r"(?:max|0|[1-9][0-9]*)", outer[key]) is None
+           for key in ("memory_high", "memory_max")):
+        raise RuntimeError("host_reboot external administrator envelope requires canonical observed controls")
+    expected = dict(schema_version=1, runner=_HOST_REBOOT_RUNNER, runner_id=outer["runner_id"],
+                    host_boot_id=bound["after_boot"], outer_pid=outer["pid"], outer_start_ticks=outer["start_ticks"],
+                    memory_high="max" if outer["memory_high"] == "max" else int(outer["memory_high"]),
+                    memory_max="max" if outer["memory_max"] == "max" else int(outer["memory_max"]),
+                    guest_mem_size_mib=outer["guest_mem_size_mib"])
+    if (receipt != expected or any(type(receipt[key]) is not int for key in
+                                  ("schema_version", "outer_pid", "outer_start_ticks", "guest_mem_size_mib"))
+            or any(type(receipt[key]) is not type(expected[key]) for key in ("memory_high", "memory_max"))):
+        raise RuntimeError("host_reboot POST requires the exact fresh external administrator envelope receipt")
+    if outer["memory_high"] != str(expected["memory_high"]) or outer["memory_max"] != str(expected["memory_max"]):
+        raise RuntimeError("host_reboot actual named-runner envelope differs from the external administrator receipt")
+
+
+def _host_reboot_controller() -> dict[str, Any]:
+    """Pin the configured resolved existing outer executable; never replace it."""
+    path = _controller_executable_path()
+    def identity(row):
+        return [row.st_dev, row.st_ino, row.st_uid, row.st_gid, stat.S_IMODE(row.st_mode),
+                row.st_nlink, row.st_size, row.st_mtime_ns, row.st_ctime_ns]
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or not before.st_mode & 0o111:
+        raise RuntimeError("host_reboot outer controller must be an existing regular executable")
+    digest = _sha256_runner_input(path)
+    if identity(path.lstat()) != identity(before) or _controller_executable_path() != path:
+        raise RuntimeError("host_reboot outer controller changed while pinning")
+    return dict(path=str(path), command=shlex.split(MVM_BINARY), identity=identity(before), sha256=digest)
+
+
+def _host_reboot_read_pre(task: Path, controller: dict) -> tuple[dict, bytes]:
+    """Read exact retained PRE and current release inputs; no runner queries."""
+    return _host_reboot_read_pre_for_source(task, controller, _REPO_ROOT)
+
+
+def _host_reboot_read_pre_for_source(task: Path, controller: dict, source_root: Path) -> tuple[dict, bytes]:
+    """Validate original bytes against their original clean source, never relabel them."""
+    bound = _host_reboot_json(_host_reboot_read(task / "task.json"))
+    if (set(bound) != _HOST_REBOOT_TASK_FIELDS or type(bound["schema_version"]) is not int
+            or bound["schema_version"] != 2 or bound["runner"] != _HOST_REBOOT_RUNNER):
+        raise RuntimeError("host_reboot retained PRE binding is invalid or changed")
+    _host_reboot_require_namespace(bound["namespace"])
+    namespace = bound["namespace"]
+    if (namespace["runner_id"] != bound["outer_before"]["runner_id"]
+            or namespace["runner_id"] != bound["outer_after"]["runner_id"]
+            or set(bound["namespace_identity"]) != {"home", "task_parent", "cache", "config", "mirror"}
+            or any(not isinstance(value, list) or len(value) != 5
+                   or any(type(n) is not int for n in value)
+                   or value[2:4] != [namespace["operator"]["uid"], namespace["operator"]["gid"]]
+                   or value[4] & 0o022 for value in bound["namespace_identity"].values())
+            or re.fullmatch(re.escape(namespace["operator"]["home"] + "/.cache/mvmctl-host-reboot-")
+                            + r"[0-9a-f]{32}", bound["guest_task"]) is None
+            or bound["before_boot"] == bound["after_boot"] or controller != bound["controller"]
+            or _sha256_runner_input(Path(MVM_CANDIDATE_BINARY)) != bound["candidate_sha256"]
+            or "mvm " + _get_mvm_version() != bound["candidate_version"]
+            or _sha256_runner_input(source_root / _HOST_REBOOT_FILE) != bound["test_sha256"]
+            or {relative: _sha256_runner_input(source_root / relative) for relative in _HOST_REBOOT_SOURCE_FILES}
+               != bound["source_payload"]
+            or subprocess.check_output(["git", "-C", str(source_root), "rev-parse", "HEAD"], text=True).strip()
+               != bound["source_revision"]
+            or subprocess.check_output(["git", "-C", str(source_root), "status", "--porcelain"], text=True)):
+        raise RuntimeError("host_reboot retained PRE binding is invalid or changed")
+    pre = _host_reboot_read(task / "pre.json")
+    outcomes = _host_reboot_read(task / "pre.outcomes.json")
+    if (hashlib.sha256(pre).hexdigest() != bound["pre_sha256"]
+            or hashlib.sha256(outcomes).hexdigest() != bound["pre_outcomes_sha256"]):
+        raise RuntimeError("host_reboot retained PRE proof changed")
+    if require_complete_pytest_outcomes(outcomes, process_returncode=0).collected != 1:
+        raise RuntimeError("host_reboot PRE must prove exactly one passed node")
+    receipt = _host_reboot_json(pre)
+    if (type(receipt["schema_version"]) is not int or receipt["schema_version"] != 2
+            or receipt["namespace"] != namespace or receipt["namespace_identity"] != bound["namespace_identity"]
+            or receipt["boot_id"] != bound["before_boot"] or receipt["source"] != dict(revision=bound["source_revision"],
+            test_sha256=bound["test_sha256"], payload=bound["source_payload"])
+            or receipt["candidate"]["sha256"] != bound["candidate_sha256"]
+            or receipt["candidate"]["version"] != bound["candidate_version"]):
+        raise RuntimeError("host_reboot PRE source/candidate/boot proof changed")
+    return bound, pre
+
+
+def _host_reboot_validate_pre(task: Path, controller: dict, namespace: Path | None) -> tuple[dict, bytes, dict]:
+    """POST execution additionally requires the live fresh runner authority."""
+    bound, pre = _host_reboot_read_pre(task, controller)
+    if namespace is not None:
+        supplied = _host_reboot_json(_host_reboot_read(namespace))
+        _host_reboot_require_namespace(supplied)
+        if supplied != bound["namespace"]:
+            raise RuntimeError("host_reboot supplied namespace changed from the retained PRE binding")
+    _host_reboot_require_guest_namespace(bound)
+    if _host_reboot_fetch(bound, "pre.json") != pre:
+        raise RuntimeError("host_reboot retained PRE proof changed")
+    if _host_reboot_probe(bound) != bound["after_boot"]:
+        raise RuntimeError("host_reboot current runner boot changed again")
+    outer = _host_reboot_outer_identity()
+    if any(outer[key] != bound["outer_after"][key] for key in ("runner_id", "created_at", "pid", "start_ticks")):
+        raise RuntimeError("host_reboot POST outer task identity changed")
+    _host_reboot_require_source(bound)
+    return bound, pre, outer
+
+
+_HOST_REBOOT_PROOF_FILES = ("task.json", "pre.terminal.json", "admin-envelope.json", "post-authority.json", "preservation.json",
+                          *(f"{phase}.{suffix}" for phase in ("pre", "post")
+                            for suffix in ("json", "outcomes.json", "native.json", "xml", "stdout", "stderr")))
+
+
+def _host_reboot_proof_hashes(task: Path) -> dict[str, str]:
+    return {name: hashlib.sha256(_host_reboot_read(task / name)).hexdigest() for name in _HOST_REBOOT_PROOF_FILES}
+
+
+def _host_reboot_require_preservation(pre: dict, post: dict, raw: bytes) -> None:
+    physical = _host_reboot_json(raw)
+    if physical != dict(before=post["physical_before"], after_boot=post["physical_after_boot"], final=post["physical_after"]):
+        raise RuntimeError("host_reboot raw preservation proof differs from POST")
+    if physical["before"] != pre["physical"]:
+        raise RuntimeError("host_reboot preservation baseline differs from PRE")
+    for domain in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec"):
+        if physical["before"][domain] != physical["after_boot"][domain] or physical["before"][domain] != physical["final"][domain]:
+            raise RuntimeError(f"host_reboot persistent {domain} changed")
+
+
+def require_completed_host_reboot(task: Path) -> dict[str, Any]:
+    """Historical closed runtime proof plus current release inputs; no live runner query.
+
+    Completed POST recorded fresh controls then. Full-release quiescent-host admission
+    remains unchanged; those historical controls are not claimed as current authority.
+    """
+    return _require_completed_host_reboot_for_source(task, _REPO_ROOT)
+
+
+def require_completed_rc030_candidate507_host_reboot(task: Path, original_source: Path) -> dict[str, Any]:
+    """Named compatibility caller supplies the checked f50 source; no generic bypass."""
+    source = verify_rc030_candidate507_reboot_sources(
+        original_source, _REPO_ROOT,
+        dict(sha256=_sha256_runner_input(Path(MVM_CANDIDATE_BINARY)), version="mvm " + _get_mvm_version()),
+        _HOST_REBOOT_SOURCE_FILES,
+    )
+    result = _require_completed_host_reboot_for_source(task, original_source)
+    return dict(result, original_source=source, classification="checked-original-source-carry")
+
+
+def _require_completed_host_reboot_for_source(task: Path, source_root: Path) -> dict[str, Any]:
+    row = task.lstat()
+    if (not task.is_absolute() or task.resolve() != task or not stat.S_ISDIR(row.st_mode)
+            or row.st_uid != os.getuid() or stat.S_IMODE(row.st_mode) != 0o700):
+        raise RuntimeError("host_reboot release proof task must be a private owned canonical directory")
+    _require_distinct_candidate_controller()
+    controller = _host_reboot_controller()
+    bound, raw_pre = _host_reboot_read_pre_for_source(task, controller, source_root)
+    terminal = _host_reboot_json(_host_reboot_read(task / "post.terminal.json"))
+    if (set(terminal) != {"domain", "tier", "phase", "phase_complete", "passed", "release_verdict", "output", "proof_sha256"}
+            or terminal["domain"] != "host_reboot" or terminal["tier"] != 2 or terminal["phase"] != "post"
+            or terminal["phase_complete"] is not True or terminal["passed"] is not True
+            or terminal["release_verdict"] != "PASS" or terminal["proof_sha256"] != _host_reboot_proof_hashes(task)):
+        raise RuntimeError("host_reboot release proof lacks exact completed native closure")
+    pre_terminal = _host_reboot_json(_host_reboot_read(task / "pre.terminal.json"))
+    if (pre_terminal["phase"] != "pre" or pre_terminal["phase_complete"] is not True
+            or pre_terminal["passed"] is not False or pre_terminal["release_verdict"] != "INCOMPLETE"):
+        raise RuntimeError("host_reboot release proof lacks the incomplete PRE checkpoint")
+    for phase in ("pre", "post"):
+        native = _host_reboot_json(_host_reboot_read(task / f"{phase}.native.json"))
+        if native != dict(phase=phase, returncode=0) or type(native["returncode"]) is not int:
+            raise RuntimeError("host_reboot release proof has a nonzero or malformed native result")
+        _host_reboot_require_phase_report(phase, _host_reboot_read(task / f"{phase}.outcomes.json"),
+                                         _host_reboot_read(task / f"{phase}.xml"), native["returncode"])
+    authority = _host_reboot_json(_host_reboot_read(task / "post-authority.json"))
+    if (set(authority) != {"schema_version", "runner", "host_boot_id", "outer", "controller"}
+            or type(authority["schema_version"]) is not int or authority["schema_version"] != 1
+            or authority["runner"] != _HOST_REBOOT_RUNNER or authority["host_boot_id"] != bound["after_boot"]
+            or authority["controller"] != controller
+            or authority["outer"]["guest_mem_size_mib"] != 6144
+            or any(authority["outer"][key] != bound["outer_after"][key]
+                   for key in ("runner_id", "created_at", "pid", "start_ticks", "guest_mem_size_mib"))):
+        raise RuntimeError("host_reboot historical POST authority differs from its bound reboot")
+    _host_reboot_require_envelope(_host_reboot_read(task / "admin-envelope.json"), bound, authority["outer"])
+    pre, post = _host_reboot_json(raw_pre), _host_reboot_json(_host_reboot_read(task / "post.json"))
+    if (type(post["schema_version"]) is not int or post["schema_version"] != 2
+            or post["namespace"] != bound["namespace"] or post["namespace_identity"] != bound["namespace_identity"]
+            or post["host_boot_id"] != bound["after_boot"] or post["vm_id"] != pre["vm"]["id"]
+            or post["source"] != pre["source"] or post["candidate"] != pre["candidate"] or post["owned_cleanup"] is not True):
+        raise RuntimeError("host_reboot release proof lacks exact source/candidate/owned cleanup")
+    _host_reboot_require_preservation(pre, post, _host_reboot_read(task / "preservation.json"))
+    if _host_reboot_controller() != controller:
+        raise RuntimeError("host_reboot release authority changed during proof consumption")
+    return dict(terminal, output="Completed historical PRE+host reboot+POST proof consumed; live runner controls not asserted")
+
+
+def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None, namespace: Path | None = None) -> dict[str, Any]:
+    """Closed named-runner continuations; PRE is never aggregate success, no root-control fallback."""
+    result = dict(domain="host_reboot", tier=2, phase=phase, phase_complete=False, passed=False,
+                  release_verdict="INCOMPLETE", output="")
+    task_valid = False
+    try:
+        if phase not in ("pre", "post") or (phase == "post") != (envelope is not None):
+            raise RuntimeError("host_reboot requires an exact PRE or POST continuation")
+        if phase == "pre" and namespace is None:
+            raise RuntimeError("host_reboot PRE requires --host-reboot-namespace")
+        admitted = _host_reboot_json(_host_reboot_read(namespace)) if phase == "pre" else None
+        if admitted is not None:
+            _host_reboot_require_namespace(admitted)
+        row = task.lstat()
+        if (not task.is_absolute() or task.resolve() != task or not stat.S_ISDIR(row.st_mode)
+                or row.st_uid != os.getuid() or stat.S_IMODE(row.st_mode) != 0o700):
+            raise RuntimeError("host_reboot task must be a private owned canonical directory")
+        _require_distinct_candidate_controller()
+        controller = _host_reboot_controller()
+        if phase == "pre":
+            if (task / "task.json").exists():
+                raise RuntimeError("host_reboot PRE receipt already exists; no replay")
+            task_valid = True
+            kernel_id, kernel_sha = (os.environ.get(key, "") for key in ("MVM_RUNNER_KERNEL_ID", "MVM_RUNNER_KERNEL_SHA256"))
+            if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in (kernel_id, kernel_sha)):
+                raise RuntimeError("host_reboot requires the existing exact imported ELF binding; no fallback")
+            revision = subprocess.check_output(["git", "-C", str(_REPO_ROOT), "rev-parse", "HEAD"], text=True).strip()
+            if subprocess.check_output(["git", "-C", str(_REPO_ROOT), "status", "--porcelain"], text=True):
+                raise RuntimeError("host_reboot requires clean signed suite source")
+            outer = _host_reboot_outer_identity()
+            if admitted["runner_id"] != outer["runner_id"]:
+                raise RuntimeError("host_reboot namespace names a different outer runner identity")
+            bound = dict(schema_version=2, runner=_HOST_REBOOT_RUNNER, controller=controller,
+                namespace=admitted, namespace_identity=None,
+                source_revision=revision, test_sha256=_sha256_runner_input(_REPO_ROOT / _HOST_REBOOT_FILE),
+                source_payload={relative: _sha256_runner_input(_REPO_ROOT / relative) for relative in _HOST_REBOOT_SOURCE_FILES},
+                candidate_sha256=_sha256_runner_input(Path(MVM_CANDIDATE_BINARY)), candidate_version="mvm " + _get_mvm_version(),
+                kernel_id=kernel_id, kernel_sha256=kernel_sha,
+                guest_task=admitted["operator"]["home"] + "/.cache/mvmctl-host-reboot-" + uuid.uuid4().hex,
+                outer_before=outer, outer_after=None, before_boot=None, after_boot=None,
+                pre_sha256=None, pre_outcomes_sha256=None)
+            bound["namespace_identity"] = _host_reboot_namespace_probe(bound)
+            bound["before_boot"] = _host_reboot_probe(bound)
+            _host_reboot_write(task, "intent.json", (json.dumps(bound, sort_keys=True) + "\n").encode())
+            guest = shlex.quote(bound["guest_task"])
+            _host_reboot_ssh(bound, f"mkdir -m 700 -- {guest} && mkdir -p -- {guest}/source/tests {guest}/tmp",
+                              connect_timeout=10, timeout=30)
+            _host_reboot_stage_source(bound)
+            raw = _host_reboot_pytest(bound, "pre", task)
+            pre = _host_reboot_json(raw)
+            if (type(pre["schema_version"]) is not int or pre["schema_version"] != 2
+                    or pre["namespace"] != admitted or pre["namespace_identity"] != bound["namespace_identity"]
+                    or pre["boot_id"] != bound["before_boot"] or pre["source"] !=
+                    dict(revision=revision, test_sha256=bound["test_sha256"], payload=bound["source_payload"])
+                    or pre["candidate"]["sha256"] != bound["candidate_sha256"]):
+                raise RuntimeError("host_reboot PRE evidence does not match the fixed source/candidate/boot")
+            bound["pre_sha256"] = hashlib.sha256(raw).hexdigest()
+            bound["pre_outcomes_sha256"] = hashlib.sha256(_host_reboot_read(task / "pre.outcomes.json")).hexdigest()
+            # Force reboot may discard close-only writes: persist source, reports and
+            # the owned nested VM's marker filesystem before the abrupt boundary.
+            _host_reboot_ssh(bound, shlex.join(["sync", "-f", "--", bound["guest_task"]]), connect_timeout=10, timeout=60)
+            _host_reboot_require_guest_namespace(bound)
+            current = _host_reboot_outer_identity()
+            if current != bound["outer_before"] or _host_reboot_controller() != controller:
+                raise RuntimeError("host_reboot outer authority changed before lifecycle")
+            mvm("vm", "reboot", _HOST_REBOOT_RUNNER, "--force", timeout=120)
+            deadline = time.monotonic() + 180
+            while True:
+                try:
+                    boot = _host_reboot_probe(bound)
+                    if boot == bound["before_boot"]:
+                        raise RuntimeError("host_reboot did not change runner boot identity")
+                    break
+                except _HostRebootReconnectUnavailable:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(1)
+            bound["after_boot"] = boot
+            bound["outer_after"] = _host_reboot_outer_identity()
+            if any(bound["outer_after"][key] != bound["outer_before"][key] for key in ("runner_id", "created_at")):
+                raise RuntimeError("host_reboot replaced the runner identity")
+            if _host_reboot_controller() != controller:
+                raise RuntimeError("host_reboot changed the outer controller")
+            _host_reboot_require_source(bound)
+            _host_reboot_write(task, "task.json", (json.dumps(bound, sort_keys=True) + "\n").encode())
+            result.update(phase_complete=True, output="PRE PHASE COMPLETE / RELEASE VERDICT INCOMPLETE; external fresh-boot admin receipt required")
+        else:
+            bound, pre, outer = _host_reboot_validate_pre(task, controller, namespace)
+            task_valid = True
+            raw_envelope = _host_reboot_read(envelope)
+            _host_reboot_require_envelope(raw_envelope, bound, outer)
+            _host_reboot_write(task, "admin-envelope.json", raw_envelope)
+            _host_reboot_write(task, "post-authority.json", json.dumps(dict(schema_version=1,
+                runner=_HOST_REBOOT_RUNNER, host_boot_id=bound["after_boot"], outer=outer, controller=controller)).encode())
+            post = _host_reboot_json(_host_reboot_pytest(bound, "post", task))
+            raw_preservation = _host_reboot_fetch(bound, "preservation.json")
+            _host_reboot_write(task, "preservation.json", raw_preservation)
+            _host_reboot_require_preservation(_host_reboot_json(pre), post, raw_preservation)
+            if (type(post["schema_version"]) is not int or post["schema_version"] != 2
+                    or post["namespace"] != bound["namespace"] or post["namespace_identity"] != bound["namespace_identity"]
+                    or post["host_boot_id"] != bound["after_boot"] or post["owned_cleanup"] is not True
+                    or post["vm_id"] != _host_reboot_json(pre)["vm"]["id"]
+                    or post["source"] != _host_reboot_json(pre)["source"]
+                    or post["candidate"] != _host_reboot_json(pre)["candidate"]
+                    or _host_reboot_probe(bound) != bound["after_boot"]
+                    or _host_reboot_outer_identity() != outer
+                    or _host_reboot_controller() != controller):
+                raise RuntimeError("host_reboot POST lacks full journey/cleanup/preservation proof")
+            result.update(phase_complete=True, passed=True, release_verdict="PASS", output="PRE+changed host boot+POST+owned cleanup passed")
+            result["proof_sha256"] = _host_reboot_proof_hashes(task)
+    except Exception as exc:
+        result["output"] = str(exc)
+    if task_valid and not (task / f"{phase}.terminal.json").exists():
+        try:
+            _host_reboot_write(task, f"{phase}.terminal.json", (json.dumps(result, sort_keys=True) + "\n").encode())
+        except Exception as exc:
+            result.update(phase_complete=False, passed=False, release_verdict="INCOMPLETE",
+                          output=result["output"] + f"; host_reboot terminal retention failed: {exc}")
+    return result
+
+
 def run_tier1_domain(
-    domain: str, test_files: list[str], mvm_version: str, push: bool = False
+    domain: str,
+    test_files: list[str],
+    mvm_version: str,
+    push: bool = False,
+    *,
+    binding: ImportedRunnerKernelBinding | None = None,
+    evidence: MatrixEvidence | None = None,
 ) -> dict[str, Any]:
-    """Full lifecycle for one Tier 1 domain. Max 5 minutes per domain."""
+    """Full lifecycle for one Tier 1 domain."""
     vm_name = _unique_name(f"t1-{domain}")
     result: dict[str, Any] = {
         "domain": domain,
@@ -851,9 +3298,25 @@ def run_tier1_domain(
         "passed": False,
         "output": "",
     }
+    created = False
+    capture = evidence.domain(domain, 1, test_files) if evidence is not None else None
+
+    def mark_created() -> None:
+        nonlocal created
+        created = True
 
     try:
-        provision_t1(vm_name, mvm_version)
+        provision_t1(
+            vm_name,
+            mvm_version,
+            mark_created,
+            **(
+                {"disk_size": "16G"} if domain == "images"
+                else {"disk_size": "11G"} if domain == "cache"
+                else {}
+            ),
+            **({"binding": binding} if binding is not None else {}),
+        )
         if push:
             log(f"  Pushing test files into '{vm_name}'...")
             mvm("cp", "-f", "tests/system", f"{vm_name}:/tests/", timeout=60)
@@ -871,33 +3334,41 @@ def run_tier1_domain(
                 timeout=30,
             )
         log(f"  Running {domain} tests...")
-        pytest_result = mvm(
-            "exec",
+        pytest_result, validation_failure = _run_remote_pytest(
             vm_name,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            f"cd / && MVM_ASSET_MIRROR=/mnt MVM_TEST_VM={vm_name} "
-            f"python3 -m pytest {' '.join(f'/{f}' for f in test_files)} --tb=short -q",
-            check=False,
-            timeout=660,
+            test_files,
+            timeout=2400 if domain == "images" else 660,
+            **({"evidence": capture} if capture is not None else {}),
         )
-        result["passed"] = pytest_result.returncode == 0
-        result["output"] = pytest_result.stdout + pytest_result.stderr
+        result["passed"] = validation_failure is None
+        result["output"] = _pytest_result_output(
+            pytest_result,
+            validation_failure,
+        )
     except Exception as e:
         result["output"] = str(e)
     finally:
-        destroy_vm(vm_name)
+        if created:
+            _record_runner_destruction(result, vm_name, capture)
+        if capture is not None:
+            capture.close(result)
 
     return result
 
 
 def run_tier2_domain(
-    domain: str, test_files: list[str], mvm_version: str, push: bool = False
+    domain: str,
+    test_files: list[str],
+    mvm_version: str,
+    push: bool = False,
+    *,
+    binding: ImportedRunnerKernelBinding | None = None,
+    evidence: MatrixEvidence | None = None,
 ) -> dict[str, Any]:
     """Full lifecycle for one Tier 2 domain."""
+    if domain == "host_reboot":
+        return {"domain": domain, "tier": 2, "passed": False,
+                "output": "host_reboot requires its explicit named-runner PRE/POST continuation; no phase executed"}
     vm_name = _unique_name(f"t2-{domain}")
     result: dict[str, Any] = {
         "domain": domain,
@@ -905,9 +3376,20 @@ def run_tier2_domain(
         "passed": False,
         "output": "",
     }
+    created = False
+    capture = evidence.domain(domain, 2, test_files) if evidence is not None else None
+
+    def mark_created() -> None:
+        nonlocal created
+        created = True
 
     try:
-        provision_t2(vm_name, mvm_version)
+        provision_t2(
+            vm_name,
+            mvm_version,
+            mark_created,
+            **({"binding": binding} if binding is not None else {}),
+        )
         if push:
             log(f"  Pushing test files into '{vm_name}'...")
             mvm("cp", "-f", "tests/system", f"{vm_name}:/tests/", timeout=60)
@@ -925,31 +3407,30 @@ def run_tier2_domain(
                 timeout=30,
             )
         log(f"  Running {domain} tests...")
-        pytest_result = mvm(
-            "exec",
+        pytest_result, validation_failure = _run_remote_pytest(
             vm_name,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            f"cd / && MVM_ASSET_MIRROR=/mnt MVM_TEST_VM={vm_name} "
-            f"python3 -m pytest {' '.join(f'/{f}' for f in test_files)} --tb=short -q",
-            check=False,
+            test_files,
             timeout=960,
+            **({"evidence": capture} if capture is not None else {}),
         )
-        result["passed"] = pytest_result.returncode == 0
-        result["output"] = pytest_result.stdout + pytest_result.stderr
+        result["passed"] = validation_failure is None
+        result["output"] = _pytest_result_output(
+            pytest_result,
+            validation_failure,
+        )
     except Exception as e:
         result["output"] = str(e)
     finally:
-        destroy_vm(vm_name)
+        if created:
+            _record_runner_destruction(result, vm_name, capture)
+        if capture is not None:
+            capture.close(result)
 
     return result
 
 
 def run_tier3_domain(
-    domain: str, test_files: list[str], timeout: int = 600
+    domain: str, test_files: list[str], timeout: int = 600, *, evidence: MatrixEvidence | None = None
 ) -> dict[str, Any]:
     """Run one Tier 3 domain directly on the host."""
     result: dict[str, Any] = {
@@ -959,18 +3440,61 @@ def run_tier3_domain(
         "output": "",
     }
     log(f"  Running {domain} tests on host (timeout={timeout}s)...")
+    capture = evidence.domain(domain, 3, test_files) if evidence is not None else None
     try:
-        pytest_result = _run_pytest(test_files, timeout=timeout)
-        result["passed"] = pytest_result.returncode == 0
-        result["output"] = pytest_result.stdout + pytest_result.stderr
+        pytest_result, validation_failure = _run_local_pytest(
+            domain,
+            test_files,
+            timeout=timeout,
+            **({"evidence": capture} if capture is not None else {}),
+        )
+        result["passed"] = validation_failure is None
+        result["output"] = _pytest_result_output(
+            pytest_result,
+            validation_failure,
+        )
+    except _PytestTimeout as e:
+        result["requires_reconciliation"] = True
+        result["output"] = str(e)
     except Exception as e:
         result["output"] = str(e)
+    finally:
+        if capture is not None:
+            capture.close(result)
     return result
 
 
 # ============================================================================
 # Main Orchestrator
 # ============================================================================
+
+
+def _timed_out_domain_result(
+    future: Future[dict[str, Any]],
+    domain: str,
+    tier: int,
+    timeout: int,
+) -> dict[str, Any]:
+    """Build one failed result after the timed-out worker is contained."""
+    output = [f"Domain timed out after {timeout}s"]
+    if future.cancelled():
+        output.append("Worker was canceled before it started")
+    else:
+        try:
+            late_result = future.result()
+        except Exception as exc:
+            output.append(f"Late worker error: {exc}")
+        else:
+            late_output = str(late_result.get("output", "")).rstrip()
+            if late_output:
+                output.append(f"Late worker output:\n{late_output}")
+
+    return {
+        "domain": domain,
+        "tier": tier,
+        "passed": False,
+        "output": "\n".join(output),
+    }
 
 
 def run_domains(
@@ -980,6 +3504,9 @@ def run_domains(
     workers: int,
     mvm_version: str,
     push: bool = False,
+    *,
+    binding: ImportedRunnerKernelBinding | None = None,
+    evidence: MatrixEvidence | None = None,
 ) -> list[dict[str, Any]]:
     """Run a set of domains in parallel using the given runner function."""
     if not domains:
@@ -987,13 +3514,26 @@ def run_domains(
 
     log(f"Tier {tier}: running {len(domains)} domain(s) with {workers} worker(s)...")
     results: list[dict[str, Any]] = []
-    # Overall timeout per domain: 15 minutes.
-    domain_timeout = 900
+    # Completion gap includes provisioning, pytest, reporting and cleanup.
+    # T2: 4200s provision/setup + 960s pytest + 840s push/reports/cleanup slack.
+    # T1 images: 1800s create + 2400s pytest + 1800s setup/push/reports/cleanup slack.
+    domain_timeout = 6000 if tier == 2 else 900
+    if tier == 1 and "images" in domains:
+        domain_timeout = 6000
+    timed_out: dict[Future[dict[str, Any]], str] = {}
 
     pool = ThreadPoolExecutor(max_workers=workers)
     try:
         future_map = {
-            pool.submit(runner_fn, domain, files, mvm_version, push): domain
+            pool.submit(
+                runner_fn,
+                domain,
+                files,
+                mvm_version,
+                push,
+                **({"binding": binding} if binding is not None else {}),
+                **({"evidence": evidence} if evidence is not None else {}),
+            ): domain
             for domain, files in domains.items()
         }
         import concurrent.futures
@@ -1006,21 +3546,15 @@ def run_domains(
                 return_when=concurrent.futures.FIRST_COMPLETED,
             )
             if not done:
-                # Timeout reached — no futures completed within domain_timeout
+                # Running threads cannot be force-canceled safely. Cancel work
+                # that has not started, then join active workers before moving on.
                 log(
-                    f"  [TIMEOUT] {len(remaining)} domain(s) timed out after {domain_timeout}s — moving on"
+                    f"  [TIMEOUT] {len(remaining)} domain(s) timed out after "
+                    f"{domain_timeout}s — containing workers before continuing"
                 )
                 for future in remaining:
-                    domain = future_map[future]
-                    results.append(
-                        {
-                            "domain": domain,
-                            "tier": tier,
-                            "passed": False,
-                            "output": f"Domain timed out after {domain_timeout}s",
-                        }
-                    )
-                    log(f"  [TIMEOUT] {domain}")
+                    future.cancel()
+                    timed_out[future] = future_map[future]
                 break
             for future in done:
                 domain = future_map[future]
@@ -1042,8 +3576,18 @@ def run_domains(
                     )
                     log(f"  [ERROR] {domain}: {e}")
     finally:
-        # Don't wait for timed-out threads — they'll be daemon-killed on exit
-        pool.shutdown(wait=False, cancel_futures=True)
+        pool.shutdown(wait=True, cancel_futures=True)
+
+    for future, domain in sorted(timed_out.items(), key=lambda item: item[1]):
+        domain_result = _timed_out_domain_result(
+            future,
+            domain,
+            tier,
+            domain_timeout,
+        )
+        results.append(domain_result)
+        log(f"  [TIMEOUT] {domain}")
+        _print_failure(domain, domain_result)
 
     return results
 
@@ -1077,6 +3621,352 @@ def print_summary(all_results: list[dict[str, Any]]) -> None:
         sys.exit(1)
 
 
+def _selection_requests_tier3(args: argparse.Namespace) -> bool:
+    """Return whether any requested selector names host-direct Tier 3 work."""
+    return (
+        args.all
+        or (args.tier is not None and 3 in args.tier)
+        or any(domain in TIER3_DOMAINS for domain in args.domains)
+    )
+
+
+def _validate_release_qualification_args(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    """Reject incomplete or narrowed release qualification before any work."""
+    if not args.release_qualification:
+        return
+    valid = (
+        args.all
+        and args.host_direct
+        and args.rebuild
+        and args.candidate_version is not None
+        and not args.domains
+        and args.tier is None
+        and not args.skip_volume_check
+    )
+    if not valid:
+        parser.error(
+            "--release-qualification requires --all --host-direct --rebuild "
+            "and an explicit --candidate-version; positional domains, --tier, "
+            "and --skip-volume-check are not allowed"
+        )
+    if args.host_reboot_task is None:
+        parser.error("--release-qualification requires --host-reboot-task with completed strict POST evidence")
+
+
+def _parse_release_host_vm_list(payload: str) -> list[dict[str, object]]:
+    """Parse the outer controller's versioned, caller-scoped VM list."""
+    try:
+        payload_size = len(payload.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise RuntimeError(
+            f"release host VM list is not valid UTF-8: {exc}"
+        ) from exc
+    if payload_size > MAX_RELEASE_HOST_VM_LIST_BYTES:
+        raise RuntimeError(
+            "release host VM list exceeds "
+            f"{MAX_RELEASE_HOST_VM_LIST_BYTES} bytes"
+        )
+
+    def reject_duplicate_fields(
+        pairs: list[tuple[str, object]],
+    ) -> dict[str, object]:
+        values: dict[str, object] = {}
+        names_by_casefold: dict[str, str] = {}
+        for field, value in pairs:
+            if field in values:
+                raise RuntimeError(
+                    f"release host VM list has duplicate field: {field}"
+                )
+            folded = field.casefold()
+            if folded in names_by_casefold:
+                colliding = sorted((names_by_casefold[folded], field))
+                raise RuntimeError(
+                    "release host VM list has case-fold duplicate fields: "
+                    f"{', '.join(colliding)}"
+                )
+            values[field] = value
+            names_by_casefold[folded] = field
+        return values
+
+    def reject_nonstandard_constant(value: str) -> None:
+        raise RuntimeError(
+            f"release host VM list has non-standard JSON value: {value}"
+        )
+
+    try:
+        envelope = json.loads(
+            payload,
+            object_pairs_hook=reject_duplicate_fields,
+            parse_constant=reject_nonstandard_constant,
+        )
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"release host VM list contains malformed JSON: {exc}"
+        ) from exc
+    if not isinstance(envelope, dict):
+        raise RuntimeError("release host VM list must be a JSON response envelope")
+    expected_envelope_fields = {"schema_version", "status", "data", "error"}
+    if set(envelope) != expected_envelope_fields:
+        raise RuntimeError("release host VM list has incomplete or unknown response fields")
+    if type(envelope["schema_version"]) is not int or envelope["schema_version"] != 1:
+        raise RuntimeError("release host VM list has unsupported response schema")
+    if envelope["status"] != "success" or envelope["error"] is not None:
+        raise RuntimeError("release host VM list is not a successful response")
+    vms = envelope["data"]
+    if not isinstance(vms, list):
+        raise RuntimeError("release host VM list data must be a JSON list")
+    if len(vms) > MAX_RELEASE_HOST_VM_LIST_ENTRIES:
+        raise RuntimeError(
+            "release host VM list exceeds "
+            f"{MAX_RELEASE_HOST_VM_LIST_ENTRIES} entries"
+        )
+
+    seen_ids: set[str] = set()
+    seen_names: set[str] = set()
+    for index, vm in enumerate(vms):
+        if not isinstance(vm, dict):
+            raise RuntimeError(
+                f"release host VM list entry {index} must be an object"
+            )
+        missing = sorted(_RELEASE_VM_FIELDS - set(vm))
+        if missing:
+            raise RuntimeError(
+                f"release host VM list entry {index} missing fields: "
+                f"{', '.join(missing)}"
+            )
+        for field in sorted(_RELEASE_VM_FIELDS):
+            value = vm[field]
+            if type(value) is not str:
+                raise RuntimeError(
+                    f"release host VM list entry {index} field {field} "
+                    "must be a string"
+                )
+            if not value:
+                raise RuntimeError(
+                    f"release host VM list entry {index} field {field} "
+                    "must not be empty"
+                )
+            if len(value) > MAX_RELEASE_HOST_VM_FIELD_LENGTH:
+                raise RuntimeError(
+                    f"release host VM list entry {index} field {field} exceeds "
+                    f"{MAX_RELEASE_HOST_VM_FIELD_LENGTH} characters"
+                )
+        status = vm["status"]
+        if status not in _RELEASE_VM_STATUSES:
+            raise RuntimeError(
+                f"release host VM list entry {index} has unknown status: "
+                f"{status}"
+            )
+        vm_id = vm["id"]
+        name = vm["name"]
+        if vm_id in seen_ids:
+            raise RuntimeError(f"release host VM list has duplicate VM id: {vm_id}")
+        if name in seen_names:
+            raise RuntimeError(f"release host VM list has duplicate VM name: {name}")
+        seen_ids.add(vm_id)
+        seen_names.add(name)
+    return vms
+
+
+def _require_release_host_without_active_vms() -> None:
+    """Reject caller-visible active VMs; this is not host-wide quiescence proof."""
+    if MVM_BINARY != "/usr/local/bin/mvm":
+        raise RuntimeError(
+            "release host VM admission requires exact /usr/local/bin/mvm"
+        )
+    result = mvm("vm", "ls", "--json", check=True, timeout=15)
+    if type(result.returncode) is not int or result.returncode != 0:
+        raise RuntimeError(
+            "outer controller vm ls --json failed with "
+            f"rc={result.returncode}"
+        )
+    if type(result.stdout) is not str:
+        raise RuntimeError("outer controller vm ls --json returned no stdout")
+    for vm in _parse_release_host_vm_list(result.stdout):
+        if vm["status"] != "stopped":
+            raise RuntimeError(
+                "release host VM is not safely stopped: "
+                f"{vm['name']} ({vm['status']})"
+            )
+
+
+def _validate_system_test_registry(parser: argparse.ArgumentParser) -> None:
+    """Reject an ambiguous or incomplete system-test domain registry."""
+    seen: set[str] = set()
+    duplicate_domains: set[str] = set()
+    empty_domains: list[str] = []
+    registered_files: list[str] = []
+    for domains in (TIER1_DOMAINS, TIER2_DOMAINS, TIER3_DOMAINS, HOST_REBOOT_PHASE_DOMAINS):
+        for domain, test_files in domains.items():
+            if domain in seen:
+                duplicate_domains.add(domain)
+            seen.add(domain)
+            if not test_files:
+                empty_domains.append(domain)
+            registered_files.extend(test_files)
+    if duplicate_domains:
+        parser.error(
+            "duplicate system-test domains: "
+            f"{', '.join(sorted(duplicate_domains))}"
+        )
+    if empty_domains:
+        parser.error(
+            "empty system-test domains: "
+            f"{', '.join(sorted(empty_domains))}"
+        )
+    duplicate_files = sorted(
+        {
+            test_file
+            for test_file in registered_files
+            if registered_files.count(test_file) > 1
+        }
+    )
+    if duplicate_files:
+        parser.error(
+            "duplicate registered system-test files: "
+            f"{', '.join(duplicate_files)}"
+        )
+    invalid_paths: list[str] = []
+    for registered_file in registered_files:
+        relative_path = Path(registered_file)
+        parts = relative_path.parts
+        canonical = (
+            not relative_path.is_absolute()
+            and relative_path.as_posix() == registered_file
+            and ".." not in parts
+        )
+        system_test = (
+            len(parts) >= 3
+            and parts[:2] == ("tests", "system")
+            and relative_path.name.startswith("test_")
+            and relative_path.suffix == ".py"
+        )
+        if not canonical or not system_test:
+            invalid_paths.append(registered_file)
+    if invalid_paths:
+        parser.error(
+            "invalid system-test paths: "
+            f"{', '.join(sorted(invalid_paths))}"
+        )
+    repo_root = _REPO_ROOT.resolve()
+    missing_files: list[str] = []
+    non_regular_files: list[str] = []
+    for registered_file in registered_files:
+        test_file = repo_root / registered_file
+        try:
+            file_mode = test_file.lstat().st_mode
+        except FileNotFoundError:
+            missing_files.append(registered_file)
+            continue
+        except OSError:
+            non_regular_files.append(registered_file)
+            continue
+        if not stat.S_ISREG(file_mode) or test_file.resolve() != test_file:
+            non_regular_files.append(registered_file)
+    if missing_files:
+        parser.error(
+            "missing system-test files: "
+            f"{', '.join(sorted(missing_files))}"
+        )
+    if non_regular_files:
+        parser.error(
+            "non-regular system-test files: "
+            f"{', '.join(sorted(non_regular_files))}"
+        )
+    system_test_root = repo_root / "tests" / "system"
+    discovered_files = {
+        test_file.relative_to(repo_root).as_posix()
+        for test_file in system_test_root.rglob("test_*.py")
+        if test_file.is_file()
+    }
+    unregistered_files = sorted(discovered_files - set(registered_files))
+    if unregistered_files:
+        parser.error(
+            "unregistered system-test files: "
+            f"{', '.join(unregistered_files)}"
+        )
+
+
+def _validate_test_selection_args(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    """Reject test selections that cannot resolve to known test domains."""
+    tier_domains = {
+        1: TIER1_DOMAINS,
+        2: TIER2_DOMAINS,
+        3: TIER3_DOMAINS,
+    }
+    domains_by_name = {
+        **TIER1_DOMAINS,
+        **TIER2_DOMAINS,
+        **TIER3_DOMAINS,
+        **HOST_REBOOT_PHASE_DOMAINS,
+    }
+    unknown = list(
+        dict.fromkeys(
+            domain for domain in args.domains if domain not in domains_by_name
+        )
+    )
+    if unknown:
+        parser.error(f"unknown domains: {', '.join(unknown)}")
+    selectors = sum((bool(args.domains), args.tier is not None, args.all))
+    if selectors > 1:
+        parser.error(
+            "choose exactly one test selector: positional domains, --tier, or --all"
+        )
+    duplicate_domains = list(
+        dict.fromkeys(
+            domain
+            for index, domain in enumerate(args.domains)
+            if domain in args.domains[:index]
+        )
+    )
+    if duplicate_domains:
+        parser.error(f"duplicate domains: {', '.join(duplicate_domains)}")
+    tiers = args.tier or []
+    duplicate_tiers = list(
+        dict.fromkeys(
+            tier
+            for index, tier in enumerate(tiers)
+            if tier in tiers[:index]
+        )
+    )
+    if duplicate_tiers:
+        parser.error(
+            f"duplicate tiers: {', '.join(str(tier) for tier in duplicate_tiers)}"
+        )
+
+    if args.domains:
+        selected_domains = list(args.domains)
+    elif args.tier is not None:
+        selected_domains = [
+            domain
+            for tier in args.tier
+            for domain in tier_domains[tier]
+        ]
+    elif args.all:
+        selected_domains = [
+            domain
+            for domains in tier_domains.values()
+            for domain in domains
+        ]
+    else:
+        return
+    if not selected_domains:
+        parser.error("test selection resolves to zero tests")
+    empty_domains = sorted(
+        domain for domain in selected_domains if not domains_by_name[domain]
+    )
+    if empty_domains:
+        parser.error(
+            f"selected domains have no test files: {', '.join(empty_domains)}"
+        )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run mvmctl system tests with per-domain VM isolation.",
@@ -1092,6 +3982,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run all T1 + T2 + T3 domains.",
     )
     parser.add_argument(
+        "--host-direct",
+        action="store_true",
+        help="Acknowledge that selected Tier 3 tests run directly on and may "
+        "mutate the outer host. Required for --all, --tier including 3, or "
+        "a Tier 3 domain.",
+    )
+    parser.add_argument(
+        "--release-qualification",
+        action="store_true",
+        help="Run the full release binary identity gate before host-direct "
+        "qualification. Requires --all --host-direct --rebuild and an "
+        "explicit --candidate-version.",
+    )
+    parser.add_argument(
+        "--record-evidence", type=Path,
+        help="Retain literal named-QA domain reports in an empty private owned directory; does not finalize a release.",
+    )
+    parser.add_argument("--collect-release-nodes", type=Path,
+                        help="Collect the entire registered node set in named QA, without executing fixtures; retain an empty private task.")
+    parser.add_argument("--collection-task", type=Path, help="Retained current full-registry collection for selected-node execution.")
+    parser.add_argument("--selected-node-file", type=Path, help="Explicit JSON declaration of the exact unproved nodes in the selected domains/tiers.")
+    parser.add_argument("--completed-matrix-task", type=Path, action="append", default=[], help="Previously completed current-node receipts, verified before subtracting covered nodes.")
+    parser.add_argument("--official-kernel-carry", type=Path, help="Original sealed official8 retained task; exact candidate and reachable inputs must still match.")
+    parser.add_argument("--rc030-qa-source-carry", type=Path,
+                        help="Closed candidate507 f50/f905/be91 source-carry record; only checked eligible nodes are subtracted.")
+    parser.add_argument(
         "--tier",
         type=_parse_tier,
         help="Comma-separated tier numbers to run (1, 2, 3). "
@@ -1106,9 +4022,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--rebuild",
         action="store_true",
-        help="Build the mvm binary, then rebuild the shared volume and custom "
-        "base image and run the provisioning smoke-test. After prepare the "
-        "script stops unless a test-running flag is also given.",
+        help="Build MVM_CANDIDATE_BINARY (never MVM_BINARY), then rebuild the "
+        "shared volume and custom base image and run the provisioning "
+        "smoke-test. After prepare the script stops unless a test-running "
+        "flag is also given.",
+    )
+    parser.add_argument(
+        "--candidate-version",
+        type=_parse_candidate_version,
+        help="Explicit X.Y.Z identity passed to build.sh --version. Required "
+        "with --rebuild unless HEAD is one clean, exact release tag.",
     )
     parser.add_argument(
         "--volume",
@@ -1118,9 +4041,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--image",
         action="store_true",
-        help="Rebuild the mvm binary, then rebuild only the custom base image "
-        "(mvm-test-runner:<version>). Ensures the shared asset volume exists first "
-        "because the builder VM attaches it.",
+        help="Rebuild only the custom base image from MVM_CANDIDATE_BINARY. "
+        "Ensures the shared asset volume exists first because the builder VM "
+        "attaches it.",
     )
     parser.add_argument(
         "--skip-volume-check",
@@ -1140,6 +4063,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Push test files into each VM before running (overrides baked-in tests). "
         "Use when modifying tests without rebuilding the base image.",
     )
+    parser.add_argument("--host-reboot-phase", choices=("pre", "post"),
+                        help="Explicit host_reboot continuation on mvmctl-030-test only; PRE is not a release verdict.")
+    parser.add_argument("--host-reboot-task", type=Path,
+                        help="Private retained host_reboot receipt directory; also mandatory read-only completed POST input for full release qualification.")
+    parser.add_argument("--host-reboot-envelope", type=Path,
+                        help="POST-only external administrator receipt for the fresh runner boot and truthful current finite controls.")
+    parser.add_argument("--host-reboot-namespace", type=Path,
+                        help="Private closed guest operator/path admission required for PRE; POST retains the original binding.")
     return parser
 
 
@@ -1147,7 +4078,12 @@ def parse_args() -> argparse.Namespace:
     return _build_parser().parse_args()
 
 
-def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) -> None:
+def run_prepare(
+    *,
+    rebuild_volume: bool = False,
+    rebuild_image: bool = False,
+    binding: ImportedRunnerKernelBinding | None = None,
+) -> None:
     """Smoke-test the provisioning pipeline.
 
     Builds a custom base image from ubuntu-minimal:noble with all test
@@ -1157,6 +4093,8 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
     corresponding flag is True.
     """
     log("=== Prepare: provisioning pipeline ===")
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
 
     # --- Step 1: Get mvm version ---
     log("[1/8] Detecting mvm version...")
@@ -1170,29 +4108,40 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
 
     # --- Step 3: Ensure kernel with nftables support ---
     log("[3/8] Ensuring kernel with nftables support...")
-    mvm(
-        "kernel",
-        "pull",
-        "official:7.0.11",
-        "--default",
-        "--features",
-        "all",
-        timeout=900,
-    )
+    if binding is None:
+        mvm(
+            "kernel",
+            "pull",
+            "official:7.0.11",
+            "--default",
+            "--features",
+            "all",
+            timeout=900,
+        )
+    else:
+        _validate_imported_runner_kernel(binding)
 
     # --- Step 4: Build custom base image ---
     log("[4/8] Building custom base image...")
-    _build_base_image(mvm_version, rebuild=rebuild_image)
+    _build_base_image(
+        mvm_version,
+        rebuild=rebuild_image,
+        **({"binding": binding} if binding is not None else {}),
+    )
+    image_key = _runner_image_key(mvm_version, binding)
 
     # --- Step 5: Create T1 VM from custom image + volume ---
     t1 = _unique_name("prep-t1")
     log(f"[5/8] Creating T1 VM '{t1}' from {BASE_IMAGE_NAME}:{mvm_version} + volume...")
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
     mvm(
         "vm",
         "create",
         t1,
         "--image",
-        f"{BASE_IMAGE_NAME}:{mvm_version}",
+        image_key,
+        *(["--kernel", binding.id] if binding is not None else []),
         "--user",
         "runner",
         "--vcpu",
@@ -1206,38 +4155,33 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
         TEST_NETWORK_NAME,
         "--volume",
         SHARED_VOLUME_NAME,
-        timeout=180,
+        timeout=1800,
     )
     try:
+        if binding is not None:
+            _require_runner_base_receipt(t1, mvm_version, binding)
         log(f"      Running mvm init inside '{t1}'...")
-        mvm(
-            "exec",
-            t1,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-            "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
-            timeout=90,
-        )
+        _initialize_runner_user(t1, timeout=90)
+        if binding is not None:
+            _require_imported_runner_smoke(t1, binding)
     finally:
-        destroy_vm(t1)
+        _destroy_prepared_vm(t1, sys.exc_info()[1])
 
     # --- Step 5: Create T2 VM from custom image + shared volume ---
     t2 = _unique_name("prep-t2")
     log(
         f"[6/8] Creating T2 VM '{t2}' from {BASE_IMAGE_NAME}:{mvm_version} + shared volume..."
     )
+    if binding is not None:
+        _validate_imported_runner_kernel(binding)
     mvm(
         "vm",
         "create",
         t2,
         "--image",
-        f"{BASE_IMAGE_NAME}:{mvm_version}",
+        image_key,
         "--kernel",
-        "official:7.0.11",
+        binding.id if binding is not None else "official:7.0.11",
         "--user",
         "runner",
         "--vcpu",
@@ -1251,24 +4195,17 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
         "--nested-virt",
         "--volume",
         SHARED_VOLUME_NAME,
-        timeout=300,
+        timeout=1800,
     )
     try:
+        if binding is not None:
+            _require_runner_base_receipt(t2, mvm_version, binding)
         log(f"[7/8] Setting up '{t2}' (mount + init)...")
-        mvm(
-            "exec",
-            t2,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-            "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
-            timeout=180,
-        )
+        _initialize_runner_user(t2, timeout=180)
+        if binding is not None:
+            _require_imported_runner_smoke(t2, binding)
 
-        log(f"[8/8] Validating cache hit (pulling 1 asset)...")
+        log("[8/8] Validating mounted mirror read (pulling 1 asset)...")
         result = mvm(
             "exec",
             t2,
@@ -1277,46 +4214,179 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
             "--timeout",
             "10",
             "--",
-            "MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23 2>&1 | head -5",
+            "MVM_ASSET_MIRROR=/mnt MVM_LOG_LEVEL=INFO /usr/local/bin/mvm image pull alpine:3.23 --force",
             timeout=150,
             check=False,
         )
-        if "Downloading image" in result.stdout or "Downloading image" in result.stderr:
-            log("  Cache hit confirmed: asset pulled from local mirror")
-        else:
-            log(f"  Pull output: {result.stdout[:200] if result.stdout else '(empty)'}")
+        _require_local_mirror_pull(result, "prepare Alpine image")
 
         vol_check = mvm("volume", "inspect", SHARED_VOLUME_NAME, "--json", timeout=15)
-        import json as _json
-
-        vol_info = _json.loads(vol_check.stdout)
-        vol_status = vol_info.get("volume", {}).get("status", "unknown")
+        volume = _volume_inspect_record(vol_check.stdout, SHARED_VOLUME_NAME)
+        vol_status = volume.get("status", "unknown")
 
         log("=== Prepare: ALL STEPS PASSED ===")
-        log(f"  Base image: {BASE_IMAGE_NAME}:{mvm_version}")
+        log(f"  Base image: {image_key}")
         log(f"  T1: '{t1}' — created, binary copied, init completed")
         log(f"  T2: '{t2}' — created, volume attached, cache hit verified")
         log(f"  Volume status: {vol_status} (correctly 'available')")
         log("  Environment is ready for running tests.")
 
     finally:
-        destroy_vm(t2)
+        _destroy_prepared_vm(t2, sys.exc_info()[1])
+
+
+def _evidence_registry() -> dict[str, Any]:
+    return {domain: dict(tier=tier, files=files) for tier, domains in (
+        (1, TIER1_DOMAINS), (2, TIER2_DOMAINS), (3, TIER3_DOMAINS), (2, HOST_REBOOT_PHASE_DOMAINS))
+        for domain, files in domains.items()}
+
+
+def _start_matrix_evidence(task: Path, args: argparse.Namespace) -> MatrixEvidence:
+    verify_release_binary_identity(controller_command=MVM_BINARY, configured_candidate=MVM_CANDIDATE_CONFIGURED,
+                                   candidate=Path(MVM_CANDIDATE_BINARY), requested_version=_get_mvm_version())
+    _require_release_host_without_active_vms()
+    registry = _evidence_registry()
+    selection = {domain: row for domain, row in registry.items() if domain != "host_reboot"
+                 and (not args.domains or domain in args.domains)
+                 and (args.tier is None or row["tier"] in args.tier)}
+    source = source_identity(_REPO_ROOT)
+    candidate = dict(sha256=_sha256_runner_input(Path(MVM_CANDIDATE_BINARY)), version="mvm " + _get_mvm_version())
+    if args.selected_node_file:
+        collection = verify_collection_task(args.collection_task, source, candidate, registry)
+        reports = [verify_matrix_task(path, source, candidate, registry) for path in args.completed_matrix_task]
+        if args.rc030_qa_source_carry:
+            checked = verify_rc030_candidate507_carry(args.rc030_qa_source_carry, source, candidate, registry)
+            if checked.collection != collection:
+                raise RuntimeError("rc030 selected execution uses a different target collection")
+            reports.extend(checked.target_reports)
+            carried = list(checked.carried_nodes)
+        else:
+            carried = verify_official_kernel_carry(args.official_kernel_carry, source, candidate) if args.official_kernel_carry else []
+        remainder = selected_node_remainder(args.selected_node_file, collection, reports, carried, set(selection))
+        selection = {domain: {**registry[domain], "nodes": nodes} for domain, nodes in remainder.items()}
+    return MatrixEvidence(task, dict(schema_version=1, host=socket.gethostname(),
+        boot_id=Path("/proc/sys/kernel/random/boot_id").read_text().strip(), source=source,
+        candidate=candidate,
+        controller=_host_reboot_controller(), registry=registry, selection=selection))
 
 
 def main() -> None:
+    global _REPO_ROOT
     parser = _build_parser()
     args = parser.parse_args()
 
+    _validate_release_qualification_args(parser, args)
+    _validate_system_test_registry(parser)
+    if args.collect_release_nodes:
+        defaults = vars(parser.parse_args([]))
+        if any(value != defaults[key] for key, value in vars(args).items() if key != "collect_release_nodes"):
+            parser.error("--collect-release-nodes is a standalone full-registry observation, without preparation or test execution")
+        collect_named_runner_nodes(sys.modules[__name__], args.collect_release_nodes)
+        return
+    _validate_test_selection_args(parser, args)
+    if (args.collection_task or args.selected_node_file or args.completed_matrix_task
+            or args.official_kernel_carry or args.rc030_qa_source_carry):
+        if not (args.collection_task and args.selected_node_file and args.record_evidence) or args.release_qualification:
+            parser.error("selected-node evidence inputs require --record-evidence, --collection-task and --selected-node-file together")
+    if args.rc030_qa_source_carry:
+        if args.official_kernel_carry:
+            parser.error("rc030 candidate507 carry cannot be combined with historical official8 carry")
+        _REPO_ROOT = rc030_candidate507_target(args.rc030_qa_source_carry)
+
+    if args.host_reboot_phase or args.host_reboot_envelope or args.host_reboot_namespace or "host_reboot" in args.domains:
+        if (args.domains != ["host_reboot"] or not args.host_reboot_phase or not args.host_reboot_task
+                or args.all or args.tier or args.host_direct or args.release_qualification
+                or args.prepare or args.image or args.volume or args.rebuild or args.push
+                or args.record_evidence
+                or args.candidate_version or args.skip_volume_check
+                or (args.host_reboot_phase == "pre" and args.host_reboot_namespace is None)
+                or (args.host_reboot_phase == "post") != bool(args.host_reboot_envelope)):
+            parser.error("host_reboot requires only its exact domain, phase/task and POST-only admin envelope receipt")
+        result = run_host_reboot_phase(args.host_reboot_phase, args.host_reboot_task, args.host_reboot_envelope,
+                                       args.host_reboot_namespace)
+        print(json.dumps(result, sort_keys=True), flush=True)
+        # PRE transport/lifecycle completion is deliberately not aggregate qualification success.
+        sys.exit(0 if result.get("phase_complete") and (args.host_reboot_phase == "pre" or result["passed"]) else 1)
+    if args.host_reboot_task and not args.release_qualification:
+        parser.error("--host-reboot-task requires explicit host_reboot phase or full --release-qualification")
+
+    if _selection_requests_tier3(args) and not args.host_direct:
+        parser.error(
+            "Tier 3 tests run directly on and may mutate the outer host; "
+            "pass --host-direct to acknowledge this"
+        )
+
+    if args.candidate_version is not None and not args.rebuild:
+        parser.error("--candidate-version requires --rebuild")
+
     test_flags = args.all or args.domains or args.tier
     prep_flags = args.prepare or args.image or args.volume or args.rebuild
+    if args.record_evidence:
+        if (not test_flags or args.rebuild or args.release_qualification or args.skip_volume_check
+                or socket.gethostname() != _HOST_REBOOT_RUNNER or Path.cwd().resolve() != _REPO_ROOT
+                or os.environ.get("MVM_TEST_VM") != _HOST_REBOOT_RUNNER
+                or os.environ.get("MVM_TEST_QUALIFICATION_HOST") != _HOST_REBOOT_RUNNER):
+            parser.error("--record-evidence requires an exact named-QA installed-candidate test run, without rebuild or narrowed admission")
 
     if not test_flags and not prep_flags:
         parser.print_help()
         sys.exit(0)
 
-    # Handle --rebuild: build binary before anything else
+    try:
+        binding = _resolve_imported_runner_kernel_binding()
+    except RuntimeError as exc:
+        parser.error(str(exc))
+    cached_imported_execution = False
+    if binding is not None:
+        if args.skip_volume_check:
+            parser.error("imported runner kernel binding forbids --skip-volume-check")
+        selects_runners = (
+            args.all
+            or (args.tier and any(t in (1, 2) for t in args.tier))
+            or any(d in TIER1_DOMAINS or d in TIER2_DOMAINS for d in args.domains)
+        )
+        if selects_runners and not (args.prepare or args.rebuild):
+            if args.image or args.volume:
+                parser.error(
+                    "imported runner kernel T1/T2 execution with --image or --volume "
+                    "requires --prepare or --rebuild"
+                )
+            cached_imported_execution = True
+
+    if args.release_qualification:
+        try:
+            validate_release_build_paths(
+                controller_command=MVM_BINARY,
+                configured_candidate=MVM_CANDIDATE_CONFIGURED,
+                candidate=Path(MVM_CANDIDATE_BINARY),
+            )
+        except RuntimeError as exc:
+            log(f"ERROR: {exc}")
+            sys.exit(1)
+
+    # Handle --rebuild: build the distinct release candidate before anything else.
     if args.rebuild:
-        _build_mvm_binary()
+        try:
+            candidate_version = _resolve_candidate_build_version(
+                args.candidate_version
+            )
+            _build_mvm_binary(candidate_version)
+        except RuntimeError as exc:
+            log(f"ERROR: {exc}")
+            sys.exit(1)
+
+    if args.release_qualification:
+        try:
+            verify_release_binary_identity(
+                controller_command=MVM_BINARY,
+                configured_candidate=MVM_CANDIDATE_CONFIGURED,
+                candidate=Path(MVM_CANDIDATE_BINARY),
+                requested_version=args.candidate_version,
+            )
+            _require_release_host_without_active_vms()
+        except RuntimeError as exc:
+            log(f"ERROR: {exc}")
+            sys.exit(1)
 
     # Validate MVM_BINARY exists
     binary = shlex.split(MVM_BINARY)[0]
@@ -1325,24 +4395,75 @@ def main() -> None:
         log("Set MVM_BINARY or ensure 'mvm' is in PATH.")
         sys.exit(1)
 
+    configured_candidate = MVM_CANDIDATE_CONFIGURED
+    candidate = Path(MVM_CANDIDATE_BINARY)
+    if (
+        configured_candidate.is_symlink()
+        or not candidate.is_file()
+        or not os.access(candidate, os.X_OK)
+    ):
+        log(
+            "ERROR: MVM_CANDIDATE_BINARY must be a regular, non-symlink, "
+            f"executable file: {configured_candidate}"
+        )
+        sys.exit(1)
+
+    try:
+        _require_distinct_candidate_controller()
+    except RuntimeError as exc:
+        log(f"ERROR: {exc}")
+        sys.exit(1)
+
+    mvm_version = None
+    if cached_imported_execution:
+        try:
+            mvm_version = _get_mvm_version()
+            if _runner_base_image_id(mvm_version, binding) is None:
+                parser.error(
+                    "imported runner base image is missing or not present: "
+                    f"{_runner_image_key(mvm_version, binding)}; "
+                    "prepare it separately with --prepare or --rebuild"
+                )
+        except RuntimeError as exc:
+            parser.error(str(exc))
+
     # Handle prep actions.
+    evidence = _start_matrix_evidence(args.record_evidence, args) if args.record_evidence else None
     # --rebuild implies --volume + --image + --prepare (in that order).
+    if args.release_qualification:
+        try:
+            # Historical runtime proof, current inputs; no live runner/lifecycle query.
+            require_completed_host_reboot(args.host_reboot_task)
+        except Exception as exc:
+            log(f"ERROR: completed host_reboot proof refused: {exc}")
+            sys.exit(1)
     if args.rebuild:
-        run_prepare(rebuild_volume=True, rebuild_image=True)
+        run_prepare(
+            rebuild_volume=True,
+            rebuild_image=True,
+            **({"binding": binding} if binding is not None else {}),
+        )
         if not test_flags:
             return
     elif args.prepare or args.image or args.volume:
         rebuild_volume = args.volume
         rebuild_image = args.image
         if args.prepare:
-            run_prepare(rebuild_volume=rebuild_volume, rebuild_image=rebuild_image)
+            run_prepare(
+                rebuild_volume=rebuild_volume,
+                rebuild_image=rebuild_image,
+                **({"binding": binding} if binding is not None else {}),
+            )
         elif args.image:
-            _build_mvm_binary()
             # The builder VM attaches the shared volume, so ensure it exists first.
             ensure_shared_volume(rebuild=rebuild_volume)
             ensure_test_network()
             mvm_version = _get_mvm_version()
-            _build_base_image(mvm_version, rebuild=True)
+            _build_base_image(
+                mvm_version,
+                rebuild=True,
+                **({"binding": binding} if binding is not None else {}),
+            )
         elif args.volume:
             ensure_shared_volume(rebuild=True)
 
@@ -1353,7 +4474,8 @@ def main() -> None:
         return
 
     # Detect mvm version for base image lookup
-    mvm_version = _get_mvm_version()
+    if mvm_version is None:
+        mvm_version = _get_mvm_version()
 
     # Ensure shared volume/network exist unless skipped.
     if not args.skip_volume_check:
@@ -1408,31 +4530,78 @@ def main() -> None:
         log("No domains selected. Use --help for options.")
         sys.exit(0)
 
+    if evidence is not None and args.selected_node_file:
+        selected = evidence.binding["selection"]
+        tier1 = {domain: row["nodes"] for domain, row in selected.items() if row["tier"] == 1}
+        tier2 = {domain: row["nodes"] for domain, row in selected.items() if row["tier"] == 2}
+        tier3 = {domain: row["nodes"] for domain, row in selected.items() if row["tier"] == 3}
+
     all_results: list[dict[str, Any]] = []
+    requires_reconciliation = False
 
     run_order = selected_order if selected_order else [1, 2, 3]
     for tier in run_order:
         if tier == 1 and tier1:
             results = run_domains(
-                tier1, 1, run_tier1_domain, args.workers, mvm_version, push=args.push
+                tier1,
+                1,
+                run_tier1_domain,
+                args.workers,
+                mvm_version,
+                push=args.push,
+                **({"binding": binding} if binding is not None else {}),
+                **({"evidence": evidence} if evidence is not None else {}),
             )
             all_results.extend(results)
         elif tier == 2 and tier2:
             results = run_domains(
-                tier2, 2, run_tier2_domain, args.workers, mvm_version, push=args.push
+                tier2,
+                2,
+                run_tier2_domain,
+                args.workers,
+                mvm_version,
+                push=args.push,
+                **({"binding": binding} if binding is not None else {}),
+                **({"evidence": evidence} if evidence is not None else {}),
             )
             all_results.extend(results)
         elif tier == 3 and tier3:
             log(f"Tier 3: running {len(tier3)} domain(s) on host...")
             for domain, files in sorted(tier3.items()):
-                timeout = 1800 if domain == "kernel_build" else 600
-                result = run_tier3_domain(domain, files, timeout=timeout)
+                if domain == "kernel_build":
+                    timeout = KERNEL_BUILD_DOMAIN_TIMEOUT
+                elif domain == "nested_isolated":
+                    timeout = NESTED_ISOLATED_DOMAIN_TIMEOUT
+                else:
+                    timeout = 600
+                result = run_tier3_domain(domain, files, timeout=timeout,
+                                         **({"evidence": evidence} if evidence is not None else {}))
                 all_results.append(result)
                 status = "PASS" if result["passed"] else "FAIL"
                 log(f"  [{status}] {domain} (tier 3)")
                 if not result["passed"]:
                     _print_failure(domain, result)
+                if result.get("requires_reconciliation"):
+                    requires_reconciliation = True
+                    break
+        if requires_reconciliation:
+            break
 
+    if evidence is not None:
+        evidence.close(all_results, source_identity(_REPO_ROOT))
+    if requires_reconciliation:
+        log("HOST RETAINED FOR RECONCILIATION / RELEASE VERDICT INCOMPLETE: pytest timed out; scheduling stopped")
+        print_summary(all_results)
+        sys.exit(1)
+    if args.release_qualification:
+        # Revalidate retained evidence/current release inputs after the batch, not runner liveness.
+        try:
+            all_results.append(require_completed_host_reboot(args.host_reboot_task))
+        except Exception as exc:
+            log(f"ERROR: completed host_reboot proof refused after batch: {exc}")
+            sys.exit(1)
+    else:
+        log("BATCH RESULTS ONLY / RELEASE VERDICT INCOMPLETE: explicit host_reboot PRE/POST proof remains mandatory")
     print_summary(all_results)
 
 

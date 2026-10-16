@@ -20,18 +20,28 @@ func NewInitCmd(initAPI api.InitAPI, hostAPI api.HostAPI) *cobra.Command {
 	var nonInteractive bool
 	var skipHost bool
 	var skipNetwork bool
+	var binaryVersion string
 
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: fmt.Sprintf("Initialize %s", infra.CLIName),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInitWizard(cmd.Context(), initAPI, hostAPI, nonInteractive, skipHost, skipNetwork)
+			return runInitWizard(
+				cmd.Context(),
+				initAPI,
+				hostAPI,
+				nonInteractive,
+				skipHost,
+				skipNetwork,
+				binaryVersion,
+			)
 		},
 	}
 
 	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "Use defaults, skip prompts")
 	cmd.Flags().BoolVar(&skipHost, "skip-host", false, "Skip host init step")
 	cmd.Flags().BoolVar(&skipNetwork, "skip-network", false, "Skip default network creation")
+	cmd.Flags().StringVar(&binaryVersion, "binary-version", "", "Firecracker version to download when none is local")
 
 	return cmd
 }
@@ -42,11 +52,20 @@ func runInitWizard(
 	initAPI api.InitAPI,
 	hostAPI api.HostAPI,
 	nonInteractive, skipHost, skipNetwork bool,
+	binaryVersion string,
 ) error {
 	common.Cli.Info("")
 	common.Cli.Info(fmt.Sprintf("%s init — first-time setup", infra.CLIName))
 	common.Cli.Info(strings.Repeat("-", 40))
-	result, err := handleInteractiveFlow(ctx, initAPI, hostAPI, nonInteractive, skipHost, skipNetwork)
+	result, err := handleInteractiveFlow(
+		ctx,
+		initAPI,
+		hostAPI,
+		nonInteractive,
+		skipHost,
+		skipNetwork,
+		binaryVersion,
+	)
 	if err != nil {
 		return err
 	}
@@ -151,12 +170,14 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 	// Run pre-flight probes before prompting for sudo
 	probeResult := s.initAPI.InitCheckReadiness(ctx)
 
-	// In non-interactive mode: run host init directly (relies on passwordless sudo).
-	// Mark as completed after attempt — even on probe failures (e.g. no KVM inside
-	// a Firecracker VM) — to prevent an infinite loop. Degraded state is acceptable;
-	// the wizard summary will report "setup incomplete".
 	if s.nonInteractive {
-		common.RunWithSudo(ctx, []string{"host", "init"}, infra.EnvKey("ESCALATED")+"=1")
+		proc := common.RunHostInitWithSudo(ctx)
+		if !proc.Success {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("sudo host init failed")
+		}
 		s.sudoCompleted = true
 		return nil
 	}
@@ -181,12 +202,29 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		}
 	}
 
-	hostStateBefore := s.hostAPI.HostStatusCheck(ctx)
+	hostStateBefore, statusErr := s.hostAPI.HostStatusCheck(ctx)
+	if statusErr != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if errors.Is(statusErr, context.Canceled) || errors.Is(statusErr, context.DeadlineExceeded) {
+			return statusErr
+		}
+		// Initial operator authorization may be unavailable until the explicit administrator bootstrap.
+		// Keep the policy prestate unknown; it cannot prove absence or a setup change.
+		hostStateBefore = nil
+	}
 
-	sessionHasGroup, _ := interaction.Context["session_has_group"].(bool)
+	sessionHasGroup, sessionKnown := interaction.Context["session_has_group"].(bool)
+	groupExists, groupKnown := interaction.Context["group_exists"].(bool)
+	userInGroup, membershipKnown := interaction.Context["user_in_group"].(bool)
+	if hostStateBefore != nil {
+		groupExists, groupKnown = hostStateBefore.GroupExists, true
+		userInGroup, membershipKnown = hostStateBefore.UserInGroup, true
+	}
 
 	// Group exists, user is member, but session doesn't have it active
-	if hostStateBefore.GroupExists && hostStateBefore.UserInGroup && !sessionHasGroup {
+	if sessionKnown && groupKnown && membershipKnown && groupExists && userInGroup && !sessionHasGroup {
 		common.Cli.Warning(fmt.Sprintf(
 			"mvm group — session not active (log out and back in, or run: newgrp %s)",
 			infra.MVMUnixGroup,
@@ -200,7 +238,10 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		sudoCmd = fmt.Sprintf("sudo %s host init", infra.CLIName)
 	}
 
-	if hostStateBefore.GroupExists {
+	if hostStateBefore == nil {
+		common.Cli.Warning("current host policy could not be verified before administrator setup")
+		common.Cli.Info(fmt.Sprintf("run:  %s", sudoCmd))
+	} else if groupExists && !hostStateBefore.SudoersExists {
 		common.Cli.Warning("sudoers file is missing")
 		common.Cli.Info(fmt.Sprintf("run:  %s", sudoCmd))
 	} else {
@@ -220,16 +261,33 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		return fmt.Errorf("skipped by user")
 	}
 
-	proc := common.RunWithSudo(ctx, []string{"host", "init"}, infra.EnvKey("ESCALATED")+"=1")
+	proc := common.RunHostInitWithSudo(ctx)
 	if !proc.Success {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		common.Cli.Warning(fmt.Sprintf("host init failed. Run '%s' manually.", sudoCmd))
 		return fmt.Errorf("sudo host init failed")
 	}
 
-	hostStateAfter := s.hostAPI.HostStatusCheck(ctx)
+	hostStateAfter, statusErr := s.hostAPI.HostStatusCheck(ctx)
+	if statusErr != nil {
+		if ctx.Err() == nil {
+			common.Cli.Warning(fmt.Sprintf(
+				"host init completed, but host policy could not be verified; log out and back in, or run: newgrp %s",
+				infra.MVMUnixGroup,
+			))
+		}
+		return statusErr
+	}
+	if !hostStateAfter.GroupExists || !hostStateAfter.UserInGroup || !hostStateAfter.SudoersExists {
+		return errs.New(
+			errs.CodeHostInitFailed,
+			"administrator setup completed but required host configuration is missing",
+		)
+	}
 	s.hostSetupMsg = composeHostSetupMessage(hostStateBefore, hostStateAfter)
 	s.sudoCompleted = true
-	s.downloadVersion = ""
 	return nil
 }
 
@@ -281,13 +339,15 @@ func handleInteractiveFlow(
 	initAPI api.InitAPI,
 	hostAPI api.HostAPI,
 	nonInteractive, skipHost, skipNetwork bool,
+	binaryVersion string,
 ) (*results.InitResult, error) {
 	state := &initState{
-		initAPI:        initAPI,
-		hostAPI:        hostAPI,
-		nonInteractive: nonInteractive,
-		skipHost:       skipHost,
-		skipNetwork:    skipNetwork,
+		initAPI:         initAPI,
+		hostAPI:         hostAPI,
+		nonInteractive:  nonInteractive,
+		skipHost:        skipHost,
+		skipNetwork:     skipNetwork,
+		downloadVersion: binaryVersion,
 	}
 
 	// Always return the last result even on early exit.
@@ -313,6 +373,9 @@ func handleInteractiveFlow(
 
 // composeHostSetupMessage composes a human-readable message about what changed.
 func composeHostSetupMessage(before, after *results.HostStatusCheck) string {
+	if before == nil {
+		return "Host configuration verified"
+	}
 	var parts []string
 	if !before.GroupExists && after.GroupExists {
 		parts = append(parts, "group created")

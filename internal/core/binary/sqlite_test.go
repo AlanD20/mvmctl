@@ -23,31 +23,33 @@ func TestBinaryL1_ListAll(t *testing.T) {
 
 	// Seed two binaries with distinct types.
 	b1 := &model.BinaryItem{
-		ID:          "bin-1111111111111111111111111111111111111111111111111111111111111111",
-		Type:        "firecracker",
-		Version:     "1.3.0",
-		FullVersion: "firecracker-v1.3.0",
-		Path:        "/var/lib/mvm/binaries/firecracker-v1.3.0",
-		IsPresent:   true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:           "bin-1111111111111111111111111111111111111111111111111111111111111111",
+		Type:         "firecracker",
+		Architecture: "x86_64",
+		Version:      "1.3.0",
+		FullVersion:  "firecracker-v1.3.0",
+		Path:         "/var/lib/mvm/binaries/firecracker-v1.3.0",
+		IsPresent:    true,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	b2 := &model.BinaryItem{
-		ID:          "bin-2222222222222222222222222222222222222222222222222222222222222222",
-		Type:        "jailer",
-		Version:     "1.3.0",
-		FullVersion: "jailer-v1.3.0",
-		Path:        "/var/lib/mvm/binaries/jailer-v1.3.0",
-		IsPresent:   true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:           "bin-2222222222222222222222222222222222222222222222222222222222222222",
+		Type:         "jailer",
+		Architecture: "x86_64",
+		Version:      "1.3.0",
+		FullVersion:  "jailer-v1.3.0",
+		Path:         "/var/lib/mvm/binaries/jailer-v1.3.0",
+		IsPresent:    true,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 
 	require.NoError(t, repo.Upsert(ctx, b1))
 	require.NoError(t, repo.Upsert(ctx, b2))
 
 	// List all and verify count and field values.
-	items, err := repo.ListAll(ctx)
+	items, err := repo.ListAll(ctx, "x86_64")
 	require.NoError(t, err)
 	require.Len(t, items, 2)
 

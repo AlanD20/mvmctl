@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"mvmctl/internal/core/vm"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
@@ -21,38 +20,37 @@ import (
 
 // --- Test helpers ---
 
-// ctxVMRepo wraps testutil.VMRepo to propagate context cancellation
-// from GetByName. The plain mock ignores context, so this wrapper is needed
-// to test the R8 (context cancellation) iron rule.
-type ctxVMRepo struct {
-	*testutil.VMRepo
+// vmStepAPI keeps FromSpec's full API contract while isolating the VM calls
+// made by Apply from the host runtime-status observer.
+type vmStepAPI struct {
+	api.API
+	mock *testutil.MockVMAPI
 }
 
-var _ vm.Repository = (*ctxVMRepo)(nil)
-
-func (r *ctxVMRepo) GetByName(ctx context.Context, name string) (*model.VMItem, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return r.VMRepo.GetByName(ctx, name)
+func (a *vmStepAPI) VMGet(ctx context.Context, input inputs.VMInput) (*model.VMItem, error) {
+	return a.mock.VMGet(ctx, input)
 }
 
-// errorVMRepo wraps testutil.VMRepo to inject errors into GetByName.
-type errorVMRepo struct {
-	*testutil.VMRepo
-	getErr error
-}
-
-var _ vm.Repository = (*errorVMRepo)(nil)
-
-func (r *errorVMRepo) GetByName(_ context.Context, _ string) (*model.VMItem, error) {
-	return nil, r.getErr
+func (a *vmStepAPI) VMCreate(
+	ctx context.Context,
+	input inputs.VMCreateInput,
+	onProgress event.OnProgressCallback,
+) ([]*model.VMItem, error) {
+	return a.mock.VMCreate(ctx, input, onProgress)
 }
 
 // newVMStep is a shorthand for creating a VMStep via the registry.
 // For nil-op tests, it constructs the step directly via NewVMStep
 // since the factory now rejects nil op.
 func newVMStep(t *testing.T, op *api.Operation) workflow.Step {
+	t.Helper()
+	if op == nil {
+		return envpkg.NewVMStep(nil, "test-vm", inputs.VMCreateInput{Name: "test-vm"})
+	}
+	return newVMStepWithAPI(t, op)
+}
+
+func newVMStepWithAPI(t *testing.T, op api.API) workflow.Step {
 	t.Helper()
 	if op == nil {
 		return envpkg.NewVMStep(nil, "test-vm", inputs.VMCreateInput{Name: "test-vm"})
@@ -86,7 +84,7 @@ func newVMProgressRecorder() (event.OnProgressCallback, *[]event.Progress) {
 
 func TestVMStep_Apply(t *testing.T) {
 	tests := map[string]struct {
-		setupOp        func(t *testing.T) *api.Operation
+		setupOp        func(t *testing.T) api.API
 		ctx            func() context.Context
 		saved          model.ResourceState
 		wantErr        string
@@ -97,15 +95,17 @@ func TestVMStep_Apply(t *testing.T) {
 		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
+			setupOp: func(_ *testing.T) api.API { return nil },
 			ctx:     context.Background,
 			wantErr: "operation not initialized",
 		},
 		"context_cancelled_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{
-					Repos: api.Repos{VM: &ctxVMRepo{VMRepo: testutil.NewVMRepo()}},
-				}
+			setupOp: func(_ *testing.T) api.API {
+				return &vmStepAPI{mock: &testutil.MockVMAPI{
+					VMGetFunc: func(ctx context.Context, _ inputs.VMInput) (*model.VMItem, error) {
+						return nil, ctx.Err()
+					},
+				}}
 			},
 			ctx: func() context.Context {
 				ctx, cancel := context.WithCancel(context.Background())
@@ -114,16 +114,13 @@ func TestVMStep_Apply(t *testing.T) {
 			},
 			wantErr: "context canceled",
 		},
-		"getbyname_database_error_wraps_correctly": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{
-					Repos: api.Repos{
-						VM: &errorVMRepo{
-							VMRepo: testutil.NewVMRepo(),
-							getErr: errors.New("connection refused"),
-						},
+		"vm_get_error_wraps_correctly": {
+			setupOp: func(_ *testing.T) api.API {
+				return &vmStepAPI{mock: &testutil.MockVMAPI{
+					VMGetFunc: func(_ context.Context, _ inputs.VMInput) (*model.VMItem, error) {
+						return nil, errors.New("connection refused")
 					},
-				}
+				}}
 			},
 			ctx:     context.Background,
 			wantErr: "check vm",
@@ -132,35 +129,39 @@ func TestVMStep_Apply(t *testing.T) {
 		// --- Happy paths AFTER ---
 
 		"already_exists_skips_creation_and_writes_state": {
-			setupOp: func(t *testing.T) *api.Operation {
-				repo := testutil.NewVMRepo()
-				require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
-					ID:         "vm-existing",
-					Name:       "test-vm",
-					RootfsPath: "/mnt/vms/vm-existing/rootfs.ext4",
-				}))
-				return &api.Operation{Repos: api.Repos{VM: repo}}
+			setupOp: func(_ *testing.T) api.API {
+				return &vmStepAPI{mock: &testutil.MockVMAPI{
+					VMGetFunc: func(_ context.Context, _ inputs.VMInput) (*model.VMItem, error) {
+						return &model.VMItem{
+							ID:         "c741bfe2-a10b-4ae9-bb65-20eec5d3554d",
+							Name:       "test-vm",
+							RootfsPath: "/mnt/vms/c741bfe2-a10b-4ae9-bb65-20eec5d3554d/rootfs.ext4",
+						}, nil
+					},
+				}}
 			},
 			ctx:       context.Background,
-			wantVMID:  "vm-existing",
-			wantVMDir: "/mnt/vms/vm-existing/rootfs.ext4",
+			wantVMID:  "c741bfe2-a10b-4ae9-bb65-20eec5d3554d",
+			wantVMDir: "/mnt/vms/c741bfe2-a10b-4ae9-bb65-20eec5d3554d/rootfs.ext4",
 		},
 		"already_exists_preserves_was_created_from_saved": {
-			setupOp: func(t *testing.T) *api.Operation {
-				repo := testutil.NewVMRepo()
-				require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
-					ID:         "vm-preserved",
-					Name:       "test-vm",
-					RootfsPath: "/mnt/vms/vm-preserved/rootfs.ext4",
-				}))
-				return &api.Operation{Repos: api.Repos{VM: repo}}
+			setupOp: func(_ *testing.T) api.API {
+				return &vmStepAPI{mock: &testutil.MockVMAPI{
+					VMGetFunc: func(_ context.Context, _ inputs.VMInput) (*model.VMItem, error) {
+						return &model.VMItem{
+							ID:         "f46adf65-06a1-45cb-a7af-df72a1557c55",
+							Name:       "test-vm",
+							RootfsPath: "/mnt/vms/f46adf65-06a1-45cb-a7af-df72a1557c55/rootfs.ext4",
+						}, nil
+					},
+				}}
 			},
 			ctx: context.Background,
 			saved: model.ResourceState{
 				Meta: model.ResourceMeta{WasCreated: true},
 			},
-			wantVMID:       "vm-preserved",
-			wantVMDir:      "/mnt/vms/vm-preserved/rootfs.ext4",
+			wantVMID:       "f46adf65-06a1-45cb-a7af-df72a1557c55",
+			wantVMDir:      "/mnt/vms/f46adf65-06a1-45cb-a7af-df72a1557c55/rootfs.ext4",
 			wantWasCreated: true,
 		},
 	}
@@ -168,7 +169,7 @@ func TestVMStep_Apply(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			op := tc.setupOp(t)
-			step := newVMStep(t, op)
+			step := newVMStepWithAPI(t, op)
 
 			state := workflow.NewSharedState()
 			writer, writes := recordingWriter()
@@ -212,14 +213,16 @@ func TestVMStep_Apply(t *testing.T) {
 // rather than silently swallowing the persistence failure.
 
 func TestVMStep_Apply_WriteFailure(t *testing.T) {
-	repo := testutil.NewVMRepo()
-	require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
-		ID:         "vm-1",
-		Name:       "test-vm",
-		RootfsPath: "/mnt/vms/vm-1/rootfs.ext4",
-	}))
-	op := &api.Operation{Repos: api.Repos{VM: repo}}
-	step := newVMStep(t, op)
+	op := &vmStepAPI{mock: &testutil.MockVMAPI{
+		VMGetFunc: func(_ context.Context, _ inputs.VMInput) (*model.VMItem, error) {
+			return &model.VMItem{
+				ID:         "55fb5dd1-9c32-46de-80b2-40aac30c7f31",
+				Name:       "test-vm",
+				RootfsPath: "/mnt/vms/55fb5dd1-9c32-46de-80b2-40aac30c7f31/rootfs.ext4",
+			}, nil
+		},
+	}}
+	step := newVMStepWithAPI(t, op)
 
 	writeErr := errors.New("disk full")
 	err := step.Apply(
@@ -241,14 +244,16 @@ func TestVMStep_Apply_WriteFailure(t *testing.T) {
 // "already exists, skipping" so the CLI can display step status.
 
 func TestVMStep_Apply_ProgressEvents(t *testing.T) {
-	repo := testutil.NewVMRepo()
-	require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
-		ID:         "vm-1",
-		Name:       "test-vm",
-		RootfsPath: "/mnt/vms/vm-1/rootfs.ext4",
-	}))
-	op := &api.Operation{Repos: api.Repos{VM: repo}}
-	step := newVMStep(t, op)
+	op := &vmStepAPI{mock: &testutil.MockVMAPI{
+		VMGetFunc: func(_ context.Context, _ inputs.VMInput) (*model.VMItem, error) {
+			return &model.VMItem{
+				ID:         "55fb5dd1-9c32-46de-80b2-40aac30c7f31",
+				Name:       "test-vm",
+				RootfsPath: "/mnt/vms/55fb5dd1-9c32-46de-80b2-40aac30c7f31/rootfs.ext4",
+			}, nil
+		},
+	}}
+	step := newVMStepWithAPI(t, op)
 
 	progress, events := newVMProgressRecorder()
 	writer, _ := recordingWriter()
@@ -543,20 +548,29 @@ func TestVMStep_Dependencies(t *testing.T) {
 	}
 }
 
-// --- VMStep.Apply dependency resolution from SharedSta ---
-// Rationale: When a VM step's dependencies (network, image, etc.) have
-// already applied, the VM step must read resolved IDs from SharedState
-// instead of using raw spec names. If it doesn't, the VM will be created
-// with unresolved reference names instead of real database IDs.
+// --- VMStep.Apply dependency resolution from SharedState ---
+// Rationale: A VM created after its dependencies must receive their resolved
+// IDs, not the resource names in the spec.
 
 func TestVMStep_Apply_DependencyResolution(t *testing.T) {
-	repo := testutil.NewVMRepo()
-	require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
-		ID:         "vm-1",
-		Name:       "test-vm",
-		RootfsPath: "/mnt/vms/vm-1/rootfs.ext4",
-	}))
-	op := &api.Operation{Repos: api.Repos{VM: repo}}
+	var createdInput inputs.VMCreateInput
+	op := &vmStepAPI{mock: &testutil.MockVMAPI{
+		VMGetFunc: func(_ context.Context, _ inputs.VMInput) (*model.VMItem, error) {
+			return nil, nil
+		},
+		VMCreateFunc: func(
+			_ context.Context,
+			input inputs.VMCreateInput,
+			_ event.OnProgressCallback,
+		) ([]*model.VMItem, error) {
+			createdInput = input
+			return []*model.VMItem{{
+				ID:         "bb684f16-1cb0-439c-98ba-427b41a8e976",
+				Name:       "test-vm",
+				RootfsPath: "/mnt/vms/bb684f16-1cb0-439c-98ba-427b41a8e976/rootfs.ext4",
+			}}, nil
+		},
+	}}
 
 	spec := map[string]any{
 		"name":    "test-vm",
@@ -581,15 +595,39 @@ func TestVMStep_Apply_DependencyResolution(t *testing.T) {
 	err = step.Apply(context.Background(), state, model.ResourceState{}, writer, noopProgress)
 	require.NoError(t, err)
 
-	// The step should have written state successfully.
-	require.Len(t, *writes, 1)
+	require.NotNil(t, createdInput.NetworkID)
+	require.NotNil(t, createdInput.ImageID)
+	require.NotNil(t, createdInput.KernelID)
+	require.NotNil(t, createdInput.BinaryID)
+	wantRefs := map[string]string{
+		"network": "net-resolved-123",
+		"image":   "img-resolved-789",
+		"kernel":  "krnl-resolved-abc",
+		"binary":  "bin-resolved-def",
+	}
+	gotRefs := map[string]string{
+		"network": *createdInput.NetworkID,
+		"image":   *createdInput.ImageID,
+		"kernel":  *createdInput.KernelID,
+		"binary":  *createdInput.BinaryID,
+	}
+	if diff := cmp.Diff(wantRefs, gotRefs); diff != "" {
+		t.Errorf("VMCreate references mismatch (-want +got):\n%s", diff)
+	}
+	assert.Equal(t, "test-vm", createdInput.Name)
+	if diff := cmp.Diff([]string{"my-key"}, createdInput.SSHKeys); diff != "" {
+		t.Errorf("VMCreate SSH keys mismatch (-want +got):\n%s", diff)
+	}
 
-	// Verify shared state was populated with the VM step output.
+	require.Len(t, *writes, 1)
+	assert.Equal(t, "bb684f16-1cb0-439c-98ba-427b41a8e976", (*writes)[0].Output["vm_id"])
+	assert.True(t, (*writes)[0].Meta.WasCreated)
+
 	val, ok := state.Get("vm:test-vm")
 	require.True(t, ok, "shared state must contain VM step output")
 	vmState, ok := val.(*envpkg.VMState)
 	require.True(t, ok, "shared state value must be *VMState")
-	assert.Equal(t, "vm-1", vmState.VMID)
+	assert.Equal(t, "bb684f16-1cb0-439c-98ba-427b41a8e976", vmState.VMID)
 }
 
 // --- VMStep.SpecHash ---

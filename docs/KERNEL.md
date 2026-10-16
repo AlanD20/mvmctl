@@ -99,11 +99,25 @@ mvm kernel pull official:6.19.9
 # Build with parallel jobs (faster)
 mvm kernel pull --type official --jobs 8
 
-# Bypass cache and force a clean build
+# Bypass the compiled-kernel cache
 mvm kernel pull --type official --clean-build
 
 # Keep the build directory after completion (useful for debugging)
 mvm kernel pull --type official --keep-build-dir
+```
+
+An explicit `MVM_TEMP_DIR` places official-kernel build work in
+`<MVM_TEMP_DIR>/kernel-build`, with compiled-cache artifacts beside that directory.
+If the variable is unset or empty, the embedded spec's `build_dir` remains in use.
+This override does not change the spec or the managed output location.
+
+`--clean-build` bypasses the compiled-output cache; it does not remove an existing
+source tree or tarball. For a fresh producer run, select a new task-specific scratch
+directory. `--keep-build-dir` retains the build tree after successful compilation.
+
+```bash
+MVM_TEMP_DIR="$PWD/.tmp/kernel-build-run" \
+  mvm kernel pull official:7.0.11 --jobs 1 --clean-build --keep-build-dir
 ```
 
 ### Build process
@@ -121,6 +135,15 @@ mvm kernel pull --type official --keep-build-dir
 | 7. Build | Compiles `vmlinux` using `make vmlinux -jN` |
 | 8. Copy & metadata | Copies `vmlinux` to kernels cache and saves metadata JSON |
 | 9. Cleanup | Removes the build directory (unless `--keep-build-dir`) |
+
+For a producer receipt, use `--debug` and retain the build directory. The
+`Kernel base config written` diagnostic identifies the fetched base-config URL,
+SHA-256 of the bytes successfully written, byte length, and source directory
+before `olddefconfig` or overlays change `.config`. Retain that event alongside
+the source archive checksum, embedded spec, invocation, toolchain identities,
+and final `.config`/`vmlinux` hashes. A later fetch of the same URL is not proof
+of the bytes this invocation consumed. If the event is absent or the build falls
+back to `defconfig`, do not claim Firecracker-base-config provenance.
 
 ### Kernel features
 
@@ -288,5 +311,17 @@ Common causes:
 | 6.19.x | Supported | Default version (`6.19.9`), latest upstream stable at release time |
 
 > **Note:** The default kernel version (`6.19.9`) is **NOT** an LTS kernel. It is the latest upstream stable at the time of release. Use `--version latest` to resolve the most recent version from the upstream directory listing. If you need long-term support, explicitly pass `--version 6.1.102` or `--version 6.12.21` to `mvm kernel pull --type official`. The LTS versions in the table above are tested and known to work — use them for production deployments.
+
+The v0.3.0 opt-in VM-to-VM source-session path additionally requires the source guest kernel's `SO_PEERPIDFD` socket
+capability. Source-session admission fails closed when that capability is absent; it never falls back to authorizing a
+numeric PID from `SO_PEERCRED` alone. The configured Firecracker CI kernel series is `6.1`; its cached `6.1.155`
+selection cannot supply this capability from stock upstream Linux, whose
+[socket implementation lacks `SO_PEERPIDFD`](https://github.com/gregkh/linux/blob/v6.1.155/net/core/sock.c).
+Select a capable kernel explicitly with `vm create --kernel <kernel>` when using a VM as an exec source. Imported or
+custom kernels must provide the actual capability; neither a version label nor successful ordinary host-to-VM exec
+proves it. The QA fixture selects an exact capable artifact without changing the default kernel. The configured
+official source-build version remains fixed at `6.19.9`; VM-to-VM exec does not select a moving `latest` version or
+require the QA artifact's version. The relay is implemented, while qualification of the corrected source-publication
+and kernel-selection paths remains pending.
 
 *See also: [RESOURCE_MANAGEMENTS.md](RESOURCE_MANAGEMENTS.md) for the kernel YAML config reference and [Firecracker official documentation](https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md).*

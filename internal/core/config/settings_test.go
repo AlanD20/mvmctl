@@ -142,7 +142,7 @@ func TestGetExpectedType(t *testing.T) {
 		"defaults_network_name":      {category: "defaults.network", key: "name", want: "string"},
 		"defaults_image_list_limit":  {category: "defaults.image", key: "remote_list_limit", want: "int"},
 		"cli_listing_style":          {category: "cli", key: "listing_style", want: "string"},
-		"settings_firewall_backend":  {category: "settings", key: "firewall_backend", want: "string"},
+		"settings_guestfs_enabled":   {category: "settings", key: "guestfs_enabled", want: "bool"},
 		"defaults_kernel_build_jobs": {category: "defaults.kernel", key: "build_jobs", want: "nil"},
 
 		// Non-existent category → empty string

@@ -1,77 +1,46 @@
-"""Verify snapshot restore gives the restored VM an independent rootfs.
+"""Verify snapshot restore gives the restored guest an independent rootfs.
 
-The vmstate file hardcodes the phantom rootfs path (captured at snapshot
-create via PATCH). On restore, the phantom symlink is updated to point to
-the new VM's rootfs copy. LoadSnapshot follows the symlink.
-
-These tests verify the restored VM's rootfs is independent of both the
-source VM and other restored VMs by reading the marker file directly
-from the ext4 disk image via debugfs (vsock doesn't work reliably on
-restored VMs; SSH can't reach the guest IP on a different network).
+Launch and restore use protected backing disks, separate from caller-owned
+staging paths reported by VM inspection. These tests read and write synced
+guest markers through mvm exec to verify independence from the source VM
+and other restored VMs. Positive cases use networkless snapshots so multiple
+restores do not clone a managed IP/MAC endpoint. A managed companion capture
+checks captured-network replacement and source-held endpoint refusals.
 """
 
 from __future__ import annotations
 
 import concurrent.futures
 import json
-import os
-import subprocess
-import tempfile
+import shlex
 import uuid
 
 import pytest
 
-from tests.system.conftest import _run_mvm, _unique_subnet, ensure_vm_deps, wait_for_ssh
+from tests.system.conftest import (
+    _json_success_data,
+    _run_mvm,
+    _unique_subnet,
+    ensure_vm_deps,
+)
 
 MARKER_PATH = "/root/.snapshot-marker"
 
 
-def _read_rootfs_marker(runner_vm: str, vm_name: str) -> str | None:
-    """Read the marker file from a VM's rootfs ext4 image using debugfs.
-
-    _run_mvm runs mvm commands directly on the test host (vm_name is
-    ignored), so the rootfs path is on the local filesystem and
-    debugfs can access it directly.
-    """
-    result = _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json")
-    info = json.loads(result.stdout)
-    fs_info = info.get("filesystem", {})
-    rootfs_path = fs_info.get("rootfs_path", "")
-    if not rootfs_path:
-        return None
-    result = subprocess.run(
-        ["debugfs", "-R", f"cat {MARKER_PATH}", rootfs_path],
-        capture_output=True, text=True, check=False,
+def _read_rootfs_marker(runner_vm: str, vm_name: str) -> str:
+    """Read the marker from the running guest's active rootfs over vsock."""
+    result = _run_mvm(
+        runner_vm, "exec", vm_name, "--timeout", "60", "--", "cat", MARKER_PATH,
     )
-    if result.returncode != 0:
-        # debugfs may fail if the rootfs is not an ext4 image or not mounted
-        return None
     return result.stdout.strip()
 
 
 def _write_rootfs_marker(runner_vm: str, vm_name: str, content: str) -> None:
-    """Write content to the marker file in a VM's rootfs ext4 image via debugfs.
-    Used to verify other VMs are unaffected by the write.
-    """
-    result = _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json")
-    info = json.loads(result.stdout)
-    fs_info = info.get("filesystem", {})
-    rootfs_path = fs_info.get("rootfs_path", "")
-    assert rootfs_path, f"no rootfs_path for {vm_name}"
-    with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
-        f.write(content)
-        tmp_path = f.name
-    try:
-        subprocess.run(
-            ["debugfs", "-w", "-R", f"rm {MARKER_PATH}", rootfs_path],
-            capture_output=True, text=True, check=False,
-        )
-        subprocess.run(
-            ["debugfs", "-w", "-R", f"write {tmp_path} {MARKER_PATH}", rootfs_path],
-            capture_output=True, text=True, check=True,
-        )
-    finally:
-        os.unlink(tmp_path)
+    """Write and sync a guest marker to verify other VMs are unaffected."""
+    _run_mvm(
+        runner_vm, "exec", vm_name, "--timeout", "60", "--",
+        f"printf '%s' {shlex.quote(content)} > {MARKER_PATH} && sync",
+    )
 
 
 pytestmark = [
@@ -86,7 +55,7 @@ pytestmark = [
 def _get_snap_id(runner_vm: str, src_vm: str) -> str:
     """Return the most recent snapshot ID for the given source VM."""
     ls_result = _run_mvm(runner_vm, "snapshot", "ls", "--json")
-    snaps = json.loads(ls_result.stdout)
+    snaps = _json_success_data(ls_result.stdout, list)
     src_snaps = [s for s in snaps if s.get("source_vm_name") == src_vm]
     assert src_snaps, f"no snapshots found for {src_vm}"
     return src_snaps[-1]["id"]
@@ -99,39 +68,23 @@ class TestRootfsIndependence:
         self,
         runner_vm: str,
         unique_vm_name: str,
-        unique_key_name: str,
-        unique_network_name: str,
     ) -> None:
         """Source VM modified after snapshot; restored VM must NOT see changes."""
         src_vm = unique_vm_name
-        key_name = unique_key_name
-        src_net = unique_network_name
-        src_subnet = _unique_subnet(src_net)
         restored_vm = f"rst-{src_vm}"
-        restored_net = f"net-{uuid.uuid4().hex[:6]}"
-        restored_subnet = _unique_subnet(restored_net)
         snap_id: str | None = None
 
         try:
-            _run_mvm(runner_vm, "network", "create", src_net,
-                     "--subnet", src_subnet, "--non-interactive")
-            _run_mvm(runner_vm, "network", "create", restored_net,
-                     "--subnet", restored_subnet, "--non-interactive")
-            _run_mvm(runner_vm, "key", "create", key_name,
-                     "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
 
             _run_mvm(runner_vm, "vm", "create", src_vm,
                      "--image", "alpine:3.23",
-                     "--network", src_net,
-                     "--ssh-key", key_name,
-                     "--writeback")
-
-            assert wait_for_ssh(runner_vm, src_vm), f"SSH timeout on source VM {src_vm}"
+                     "--no-network", "--cloud-init-mode", "off", "--no-pci",
+                     "--disk-size", "512M", "--mem", "256M", "--vcpu", "1",
+                     "--writeback", timeout=180)
 
             # Write marker BEFORE snapshot
-            _run_mvm(runner_vm, "ssh", src_vm, "-u", "root",
-                     "--cmd", f"echo 'ORIGINAL' > {MARKER_PATH} && sync")
+            _write_rootfs_marker(runner_vm, src_vm, "ORIGINAL")
             result = _run_mvm(runner_vm, "exec", src_vm, "--", f"cat {MARKER_PATH}")
             assert result.stdout.strip() == "ORIGINAL"
 
@@ -148,64 +101,99 @@ class TestRootfsIndependence:
                 "source VM should still have ORIGINAL after snapshot resume"
 
             # Modify marker AFTER snapshot in source VM
-            _run_mvm(runner_vm, "ssh", src_vm, "-u", "root",
-                     "--cmd", f"echo 'MODIFIED-AFTER-SNAPSHOT' > {MARKER_PATH} && sync")
+            _write_rootfs_marker(runner_vm, src_vm, "MODIFIED-AFTER-SNAPSHOT")
             result = _run_mvm(runner_vm, "exec", src_vm, "--", f"cat {MARKER_PATH}")
             assert result.stdout.strip() == "MODIFIED-AFTER-SNAPSHOT", \
                 "source VM should see modified content"
 
-            # Restore to new VM on different network
-            _run_mvm(runner_vm, "snapshot", "restore", snap_id, restored_vm,
-                     "--network", restored_net)
+            # Restore beside the running networkless source
+            _run_mvm(runner_vm, "snapshot", "restore", snap_id, restored_vm, timeout=180)
             _run_mvm(runner_vm, "vm", "resume", restored_vm)
 
-            # Verify restored VM's rootfs on disk has ORIGINAL (NOT modified)
+            # Verify restored guest has ORIGINAL (NOT modified)
             marker = _read_rootfs_marker(runner_vm, restored_vm)
             assert marker == "ORIGINAL", \
                 f"restored VM rootfs should have ORIGINAL, got: {marker}"
 
         finally:
-            _run_mvm(runner_vm, "vm", "rm", restored_vm, "--force", check=False)
-            _run_mvm(runner_vm, "vm", "rm", src_vm, "--force", check=False)
-            if snap_id:
-                _run_mvm(runner_vm, "snapshot", "rm", snap_id, "--force", check=False)
-            _run_mvm(runner_vm, "network", "rm", restored_net, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "network", "rm", src_net, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
+            for name in (restored_vm, src_vm):
+                listed = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+                if any(vm["name"] == name for vm in listed):
+                    _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
+                assert all(vm["name"] != name for vm in _json_success_data(
+                    _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+                ))
+            for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ):
+                if snapshot["source_vm_name"] == src_vm:
+                    _run_mvm(runner_vm, "snapshot", "rm", snapshot["id"], "--force", timeout=120)
+            assert all(snapshot["source_vm_name"] != src_vm for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ))
 
     def test_rootfs_independent_after_source_deleted(
         self,
         runner_vm: str,
         unique_vm_name: str,
-        unique_key_name: str,
         unique_network_name: str,
     ) -> None:
         """Source VM deleted after snapshot; restored VM must still get correct rootfs."""
         src_vm = unique_vm_name
-        key_name = unique_key_name
-        net_name = unique_network_name
-        subnet = _unique_subnet(net_name)
+        endpoint_vm = f"endpoint-{src_vm}"
+        refused_vm = f"denied-{src_vm}"
+        src_net = unique_network_name
+        other_net = f"other-{uuid.uuid4().hex[:8]}"
         restored_vm = f"rst-{src_vm}"
         snap_id: str | None = None
 
         try:
-            _run_mvm(runner_vm, "network", "create", net_name,
-                     "--subnet", subnet, "--non-interactive")
-            _run_mvm(runner_vm, "key", "create", key_name,
-                     "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
+
+            # Managed captures cannot replace or duplicate their captured endpoint.
+            _run_mvm(runner_vm, "network", "create", src_net,
+                     "--subnet", _unique_subnet(src_net), "--no-nat")
+            _run_mvm(runner_vm, "network", "create", other_net,
+                     "--subnet", _unique_subnet(other_net), "--no-nat")
+            managed = _json_success_data(_run_mvm(
+                runner_vm, "vm", "create", endpoint_vm, "--image", "alpine:3.23",
+                "--network", src_net, "--cloud-init-mode", "off", "--no-pci",
+                "--disk-size", "512M", "--mem", "256M", "--vcpu", "1",
+                "--writeback", "--json", timeout=180,
+            ).stdout, list)[0]
+            _write_rootfs_marker(runner_vm, endpoint_vm, "MANAGED-SOURCE")
+            _run_mvm(runner_vm, "snapshot", "create", endpoint_vm)
+            endpoint_snap = _get_snap_id(runner_vm, endpoint_vm)
+            for network, message in (
+                (other_net, "snapshot restore cannot replace the captured network, IP, or MAC"),
+                (src_net, f"captured IP {managed['ipv4']} is already leased on network {managed['network_id']}"),
+            ):
+                before = sorted((vm["id"], vm["name"], vm["status"]) for vm in _json_success_data(
+                    _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+                ))
+                denied = _run_mvm(
+                    runner_vm, "snapshot", "restore", endpoint_snap, refused_vm,
+                    "--network", network, "--json", check=False,
+                )
+                assert denied.returncode != 0, (denied.stdout, denied.stderr)
+                error = json.loads(denied.stdout)
+                assert error["schema_version"] == 1 and error["status"] == "error", error
+                assert error["data"] is None and error["error"]["code"] == "snapshot.restore_failed", error
+                assert message in error["error"]["message"], error
+                assert sorted((vm["id"], vm["name"], vm["status"]) for vm in _json_success_data(
+                    _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+                )) == before
+                assert _read_rootfs_marker(runner_vm, endpoint_vm) == "MANAGED-SOURCE"
+            _run_mvm(runner_vm, "vm", "rm", endpoint_vm, "--force", timeout=120)
 
             _run_mvm(runner_vm, "vm", "create", src_vm,
                      "--image", "alpine:3.23",
-                     "--network", net_name,
-                     "--ssh-key", key_name,
-                     "--writeback")
-
-            assert wait_for_ssh(runner_vm, src_vm), f"SSH timeout on source VM {src_vm}"
+                     "--no-network", "--cloud-init-mode", "off", "--no-pci",
+                     "--disk-size", "512M", "--mem", "256M", "--vcpu", "1",
+                     "--writeback", timeout=180)
 
             # Write marker
-            _run_mvm(runner_vm, "ssh", src_vm, "-u", "root",
-                     "--cmd", f"echo 'PERSISTENT-MARKER' > {MARKER_PATH} && sync")
+            _write_rootfs_marker(runner_vm, src_vm, "PERSISTENT-MARKER")
             result = _run_mvm(runner_vm, "exec", src_vm, "--", f"cat {MARKER_PATH}")
             assert result.stdout.strip() == "PERSISTENT-MARKER"
 
@@ -216,11 +204,13 @@ class TestRootfsIndependence:
             snap_id = _get_snap_id(runner_vm, src_vm)
 
             # Delete source VM (leaves snapshot untouched)
-            _run_mvm(runner_vm, "vm", "rm", src_vm, "--force")
+            _run_mvm(runner_vm, "vm", "rm", src_vm, "--force", timeout=120)
+            assert all(vm["name"] != src_vm for vm in _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+            ))
 
             # Restore to new VM
-            _run_mvm(runner_vm, "snapshot", "restore", snap_id, restored_vm,
-                     "--network", net_name)
+            _run_mvm(runner_vm, "snapshot", "restore", snap_id, restored_vm, timeout=180)
             _run_mvm(runner_vm, "vm", "resume", restored_vm)
 
             # Verify marker survived in the restored VM's rootfs
@@ -229,46 +219,50 @@ class TestRootfsIndependence:
                 f"restored VM rootfs should have PERSISTENT-MARKER, got: {marker}"
 
         finally:
-            _run_mvm(runner_vm, "vm", "rm", restored_vm, "--force", check=False)
-            _run_mvm(runner_vm, "vm", "rm", src_vm, "--force", check=False)
-            if snap_id:
-                _run_mvm(runner_vm, "snapshot", "rm", snap_id, "--force", check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
+            for name in (refused_vm, restored_vm, src_vm, endpoint_vm):
+                listed = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+                if any(vm["name"] == name for vm in listed):
+                    _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
+                assert all(vm["name"] != name for vm in _json_success_data(
+                    _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+                ))
+            for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ):
+                if snapshot["source_vm_name"] in (src_vm, endpoint_vm):
+                    _run_mvm(runner_vm, "snapshot", "rm", snapshot["id"], "--force", timeout=120)
+            assert all(snapshot["source_vm_name"] not in (src_vm, endpoint_vm) for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ))
+            for network in (other_net, src_net):
+                listed = _json_success_data(_run_mvm(runner_vm, "network", "ls", "--json").stdout, list)
+                if any(item["name"] == network for item in listed):
+                    _run_mvm(runner_vm, "network", "rm", network, "--force", timeout=120)
+                assert all(item["name"] != network for item in _json_success_data(
+                    _run_mvm(runner_vm, "network", "ls", "--json").stdout, list,
+                ))
 
     def test_source_stopped_not_deleted(
         self,
         runner_vm: str,
         unique_vm_name: str,
-        unique_key_name: str,
-        unique_network_name: str,
     ) -> None:
-        """Source VM stopped (dir+rootfs still on disk); restored VM must be independent."""
+        """Source VM stopped but retained; restored VM must be independent."""
         src_vm = unique_vm_name
-        key_name = unique_key_name
-        net_name = unique_network_name
-        subnet = _unique_subnet(net_name)
         restored_vm = f"rst-{src_vm}"
         snap_id: str | None = None
 
         try:
-            _run_mvm(runner_vm, "network", "create", net_name,
-                     "--subnet", subnet, "--non-interactive")
-            _run_mvm(runner_vm, "key", "create", key_name,
-                     "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
 
             _run_mvm(runner_vm, "vm", "create", src_vm,
                      "--image", "alpine:3.23",
-                     "--network", net_name,
-                     "--ssh-key", key_name,
-                     "--writeback")
-
-            assert wait_for_ssh(runner_vm, src_vm), f"SSH timeout on source VM {src_vm}"
+                     "--no-network", "--cloud-init-mode", "off", "--no-pci",
+                     "--disk-size", "512M", "--mem", "256M", "--vcpu", "1",
+                     "--writeback", timeout=180)
 
             # Write marker
-            _run_mvm(runner_vm, "ssh", src_vm, "-u", "root",
-                     "--cmd", f"echo 'STOPPED-NOT-DELETED' > {MARKER_PATH} && sync")
+            _write_rootfs_marker(runner_vm, src_vm, "STOPPED-NOT-DELETED")
 
             # Snapshot
             _run_mvm(runner_vm, "vm", "pause", src_vm)
@@ -276,12 +270,15 @@ class TestRootfsIndependence:
 
             snap_id = _get_snap_id(runner_vm, src_vm)
 
-            # Stop source VM — directory and rootfs file stay on disk
+            # Stop source VM while retaining its resources
             _run_mvm(runner_vm, "vm", "stop", src_vm, "--force")
+            source = [vm for vm in _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+            ) if vm["name"] == src_vm]
+            assert len(source) == 1 and source[0]["status"] == "stopped", source
 
             # Restore to new VM
-            _run_mvm(runner_vm, "snapshot", "restore", snap_id, restored_vm,
-                     "--network", net_name)
+            _run_mvm(runner_vm, "snapshot", "restore", snap_id, restored_vm, timeout=180)
             _run_mvm(runner_vm, "vm", "resume", restored_vm)
 
             # Verify marker in restored VM's rootfs
@@ -289,61 +286,55 @@ class TestRootfsIndependence:
             assert marker == "STOPPED-NOT-DELETED", \
                 f"restored VM rootfs should have STOPPED-NOT-DELETED, got: {marker}"
 
+            _write_rootfs_marker(runner_vm, restored_vm, "MODIFIED-IN-RESTORED")
+            assert _read_rootfs_marker(runner_vm, restored_vm) == "MODIFIED-IN-RESTORED"
+            _run_mvm(runner_vm, "vm", "start", src_vm, timeout=180)
+            assert _read_rootfs_marker(runner_vm, src_vm) == "STOPPED-NOT-DELETED"
+
         finally:
-            _run_mvm(runner_vm, "vm", "rm", restored_vm, "--force", check=False)
-            _run_mvm(runner_vm, "vm", "rm", src_vm, "--force", check=False)
-            if snap_id:
-                _run_mvm(runner_vm, "snapshot", "rm", snap_id, "--force", check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
+            for name in (restored_vm, src_vm):
+                listed = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+                if any(vm["name"] == name for vm in listed):
+                    _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
+                assert all(vm["name"] != name for vm in _json_success_data(
+                    _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+                ))
+            for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ):
+                if snapshot["source_vm_name"] == src_vm:
+                    _run_mvm(runner_vm, "snapshot", "rm", snapshot["id"], "--force", timeout=120)
+            assert all(snapshot["source_vm_name"] != src_vm for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ))
 
     def test_sequential_restores_independent(
         self,
         runner_vm: str,
         unique_vm_name: str,
-        unique_key_name: str,
-        unique_network_name: str,
     ) -> None:
         """Two sequential restores from the same snapshot must be independent.
 
         Verifies: source-VM changes don't leak into restored VMs,
-        and modifications to one restored VM's rootfs (via debugfs)
+        and modifications to one restored VM's rootfs (via mvm exec)
         don't affect the other restored VM or the source VM.
         """
         src_vm = unique_vm_name
-        key_name = unique_key_name
-        net_name = unique_network_name
-        subnet = _unique_subnet(net_name)
         vm_b = f"seq-b-{uuid.uuid4().hex[:6]}"
         vm_c = f"seq-c-{uuid.uuid4().hex[:6]}"
-        net_b = f"net-b-{uuid.uuid4().hex[:6]}"
-        net_c = f"net-c-{uuid.uuid4().hex[:6]}"
-        sub_b = _unique_subnet(net_b)
-        sub_c = _unique_subnet(net_c)
         snap_id: str | None = None
 
         try:
-            _run_mvm(runner_vm, "network", "create", net_name,
-                     "--subnet", subnet, "--non-interactive")
-            _run_mvm(runner_vm, "network", "create", net_b,
-                     "--subnet", sub_b, "--non-interactive")
-            _run_mvm(runner_vm, "network", "create", net_c,
-                     "--subnet", sub_c, "--non-interactive")
-            _run_mvm(runner_vm, "key", "create", key_name,
-                     "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
 
             _run_mvm(runner_vm, "vm", "create", src_vm,
                      "--image", "alpine:3.23",
-                     "--network", net_name,
-                     "--ssh-key", key_name,
-                     "--writeback")
-
-            assert wait_for_ssh(runner_vm, src_vm), f"SSH timeout on source VM {src_vm}"
+                     "--no-network", "--cloud-init-mode", "off", "--no-pci",
+                     "--disk-size", "512M", "--mem", "256M", "--vcpu", "1",
+                     "--writeback", timeout=180)
 
             # Write marker
-            _run_mvm(runner_vm, "ssh", src_vm, "-u", "root",
-                     "--cmd", f"echo 'ORIGINAL' > {MARKER_PATH} && sync")
+            _write_rootfs_marker(runner_vm, src_vm, "ORIGINAL")
             result = _run_mvm(runner_vm, "exec", src_vm, "--", f"cat {MARKER_PATH}")
             assert result.stdout.strip() == "ORIGINAL"
 
@@ -355,8 +346,7 @@ class TestRootfsIndependence:
             _run_mvm(runner_vm, "vm", "resume", src_vm)
 
             # --- First restore: VM B ---
-            _run_mvm(runner_vm, "snapshot", "restore", snap_id, vm_b,
-                     "--network", net_b)
+            _run_mvm(runner_vm, "snapshot", "restore", snap_id, vm_b, timeout=180)
             _run_mvm(runner_vm, "vm", "resume", vm_b)
 
             marker_b = _read_rootfs_marker(runner_vm, vm_b)
@@ -364,8 +354,7 @@ class TestRootfsIndependence:
                 f"VM B should have ORIGINAL, got: {marker_b}"
 
             # --- Second restore: VM C ---
-            _run_mvm(runner_vm, "snapshot", "restore", snap_id, vm_c,
-                     "--network", net_c)
+            _run_mvm(runner_vm, "snapshot", "restore", snap_id, vm_c, timeout=180)
             _run_mvm(runner_vm, "vm", "resume", vm_c)
 
             marker_c = _read_rootfs_marker(runner_vm, vm_c)
@@ -373,8 +362,9 @@ class TestRootfsIndependence:
                 f"VM C should have ORIGINAL, got: {marker_c}"
 
             # --- Three-way independence check ---
-            # Modify VM B's rootfs via debugfs on disk
+            # Modify VM B's active guest rootfs
             _write_rootfs_marker(runner_vm, vm_b, "MODIFIED-IN-B")
+            assert _read_rootfs_marker(runner_vm, vm_b) == "MODIFIED-IN-B"
 
             # VM C must still have ORIGINAL
             marker_c2 = _read_rootfs_marker(runner_vm, vm_c)
@@ -382,7 +372,7 @@ class TestRootfsIndependence:
                 f"VM C should STILL have ORIGINAL despite VM B modification, " \
                 f"got: {marker_c2}"
 
-            # Source VM must still have ORIGINAL (no leak from debugfs write)
+            # Source VM must still have ORIGINAL (no leak from VM B's write)
             source_marker = _run_mvm(runner_vm, "exec", src_vm, "--",
                                      f"cat {MARKER_PATH}")
             assert source_marker.stdout.strip() == "ORIGINAL", \
@@ -390,55 +380,49 @@ class TestRootfsIndependence:
                 f"got: {source_marker.stdout.strip()}"
 
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_c, "--force", check=False)
-            _run_mvm(runner_vm, "vm", "rm", vm_b, "--force", check=False)
-            _run_mvm(runner_vm, "vm", "rm", src_vm, "--force", check=False)
-            if snap_id:
-                _run_mvm(runner_vm, "snapshot", "rm", snap_id, "--force", check=False)
-            _run_mvm(runner_vm, "network", "rm", net_c, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "network", "rm", net_b, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "network", "rm", net_name, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
+            for name in (vm_c, vm_b, src_vm):
+                listed = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+                if any(vm["name"] == name for vm in listed):
+                    _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
+                assert all(vm["name"] != name for vm in _json_success_data(
+                    _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+                ))
+            for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ):
+                if snapshot["source_vm_name"] == src_vm:
+                    _run_mvm(runner_vm, "snapshot", "rm", snapshot["id"], "--force", timeout=120)
+            assert all(snapshot["source_vm_name"] != src_vm for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ))
 
     def test_multi_vm_restore(
         self,
         runner_vm: str,
         unique_vm_name: str,
-        unique_key_name: str,
-        unique_network_name: str,
     ) -> None:
-        """Restore multiple VMs from one snapshot via --count 2; verify independence.
+        """Count-two refuses; two single-target restores prove disk independence.
 
-        Verifies modifying one restored VM's rootfs (via debugfs) does NOT
-        affect the other restored VM from the same --count restore.
+        Verifies modifying one restored VM's rootfs (via mvm exec) does NOT
+        affect the other restored VM from the same snapshot.
         """
         src_vm = unique_vm_name
-        key_name = unique_key_name
-        net_name = unique_network_name
-        subnet = _unique_subnet(net_name)
         base_name = f"multi-{src_vm}"
-        vm0 = base_name        # first VM keeps base name
-        vm1 = f"{base_name}-2"  # second VM gets -2 suffix
+        vm0 = base_name
+        vm1 = f"{base_name}-2"
         snap_id: str | None = None
 
         try:
-            _run_mvm(runner_vm, "network", "create", net_name,
-                     "--subnet", subnet, "--non-interactive")
-            _run_mvm(runner_vm, "key", "create", key_name,
-                     "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
 
             _run_mvm(runner_vm, "vm", "create", src_vm,
                      "--image", "alpine:3.23",
-                     "--network", net_name,
-                     "--ssh-key", key_name,
-                     "--writeback")
-
-            assert wait_for_ssh(runner_vm, src_vm), f"SSH timeout on source VM {src_vm}"
+                     "--no-network", "--cloud-init-mode", "off", "--no-pci",
+                     "--disk-size", "512M", "--mem", "256M", "--vcpu", "1",
+                     "--writeback", timeout=180)
 
             # Write marker
-            _run_mvm(runner_vm, "ssh", src_vm, "-u", "root",
-                     "--cmd", f"echo 'SHARED-MARKER' > {MARKER_PATH} && sync")
+            _write_rootfs_marker(runner_vm, src_vm, "SHARED-MARKER")
             result = _run_mvm(runner_vm, "exec", src_vm, "--", f"cat {MARKER_PATH}")
             assert result.stdout.strip() == "SHARED-MARKER"
 
@@ -449,9 +433,26 @@ class TestRootfsIndependence:
             snap_id = _get_snap_id(runner_vm, src_vm)
             _run_mvm(runner_vm, "vm", "resume", src_vm)
 
-            # Restore 2 VMs from the snapshot
-            _run_mvm(runner_vm, "snapshot", "restore", snap_id, base_name,
-                     "--network", net_name, "--count", "2")
+            # Count-two is unsupported and must not publish either target.
+            before = sorted((vm["id"], vm["name"], vm["status"]) for vm in _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+            ))
+            denied = _run_mvm(
+                runner_vm, "snapshot", "restore", snap_id, base_name,
+                "--count", "2", "--json", check=False,
+            )
+            assert denied.returncode != 0, (denied.stdout, denied.stderr)
+            error = json.loads(denied.stdout)
+            assert error["schema_version"] == 1 and error["status"] == "error", error
+            assert error["data"] is None and error["error"]["code"] == "snapshot.restore_failed", error
+            assert "exactly one target VM per invocation" in error["error"]["message"], error
+            assert sorted((vm["id"], vm["name"], vm["status"]) for vm in _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+            )) == before
+
+            # Two supported single-target restores exercise independent disks.
+            _run_mvm(runner_vm, "snapshot", "restore", snap_id, vm0, timeout=180)
+            _run_mvm(runner_vm, "snapshot", "restore", snap_id, vm1, timeout=180)
             _run_mvm(runner_vm, "vm", "resume", vm0)
             _run_mvm(runner_vm, "vm", "resume", vm1)
 
@@ -461,8 +462,9 @@ class TestRootfsIndependence:
                 assert marker == "SHARED-MARKER", \
                     f"{vm} should have SHARED-MARKER, got: {marker}"
 
-            # Modify VM0's rootfs via debugfs
+            # Modify VM0's active guest rootfs
             _write_rootfs_marker(runner_vm, vm0, "MODIFIED-IN-VM0")
+            assert _read_rootfs_marker(runner_vm, vm0) == "MODIFIED-IN-VM0"
 
             # VM1 must still have SHARED-MARKER (three-way independence)
             marker_vm1 = _read_rootfs_marker(runner_vm, vm1)
@@ -477,61 +479,54 @@ class TestRootfsIndependence:
                 f"Source VM should STILL have SHARED-MARKER despite VM0 modification, " \
                 f"got: {source_marker.stdout.strip()}"
 
+            _write_rootfs_marker(runner_vm, vm1, "MODIFIED-IN-VM1")
+            assert _read_rootfs_marker(runner_vm, vm1) == "MODIFIED-IN-VM1"
+            assert _read_rootfs_marker(runner_vm, vm0) == "MODIFIED-IN-VM0"
+            assert _read_rootfs_marker(runner_vm, src_vm) == "SHARED-MARKER"
+
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm1, "--force", check=False)
-            _run_mvm(runner_vm, "vm", "rm", vm0, "--force", check=False)
-            _run_mvm(runner_vm, "vm", "rm", src_vm, "--force", check=False)
-            if snap_id:
-                _run_mvm(runner_vm, "snapshot", "rm", snap_id, "--force", check=False)
-            _run_mvm(runner_vm, "network", "rm", net_name, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
+            for name in (vm1, vm0, src_vm):
+                listed = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+                if any(vm["name"] == name for vm in listed):
+                    _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
+                assert all(vm["name"] != name for vm in _json_success_data(
+                    _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+                ))
+            for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ):
+                if snapshot["source_vm_name"] == src_vm:
+                    _run_mvm(runner_vm, "snapshot", "rm", snapshot["id"], "--force", timeout=120)
+            assert all(snapshot["source_vm_name"] != src_vm for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ))
 
     def test_concurrent_restores(
         self,
         runner_vm: str,
         unique_vm_name: str,
-        unique_key_name: str,
-        unique_network_name: str,
     ) -> None:
-        """Concurrent restores from same snapshot; .restore.lock must serialize.
+        """Concurrent restores from the same snapshot must be independent.
 
         Verifies concurrent restores produce independent rootfs images:
         modifying one does NOT affect the other or the source VM.
         """
         src_vm = unique_vm_name
-        key_name = unique_key_name
-        net_name = unique_network_name
-        subnet = _unique_subnet(net_name)
         vm_b = f"cur-b-{uuid.uuid4().hex[:6]}"
         vm_c = f"cur-c-{uuid.uuid4().hex[:6]}"
-        net_b = f"net-b-{uuid.uuid4().hex[:6]}"
-        net_c = f"net-c-{uuid.uuid4().hex[:6]}"
-        sub_b = _unique_subnet(net_b)
-        sub_c = _unique_subnet(net_c)
         snap_id: str | None = None
 
         try:
-            _run_mvm(runner_vm, "network", "create", net_name,
-                     "--subnet", subnet, "--non-interactive")
-            _run_mvm(runner_vm, "network", "create", net_b,
-                     "--subnet", sub_b, "--non-interactive")
-            _run_mvm(runner_vm, "network", "create", net_c,
-                     "--subnet", sub_c, "--non-interactive")
-            _run_mvm(runner_vm, "key", "create", key_name,
-                     "--algorithm", "ed25519")
             ensure_vm_deps(runner_vm)
 
             _run_mvm(runner_vm, "vm", "create", src_vm,
                      "--image", "alpine:3.23",
-                     "--network", net_name,
-                     "--ssh-key", key_name,
-                     "--writeback")
-
-            assert wait_for_ssh(runner_vm, src_vm), f"SSH timeout on source VM {src_vm}"
+                     "--no-network", "--cloud-init-mode", "off", "--no-pci",
+                     "--disk-size", "512M", "--mem", "256M", "--vcpu", "1",
+                     "--writeback", timeout=180)
 
             # Write marker
-            _run_mvm(runner_vm, "ssh", src_vm, "-u", "root",
-                     "--cmd", f"echo 'CONCURRENT-MARKER' > {MARKER_PATH} && sync")
+            _write_rootfs_marker(runner_vm, src_vm, "CONCURRENT-MARKER")
             result = _run_mvm(runner_vm, "exec", src_vm, "--", f"cat {MARKER_PATH}")
             assert result.stdout.strip() == "CONCURRENT-MARKER"
 
@@ -543,15 +538,14 @@ class TestRootfsIndependence:
             _run_mvm(runner_vm, "vm", "resume", src_vm)
 
             # Launch two restore commands concurrently.
-            # The .restore.lock serializes phantom symlink updates.
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 fut_b = executor.submit(
                     _run_mvm, runner_vm, "snapshot", "restore", snap_id, vm_b,
-                    "--network", net_b,
+                    timeout=180,
                 )
                 fut_c = executor.submit(
                     _run_mvm, runner_vm, "snapshot", "restore", snap_id, vm_c,
-                    "--network", net_c,
+                    timeout=180,
                 )
 
                 done, not_done = concurrent.futures.wait(
@@ -575,8 +569,9 @@ class TestRootfsIndependence:
                     f"{vm} should have CONCURRENT-MARKER, got: {marker}"
 
             # --- Three-way independence check ---
-            # Modify VM B's rootfs via debugfs
+            # Modify VM B's active guest rootfs
             _write_rootfs_marker(runner_vm, vm_b, "MODIFIED-IN-B")
+            assert _read_rootfs_marker(runner_vm, vm_b) == "MODIFIED-IN-B"
 
             # VM C must still have CONCURRENT-MARKER
             marker_c2 = _read_rootfs_marker(runner_vm, vm_c)
@@ -592,12 +587,18 @@ class TestRootfsIndependence:
                 f"got: {source_marker.stdout.strip()}"
 
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_c, "--force", check=False)
-            _run_mvm(runner_vm, "vm", "rm", vm_b, "--force", check=False)
-            _run_mvm(runner_vm, "vm", "rm", src_vm, "--force", check=False)
-            if snap_id:
-                _run_mvm(runner_vm, "snapshot", "rm", snap_id, "--force", check=False)
-            _run_mvm(runner_vm, "network", "rm", net_c, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "network", "rm", net_b, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "network", "rm", net_name, "--force", check=False, timeout=120)
-            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
+            for name in (vm_c, vm_b, src_vm):
+                listed = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+                if any(vm["name"] == name for vm in listed):
+                    _run_mvm(runner_vm, "vm", "rm", name, "--force", timeout=120)
+                assert all(vm["name"] != name for vm in _json_success_data(
+                    _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list,
+                ))
+            for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ):
+                if snapshot["source_vm_name"] == src_vm:
+                    _run_mvm(runner_vm, "snapshot", "rm", snapshot["id"], "--force", timeout=120)
+            assert all(snapshot["source_vm_name"] != src_vm for snapshot in _json_success_data(
+                _run_mvm(runner_vm, "snapshot", "ls", "--json").stdout, list,
+            ))

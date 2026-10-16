@@ -1,6 +1,7 @@
 package infra
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -20,6 +21,12 @@ const BootstrapName = "mvmctl"
 
 // CLIName is the canonical CLI name. A compiled Go binary has one name.
 const CLIName = "mvm"
+
+// SystemBinaryPath is the canonical root-owned executable used for privileged dispatch.
+const SystemBinaryPath = "/usr/local/bin/mvm"
+
+// PrivilegedProtocolMarker selects the current fixed internal privileged protocol.
+const PrivilegedProtocolMarker = "__mvm_privileged_v1"
 
 // MvmctlGitHubRepo is the GitHub repository for mvmctl self-update.
 const MvmctlGitHubRepo = "AlanD20/mvmctl"
@@ -46,11 +53,66 @@ const MVMUnixGroup = CLIName
 
 const MVMDBFilename = "mvmdb.db"
 
-const MVMForwardChain = "MVM-FORWARD"
+// TrustedBinaryRoot contains root-owned Firecracker release pairs used by Jailer.
+const TrustedBinaryRoot = "/var/lib/mvmctl/binaries"
 
-const MVMPostroutingChain = "MVM-POSTROUTING"
+// JailerChrootBase is the fixed root-owned base directory for per-VM jails.
+const JailerChrootBase = "/var/lib/mvmctl/jailer"
 
-const MVMNocloudNetInputChain = "MVM-NOCLOUDNET-INPUT"
+// JailerInstanceRoot contains persistent root-owned VM authority records.
+const JailerInstanceRoot = "/var/lib/mvmctl/instances"
+
+// FirewallGenerationRoot contains the persistent root-owned firewall generation authority.
+const FirewallGenerationRoot = "/var/lib/mvmctl/firewall"
+
+// NetworkAuthorityRoot contains persistent root-owned managed-network identity records.
+const NetworkAuthorityRoot = "/var/lib/mvmctl/networks"
+
+// JailerCgroupParent is the fixed cgroup-v2 subtree used by canonical Jailer launches.
+const JailerCgroupParent = "mvmctl"
+
+// CgroupV2Root is the unified Linux cgroup-v2 mount point required by VM launches.
+const CgroupV2Root = "/sys/fs/cgroup"
+
+// JailerManifestFilename is the fixed per-VM launch manifest name.
+const JailerManifestFilename = "jailer-launch.json"
+
+// GuestAgentConfigDirectory is the persistent root-only guest directory containing agent authentication state.
+const GuestAgentConfigDirectory = "/etc/mvmctl"
+
+// GuestAgentTokenPath is the fixed persistent guest-agent authentication token leaf.
+const GuestAgentTokenPath = GuestAgentConfigDirectory + "/agent.token"
+
+const (
+	// VMRootfsFilename is the fixed managed VM root filesystem leaf.
+	VMRootfsFilename = "rootfs.img"
+	// VMCloudInitISOFilename is the fixed managed VM cloud-init ISO leaf.
+	VMCloudInitISOFilename = "cloud-init.iso"
+	// VMFirecrackerConfigFilename is the fixed managed Firecracker configuration leaf.
+	VMFirecrackerConfigFilename = "firecracker.json"
+	// VMFirecrackerLogFilename is the fixed managed Firecracker log leaf.
+	VMFirecrackerLogFilename = "firecracker.log"
+	// VMFirecrackerConsoleLogFilename is the fixed managed Firecracker console log leaf.
+	VMFirecrackerConsoleLogFilename = "firecracker.console.log"
+	// VMFirecrackerMetricsFilename is the fixed managed Firecracker metrics leaf.
+	VMFirecrackerMetricsFilename = "firecracker.metrics"
+	// VMFirecrackerAPISocketFilename is the fixed Firecracker API socket leaf.
+	VMFirecrackerAPISocketFilename = "firecracker.api.socket"
+	// VMVsockSocketFilename is the fixed Firecracker vsock host socket leaf.
+	VMVsockSocketFilename = "vsock.sock"
+	// VMConsoleSocketFilename is the fixed console relay socket leaf.
+	VMConsoleSocketFilename = "console.sock"
+	// VMFirecrackerPIDFilename is the fixed display-only Firecracker PID leaf.
+	VMFirecrackerPIDFilename = "firecracker.pid"
+	// VMConsolePIDFilename is the fixed display-only console relay PID leaf.
+	VMConsolePIDFilename = "console.pid"
+	// SnapshotRootfsFilename is the fixed managed snapshot root filesystem leaf.
+	SnapshotRootfsFilename = "rootfs.img"
+	// SnapshotMemoryFilename is the fixed managed snapshot memory leaf.
+	SnapshotMemoryFilename = "memory"
+	// SnapshotStateFilename is the fixed managed snapshot state leaf.
+	SnapshotStateFilename = "vmstate"
+)
 
 func SudoersDropInPath() string {
 	return fmt.Sprintf("/etc/sudoers.d/%s", CLIName)
@@ -65,27 +127,30 @@ var OverridableDefaults = map[string]map[string]any{
 		"ssh_timeout_sec": 10,
 	},
 	"defaults.vm": {
-		"vcpu_count":          1,
-		"mem_size_mib":        512,
-		"ssh_user":            "root",
-		"user_password":       "password",
-		"dns_server":          "1.1.1.1",
-		"root_uid":            0,
-		"root_gid":            0,
-		"user_uid":            1000,
-		"user_gid":            1000,
-		"pci_enabled":         true,
-		"nested_virt":         false,
-		"enable_logging":      true,
-		"enable_metrics":      false,
-		"enable_console":      false,
-		"lsm_flags":           "landlock,lockdown,yama,integrity,selinux,bpf",
-		"boot_args":           "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3 no_timer_check clocksource=kvm-clock systemd.show_status=false",
-		"guest_mac_prefix":    "02:FC",
-		"vsock_port":          1024,
-		"allow_remote_exec":   false,
-		"vsock_user":          "root",
-		"vsock_probe_timeout": 5,
+		"vcpu_count":              1,
+		"mem_size_mib":            512,
+		"ssh_user":                "root",
+		"user_password":           "password",
+		"dns_server":              "1.1.1.1",
+		"root_uid":                0,
+		"root_gid":                0,
+		"user_uid":                1000,
+		"user_gid":                1000,
+		"pci_enabled":             true,
+		"nested_virt":             false,
+		"enable_logging":          true,
+		"enable_metrics":          false,
+		"enable_console":          false,
+		"lsm_flags":               "landlock,lockdown,yama,integrity,selinux,bpf",
+		"boot_args":               "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3 no_timer_check clocksource=kvm-clock systemd.show_status=false",
+		"guest_mac_prefix":        "02:FC",
+		"vsock_port":              1024,
+		"vsock_user":              "root",
+		"vsock_probe_timeout":     5,
+		"cgroup_vmm_headroom_mib": 128,
+		"cgroup_cpu_weight":       100,
+		"cgroup_pids_max":         256,
+		"cgroup_swap_max_bytes":   0,
 	},
 	"defaults.network": {
 		"name":        "net",
@@ -104,26 +169,13 @@ var OverridableDefaults = map[string]map[string]any{
 		"remote_list_cache_ttl": 14400,
 	},
 	"defaults.firecracker": {
-		"log_level":               "Debug",
-		"log_filename":            "firecracker.log",
-		"serial_output_filename":  "firecracker.console.log",
-		"metrics_filename":        "firecracker.metrics",
-		"api_socket_filename":     "firecracker.api.socket",
-		"pid_filename":            "firecracker.pid",
-		"config_filename":         "firecracker.json",
-		"console_socket_filename": "console.sock",
-		"console_pid_filename":    "console.pid",
-		"vsock_filename":          "vsock.sock",
+		"log_level": "Debug",
 	},
 	"defaults.volume": {
 		"cache_type": "Unsafe",
 	},
 	"defaults.cloudinit": {
-		"iso_name":                 "cloud-init.iso",
-		"nocloud_port_range_start": 8000,
-		"nocloud_port_range_end":   9000,
-		"nocloud_max_port_retries": 100,
-		"nocloud_kill_after":       "5m",
+		"nocloud_kill_after": "5m",
 	},
 	"defaults.binary": {
 		"remote_version_limit": 5,
@@ -132,11 +184,7 @@ var OverridableDefaults = map[string]map[string]any{
 		"listing_style": "short",
 	},
 	"settings": {
-		"guestfs_enabled":  false,
-		"firewall_backend": "nftables",
-	},
-	"settings.firewall": {
-		"iptables_xtcomment": true,
+		"guestfs_enabled": false,
 	},
 }
 
@@ -239,6 +287,10 @@ const HTTPTimeoutSha256SidecarS = 15
 
 // --- Default versions ---
 const DefaultFirecrackerCIVersion = "v1.15"
+
+// QualifiedVMLaunchFirecrackerVersion is the exact Firecracker/Jailer pair admitted for v0.3.0 VM execution.
+const QualifiedVMLaunchFirecrackerVersion = "1.17.0"
+
 const MinKernelMajor = 5
 const MinKernelMinor = 10
 
@@ -269,6 +321,9 @@ const DownloadRetryBackoff = 2.0
 // --- Cloud-init ---
 const RequiredISOTool = "cloud-localds"
 const NoCloudNetBindTimeoutS = 5.0
+
+// NoCloudNetPort is reserved for NoCloud on each managed network's gateway.
+const NoCloudNetPort = 8000
 
 // --- Console ---
 const ConsoleSocketTimeoutS = 2.0
@@ -337,19 +392,19 @@ const DefaultSysctlConfPath = "/etc/sysctl.d/mvmctl.conf"
 // --- Libguestfs ---
 const DefaultLibguestfsSeedDir = "/var/lib/cloud/seed/nocloud"
 
+// These are the only offline NoCloud datasource values generated for VM boot.
+const NoCloudISODatasource = "nocloud"
+const NoCloudInjectDatasource = "nocloud;s=file://" + DefaultLibguestfsSeedDir + "/"
+
 // --- Firecracker GitHub ---
 const FirecrackerGithubDownloadURL = "https://github.com/firecracker-microvm/firecracker/releases/download"
 const FirecrackerGitRepoURL = "https://github.com/firecracker-microvm/firecracker.git"
 
 // --- Privileged system binaries ---
 var PrivilegedBinaries = map[string]string{
-	"/usr/sbin/ip":               "iproute2",
-	"/usr/sbin/iptables":         "iptables",
-	"/usr/sbin/iptables-restore": "iptables",
-	"/usr/sbin/iptables-save":    "iptables",
-	"/usr/sbin/nft":              "nftables",
-	"/usr/sbin/sysctl":           "procps",
-	"/usr/sbin/modprobe":         "kmod",
+	"/usr/sbin/ip":       "iproute2",
+	"/usr/sbin/sysctl":   "procps",
+	"/usr/sbin/modprobe": "kmod",
 }
 
 // PrivilegedBinariesOrdered returns the keys of PrivilegedBinaries in
@@ -357,10 +412,6 @@ var PrivilegedBinaries = map[string]string{
 // needed for deterministic sudoers content generation.
 var PrivilegedBinariesOrdered = [...]string{
 	"/usr/sbin/ip",
-	"/usr/sbin/iptables",
-	"/usr/sbin/iptables-restore",
-	"/usr/sbin/iptables-save",
-	"/usr/sbin/nft",
 	"/usr/sbin/sysctl",
 	"/usr/sbin/modprobe",
 }
@@ -392,7 +443,6 @@ var RequiredBinaries = []string{
 	"ip", "modprobe", "lsmod", "groupadd", "usermod",
 	"groupdel", "visudo", "ssh-keygen", "tar",
 	"qemu-img", "mkfs.ext4", "blkid", "sfdisk", "dumpe2fs",
-	"iptables", "nft",
 }
 
 // CloudInitMode type moved to mvmctl/internal/infra/model (model.CloudInitMode).
@@ -465,25 +515,15 @@ var (
 
 func GetCacheDir() (string, error) {
 	cacheDirOnce.Do(func() {
-		override, ok := EnvGet("CACHE_DIR")
-		if ok && override != "" {
-			var resolved string
-			resolved, cacheDirErr = filepath.Abs(override)
-			if cacheDirErr != nil {
-				cacheDirErr = fmt.Errorf("invalid cache dir path: %w", cacheDirErr)
-				return
-			}
-			// Ensure the directory exists with proper permissions.
-			if err := ensureDirAndChown(resolved); err != nil {
-				cacheDirErr = fmt.Errorf("create cache dir: %w", err)
-				return
-			}
-			cacheDirVal = resolved
-			return
-		}
-		path := filepath.Join(GetRealHome(), ".cache", ProjectName)
-		if err := ensureDirAndChown(path); err != nil {
-			cacheDirErr = fmt.Errorf("create default cache dir: %w", err)
+		override, _ := EnvGet("CACHE_DIR")
+		path, err := resolveUserDir(
+			context.Background(),
+			defaultUserCacheDir,
+			override,
+			realDefaultUserDirDeps(),
+		)
+		if err != nil {
+			cacheDirErr = fmt.Errorf("create cache dir: %w", err)
 			return
 		}
 		cacheDirVal = path
@@ -492,21 +532,15 @@ func GetCacheDir() (string, error) {
 }
 
 func GetConfigDir() (string, error) {
-	override, ok := EnvGet("CONFIG_DIR")
-	if ok && override != "" {
-		resolved, err := filepath.Abs(override)
-		if err != nil {
-			return "", fmt.Errorf("invalid config dir path: %w", err)
-		}
-		// Ensure the directory exists with proper permissions.
-		if err := ensureDirAndChown(resolved); err != nil {
-			return "", fmt.Errorf("create config dir: %w", err)
-		}
-		return resolved, nil
-	}
-	path := filepath.Join(GetRealHome(), ".config", ProjectName)
-	if err := ensureDirAndChown(path); err != nil {
-		return "", fmt.Errorf("create default config dir: %w", err)
+	override, _ := EnvGet("CONFIG_DIR")
+	path, err := resolveUserDir(
+		context.Background(),
+		defaultUserConfigDir,
+		override,
+		realDefaultUserDirDeps(),
+	)
+	if err != nil {
+		return "", fmt.Errorf("create config dir: %w", err)
 	}
 	return path, nil
 }
@@ -527,7 +561,15 @@ func GetTempDir() string {
 		}
 		return override
 	}
-	path := filepath.Join("/tmp", ProjectName)
+	// Keep ordinary-user temporary work beneath that user's selected cache.
+	// A single /tmp/mvmctl directory lets the first operator's 0700 ownership
+	// prevent every other enrolled operator from pulling images.
+	path := filepath.Join(GetRealHome(), ".cache", ProjectName, "tmp")
+	if cacheDir, err := GetCacheDir(); err == nil {
+		path = filepath.Join(cacheDir, "tmp")
+	} else {
+		slog.Warn("failed to resolve cache directory for temporary work", "error", err)
+	}
 	if err := ensureDirAndChown(path); err != nil {
 		slog.Warn("failed to create temp directory", "path", path, "error", err)
 	}
@@ -615,9 +657,9 @@ func GetVolumesDir() string {
 	return path
 }
 
-// GetVolumePath returns the filesystem path for a volume with the given name and format.
-func GetVolumePath(name, format string) string {
-	return filepath.Join(GetVolumesDir(), fmt.Sprintf("%s.%s", name, format))
+// GetVolumePath returns the canonical managed raw-volume path for a volume ID.
+func GetVolumePath(volumeID string) string {
+	return filepath.Join(GetVolumesDir(), volumeID+".raw")
 }
 
 func GetBinDir() string {
@@ -680,23 +722,6 @@ func GetSnapshotDir(id string) string {
 	path := filepath.Join(cacheDir, "snapshots", id)
 	if err := ensureDirAndChown(path); err != nil {
 		slog.Warn("failed to create snapshot directory", "path", path, "error", err)
-	}
-	return path
-}
-
-func GetWarmImagesDir() string {
-	pool, ok := EnvGet("WARM_POOL")
-	if ok && pool == "disk" {
-		path := filepath.Join(GetImagesDir(), "ready")
-		if err := ensureDirAndChown(path); err != nil {
-			slog.Warn("failed to create warm image directory", "path", path, "error", err)
-		}
-		return path
-	}
-	// default: tmpfs
-	path := filepath.Join(GetTempDir(), "ready")
-	if err := ensureDirAndChown(path); err != nil {
-		slog.Warn("failed to create warm image directory", "path", path, "error", err)
 	}
 	return path
 }

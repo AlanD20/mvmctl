@@ -3,6 +3,7 @@ package inputs
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/vsock"
@@ -11,7 +12,8 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ExecInput holds the input for executing a command inside a VM via vsock.
+// ExecInput holds an ordinary host-to-VM command request carried over vsock.
+// VM-to-VM authorization uses VMToVMExecPolicyCreateInput and never shares the IP traffic-policy plane.
 type ExecInput struct {
 	Identifier string            `json:"target"            yaml:"target"`
 	Command    string            `json:"command,omitempty" yaml:"cmd,omitempty"` // empty = interactive shell
@@ -20,6 +22,8 @@ type ExecInput struct {
 	Port       int               `json:"port"              yaml:"port"`
 	Env        map[string]string `json:"env,omitempty"     yaml:"env,omitempty"`
 	NoSync     bool              `json:"no_sync,omitempty" yaml:"no_sync,omitempty"`
+	// AllowVMExec opens one process-bound source session; directional policy still authorizes its request.
+	AllowVMExec bool `json:"allow_vm_exec,omitempty" yaml:"allow_vm_exec,omitempty"`
 }
 
 // ResolvedExecInput holds the resolved VM and vsock config for exec operations.
@@ -31,6 +35,12 @@ type ResolvedExecInput struct {
 
 // Validate checks that the exec input has a valid identifier.
 func (i *ExecInput) Validate() error {
+	if i.AllowVMExec && i.Command == "" {
+		return errs.New(errs.CodeValidationFailed, "VM-to-VM execution requires a non-interactive outer command")
+	}
+	if i.Port < 0 || uint64(i.Port) > math.MaxUint32 {
+		return errs.New(errs.CodeValidationFailed, "vsock port must be within the supported range")
+	}
 	if i.Identifier == "" {
 		return fmt.Errorf("VM identifier is required")
 	}

@@ -207,19 +207,6 @@ func Apply(
 						}
 					}
 				}
-			case "binary":
-				result := op.BinaryRemove(
-					ctx,
-					inputs.BinaryInput{Identifiers: []string{name}, IncludeDeleted: true},
-					true,
-				)
-				if result.HasErrors() {
-					for _, r := range result.Errors() {
-						if r.ToError() != nil {
-							removeErr = r.ToError()
-						}
-					}
-				}
 			case "snapshot":
 				result := op.SnapshotRemove(ctx, inputs.SnapshotInput{Identifiers: []string{name}})
 				if result.HasErrors() {
@@ -231,6 +218,7 @@ func Apply(
 				}
 			default:
 				slog.Warn("unsupported resource type for removal in env workflow", "type", stepType, "target", target)
+				continue
 			}
 			if removeErr != nil {
 				slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", removeErr)

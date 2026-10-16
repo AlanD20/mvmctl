@@ -1,5 +1,8 @@
 # How Agents Write System Tests
 
+This is the authoring guide for L0, L1, and L2 scenarios. The execution-tier architecture, fixture scope, runner
+protocol, and known limitations live in [system-test-architecture.md](../system-test-architecture.md).
+
 > **See also:** [ADR-0012](../adr/0012-unified-test-architecture.md) for the architectural decisions and rationale behind this document.
 >
 > **See also:** [HOW_AGENTS_WRITE_UNIT_TESTS.md](HOW_AGENTS_WRITE_UNIT_TESTS.md) for L0/L1 test patterns (table-driven tests, in-memory repos, FakeRunner, in-memory SQLite).
@@ -23,7 +26,7 @@
 
 ## Purpose
 
-This document is a **specification and how-to reference** for writing and classifying tests at all three levels. It defines:
+This document explains how to write and classify tests at all three levels. It defines:
 
 - **L0** (pure function Go tests) — when to write them, what they prove
 - **L1** (hermetic Go tests) — when to use in-memory SQLite, temp dirs, `FakeRunner`
@@ -58,8 +61,8 @@ Agents do NOT invent test architecture. They translate the scenario catalog (the
   │  └─────────────────────────────────────────┘ │
   └─────────────────────────────────────────────┘
 
-Critical: L2 is the ground truth. L0 and L1 catch bugs earlier during
-`go test ./...` but NEVER replace L2 coverage. A feature is not considered
+Critical: L2 is the ground truth. L0 and L1 catch bugs earlier during the
+unprivileged Go selection in `scripts/run-go-ci-tests.sh` but NEVER replace L2 coverage. A feature is not considered
 tested until it has an L2 test. Passing L0/L1 alone means nothing — the
 feature could be completely broken at the subprocess level.
 ```
@@ -255,20 +258,22 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `vm create --ip` / `--mac` | **L2** | Real Firecracker spawn |
 | `vm create --console` | **L2** | Real Firecracker spawn |
 | `vm create --no-pci` | **L2** | Real Firecracker spawn |
+| canonical Jailer launch, cgroup enforcement, and cleanup | **L2** | Real chroot, trusted pair, cgroup membership and values, lifecycle, volume, and snapshot behavior |
 | `vm create --enable-logging` / `--enable-metrics` | **L2** | Verify files on disk |
 | `vm create --cloud-init-mode <mode>` | **L2** | Real Firecracker + cloud-init |
-| `vm create --nocloud-net-port` | **L2** | Real Firecracker + network |
+| `vm create --nocloud-net-port` (rejected) | **L2** | Custom ports must fail before effects; NoCloud uses fixed gateway TCP 8000 |
+| `vm create --no-network` | **L2** | Real isolated VM with no guest NIC, restart/reboot, and vsock agent |
 | `vm create --count N` | **L2** | Multiple Firecracker spawns |
 | `vm create --volume` | **L2** | Real volume attach |
 | `vm create --ssh-key` | **L2** | Real SSH key injection |
 | `vm create --nested-virt` | **L2** | Real KVM passthrough |
 | `vm create --cpu-template` | **L2** | Real Firecracker config |
 | `vm create --cloudinit-config` | **L2** | Real cloud-init |
-| `vm ls` / `vm ls --json` | L1 | DB query + JSON |
-| `vm ls --json` empty | L1 | DB query |
+| `vm ls` / `vm ls --json` | **L2** | Root-observed runtime reconciliation plus DB projection and JSON |
+| `vm ls --json` empty | **L2** | Root authority absence and empty JSON projection |
 | `vm ps` / `vm ps --json` | **L2** | Real process table |
-| `vm inspect` / `--json` / `--tree` | L1 | DB query + JSON |
-| `vm inspect` by IP | L1 | DB query + JSON |
+| `vm inspect` / `--json` / `--tree` | **L2** | Running VM inspection requires authenticated root runtime and protected cgroup reads |
+| `vm inspect` by IP | **L2** | Selector lookup followed by authenticated runtime/cgroup observation |
 | `vm start / stop / reboot / pause / resume` | **L2** | Real process signaling |
 | `vm stop --force` | **L2** | Real process kill |
 | `vm rm` / `vm rm --force` | **L2** | Real process + file cleanup |
@@ -296,43 +301,43 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 
 | Scenario | Verdict | Why |
 |----------|---------|-----|
-| `network create --subnet <cidr>` | **L2** | Real bridge + firewall |
+| `network create --subnet <cidr>` | **L2** | Real bridge + firewall; no prompt-suppression flag |
 | `network create` without `--subnet` | L1 | Cobra validation |
-| `network create --non-interactive` | **L2** | Real bridge |
 | `network create` invalid CIDR | L1 | Cobra validation |
 | `network create` duplicate name/subnet | **L2** | Real DB constraint |
-| `network create --no-nat` | **L2** | Verify no MASQUERADE rule |
+| `network create --no-nat` | **L2** | Verify no managed nftables NAT rule |
 | `network create --ipv4-gateway` | **L2** | Real bridge IP config |
-| `network create --nat-gateways` | **L2** | Real NAT config |
+| `network create --nat-gateways` (removed) | **L2** | Reject the caller-selected uplink flag before effects |
 | `network ls` / `network ls --json` | L1 | DB query + JSON |
 | `network inspect` / `--json` / `--tree` | L1 | DB query + JSON |
 | `network rm` / `network rm --force` | **L2** | Real bridge + firewall cleanup |
 | `network rm <nonexistent>` | L1 | Error handling |
 | `network rm <name1> <name2>` | **L2** | Multiple bridge cleanup |
 | `network default` / `network default <nonexistent>` | L1 | DB update |
-| `network sync` / `network sync --json` | **L2** | Real bridge + firewall recreation |
-| Sync after bridge deletion | **L2** | Real bridge deletion + recovery |
+| `network sync` / `network sync --json` | **L2** | Exact bridge and firewall reconciliation; prior-boot recovery requires a real reboot |
+| `policy traffic create/ls/inspect/rm` | **L2** | Exact source, protocol, and port allows; same/cross-network default deny and replies |
+| `policy exec create/ls/rm` | **L2** | Directional non-root VM-to-VM execution without granting TCP/UDP traffic |
+| Same-boot sync after bridge deletion | **L2** | Reject missing recorded bridge without silently re-creating it; exact removal remains available |
 
 ### `mvm volume`
 
 | Scenario | Verdict | Why |
 |----------|---------|-----|
-| `volume create <name> <size>` | **L2** | Real file creation (truncate/qemu-img) |
-| `volume create --format qcow2` | **L2** | Real qemu-img |
-| `volume create --format raw` | **L2** | Real file creation |
+| `volume create <name> <size>` | **L2** | Real raw backing creation and authoritative inspection |
+| `volume create --format` (removed) | **L2** | Reject raw/QCOW2/VMDK flag variants without a record or backing file; QCOW2 image import remains supported |
 | `volume create <invalid>` | L1 | Cobra validation |
 | `volume create` duplicate name | L1 | DB constraint |
 | `volume create --read-only` | **L2** | Real file permissions |
 | `volume ls` / `volume ls --json` | L1 | DB query + JSON |
 | `volume ls` empty | L1 | DB query |
-| `volume inspect` / `--json` | L1 | DB query + JSON |
+| `volume inspect` / `--json` | **L2** | Root-brokered backing inspection and versioned JSON |
 | `volume inspect` nonexistent | L1 | Error handling |
 | `volume rm` / `--force` | **L2** | Real file deletion |
 | `volume rm` nonexistent | L1 | Error handling |
 | `volume rm <name1> <name2>` | **L2** | Real file deletion |
 | `volume rm` partial failure | **L2** | Real file deletion |
 | `volume resize` | **L2** | Real file resize |
-| `volume resize` shrink | **L2** | Real file resize |
+| `volume resize` shrink | **L2** | Reject shrink and prove backing identity/size unchanged |
 | `volume attach` / `volume detach` | **L2** | Real Firecracker API + VM lifecycle |
 | Invariants: available→attached→available | **L2** | Real VM attach/detach |
 | Volume hotplug / hotunplug | **L2** | Real Firecracker PCI hotplug |
@@ -378,12 +383,12 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `bin ls --json` | L1 | DB query + JSON |
 | `bin ls --remote` / `--remote --limit` | **L2** | Real network I/O |
 | `bin pull <version>` | **L2** | Real HTTP download |
-| `bin pull --force` / `--default` / `--git-ref` | **L2** | Real HTTP download / Docker |
+| `bin pull <version> --force` / `--default` | **L2** | Root-authoritative release install and optional real download |
 | `bin pull` nonexistent | L1 | Error handling |
-| `bin rm` / `bin rm --version` | **L2** | Real file deletion |
+| `bin rm <exact-version>...` | **L2** | Root-authoritative release removal |
 | `bin rm` nonexistent | L1 | Error handling |
 | `bin default` / `bin default <nonexistent>` | L1 | DB update |
-| Service symlinks survive cache clean | **L2** | Real filesystem symlinks |
+| Trusted releases survive cache clean | **L2** | Root store is independent of the user cache |
 
 ### `mvm exec`
 
@@ -448,9 +453,9 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 
 | Scenario | Verdict | Why |
 |----------|---------|-----|
-| `run nocloudnet serve --help` | L1 | Cobra output |
-| `run console relay --help` | L1 | Cobra output |
-| `run provision --help` | L1 | Cobra output |
+| `run nocloudnet serve --help` and missing identity | L2 | Installed CLI help and required-flag rejection |
+| `run console relay --help` and missing identity | L2 | Installed CLI help and required-flag rejection |
+| removed `run provision` absent from `run --help` | L2 | Installed CLI command-list regression guard |
 
 ### Invariants, Cross-Resource, and Consistency
 
@@ -476,10 +481,11 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 Every L2 test runs **inside a disposable Firecracker VM** with nested KVM, not directly on the host:
 
 ```
-Host (no mvm state at all)
+Outer host (only controller-owned disposable test resources)
 │
 └── Runner VM (custom base image mvm-test-runner:<version>)
-    ├── /usr/local/bin/mvm          ← built binary, baked in
+    ├── /opt/mvmctl-test/mvm-candidate ← root-owned staged release candidate
+    ├── /usr/local/bin/mvm          ← installed through host install-system
     ├── /tests/system/              ← test suite, baked in
     ├── /mnt/                       ← shared RO asset volume
     │
@@ -493,9 +499,11 @@ Host (no mvm state at all)
 ### Runner VM Lifecycle
 
 ```
-1. Build mvm binary on host
-2. Create runner VM from custom base image (mvm-test-runner:<version>)
-3. Provision: mount shared asset volume, run mvm init, pull cache hits
+1. Build `MVM_CANDIDATE_BINARY` on the host without replacing the installed `MVM_BINARY` controller
+2. Derive the image tag from an isolated candidate version probe and create a runner VM from that image
+3. Stage the candidate in the runner, invoke `host install-system`, initialize through exact
+   `/usr/local/bin/mvm`, mount the shared volume, run unprivileged
+   `/usr/local/bin/mvm init --binary-version 1.17.0`, and pull cache hits through that same installed path
 4. Execute pytest <test-file> directly inside the VM
 5. Destroy runner VM when done
 ```
@@ -507,7 +515,7 @@ Runner VMs are created fresh per test session, not restored from snapshots. See 
 The runner VM is created ONCE per test session (session-scoped pytest fixture). All tests in the session share the same VM. This is safe because:
 
 - The VM is **ephemeral** — created at session start, destroyed at session end. No state leaks between sessions.
-- Within a session, tests are ORDERED by dependency (create → read → update → delete), not by "safe vs destructive." A test that runs `cache clean --force` may break subsequent tests in the same session — but that's a test ordering bug, not a global state corruption. The NEXT session starts clean.
+- Within a session, mutating tests use unique names and function-scoped resources with checked teardown. Do not depend on another test's creation or cleanup order. Run runner-wide destructive cases in a dedicated disposable runner.
 - For PARALLEL execution, each worker gets its OWN runner VM. No state sharing across workers.
 - The `zzz_destructive/` pattern is replaced by explicit markers. The runner VM makes ordering a convenience concern, not a correctness requirement.
 
@@ -519,12 +527,12 @@ network-dependent skips:
 - Alpine 3.23 image (for fast VM creation)
 - Ubuntu 24.04 image (for nested virt tests)
 - Ubuntu minimal 24.04 image (minimal base for builder VM)
-- Firecracker binary 1.16.0 (for hotplug tests)
+- Firecracker/Jailer 1.17.0 (the exact approved VM launch pair; older audited archives are not VM-launch fallbacks)
 - Firecracker kernel v1.15 (default)
 
 The official kernel 7.0.11 is **not pre-baked** into the base image — it is
 pulled on demand by the orchestrator (or pre-seeded in the host asset mirror)
-via `mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm,btrfs`.
+via `/usr/local/bin/mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm,btrfs`.
 The shared asset volume contains the asset mirror contents, which includes
 pre-downloaded kernels, images, and binaries if the host mirror was populated
 before `--prepare`.
@@ -549,13 +557,22 @@ The orchestrator (`scripts/run-system-tests.py`) creates and provisions the VM b
 running pytest, and destroys it after. The fixture just provides the VM name to
 tests so they can reference it when calling `_run_mvm(runner_vm, ...)`.
 
+`_run_mvm` always executes exact `/usr/local/bin/mvm`. Do not change it back to PATH lookup and do not copy a candidate
+directly onto that path; doing either would bypass the administrator installation path that the L2 suite qualifies.
+On the outer host, `MVM_BINARY` is only the resource controller and `MVM_CANDIDATE_BINARY` is the artifact under test;
+the orchestrator rejects path, symlink, and hard-link aliases between them.
+
 ### Test Timeout Policy: CLI flags vs subprocess timeouts
 
 **These are two distinct concerns — do not conflate them.**
 
 **CLI `--timeout` flags** (e.g., `mvm exec --timeout`, `mvm ssh --timeout`):
 
-These are **connect/probe timeouts** only (per ADR-0013). They control how long the CLI waits for the target to establish a connection. Default: **5s**, absolute max: **10s**. Once connected, the operation runs unbounded. See `CONTEXT.md` for the full taxonomy.
+These are **connect/probe timeouts** only (per ADR-0013). Defaults are command-specific: `mvm exec` uses
+`defaults.vm.vsock_probe_timeout` (5 seconds), while `mvm ssh` uses `settings.vm.ssh_timeout_sec` (10 seconds).
+A positive explicit `--timeout` overrides the configured connection budget; there is no universal 10-second maximum.
+For a newly created guest, choose a connection budget that allows guest-agent startup rather than treating Firecracker
+API readiness as guest readiness. Once connected, command execution remains unbounded. See `CONTEXT.md` for the taxonomy.
 
 **Subprocess timeouts in test infrastructure** (`timeout=` parameter of `_run_mvm()` / `_guest_run()`):
 
@@ -565,8 +582,8 @@ These control how long `subprocess.run()` waits for the `mvm` command to complet
 def _run_mvm(
     vm_name: str, *args: str, check: bool = True, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
-    """Run an mvm command. vm_name is ignored — already inside test VM."""
-    cmd = ["mvm", *args]
+    """Run the installed mvm CLI. vm_name is ignored inside the test VM."""
+    cmd = ["/usr/local/bin/mvm", *args]
     result = subprocess.run(
         cmd, capture_output=True, text=True,
         timeout=timeout + 30,  # 90s total by default
@@ -590,39 +607,10 @@ Individual slow operations use explicit higher timeouts:
 
 ### Test File Pattern
 
-```python
-"""Volume CRUD system tests — runs inside runner VM."""
-
-from __future__ import annotations
-
-import json
-import pytest
-
-from tests.system.conftest import _run_mvm
-
-pytestmark = [pytest.mark.system, pytest.mark.domain_volume]
-
-
-class TestVolumeLifecycle:
-    def test_volume_create(self, runner_vm):
-        """Create a volume and verify size via --json."""
-        result = _run_mvm(
-            runner_vm, "volume", "create", "myvol", "1G", "--json", timeout=30
-        )
-        data = json.loads(result.stdout)
-        assert data["name"] == "myvol"
-        assert data["size_bytes"] == 1073741824
-        assert data["status"] == "available"
-    
-    def test_volume_rm(self, runner_vm):
-        """Remove a volume and verify it is gone from listing."""
-        _run_mvm(runner_vm, "volume", "create", "myvol2", "512M", "--json")
-        _run_mvm(runner_vm, "volume", "rm", "myvol2", "--force")
-        
-        result = _run_mvm(runner_vm, "volume", "ls", "--json")
-        volumes = json.loads(result.stdout)
-        assert not any(v["name"] == "myvol2" for v in volumes)
-```
+Use [the current raw-volume system case](../../tests/system/volume/test_volume.py) as the file pattern:
+`TestRawVolumeAuthoritativeStorage` invokes the installed CLI, decodes the versioned JSON envelope with
+`_json_success_data`, uses a unique small volume, and checks removal in `finally`. For VM-mutating tests, use a
+function-scoped fixture and assert that its VM and dependent resources are absent after teardown.
 
 ### What L2 Tests Assert
 
@@ -630,7 +618,7 @@ L2 tests assert on **real side effects** — what the user sees and what the sys
 
 - CLI output (JSON fields, return codes, error messages)
 - Files on disk (key files, volume files, log files, config files)
-- System state (bridges, iptables rules, processes)
+- System state (managed namespaces and links, nftables rules, processes)
 - Guest state (SSH connectivity, block devices, CPU features)
 
 L2 tests do NOT mock anything. The binary is real. The subprocesses are real. The infrastructure is real (inside the VM).
@@ -727,6 +715,9 @@ Dead code deleted and docs consolidated:
 
 ## Before Submitting, Self-Check
 
+Use the applicable items for the changed surface, following the focused
+[verification requirements in AGENTS.md](../../AGENTS.md#verification).
+
 ```
 [ ] Did I classify the scenario using the decision tree?
 [ ] L0: No I/O, no DB, no subprocess — just a table-driven Go test?
@@ -737,7 +728,19 @@ Dead code deleted and docs consolidated:
 [ ] L2 tests: Do they assert on real side effects (output, files, system state)?
 [ ] L1/L0 tests: Do they follow HOW_AGENTS_WRITE_UNIT_TESTS.md patterns?
 [ ] Is every destructive test explicitly marked (not ordered by filename)?
-[ ] Does `go test ./...` pass? (checks L0/L1)
-[ ] Does `pytest tests/system/` pass inside the runner VM? (checks L2)
-[ ] Zero skipped tests? (skip = broken environment or incomplete test)
+[ ] Do focused format, vet, and Go tests pass when L0/L1 code changed?
+[ ] Does collection pass for the affected Python system tests?
+[ ] Does the smallest affected orchestrator or runner test pass?
+[ ] When exercising CLI behavior, does the affected L2 scenario or domain pass in its prescribed environment?
+[ ] Zero skipped tests in the selected scope? (skip = broken environment or incomplete test)
 ```
+
+Complete CI remains the integration owner's gate before declaring the PR or
+release ready. Run the full system-test matrix at the release gate or when the
+current task explicitly requests it, using
+[How to Run System Tests](HOW_TO_RUN_SYSTEM_TESTS.md#41-run-all-tests-release-gate-only)
+and [RC QA](../RC_QA.md). Do not run the entire pytest tree as a default
+per-change check. A focused pass does not replace release qualification; report
+the scope tested and any pending runtime verification. Host-direct and Tier 3
+execution still require the explicit authorization and clean environment defined
+by those guides and `AGENTS.md`.

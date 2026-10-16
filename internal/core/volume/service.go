@@ -4,15 +4,18 @@ package volume
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
+	"golang.org/x/sys/unix"
+
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/lib/system"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
@@ -28,39 +31,40 @@ func NewService(repo Repository) *Service {
 
 // CreateDisk creates a disk file on the filesystem and persists the volume record.
 func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model.VolumeItem, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, errs.WrapMsg(errs.CodeVolumeError, "create volume cancelled", err)
+	}
 	parentDir := filepath.Dir(vol.Path)
-	if err := os.MkdirAll(parentDir, os.ModePerm); err != nil {
+	if err := os.MkdirAll(parentDir, 0700); err != nil {
 		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("create disk directory: %s", err))
 	}
-
-	switch vol.Format {
-	case model.VolumeFormatRaw:
-		_, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{"fallocate", "-l", strconv.FormatInt(vol.SizeBytes, 10), vol.Path},
-			system.RunCmdOpts{Check: true, Capture: true},
-		)
-		if err != nil {
-			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("fallocate failed: %s", err.Error()))
+	// CRITICAL: Root admission rejects group-writable files. Allocate through the
+	// exclusive 0600 descriptor so umask and path replacement cannot change the inode.
+	file, err := os.OpenFile(vol.Path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeVolumeError, "create exclusive raw volume", err)
+	}
+	allocationErr := file.Chmod(0600)
+	if allocationErr == nil {
+		allocationErr = unix.Fallocate(int(file.Fd()), 0, 0, vol.SizeBytes)
+	}
+	if allocationErr == nil {
+		allocationErr = file.Sync()
+	}
+	if err := errors.Join(allocationErr, file.Close()); err != nil {
+		cleanupErr := os.Remove(vol.Path)
+		if errors.Is(cleanupErr, os.ErrNotExist) {
+			cleanupErr = nil
 		}
-	case model.VolumeFormatQCOW2:
-		_, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{
-				"qemu-img",
-				"create",
-				"-f",
-				string(model.VolumeFormatQCOW2),
-				vol.Path,
-				strconv.FormatInt(vol.SizeBytes, 10),
-			},
-			system.RunCmdOpts{Check: true, Capture: true},
-		)
-		if err != nil {
-			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("qemu-img create failed: %s", err.Error()))
+		return nil, errs.WrapMsg(errs.CodeVolumeError, "allocate raw volume", errors.Join(err, cleanupErr))
+	}
+	if err := ctx.Err(); err != nil {
+		cleanupErr := os.Remove(vol.Path)
+		if errors.Is(cleanupErr, os.ErrNotExist) {
+			cleanupErr = nil
 		}
-	default:
-		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("Unsupported format: %s", vol.Format))
+		return nil, errs.WrapMsg(errs.CodeVolumeError, "create volume cancelled before record publication",
+			errors.Join(err, cleanupErr))
 	}
 
 	if err := s.repo.Upsert(ctx, vol); err != nil {
@@ -70,12 +74,22 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 	return vol, nil
 }
 
-// Remove deletes the disk file and its DB record. Always returns nil.
+// Remove deletes authoritative storage before removing its local database projection.
 func (s *Service) Remove(ctx context.Context, volume *model.VolumeItem) error {
-	_ = s.repo.Delete(ctx, volume.ID)
-
-	if _, err := os.Stat(volume.Path); err == nil {
-		_ = os.Remove(volume.Path)
+	cacheRoot, err := infra.GetCacheDir()
+	if err != nil {
+		return err
+	}
+	if _, err := jailer.NewProtectedVolumeClient().Remove(ctx, jailer.ProtectedVolumeRemoveRequest{
+		CacheRoot: cacheRoot, VolumeID: volume.ID,
+	}); err != nil {
+		slog.Error("remove authoritative volume storage", "volume_id", volume.ID, "error", err)
+		return err
+	}
+	if err := s.repo.Delete(ctx, volume.ID); err != nil {
+		slog.Error("delete removed volume projection", "volume_id", volume.ID, "error", err)
+		return errs.WrapMsg(errs.CodeVolumeError,
+			"volume storage was removed; retry to remove its local database record", err)
 	}
 
 	return nil
@@ -87,45 +101,46 @@ func (s *Service) ResizeDisk(
 	vol *model.VolumeItem,
 	newSizeBytes int64,
 ) (*model.VolumeItem, error) {
-	if _, err := os.Stat(vol.Path); err != nil {
-		if os.IsNotExist(err) {
-			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("Disk file not found: %s", vol.Path))
-		}
-		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("stat disk file: %s", err))
+	if newSizeBytes <= 0 {
+		return nil, errs.New(errs.CodeVolumeResizeFailed, "volume growth requires a positive logical size")
+	}
+	cacheRoot, err := infra.GetCacheDir()
+	if err != nil {
+		return nil, err
+	}
+	result, err := jailer.NewProtectedVolumeClient().Grow(ctx, jailer.ProtectedVolumeGrowRequest{
+		CacheRoot: cacheRoot, VolumeID: vol.ID, TargetBytes: uint64(newSizeBytes),
+	})
+	if err != nil {
+		slog.Error("grow authoritative volume storage", "volume_id", vol.ID, "error", err)
+		return nil, err
 	}
 
-	switch vol.Format {
-	case model.VolumeFormatRaw:
-		_, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{"fallocate", "-l", strconv.FormatInt(newSizeBytes, 10), vol.Path},
-			system.RunCmdOpts{Check: true, Capture: true},
-		)
-		if err != nil {
-			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("fallocate resize failed: %s", err.Error()))
-		}
-	case model.VolumeFormatQCOW2:
-		_, err := system.DefaultRunner.Run(
-			ctx,
-			[]string{"qemu-img", "resize", vol.Path, strconv.FormatInt(newSizeBytes, 10)},
-			system.RunCmdOpts{Check: true, Capture: true},
-		)
-		if err != nil {
-			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("qemu-img resize failed: %s", err.Error()))
-		}
-	default:
-		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("Unsupported format: %s", vol.Format))
-	}
-
-	// Update volume fields before upserting.
-	vol.SizeBytes = newSizeBytes
+	vol.SizeBytes = int64(result.LogicalBytes)
 	vol.UpdatedAt = time.Now().Format(time.RFC3339)
 
 	if err := s.repo.Upsert(ctx, vol); err != nil {
-		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("upsert volume after resize: %s", err))
+		slog.Error("update grown volume projection", "volume_id", vol.ID, "error", err)
+		return nil, errs.WrapMsg(errs.CodeVolumeError,
+			"volume storage was grown; retry the same size to update its local database record", err)
 	}
 
 	return vol, nil
+}
+
+// InspectDisk reads the current authoritative backing without trusting the persisted caller path or size.
+func (s *Service) InspectDisk(ctx context.Context, vol *model.VolumeItem) (jailer.ProtectedVolumeInspectResult, error) {
+	cacheRoot, err := infra.GetCacheDir()
+	if err != nil {
+		return jailer.ProtectedVolumeInspectResult{}, err
+	}
+	result, err := jailer.NewProtectedVolumeClient().Inspect(ctx, jailer.ProtectedVolumeInspectRequest{
+		CacheRoot: cacheRoot, VolumeID: vol.ID,
+	})
+	if err != nil {
+		slog.Error("inspect authoritative volume storage", "volume_id", vol.ID, "error", err)
+	}
+	return result, err
 }
 
 // SetVolumesState updates the state of one or more volumes.

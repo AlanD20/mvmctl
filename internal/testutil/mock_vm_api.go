@@ -15,7 +15,7 @@ type MockVMAPI struct {
 	VMCreateFunc  func(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VMItem, error)
 	VMRemoveFunc  func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMPruneFunc   func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	VMListFunc    func(ctx context.Context, statuses ...string) []*model.VMItem
+	VMListFunc    func(ctx context.Context, statuses ...string) ([]*model.VMItem, error)
 	VMGetFunc     func(ctx context.Context, input inputs.VMInput) (*model.VMItem, error)
 	VMInspectFunc func(ctx context.Context, input inputs.VMInput) (*results.VMInspect, error)
 	VMStartFunc   func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
@@ -50,11 +50,11 @@ func (m *MockVMAPI) VMPrune(ctx context.Context, dryRun bool, includeAll bool) (
 	return nil, nil
 }
 
-func (m *MockVMAPI) VMList(ctx context.Context, statuses ...string) []*model.VMItem {
+func (m *MockVMAPI) VMList(ctx context.Context, statuses ...string) ([]*model.VMItem, error) {
 	if m.VMListFunc != nil {
 		return m.VMListFunc(ctx, statuses...)
 	}
-	return nil
+	return nil, nil
 }
 
 func (m *MockVMAPI) VMGet(ctx context.Context, input inputs.VMInput) (*model.VMItem, error) {

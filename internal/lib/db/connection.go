@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,7 +15,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/errs"
 
-	_ "modernc.org/sqlite"
+	sqlite "modernc.org/sqlite"
 )
 
 type Handle struct {
@@ -127,37 +128,66 @@ func (d *Handle) Close() error {
 
 // RestoreFromSnapshot restores the database from a snapshot file.
 //
-// VACUUM INTO creates a NEW inode on Linux, so existing connections holding
-// file descriptors to the old inode would continue serving stale data.
-// To prevent this, RestoreFromSnapshot closes the connection pool before
-// the restore. The pool reopens lazily on the next DB() call, getting the
-// new inode with all PRAGMAs applied.
-func (d *Handle) RestoreFromSnapshot(snapshotPath string) error {
-	// Close the pool so existing connections don't hold stale page cache
-	// from the old inode.
-	if err := d.Close(); err != nil {
-		return fmt.Errorf("close database before restore: %w", err)
+// The restore uses SQLite's backup API against the existing database file so
+// its WAL and shared-memory files stay paired with the same inode.
+func (d *Handle) RestoreFromSnapshot(ctx context.Context, snapshotPath string) (restoreErr error) {
+	// Keep this Handle from reopening while the dedicated restore connection owns
+	// the destination database.
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.opened {
+		d.opened = false
+		if err := d.db.Close(); err != nil {
+			return fmt.Errorf("close database before restore: %w", err)
+		}
 	}
+	d.db = nil
 
 	if _, err := os.Stat(snapshotPath); os.IsNotExist(err) {
 		return errs.New(errs.CodeMigrationFailed,
 			fmt.Sprintf("Snapshot not found: %s", snapshotPath))
 	}
 
-	srcDB, err := sql.Open("sqlite", snapshotPath)
+	destination, err := sql.Open("sqlite", d.dbPath+"?_pragma=busy_timeout=5000")
 	if err != nil {
-		return fmt.Errorf("open snapshot db for restore: %w", err)
+		return errs.WrapMsg(errs.CodeMigrationFailed, "open database for restore", err)
 	}
-	defer srcDB.Close()
-
-	if _, err := srcDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", d.dbPath)); err != nil {
-		return errs.New(errs.CodeMigrationFailed,
-			fmt.Sprintf("Failed to restore from snapshot: %v", err))
+	defer func() {
+		if err := destination.Close(); err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("close restored database: %w", err))
+		}
+	}()
+	connection, err := destination.Conn(ctx)
+	if err != nil {
+		return errs.WrapMsg(errs.CodeMigrationFailed, "connect to database for restore", err)
 	}
-
-	// VACUUM INTO creates a new file (new inode) with default permissions.
+	defer func() {
+		if err := connection.Close(); err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("release restore connection: %w", err))
+		}
+	}()
+	if err := connection.Raw(func(driverConnection any) error {
+		restorer, ok := driverConnection.(interface {
+			NewRestore(string) (*sqlite.Backup, error)
+		})
+		if !ok {
+			return errors.New("sqlite restore API is unavailable")
+		}
+		backup, err := restorer.NewRestore(snapshotPath)
+		if err != nil {
+			return err
+		}
+		more, stepErr := backup.Step(-1)
+		finishErr := backup.Finish()
+		if more && stepErr == nil {
+			stepErr = errors.New("sqlite restore did not finish copying the snapshot")
+		}
+		return errors.Join(stepErr, finishErr)
+	}); err != nil {
+		return errs.WrapMsg(errs.CodeMigrationFailed, "restore database from snapshot", err)
+	}
 	if err := os.Chmod(d.dbPath, infra.DBFilePerm); err != nil {
-		slog.Warn("Failed to set permissions on restored database", "path", d.dbPath, "error", err)
+		return errs.WrapMsg(errs.CodeMigrationFailed, "set restored database permissions", err)
 	}
 
 	return nil
@@ -165,7 +195,7 @@ func (d *Handle) RestoreFromSnapshot(snapshotPath string) error {
 
 // Connect returns the underlying *sqlx.DB (lazily opened).
 // Permissions are set once in openLazy() when the pool first opens, and
-// in RestoreFromSnapshot() after a restore creates a new file.
+// in RestoreFromSnapshot() after SQLite restores the existing database.
 func (d *Handle) Connect() *sqlx.DB {
 	return d.DB()
 }

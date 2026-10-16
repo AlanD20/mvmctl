@@ -82,7 +82,7 @@ func (s *Service) RemoveImage(ctx context.Context, image *model.ImageItem, force
 	}
 
 	// Delete ALL related files from disk
-	removed := s.RemoveImageFiles(image)
+	removed := s.RemoveImageFiles(ctx, image)
 	if len(removed) > 0 {
 		slog.Info("Removed image files", "files", strings.Join(removed, ", "))
 	}
@@ -102,16 +102,16 @@ func (s *Service) RemoveImage(ctx context.Context, image *model.ImageItem, force
 }
 
 // RemoveManyPaths removes files for multiple images from disk. No DB changes.
-func (s *Service) RemoveManyPaths(images []*model.ImageItem) []string {
+func (s *Service) RemoveManyPaths(ctx context.Context, images []*model.ImageItem) []string {
 	var removed []string
 	for _, image := range images {
-		removed = append(removed, s.RemoveImageFiles(image)...)
+		removed = append(removed, s.RemoveImageFiles(ctx, image)...)
 	}
 	return removed
 }
 
 // RemoveImageFiles removes all files for an image from disk. No DB changes.
-func (s *Service) RemoveImageFiles(image *model.ImageItem) []string {
+func (s *Service) RemoveImageFiles(ctx context.Context, image *model.ImageItem) []string {
 	var removed []string
 
 	entries, err := os.ReadDir(infra.GetImagesDir())
@@ -125,12 +125,17 @@ func (s *Service) RemoveImageFiles(image *model.ImageItem) []string {
 		}
 	}
 
-	entries, err = os.ReadDir(infra.GetWarmImagesDir())
+	warmDir, err := infra.GetWarmImagesDir(ctx)
+	if err != nil {
+		slog.Warn("cannot inspect warm-image pool during removal", "error", err)
+		return removed
+	}
+	entries, err = os.ReadDir(warmDir)
 	if err != nil {
 		return removed
 	}
 	for _, entry := range entries {
-		if err := os.Remove(filepath.Join(infra.GetWarmImagesDir(), entry.Name())); err == nil {
+		if err := os.Remove(filepath.Join(warmDir, entry.Name())); err == nil {
 			removed = append(removed, entry.Name())
 		}
 	}
@@ -202,6 +207,35 @@ func (s *Service) OptimizeImage(
 	provisionerType provisioner.ProvisionerType,
 	warnings []string,
 ) (*model.ImageItem, []string, error) {
+	return s.optimizeImage(ctx, imagePath, imageID, spec, timestamp, skipOptimization,
+		provisionerType, warnings, imageInspectionOrdinary)
+}
+
+// OptimizeVMRootfsImage prepares only the disposable VM-export inspection copy for journal replay.
+// The extracted source and the normal optimizer's publication remain unchanged.
+func (s *Service) OptimizeVMRootfsImage(
+	ctx context.Context,
+	imagePath, imageID string,
+	spec *model.ImageSpec,
+	timestamp string,
+	skipOptimization bool,
+	provisionerType provisioner.ProvisionerType,
+	warnings []string,
+) (*model.ImageItem, []string, error) {
+	return s.optimizeImage(ctx, imagePath, imageID, spec, timestamp, skipOptimization,
+		provisionerType, warnings, imageInspectionVMRootfs)
+}
+
+func (s *Service) optimizeImage(
+	ctx context.Context,
+	imagePath, imageID string,
+	spec *model.ImageSpec,
+	timestamp string,
+	skipOptimization bool,
+	provisionerType provisioner.ProvisionerType,
+	warnings []string,
+	source imageInspectionSource,
+) (*model.ImageItem, []string, error) {
 	tl := timinglog.Start("optimize", "image_id", imageID)
 	defer tl.Complete()
 
@@ -211,6 +245,9 @@ func (s *Service) OptimizeImage(
 	}
 	fsUUID := system.DetectFilesystemUUID(ctx, imagePath)
 	tl.Stage("fs_detect")
+	// The selected LoopMount backend always uses its closed managed protocol. An unsupported
+	// filesystem fails admission; it cannot select the retired raw-path service or GuestFS.
+	typedOptimization := provisionerType == provisioner.ProvisionerLoopMount
 
 	// --- Single Provisioner reused across all phases ---
 	// Each method (DetectOS, Run) creates a fresh backend session internally,
@@ -220,15 +257,28 @@ func (s *Service) OptimizeImage(
 
 	// --- Detect OS type from the image (always, even when skipping) ---
 	detectedOS := ""
-	osResult, osErr := p.DetectOS(ctx)
-	if osErr == nil {
-		detectedOS = osResult
+	if typedOptimization {
+		var inspectErr error
+		if source == imageInspectionVMRootfs {
+			detectedOS, inspectErr = inspectVMRootfsStagedImage(ctx, imagePath, imageID, fsType)
+		} else {
+			detectedOS, inspectErr = inspectStagedImage(ctx, imagePath, imageID, fsType)
+		}
+		if inspectErr != nil {
+			slog.Error("managed image inspection failed", "image_id", imageID, "error", inspectErr)
+			return nil, warnings, inspectErr
+		}
 	} else {
-		slog.Warn("OS detection failed, falling back to spec type", "image_id", imageID)
+		osResult, osErr := p.DetectOS(ctx)
+		if osErr == nil {
+			detectedOS = osResult
+		} else {
+			slog.Warn("OS detection failed, falling back to spec type", "image_id", imageID)
+		}
 	}
 
 	// --- Convert, deblob, shrink in a single backend session ---
-	if fsType == "btrfs" {
+	if fsType == "btrfs" && !typedOptimization {
 		slog.Info("Converting filesystem from btrfs to ext4...")
 		p.ConvertTo("ext4")
 		fsType = "ext4"
@@ -237,15 +287,40 @@ func (s *Service) OptimizeImage(
 	preShrinkInfo, _ := os.Stat(imagePath)
 	preShrinkSize := preShrinkInfo.Size()
 
-	if !skipOptimization {
+	if !skipOptimization && !typedOptimization {
 		p.Deblob()
 	}
-	if FSCanShrink[fsType] {
+	if FSCanShrink[fsType] && !typedOptimization {
 		p.Shrink()
 	}
-	optimized, runErr := p.Run(ctx)
-	if runErr != nil {
-		return nil, warnings, runErr
+	optimized := false
+	if typedOptimization && (!skipOptimization || FSCanShrink[fsType] || fsType == "btrfs") {
+		// Conversion and shrink have separate durable intents. The staging consumer first
+		// converts Btrfs, then binds cleanup/shrink to the exact returned ext4 size.
+		shrink := FSCanShrink[fsType] || fsType == "btrfs"
+		if err := optimizeStagedImage(
+			ctx,
+			imagePath,
+			imageID,
+			fsType,
+			detectedOS,
+			!skipOptimization,
+			shrink,
+		); err != nil {
+			slog.Error("managed image optimization failed", "image_id", imageID, "error", err)
+			return nil, warnings, err
+		}
+		if fsType == "btrfs" {
+			fsType = "ext4"
+			fsUUID = system.DetectFilesystemUUID(ctx, imagePath)
+		}
+		optimized = true
+	} else if !typedOptimization {
+		var runErr error
+		optimized, runErr = p.Run(ctx)
+		if runErr != nil {
+			return nil, warnings, runErr
+		}
 	}
 	if !optimized && warnings != nil {
 		warnings = append(warnings,
@@ -328,10 +403,6 @@ func (s *Service) DownloadImage(
 ) (string, error) {
 	downloadPath := filepath.Join(outputDir, imageID+".download")
 
-	if force {
-		os.Remove(downloadPath)
-	}
-
 	templateVars := s.getTemplateVariables(spec, ciVersion)
 	source := spec.Source
 	if strings.Contains(spec.Source, "{") {
@@ -342,31 +413,45 @@ func (s *Service) DownloadImage(
 		}
 	}
 
-	var resolvedSHA256 string
+	var checksum imageChecksum
 	if spec.SHA256 != "" {
-		resolvedSHA256 = strings.ToLower(spec.SHA256)
+		var err error
+		checksum.sha256, err = validateImageDigest(spec.SHA256, sha256DigestSize)
+		if err != nil {
+			slog.Error("invalid image checksum", "error", err)
+			return "", err
+		}
 	}
 
 	sha256URL := spec.SHA256URL
 	if sha256URL != "" {
-		if r, err := infra.RenderTemplate(sha256URL, templateVars); err == nil {
-			sha256URL = r
+		r, err := infra.RenderTemplate(sha256URL, templateVars)
+		if err != nil {
+			slog.Error("failed to render image checksum URL", "error", err)
+			return "", errs.WrapMsg(errs.CodeDownloadFailed, "failed to render image checksum URL", err)
+		}
+		sha256URL = r
+	}
+
+	if checksum.sha256 == "" && sha256URL != "" {
+		sourceURL, err := url.Parse(source)
+		if err != nil {
+			slog.Error("failed to parse image source URL", "error", err)
+			return "", errs.WrapMsg(errs.CodeDownloadFailed, "failed to parse image source URL", err)
+		}
+		checksum, err = s.fetchImageChecksum(ctx, sha256URL, filepath.Base(sourceURL.Path))
+		if err != nil {
+			slog.Error("failed to acquire image checksum", "url", sha256URL, "error", err)
+			return "", err
 		}
 	}
 
-	if resolvedSHA256 == "" && sha256URL != "" {
-		sourceBasename := ""
-		if idx := strings.LastIndex(source, "/"); idx >= 0 {
-			sourceBasename = source[idx+1:]
-		}
-		sha, err := s.fetchSHA256FromURL(ctx, sha256URL, sourceBasename)
-		if err == nil && sha != "" {
-			resolvedSHA256 = sha
-		}
+	if force {
+		os.Remove(downloadPath)
 	}
 
 	// Download the file
-	if err := s.downloadFile(ctx, source, downloadPath, resolvedSHA256, progress); err != nil {
+	if err := s.downloadFile(ctx, source, downloadPath, checksum, progress); err != nil {
 		return "", err
 	}
 
@@ -408,11 +493,28 @@ func (s *Service) ExtractImage(
 	}
 }
 
+// ExtractVMRootfsImage copies the root filesystem from an independent raw VM export.
+// The root-owned source remains intact for its named release operation (ADR-0018).
+func (s *Service) ExtractVMRootfsImage(
+	ctx context.Context,
+	sourcePath, imageID, outputDir string,
+	partition int,
+	disabledDetectors []string,
+	provisionerType provisioner.ProvisionerType,
+) (string, error) {
+	finalPath := filepath.Join(outputDir, imageID+".img")
+	return CopyRootPartitionViaBackend(ctx, sourcePath, finalPath, partition, disabledDetectors, provisionerType)
+}
+
 // MaterializeTo performs fast durable copy from warm pool to destination.
 // Uses a fallback chain: sendfile(2) → io.Copy in infra.CopyFile().
 // After copy, fdatasync ensures data integrity.
 func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath string) error {
-	cachedPath := filepath.Join(infra.GetWarmImagesDir(), fmt.Sprintf("%s.%s", imageID, fsType))
+	warmDir, err := infra.GetWarmImagesDir(ctx)
+	if err != nil {
+		return errs.WrapMsg(errs.CodeImageError, "resolve warm-image pool", err)
+	}
+	cachedPath := filepath.Join(warmDir, fmt.Sprintf("%s.%s", imageID, fsType))
 	if _, err := os.Stat(cachedPath); os.IsNotExist(err) {
 		return errs.New(errs.CodeImageError, fmt.Sprintf("Image not in cache: %s", imageID))
 	}
@@ -431,10 +533,14 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 }
 
 // EnsureCached ensures images are decompressed to tmpfs cache, creating if needed.
-func (s *Service) EnsureCached(images []*model.ImageItem) ([]string, error) {
+func (s *Service) EnsureCached(ctx context.Context, images []*model.ImageItem) ([]string, error) {
+	warmDir, err := infra.GetWarmImagesDir(ctx)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeImageWarmFailed, "resolve warm-image pool", err)
+	}
 	var results []string
 	for _, image := range images {
-		cachedPath := filepath.Join(infra.GetWarmImagesDir(), fmt.Sprintf("%s.%s", image.ID, image.FSType))
+		cachedPath := filepath.Join(warmDir, fmt.Sprintf("%s.%s", image.ID, image.FSType))
 		lockPath := cachedPath + ".lock"
 
 		release, err := infra.AcquireExclusiveFileLock(lockPath)
@@ -1156,60 +1262,17 @@ func calculateMinimumImageSizeMB(contentBytes int64) int {
 	return calculatedMiB
 }
 
-// SHA256 verification
-
-func (s *Service) fetchSHA256FromURL(ctx context.Context, sha256URL, sourceFilename string) (string, error) {
-	// Use shared HttpDownload.GetContent — provides retry, HTTP caching, and mirror support.
-	// Catches HttpDownloadError → returns empty (no error).
-	content, err := s.dl.GetContent(ctx, download.RequestOpts{
-		URL: sha256URL, Timeout: infra.HTTPTimeoutSha256FetchS,
-	})
-	if err != nil {
-		return "", nil // HttpDownloadError → returns empty
-	}
-
-	content = strings.TrimSpace(content)
-	if sourceFilename == "" {
-		parts := strings.Fields(content)
-		if len(parts) == 0 {
-			return "", nil // empty parts → returns empty
-		}
-		return strings.ToLower(parts[0]), nil
-	}
-
-	sourceBasename := filepath.Base(sourceFilename)
-	for line := range strings.SplitSeq(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		lineParts := strings.Fields(line)
-		if len(lineParts) < 2 {
-			continue
-		}
-		filenameInLine := strings.TrimLeft(lineParts[len(lineParts)-1], "*")
-		filenameInLineBasename := filepath.Base(filenameInLine)
-
-		if filenameInLine == sourceFilename ||
-			filenameInLine == sourceBasename ||
-			filenameInLineBasename == sourceFilename ||
-			filenameInLineBasename == sourceBasename {
-			return strings.ToLower(lineParts[0]), nil
-		}
-	}
-	return "", nil // not found — not an error
-}
-
 func (s *Service) downloadFile(
 	ctx context.Context,
-	url, destPath, expectedSHA256 string,
+	url, destPath string,
+	checksum imageChecksum,
 	progress func(int64, int64),
 ) error {
-	allowMissing := expectedSHA256 == ""
-	if progress == nil {
-		return s.dl.DownloadFile(ctx, url, destPath, expectedSHA256, allowMissing, allowMissing, nil)
+	if checksum.sha512 != "" {
+		return s.dl.DownloadFileSHA512(ctx, url, destPath, checksum.sha512, false, false, progress)
 	}
-	return s.dl.DownloadFile(ctx, url, destPath, expectedSHA256, allowMissing, allowMissing, progress)
+	allowMissing := checksum.sha256 == ""
+	return s.dl.DownloadFile(ctx, url, destPath, checksum.sha256, allowMissing, allowMissing, progress)
 }
 
 func (s *Service) resolveFSType(ctx context.Context, imagePath string) (string, error) {

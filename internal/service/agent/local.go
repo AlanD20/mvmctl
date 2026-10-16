@@ -1,109 +1,114 @@
 package agent
 
 import (
-	"encoding/json"
-	"log/slog"
+	"context"
+	"io"
 	"net"
+	"time"
+
+	"mvmctl/internal/lib/vmexecwire"
 )
 
-// handleLocalConn handles an incoming connection on the local Unix socket.
-// It reads a RemoteVMRequest from the client, forwards it to the host via the
-// active vsock connection, and relays response frames back to the local client.
-func (a *Agent) handleLocalConn(localConn net.Conn) {
+const (
+	maxSourceAdmissions    = 8
+	sourceRequestReadLimit = 2 * time.Second
+)
+
+func (a *Agent) handleLocalConnection(ctx context.Context, localConn net.Conn) {
+	if !a.beginSourceAdmission() {
+		_ = localConn.Close()
+		return
+	}
+	defer func() { <-a.sourceAdmission }()
+	connectionDone := make(chan struct{})
+	defer close(connectionDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = localConn.Close()
+		case <-connectionDone:
+		}
+	}()
+	a.handleLocalConn(ctx, localConn)
+}
+
+// handleLocalConn admits one process-bound local peer and relays one closed VM-exec request.
+func (a *Agent) handleLocalConn(ctx context.Context, localConn net.Conn) {
 	defer localConn.Close()
-
-	// Read RemoteVMRequest from local socket.
-	var req RemoteVMRequest
-	if err := json.NewDecoder(localConn).Decode(&req); err != nil {
-		slog.Error("local: failed to decode request", "error", err)
-		return
-	}
-
-	slog.Debug("local: received remote exec request",
-		"destination", req.Destination,
-		"command", req.Command,
-	)
-
-	// Get the active vsock connection.
-	a.activeConnMu.Lock()
-	conn := a.activeConn
-	a.activeConnMu.Unlock()
-	if conn == nil {
-		slog.Error("local: no active vsock connection")
-		_ = writeFrame(localConn, &execResponse{
-			Type:   responseTypeRemoteVM,
-			Status: 1,
-			Error:  "no active vsock connection",
-		})
-		return
-	}
-
-	// Marshal the request payload and write a remote_vm frame to the vsock
-	// connection. This is sent to the host which will relay to the target VM.
-	payload, err := json.Marshal(req)
+	binding, err := a.claimSourceForPeer(ctx, localConn)
 	if err != nil {
-		slog.Error("local: failed to marshal remote request", "error", err)
+		return
+	}
+	defer a.cleanupSourceBinding(binding)
+	if err := binding.transport.handoffReadOwner(); err != nil {
 		return
 	}
 
-	// Lock connMu to serialize writes with streamingWriter in handleExec.
-	// During the relay handleExec is blocked on cmd.Wait() and the child
-	// produces no output, so contention is unlikely but the mutex guarantees
-	// correctness.
-	a.connMu.Lock()
-	err = writeFrame(conn, &execResponse{
-		Type: responseTypeRemoteVM,
-		Data: string(payload),
-	})
-	a.connMu.Unlock()
+	connectionDone := make(chan struct{})
+	defer close(connectionDone)
+	go func() {
+		select {
+		case <-binding.transport.done:
+			// Outer cleanup must interrupt a partial local request.
+			_ = localConn.Close()
+		case <-connectionDone:
+		}
+	}()
+	requestDeadline := time.Now().Add(sourceRequestReadLimit)
+	if binding.transport.deadline.Before(requestDeadline) {
+		requestDeadline = binding.transport.deadline
+	}
+	if err := localConn.SetReadDeadline(requestDeadline); err != nil {
+		return
+	}
+	request, err := vmexecwire.DecodeSourceRequest(ctx, localConn)
 	if err != nil {
-		slog.Error("local: failed to write remote_vm frame to vsock", "error", err)
+		return
+	}
+	if err := localConn.SetDeadline(binding.transport.deadline); err != nil {
 		return
 	}
 
-	// Read response frames from the vsock connection and forward them to the
-	// local socket. The host relays stdout/stderr frames and sends a final
-	// "remote_vm" frame with the exit status.
-	decoder := json.NewDecoder(conn)
-	for {
-		var resp execResponse
-		a.readMu.Lock()
-		err := decoder.Decode(&resp)
-		a.readMu.Unlock()
-		if err != nil {
-			slog.Error("local: failed to decode vsock response", "error", err)
-			return
-		}
-
-		switch resp.Type {
-		case "stdout":
-			if err := writeFrame(localConn, &execResponse{
-				Type: "stdout",
-				Data: resp.Data,
-			}); err != nil {
-				slog.Error("local: failed to forward stdout frame", "error", err)
-				return
-			}
-		case "stderr":
-			if err := writeFrame(localConn, &execResponse{
-				Type: "stderr",
-				Data: resp.Data,
-			}); err != nil {
-				slog.Error("local: failed to forward stderr frame", "error", err)
-				return
-			}
-		case responseTypeRemoteVM:
-			// Final frame with exit code from the remote execution.
-			if err := writeFrame(localConn, &execResponse{
-				Type:   responseTypeRemoteVM,
-				Status: resp.Status,
-				Error:  resp.Error,
-			}); err != nil {
-				slog.Error("local: failed to write final remote_vm frame", "error", err)
-			}
-			return
-		default:
-			slog.Debug("local: ignoring unknown frame type", "type", resp.Type)
-		}
+	if err := vmexecwire.EncodeSourceRequest(ctx, binding.transport.conn, request); err != nil {
+		writeLocalSourceError(ctx, localConn, request.RequestID)
+		return
 	}
+	relaySourceConnections(localConn, binding.transport)
+}
+
+func (a *Agent) beginSourceAdmission() bool {
+	a.sourceMu.Lock()
+	a.ensureSourceStateLocked()
+	admission := a.sourceAdmission
+	a.sourceMu.Unlock()
+	select {
+	case admission <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func writeLocalSourceError(ctx context.Context, conn net.Conn, requestID string) {
+	writer, err := vmexecwire.NewResponseWriter(conn, requestID)
+	if err != nil {
+		return
+	}
+	_ = writer.WriteError(ctx, "source execution is unavailable")
+}
+
+func relaySourceConnections(localConn net.Conn, transport *sourceTransport) {
+	completed := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(transport.conn, localConn)
+		completed <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(localConn, transport.conn)
+		completed <- struct{}{}
+	}()
+	<-completed
+	transport.close()
+	_ = localConn.Close()
+	<-completed
 }

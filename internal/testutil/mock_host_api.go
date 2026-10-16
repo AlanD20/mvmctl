@@ -10,7 +10,8 @@ import (
 
 // MockHostAPI implements api.HostAPI for testing.
 type MockHostAPI struct {
-	HostInitFunc                  func(ctx context.Context, onProgress event.OnProgressCallback) (any, error)
+	HostInstallSystemBinaryFunc   func(ctx context.Context) (bool, error)
+	HostInitFunc                  func(ctx context.Context, onProgress event.OnProgressCallback) (*results.HostInit, error)
 	HostGetStateFunc              func(ctx context.Context) (*model.HostStateItem, error)
 	HostDetectResourcesFunc       func(ctx context.Context) (*model.HostResources, error)
 	HostNetworkSetupFunc          func(ctx context.Context) error
@@ -19,7 +20,7 @@ type MockHostAPI struct {
 	HostCheckKVMAccessFunc        func() bool
 	HostCheckRequiredBinariesFunc func() []string
 	HostGetIPForwardStatusFunc    func(ctx context.Context) (string, error)
-	HostStatusCheckFunc           func(ctx context.Context) *results.HostStatusCheck
+	HostStatusCheckFunc           func(ctx context.Context) (*results.HostStatusCheck, error)
 	HostCleanFunc                 func(ctx context.Context) ([]string, error)
 	HostResetFunc                 func(ctx context.Context) ([]string, error)
 	HostGetRunningVMsFunc         func(ctx context.Context) ([]*model.VMItem, error)
@@ -27,7 +28,14 @@ type MockHostAPI struct {
 	HostCheckReadinessFunc        func(ctx context.Context) *model.ProbeResult
 }
 
-func (m *MockHostAPI) HostInit(ctx context.Context, onProgress event.OnProgressCallback) (any, error) {
+func (m *MockHostAPI) HostInstallSystemBinary(ctx context.Context) (bool, error) {
+	if m.HostInstallSystemBinaryFunc != nil {
+		return m.HostInstallSystemBinaryFunc(ctx)
+	}
+	return false, nil
+}
+
+func (m *MockHostAPI) HostInit(ctx context.Context, onProgress event.OnProgressCallback) (*results.HostInit, error) {
 	if m.HostInitFunc != nil {
 		return m.HostInitFunc(ctx, onProgress)
 	}
@@ -90,11 +98,11 @@ func (m *MockHostAPI) HostGetIPForwardStatus(ctx context.Context) (string, error
 	return "", nil
 }
 
-func (m *MockHostAPI) HostStatusCheck(ctx context.Context) *results.HostStatusCheck {
+func (m *MockHostAPI) HostStatusCheck(ctx context.Context) (*results.HostStatusCheck, error) {
 	if m.HostStatusCheckFunc != nil {
 		return m.HostStatusCheckFunc(ctx)
 	}
-	return nil
+	return nil, nil
 }
 
 func (m *MockHostAPI) HostClean(ctx context.Context) ([]string, error) {

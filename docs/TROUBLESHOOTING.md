@@ -5,8 +5,8 @@ Common issues and solutions when using `mvm`.
 ## Table of Contents
 
 - [Permission denied: /dev/kvm](#permission-denied-devkvm)
-- [Mixed Firewall Backend](#mixed-firewall-backend)
-- [Firewall rules lost after reboot](#firewall-rules-lost-after-reboot)
+- [Managed firewall or network refusal](#managed-firewall-or-network-refusal)
+- [Managed network state after host reboot](#managed-network-state-after-host-reboot)
 - [VM won't boot / SSH times out](#vm-wont-boot-ssh-times-out)
 - [VM won't start / Firecracker exits immediately](#vm-wont-start-firecracker-exits-immediately)
 - [Undoing host init — host clean vs host reset](#undoing-host-init-host-clean-vs-host-reset)
@@ -55,59 +55,48 @@ groups | grep kvm
 
 ---
 
-## Mixed Firewall Backend
+## Managed firewall or network refusal
 
-**Symptom:** VM has valid IP and gateway. ICMP (ping) works. TCP (curl/wget) times out.
+**Symptom:** Managed networking fails admission, or a VM cannot reach its intended destination.
 
-**Detection:**
+v0.3.0 uses direct Go nftables transactions. Managed networking requires kernel support for both `inet` and
+`bridge` families, connection tracking, and NAT; installing the `nft` tool cannot add missing kernel support.
+Same-network and cross-network VM traffic starts denied. VM-to-VM TCP/UDP connectivity requires an applicable
+traffic grant; successful vsock execution does not establish IP connectivity.
 
-First check which firewall backend mvmctl is configured to use:
+Inspect the affected managed network, VM, and traffic grants:
+
 ```bash
-mvm config get settings firewall_backend
+mvm network inspect <network-name> --json
+mvm vm inspect <vm-name> --json
+mvm policy traffic ls --json
 ```
 
-If the backend is `nftables` (default), verify the nftables ruleset contains mvm chains:
-```bash
-sudo nft list ruleset | grep -c "MVM-"
-```
+For a refused operation, retain its structured error code and details. Root authority refuses foreign or changed
+managed firewall state rather than overwriting it. Resolve the reported ownership or kernel-capability problem
+before retrying; a ruleset flush or host reboot is not a reconciliation procedure.
 
-If the backend is `iptables`, check which iptables variant is active:
-```bash
-iptables --version
-```
-
-**Cause:** Docker and mvmctl use different firewall backends. Rules go to different places. mvmctl defaults to nftables; Docker may configure the system to use iptables-legacy, creating a split where rules are applied to the wrong backend.
-
-**Fix:**
-```bash
-# Option 1: Sync firewall rules from the database
-mvm network sync
-
-# Option 2: Reboot host (clears all firewall state cleanly)
-sudo reboot
-
-# Option 3: Configure Docker to use the same backend as mvmctl
-# Edit /etc/docker/daemon.json and restart Docker
-```
-
-Then re-run: `mvm host init`
+See [networking and policy](RUNTIME.md#networking-policy-and-guest-execution) and
+[traffic grants](REFERENCES.md#mvm-policy) for the supported contract.
 
 ---
 
-## Firewall rules lost after reboot
+## Managed network state after host reboot
 
-**Problem:** After a reboot, VMs can't reach the network, or firewall chains are missing.
+**Problem:** Retained network or VM records need reconciliation after a host reboot.
 
-**Cause:** `mvm` does not persist firewall rules to system files (`/etc/nftables.conf`, `/etc/iptables/rules.v4`). Firewall rules are managed dynamically and must be reloaded after a reboot.
+Inspect the affected network and VM, then request managed-network authority reconciliation:
 
-**Solution:**
-
-Run `mvm network sync` after every reboot to reload all mvm firewall rules from the database:
 ```bash
-mvm network sync
+mvm network inspect <network-name> --json
+mvm vm inspect <vm-name> --json
+mvm network sync <network-name> --json
 ```
 
-This restores all NAT, forwarding, and nocloud-net rules to the active firewall backend (nftables or iptables).
+`network sync` reconciles managed network authority and retries pending creation. Inspect its result and any
+reported failure; it does not promise restoration of arbitrary firewall rules or a NoCloud listener. Retained VM
+records do not mean the old Firecracker process survived. Cleanup and relaunch must reconcile root-owned state,
+and ambiguous ownership remains a refusal. See [runtime state](RUNTIME.md#state-and-process-layout).
 
 ---
 
@@ -145,29 +134,35 @@ mvm logs myvm --os
 
 **Common causes:**
 
-**1. Missing or broken jailer.** Firecracker requires the `jailer` binary alongside it. If the binary was fetched with `mvm bin pull`, it should be bundled, but manual installs may miss it.
+**1. Missing, mismatched, or untrusted Jailer pair.** VM launch requires the exact checksum-verified Firecracker/Jailer release pair in the root-owned trusted store. Re-pull the selected release; source-built or manually copied binaries cannot launch jailed VMs:
 
-**2. Kernel file is not readable by Firecracker.** Verify the kernel exists and the path is correct:
 ```bash
-mvm kernel ls --json | jq -r '.[].path'
+mvm bin ls --long
+mvm bin pull <version> --force
+```
+
+**2. cgroup v2 or required controllers are unavailable.** VM launch requires the unified cgroup-v2 hierarchy with `cpu`, `memory`, and `pids`. Refresh host information and inspect the detected limits:
+
+```bash
+mvm host info --refresh --json
+```
+
+If launch reports a verification mismatch, `mvm vm inspect <name> --json` shows the requested and observed values. mvmctl fails closed rather than launching without the envelope.
+
+**3. Kernel file is not readable by Firecracker.** Verify the kernel exists and the path is correct:
+```bash
+mvm kernel ls --json | jq -r '.data[].path'
 ls -l <path_from_output>
 ```
 
-**3. Invalid boot arguments.** Custom boot args (set via `mvm config`) may contain typos or flags the kernel doesn't understand. Reset to defaults:
+**4. Invalid boot arguments.** Custom boot args (set via `mvm config`) may contain typos or flags the kernel doesn't understand. Reset to defaults:
 ```bash
 mvm config reset defaults.vm boot_args
 ```
 
-**4. Socket path too long.** Firecracker uses Unix domain sockets which have a 108-character path limit. Long VM names or deep cache directories can exceed this. Check:
-```bash
-# See the VM's socket path
-ls -la ~/.cache/mvmctl/vms/*/firecracker.api.socket
-# If it looks very long, try a shorter VM name
-```
-
 **5. Binary / kernel architecture mismatch.** A kernel built for `x86_64` won't boot under an `aarch64` Firecracker binary. Verify both match:
 ```bash
-file $(mvm kernel ls --json | jq -r '.[0].path')
+file $(mvm kernel ls --json | jq -r '.data[0].path')
 mvm bin ls
 ```
 
@@ -177,44 +172,44 @@ mvm bin ls
 
 **Problem:** You want to roll back the changes made by `mvm host init`.
 
-There are two levels of undo depending on how much you want to remove:
+Caller-scoped network cleanup and administrator rollback have different scopes. Neither command is a supported
+legacy-state migration or removal procedure. See the [host command reference](REFERENCES.md#mvm-host).
 
 ### `mvm host clean` — Remove networking only
 
-Stop all running VMs first, then:
+Stop the caller's running VMs first, then run as the enrolled operator:
 
 ```bash
 mvm host clean
 ```
 
-This removes:
-- All bridges and TAP devices
-- All firewall chains used by mvm
-- The default network from the database
-- Any orphaned bridges and rules
+`host clean` observes the caller's root VM inventory and removes its locally registered networks through typed
+root authority. It refuses running VMs or incomplete observation and does not force-stop VMs or reset shared
+host settings, operator membership, or the sudoers policy. Recreate desired networks with `mvm network create`;
+network cleanup does not undo administrator enrollment.
 
-It does **NOT** touch:
-- The `mvm` system group or your user membership
-- The sudoers drop-in file
-- Sysctl `ip_forward` setting
+### `mvm host reset` — Administrator rollback
 
-Run `mvm host init` afterwards to recreate the default network.
-
-### `mvm host reset` — Full factory reset
+Reset requires exclusive host-wide quiescence and compatible recorded administrator state. Run through the
+installed root-owned binary with administrator access:
 
 ```bash
-mvm host reset --force
+sudo /usr/local/bin/mvm host reset --force
 ```
 
-Does everything `clean` does, **plus**:
-- Removes the sudoers drop-in (`/etc/sudoers.d/mvm`)
-- Removes your user from the `mvm` group
-- Deletes the `mvm` system group
-- Restores `net.ipv4.ip_forward` to its original value
+Reset restores recorded host settings and enrollment changes through retryable receipts. It refuses live or
+ambiguous state, preserves authority history, and leaves privileged admission disabled afterward, including
+after a restoration error. `--force` does not bypass quiescence or force-stop VMs.
 
-After reset, run `mvm host init` from scratch to set everything up again.
+To set up the host and enroll the invoking non-root operator again:
 
-> Both commands refuse to run if any VMs are still running. Stop them first with `mvm vm rm <name>`.
+```bash
+sudo /usr/local/bin/mvm host init
+```
+
+Log out and back in, or run `newgrp mvm`, if the current session lacks the enrolled group. In a direct-root
+session, both init and reset require `--operator USER`; sudo invocation selects its invoking operator and
+rejects that flag.
 
 ---
 
@@ -224,13 +219,18 @@ After reset, run `mvm host init` from scratch to set everything up again.
 
 **Solution:**
 
-The port range (8000-9000) may be exhausted. Check for stale servers:
+NoCloud net mode binds the selected managed network's gateway on fixed TCP port `8000`. Custom ports are
+rejected, and a listener collision fails without adopting or killing the existing listener. Inspect the network
+and the listener at its actual gateway address:
+
 ```bash
-# List processes using nocloud ports
-sudo ss -tlnp | grep -E ':(8[0-9]{3}|9[0-9]{3})'
-# Kill any orphaned mvm processes
-pkill -f "mvm run nocloudnet serve"
+mvm network inspect <network-name> --json
+sudo ss -ltnp 'sport = :8000'
 ```
+
+Identify the listener's owning workload before changing it. A successful bind must precede the typed fixed-slot
+service grant; the grant reserves gateway TCP `8000` and does not authenticate the listener process.
+See [NoCloud net mode](REFERENCES.md#how-net-mode-works).
 
 ---
 
@@ -240,32 +240,24 @@ pkill -f "mvm run nocloudnet serve"
 
 **Solution:**
 
-Verify firewall rules are configured:
+Confirm the VM uses a managed network and net cloud-init mode; networkless placement cannot use net mode.
+Inspect the network's actual gateway, its fixed TCP `8000` listener, and the VM's cloud-init messages:
 
-For the nftables backend (default):
 ```bash
-sudo nft list chain inet filter MVM-NOCLOUDNET-INPUT
-# Should show rules allowing source IP to destination ports
+mvm network inspect <network-name> --json
+sudo ss -ltnp 'sport = :8000'
+mvm logs myvm | grep -i nocloud
 ```
 
-For the iptables backend:
+From the affected guest, diagnose HTTP delivery using the actual gateway address:
+
 ```bash
-sudo iptables -L MVM-NOCLOUDNET-INPUT -n -v
-# Should show rules allowing source IP to destination ports
+curl -v http://<gateway-ip>:8000/meta-data
 ```
 
-Check that the VM's network is correctly set up. First find the nocloud server port and correct gateway from the VM logs:
-```bash
-mvm logs myvm --os | grep -i nocloud
-```
-
-Then test from within the VM (adjust subnet and port to what your config uses):
-```bash
-# Test connectivity to the default gateway (default subnet: 172.27.0.0/24)
-ping -c 1 172.27.0.1
-# Test HTTP access to nocloud server (port is dynamically allocated, check logs)
-curl -v http://172.27.0.1:<port>/
-```
+Keep listener readiness separate from the root-derived service grant: a listening socket alone does not prove
+the grant is applied, and a retained grant does not prove the listener is running. Review any typed bind or grant
+failure before retrying. See [NoCloud security](REFERENCES.md#net-mode-security-architecture).
 
 ---
 
@@ -490,18 +482,24 @@ libguestfs-make-fixed-appliance ~/.cache/mvmctl/appliance
 **Solution:**
 
 ```bash
-# Detach the volume from the VM first
+# Stop the VM, then detach its volume
+mvm vm stop <vm-identifier>
 mvm volume detach <vm-identifier> <volume-name>
 
 # Then remove the volume
 mvm volume rm <volume-name>
 ```
 
-Or force-remove (removes the volume record and file but does not hot-unplug from the VM):
+To remove a volume that remains attached, stop its VM first, then use `--force`:
 
 ```bash
+mvm vm stop <vm-identifier>
 mvm volume rm <volume-name> --force
 ```
+
+`--force` bypasses the attachment refusal only for a VM authoritatively observed as stopped; it never hot-unplugs
+a running guest. To grow an attached volume, stop the VM but leave the volume attached, then run
+`mvm volume resize <volume-name> <new-size>` before starting the VM again.
 
 ---
 

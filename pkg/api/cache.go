@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mvmctl/internal/infra"
@@ -10,11 +11,15 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/provisioner/guestfs"
 	"mvmctl/internal/lib/system"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // CacheAPI defines the public interface for cache operations.
@@ -140,6 +145,10 @@ func (op *Operation) CachePruneBinaries(ctx context.Context, dryRun bool, includ
 
 // CachePruneMisc prunes miscellaneous cache items.
 func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[string]any, error) {
+	staleProvisionCleaned, err := op.Services.Cache.CleanStaleProvisionMounts(ctx, dryRun)
+	if err != nil {
+		return nil, err
+	}
 	binDir := infra.GetBinDir()
 	serviceBinariesCleaned := false
 	if _, err := os.Stat(binDir); err == nil && !dryRun {
@@ -148,13 +157,11 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[strin
 	}
 	appliancePruned := guestfs.PruneAppliance(op.CacheDir, dryRun)
 	warmPruned := op.Services.Cache.PruneWarmImages(ctx, dryRun)
-	guestfsStateCleaned := guestfs.CleanStaleState()
-	staleProvisionCleaned := op.Services.Cache.CleanStaleProvisionMounts(ctx, dryRun)
 	result := map[string]any{
 		"service_binaries":       serviceBinariesCleaned,
 		"appliance":              appliancePruned,
 		"warm_images":            warmPruned,
-		"guestfs_state":          guestfsStateCleaned,
+		"guestfs_state":          false,
 		"stale_provision_mounts": staleProvisionCleaned,
 	}
 	return result, nil
@@ -163,18 +170,13 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[strin
 // CachePruneAll performs complete cache prune across all resource types.
 // Returns *model.PruneAllResult
 func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll bool) (*model.PruneAllResult, error) {
-	if err := system.CheckPrivileges("/usr/sbin/ip", "prune all cache resources"); err != nil {
-		return nil, errs.WrapMsg(
-			errs.CodePrivilegeRequired,
-			fmt.Sprintf("Privilege check failed: %v", err),
-			err,
-			errs.WithClass(errs.ClassNeedsInteraction),
-		)
-	}
 	// Detect running VMs (list all then check status)
 	hadRunningVMs := false
 	if op.Repos.VM != nil {
 		vms, err := op.Repos.VM.ListAll(ctx)
+		if err != nil {
+			return nil, err
+		}
 		if err == nil {
 			for _, v := range vms {
 				if v.Status == model.VMStatusRunning || v.Status == model.VMStatusStarting {
@@ -187,30 +189,38 @@ func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll 
 	// Prune each resource type — collect IDs from results.
 	var prunedIDs []string
 	var failedIDs []string
-	// CachePruneVMs still returns *errs.OperationResult (not yet refactored)
-	pruneVMsResult := op.CachePruneVMs(ctx, dryRun, includeAll)
-	if pruneVMsResult != nil && pruneVMsResult.IsOK() && pruneVMsResult.Item != nil {
-		if items, ok := pruneVMsResult.Item.([]string); ok {
-			prunedIDs = append(prunedIDs, items...)
+	var failures []results.CachePruneFailure
+	var causes []error
+	collect := func(resource string, ids []string, err error) {
+		prunedIDs = append(prunedIDs, ids...)
+		if err == nil {
+			return
 		}
+		failure := results.CachePruneFailure{Resource: resource, Code: "cache.prune_failed",
+			Class: errs.ClassInternal, Message: err.Error()}
+		var de *errs.DomainError
+		if errors.As(err, &de) {
+			failure.Code, failure.Class, failure.Message = de.Code, de.Class, de.Message
+			failure.Op, failure.Entity, failure.Details = de.Op, de.Entity, de.Details
+			if de.Entity != "" {
+				failedIDs = append(failedIDs, de.Entity)
+			}
+		}
+		failures = append(failures, failure)
+		causes = append(causes, err)
 	}
+	vmIDs, err := op.VMPrune(ctx, dryRun, includeAll)
+	collect("vm", vmIDs, err)
 	netIDs, err := op.CachePruneNetworks(ctx, dryRun, includeAll)
-	if err == nil {
-		prunedIDs = append(prunedIDs, netIDs...)
-	}
+	collect("network", netIDs, err)
 	imgIDs, err := op.CachePruneImages(ctx, dryRun, includeAll)
-	if err == nil {
-		prunedIDs = append(prunedIDs, imgIDs...)
-	}
+	collect("image", imgIDs, err)
 	kernelIDs, err := op.CachePruneKernels(ctx, dryRun, includeAll)
-	if err == nil {
-		prunedIDs = append(prunedIDs, kernelIDs...)
-	}
+	collect("kernel", kernelIDs, err)
 	binIDs, err := op.CachePruneBinaries(ctx, dryRun, includeAll)
-	if err == nil {
-		prunedIDs = append(prunedIDs, binIDs...)
-	}
+	collect("binary", binIDs, err)
 	miscMap, miscErr := op.CachePruneMisc(ctx, dryRun)
+	collect("misc", nil, miscErr)
 	if miscErr == nil {
 		if infra.IsTrue(miscMap["appliance"]) {
 			prunedIDs = append(prunedIDs, "appliance")
@@ -231,6 +241,10 @@ func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll 
 		FailedIDs:     failedIDs,
 		HadRunningVMs: hadRunningVMs,
 	}
+	if len(causes) > 0 {
+		return result, errs.WrapMsg(errs.CodeCacheCleanFailed, "one or more cache resources failed to prune",
+			errors.Join(causes...), errs.WithDetails(map[string]any{"failures": failures}))
+	}
 	return result, nil
 }
 
@@ -239,6 +253,13 @@ func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll 
 func (op *Operation) CacheClean(ctx context.Context, dryRun bool) (*model.CleanResult, error) {
 	// Step 1: Prune all cached resources)
 	pruneResult, pruneErr := op.CachePruneAll(ctx, dryRun, true)
+	if pruneErr != nil {
+		result := &model.CleanResult{CacheDir: op.CacheDir}
+		if pruneResult != nil {
+			result.PruneResult = *pruneResult
+		}
+		return result, pruneErr
+	}
 	// Step 2: Abort if any VMs failed to prune or orphan processes remain post-prune.
 	//)
 	if !dryRun && pruneErr == nil && pruneResult != nil {
@@ -279,15 +300,74 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) (*model.CleanR
 	}
 	// Step 3: Clean host networking (while DB still exists in cache dir)
 	if !dryRun {
-		_, _ = op.HostClean(ctx)
+		if _, err := op.HostClean(ctx); err != nil {
+			result := &model.CleanResult{CacheDir: op.CacheDir}
+			if pruneResult != nil {
+				result.PruneResult = *pruneResult
+			}
+			return result, err
+		}
 	}
+	return op.completeCacheClean(ctx, dryRun, pruneResult, jailer.NewProtectedCacheClient())
+}
+
+type protectedCacheCleaner interface {
+	Clean(context.Context, jailer.ProtectedCacheCleanRequest) (jailer.ProtectedCacheCleanResult, error)
+}
+
+// completeCacheClean runs only after pruning and root host-clean admission. The named receiver
+// owns protected-parent retirement; ordinary removal never runs after a refused acknowledgement.
+func (op *Operation) completeCacheClean(
+	ctx context.Context, dryRun bool, pruneResult *model.PruneAllResult, cleaner protectedCacheCleaner,
+) (*model.CleanResult, error) {
 	// Step 4: Remove the cache directory itself
 	cacheDirRemoved := false
 	if _, err := os.Stat(op.CacheDir); err == nil {
 		if !dryRun {
-			os.RemoveAll(op.CacheDir)
+			acknowledgement, err := cleaner.Clean(ctx,
+				jailer.ProtectedCacheCleanRequest{CacheRoot: op.CacheDir})
+			if err != nil {
+				result := &model.CleanResult{CacheDir: op.CacheDir}
+				if pruneResult != nil {
+					result.PruneResult = *pruneResult
+				}
+				return result, errs.Wrap(errs.CodeCacheCleanFailed, err)
+			}
+			if err := acknowledgement.Validate(); err != nil {
+				result := &model.CleanResult{CacheDir: op.CacheDir}
+				if pruneResult != nil {
+					result.PruneResult = *pruneResult
+				}
+				return result, errs.Wrap(errs.CodeCacheCleanFailed, err)
+			}
+			// Root leaves its empty private quarantine in the caller-owned namespace. Only
+			// the ordinary caller removes this fixed suffix; never ask root to unlink it.
+			quarantineErr := unix.Rmdir(filepath.Join(op.CacheDir, jailer.ProtectedCacheQuarantineDirectory))
+			if errors.Is(quarantineErr, unix.ENOENT) {
+				quarantineErr = nil
+			}
+			if err := quarantineErr; err != nil {
+				result := &model.CleanResult{CacheDir: op.CacheDir}
+				if pruneResult != nil {
+					result.PruneResult = *pruneResult
+				}
+				return result, errs.Wrap(errs.CodeCacheCleanFailed, err)
+			}
+			if err := os.RemoveAll(op.CacheDir); err != nil {
+				result := &model.CleanResult{CacheDir: op.CacheDir}
+				if pruneResult != nil {
+					result.PruneResult = *pruneResult
+				}
+				return result, errs.Wrap(errs.CodeCacheCleanFailed, err)
+			}
 		}
 		cacheDirRemoved = true
+	} else if !os.IsNotExist(err) {
+		result := &model.CleanResult{CacheDir: op.CacheDir}
+		if pruneResult != nil {
+			result.PruneResult = *pruneResult
+		}
+		return result, errs.Wrap(errs.CodeCacheCleanFailed, err)
 	}
 	// Build CleanResult)
 	if pruneResult == nil {

@@ -2,7 +2,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"mvmctl/internal/cli/common"
@@ -54,7 +53,6 @@ func NewVolumeCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.Comma
 }
 
 func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.Command {
-	var jsonOutput bool
 	var longOutput bool
 
 	cmd := &cobra.Command{
@@ -65,12 +63,7 @@ func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.C
 		RunE: func(cmd *cobra.Command, args []string) error {
 			volumes := volumeAPI.VolumeListAll(cmd.Context())
 
-			if jsonOutput {
-				if volumes == nil {
-					volumes = []*model.VolumeItem{}
-				}
-				jsonBytes, _ := json.MarshalIndent(volumes, "", "  ")
-				fmt.Println(string(jsonBytes))
+			if common.RecordListResult(volumes) {
 				return nil
 			}
 
@@ -81,13 +74,11 @@ func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.C
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&longOutput, "long", false, "Show full listing with all columns")
 	return cmd
 }
 
 func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
-	var format string
 	var readOnly bool
 	var shareable bool
 	var writeback bool
@@ -100,10 +91,6 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 			name := args[0]
 			sizeStr := args[1]
 
-			var formatPtr *string
-			if cmd.Flags().Changed("format") {
-				formatPtr = &format
-			}
 			var readOnlyPtr *bool
 			if cmd.Flags().Changed("read-only") || cmd.Flags().Changed("readonly") {
 				readOnlyPtr = &readOnly
@@ -119,12 +106,12 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 			input := inputs.VolumeCreateInput{
 				Name:      name,
 				Size:      sizeStr,
-				Format:    formatPtr,
 				ReadOnly:  readOnlyPtr,
 				Shareable: shareablePtr,
 				Writeback: writebackPtr,
 			}
 			vol, err := volumeAPI.VolumeCreate(cmd.Context(), input)
+			common.RecordResult(vol)
 			if err != nil {
 				return err
 			}
@@ -147,7 +134,6 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&format, "format", "", "Disk format: raw or qcow2 (default: raw)")
 	// Accept both --read-only and --readonly as aliases
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "readonly", false, "Mount volume as read-only (default: writable)")
@@ -171,6 +157,9 @@ func newVolumeRemoveCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 		ValidArgsFunction: completeVolumeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			removeResult := volumeAPI.VolumeRemove(cmd.Context(), inputs.VolumeInput{Identifiers: args}, force)
+			if common.StructuredOutput() {
+				return common.RecordBatch(removeResult)
+			}
 			for _, r := range removeResult.Items {
 				itemName := "unknown"
 				if r.Item != nil {
@@ -195,12 +184,11 @@ func newVolumeRemoveCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "Remove even if attached to VMs")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Remove even if attached to a stopped VM")
 	return cmd
 }
 
 func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:               "inspect [selector]",
@@ -215,8 +203,7 @@ func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 				return err
 			}
 
-			if jsonOutput {
-				fmt.Println(common.MarshalJSONDefaultStr(info))
+			if common.RecordResult(info) {
 				return nil
 			}
 
@@ -225,7 +212,6 @@ func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 
@@ -257,7 +243,12 @@ func newVolumeAttachCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:   "attach [vm-selector] [volume-selector]",
 		Short: "Attach a volume to a VM.",
-		Long: `Attach a volume to a running VM.
+		Long: `Attach a volume to a VM.
+
+Running VMs require verified guest block-device readiness before success.
+Paused VMs retain a staged attachment and return a deferred-readiness error;
+resume the VM and retry the same attach to verify readiness.
+Stopped VMs record the attachment for the next start.
 
 Arguments:
   vm-selector        VM selector (name, ID prefix, IP, or MAC)

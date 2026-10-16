@@ -10,10 +10,10 @@
 
 Think "Docker for VMs" — one command to create, start, and connect.
 
-- ⚡ **Fast boot times** — VMs boot in 2-4 seconds (loop-mount) or 9-14 seconds (guestfs), so you iterate at container speed with VM-grade isolation
+- ⚡ **Fast boot times** — lightweight Firecracker guests keep development feedback fast; the older timing benchmarks are not a v0.3.0 performance guarantee
 - 🔥 **Powered by Firecracker** — AWS's battle-tested microVM technology, the engine behind Lambda and Fargate
 - 🛡️ **Secure by default** — hardware-level isolation with KVM
-- 📦 **Single binary** — one statically-linked Go binary with no language runtime dependencies. Calls standard Linux utilities (ip, sudo, iptables/nftables, losetup, mount)
+- 📦 **Single installed binary** — the root-owned `mvm` executable serves both the unprivileged CLI and its narrowly typed privileged operations; host packages are still needed for VM setup and provisioning
 - 🖼️ **Image support** — ready-to-use images for Ubuntu, Debian, Arch, Alpine, and more. Import your own base images
 - 💾 **Volumes & persistence** — create, attach, resize, and detach persistent data disks that survive VM lifecycles
 - ⚙️ **Custom kernels** — download pre-built Firecracker kernels or build official kernels with custom features (KVM, nftables)
@@ -42,7 +42,7 @@ Think "Docker for VMs" — one command to create, start, and connect.
 
 ## Prerequisites
 
-- **Linux** (x86_64 or aarch64) with KVM access (`/dev/kvm`):
+- **Linux** with KVM access (`/dev/kvm`). The v0.3.0 runtime qualification is on x86_64; aarch64 is not yet runtime-qualified:
   ```bash
   sudo usermod -aG kvm $USER
   # Log out and back in
@@ -51,40 +51,51 @@ Think "Docker for VMs" — one command to create, start, and connect.
 
   Ubuntu/Debian:
   ```bash
-  sudo apt-get install -y iproute2 iptables nftables qemu-utils e2fsprogs util-linux procps kmod openssh-client tar sudo passwd fakeroot
+  sudo apt-get install -y iproute2 qemu-utils e2fsprogs util-linux procps kmod openssh-client tar sudo passwd fakeroot
   ```
   Arch Linux:
   ```bash
-  sudo pacman -S --needed iproute2 iptables nftables qemu-img e2fsprogs util-linux procps-ng kmod openssh tar sudo shadow fakeroot
+  sudo pacman -S --needed iproute2 qemu-img e2fsprogs util-linux procps-ng kmod openssh tar sudo shadow fakeroot
   ```
   Optional (for ISO cloud-init mode only): `cloud-image-utils` (Ubuntu/Debian) or `cloud-utils` (Arch)
-- **Root access (one-time):** run `mvm host init` once to create the `mvm` group and a sudoers drop-in; normal `mvm` commands require no `sudo` after that
+- **Administrator access for installation and host setup:** install the trusted artifact at `/usr/local/bin/mvm`, then run `host init`; normal commands run without `sudo` after setup. Later system-binary upgrades also require an administrator.
+- **Firecracker/Jailer 1.17.0:** the approved v0.3.0 launch contract requires this exact matching release pair; affected runtime qualification remains pending. Managed networking also requires kernel nftables support for both `inet` and `bridge` families; installing the `nft` CLI does not add missing kernel support.
+- **Fresh snapshots after upgrade:** create fresh 1.17.0 snapshots and qualify restore with the same pair. Older snapshot state is neither converted nor relabeled. The historical 1.16.2 format is incompatible with 1.16.0/1.16.1 in both directions. See [runtime guidance](docs/RUNTIME.md#vm-launch-and-resource-control).
 - **Environment variables:** Configure runtime behavior via `MVM_*` variables. See [docs/REFERENCES.md](docs/REFERENCES.md#environment-variables) for the full list.
 
 ---
 
 ## Installation
 
-### 1. Download prebuilt binary (recommended)
+v0.3.0 requires a clean installation and fresh managed state; it does not migrate legacy databases, runtime,
+or protected-storage layouts. Before replacing an older installation, stop/remove its VMs and preserve desired
+artifacts separately. Review the [administrator installation constraints](docs/REFERENCES.md#mvm-host) before
+cleanup: `host clean` and `host reset` are not a supported legacy-state removal procedure.
 
-You may head over to [Releases](https://github.com/AlanD20/mvmctl/releases) page to get the desired package for your distro or you may simply get the static and standalone binary itself:
+### 1. Download a published v0.3.0 binary
+
+v0.3.0 is not released yet. Once published, obtain the `v0.3.0` artifact from [Releases](https://github.com/AlanD20/mvmctl/releases); do not use `releases/latest` while it may still point to an older installation contract. For current development, use the source-build path below in a disposable environment.
 
 ```bash
-mkdir -p ~/.local/bin
-curl -L -o ~/.local/bin/mvm https://github.com/AlanD20/mvmctl/releases/latest/download/mvm
-chmod +x ~/.local/bin/mvm
-mvm --help
+curl -fL -o ./mvm https://github.com/AlanD20/mvmctl/releases/download/v0.3.0/mvm
+chmod +x ./mvm
+sudo ./mvm host install-system
+sudo /usr/local/bin/mvm host init
+/usr/local/bin/mvm --help
 ```
 
-> Make sure `~/.local/bin` is in your `$PATH`. Most modern Linux distros include it by default.
+> `/usr/local/bin/mvm` is the single installed executable. It is root-owned; normal use is unprivileged. Keep a
+> downloaded candidate user-owned and use its `host install-system` command for future administrator-approved upgrades.
 
 ### 2. Build from source
 
 ```bash
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
-./scripts/build.sh release --output ~/.local/bin/mvm
-mvm --help
+./scripts/build.sh release --version 0.3.0-rc.1
+sudo ./dist/mvm host install-system
+sudo /usr/local/bin/mvm host init
+/usr/local/bin/mvm --help
 ```
 
 See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference with all flags, options, and selectors.
@@ -94,19 +105,23 @@ See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference 
 ## Quick Start
 
 ```bash
-# 1. One-time system setup (interactive, handles sudo)
-mvm init
+# 1. One-time system setup after installing the root-owned binary
+sudo /usr/local/bin/mvm host init
 
-# 2. Log out and back in, then download a kernel and image
+# 2. Log out and back in, then initialize the operator cache and the exact required binary pair
+mvm init --skip-host --non-interactive --binary-version 1.17.0
+
+# 3. Download a kernel and image
 mvm kernel pull --type firecracker --default
 mvm image pull ubuntu:24.04 --default
 
-# 3. Create and connect to a VM
+# 4. Create and connect to a VM
 mvm vm create myvm --image ubuntu:24.04 --vcpu 2 --mem 2G --disk-size 20G
 mvm exec myvm                    # vsock agent — no SSH needed
 ```
 
-That's it. When you're done: `mvm vm rm myvm`.
+`--binary-version` is used by `mvm init` only when no local pair is selected. If a different pair is already the
+default, run `mvm bin pull 1.17.0 --default` before creating a VM. When you're done: `mvm vm rm myvm`.
 
 ---
 
@@ -115,6 +130,7 @@ That's it. When you're done: `mvm vm rm myvm`.
 | Task | Command | Learn more |
 |------|---------|-----------|
 | Create a VM | `mvm vm create myvm --image ubuntu:24.04` | [REFERENCES.md](docs/REFERENCES.md#mvm-vm) |
+| Create without an IP network | `mvm vm create offline-worker --no-network` | [REFERENCES.md](docs/REFERENCES.md#mvm-vm) |
 | Run a command inside a VM | `mvm exec myvm -- ls -la` | [REFERENCES.md](docs/REFERENCES.md#mvm-exec) |
 | Copy files to/from a VM | `mvm cp ./file.txt myvm:/root/` | [REFERENCES.md](docs/REFERENCES.md#mvm-cp) |
 | SSH into a VM | `mvm ssh myvm` | [REFERENCES.md](docs/REFERENCES.md#mvm-ssh) |
@@ -148,7 +164,7 @@ That's it. When you're done: `mvm vm rm myvm`.
 |-------|----------|
 | **Permission denied: /dev/kvm** | Missing: `sudo modprobe kvm && sudo modprobe kvm_intel` (or `kvm_amd`). Unreadable: `sudo usermod -aG kvm $USER`, log out/back in |
 | **VM won't boot / SSH times out** | Cloud-init takes 30-60s. Watch with `mvm logs myvm --follow` |
-| **nocloud-net server failed** | Port range exhausted. Check: `sudo ss -tlnp \| grep -E ':(8[0-9]{3}\|9[0-9]{3})'` |
+| **nocloud-net server failed** | NoCloud uses fixed TCP port `8000` on the managed network gateway; check that listener and the network's service grant. |
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the full guide.
 

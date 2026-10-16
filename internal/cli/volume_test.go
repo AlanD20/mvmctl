@@ -171,27 +171,23 @@ func TestNewVolumeCreateCmd(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("with_format_flag_returns_no_error", func(t *testing.T) {
-		mock := &testutil.MockVolumeAPI{
-			VolumeCreateFunc: func(ctx context.Context, input inputs.VolumeCreateInput) (*model.VolumeItem, error) {
-				assert.NotNil(t, input.Format)
-				if input.Format != nil {
-					assert.Equal(t, "qcow2", *input.Format)
-				}
-				return &model.VolumeItem{
-					ID:        "vol-1",
-					Name:      "my-vol",
-					SizeBytes: 10737418240,
-					Status:    model.VolumeStatusAvailable,
-				}, nil
-			},
-		}
-		cmd := cli.NewVolumeCmd(mock, nil)
-		createCmd, _, _ := cmd.Find([]string{"create"})
-		createCmd.Flags().Set("format", "qcow2")
-		err := createCmd.RunE(createCmd, []string{"my-vol", "10G"})
-		assert.NoError(t, err)
-	})
+	for _, format := range []string{"raw", "qcow2"} {
+		t.Run("removed_format_flag_"+format, func(t *testing.T) {
+			called := false
+			mock := &testutil.MockVolumeAPI{
+				VolumeCreateFunc: func(context.Context, inputs.VolumeCreateInput) (*model.VolumeItem, error) {
+					called = true
+					return nil, errors.New("unexpected create")
+				},
+			}
+			cmd := cli.NewVolumeCmd(mock, nil)
+			cmd.SetArgs([]string{"create", "my-vol", "10G", "--format", format})
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "unknown flag: --format")
+			assert.False(t, called)
+		})
+	}
 
 	t.Run("api_error_returns_error", func(t *testing.T) {
 		mock := &testutil.MockVolumeAPI{

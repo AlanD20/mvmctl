@@ -63,6 +63,8 @@ kernel-official:
       enforce:
         CONFIG_NFT_NAT: y
         CONFIG_NF_TABLES_INET: y
+        CONFIG_NF_TABLES_BRIDGE: y
+        CONFIG_NF_CONNTRACK_BRIDGE: y
         CONFIG_NF_NAT_MASQUERADE: y
         CONFIG_NFT_MASQ: y
     tuntap:
@@ -104,6 +106,9 @@ kernel-official:
         CONFIG_OVERLAY_FS: y
         CONFIG_NET_CLS_CGROUP: y
         CONFIG_SCHEDSTATS: y
+        CONFIG_MODULES: y
+        CONFIG_MODULE_UNLOAD: y
+
     iptables:
       desc: "iptables kube-proxy backend"
       enforce:
@@ -152,6 +157,16 @@ kernel-official:
         CONFIG_IP_NF_TARGET_MASQUERADE: y
         CONFIG_BRIDGE_NETFILTER: y
         CONFIG_NETFILTER_NETLINK: y
+        # IPVS support
+        CONFIG_IP_VS: y
+        CONFIG_IP_VS_PROTO_TCP: y
+        CONFIG_IP_VS_PROTO_UDP: y
+        CONFIG_IP_VS_NFCT: y
+        CONFIG_IP_VS_RR: y
+        CONFIG_IP_VS_WRR: y
+        CONFIG_IP_VS_LC: y
+        CONFIG_IP_VS_WLC: y
+        CONFIG_IP_VS_SH: y
 
     cni-bridge:
       desc: "CNI bridge / overlay networking"

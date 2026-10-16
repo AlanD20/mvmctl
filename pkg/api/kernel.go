@@ -194,7 +194,6 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 			spec,
 			resolvedCIVersion,
 			resolved.Arch,
-			resolved.OutputDir,
 			event.FormatProgress(onProgress),
 		)
 		if err != nil {
@@ -222,7 +221,7 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 				maps.Copy(featureEnforces, f.Enforce)
 			}
 		}
-		fetchResult, err = op.Services.Kernel.BuildOfficialKernel(ctx, spec, resolved.Arch, resolved.OutputDir,
+		fetchResult, err = op.Services.Kernel.BuildOfficialKernel(ctx, spec, resolved.Arch,
 			resolved.Jobs, resolved.KeepBuildDir, !resolved.CleanBuild, resolved.SkipChecksum,
 			configPath, featureEnforces,
 			event.FormatProgress(onProgress), onProgress)
@@ -249,12 +248,17 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 	if err := os.Rename(fetchResult.Path, kernelPath); err != nil {
 		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Failed to rename kernel file: %v", err), err)
 	}
-	// Parse filename for base_name (use original filename before rename)
-	parsed := kernel.ParseFilename(filepath.Base(fetchResult.Path))
+	if err := op.Services.Kernel.ImportProtected(ctx, kernelID); err != nil {
+		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, "import protected kernel", err)
+	}
+	// Preserve the established display metadata without allowing it to select a
+	// managed filename. The on-disk basename is always the content-derived ID.
+	displayName := fmt.Sprintf(kernel.KernelOutputPattern, spec.OutputName, fetchResult.Version, resolved.Arch)
+	parsed := kernel.ParseFilename(displayName)
 	// Create KernelItem
 	kernelItem := &model.KernelItem{
 		ID:        kernelID,
-		Name:      filepath.Base(fetchResult.Path),
+		Name:      displayName,
 		BaseName:  parsed.BaseName,
 		Version:   fetchResult.Version,
 		Arch:      resolved.Arch,
@@ -274,7 +278,16 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Failed to persist kernel: %v", err), err)
 	}
 	if resolved.SetDefault {
-		_ = op.Repos.Kernel.SetDefault(ctx, kernelItem.ID)
+		if err := op.Repos.Kernel.SetDefault(ctx, kernelItem.ID); err != nil {
+			return nil, errs.WrapMsg(errs.CodeKernelPullFailed, "failed to set default kernel", err)
+		}
+		kernelItem, err = op.Repos.Kernel.Get(ctx, kernelItem.ID)
+		if err != nil {
+			return nil, errs.WrapMsg(errs.CodeKernelPullFailed, "failed to read default kernel", err)
+		}
+		if kernelItem == nil {
+			return nil, errs.New(errs.CodeKernelPullFailed, "pulled kernel is missing after setting default")
+		}
 	}
 	// Clean up old kernel file if ID changed and path is different
 	// Compare resolved paths before deleting old.
@@ -323,6 +336,9 @@ func (op *Operation) KernelImport(ctx context.Context, input inputs.KernelImport
 		resolved.SetDefault,
 	)
 	if err != nil {
+		if domainErr := errs.AsDomainError(err); domainErr != nil && domainErr.Code == errs.CodeKernelImportFailed {
+			return nil, err
+		}
 		return nil, errs.WrapMsg(errs.CodeKernelImportFailed, fmt.Sprintf("Kernel import failed: %v", err), err)
 	}
 	op.AuditLog.LogOperation("kernel.import", map[string]any{

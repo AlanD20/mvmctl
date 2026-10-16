@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/version"
 	"mvmctl/internal/service/agent"
 )
@@ -19,7 +20,7 @@ import (
 func main() {
 	port := flag.Int("port", 1024, "vsock port to listen on")
 	token := flag.String("token", "", "auth token (overrides -token-file)")
-	tokenFile := flag.String("token-file", "/var/run/mvm-agent.token", "path to auth token file")
+	tokenFile := flag.String("token-file", infra.GuestAgentTokenPath, "path to auth token file")
 	versionFlag := flag.Bool("version", false, "print version and exit")
 	localSocket := flag.String("local-socket", "/var/run/mvm-agent.sock",
 		"path to the daemon's local Unix socket (used by 'remote' subcommand)")
@@ -38,17 +39,11 @@ func main() {
 		os.Exit(runRemoteSubcommand(*localSocket, flag.Args()[1:]))
 	}
 
-	// Token resolution order:
-	//   1. -token flag (explicit value, highest priority)
-	//   2. -token-file path (read from file at startup)
-	//   3. No token (skip auth)
-	resolvedToken := *token
-	if resolvedToken == "" {
-		if data, err := os.ReadFile(*tokenFile); err == nil {
-			resolvedToken = strings.TrimSpace(string(data))
-			slog.Debug("loaded token from file", "path", *tokenFile)
-		}
+	resolvedToken, err := resolveAgentToken(*token, *tokenFile, os.ReadFile)
+	if err != nil {
+		log.Fatalf("agent authentication unavailable: %v", err)
 	}
+	slog.Debug("loaded agent authentication", "from_file", *token == "", "path", *tokenFile)
 
 	// Create context that is cancelled on SIGTERM or SIGINT.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
@@ -60,4 +55,29 @@ func main() {
 	if err := agent.Run(ctx); err != nil {
 		log.Fatalf("agent exited with error: %v", err)
 	}
+}
+
+func resolveAgentToken(
+	explicitToken string,
+	tokenFile string,
+	readFile func(string) ([]byte, error),
+) (string, error) {
+	if explicitToken != "" {
+		return explicitToken, nil
+	}
+	if tokenFile == "" {
+		return "", fmt.Errorf("agent token file path is required")
+	}
+	if readFile == nil {
+		return "", fmt.Errorf("agent token file reader is required")
+	}
+	data, err := readFile(tokenFile)
+	if err != nil {
+		return "", fmt.Errorf("read agent token file %q: %w", tokenFile, err)
+	}
+	resolved := strings.TrimSpace(string(data))
+	if resolved == "" {
+		return "", fmt.Errorf("agent token file %q is empty", tokenFile)
+	}
+	return resolved, nil
 }

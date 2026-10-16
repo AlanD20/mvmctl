@@ -5,15 +5,233 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - Unreleased
+
+### Added
+
+- Added explicit same-operator identical-kernel reimport into a fresh active cache after terminal kernel removal
+  and completed old-store retirement, preserving predecessor records, digests, locks and monotonic generations.
+  Requires fresh kernel logical schema 2; existing schema 1 is not adopted and mutable backing rules are unchanged.
+  See [kernel lineage](docs/adr/0025-immutable-kernel-cache-lineage.md).
+- Added mandatory Jailer launch with isolated per-VM system identities, private API/vsock sockets, and
+  authenticated root-brokered control. Create, start, reboot, and restore verify the selected resources and live
+  process; direct Firecracker launch fallback is removed. See [runtime guidance](docs/RUNTIME.md).
+- Added one root-owned system installation at `/usr/local/bin/mvm`. Administrators install a trusted artifact with
+  `sudo ./mvm host install-system`, then enroll operators with `sudo /usr/local/bin/mvm host init`.
+  Operators run the public CLI without sudo; the managed sudoers policy grants only the fixed privileged marker.
+  See [installation](README.md#installation) and
+  [ADR-0016](docs/adr/0016-root-owned-single-binary-privileged-dispatch.md).
+- Added resumable administrator setup, multiple-operator enrollment, and root-owned host admission.
+  Direct-root setup/reset requires explicit `--operator USER`; authenticated sudo selects its invoking operator.
+  `host reset` requires exclusive quiescence, refuses live/ambiguous or changed administrator state, restores
+  recorded settings, and leaves admission disabled. See [host commands](docs/REFERENCES.md#mvm-host).
+- Added a root-created network namespace for every VM, with receiver-derived fixed link/runtime names and
+  default-deny managed same-network and cross-network traffic. Firewall enforcement uses direct Go nftables
+  transactions with anti-spoofing, connection tracking, and conditional internet egress/NAT.
+- Added separate `mvm policy traffic` and `mvm policy exec` families. Traffic grants permit source-network or
+  exact source-VM TCP/UDP access to a destination VM; exec grants permit directional execution as an exact
+  non-root destination user, independently of same-network, cross-network, or networkless placement.
+  Neither policy grants the other's authority. See [policy reference](docs/REFERENCES.md#mvm-policy).
+- Added explicit VM-to-VM execution opt-in through `mvm exec --allow-vm-exec` and
+  `mvm-agent remote --user USER DESTINATION -- COMMAND`. The authenticated relay binds both live VM identities,
+  supports separate output streams and cancellation, and records command-redacted audit correlation.
+  See [exec reference](docs/REFERENCES.md#mvm-exec) and
+  [ADR-0017](docs/adr/0017-per-vm-network-namespaces-and-typed-policies.md).
+- Added VM-to-VM relay limits of eight host-global sessions, a five-minute absolute lifetime, a 32-KiB command,
+  8-MiB combined output, and 64-KiB frames. Cancellation terminates the admitted command process group;
+  audit files are operator-owned observability, not tamper-proof root authority.
+- Added `mvm vm create --no-network` with an isolated loopback-only namespace, no NIC/IP/MAC allocation, and
+  vsock guest access. It conflicts with network/IP/MAC selection and NoCloud network mode.
+  See [VM creation](docs/REFERENCES.md#mvm-vm) and
+  [ADR-0020](docs/adr/0020-networkless-vm-placement.md).
+- Added protected active rootfs/raw-volume backing and root-controlled full snapshots covering rootfs,
+  RAM/vmstate, and attached data volumes under exclusive write ownership. Competing writable VM access refuses
+  capture. Restore creates independent writable disks and retains immutable captured memory backing.
+  See [snapshot reference](docs/REFERENCES.md#mvm-snapshot-alias-ss) and
+  [ADR-0018](docs/adr/0018-isolated-vm-execution-and-snapshot-authority.md).
+- Added snapshot recovery through typed inspect/remove operations and retained capture intent.
+  `snapshot create` emits its full request ID to stderr before capture, including JSON mode; retain that ID
+  to inspect or remove a capture whose local projection was interrupted.
+- Added authenticated live-volume attachment readiness: Running attach requires the exact guest disk
+  serial/capacity and unchanged root attachment identity. Paused attach stages the binding with a retryable
+  deferred-readiness error; resume and retry the same attach. Stopped attach takes effect on next start.
+  See [volume behavior](docs/RUNTIME.md#volumes-snapshots-and-recovery).
+- Added cgroup-v2 CPU, swap, PID, and pressure-only memory control with verified root readback.
+  `memory.high` is guest RAM plus configured VMM headroom; `memory.max=max` permits exceeding that threshold.
+  `vm inspect` reports requested/observed policy and usage. See
+  [ADR-0019](docs/adr/0019-pressure-only-vm-memory-control.md).
+- Added global `--json` schema-1 success/error/partial envelopes, typed command data, structured error
+  code/class/details, and per-item batch outcomes. Empty array listings remain `[]`; partial results exit
+  unsuccessfully. See [output contract](docs/REFERENCES.md#command-reference).
+- Added `mvm init --binary-version VERSION` for deterministic exact-pair selection when no local pair exists.
+  See [initialization](docs/REFERENCES.md#mvm-init).
+
+### Changed
+
+- Changed the approved VM launch contract to the exact matching Firecracker/Jailer **1.17.0** pair, selecting the
+  latest stable official release for this dependency update. The earlier 1.16.2 update fixed the upstream
+  1.16.1 pause/resume-vsock defect. Older audited pairs remain manageable binary artifacts, not launch fallbacks.
+  Future release updates review and qualify the latest stable matching pair before changing the exact pin.
+  Sealed launch supports x86 nested virtualization; ARM nested launch remains refused.
+  See [release requirements](docs/RUNTIME.md#vm-launch-and-resource-control).
+- Changed binary pull/remove to use the checksum-verified root release store and architecture-scoped pair
+  projections. Removal accepts exact versions; `--force` cannot bypass root references or ownership checks.
+  A failed local projection after root success is repaired by retry. See [binary commands](docs/REFERENCES.md#mvm-bin).
+- Changed VM lifecycle/status to use bounded root-authoritative observation rather than SQLite status or PID
+  mirrors. Observation errors propagate; paused display requires a live verified process. Cleanup reconciles
+  stopped/crashed/prior-boot records and finishes root removal before deleting the local projection.
+- Changed traffic creation to apply the root grant before local publication, and removal to prove revocation or
+  absence first. Stop preserves endpoint reservations/grants for restart; VM removal invalidates them.
+- Changed snapshot restore to preserve the captured release, drive IDs, guest CID, and managed network/IP/MAC.
+  Restore reserves the exact endpoint; conflicts and a different requested network refuse restoration.
+  Fresh address allocation, cross-network restore, and simultaneous endpoint clones are unsupported.
+- Changed volume growth and `volume rm --force` to permit an attached volume only when root observation proves
+  its VM stopped; detaching first is unnecessary. Force does not hot-unplug a running VM, and retained writers
+  still block protected-backing removal. See [volume commands](docs/REFERENCES.md#mvm-volume).
+- Changed NoCloud network delivery to one gateway-bound TCP **8000** listener per network, with typed
+  apply/revoke authority. Custom ports and bind collisions refuse; the grant reserves a service slot rather
+  than authenticating its listener process. See [cloud-init guidance](docs/RUNTIME.md#root-filesystem-provisioning-and-cloud-init).
+- Changed LoopMount provisioning, read-only inspection, and optimization to closed typed root operations.
+  Retained account creation, SSH/sudo setup, agent/seed injection, hostname/DNS, automatic deblob, fstab repair,
+  supported filesystem growth/shrink, and Btrfs-to-ext4 conversion with durable recovery.
+- Changed XFS support to typed inspection/provisioning, deblob, and fstab repair at existing capacity.
+  XFS resize/shrink refuse before mutation. GuestFS remains an optional mutually exclusive provisioner.
+  See [provisioner guidance](docs/RUNTIME.md#root-filesystem-provisioning-and-cloud-init).
+- Changed managed artifacts to fixed receiver-derived names: volume IDs select `volumes/<id>.raw`, kernel
+  IDs select `kernels/<id>`, VM rootfs uses `rootfs.img`, and snapshots use `rootfs.img`, `memory`, and
+  `vmstate`. Custom cloud-init ISO inputs are copied into the fixed managed leaf.
+- Changed storage admission to pin ownership, file/mount identity, and local-filesystem placement.
+  Explicit kernel same-content reimport verifies the retained digest; VM/snapshot references block retirement.
+  See [protected cache retirement](docs/adr/0022-explicit-protected-cache-retirement.md) and
+  [protected authority layout](docs/adr/0023-protected-branch-authority-layout.md).
+- Changed console discovery and relay-only stop to root-verified relay/endpoint authority. Stopping the console
+  preserves Firecracker and vsock; caller PID mirrors and counterfeit socket peers cannot authorize signaling.
+  Persistent logs remain available after stop. See [console commands](docs/REFERENCES.md#mvm-console).
+- Changed VM-to-image import to copy the current protected root disk: Running sources pause for copy and resume
+  before extraction; Paused/Stopped sources retain their state. Independent temporary exports use
+  `/var/lib/mvmctl/vm-rootfs-export-data` and need additional space there.
+- Changed interrupted image-import recovery to typed exact-ID forced removal, with busy-export refusal and
+  explicit source-state recovery errors. Ext4 journal replay occurs only on a disposable inspection copy.
+  See [VM image import](docs/REFERENCES.md#mvm-image).
+- Changed `host clean` to consult the caller's root-owned VM inventory, including records absent from SQLite.
+  It refuses running or incompletely observed VMs; it is caller-scoped cleanup, not global reset authority.
+  Cache cleanup propagates errors and uses typed operations.
+
+### Breaking changes
+
+- Required a clean installation: v0.3.0 does not migrate, backfill, adopt, or preserve legacy databases, running
+  VMs, jails, cgroups, TAPs, firewall state, policy rows, or remote-exec flags. Stop/remove old VMs and preserve
+  desired user artifacts separately before administrator cleanup and fresh initialization; ambiguous state refuses.
+  See [installation requirements](README.md#installation) and
+  [clean-break contract](docs/adr/0016-root-owned-single-binary-privileged-dispatch.md).
+- Removed user-owned binaries as sudo targets. Canonical system upgrades require administrator
+  `host install-system`; `self-update apply` refuses `/usr/local/bin/mvm` but remains available for user-owned
+  artifacts. Invoking/system privileged protocol mismatch stops before effects.
+- Required cgroup v2 with the necessary controllers and kernel nftables bridge/inet, connection-tracking, and
+  NAT support. Managed networks require non-overlapping RFC1918 prefixes with usable hosts (`/30` or larger).
+  Enabled NAT requires one unambiguous eligible IPv4 default-route uplink; caller-selected uplinks are removed.
+- Removed flat policy commands, `allow_remote_exec`/legacy VM-wide trust state, the `remote_vm` protocol,
+  iptables/`nft` CLI backends and selectors, raw host-tool sudo grants, and public `run provision`/`run jailer`.
+  Recreate typed traffic/exec grants; previously unrestricted managed peer traffic now starts denied.
+- Removed `volume create --format`, including `--format raw`, and QCOW2 data-volume create/resize.
+  Non-raw records may be inspected/removed but cannot be attached, resized, or relaunched.
+  QCOW2 image import/conversion and volume read-only/shareable/writeback options remain supported.
+- Removed public `api_socket_path`, custom Firecracker/cloud-init/console filenames, and kernel API destination
+  fields `output_dir`, `name`, and `output_path`. Control uses the root broker; managed paths are receiver-owned.
+- Changed JSON reads from bare objects/lists to envelope `data`. Streaming/interactive exec, SSH, logs,
+  completion, service run, init wizard, and console attachment reject JSON before effects; console state/kill support it.
+- Rejected legacy remote-exec databases, unique guest-CID schemas, older root journals, and incompatible protected
+  layouts without adoption. Separate vsock UDS endpoints now permit independent CID namespaces.
+- Rejected FUSE, network, overlay/stacked, and automount cache roots. Custom `MVM_CACHE_DIR` remains supported
+  on ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or ZFS.
+- Required fresh 1.17.0 snapshots and matching-pair restore qualification; earlier snapshot results do not qualify
+  this pair. Historically, Firecracker 1.16.2 snapshots are incompatible with 1.16.0/1.16.1 in both directions.
+  Older snapshot state is neither converted nor relabeled, and cross-version compatibility is not asserted. See
+  [upstream release notes](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.16.2).
 
 ### Fixed
 
-#### `mvm image inspect`
-- Ambiguous ID prefix now reports `"Image ID is ambiguous"` instead of `"No images found"`.
+- Fixed local host-direct pytest timeouts to retain bounded output and shutdown diagnostics, attempt
+  identity-pinned private process-group shutdown, and stop later domains and tiers. The domain fails and
+  the qualification host is retained for reconciliation with release evidence incomplete; process-group
+  cleanup does not prove privileged root-helper or VMM quiescence. See
+  [system-test timeout guidance](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#45-limit-parallel-workers).
+- Fixed the eight-case nested-isolation QA domain's aggregate deadline to allow its measured per-test
+  VM setup/teardown and nested lifecycle work, without extending individual commands or weakening assertions.
+- Fixed structured kernel-import conflicts to retain their error details and entity identity in API responses.
+- Fixed VM-to-image export to skip source-reported holes without expanding the entire logical disk into allocated
+  zero blocks, while preserving disk contents and length.
+- Fixed `host status` to verify inaccessible managed sudoers through authenticated root observation instead of
+  treating permission denial as absence. Unconfirmed observation errors propagate; the interactive `mvm init`
+  wizard can request explicit administrator setup with an unknown initial policy state and requires successful
+  verification afterward.
+- Fixed cache system-test fixtures to select unused physical cache identities while preserving retired root
+  authority. The Tier 1 `cache` runner uses an 11 GiB disk; other T1/T2 runner disks and memory are unchanged.
+- Fixed OpenRC agent startup to run before networking, chronyd, and cloud-init, without extending exec deadlines
+  or changing authentication. See [ADR-0024](docs/adr/0024-early-openrc-agent-startup.md).
+- Fixed resume to consult root-owned pending-export admission and authenticated Firecracker state before success;
+  unresolved export recovery cannot be bypassed by cached Running/Starting status.
+- Fixed prior-boot VM/network cleanup and shared-state directory admission while retaining private permissions,
+  exact process absence, and root ownership. Interrupted creation without a database row can recover through
+  exact full-ID forced VM removal; original caller staging files are retained and reported.
+- Fixed protected snapshot/volume/cache retirement to separate permanent authority from removable data branches,
+  including distinct-filesystem caches and retry after interrupted deletion.
+- Fixed same-network traffic grants under `br_netfilter` by adding the exact inet companion allow;
+  default deny and the host's bridge-netfilter setting remain intact.
+- Fixed stale guest-neighbor removal to invalidate only the admitted dynamic IPv4 neighbor on its exact bridge.
+  Fixed rapid same-name/subnet network recreation to use a fresh identity.
+- Fixed Jailer startup credential/sealing races, actual leaf-cgroup verification/removal, disabled-log admission,
+  and slow disk preparation consuming the child's setup deadline.
+- Fixed live attach/detach namespace handling and authenticated guest-device removal before backing access revocation.
+  Known-applied attachment failures retain the binding for retry rather than falsely making the volume available.
+- Fixed cloud-init OFF independently of deblob/`--skip-deblob`, safe seed-ISO permissions, Ubuntu usrmerged
+  systemd admission, and NoCloud readiness-pipe deadlines.
+- Fixed read-only LoopMount inspection access-time drift and fixed-path `blkid` fallback.
+  Partition extraction falls back to `parted` after failed/malformed `sfdisk` probes instead of assuming no table.
+- Fixed image SHA-512 sidecar verification, including Alpine bare-token checksums; malformed/unavailable configured
+  metadata refuses publication. Fixed automatic import format resolution and long image name/version selectors.
+- Fixed image pull/import and `kernel pull --default` to return committed default state and propagate write errors.
+  Kernel builds honor explicit `MVM_TEMP_DIR`; official kernel configuration includes bridge connection tracking.
+- Fixed GuestFS probe timeout units and removed guessed global orphan/process cleanup.
+  Cache previews no longer prune unrelated GuestFS state.
+- Fixed moduleless built-in-KVM host initialization, first-read capacity reporting, and failed sudo setup being
+  marked complete. Administrator reset errors now report their stage and bounded cause.
+- Fixed mixed VM creation failures to retain attempted IDs and primary/recovery errors in
+  `error.details.failed_vms`/`created_vm_ids` with `data: null`; atomic rollback does not promise removal.
+  Fixed per-selector volume outcomes, snapshot partial errors, cache error propagation, and exec-port validation.
+- Fixed ambiguous image-prefix errors and human-readable byte sizes in inspection output.
+- Fixed system-test runner base-image reuse to require one present exact type/version match and rebuild removal
+  to use that admitted image's full ID. This tooling change does not alter public image resolver semantics.
+- Fixed system-test command timeouts to interrupt the owned CLI caller first, with bounded kill/reap fallback,
+  retained output and cleanup errors. A timeout remains a failure even if shutdown completes successfully.
+- Fixed QA host-reboot phases to require an explicit private `--host-reboot-namespace` input for PRE, binding
+  the exact runner, non-root operator and selected directories. POST retains that binding; task and phase receipts
+  require fresh schema 2 without adopting older records or legacy cache state. The original outer controller
+  and attached SSH key remain unchanged. This flag belongs to QA/developer tooling; see the
+  [host-reboot guide](docs/development/HOW_TO_RUN_SYSTEM_TESTS.md#47-explicit-named-runner-host-reboot-journey).
+- Aligned T1/T2 domain-runner VM creation deadlines to 1,800 seconds in system-test tooling.
+- Fixed networkless VM cleanup when Firecracker exits after recovery admission: retained pidfd exit and
+  successful reap now retire the live namespace check. Failed reaping and ambiguous live identity still refuse.
 
-#### `mvm inspect` (all — vm, image, network, key, etc.)
-- Byte-size fields (`_size` keys) in tree output are now human-readable (e.g., `8589934592` → `8.0 GiB`).
+### Known limitations and qualification
+
+- Candidate-bound x86_64 QA passed all 528 registered nodes (526 ordinary plus actual reboot PRE/POST), and the
+  closed candidate565 evidence join exited zero with PASS. Original source bindings remain literal; this was
+  not one full latest-HEAD invocation or a generic source-carry waiver. See the
+  [coverage checkpoint and proof identifiers](tests/system/COVERAGE_MATRIX.md#v030-release-security-qualification-overlay).
+- v0.3.0 remains unreleased. Remote CI, aarch64 runtime qualification and final release approval remain open.
+- Original exec/cache transients and the original saturation incident remain unexplained. Bounded pressure/guest
+  exhaustion passes neither attribute those failures nor guarantee survival under arbitrary host/ancestor/global OOM.
+- The required matching Firecracker/Jailer 1.17.0 pair passed the selected hotplug/snapshot journeys. Attachment
+  readiness detects unusable devices; it cannot repair the BAR relocation failure observed with 1.16.2.
+- Ambiguous ownership, interrupted effects and durability/cleanup errors remain explicit rather than authorizing
+  adoption or deletion. Snapshot projection recovery may require the emitted full ID; VM image import is a root-disk
+  copy, not an application-consistent RAM/data-volume snapshot.
+- Release-derived device budgets, the 10,000,000-byte complete vmstate limit and trusted captured-RAM length remain.
+  No per-data-volume/aggregate quota or physical-space reservation is promised; operators must budget capture,
+  restore and recovery space. See [resource-limit decisions](docs/improvements/volume-snapshot-resource-limits.md).
+- Registered-node completion does not establish every authority-abuse, replacement-race, policy fault, cancellation
+  or failure-recovery case. The coverage matrix retains those limits and all command-level Partial/Missing entries.
 
 ## [0.2.0] - 2026-07-10
 
@@ -317,6 +535,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System tests run in nested VM with unprivileged user
 - Coverage matrix tracking every CLI subcommand and flag
 
-[Unreleased]: https://github.com/AlanD20/mvmctl/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/AlanD20/mvmctl/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/AlanD20/mvmctl/releases/tag/v0.2.0
 [0.1.0]: https://github.com/AlanD20/mvmctl/releases/tag/v0.1.0

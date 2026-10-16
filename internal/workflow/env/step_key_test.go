@@ -65,13 +65,14 @@ func newKeyStep(t *testing.T, op *api.Operation) workflow.Step {
 
 // newKeyOp creates a minimal Operation with repos suitable for KeyRemove.
 // AuditLog is included because KeyRemove calls op.AuditLog.LogOperation.
-func newKeyOp(keyRepo key.Repository) *api.Operation {
+func newKeyOp(t *testing.T, keyRepo key.Repository) *api.Operation {
+	t.Helper()
 	return &api.Operation{
 		Repos: api.Repos{
 			Key: keyRepo,
 			VM:  testutil.NewVMRepo(),
 		},
-		AuditLog: logging.NewAuditLog(),
+		AuditLog: logging.NewAuditLog(t.Context()),
 	}
 }
 
@@ -134,7 +135,7 @@ func TestKeyStep_Apply(t *testing.T) {
 					Name:      "my-key",
 					IsPresent: true,
 				}))
-				return newKeyOp(repo)
+				return newKeyOp(t, repo)
 			},
 			ctx:       context.Background,
 			wantKeyID: "key-existing",
@@ -149,7 +150,7 @@ func TestKeyStep_Apply(t *testing.T) {
 					Name:      "my-key",
 					IsPresent: true,
 				}))
-				return newKeyOp(repo)
+				return newKeyOp(t, repo)
 			},
 			ctx: context.Background,
 			saved: model.ResourceState{
@@ -220,7 +221,7 @@ func TestKeyStep_Apply_WriteFailure(t *testing.T) {
 		Name:      "my-key",
 		IsPresent: true,
 	}))
-	op := newKeyOp(repo)
+	op := newKeyOp(t, repo)
 	step := newKeyStep(t, op)
 
 	writeErr := errors.New("disk full")
@@ -266,7 +267,7 @@ func TestKeyStep_Destroy(t *testing.T) {
 						},
 						VM: testutil.NewVMRepo(),
 					},
-					AuditLog: logging.NewAuditLog(),
+					AuditLog: logging.NewAuditLog(t.Context()),
 				}
 			},
 			saved: model.ResourceState{
@@ -279,15 +280,15 @@ func TestKeyStep_Destroy(t *testing.T) {
 		// --- Happy paths AFTER ---
 
 		"saved_nil_and_spec_nil_writes_state_and_returns": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return newKeyOp(testutil.NewKeyRepo())
+			setupOp: func(t *testing.T) *api.Operation {
+				return newKeyOp(t, testutil.NewKeyRepo())
 			},
 			saved: model.ResourceState{},
 			// No removal, no error — just writes state
 		},
 		"was_created_false_skips_destroy": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return newKeyOp(testutil.NewKeyRepo())
+			setupOp: func(t *testing.T) *api.Operation {
+				return newKeyOp(t, testutil.NewKeyRepo())
 			},
 			saved: model.ResourceState{
 				Spec: model.ResourceMap{"key_id": "key-keep"},
@@ -305,7 +306,7 @@ func TestKeyStep_Destroy(t *testing.T) {
 					IsPresent:     true,
 					PublicKeyPath: "/tmp/nonexistent.pub", // file won't exist; os.Remove is a no-op
 				}))
-				return newKeyOp(repo)
+				return newKeyOp(t, repo)
 			},
 			saved: model.ResourceState{
 				Spec: model.ResourceMap{"key_id": "key-remove"},
@@ -365,7 +366,7 @@ func TestKeyStep_Destroy_ContextCancelled(t *testing.T) {
 			Key: &ctxKeyRepo{KeyRepo: testutil.NewKeyRepo()},
 			VM:  testutil.NewVMRepo(),
 		},
-		AuditLog: logging.NewAuditLog(),
+		AuditLog: logging.NewAuditLog(t.Context()),
 	}
 	step := newKeyStep(t, op)
 
@@ -387,7 +388,7 @@ func TestKeyStep_Destroy_ContextCancelled(t *testing.T) {
 // rather than silently swallowing the persistence failure.
 
 func TestKeyStep_Destroy_WriteFailure(t *testing.T) {
-	op := newKeyOp(testutil.NewKeyRepo())
+	op := newKeyOp(t, testutil.NewKeyRepo())
 	step := newKeyStep(t, op)
 
 	writeErr := errors.New("disk full")
@@ -441,7 +442,7 @@ func TestKeyStep_StateData(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := newKeyOp(testutil.NewKeyRepo())
+			op := newKeyOp(t, testutil.NewKeyRepo())
 
 			var step workflow.Step
 			if tc.fromState {
@@ -473,7 +474,7 @@ func TestKeyStep_StateData_AfterApply(t *testing.T) {
 		Name:      "my-key",
 		IsPresent: true,
 	}))
-	op := newKeyOp(repo)
+	op := newKeyOp(t, repo)
 	step := newKeyStep(t, op)
 
 	state := workflow.NewSharedState()
@@ -515,7 +516,7 @@ func TestKeyStep_StateData_AfterDestroy(t *testing.T) {
 		IsPresent:     true,
 		PublicKeyPath: "/tmp/nonexistent.pub",
 	}))
-	op := newKeyOp(repo)
+	op := newKeyOp(t, repo)
 
 	saved := model.ResourceState{
 		Spec: model.ResourceMap{"key_id": "key-del"},

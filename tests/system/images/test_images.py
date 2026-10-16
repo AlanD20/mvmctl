@@ -1,2080 +1,2278 @@
-"""Image management system tests."""
+"""Image CLI contracts against the installed candidate inside a disposable runner."""
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
-from typing import Any
+import select
+import shlex
+import shutil
+import signal
+import subprocess
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
 from tests.system.conftest import (
-    _ensure_image,
     _guest_run,
+    _json_success_data,
+    _register_image_workspace,
     _run_mvm,
-    _unique_subnet,
-    ensure_vm_deps,
 )
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_image]
 
-# Cache directory inside the test VM
-VM_CACHE_DIR = "/root/.cache/mvmctl"
-VM_IMAGES_DIR = f"{VM_CACHE_DIR}/images"
-VM_TMP_DIR = "/tmp"
 
+_VM_IMPORT_DEATH_OBSERVER = r"""
+import hashlib
+import json
+import os
+import re
+import resource
+import select
+import signal
+import socket
+import stat
+import struct
+import sys
+import time
 
-# ============================================================================
-# Helpers — all operations run INSIDE the test VM via _run_mvm
-# ============================================================================
+vm_id, owner, source_pid, source_ticks, cache, import_name, fault_mode = sys.argv[1:]
+owner, source_pid, source_ticks = int(owner), int(source_pid), int(source_ticks)
+assert fault_mode in ('death', 'sigint-survivor', 'copy-io')
+assert os.geteuid() == 0 and int(os.environ['SUDO_UID']) == owner > 0
+assert re.fullmatch(r'[0-9a-f]{32}', vm_id)
+assert re.fullmatch(r'sys-image-[0-9a-f]{32}', import_name)
+fds, receiver, receiver_pidfd, image_id, exports, copies = [], None, None, None, None, None
+exports_parent = None
+receiver_owned = False
 
+def keep(fd):
+    fds.append(fd)
+    return fd
 
-def _parse_json_output(output: str) -> Any:
-    """Parse mvm JSON output, stripping trailing non-JSON lines (warnings)."""
-    for end_char in ("]", "}"):
-        last_idx = output.rfind(end_char)
-        if last_idx != -1:
-            return json.loads(output[:last_idx + 1])
-    return json.loads(output)
+def forget(fd):
+    os.close(fd)
+    fds.remove(fd)
 
+def identity(info):
+    return info.st_dev, info.st_ino
 
-def _vm_mktemp(runner_vm: str, suffix: str = "") -> str:
-    """Create a unique temp path inside the test VM."""
-    result = _guest_run(runner_vm,
-        f"mktemp -p {VM_TMP_DIR} {suffix}",
-    )
-    return result.stdout.strip()
+def stable(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
+def unique(pairs):
+    value = {}
+    for key, item in pairs:
+        assert key not in value, 'duplicate authority field'
+        value[key] = item
+    return value
 
-def _get_cached_alpine_path_in_vm(
-    runner_vm: str,
-    name: str = "alpine-extracted.raw",
-) -> str | None:
-    """Find a cached alpine image and decompress it to a VM temp path.
+def read(parent, name, maximum):
+    fd = os.open(name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    try:
+        before = os.fstat(fd)
+        value = bytearray()
+        while len(value) <= maximum:
+            part = os.read(fd, min(65536, maximum + 1 - len(value)))
+            if not part:
+                break
+            value.extend(part)
+        after = os.fstat(fd)
+        assert len(value) <= maximum and stable(before) == stable(after), 'unstable or oversized observation'
+        return before, bytes(value)
+    finally:
+        os.close(fd)
 
-    Returns the VM-internal path to the decompressed image file, or None if
-    no cached alpine image can be found.
-    """
-    result = _run_mvm(runner_vm, "image", "ls", "--json")
-    images: list[dict[str, Any]] = _parse_json_output(result.stdout)
-    alpine_images = [
-        i for i in images
-        if "alpine" in i.get("type", "").lower() and i.get("is_present")
-    ]
-    if not alpine_images:
-        return None
+def directory(parent, name):
+    fd = keep(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=parent))
+    info = os.fstat(fd)
+    assert info.st_uid == info.st_gid == 0 and not info.st_mode & 0o022, (name, info)
+    return fd
 
-    target = alpine_images[0]
-    result = _run_mvm(
-        runner_vm, "image", "inspect", target["id"], "--json", check=False
-    )
-    if result.returncode != 0:
-        return None
+def authority(parent, name, maximum=16384, mode=0o600):
+    info, raw = read(parent, name, maximum)
+    assert info.st_mode == stat.S_IFREG | mode and info.st_uid == info.st_gid == 0
+    assert info.st_nlink == 1 and 0 < info.st_size <= maximum
+    value = json.loads(raw, object_pairs_hook=unique)
+    assert json.dumps(value, separators=(',', ':'), ensure_ascii=False).encode() == raw
+    return info, raw, value
 
-    data = _parse_json_output(result.stdout)
-    source_path = data.get("path") or data.get("storage", {}).get("path")
-    if not source_path:
-        return None
+def proc(pid):
+    return os.open('/proc/' + str(pid), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
 
-    if source_path.startswith("/"):
-        resolved_source = source_path
-    else:
-        resolved_source = f"{VM_IMAGES_DIR}/{source_path}"
-    temp_path = f"{VM_TMP_DIR}/{name}"
+def process(fd):
+    _, raw = read(fd, 'stat', 16384)
+    fields = raw.decode().rpartition(') ')[2].split()
+    return {'state': fields[0], 'parent': int(fields[1]), 'group': int(fields[2]), 'ticks': int(fields[19])}
 
-    # Check if source file exists inside the VM
-    check = _guest_run(runner_vm,
-        f"test -f {resolved_source} && echo exists || echo not-found",
-        check=False,
-    )
-    if "not-found" in check.stdout:
-        return None
+def credentials(fd):
+    _, raw = read(fd, 'status', 65536)
+    values = dict(line.split(':', 1) for line in raw.decode().splitlines() if ':' in line)
+    return [int(x) for x in values['Uid'].split()], [int(x) for x in values['Gid'].split()]
 
-    # Decompress or copy inside the VM
-    if source_path.endswith(".zst"):
-        result = _guest_run(runner_vm,
-            f"zstd -d -f {resolved_source} -o {temp_path}",
-            check=False,
-        )
-        if result.returncode != 0:
-            return None
-    else:
-        result = _guest_run(runner_vm,
-            f"cp {resolved_source} {temp_path}",
-            check=False,
-        )
-        if result.returncode != 0:
-            return None
-    return temp_path
+def exited(pidfd, timeout=0):
+    poller = select.poll()
+    poller.register(pidfd, select.POLLIN)
+    events = poller.poll(timeout)
+    assert not events or not events[0][1] & (select.POLLERR | select.POLLNVAL), events
+    return bool(events)
 
+def digest_executable(parent):
+    # /proc/<admitted-pid>/exe is an intentional process-identity read, not a selector.
+    fd = os.open('exe', os.O_RDONLY | os.O_CLOEXEC, dir_fd=parent)
+    try:
+        info = os.fstat(fd)
+        assert stat.S_ISREG(info.st_mode) and info.st_uid == info.st_gid == 0
+        assert stat.S_IMODE(info.st_mode) == 0o755 and info.st_nlink == 1
+        assert 0 < info.st_size <= 64 * 1024 * 1024
+        with os.fdopen(os.dup(fd), 'rb') as value:
+            return identity(info), hashlib.file_digest(value, 'sha256').hexdigest()
+    finally:
+        os.close(fd)
 
-def _create_ext4_raw_in_vm(
-    runner_vm: str,
-    name: str = "test.raw",
-    size: str = "64M",
-) -> str | None:
-    """Create an ext4-formatted raw disk image inside the test VM.
+def source_unchanged():
+    assert not exited(source_pidfd)
+    current = process(source_proc)
+    assert current['ticks'] == source_ticks and current['state'] not in ('Z', 'X')
+    assert credentials(source_proc) == ([execution_uid] * 4, [execution_gid] * 4)
+    info, raw, _ = authority(instances, vm_id + '.json')
+    assert identity(info) == identity(source_record_info) and raw == source_record_raw
+    assert identity(os.stat('root', dir_fd=source_proc)) == jail_identity
+    assert identity(os.stat('ns/mnt', dir_fd=source_proc)) == mount_identity
+    _, cgroup = read(source_proc, 'cgroup', 16384)
+    assert cgroup.decode() == '0::/mvmctl/' + vm_id + '\n'
+    _, boot = read(None, '/proc/sys/kernel/random/boot_id', 128)
+    assert boot.decode().strip() == boot_id
+    _, _, current_device = authority(jail, '.mvm-device-authority.json', 262144, 0o400)
+    assert current_device['rootfs'] == rootfs and current_device['launch_generation'] == generation
+    executable = os.open('exe', os.O_RDONLY | os.O_CLOEXEC, dir_fd=source_proc)
+    try:
+        info = os.fstat(executable)
+        observed = {'device': info.st_dev, 'inode': info.st_ino, 'size_bytes': info.st_size,
+                    'mode': info.st_mode, 'uid': info.st_uid, 'gid': info.st_gid, 'links': info.st_nlink}
+        assert {key: active['executable'][key] for key in observed} == observed
+        assert 0 < info.st_size <= 64 * 1024 * 1024
+        with os.fdopen(os.dup(executable), 'rb') as value:
+            assert hashlib.file_digest(value, 'sha256').hexdigest() == launch['release']['firecracker_sha256']
+    finally:
+        os.close(executable)
 
-    Requires truncate and mkfs.ext4 inside the VM. Returns the VM-internal
-    path, or None if a prerequisite tool is unavailable or the operation fails.
-    """
-    # Check prerequisites inside the VM
-    for tool in ("truncate", "mkfs.ext4"):
-        check = _guest_run(runner_vm,
-            f"which {tool} && echo found || echo not-found",
-            check=False,
-        )
-        if "not-found" in check.stdout:
-            return None
+def observe_paused_state():
+    # Read only the fixed state endpoint of this retained Firecracker generation.
+    deadline = time.monotonic() + 5
+    source_unchanged()
+    runtime = keep(os.open('vmm-runtime', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                           dir_fd=jail))
+    try:
+        runtime_info = os.fstat(runtime)
+        assert stat.S_ISDIR(runtime_info.st_mode) and stat.S_IMODE(runtime_info.st_mode) == 0o700
+        assert runtime_info.st_uid == execution_uid and runtime_info.st_gid == execution_gid
+        socket_info = os.stat('firecracker.api.socket', dir_fd=runtime, follow_symlinks=False)
+        assert stat.S_ISSOCK(socket_info.st_mode) and socket_info.st_mode & 0o077 == 0
+        assert socket_info.st_mode & 0o200 and socket_info.st_uid == execution_uid
+        assert socket_info.st_gid == execution_gid
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(max(0.001, deadline - time.monotonic()))
+            connection.connect('/proc/self/fd/' + str(runtime) + '/firecracker.api.socket')
+            peer = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i'))
+            assert struct.unpack('3i', peer) == (source_pid, execution_uid, execution_gid)
+            source_unchanged()
+            assert stable(os.fstat(runtime)) == stable(runtime_info)
+            assert stable(os.stat('vmm-runtime', dir_fd=jail, follow_symlinks=False)) == stable(runtime_info)
+            assert stable(os.stat('firecracker.api.socket', dir_fd=runtime,
+                                  follow_symlinks=False)) == stable(socket_info)
+            assert time.monotonic() < deadline, 'state observation admission exceeded its budget'
+            connection.settimeout(deadline - time.monotonic())
+            connection.sendall(b'GET / HTTP/1.1\r\nHost: firecracker\r\nConnection: close\r\n\r\n')
+            response, body_start, content_length = bytearray(), None, None
+            while body_start is None or len(response) - body_start < content_length:
+                assert len(response) < 65536, 'oversized state response'
+                remaining = deadline - time.monotonic()
+                assert remaining > 0, 'state observation timed out'
+                connection.settimeout(remaining)
+                part = connection.recv(min(4096, 65536 - len(response)))
+                assert part, 'incomplete state response'
+                response.extend(part)
+                if body_start is None and b'\r\n\r\n' in response:
+                    header, _ = bytes(response).split(b'\r\n\r\n', 1)
+                    lines = header.decode('ascii').split('\r\n')
+                    assert lines[0].split(' ', 2)[:2] == ['HTTP/1.1', '200'], lines[0]
+                    headers = unique((name.lower(), value.strip()) for name, value in
+                                     (line.split(':', 1) for line in lines[1:]))
+                    assert 'transfer-encoding' not in headers and 'content-length' in headers
+                    assert re.fullmatch(r'[0-9]+', headers['content-length'])
+                    content_length = int(headers['content-length'])
+                    body_start = len(header) + 4
+                    assert 0 < content_length <= 65536 - body_start, 'oversized state body'
+            assert len(response) == body_start + content_length, 'unexpected state response extent'
+            observed = json.loads(bytes(response[body_start:]), object_pairs_hook=unique)
+            assert observed['state'] == 'Paused', observed
+            assert connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')) == peer
+            source_unchanged()
+            assert stable(os.fstat(runtime)) == stable(runtime_info)
+            assert stable(os.stat('vmm-runtime', dir_fd=jail, follow_symlinks=False)) == stable(runtime_info)
+            assert stable(os.stat('firecracker.api.socket', dir_fd=runtime,
+                                  follow_symlinks=False)) == stable(socket_info)
+            assert time.monotonic() < deadline, 'state observation exceeded its budget'
+            return observed['state']
+    finally:
+        forget(runtime)
 
-    raw_path = f"{VM_TMP_DIR}/{name}"
+def receiver_unchanged():
+    assert receiver_pidfd is not None and not exited(receiver_pidfd)
+    current = process(receiver)
+    assert current['ticks'] == receiver_identity['ticks'] and current['state'] not in ('Z', 'X')
+    assert current['group'] == receiver_identity['group']
+    assert credentials(receiver) == ([0] * 4, [0] * 4)
+    assert digest_executable(receiver) == candidate
+    assert read(receiver, 'cmdline', 4096)[1].split(b'\0')[:-1] == receiver_argv
+    assert read(receiver, 'cgroup', 16384)[1] == cli_cgroup
+    assert identity(os.stat('ns/mnt', dir_fd=receiver)) == cli_mount
 
-    result = _guest_run(runner_vm,
-        f"truncate --size {size} {raw_path}",
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
-
-    result = _guest_run(runner_vm,
-        f"mkfs.ext4 -F {raw_path}",
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
-    return raw_path
-
-
-def _create_qcow2_from_raw_in_vm(
-    runner_vm: str,
-    raw_path: str,
-    qcow2_path: str,
-) -> bool:
-    """Convert a raw image to qcow2 format inside the test VM.
-
-    Returns True on success, False on failure.
-    """
-    result = _guest_run(
-        runner_vm,
-        f"qemu-img convert -f raw -O qcow2 {raw_path} {qcow2_path}",
-        check=False,
-    )
-    return result.returncode == 0
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _ensure_alpine_available(runner_vm: str) -> None:
-    """Ensure alpine-3.21 image is cached before any test in this module."""
-    _ensure_image(runner_vm, "alpine:3.23")
-
-
-class TestImagePull:
-    """Test image pulling operations."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    @pytest.mark.parametrize(
-        "image_args",
-        [
-            ["alpine", "--version", "3.21"],
-            ["ubuntu-minimal", "--version", "24.04"],
-        ],
-        ids=["alpine:3.23", "ubuntu:24.04"],
-    )
-    def test_image_pull(self, runner_vm, image_args):
-        """Pull each supported image.
-
-        Tests a lightweight image (alpine) and a common one (ubuntu-minimal).
-        """
-        result = _run_mvm(runner_vm, "image", "pull", *image_args, timeout=120)
-        assert result.returncode == 0
-        assert (
-            "pulled" in result.stdout.lower()
-            or "already" in result.stdout.lower()
-        )
-
-
-class TestImageList:
-    """Test image listing operations."""
-
-    def test_image_list_json(self, runner_vm):
-        """List images in JSON format."""
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        data = _parse_json_output(result.stdout)
-        assert isinstance(data, list)
-        if data:
-            entry = data[0]
-            assert "id" in entry, f"Expected 'id' field in image entry: {entry}"
-            assert isinstance(entry.get("type"), str) and entry["type"], (
-                f"Expected non-empty type: {entry}"
-            )
-
-    def test_image_list_table(self, runner_vm):
-        """List images in table format."""
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        data = _parse_json_output(result.stdout)
-        assert isinstance(data, list)
-        if data:
-            entry = data[0]
-            assert entry.get("is_present") is True, (
-                f"Expected image to be present: {entry}"
-            )
-            assert isinstance(entry.get("type"), str) and entry["type"], (
-                f"Expected non-empty type: {entry}"
-            )
-
-    def test_image_list_no_cache(self, runner_vm):
-        """List cached images with --no-cache flag."""
-        result = _run_mvm(runner_vm, "image", "ls", "--no-cache", check=False)
-        assert result.returncode == 0, (
-            f"image ls --no-cache failed: {result.stderr}"
-        )
-
-    def test_image_list_type_filter(self, runner_vm):
-        """List cached images filtered by --type alpine."""
-        result = _run_mvm(
-            runner_vm, "image", "ls", "--type", "alpine", check=False
-        )
-        assert result.returncode == 0, (
-            f"image ls --type alpine failed: {result.stderr}"
-        )
-        if result.stdout.strip():
+def children(parent):
+    # Go may fork from any thread: enumerate only this admitted ancestry subtree.
+    task = os.open('task', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=parent)
+    try:
+        names = os.listdir(task)
+        assert len(names) <= 256
+        values = set()
+        for name in names:
             try:
-                data = _parse_json_output(result.stdout)
-                for entry in data:
-                    assert "alpine" in entry.get("type", "").lower(), (
-                        f"Expected alpine type, got: {entry}"
-                    )
-            except (json.JSONDecodeError, ValueError, TypeError):
+                _, raw = read(task, name + '/children', 4096)
+                values.update(int(x) for x in raw.split())
+            except FileNotFoundError:
                 pass
+        return values
+    finally:
+        os.close(task)
 
-    def test_image_list_remote(self, runner_vm):
-        """List images available from the remote registry."""
-        result = _run_mvm(
-            runner_vm, "image", "ls", "--remote", "--json", check=False
-        )
-        assert result.returncode == 0 and result.stdout.strip(), (
-            f"Remote listing failed in Tier 2 environment (should have network): "
-            f"{result.stderr}"
-        )
-        data = _parse_json_output(result.stdout)
-        assert isinstance(data, list)
-        assert len(data) > 0, "Expected at least one remote image"
-        entry = data[0]
-        assert isinstance(entry.get("type"), str) and entry["type"], (
-            f"Expected non-empty type: {entry}"
-        )
-        assert isinstance(entry.get("display_name"), str) or isinstance(
-            entry.get("version"), str
-        ), f"Expected display_name or version: {entry}"
+def find_receiver(cli_pid):
+    pending, seen, found = [(cli_pid, cli_ticks)], set(), []
+    while pending:
+        pid, ticks = pending.pop()
+        assert pid not in seen and len(seen) < 32, 'ambiguous or oversized CLI ancestry'
+        seen.add(pid)
+        try:
+            parent = proc(pid)
+        except FileNotFoundError:
+            continue
+        try:
+            try:
+                assert process(parent)['ticks'] == ticks
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            try:
+                child_pids = children(parent)
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            for child_pid in child_pids:
+                try:
+                    child = proc(child_pid)
+                except FileNotFoundError:
+                    continue
+                try:
+                    try:
+                        observed = process(child)
+                        argv = read(child, 'cmdline', 4096)[1].split(b'\0')[:-1]
+                    except (FileNotFoundError, ProcessLookupError):
+                        continue
+                    assert observed['parent'] == pid
+                    if argv == receiver_argv:
+                        assert credentials(child) == ([0] * 4, [0] * 4)
+                        assert digest_executable(child) == candidate
+                        found.append((child_pid, observed))
+                    pending.append((child_pid, observed['ticks']))
+                finally:
+                    os.close(child)
+        finally:
+            os.close(parent)
+    assert len(found) <= 1, 'multiple export receivers'
+    return found
 
-    def test_image_ls_remote_works(self, runner_vm):
-        """Listing remote images should return a non-empty list."""
+def copy_phase():
+    _, _, progress = authority(exports, vm_id + '.json')
+    assert progress['owner_uid'] == owner and progress['vm_id'] == vm_id
+    assert progress['generation'] == generation and progress['boot_id'] == boot_id
+    assert progress['rootfs'] == rootfs and progress['cache_root'] == cache
+    assert progress['original_state'] == 'Running'
+    identifier = progress['image_id']
+    assert re.fullmatch(r'[0-9a-f]{64}', identifier)
+    entry = directory(copies, identifier)
+    try:
+        _, _, record = authority(entry, 'copy.json')
+    finally:
+        forget(entry)
+    bound = record['source']
+    for key in ('owner_uid', 'vm_id', 'generation', 'boot_id', 'rootfs', 'cache_root', 'image_id'):
+        assert bound[key] == progress[key]
+    assert record['file'] == {'device': progress['output_device'], 'inode': progress['output_inode']}
+    assert record['directory'] == {'device': progress['parent_device'], 'inode': progress['parent_inode']}
+    return progress, record
+
+def freeze_copy():
+    global image_id, data_uid, copy_record, progress_before, partial_size
+    progress, record = copy_phase()
+    if progress['stage'] != 'copying' or record['phase'] != 'allocated':
+        assert progress['stage'] in ('prepared', 'pause_inflight', 'paused'), 'missed mid-copy fault window'
+        return False
+    source_unchanged()
+    receiver_unchanged()
+    signal.pidfd_send_signal(receiver_pidfd, signal.SIGSTOP)
+    deadline = time.monotonic() + 5
+    while process(receiver)['state'] != 'T' and time.monotonic() < deadline:
+        assert not exited(receiver_pidfd)
+        time.sleep(0.001)
+    assert process(receiver)['state'] == 'T', 'receiver did not stop'
+    receiver_unchanged()
+    progress, record = copy_phase()
+    # Retain admitted request ownership even when the fault phase raced past us.
+    image_id = progress['image_id']
+    assert progress['stage'] == 'copying' and record['phase'] == 'allocated', 'missed mid-copy fault window'
+    data_root = directory(state, 'vm-rootfs-export-data')
+    assert identity(os.fstat(data_root)) == (record['data_root']['device'], record['data_root']['inode'])
+    data_uid = directory(data_root, str(owner))
+    assert identity(os.fstat(data_uid)) == (record['uid_directory']['device'], record['uid_directory']['inode'])
+    data = directory(data_uid, image_id)
+    assert identity(os.fstat(data)) == (progress['parent_device'], progress['parent_inode'])
+    assert os.listdir(data) == [], 'partial output must remain anonymous'
+    marker = os.stat(image_id + '.copy', dir_fd=data_uid, follow_symlinks=False)
+    assert identity(marker) == (record['marker']['device'], record['marker']['inode'])
+    assert stat.S_ISREG(marker.st_mode) and marker.st_uid == marker.st_gid == 0 and marker.st_nlink == 1
+    descriptor_dir = os.open('fd', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=receiver)
+    try:
+        names = os.listdir(descriptor_dir)
+        assert len(names) <= 256
+        matches = [os.stat(name, dir_fd=descriptor_dir) for name in names]
+        matches = [info for info in matches if identity(info) == (progress['output_device'], progress['output_inode'])]
+        assert len(matches) == 1
+        info = matches[0]
+        assert info.st_mode == stat.S_IFREG | 0o600 and info.st_uid == info.st_gid == 0 and info.st_nlink == 0
+        assert 0 < info.st_size < rootfs['bytes'], 'copy was not interrupted mid-write'
+    finally:
+        os.close(descriptor_dir)
+    copy_record, progress_before, partial_size = record, progress, info.st_size
+    print(json.dumps({'phase': 'copying', 'image_id': image_id, 'receiver_pid': receiver_pid,
+                      'receiver_start_ticks': receiver_identity['ticks'], 'partial_bytes': info.st_size,
+                      'source_generation': generation, 'source_rootfs': rootfs}), flush=True)
+    return True
+
+def suspended_copy_unchanged():
+    source_unchanged()
+    receiver_unchanged()
+    assert process(receiver)['state'] == 'T', 'SIGINT receiver did not survive suspended'
+    progress, record = copy_phase()
+    assert progress == progress_before and record == copy_record
+    data = directory(data_uid, image_id)
+    try:
+        assert identity(os.fstat(data)) == (progress['parent_device'], progress['parent_inode'])
+        assert os.listdir(data) == [], 'suspended copy became public'
+    finally:
+        forget(data)
+    descriptor_dir = os.open('fd', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=receiver)
+    try:
+        names = os.listdir(descriptor_dir)
+        assert len(names) <= 256
+        matches = [os.stat(name, dir_fd=descriptor_dir) for name in names]
+        matches = [info for info in matches if identity(info) == (progress['output_device'], progress['output_inode'])]
+        assert len(matches) == 1
+        info = matches[0]
+        assert info.st_mode == stat.S_IFREG | 0o600 and info.st_uid == info.st_gid == 0
+        assert info.st_nlink == 0 and info.st_size == partial_size
+    finally:
+        os.close(descriptor_dir)
+
+def observe_sigint_survivor():
+    assert exited(cli_pidfd, 5000), 'SIGINT caller did not exit'
+    suspended_copy_unchanged()
+    print(json.dumps({'phase': 'interrupted', 'image_id': image_id,
+                      'receiver_exited': False, 'receiver_stopped': True}), flush=True)
+    while select.select([sys.stdin], [], [], 45)[0]:
+        command = sys.stdin.readline(256)
+        assert command in ('busy\n', 'continue\n'), 'missing survivor command'
+        suspended_copy_unchanged()
+        if command == 'busy\n':
+            print(json.dumps({'phase': 'busy', 'image_id': image_id,
+                              'copy_authority_unchanged': True}), flush=True)
+            continue
+        signal.pidfd_send_signal(receiver_pidfd, signal.SIGCONT)
+        assert exited(receiver_pidfd, 90000), 'surviving receiver did not settle'
+        source_unchanged()
+        progress, record = copy_phase()
+        assert progress['stage'] == 'complete' and progress['original_state'] == 'Running'
+        for key in ('owner_uid', 'vm_id', 'generation', 'boot_id', 'rootfs', 'cache_root',
+                    'image_id', 'output_device', 'output_inode', 'parent_device', 'parent_inode'):
+            assert progress[key] == progress_before[key]
+        assert record['phase'] == 'released' and record['file'] == copy_record['file']
+        assert image_id not in os.listdir(data_uid), 'failed-response copy was not discarded'
+        print(json.dumps({'phase': 'settled', 'image_id': image_id, 'receiver_exited': True,
+                          'source_generation': generation, 'source_recovery_pending': False}), flush=True)
+        return
+    raise AssertionError('SIGINT survivor observation timeout')
+
+def fail_copy_io():
+    suspended_copy_unchanged()
+    descriptor_dir = os.open('fd', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=receiver)
+    try:
+        names = os.listdir(descriptor_dir)
+        assert len(names) <= 256
+        matches = [name for name in names if identity(os.stat(name, dir_fd=descriptor_dir)) ==
+                   (progress_before['output_device'], progress_before['output_inode'])]
+        assert len(matches) == 1
+        # Intentional proc-FD observation: O_PATH retains only the already authenticated
+        # anonymous output inode, never a source disk or writable output capability.
+        output = keep(os.open(matches[0], os.O_PATH | os.O_CLOEXEC, dir_fd=descriptor_dir))
+    finally:
+        os.close(descriptor_dir)
+    before = os.fstat(output)
+    assert identity(before) == (copy_record['file']['device'], copy_record['file']['inode'])
+    assert before.st_mode == stat.S_IFREG | 0o600 and before.st_uid == before.st_gid == 0
+    assert before.st_nlink == 0 and before.st_size == partial_size
+    # Leave bounded authority writes well below the limit and require further real
+    # copy progress after injection, followed by a kernel EFBIG before full extent.
+    limit = max(16 * 1024 * 1024, partial_size + 1024 * 1024)
+    assert partial_size < limit < rootfs['bytes'], 'missed bounded copy-I/O window'
+    original = resource.prlimit(receiver_pid, resource.RLIMIT_FSIZE)
+    assert all(value == resource.RLIM_INFINITY or value >= rootfs['bytes'] for value in original)
+    # prlimit takes a numeric PID. Recheck the retained, stopped receiver and the
+    # request/output binding immediately around this one administrative effect.
+    suspended_copy_unchanged()
+    assert resource.prlimit(receiver_pid, resource.RLIMIT_FSIZE, (limit, original[1])) == original
+    receiver_unchanged()
+    assert process(receiver)['state'] == 'T'
+    assert resource.prlimit(receiver_pid, resource.RLIMIT_FSIZE) == (limit, original[1])
+    signal.pidfd_send_signal(receiver_pidfd, signal.SIGCONT)
+    assert exited(receiver_pidfd, 90000), 'limited copy receiver did not settle'
+    source_unchanged()
+    after = os.fstat(output)
+    assert identity(after) == identity(before) and after.st_nlink == 0
+    assert after.st_size == limit < rootfs['bytes'], 'copy did not reach its kernel file-size limit'
+    entry = directory(copies, image_id)
+    try:
+        _, _, record = authority(entry, 'copy.json')
+    finally:
+        forget(entry)
+    assert record['phase'] == 'released' and record['file'] == copy_record['file']
+    assert record['source'] == copy_record['source']
+    assert image_id not in os.listdir(data_uid), 'failed copy retained a public data directory'
+    assert vm_id + '.json' not in os.listdir(exports), 'failed copy left source recovery pending'
+    forget(output)
+    print(json.dumps({'phase': 'io-failed', 'image_id': image_id, 'receiver_exited': True,
+                      'partial_bytes': partial_size, 'limited_bytes': limit, 'failed_copy_bytes': after.st_size,
+                      'source_generation': generation, 'source_recovery_pending': False}), flush=True)
+
+try:
+    root = directory(None, '/')
+    var = directory(root, 'var')
+    lib = directory(var, 'lib')
+    state = directory(lib, 'mvmctl')
+    instances = directory(directory(state, 'instances'), str(owner))
+    source_record_info, source_record_raw, source_record = authority(instances, vm_id + '.json')
+    assert source_record['owner_uid'] == owner and source_record['vm_id'] == vm_id
+    assert source_record['lifecycle'] == 'active' and source_record['network_placement'] == 'networkless'
+    launch, active = source_record['launch'], source_record['active']
+    generation = source_record['launch_generation']
+    assert launch['pid'] == source_pid and launch['start_time_ticks'] == source_ticks
+    execution_uid, execution_gid = launch['execution_identity']['uid'], launch['execution_identity']['gid']
+    assert execution_uid not in (0, owner) and generation > 0
+    source_pidfd = keep(os.pidfd_open(source_pid))
+    source_proc = keep(proc(source_pid))
+    jail = keep(os.open('root', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=source_proc))
+    jail_identity = active['jail_root']['device'], active['jail_root']['inode']
+    mount_identity = active['mount_namespace']['device'], active['mount_namespace']['inode']
+    _, _, device = authority(jail, '.mvm-device-authority.json', 262144, 0o400)
+    rootfs, boot_id = device['rootfs'], device['host_boot_id']
+    assert device['vm_id'] == vm_id and device['owner_uid'] == owner and device['launch_generation'] == generation
+    assert rootfs['kind'] == 'rootfs' and rootfs['logical_id'] == vm_id and rootfs['owner_uid'] == owner
+    assert rootfs['bytes'] == 512 * 1024 * 1024 and rootfs['identity']['size'] == rootfs['bytes']
+    source_unchanged()
+    print(json.dumps({'phase': 'ready', 'source_generation': generation}), flush=True)
+    assert select.select([sys.stdin], [], [], 30)[0], 'CLI arm timeout'
+    command = sys.stdin.readline(256).split()
+    assert len(command) == 3 and command[0] == 'arm'
+    cli_pid, cli_ticks = int(command[1]), int(command[2])
+    cli_pidfd, cli_proc = keep(os.pidfd_open(cli_pid)), keep(proc(cli_pid))
+    assert process(cli_proc)['ticks'] == cli_ticks and not exited(cli_pidfd)
+    assert credentials(cli_proc)[0] == [owner] * 4
+    candidate = digest_executable(cli_proc)
+    assert candidate[0] == identity(os.stat('/usr/local/bin/mvm', follow_symlinks=False))
+    assert read(cli_proc, 'cmdline', 4096)[1].split(b'\0')[:-1] == [
+        b'/usr/local/bin/mvm', b'image', b'import', import_name.encode(), vm_id.encode(),
+        b'--skip-optimization', b'--json',
+    ]
+    cli_cgroup = read(cli_proc, 'cgroup', 16384)[1]
+    cli_mount = identity(os.stat('ns/mnt', dir_fd=cli_proc))
+    receiver_argv = [b'/usr/local/bin/mvm', b'__mvm_privileged_v1', b'jailer-vm-rootfs-export']
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        assert not exited(cli_pidfd), 'CLI exited before the copy fault'
+        if receiver is None:
+            found = find_receiver(cli_pid)
+            if found:
+                receiver_pid, receiver_identity = found[0]
+                receiver_pidfd, receiver = keep(os.pidfd_open(receiver_pid)), keep(proc(receiver_pid))
+                receiver_unchanged()
+                receiver_owned = True
+        if receiver is not None:
+            try:
+                if exports is None:
+                    if exports_parent is None:
+                        exports_parent = directory(state, 'vm-rootfs-exports')
+                    exports = directory(exports_parent, str(owner))
+                if copies is None:
+                    copies = directory(exports, 'copies')
+                if freeze_copy():
+                    break
+            except FileNotFoundError:
+                pass
+        time.sleep(0.002)
+    else:
+        raise AssertionError('no authentic partial-copy fault phase')
+    caller_timeout = 60 if fault_mode == 'sigint-survivor' else 30
+    assert select.select([sys.stdin], [], [], caller_timeout)[0], 'receiver fault command timeout'
+    command = sys.stdin.readline(256)
+    if fault_mode == 'sigint-survivor':
+        assert command == 'interrupted\n'
+        observe_sigint_survivor()
+    elif fault_mode == 'copy-io':
+        assert command == 'fail-copy\n'
+        assert not exited(cli_pidfd), 'copy-I/O fault requires a live importing caller'
+        fail_copy_io()
+    else:
+        assert command == 'kill\n'
+        assert exited(cli_pidfd, 5000), 'client must be dead before killing the receiver'
+        receiver_unchanged()
+        assert process(receiver)['state'] == 'T'
+        signal.pidfd_send_signal(receiver_pidfd, signal.SIGKILL)
+        assert exited(receiver_pidfd, 10000), 'retained receiver did not exit'
+        source_unchanged()
+        progress, record = copy_phase()
+        assert progress == progress_before and record == copy_record
+        assert os.listdir(directory(data_uid, image_id)) == []
+        print(json.dumps({'phase': 'dead', 'image_id': image_id, 'receiver_exited': True,
+                          'source_recovery_pending': True}), flush=True)
+        while select.select([sys.stdin], [], [], 120)[0]:
+            command = sys.stdin.readline(256)
+            if not command:
+                break
+            if command == 'state\n':
+                assert copy_phase()[0] == progress_before, 'state observation requires pending source recovery'
+                observed_state = observe_paused_state()
+                print(json.dumps({'phase': 'state', 'image_id': image_id,
+                                  'source_generation': generation, 'state': observed_state}), flush=True)
+                continue
+            parts = command.split()
+            assert parts == ['released'] or (
+                len(parts) == 2 and parts[0] == 'recovered' and re.fullmatch(r'[0-9a-f]{64}', parts[1])
+            )
+            source_unchanged()
+            entry = directory(copies, image_id)
+            try:
+                _, _, record = authority(entry, 'copy.json')
+            finally:
+                forget(entry)
+            assert record['phase'] == 'released' and record['file'] == copy_record['file']
+            assert image_id not in os.listdir(data_uid)
+            if command == 'released\n':
+                assert copy_phase()[0] == progress_before, 'copy release falsely cleared pending source'
+            else:
+                _, _, recovered = authority(exports, vm_id + '.json')
+                assert recovered['image_id'] == parts[1] != image_id and recovered['stage'] == 'complete'
+                for key in ('owner_uid', 'vm_id', 'generation', 'boot_id', 'rootfs', 'cache_root', 'original_state'):
+                    assert recovered[key] == progress_before[key]
+            print(json.dumps({'phase': parts[0], 'image_id': image_id}), flush=True)
+        else:
+            raise AssertionError('orphan recovery observation timeout')
+except BaseException as error:
+    print(json.dumps({'error': str(error), 'image_id': image_id}), flush=True)
+    # Let the unprivileged owner kill its CLI first, preventing an API cleanup race.
+    if select.select([sys.stdin], [], [], 30)[0]:
+        sys.stdin.readline(256)
+    raise
+finally:
+    if receiver_owned and not exited(receiver_pidfd):
+        signal.pidfd_send_signal(receiver_pidfd, signal.SIGKILL)
+        assert exited(receiver_pidfd, 10000), 'owned receiver cleanup did not finish'
+    for fd in reversed(fds):
+        os.close(fd)
+"""
+
+
+@dataclass(frozen=True)
+class _VMImportSource:
+    """Pin list-observed process identity and the CLI-observed managed cache."""
+
+    id: str
+    pid: int
+    process_start_time: int
+    cache: Path
+
+    @classmethod
+    def capture(cls, runner_vm: str, identifier: str, status: str) -> _VMImportSource:
+        print("VM import phase=source_state_check_enter", flush=True)
+        assert re.fullmatch(r"[0-9a-f]{32}", identifier)
+        listed = _json_success_data(
+            _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+        )
+        matches = [vm for vm in listed if vm["id"] == identifier]
+        assert len(matches) == 1 and matches[0]["status"] == status
+        row = matches[0]
+        for key in ("pid", "process_start_time"):
+            assert type(row[key]) is int and row[key] > 0
+        inspected = _json_success_data(
+            _run_mvm(runner_vm, "vm", "inspect", identifier, "--json").stdout,
+            dict,
+        )
+        observed = inspected["vm"]
+        for key in ("id", "pid", "status"):
+            assert observed[key] == row[key]
+        rootfs_selection = inspected["filesystem"]["rootfs_path"]
+        rootfs = Path(rootfs_selection)
+        assert rootfs.is_absolute() and str(rootfs) == rootfs_selection
+        cache = rootfs.parent.parent.parent
+        assert (
+            rootfs == cache / "vms" / identifier / "rootfs.img"
+            and row["rootfs_path"] == rootfs_selection
+            and cache.resolve(strict=True) == cache
+            and cache.is_dir()
+        ), "import fault requires matching CLI-observed canonical managed cache"
+        print("VM import phase=source_state_check_success", flush=True)
+        return cls(identifier, row["pid"], row["process_start_time"], cache)
+
+    def require_state(self, runner_vm: str, status: str) -> None:
+        assert self.capture(runner_vm, self.id, status) == self
+
+
+class _VMImportReceiverDeath:
+    """Own only one ordinary importing CLI and its authenticated export receiver."""
+
+    def __init__(self, runner_vm, source: _VMImportSource, *, mode="death"):
+        qualification_host = os.environ.get("MVM_TEST_QUALIFICATION_HOST")
+        assert (
+            qualification_host and qualification_host == os.environ.get("MVM_TEST_VM")
+        ), "administrator fault requires explicit exact qualification-host admission"
+        assert "PYTEST_XDIST_WORKER" not in os.environ
+        assert mode in ("death", "sigint-survivor", "copy-io")
+        self.mode = mode
+        self.runner_vm = runner_vm
+        self.name = f"sys-image-{uuid.uuid4().hex}"
+        self.image_id = None
+        self.cli = None
+        self.cli_pidfd = None
+        self.baseline_ids = {image["id"] for image in _images(runner_vm)}
+        self.observer = subprocess.Popen(
+            [
+                "/usr/bin/sudo",
+                "-n",
+                "/usr/bin/python3",
+                "-I",
+                "-u",
+                "-c",
+                _VM_IMPORT_DEATH_OBSERVER,
+                source.id,
+                str(os.getuid()),
+                str(source.pid),
+                str(source.process_start_time),
+                str(source.cache),
+                self.name,
+                mode,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def read(self):
+        timeout = 95 if self.mode in ("sigint-survivor", "copy-io") else 45
+        assert select.select([self.observer.stdout], [], [], timeout)[0], (
+            "import observer timed out"
+        )
+        line = self.observer.stdout.readline(16385)
+        assert line and len(line) <= 16384, "missing or oversized import fault receipt"
+        receipt = json.loads(line)
+        if receipt.get("image_id") is not None:
+            identifier = receipt["image_id"]
+            assert re.fullmatch(r"[0-9a-f]{64}", identifier)
+            assert identifier not in self.baseline_ids
+            assert self.image_id is None or self.image_id == identifier
+            self.image_id = identifier
+        assert "error" not in receipt, receipt
+        print(f"VM import fault receipt={receipt}", flush=True)
+        return receipt
+
+    def require(self, command):
+        self.observer.stdin.write(command + "\n")
+        self.observer.stdin.flush()
+        return self.read()
+
+    def arm(self, source: _VMImportSource):
+        ready = self.read()
+        assert ready["phase"] == "ready"
+        self.source_generation = ready["source_generation"]
+        assert all(image["type"] != self.name for image in _images(self.runner_vm))
+        self.cli = subprocess.Popen(
+            [
+                "/usr/local/bin/mvm",
+                "image",
+                "import",
+                self.name,
+                source.id,
+                "--skip-optimization",
+                "--json",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={**os.environ, "NO_COLOR": "1"},
+            text=True,
+        )
+        self.cli_pidfd = os.pidfd_open(self.cli.pid)
+        fields = (
+            Path(f"/proc/{self.cli.pid}/stat").read_text().rpartition(") ")[2].split()
+        )
+        assert fields[0] not in ("Z", "X") and self.cli.poll() is None
+        receipt = self.require(f"arm {self.cli.pid} {fields[19]}")
+        assert (
+            receipt["phase"] == "copying"
+            and 0 < receipt["partial_bytes"] < 512 * 1024 * 1024
+        )
+
+    def kill(self):
+        assert self.cli.poll() is None and self.image_id is not None
+        signal.pidfd_send_signal(self.cli_pidfd, signal.SIGKILL)
+        stdout, stderr = self.cli.communicate(timeout=10)
+        assert self.cli.returncode == -signal.SIGKILL, (stdout, stderr)
+        assert not stdout, "interrupted import published a success response"
+        print(f"interrupted import stderr={stderr}", flush=True)
+        receipt = self.require("kill")
+        assert receipt == {
+            "phase": "dead",
+            "image_id": self.image_id,
+            "receiver_exited": True,
+            "source_recovery_pending": True,
+        }
+
+    def interrupt(self):
+        assert self.mode == "sigint-survivor"
+        assert self.cli.poll() is None and self.image_id is not None
+        # Signal only the admitted caller, never its group or privileged receiver.
+        signal.pidfd_send_signal(self.cli_pidfd, signal.SIGINT)
+        stdout, stderr = self.cli.communicate(timeout=45)
+        assert self.cli.returncode > 0, (self.cli.returncode, stdout, stderr)
+        response = json.loads(stdout)
+        assert response["status"] == "error" and response["data"] is None
+        error = response["error"]
+        assert error["code"] == "image.import.failed"
+        assert error["message"] == "VM image export failed"
+        assert error["op"] == "image"
+        assert error["details"] == {"image_id": self.image_id}
+        print(f"SIGINT caller stdout={stdout} stderr={stderr}", flush=True)
+        receipt = self.require("interrupted")
+        assert receipt == {
+            "phase": "interrupted",
+            "image_id": self.image_id,
+            "receiver_exited": False,
+            "receiver_stopped": True,
+        }
+
+    def require_paused_state(self):
+        assert self.mode == "death"
+        assert self.require("state") == {
+            "phase": "state",
+            "image_id": self.image_id,
+            "source_generation": self.source_generation,
+            "state": "Paused",
+        }
+
+    def finish_survivor(self):
+        assert self.mode == "sigint-survivor" and self.cli.returncode > 0
+        receipt = self.require("continue")
+        assert receipt["phase"] == "settled" and receipt["image_id"] == self.image_id
+        assert receipt["receiver_exited"] is True
+        assert receipt["source_recovery_pending"] is False
+        assert receipt["source_generation"] == self.source_generation
+        self.observer.wait(timeout=10)
+        assert self.observer.returncode == 0, self.observer.stderr.read(16385)
+        return receipt
+
+    def fail_copy_io(self):
+        assert self.mode == "copy-io" and self.cli.poll() is None
+        receipt = self.require("fail-copy")
+        assert receipt["phase"] == "io-failed" and receipt["image_id"] == self.image_id
+        assert (
+            0 < receipt["partial_bytes"] < receipt["limited_bytes"] < 512 * 1024 * 1024
+        )
+        assert receipt["failed_copy_bytes"] == receipt["limited_bytes"]
+        assert (
+            receipt["receiver_exited"] is True
+            and receipt["source_recovery_pending"] is False
+        )
+        assert receipt["source_generation"] == self.source_generation
+        stdout, stderr = self.cli.communicate(timeout=45)
+        assert self.cli.returncode > 0, (self.cli.returncode, stdout, stderr)
+        response = json.loads(stdout)
+        assert response["status"] == "error" and response["data"] is None
+        error = response["error"]
+        assert error["code"] == "image.import.failed"
+        # Public wrapping exposes only the image selection. The authenticated
+        # inode growth to the imposed limit proves the copy fault, not JSON errno text.
+        assert error["message"] == "VM image export failed"
+        assert error["details"] == {"image_id": self.image_id}
+        print(f"copy-I/O caller stdout={stdout} stderr={stderr}", flush=True)
+        self.observer.wait(timeout=10)
+        assert self.observer.returncode == 0, self.observer.stderr.read(16385)
+
+    def close(self):
+        errors = []
+        try:
+            if self.cli is not None:
+                if self.cli.poll() is None:
+                    assert self.cli_pidfd is not None
+                    signal.pidfd_send_signal(self.cli_pidfd, signal.SIGKILL)
+                stdout, stderr = self.cli.communicate(timeout=10)
+                if self.cli.returncode == 0:
+                    created = _json_success_data(stdout, dict)
+                    assert (
+                        created["type"] == self.name
+                        and created["id"] not in self.baseline_ids
+                    )
+                    assert self.image_id is None or self.image_id == created["id"]
+                    self.image_id = created["id"]
+                print(
+                    f"import cleanup exit={self.cli.returncode} stdout={stdout} stderr={stderr}",
+                    flush=True,
+                )
+        except Exception as error:
+            errors.append(f"CLI cleanup: {error}")
+        finally:
+            if self.cli_pidfd is not None:
+                os.close(self.cli_pidfd)
+            if self.cli is not None:
+                self.cli.stdout.close()
+                self.cli.stderr.close()
+        try:
+            self.observer.stdin.close()
+            self.observer.wait(timeout=35)
+            diagnostic = self.observer.stderr.read(16385)
+            print(
+                f"VM import observer cleanup exit={self.observer.returncode} "
+                f"stderr={diagnostic}",
+                flush=True,
+            )
+            assert self.observer.returncode == 0, diagnostic
+        except Exception as error:
+            errors.append(f"receiver observer cleanup: {error}")
+        finally:
+            self.observer.stdout.close()
+            self.observer.stderr.close()
+        if self.image_id is not None:
+            try:
+                rows = [
+                    image
+                    for image in _images(self.runner_vm)
+                    if image["id"] == self.image_id
+                ]
+                if rows:
+                    assert len(rows) == 1 and rows[0]["type"] == self.name
+                    rows[0]["_backing_identity"] = _backing_identity(rows[0]["path"])
+                    _remove_image(self.runner_vm, rows[0])
+                else:
+                    _run_mvm(
+                        self.runner_vm,
+                        "image",
+                        "rm",
+                        self.image_id,
+                        "--force",
+                        "--json",
+                    )
+                assert all(
+                    image["id"] != self.image_id for image in _images(self.runner_vm)
+                )
+            except Exception as error:
+                errors.append(f"owned import cleanup: {error}")
+        assert not errors, errors
+
+
+def _images(runner_vm):
+    return _json_success_data(_run_mvm(runner_vm, "image", "ls", "--json").stdout, list)
+
+
+def _alpine(runner_vm):
+    matches = [
+        i
+        for i in _images(runner_vm)
+        if i["type"] == "alpine" and i["version"] == "3.23" and i["is_present"]
+    ]
+    assert len(matches) == 1, (
+        "runner prerequisite: exactly one present mirrored Alpine 3.23 image"
+    )
+    return matches[0]
+
+
+def _backing_identity(path):
+    info = Path(path).lstat()
+    assert Path(path).is_file() and not Path(path).is_symlink(), path
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
+def _defaults(runner_vm):
+    return [i["id"] for i in _images(runner_vm) if i["is_default"]]
+
+
+def _image_state(items):
+    # SetDefault records the selection time, including when restoring the prior default.
+    return [
+        {key: value for key, value in item.items() if key != "updated_at"}
+        for item in items
+    ]
+
+
+def _restore_default(runner_vm, original):
+    # An empty selection is restored by checked removal of the case-owned selected image.
+    assert len(original) <= 1, "multiple original image defaults"
+    if original:
+        _run_mvm(runner_vm, "image", "default", original[0])
+    assert _defaults(runner_vm) == original
+
+
+@pytest.fixture(autouse=True)
+def image_workspace(runner_vm, tmp_path, monkeypatch, request):
+    """Keep warm files private and prove that prepared image records/backings survive each case."""
+    before = _images(runner_vm)
+    backing = {i["id"]: _backing_identity(i["path"]) for i in before if i["is_present"]}
+    scratch = _register_image_workspace(request, tmp_path)
+    monkeypatch.setenv("MVM_TEMP_DIR", str(tmp_path / "work"))
+    monkeypatch.delenv("MVM_WARM_POOL", raising=False)
+    yield tmp_path
+    assert _image_state(_images(runner_vm)) == _image_state(before), (
+        "test changed pre-existing image records or leaked an image"
+    )
+    for image in before:
+        if image["id"] in backing:
+            assert _backing_identity(image["path"]) == backing[image["id"]]
+    scratch.eligible = True
+
+
+@pytest.fixture
+def isolated_pull_cache(runner_vm, image_workspace, monkeypatch):
+    """Force pulls may replace only records created inside this selected cache."""
+    with monkeypatch.context() as selection:
+        cache = image_workspace / "pull-cache"
+        selection.setenv("MVM_CACHE_DIR", str(cache))
+        selection.setenv("MVM_CONFIG_DIR", str(image_workspace / "pull-config"))
+        selection.setenv("MVM_TEMP_DIR", str(cache / "tmp"))
+        _run_mvm(runner_vm, "cache", "init", "--json")
+        # Project the already installed trusted release into the private database.
+        _run_mvm(runner_vm, "bin", "pull", "1.17.0", "--default", "--json", timeout=300)
+        yield cache
+        for item in _images(runner_vm):
+            _remove_image(runner_vm, item)
+        assert _images(runner_vm) == []
+
+
+def _extract_alpine(runner_vm, directory):
+    image = _alpine(runner_vm)
+    raw = directory / f"alpine-{uuid.uuid4().hex}.raw"
+    _guest_run(
+        runner_vm, f"zstd -d {shlex.quote(image['path'])} -o {shlex.quote(str(raw))}"
+    )
+    assert raw.is_file() and raw.stat().st_size > 0
+    # A unique filesystem UUID also prevents content-derived collisions if IDs change later.
+    _guest_run(runner_vm, f"tune2fs -U {uuid.uuid4()} {shlex.quote(str(raw))}")
+    return raw
+
+
+def _ext4(runner_vm, directory, size="64M"):
+    raw = directory / f"ext4-{uuid.uuid4().hex}.raw"
+    seed = directory / f"ext4-seed-{uuid.uuid4().hex}"
+    seed.mkdir(mode=0o700)
+    (seed / "etc").mkdir()
+    (seed / "etc" / "os-release").write_text("ID=linux\n", encoding="utf-8")
+    _guest_run(runner_vm, f"truncate -s {shlex.quote(size)} {shlex.quote(str(raw))}")
+    _guest_run(
+        runner_vm, f"mkfs.ext4 -F -d {shlex.quote(str(seed))} {shlex.quote(str(raw))}"
+    )
+    return raw
+
+
+def _partition_disk(runner_vm, directory):
+    """Type favors partition 1; disabling type favors the larger partition 2."""
+    sources = [_ext4(runner_vm, directory), _ext4(runner_vm, directory, "128M")]
+    uuids = [
+        _guest_run(
+            runner_vm, f"blkid -p -s UUID -o value {shlex.quote(str(source))}"
+        ).stdout.strip()
+        for source in sources
+    ]
+    assert uuids[0] and uuids[1] and uuids[0] != uuids[1]
+    disk = directory / "partitioned.raw"
+    _guest_run(runner_vm, f"truncate -s 194M {shlex.quote(str(disk))}")
+    _guest_run(
+        runner_vm,
+        f"printf 'label: dos\nstart=2048,size=131072,type=83\nstart=133120,size=262144,type=7\n' | sfdisk {shlex.quote(str(disk))}",
+    )
+    for source, offset in zip(sources, (1, 65), strict=True):
+        _guest_run(
+            runner_vm,
+            f"dd if={shlex.quote(str(source))} of={shlex.quote(str(disk))} bs=1M seek={offset} conv=notrunc status=none",
+        )
+    return disk, uuids
+
+
+def _assert_partition_uuid(runner_vm, image, expected, directory):
+    """Read the actual imported compressed backing, independently of its UUID metadata."""
+    raw = directory / f"readback-{image['id']}.raw"
+    _guest_run(
+        runner_vm, f"zstd -d {shlex.quote(image['path'])} -o {shlex.quote(str(raw))}"
+    )
+    actual = _guest_run(
+        runner_vm, f"blkid -p -s UUID -o value {shlex.quote(str(raw))}"
+    ).stdout.strip()
+    assert actual == expected and image["fs_uuid"] == expected
+
+
+def _qcow2(runner_vm, raw):
+    output = raw.with_suffix(".qcow2")
+    _guest_run(
+        runner_vm,
+        f"qemu-img convert -f raw -O qcow2 {shlex.quote(str(raw))} {shlex.quote(str(output))}",
+    )
+    info = json.loads(
+        _guest_run(
+            runner_vm, f"qemu-img info --output=json {shlex.quote(str(output))}"
+        ).stdout
+    )
+    assert info["format"] == "qcow2"
+    return output
+
+
+def _remove_image(runner_vm, receipt, *flags):
+    """Remove only the exact full-ID record and backing admitted by a creation receipt."""
+    current = next(i for i in _images(runner_vm) if i["id"] == receipt["id"])
+    assert current["path"] == receipt["path"] and current["type"] == receipt["type"]
+    if "_backing_identity" in receipt:
+        assert _backing_identity(receipt["path"]) == receipt["_backing_identity"]
+    result = _json_success_data(
+        _run_mvm(runner_vm, "image", "rm", receipt["id"], *flags, "--json").stdout, dict
+    )
+    assert len(result["items"]) == 1
+    assert result["items"][0]["result"]["code"] == "image.removed"
+    assert result["items"][0]["error"] is None
+    assert all(i["id"] != receipt["id"] for i in _images(runner_vm))
+    assert not Path(receipt["path"]).exists(), receipt
+
+
+@contextmanager
+def _imported(runner_vm, source, *flags):
+    """A unique import identity must be absent before effects; successful JSON grants cleanup ownership."""
+    name = f"sys-image-{uuid.uuid4().hex}"
+    before = _images(runner_vm)
+    assert all(i["type"] != name and i["name"] != name for i in before)
+    item = None
+    identity = None
+    try:
         result = _run_mvm(
             runner_vm,
             "image",
-            "ls",
-            "--remote",
+            "import",
+            name,
+            str(source),
+            *flags,
             "--json",
-            timeout=120,
-            check=False,
+            timeout=300,
         )
-        assert result.returncode == 0, (
-            f"Remote listing failed in Tier 2 environment: {result.stderr}"
+        receipt = _json_success_data(result.stdout, dict)
+        assert re.fullmatch(r"[0-9a-f]{64}", receipt["id"]), receipt
+        assert receipt["id"] not in {i["id"] for i in before}, (
+            "creation receipt collided with a baseline ID"
         )
-        assert result.stdout.strip(), "Remote listing returned empty stdout"
-        try:
-            data = _parse_json_output(result.stdout)
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            pytest.fail(f"Remote listing returned non-JSON output: {e}")
-        assert len(data) > 0, "Expected at least one remote image"
+        assert receipt["path"] not in {i["path"] for i in before}, (
+            "creation receipt reused a baseline backing"
+        )
+        item = receipt
+        identity = _backing_identity(item["path"])
+        item["_backing_identity"] = identity
+        assert item["type"] == name and item["is_imported"] and item["is_present"], item
+        listed = next(i for i in _images(runner_vm) if i["id"] == item["id"])
+        assert all(
+            listed[key] == item[key]
+            for key in (
+                "id",
+                "type",
+                "version",
+                "path",
+                "fs_type",
+                "is_imported",
+                "is_present",
+            )
+        )
+        yield item
+    finally:
+        if item is not None:
+            current = next(
+                (i for i in _images(runner_vm) if i["id"] == item["id"]), None
+            )
+            if current is not None:
+                assert _backing_identity(item["path"]) == identity, (
+                    "owned image backing changed before cleanup"
+                )
+                _remove_image(runner_vm, item)
 
-    def test_image_inspect(self, runner_vm):
-        """Inspect a cached image by ID prefix."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = [i for i in _parse_json_output(result.stdout) if i.get("is_present")]
-        assert images, (
-            "No present cached images to inspect — _ensure_image should "
-            "have pulled alpine:3.23"
+
+@contextmanager
+def _booted(runner_vm, image, *, disk_size_mib=None):
+    if disk_size_mib is None:
+        disk_size_mib = max(512, image["minimum_rootfs_size_mib"] + 64)
+    name = f"sys-image-vm-{uuid.uuid4().hex[:8]}"
+    before = _json_success_data(_run_mvm(runner_vm, "vm", "ls", "--json").stdout, list)
+    assert all(vm["name"] != name for vm in before)
+    receipt = None
+    try:
+        created = _json_success_data(
+            _run_mvm(
+                runner_vm,
+                "vm",
+                "create",
+                name,
+                "--image",
+                image["id"],
+                "--no-network",
+                "--cloud-init-mode",
+                "off",
+                "--skip-deblob",
+                "--no-pci",
+                "-s",
+                f"{disk_size_mib}M",
+                "--mem",
+                "256M",
+                "--vcpu",
+                "1",
+                "--json",
+                timeout=180,
+            ).stdout,
+            list,
         )
-        prefix = images[0]["id"][:6]
-        result = _run_mvm(runner_vm, "image", "inspect", prefix, "--json")
-        assert result.returncode == 0
-        data = _parse_json_output(result.stdout)
-        img_data = data.get("image", data)
-        assert img_data.get("id", "").startswith(prefix), (
-            f"Expected image id to start with prefix '{prefix}', "
-            f"got: {img_data.get('id', 'N/A')}"
+        assert len(created) == 1
+        candidate = created[0]
+        assert candidate["id"] not in {vm["id"] for vm in before}
+        assert candidate["name"] == name
+        receipt = candidate
+        assert receipt["status"] == "running" and receipt["image_id"] == image["id"]
+        yield receipt
+    finally:
+        if receipt is not None:
+            _run_mvm(
+                runner_vm, "vm", "rm", receipt["id"], "--force", "--json", timeout=120
+            )
+            after = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
+            assert after == before, "VM teardown changed unrelated VMs or leaked its VM"
+
+
+class TestImagePull:
+    @pytest.mark.parametrize(
+        "image_args",
+        [
+            ["alpine:3.23"],
+            ["alpine", "--version", "3.23"],
+            ["unused-selector", "--type", "alpine", "--version", "3.23"],
+        ],
+        ids=["slug", "version", "type-override"],
+    )
+    def test_image_pull(self, runner_vm, image_args):
+        """Cached pull flags select the exact prepared image without replacing it."""
+        expected = _alpine(runner_vm)
+        item = _json_success_data(
+            _run_mvm(
+                runner_vm, "image", "pull", *image_args, "--json", timeout=300
+            ).stdout,
+            dict,
         )
+        assert item == expected
+
+
+class TestImageList:
+    def test_image_list_json(self, runner_vm):
+        image = _alpine(runner_vm)
+        assert re.fullmatch(r"[0-9a-f]{64}", image["id"])
+        assert image["fs_type"] == "ext4" and image["distro"] == "alpine"
+
+    def test_image_list_table(self, runner_vm):
+        image = _alpine(runner_vm)
+        output = _run_mvm(runner_vm, "image", "ls").stdout
+        assert all(
+            field in output.splitlines()[0]
+            for field in ("ID", "NAME", "VERSION", "TYPE")
+        )
+        assert image["id"][:6] in output and image["name"] in output
+
+    def test_image_inspect_human(self, runner_vm):
+        image = _alpine(runner_vm)
+        output = _run_mvm(runner_vm, "image", "inspect", image["id"]).stdout
+        assert f"Image: {image['name']}" in output
+        assert f"ID: {image['id']}" in output and f"Path: {image['path']}" in output
+
+    def test_image_list_remote(self, runner_vm):
+        """Bound registry metadata to Alpine; no dynamically selected artifact downloads."""
+        data = _json_success_data(
+            _run_mvm(
+                runner_vm, "image", "ls", "--remote", "--type", "alpine", "--json"
+            ).stdout,
+            list,
+        )
+        assert data and all(i["type"] == "alpine" for i in data)
+        assert any(i["version"] == "3.23" for i in data)
 
     def test_image_inspect_json(self, runner_vm):
-        """Inspect an image with --json output."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = [i for i in _parse_json_output(result.stdout) if i.get("is_present")]
-        assert images, (
-            "No present cached images to inspect — _ensure_image should "
-            "have pulled alpine:3.23"
+        image = _alpine(runner_vm)
+        data = _json_success_data(
+            _run_mvm(runner_vm, "image", "inspect", image["id"][:6], "--json").stdout,
+            dict,
         )
-        prefix = images[0]["id"][:6]
-        result = _run_mvm(runner_vm, "image", "inspect", prefix, "--json")
-        assert result.returncode == 0
-        data = _parse_json_output(result.stdout)
-        img_data = data.get("image", data)
-        assert "id" in img_data, (
-            f"Expected 'id' in image inspect output, got keys: {list(data.keys())}"
+        assert (
+            data["image"]["id"] == image["id"]
+            and data["image"]["name"] == image["name"]
         )
-        assert "name" in img_data or "base_name" in img_data
+        assert (
+            data["storage"]["path"] == image["path"]
+            and data["storage"]["fs_type"] == "ext4"
+        )
 
 
 class TestImageDefaults:
-    """Test image default operations."""
-
-    def test_image_set_default(self, runner_vm):
-        """Set image as default."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = _parse_json_output(result.stdout)
-        alpine_images = [
-            i for i in images if "alpine" in i.get("type", "").lower()
-        ]
-        assert alpine_images, "No alpine image available in Tier 2 environment"
-        target_id = alpine_images[0]["id"]
-
-        result = _run_mvm(runner_vm, "image", "default", target_id, check=False)
-        assert result.returncode == 0, (
-            f"Failed to set image as default: {result.stderr.strip()}"
-        )
-        ls_result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images_after = json.loads(ls_result.stdout)
-        default_img = next(
-            (i for i in images_after if i.get("is_default")), None
-        )
-        assert default_img is not None, (
-            "No image marked as default in ls --json"
-        )
+    @pytest.mark.destructive
+    def test_image_set_default(self, runner_vm, image_workspace):
+        original = _defaults(runner_vm)
+        assert len(original) <= 1
+        try:
+            with _imported(
+                runner_vm,
+                _ext4(runner_vm, image_workspace),
+                "--format",
+                "raw",
+                "--skip-optimization",
+            ) as image:
+                _run_mvm(runner_vm, "image", "default", image["id"])
+                assert _defaults(runner_vm) == [image["id"]]
+        finally:
+            _restore_default(runner_vm, original)
 
     def test_set_default_nonexistent_image_fails(self, runner_vm):
-        """Setting default to a nonexistent image slug should fail."""
+        before = _images(runner_vm)
         result = _run_mvm(
             runner_vm,
             "image",
             "default",
-            "totally-nonexistent-image",
+            f"missing-{uuid.uuid4().hex}",
+            "--json",
             check=False,
         )
         assert result.returncode != 0
-        assert result.stderr, (
-            f"Expected stderr with error message, got stdout={result.stdout}"
+        response = json.loads(result.stdout)
+        assert (
+            response["schema_version"] == 1
+            and response["status"] == "error"
+            and response["data"] is None
         )
+        assert response["error"]["code"] == "image.not_found"
+        assert _images(runner_vm) == before
 
 
 class TestImageWarm:
-    """Test image warm operations."""
-
-    def test_image_warm(self, runner_vm):
-        """Pre-decompress image to ready pool for fast VM creation."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "warm",
-            "alpine:3.23",
-            check=False,
+    @pytest.mark.parametrize("selector", ["slug", "prefix", "all"])
+    def test_image_warm(self, runner_vm, image_workspace, selector):
+        """Warm output contains complete bytes from each selected compressed backing."""
+        image = _alpine(runner_vm)
+        selected = _images(runner_vm) if selector == "all" else [image]
+        args = (
+            ["--all"]
+            if selector == "all"
+            else ["alpine:3.23" if selector == "slug" else image["id"][:6]]
         )
-        assert result.returncode == 0, (
-            f"Image warm failed in Tier 2 environment: {result.stderr.strip()}"
+        paths = _json_success_data(
+            _run_mvm(runner_vm, "image", "warm", *args, "--json").stdout, list
+        )
+        assert len(paths) == len(selected)
+        for item, path in zip(selected, paths, strict=True):
+            warmed = Path(path)
+            assert warmed.parent == image_workspace / "work" / "ready"
+            assert warmed.name == f"{item['id']}.{item['fs_type']}"
+            expected = image_workspace / f"expected-{item['id']}.raw"
+            _guest_run(
+                runner_vm,
+                f"zstd -d {shlex.quote(item['path'])} -o {shlex.quote(str(expected))}",
+            )
+            assert warmed.stat().st_size == expected.stat().st_size
+            with warmed.open("rb") as actual, expected.open("rb") as source:
+                assert (
+                    hashlib.file_digest(actual, "sha256").digest()
+                    == hashlib.file_digest(source, "sha256").digest()
+                )
+        identities = [_backing_identity(path) for path in paths]
+        again = _json_success_data(
+            _run_mvm(runner_vm, "image", "warm", *args, "--json").stdout, list
         )
         assert (
-            "warmed" in result.stdout.lower()
-            or "ready" in result.stdout.lower()
+            again == paths and [_backing_identity(path) for path in again] == identities
         )
 
     def test_warm_nonexistent_image_fails(self, runner_vm):
-        """Warming a nonexistent image slug should fail with clear error."""
         result = _run_mvm(
             runner_vm,
             "image",
             "warm",
-            "totally-nonexistent-image",
+            f"missing-{uuid.uuid4().hex}",
+            "--json",
             check=False,
         )
         assert result.returncode != 0
-        assert result.stderr, (
-            f"Expected stderr with error message, got stdout={result.stdout}"
-        )
-
-    def test_image_warm_by_id_prefix(self, runner_vm: str) -> None:
-        """Warm an image using its 6-char ID prefix."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = _parse_json_output(result.stdout)
-        cached = [i for i in images if i.get("is_present")]
-        assert cached, "No cached images available to warm"
-        prefix = cached[0]["id"][:6]
-        result = _run_mvm(
-            runner_vm, "image", "warm", prefix, check=False,
-        )
-        assert result.returncode == 0, (
-            f"Image warm by prefix failed: {result.stderr.strip()}"
-        )
+        response = json.loads(result.stdout)
         assert (
-            "warmed" in result.stdout.lower()
-            or "ready" in result.stdout.lower()
+            response["status"] == "error"
+            and response["error"]["code"] == "image.not_found"
         )
-
-    def test_image_warm_all(self, runner_vm: str) -> None:
-        """Pre-decompress all cached images to ready pool via --all flag."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(
-            runner_vm, "image", "warm", "--all", check=False,
-        )
-        assert result.returncode == 0, (
-            f"Image warm --all failed in Tier 2 environment: {result.stderr.strip()}"
-        )
-        assert (
-            "warmed" in result.stdout.lower()
-            or "ready" in result.stdout.lower()
-        )
-
-
-class TestImageInspectJson:
-    """Test image inspect JSON output."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.domain_image]
-
-    def test_image_inspect_json_output(self, runner_vm):
-        """Inspect an image with --json output."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = [i for i in _parse_json_output(result.stdout) if i.get("is_present")]
-        assert images, "No present cached images to inspect"
-        prefix = images[0]["id"][:6]
-
-        result = _run_mvm(runner_vm, "image", "inspect", prefix, "--json")
-        assert result.returncode == 0
-        data = _parse_json_output(result.stdout)
-        img_data = data.get("image", data)
-        assert "id" in img_data, (
-            f"Expected 'id' in image inspect --json output, got keys: {list(img_data.keys())}"
-        )
-        assert "name" in img_data or "base_name" in img_data
 
 
 class TestImageImport:
-    """Test image import operations."""
+    def test_image_import_local_file(self, runner_vm, image_workspace):
+        source = _extract_alpine(runner_vm, image_workspace)
+        with _imported(runner_vm, source, "--format", "raw") as image:
+            assert image["fs_type"] == "ext4" and image["distro"] == "alpine"
 
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_import_local_file(self, runner_vm):
-        """Import a local image file (inside the test VM)."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        cached_path = _get_cached_alpine_path_in_vm(
-            runner_vm, "alpine-import.raw"
-        )
-        assert cached_path is not None, (
-            "No cached alpine image available to extract and re-import"
-        )
-
-        imported_prefix = None
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                "imported-alpine",
-                cached_path,
-                "--format",
-                "raw",
-                check=False,
-            )
-            assert result.returncode == 0
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = _parse_json_output(result.stdout)
-            imported = [
-                i for i in images
-                if "imported" in i.get("name", "").lower()
-                and "alpine" in i.get("type", "").lower()
-            ]
-            assert imported, "Imported image not found in listing"
-            imported_prefix = imported[0]["id"][:6]
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-    def test_import_from_nonexistent_path_fails(self, runner_vm):
-        """Import from a path that does not exist should fail with clear error."""
+    def test_import_from_nonexistent_path_fails(self, runner_vm, image_workspace):
+        name = f"missing-{uuid.uuid4().hex}"
+        before = _images(runner_vm)
         result = _run_mvm(
             runner_vm,
             "image",
             "import",
-            "test-fail-name",
-            "/tmp/nonexistent-path-that-does-not-exist.qcow2",
+            name,
+            str(image_workspace / "missing.qcow2"),
+            "--json",
             check=False,
         )
         assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "not found" in combined or "does not exist" in combined, (
-            f"Expected error about nonexistent path, got: {result.stderr}"
+        response = json.loads(result.stdout)
+        assert (
+            response["schema_version"] == 1
+            and response["status"] == "error"
+            and response["data"] is None
         )
+        assert response["error"]["code"] == "image.import.failed"
+        assert "source not found" in response["error"]["message"]
+        assert _images(runner_vm) == before
 
 
 class TestImagePullAdvanced:
-    """Test advanced image pull operations -- edge cases and state verification."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
+    @pytest.mark.destructive
     def test_pull_cached_image_with_default_sets_default(
-        self, runner_vm: str
-    ) -> None:
-        """Pull already-cached alpine-3.21 with --default must set it as sole default."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images: list[dict[str, Any]] = _parse_json_output(result.stdout)
-        alpine_present = any(
-            i.get("type") == "alpine" and i.get("is_present") for i in images
-        )
-        assert alpine_present, "alpine-3.21 not cached in Tier 2 environment"
-
-        original_defaults = [i for i in images if i.get("is_default")]
-        original_default_id: str | None = (
-            original_defaults[0]["id"] if original_defaults else None
-        )
-
-        try:
-            _run_mvm(
-                runner_vm,
-                "image",
-                "pull",
-                "alpine",
-                "--version",
-                "3.21",
-                "--default",
-                timeout=60,
-            )
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images_after: list[dict[str, Any]] = _parse_json_output(result.stdout)
-            defaults = [i for i in images_after if i.get("is_default")]
-            assert len(defaults) == 1, (
-                f"Expected exactly 1 default image, got {len(defaults)}"
-            )
-            assert defaults[0]["type"] == "alpine", (
-                f"Expected alpine:3.23 as default, got {defaults[0].get('type')}"
-            )
-        finally:
-            if original_default_id:
-                _run_mvm(
-                    runner_vm,
-                    "image",
-                    "default",
-                    original_default_id[:6],
-                    check=False,
-                )
-
-    def test_pull_cached_image_with_force_redownloads(
-        self, runner_vm: str
-    ) -> None:
-        """Pull already-cached alpine-3.21 with --force should re-download."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images: list[dict[str, Any]] = _parse_json_output(result.stdout)
-        alpine_present = any(
-            i.get("type") == "alpine" and i.get("is_present") for i in images
-        )
-        assert alpine_present, "alpine-3.21 not cached in Tier 2 environment"
-
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "alpine",
-            "--version",
-            "3.21",
-            "--force",
-            timeout=60,
-        )
-        assert (
-            "pulled" in result.stdout.lower()
-            or "success" in result.stdout.lower()
-        ), f"Expected pull success message, got: {result.stdout}"
-
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images_after: list[dict[str, Any]] = _parse_json_output(result.stdout)
-        alpine_still_present = any(
-            i.get("type") == "alpine" and i.get("is_present")
-            for i in images_after
-        )
-        assert alpine_still_present, "alpine-3.21 missing after --force pull"
-
-    def test_pull_nonexistent_image_fails_gracefully(
-        self, runner_vm: str
-    ) -> None:
-        """Pull a nonexistent image slug should fail with clear error."""
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "totally-nonexistent-image-name-12345",
-            check=False,
-            timeout=60,
-        )
-        assert result.returncode != 0
-        assert "not found" in result.stderr.lower() or "no image types matched" in result.stderr.lower(), (
-            f"Expected error about nonexistent image, got: {result.stderr}"
-        )
-
-    def test_pull_with_explicit_type_override(self, runner_vm: str) -> None:
-        """Pull with --type alpine should override slug-derived type."""
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "debian",
-            "--type",
-            "alpine",
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Pull with --type override failed in Tier 2 environment: {result.stderr.strip()}"
-        )
-        assert (
-            "pulled" in result.stdout.lower()
-            or "already" in result.stdout.lower()
-        ), f"Expected pull success, got: {result.stdout}"
-
-        ls_result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = json.loads(ls_result.stdout)
-        alpine_present = any(
-            i.get("type", "").startswith("alpine") and i.get("is_present")
-            for i in images
-        )
-        assert alpine_present, (
-            "No alpine image found after --type override pull"
-        )
-
-    def test_pull_image_with_version_flag(self, runner_vm: str) -> None:
-        """Pull alpine with --version 3.21 should succeed."""
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "alpine",
-            "--version",
-            "3.21",
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Pull with --version failed in Tier 2 environment: {result.stderr.strip()}"
-        )
-
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images: list[dict[str, Any]] = _parse_json_output(result.stdout)
-        alpine_present = any(
-            i.get("type", "").startswith("alpine") and i.get("is_present")
-            for i in images
-        )
-        assert alpine_present, (
-            "alpine not present after pull with --version flag"
-        )
-
-
-class TestImageImportAdvanced:
-    """Test advanced image import operations."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_import_with_format_qcow2(self, runner_vm):
-        """Import a qcow2 image using --format qcow2 (inside the VM)."""
-        # Check qemu-img availability inside the VM
-        check = _guest_run(runner_vm,
-            "which qemu-img && echo found || echo not-found",
-            check=False,
-        )
-        assert "found" in check.stdout, "qemu-img not available inside the test VM"
-
-        raw_path = _create_ext4_raw_in_vm(runner_vm, "test-image.raw")
-        assert raw_path is not None, (
-            "mkfs.ext4 or truncate not available inside the test VM"
-        )
-
-        qcow2_path = f"{VM_TMP_DIR}/test-image.qcow2"
-        assert _create_qcow2_from_raw_in_vm(runner_vm, raw_path, qcow2_path), (
-            "qemu-img convert failed inside the VM"
-        )
-
-        imported_prefix = None
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                "test-qcow2",
-                qcow2_path,
-                "--format",
-                "qcow2",
-                "--skip-optimization",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Import qcow2 failed: {result.stderr.strip()}"
-            )
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = _parse_json_output(result.stdout)
-            imported = [i for i in images if i.get("name") == "test-qcow2"]
-            assert imported, "Imported qcow2 image not found in listing"
-            imported_prefix = imported[0]["id"][:6]
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-    def test_image_import_force_overwrite(self, runner_vm):
-        """Import the same image twice, verify --force suppresses the error."""
-        raw_path = _create_ext4_raw_in_vm(runner_vm, "test-overwrite.raw")
-        assert raw_path is not None, (
-            "mkfs.ext4 or truncate not available inside the test VM"
-        )
-
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "import",
-            "test-overwrite",
-            raw_path,
-            "--format",
-            "raw",
-            "--skip-optimization",
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"First import failed: {result.stderr.strip()}"
-        )
-
-        imported_prefix = None
-        try:
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = _parse_json_output(result.stdout)
-            imported = [i for i in images if i.get("name") == "test-overwrite"]
-            if imported:
-                imported_prefix = imported[0]["id"][:6]
-
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                "test-overwrite",
-                raw_path,
-                "--format",
-                "raw",
-                "--skip-optimization",
-                "--force",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Force import failed: {result.stderr}"
-            )
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-    def test_image_import_with_root_partition(self, runner_vm):
-        """Import a qcow2 image with --root-partition 1 flag."""
-        check = _guest_run(runner_vm,
-            "which qemu-img && echo found || echo not-found",
-            check=False,
-        )
-        assert "found" in check.stdout, "qemu-img not available inside the test VM"
-
-        raw_path = _create_ext4_raw_in_vm(runner_vm, "test-rootpart.raw")
-        assert raw_path is not None, (
-            "mkfs.ext4 or truncate not available inside the test VM"
-        )
-
-        qcow2_path = f"{VM_TMP_DIR}/test-rootpart.qcow2"
-        assert _create_qcow2_from_raw_in_vm(runner_vm, raw_path, qcow2_path), (
-            "qemu-img convert failed inside the VM"
-        )
-
-        imported_prefix = None
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                "test-rootpart",
-                qcow2_path,
-                "--format",
-                "qcow2",
-                "--root-partition",
-                "1",
-                "--skip-optimization",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Import with --root-partition failed: {result.stderr.strip()}"
-            )
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = _parse_json_output(result.stdout)
-            imported = [i for i in images if i.get("name") == "test-rootpart"]
-            assert imported, (
-                "Imported root-partition image not found in listing"
-            )
-            imported_prefix = imported[0]["id"][:6]
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-    def test_image_import_with_disable_detector(self, runner_vm):
-        """Import an image with --disable-detector arch flag."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        cached_path = _get_cached_alpine_path_in_vm(
-            runner_vm, "alpine-nodetector.raw"
-        )
-        assert cached_path is not None, (
-            "No cached alpine image available to import with --disable-detector"
-        )
-
-        imported_prefix = None
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                "imported-no-detector",
-                cached_path,
-                "--format",
-                "raw",
-                "--disable-detector",
-                "type",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Import with --disable-detector failed: {result.stderr.strip()}"
-            )
-
-            ls_result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = json.loads(ls_result.stdout)
-            imported = [
-                i for i in images if i.get("name") == "imported-no-detector"
-            ]
-            assert imported, (
-                "Imported image with --disable-detector not found in listing"
-            )
-            imported_prefix = imported[0]["id"][:6]
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-    def test_image_import_without_format_auto_detect(self, runner_vm):
-        """Import a raw image without specifying --format (auto-detect)."""
-        raw_path = _create_ext4_raw_in_vm(runner_vm, "test-autodetect.raw")
-        assert raw_path is not None, (
-            "mkfs.ext4 or truncate not available inside the test VM"
-        )
-
-        imported_prefix = None
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                "test-autodetect",
-                raw_path,
-                "--format",
-                "raw",
-                "--skip-optimization",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Import without --format failed: {result.stderr.strip()}"
-            )
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = _parse_json_output(result.stdout)
-            imported = [i for i in images if i.get("name") == "test-autodetect"]
-            assert imported, "Auto-detected imported image not found in listing"
-            imported_prefix = imported[0]["id"][:6]
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-    def test_image_import_with_version(self, runner_vm):
-        """Import a local image with --version flag and verify version in ls --json."""
-        raw_path = _create_ext4_raw_in_vm(runner_vm, "test-version.raw")
-        assert raw_path is not None, (
-            "mkfs.ext4 or truncate not available inside the test VM"
-        )
-
-        imported_prefix: str | None = None
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                "test-version",
-                raw_path,
-                "--format",
-                "raw",
-                "--version",
-                "1.0",
-                "--skip-optimization",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Import with --version failed: {result.stderr.strip()}"
-            )
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = _parse_json_output(result.stdout)
-            imported = [
-                i for i in images if i.get("type") == "test-version"
-            ]
-            assert imported, (
-                "Imported image with --version not found in listing"
-            )
-            assert imported[0].get("version") == "1.0", (
-                f"Expected version '1.0', got '{imported[0].get('version')}'"
-            )
-            imported_prefix = imported[0]["id"][:6]
-        finally:
-            if imported_prefix:
-                _run_mvm(
-                    runner_vm, "image", "rm", imported_prefix, check=False
-                )
-
-    def test_image_import_with_skip_optimization(self, runner_vm):
-        """Import an image with --skip-optimization flag."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        cached_path = _get_cached_alpine_path_in_vm(
-            runner_vm, "alpine-skipopt.raw"
-        )
-        assert cached_path is not None, (
-            "No alpine image available to import with --skip-optimization"
-        )
-
-        imported_prefix = None
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                "imported-skip-opt",
-                cached_path,
-                "--format",
-                "raw",
-                "--skip-optimization",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Import with --skip-optimization failed: {result.stderr.strip()}"
-            )
-
-            ls_result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = json.loads(ls_result.stdout)
-            imported = [
-                i for i in images
-                if "imported" in i.get("name", "").lower()
-            ]
-            assert imported, (
-                "Imported image with --skip-optimization not found in listing"
-            )
-            imported_prefix = imported[0]["id"][:6]
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-
-class TestImagePullArchFlag:
-    """Test image pull (arch is auto-detected in Go CLI)."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_pull_with_arch(self, runner_vm):
-        """Pull an already-cached image (arch detection is automatic in Go CLI)."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "alpine",
-            "--version",
-            "3.21",
-            "--force",
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Pull failed in Tier 2 environment: {result.stderr.strip()}"
-        )
-        assert "pulled" in result.stdout.lower(), (
-            f"Expected 'pulled' in output, got: {result.stdout}"
-        )
-
-
-class TestImagePullNoCache:
-    """Test image pull with --no-cache flag."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_pull_with_no_cache(self, runner_vm):
-        """Pull an image with --no-cache flag to bypass local cache."""
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "alpine",
-            "--version",
-            "3.21",
-            "--no-cache",
-            "--force",
-            timeout=120,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Pull with --no-cache failed in Tier 2 environment: {result.stderr.strip()}"
-        )
-        assert "pulled" in result.stdout.lower(), (
-            f"Expected 'pulled' in output, got: {result.stdout}"
-        )
-
-
-class TestImagePullSkipOptimization:
-    """Test image pull with --skip-optimization flag."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_pull_with_skip_optimization(self, runner_vm):
-        """Pull an image with --skip-optimization flag."""
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "alpine",
-            "--version",
-            "3.21",
-            "--skip-optimization",
-            "--force",
-            timeout=60,
-        )
-        assert "pulled" in result.stdout.lower()
-
-
-class TestImageImportSetDefault:
-    """Test image import with --default flag."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_import_with_set_default(self, runner_vm):
-        """Import a local image file with --default flag."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        cached_path = _get_cached_alpine_path_in_vm(
-            runner_vm, "test-import-default.raw"
-        )
-        assert cached_path is not None, (
-            "No cached alpine image available to import"
-        )
-
-        imported_prefix = None
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                "test-import-default",
-                cached_path,
-                "--format",
-                "raw",
-                "--default",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Import with --default failed: {result.stderr.strip()}"
-            )
-
-            ls_after = _run_mvm(runner_vm, "image", "ls", "--json")
-            images_after = json.loads(ls_after.stdout)
-            default_img = next(
-                (i for i in images_after if i.get("is_default")), None
-            )
-            assert default_img is not None, (
-                "No image marked as default in ls --json after import --default"
-            )
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = _parse_json_output(result.stdout)
-            imported = [
-                i for i in images
-                if "imported" in i.get("name", "").lower()
-                and i.get("type", "").lower().startswith("alpine")
-            ]
-            if imported:
-                imported_prefix = imported[0]["id"][:6]
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-
-class TestImageImportArch:
-    """Test image import (arch is auto-detected in Go CLI)."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_import_with_arch(self, runner_vm):
-        """Import a qcow2 image (arch detection is automatic in Go CLI)."""
-        check = _guest_run(runner_vm,
-            "which qemu-img && echo found || echo not-found",
-            check=False,
-        )
-        assert "found" in check.stdout, "qemu-img not available inside the test VM"
-
-        raw_path = _create_ext4_raw_in_vm(runner_vm, "test-arch.raw")
-        assert raw_path is not None, (
-            "mkfs.ext4 or truncate not available inside the test VM"
-        )
-
-        qcow2_path = f"{VM_TMP_DIR}/test-arch.qcow2"
-        assert _create_qcow2_from_raw_in_vm(runner_vm, raw_path, qcow2_path), (
-            "qemu-img convert failed inside the VM"
-        )
-
-        imported_prefix = None
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                "test-arch",
-                qcow2_path,
-                "--format",
-                "qcow2",
-                "--skip-optimization",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Image import failed: {result.stderr.strip()}"
-            )
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = _parse_json_output(result.stdout)
-            imported = [i for i in images if i.get("name") == "test-arch"]
-            assert imported, "Imported arch image not found in listing"
-            imported_prefix = imported[0]["id"][:6]
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-
-class TestImageImportCreateVM:
-    """Test the full end-to-end flow of importing an image and creating a VM."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.requires_kvm,
-        pytest.mark.slow,
-        pytest.mark.domain_vm,
-    ]
-
-    def test_imported_image_vm_creation(
-        self,
-        runner_vm,
-        unique_vm_name,
-        unique_network_name,
+        self, runner_vm, isolated_pull_cache
     ):
-        """Import a cached alpine image and create a running VM from it."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        cached_path = _get_cached_alpine_path_in_vm(
-            runner_vm, "alpine-for-import.raw"
-        )
-        assert cached_path is not None, (
-            "No present alpine image available for import"
-        )
-
-        import_name = f"imported-{unique_vm_name}"
-        network_name = unique_network_name
-        subnet = _unique_subnet(network_name)
-        vm_name = unique_vm_name
-
-        imported_prefix: str | None = None
-
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                import_name,
-                cached_path,
-                "--format",
-                "raw",
-                "--skip-optimization",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Image import failed: {result.stderr.strip()}"
-            )
-
-            m = re.search(r"ID:\s+(\w+)", result.stdout)
-            assert m, (
-                f"Could not parse image ID from import output: {result.stdout.strip()}"
-            )
-            imported_prefix = m.group(1)
-
-            img_ls_result = _run_mvm(runner_vm, "image", "ls", "--json")
-            all_imgs = json.loads(img_ls_result.stdout)
-            imported_img = next(
-                (i for i in all_imgs if i["id"].startswith(imported_prefix)),
-                None,
-            )
-            assert imported_img, (
-                f"Imported image with prefix '{imported_prefix}' not in listing"
-            )
-            imported_name = imported_img.get("name", "")
-
-            result = _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-                "--non-interactive",
-            )
-            assert result.returncode == 0, (
-                f"Network create failed: {result.stderr}"
-            )
-
-            ensure_vm_deps(runner_vm)
-            try:
-                result = _run_mvm(
-                    runner_vm,
-                    "vm",
-                    "create",
-                    vm_name,
-                    "--image",
-                    imported_prefix,
-                    "--network",
-                    network_name,
-                    timeout=60,
-                )
-                assert result.returncode == 0, (
-                    f"VM create failed: {result.stderr}"
-                )
-
-                result = _run_mvm(runner_vm, "vm", "ls", "--json")
-                vms = _parse_json_output(result.stdout)
-                vm = next((v for v in vms if v["name"] == vm_name), None)
-                assert vm is not None, f"VM '{vm_name}' not found in listing"
-                assert vm["status"] == "running", (
-                    f"Expected VM status 'running', got '{vm['status']}'"
-                )
-                assert vm.get("image_id", ""), f"VM has no image_id: {vm}"
-
-                inspect_result = _run_mvm(
-                    runner_vm, "vm", "inspect", vm_name, "--json"
-                )
-                inspect_data = json.loads(inspect_result.stdout)
-                assert imported_name in str(
-                    inspect_data.get("assets", {}).get("image", {}).get("name", "")
-                ), (
-                    f"VM image_name doesn't contain '{imported_name}': "
-                    f"{inspect_data.get('assets', {}).get('image', {}).get('name', '')}"
-                )
-            finally:
-                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-                _run_mvm(
-                    runner_vm, "network", "rm", network_name, "--force", check=False,
-                )
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-    def test_import_ubuntu_tar_rootfs(
-        self,
-        runner_vm,
-        unique_vm_name,
-        unique_network_name,
-    ):
-        """Download Ubuntu 24.04 minimal tar-rootfs, import, create VM, verify running."""
-        ubuntu_url = (
-            "https://cloud-images.ubuntu.com/minimal/releases/noble/release/"
-            "ubuntu-24.04-minimal-cloudimg-amd64-root.tar.xz"
-        )
-        download_path = f"{VM_TMP_DIR}/ubuntu-24.04-minimal-root.tar.xz"
-
-        # Download inside the VM using curl
-        download = _guest_run(runner_vm,
-            f"curl -sSL -o {download_path} {ubuntu_url}",
-            timeout=120,
-            check=False,
-        )
-        assert download.returncode == 0, (
-            f"Failed to download Ubuntu image inside VM: {download.stderr}"
-        )
-
-        import_name = f"ubuntu-imported-{unique_vm_name}"
-        network_name = unique_network_name
-        subnet = _unique_subnet(network_name)
-        vm_name = unique_vm_name
-        imported_prefix: str | None = None
-
-        try:
-            result = _run_mvm(
-                runner_vm,
-                "image",
-                "import",
-                import_name,
-                download_path,
-                "--format",
-                "tar-rootfs",
-                "--skip-optimization",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Ubuntu image import failed: {result.stderr.strip()}"
-            )
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = _parse_json_output(result.stdout)
-            imported = [
-                i for i in images
-                if "imported" in i.get("name", "").lower()
-                and "ubuntu" in i.get("type", "").lower()
-            ]
-            assert imported, (
-                f"Imported ubuntu image not found in listing. "
-                f"Used import name '{import_name}'."
-            )
-            imported_prefix = imported[0]["id"][:6]
-
-            result = _run_mvm(
-                runner_vm,
-                "network",
-                "create",
-                network_name,
-                "--subnet",
-                subnet,
-                "--non-interactive",
-            )
-            assert result.returncode == 0, (
-                f"Network create failed: {result.stderr}"
-            )
-
-            ensure_vm_deps(runner_vm)
-            try:
-                result = _run_mvm(
-                    runner_vm,
-                    "vm",
-                    "create",
-                    vm_name,
-                    "--image",
-                    imported_prefix,
-                    "--network",
-                    network_name,
-                    timeout=120,
-                )
-                assert result.returncode == 0, (
-                    f"VM create with imported Ubuntu failed: {result.stderr}"
-                )
-
-                result = _run_mvm(runner_vm, "vm", "ls", "--json")
-                vms = _parse_json_output(result.stdout)
-                vm = next((v for v in vms if v["name"] == vm_name), None)
-                assert vm is not None, f"VM '{vm_name}' not found in listing"
-                assert vm["status"] == "running", (
-                    f"Expected VM status 'running', got '{vm['status']}'"
-                )
-            finally:
-                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-                _run_mvm(
-                    runner_vm, "network", "rm", network_name, "--force", check=False,
-                )
-        finally:
-            if imported_prefix:
-                _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
-
-
-class TestImageDefaultMigration:
-    """Test that the default image migrates to a new record on force re-pull."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    def test_default_migrates_to_new_image_on_force_repull(
-        self, runner_vm: str
-    ) -> None:
-        """When force-re-pulling the same image, default should migrate to new record."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images: list[dict[str, Any]] = _parse_json_output(result.stdout)
-
-        present_alpine = [
-            i for i in images
-            if i.get("type") == "alpine" and i.get("is_present")
-        ]
-        assert present_alpine, (
-            "alpine not present after _ensure_image"
-        )
-
-        old_alpine = present_alpine[0]
-        old_alpine_id: str = old_alpine["id"]
-
-        original_defaults = [i for i in images if i.get("is_default")]
-        original_default_id: str | None = (
-            original_defaults[0]["id"] if original_defaults else None
-        )
-
-        changed_default = False
-        if not old_alpine.get("is_default"):
-            result_set = _run_mvm(
-                runner_vm, "image", "default", old_alpine_id[:6], check=False
-            )
-            assert result_set.returncode == 0, (
-                f"Could not set default to {old_alpine_id[:6]}: {result_set.stderr}"
-            )
-            changed_default = True
-
-        try:
-            # Force-pull a DIFFERENT version (3.21)
+        assert _images(runner_vm) == []
+        original = _defaults(runner_vm)
+        owned = _json_success_data(
             _run_mvm(
-                runner_vm,
-                "image",
-                "pull",
-                "alpine",
-                "--version",
-                "3.21",
-                "--force",
-                timeout=180,
-            )
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images_after: list[dict[str, Any]] = _parse_json_output(result.stdout)
-
-            alpine_after = [
-                i for i in images_after if i.get("type") == "alpine"
-            ]
-
-            # Default should remain on the old 3.23 record
-            new_default = next(
-                (i for i in alpine_after if i.get("is_default")), None
-            )
-            assert new_default is not None, (
-                "Expected a default alpine record"
-            )
-            assert new_default["id"] == old_alpine_id, (
-                "Default should stay on the old record when pulling a different version"
-            )
-
-            # The new 3.21 record should exist and be present.
-            # Filter by is_present to avoid picking up a soft-deleted stale record from a previous run.
-            new_version = next(
-                (i for i in alpine_after if i.get("version") == "3.21" and i.get("is_present")), None
-            )
-            assert new_version is not None, (
-                "Expected alpine:3.21 record after force pull"
-            )
-            assert new_version.get("is_present"), (
-                "New alpine:3.21 record should be present"
-            )
-        finally:
-            if changed_default and original_default_id:
-                _run_mvm(
-                    runner_vm,
-                    "image",
-                    "default",
-                    original_default_id[:6],
-                    check=False,
-                )
-
-
-class TestImageRemove:
-    """Test image removal operations."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_remove_with_fixture(self, runner_vm):
-        """Remove a cached image by ID prefix and verify it's gone."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        before = _parse_json_output(result.stdout)
-        alpine_images = [
-            i for i in before
-            if "alpine" in i.get("type", "").lower() and i.get("is_present")
-        ]
-        assert alpine_images, (
-            "No present alpine image available to test removal"
+                runner_vm, "image", "pull", "alpine:3.23", "--json", timeout=300
+            ).stdout,
+            dict,
         )
-
-        was_default = alpine_images[0].get("is_default", False)
-        target_id = alpine_images[0]["id"]
-        target_prefix = target_id[:6]
-        was_removed = False
-
+        owned["_backing_identity"] = _backing_identity(owned["path"])
         try:
-            result = _run_mvm(
-                runner_vm, "image", "rm", target_prefix, check=False,
-            )
-            assert result.returncode == 0
-            was_removed = True
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            after = [
-                i for i in _parse_json_output(result.stdout)
-                if i.get("is_present", True)
-            ]
-            assert not any(i["id"] == target_id for i in after)
-        finally:
-            if was_removed:
-                pull_args = ["image", "pull", "alpine", "--version", "3.21"]
-                if was_default:
-                    pull_args.append("--default")
-                _run_mvm(runner_vm, *pull_args, timeout=120)
-
-
-class TestImageRemoveForce:
-    """Test image removal with --force flag."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_rm_with_force(self, runner_vm):
-        """Remove a cached image by ID prefix with --force and verify it's gone."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = _parse_json_output(result.stdout)
-        alpine_images = [
-            i for i in images
-            if "alpine" in i.get("type", "").lower() and i.get("is_present")
-        ]
-        assert alpine_images, (
-            "No present alpine image available to test removal"
-        )
-
-        was_default = alpine_images[0].get("is_default", False)
-        target_id = alpine_images[0]["id"]
-
-        try:
-            result = _run_mvm(
-                runner_vm, "image", "rm", target_id[:6], "--force", check=False,
-            )
-            assert result.returncode == 0, (
-                f"Force remove failed: {result.stderr}"
-            )
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            after = [
-                i for i in _parse_json_output(result.stdout)
-                if i.get("is_present", True)
-            ]
-            assert not any(i["id"] == target_id for i in after)
-        finally:
-            pull_args = ["image", "pull", "alpine", "--version", "3.21"]
-            if was_default:
-                pull_args.append("--default")
-            _run_mvm(runner_vm, *pull_args, check=False, timeout=120)
-
-
-class TestImageDependencyDeletion:
-    """Test dependency ordering for image deletion -- references by VMs block removal."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.domain_image,
-    ]
-
-    @pytest.mark.requires_kvm
-    def test_delete_image_used_by_stopped_vm_fails(
-        self,
-        runner_vm: str,
-        unique_vm_name: str,
-        created_network: str,
-    ) -> None:
-        """Deleting an image referenced by a stopped VM should be rejected."""
-        vm_name = unique_vm_name
-
-        try:
-            ls_result = _run_mvm(
-                runner_vm, "image", "ls", "--json", check=False,
-            )
-            alpine_present = False
-            if ls_result.returncode == 0 and ls_result.stdout.strip():
-                images: list[dict[str, Any]] = json.loads(ls_result.stdout)
-                alpine_present = any(
-                    i.get("type") == "alpine" and i.get("is_present")
-                    for i in images
-                )
-            if not alpine_present:
+            image = _json_success_data(
                 _run_mvm(
                     runner_vm,
                     "image",
                     "pull",
-                    "alpine",
-                    "--version",
-                    "3.21",
-                    timeout=180,
-                )
-
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                created_network,
-                timeout=120,
+                    "alpine:3.23",
+                    "--default",
+                    "--json",
+                    timeout=300,
+                ).stdout,
+                dict,
             )
-
-            ins_result = _run_mvm(
-                runner_vm, "vm", "inspect", vm_name, "--json", check=False,
-            )
-            assert ins_result.returncode == 0, (
-                f"Failed to inspect VM: {ins_result.stderr}"
-            )
-            vm_info: dict[str, Any] = json.loads(ins_result.stdout)
-            image_id_full = vm_info.get("assets", {}).get("image", {}).get("id", "")
-            assert image_id_full
-            image_id_prefix = image_id_full[:6]
-
-            result = _run_mvm(
-                runner_vm, "image", "rm", image_id_prefix, check=False,
-            )
-            assert "referenced" in result.stderr.lower() or "in use by" in result.stderr.lower(), (
-                f"Expected image rm to report reference, got: "
-                f"rc={result.returncode} stdout={result.stdout}"
-            )
-
-            ls_image = _run_mvm(
-                runner_vm, "image", "ls", "--json", check=False,
-            )
-            if ls_image.returncode == 0 and ls_image.stdout.strip():
-                images_after = json.loads(ls_image.stdout)
-                alpine_after = next(
-                    (i for i in images_after if i.get("type") == "alpine"),
-                    None,
-                )
-                assert alpine_after is not None
-
-            ls_vm = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if ls_vm.returncode == 0 and ls_vm.stdout.strip():
-                vms_after = json.loads(ls_vm.stdout)
-                vm_names = [v.get("name") for v in vms_after]
-                assert vm_name in vm_names
+            assert image["id"] == owned["id"] == _alpine(runner_vm)["id"]
+            assert _backing_identity(image["path"]) == owned["_backing_identity"]
+            assert _defaults(runner_vm) == [image["id"]]
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
+            _remove_image(runner_vm, owned)
+            _restore_default(runner_vm, original)
 
-    @pytest.mark.requires_kvm
-    @pytest.mark.requires_network
-    @pytest.mark.slow
-    def test_delete_image_used_by_running_vm_fails_without_force(
-        self,
-        runner_vm: str,
-        unique_vm_name: str,
-        created_network: str,
-    ) -> None:
-        """Deleting an image referenced by a running VM should be rejected."""
-        vm_name = unique_vm_name
-
-        try:
-            _run_mvm(
-                runner_vm,
-                "vm",
-                "create",
-                vm_name,
-                "--image",
-                "alpine:3.23",
-                "--network",
-                created_network,
-                timeout=120,
-            )
-            _run_mvm(runner_vm, "vm", "start", vm_name)
-
-            vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if vm_ls.returncode == 0 and vm_ls.stdout.strip():
-                vms = json.loads(vm_ls.stdout)
-                vm_names = [v.get("name") for v in vms]
-                assert vm_name in vm_names
-
-            ins_result = _run_mvm(
-                runner_vm, "vm", "inspect", vm_name, "--json", check=False,
-            )
-            assert ins_result.returncode == 0
-            vm_info: dict[str, Any] = json.loads(ins_result.stdout)
-            image_id_full = vm_info.get("assets", {}).get("image", {}).get("id", "")
-            assert image_id_full
-            image_id_prefix = image_id_full[:6]
-
-            result = _run_mvm(
-                runner_vm, "image", "rm", image_id_prefix, check=False,
-            )
-            assert "referenced" in result.stderr.lower() or "in use by" in result.stderr.lower(), (
-                f"Expected image rm to report reference, got: "
-                f"rc={result.returncode} stdout={result.stdout}"
-            )
-
-            ls_image = _run_mvm(
-                runner_vm, "image", "ls", "--json", check=False,
-            )
-            if ls_image.returncode == 0 and ls_image.stdout.strip():
-                images_after = json.loads(ls_image.stdout)
-                alpine_after = next(
-                    (i for i in images_after if i.get("type") == "alpine"),
-                    None,
-                )
-                assert alpine_after is not None
-
-            ls_vm = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if ls_vm.returncode == 0 and ls_vm.stdout.strip():
-                vms_after = json.loads(ls_vm.stdout)
-                vm_names = [v.get("name") for v in vms_after]
-                assert vm_name in vm_names
-        finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-
-    def test_delete_default_image_promotes_other_or_clears(
-        self,
-        runner_vm: str,
-    ) -> None:
-        """Deleting a formerly-default image should not leave orphans."""
-        _ensure_image(runner_vm, "alpine:3.23")
-        _ensure_image(runner_vm, "ubuntu:24.04")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = _parse_json_output(result.stdout)
-        present_images = [i for i in images if i.get("is_present", True)]
-
-        assert len(present_images) >= 2, (
-            "Need at least 2 present images for this test"
-        )
-
-        default_img = next(
-            (i for i in present_images if i.get("is_default")),
-            present_images[0],
-        )
-        other_img = next(
-            (i for i in present_images if i["id"] != default_img["id"]),
-            None,
-        )
-
-        assert other_img is not None, (
-            "No non-default image available to set as default"
-        )
-
-        old_default_prefix = default_img["id"][:6]
-        other_prefix = other_img["id"][:6]
-
-        try:
-            _run_mvm(runner_vm, "image", "default", other_prefix, check=False)
-            _run_mvm(runner_vm, "image", "rm", old_default_prefix, check=False)
-
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images_after = _parse_json_output(result.stdout)
-            default_count = sum(1 for i in images_after if i.get("is_default"))
-            assert default_count <= 1, (
-                f"Expected at most 1 default image, got {default_count}"
-            )
-        finally:
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images_final = _parse_json_output(result.stdout)
-            has_default = any(i.get("is_default") for i in images_final)
-            if not has_default and images_final:
-                _run_mvm(
-                    runner_vm,
-                    "image",
-                    "default",
-                    images_final[0]["id"][:6],
-                    check=False,
-                )
-
-
-class TestImageAdvancedFlags:
-    """Tests for image advanced flags and edge cases."""
-
-    pytestmark = [pytest.mark.system, pytest.mark.tier2, pytest.mark.domain_image]
-
-    @pytest.mark.slow
-    def test_image_pull_with_disable_detector(self, runner_vm):
-        """Pull an image with --disable-detector all --force."""
-        # Rationale: Downloads an image with --disable-detector flag.
-        # Needs network access to pull but no local VM resources.
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "alpine",
-            "--version",
-            "3.23",
-            "--disable-detector",
-            "all",
-            "--force",
-            timeout=180,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Pull with --disable-detector failed: {result.stderr.strip()}"
-        )
-        combined = (result.stdout + result.stderr).lower()
-        assert "pulled" in combined
-
-
-class TestImagePullAdvancedFlags:
-    """Test advanced image pull flags."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.tier2,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_pull_with_version(self, runner_vm):
-        """Pull an image with --version flag, dynamically resolved from remote listing."""
-        # Rationale: Verifies that --version flag works when pulling
-        # a specific image version. Regression would break versioned
-        # image pulls for all users.
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "ls",
-            "--remote",
-            "--json",
-            timeout=30,
-            check=False,
-        )
-        assert result.returncode == 0 and result.stdout.strip(), (
-            f"Remote listing not available: {result.stderr}"
-        )
-        try:
-            remote_images = json.loads(result.stdout)
-        except (json.JSONDecodeError, ValueError, TypeError):
-            pytest.fail("Remote listing returned non-JSON output")
-        assert remote_images, "No remote images available"
-        test_img = next(
-            (
-                img
-                for img in remote_images
-                if img.get("type") and img.get("version")
-            ),
-            None,
-        )
-        assert test_img is not None, (
-            "No remote image has both type and version metadata"
-        )
-        selector = test_img["type"]
-        version = test_img["version"]
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            selector,
-            "--version",
-            version,
-            "--force",
-            "--skip-optimization",
-            timeout=300,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Pull {selector} --version {version} failed: "
-            f"{result.stderr.strip()}"
-        )
-
-        # L2 verification: confirm the image type appears in listing
-        ls_result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = json.loads(ls_result.stdout)
-        assert any(
-            i.get("type") == selector and i.get("is_present")
-            for i in images
-        ), f"Pulled image type={selector} not found in listing"
-
-    def test_image_pull_with_arch(self, runner_vm):
-        """Pull an image (arch detection is automatic in Go CLI)."""
-        # Rationale: Verifies that image pull works. The Go CLI detects
-        # host architecture automatically — no --arch flag needed.
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "alpine",
-            "--version",
-            "3.23",
-            "--force",
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Pull failed: {result.stderr.strip()}"
-        )
-        combined = (result.stdout + result.stderr).lower()
-        assert "pulled" in combined
-
-
-class TestImagePullWithTypeFlag:
-    """Test image pull with explicit --type flag."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.tier2,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_pull_with_explicit_type(self, runner_vm):
-        """Pull an image with --type flag matching the positional selector."""
-        # Rationale: Verifies that --type flag works alongside the
-        # positional selector. Regression would break image pulls that
-        # explicitly specify type.
-        result = _run_mvm(
-            runner_vm,
-            "image",
-            "pull",
-            "alpine:3.23",
-            "--type",
-            "alpine",
-            "--force",
-            timeout=120,
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Pull with --type failed: {result.stderr.strip()}"
-        )
-        combined = (result.stdout + result.stderr).lower()
-        assert "pulled" in combined
-
-
-class TestImageImportWithDisableDetector:
-    """Test image import with --disable-detector flag."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.tier2,
-        pytest.mark.domain_image,
-    ]
-
-    def test_image_import_with_disable_detector(
-        self, runner_vm
+    @pytest.mark.parametrize(
+        "flags",
+        [[], ["--no-cache"], ["--skip-optimization"], ["--disable-detector", "all"]],
+        ids=["force", "no-cache", "skip-optimization", "disable-detector"],
+    )
+    def test_pull_cached_image_with_force_redownloads(
+        self, runner_vm, isolated_pull_cache, flags
     ):
-        """Import an image with --disable-detector all flag.
-
-        Rationale: Verifies that --disable-detector all skips the
-        OS detection phase during import. Regression would break
-        users importing images with custom or unknown OS layouts.
-        """
-        _ensure_image(runner_vm, "alpine:3.23")
-        result = _run_mvm(runner_vm, "image", "ls", "--json")
-        images = json.loads(result.stdout)
-        alpine_images = [
-            i
-            for i in images
-            if "alpine" in i.get("type", "").lower() and i.get("is_present")
-        ]
-        if not alpine_images:
+        """Mirror-backed replacement preserves the selected default and retires its old backing."""
+        first = _json_success_data(
             _run_mvm(
                 runner_vm,
                 "image",
                 "pull",
-                "alpine",
-                "--version",
-                "3.23",
-                check=False,
+                "alpine:3.23",
+                "--default",
+                "--json",
                 timeout=300,
-            )
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = json.loads(result.stdout)
-            alpine_images = [
-                i
-                for i in images
-                if "alpine" in i.get("type", "").lower() and i.get("is_present")
-            ]
-
-        assert alpine_images, (
-            "No alpine image available to use as import source"
+            ).stdout,
+            dict,
         )
-
-        cached_path = _get_cached_alpine_path_in_vm(
-            runner_vm, "alpine-for-import.raw"
-        )
-        assert cached_path is not None, (
-            "Failed to extract cached alpine image for import"
-        )
-
-        imported_prefix: str | None = None
-        try:
-            result = _run_mvm(
+        assert first["is_default"] is True
+        # IDs include second-resolution creation time: wait for a distinct creation interval.
+        _guest_run(runner_vm, "sleep 1")
+        second = _json_success_data(
+            _run_mvm(
                 runner_vm,
                 "image",
-                "import",
-                "test-disable-detector",
-                cached_path,
-                "--format",
-                "raw",
-                "--disable-detector",
-                "all",
-                check=False,
-            )
-            assert result.returncode == 0, (
-                f"Import with --disable-detector failed: {result.stderr.strip()}"
-            )
+                "pull",
+                "alpine:3.23",
+                "--force",
+                *flags,
+                "--json",
+                timeout=300,
+            ).stdout,
+            dict,
+        )
+        assert second["is_default"] is True
+        assert second["id"] != first["id"]
+        assert (
+            second["type"] == "alpine"
+            and second["version"] == "3.23"
+            and second["is_present"]
+        )
+        assert _defaults(runner_vm) == [second["id"]]
+        assert Path(second["path"]).is_file() and not Path(first["path"]).exists()
+        assert all(
+            i["id"] == second["id"] or not i["is_present"] for i in _images(runner_vm)
+        )
 
-            result = _run_mvm(runner_vm, "image", "ls", "--json")
-            images = json.loads(result.stdout)
-            imported = [
-                i for i in images if i.get("name") == "test-disable-detector"
-            ]
-            assert imported, (
-                "Imported image with --disable-detector not found in listing"
-            )
-            imported_prefix = imported[0]["id"][:6]
-        finally:
-            if imported_prefix:
-                _run_mvm(
-                    runner_vm, "image", "rm", imported_prefix, check=False
+    def test_pull_nonexistent_image_fails_gracefully(self, runner_vm):
+        result = _run_mvm(
+            runner_vm,
+            "image",
+            "pull",
+            f"missing-{uuid.uuid4().hex}",
+            "--json",
+            check=False,
+        )
+        assert result.returncode != 0
+        response = json.loads(result.stdout)
+        assert (
+            response["status"] == "error"
+            and response["error"]["code"] == "image.pull.failed"
+        )
+
+
+class TestImageImportAdvanced:
+    pytestmark = [pytest.mark.tier2]
+
+    @pytest.mark.requires_kvm
+    def test_image_import_with_format_qcow2(self, runner_vm, image_workspace):
+        source = _qcow2(runner_vm, _extract_alpine(runner_vm, image_workspace))
+        with _imported(
+            runner_vm, source, "--format", "qcow2", "--skip-optimization"
+        ) as image:
+            assert image["fs_type"] == "ext4" and image["distro"] == "alpine"
+            with _booted(runner_vm, image) as vm:
+                guest = _run_mvm(
+                    runner_vm, "exec", vm["id"], "--", "cat", "/etc/os-release"
                 )
+                assert "ID=alpine" in guest.stdout.splitlines()
+
+    def test_image_import_force_overwrite(self, runner_vm, image_workspace):
+        source = _ext4(runner_vm, image_workspace)
+        with _imported(
+            runner_vm, source, "--format", "raw", "--skip-optimization"
+        ) as image:
+            again = _json_success_data(
+                _run_mvm(
+                    runner_vm,
+                    "image",
+                    "import",
+                    image["type"],
+                    str(source),
+                    "--format",
+                    "raw",
+                    "--json",
+                ).stdout,
+                dict,
+            )
+            assert again["id"] == image["id"]
+            _guest_run(runner_vm, "sleep 1")
+            before = _images(runner_vm)
+            new = None
+            try:
+                candidate = _json_success_data(
+                    _run_mvm(
+                        runner_vm,
+                        "image",
+                        "import",
+                        image["type"],
+                        str(source),
+                        "--format",
+                        "raw",
+                        "--skip-optimization",
+                        "--force",
+                        "--json",
+                        timeout=300,
+                    ).stdout,
+                    dict,
+                )
+                assert re.fullmatch(r"[0-9a-f]{64}", candidate["id"])
+                assert candidate["id"] not in {item["id"] for item in before}
+                assert candidate["path"] not in {item["path"] for item in before}
+                assert candidate["type"] == image["type"]
+                new = candidate
+                new["_backing_identity"] = _backing_identity(new["path"])
+                assert new["is_imported"] and new["is_present"]
+                assert not Path(image["path"]).exists()
+            finally:
+                if new is not None:
+                    _remove_image(runner_vm, new)
+
+    def test_image_import_with_root_partition(self, runner_vm, image_workspace):
+        """Explicit partition 2 must differ from the automatic detector's partition 1."""
+        disk, uuids = _partition_disk(runner_vm, image_workspace)
+        qcow2 = _qcow2(runner_vm, disk)
+        with _imported(
+            runner_vm, qcow2, "--format", "qcow2", "--skip-optimization"
+        ) as automatic:
+            _assert_partition_uuid(runner_vm, automatic, uuids[0], image_workspace)
+        with _imported(
+            runner_vm,
+            qcow2,
+            "--format",
+            "qcow2",
+            "--root-partition",
+            "2",
+            "--skip-optimization",
+        ) as image:
+            _assert_partition_uuid(runner_vm, image, uuids[1], image_workspace)
+
+    @pytest.mark.parametrize(
+        "disabled", ["type", "all"], ids=["disable-type", "disable-all"]
+    )
+    def test_image_import_with_disable_detector(
+        self, runner_vm, image_workspace, disabled
+    ):
+        """The sfdisk path has no label/filesystem scores; type and size decide this layout."""
+        disk, uuids = _partition_disk(runner_vm, image_workspace)
+        qcow2 = _qcow2(runner_vm, disk)
+        # With type enabled: 64 MiB Linux scores .5-.25; 128 MiB neutral scores zero.
+        # Disabling type selects partition 2; disabling all ties both at zero.
+        with _imported(
+            runner_vm, qcow2, "--format", "qcow2", "--skip-optimization"
+        ) as automatic:
+            _assert_partition_uuid(runner_vm, automatic, uuids[0], image_workspace)
+        if disabled == "type":
+            with _imported(
+                runner_vm,
+                qcow2,
+                "--format",
+                "qcow2",
+                "--skip-optimization",
+                "--disable-detector",
+                disabled,
+            ) as image:
+                _assert_partition_uuid(runner_vm, image, uuids[1], image_workspace)
+        else:
+            before = _images(runner_vm)
+            name = f"sys-image-{uuid.uuid4().hex}"
+            assert all(item["type"] != name for item in before)
+            unexpected = None
+            try:
+                result = _run_mvm(
+                    runner_vm,
+                    "image",
+                    "import",
+                    name,
+                    str(qcow2),
+                    "--format",
+                    "qcow2",
+                    "--skip-optimization",
+                    "--disable-detector",
+                    disabled,
+                    "--json",
+                    check=False,
+                    timeout=300,
+                )
+                if result.returncode == 0:
+                    candidate = _json_success_data(result.stdout, dict)
+                    assert re.fullmatch(r"[0-9a-f]{64}", candidate["id"])
+                    assert candidate["id"] not in {item["id"] for item in before}
+                    assert candidate["path"] not in {item["path"] for item in before}
+                    assert candidate["type"] == name
+                    unexpected = candidate
+                    unexpected["_backing_identity"] = _backing_identity(
+                        unexpected["path"]
+                    )
+                assert result.returncode != 0
+                response = json.loads(result.stdout)
+                assert (
+                    response["schema_version"] == 1
+                    and response["status"] == "error"
+                    and response["data"] is None
+                )
+                assert response["error"]["code"] == "image.import.failed"
+                assert "tie score 0.000000" in response["error"]["message"]
+                assert _images(runner_vm) == before
+            finally:
+                if unexpected is not None:
+                    _remove_image(runner_vm, unexpected)
+
+    @pytest.mark.parametrize(
+        "flags,version",
+        [
+            ([], ""),
+            (["--version", "1.0"], "1.0"),
+            (["--skip-optimization"], ""),
+        ],
+        ids=[
+            "auto-format",
+            "version",
+            "skip-optimization",
+        ],
+    )
+    def test_image_import_without_format_auto_detect(
+        self, runner_vm, image_workspace, flags, version
+    ):
+        source = _ext4(runner_vm, image_workspace)
+        with _imported(runner_vm, source, *flags) as image:
+            assert image["version"] == version and image["fs_type"] == "ext4"
+            assert image["arch"] == _alpine(runner_vm)["arch"]
+
+
+@contextmanager
+def _booted_vm_import(runner_vm, image, *, clone=False):
+    """Observe these import journeys' VM boundaries without changing owned teardown."""
+    role = "clone" if clone else "source"
+    print(f"VM import phase={role}_boot_enter", flush=True)
+    with _booted(runner_vm, image, disk_size_mib=512) as vm:
+        print(f"VM import phase={role}_boot_ready", flush=True)
+        try:
+            yield vm
+        finally:
+            # Enter is diagnostic only: the existing resource owner still checks cleanup.
+            print(f"VM import phase={role}_cleanup_enter", flush=True)
+    print(f"VM import phase={role}_cleanup_returned", flush=True)
+
+
+class TestImageImportSetDefault:
+    @pytest.mark.destructive
+    def test_image_import_with_set_default(self, runner_vm, image_workspace):
+        original = _defaults(runner_vm)
+        assert len(original) <= 1
+        source = _ext4(runner_vm, image_workspace)
+        try:
+            with _imported(
+                runner_vm, source, "--format", "raw", "--default", "--skip-optimization"
+            ) as image:
+                assert _defaults(runner_vm) == [image["id"]]
+        finally:
+            _restore_default(runner_vm, original)
+
+
+class TestImageImportCreateVM:
+    pytestmark = [pytest.mark.tier2, pytest.mark.requires_kvm, pytest.mark.slow]
+
+    @pytest.mark.destructive
+    def test_vm_import_mid_copy_io_failure_restores_source_and_discards_partial(
+        self, runner_vm, image_workspace
+    ):
+        """A receiver-only kernel file limit rejects a real partial copy and restores the source."""
+        marker = f"/qa-image-import-{uuid.uuid4().hex}"
+        contents = f"copy-io-{uuid.uuid4().hex}"
+
+        with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
+            written = _run_mvm(
+                runner_vm,
+                "exec",
+                source["id"],
+                "--user",
+                "root",
+                "--timeout",
+                "30",
+                "--",
+                f"printf '%s' {shlex.quote(contents)} > {shlex.quote(marker)} "
+                f"&& sync && cat {shlex.quote(marker)}",
+            )
+            assert written.stdout == contents
+            source_receipt = _VMImportSource.capture(runner_vm, source["id"], "running")
+            fault = _VMImportReceiverDeath(runner_vm, source_receipt, mode="copy-io")
+            try:
+                fault.arm(source_receipt)
+                fault.fail_copy_io()
+                assert all(
+                    image["id"] != fault.image_id and image["type"] != fault.name
+                    for image in _images(runner_vm)
+                )
+                source_receipt.require_state(runner_vm, "running")
+                readback = _run_mvm(
+                    runner_vm,
+                    "exec",
+                    source["id"],
+                    "--user",
+                    "root",
+                    "--timeout",
+                    "30",
+                    "--",
+                    "cat",
+                    marker,
+                )
+                assert readback.stdout == contents
+                for _ in range(2):
+                    removed = _json_success_data(
+                        _run_mvm(
+                            runner_vm,
+                            "image",
+                            "rm",
+                            fault.image_id,
+                            "--force",
+                            "--json",
+                        ).stdout,
+                        dict,
+                    )
+                    assert len(removed["items"]) == 1
+                    item = removed["items"][0]
+                    assert item["error"] is None
+                    result = item["result"]
+                    assert result["status"] == "success"
+                    assert result["code"] == "image.export_removed"
+                    assert result["item"] == fault.image_id and result["warnings"] == []
+                    assert result["metadata"] == {
+                        "export_only": True,
+                        "source_vm_id": source["id"],
+                    }
+                assert all(
+                    image["id"] != fault.image_id and image["type"] != fault.name
+                    for image in _images(runner_vm)
+                )
+                source_receipt.require_state(runner_vm, "running")
+            finally:
+                fault.close()
+
+    def test_vm_import_sigint_survivor_refuses_release_then_restores_and_discards(
+        self, runner_vm, image_workspace
+    ):
+        """Caller SIGINT leaves a surviving locked receiver to settle, not root cancellation."""
+        marker = f"/qa-image-import-{uuid.uuid4().hex}"
+        contents = f"sigint-survivor-{uuid.uuid4().hex}"
+
+        with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
+            print("VM import phase=marker_exec_begin", flush=True)
+            written = _run_mvm(
+                runner_vm,
+                "exec",
+                source["id"],
+                "--user",
+                "root",
+                "--timeout",
+                "30",
+                "--",
+                f"printf '%s' {shlex.quote(contents)} > {shlex.quote(marker)} "
+                f"&& sync && cat {shlex.quote(marker)}",
+            )
+            assert written.stdout == contents
+            print("VM import phase=marker_exec_success", flush=True)
+            source_receipt = _VMImportSource.capture(runner_vm, source["id"], "running")
+            fault = _VMImportReceiverDeath(
+                runner_vm, source_receipt, mode="sigint-survivor"
+            )
+            try:
+                print("VM import phase=import_begin", flush=True)
+                fault.arm(source_receipt)
+                print("VM import phase=import_partial_copy", flush=True)
+                fault.interrupt()
+                print("VM import phase=import_sigint_survivor", flush=True)
+                assert all(
+                    image["id"] != fault.image_id and image["type"] != fault.name
+                    for image in _images(runner_vm)
+                )
+                # No public VM observation while the suspended receiver owns the VM lock.
+                refused = _run_mvm(
+                    runner_vm,
+                    "image",
+                    "rm",
+                    fault.image_id,
+                    "--force",
+                    "--json",
+                    check=False,
+                )
+                print(
+                    f"survivor release refusal stdout={refused.stdout} stderr={refused.stderr}",
+                    flush=True,
+                )
+                assert refused.returncode != 0
+                response = json.loads(refused.stdout)
+                assert response["status"] == "error"
+                assert response["error"]["code"] == "cli.batch.failed"
+                assert len(response["data"]["items"]) == 1
+                item = response["data"]["items"][0]
+                assert item["result"]["status"] == "error"
+                assert item["result"]["item"] == fault.image_id
+                assert item["error"]["code"] == "image.import.failed"
+                assert item["error"]["class"] == 3
+                assert item["error"]["message"] == "VM export copy release did not complete"
+                assert item["error"]["op"] == "image"
+                assert item["error"]["details"] == {
+                    "image_id": fault.image_id,
+                    "rootfs_export_copy_pending": True,
+                }
+                assert fault.require("busy") == {
+                    "phase": "busy",
+                    "image_id": fault.image_id,
+                    "copy_authority_unchanged": True,
+                }
+                assert all(
+                    image["id"] != fault.image_id and image["type"] != fault.name
+                    for image in _images(runner_vm)
+                )
+                fault.finish_survivor()
+                print("VM import phase=import_survivor_settled", flush=True)
+                source_receipt.require_state(runner_vm, "running")
+                print("VM import phase=source_readback_begin", flush=True)
+                readback = _run_mvm(
+                    runner_vm,
+                    "exec",
+                    source["id"],
+                    "--user",
+                    "root",
+                    "--timeout",
+                    "30",
+                    "--",
+                    "cat",
+                    marker,
+                )
+                assert readback.stdout == contents
+                print("VM import phase=source_readback_success", flush=True)
+                for _ in range(2):
+                    removed = _json_success_data(
+                        _run_mvm(
+                            runner_vm,
+                            "image",
+                            "rm",
+                            fault.image_id,
+                            "--force",
+                            "--json",
+                        ).stdout,
+                        dict,
+                    )
+                    assert len(removed["items"]) == 1
+                    item = removed["items"][0]
+                    assert item["error"] is None
+                    result = item["result"]
+                    assert result["status"] == "success"
+                    assert result["code"] == "image.export_removed"
+                    assert result["item"] == fault.image_id and result["warnings"] == []
+                    assert result["metadata"] == {
+                        "export_only": True,
+                        "source_vm_id": source["id"],
+                    }
+                assert all(
+                    image["id"] != fault.image_id and image["type"] != fault.name
+                    for image in _images(runner_vm)
+                )
+                source_receipt.require_state(runner_vm, "running")
+            finally:
+                print("VM import phase=fault_cleanup_enter", flush=True)
+                fault.close()
+                print("VM import phase=fault_cleanup_returned", flush=True)
+
+    def test_vm_import_receiver_death_retires_orphan_and_recovers_source(
+        self, runner_vm, image_workspace
+    ):
+        """Actual client/receiver death leaves public exact-ID recovery, not a partial image."""
+        marker = f"/qa-image-import-{uuid.uuid4().hex}"
+        contents = f"receiver-death-{uuid.uuid4().hex}"
+
+        with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
+            print("VM import phase=marker_exec_begin", flush=True)
+            written = _run_mvm(
+                runner_vm,
+                "exec",
+                source["id"],
+                "--user",
+                "root",
+                "--timeout",
+                "30",
+                "--",
+                f"printf '%s' {shlex.quote(contents)} > {shlex.quote(marker)} "
+                f"&& sync && cat {shlex.quote(marker)}",
+            )
+            assert written.stdout == contents
+            print("VM import phase=marker_exec_success", flush=True)
+            source_receipt = _VMImportSource.capture(runner_vm, source["id"], "running")
+            fault = _VMImportReceiverDeath(runner_vm, source_receipt)
+            try:
+                print("VM import phase=import_begin", flush=True)
+                fault.arm(source_receipt)
+                print("VM import phase=import_partial_copy", flush=True)
+                fault.kill()
+                print("VM import phase=import_receiver_dead", flush=True)
+                assert all(
+                    image["id"] != fault.image_id for image in _images(runner_vm)
+                )
+                # Public status observes process liveness; root GET independently proves CPU pause.
+                source_receipt.require_state(runner_vm, "running")
+                fault.require_paused_state()
+                for _ in range(2):
+                    removed = _json_success_data(
+                        _run_mvm(
+                            runner_vm,
+                            "image",
+                            "rm",
+                            fault.image_id,
+                            "--force",
+                            "--json",
+                        ).stdout,
+                        dict,
+                    )
+                    assert len(removed["items"]) == 1
+                    item = removed["items"][0]
+                    assert item["error"] is None
+                    result = item["result"]
+                    assert (
+                        result["status"] == "success"
+                        and result["code"] == "image.export_removed"
+                    )
+                    assert result["item"] == fault.image_id
+                    assert result["metadata"] == {
+                        "export_only": True,
+                        "source_vm_id": source["id"],
+                    }
+                    assert result["warnings"] == [
+                        f"Source VM {source['id']} still requires state recovery or normal termination; "
+                        "only the independent copy was removed."
+                    ]
+                    assert fault.require("released")["phase"] == "released"
+                refused = _run_mvm(
+                    runner_vm, "vm", "resume", source["id"], "--json", check=False
+                )
+                assert refused.returncode != 0
+                response = json.loads(refused.stdout)
+                assert response["status"] == "error"
+                assert response["error"]["code"] == "cli.batch.failed"
+                assert len(response["data"]["items"]) == 1
+                item = response["data"]["items"][0]
+                assert item["result"]["status"] == "error"
+                assert item["result"]["code"] == "vm.resume_failed"
+                assert item["error"]["code"] == "image.import.failed"
+                assert item["error"]["message"] == (
+                    "VM rootfs export did not complete; source state is unknown"
+                )
+                assert item["error"]["details"] == {
+                    "source_vm_id": source["id"],
+                    "vm_state": "unknown",
+                }
+                source_receipt.require_state(runner_vm, "running")
+                fault.require_paused_state()
+                assert fault.require("released")["phase"] == "released"
+                print("VM import phase=recovery_import_begin", flush=True)
+                with _imported(
+                    runner_vm, source["id"], "--skip-optimization"
+                ) as recovered:
+                    assert recovered["id"] != fault.image_id
+                    print("VM import phase=recovery_import_success", flush=True)
+                    source_receipt.require_state(runner_vm, "running")
+                    assert (
+                        fault.require(f"recovered {recovered['id']}")["phase"]
+                        == "recovered"
+                    )
+                    print("VM import phase=source_readback_begin", flush=True)
+                    source_readback = _run_mvm(
+                        runner_vm,
+                        "exec",
+                        source["id"],
+                        "--user",
+                        "root",
+                        "--timeout",
+                        "30",
+                        "--",
+                        "cat",
+                        marker,
+                    )
+                    assert source_readback.stdout == contents
+                    print("VM import phase=source_readback_success", flush=True)
+                    with _booted_vm_import(runner_vm, recovered, clone=True) as clone:
+                        print("VM import phase=clone_readback_begin", flush=True)
+                        readback = _run_mvm(
+                            runner_vm,
+                            "exec",
+                            clone["id"],
+                            "--user",
+                            "root",
+                            "--timeout",
+                            "30",
+                            "--",
+                            "cat",
+                            marker,
+                        )
+                        assert readback.stdout == contents
+                        print("VM import phase=clone_readback_success", flush=True)
+                    source_receipt.require_state(runner_vm, "running")
+                    print("VM import phase=image_cleanup_enter", flush=True)
+                print("VM import phase=image_cleanup_returned", flush=True)
+            finally:
+                print("VM import phase=fault_cleanup_enter", flush=True)
+                fault.close()
+                print("VM import phase=fault_cleanup_returned", flush=True)
+
+    @pytest.mark.parametrize("original_status", ["running", "paused", "stopped"])
+    def test_vm_import_preserves_guest_contents_and_source_state(
+        self, runner_vm, image_workspace, original_status
+    ):
+        """VM selectors capture guest-written bytes and restore the source's observed state."""
+        marker = f"/qa-image-import-{uuid.uuid4().hex}"
+        guest_contents = f"guest-{uuid.uuid4().hex}"
+
+        def source_state(source):
+            print("VM import phase=source_state_check_enter", flush=True)
+            listed = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
+            matches = [item for item in listed if item["id"] == source["id"]]
+            assert len(matches) == 1 and matches[0]["status"] == original_status
+            inspected = _json_success_data(
+                _run_mvm(runner_vm, "vm", "inspect", source["id"], "--json").stdout,
+                dict,
+            )
+            assert inspected["vm"]["id"] == source["id"]
+            assert inspected["vm"]["status"] == original_status
+            print("VM import phase=source_state_check_success", flush=True)
+            return inspected
+
+        with _booted_vm_import(runner_vm, _alpine(runner_vm)) as source:
+            assert re.fullmatch(r"[0-9a-f]{32}", source["id"])
+            print("VM import phase=marker_exec_begin", flush=True)
+            written = _run_mvm(
+                runner_vm,
+                "exec",
+                source["id"],
+                "--user",
+                "root",
+                "--timeout",
+                "30",
+                "--",
+                f"printf '%s' {shlex.quote(guest_contents)} > {shlex.quote(marker)} "
+                f"&& sync && cat {shlex.quote(marker)}",
+            )
+            assert written.stdout == guest_contents
+            print("VM import phase=marker_exec_success", flush=True)
+            if original_status != "running":
+                _run_mvm(
+                    runner_vm,
+                    "vm",
+                    "pause" if original_status == "paused" else "stop",
+                    source["id"],
+                    "--json",
+                )
+            inspected = source_state(source)
+            if original_status == "stopped":
+                # The caller's staging file is not the disk receiving guest writes.
+                # Put contradictory bytes there, without opening protected root storage.
+                cache = Path(
+                    os.environ.get("MVM_CACHE_DIR", str(Path.home() / ".cache/mvmctl"))
+                )
+                staging = cache / "vms" / source["id"] / "rootfs.img"
+                assert staging.is_absolute() and staging.resolve() == staging
+                assert staging == Path(source["rootfs_path"])
+                assert staging == Path(inspected["filesystem"]["rootfs_path"])
+                info = staging.lstat()
+                assert (
+                    staging.is_file()
+                    and info.st_uid == os.getuid()
+                    and info.st_nlink == 1
+                )
+                assert info.st_size == 512 * 1024 * 1024
+                identity = (info.st_dev, info.st_ino, info.st_size)
+                stale_contents = f"caller-staging-{uuid.uuid4().hex}"
+                stale_marker = image_workspace / "staging-marker"
+                stale_marker.write_text(stale_contents, encoding="utf-8")
+                _guest_run(
+                    runner_vm,
+                    f"debugfs -w -R {shlex.quote(f'write {stale_marker} {marker}')} "
+                    f"{shlex.quote(str(staging))}",
+                )
+                stale_readback = _guest_run(
+                    runner_vm,
+                    f"debugfs -R {shlex.quote(f'cat {marker}')} "
+                    f"{shlex.quote(str(staging))}",
+                )
+                assert stale_readback.stdout == stale_contents
+                after = staging.lstat()
+                assert (after.st_dev, after.st_ino, after.st_size) == identity
+
+            print("VM import phase=import_begin", flush=True)
+            with _imported(runner_vm, source["id"], "--skip-optimization") as image:
+                print("VM import phase=import_success", flush=True)
+                source_state(source)
+                with _booted_vm_import(runner_vm, image, clone=True) as clone:
+                    print("VM import phase=clone_readback_begin", flush=True)
+                    readback = _run_mvm(
+                        runner_vm,
+                        "exec",
+                        clone["id"],
+                        "--user",
+                        "root",
+                        "--timeout",
+                        "30",
+                        "--",
+                        "cat",
+                        marker,
+                    )
+                    assert readback.stdout == guest_contents
+                    print("VM import phase=clone_readback_success", flush=True)
+                source_state(source)
+                print("VM import phase=image_cleanup_enter", flush=True)
+            print("VM import phase=image_cleanup_returned", flush=True)
+
+    def test_imported_image_vm_creation(self, runner_vm, image_workspace):
+        source = _extract_alpine(runner_vm, image_workspace)
+        with _imported(
+            runner_vm, source, "--format", "raw", "--skip-optimization"
+        ) as image:
+            with _booted(runner_vm, image) as vm:
+                assert (
+                    "ID=alpine"
+                    in _run_mvm(
+                        runner_vm, "exec", vm["id"], "--", "cat", "/etc/os-release"
+                    ).stdout.splitlines()
+                )
+
+    def test_import_ubuntu_tar_rootfs(self, runner_vm, image_workspace):
+        """Retain tar-rootfs import/boot coverage using the prepared mirror, never curl."""
+        mirror = os.environ.get("MVM_ASSET_MIRROR")
+        assert mirror, (
+            "runner prerequisite: MVM_ASSET_MIRROR points to the prepared read-only mirror"
+        )
+        source = Path(mirror) / "noble-server-cloudimg-amd64-root.tar.xz"
+        assert source.is_file(), (
+            f"runner prerequisite: mirrored Ubuntu tar-rootfs {source}"
+        )
+        mirror_identity = _backing_identity(source)
+        with source.open("rb") as original:
+            mirror_digest = hashlib.file_digest(original, "sha256").digest()
+        try:
+            # Only the private copy is an import source; the mirror remains outside cleanup ownership.
+            local = image_workspace / source.name
+            assert not local.exists()
+            shutil.copyfile(source, local)
+            assert _backing_identity(source) == mirror_identity
+            assert local.stat().st_size == mirror_identity[2]
+            with local.open("rb") as copied:
+                assert hashlib.file_digest(copied, "sha256").digest() == mirror_digest
+            with _imported(
+                runner_vm, local, "--format", "tar-rootfs", "--skip-optimization"
+            ) as image:
+                assert image["distro"] == "ubuntu" and image["fs_type"] == "ext4"
+                warmed = _json_success_data(
+                    _run_mvm(runner_vm, "image", "warm", image["id"], "--json").stdout,
+                    list,
+                )
+                assert len(warmed) == 1
+                backing = Path(warmed[0])
+                assert backing.parent == image_workspace / "work" / "ready"
+                assert backing.name == f"{image['id']}.ext4"
+                backing_bytes = _backing_identity(backing)[2]
+                minimum_mib = image["minimum_rootfs_size_mib"]
+                assert (
+                    backing_bytes > 0
+                    and isinstance(minimum_mib, int)
+                    and minimum_mib > 0
+                )
+                disk_mib = max(minimum_mib, (backing_bytes + 1048575) // 1048576)
+                with _booted(runner_vm, image, disk_size_mib=disk_mib) as vm:
+                    release = _run_mvm(
+                        runner_vm, "exec", vm["id"], "--", "cat", "/etc/os-release"
+                    ).stdout.splitlines()
+                    assert "ID=ubuntu" in release and 'VERSION_ID="24.04"' in release
+        finally:
+            assert _backing_identity(source) == mirror_identity
+            with source.open("rb") as original:
+                assert hashlib.file_digest(original, "sha256").digest() == mirror_digest
+
+
+class TestImageRemove:
+    @pytest.mark.destructive
+    @pytest.mark.parametrize("flags", [[], ["--force"]], ids=["normal", "force"])
+    def test_image_remove_with_fixture(self, runner_vm, image_workspace, flags):
+        source = _ext4(runner_vm, image_workspace)
+        with _imported(
+            runner_vm, source, "--format", "raw", "--skip-optimization"
+        ) as image:
+            _remove_image(runner_vm, image, *flags)
+
+
+class TestImageDependencyDeletion:
+    pytestmark = [pytest.mark.tier2, pytest.mark.requires_kvm]
+
+    @pytest.mark.parametrize("stopped", [False, True], ids=["running", "stopped"])
+    def test_delete_image_used_by_stopped_vm_fails(
+        self, runner_vm, image_workspace, stopped
+    ):
+        source = _extract_alpine(runner_vm, image_workspace)
+        with _imported(
+            runner_vm, source, "--format", "raw", "--skip-optimization"
+        ) as image:
+            with _booted(runner_vm, image) as vm:
+                if stopped:
+                    _run_mvm(
+                        runner_vm,
+                        "vm",
+                        "stop",
+                        vm["id"],
+                        "--force",
+                        "--json",
+                        timeout=120,
+                    )
+                before = _images(runner_vm)
+                identity = _backing_identity(image["path"])
+                result = _run_mvm(
+                    runner_vm, "image", "rm", image["id"], "--json", check=False
+                )
+                assert result.returncode != 0
+                response = json.loads(result.stdout)
+                assert response["status"] == "error"
+                assert response["data"]["items"][0]["result"]["code"] == "image.in_use"
+                assert (
+                    _images(runner_vm) == before
+                    and _backing_identity(image["path"]) == identity
+                )
+                vms = _json_success_data(
+                    _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+                )
+                assert next(i for i in vms if i["id"] == vm["id"])["status"] == (
+                    "stopped" if stopped else "running"
+                )
+
+    @pytest.mark.destructive
+    def test_delete_default_image_promotes_other_or_clears(
+        self, runner_vm, image_workspace
+    ):
+        """Removing an owned default clears selection or preserves its selected replacement."""
+        original = _defaults(runner_vm)
+        assert len(original) <= 1
+        with _imported(
+            runner_vm,
+            _ext4(runner_vm, image_workspace),
+            "--format",
+            "raw",
+            "--skip-optimization",
+        ) as image:
+            try:
+                _run_mvm(runner_vm, "image", "default", image["id"])
+                assert _defaults(runner_vm) == [image["id"]]
+                if original:
+                    _restore_default(runner_vm, original)
+                _remove_image(runner_vm, image)
+                assert _defaults(runner_vm) == original
+            finally:
+                _restore_default(runner_vm, original)

@@ -34,6 +34,7 @@ Examples:
 			timeout, _ := c.Flags().GetInt("timeout")
 			user, _ := c.Flags().GetString("user")
 			noSync, _ := c.Flags().GetBool("no-sync")
+			allowVMExec, _ := c.Flags().GetBool("allow-vm-exec")
 
 			command := ""
 			if len(args) > 1 {
@@ -41,12 +42,13 @@ Examples:
 			}
 
 			input := inputs.ExecInput{
-				Identifier: args[0],
-				Command:    command,
-				Port:       port,
-				Timeout:    timeout,
-				User:       user,
-				NoSync:     noSync,
+				Identifier:  args[0],
+				Command:     command,
+				Port:        port,
+				Timeout:     timeout,
+				User:        user,
+				NoSync:      noSync,
+				AllowVMExec: allowVMExec,
 			}
 			result, err := execAPI.Exec(c.Context(), input)
 			if err != nil {
@@ -65,6 +67,7 @@ Examples:
 	cmd.Flags().IntP("timeout", "t", 0, "Vsock agent connect/probe timeout in seconds")
 	cmd.Flags().StringP("user", "u", "", "User to run the command as (default: root)")
 	cmd.Flags().Bool("no-sync", false, "Skip final sync() after command (faster but risks data loss on VM stop)")
+	cmd.Flags().Bool("allow-vm-exec", false, "Allow this command to request policy-authorized VM-to-VM execution")
 
 	return cmd
 }

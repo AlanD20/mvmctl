@@ -18,13 +18,6 @@ import (
 )
 
 const (
-	// DefaultConsolePIDFilename is the default PID file name for console relays.
-	DefaultConsolePIDFilename = "console.pid"
-	// DefaultConsoleSocketFilename is the default socket file name for console relays.
-	DefaultConsoleSocketFilename = "console.sock"
-	// DefaultConsoleLogFilename is the default log file name for console relays.
-	DefaultConsoleLogFilename = "firecracker.console.log"
-
 	consoleReadBufferSize = 4096 // CONST_CONSOLE_READ_BUFFER_SIZE
 
 	// Wire protocol constants for the console relay control header.
@@ -36,13 +29,10 @@ const (
 
 // Config holds configuration for the console relay subprocess.
 type Config struct {
-	VMID           string
-	VMPath         string
-	VMName         string
-	PtyFD          int
-	PIDFilename    string // optional, defaults to DefaultConsolePIDFilename
-	SocketFilename string // optional, defaults to DefaultConsoleSocketFilename
-	LogFilename    string // optional, defaults to DefaultConsoleLogFilename
+	VMID   string
+	VMPath string
+	VMName string
+	PtyFD  int
 }
 
 // Run starts the console relay with the given config.
@@ -52,22 +42,9 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("missing required arguments for console relay")
 	}
 
-	// Compute paths from VM directory, using provided filenames or defaults.
-	pidName := cfg.PIDFilename
-	if pidName == "" {
-		pidName = DefaultConsolePIDFilename
-	}
-	sockName := cfg.SocketFilename
-	if sockName == "" {
-		sockName = DefaultConsoleSocketFilename
-	}
-	logName := cfg.LogFilename
-	if logName == "" {
-		logName = DefaultConsoleLogFilename
-	}
-	pidPath := filepath.Join(cfg.VMPath, pidName)
-	socketPath := filepath.Join(cfg.VMPath, sockName)
-	logPath := filepath.Join(cfg.VMPath, logName)
+	pidPath := filepath.Join(cfg.VMPath, infra.VMConsolePIDFilename)
+	socketPath := filepath.Join(cfg.VMPath, infra.VMConsoleSocketFilename)
+	logPath := filepath.Join(cfg.VMPath, infra.VMFirecrackerConsoleLogFilename)
 
 	// Open the PTY FD inherited from parent (passed as ExtraFiles[0] = FD 3).
 	ptyFile := os.NewFile(uintptr(cfg.PtyFD), "pty")

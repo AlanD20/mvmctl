@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"strings"
@@ -25,7 +26,7 @@ var setupLoggingOnce sync.Once
 // 1. debug=true  → DEBUG level
 // 2. verbose=true → INFO level
 // 3. MVM_LOG_LEVEL env var → parsed level (default WARNING)
-func SetupLogging(verbose, debug bool) {
+func SetupLogging(ctx context.Context, verbose, debug bool) {
 	setupLoggingOnce.Do(func() {
 		var level slog.Level
 		switch {
@@ -55,7 +56,7 @@ func SetupLogging(verbose, debug bool) {
 
 		// File handler always at DEBUG — captures everything without --debug flags.
 		logPath := infra.GetLogPath()
-		rw, err := rotating.NewRotatingFileWriter(logPath)
+		rw, err := rotating.NewRotatingFileWriter(ctx, logPath)
 		if err == nil {
 			fileH := &textHandler{writer: rw, level: slog.LevelDebug}
 			handlers = append(handlers, fileH)
