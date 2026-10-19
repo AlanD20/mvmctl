@@ -73,6 +73,8 @@ type PortInterval struct {
 
 // VMTrafficGrant permits one root-resolved VM pair.
 type VMTrafficGrant struct {
+	ClaimID         string       `json:"claim_id,omitempty"`
+	Incarnation     string       `json:"incarnation,omitempty"`
 	ID              string       `json:"id"`
 	SourceVMID      string       `json:"source_vm_id"`
 	DestinationVMID string       `json:"destination_vm_id"`
@@ -82,6 +84,8 @@ type VMTrafficGrant struct {
 
 // NetworkTrafficGrant permits a managed network to reach one VM.
 type NetworkTrafficGrant struct {
+	ClaimID         string       `json:"claim_id,omitempty"`
+	Incarnation     string       `json:"incarnation,omitempty"`
 	ID              string       `json:"id"`
 	SourceNetworkID string       `json:"source_network_id"`
 	DestinationVMID string       `json:"destination_vm_id"`
@@ -255,6 +259,9 @@ func (intent Intent) validateDurablePolicies() error {
 	}
 	ids := make(map[string]struct{}, len(intent.VMGrants)+len(intent.NetworkGrants)+len(intent.HostServices))
 	for _, grant := range intent.VMGrants {
+		if !validPolicyOwnership(grant.ClaimID, grant.Incarnation) {
+			return invalidGeneration("invalid durable VM policy ownership")
+		}
 		if err := validateGrantBase(
 			grant.ID,
 			protocol(grant.Protocol),
@@ -271,6 +278,9 @@ func (intent Intent) validateDurablePolicies() error {
 		}
 	}
 	for _, grant := range intent.NetworkGrants {
+		if !validPolicyOwnership(grant.ClaimID, grant.Incarnation) {
+			return invalidGeneration("invalid durable network policy ownership")
+		}
 		if err := validateGrantBase(
 			grant.ID,
 			protocol(grant.Protocol),

@@ -11,6 +11,28 @@ import (
 // Service manages directional execution-policy intent.
 type Service struct{ repo Repository }
 
+// EnsureOwned atomically creates or observes a policy without adopting another claim.
+func (s *Service) EnsureOwned(
+	ctx context.Context,
+	intent *model.VMToVMExecAllowIntent,
+	expected string,
+) (*model.VMToVMExecAllowIntent, error) {
+	result, err := s.repo.EnsureOwned(ctx, intent, expected)
+	if err != nil {
+		slog.Error("failed to ensure owned execution policy", "policy", intent.ID, "error", err)
+	}
+	return result, err
+}
+
+// RemoveOwned revokes only the exact workflow claim and optional recorded incarnation.
+func (s *Service) RemoveOwned(ctx context.Context, policyID, claim, incarnation string) error {
+	err := s.repo.DeleteOwned(ctx, policyID, claim, incarnation)
+	if err != nil {
+		slog.Error("failed to remove owned execution policy", "policy", policyID, "error", err)
+	}
+	return err
+}
+
 // NewService creates an execution-policy service.
 func NewService(repo Repository) *Service { return &Service{repo: repo} }
 

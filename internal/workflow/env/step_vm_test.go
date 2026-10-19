@@ -143,6 +143,7 @@ func TestVMStep_Apply(t *testing.T) {
 			ctx:       context.Background,
 			wantVMID:  "c741bfe2-a10b-4ae9-bb65-20eec5d3554d",
 			wantVMDir: "/mnt/vms/c741bfe2-a10b-4ae9-bb65-20eec5d3554d/rootfs.ext4",
+			wantErr:   "resource already exists",
 		},
 		"already_exists_preserves_was_created_from_saved": {
 			setupOp: func(_ *testing.T) api.API {
@@ -158,7 +159,8 @@ func TestVMStep_Apply(t *testing.T) {
 			},
 			ctx: context.Background,
 			saved: model.ResourceState{
-				Meta: model.ResourceMeta{WasCreated: true},
+				Output: model.ResourceMap{"vm_id": "f46adf65-06a1-45cb-a7af-df72a1557c55"},
+				Meta:   model.ResourceMeta{WasCreated: true},
 			},
 			wantVMID:       "f46adf65-06a1-45cb-a7af-df72a1557c55",
 			wantVMDir:      "/mnt/vms/f46adf65-06a1-45cb-a7af-df72a1557c55/rootfs.ext4",
@@ -174,6 +176,9 @@ func TestVMStep_Apply(t *testing.T) {
 			state := workflow.NewSharedState()
 			writer, writes := recordingWriter()
 
+			if tc.saved.Output != nil {
+				tc.saved.Meta.SpecHash = step.SpecHash()
+			}
 			err := step.Apply(tc.ctx(), state, tc.saved, writer, noopProgress)
 
 			if tc.wantErr != "" {
@@ -228,7 +233,10 @@ func TestVMStep_Apply_WriteFailure(t *testing.T) {
 	err := step.Apply(
 		context.Background(),
 		workflow.NewSharedState(),
-		model.ResourceState{},
+		model.ResourceState{
+			Output: model.ResourceMap{"vm_id": "55fb5dd1-9c32-46de-80b2-40aac30c7f31"},
+			Meta:   model.ResourceMeta{SpecHash: step.SpecHash()},
+		},
 		failingWriter(writeErr),
 		noopProgress,
 	)
@@ -257,7 +265,16 @@ func TestVMStep_Apply_ProgressEvents(t *testing.T) {
 
 	progress, events := newVMProgressRecorder()
 	writer, _ := recordingWriter()
-	err := step.Apply(context.Background(), workflow.NewSharedState(), model.ResourceState{}, writer, progress)
+	err := step.Apply(
+		context.Background(),
+		workflow.NewSharedState(),
+		model.ResourceState{
+			Output: model.ResourceMap{"vm_id": "55fb5dd1-9c32-46de-80b2-40aac30c7f31"},
+			Meta:   model.ResourceMeta{SpecHash: step.SpecHash()},
+		},
+		writer,
+		progress,
+	)
 	require.NoError(t, err)
 
 	require.Len(t, *events, 2, "expected two progress events (checking + skipping)")
@@ -354,8 +371,7 @@ func TestVMStep_Destroy_WriteFailure(t *testing.T) {
 	)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "persist step state after destroy",
-		"Destroy must wrap write errors with context")
+	assert.ErrorIs(t, err, writeErr)
 	return
 }
 
@@ -574,11 +590,11 @@ func TestVMStep_Apply_DependencyResolution(t *testing.T) {
 
 	spec := map[string]any{
 		"name":    "test-vm",
-		"network": "my-net",
-		"key":     "my-key",
-		"image":   "alpine",
-		"kernel":  "fc-kernel",
-		"binary":  "firecracker",
+		"network": "@network:my-net",
+		"key":     "@key:my-key",
+		"image":   "@image:alpine",
+		"kernel":  "@kernel:fc-kernel",
+		"binary":  "@binary:firecracker",
 	}
 	step, err := envpkg.Registry["vm"].FromSpec("vm", "test-vm", spec, op)
 	require.NoError(t, err)
@@ -615,7 +631,7 @@ func TestVMStep_Apply_DependencyResolution(t *testing.T) {
 		t.Errorf("VMCreate references mismatch (-want +got):\n%s", diff)
 	}
 	assert.Equal(t, "test-vm", createdInput.Name)
-	if diff := cmp.Diff([]string{"my-key"}, createdInput.SSHKeys); diff != "" {
+	if diff := cmp.Diff([]string{"key-resolved-456"}, createdInput.SSHKeys); diff != "" {
 		t.Errorf("VMCreate SSH keys mismatch (-want +got):\n%s", diff)
 	}
 

@@ -1304,12 +1304,14 @@ func TestHandleConnection_ExecTTYDispatch(t *testing.T) {
 // first call. Must handle empty/corrupt embedded data gracefully (return nil,
 // no panic) and correctly decompress valid gzip content.
 
-func TestAgentBinary_EmptyEmbed(t *testing.T) {
-	// The placeholder file (agent-linux-{arch}.gz) is an empty file created
-	// by scripts/build.sh before the agent is built. gzip.NewReader on empty
-	// data fails, so AgentBinary() must return nil without panicking.
+func TestAgentBinary_EmbeddedArtifact(t *testing.T) {
 	got := AgentBinary()
-	assert.Empty(t, got, "AgentBinary() must return nil for empty/invalid embed")
+	if len(agentBinaryZST) == 0 {
+		assert.Empty(t, got, "generation-only placeholder has no executable")
+		return
+	}
+	require.GreaterOrEqual(t, len(got), 4)
+	assert.Equal(t, []byte{0x7f, 'E', 'L', 'F'}, got[:4], "built embed must decode to an executable")
 }
 
 func TestAgentBinary_DecompressLogic(t *testing.T) {

@@ -10,6 +10,12 @@ import (
 
 // Repository persists exact directional execution allow intent.
 type Repository interface {
+	EnsureOwned(
+		ctx context.Context,
+		intent *model.VMToVMExecAllowIntent,
+		expected string,
+	) (*model.VMToVMExecAllowIntent, error)
+	DeleteOwned(ctx context.Context, policyID, claim, incarnation string) error
 	Create(ctx context.Context, intent *model.VMToVMExecAllowIntent) error
 	Get(ctx context.Context, intentID string) (*model.VMToVMExecAllowIntent, error)
 	GetByIdentity(ctx context.Context, intent *model.VMToVMExecAllowIntent) (*model.VMToVMExecAllowIntent, error)

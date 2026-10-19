@@ -56,7 +56,20 @@ func (s *CopyStep) Apply(
 	// vsock reachability is guaranteed by the DAG (VM start step runs first).
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "copying files"})
 	stepProgress := func(e event.Progress) { e.Phase = s.Name(); onProgress(e) }
-	if _, err := s.op.CPCopy(ctx, s.input, event.FormatProgress(stepProgress)); err != nil {
+	input := s.input
+	input.Sources = append([]string(nil), s.input.Sources...)
+	var err error
+	for i, path := range input.Sources {
+		input.Sources[i], err = resolveCopyReference(state, path)
+		if err != nil {
+			return err
+		}
+	}
+	input.Dest, err = resolveCopyReference(state, input.Dest)
+	if err != nil {
+		return err
+	}
+	if _, err := s.op.CPCopy(ctx, input, event.FormatProgress(stepProgress)); err != nil {
 		return err
 	}
 

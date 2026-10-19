@@ -2,12 +2,14 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
@@ -15,7 +17,6 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/pkg/api"
-	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
 )
 
@@ -38,7 +39,10 @@ func Apply(
 	specPath string,
 	onProgress event.OnProgressCallback,
 	extraEnv map[string]string,
-) error {
+) (applyErr error) {
+	if onProgress == nil {
+		onProgress = func(event.Progress) {}
+	}
 	// Resolve YAML spec into steps.
 	spec, steps, err := ResolveSpec(ctx, specPath, op)
 	if err != nil {
@@ -81,6 +85,9 @@ func Apply(
 	// Read existing workflow state for re-apply detection.
 	var prevResources []model.AppliedResource
 	prevState, rErr := workflow.ReadWorkflowState(stateDir)
+	if rErr != nil && !os.IsNotExist(rErr) {
+		return fmt.Errorf("read previous workflow state: %w", rErr)
+	}
 	if rErr == nil && prevState != nil {
 		prevResources = prevState.Resources
 	}
@@ -89,9 +96,12 @@ func Apply(
 	// Each step writes its own state immediately after a successful API call.
 	var (
 		mu        sync.Mutex
-		resources []model.AppliedResource
+		resources = append([]model.AppliedResource(nil), prevResources...)
 		createdAt string
 	)
+	if prevState != nil {
+		createdAt = prevState.CreatedAt
+	}
 
 	onStepComplete := func(ctx context.Context, step workflow.Step, stateData model.ResourceState) error {
 		mu.Lock()
@@ -99,7 +109,13 @@ func Apply(
 		if createdAt == "" {
 			createdAt = infra.Now()
 		}
-		resources = append(resources, model.AppliedResource{
+		filtered := resources[:0]
+		for _, res := range resources {
+			if res.Name != step.Name() {
+				filtered = append(filtered, res)
+			}
+		}
+		resources = append(filtered, model.AppliedResource{
 			Name:         step.Name(),
 			Type:         step.Type(),
 			Dependencies: step.Dependencies(),
@@ -120,20 +136,56 @@ func Apply(
 		return nil
 	}
 
-	err = pipeline.Execute(ctx, state, onProgress, prevResources, workflow.WithOnStepComplete(onStepComplete))
-
-	// Ephemeral: destroy everything and remove state.
-	// Runs regardless of success/failure — ensures cleanup on partial failure.
+	// Reject resource declaration changes before any step can produce effects.
+	previous := make(map[string]model.ResourceState, len(prevResources))
+	for _, r := range prevResources {
+		if _, ok := previous[r.Name]; ok {
+			return fmt.Errorf("duplicate saved resource %q", r.Name)
+		}
+		if _, ok := Registry[r.Type]; !ok || InferStepType(r.Name) != r.Type {
+			return fmt.Errorf("invalid saved resource type for %q", r.Name)
+		}
+		if r.State.Output == nil {
+			return fmt.Errorf("saved resource %q has no output; preserve state and recover its identity", r.Name)
+		}
+		previous[r.Name] = r.State
+	}
+	for _, step := range steps {
+		switch step.Type() {
+		case "exec", "ssh", "copy", "ready":
+			continue
+		}
+		if saved, ok := previous[step.Name()]; ok && saved.Meta.SpecHash != step.SpecHash() {
+			return fmt.Errorf(
+				"%s: declaration changed; destroy the saved environment before changing resource declarations",
+				step.Name(),
+			)
+		}
+	}
 	if spec.Ephemeral {
 		defer func() {
-			slog.Info("ephemeral spec — destroying resources", "spec", specPath)
-			if dErr := Destroy(ctx, op, specPath, onProgress); dErr != nil {
-				slog.Warn("ephemeral destroy failed", "spec", specPath, "error", dErr)
-			} else {
-				slog.Info("ephemeral spec destroyed", "spec", specPath)
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if len(resources) == 0 {
+				return
 			}
+			// Retry the latest in-memory ownership inventory before cleanup after a failed write.
+			wfState := &model.WorkflowState{
+				WorkflowID:    wfID,
+				SpecPath:      specPath,
+				SchemaVersion: envStateSchemaVersion,
+				CreatedAt:     createdAt,
+				UpdatedAt:     infra.Now(),
+				Resources:     resources,
+			}
+			if persistErr := workflow.WriteWorkflowState(stateDir, wfState); persistErr != nil {
+				applyErr = errors.Join(applyErr, fmt.Errorf("persist ephemeral cleanup inventory: %w", persistErr))
+				return
+			}
+			applyErr = errors.Join(applyErr, Destroy(cleanupCtx, op, specPath, onProgress))
 		}()
 	}
+	err = pipeline.Execute(ctx, state, onProgress, prevResources, workflow.WithOnStepComplete(onStepComplete))
 
 	if err != nil {
 		return errs.WrapMsg(
@@ -143,114 +195,79 @@ func Apply(
 		)
 	}
 
-	// Handle step removals — destroy resources listed in removes.
-	// After each successful removal, update the workflow state so
-	// a subsequent Destroy doesn't try to tear down already-removed resources.
+	// Removals use saved ownership and exact identity, never a display name.
+	targets := map[string]bool{}
 	for _, step := range steps {
 		for _, target := range step.Removes() {
-			stepType := InferStepType(target)
-			name := BareStepName(target, stepType)
-			var removeErr error
-			switch stepType {
-			case "vm":
-				result := op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{name}})
-				if result.HasErrors() {
-					for _, r := range result.Errors() {
-						if r.ToError() != nil {
-							removeErr = r.ToError()
-						}
-					}
-				}
-			case "image", "image_import":
-				result := op.ImageRemove(
-					ctx,
-					inputs.ImageInput{Identifiers: []string{name}, IncludeDeleted: true},
-					true,
-				)
-				if result.HasErrors() {
-					for _, r := range result.Errors() {
-						if r.ToError() != nil {
-							removeErr = r.ToError()
-						}
-					}
-				}
-			case "network":
-				removeErr = op.NetworkRemove(
-					ctx,
-					inputs.NetworkInput{Identifiers: []string{name}, Force: true, IncludeDeleted: true},
-					true,
-				)
-			case "volume":
-				result := op.VolumeRemove(ctx, inputs.VolumeInput{Identifiers: []string{name}}, true)
-				if result.HasErrors() {
-					for _, r := range result.Errors() {
-						if r.ToError() != nil {
-							removeErr = r.ToError()
-						}
-					}
-				}
-			case "key":
-				result := op.KeyRemove(ctx, inputs.KeyInput{Identifiers: []string{name}}, true)
-				if result.HasErrors() {
-					for _, r := range result.Errors() {
-						if r.ToError() != nil {
-							removeErr = r.ToError()
-						}
-					}
-				}
-			case "kernel":
-				result := op.KernelRemove(ctx, inputs.KernelInput{Identifiers: []string{name}, IncludeDeleted: true})
-				if result.HasErrors() {
-					for _, r := range result.Errors() {
-						if r.ToError() != nil {
-							removeErr = r.ToError()
-						}
-					}
-				}
-			case "snapshot":
-				result := op.SnapshotRemove(ctx, inputs.SnapshotInput{Identifiers: []string{name}})
-				if result.HasErrors() {
-					for _, r := range result.Errors() {
-						if r.ToError() != nil {
-							removeErr = r.ToError()
-						}
-					}
-				}
-			default:
-				slog.Warn("unsupported resource type for removal in env workflow", "type", stepType, "target", target)
+			targets[target] = true
+		}
+	}
+	if len(targets) > 0 {
+		var removalSteps []workflow.Step
+		names := map[string]bool{}
+		for _, res := range resources {
+			if !targets[res.Name] {
 				continue
 			}
-			if removeErr != nil {
-				slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", removeErr)
-			} else {
-				slog.Info("resource removed after step", "step", step.Name(), "target", target)
-				// Update workflow state to reflect the removal.
-				mu.Lock()
-				filtered := make([]model.AppliedResource, 0, len(resources))
-				for _, r := range resources {
-					if r.Name != target {
-						filtered = append(filtered, r)
-					}
-				}
-				resources = filtered
-				wfState := &model.WorkflowState{
-					WorkflowID:    wfID,
-					SpecPath:      specPath,
-					SchemaVersion: envStateSchemaVersion,
-					CreatedAt:     createdAt,
-					UpdatedAt:     infra.Now(),
-					Resources:     resources,
-				}
-				if pErr := workflow.WriteWorkflowState(stateDir, wfState); pErr != nil {
-					slog.Debug(
-						"failed to persist workflow state after removal",
-						"wf_id", wfID,
-						"target", target,
-						"error", pErr,
-					)
-				}
-				mu.Unlock()
+			factory, ok := Registry[res.Type]
+			if !ok {
+				return fmt.Errorf("unknown removal type %q", res.Type)
 			}
+			step, err := factory.FromState(res.Type, BareStepName(res.Name, res.Type), res.State, res.Dependencies, op)
+			if err != nil {
+				return err
+			}
+			if res.Type == "image" || res.Type == "image_import" {
+				step = &assetRemovalStep{Step: step, op: op}
+			}
+			removalSteps = append(removalSteps, step)
+			names[res.Name] = true
+		}
+		for _, res := range resources {
+			if targets[res.Name] {
+				continue
+			}
+			for _, dep := range res.Dependencies {
+				if targets[dep] && res.Type != "exec" && res.Type != "ssh" && res.Type != "copy" &&
+					res.Type != "ready" {
+					return fmt.Errorf("cannot remove %s while dependent %s remains", dep, res.Name)
+				}
+			}
+		}
+		cleanup, err := workflow.NewDestroyPipeline(removalSteps, names)
+		if err != nil {
+			return err
+		}
+		removeState := func(ctx context.Context, step workflow.Step, data model.ResourceState) error {
+			mu.Lock()
+			defer mu.Unlock()
+			filtered := make([]model.AppliedResource, 0, len(resources))
+			for _, res := range resources {
+				if res.Name != step.Name() {
+					filtered = append(filtered, res)
+				}
+			}
+			wfState := &model.WorkflowState{
+				WorkflowID:    wfID,
+				SpecPath:      specPath,
+				SchemaVersion: envStateSchemaVersion,
+				CreatedAt:     createdAt,
+				UpdatedAt:     infra.Now(),
+				Resources:     filtered,
+			}
+			if err := workflow.WriteWorkflowState(stateDir, wfState); err != nil {
+				return err
+			}
+			resources = filtered
+			return nil
+		}
+		if err := cleanup.Destroy(
+			ctx,
+			resources,
+			onProgress,
+			workflow.WithDestroyOnStepComplete(removeState),
+		); err != nil {
+			return err
 		}
 	}
 
@@ -268,6 +285,9 @@ func Destroy(
 	specOrID string,
 	onProgress event.OnProgressCallback,
 ) error {
+	if onProgress == nil {
+		onProgress = func(event.Progress) {}
+	}
 	// Determine the workflow ID and state directory.
 	wfID := ResolveWorkflowID(specOrID)
 	stateDir := infra.GetWorkflowsStateDirByID(wfID)
@@ -292,10 +312,15 @@ func Destroy(
 	var steps []workflow.Step
 	stepNames := make(map[string]bool)
 	for _, res := range wfState.Resources {
+		if stepNames[res.Name] || InferStepType(res.Name) != res.Type {
+			return fmt.Errorf("invalid or duplicate saved step %q", res.Name)
+		}
 		factory, ok := Registry[res.Type]
 		if !ok {
-			slog.Debug("unknown step type in saved state, skipping", "type", res.Type, "name", res.Name)
-			continue
+			return fmt.Errorf(
+				"unknown saved step type %q; preserve state and recover its implementation before cleanup",
+				res.Type,
+			)
 		}
 		// Extract the bare name from the full step name (format: "type:name").
 		bareName := BareStepName(res.Name, res.Type)
@@ -388,8 +413,11 @@ func Destroy(
 	}
 
 	// Remove the workflow state after all destroys succeed.
+	if len(resources) > 0 {
+		return nil
+	}
 	if err := workflow.RemoveWorkflowState(wfID); err != nil {
-		slog.Debug("failed to remove workflow state", "wf_id", wfID, "error", err)
+		return fmt.Errorf("remove workflow state: %w", err)
 	}
 
 	return nil

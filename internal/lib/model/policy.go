@@ -25,6 +25,8 @@ const (
 // The port is reached through the VM's managed guest address. This intent cannot make a service bound only to guest
 // loopback reachable, grant host command execution, or describe a compiled firewall rule.
 type NetworkToVMTrafficAllowIntent struct {
+	ClaimID              string          `json:"claim_id,omitempty" db:"claim_id"`
+	Incarnation          string          `json:"incarnation,omitempty" db:"incarnation"`
 	ID                   string          `json:"id"                     db:"id"`
 	SourceNetworkID      string          `json:"source_network_id"      db:"source_network_id"`
 	DestinationVMID      string          `json:"destination_vm_id"      db:"destination_vm_id"`
@@ -39,6 +41,8 @@ type NetworkToVMTrafficAllowIntent struct {
 // The port is reached through the destination VM's managed guest address. This intent applies to the IP data plane
 // only; same-network placement grants nothing without an exact allow intent.
 type VMToVMTrafficAllowIntent struct {
+	ClaimID              string          `json:"claim_id,omitempty" db:"claim_id"`
+	Incarnation          string          `json:"incarnation,omitempty" db:"incarnation"`
 	ID                   string          `json:"id"                     db:"id"`
 	SourceVMID           string          `json:"source_vm_id"           db:"source_vm_id"`
 	DestinationVMID      string          `json:"destination_vm_id"      db:"destination_vm_id"`
@@ -52,6 +56,8 @@ type VMToVMTrafficAllowIntent struct {
 // VMToVMExecAllowIntent grants one exact source VM access to one exact destination VM user through the vsock relay.
 // It is directional, independent of managed-network placement, and never grants IP traffic or VM-to-host execution.
 type VMToVMExecAllowIntent struct {
+	ClaimID         string `json:"claim_id,omitempty" db:"claim_id"`
+	Incarnation     string `json:"incarnation,omitempty" db:"incarnation"`
 	ID              string `json:"id"                db:"id"`
 	SourceVMID      string `json:"source_vm_id"      db:"source_vm_id"`
 	DestinationVMID string `json:"destination_vm_id" db:"destination_vm_id"`

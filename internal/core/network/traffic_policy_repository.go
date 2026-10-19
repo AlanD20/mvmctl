@@ -9,6 +9,10 @@ import (
 // TrafficPolicyRepository persists the two closed traffic allow-intent forms.
 // InvalidateByVM spans both tables so callers cannot observe partial invalidation.
 type TrafficPolicyRepository interface {
+	ProjectNetworkToVM(ctx context.Context, intent *model.NetworkToVMTrafficAllowIntent) error
+	ProjectVMToVM(ctx context.Context, intent *model.VMToVMTrafficAllowIntent) error
+	DeleteOwnedNetworkToVM(ctx context.Context, policyID, claim, incarnation string) error
+	DeleteOwnedVMToVM(ctx context.Context, policyID, claim, incarnation string) error
 	CreateNetworkToVM(ctx context.Context, intent *model.NetworkToVMTrafficAllowIntent) error
 	GetNetworkToVM(ctx context.Context, intentID string) (*model.NetworkToVMTrafficAllowIntent, error)
 	GetNetworkByIdentity(

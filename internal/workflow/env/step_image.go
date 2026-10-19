@@ -56,17 +56,39 @@ func (s *ImageStep) Apply(
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
 
+	lookup := s.input.Type
+	prior := StateFromMap[ImageState](saved.Output)
+	if saved.Output != nil {
+		if prior == nil || prior.ImageID == "" {
+			return fmt.Errorf("%s: saved resource identity is invalid", s.Name())
+		}
+		if saved.Meta.SpecHash != s.specHash {
+			return fmt.Errorf(
+				"%s: declaration changed; destroy the saved resource before changing its declaration",
+				s.Name(),
+			)
+		}
+		lookup = prior.ImageID
+	} else if selected := s.inputSpec.GetString("existing"); selected != "" {
+		lookup = selected
+	}
 	// Recover WasCreated from saved meta.
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.ImageGet(ctx, inputs.ImageInput{Identifiers: []string{s.input.Type}})
+	existing, err := s.op.ImageGet(ctx, inputs.ImageInput{Identifiers: []string{lookup}})
 	if err != nil && !errs.IsNotFound(err) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
 			fmt.Sprintf("check image type %q: %v", s.input.Type, err),
 			err,
 		)
+	}
+	if prior != nil && (existing == nil || existing.ID != prior.ImageID) {
+		return fmt.Errorf("%s: saved resource %s is missing; refusing replacement", s.Name(), prior.ImageID)
+	}
+	if s.inputSpec.GetString("existing") != "" && existing == nil {
+		return fmt.Errorf("%s: selected existing resource was not found", s.Name())
 	}
 	if existing != nil {
 		onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "already exists, skipping"})
@@ -87,23 +109,27 @@ func (s *ImageStep) Apply(
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "pulling image"})
 	// Wrap onProgress to inject step name into API-level progress events.
 	stepProgress := func(e event.Progress) { e.Phase = s.Name(); onProgress(e) }
-	img, err := s.op.ImagePull(ctx, s.input, stepProgress)
-	if err != nil {
-		return err
+	result, err := s.op.ImagePullWithResult(ctx, s.input, stepProgress)
+	if result == nil || result.Image == nil || result.Image.ID == "" {
+		if err != nil {
+			return err
+		}
+		return errs.New(errs.CodeInternal, "image pull returned no identity")
 	}
 
 	s.saved = &ImageState{
-		ImageID: img.ID,
+		ImageID: result.Image.ID,
 	}
 	s.meta = model.ResourceMeta{
-		WasCreated: true,
+		WasCreated: result.Created,
 		SpecHash:   s.specHash,
 	}
 	state.Set(s.Name(), s.saved)
-	if err := write(ctx, s.StateData()); err != nil {
-		return fmt.Errorf("persist step state: %w", err)
+	// Preserve committed ownership even when a later acquisition effect failed.
+	if writeErr := write(context.WithoutCancel(ctx), s.StateData()); writeErr != nil {
+		return errors.Join(err, fmt.Errorf("persist step state: %w", writeErr))
 	}
-	return nil
+	return err
 }
 
 func (s *ImageStep) Destroy(

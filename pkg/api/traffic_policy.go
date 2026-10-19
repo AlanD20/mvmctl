@@ -39,20 +39,12 @@ func (op *Operation) NetworkToVMTrafficPolicyCreate(
 	}
 	intent.ID = crypto.NetworkToVMTrafficPolicyDigest(*intent)
 	request := networkTrafficPolicyRequest(intent)
-	if _, err := op.trafficPolicyClient.ApplyNetworkTrafficPolicy(ctx, request); err != nil {
+	root, err := op.trafficPolicyClient.ApplyNetworkTrafficPolicy(ctx, request)
+	if err != nil {
 		return nil, err
 	}
-	existing, err := op.Repos.TrafficPolicy.GetNetworkToVM(ctx, intent.ID)
-	if err != nil {
-		return nil, trafficPolicyProjectionError(intent.ID, false, err)
-	}
-	if existing != nil {
-		if crypto.NetworkToVMTrafficPolicyDigest(*existing) != intent.ID {
-			return nil, trafficPolicyProjectionError(intent.ID, false,
-				errs.New(errs.CodePolicyCreateFailed, "local traffic policy identity conflicts with root intent"))
-		}
-		intent = existing
-	} else if err := op.Services.TrafficPolicy.CreateNetworkToVM(ctx, intent); err != nil {
+	intent.ClaimID, intent.Incarnation = root.ClaimID, root.Incarnation
+	if err := op.Repos.TrafficPolicy.ProjectNetworkToVM(ctx, intent); err != nil {
 		return nil, trafficPolicyProjectionError(intent.ID, false, err)
 	}
 	op.AuditLog.LogOperation("policy.traffic.network.create", map[string]any{"id": intent.ID}, "")
@@ -86,20 +78,12 @@ func (op *Operation) VMToVMTrafficPolicyCreate(
 	}
 	intent.ID = crypto.VMToVMTrafficPolicyDigest(*intent)
 	request := vmTrafficPolicyRequest(intent)
-	if _, err := op.trafficPolicyClient.ApplyVMTrafficPolicy(ctx, request); err != nil {
+	root, err := op.trafficPolicyClient.ApplyVMTrafficPolicy(ctx, request)
+	if err != nil {
 		return nil, err
 	}
-	existing, err := op.Repos.TrafficPolicy.GetVMToVM(ctx, intent.ID)
-	if err != nil {
-		return nil, trafficPolicyProjectionError(intent.ID, false, err)
-	}
-	if existing != nil {
-		if crypto.VMToVMTrafficPolicyDigest(*existing) != intent.ID {
-			return nil, trafficPolicyProjectionError(intent.ID, false,
-				errs.New(errs.CodePolicyCreateFailed, "local traffic policy identity conflicts with root intent"))
-		}
-		intent = existing
-	} else if err := op.Services.TrafficPolicy.CreateVMToVM(ctx, intent); err != nil {
+	intent.ClaimID, intent.Incarnation = root.ClaimID, root.Incarnation
+	if err := op.Repos.TrafficPolicy.ProjectVMToVM(ctx, intent); err != nil {
 		return nil, trafficPolicyProjectionError(intent.ID, false, err)
 	}
 	op.AuditLog.LogOperation("policy.traffic.vm.create", map[string]any{"id": intent.ID}, "")

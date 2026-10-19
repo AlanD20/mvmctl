@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -96,6 +97,9 @@ func (p *Pipeline) Execute(
 	savedResources []model.AppliedResource,
 	opts ...ExecuteOption,
 ) error {
+	if onProgress == nil {
+		onProgress = func(event.Progress) {}
+	}
 	if len(p.levels) == 0 {
 		return nil
 	}
@@ -132,7 +136,7 @@ func (p *Pipeline) Execute(
 			go func(s Step) {
 				defer wg.Done()
 
-				var write StateWriter
+				write := StateWriter(func(context.Context, model.ResourceState) error { return nil })
 				if cfg.onStepComplete != nil {
 					write = func(ctx context.Context, data model.ResourceState) error {
 						return cfg.onStepComplete(ctx, s, data)
@@ -143,9 +147,7 @@ func (p *Pipeline) Execute(
 				if err := s.Apply(ctx, state, savedByStep[s.Name()], write, onProgress); err != nil {
 					emitProgress(onProgress, s.Name(), "failed", err.Error())
 					mu.Lock()
-					if firstErr == nil {
-						firstErr = fmt.Errorf("step %q: %w", s.Name(), err)
-					}
+					firstErr = errors.Join(firstErr, fmt.Errorf("step %q: %w", s.Name(), err))
 					mu.Unlock()
 					return
 				}
@@ -201,6 +203,9 @@ func (p *Pipeline) Destroy(
 	onProgress event.OnProgressCallback,
 	opts ...DestroyOption,
 ) error {
+	if onProgress == nil {
+		onProgress = func(event.Progress) {}
+	}
 	if len(p.levels) == 0 {
 		return nil
 	}
@@ -243,7 +248,7 @@ func (p *Pipeline) Destroy(
 			go func(s Step) {
 				defer wg.Done()
 
-				var write StateWriter
+				write := StateWriter(func(context.Context, model.ResourceState) error { return nil })
 				if cfg.onStepComplete != nil {
 					write = func(ctx context.Context, data model.ResourceState) error {
 						return cfg.onStepComplete(ctx, s, data)
@@ -255,9 +260,7 @@ func (p *Pipeline) Destroy(
 				if err := s.Destroy(ctx, saved.State, write, onProgress); err != nil {
 					emitProgress(onProgress, s.Name(), "failed", err.Error())
 					mu.Lock()
-					if firstErr == nil {
-						firstErr = fmt.Errorf("destroy step %q: %w", s.Name(), err)
-					}
+					firstErr = errors.Join(firstErr, fmt.Errorf("destroy step %q: %w", s.Name(), err))
 					mu.Unlock()
 					return
 				}
@@ -268,6 +271,8 @@ func (p *Pipeline) Destroy(
 		wg.Wait()
 		if firstErr != nil {
 			slog.Warn("destroy step failed in concurrent level", "level", levelIdx, "error", firstErr)
+			// Keep dependencies alive when a dependent's cleanup outcome is uncertain.
+			return firstErr
 		}
 	}
 

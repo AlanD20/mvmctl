@@ -65,55 +65,57 @@ func (s *VMStep) Apply(
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
 
-	// Resolve step-name references to actual resource IDs from the
-	// SharedState. When the YAML spec references `kernel: default-kernel`,
-	// that's a step name (kernel:default-kernel), not a kernel ID. Look it
-	// up in the SharedState to get the actual kernel_id, then pass that
-	// to VMCreate so the API resolver can find it.
-	resolveStepRef := func(stepType, stepName string) *string {
-		if stepName == "" {
-			return nil
-		}
-		raw, ok := state.Get(stepType + ":" + stepName)
-		if !ok {
-			return &stepName // not a step reference, pass through
-		}
-		switch st := raw.(type) {
-		case *NetworkState:
-			return &st.NetworkID
-		case *KernelState:
-			return &st.KernelID
-		case *ImageState:
-			return &st.ImageID
-		case *BinaryState:
-			return &st.BinaryID
-		default:
-			return &stepName // unknown state type, pass through
+	if s.input.Count != nil && *s.input.Count != 1 {
+		return fmt.Errorf("VM count must be 1")
+	}
+	input := s.input
+	for _, field := range []**string{&input.KernelID, &input.BinaryID, &input.ImageID, &input.NetworkID} {
+		if *field != nil {
+			id, err := resolveResourceReference(state, **field)
+			if err != nil {
+				return err
+			}
+			*field = &id
 		}
 	}
-	if s.input.KernelID != nil {
-		resolved := resolveStepRef("kernel", *s.input.KernelID)
-		s.input.KernelID = resolved
+	input.SSHKeys = append([]string(nil), s.input.SSHKeys...)
+	input.Volumes = append([]string(nil), s.input.Volumes...)
+	for i, ref := range input.SSHKeys {
+		id, err := resolveResourceReference(state, ref)
+		if err != nil {
+			return err
+		}
+		input.SSHKeys[i] = id
 	}
-	if s.input.BinaryID != nil {
-		resolved := resolveStepRef("binary", *s.input.BinaryID)
-		s.input.BinaryID = resolved
+	for i, ref := range input.Volumes {
+		id, err := resolveResourceReference(state, ref)
+		if err != nil {
+			return err
+		}
+		input.Volumes[i] = id
 	}
-	if s.input.ImageID != nil {
-		resolved := resolveStepRef("image", *s.input.ImageID)
-		s.input.ImageID = resolved
+	lookup := s.input.Name
+	prior := StateFromMap[VMState](saved.Output)
+	if saved.Output != nil {
+		if prior == nil || prior.VMID == "" {
+			return fmt.Errorf("%s: saved resource identity is invalid", s.Name())
+		}
+		if saved.Meta.SpecHash != s.specHash {
+			return fmt.Errorf(
+				"%s: declaration changed; destroy the saved resource before changing its declaration",
+				s.Name(),
+			)
+		}
+		lookup = prior.VMID
+	} else if selected := s.inputSpec.GetString("existing"); selected != "" {
+		lookup = selected
 	}
-	if s.input.NetworkID != nil {
-		resolved := resolveStepRef("network", *s.input.NetworkID)
-		s.input.NetworkID = resolved
-	}
-
 	// Check if VM already exists — skip creation if so.
 	// Preserve WasCreated from previous state if this is a re-apply.
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.VMGet(ctx, inputs.VMInput{Identifiers: []string{s.name}})
+	existing, err := s.op.VMGet(ctx, inputs.VMInput{Identifiers: []string{lookup}})
 	if err != nil && !errs.IsNotFound(err) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
@@ -121,7 +123,16 @@ func (s *VMStep) Apply(
 			err,
 		)
 	}
+	if prior != nil && (existing == nil || existing.ID != prior.VMID) {
+		return fmt.Errorf("%s: saved resource %s is missing; refusing replacement", s.Name(), prior.VMID)
+	}
+	if s.inputSpec.GetString("existing") != "" && existing == nil {
+		return fmt.Errorf("%s: selected existing resource was not found", s.Name())
+	}
 	if existing != nil {
+		if prior == nil && s.inputSpec.GetString("existing") == "" {
+			return fmt.Errorf("%s: resource already exists; select it explicitly with existing", s.Name())
+		}
 		onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "already exists, skipping"})
 		s.saved = &VMState{
 			VMID:  existing.ID,
@@ -141,7 +152,7 @@ func (s *VMStep) Apply(
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "creating vm"})
 	// Wrap onProgress to inject step name into API-level progress events.
 	stepProgress := func(e event.Progress) { e.Phase = s.Name(); onProgress(e) }
-	vms, err := s.op.VMCreate(ctx, s.input, stepProgress)
+	vms, err := s.op.VMCreate(ctx, input, stepProgress)
 	if err != nil {
 		return err
 	}
@@ -190,14 +201,13 @@ func (s *VMStep) Destroy(
 		s.meta = saved.Meta
 	}
 
-	// Determine the VM identifier to remove. Prefer the saved VMID from
-	// our own state, but if that's empty, try the step name as a fallback.
-	vmID := ""
-	if s.saved != nil && s.saved.VMID != "" {
-		vmID = s.saved.VMID
-	} else {
-		vmID = s.name
+	if !s.meta.WasCreated {
+		return write(ctx, s.StateData())
 	}
+	if s.saved == nil || s.saved.VMID == "" {
+		return fmt.Errorf("%s: owned VM identity is missing; refusing name-based cleanup", s.Name())
+	}
+	vmID := s.saved.VMID
 
 	// Check if the VM actually exists before trying to remove it.
 	existing, err := s.op.VMGet(ctx, inputs.VMInput{Identifiers: []string{vmID}})
@@ -214,6 +224,9 @@ func (s *VMStep) Destroy(
 			return fmt.Errorf("persist step state after destroy skip: %w", err)
 		}
 		return nil
+	}
+	if existing.ID != vmID {
+		return fmt.Errorf("%s: saved VM identity does not match resolved resource", s.Name())
 	}
 
 	result := s.op.VMRemove(ctx, inputs.VMInput{
@@ -255,15 +268,6 @@ func newVMStepFromSpec(
 		return nil, errors.New("operation not initialized")
 	}
 
-	// Strip "type:" prefix from step reference fields so downstream resolvers
-	// receive bare step names. The spec may have "network: "@network:default""
-	// which becomes "network:default" after stripSpecRefs, then "default" here.
-	for _, ref := range []string{"network", "key", "image", "kernel", "binary"} {
-		if s, ok := spec[ref].(string); ok {
-			spec[ref] = stripBareName(s)
-		}
-	}
-
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -276,6 +280,9 @@ func newVMStepFromSpec(
 	// Resource name: spec "name" overrides step name.
 	if input.Name == "" {
 		input.Name = name
+	}
+	if input.Count != nil && *input.Count != 1 {
+		return nil, fmt.Errorf("VM count must be 1")
 	}
 
 	// spec uses "key" as a single string but VMCreateInput stores SSHKeys as []string

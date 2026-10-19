@@ -35,7 +35,7 @@ func (server *TrafficPolicyServer) ApplyNetworkTrafficPolicy(
 	if err := authority.begin(ctx, request.SourceNetworkID); err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
-	if err := authority.firewall.ApplyNetworkTrafficGrant(ctx, firewall.NetworkTrafficGrant{
+	receipt, err := authority.firewall.EnsureNetworkTrafficGrant(ctx, firewall.NetworkTrafficGrant{
 		ID:              request.PolicyID(),
 		SourceNetworkID: request.SourceNetworkID,
 		DestinationVMID: request.DestinationVMID,
@@ -43,10 +43,16 @@ func (server *TrafficPolicyServer) ApplyNetworkTrafficPolicy(
 			request.Protocol,
 		),
 		Ports: firewall.PortInterval{First: request.PortStart, Last: request.PortEnd},
-	}); err != nil {
+	}, request.ClaimID, request.Incarnation)
+	if err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
-	return TrafficPolicyMutationResult{PolicyID: request.PolicyID()}, nil
+	return TrafficPolicyMutationResult{
+		PolicyID:    request.PolicyID(),
+		Incarnation: receipt.Incarnation,
+		ClaimID:     receipt.ClaimID,
+		WasCreated:  receipt.WasCreated,
+	}, nil
 }
 
 // ApplyVMTrafficPolicy installs a grant using the source network resolved under both exact VM locks.
@@ -69,7 +75,7 @@ func (server *TrafficPolicyServer) ApplyVMTrafficPolicy(
 	if err := authority.begin(ctx, authority.topologies[request.SourceVMID].NetworkID); err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
-	if err := authority.firewall.ApplyVMTrafficGrant(ctx, firewall.VMTrafficGrant{
+	receipt, err := authority.firewall.EnsureVMTrafficGrant(ctx, firewall.VMTrafficGrant{
 		ID:              request.PolicyID(),
 		SourceVMID:      request.SourceVMID,
 		DestinationVMID: request.DestinationVMID,
@@ -77,10 +83,16 @@ func (server *TrafficPolicyServer) ApplyVMTrafficPolicy(
 			request.Protocol,
 		),
 		Ports: firewall.PortInterval{First: request.PortStart, Last: request.PortEnd},
-	}); err != nil {
+	}, request.ClaimID, request.Incarnation)
+	if err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
-	return TrafficPolicyMutationResult{PolicyID: request.PolicyID()}, nil
+	return TrafficPolicyMutationResult{
+		PolicyID:    request.PolicyID(),
+		Incarnation: receipt.Incarnation,
+		ClaimID:     receipt.ClaimID,
+		WasCreated:  receipt.WasCreated,
+	}, nil
 }
 
 // RemoveNetworkTrafficPolicy proves revocation or exact absence before acknowledging local projection deletion.
@@ -99,7 +111,12 @@ func (server *TrafficPolicyServer) RemoveNetworkTrafficPolicy(
 	if err := authority.begin(ctx, request.SourceNetworkID); err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
-	if err := authority.firewall.RemoveNetworkTrafficGrant(ctx, request.PolicyID()); err != nil {
+	if err := authority.firewall.RemoveOwnedNetworkTrafficGrant(
+		ctx,
+		request.PolicyID(),
+		request.ClaimID,
+		request.Incarnation,
+	); err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
 	return TrafficPolicyMutationResult{PolicyID: request.PolicyID()}, nil
@@ -125,7 +142,12 @@ func (server *TrafficPolicyServer) RemoveVMTrafficPolicy(
 	if err := authority.begin(ctx, authority.topologies[request.SourceVMID].NetworkID); err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
-	if err := authority.firewall.RemoveVMTrafficGrant(ctx, request.PolicyID()); err != nil {
+	if err := authority.firewall.RemoveOwnedVMTrafficGrant(
+		ctx,
+		request.PolicyID(),
+		request.ClaimID,
+		request.Incarnation,
+	); err != nil {
 		return TrafficPolicyMutationResult{}, err
 	}
 	return TrafficPolicyMutationResult{PolicyID: request.PolicyID()}, nil

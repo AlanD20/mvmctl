@@ -318,7 +318,11 @@ func (r *VMCreateRequest) resolveMemory(ctx context.Context, input *VMCreateInpu
 	if input.MemSizeMib == "" {
 		return r.cfg.GetInt(ctx, "defaults.vm", "mem_size_mib")
 	}
-	memStr := strings.TrimSpace(input.MemSizeMib)
+	return parseVMMemory(input.MemSizeMib)
+}
+
+func parseVMMemory(value string) (int, error) {
+	memStr := strings.TrimSpace(value)
 	if mib, err := strconv.Atoi(memStr); err == nil {
 		return mib, nil
 	}
@@ -337,6 +341,46 @@ func (input VMCreateInput) Validate() error {
 	}
 	if err := validators.VMName(input.Name); err != nil {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid VM name: %s", err.Error()))
+	}
+	if input.VCPUCount != nil && (*input.VCPUCount < infra.VCPUMin || *input.VCPUCount > infra.VCPUMax) {
+		return errs.New(
+			errs.CodeValidationFailed,
+			fmt.Sprintf("vcpu must be between %d and %d", infra.VCPUMin, infra.VCPUMax),
+		)
+	}
+	if input.MemSizeMib != "" {
+		mib, err := parseVMMemory(input.MemSizeMib)
+		if err != nil {
+			return err
+		}
+		if mib < infra.MemMinMB || mib > infra.MemMaxMB {
+			return errs.New(
+				errs.CodeValidationFailed,
+				fmt.Sprintf("memory must be between %d and %d MiB", infra.MemMinMB, infra.MemMaxMB),
+			)
+		}
+	}
+	if input.DiskSize != "" {
+		bytes, err := disk.ParseDiskSizeToBytes(input.DiskSize)
+		if err != nil {
+			return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid disk size: %v", err))
+		}
+		if bytes < disk.MebibyteBytes {
+			return errs.New(errs.CodeValidationFailed, "disk size must be at least 1 MiB")
+		}
+	}
+	if input.Count != nil && *input.Count < 1 {
+		return errs.New(errs.CodeValidationFailed, "count must be positive")
+	}
+	if input.RequestedGuestMAC != nil && *input.RequestedGuestMAC != "" {
+		if err := validators.MAC(*input.RequestedGuestMAC); err != nil {
+			return errs.New(errs.CodeValidationFailed, err.Error())
+		}
+	}
+	if input.RequestedGuestIP != nil && *input.RequestedGuestIP != "" {
+		if err := validators.IPv4Address(*input.RequestedGuestIP, "guest IP", true, "", ""); err != nil {
+			return errs.New(errs.CodeValidationFailed, err.Error())
+		}
 	}
 	if !input.NoNetwork {
 		return nil
@@ -432,13 +476,6 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		return nil, err
 	}
 	// Resolve VCPU count
-	// Validate explicitly set vcpu count before defaulting
-	if input.VCPUCount != nil && *input.VCPUCount <= 0 {
-		return nil, errs.New(errs.CodeVMCreateFailed,
-			"--vcpu must be a positive integer",
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
 	vcpuCount, _ := r.cfg.GetInt(ctx, "defaults.vm", "vcpu_count")
 	if input.VCPUCount != nil && *input.VCPUCount > 0 {
 		vcpuCount = *input.VCPUCount

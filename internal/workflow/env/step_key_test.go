@@ -141,6 +141,7 @@ func TestKeyStep_Apply(t *testing.T) {
 			wantKeyID: "key-existing",
 			// WasCreated defaults to false on fresh run
 			wantWasCreated: false,
+			wantErr:        "resource already exists",
 		},
 		"key_exists_preserves_was_created_from_saved": {
 			setupOp: func(t *testing.T) *api.Operation {
@@ -154,7 +155,8 @@ func TestKeyStep_Apply(t *testing.T) {
 			},
 			ctx: context.Background,
 			saved: model.ResourceState{
-				Meta: model.ResourceMeta{WasCreated: true},
+				Output: model.ResourceMap{"key_id": "key-preserved"},
+				Meta:   model.ResourceMeta{WasCreated: true},
 			},
 			wantKeyID:      "key-preserved",
 			wantWasCreated: true,
@@ -169,6 +171,9 @@ func TestKeyStep_Apply(t *testing.T) {
 			state := workflow.NewSharedState()
 			writer, writes := recordingWriter()
 
+			if tc.saved.Output != nil {
+				tc.saved.Meta.SpecHash = step.SpecHash()
+			}
 			err := step.Apply(tc.ctx(), state, tc.saved, writer, noopProgress)
 
 			if tc.wantErr != "" {
@@ -228,7 +233,10 @@ func TestKeyStep_Apply_WriteFailure(t *testing.T) {
 	err := step.Apply(
 		context.Background(),
 		workflow.NewSharedState(),
-		model.ResourceState{},
+		model.ResourceState{
+			Output: model.ResourceMap{"key_id": "key-1"},
+			Meta:   model.ResourceMeta{SpecHash: step.SpecHash()},
+		},
 		failingWriter(writeErr),
 		noopProgress,
 	)
@@ -483,7 +491,10 @@ func TestKeyStep_StateData_AfterApply(t *testing.T) {
 	err := step.Apply(
 		context.Background(),
 		state,
-		model.ResourceState{Meta: model.ResourceMeta{WasCreated: false}},
+		model.ResourceState{
+			Output: model.ResourceMap{"key_id": "key-abc"},
+			Meta:   model.ResourceMeta{SpecHash: step.SpecHash()},
+		},
 		writer,
 		noopProgress,
 	)

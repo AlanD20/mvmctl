@@ -93,6 +93,9 @@ func (a *Agent) handleLegacyConnection(ctx context.Context, reader io.Reader, co
 		}
 
 		switch req.Type {
+		case requestTypeReady:
+			handleReady(ctx, req, conn, connMu)
+			return
 		case requestTypeExec:
 			if req.SourceSessionID == "" {
 				a.handleExec(ctx, req, conn, connMu)

@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -20,6 +21,18 @@ import (
 
 type memoryExecPolicyRepo struct {
 	items []*model.VMToVMExecAllowIntent
+}
+
+func (r *memoryExecPolicyRepo) EnsureOwned(
+	context.Context,
+	*model.VMToVMExecAllowIntent,
+	string,
+) (*model.VMToVMExecAllowIntent, error) {
+	return nil, fmt.Errorf("ownership operations require the real repository fixture")
+}
+
+func (r *memoryExecPolicyRepo) DeleteOwned(context.Context, string, string, string) error {
+	return fmt.Errorf("ownership operations require the real repository fixture")
 }
 
 func (r *memoryExecPolicyRepo) Create(_ context.Context, intent *model.VMToVMExecAllowIntent) error {

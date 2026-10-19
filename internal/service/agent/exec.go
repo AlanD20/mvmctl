@@ -195,7 +195,18 @@ func handleExecCommand(
 	}
 
 	var cmd *exec.Cmd
-	if req.User != "" && req.User != "root" {
+	if req.Type == requestTypeReady {
+		var err error
+		cmd, err = newReadyCommand(ctx, req.Command, req.User)
+		if err != nil {
+			connMu.Lock()
+			_ = writeFrame(conn, &execResponse{
+				ID: req.ID, Type: responseTypeResult, Status: -1, Error: err.Error(),
+			})
+			connMu.Unlock()
+			return
+		}
+	} else if req.User != "" && req.User != "root" {
 		// Run as a different user via su.
 		cmd = exec.CommandContext(ctx, "su", "-", req.User, "-c", req.Command)
 	} else {
@@ -221,7 +232,9 @@ func handleExecCommand(
 
 	// Merge provided environment with the current environment.
 	if len(req.Env) > 0 {
-		cmd.Env = os.Environ()
+		if cmd.Env == nil {
+			cmd.Env = os.Environ()
+		}
 		for k, v := range req.Env {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
@@ -252,7 +265,22 @@ func handleExecCommand(
 	}
 
 	exitCode := 0
-	err := cmd.Wait()
+	var err error
+	if req.Type == requestTypeReady {
+		var cleanupErr error
+		err, cleanupErr = waitReadyCommand(ctx, cmd)
+		if cleanupErr != nil {
+			slog.Error("readiness process group cleanup failed", "id", req.ID, "error", cleanupErr)
+			connMu.Lock()
+			_ = writeFrame(conn, &execResponse{
+				ID: req.ID, Type: responseTypeResult, Status: -1, Error: cleanupErr.Error(),
+			})
+			connMu.Unlock()
+			return
+		}
+	} else {
+		err = cmd.Wait()
+	}
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {

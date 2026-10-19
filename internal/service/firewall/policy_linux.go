@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"mvmctl/internal/lib/authorityfs"
+	"mvmctl/internal/lib/crypto"
 )
 
 // PolicyBinding is root-observed network authority for a closed traffic-policy mutation.
@@ -34,70 +35,143 @@ func BeginPolicyChange(
 
 // ApplyVMTrafficGrant installs one exact directional owned-VM grant and freshly verifies the full generation.
 func (lease *MutationLease) ApplyVMTrafficGrant(ctx context.Context, grant VMTrafficGrant) error {
+	_, err := lease.EnsureVMTrafficGrant(ctx, grant, "", "")
+	return err
+}
+
+// EnsureVMTrafficGrant compares ownership while retaining the existing mutation lease.
+func (lease *MutationLease) EnsureVMTrafficGrant(
+	ctx context.Context,
+	grant VMTrafficGrant,
+	claim, expected string,
+) (PolicyReceipt, error) {
 	if lease == nil || lease.state == nil {
-		return generationAuthorityError("firewall policy lease is unavailable", nil, nil)
+		return PolicyReceipt{}, generationAuthorityError("firewall policy lease is unavailable", nil, nil)
 	}
 	state := lease.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if err := state.ready(ctx); err != nil {
-		return err
+		return PolicyReceipt{}, err
 	}
 	source, err := state.ownedEndpoint(grant.SourceVMID)
 	if err != nil {
-		return err
+		return PolicyReceipt{}, err
 	}
 	if _, err := state.ownedEndpoint(grant.DestinationVMID); err != nil {
-		return err
+		return PolicyReceipt{}, err
 	}
 	if source.NetworkID != state.binding.NetworkID {
-		return generationAuthorityError("VM policy source differs from retained network lock", nil, nil)
+		return PolicyReceipt{}, generationAuthorityError(
+			"VM policy source differs from retained network lock",
+			nil,
+			nil,
+		)
 	}
 	target := cloneIntent(state.intent)
-	for _, existing := range target.VMGrants {
+	for index, existing := range target.VMGrants {
 		if existing.ID == grant.ID {
+			grant.ClaimID, grant.Incarnation = existing.ClaimID, existing.Incarnation
 			if existing != grant {
-				return generationAuthorityError("existing VM policy intent differs", nil, nil)
+				return PolicyReceipt{}, generationAuthorityError("existing VM policy intent differs", nil, nil)
 			}
-			return state.applyIntent(ctx, target)
+			if expected != "" && existing.Incarnation != expected {
+				return PolicyReceipt{}, policyOwnershipConflict()
+			}
+			if existing.Incarnation == "" {
+				existing.Incarnation = crypto.UUIDV4()
+				target.VMGrants[index] = existing
+			}
+			return PolicyReceipt{
+				Incarnation: existing.Incarnation,
+				ClaimID:     existing.ClaimID,
+				WasCreated:  claim != "" && existing.ClaimID == claim,
+			}, state.applyIntent(
+				ctx,
+				target,
+			)
 		}
 	}
+	if expected != "" {
+		return PolicyReceipt{}, policyOwnershipConflict()
+	}
+	grant.Incarnation, grant.ClaimID = crypto.UUIDV4(), claim
 	target.VMGrants = append(target.VMGrants, grant)
-	return state.applyIntent(ctx, target)
+	if err := state.applyIntent(ctx, target); err != nil {
+		return PolicyReceipt{}, err
+	}
+	return PolicyReceipt{Incarnation: grant.Incarnation, ClaimID: claim, WasCreated: claim != ""}, nil
 }
 
 // ApplyNetworkTrafficGrant installs one owned-network to owned-VM grant, including same-network traffic.
 func (lease *MutationLease) ApplyNetworkTrafficGrant(ctx context.Context, grant NetworkTrafficGrant) error {
+	_, err := lease.EnsureNetworkTrafficGrant(ctx, grant, "", "")
+	return err
+}
+
+// EnsureNetworkTrafficGrant compares ownership while retaining the existing mutation lease.
+func (lease *MutationLease) EnsureNetworkTrafficGrant(
+	ctx context.Context,
+	grant NetworkTrafficGrant,
+	claim, expected string,
+) (PolicyReceipt, error) {
 	if lease == nil || lease.state == nil {
-		return generationAuthorityError("firewall policy lease is unavailable", nil, nil)
+		return PolicyReceipt{}, generationAuthorityError("firewall policy lease is unavailable", nil, nil)
 	}
 	state := lease.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if err := state.ready(ctx); err != nil {
-		return err
+		return PolicyReceipt{}, err
 	}
 	if err := state.ownedNetwork(grant.SourceNetworkID); err != nil {
-		return err
+		return PolicyReceipt{}, err
 	}
 	if _, err := state.ownedEndpoint(grant.DestinationVMID); err != nil {
-		return err
+		return PolicyReceipt{}, err
 	}
 	target := cloneIntent(state.intent)
-	for _, existing := range target.NetworkGrants {
+	for index, existing := range target.NetworkGrants {
 		if existing.ID == grant.ID {
+			grant.ClaimID, grant.Incarnation = existing.ClaimID, existing.Incarnation
 			if existing != grant {
-				return generationAuthorityError("existing network policy intent differs", nil, nil)
+				return PolicyReceipt{}, generationAuthorityError("existing network policy intent differs", nil, nil)
 			}
-			return state.applyIntent(ctx, target)
+			if expected != "" && existing.Incarnation != expected {
+				return PolicyReceipt{}, policyOwnershipConflict()
+			}
+			if existing.Incarnation == "" {
+				existing.Incarnation = crypto.UUIDV4()
+				target.NetworkGrants[index] = existing
+			}
+			return PolicyReceipt{
+				Incarnation: existing.Incarnation,
+				ClaimID:     existing.ClaimID,
+				WasCreated:  claim != "" && existing.ClaimID == claim,
+			}, state.applyIntent(
+				ctx,
+				target,
+			)
 		}
 	}
+	if expected != "" {
+		return PolicyReceipt{}, policyOwnershipConflict()
+	}
+	grant.Incarnation, grant.ClaimID = crypto.UUIDV4(), claim
 	target.NetworkGrants = append(target.NetworkGrants, grant)
-	return state.applyIntent(ctx, target)
+	if err := state.applyIntent(ctx, target); err != nil {
+		return PolicyReceipt{}, err
+	}
+	return PolicyReceipt{Incarnation: grant.Incarnation, ClaimID: claim, WasCreated: claim != ""}, nil
 }
 
 // RemoveVMTrafficGrant revokes a root-stored owned VM grant before desired-state deletion.
 func (lease *MutationLease) RemoveVMTrafficGrant(ctx context.Context, policyID string) error {
+	return lease.RemoveOwnedVMTrafficGrant(ctx, policyID, "", "")
+}
+
+// RemoveOwnedVMTrafficGrant conditionally removes only the recorded incarnation and claim.
+func (lease *MutationLease) RemoveOwnedVMTrafficGrant(ctx context.Context, policyID, claim, expected string) error {
 	if lease == nil || lease.state == nil {
 		return generationAuthorityError("firewall policy lease is unavailable", nil, nil)
 	}
@@ -111,6 +185,9 @@ func (lease *MutationLease) RemoveVMTrafficGrant(ctx context.Context, policyID s
 	for _, existing := range target.VMGrants {
 		if existing.ID != policyID {
 			continue
+		}
+		if claim != "" && (existing.ClaimID != claim || (expected != "" && existing.Incarnation != expected)) {
+			return policyOwnershipConflict()
 		}
 		source, err := state.ownedEndpoint(existing.SourceVMID)
 		if err != nil {
@@ -132,6 +209,14 @@ func (lease *MutationLease) RemoveVMTrafficGrant(ctx context.Context, policyID s
 
 // RemoveNetworkTrafficGrant revokes a root-stored owned network grant before desired-state deletion.
 func (lease *MutationLease) RemoveNetworkTrafficGrant(ctx context.Context, policyID string) error {
+	return lease.RemoveOwnedNetworkTrafficGrant(ctx, policyID, "", "")
+}
+
+// RemoveOwnedNetworkTrafficGrant conditionally removes only the recorded incarnation and claim.
+func (lease *MutationLease) RemoveOwnedNetworkTrafficGrant(
+	ctx context.Context,
+	policyID, claim, expected string,
+) error {
 	if lease == nil || lease.state == nil {
 		return generationAuthorityError("firewall policy lease is unavailable", nil, nil)
 	}
@@ -145,6 +230,9 @@ func (lease *MutationLease) RemoveNetworkTrafficGrant(ctx context.Context, polic
 	for _, existing := range target.NetworkGrants {
 		if existing.ID != policyID {
 			continue
+		}
+		if claim != "" && (existing.ClaimID != claim || (expected != "" && existing.Incarnation != expected)) {
+			return policyOwnershipConflict()
 		}
 		if err := state.ownedNetwork(existing.SourceNetworkID); err != nil {
 			return err

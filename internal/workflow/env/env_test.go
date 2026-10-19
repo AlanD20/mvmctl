@@ -30,16 +30,20 @@ import (
 
 func TestRegistry_ContainsAllExpectedTypes(t *testing.T) {
 	expectedTypes := map[string]struct{}{
-		"network":      {},
-		"key":          {},
-		"image":        {},
-		"image_import": {},
-		"kernel":       {},
-		"binary":       {},
-		"vm":           {},
-		"ssh":          {},
-		"exec":         {},
-		"copy":         {},
+		"network":        {},
+		"key":            {},
+		"image":          {},
+		"image_import":   {},
+		"kernel":         {},
+		"binary":         {},
+		"vm":             {},
+		"ssh":            {},
+		"exec":           {},
+		"copy":           {},
+		"volume":         {},
+		"traffic_policy": {},
+		"exec_policy":    {},
+		"ready":          {},
 	}
 
 	for typ := range expectedTypes {
@@ -285,7 +289,7 @@ network:
   my-net:
     subnet: 10.0.0.0/24
 key:
-  my-key:
+  my-key: {}
 image:
   alpine:
     type: alpine
@@ -341,7 +345,7 @@ network:
   my-net:
     subnet: 10.0.0.0/24
 key:
-  my-key:
+  my-key: {}
 image:
   alpine:
     type: alpine
@@ -397,7 +401,7 @@ func TestResolveSpec_EmptySpecFile(t *testing.T) {
 func TestResolveSpec_MissingVersion(t *testing.T) {
 	specContent := `
 network:
-  test:
+  fixture-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -432,7 +436,7 @@ func TestResolveSpec_InvalidYAML(t *testing.T) {
 func TestResolveSpec_ContextCancellation(t *testing.T) {
 	specContent := `version: "1"
 network:
-  test:
+  fixture-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -447,8 +451,7 @@ network:
 
 // NOTE: This test mutates the package-level Registry. Do NOT add t.Parallel().
 
-// Rationale: ResolveSpec must silently skip step types not in the Registry.
-// The Registry is the source of truth — unknown types in YAML are ignored.
+// Rationale: Unknown sections must fail admission before any resource is created.
 func TestResolveSpec_UnknownStepType(t *testing.T) {
 	origFactory := envpkg.Registry["network"]
 	t.Cleanup(func() { envpkg.Registry["network"] = origFactory })
@@ -456,14 +459,14 @@ func TestResolveSpec_UnknownStepType(t *testing.T) {
 
 	specContent := `version: "1"
 network:
-  test:
+  fixture-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
 
 	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
-	require.NoError(t, err)
-	assert.Len(t, steps, 0, "no steps should be created when the type is not in Registry")
+	require.Error(t, err)
+	assert.Empty(t, steps)
 }
 
 // NOTE: This test mutates the package-level Registry. Do NOT add t.Parallel().
@@ -486,7 +489,7 @@ func TestResolveSpec_FactoryFromSpecError(t *testing.T) {
 
 	specContent := `version: "1"
 network:
-  test:
+  fixture-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -701,7 +704,7 @@ network:
   my-net:
     subnet: 10.0.0.0/24
 key:
-  my-key:
+  my-key: {}
 vm:
   my-vm:
     network: my-net
@@ -715,10 +718,8 @@ ssh:
       - vm:my-vm
 copy:
   copy-binary:
-    target: my-vm
-    user: root
     src: ./mvm
-    dst: /root/
+    dest: my-vm:/root/
     depends_on:
       - vm:my-vm
 `

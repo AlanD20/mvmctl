@@ -9,6 +9,7 @@ import (
 
 // execRequest type constants.
 const (
+	requestTypeReady   = "ready"
 	requestTypeExec    = "exec"
 	requestTypeExecTTY = "exec-tty"
 	requestTypePing    = "ping"

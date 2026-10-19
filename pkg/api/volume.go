@@ -55,8 +55,8 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 	}
 
 	timestamp := time.Now().Format(time.RFC3339)
-	// Generate ID matching The HashGenerator.volume(name, timestamp) exactly
-	volumeID := crypto.VolumeID(resolved.Name, timestamp)
+	// A recreated same-name disk must not inherit a previous workflow's removal identity.
+	volumeID := crypto.VolumeID(resolved.Name, crypto.UUIDV4())
 	volumeItem := &model.VolumeItem{
 		ID:          volumeID,
 		Name:        resolved.Name,
@@ -308,14 +308,14 @@ func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreate
 
 // VolumeGet returns a single volume by identifier.
 func (op *Operation) VolumeGet(ctx context.Context, input inputs.VolumeInput) (*model.VolumeItem, error) {
-	volumes, err := input.Resolve(ctx, op.Repos.Volume)
-	if err != nil {
+	if err := input.Validate(); err != nil {
 		return nil, err
 	}
-	if len(volumes) > 1 {
+	if len(input.Identifiers) != 1 {
 		return nil, fmt.Errorf("Expected exactly one volume identifier")
 	}
-	return volumes[0], nil
+	// Single-resource lookups must preserve typed absence for identity-safe cleanup.
+	return volume.NewResolver(op.Repos.Volume).Resolve(ctx, input.Identifiers[0])
 }
 
 // --- AttachVolume / DetachVolume ---

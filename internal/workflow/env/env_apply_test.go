@@ -50,8 +50,9 @@ func noopFactory(stepType string, removes ...string) StepFactory {
 				func(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 					if write != nil {
 						return write(ctx, model.ResourceState{
-							Spec: spec,
-							Meta: model.ResourceMeta{WasCreated: true},
+							Spec:   spec,
+							Output: map[string]any{"fixture_id": stepName},
+							Meta:   model.ResourceMeta{WasCreated: true},
 						})
 					}
 					return nil
@@ -60,7 +61,10 @@ func noopFactory(stepType string, removes ...string) StepFactory {
 					return nil
 				},
 				func() model.ResourceState {
-					return model.ResourceState{Meta: model.ResourceMeta{WasCreated: true}}
+					return model.ResourceState{
+						Output: map[string]any{"fixture_id": stepName},
+						Meta:   model.ResourceMeta{WasCreated: true},
+					}
 				},
 			), nil
 		},
@@ -189,7 +193,7 @@ network:
 
 // Rationale: Binary lifecycle belongs to the trusted release API. The generic removes alias must not dispatch an
 // immediate binary deletion or dereference an otherwise-unused API operation.
-func TestApply_DoesNotDispatchBinaryImmediateRemovalAlias(t *testing.T) {
+func TestApply_RejectsBinaryImmediateRemovalAlias(t *testing.T) {
 	replaceAndRestore(t, "network", noopFactory("network", "binary:1.16.1"))
 
 	specPath := writeApplySpec(t, `version: "1"
@@ -199,7 +203,7 @@ network:
 `)
 	defer cleanupState(t, specPath)
 
-	require.NoError(t, Apply(context.Background(), nil, specPath, nil, nil))
+	require.Error(t, Apply(context.Background(), nil, specPath, nil, nil))
 }
 
 // Rationale: A spec with two independent resource types must produce a state
@@ -211,8 +215,9 @@ func TestApply_MultipleSteps(t *testing.T) {
 	specContent := `version: "1"
 network:
   test-net:
+    subnet: 10.0.0.0/24
 key:
-  my-key:
+  my-key: {}
 `
 	specPath := writeApplySpec(t, specContent)
 	defer cleanupState(t, specPath)
@@ -283,8 +288,9 @@ func TestApply_Reapply(t *testing.T) {
 	specContent := `version: "1"
 network:
   test-net:
+    subnet: 10.0.0.0/24
 key:
-  my-key:
+  my-key: {}
 `
 	specPath := writeApplySpec(t, specContent)
 	defer cleanupState(t, specPath)

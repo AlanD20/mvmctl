@@ -57,11 +57,27 @@ func (s *NetworkStep) Apply(
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
 
+	lookup := s.input.Name
+	prior := StateFromMap[NetworkState](saved.Output)
+	if saved.Output != nil {
+		if prior == nil || prior.NetworkID == "" {
+			return fmt.Errorf("%s: saved resource identity is invalid", s.Name())
+		}
+		if saved.Meta.SpecHash != s.specHash {
+			return fmt.Errorf(
+				"%s: declaration changed; destroy the saved resource before changing its declaration",
+				s.Name(),
+			)
+		}
+		lookup = prior.NetworkID
+	} else if selected := s.inputSpec.GetString("existing"); selected != "" {
+		lookup = selected
+	}
 	// Recover WasCreated from saved meta.
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.NetworkGet(ctx, inputs.NetworkInput{Identifiers: []string{s.input.Name}})
+	existing, err := s.op.NetworkGet(ctx, inputs.NetworkInput{Identifiers: []string{lookup}})
 	if err != nil && !errs.IsNotFound(err) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
@@ -70,7 +86,16 @@ func (s *NetworkStep) Apply(
 		)
 	}
 
+	if prior != nil && (existing == nil || existing.ID != prior.NetworkID) {
+		return fmt.Errorf("%s: saved resource %s is missing; refusing replacement", s.Name(), prior.NetworkID)
+	}
+	if s.inputSpec.GetString("existing") != "" && existing == nil {
+		return fmt.Errorf("%s: selected existing resource was not found", s.Name())
+	}
 	if existing != nil {
+		if prior == nil && s.inputSpec.GetString("existing") == "" {
+			return fmt.Errorf("%s: resource already exists; select it explicitly with existing", s.Name())
+		}
 		onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "already exists, skipping"})
 		s.saved = &NetworkState{
 			NetworkID: existing.ID,
@@ -127,20 +152,9 @@ func (s *NetworkStep) Destroy(
 		s.meta = saved.Meta
 	}
 
-	// Determine whether to attempt removal.
 	shouldRemove := s.meta.WasCreated
-	if !shouldRemove && s.saved != nil && s.saved.NetworkID != "" {
-		// WasCreated=false means the network pre-existed at apply time.
-		// But it may have been soft-deleted by another spec's destroy
-		// while VMs still referenced it — now it's an orphan. Check
-		// whether it's soft-deleted and clean it up if so.
-		existing, err := s.op.NetworkGet(ctx, inputs.NetworkInput{
-			Identifiers:    []string{s.saved.NetworkID},
-			IncludeDeleted: true,
-		})
-		if err == nil && existing != nil && !existing.IsPresent {
-			shouldRemove = true
-		}
+	if shouldRemove && (s.saved == nil || s.saved.NetworkID == "") {
+		return fmt.Errorf("%s: owned network identity is missing", s.Name())
 	}
 
 	if s.saved == nil || !shouldRemove {
@@ -150,6 +164,22 @@ func (s *NetworkStep) Destroy(
 		return nil
 	}
 
+	item, err := s.op.NetworkGet(
+		ctx,
+		inputs.NetworkInput{Identifiers: []string{s.saved.NetworkID}, IncludeDeleted: true},
+	)
+	if err != nil {
+		if errs.IsNotFound(err) {
+			return write(ctx, s.StateData())
+		}
+		return err
+	}
+	if item == nil {
+		return write(ctx, s.StateData())
+	}
+	if item.ID != s.saved.NetworkID {
+		return fmt.Errorf("%s: saved network identity does not match resolved resource", s.Name())
+	}
 	if err := s.op.NetworkRemove(ctx, inputs.NetworkInput{
 		Identifiers:    []string{s.saved.NetworkID},
 		Force:          true,

@@ -4,6 +4,7 @@ import (
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
+	"regexp"
 )
 
 const (
@@ -19,6 +20,8 @@ const (
 
 // NetworkTrafficPolicyRequest contains only a closed grant identity; root resolves ownership and network facts.
 type NetworkTrafficPolicyRequest struct {
+	ClaimID         string                `json:"claim_id,omitempty"`
+	Incarnation     string                `json:"incarnation,omitempty"`
 	SourceNetworkID string                `json:"source_network_id"`
 	DestinationVMID string                `json:"destination_vm_id"`
 	Protocol        model.TrafficProtocol `json:"protocol"`
@@ -28,6 +31,9 @@ type NetworkTrafficPolicyRequest struct {
 
 // Validate admits canonical immutable identifiers and a bounded transport grant.
 func (request NetworkTrafficPolicyRequest) Validate() error {
+	if err := validatePolicyOwnership(request.ClaimID, request.Incarnation); err != nil {
+		return err
+	}
 	if !networkIDPattern.MatchString(request.SourceNetworkID) || !vmIDPattern.MatchString(request.DestinationVMID) {
 		return errs.New(errs.CodeValidationFailed, "traffic policy requires canonical network and VM identifiers")
 	}
@@ -47,6 +53,8 @@ func (request NetworkTrafficPolicyRequest) PolicyID() string {
 
 // VMTrafficPolicyRequest grants one exact directional VM pair without any caller-supplied network placement.
 type VMTrafficPolicyRequest struct {
+	ClaimID         string                `json:"claim_id,omitempty"`
+	Incarnation     string                `json:"incarnation,omitempty"`
 	SourceVMID      string                `json:"source_vm_id"`
 	DestinationVMID string                `json:"destination_vm_id"`
 	Protocol        model.TrafficProtocol `json:"protocol"`
@@ -56,6 +64,9 @@ type VMTrafficPolicyRequest struct {
 
 // Validate admits distinct immutable VM identities and bounded transport intent.
 func (request VMTrafficPolicyRequest) Validate() error {
+	if err := validatePolicyOwnership(request.ClaimID, request.Incarnation); err != nil {
+		return err
+	}
 	if !vmIDPattern.MatchString(request.SourceVMID) || !vmIDPattern.MatchString(request.DestinationVMID) ||
 		request.SourceVMID == request.DestinationVMID {
 		return errs.New(errs.CodeValidationFailed, "traffic policy requires distinct canonical VM identifiers")
@@ -76,11 +87,19 @@ func (request VMTrafficPolicyRequest) PolicyID() string {
 
 // TrafficPolicyMutationResult is returned only after root verifies the complete kernel generation.
 type TrafficPolicyMutationResult struct {
-	PolicyID string `json:"policy_id"`
+	ClaimID     string `json:"claim_id,omitempty"`
+	Incarnation string `json:"incarnation,omitempty"`
+	WasCreated  bool   `json:"was_created"`
+	PolicyID    string `json:"policy_id"`
 }
 
 // Validate requires the receiver to acknowledge exactly the requested immutable grant.
 func (result TrafficPolicyMutationResult) Validate(expectedID string) error {
+	if (result.Incarnation != "" && !policyOwnershipToken.MatchString(result.Incarnation)) ||
+		(result.ClaimID != "" && (!policyOwnershipToken.MatchString(result.ClaimID) || result.Incarnation == "")) ||
+		(result.WasCreated && result.ClaimID == "") {
+		return errs.New(errs.CodePolicySyncFailed, "root policy ownership receipt is invalid")
+	}
 	if result.PolicyID != expectedID || len(expectedID) != 64 {
 		return errs.New(errs.CodePolicySyncFailed, "root traffic policy result does not match the requested grant")
 	}
@@ -93,6 +112,19 @@ func validateTrafficPolicyPorts(protocol model.TrafficProtocol, first, last uint
 	}
 	if first == 0 || last < first {
 		return errs.New(errs.CodePolicyPortInvalid, "traffic policy port range must be within 1 through 65535")
+	}
+	return nil
+}
+
+var policyOwnershipToken = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+func validatePolicyOwnership(claim, incarnation string) error {
+	if claim == "" && incarnation == "" {
+		return nil
+	}
+	if !policyOwnershipToken.MatchString(claim) ||
+		(incarnation != "" && !policyOwnershipToken.MatchString(incarnation)) {
+		return errs.New(errs.CodeValidationFailed, "invalid policy ownership tokens")
 	}
 	return nil
 }

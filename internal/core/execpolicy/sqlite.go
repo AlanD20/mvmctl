@@ -6,6 +6,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
 )
 
@@ -15,10 +16,11 @@ type sqliteRepo struct{ db *sqlx.DB }
 func NewRepository(db *sqlx.DB) Repository { return &sqliteRepo{db: db} }
 
 func (r *sqliteRepo) Create(ctx context.Context, intent *model.VMToVMExecAllowIntent) error {
+	intent.Incarnation = crypto.UUIDV4()
 	_, err := r.db.ExecContext(ctx, `INSERT INTO exec_policies
-		(id, source_vm_id, destination_vm_id, target_user, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, intent.ID, intent.SourceVMID, intent.DestinationVMID,
-		intent.TargetUser, intent.CreatedAt, intent.UpdatedAt)
+		(id, source_vm_id, destination_vm_id, target_user, created_at, updated_at, claim_id, incarnation)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, intent.ID, intent.SourceVMID, intent.DestinationVMID,
+		intent.TargetUser, intent.CreatedAt, intent.UpdatedAt, intent.ClaimID, intent.Incarnation)
 	return err
 }
 
