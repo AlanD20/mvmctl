@@ -208,7 +208,9 @@ func decodeRouteTUNData(data []byte, observation *routeLinkObservation) error {
 	if err := decoder.Err(); err != nil {
 		return fmt.Errorf("decode TAP link data: %w", err)
 	}
-	for _, required := range []uint16{iflaTunOwner, iflaTunType, iflaTunPI, iflaTunPersist} {
+	// Linux omits an unset TUN/TAP owner. Observation must accept unrelated links;
+	// validateManagedTAPAuthority separately requires the exact nonzero execution UID.
+	for _, required := range []uint16{iflaTunType, iflaTunPI, iflaTunPersist} {
 		if _, exists := seen[required]; !exists {
 			return fmt.Errorf("TAP link attribute %d is missing", required)
 		}

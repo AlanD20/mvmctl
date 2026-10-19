@@ -165,6 +165,21 @@ func TestDecodeRouteLinkMessageAcceptsForeignLinksAndKernelNestedEncoding(t *tes
 	assert.Empty(t, observation.kind)
 	assert.Equal(t, uint16(unix.ARPHRD_LOOPBACK), observation.deviceType)
 
+	// Rationale: An unrelated owner-unset TUN (for example tailscale0) must not
+	// prevent host link discovery, nor may owner-unset TAP evidence authorize mvm's TAP.
+	for _, deviceType := range []uint8{unix.IFF_TUN, unix.IFF_TAP} {
+		foreign := testRouteLinkMessage(t, "foreign0", "external", 30, 0, 0, 0, linkKindTAP,
+			func(encoder *netlink.AttributeEncoder) {
+				encoder.Uint8(iflaTunType, deviceType)
+				encoder.Uint8(iflaTunPI, 0)
+				encoder.Uint8(iflaTunPersist, 0)
+			})
+		observation, err := decodeRouteLinkMessage(foreign)
+		require.NoError(t, err)
+		assert.Zero(t, observation.tunOwner)
+		assert.Error(t, validateManagedTAPAuthority(observation, OwnerUID(1000), 0))
+	}
+
 	kernelStyle := testRouteLinkMessage(t, "mvt012345678901", managedTAPAlias("mvt012345678901", 1000), 24,
 		0, 0, 0, linkKindTAP, func(encoder *netlink.AttributeEncoder) {
 			encoder.Uint32(iflaTunOwner, 1000)

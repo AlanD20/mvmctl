@@ -165,6 +165,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Host network discovery accepts unrelated TUN/TAP devices with an unset owner, including Tailscale interfaces,
+  without weakening the authenticated owner checks for managed VM TAPs.
+
 - Fixed local host-direct pytest timeouts to retain bounded output and shutdown diagnostics, attempt
   identity-pinned private process-group shutdown, and stop later domains and tiers. The domain fails and
   the qualification host is retained for reconciliation with release evidence incomplete; process-group
