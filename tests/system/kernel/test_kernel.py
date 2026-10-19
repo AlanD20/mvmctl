@@ -297,12 +297,10 @@ class _KernelPullSequence(_KernelPullOwner):
         assert after["config_files"] == before["config_files"], "retained config changed during init"
         for name, identity in before["cache_entries"].items():
             assert after["cache_entries"].get(name) == identity, ("retained cache entry changed", name)
-        # Closed current init outputs: audit writer plus DB snapshots before schema migrations 2–8.
+        # Closed current init outputs: the atomic baseline creates no migration snapshots.
         directories = {"tmp", "vms", "images", "kernels", "bin", "logs"}
         regular_files = {
             "mvmdb.db", "mvmdb.db-wal", "mvmdb.db-shm", "audit.log", "audit.log.lock",
-            "mvmdb.db.v2.snap", "mvmdb.db.v3.snap", "mvmdb.db.v4.snap", "mvmdb.db.v5.snap",
-            "mvmdb.db.v6.snap", "mvmdb.db.v7.snap", "mvmdb.db.v8.snap",
         }
         assert set(added) <= directories | regular_files, ("unexpected cache init entries", added)
         for name in added:

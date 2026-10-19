@@ -299,10 +299,8 @@ def test_retained_normal_init_precedes_inventory_and_preserves_historical_author
             for name in ("tmp", "vms", "images", "kernels", "bin", "logs"):
                 (sequence.cache_dir / name).mkdir(mode=0o700)
             (sequence.cache_dir / "mvmdb.db").write_bytes(b"initialized private schema")
-            for name in ("audit.log", "audit.log.lock", "mvmdb.db.v2.snap", "mvmdb.db.v3.snap",
-                         "mvmdb.db.v4.snap", "mvmdb.db.v5.snap", "mvmdb.db.v6.snap",
-                         "mvmdb.db.v7.snap", "mvmdb.db.v8.snap"):
-                (sequence.cache_dir / name).write_bytes(b"normal init audit or migration snapshot")
+            for name in ("audit.log", "audit.log.lock"):
+                (sequence.cache_dir / name).write_bytes(b"normal init audit")
             data = dict(cache_dir=str(sequence.cache_dir))
         else:
             assert (sequence.cache_dir / "mvmdb.db").is_file()
@@ -321,9 +319,7 @@ def test_retained_normal_init_precedes_inventory_and_preserves_historical_author
     assert after["identities"] == before["identities"]
     assert after["config_files"] == before["config_files"]
     assert after["added_cache_entries"] == [
-        "audit.log", "audit.log.lock", "bin", "images", "kernels", "logs", "mvmdb.db",
-        "mvmdb.db.v2.snap", "mvmdb.db.v3.snap", "mvmdb.db.v4.snap", "mvmdb.db.v5.snap",
-        "mvmdb.db.v6.snap", "mvmdb.db.v7.snap", "mvmdb.db.v8.snap", "tmp", "vms",
+        "audit.log", "audit.log.lock", "bin", "images", "kernels", "logs", "mvmdb.db", "tmp", "vms",
     ]
     assert sequence.file_receipt(historical_key) == original_key
     assert sequence.inventory() == sequence.baseline
