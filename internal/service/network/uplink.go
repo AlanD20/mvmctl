@@ -1,6 +1,7 @@
 package network
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -117,7 +118,7 @@ func observeSelectedUplink(
 		byIndex[link.ifIndex] = link
 	}
 	var selected selectedUplink
-	count := 0
+	uplinks := make(map[int]struct{})
 	for _, route := range routes {
 		link, found := byIndex[route.ifIndex]
 		if !found {
@@ -127,17 +128,37 @@ func observeSelectedUplink(
 			isManagedUplinkLink(link) {
 			continue
 		}
-		count++
-		selected = selectedUplink{
-			link: linkIdentity{name: link.name, ifIndex: link.ifIndex, namespace: namespace},
-			kind: link.kind, deviceType: link.deviceType, alias: link.alias, master: link.master, route: route,
+		uplinks[link.ifIndex] = struct{}{}
+		if selected.link.ifIndex == 0 || defaultUplinkRouteLess(route, selected.route) {
+			selected = selectedUplink{
+				link: linkIdentity{name: link.name, ifIndex: link.ifIndex, namespace: namespace},
+				kind: link.kind, deviceType: link.deviceType, alias: link.alias, master: link.master, route: route,
+			}
 		}
 	}
-	// CRITICAL: Metrics never resolve ambiguity; every eligible route counts, including equal-output routes.
-	if count != 1 {
-		return selectedUplink{}, fmt.Errorf("NAT requires exactly one eligible IPv4 default route, found %d", count)
+	// CRITICAL: Metrics never choose between uplinks; multiple routes are safe only on the same output link.
+	if len(uplinks) != 1 {
+		return selectedUplink{}, fmt.Errorf(
+			"NAT requires exactly one eligible IPv4 default-route uplink, found %d", len(uplinks),
+		)
 	}
 	return selected, nil
+}
+
+func defaultUplinkRouteLess(left, right routeIPv4Observation) bool {
+	// Canonical route evidence keeps exact revalidation independent of netlink dump order.
+	// The default-route dump fixes destination/table/kind; decoding binds gateway/source presence to validity.
+	order := cmp.Or(
+		left.gateway.Compare(right.gateway),
+		left.source.Compare(right.source),
+		cmp.Compare(left.protocol, right.protocol),
+		cmp.Compare(left.scope, right.scope),
+		cmp.Compare(left.metric, right.metric),
+	)
+	if order != 0 {
+		return order < 0
+	}
+	return !left.hasMetric && right.hasMetric
 }
 
 func isManagedUplinkLink(link routeLinkObservation) bool {
