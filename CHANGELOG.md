@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added environment `volume`, `traffic_policy`, `exec_policy`, and `ready` steps. Raw data volumes are retained
+  by default; disposable cleanup requires `retain: false` and workflow ownership. Policies use the existing typed
+  authority, and readiness runs bounded guest checks. See the [environment reference](docs/ENV_SPEC_REFERENCE.md).
 - Added explicit same-operator identical-kernel reimport into a fresh active cache after terminal kernel removal
   and completed old-store retirement, preserving predecessor records, digests, locks and monotonic generations.
   Requires fresh kernel logical schema 2; existing schema 1 is not adopted and mutable backing rules are unchanged.
@@ -68,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Environment version-1 specs now reject unknown fields, invalid references/dependencies, and VM counts other than
+  one before effects. Reapply preserves exact resource identity and refuses changed owned declarations; imperative
+  steps and readiness rerun. Cleanup preserves existing resources and reports persistence and teardown failures.
 - Changed the approved VM launch contract to the exact matching Firecracker/Jailer **1.17.0** pair, selecting the
   latest stable official release for this dependency update. The earlier 1.16.2 update fixed the upstream
   1.16.1 pause/resume-vsock defect. Older audited pairs remain manageable binary artifacts, not launch fallbacks.

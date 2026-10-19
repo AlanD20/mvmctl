@@ -67,6 +67,15 @@ Matches user expectation and common CLI conventions (e.g., `curl --connect-timeo
 
 ## Implementation Notes
 
+### Environment readiness exception (2026-10-16)
+
+The approved `ready` environment step is a bounded readiness assertion. Its YAML `timeout` is a positive total
+deadline (default 60 seconds) covering probes, guest check execution, and retry waits; `interval` defaults to one
+second. A deadline is necessary for a readiness gate to fail rather than hold dependent steps indefinitely.
+This narrow exception does not change `exec.timeout`, `ssh.timeout`, or public CLI `--timeout` semantics.
+
+### Ordinary execution
+
 - `internal/core/ssh/service.go`: `s.timeout` is now probe-only. `Connect` and `StreamCommand` run the actual command with `Timeout: 0`.
 - `pkg/api/exec.go`: `input.Timeout` overrides `defaults.vm.vsock_probe_timeout`; `client.Exec` receives `0` for the command timeout.
 - CLI help text updated to say "connect/probe timeout".

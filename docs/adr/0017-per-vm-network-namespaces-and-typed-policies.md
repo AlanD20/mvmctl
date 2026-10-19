@@ -462,6 +462,18 @@ mvm policy exec ...
 
 There is no generic rule, action, selector registry, firewall-expression, or privileged-operation policy.
 
+#### Environment policy ownership (2026-10-16)
+
+Environment-created grants bind a durable workflow ownership token to the exact policy incarnation. The token
+correlates retries and conditional cleanup; it is not authorization. A same-claim retry recovers the exact receipt,
+while an old saved environment cannot remove a grant that was deleted and recreated. Existing policies are selected
+without adoption. Ordinary policy CLI behavior is unchanged.
+
+Traffic creation and conditional removal retain the existing root authority and mutation lease. Even cleanup that
+proves a grant absent requires current endpoint/network authority; externally deleted endpoints can therefore fail
+closed. Normal reverse-dependency teardown removes policies before endpoints. Exec policy claims and conditional
+removal use the atomic desired-intent repository, without granting root or host execution authority.
+
 #### Traffic policies
 
 A traffic policy grants TCP or UDP access to an exact destination VM port or port range. It has one of two closed,
