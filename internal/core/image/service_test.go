@@ -88,6 +88,14 @@ func TestExtractVMRootfsImage_UnrecognizedWholeImagePreservesExport(t *testing.T
 // keeping the service hermetic.
 type fakeRepo struct{}
 
+func (fakeRepo) SaveImported(context.Context, *model.ImageItem) (bool, error) {
+	return false, fmt.Errorf("persistence is not supported by this service fixture")
+}
+
+func (fakeRepo) SavePulled(context.Context, *model.ImageItem) (bool, error) {
+	return false, fmt.Errorf("persistence is not supported by this service fixture")
+}
+
 func (fakeRepo) Get(_ context.Context, _ string) (*model.ImageItem, error) { return nil, nil }
 func (fakeRepo) FindByPrefix(_ context.Context, _ string, _ ...bool) ([]*model.ImageItem, error) {
 	return nil, nil

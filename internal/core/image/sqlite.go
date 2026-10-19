@@ -95,7 +95,34 @@ func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.ImageItem, error) {
 }
 
 func (r *sqliteRepo) Upsert(ctx context.Context, img *model.ImageItem) error {
-	_, err := r.db.ExecContext(ctx,
+	return saveImage(ctx, r.db, img)
+}
+
+func (r *sqliteRepo) SaveImported(ctx context.Context, img *model.ImageItem) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback() // Commit closes the transaction; rollback protects every early return.
+	var count int
+	if err := tx.GetContext(ctx, &count, `SELECT COUNT(*) FROM images WHERE id = ?`, img.ID); err != nil {
+		return false, err
+	}
+	if err := saveImage(ctx, tx, img); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return count == 0, nil
+}
+
+func (r *sqliteRepo) SavePulled(ctx context.Context, img *model.ImageItem) (bool, error) {
+	return r.SaveImported(ctx, img)
+}
+
+func saveImage(ctx context.Context, db sqlx.ExtContext, img *model.ImageItem) error {
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO images (
 			id, type, version, name, distro, arch, path, fs_type, fs_uuid,
 			compressed_size, original_size, compression_ratio,

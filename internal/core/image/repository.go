@@ -25,6 +25,10 @@ type Repository interface {
 	ListAll(ctx context.Context) ([]*model.ImageItem, error)
 	// Upsert inserts or replaces an image record.
 	Upsert(ctx context.Context, img *model.ImageItem) error
+	// SaveImported atomically reports whether this call inserted a new image identity.
+	SaveImported(ctx context.Context, img *model.ImageItem) (bool, error)
+	// SavePulled atomically reports whether this pull inserted a new image identity.
+	SavePulled(ctx context.Context, img *model.ImageItem) (bool, error)
 	// SoftDelete sets deleted_at and is_present=0.
 	SoftDelete(ctx context.Context, imageID string) error
 	// Delete removes an image record permanently.

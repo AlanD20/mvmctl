@@ -12,15 +12,17 @@ import (
 
 // MockImageAPI implements api.ImageAPI for testing.
 type MockImageAPI struct {
-	ImagePruneFunc      func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	ImagePullFunc       func(ctx context.Context, input inputs.ImagePullInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
-	ImageImportFunc     func(ctx context.Context, input inputs.ImageImportInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
-	ImageWarmFunc       func(ctx context.Context, input inputs.ImageInput, all bool, onProgress event.OnProgressCallback) ([]string, error)
-	ImageRemoveFunc     func(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult
-	ImageListAllFunc    func(ctx context.Context, remote bool, typeFilter string, noCache bool, onProgress event.OnProgressCallback) ([]*model.ImageItem, []model.VersionInfo, error)
-	ImageGetFunc        func(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error)
-	ImageInspectFunc    func(ctx context.Context, input inputs.ImageInput) (*results.ImageInspect, error)
-	ImageSetDefaultFunc func(ctx context.Context, input inputs.ImageInput) error
+	ImagePullWithResultFunc   func(context.Context, inputs.ImagePullInput, event.OnProgressCallback) (*results.ImagePullResult, error)
+	ImageImportWithResultFunc func(context.Context, inputs.ImageImportInput, event.OnProgressCallback) (*results.ImageImportResult, error)
+	ImagePruneFunc            func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	ImagePullFunc             func(ctx context.Context, input inputs.ImagePullInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
+	ImageImportFunc           func(ctx context.Context, input inputs.ImageImportInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
+	ImageWarmFunc             func(ctx context.Context, input inputs.ImageInput, all bool, onProgress event.OnProgressCallback) ([]string, error)
+	ImageRemoveFunc           func(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult
+	ImageListAllFunc          func(ctx context.Context, remote bool, typeFilter string, noCache bool, onProgress event.OnProgressCallback) ([]*model.ImageItem, []model.VersionInfo, error)
+	ImageGetFunc              func(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error)
+	ImageInspectFunc          func(ctx context.Context, input inputs.ImageInput) (*results.ImageInspect, error)
+	ImageSetDefaultFunc       func(ctx context.Context, input inputs.ImageInput) error
 }
 
 func (m *MockImageAPI) ImagePrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {

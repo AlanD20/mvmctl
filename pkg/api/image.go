@@ -28,6 +28,11 @@ import (
 
 // ImageAPI defines the public interface for image operations.
 type ImageAPI interface {
+	ImagePullWithResult(
+		context.Context,
+		inputs.ImagePullInput,
+		event.OnProgressCallback,
+	) (*results.ImagePullResult, error)
 	ImagePrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
 	ImagePull(
 		ctx context.Context,
@@ -39,6 +44,11 @@ type ImageAPI interface {
 		input inputs.ImageImportInput,
 		onProgress event.OnProgressCallback,
 	) (*model.ImageItem, error)
+	ImageImportWithResult(
+		context.Context,
+		inputs.ImageImportInput,
+		event.OnProgressCallback,
+	) (*results.ImageImportResult, error)
 	ImageWarm(
 		ctx context.Context,
 		input inputs.ImageInput,
@@ -110,6 +120,19 @@ func (op *Operation) ImagePull(
 	input inputs.ImagePullInput,
 	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
+	result, err := op.ImagePullWithResult(ctx, input, onProgress)
+	if result == nil {
+		return nil, err
+	}
+	return result.Image, err
+}
+
+// ImagePullWithResult distinguishes newly persisted images from cached reuse.
+func (op *Operation) ImagePullWithResult(
+	ctx context.Context,
+	input inputs.ImagePullInput,
+	onProgress event.OnProgressCallback,
+) (*results.ImagePullResult, error) {
 	// Resolve pull input (arch, output dir, validation)
 	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image)
 	if err != nil {
@@ -207,17 +230,19 @@ func (op *Operation) ImagePull(
 				slog.Info("Image already exists", "path", existing.Path)
 				if input.SetDefault {
 					if err := op.Repos.Image.SetDefault(ctx, existing.ID); err != nil {
-						return nil, errs.WrapMsg(errs.CodeImagePullFailed, "failed to set default image", err)
+						return &results.ImagePullResult{Image: existing, Created: false},
+							errs.WrapMsg(errs.CodeImagePullFailed, "failed to set default image", err)
 					}
 					existing.IsDefault = true
 				}
-				return existing, nil
+				return &results.ImagePullResult{Image: existing, Created: false}, nil
 			}
 		}
 	}
 
 	timestamp := time.Now().Format(time.RFC3339)
-	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
+	// Concurrent pulls must never publish to the same second-derived identity or filename.
+	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp+":"+crypto.UUIDV4())
 	workDir, err := os.MkdirTemp(infra.GetTempDir(), "mvm-pull-*")
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Failed to create temp dir: %v", err), err)
@@ -319,12 +344,14 @@ func (op *Operation) ImagePull(
 		}
 	}
 	os.Remove(downloadPath)
-	if err := op.Repos.Image.Upsert(ctx, imageItem); err != nil {
+	created, err := op.Repos.Image.SavePulled(ctx, imageItem)
+	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImagePullFailed, "failed to save image", err)
 	}
 	if input.SetDefault || (existing != nil && existing.IsDefault) {
 		if err := op.Repos.Image.SetDefault(ctx, imageItem.ID); err != nil {
-			return nil, errs.WrapMsg(errs.CodeImagePullFailed, "failed to set default image", err)
+			return &results.ImagePullResult{Image: imageItem, Created: created},
+				errs.WrapMsg(errs.CodeImagePullFailed, "failed to set default image", err)
 		}
 		imageItem.IsDefault = true
 	}
@@ -343,15 +370,28 @@ func (op *Operation) ImagePull(
 			Phase: "complete", Status: "complete", Message: "Image pull complete.",
 		})
 	}
-	return imageItem, nil
+	return &results.ImagePullResult{Image: imageItem, Created: created}, nil
 }
 
-// ImageImport imports a local image file.
+// ImageImport imports a local image file while preserving the existing API shape.
 func (op *Operation) ImageImport(
 	ctx context.Context,
 	input inputs.ImageImportInput,
 	onProgress event.OnProgressCallback,
-) (_ *model.ImageItem, returnErr error) {
+) (*model.ImageItem, error) {
+	result, err := op.ImageImportWithResult(ctx, input, onProgress)
+	if result == nil {
+		return nil, err
+	}
+	return result.Image, err
+}
+
+// ImageImportWithResult distinguishes a new identity from reuse or replacement.
+func (op *Operation) ImageImportWithResult(
+	ctx context.Context,
+	input inputs.ImageImportInput,
+	onProgress event.OnProgressCallback,
+) (_ *results.ImageImportResult, returnErr error) {
 	// Resolve import input (arch, format, validation)
 	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image, op.Repos.VM)
 	if err != nil {
@@ -372,17 +412,21 @@ func (op *Operation) ImageImport(
 			slog.Warn("Failed to connect to VM for sync before import", "vm", resolved.SourceVM.Name, "error", err)
 		}
 	}
-	existing, _ := op.Repos.Image.GetByVersionAndType(ctx, resolved.Version, resolved.Type)
+	existing, err := op.Repos.Image.GetByVersionAndType(ctx, resolved.Version, resolved.Type)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeImageImportFailed, "look up imported image", err)
+	}
 	if !resolved.Force && existing != nil && existing.Path != "" {
 		if _, err := os.Stat(existing.Path); err == nil {
 			slog.Info("Image already exists", "path", existing.Path)
 			if resolved.SetDefault {
 				if err := op.Repos.Image.SetDefault(ctx, existing.ID); err != nil {
-					return nil, errs.WrapMsg(errs.CodeImageImportFailed, "failed to set default image", err)
+					return &results.ImageImportResult{Image: existing, Created: false},
+						errs.WrapMsg(errs.CodeImageImportFailed, "failed to set default image", err)
 				}
 				existing.IsDefault = true
 			}
-			return existing, nil
+			return &results.ImageImportResult{Image: existing, Created: false}, nil
 		}
 	}
 	// Format detection warning
@@ -413,7 +457,7 @@ func (op *Operation) ImageImport(
 	defer tl.Complete()
 
 	timestamp := time.Now().Format(time.RFC3339)
-	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
+	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp+":"+crypto.UUIDV4())
 	sourcePath := *resolved.Source
 	var exportClient *jailersvc.VMRootfsExportClient
 	var releasePending bool
@@ -510,12 +554,14 @@ func (op *Operation) ImageImport(
 	tl.Stage("optimize")
 
 	imageItem.IsImported = true
-	if err := op.Repos.Image.Upsert(ctx, imageItem); err != nil {
+	created, err := op.Repos.Image.SaveImported(ctx, imageItem)
+	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageImportFailed, "failed to save image", err)
 	}
 	if input.SetDefault || (existing != nil && existing.IsDefault) {
 		if err := op.Repos.Image.SetDefault(ctx, imageItem.ID); err != nil {
-			return nil, errs.WrapMsg(errs.CodeImageImportFailed, "failed to set default image", err)
+			return &results.ImageImportResult{Image: imageItem, Created: created},
+				errs.WrapMsg(errs.CodeImageImportFailed, "failed to set default image", err)
 		}
 		imageItem.IsDefault = true
 	}
@@ -540,7 +586,7 @@ func (op *Operation) ImageImport(
 			Phase: "complete", Status: "complete", Message: "Image import complete.",
 		})
 	}
-	return imageItem, nil
+	return &results.ImageImportResult{Image: imageItem, Created: created}, nil
 }
 
 // ImageWarm pre-decompresses images to ready pool for fast VM creation.
