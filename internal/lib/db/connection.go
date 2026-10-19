@@ -214,18 +214,3 @@ func (d *Handle) GetCurrentVersion() (int, error) {
 func (d *Handle) Ping() error {
 	return d.DB().Ping()
 }
-
-// ensureMigrationsTable creates the db_migrations tracking table if it doesn't exist.
-func (d *Handle) ensureMigrationsTable(ctx context.Context) error {
-	_, err := d.DB().ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS db_migrations (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			version INTEGER NOT NULL UNIQUE,
-			name TEXT NOT NULL,
-			applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			checksum TEXT,
-			snapshot_path TEXT
-		)
-	`)
-	return err
-}

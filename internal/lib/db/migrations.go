@@ -2,8 +2,10 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -11,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 
 	"mvmctl/pkg/errs"
 )
@@ -95,178 +99,114 @@ func listMigrationFiles() ([]migrationFile, error) {
 	return files, nil
 }
 
-// takeSnapshot creates an online SQLite backup snapshot before a migration.
-// Uses VACUUM INTO to create a transactionally consistent copy.
-func (d *Handle) takeSnapshot(version int) (string, error) {
-	snapPath := fmt.Sprintf("%s.v%d.snap", d.Path(), version)
-
-	srcDB, err := sql.Open("sqlite", d.Path())
-	if err != nil {
-		return "", fmt.Errorf("open source db for snapshot: %w", err)
-	}
-	defer srcDB.Close()
-
-	if _, err := srcDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", snapPath)); err != nil {
-		return "", fmt.Errorf("create snapshot via VACUUM INTO: %w", err)
-	}
-
-	return snapPath, nil
-}
-
-// RunMigrationsCtx runs pending migrations against the database.
-//
-// Each migration SQL file is executed via ExecContext. No wrapping transaction
-// is used — each statement auto-commits individually in SQLite's autocommit mode.
-//
-// Migration history is recorded in db_migrations table. Schema version is
-// managed by each migration SQL file via PRAGMA user_version.
-//
-// Returns the number of migrations applied (0 if none pending).
-func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
-	sqlDB := d.DB()
-	if err := d.rejectLegacyRemoteExecSchema(ctx); err != nil {
-		return 0, err
-	}
-	if err := d.rejectLegacyVMPlacementSchema(ctx); err != nil {
-		return 0, err
-	}
-
-	// Ensure the tracking table exists
-	if err := d.ensureMigrationsTable(ctx); err != nil {
-		return 0, fmt.Errorf("create migrations table: %w", err)
-	}
-
-	// List available migration files
+// RunMigrationsCtx atomically applies pending SQL, migration receipts and schema version.
+func (d *Handle) RunMigrationsCtx(ctx context.Context) (applied int, runErr error) {
 	files, err := listMigrationFiles()
 	if err != nil {
 		return 0, err
 	}
-	if len(files) == 0 {
-		return 0, nil
+	tx, err := d.DB().BeginTxx(ctx, nil)
+	if err != nil {
+		return 0, errs.WrapMsg(errs.CodeMigrationFailed, "begin migrations", err)
 	}
-
-	// Get current version from PRAGMA user_version
-	var currentVersion int
-	if err := sqlDB.QueryRow("PRAGMA user_version").Scan(&currentVersion); err != nil {
-		return 0, fmt.Errorf("get current version from user_version: %w", err)
+	defer func() {
+		// Rollback is also required after admission refuses an existing database.
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			runErr = errors.Join(runErr, errs.WrapMsg(errs.CodeMigrationFailed, "rollback migrations", err))
+		}
+	}()
+	currentVersion, err := admittedMigrationVersion(ctx, tx, files)
+	if err != nil {
+		return 0, err
 	}
-
-	// Apply pending migrations
-	applied := 0
-	for _, f := range files {
-		if f.version <= currentVersion {
-			continue
+	for _, f := range files[currentVersion:] {
+		if _, err := tx.ExecContext(ctx, f.sql); err != nil {
+			return 0, errs.WrapMsg(errs.CodeMigrationFailed, "apply migration "+f.name, err)
 		}
-
-		// Take online snapshot before migration (for version > 1)
-		snapshotPath := ""
-		if f.version > 1 {
-			snapPath, snapErr := d.takeSnapshot(f.version)
-			if snapErr != nil {
-				return applied, fmt.Errorf("take snapshot before migration %s: %w", f.name, snapErr)
-			}
-			snapshotPath = snapPath
-		}
-
-		// Execute the migration SQL via ExecContext.
-		// No explicit transaction wrapping — each statement auto-commits individually
-		// in SQLite's autocommit mode.
-		if _, err := sqlDB.ExecContext(ctx, f.sql); err != nil {
-			// Migration failed — restore the snapshot taken before it so the
-			// database is left in a clean pre-migration state rather than broken.
-			if snapshotPath != "" {
-				if restoreErr := d.RestoreFromSnapshot(context.WithoutCancel(ctx), snapshotPath); restoreErr != nil {
-					slog.Error("failed to restore snapshot after migration failure",
-						"version", f.version, "snapshot", snapshotPath, "error", restoreErr)
-				}
-			}
-			return applied, errs.New(errs.CodeMigrationFailed,
-				fmt.Sprintf("Migration %s (version %d) failed: %v", f.name, f.version, err))
-		}
-
-		// Record migration with ISO-8601 timestamp.
-		// Use Go's zero value (empty string) for missing snapshot path.
-		appliedAt := time.Now().Format(time.RFC3339)
-		if _, err := sqlDB.ExecContext(ctx,
-			"INSERT INTO db_migrations (version, name, applied_at, snapshot_path) VALUES (?, ?, ?, ?)",
-			f.version, f.name, appliedAt, snapshotPath,
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO db_migrations (version, name, applied_at, checksum, snapshot_path) VALUES (?, ?, ?, ?, '')",
+			f.version, f.name, time.Now().Format(time.RFC3339), migrationChecksum(f),
 		); err != nil {
-			return applied, errs.New(errs.CodeMigrationFailed,
-				fmt.Sprintf("Failed to record migration %s: %v", f.name, err))
+			return 0, errs.WrapMsg(errs.CodeMigrationFailed, "record migration "+f.name, err)
 		}
-		slog.Info("Applied migration", "name", f.name)
-		applied++
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", f.version)); err != nil {
+			return 0, errs.WrapMsg(errs.CodeMigrationFailed, "record schema version", err)
+		}
 	}
-
-	return applied, nil
+	if err := tx.Commit(); err != nil {
+		return 0, errs.WrapMsg(errs.CodeMigrationFailed, "commit migrations", err)
+	}
+	for _, f := range files[currentVersion:] {
+		slog.Info("Applied migration", "name", f.name)
+	}
+	return len(files) - currentVersion, nil
 }
 
-// GetPendingMigrations returns the list of migration files that haven't been applied yet.
+// GetPendingMigrations admits the database without modifying its schema or migration history.
 func (d *Handle) GetPendingMigrations(ctx context.Context) ([]string, error) {
-	if err := d.rejectLegacyRemoteExecSchema(ctx); err != nil {
-		return nil, err
-	}
-	if err := d.rejectLegacyVMPlacementSchema(ctx); err != nil {
-		return nil, err
-	}
-
-	var currentVersion int
-	if err := d.DB().QueryRow("PRAGMA user_version").Scan(&currentVersion); err != nil {
-		return nil, fmt.Errorf("get current version: %w", err)
-	}
-
 	files, err := listMigrationFiles()
 	if err != nil {
 		return nil, err
 	}
-
+	currentVersion, err := admittedMigrationVersion(ctx, d.DB(), files)
+	if err != nil {
+		return nil, err
+	}
 	var pending []string
-	for _, f := range files {
-		if f.version > currentVersion {
-			pending = append(pending, f.name)
-		}
+	for _, f := range files[currentVersion:] {
+		pending = append(pending, f.name)
 	}
 	return pending, nil
 }
 
-func (d *Handle) rejectLegacyRemoteExecSchema(ctx context.Context) error {
-	var legacyColumnCount int
-	if err := d.DB().GetContext(
-		ctx,
-		&legacyColumnCount,
-		"SELECT COUNT(*) FROM pragma_table_info('vm_instances') WHERE name = 'remote_exec'",
-	); err != nil {
-		return errs.WrapMsg(errs.CodeMigrationFailed, "failed to inspect VM schema", err)
-	}
-	if legacyColumnCount == 0 {
-		return nil
-	}
-	return errs.New(
-		errs.CodeMigrationFailed,
-		"clean installation required: v0.3.0 cannot use this legacy VM database; "+
-			"preserve desired artifacts, remove the old mvm state directory, and run mvm init",
-		errs.WithClass(errs.ClassValidation),
-	)
+func migrationChecksum(f migrationFile) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(f.sql)))
 }
 
-func (d *Handle) rejectLegacyVMPlacementSchema(ctx context.Context) error {
-	var legacyTableCount int
-	if err := d.DB().GetContext(ctx, &legacyTableCount, `
-		SELECT COUNT(*) FROM sqlite_master
-		WHERE type = 'table' AND name = 'vm_instances'
-		AND NOT EXISTS (
-			SELECT 1 FROM pragma_table_info('vm_instances') WHERE name = 'network_placement'
-		)
-	`); err != nil {
-		return errs.WrapMsg(errs.CodeMigrationFailed, "failed to inspect VM placement schema", err)
+// Version numbers alone cannot distinguish the fresh baseline from earlier development databases.
+// Receipts are compatibility identity, not an authorization boundary for caller-owned SQLite.
+func admittedMigrationVersion(ctx context.Context, query sqlx.QueryerContext, files []migrationFile) (int, error) {
+	var version int
+	if err := sqlx.GetContext(ctx, query, &version, "PRAGMA user_version"); err != nil {
+		return 0, errs.WrapMsg(errs.CodeMigrationFailed, "read schema version", err)
 	}
-	if legacyTableCount == 0 {
-		return nil
+	var objects int
+	if err := sqlx.GetContext(ctx, query, &objects,
+		"SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"); err != nil {
+		return 0, errs.WrapMsg(errs.CodeMigrationFailed, "inspect database schema", err)
 	}
-	return errs.New(
-		errs.CodeMigrationFailed,
-		"clean installation required: v0.3.0 cannot use a VM database without network placement; "+
-			"preserve desired artifacts, remove the old mvm state directory, and run mvm init",
-		errs.WithClass(errs.ClassValidation),
-	)
+	if version == 0 && objects == 0 {
+		return 0, nil
+	}
+	refuse := func() error {
+		return errs.New(errs.CodeMigrationFailed,
+			"clean installation required: database does not match the v0.3.0 baseline; "+
+				"preserve desired artifacts and initialize a fresh state directory",
+			errs.WithClass(errs.ClassValidation))
+	}
+	if version < 1 || version > len(files) {
+		return 0, refuse()
+	}
+	var receipts []struct {
+		Version  int    `db:"version"`
+		Name     string `db:"name"`
+		Checksum string `db:"checksum"`
+	}
+	if err := sqlx.SelectContext(ctx, query, &receipts,
+		"SELECT version, name, COALESCE(checksum, '') AS checksum FROM db_migrations ORDER BY version"); err != nil {
+		if ctx.Err() != nil {
+			return 0, errs.WrapMsg(errs.CodeMigrationFailed, "read migration history", ctx.Err())
+		}
+		return 0, refuse()
+	}
+	if len(receipts) != version {
+		return 0, refuse()
+	}
+	for i, receipt := range receipts {
+		f := files[i]
+		if receipt.Version != f.version || receipt.Name != f.name || receipt.Checksum != migrationChecksum(f) {
+			return 0, refuse()
+		}
+	}
+	return version, nil
 }

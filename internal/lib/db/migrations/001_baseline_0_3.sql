@@ -1,7 +1,12 @@
--- Migration: 001_initial_schema
--- Version: 1
--- Description: Initial database schema with 15 tables (vm_instances, images, kernels, binaries, volumes, networks, network_leases, host_state, host_state_changes, iptables_rules, nftables_rules, ssh_keys, user_settings, vm_vsock_config, snapshots)
--- Created: 2026-04-02
+-- Fresh v0.3.0 baseline. Migration identity and version are committed by the runner.
+CREATE TABLE db_migrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version INTEGER NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    checksum TEXT,
+    snapshot_path TEXT
+);
 
 -- IMAGES: OS image metadata
 -- JSON mappings: internal_id -> type, filename -> path
@@ -179,6 +184,8 @@ CREATE TABLE vm_instances (
     volume_ids TEXT NULL,       -- JSON array of volume IDs
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    jailer_binary_id TEXT NOT NULL DEFAULT '',
+    cgroup_limits TEXT NOT NULL DEFAULT '{"policy_version":0,"cpu_quota_micros":100000,"cpu_period_micros":100000,"cpu_weight":100,"memory_high_bytes":671088640,"memory_max_bytes":671088640,"swap_max_bytes":0,"pids_max":256}',
     FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE RESTRICT,
     FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE RESTRICT,
     FOREIGN KEY (kernel_id) REFERENCES kernels(id) ON DELETE RESTRICT,
@@ -186,6 +193,7 @@ CREATE TABLE vm_instances (
 );
 CREATE INDEX idx_vm_instances_name ON vm_instances(name);
 CREATE INDEX idx_vm_instances_status ON vm_instances(status);
+CREATE INDEX idx_vm_instances_jailer_binary ON vm_instances(jailer_binary_id);
 
 -- HOST_STATE: Host initialization state (singleton, always id=1)
 CREATE TABLE host_state (
@@ -247,60 +255,6 @@ CREATE INDEX idx_host_changes_session ON host_state_changes(session_id);
 CREATE INDEX idx_host_changes_setting ON host_state_changes(setting);
 CREATE INDEX idx_host_changes_reverted ON host_state_changes(reverted);
 
--- IPTABLES_RULES: Tracks every iptables rule created by mvmctl
--- Enables reliable cleanup and synchronization
-CREATE TABLE iptables_rules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-    -- Rule Location
-    table_name TEXT NOT NULL CHECK(table_name IN ('nat', 'filter')),
-    chain_name TEXT NOT NULL CHECK(chain_name LIKE 'MVM-%'),  -- Only MVM-* chains
-
-    -- Rule Parameters (explicit columns for precise matching)
-    rule_type TEXT NOT NULL CHECK(rule_type IN ('masquerade', 'forward_in', 'forward_out', 'nocloudnet_input')),
-    protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp', 'icmp', 'all')),  -- Default: 'all'
-    source TEXT NOT NULL,                        -- Default: '0.0.0.0/0' (any source)
-    destination TEXT NOT NULL,                   -- Default: '0.0.0.0/0' (any destination)
-    in_interface TEXT NOT NULL,                  -- Input interface (-i), e.g., 'mvm-default'
-    out_interface TEXT NOT NULL,                 -- Output interface (-o), e.g., 'eth0'
-    target TEXT NOT NULL,               -- 'MASQUERADE', 'ACCEPT', 'DROP'
-    sport INTEGER NOT NULL,                      -- Source port (optional)
-    dport INTEGER NOT NULL,                      -- Destination port (optional)
-
-    -- Resource Reference (rules always belong to a network)
-    network_id TEXT NOT NULL,           -- FK to networks (CASCADE delete)
-
-    -- Identification & Debugging
-    comment_tag TEXT NULL,                   -- Full comment: 'mvm:{rule_type}:{network_name}:{context}'
-    command_string TEXT NULL,                -- Full command for debugging
-
-    -- Lifecycle
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    last_verified_at TIMESTAMP NULL,         -- When last confirmed in iptables
-    is_active INTEGER DEFAULT 1 NOT NULL CHECK(is_active IN (0, 1)),
-
-    -- Constraints
-    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
-);
-
--- Indexes for efficient queries
-CREATE INDEX idx_iptables_rules_network ON iptables_rules(network_id);
-CREATE INDEX idx_iptables_rules_chain ON iptables_rules(table_name, chain_name);
-CREATE INDEX idx_iptables_rules_type ON iptables_rules(rule_type);
-CREATE INDEX idx_iptables_rules_active ON iptables_rules(is_active) WHERE is_active = 1;
-CREATE INDEX idx_iptables_rules_interfaces ON iptables_rules(in_interface, out_interface)
-    WHERE in_interface IS NOT NULL OR out_interface IS NOT NULL;
-CREATE INDEX idx_iptables_rules_network_type ON iptables_rules(network_id, rule_type);
-
--- Prevent duplicate active rules for same network+spec combination
-CREATE UNIQUE INDEX idx_iptables_rules_unique_active
-    ON iptables_rules(network_id, rule_type, table_name, chain_name,
-                      COALESCE(protocol, ''), COALESCE(source, ''),
-                      COALESCE(destination, ''), COALESCE(in_interface, ''),
-                      COALESCE(out_interface, ''), target,
-                      COALESCE(sport, -1), COALESCE(dport, -1))
-    WHERE is_active = 1;
-
 -- SSH_KEYS: SSH key metadata and paths
 CREATE TABLE ssh_keys (
     id TEXT PRIMARY KEY,
@@ -329,50 +283,6 @@ CREATE TABLE user_settings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (category, key)
 );
-
--- NFTABLES_RULES: Tracks every nftables rule created by mvmctl
-CREATE TABLE IF NOT EXISTS nftables_rules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-    -- Rule Location
-    chain TEXT NOT NULL CHECK(chain LIKE 'MVM-%'),       -- Only MVM-* chains (same as iptables)
-    rule_type TEXT NOT NULL CHECK(rule_type IN ('masquerade', 'forward_in', 'forward_out', 'nocloudnet_input')),
-    table_name TEXT NOT NULL CHECK(table_name IN ('filter', 'nat')),
-
-    -- Rule Parameters
-    protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp', 'icmp', 'all')),
-    source TEXT NOT NULL,
-    destination TEXT NOT NULL,
-    in_interface TEXT NOT NULL,
-    out_interface TEXT NOT NULL,
-    target TEXT NOT NULL,
-    sport INTEGER NOT NULL,
-    dport INTEGER NOT NULL,
-
-    -- Resource Reference
-    network_id TEXT NOT NULL REFERENCES networks(id) ON DELETE CASCADE,
-
-    -- Identification & Debugging
-    nft_handle INTEGER NULL,
-    comment_tag TEXT NULL,
-    command_string TEXT NULL,
-
-    -- Lifecycle
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    last_verified_at TIMESTAMP NULL,
-    is_active INTEGER DEFAULT 1 NOT NULL CHECK(is_active IN (0, 1))
-);
-
-CREATE INDEX IF NOT EXISTS idx_nftables_rules_network ON nftables_rules(network_id);
-CREATE INDEX IF NOT EXISTS idx_nftables_rules_chain ON nftables_rules(chain);
-CREATE INDEX IF NOT EXISTS idx_nftables_rules_active ON nftables_rules(is_active) WHERE is_active = 1;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_nftables_rules_unique_active
-    ON nftables_rules(network_id, rule_type, chain,
-                      COALESCE(protocol, ''), COALESCE(source, ''),
-                      COALESCE(destination, ''), COALESCE(in_interface, ''),
-                      COALESCE(out_interface, ''), target,
-                      COALESCE(sport, -1), COALESCE(dport, -1))
-    WHERE is_active = 1;
 
 -- VSOCK_CONFIG: Per-VM vsock device and agent configuration
 CREATE TABLE vm_vsock_config (
@@ -418,5 +328,61 @@ CREATE INDEX idx_snapshots_kernel ON snapshots(kernel_id);
 CREATE INDEX idx_snapshots_network ON snapshots(network_id);
 CREATE INDEX idx_snapshots_binary ON snapshots(binary_id);
 
--- Set schema version
-PRAGMA user_version = 1;
+CREATE TABLE network_traffic_policies (
+    id TEXT PRIMARY KEY CHECK(length(id) = 64 AND id NOT GLOB '*[^0-9a-f]*'),
+    source_network_id TEXT NOT NULL,
+    destination_vm_id TEXT NOT NULL,
+    protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp')),
+    destination_port_start INTEGER NOT NULL CHECK(destination_port_start BETWEEN 1 AND 65535),
+    destination_port_end INTEGER NOT NULL CHECK(destination_port_end BETWEEN destination_port_start AND 65535),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    claim_id TEXT NOT NULL DEFAULT '',
+    incarnation TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (source_network_id) REFERENCES networks(id) ON DELETE CASCADE,
+    FOREIGN KEY (destination_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    UNIQUE(source_network_id, destination_vm_id, protocol, destination_port_start, destination_port_end)
+);
+CREATE INDEX idx_network_traffic_source ON network_traffic_policies(source_network_id);
+CREATE INDEX idx_network_traffic_destination ON network_traffic_policies(destination_vm_id);
+
+CREATE TABLE vm_traffic_policies (
+    id TEXT PRIMARY KEY CHECK(length(id) = 64 AND id NOT GLOB '*[^0-9a-f]*'),
+    source_vm_id TEXT NOT NULL,
+    destination_vm_id TEXT NOT NULL,
+    protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp')),
+    destination_port_start INTEGER NOT NULL CHECK(destination_port_start BETWEEN 1 AND 65535),
+    destination_port_end INTEGER NOT NULL CHECK(destination_port_end BETWEEN destination_port_start AND 65535),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    claim_id TEXT NOT NULL DEFAULT '',
+    incarnation TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (source_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    FOREIGN KEY (destination_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    CHECK(source_vm_id <> destination_vm_id),
+    UNIQUE(source_vm_id, destination_vm_id, protocol, destination_port_start, destination_port_end)
+);
+CREATE INDEX idx_vm_traffic_source ON vm_traffic_policies(source_vm_id);
+CREATE INDEX idx_vm_traffic_destination ON vm_traffic_policies(destination_vm_id);
+
+CREATE TABLE exec_policies (
+    id TEXT PRIMARY KEY CHECK(length(id) = 64 AND id NOT GLOB '*[^0-9a-f]*'),
+    source_vm_id TEXT NOT NULL,
+    destination_vm_id TEXT NOT NULL,
+    target_user TEXT NOT NULL CHECK(
+        length(target_user) BETWEEN 1 AND 32
+        AND target_user <> 'root'
+        AND substr(target_user, 1, 1) GLOB '[a-z_]'
+        AND target_user NOT GLOB '*[^a-z0-9_-]*'
+    ),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    claim_id TEXT NOT NULL DEFAULT '',
+    incarnation TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (source_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    FOREIGN KEY (destination_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    CHECK(source_vm_id <> destination_vm_id),
+    UNIQUE(source_vm_id, destination_vm_id, target_user)
+);
+CREATE INDEX idx_exec_policy_source ON exec_policies(source_vm_id);
+CREATE INDEX idx_exec_policy_destination ON exec_policies(destination_vm_id);
