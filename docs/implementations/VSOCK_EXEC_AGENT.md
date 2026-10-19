@@ -268,7 +268,7 @@ type FirecrackerVMConfig struct {
 ### DB schema
 
 The `vm_vsock_config` table is created in
-`internal/lib/db/migrations/001_initial_schema.sql`:
+`internal/lib/db/migrations/001_baseline_0_3.sql`:
 
 ```sql
 CREATE TABLE vm_vsock_config (

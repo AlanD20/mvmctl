@@ -271,6 +271,8 @@ particular, root active identity cannot be inferred from user state or bypassed 
 v0.3.0 no longer uses the legacy `remote_vm` relay, shared `activeConn`, `OnHostFrame`, or
 `internal/vsockhandler`. A guest cannot inject a new operation into an ordinary exec response stream. The VM-wide
 remote-exec field, configuration default, create flags/input/result, repository persistence, and environment-spec
-property are also removed. Fresh databases use schema version 6 without the column. Schema-version 3, 4, or 5
-databases that still contain it are rejected before pending-migration inspection or migration application and remain
-unchanged, even if every stored bit is false. v0.3.0 provides no conversion from that trust mesh to directional policy.
+property are also removed. The fresh v0.3.0 version-1 baseline contains no such column. Pending-migration inspection
+and migration application require a matching baseline filename/checksum receipt for existing state and reject older
+or unknown databases unchanged, regardless of legacy trust-bit values. v0.3.0 provides no conversion from that trust
+mesh to directional policy. See the
+[clean-installation contract](../adr/0017-per-vm-network-namespaces-and-typed-policies.md#clean-installation-contract).

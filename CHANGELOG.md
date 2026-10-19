@@ -71,6 +71,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Collapsed the nine development SQL migrations into one complete `001_baseline_0_3.sql` fresh-install schema at
+  version 1. Existing databases require matching migration filenames and SHA-256 receipts; older or unknown state
+  refuses unchanged with clean-install guidance. Future numbered migrations remain supported. SQL, receipts, and
+  version changes commit atomically; automatic pre-migration snapshots are removed.
+- Enabled NAT now accepts multiple eligible IPv4 main-table default routes when all resolve to the same uplink.
+  Selection is stable across route-dump ordering; distinct uplinks refuse even at different metrics, and retained
+  route/link evidence is revalidated before use.
 - Environment version-1 specs now reject unknown fields, invalid references/dependencies, and VM counts other than
   one before effects. Reapply preserves exact resource identity and refuses changed owned declarations; imperative
   steps and readiness rerun. Cleanup preserves existing resources and reports persistence and teardown failures.
@@ -135,7 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   artifacts. Invoking/system privileged protocol mismatch stops before effects.
 - Required cgroup v2 with the necessary controllers and kernel nftables bridge/inet, connection-tracking, and
   NAT support. Managed networks require non-overlapping RFC1918 prefixes with usable hosts (`/30` or larger).
-  Enabled NAT requires one unambiguous eligible IPv4 default-route uplink; caller-selected uplinks are removed.
+  Enabled NAT requires all eligible IPv4 main-table default routes to resolve to one uplink; caller-selected uplinks
+  are removed.
 - Removed flat policy commands, `allow_remote_exec`/legacy VM-wide trust state, the `remote_vm` protocol,
   iptables/`nft` CLI backends and selectors, raw host-tool sudo grants, and public `run provision`/`run jailer`.
   Recreate typed traffic/exec grants; previously unrestricted managed peer traffic now starts denied.

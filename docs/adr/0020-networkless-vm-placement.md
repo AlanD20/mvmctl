@@ -3,7 +3,7 @@
 **Status:** Accepted for v0.3.0; source integrated, partial installed qualification passed;
 full release qualification incomplete
 **Date:** 2026-09-26
-**Last Updated:** 2026-10-13 (release qualification status)
+**Last Updated:** 2026-10-19 (fresh-install baseline)
 **Extends:** [ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md) and [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md)
 
 ## Context
@@ -74,13 +74,16 @@ now accepts an explicit networkless placement and emits no NIC or kernel `ip=` a
 rejecting managed endpoint fields, NoCloud NET mode, and caller-supplied `ip=` or `ds=` boot arguments. Generated
 offline NoCloud arguments are limited to the fixed local ISO or injected-seed form; the old duplicated `ds=ds=` inject
 argument was corrected. Offline cloud-init seed generation no longer requires a fabricated IP/gateway or writes a
-network configuration. The fresh version-8 user VM schema persists explicit placement, retains the managed network
+network configuration. The fresh v0.3.0 version-1 baseline persists explicit placement, retains the managed network
 foreign key, and stores SQL
 `NULL` rather than a fabricated network ID for networkless rows. Public create now selects networkless placement only
 with explicit `--no-network`; omission continues to select the managed default. Its resolver rejects conflicting
 endpoint and NoCloud NET fields, avoids default-network lookup for the explicit variant, and does not allocate a
 TAP, MAC, or IP lease. Relaunch reconstructs and retains the persisted variant, rejecting malformed networkless state
-before reboot stops the VM. Public SSH rejects networkless placement with a vsock-exec direction.
+before reboot stops the VM. The baseline replaces the earlier development schema versions; existing databases must
+match its migration receipt rather than relying on a version number. See the
+[clean-installation contract](0017-per-vm-network-namespaces-and-typed-policies.md#clean-installation-contract).
+Public SSH rejects networkless placement with a vsock-exec direction.
 The public root launch wire requires an explicit managed or networkless tag and rejects omitted, unknown, or mixed
 endpoint variants before effects.
 The strict schema-5 instance codec rejects older-schema records, including cleaned tombstones. Separately, the private

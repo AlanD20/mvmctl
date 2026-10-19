@@ -2,7 +2,7 @@
 
 **Status:** Accepted; source integrated, partial installed qualification passed; full release qualification incomplete
 **Date:** 2026-08-23
-**Last Updated:** 2026-10-13 (source completion and guest-kernel capability clarification)
+**Last Updated:** 2026-10-19 (fresh-install baseline and same-uplink route admission)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 **No-IP placement:** [ADR-0020: Networkless VM Placement](0020-networkless-vm-placement.md) specifies the separate
@@ -85,18 +85,22 @@ The v0.3.0 public network contract retains only the NAT enabled/disabled choice.
 user model, and privileged request expose no `NATGateways` list, interface name, ifindex, route, or uplink selector.
 When NAT is disabled, no uplink authority is required and the firewall compiler emits neither uplink egress nor NAT.
 
-When NAT is enabled, root uses a typed rtnetlink authority pinned to the exact host network namespace to discover one
-eligible main-table IPv4 default route. Eligibility requires one unicast `0.0.0.0/0` route with exactly one output
-interface, no multipath next hops, and a resolved link that is neither loopback nor mvm-owned. Root does not rank
-several candidates by metric: zero or multiple eligible routes fail closed because multi-uplink selection is not
-supported in v0.3.0.
+When NAT is enabled, root uses a typed rtnetlink authority pinned to the exact host network namespace to discover the
+eligible main-table IPv4 default routes. Each eligible route must be unicast `0.0.0.0/0` with exactly one output
+interface, no multipath next hops, and a resolved link that is neither loopback nor mvm-owned. Multiple eligible
+routes are accepted only when all resolve to the same uplink ifindex. Root retains a deterministic representative
+independent of route-dump order. No eligible uplink or distinct eligible uplinks fail closed, even when metrics differ;
+metrics never choose between uplinks. Multi-uplink selection remains unsupported in v0.3.0.
 
 The admitted managed-network authority persists the selected uplink's exact ifindex, name, link kind, and host
 network-namespace device/inode. Root reopens and revalidates both route and link immediately before compilation,
 application, and topology activation. A missing route, changed interface or namespace identity, replacement, or
 additional eligible uplink blocks activation and preserves cleanup authority. Only this retained typed identity may
-enter the private compiler; a caller-provided raw link name never does. Removal of the current `NATGateways`
-input/model surface and raw compiler uplink field, plus focused and live tests, remains pending.
+enter the private compiler; a caller-provided raw link name never does.
+
+Accepted clarification (2026-10-19): route uniqueness is defined by the resolved uplink identity, not by route count.
+Several routes on the same interface do not create a choice of egress interface. This supersedes the earlier
+exactly-one-route restriction while retaining exact route/link revalidation and refusal of distinct uplinks.
 
 #### Retained activation authority
 
@@ -588,12 +592,13 @@ active-pair/capacity authority, runtime policy resolution/enforcement, redacted 
 qualification were still pending. No production path opened a `SourceSession` or constructed an authorized destination
 request at that slice.
 
-The sixth slice removes the VM-wide trust flag without attempting compatibility. Fresh databases end at schema version
-6 with no `remote_exec` column. The VM model, configuration default, create input/result, repository persistence, CLI
-flags, and environment-spec examples no longer expose it. Before either pending-migration inspection or migration
-application, schema-version 3, 4, or 5 databases that still contain the removed column fail with an explicit
-clean-install-required validation error and remain unchanged. The guard treats column presence as legacy state even
-when every stored bit is false; no value is converted into a directional policy.
+The sixth slice removed the VM-wide trust flag without attempting compatibility. At that checkpoint, fresh databases
+ended at schema version 6 with no `remote_exec` column. The slice removed it from the VM model, configuration default,
+create input/result, repository persistence, CLI flags, and environment-spec examples. Its admission guard rejected
+schema-version 3, 4, or 5 databases containing the removed column before pending-migration inspection or migration
+application, with a clean-install-required validation error and no database changes. Column presence marked legacy
+state even when every stored bit was false; no value was converted into a directional policy. The receipt-based
+version-1 baseline below supersedes that checkpoint's migration admission rules.
 
 The seventh slice implements Task 15's private capacity substrate without activating the relay. Root stores strict
 schema-1 reservations at `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` beneath exact `root:root` mode-`0700`
@@ -777,10 +782,18 @@ report per-item results explicitly; partial success is never collapsed into a ni
 ## Clean-Installation Contract
 
 v0.3.0 does not read, migrate, backfill, or preserve legacy policy rows, iptables state, host-global TAP ownership, or
-VM-wide remote-exec values. The fresh database schema is version 6 and contains no such column. Pending-migration and
-migration admission reject schema-version 3 through 5 databases that still contain it before schema work, leave the
-database unchanged, and return an explicit clean-install-required diagnostic. Initialization never silently adopts or
-deletes ambiguous host state.
+VM-wide remote-exec values. The fresh database contains no VM-wide trust column, obsolete firewall tracking, or routed
+service-access policy tables. Initialization never silently adopts or deletes ambiguous host state.
+
+Accepted baseline cutover (2026-10-19): `001_baseline_0_3.sql` replaces the nine development migrations and creates the
+complete final v0.3.0 schema at SQLite `user_version=1`, preserving its indexes and constraints. An empty
+version-0 database may initialize; an existing database must have a complete numbered migration history matching the
+embedded filenames and SHA-256 checksums, beginning with this baseline receipt. A version number alone is insufficient.
+Pending-migration inspection and migration application refuse older or unknown databases before schema work with a
+clean-install-required validation error, leaving their schema, version, and contents unchanged. This supersedes the
+earlier version-specific legacy-column checks. Future schema changes retain sequential numbered migrations. All
+pending SQL, receipts, and `user_version` commit in one transaction or roll back together; automatic pre-migration
+snapshots are not part of this contract. Receipts establish compatibility for caller-owned SQLite, not root authority.
 
 Operators must stop and remove old VMs, retain any desired user artifacts separately, remove the old mvm state
 directory selected by `MVM_CACHE_DIR` (normally `~/.cache/mvmctl`) through the documented clean-install procedure,

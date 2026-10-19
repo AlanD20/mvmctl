@@ -214,10 +214,11 @@ Defined in `internal/lib/db/migrations/*.sql`. Accessed via `github.com/jmoiron/
 
 The final schema includes `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`,
 `host_state`, `host_state_changes`, `network_traffic_policies`, `vm_traffic_policies`, `exec_policies`, `ssh_keys`,
-`user_settings`, `vm_vsock_config`, `snapshots`, and `db_migrations`. Migrations may create transitional tables and
-then retire them before version 7. Read `internal/lib/db/migrations/` for the exact schema. The fresh version-8
-`vm_instances` row records `managed` or `networkless` placement explicitly. A managed row retains a real network
-foreign key, IPv4, and MAC; a networkless row stores a SQL `NULL` network ID and empty endpoint fields.
+`user_settings`, `vm_vsock_config`, `snapshots`, and `db_migrations`. The single fresh-install migration,
+`internal/lib/db/migrations/001_baseline_0_3.sql`, creates the complete v0.3.0 schema at SQLite `user_version=1`,
+including its indexes and constraints. The `vm_instances` row records `managed` or `networkless` placement
+explicitly. A managed row retains a real network foreign key, IPv4, and MAC; a networkless row stores a SQL `NULL`
+network ID and empty endpoint fields.
 
 `host_state` is a caller-owned capacity cache, not administrator setup authority. The first `mvm host info` read
 creates its row if needed; `--refresh` re-detects and updates it. Root-owned host admission and its journal remain
@@ -230,17 +231,18 @@ unsafe policy state or an unavailable, missing or invalid observation returns an
 wizard may request explicit administrator bootstrap with an unknown initial policy state, but must verify policy and group
 state afterward before reporting setup success.
 
-The fresh v0.3.0 schema is version 8 and has no VM-wide `remote_exec` column. Migration `007` retires empty obsolete
-firewall tracking and routed service-access policy tables and selector settings, refusing populated tables rather than
-adopting their state. Pending-migration inspection and migration execution reject an older VM table without the
-placement column with clean-install guidance; migration `008` also verifies that column before recording version 8.
-It does not convert an older version-7 VM table. Schema-version 3, 4, or 5 databases that still contain the removed
-`remote_exec` column are also legacy databases, even when every stored value is false. Both pending-migration
-inspection and migration application reject them with a validation-class `database.migration.failed` error before
-schema work, leaving their version and contents unchanged. v0.3.0 does not infer directional exec policies from that
-legacy bit. After stopping the old VMs and preserving desired artifacts, remove the old mvm state directory selected
-by `MVM_CACHE_DIR` (normally `~/.cache/mvmctl`) through the documented clean-install procedure and initialize fresh
-v0.3.0 state; never delete live state as an incidental migration step.
+The baseline replaces the nine development migrations; it contains no VM-wide `remote_exec` column, obsolete firewall
+tracking or routed service-access policy tables, or retired selector settings. Version numbers alone do not identify
+compatible databases. Both pending-migration inspection and migration execution accept only an empty version-0
+database or a database whose complete migration history matches the embedded numbered files by version, filename,
+and SHA-256 checksum. The baseline receipt must name `001_baseline_0_3.sql`; older or unknown databases are refused
+with a validation-class `database.migration.failed` clean-install diagnostic, leaving their schema, version, and
+contents unchanged. No legacy trust bit or policy is converted. Future changes continue with sequential numbered
+migrations after the baseline. Pending SQL, migration receipts, and `user_version` commit in one transaction and roll
+back together on failure; migrations do not create automatic pre-migration snapshots. After stopping the old VMs and
+preserving desired artifacts, remove the old mvm state directory selected by `MVM_CACHE_DIR` (normally
+`~/.cache/mvmctl`) through the documented clean-install procedure and initialize fresh v0.3.0 state; never delete live
+state as an incidental migration step. Receipts identify compatibility in caller-owned SQLite, not privileged authority.
 
 The same fresh schema deliberately does not make `vm_vsock_config.guest_cid` globally unique. Each Firecracker process
 serves its vsock device through an independent UDS endpoint and therefore has its own CID namespace, while a snapshot
@@ -629,13 +631,15 @@ route through the resolved gateway, all without an explicit metric. Default gues
 the versioned, NUL-framed owner/VM SHA-256 derivation; the selected globally unique unicast MAC is persisted.
 
 Public NAT intent is only enabled or disabled; v0.3.0 removes the public/unprivileged `NATGateways` interface-name
-choice. For enabled NAT, root must discover exactly one eligible IPv4 main-table default-route uplink through typed
-rtnetlink pinned to the host network namespace, persist its exact ifindex/name/kind/namespace identity, and revalidate
-it before compile/apply/activation. Zero, multiple, multipath, replaced, or changed candidates fail closed; metrics do
-not select among several routes, and multi-uplink selection is unsupported. The public NAT interface-name selectors
-are removed. Named root managed-network create/remove and exact removal receipts are implemented, and core/API
-network mutations now consume them. Retrying a pending desired network requires exactly matching inputs. Missing root
-authority does not authorize cleanup of an interrupted local projection. System qualification remains pending.
+choice. For enabled NAT, root discovers eligible IPv4 main-table default routes through typed rtnetlink pinned to the
+host network namespace. Multiple routes are permitted only when all resolve to the same uplink ifindex. Root retains a
+deterministic representative independent of route-dump order, persists its exact route and link identity, and
+revalidates it before compile/apply/activation. No eligible uplink, distinct uplinks even at different metrics,
+multipath, replacement, or changed retained evidence fail closed; multi-uplink selection is unsupported. The public
+NAT interface-name selectors are removed. Named root managed-network create/remove and exact removal receipts are
+implemented, and core/API network mutations now consume them. Retrying a pending desired network requires exactly
+matching inputs. Missing root authority does not authorize cleanup of an interrupted local projection. System
+qualification remains pending.
 
 Production topology preparation must consume the opaque child `TopologyHold` from the real Jailer VM lock and retain
 it, the namespace pin, and later firewall endpoint authority through active or retryable cleaning state. After all
