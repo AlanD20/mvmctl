@@ -205,6 +205,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   systemd admission, and NoCloud readiness-pipe deadlines.
 - Fixed read-only LoopMount inspection access-time drift and fixed-path `blkid` fallback.
   Partition extraction falls back to `parted` after failed/malformed `sfdisk` probes instead of assuming no table.
+- Fixed Btrfs-to-ext4 image conversion on newer kernels by using `rescue=nologreplay` for the read-only snapshot mount.
 - Fixed image SHA-512 sidecar verification, including Alpine bare-token checksums; malformed/unavailable configured
   metadata refuses publication. Fixed automatic import format resolution and long image name/version selectors.
 - Fixed image pull/import and `kernel pull --default` to return committed default state and propagate write errors.

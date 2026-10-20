@@ -46,7 +46,12 @@ func convertRootfsImage(ctx context.Context, deps rootfsVMProvisionDeps, lease *
 		return outcome, err
 	}
 	if record.Phase == imageConversionPrepared {
-		if err := copyImageConversionSnapshot(ctx, lease.rootfsFD, transaction.snapshotFD, record.Original.Size); err != nil {
+		if err := copyImageConversionSnapshot(
+			ctx,
+			lease.rootfsFD,
+			transaction.snapshotFD,
+			record.Original.Size,
+		); err != nil {
 			return outcome, err
 		}
 		after, err := inspectImageConversionFile(
@@ -249,7 +254,8 @@ func constructImageConversionCandidate(
 	if err := revalidateRootfsInspectMountpoint(ctx, deps.inspectDeps(), mountpoint); err != nil {
 		return err
 	}
-	if err := deps.mount(ctx, sourcePath, rootfsInspectMountPath, string(FilesystemBtrfs), rootfsInspectMountFlags, "nologreplay"); err != nil {
+	if err := deps.mount(ctx, sourcePath, rootfsInspectMountPath,
+		string(FilesystemBtrfs), rootfsInspectMountFlags, "rescue=nologreplay"); err != nil {
 		return rootfsAtomicError("mount immutable conversion snapshot", err)
 	}
 	mounted = true
@@ -318,7 +324,8 @@ func imageConversionCapacity(ctx context.Context, rootFD int) (uint64, uint64, e
 			return rootfsAtomicError("conversion tree exceeds directory depth bound", nil)
 		}
 		fd, err := unix.Openat2(parentFD, ".", &unix.OpenHow{
-			Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW, Resolve: rootfsDescendantResolveFlags,
+			Flags:   unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW,
+			Resolve: rootfsDescendantResolveFlags,
 		})
 		if err != nil {
 			return rootfsAtomicError("open conversion tree directory", err)
