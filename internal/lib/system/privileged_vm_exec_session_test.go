@@ -725,7 +725,8 @@ func TestPrivilegedVMExecSessionHelper(t *testing.T) {
 			os.Exit(30)
 		}
 		if mode == "open-failure-open" {
-			select {}
+			// A live timer keeps the helper idle until its parent kills it, rather than deadlocking and exiting.
+			time.Sleep(time.Minute)
 		}
 		if mode == "open-trailing" {
 			_, _ = control.Write([]byte("x"))
@@ -799,7 +800,7 @@ func TestPrivilegedVMExecSessionHelper(t *testing.T) {
 		os.Exit(9)
 	}
 	if mode == "terminal-open" {
-		select {}
+		time.Sleep(time.Minute)
 	}
 	if mode == "terminal-trailing" {
 		_, _ = control.Write([]byte("x"))

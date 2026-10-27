@@ -804,7 +804,8 @@ func TestPrivilegedControlHelper(t *testing.T) {
 	case "test-non-eof":
 		_, _ = io.ReadAll(os.Stdin)
 		_, _ = os.Stdin.WriteString("response:partial")
-		select {}
+		// Keep a live timer: select{} triggers runtime deadlock exit and fabricates socket EOF.
+		time.Sleep(time.Minute)
 	case "test-overflow":
 		_, _ = io.ReadAll(os.Stdin)
 		_, _ = os.Stdin.Write(repeatedPrivilegedControlBytes("r", 128))
@@ -822,7 +823,7 @@ func TestPrivilegedControlHelper(t *testing.T) {
 	case "test-exact-response-open":
 		_, _ = io.ReadAll(os.Stdin)
 		_, _ = os.Stdin.Write(repeatedPrivilegedControlBytes("r", 32))
-		select {}
+		time.Sleep(time.Minute)
 	case "test-short-payload":
 		observed, _ := io.ReadAll(os.Stdin)
 		_, _ = os.Stdin.Write(append([]byte("observed:"), observed...))
@@ -842,7 +843,7 @@ func TestPrivilegedControlHelper(t *testing.T) {
 		_, _ = io.ReadAll(os.Stdin)
 		_, _ = os.Stdin.WriteString("response:complete")
 		_ = unix.Shutdown(int(os.Stdin.Fd()), unix.SHUT_WR)
-		select {}
+		time.Sleep(time.Minute)
 	default:
 		os.Exit(94)
 	}
