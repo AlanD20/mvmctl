@@ -118,11 +118,43 @@ func newTrafficPolicyCmd(policyAPI api.PolicyAPI) *cobra.Command {
 
 func newTrafficPolicyCreateCmd(policyAPI api.PolicyAPI) *cobra.Command {
 	var sourceNetwork, sourceVM, destination, protocol, port string
+	var toHost bool
 	cmd := &cobra.Command{
 		Use: "create", Short: "Record one network-source or exact VM-source traffic allow intent.", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if (sourceNetwork == "") == (sourceVM == "") {
 				return errs.New(errs.CodeValidationFailed, "exactly one of --from-network or --from-vm is required")
+			}
+			if toHost == (destination != "") {
+				return errs.New(errs.CodeValidationFailed, "exactly one of --to-vm or --to-host is required")
+			}
+			if toHost && sourceNetwork != "" {
+				policy, err := policyAPI.NetworkToHostTrafficPolicyCreate(cmd.Context(),
+					inputs.NetworkToHostTrafficPolicyCreateInput{
+						SourceNetwork: sourceNetwork, Protocol: protocol, DestinationPort: port,
+					})
+				if err != nil {
+					return err
+				}
+				if common.RecordResult(policy) {
+					return nil
+				}
+				common.Cli.PrintDictTree(common.Cli.ToMap(policy), "Network-to-host traffic allow intent")
+				return nil
+			}
+			if toHost {
+				policy, err := policyAPI.VMToHostTrafficPolicyCreate(cmd.Context(),
+					inputs.VMToHostTrafficPolicyCreateInput{
+						SourceVM: sourceVM, Protocol: protocol, DestinationPort: port,
+					})
+				if err != nil {
+					return err
+				}
+				if common.RecordResult(policy) {
+					return nil
+				}
+				common.Cli.PrintDictTree(common.Cli.ToMap(policy), "VM-to-host traffic allow intent")
+				return nil
 			}
 			if sourceNetwork != "" {
 				policy, err := policyAPI.NetworkToVMTrafficPolicyCreate(
@@ -159,8 +191,11 @@ func newTrafficPolicyCreateCmd(policyAPI api.PolicyAPI) *cobra.Command {
 	cmd.Flags().StringVar(&sourceNetwork, "from-network", "", "Source managed network")
 	cmd.Flags().StringVar(&sourceVM, "from-vm", "", "Exact source VM")
 	cmd.Flags().StringVar(&destination, "to-vm", "", "Exact destination VM")
+	cmd.Flags().BoolVar(&toHost, "to-host", false, "Destination is the source managed network's host gateway")
 	cmd.Flags().StringVar(&protocol, "protocol", "", "TCP/UDP protocol: tcp or udp")
 	cmd.Flags().StringVar(&port, "port", "", "Destination port or bounded range")
+	cmd.MarkFlagsMutuallyExclusive("from-network", "from-vm")
+	cmd.MarkFlagsMutuallyExclusive("to-vm", "to-host")
 	if err := cmd.RegisterFlagCompletionFunc("from-network", completeNetworkNames); err != nil {
 		panic(err)
 	}
@@ -181,7 +216,7 @@ var trafficPolicyColumns = []common.ListingColumn{
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(trafficPolicyRow).id) }},
 	{Header: "Source Kind", Extract: func(v any) string { return v.(trafficPolicyRow).sourceKind }},
 	{Header: "Source", Extract: func(v any) string { return v.(trafficPolicyRow).source }},
-	{Header: "Destination VM", Extract: func(v any) string { return v.(trafficPolicyRow).destination }},
+	{Header: "Destination", Extract: func(v any) string { return v.(trafficPolicyRow).destination }},
 	{Header: "Protocol", Extract: func(v any) string { return v.(trafficPolicyRow).protocol }},
 	{Header: "Destination Port", Extract: func(v any) string { return v.(trafficPolicyRow).port }},
 }
@@ -198,13 +233,29 @@ func newTrafficPolicyListCmd(policyAPI api.PolicyAPI) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			networkHosts, err := policyAPI.NetworkToHostTrafficPolicyList(cmd.Context())
+			if err != nil {
+				return err
+			}
+			vmHosts, err := policyAPI.VMToHostTrafficPolicyList(cmd.Context())
+			if err != nil {
+				return err
+			}
 			if networks == nil {
 				networks = []*results.NetworkToVMTrafficPolicy{}
 			}
 			if vms == nil {
 				vms = []*results.VMToVMTrafficPolicy{}
 			}
-			if common.RecordResult(&results.TrafficPolicies{NetworkToVM: networks, VMToVM: vms}) {
+			if networkHosts == nil {
+				networkHosts = []*results.NetworkToHostTrafficPolicy{}
+			}
+			if vmHosts == nil {
+				vmHosts = []*results.VMToHostTrafficPolicy{}
+			}
+			if common.RecordResult(&results.TrafficPolicies{
+				NetworkToVM: networks, VMToVM: vms, NetworkToHost: networkHosts, VMToHost: vmHosts,
+			}) {
 				return nil
 			}
 			rows := make([]trafficPolicyRow, 0, len(networks)+len(vms))
@@ -228,6 +279,16 @@ func newTrafficPolicyListCmd(policyAPI api.PolicyAPI) *cobra.Command {
 					trafficPolicyPorts(policy.DestinationPortStart, policy.DestinationPortEnd),
 				})
 			}
+			for _, policy := range networkHosts {
+				rows = append(rows, trafficPolicyRow{policy.ID, "network", policy.SourceNetworkName,
+					"host (" + policy.Gateway + ")", string(policy.Protocol),
+					trafficPolicyPorts(policy.DestinationPortStart, policy.DestinationPortEnd)})
+			}
+			for _, policy := range vmHosts {
+				rows = append(rows, trafficPolicyRow{policy.ID, "vm", policy.SourceVMName,
+					"host (" + policy.Gateway + ")", string(policy.Protocol),
+					trafficPolicyPorts(policy.DestinationPortStart, policy.DestinationPortEnd)})
+			}
 			common.RenderListing(rows, trafficPolicyColumns, "short")
 			return nil
 		},
@@ -242,13 +303,37 @@ func trafficPolicyPorts(start, end int) string {
 }
 
 func newTrafficPolicyInspectCmd(policyAPI api.PolicyAPI) *cobra.Command {
-	var networkSource, vmSource bool
+	var networkSource, vmSource, toHost bool
 	cmd := &cobra.Command{
 		Use: "inspect [policy]", Short: "Inspect desired traffic allow intent.", Args: cobra.ExactArgs(1),
 		ValidArgsFunction: completePolicyIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if networkSource == vmSource {
 				return errs.New(errs.CodeValidationFailed, "exactly one of --from-network or --from-vm is required")
+			}
+			if toHost && networkSource {
+				policy, err := policyAPI.NetworkToHostTrafficPolicyInspect(cmd.Context(),
+					inputs.NetworkToHostTrafficPolicyInput{Identifiers: args})
+				if err != nil {
+					return err
+				}
+				if common.RecordResult(policy) {
+					return nil
+				}
+				common.Cli.PrintDictTree(common.Cli.ToMap(policy), "Network-to-host traffic allow intent")
+				return nil
+			}
+			if toHost {
+				policy, err := policyAPI.VMToHostTrafficPolicyInspect(cmd.Context(),
+					inputs.VMToHostTrafficPolicyInput{Identifiers: args})
+				if err != nil {
+					return err
+				}
+				if common.RecordResult(policy) {
+					return nil
+				}
+				common.Cli.PrintDictTree(common.Cli.ToMap(policy), "VM-to-host traffic allow intent")
+				return nil
 			}
 			if networkSource {
 				policy, err := policyAPI.NetworkToVMTrafficPolicyInspect(
@@ -280,11 +365,12 @@ func newTrafficPolicyInspectCmd(policyAPI api.PolicyAPI) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&networkSource, "from-network", false, "Select the network-source policy family")
 	cmd.Flags().BoolVar(&vmSource, "from-vm", false, "Select the VM-source policy family")
+	cmd.Flags().BoolVar(&toHost, "to-host", false, "Select grants to the managed host gateway")
 	return cmd
 }
 
 func newTrafficPolicyRemoveCmd(policyAPI api.PolicyAPI) *cobra.Command {
-	var networkSource, vmSource, force bool
+	var networkSource, vmSource, force, toHost bool
 	cmd := &cobra.Command{
 		Use: "rm [policies...]", Aliases: []string{"remove", "delete", "del"},
 		Short: "Remove desired traffic allow intent after authoritative revocation.", Args: cobra.MinimumNArgs(1),
@@ -303,16 +389,23 @@ func newTrafficPolicyRemoveCmd(policyAPI api.PolicyAPI) *cobra.Command {
 					return nil
 				}
 			}
-			if networkSource {
-				if err := policyAPI.NetworkToVMTrafficPolicyRemove(cmd.Context(),
-					inputs.NetworkToVMTrafficPolicyInput{Identifiers: args}); err != nil {
-					return err
-				}
-			} else {
-				if err := policyAPI.VMToVMTrafficPolicyRemove(cmd.Context(),
-					inputs.VMToVMTrafficPolicyInput{Identifiers: args}); err != nil {
-					return err
-				}
+			var removeErr error
+			switch {
+			case toHost && networkSource:
+				removeErr = policyAPI.NetworkToHostTrafficPolicyRemove(cmd.Context(),
+					inputs.NetworkToHostTrafficPolicyInput{Identifiers: args})
+			case toHost:
+				removeErr = policyAPI.VMToHostTrafficPolicyRemove(cmd.Context(),
+					inputs.VMToHostTrafficPolicyInput{Identifiers: args})
+			case networkSource:
+				removeErr = policyAPI.NetworkToVMTrafficPolicyRemove(cmd.Context(),
+					inputs.NetworkToVMTrafficPolicyInput{Identifiers: args})
+			default:
+				removeErr = policyAPI.VMToVMTrafficPolicyRemove(cmd.Context(),
+					inputs.VMToVMTrafficPolicyInput{Identifiers: args})
+			}
+			if removeErr != nil {
+				return removeErr
 			}
 			if common.StructuredOutput() {
 				return nil
@@ -324,5 +417,6 @@ func newTrafficPolicyRemoveCmd(policyAPI api.PolicyAPI) *cobra.Command {
 	cmd.Flags().BoolVar(&networkSource, "from-network", false, "Select the network-source policy family")
 	cmd.Flags().BoolVar(&vmSource, "from-vm", false, "Select the VM-source policy family")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
+	cmd.Flags().BoolVar(&toHost, "to-host", false, "Select grants to the managed host gateway")
 	return cmd
 }

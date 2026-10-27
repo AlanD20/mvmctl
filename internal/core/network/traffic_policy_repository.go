@@ -6,9 +6,21 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// TrafficPolicyRepository persists the two closed traffic allow-intent forms.
-// InvalidateByVM spans both tables so callers cannot observe partial invalidation.
+// TrafficPolicyRepository persists closed VM and managed-host traffic allow intents.
+// InvalidateByVM spans all affected tables so callers cannot observe partial invalidation.
 type TrafficPolicyRepository interface {
+	ProjectVMToHost(ctx context.Context, intent *model.VMToHostTrafficAllowIntent) error
+	ProjectNetworkToHost(ctx context.Context, intent *model.NetworkToHostTrafficAllowIntent) error
+	GetVMToHost(ctx context.Context, policyID string) (*model.VMToHostTrafficAllowIntent, error)
+	GetNetworkToHost(ctx context.Context, policyID string) (*model.NetworkToHostTrafficAllowIntent, error)
+	FindVMToHostByPrefix(ctx context.Context, prefix string) ([]*model.VMToHostTrafficAllowIntent, error)
+	FindNetworkToHostByPrefix(ctx context.Context, prefix string) ([]*model.NetworkToHostTrafficAllowIntent, error)
+	ListVMToHost(ctx context.Context) ([]*model.VMToHostTrafficAllowIntent, error)
+	ListNetworkToHost(ctx context.Context) ([]*model.NetworkToHostTrafficAllowIntent, error)
+	DeleteVMToHost(ctx context.Context, policyIDs []string) error
+	DeleteNetworkToHost(ctx context.Context, policyIDs []string) error
+	DeleteOwnedVMToHost(ctx context.Context, policyID, claim, incarnation string) error
+	DeleteOwnedNetworkToHost(ctx context.Context, policyID, claim, incarnation string) error
 	ProjectNetworkToVM(ctx context.Context, intent *model.NetworkToVMTrafficAllowIntent) error
 	ProjectVMToVM(ctx context.Context, intent *model.VMToVMTrafficAllowIntent) error
 	DeleteOwnedNetworkToVM(ctx context.Context, policyID, claim, incarnation string) error

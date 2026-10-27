@@ -24,10 +24,28 @@ type VMToVMTrafficPolicy struct {
 	NetworkRelation        model.ManagedNetworkRelation `json:"network_relation"`
 }
 
-// TrafficPolicies keeps the two closed traffic source forms distinct in list output.
+// TrafficPolicies keeps closed source and destination forms distinct in list output.
 type TrafficPolicies struct {
-	NetworkToVM []*NetworkToVMTrafficPolicy `json:"network_to_vm"`
-	VMToVM      []*VMToVMTrafficPolicy      `json:"vm_to_vm"`
+	NetworkToVM   []*NetworkToVMTrafficPolicy   `json:"network_to_vm"`
+	VMToVM        []*VMToVMTrafficPolicy        `json:"vm_to_vm"`
+	NetworkToHost []*NetworkToHostTrafficPolicy `json:"network_to_host"`
+	VMToHost      []*VMToHostTrafficPolicy      `json:"vm_to_host"`
+}
+
+// VMToHostTrafficPolicy describes a gateway grant; Gateway is display data, not mutation authority.
+type VMToHostTrafficPolicy struct {
+	model.VMToHostTrafficAllowIntent
+	SourceVMName      string `json:"source_vm_name"`
+	SourceNetworkID   string `json:"source_network_id"`
+	SourceNetworkName string `json:"source_network_name"`
+	Gateway           string `json:"gateway"`
+}
+
+// NetworkToHostTrafficPolicy describes access to the source managed network's own host gateway.
+type NetworkToHostTrafficPolicy struct {
+	model.NetworkToHostTrafficAllowIntent
+	SourceNetworkName string `json:"source_network_name"`
+	Gateway           string `json:"gateway"`
 }
 
 // VMToVMExecPolicy describes one directional non-root execution grant with current VM names.

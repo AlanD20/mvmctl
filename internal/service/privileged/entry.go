@@ -336,6 +336,14 @@ func dispatch(
 		return dispatchHandled, handleRemoveNetworkTrafficPolicy(ctx, endpoint, caller, deps.control)
 	case network.VMTrafficPolicyRemoveAction:
 		return dispatchHandled, handleRemoveVMTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.VMHostTrafficPolicyApplyAction:
+		return dispatchHandled, handleApplyVMHostTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.VMHostTrafficPolicyRemoveAction:
+		return dispatchHandled, handleRemoveVMHostTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.NetworkHostTrafficPolicyApplyAction:
+		return dispatchHandled, handleApplyNetworkHostTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.NetworkHostTrafficPolicyRemoveAction:
+		return dispatchHandled, handleRemoveNetworkHostTrafficPolicy(ctx, endpoint, caller, deps.control)
 	case jailer.RuntimeStatusAction:
 		return dispatchHandled, handleRuntimeStatus(ctx, endpoint, caller, deps.runtimeStatus, deps.control)
 	case jailer.ConsoleObserveAction:

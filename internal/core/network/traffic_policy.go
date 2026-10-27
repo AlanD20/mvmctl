@@ -8,16 +8,18 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// TrafficPolicyService manages the two closed traffic-policy source forms.
+// TrafficPolicyService manages closed VM and managed-host traffic-policy forms.
 type TrafficPolicyService struct {
 	repo TrafficPolicyRepository
 }
 
-// TrafficPolicyAllowIntents contains persisted desired grants in their two closed source forms.
+// TrafficPolicyAllowIntents contains persisted desired grants for VM and managed-host destinations.
 // These rows are not compiled firewall rules and do not describe applied kernel state.
 type TrafficPolicyAllowIntents struct {
-	NetworkToVM []*model.NetworkToVMTrafficAllowIntent
-	VMToVM      []*model.VMToVMTrafficAllowIntent
+	NetworkToVM   []*model.NetworkToVMTrafficAllowIntent
+	VMToVM        []*model.VMToVMTrafficAllowIntent
+	NetworkToHost []*model.NetworkToHostTrafficAllowIntent
+	VMToHost      []*model.VMToHostTrafficAllowIntent
 }
 
 // NewTrafficPolicyService creates a traffic policy service.
@@ -76,7 +78,19 @@ func (s *TrafficPolicyService) AllowIntents(ctx context.Context) (*TrafficPolicy
 		slog.Error("failed to list VM traffic policy intents", "error", err)
 		return nil, errs.WrapMsg(errs.CodePolicyListFailed, "failed to list VM traffic policy intents", err)
 	}
-	return &TrafficPolicyAllowIntents{NetworkToVM: fromNetworks, VMToVM: fromVMs}, nil
+	networkHosts, err := s.repo.ListNetworkToHost(ctx)
+	if err != nil {
+		slog.Error("failed to list network-to-host policy intents", "error", err)
+		return nil, errs.WrapMsg(errs.CodePolicyListFailed, "failed to list network-to-host policy intents", err)
+	}
+	vmHosts, err := s.repo.ListVMToHost(ctx)
+	if err != nil {
+		slog.Error("failed to list VM-to-host policy intents", "error", err)
+		return nil, errs.WrapMsg(errs.CodePolicyListFailed, "failed to list VM-to-host policy intents", err)
+	}
+	return &TrafficPolicyAllowIntents{
+		NetworkToVM: fromNetworks, VMToVM: fromVMs, NetworkToHost: networkHosts, VMToHost: vmHosts,
+	}, nil
 }
 
 // RemoveNetworkToVM deletes network-source policy intent atomically.

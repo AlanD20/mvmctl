@@ -195,7 +195,7 @@ func validateStepInput(kind, name string, spec model.ResourceMap) error {
 	case "volume", "traffic_policy", "exec_policy", "ready":
 		allowed := map[string]string{
 			"volume":         "name size read_only shareable writeback retain existing",
-			"traffic_policy": "source_network source_vm destination_vm protocol port existing",
+			"traffic_policy": "source_network source_vm destination_vm destination_host protocol port existing",
 			"exec_policy":    "source_vm destination_vm target_user existing",
 			"ready":          "target cmd timeout interval user",
 		}

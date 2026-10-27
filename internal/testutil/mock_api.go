@@ -34,15 +34,23 @@ type MockOperation struct {
 
 // MockPolicyAPI implements api.PolicyAPI for composite-interface compatibility.
 type MockPolicyAPI struct {
-	NetworkToVMTrafficPolicyCreateFunc  func(context.Context, inputs.NetworkToVMTrafficPolicyCreateInput) (*results.NetworkToVMTrafficPolicy, error)
-	NetworkToVMTrafficPolicyListFunc    func(context.Context) ([]*results.NetworkToVMTrafficPolicy, error)
-	NetworkToVMTrafficPolicyInspectFunc func(context.Context, inputs.NetworkToVMTrafficPolicyInput) (*results.NetworkToVMTrafficPolicy, error)
-	NetworkToVMTrafficPolicyRemoveFunc  func(context.Context, inputs.NetworkToVMTrafficPolicyInput) error
-	VMToVMTrafficPolicyCreateFunc       func(context.Context, inputs.VMToVMTrafficPolicyCreateInput) (*results.VMToVMTrafficPolicy, error)
-	VMToVMTrafficPolicyListFunc         func(context.Context) ([]*results.VMToVMTrafficPolicy, error)
-	VMToVMTrafficPolicyInspectFunc      func(context.Context, inputs.VMToVMTrafficPolicyInput) (*results.VMToVMTrafficPolicy, error)
-	VMToVMTrafficPolicyRemoveFunc       func(context.Context, inputs.VMToVMTrafficPolicyInput) error
-	ExecPolicyCreateFunc                func(
+	VMToHostTrafficPolicyCreateFunc       func(context.Context, inputs.VMToHostTrafficPolicyCreateInput) (*results.VMToHostTrafficPolicy, error)
+	VMToHostTrafficPolicyListFunc         func(context.Context) ([]*results.VMToHostTrafficPolicy, error)
+	VMToHostTrafficPolicyInspectFunc      func(context.Context, inputs.VMToHostTrafficPolicyInput) (*results.VMToHostTrafficPolicy, error)
+	VMToHostTrafficPolicyRemoveFunc       func(context.Context, inputs.VMToHostTrafficPolicyInput) error
+	NetworkToHostTrafficPolicyCreateFunc  func(context.Context, inputs.NetworkToHostTrafficPolicyCreateInput) (*results.NetworkToHostTrafficPolicy, error)
+	NetworkToHostTrafficPolicyListFunc    func(context.Context) ([]*results.NetworkToHostTrafficPolicy, error)
+	NetworkToHostTrafficPolicyInspectFunc func(context.Context, inputs.NetworkToHostTrafficPolicyInput) (*results.NetworkToHostTrafficPolicy, error)
+	NetworkToHostTrafficPolicyRemoveFunc  func(context.Context, inputs.NetworkToHostTrafficPolicyInput) error
+	NetworkToVMTrafficPolicyCreateFunc    func(context.Context, inputs.NetworkToVMTrafficPolicyCreateInput) (*results.NetworkToVMTrafficPolicy, error)
+	NetworkToVMTrafficPolicyListFunc      func(context.Context) ([]*results.NetworkToVMTrafficPolicy, error)
+	NetworkToVMTrafficPolicyInspectFunc   func(context.Context, inputs.NetworkToVMTrafficPolicyInput) (*results.NetworkToVMTrafficPolicy, error)
+	NetworkToVMTrafficPolicyRemoveFunc    func(context.Context, inputs.NetworkToVMTrafficPolicyInput) error
+	VMToVMTrafficPolicyCreateFunc         func(context.Context, inputs.VMToVMTrafficPolicyCreateInput) (*results.VMToVMTrafficPolicy, error)
+	VMToVMTrafficPolicyListFunc           func(context.Context) ([]*results.VMToVMTrafficPolicy, error)
+	VMToVMTrafficPolicyInspectFunc        func(context.Context, inputs.VMToVMTrafficPolicyInput) (*results.VMToVMTrafficPolicy, error)
+	VMToVMTrafficPolicyRemoveFunc         func(context.Context, inputs.VMToVMTrafficPolicyInput) error
+	ExecPolicyCreateFunc                  func(
 		context.Context,
 		inputs.VMToVMExecPolicyCreateInput,
 	) (*results.VMToVMExecPolicy, error)

@@ -60,6 +60,26 @@ func completePolicyIDs(cmd *cobra.Command, args []string, toComplete string) ([]
 			results = append(results, short)
 		}
 	}
+	networkHosts, err := opRef.NetworkToHostTrafficPolicyList(cmd.Context())
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	for _, policy := range networkHosts {
+		short := crypto.Truncate(policy.ID, 12)
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
+			results = append(results, short)
+		}
+	}
+	vmHosts, err := opRef.VMToHostTrafficPolicyList(cmd.Context())
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	for _, policy := range vmHosts {
+		short := crypto.Truncate(policy.ID, 12)
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
+			results = append(results, short)
+		}
+	}
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 

@@ -12,6 +12,27 @@ import (
 
 // EnvironmentPolicyAPI provides atomic receipt-based ownership for workflow policy steps.
 type EnvironmentPolicyAPI interface {
+	VMToHostTrafficPolicyEnsure(
+		context.Context,
+		inputs.VMToHostTrafficPolicyCreateInput,
+		inputs.EnvironmentPolicyOwnershipInput,
+	) (*results.EnvironmentPolicyReceipt, error)
+	VMToHostTrafficPolicyRemoveOwned(
+		context.Context,
+		inputs.VMToHostTrafficPolicyCreateInput,
+		inputs.EnvironmentPolicyOwnershipInput,
+	) error
+
+	NetworkToHostTrafficPolicyEnsure(
+		context.Context,
+		inputs.NetworkToHostTrafficPolicyCreateInput,
+		inputs.EnvironmentPolicyOwnershipInput,
+	) (*results.EnvironmentPolicyReceipt, error)
+	NetworkToHostTrafficPolicyRemoveOwned(
+		context.Context,
+		inputs.NetworkToHostTrafficPolicyCreateInput,
+		inputs.EnvironmentPolicyOwnershipInput,
+	) error
 	NetworkToVMTrafficPolicyEnsure(
 		context.Context,
 		inputs.NetworkToVMTrafficPolicyCreateInput,

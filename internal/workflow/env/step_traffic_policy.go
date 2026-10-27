@@ -24,18 +24,20 @@ type TrafficPolicyState struct {
 	Incarnation     string `yaml:"incarnation"`
 	SourceNetworkID string `yaml:"source_network_id,omitempty"`
 	SourceVMID      string `yaml:"source_vm_id,omitempty"`
-	DestinationVMID string `yaml:"destination_vm_id"`
+	DestinationVMID string `yaml:"destination_vm_id,omitempty"`
+	DestinationHost bool   `yaml:"destination_host,omitempty"`
 	Protocol        string `yaml:"protocol"`
 	Port            string `yaml:"port"`
 }
 
 type trafficPolicyDeclaration struct {
-	SourceNetwork string `yaml:"source_network"`
-	SourceVM      string `yaml:"source_vm"`
-	DestinationVM string `yaml:"destination_vm"`
-	Protocol      string `yaml:"protocol"`
-	Port          string `yaml:"port"`
-	Existing      string `yaml:"existing"`
+	SourceNetwork   string `yaml:"source_network"`
+	SourceVM        string `yaml:"source_vm"`
+	DestinationVM   string `yaml:"destination_vm"`
+	DestinationHost bool   `yaml:"destination_host"`
+	Protocol        string `yaml:"protocol"`
+	Port            string `yaml:"port"`
+	Existing        string `yaml:"existing"`
 }
 
 type trafficPolicyStepAPI interface {
@@ -45,7 +47,7 @@ type trafficPolicyStepAPI interface {
 	api.NetworkAPI
 }
 
-// TrafficPolicyStep applies typed network-to-VM or VM-to-VM grants through root policy authority.
+// TrafficPolicyStep applies typed VM or gateway grants through root policy authority.
 type TrafficPolicyStep struct {
 	resourceStepRecord
 	input trafficPolicyDeclaration
@@ -88,7 +90,13 @@ func (s *TrafficPolicyStep) Apply(ctx context.Context, state *workflow.SharedSta
 	}
 	var receipt *results.EnvironmentPolicyReceipt
 	var applyErr error
-	if output.SourceNetworkID != "" {
+	if output.DestinationHost && output.SourceNetworkID != "" {
+		receipt, applyErr = s.op.NetworkToHostTrafficPolicyEnsure(ctx, output.networkHostInput(),
+			inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
+	} else if output.DestinationHost {
+		receipt, applyErr = s.op.VMToHostTrafficPolicyEnsure(ctx, output.vmHostInput(),
+			inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
+	} else if output.SourceNetworkID != "" {
 		receipt, applyErr = s.op.NetworkToVMTrafficPolicyEnsure(ctx, output.networkInput(),
 			inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
 	} else {
@@ -114,21 +122,23 @@ func (s *TrafficPolicyStep) resolveEndpoints(
 	ctx context.Context,
 	state *workflow.SharedState,
 ) (*TrafficPolicyState, error) {
-	destination, err := resourceStepReference(state, s.input.DestinationVM, "vm")
-	if err != nil {
-		return nil, err
+	output := &TrafficPolicyState{
+		DestinationHost: s.input.DestinationHost, Protocol: s.input.Protocol, Port: s.input.Port,
 	}
-	destinationVM, err := s.op.VMGet(ctx, inputs.VMInput{Identifiers: []string{destination}})
-	if err != nil {
-		return nil, err
+	if !s.input.DestinationHost {
+		destination, err := resourceStepReference(state, s.input.DestinationVM, "vm")
+		if err != nil {
+			return nil, err
+		}
+		destinationVM, err := s.op.VMGet(ctx, inputs.VMInput{Identifiers: []string{destination}})
+		if err != nil {
+			return nil, err
+		}
+		if destinationVM == nil || (strings.HasPrefix(s.input.DestinationVM, "@") && destinationVM.ID != destination) {
+			return nil, resourceIdentityMismatch(s.Name())
+		}
+		output.DestinationVMID = destinationVM.ID
 	}
-	if destinationVM == nil {
-		return nil, resourceIdentityMismatch(s.Name())
-	}
-	if strings.HasPrefix(s.input.DestinationVM, "@") && destinationVM.ID != destination {
-		return nil, resourceIdentityMismatch(s.Name())
-	}
-	output := &TrafficPolicyState{DestinationVMID: destinationVM.ID, Protocol: s.input.Protocol, Port: s.input.Port}
 	if s.input.SourceNetwork != "" {
 		source, err := resourceStepReference(state, s.input.SourceNetwork, "network")
 		if err != nil {
@@ -166,12 +176,16 @@ func (s *TrafficPolicyStep) resolveEndpoints(
 }
 
 func (s *TrafficPolicyStep) inspectExisting(ctx context.Context, output *TrafficPolicyState) error {
-	input := output.vmInput()
-	// Port admission is identical for both closed source forms.
-	input.SourceVM = "source"
+	// Port admission is identical for VM and host destinations; this parses no endpoint identity.
+	input := inputs.VMToHostTrafficPolicyCreateInput{
+		SourceVM: "source", Protocol: output.Protocol, DestinationPort: output.Port,
+	}
 	protocol, first, last, err := input.ResolvedTraffic()
 	if err != nil {
 		return err
+	}
+	if output.DestinationHost {
+		return s.inspectExistingHostPolicy(ctx, output, protocol, first, last)
 	}
 	if output.SourceNetworkID != "" {
 		item, err := s.op.NetworkToVMTrafficPolicyInspect(ctx, inputs.NetworkToVMTrafficPolicyInput{
@@ -222,7 +236,13 @@ func (s *TrafficPolicyStep) Destroy(ctx context.Context, saved model.ResourceSta
 		return s.persist(ctx, write)
 	}
 	var err error
-	if output.SourceNetworkID != "" {
+	if output.DestinationHost && output.SourceNetworkID != "" {
+		err = s.op.NetworkToHostTrafficPolicyRemoveOwned(ctx, output.networkHostInput(),
+			inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
+	} else if output.DestinationHost {
+		err = s.op.VMToHostTrafficPolicyRemoveOwned(ctx, output.vmHostInput(),
+			inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
+	} else if output.SourceNetworkID != "" {
 		err = s.op.NetworkToVMTrafficPolicyRemoveOwned(ctx, output.networkInput(),
 			inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
 	} else {
@@ -253,7 +273,19 @@ func newTrafficPolicyStepFromSpec(stepType, name string, spec model.ResourceMap,
 			"traffic policy requires exactly one source_network or source_vm",
 		)
 	}
-	if input.SourceNetwork != "" {
+	if input.DestinationHost == (input.DestinationVM != "") {
+		return nil, errs.New(errs.CodeValidationFailed,
+			"traffic policy requires exactly one destination_vm or destination_host: true")
+	}
+	if input.DestinationHost && input.SourceNetwork != "" {
+		validation := inputs.NetworkToHostTrafficPolicyCreateInput{SourceNetwork: input.SourceNetwork,
+			Protocol: input.Protocol, DestinationPort: input.Port}
+		err = validation.Validate()
+	} else if input.DestinationHost {
+		validation := inputs.VMToHostTrafficPolicyCreateInput{SourceVM: input.SourceVM,
+			Protocol: input.Protocol, DestinationPort: input.Port}
+		err = validation.Validate()
+	} else if input.SourceNetwork != "" {
 		validation := inputs.NetworkToVMTrafficPolicyCreateInput{SourceNetwork: input.SourceNetwork,
 			DestinationVM: input.DestinationVM, Protocol: input.Protocol, DestinationPort: input.Port}
 		err = validation.Validate()

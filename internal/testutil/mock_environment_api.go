@@ -21,12 +21,16 @@ func (m *MockReadyAPI) ExecReady(ctx context.Context, input inputs.ReadyInput) (
 
 // MockEnvironmentPolicyAPI supplies explicit ownership outcomes for workflow tests.
 type MockEnvironmentPolicyAPI struct {
-	NetworkToVMTrafficPolicyEnsureFunc      func(context.Context, inputs.NetworkToVMTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
-	NetworkToVMTrafficPolicyRemoveOwnedFunc func(context.Context, inputs.NetworkToVMTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) error
-	VMToVMTrafficPolicyEnsureFunc           func(context.Context, inputs.VMToVMTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
-	VMToVMTrafficPolicyRemoveOwnedFunc      func(context.Context, inputs.VMToVMTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) error
-	ExecPolicyEnsureFunc                    func(context.Context, inputs.VMToVMExecPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
-	ExecPolicyRemoveOwnedFunc               func(context.Context, inputs.VMToVMExecPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) error
+	VMToHostTrafficPolicyEnsureFunc           func(context.Context, inputs.VMToHostTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
+	VMToHostTrafficPolicyRemoveOwnedFunc      func(context.Context, inputs.VMToHostTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) error
+	NetworkToHostTrafficPolicyEnsureFunc      func(context.Context, inputs.NetworkToHostTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
+	NetworkToHostTrafficPolicyRemoveOwnedFunc func(context.Context, inputs.NetworkToHostTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) error
+	NetworkToVMTrafficPolicyEnsureFunc        func(context.Context, inputs.NetworkToVMTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
+	NetworkToVMTrafficPolicyRemoveOwnedFunc   func(context.Context, inputs.NetworkToVMTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) error
+	VMToVMTrafficPolicyEnsureFunc             func(context.Context, inputs.VMToVMTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
+	VMToVMTrafficPolicyRemoveOwnedFunc        func(context.Context, inputs.VMToVMTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) error
+	ExecPolicyEnsureFunc                      func(context.Context, inputs.VMToVMExecPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
+	ExecPolicyRemoveOwnedFunc                 func(context.Context, inputs.VMToVMExecPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) error
 }
 
 func (m *MockEnvironmentPolicyAPI) NetworkToVMTrafficPolicyEnsure(

@@ -152,13 +152,31 @@ func (r *trafficPolicySQLiteRepo) InvalidateByVM(ctx context.Context, vmID strin
 		`DELETE FROM vm_traffic_policies WHERE source_vm_id = ? OR destination_vm_id = ?`, vmID, vmID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM vm_host_traffic_policies WHERE source_vm_id = ?`, vmID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
 func (r *trafficPolicySQLiteRepo) InvalidateByNetwork(ctx context.Context, networkID string) error {
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM network_traffic_policies WHERE source_network_id = ?`, networkID)
-	return err
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Rollback after Commit returns sql.ErrTxDone; the operation result is authoritative.
+		_ = tx.Rollback()
+	}()
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM network_traffic_policies WHERE source_network_id = ?`, networkID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM network_host_traffic_policies WHERE source_network_id = ?`, networkID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func deleteTrafficPolicyAllowIntents(
