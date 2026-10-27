@@ -51,5 +51,10 @@ func (lease *MutationLease) VerifyNetworkAbsent(ctx context.Context) error {
 			return generationAuthorityError("firewall network still has a host service grant", nil, nil)
 		}
 	}
+	for _, grant := range state.intent.NetworkHostGrants {
+		if grant.SourceNetworkID == networkID {
+			return generationAuthorityError("firewall network still has a host traffic grant", nil, nil)
+		}
+	}
 	return verifyExactCommittedGeneration(ctx, state.network.kernel, state.compiled)
 }

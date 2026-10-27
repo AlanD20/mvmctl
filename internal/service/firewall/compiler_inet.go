@@ -64,6 +64,8 @@ func (compiler *generationCompiler) compileINet(intent generationIntent) {
 			))
 	}
 
+	compiler.compileHostTraffic(intent)
+
 	for _, network := range networks {
 		compiler.addRule(&compiler.generation.inet, input, "inet.input.default-deny."+network.id,
 			joinExpressions(matchInputInterface(network.hostBridge), dropVerdict()))

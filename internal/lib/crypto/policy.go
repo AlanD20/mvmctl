@@ -34,6 +34,18 @@ func VMToVMTrafficPolicyDigest(intent model.VMToVMTrafficAllowIntent) string {
 	)
 }
 
+// VMToHostTrafficPolicyDigest returns the deterministic identity of one VM-to-managed-host grant.
+func VMToHostTrafficPolicyDigest(intent model.VMToHostTrafficAllowIntent) string {
+	return digestTypedPolicy("traffic-vm-to-host", intent.SourceVMID, string(intent.Protocol),
+		strconv.Itoa(intent.DestinationPortStart), strconv.Itoa(intent.DestinationPortEnd))
+}
+
+// NetworkToHostTrafficPolicyDigest returns the deterministic identity of one network-to-managed-host grant.
+func NetworkToHostTrafficPolicyDigest(intent model.NetworkToHostTrafficAllowIntent) string {
+	return digestTypedPolicy("traffic-network-to-host", intent.SourceNetworkID, string(intent.Protocol),
+		strconv.Itoa(intent.DestinationPortStart), strconv.Itoa(intent.DestinationPortEnd))
+}
+
 // VMToVMExecPolicyDigest returns the deterministic identity of one directional VM-to-VM exec grant.
 func VMToVMExecPolicyDigest(intent model.VMToVMExecAllowIntent) string {
 	return digestTypedPolicy(

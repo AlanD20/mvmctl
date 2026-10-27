@@ -101,6 +101,26 @@ type HostServiceIntent struct {
 	Ports           PortInterval `json:"ports"`
 }
 
+// VMHostTrafficGrant permits one owned VM to reach its managed network's host gateway.
+type VMHostTrafficGrant struct {
+	ClaimID     string       `json:"claim_id,omitempty"`
+	Incarnation string       `json:"incarnation,omitempty"`
+	ID          string       `json:"id"`
+	SourceVMID  string       `json:"source_vm_id"`
+	Protocol    Protocol     `json:"protocol"`
+	Ports       PortInterval `json:"ports"`
+}
+
+// NetworkHostTrafficGrant permits an owned managed network to reach its own host gateway.
+type NetworkHostTrafficGrant struct {
+	ClaimID         string       `json:"claim_id,omitempty"`
+	Incarnation     string       `json:"incarnation,omitempty"`
+	ID              string       `json:"id"`
+	SourceNetworkID string       `json:"source_network_id"`
+	Protocol        Protocol     `json:"protocol"`
+	Ports           PortInterval `json:"ports"`
+}
+
 // Intent is the full host-global graph stored beside the authoritative generation record.
 // A graph is admitted only when its compiler-derived identity agrees with that record.
 type Intent struct {
@@ -111,6 +131,9 @@ type Intent struct {
 	VMGrants       []VMTrafficGrant      `json:"vm_grants"`
 	NetworkGrants  []NetworkTrafficGrant `json:"network_grants"`
 	HostServices   []HostServiceIntent   `json:"host_services"`
+	// Omitted empty extensions preserve the exact canonical encoding of existing root journals.
+	VMHostGrants      []VMHostTrafficGrant      `json:"vm_host_grants,omitempty"`
+	NetworkHostGrants []NetworkHostTrafficGrant `json:"network_host_grants,omitempty"`
 }
 
 func (intent Intent) compile() (compiledGeneration, error) {
@@ -176,6 +199,24 @@ func (intent Intent) compile() (compiledGeneration, error) {
 				service.Protocol,
 			),
 			ports: portInterval{first: service.Ports.First, last: service.Ports.Last},
+		})
+	}
+	for _, grant := range intent.VMHostGrants {
+		if _, sourceActive := active[grant.SourceVMID]; !sourceActive {
+			continue
+		}
+		resolved.vmHostGrants = append(resolved.vmHostGrants, vmHostTrafficGrant{
+			id: grant.ID, sourceVMID: grant.SourceVMID, protocol: protocol(grant.Protocol),
+			ports: portInterval{first: grant.Ports.First, last: grant.Ports.Last},
+		})
+	}
+	for _, grant := range intent.NetworkHostGrants {
+		if _, sourceActive := activeNetworks[grant.SourceNetworkID]; !sourceActive {
+			continue
+		}
+		resolved.networkHostGrants = append(resolved.networkHostGrants, networkHostTrafficGrant{
+			id: grant.ID, sourceNetworkID: grant.SourceNetworkID, protocol: protocol(grant.Protocol),
+			ports: portInterval{first: grant.Ports.First, last: grant.Ports.Last},
 		})
 	}
 	return compileGeneration(resolved)
@@ -306,6 +347,30 @@ func (intent Intent) validateDurablePolicies() error {
 		}
 		if _, found := networks[service.SourceNetworkID]; !found {
 			return invalidGeneration("host service references an absent network")
+		}
+	}
+	for _, grant := range intent.VMHostGrants {
+		if grant.Incarnation == "" || !validPolicyOwnership(grant.ClaimID, grant.Incarnation) {
+			return invalidGeneration("invalid durable VM-to-host policy ownership")
+		}
+		if err := validateGrantBase(grant.ID, protocol(grant.Protocol),
+			portInterval{first: grant.Ports.First, last: grant.Ports.Last}, ids); err != nil {
+			return err
+		}
+		if _, found := reservations[grant.SourceVMID]; !found {
+			return invalidGeneration("durable VM-to-host grant references an absent reservation")
+		}
+	}
+	for _, grant := range intent.NetworkHostGrants {
+		if grant.Incarnation == "" || !validPolicyOwnership(grant.ClaimID, grant.Incarnation) {
+			return invalidGeneration("invalid durable network-to-host policy ownership")
+		}
+		if err := validateGrantBase(grant.ID, protocol(grant.Protocol),
+			portInterval{first: grant.Ports.First, last: grant.Ports.Last}, ids); err != nil {
+			return err
+		}
+		if _, found := networks[grant.SourceNetworkID]; !found {
+			return invalidGeneration("durable network-to-host grant references an absent network")
 		}
 	}
 	return nil

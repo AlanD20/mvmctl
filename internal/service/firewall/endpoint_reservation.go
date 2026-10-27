@@ -77,6 +77,15 @@ func (lease *MutationLease) VerifyRetiredEndpoint(ctx context.Context, reservati
 		found = true
 	}
 	if !found {
+		for _, grant := range state.intent.VMHostGrants {
+			if grant.SourceVMID == reservation.VMID {
+				return generationAuthorityError(
+					"retired endpoint has a host grant without reservation authority",
+					nil,
+					nil,
+				)
+			}
+		}
 		for _, grant := range state.intent.VMGrants {
 			if grant.SourceVMID == reservation.VMID || grant.DestinationVMID == reservation.VMID {
 				return generationAuthorityError(
@@ -200,5 +209,7 @@ func (lease *MutationLease) RemoveVMPolicies(ctx context.Context, vmID string) e
 		target.NetworkGrants,
 		func(grant NetworkTrafficGrant) bool { return grant.DestinationVMID == vmID },
 	)
+	target.VMHostGrants = slices.DeleteFunc(target.VMHostGrants,
+		func(grant VMHostTrafficGrant) bool { return grant.SourceVMID == vmID })
 	return state.applyIntent(ctx, target)
 }

@@ -242,12 +242,29 @@ func validateIntent(intent generationIntent) error {
 			return invalidGeneration("host service references an unknown source network")
 		}
 	}
+	for _, grant := range intent.vmHostGrants {
+		if err := validateGrantBase(grant.id, grant.protocol, grant.ports, grantIDs); err != nil {
+			return err
+		}
+		if _, exists := endpoints[grant.sourceVMID]; !exists {
+			return invalidGeneration("VM-to-host grant references an unknown source VM")
+		}
+	}
+	for _, grant := range intent.networkHostGrants {
+		if err := validateGrantBase(grant.id, grant.protocol, grant.ports, grantIDs); err != nil {
+			return err
+		}
+		if _, exists := networks[grant.sourceNetworkID]; !exists {
+			return invalidGeneration("network-to-host grant references an unknown source network")
+		}
+	}
 	return nil
 }
 
 func generationIntentIsEmpty(intent generationIntent) bool {
 	return len(intent.endpoints) == 0 && len(intent.networks) == 0 && len(intent.vmGrants) == 0 &&
-		len(intent.networkGrants) == 0 && len(intent.hostServices) == 0
+		len(intent.networkGrants) == 0 && len(intent.hostServices) == 0 &&
+		len(intent.vmHostGrants) == 0 && len(intent.networkHostGrants) == 0
 }
 
 func validateNetwork(

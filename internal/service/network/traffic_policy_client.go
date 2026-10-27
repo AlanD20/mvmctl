@@ -10,7 +10,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// TrafficPolicyClient exposes only the four named root traffic-policy mutations.
+// TrafficPolicyClient exposes named VM and managed-host traffic-policy mutations.
 type TrafficPolicyClient struct{}
 
 // NewTrafficPolicyClient binds policy mutations to the fixed installed privileged transport.
@@ -60,7 +60,8 @@ func (client *TrafficPolicyClient) RemoveVMTrafficPolicy(
 	return exchangeTrafficPolicy(ctx, client, VMTrafficPolicyRemoveAction, request, request.PolicyID())
 }
 
-func exchangeTrafficPolicy[Request NetworkTrafficPolicyRequest | VMTrafficPolicyRequest](
+func exchangeTrafficPolicy[Request NetworkTrafficPolicyRequest | VMTrafficPolicyRequest |
+	VMHostTrafficPolicyRequest | NetworkHostTrafficPolicyRequest](
 	ctx context.Context, client *TrafficPolicyClient, action string, request Request, expectedID string,
 ) (TrafficPolicyMutationResult, error) {
 	if ctx == nil || client == nil {

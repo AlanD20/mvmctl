@@ -54,7 +54,13 @@ func encodeCanonicalGeneration(
 		return invalidGeneration("compiled empty generation contains nftables output")
 	}
 
-	encoder.text("schema", generationDigestSchema)
+	// CRITICAL: Existing generations retain their exact v1 identity; new host-policy projections use v2.
+	// This permits exact-before observation without resetting or adopting an installed authority record.
+	schema := generationDigestSchema
+	if len(intent.vmHostGrants) != 0 || len(intent.networkHostGrants) != 0 {
+		schema = "mvmctl.firewall.generation.v2"
+	}
+	encoder.text("schema", schema)
 	encoder.boolean("generation.empty", generation.empty)
 	encodeCanonicalIntent(encoder, intent)
 	if err := encodeCanonicalOutput(encoder, generation); err != nil {
@@ -123,6 +129,31 @@ func encodeCanonicalIntent(encoder *generationDigestEncoder, intent generationIn
 		encoder.text("source-network-id", service.sourceNetworkID)
 		encodeCanonicalProtocolAndPorts(encoder, service.protocol, service.ports)
 		encoder.endRecord("intent.host-service")
+	}
+	if len(intent.vmHostGrants) != 0 || len(intent.networkHostGrants) != 0 {
+		encodeCanonicalHostGrants(encoder, intent)
+	}
+}
+
+func encodeCanonicalHostGrants(encoder *generationDigestEncoder, intent generationIntent) {
+	vmGrants := sortedCopy(intent.vmHostGrants, func(grant vmHostTrafficGrant) string { return grant.id })
+	encoder.count("intent.vm-host-grants", len(vmGrants))
+	for _, grant := range vmGrants {
+		encoder.beginRecord("intent.vm-host-grant")
+		encoder.text("id", grant.id)
+		encoder.text("source-vm-id", grant.sourceVMID)
+		encodeCanonicalProtocolAndPorts(encoder, grant.protocol, grant.ports)
+		encoder.endRecord("intent.vm-host-grant")
+	}
+	networkGrants := sortedCopy(intent.networkHostGrants,
+		func(grant networkHostTrafficGrant) string { return grant.id })
+	encoder.count("intent.network-host-grants", len(networkGrants))
+	for _, grant := range networkGrants {
+		encoder.beginRecord("intent.network-host-grant")
+		encoder.text("id", grant.id)
+		encoder.text("source-network-id", grant.sourceNetworkID)
+		encodeCanonicalProtocolAndPorts(encoder, grant.protocol, grant.ports)
+		encoder.endRecord("intent.network-host-grant")
 	}
 }
 

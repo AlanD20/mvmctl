@@ -71,14 +71,30 @@ type hostServiceIntent struct {
 	ports           portInterval
 }
 
+type vmHostTrafficGrant struct {
+	id         string
+	sourceVMID string
+	protocol   protocol
+	ports      portInterval
+}
+
+type networkHostTrafficGrant struct {
+	id              string
+	sourceNetworkID string
+	protocol        protocol
+	ports           portInterval
+}
+
 // generationIntent is fully resolved root-side intent. It deliberately exposes neither nftables expressions, generic
 // actions, nor a caller-selectable generation identity. The compiler derives identity from normalized semantic state.
 type generationIntent struct {
-	endpoints     []endpointIntent
-	networks      []networkIntent
-	vmGrants      []vmTrafficGrant
-	networkGrants []networkTrafficGrant
-	hostServices  []hostServiceIntent
+	endpoints         []endpointIntent
+	networks          []networkIntent
+	vmGrants          []vmTrafficGrant
+	networkGrants     []networkTrafficGrant
+	hostServices      []hostServiceIntent
+	vmHostGrants      []vmHostTrafficGrant
+	networkHostGrants []networkHostTrafficGrant
 }
 
 type tableIdentity struct {

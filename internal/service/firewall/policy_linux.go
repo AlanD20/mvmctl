@@ -321,6 +321,8 @@ func (lease *MutationLease) RemoveNetwork(ctx context.Context, network NetworkIn
 		target.HostServices,
 		func(service HostServiceIntent) bool { return service.SourceNetworkID == network.NetworkID },
 	)
+	target.NetworkHostGrants = slices.DeleteFunc(target.NetworkHostGrants,
+		func(grant NetworkHostTrafficGrant) bool { return grant.SourceNetworkID == network.NetworkID })
 	return state.applyIntent(ctx, target)
 }
 

@@ -174,7 +174,8 @@ func hostResetIntentEmpty(intent Intent) bool {
 	return len(intent.ActiveNetworks) == 0 && len(intent.Reservations) == 0 && len(intent.Endpoints) == 0 &&
 		len(
 			intent.Networks,
-		) == 0 && len(intent.VMGrants) == 0 && len(intent.NetworkGrants) == 0 && len(intent.HostServices) == 0
+		) == 0 && len(intent.VMGrants) == 0 && len(intent.NetworkGrants) == 0 && len(intent.HostServices) == 0 &&
+		len(intent.VMHostGrants) == 0 && len(intent.NetworkHostGrants) == 0
 }
 
 // Release drops the namespace pin, existing store, firewall lock, and authority in reverse order.
