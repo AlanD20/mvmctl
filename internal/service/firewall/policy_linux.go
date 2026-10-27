@@ -86,10 +86,7 @@ func (lease *MutationLease) EnsureVMTrafficGrant(
 				Incarnation: existing.Incarnation,
 				ClaimID:     existing.ClaimID,
 				WasCreated:  claim != "" && existing.ClaimID == claim,
-			}, state.applyIntent(
-				ctx,
-				target,
-			)
+			}, state.applyIntent(ctx, target)
 		}
 	}
 	if expected != "" {
@@ -148,10 +145,7 @@ func (lease *MutationLease) EnsureNetworkTrafficGrant(
 				Incarnation: existing.Incarnation,
 				ClaimID:     existing.ClaimID,
 				WasCreated:  claim != "" && existing.ClaimID == claim,
-			}, state.applyIntent(
-				ctx,
-				target,
-			)
+			}, state.applyIntent(ctx, target)
 		}
 	}
 	if expected != "" {

@@ -124,8 +124,10 @@ func TestObserveSelectedUplinkRejectsAmbiguousOrMissingAuthority(t *testing.T) {
 			wantErr: "multipath",
 		},
 		"only managed output link": {
-			routes:  []netlink.Message{firstMessage},
-			links:   []netlink.Message{testRouteLinkMessage(t, "eth0", "mvmctl:owned", 10, unix.IFF_UP, 0, 0, "veth", nil)},
+			routes: []netlink.Message{firstMessage},
+			links: []netlink.Message{
+				testRouteLinkMessage(t, "eth0", "mvmctl:owned", 10, unix.IFF_UP, 0, 0, "veth", nil),
+			},
 			wantErr: "found 0",
 		},
 		"only loopback output link": {
