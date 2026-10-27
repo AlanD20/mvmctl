@@ -567,10 +567,10 @@ Policy management separates TCP/UDP traffic intent from directional VM-to-VM exe
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm policy traffic create` | Exactly one of `--from-network NETWORK` or `--from-vm VM`; `--to-vm VM`, `--protocol tcp\|udp`, `--port PORT\|START-END` | Apply a root-authorized traffic grant, then project it locally |
-| `mvm policy traffic ls` | `--json` | List both source families with current resource names |
-| `mvm policy traffic inspect` | `POLICY_ID`, exactly one of `--from-network` or `--from-vm`, `--json` | Inspect intent in the selected family |
-| `mvm policy traffic rm` | `POLICY_IDS...`, exactly one of `--from-network` or `--from-vm`, `-f, --force` | Revoke the root grant or prove its absence before deleting the local projection |
+| `mvm policy traffic create` | Exactly one of `--from-network NETWORK` or `--from-vm VM`; exactly one of `--to-vm VM` or `--to-host`; `--protocol tcp\|udp`, `--port PORT\|START-END` | Apply a root-authorized traffic grant, then project it locally |
+| `mvm policy traffic ls` | `--json` | List VM and host-gateway grants with current resource names |
+| `mvm policy traffic inspect` | `POLICY_ID`, exactly one of `--from-network` or `--from-vm`, optional `--to-host`, `--json` | Inspect intent; add `--to-host` for a host-gateway grant |
+| `mvm policy traffic rm` | `POLICY_IDS...`, exactly one of `--from-network` or `--from-vm`, optional `--to-host`, `-f, --force` | Revoke the root grant or prove its absence before deleting the local projection |
 | `mvm policy exec create` | `SOURCE_VM DESTINATION_VM TARGET_USER` | Persist one directional execution grant for an exact non-root destination user |
 | `mvm policy exec ls` | `--json` | List directional execution policies with current VM names |
 | `mvm policy exec rm` | `POLICY_IDS...`, `-f, --force` | Remove one or more execution policies by exact ID or unambiguous prefix |
@@ -580,6 +580,20 @@ absence first. List and inspect show the local projection. Root success followed
 for repair/retry and does not undo the root outcome. Policies may bind exact active or cleaned root endpoints. Stopping
 a VM preserves endpoint reservations and grants for restart; removing it invalidates them. A grant to a stopped
 endpoint does not create a live network interface.
+
+Use `--to-host` to reach a host service through the source managed network's gateway. For a network with gateway
+`10.25.0.1`, the guest connects to that address, not the workstation's LAN address or `127.0.0.1`:
+
+```bash
+mvm policy traffic create --from-vm client --to-host --protocol tcp --port 5432
+mvm policy traffic inspect POLICY_ID --from-vm --to-host
+mvm policy traffic rm POLICY_ID --from-vm --to-host --force
+```
+
+Operators can select any destination port, but every policy must explicitly name its protocol and port/range.
+The service must listen on the gateway or a suitable wildcard address; the policy does not expose a localhost-only
+listener. `--from-network` grants the selected network's VMs access to its own gateway. Host-to-VM access is not
+managed by these policies. JSON lists separate `network_to_vm`, `vm_to_vm`, `network_to_host` and `vm_to_host` arrays.
 
 Execution grants are directional, independent of IP-network placement, and require an exact non-root target user.
 The opt-in API relay now reads and enforces them at runtime. It also requires root-admitted active VM identities;

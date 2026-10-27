@@ -2,7 +2,7 @@
 
 **Status:** Accepted; source integrated, partial installed qualification passed; full release qualification incomplete
 **Date:** 2026-08-23
-**Last Updated:** 2026-10-19 (fresh-install baseline and same-uplink route admission)
+**Last Updated:** 2026-10-26 (explicit managed-gateway traffic grants)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 **No-IP placement:** [ADR-0020: Networkless VM Placement](0020-networkless-vm-placement.md) specifies the separate
@@ -480,11 +480,42 @@ removal use the atomic desired-intent repository, without granting root or host 
 
 #### Traffic policies
 
-A traffic policy grants TCP or UDP access to an exact destination VM port or port range. It has one of two closed,
-explicit source forms:
+A traffic policy grants TCP or UDP access to an explicit destination port or port range. Its source is one of two
+closed forms:
 
-- source managed network to destination VM; or
-- exact source VM to exact destination VM.
+- one managed network; or
+- one exact VM.
+
+The destination is either an exact VM or the source network's host gateway. VM-to-host and network-to-host grants
+have separate typed inputs, methods, root actions, identities and persistence; they do not reuse the private NoCloud
+action. The public CLI selects the host with `--to-host`, mutually exclusive with `--to-vm`. Environment version 1
+uses `destination_host: true`, mutually exclusive with `destination_vm`; its claim/incarnation ownership and existing
+selection rules are unchanged.
+
+Accepted operator decision (2026-10-25): every enrolled operator may choose any host destination port. There is no
+administrator port allowlist. Each grant must explicitly select TCP or UDP and a port or bounded range; an omitted
+port never means all ports. This delegates service reachability, not service-process ownership or host execution.
+Root admits the source owner and retained network identity and derives the gateway. The caller cannot select a host
+address. A VM source requires managed placement; networkless VMs have no gateway path.
+
+Host grants compile only in the inet input chain, before its managed-source default drop. VM grants match the exact
+admitted source IPv4; network grants match the admitted source prefix. Both also match the source managed bridge,
+that network's exact host gateway, protocol and destination ports. They expose neither another host address nor
+localhost-only services and add no proxy, forwarding or output-chain policy. Host-to-VM behavior remains outside
+policy management. Existing anti-spoofing, connection-tracking replies and NoCloud TCP 8000 rules remain unchanged.
+
+VM-source grants remain durable while the endpoint is stopped and compile only when that exact endpoint is active.
+Network-source grants compile only for the active source network. Final VM removal invalidates its host grants;
+network removal invalidates network-to-host grants after endpoint/reservation cleanup. Conditional workflow removal
+retains root ownership and incarnation checks. A root success followed by local projection failure remains an
+explicit repair-by-retry outcome, not permission to roll back an acknowledged grant.
+
+Persistence rollout adds `002_host_traffic_policies.sql` after the unchanged published baseline, without deleting
+VMs or existing rows. Root intent adds omitted-when-empty typed host-grant fields, retaining the canonical bytes of
+existing journals. A compiled generation with host grants uses canonical digest schema v2; projections without host
+grants retain their exact v1 identity, including the empty projection used across boots. This permits exact-before
+observation rather than record adoption/reset. No new nftables expression type or broader root action is introduced.
+These new paths require affected Go and installed-candidate system qualification before release sign-off.
 
 The CLI may present these forms under the common `traffic` namespace, but API and network-domain interfaces use
 separate typed inputs and methods. Persisted intent stores immutable resource identities, protocol, and port bounds—not

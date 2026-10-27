@@ -213,10 +213,12 @@ net, _ := input.ResolveNetwork(ctx, op.Repos.Network)
 Defined in `internal/lib/db/migrations/*.sql`. Accessed via `github.com/jmoiron/sqlx` with `modernc.org/sqlite` driver. PRAGMAs (foreign_keys=ON, journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, wal_autocheckpoint=1000, cache_size=-64000) set via DSN parameters in `db.Handle.openLazy()`. Connection pool has `SetMaxOpenConns(1)` and `SetMaxIdleConns(1)` for SQLite's single-writer semantics.
 
 The final schema includes `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`,
-`host_state`, `host_state_changes`, `network_traffic_policies`, `vm_traffic_policies`, `exec_policies`, `ssh_keys`,
-`user_settings`, `vm_vsock_config`, `snapshots`, and `db_migrations`. The single fresh-install migration,
-`internal/lib/db/migrations/001_baseline_0_3.sql`, creates the complete v0.3.0 schema at SQLite `user_version=1`,
-including its indexes and constraints. The `vm_instances` row records `managed` or `networkless` placement
+`host_state`, `host_state_changes`, `network_traffic_policies`, `vm_traffic_policies`, `network_host_traffic_policies`,
+`vm_host_traffic_policies`, `exec_policies`, `ssh_keys`,
+`user_settings`, `vm_vsock_config`, `snapshots`, and `db_migrations`. The published fresh-install migration,
+`internal/lib/db/migrations/001_baseline_0_3.sql`, establishes the baseline at SQLite `user_version=1`.
+`002_host_traffic_policies.sql` adds the two host-grant projection tables at version 2 without changing the baseline
+receipt or existing VM/policy rows. The `vm_instances` row records `managed` or `networkless` placement
 explicitly. A managed row retains a real network foreign key, IPv4, and MAC; a networkless row stores a SQL `NULL`
 network ID and empty endpoint fields.
 
@@ -1137,6 +1139,13 @@ before deleting that projection. Root admits exact active or cleaned endpoint to
 survive stop and become effective again only with an admitted live endpoint. VM removal invalidates both. Root success
 followed by local projection failure remains a reported repair/retry condition. List and inspect show local projection,
 which is never authority for kernel mutation.
+
+Traffic also supports explicit VM-to-host and network-to-host grants. Root derives the source managed network's
+gateway; the request accepts no host IP. Enrolled operators may select any TCP/UDP destination port or bounded range,
+but must name it explicitly. These grants affect only the inet input path, preserve VM-to-VM and host-to-VM behavior,
+and retain distinct root actions from fixed NoCloud access. Environment version 1 uses `destination_host: true`.
+See ADR-0017 for canonical digest, persistence rollout, ownership and lifecycle details. New host-grant installed
+qualification remains pending.
 
 Managed network and traffic mutations use typed root nftables transactions. The old service-access production path,
 NoCloud legacy-tracker consumer, CLI nftables/iptables implementations, tracker repositories, and backend selectors

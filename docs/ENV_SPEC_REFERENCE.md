@@ -385,18 +385,22 @@ This fragment uses configured VM defaults. It creates an unformatted raw disk; f
 
 ### `traffic_policy`
 
-Allow TCP or UDP traffic to a destination VM through the existing policy API. Same-network traffic also requires grants. A policy does not bypass the firewall or grant guest execution.
+Allow TCP or UDP traffic to a destination VM or the source network's host gateway. Same-network VM traffic also requires grants. A policy does not grant command execution.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `source_network` | `string` | Source network selector or `@network:name`; mutually exclusive with `source_vm`. |
 | `source_vm` | `string` | Source VM selector or `@vm:name`; mutually exclusive with `source_network`. |
-| `destination_vm` | `string` | Destination VM selector or `@vm:name`. |
+| `destination_vm` | `string` | Destination VM selector or `@vm:name`; mutually exclusive with `destination_host: true`. |
+| `destination_host` | `bool` | Set `true` for the source managed network's host gateway, not the host's LAN address or localhost. |
 | `protocol` | `string` | `tcp` or `udp`. |
 | `port` | `string` or `int` | Destination port or inclusive range, e.g. `5432` or `"8000-8080"`; bounds 1–65535. |
 | `existing` | `string` | Select an existing policy by exact ID, verified against the declared source, destination, protocol, and port/range. |
 
 Both creation and existing selection require exactly one source, a destination, protocol, and port/range. With `existing`, these fields must match the selected grant. Existing selection preserves the policy on destroy.
+
+Operators may select any host port, but must explicitly declare its protocol and port/range. The host service must
+listen on the gateway or a suitable wildcard address. Host-to-VM access remains outside policy management.
 
 ```yaml
 traffic_policy:
@@ -406,6 +410,12 @@ traffic_policy:
     protocol: tcp
     port: 5432
     depends_on: ["@vm:app", "@vm:database"]
+  host-database-access:
+    source_vm: "@vm:app"
+    destination_host: true
+    protocol: tcp
+    port: 5432
+    depends_on: ["@vm:app"]
 ```
 
 ### `exec_policy`
