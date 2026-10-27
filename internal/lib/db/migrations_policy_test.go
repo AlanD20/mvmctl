@@ -59,6 +59,18 @@ func TestBaselineTypedPolicyConstraints(t *testing.T) {
 
 	validPolicyID := strings.Repeat("a", 64)
 	tests := map[string]string{
+		"VM host source missing": fmt.Sprintf(`INSERT INTO vm_host_traffic_policies
+			(id,source_vm_id,protocol,destination_port_start,destination_port_end)
+			VALUES ('%s','missing','tcp',443,443)`, validPolicyID),
+		"VM host port omitted": fmt.Sprintf(`INSERT INTO vm_host_traffic_policies
+			(id,source_vm_id,protocol,destination_port_start,destination_port_end)
+			VALUES ('%s','vm-a','tcp',0,0)`, validPolicyID),
+		"network host protocol invalid": fmt.Sprintf(`INSERT INTO network_host_traffic_policies
+			(id,source_network_id,protocol,destination_port_start,destination_port_end)
+			VALUES ('%s','net-a','icmp',443,443)`, validPolicyID),
+		"network host descending ports": fmt.Sprintf(`INSERT INTO network_host_traffic_policies
+			(id,source_network_id,protocol,destination_port_start,destination_port_end)
+			VALUES ('%s','net-a','udp',54,53)`, validPolicyID),
 		"network source missing": fmt.Sprintf(`INSERT INTO network_traffic_policies
 			(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
 			VALUES ('%s','missing','vm-b','tcp',443,443)`, validPolicyID),

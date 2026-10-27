@@ -510,8 +510,10 @@ network removal invalidates network-to-host grants after endpoint/reservation cl
 retains root ownership and incarnation checks. A root success followed by local projection failure remains an
 explicit repair-by-retry outcome, not permission to roll back an acknowledged grant.
 
-Persistence rollout adds `002_host_traffic_policies.sql` after the unchanged published baseline, without deleting
-VMs or existing rows. Root intent adds omitted-when-empty typed host-grant fields, retaining the canonical bytes of
+The accepted pre-release consolidation (2026-10-27) includes both host-grant tables in
+`001_baseline_0_3.sql` at version 1, replacing the temporary second migration. Existing development databases
+with a different receipt remain rejected by normal initialization; there is no automatic receipt adoption.
+Root intent adds omitted-when-empty typed host-grant fields, retaining the canonical bytes of
 existing journals. A compiled generation with host grants uses canonical digest schema v2; projections without host
 grants retain their exact v1 identity, including the empty projection used across boots. This permits exact-before
 observation rather than record adoption/reset. No new nftables expression type or broader root action is introduced.

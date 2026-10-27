@@ -217,8 +217,8 @@ The final schema includes `images`, `kernels`, `binaries`, `volumes`, `networks`
 `vm_host_traffic_policies`, `exec_policies`, `ssh_keys`,
 `user_settings`, `vm_vsock_config`, `snapshots`, and `db_migrations`. The published fresh-install migration,
 `internal/lib/db/migrations/001_baseline_0_3.sql`, establishes the baseline at SQLite `user_version=1`.
-`002_host_traffic_policies.sql` adds the two host-grant projection tables at version 2 without changing the baseline
-receipt or existing VM/policy rows. The `vm_instances` row records `managed` or `networkless` placement
+The single baseline includes both host-grant projection tables; no second migration is shipped for them.
+The `vm_instances` row records `managed` or `networkless` placement
 explicitly. A managed row retains a real network foreign key, IPv4, and MAC; a networkless row stores a SQL `NULL`
 network ID and empty endpoint fields.
 

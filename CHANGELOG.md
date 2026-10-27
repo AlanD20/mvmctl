@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added explicit VM-to-host and network-to-host traffic grants through `--to-host` and environment
   `destination_host: true`. Grants select TCP/UDP ports on the source network's host gateway; they do not expose
   localhost-only listeners, grant execution, or change host-to-VM policy. Operators may explicitly select any port.
-  An additive schema migration preserves existing v0.3.0 VM and policy records.
+  Both host-grant tables are included in the single v0.3.0 fresh-install baseline.
 - Added environment `volume`, `traffic_policy`, `exec_policy`, and `ready` steps. Raw data volumes are retained
   by default; disposable cleanup requires `retain: false` and workflow ownership. Policies use the existing typed
   authority, and readiness runs bounded guest checks. See the [environment reference](docs/ENV_SPEC_REFERENCE.md).
@@ -75,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Collapsed the nine development SQL migrations into one complete `001_baseline_0_3.sql` fresh-install schema at
+- Collapsed the development SQL migrations, including the host-grant tables, into one complete `001_baseline_0_3.sql` fresh-install schema at
   version 1. Existing databases require matching migration filenames and SHA-256 receipts; older or unknown state
   refuses unchanged with clean-install guidance. Future numbered migrations remain supported. SQL, receipts, and
   version changes commit atomically; automatic pre-migration snapshots are removed.

@@ -19,12 +19,12 @@ func TestBaselineInitializesOnce(t *testing.T) {
 	handle := newMigrationDatabase(t)
 	pending, err := handle.GetPendingMigrations(ctx)
 	require.NoError(t, err)
-	if diff := cmp.Diff([]string{"001_baseline_0_3.sql", "002_host_traffic_policies.sql"}, pending); diff != "" {
+	if diff := cmp.Diff([]string{"001_baseline_0_3.sql"}, pending); diff != "" {
 		t.Fatalf("pending migrations (-want +got):\n%s", diff)
 	}
 	applied, err := handle.RunMigrationsCtx(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 2, applied)
+	assert.Equal(t, 1, applied)
 	seedTypedPolicyResources(t, ctx, handle)
 
 	var stored struct {
@@ -54,7 +54,7 @@ func TestBaselineInitializesOnce(t *testing.T) {
 	assert.Empty(t, pending)
 	var version int
 	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
-	assert.Equal(t, 2, version)
+	assert.Equal(t, 1, version)
 	var jailer string
 	require.NoError(t, handle.DB().GetContext(ctx, &jailer,
 		"SELECT jailer_binary_id FROM vm_instances WHERE id = 'vm-a'"))
@@ -125,7 +125,7 @@ func TestBaselineRejectsAlteredReceipt(t *testing.T) {
 		"checksum":         "UPDATE db_migrations SET checksum = 'wrong'",
 		"missing receipt":  "DELETE FROM db_migrations",
 		"version mismatch": "PRAGMA user_version = 0",
-		"extra receipt":    "INSERT INTO db_migrations (version,name,checksum) VALUES (3,'other','other')",
+		"extra receipt":    "INSERT INTO db_migrations (version,name,checksum) VALUES (2,'other','other')",
 	} {
 		t.Run(name, func(t *testing.T) {
 			handle := newMigrationDatabase(t)
@@ -167,7 +167,7 @@ func TestBaselineRollsBackPartialSchemaAndCanRetry(t *testing.T) {
 	require.NoError(t, err)
 	applied, err = handle.RunMigrationsCtx(t.Context())
 	require.NoError(t, err)
-	assert.Equal(t, 2, applied)
+	assert.Equal(t, 1, applied)
 	var receipt string
 	require.NoError(t, handle.DB().GetContext(t.Context(), &receipt,
 		"SELECT name FROM db_migrations WHERE version = 1"))
