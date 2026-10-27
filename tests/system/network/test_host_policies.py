@@ -395,6 +395,7 @@ def test_gateway_grants_restrict_source_destination_protocol_and_survive_restart
             assert (
                 duplicate["id"] == vm_grant["id"]
                 and duplicate["incarnation"] == vm_grant["incarnation"]
+                and duplicate["created_at"] == vm_grant["created_at"]
             )
 
             _run_mvm(runner_vm, "vm", "stop", source["binding"]["id"])
@@ -449,6 +450,18 @@ def test_gateway_grants_restrict_source_destination_protocol_and_survive_restart
             probe(foreign, other_gateway, server.port, "udp", "timeout")
             probe(source, other_gateway, server.port, "udp", "timeout")
             probe(source, gateway, server.port, "tcp", "timeout")
+            duplicate_network = _host_grant(
+                runner_vm,
+                "network",
+                source_network["id"],
+                "udp",
+                f"{server.port}-{server.port + 1}",
+            )
+            assert (
+                duplicate_network["id"] == network_grant["id"]
+                and duplicate_network["incarnation"] == network_grant["incarnation"]
+                and duplicate_network["created_at"] == network_grant["created_at"]
+            )
             _run_mvm(
                 runner_vm,
                 "policy",

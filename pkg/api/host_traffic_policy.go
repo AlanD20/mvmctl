@@ -20,8 +20,7 @@ func (op *Operation) VMToHostTrafficPolicyCreate(
 	if err != nil {
 		return nil, err
 	}
-	network, err := op.trafficPolicyNetwork(ctx, string(source.NetworkID))
-	if err != nil {
+	if _, err := op.trafficPolicyNetwork(ctx, string(source.NetworkID)); err != nil {
 		return nil, err
 	}
 	protocol, start, end, err := input.ResolvedTraffic()
@@ -43,7 +42,7 @@ func (op *Operation) VMToHostTrafficPolicyCreate(
 		return nil, trafficPolicyProjectionError(intent.ID, false, err)
 	}
 	op.AuditLog.LogOperation("policy.traffic.vm-host.create", map[string]any{"id": intent.ID}, "")
-	return vmHostTrafficPolicyResult(intent, source, network), nil
+	return op.VMToHostTrafficPolicyInspect(ctx, inputs.VMToHostTrafficPolicyInput{Identifiers: []string{intent.ID}})
 }
 
 // VMToHostTrafficPolicyList returns local desired grants, not proof of applied kernel access.
@@ -164,7 +163,8 @@ func (op *Operation) NetworkToHostTrafficPolicyCreate(
 		return nil, trafficPolicyProjectionError(intent.ID, false, err)
 	}
 	op.AuditLog.LogOperation("policy.traffic.network-host.create", map[string]any{"id": intent.ID}, "")
-	return networkHostTrafficPolicyResult(intent, source), nil
+	return op.NetworkToHostTrafficPolicyInspect(ctx,
+		inputs.NetworkToHostTrafficPolicyInput{Identifiers: []string{intent.ID}})
 }
 
 // NetworkToHostTrafficPolicyList returns local desired grants, not proof of applied kernel access.
