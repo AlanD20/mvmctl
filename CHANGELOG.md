@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default-deny managed same-network and cross-network traffic. Firewall enforcement uses direct Go nftables
   transactions with anti-spoofing, connection tracking, and conditional internet egress/NAT.
 - Added separate `mvm policy traffic` and `mvm policy exec` families. Traffic grants permit source-network or
-  exact source-VM TCP/UDP access to a destination VM; exec grants permit directional execution as an exact
+  exact source-VM TCP/UDP access to a destination VM or the source network's host gateway; exec grants permit execution as an exact
   non-root destination user, independently of same-network, cross-network, or networkless placement.
   Neither policy grants the other's authority. See [policy reference](docs/REFERENCES.md#mvm-policy).
 - Added explicit VM-to-VM execution opt-in through `mvm exec --allow-vm-exec` and
