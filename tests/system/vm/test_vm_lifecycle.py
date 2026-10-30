@@ -1177,10 +1177,17 @@ class TestVMConfigOptions:
         ).stdout.split()
         assert datasource in boot_args, boot_args
         assert not any(value.startswith("ip=") for value in boot_args), boot_args
-        interfaces = _run_mvm(
-            runner_vm, "exec", vm["id"], "--", "ls /sys/class/net"
+        hardware_links = _run_mvm(
+            runner_vm, "exec", vm["id"], "--",
+            "set -e; test -d /sys/class/net/lo; "
+            "for link in /sys/class/net/*; do "
+            "if test -e \"$link/device\"; then printf '%s\\n' \"$link\"; fi; done",
         ).stdout.split()
-        assert interfaces == ["lo"], interfaces
+        assert hardware_links == [], hardware_links
+        routes = _run_mvm(
+            runner_vm, "exec", vm["id"], "--", "ip route show default"
+        ).stdout.strip()
+        assert routes == "", routes
 
     @pytest.mark.parametrize(
         "memory", ["256", "256M"], ids=["numeric", "human-readable"]
