@@ -31,10 +31,7 @@ func TestResumeStagedImagePreservesExactIntentAndSource(t *testing.T) {
 	for name, mutate := range map[string]func(*testing.T, *stagedImage, string){
 		"unchanged":            func(*testing.T, *stagedImage, string) {},
 		"filesystem extension": func(*testing.T, *stagedImage, string) {},
-		"foreign source path": func(t *testing.T, stage *stagedImage, source string) {
-			stage.recovery.SourcePath = filepath.Join(filepath.Dir(source), "unrelated.ext4")
-			require.NoError(t, stage.saveRecovery(t.Context()))
-		},
+		"foreign source path":  func(*testing.T, *stagedImage, string) {},
 		"missing manifest": func(t *testing.T, stage *stagedImage, _ string) {
 			require.NoError(t, stage.root.Remove(stagedRecoveryLeaf))
 		},
@@ -55,6 +52,11 @@ func TestResumeStagedImagePreservesExactIntentAndSource(t *testing.T) {
 			source := filepath.Join(cache, "images", id+".img")
 			if name == "filesystem extension" {
 				source = filepath.Join(cache, "images", id+".ext4")
+			}
+			if name == "foreign source path" {
+				// This existing file and its manifest are otherwise valid: without
+				// path confinement admission would succeed rather than fail on absence.
+				source = filepath.Join(cache, "images", "unrelated-"+id+".ext4")
 			}
 			file, err := os.OpenFile(source, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 			require.NoError(t, err)
