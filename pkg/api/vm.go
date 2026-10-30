@@ -322,9 +322,8 @@ func (op *Operation) vmBuilderExecute(
 		return cloneErr
 	}
 	builder.markCreated("rootfs")
-	// Progress: cloud-init
-	emitProgress(builder.onProgress, "cloud-init", "running", "Provisioning cloud-init...")
-	// Cloud-init provisioning, rootfs operations (timed)
+	emitProgress(builder.onProgress, "rootfs", "running", "Preparing VM filesystem...")
+	// Guest filesystem preparation includes off-mode configuration and optional cloud-init seed generation.
 	var (
 		provisionErr    error
 		cloudInitMarker string
@@ -339,6 +338,9 @@ func (op *Operation) vmBuilderExecute(
 		networkGateway = resolved.Network.IPv4Gateway
 	}
 	tl.StageFunc("provision_rootfs", func() {
+		provisionTiming := timinglog.Start("vm_provision", "vm_id", builder.vmID,
+			"cloud_init_mode", resolved.CloudInitMode)
+		defer provisionTiming.Complete()
 		backend, backendErr := provisioner.NewBackend(ctx, provisioner.BackendOpts{
 			RootfsPath:      builder.rootfsPath,
 			FsType:          resolved.Image.FSType,
@@ -392,6 +394,7 @@ func (op *Operation) vmBuilderExecute(
 			}
 			cloudInitMarker = "cloud-init-off"
 		} else if resolved.CloudInitMode == model.CloudInitModeINJECT {
+			emitProgress(builder.onProgress, "cloud-init", "running", "Preparing cloud-init configuration...")
 			ciConfig := &cloudinit.Config{
 				Mode:                  resolved.CloudInitMode,
 				VMName:                resolved.Name,
@@ -428,6 +431,7 @@ func (op *Operation) vmBuilderExecute(
 			}
 			cloudInitMarker = "cloud-init-inject"
 		} else if resolved.CloudInitMode == model.CloudInitModeISO || resolved.CloudInitMode == model.CloudInitModeNET {
+			emitProgress(builder.onProgress, "cloud-init", "running", "Preparing cloud-init configuration...")
 			// Determine the cloud-init directory. For NET mode with a shared batch
 			// nocloud server, use a per-VM subdirectory under the shared batch dir.
 			cloudInitDir := filepath.Join(builder.vmDir, "cloud-init")
@@ -512,8 +516,12 @@ func (op *Operation) vmBuilderExecute(
 			}
 		}
 		// Execute all queued provisioning operations
-		if err := backend.Run(ctx); err != nil {
-			provisionErr = fmt.Errorf("provision VM rootfs: %w", err)
+		emitProgress(builder.onProgress, "rootfs", "running", "Configuring VM filesystem...")
+		provisionTiming.Stage("prepare_plan")
+		var runErr error
+		provisionTiming.StageFunc("apply_plan", func() { runErr = backend.Run(ctx) })
+		if runErr != nil {
+			provisionErr = fmt.Errorf("provision VM rootfs: %w", runErr)
 			return
 		}
 	})
