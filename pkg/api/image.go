@@ -15,6 +15,7 @@ import (
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/download"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/provisioner"
 	"mvmctl/internal/lib/system"
 	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/inputs"
@@ -392,6 +393,9 @@ func (op *Operation) ImageImportWithResult(
 	input inputs.ImageImportInput,
 	onProgress event.OnProgressCallback,
 ) (_ *results.ImageImportResult, returnErr error) {
+	if input.ResumeID != "" && op.ProvisionerType != provisioner.ProvisionerLoopMount {
+		return nil, errs.New(errs.CodeValidationFailed, "retained local import resume requires the LoopMount backend")
+	}
 	// Resolve import input (arch, format, validation)
 	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image, op.Repos.VM)
 	if err != nil {

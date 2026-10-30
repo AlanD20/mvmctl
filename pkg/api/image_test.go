@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,11 +13,27 @@ import (
 
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/provisioner"
 	"mvmctl/internal/testutil"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
 )
+
+func TestImageImportResumeRefusesChangedBackendBeforeEffects(t *testing.T) {
+	// No repositories/services are provided: backend changes must be refused before
+	// opening retained staging or reaching a different optimizer/publication path.
+	op := &api.Operation{ProvisionerType: provisioner.ProvisionerGuestFS}
+	result, err := op.ImageImportWithResult(t.Context(), inputs.ImageImportInput{
+		Name: "retained", Source: "original.raw", ResumeID: strings.Repeat("a", 64),
+	}, nil)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	var domainErr *errs.DomainError
+	require.ErrorAs(t, err, &domainErr)
+	assert.Equal(t, errs.CodeValidationFailed, domainErr.Code)
+	assert.Contains(t, domainErr.Message, "LoopMount")
+}
 
 func TestImageImportCachedDefaultResult(t *testing.T) {
 	// Rationale: SQLite updates do not mutate the previously loaded image; the
