@@ -470,8 +470,12 @@ func (op *Operation) ImageImportWithResult(
 	}
 	defer func() {
 		if returnErr != nil && resolved.SourceVM == nil {
-			returnErr = errs.WrapMsg(errs.CodeImageImportFailed, "local image import did not complete", returnErr,
-				errs.WithDetails(map[string]any{"image_id": imageID}))
+			returnErr = errs.WrapMsg(
+				errs.CodeImageImportFailed,
+				fmt.Sprintf("Local image import failed: %v", returnErr),
+				returnErr,
+				errs.WithDetails(map[string]any{"image_id": imageID}),
+			)
 		}
 	}()
 	sourcePath := *resolved.Source
