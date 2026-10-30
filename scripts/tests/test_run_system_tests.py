@@ -4533,8 +4533,8 @@ def test_imported_cached_execution_runs_one_owned_ready_runner_without_preparati
                 stdout = json.dumps(receipt)
             elif args[-1].startswith("python3 -c"):
                 stdout = f"Linux 7.0.11 GNU build ID {binding.build_id}\n"
-            elif args[-1] == "/usr/local/bin/mvm host status --json":
-                stdout = json.dumps({"resources": {"nftables_available": True}})
+            elif args[-1] == "/usr/local/bin/mvm host info --json":
+                stdout = json.dumps({"dependencies": {"nftables_available": True}})
             elif args[-1] == "/usr/local/bin/mvm image ls --json":
                 stdout = json.dumps({"schema_version": 1, "status": "success", "error": None,
                     "data": [{"type": "alpine", "version": "3.23", "is_default": True, "is_present": True}]})
@@ -4555,7 +4555,7 @@ def test_imported_cached_execution_runs_one_owned_ready_runner_without_preparati
     assert live_vm_ids == {"unrelated-vm"}
     assert not any(args[:2] in {("image", "rm"), ("image", "import"), ("kernel", "pull")} for args in calls)
     init = next(i for i, args in enumerate(calls) if args[-1] == orchestrator.RUNNER_USER_INIT_COMMAND)
-    smoke = next(i for i, args in enumerate(calls) if args[-1] == "/usr/local/bin/mvm host status --json")
+    smoke = next(i for i, args in enumerate(calls) if args[-1] == "/usr/local/bin/mvm host info --json")
     pytest_calls = [i for i, args in enumerate(calls) if args[0] == "exec" and "python3 -m pytest" in args[-1]]
     assert len(pytest_calls) == 1
     assert init < smoke < pytest_calls[0]
@@ -4827,8 +4827,8 @@ def test_imported_domain_binding_failure_keeps_owned_cleanup_and_stale_import_re
             elif args[-1].startswith("python3 -c"):
                 build_id = "b" * 40 if fault == "build-id" else binding.build_id
                 stdout = f"Linux 7.0.11 GNU build ID {build_id}\n"
-            elif args[-1] == "/usr/local/bin/mvm host status --json":
-                stdout = json.dumps({"resources": {"nftables_available": False}})
+            elif args[-1] == "/usr/local/bin/mvm host info --json":
+                stdout = json.dumps({"dependencies": {"nftables_available": False}})
         return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
@@ -4924,8 +4924,8 @@ def test_imported_smoke_requires_exact_kernel_and_true_nftables(
             data = {
                 "assets": {"kernel": {"id": "b" * 64 if bad_kernel else binding.id}}
             }
-        elif args[-1] == "/usr/local/bin/mvm host status --json":
-            data = {"resources": {"nftables_available": bad_nftables}}
+        elif args[-1] == "/usr/local/bin/mvm host info --json":
+            data = {"dependencies": {"nftables_available": bad_nftables}}
         else:
             return subprocess.CompletedProcess(
                 args, 0, stdout=f"Linux 7.0.11 GNU build ID {binding.build_id}\n"
@@ -4953,8 +4953,8 @@ def test_imported_smoke_requires_live_build_id_to_match_validated_elf(
         calls.append(args)
         if args[:2] == ("vm", "inspect"):
             stdout = json.dumps({"assets": {"kernel": {"id": binding.id}}})
-        elif args[-1] == "/usr/local/bin/mvm host status --json":
-            stdout = json.dumps({"resources": {"nftables_available": True}})
+        elif args[-1] == "/usr/local/bin/mvm host info --json":
+            stdout = json.dumps({"dependencies": {"nftables_available": True}})
         else:
             stdout = f"Linux 7.0.11 GNU build ID {live_build_id}\n"
         return subprocess.CompletedProcess(args, 0, stdout=stdout)

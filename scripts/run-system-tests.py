@@ -573,7 +573,7 @@ def _require_imported_runner_smoke(
     log(f"  {vm_name}: {live.stdout.strip()}")
     if live.stdout.strip() != f"Linux {binding.version} GNU build ID {binding.build_id}":
         raise RuntimeError("smoke VM live GNU build ID does not match imported ELF")
-    status = mvm(
+    readiness = mvm(
         "exec",
         vm_name,
         "--user",
@@ -581,14 +581,14 @@ def _require_imported_runner_smoke(
         "--timeout",
         "10",
         "--",
-        "/usr/local/bin/mvm host status --json",
+        "/usr/local/bin/mvm host info --json",
         timeout=30,
     )
-    data = _runner_binding_json(status.stdout)
-    resources = data.get("resources")
+    data = _runner_binding_json(readiness.stdout)
+    dependencies = data.get("dependencies")
     if (
-        not isinstance(resources, dict)
-        or resources.get("nftables_available") is not True
+        not isinstance(dependencies, dict)
+        or dependencies.get("nftables_available") is not True
     ):
         raise RuntimeError("imported runner smoke requires nftables_available: true")
 

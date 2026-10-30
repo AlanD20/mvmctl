@@ -48,8 +48,8 @@ resource limits still differ.
 - `/dev/kvm` is fully accessible — mvm creates and runs nested VMs inside the
   runner VM
 - The runner has its own network stack, but its kernel must support the **modeled bridge and inet nftables rules**, not
-  merely create an inet table. Check the installed candidate's `mvm host status --json` and require
-  `data.resources.nftables_available: true` before treating network or policy tests as release evidence.
+  merely create an inet table. Check the installed candidate's `mvm host info --json` and require
+  `data.dependencies.nftables_available: true` before treating network or policy tests as release evidence.
 - Check `sudo` and `docker` availability in the exact runner image. Kernel module loading also depends on that
   image's matching module tree; do not assume every required feature is compiled into the 7.0.11 asset.
 - Verify the filesystem facilities needed by the selected domains, including tmpfs, overlayfs, Btrfs and ext4.
@@ -706,7 +706,7 @@ KVM) is a **release blocker** — fix the environment, not the code.
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| `nftables_available: false` or bridge-family `operation not supported` | Runner kernel lacks the required bridge/inet nftables behavior | Use a runner kernel with the required nftables capabilities, then rerun `mvm host status --json`; installing the `nft` or `iptables` CLI does not supply missing kernel support. |
+| `nftables_available: false` or bridge-family `operation not supported` | Runner kernel lacks the required bridge/inet nftables behavior | Use a runner kernel with the required nftables capabilities, then rerun `mvm host info --json`; installing the `nft` or `iptables` CLI does not supply missing kernel support. |
 | VM creation hangs | Binary not built or missing | Re-run `./scripts/build.sh release` |
 | `bridge already exists` | Stale bridges from previous run | Clean up with `mvm network rm --force` |
 | `Text file busy` on service binary | Stale disposable runner or base image | Destroy the affected runner through the outer controller and rebuild the base image; do not kill host processes by basename |

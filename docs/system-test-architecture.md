@@ -156,7 +156,7 @@ and `btrfs`, but that feature list does not prove the bridge-family nftables cap
 **0.3.0 runner-kernel gate:** The cached image used on 2026-09-26 rejected bridge-family nftables despite accepting
 inet tables; its network and policy results cannot qualify the release. On 2026-09-27, the named `mvmctl-030-test`
 runner was replaced with a rebuilt bridge-capable 7.0.11 kernel. Its installed candidate reports
-`data.resources.nftables_available: true`, and a bridge-table create/list/delete probe passed. The orchestrator
+`data.dependencies.nftables_available: true` through `mvm host info --json`, and a bridge-table create/list/delete probe passed. The orchestrator
 must still prove that capability on every newly provisioned runner image before network, firewall, or policy results
 count as release evidence; the feature list alone is insufficient.
 
