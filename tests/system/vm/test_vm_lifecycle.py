@@ -1113,6 +1113,7 @@ def _create_config_vm(
     memory: str = "256M",
     vcpu: int | None = 1,
     pci_enabled: bool = False,
+    cloud_init_mode: str = "off",
 ) -> dict:
     """Launch a small isolated VM through the public CLI, not a test-only backend."""
     args = [
@@ -1123,7 +1124,7 @@ def _create_config_vm(
         "alpine:3.23",
         "--no-network",
         "--cloud-init-mode",
-        "off",
+        cloud_init_mode,
         "--skip-deblob",
         "--disk-size",
         "512M",
@@ -1155,6 +1156,31 @@ class TestVMConfigOptions:
         pytest.mark.slow,
         pytest.mark.domain_vm,
     ]
+
+    @pytest.mark.parametrize(
+        ("mode", "datasource"),
+        [
+            ("inject", "ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/"),
+            ("iso", "ds=nocloud"),
+        ],
+    )
+    def test_local_cloud_init_keeps_networkless_placement(
+        self, runner_vm, config_vm_name, mode, datasource
+    ):
+        """Local NoCloud seeds boot without creating or requiring a guest NIC."""
+        vm = _create_config_vm(
+            runner_vm, config_vm_name, cloud_init_mode=mode, memory="512M"
+        )
+        assert vm["network_placement"] == "networkless", vm
+        boot_args = _run_mvm(
+            runner_vm, "exec", vm["id"], "--timeout", "30", "--", "cat /proc/cmdline"
+        ).stdout.split()
+        assert datasource in boot_args, boot_args
+        assert not any(value.startswith("ip=") for value in boot_args), boot_args
+        interfaces = _run_mvm(
+            runner_vm, "exec", vm["id"], "--", "ls /sys/class/net"
+        ).stdout.split()
+        assert interfaces == ["lo"], interfaces
 
     @pytest.mark.parametrize(
         "memory", ["256", "256M"], ids=["numeric", "human-readable"]

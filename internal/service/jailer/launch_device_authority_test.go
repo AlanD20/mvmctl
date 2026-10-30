@@ -62,6 +62,29 @@ func TestLaunchDeviceAuthorityAdmitsOnlyMatchingPlacementAndConfig(t *testing.T)
 			},
 			wantErr: true,
 		},
+		"networkless injected local seed": {
+			mutate: func(value *vmLaunchDeviceAuthority) {
+				makeNetworklessLaunchDeviceAuthority(value)
+				value.BootArgs += " ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/"
+				value.Config.BootSource.BootArgs = value.BootArgs
+			},
+		},
+		"networkless remote seed URL": {
+			mutate: func(value *vmLaunchDeviceAuthority) {
+				makeNetworklessLaunchDeviceAuthority(value)
+				value.BootArgs += " ds=nocloud;seedfrom=http://10.0.0.1/"
+				value.Config.BootSource.BootArgs = value.BootArgs
+			},
+			wantErr: true,
+		},
+		"networkless arbitrary local seed": {
+			mutate: func(value *vmLaunchDeviceAuthority) {
+				makeNetworklessLaunchDeviceAuthority(value)
+				value.BootArgs += " ds=nocloud;s=file:///elsewhere/"
+				value.Config.BootSource.BootArgs = value.BootArgs
+			},
+			wantErr: true,
+		},
 		"managed missing NIC": {
 			mutate: func(value *vmLaunchDeviceAuthority) {
 				value.Config.NetworkInterfaces = []managedFirecrackerNetworkInterface{}

@@ -169,6 +169,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed networkless VM launch rejecting the fixed local NoCloud datasource used by injected and ISO cloud-init.
+  Remote datasource URLs and IP boot configuration remain rejected for networkless VMs.
+- VM creation now reports filesystem preparation separately from optional cloud-init configuration.
+  Timing logs distinguish provisioning-plan preparation from applying the filesystem changes.
+- Fixed imported-kernel QA readiness checks to use the current `host info` JSON schema.
+
 - Host network discovery accepts unrelated TUN/TAP devices with an unset owner, including Tailscale interfaces,
   without weakening the authenticated owner checks for managed VM TAPs.
 

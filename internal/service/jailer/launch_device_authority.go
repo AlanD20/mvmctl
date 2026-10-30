@@ -363,8 +363,21 @@ func (metadata vmLaunchDeviceAuthority) matchesConfig(config managedFirecrackerC
 			return instanceValidationError("launch networkless configuration contains a guest NIC")
 		}
 		for argument := range strings.FieldsSeq(config.BootSource.BootArgs) {
-			if strings.HasPrefix(argument, "ip=") || strings.HasPrefix(argument, "ds=") {
+			if strings.HasPrefix(argument, "ip=") {
 				return instanceValidationError("launch networkless configuration contains network boot arguments")
+			}
+			if strings.HasPrefix(argument, "ds=") {
+				// Local seeds need no NIC. Only the fixed guest-local datasource matching
+				// the sealed ISO-device topology is admitted; remote or arbitrary seeds refuse.
+				expected := infra.NoCloudInjectDatasource
+				if metadata.CloudInit {
+					expected = infra.NoCloudISODatasource
+				}
+				if argument != "ds="+expected {
+					return instanceValidationError(
+						"launch networkless configuration contains a nonlocal cloud-init datasource",
+					)
+				}
 			}
 		}
 	default:

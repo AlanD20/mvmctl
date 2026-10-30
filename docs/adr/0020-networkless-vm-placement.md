@@ -36,6 +36,9 @@ without an IP data plane. It is not an implicit fallback when a default network 
   without the vsock device and agent on both VMs. IP-based SSH, `mvm ssh`, host port access, any
   traffic policy involving that VM, and NoCloud NET are unavailable for this placement; they must fail explicitly
   rather than hang or infer connectivity.
+- Local cloud-init remains supported: injected seeds use the fixed guest path
+  `file:///var/lib/cloud/seed/nocloud/`; ISO seeds use the admitted read-only seed device. Root launch validation
+  permits these exact local datasources while continuing to reject IP boot arguments and remote seed URLs.
 - Persist the placement variant in the user VM row and root-owned lifecycle/snapshot authority. Start, reboot,
   reconciliation, and restore re-admit the same variant; none may invent a managed network or silently drop namespace
   isolation. Snapshot restore of a networkless VM captures no IP/MAC endpoint and allocates none. A networked snapshot
