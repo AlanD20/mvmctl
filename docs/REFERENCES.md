@@ -267,6 +267,7 @@ The image resolver tries selectors in priority order:
 | `--version VERSION` | Set image version | — |
 | `--default, -d` | Set as default after import | `false` |
 | `--force, -f` | Overwrite existing | `false` |
+| `--resume IMAGE_ID` | Resume retained local-image optimization using its full ID; incompatible with `--force` | — |
 | `--skip-optimization` | Skip OS cache cleanup (deblob), keep plain ext4 | `true` |
 | `--disable-detector NAME` | Comma-separated detectors to disable: `type`, `label`, `size`, `filesystem`, `all` | — |
 
@@ -309,6 +310,11 @@ at existing capacity; resize/shrink requests fail before mutation.
 Interrupted optimization can resume from exact retained staging intent and resource identities. A checked root result
 is required before publication, which requires atomic exchange and preserves the original until durable completion.
 Unknown or changed remnants remain for recovery rather than being adopted or recursively removed.
+For a local-file import, use `mvm image import NAME ORIGINAL_SOURCE --resume FULL_IMAGE_ID` with the original
+optimization options. Failed local imports include `image_id` in their JSON error details. Resume requires an
+unregistered ID and intact retained optimization state; it skips extraction and refuses changed resources or intent.
+It does not recover VM-source imports or failures after optimization state has already been removed. Preserve the
+original source and retained files; do not remove root-owned records manually.
 Unprivileged archive construction remains separate; passing registered journeys does not establish every interruption
 or replacement-race outcome.
 

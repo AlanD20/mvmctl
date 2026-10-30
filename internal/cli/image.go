@@ -369,6 +369,7 @@ func newImageImportCmd(imageAPI api.ImageAPI) *cobra.Command {
 		skipOptimization bool
 		disableDetector  string
 		version          string
+		resumeID         string
 	)
 
 	cmd := &cobra.Command{
@@ -419,6 +420,7 @@ Examples:
 				SkipOptimization:  skipOptimization,
 				SetDefault:        setDefault,
 				Force:             force,
+				ResumeID:          resumeID,
 			}
 
 			prog := common.NewProgress()
@@ -456,6 +458,7 @@ Examples:
 	cmd.Flags().
 		StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
 	cmd.Flags().StringVar(&version, "version", "", "Set image version (overrides name:ver format)")
+	cmd.Flags().StringVar(&resumeID, "resume", "", "Resume retained local-image optimization by full image ID")
 
 	return cmd
 }

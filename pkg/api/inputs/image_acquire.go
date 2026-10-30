@@ -2,6 +2,7 @@ package inputs
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -110,6 +111,7 @@ type ImageImportInput struct {
 	Partition         int      `json:"partition,omitempty"           yaml:"partition,omitempty"`
 	SkipOptimization  bool     `json:"skip_optimization"             yaml:"skip_optimization"`
 	DisabledDetectors []string `json:"disabled_detectors,omitempty"  yaml:"disabled_detectors,omitempty"`
+	ResumeID          string   `json:"resume_id,omitempty"           yaml:"resume_id,omitempty"`
 }
 
 // Validate checks that the image import input is valid.
@@ -122,6 +124,15 @@ func (i *ImageImportInput) Validate() error {
 	}
 	if i.Partition < 0 {
 		return fmt.Errorf("partition cannot be negative")
+	}
+	if i.ResumeID != "" {
+		if _, err := hex.DecodeString(i.ResumeID); err != nil || len(i.ResumeID) != 64 ||
+			i.ResumeID != strings.ToLower(i.ResumeID) {
+			return errs.New(errs.CodeValidationFailed, "resume requires a full lowercase image ID")
+		}
+		if i.Force {
+			return errs.New(errs.CodeValidationFailed, "resume cannot replace a registered image with force")
+		}
 	}
 	return nil
 }
@@ -138,6 +149,15 @@ func (i *ImageImportInput) Resolve(
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
+	if i.ResumeID != "" {
+		registered, err := repo.Get(ctx, i.ResumeID)
+		if err != nil {
+			return nil, err
+		}
+		if registered != nil {
+			return nil, errs.New(errs.CodeValidationFailed, "image is already registered; inspect it instead of resuming")
+		}
+	}
 
 	// --- 1. Try VM resolution first — VM name supersedes local path ---
 	source := i.Source
@@ -146,6 +166,9 @@ func (i *ImageImportInput) Resolve(
 		vmResolver := vm.NewResolver(vmRepo)
 		vmItem, vmErr := vmResolver.Resolve(ctx, source)
 		if vmErr == nil && vmItem != nil {
+			if i.ResumeID != "" {
+				return nil, errs.New(errs.CodeValidationFailed, "resume is supported only for retained local image imports")
+			}
 			source = vmItem.ID // Provenance only; root export selects the protected bytes.
 			resolvedVM = vmItem
 			i.Format = "raw"          // force raw for VM rootfs

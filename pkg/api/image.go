@@ -416,6 +416,9 @@ func (op *Operation) ImageImportWithResult(
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageImportFailed, "look up imported image", err)
 	}
+	if input.ResumeID != "" && existing != nil {
+		return nil, errs.New(errs.CodeImageImportFailed, "resume conflicts with an already registered image version")
+	}
 	if !resolved.Force && existing != nil && existing.Path != "" {
 		if _, err := os.Stat(existing.Path); err == nil {
 			slog.Info("Image already exists", "path", existing.Path)
@@ -458,6 +461,15 @@ func (op *Operation) ImageImportWithResult(
 
 	timestamp := time.Now().Format(time.RFC3339)
 	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp+":"+crypto.UUIDV4())
+	if input.ResumeID != "" {
+		imageID = input.ResumeID
+	}
+	defer func() {
+		if returnErr != nil && resolved.SourceVM == nil {
+			returnErr = errs.WrapMsg(errs.CodeImageImportFailed, "local image import did not complete", returnErr,
+				errs.WithDetails(map[string]any{"image_id": imageID}))
+		}
+	}()
 	sourcePath := *resolved.Source
 	var exportClient *jailersvc.VMRootfsExportClient
 	var releasePending bool
@@ -489,12 +501,18 @@ func (op *Operation) ImageImportWithResult(
 		sourcePath = copy.CopyPath()
 	}
 	if onProgress != nil {
+		phase, message := "extract", "Extracting image..."
+		if input.ResumeID != "" {
+			phase, message = "resume", "Reopening retained image optimization..."
+		}
 		onProgress(event.Progress{
-			Phase: "extract", Status: "running", Message: "Extracting image...",
+			Phase: phase, Status: "running", Message: message,
 		})
 	}
 	var extractedPath string
-	if resolved.SourceVM != nil {
+	if input.ResumeID != "" {
+		extractedPath, err = op.Services.Image.ResumeStagedImagePath(ctx, imageID)
+	} else if resolved.SourceVM != nil {
 		extractedPath, err = op.Services.Image.ExtractVMRootfsImage(
 			ctx,
 			sourcePath,

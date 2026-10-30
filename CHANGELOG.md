@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `mvm image import --resume FULL_IMAGE_ID` for interrupted local-file optimization. It reuses checked
+  retained staging and root receipts without extracting again; changed resources, registered IDs and VM sources
+  are refused. Failed local imports expose their allocated ID in JSON error details.
 - Added explicit VM-to-host and network-to-host traffic grants through `--to-host` and environment
   `destination_host: true`. Grants select TCP/UDP ports on the source network's host gateway; they do not expose
   localhost-only listeners, grant execution, or change host-to-VM policy. Operators may explicitly select any port.

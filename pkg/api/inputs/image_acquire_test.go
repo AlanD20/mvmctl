@@ -3,15 +3,55 @@ package inputs_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/core/config"
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/testutil"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/errs"
 )
+
+func TestImageImportResumeRejectsAmbiguousIdentity(t *testing.T) {
+	for name, input := range map[string]inputs.ImageImportInput{
+		"prefix":    {ResumeID: "abcd"},
+		"path":      {ResumeID: strings.Repeat("a", 63) + "/"},
+		"uppercase": {ResumeID: strings.Repeat("A", 64)},
+		"replace":   {ResumeID: strings.Repeat("a", 64), Force: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			input.Name, input.Source = "resume", "source.img"
+			require.Error(t, input.Validate())
+		})
+	}
+	input := inputs.ImageImportInput{Name: "resume", Source: "source.img", ResumeID: strings.Repeat("a", 64)}
+	require.NoError(t, input.Validate())
+}
+
+func TestImageImportResumeRefusesRegisteredAndVMSourceBeforeFileEffects(t *testing.T) {
+	for _, registered := range []bool{false, true} {
+		t.Run(map[bool]string{true: "registered image", false: "VM source"}[registered], func(t *testing.T) {
+			images := testutil.NewImageRepo()
+			vms := testutil.NewVMRepo()
+			id := strings.Repeat("a", 64)
+			if registered {
+				require.NoError(t, images.Upsert(t.Context(), &model.ImageItem{ID: id}))
+			} else {
+				require.NoError(t, vms.Upsert(t.Context(), &model.VMItem{ID: "vm", Name: "source"}))
+			}
+			input := inputs.ImageImportInput{Name: "resume", Source: "source", ResumeID: id}
+			_, err := input.Resolve(t.Context(), nil, images, vms)
+			require.Error(t, err)
+			var domainErr *errs.DomainError
+			require.ErrorAs(t, err, &domainErr)
+			require.Equal(t, errs.CodeValidationFailed, domainErr.Code)
+		})
+	}
+}
 
 func TestImageImportInputResolveFormat(t *testing.T) {
 	// Rationale: auto is a public selection policy, not an extraction format.
