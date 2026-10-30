@@ -155,7 +155,10 @@ func (i *ImageImportInput) Resolve(
 			return nil, err
 		}
 		if registered != nil {
-			return nil, errs.New(errs.CodeValidationFailed, "image is already registered; inspect it instead of resuming")
+			return nil, errs.New(
+				errs.CodeValidationFailed,
+				"image is already registered; inspect it instead of resuming",
+			)
 		}
 	}
 
@@ -167,7 +170,10 @@ func (i *ImageImportInput) Resolve(
 		vmItem, vmErr := vmResolver.Resolve(ctx, source)
 		if vmErr == nil && vmItem != nil {
 			if i.ResumeID != "" {
-				return nil, errs.New(errs.CodeValidationFailed, "resume is supported only for retained local image imports")
+				return nil, errs.New(
+					errs.CodeValidationFailed,
+					"resume is supported only for retained local image imports",
+				)
 			}
 			source = vmItem.ID // Provenance only; root export selects the protected bytes.
 			resolvedVM = vmItem
