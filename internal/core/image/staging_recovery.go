@@ -181,40 +181,14 @@ func sameStagedPlan(left, right loopmountsvc.ImageOptimizePlan) bool {
 }
 
 func (stage *stagedImage) loadRecovery(ctx context.Context) (returnErr error) {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	file, err := stage.root.OpenFile(stagedRecoveryLeaf, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	record, identity, err := readStagedRecovery(ctx, stage.root)
 	if err != nil {
-		return errs.WrapMsg(errs.CodeImageError, "retained image staging has no readable recovery record", err)
-	}
-	defer func() { returnErr = errors.Join(returnErr, file.Close()) }()
-	identity, err := stagedFileIdentity(file)
-	if err != nil || !identity.callerFile() || identity.Size <= 0 || identity.Size > maxStagedRecoveryBytes {
-		return errs.WrapMsg(errs.CodeImageError, "image recovery record has unsafe metadata", err)
-	}
-	data, err := io.ReadAll(io.LimitReader(file, maxStagedRecoveryBytes+1))
-	if err != nil || len(data) > maxStagedRecoveryBytes {
-		return errs.WrapMsg(errs.CodeImageError, "read bounded image recovery record", err)
-	}
-	var record stagedImageRecovery
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&record); err != nil {
-		return errs.WrapMsg(errs.CodeImageError, "decode image recovery record", err)
-	}
-	canonical, err := json.Marshal(record)
-	if err != nil || !bytes.Equal(data, append(canonical, '\n')) {
-		return errs.WrapMsg(errs.CodeImageError, "image recovery record is not canonical", err)
-	}
-	after, err := stagedFileIdentity(file)
-	if err != nil || after != identity {
-		return errs.WrapMsg(errs.CodeImageError, "image recovery record changed while reading", err)
-	}
-	if err := stage.admitRecovery(record); err != nil {
 		return err
 	}
-	stage.recovery = &record
+	if err := stage.admitRecovery(*record); err != nil {
+		return err
+	}
+	stage.recovery = record
 	stage.manifestIdentity = identity
 	stage.manifestMade = true
 	stage.lockMade = true
@@ -222,6 +196,58 @@ func (stage *stagedImage) loadRecovery(ctx context.Context) (returnErr error) {
 	stage.request.Filesystem = record.SourceFilesystem
 	stage.request.ExpectedImageBytes = uint64(record.Source.Size)
 	return nil
+}
+
+func readStagedRecovery(
+	ctx context.Context, root *os.Root,
+) (_ *stagedImageRecovery, _ stagedImageIdentity, returnErr error) {
+	if err := ctx.Err(); err != nil {
+		return nil, stagedImageIdentity{}, err
+	}
+	file, err := root.OpenFile(stagedRecoveryLeaf, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, stagedImageIdentity{}, errs.WrapMsg(
+			errs.CodeImageError,
+			"retained image staging has no readable recovery record",
+			err,
+		)
+	}
+	defer func() { returnErr = errors.Join(returnErr, file.Close()) }()
+	identity, err := stagedFileIdentity(file)
+	if err != nil || !identity.callerFile() || identity.Size <= 0 || identity.Size > maxStagedRecoveryBytes {
+		return nil, stagedImageIdentity{}, errs.WrapMsg(
+			errs.CodeImageError,
+			"image recovery record has unsafe metadata",
+			err,
+		)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxStagedRecoveryBytes+1))
+	if err != nil || len(data) > maxStagedRecoveryBytes {
+		return nil, stagedImageIdentity{}, errs.WrapMsg(errs.CodeImageError, "read bounded image recovery record", err)
+	}
+	var record stagedImageRecovery
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&record); err != nil {
+		return nil, stagedImageIdentity{}, errs.WrapMsg(errs.CodeImageError, "decode image recovery record", err)
+	}
+	canonical, err := json.Marshal(record)
+	if err != nil || !bytes.Equal(data, append(canonical, '\n')) {
+		return nil, stagedImageIdentity{}, errs.WrapMsg(
+			errs.CodeImageError,
+			"image recovery record is not canonical",
+			err,
+		)
+	}
+	after, err := stagedFileIdentity(file)
+	if err != nil || after != identity {
+		return nil, stagedImageIdentity{}, errs.WrapMsg(
+			errs.CodeImageError,
+			"image recovery record changed while reading",
+			err,
+		)
+	}
+	return &record, identity, nil
 }
 
 func (stage *stagedImage) admitRecovery(record stagedImageRecovery) error {

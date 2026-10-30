@@ -29,7 +29,12 @@ func TestResumeStagedImagePreservesExactIntentAndSource(t *testing.T) {
 		return &system.RunResult{Stdout: "ext4\n"}, nil
 	}})
 	for name, mutate := range map[string]func(*testing.T, *stagedImage, string){
-		"unchanged": func(*testing.T, *stagedImage, string) {},
+		"unchanged":            func(*testing.T, *stagedImage, string) {},
+		"filesystem extension": func(*testing.T, *stagedImage, string) {},
+		"foreign source path": func(t *testing.T, stage *stagedImage, source string) {
+			stage.recovery.SourcePath = filepath.Join(filepath.Dir(source), "unrelated.ext4")
+			require.NoError(t, stage.saveRecovery(t.Context()))
+		},
 		"missing manifest": func(t *testing.T, stage *stagedImage, _ string) {
 			require.NoError(t, stage.root.Remove(stagedRecoveryLeaf))
 		},
@@ -48,6 +53,9 @@ func TestResumeStagedImagePreservesExactIntentAndSource(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			id := fmt.Sprintf("%x", sha256.Sum256([]byte(t.Name())))
 			source := filepath.Join(cache, "images", id+".img")
+			if name == "filesystem extension" {
+				source = filepath.Join(cache, "images", id+".ext4")
+			}
 			file, err := os.OpenFile(source, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 			require.NoError(t, err)
 			require.NoError(t, file.Truncate(16<<20))
@@ -63,7 +71,7 @@ func TestResumeStagedImagePreservesExactIntentAndSource(t *testing.T) {
 			sourceBefore, err := os.ReadFile(source)
 			require.NoError(t, err)
 			path, err := NewService(nil).ResumeStagedImagePath(t.Context(), id)
-			if name == "unchanged" {
+			if name == "unchanged" || name == "filesystem extension" {
 				require.NoError(t, err)
 				assert.Equal(t, source, path)
 				// A second admission also proves that the first one released its recovery lock.

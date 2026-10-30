@@ -29,13 +29,20 @@ func (s *Service) ResumeStagedImagePath(ctx context.Context, imageID string) (_ 
 	if err != nil {
 		return "", errs.WrapMsg(errs.CodeImageImportFailed, "no retained optimization exists for this image ID", err)
 	}
-	info, statErr := retained.Lstat(stagedRecoveryLeaf)
+	record, _, readErr := readStagedRecovery(ctx, retained)
 	closeErr := retained.Close()
-	if statErr != nil || info == nil || !info.Mode().IsRegular() || closeErr != nil {
+	if readErr != nil || closeErr != nil {
 		return "", errs.WrapMsg(errs.CodeImageImportFailed, "retained optimization manifest is unavailable or unsafe",
-			errors.Join(statErr, closeErr))
+			errors.Join(readErr, closeErr))
 	}
-	path := filepath.Join(cacheDir, "images", imageID+".img")
+	if err := record.SourceFilesystem.Validate(); err != nil {
+		return "", err
+	}
+	path := record.SourcePath
+	base := filepath.Join(cacheDir, "images", imageID)
+	if path != base+".img" && path != base+"."+string(record.SourceFilesystem) {
+		return "", errs.New(errs.CodeImageImportFailed, "retained source is not this image's managed extracted file")
+	}
 	filesystem, err := s.resolveFSType(ctx, path)
 	if err != nil {
 		return "", err
