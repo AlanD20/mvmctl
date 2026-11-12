@@ -6,8 +6,10 @@ import ipaddress
 import json
 import os
 import re
+import socket
 import stat
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -29,6 +31,104 @@ pytestmark = [
     pytest.mark.slow,
     pytest.mark.domain_network,
 ]
+
+
+@pytest.mark.requires_network
+def test_vm_ip_reuse_survives_pending_host_connections(
+    runner_vm: str,
+    unique_vm_name: str,
+    unique_network_name: str,
+    record_property,
+) -> None:
+    """Normal connection retries must not turn unresolved ARP into a launch conflict.
+
+    This journey covers create/remove/recreate under real host traffic. The deterministic
+    Go regression separately exercises the precise deletion/read-back interleaving.
+    """
+    subnet = _unique_subnet(unique_network_name)
+    address = str(ipaddress.ip_network(subnet).network_address + 50)
+    names = (unique_vm_name, unique_vm_name + "-replacement")
+    before_vms = _nft_items(runner_vm, "vm")
+    before_networks = _nft_items(runner_vm, "network")
+    assert not any(item["name"] in names for item in before_vms)
+    assert not any(item["name"] == unique_network_name for item in before_networks)
+    assert not any(ipaddress.ip_network(subnet).overlaps(ipaddress.ip_network(item["subnet"]))
+                   for item in before_networks), before_networks
+    network = None
+    attempted: set[str] = set()
+    identities: list[str] = []
+    stop = threading.Event()
+    attempted_connection = threading.Event()
+    attempts = 0
+
+    def connect_until_stopped() -> None:
+        nonlocal attempts
+        while not stop.is_set():
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+                connection.settimeout(0.05)
+                try:
+                    connection.connect_ex((address, 8080))
+                except OSError:
+                    pass  # Closed ports and an absent VM are expected during this journey.
+                attempts += 1
+                attempted_connection.set()
+            stop.wait(0.005)
+
+    traffic = threading.Thread(target=connect_until_stopped, daemon=True)
+    try:
+        network = _json_success_data(_run_mvm(
+            runner_vm, "network", "create", unique_network_name,
+            "--subnet", subnet, "--no-nat", "--json",
+        ).stdout, dict)
+        assert network["name"] == unique_network_name
+        traffic.start()
+        assert attempted_connection.wait(5), "host connection worker did not attempt traffic"
+        neighbors = json.loads(_guest_run(runner_vm,
+            f"ip -j neigh show to {quote(address)} dev {quote(network['bridge'])}",
+        ).stdout)
+        assert len(neighbors) == 1 and neighbors[0]["dst"] == address, neighbors
+        assert "lladdr" not in neighbors[0], neighbors
+        record_property("pending_neighbor_before_first_launch", json.dumps(neighbors))
+        for name in names:
+            attempted.add(name)
+            created = _json_success_data(_run_mvm(
+                runner_vm, "vm", "create", name, "--image", "alpine:3.23",
+                "--network", network["id"], "--ip", address, "--cloud-init-mode", "inject",
+                "--vcpu", "1", "--mem", "256M", "--disk-size", "512M", "--no-pci", "--json",
+                timeout=180,
+            ).stdout, list)
+            assert len(created) == 1 and created[0]["name"] == name, created
+            vm = created[0]
+            identities.append(vm["id"])
+            assert vm["ipv4"] == address, vm
+            probe = _run_mvm(runner_vm, "exec", vm["id"], "--timeout", "30", "--",
+                             "cat /proc/sys/kernel/random/boot_id; ip -4 -o addr show dev eth0")
+            lines = probe.stdout.splitlines()
+            assert lines and re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", lines[0]), lines
+            assert f"inet {address}/" in probe.stdout, probe.stdout
+            _run_mvm(runner_vm, "vm", "rm", vm["id"], "--force", timeout=120)
+        assert len(set(identities)) == 2, identities
+    finally:
+        stop.set()
+        if traffic.ident is not None:
+            traffic.join(timeout=5)
+        failures: list[str] = []
+        if traffic.is_alive():
+            failures.append("host connection worker did not stop")
+        record_property("host_connection_attempts", attempts)
+        for vm in _nft_items(runner_vm, "vm"):
+            if vm["name"] in attempted:
+                assert vm["id"] not in {item["id"] for item in before_vms}, vm
+                removed = _run_mvm(runner_vm, "vm", "rm", vm["id"], "--force", check=False, timeout=120)
+                if removed.returncode != 0:
+                    failures.append(removed.stdout + removed.stderr)
+        if network is not None:
+            removed = _run_mvm(runner_vm, "network", "rm", network["id"], "--force", check=False)
+            if removed.returncode != 0:
+                failures.append(removed.stdout + removed.stderr)
+        assert not failures, failures
+        assert not any(vm["name"] in names for vm in _nft_items(runner_vm, "vm"))
+        assert not any(item["name"] == unique_network_name for item in _nft_items(runner_vm, "network"))
 
 
 def _chain_output(runner_vm: str, family: str, chain: str) -> str:

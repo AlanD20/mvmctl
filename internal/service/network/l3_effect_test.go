@@ -165,6 +165,33 @@ func TestLinkEffectRejectsNeighborInvalidationAfterHostExposure(t *testing.T) {
 	assert.Empty(t, fixture.route.neighborInvalidations)
 }
 
+func TestLinkEffectReportsNeighborFailureWithoutLosingClassification(t *testing.T) {
+	t.Parallel()
+	for name, cause := range map[string]error{
+		"netlink failure": errors.New("neighbor readback connection closed"),
+		"classified conflict": errs.New(errs.CodeNetworkNotFound, "neighbor authority changed",
+			errs.WithClass(errs.ClassConflict), errs.WithDetails(map[string]any{"proof": "retained"})),
+	} {
+		t.Run(name, func(t *testing.T) {
+			fixture, topology, endpoint := newL3EffectFixture(t)
+			fixture.route.neighborError = cause
+
+			err := fixture.effect.InvalidateManagedNeighbor(t.Context(), fixture.pin, topology, endpoint)
+
+			require.ErrorIs(t, err, cause)
+			failure := errs.AsDomainError(err)
+			require.NotNil(t, failure)
+			assert.Contains(t, failure.Message, "invalidate exact guest neighbor")
+			assert.Contains(t, failure.Message, cause.Error(), "public error must expose the underlying failure")
+			if classified := errs.AsDomainError(cause); classified != nil {
+				assert.Equal(t, classified.Code, failure.Code)
+				assert.Equal(t, classified.Class, failure.Class)
+				assert.Equal(t, classified.Details, failure.Details)
+			}
+		})
+	}
+}
+
 // Rationale: Fabric links are fixed unnumbered L2 members. An unexpected IPv4 address or route is authority-bearing
 // state and must block configuration rather than be repaired or silently retained.
 func TestLinkEffectRejectsUnexpectedFabricIPv4Authority(t *testing.T) {

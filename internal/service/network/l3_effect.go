@@ -177,7 +177,9 @@ func (effect *linkEffect) InvalidateManagedNeighbor(
 	if err := effect.route.invalidateIPv4Neighbor(
 		ctx, retained.hostFD, links.managedBridge.ifIndex, endpoint.guestAddress.value,
 	); err != nil {
-		return l3EffectError(topology.managedBridge.name, "invalidate exact guest neighbor", err)
+		failure := l3EffectError(topology.managedBridge.name, "invalidate exact guest neighbor", err)
+		failure.Message = fmt.Sprintf("failed to invalidate exact guest neighbor: %v", err)
+		return failure
 	}
 	return nil
 }

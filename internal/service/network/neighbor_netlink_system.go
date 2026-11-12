@@ -45,7 +45,8 @@ func (adapter *directRouteNetlink) inspectIPv4Neighbor(
 }
 
 // invalidateIPv4Neighbor removes only one dynamic guest-address neighbor on one admitted bridge.
-// Static, proxy, foreign, and malformed entries are conflicts, not cleanup targets.
+// Read-back may find a new unresolved lookup with no MAC when host traffic races deletion.
+// Static, proxy, foreign, malformed, or still-resolved entries remain conflicts.
 func (adapter *directRouteNetlink) invalidateIPv4Neighbor(
 	ctx context.Context,
 	namespaceFD int,
@@ -67,13 +68,26 @@ func (adapter *directRouteNetlink) invalidateIPv4Neighbor(
 	inspectionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	remaining, inspectErr := adapter.inspectIPv4Neighbor(inspectionCtx, namespaceFD, ifIndex, address)
-	if remaining == nil && inspectErr == nil {
+	if inspectErr == nil && remaining != nil {
+		if err := admitDynamicIPv4Neighbor(*remaining, ifIndex, address); err != nil {
+			return errors.Join(deleteErr, fmt.Errorf("admit neighbor after invalidation: %w", err))
+		}
+	}
+	// A recreated INCOMPLETE/FAILED entry without a link-layer address cannot reuse the old
+	// VM's MAC. Do not chase lookups created by ordinary host traffic while the veth is down.
+	unresolved := remaining != nil && !remaining.hasMAC &&
+		(remaining.state == unix.NUD_INCOMPLETE || remaining.state == unix.NUD_FAILED)
+	if inspectErr == nil && (remaining == nil || unresolved) {
 		if onlyNeighborNotFound(deleteErr) {
 			return nil
 		}
 		return deleteErr
 	}
-	return errors.Join(deleteErr, inspectErr, fmt.Errorf("exact IPv4 neighbor remains after invalidation"))
+	return errors.Join(
+		deleteErr,
+		inspectErr,
+		fmt.Errorf("exact IPv4 neighbor retains a link-layer destination after invalidation"),
+	)
 }
 
 // onlyNeighborNotFound refuses joined cancellation or connection failures even when one cause is ENOENT.

@@ -185,8 +185,90 @@ func TestDirectRouteNetlinkRejectsUnprovenNeighborDeletion(t *testing.T) {
 
 	err := adapter.invalidateIPv4Neighbor(t.Context(), 41, 20, address)
 
-	assert.ErrorContains(t, err, "remains after invalidation")
+	assert.ErrorContains(t, err, "retains a link-layer destination")
 	require.Len(t, connection.requests, 3)
+}
+
+// Host traffic may recreate an unresolved entry immediately after deletion. It has no stale
+// link-layer destination and must not block launch; a remaining MAC or administrator entry must.
+func TestDirectRouteNetlinkAdmitsOnlyUnresolvedNeighborRecreation(t *testing.T) {
+	t.Parallel()
+	address := netip.MustParseAddr("10.44.0.2")
+	tests := map[string]struct {
+		state     uint16
+		flags     uint8
+		hasMAC    bool
+		ifIndex   int
+		deleteErr error
+		wantErr   bool
+	}{
+		"new ARP lookup":              {state: unix.NUD_INCOMPLETE},
+		"failed unresolved lookup":    {state: unix.NUD_FAILED},
+		"lookup after concurrent GC":  {state: unix.NUD_INCOMPLETE, deleteErr: unix.ENOENT},
+		"old binding retained":        {state: unix.NUD_STALE, hasMAC: true, wantErr: true},
+		"unresolved with old MAC":     {state: unix.NUD_INCOMPLETE, hasMAC: true, wantErr: true},
+		"failed with old MAC":         {state: unix.NUD_FAILED, hasMAC: true, wantErr: true},
+		"permanent conflict":          {state: unix.NUD_PERMANENT, hasMAC: true, wantErr: true},
+		"proxy conflict":              {state: unix.NUD_INCOMPLETE, flags: unix.NTF_PROXY, wantErr: true},
+		"different bridge":            {state: unix.NUD_INCOMPLETE, ifIndex: 21, wantErr: true},
+		"malformed resolved neighbor": {state: unix.NUD_REACHABLE, wantErr: true},
+		"delete lost connection": {
+			state: unix.NUD_INCOMPLETE, deleteErr: errors.New("connection close failed"), wantErr: true,
+		},
+		"GC joined with cancellation": {
+			state:     unix.NUD_INCOMPLETE,
+			deleteErr: errors.Join(unix.ENOENT, errors.New("request canceled")), wantErr: true,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			reads, deletes := 0, 0
+			connection := &fakeRouteNetlinkConnection{
+				execute: func(message netlink.Message) ([]netlink.Message, error) {
+					if message.Header.Type == netlink.HeaderType(unix.RTM_DELNEIGH) {
+						deletes++
+						if test.deleteErr != nil {
+							return nil, test.deleteErr
+						}
+						return []netlink.Message{testRouteACK()}, nil
+					}
+					reads++
+					if reads == 1 {
+						return []netlink.Message{testIPv4NeighborReply(t, 20, address, unix.NUD_STALE, 0)}, nil
+					}
+					ifIndex := 20
+					if test.ifIndex != 0 {
+						ifIndex = test.ifIndex
+					}
+					reply := testIPv4NeighborReply(t, ifIndex, address, test.state, test.flags)
+					if !test.hasMAC {
+						attributes, err := netlink.MarshalAttributes([]netlink.Attribute{
+							{Type: unix.NDA_DST, Data: address.AsSlice()},
+						})
+						require.NoError(t, err)
+						reply.Data = append(reply.Data[:unix.SizeofNdMsg:unix.SizeofNdMsg], attributes...)
+					}
+					return []netlink.Message{reply}, nil
+				},
+			}
+			adapter := &directRouteNetlink{dial: func(int, *netlink.Config) (routeNetlinkConnection, error) {
+				return connection, nil
+			}}
+
+			err := adapter.invalidateIPv4Neighbor(t.Context(), 41, 20, address)
+
+			if test.wantErr {
+				require.Error(t, err)
+				if test.deleteErr != nil {
+					assert.ErrorIs(t, err, test.deleteErr)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, 1, deletes, "do not chase newly created neighbor entries")
+			assert.Equal(t, 2, reads)
+		})
+	}
 }
 
 func TestDirectRouteNetlinkRejectsMalformedNeighborReply(t *testing.T) {

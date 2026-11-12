@@ -2,6 +2,7 @@
 
 **Status:** Active
 **Date:** 2026-09-27
+**Updated:** 2026-11-12
 **Supersedes:** [ADR-0006](0006-arp-cache-flush-before-vm-spawn.md)
 **Related:** [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md), [ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md)
 
@@ -27,8 +28,13 @@ down; the managed-network L3 record and firewall endpoint are revalidated by the
 The root netlink adapter issues an exact IPv4 `RTM_GETNEIGH` for the bridge ifindex and guest address. Absence is a
 successful no-op. Only a canonical dynamic unicast entry with ordinary flags may be removed; permanent, proxy,
 foreign, and malformed entries fail closed. It then issues `RTM_DELNEIGH` for that exact key and performs a bounded
-read-back proving absence. If kernel neighbor GC wins the race and deletion alone reports `ENOENT`, proven absence
-still succeeds; a joined cancellation, transport, or close failure does not. Other errors or unproven deletion abort
+read-back proving that no old link-layer destination remains. Absence succeeds. A new ordinary dynamic
+`INCOMPLETE` or `FAILED` entry with no MAC also succeeds: ongoing host connection attempts can recreate an
+unresolved lookup immediately after deletion. The exact bridge/address, unicast kind and ordinary flags are still
+checked. Any retained MAC, permanent/proxy entry, foreign identity or malformed reply blocks launch. The operation
+does not repeatedly delete entries created by host traffic or wait for ARP resolution while the host veth is down.
+If kernel neighbor GC wins the race and deletion alone reports `ENOENT`, either safe read-back also succeeds;
+a joined cancellation, transport, or close failure does not. Other errors or unproven deletion abort
 launch and use the existing topology cleanup path. There is no new public neighbor command or generic privileged
 netlink request.
 
@@ -37,6 +43,11 @@ netlink request.
 - Other guest addresses on the bridge are untouched; the old whole-bridge flush and its raw-sudo helper are removed.
 - The operation is idempotent for an absent entry. It does not promise isolation against a trusted administrator
   changing neighbors concurrently after the read-back.
+- A real-kernel regression in a disposable namespace reproduced a host packet recreating an unresolved entry
+  between acknowledged deletion and read-back. The previous absence-only check failed; the corrected check passed
+  with state `INCOMPLETE`, ordinary flags, unicast kind and no MAC. Unit cases retain refusal of old MACs,
+  administrator/proxy entries, foreign bridge identity and deletion failures. Network activation errors preserve
+  their underlying cause in the public message.
 - Pinned Go 1.26.3 package tests, vet, and a race run passed in `mvmctl-030-test`. A bounded real-kernel probe in a
   disposable runner namespace removed one stale dynamic entry, rejected a permanent entry, and confirmed namespace
   teardown. This proves the netlink protocol on that kernel, not full managed VM/IP-reuse behavior.
