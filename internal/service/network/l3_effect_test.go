@@ -186,7 +186,9 @@ func TestLinkEffectReportsNeighborFailureWithoutLosingClassification(t *testing.
 			if classified := errs.AsDomainError(cause); classified != nil {
 				assert.Equal(t, classified.Code, failure.Code)
 				assert.Equal(t, classified.Class, failure.Class)
-				assert.Equal(t, classified.Details, failure.Details)
+				if diff := cmp.Diff(classified.Details, failure.Details); diff != "" {
+					t.Errorf("neighbor failure details mismatch (-want +got):\n%s", diff)
+				}
 			}
 		})
 	}
