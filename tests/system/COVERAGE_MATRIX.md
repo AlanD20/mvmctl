@@ -176,6 +176,7 @@ The CLI tables retain their detailed command/flag evidence and gaps. Additional 
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
+| VM IP reuse under pending host connections | 🟡 Partial | `network/test_nftables.py` | `test_vm_ip_reuse_survives_pending_host_connections` | Installed `3f48e3d5`: create/remove/recreate on one IP with continuing host TCP attempts, guest exec/IP readback and owned cleanup passed (1/1, 10.35s). A controlled kernel probe and Go regression separately establish the deletion/read-back race; spoofing and host-reboot recovery remain unqualified. |
 | `network create <name> --subnet <cidr>` | ✅ Deep | `network/test_network.py` | `TestNetworkLifecycle` | L3: bridge exists, IP assigned, firewall rules |
 | `network create` without --subnet | ⚡ Shallow | `network/test_network.py` | `TestNetworkEdgeCases` | L1: checks error message |
 | `network create` invalid CIDR | ⚡ Shallow | `network/test_network.py` | `TestNetworkLifecycle` | L1 |

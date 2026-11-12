@@ -173,8 +173,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed VM launch failures when host connection retries recreate an unresolved ARP entry after cleanup of a reused
-  IP. Checked entries with no MAC are accepted; retained MACs, static/proxy entries and netlink failures still
-  block launch. Neighbor-cleanup errors now include their underlying cause.
+  IP. Ordinary unresolved dynamic entries with no MAC are accepted; retained MACs, static/proxy entries and
+  netlink failures still block launch. Neighbor-cleanup errors now include their underlying cause.
 - Fixed networkless VM launch rejecting the fixed local NoCloud datasource used by injected and ISO cloud-init.
   Remote datasource URLs and IP boot configuration remain rejected for networkless VMs.
 - VM creation now reports filesystem preparation separately from optional cloud-init configuration.

@@ -48,6 +48,9 @@ netlink request.
   with state `INCOMPLETE`, ordinary flags, unicast kind and no MAC. Unit cases retain refusal of old MACs,
   administrator/proxy entries, foreign bridge identity and deletion failures. Network activation errors preserve
   their underlying cause in the public message.
+- The installed `3f48e3d5` candidate passed the Python create/remove/recreate journey under continuing host TCP
+  attempts in the named QA runner (one case, 10.35 seconds). This covers the reported usage pattern; the controlled
+  kernel probe and Go tests establish the specific deletion/read-back interleaving.
 - Pinned Go 1.26.3 package tests, vet, and a race run passed in `mvmctl-030-test`. A bounded real-kernel probe in a
   disposable runner namespace removed one stale dynamic entry, rejected a permanent entry, and confirmed namespace
   teardown. This proves the netlink protocol on that kernel, not full managed VM/IP-reuse behavior.
