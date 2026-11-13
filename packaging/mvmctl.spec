@@ -42,6 +42,11 @@ gzip -9 %{buildroot}/usr/share/man/man1/mvm.1
 %{_mandir}/man1/mvm.1.gz
 
 %changelog
+* Fri Nov 13 2026 AlanD20 <aland20@pm.me> - 0.3.0-1
+- Clean installation with one system binary and typed root-owned lifecycle authority.
+- Isolated VM networking, traffic and exec policies, protected storage and snapshots.
+- Pressure-only memory control and verified status/recovery behavior.
+
 * Fri Jul 10 2026 AlanD20 <aland20@pm.me> - 0.2.0-1
 - New --allow-remote-exec flag. When set, the VM can both issue and accept remote exec commands to/from other flagged VMs. Configurable via defaults.vm.allow_remote_exec (default false).
 - Guest agent (mvm-vsock-agent) now has a remote <destination> -- <command> subcommand that connects to the daemon's local Unix socket and requests execution on another VM.
