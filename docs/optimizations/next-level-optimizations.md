@@ -245,7 +245,7 @@ Instead, the Go equivalents are:
 |---|---|
 | Connection pooling for Firecracker API client (`internal/lib/firecracker/client.go`) | ❌ Not done — single-use HTTP client per VM |
 | Event-driven VM state monitoring (vs polling) | ❌ Not done |
-| Memory ballooning (Firecracker API) | ❌ Not done |
+| Memory ballooning (Firecracker API) | ❌ Not done — runtime overcommit only, not a teardown mechanism; see [MEMORY_RECLAIM.md](../implementations/MEMORY_RECLAIM.md) |
 | CPU pinning (Firecracker machine config) | ❌ Not done |
 
 ---

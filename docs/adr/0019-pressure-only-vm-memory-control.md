@@ -2,12 +2,12 @@
 
 **Status:** Accepted; implemented, bounded local memory QA passed; original incident unresolved
 **Date:** 2026-09-19
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-11-13
 **Supersedes:** Per-VM finite memory maximum in [ADR-0015](0015-jailer-canonical-launcher.md) and policy-v1 memory behavior in [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md)
 
 ## Context
 
-The reported saturation failure has not been attributed to a specific OOM mechanism. The existing policy sets
+The reported saturation failure has not been attributed to a specific OOM mechanism. The superseded policy set
 `memory.high` and `memory.max` to guest RAM plus configurable VMM headroom. A hard cgroup ceiling may invoke OOM
 when reclaim cannot satisfy an allocation; it is not a transparent cap on guest allocations.
 
@@ -45,3 +45,10 @@ candidate SHA-256 `886cb7e5fffc73c7918b17f26a454527396ff8b4b1e989c37312098407237
 distinguish guest OOM from a VMM kill in the tested workload; they do not diagnose the original reported kill or prove
 safety under arbitrary ancestor/host pressure. Original incident attribution and complete release qualification remain
 open. The outer runner still uses the installed 0.2.0 controller's finite memory policy; it was not changed by this QA.
+
+A later bounded observation on 2026-10-30, using candidate `1d7e2cda`, again identified the guest allocator
+as the OOM victim while preserving Firecracker PID/start identity, guest boot identity and fresh exec/allocation.
+The VM leaf used `memory.max=max`; its observed leaf/ancestor OOM counters stayed unchanged. No memory-policy
+change was made for that observation. This supports the implemented bounded behavior without attributing the
+original incident. The final release checklist follows this accepted pressure-only decision; it does not revive
+the superseded finite-envelope proposal or remove the original-incident limitation from release approval.

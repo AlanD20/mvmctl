@@ -2,8 +2,22 @@
 
 **Branch:** `0.3.0-release`
 
-**Status (2026-10-16):** Implementation, local qualification and documentation complete. Authorized branch push,
-remote CI and the user's release decision remain. v0.3.0 is unreleased.
+**Status (2026-11-13):** Implementation and accepted local qualification are complete, including the
+subsequent host-policy, image-recovery, networkless-launch and neighbor-race fixes. Final integration checks,
+current remote CI and the user's release decision precede tagging. v0.3.0 remains unreleased.
+
+## Memory policy and sign-off
+
+[ADR-0019](../docs/adr/0019-pressure-only-vm-memory-control.md) records the user's approved replacement of
+finite VM-leaf hard limits: `memory.high` is guest RAM plus configured headroom; `memory.max=max` allows
+exceeding that threshold. The earlier finite-envelope proposal and paused-work checklist are superseded.
+
+Bounded installed-candidate Python saturation cases passed with and without swap. Separate guest-global
+allocation exhaustion identified the guest allocator as the OOM victim, while the same Firecracker process
+and fresh exec survived with unchanged observed host-side OOM counters. Later targeted observation confirmed
+this distinction. These results satisfy the accepted bounded pressure-only behavior; they do not diagnose
+the original incident or promise survival under arbitrary ancestor/host OOM. That limitation remains part
+of the final release decision, not an unimplemented replacement policy.
 
 ## Implemented Baseline
 

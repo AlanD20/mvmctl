@@ -15,6 +15,7 @@ Common issues and solutions when using `mvm`.
 - [Console relay not working](#console-relay-not-working)
 - [IP address exhaustion (no available IPs)](#ip-address-exhaustion-no-available-ips)
 - [Cache corruption or stale state](#cache-corruption-or-stale-state)
+- [Host memory stays high after destroying VMs](#host-memory-stays-high-after-destroying-vms)
 - [Out of disk space for images or VMs](#out-of-disk-space-for-images-or-vms)
 - [libguestfs / mvm cache init hangs forever](#libguestfs-mvm-cache-init-hangs-forever)
 - [Cannot remove volume attached to a VM](#cannot-remove-volume-attached-to-a-vm)
@@ -327,6 +328,23 @@ For a complete reset (removes all VMs):
 mvm vm ls                  # Check what VMs exist
 mvm cache prune --all      # Prune everything
 ```
+
+---
+
+## Host memory stays high after destroying VMs
+
+**Symptom:** Host memory usage stays high after `mvm vm stop` or `mvm vm rm`.
+
+Firecracker's process exit releases its memory mappings. File cache, independent snapshot files and warm
+images can remain. Clean file cache is reclaimable under pressure; an existing snapshot does not pin every
+cached page in RAM. The warm pool defaults to `/tmp/mvmctl-<uid>/ready`, on tmpfs only when that filesystem
+is memory-backed.
+
+Check `mvm vm inspect VM --json` while the VM runs, then compare anonymous, file-cache and shared-memory
+usage. Host-wide `AnonPages`, `Cached`, `Shmem` and swap counters include unrelated processes. Review
+`mvm cache prune misc --dry-run` before pruning warm images and the selected appliance cache.
+
+See [host memory after teardown](implementations/MEMORY_RECLAIM.md) for accounting and diagnostic details.
 
 ---
 

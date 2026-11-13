@@ -4,6 +4,18 @@ This checklist implements `tasks/plan.md`. Go production and L0/L1 work belongs 
 `tests/system/` and release verification belongs to the `qa-engineer`; ADRs, plans, and documentation belong to the
 `architect`. The architect reviews the actual diff after every implementation slice.
 
+## Accepted memory policy
+
+- [x] Implement the explicitly approved pressure-only policy from [ADR-0019](../docs/adr/0019-pressure-only-vm-memory-control.md).
+- [x] Verify literal unlimited `memory.max`, configured `memory.high`, swap/CPU/PID controls and authenticated readback.
+- [x] Exercise bounded sustained guest saturation with and without swap, preserving VMM identity and responsiveness.
+- [x] Distinguish an identified guest-global OOM victim from a VMM kill, then verify fresh exec and allocation.
+- [x] Document that host/ancestor OOM remains possible and that the original incident is still unattributed.
+
+The obsolete finite-envelope proposal is superseded by the user's accepted ADR-0019 decision. These checked
+items describe bounded verified behavior, not attribution or OOM immunity. The original incident remains
+an explicit limitation for final release approval; a recurrence requires fresh process/counter/kernel evidence.
+
 ## Accepted Work (2026-10-16)
 
 - [x] Integrate the approved security/lifecycle implementation and recorded decisions linked from [plan.md](plan.md).
@@ -17,14 +29,16 @@ Candidate identity and detailed evidence are in the
 [system-test execution guide](../docs/development/HOW_TO_RUN_SYSTEM_TESTS.md).
 Successful local QA, builds and installations need no replay for documentation-only changes.
 
-## Remaining Release Steps
+## Final integration before tagging
 
-- [ ] Integrate reviewed documentation cleanup, retaining unrelated user edits unchanged. Owner: architect/integrator.
-- [ ] Push the authorized `0.3.0-release` branch and observe remote CI for the pushed commit. Owner: integrator.
-  Follow the current [CI workflow](../.github/workflows/ci.yml) and [AGENTS.md](../AGENTS.md);
-  local acceptance is not remote CI evidence.
-- [ ] Present the final diff, local qualification, remote CI and limitations for the user's release approval.
-  Owner: architect/integrator. Tag/publication remains subject to that decision and [RELEASE.md](../docs/RELEASE.md).
+- [x] Integrate operator documentation and accepted decision updates, preserving unrelated workspace changes.
+- [x] Implement and verify the post-baseline host-policy, image-import recovery, networkless launch and neighbor fixes.
+- [ ] Run the complete Go CI sequence on the final clean integration checkout and retain the root-Jailer result.
+- [ ] Update [release PR #7](https://github.com/AlanD20/mvmctl/pull/7), push the release branch and confirm its current CI.
+- [ ] Present the exact source, local qualification, current remote CI and known limits for final release approval.
+
+The live PR checklist records completed remote CI without treating an older successful run as current evidence.
+Tagging, publication and the AUR metadata update follow approval and [RELEASE.md](../docs/RELEASE.md).
 
 ## Deferred, Not Release Blockers
 

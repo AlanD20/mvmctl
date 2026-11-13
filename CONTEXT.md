@@ -416,8 +416,8 @@ from launch to active to cleanup without path reconstruction. Abort first termin
 task, then causally binds the leaf for cleanup. Completion requires the exact unreplaced leaf to be empty before
 retryable descriptor-relative removal and commits durable `cleaned` only afterward. A terminal descriptor-close error
 after proven removal converges rather than retrying a reused descriptor. This authority adds no cgroup path to the
-schema and is now consumed by typed root launch/cleanup; focused live enforcement passed in the named runner, while
-sustained pressure and wider lifecycle qualification remain open.
+schema and is consumed by typed root launch/cleanup. Focused live enforcement and bounded sustained-pressure
+checks passed in the named runner; wider failure coverage remains limited as recorded in the qualification matrix.
 
 Private launch cgroup control now accepts only a typed policy-v2 intent: CPU quota, period, and weight; memory high,
 maximum, and swap maximum; and an exact PID maximum. Preparation checks fixed `cpu`, `memory`, and `pids` controller
@@ -435,8 +435,10 @@ guest RAM plus configured headroom as `memory.high`, carries explicit unlimited-
 field, and requires literal kernel `memory.max=max`. Swap, CPU, PID, and ancestor limits are unchanged. Configuration
 errors propagate; missing/v1 policy is not silently backfilled. Pressure may exceed the threshold, and host or ancestor
 OOM remains possible. Focused installed-candidate runner tests have observed the pressure-only controls, actual
-`memory.high` events under guest allocation, unchanged leaf `oom_kill`, and responsive vsock. Sustained saturation,
-ancestor/host OOM behavior, and full release qualification remain open.
+`memory.high` events under guest allocation, unchanged leaf `oom_kill`, and responsive vsock. Bounded sustained
+saturation with and without swap and identified guest-global OOM recovery also passed; the original incident and
+arbitrary ancestor/host OOM behavior remain unqualified. Preserve the candidate bindings in ADR-0019 and the
+coverage matrix rather than treating these observations as one latest-source full-suite run.
 
 Fresh private cleanup admission now reopens the record's exact pidfd/start-tick-bound processes and observes the
 Firecracker as either the committed active identity or the exact launching task before durably transferring authority
