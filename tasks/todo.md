@@ -43,7 +43,9 @@ Successful local QA, builds and installations need no replay for documentation-o
 
 - [x] Integrate operator documentation and accepted decision updates, preserving unrelated workspace changes.
 - [x] Implement and verify the post-baseline host-policy, image-import recovery, networkless launch and neighbor fixes.
-- [x] Complete the Go CI sequence and full root-Jailer package in the clean QA checkout (`2eb0cb4d`); retain both results.
+- [x] Complete the Go CI sequence and full root-Jailer package in the clean QA checkout (`49282ff8`); retain both results.
+  The subsequent closeout changes only ignore generated coverage and update this checklist; current remote CI
+  and candidate identity are recorded in the PR.
 - [x] Prepare [release PR #7](https://github.com/AlanD20/mvmctl/pull/7) and the release branch for current CI.
   The live PR checks must pass on its pushed head before tagging.
 - [x] Assemble the source, local qualification and known limits for the final approval checklist in the PR.
