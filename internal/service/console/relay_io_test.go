@@ -3,24 +3,34 @@ package console
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
-func TestRelayIOBidirectional(t *testing.T) {
-	vmR, vmW, _ := os.Pipe()
+func TestRelayIOForwardsVMOutputToClient(t *testing.T) {
+	vmR, vmW, err := os.Pipe()
+	require.NoError(t, err)
 	defer vmR.Close()
 	defer vmW.Close()
 
 	tmpDir := t.TempDir()
-	sockPath := tmpDir + "/console.sock"
-	listener, _ := net.Listen("unix", sockPath)
+	// An abstract AF_UNIX address avoids filesystem paths and their length limit.
+	socketName := fmt.Sprintf("@mvm-console-%d-%d", os.Getpid(), time.Now().UnixNano())
+	listener, err := net.Listen("unix", socketName)
+	require.NoError(t, err)
 	unixListener := listener.(*net.UnixListener)
+	defer unixListener.Close()
 
-	logPath := tmpDir + "/console.log"
-	logFile, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logPath := filepath.Join(tmpDir, "console.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	require.NoError(t, err)
+	defer logFile.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -38,7 +48,7 @@ func TestRelayIOBidirectional(t *testing.T) {
 	default:
 	}
 
-	client, err := net.Dial("unix", sockPath)
+	client, err := net.Dial("unix", socketName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +67,11 @@ func TestRelayIOBidirectional(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// VM → Client
-	vmW.Write([]byte("output\n"))
+	_, err = vmW.Write([]byte("output\n"))
+	require.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
-	client.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	require.NoError(t, client.SetReadDeadline(time.Now().Add(500*time.Millisecond)))
 	buf := make([]byte, 4096)
 	n, err := client.Read(buf)
 	if err != nil {
@@ -73,5 +84,5 @@ func TestRelayIOBidirectional(t *testing.T) {
 	vmW.Close()
 	vmR.Close()
 	cancel()
-	<-relayDone
+	require.NoError(t, <-relayDone)
 }

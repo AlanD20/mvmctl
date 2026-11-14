@@ -95,7 +95,7 @@ Three-layer flow: **CLI → API → Core**
 - Performs state detection (checking current system state to branch execution)
 - Guards invariants that protect against system damage
 - Does NOT validate caller input
-- Constructor takes repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker)`
+- Constructor takes repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker, policyRepo ServiceAccessPolicyRepository)`
 - Wired once at startup in `app.Initialize()`
 - Service methods that don't reference the Service struct live in `utils.go`
 
@@ -172,8 +172,8 @@ if errs.IsNotFound(err) { ... }
 ONE canonical path: `system.DefaultRunner.Run(ctx, args, system.RunCmdOpts{...})` or `system.DefaultRunner.Stream(ctx, args, system.RunCmdOpts{...})` in `internal/lib/system/runner.go`.
 
 ```go
-// Correct
-result, err := system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", tap, "down"}, system.RunCmdOpts{Privileged: true})
+// Correct for an ordinary subprocess that is not a typed root effect
+result, err := system.DefaultRunner.Run(ctx, []string{"ip", "link", "show", tap}, system.RunCmdOpts{})
 
 // Forbidden
 exec.Command("iptables", ...) // NEVER
@@ -183,17 +183,23 @@ Documented exceptions for direct `os/exec` / `os/exec.CommandContext`:
 
 | Location | Why DefaultRunner doesn't work |
 |----------|-------------------------------|
-| `internal/core/vm/firecracker.go` | Needs `pass_fds` for VM API socket and log file descriptors |
+| `internal/service/jailer/entry.go` | Privileged Jailer handoff uses `syscall.Exec` to preserve console stdio and process identity after chroot setup |
+| `internal/service/jailer/lifecycle_child_spawn.go` | Fixed-binary `os.StartProcess` creates the authenticated handshake-blocked child and closed inherited channels |
+| `internal/service/jailer/lifecycle_child.go` | Fixed admitted Jailer `syscall.Exec` preserves process identity and private descriptor-only mounts; the early child route always exits |
+| `internal/service/jailer/lifecycle_console_spawn.go` | Fixed-binary `os.StartProcess` drops to the admitted caller UID/GID with empty supplementary groups and passes only the root-created PTY and authenticated closed channels; the relay consumes pinned outputs rather than caller paths |
 | `internal/core/ssh/utils.go` | SSH connectivity probe uses `exec.CommandContext` with short-lived probe context |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine with chained losetup/mount/umount/chroot |
 | `internal/service/agent/exec.go` | Guest agent command execution via `su`/`sh` with `exec.CommandContext` |
 | `internal/service/agent/pty.go` | Guest agent PTY session via `su` with `exec.CommandContext` |
+| `internal/service/agent/destination_process.go` | Closed VM-exec destination execution requires an exact nonzero numeric UID, numeric groups, fixed environment/home, `/bin/sh -c`, and process-group cancellation that `DefaultRunner` cannot express |
 | `internal/lib/archive/archive.go` | xz decompression via pipe-based `exec.CommandContext` |
+| `internal/lib/system/privileged_control.go` | Fixed authenticated dispatcher exchange requires a duplex fd-0 socket, physical EOF and owned reaping; only payload-free VM-rootfs export disconnects without killing its separately sessioned recovery worker |
 | `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of `DefaultRunner.Run()` / `Stream()` / `SpawnService` itself |
 
 **Binary lookup carve-out:** Utility files across the codebase use `exec.LookPath()` (not `exec.Command`/`exec.CommandContext`) solely to check whether a system binary exists before calling it through `DefaultRunner.Run()`. This is NOT a subprocess execution — it's a filesystem existence check. These files are not listed as exceptions above and do not violate the subprocess rule.
 
-Service subprocesses use `system.SpawnService(ctx, cfg)`.
+Ordinary-user service subprocesses use `system.SpawnService(ctx, cfg)`. Managed network and rootfs effects use their
+closed authenticated privileged-dispatch actions, not raw privileged subprocess arguments.
 
 ## 8. Model Types
 
@@ -254,24 +260,30 @@ pool.Seq[T,R](ctx, items, fn)             // sequential fail-fast, returns []Res
 
 ## 12. Testing
 
-Three-level architecture — see `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for the full specification.
+Read `docs/system-test-architecture.md` for the test architecture and
+`docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for authoring guidance.
 
 ### L0: Pure Function Tests (Go)
-- Table-driven `map[string]struct{...}` with `t.Run()`. No I/O, no DB, no subprocess.
+- Use named table cases with `t.Run()`. Use a map when order must not matter. Use a slice when deterministic order makes
+  the contract clearer. L0 has no I/O, database, or subprocess work.
 - Input → output only. Runs in microseconds.
 - Example: `ParseDiskSize("1G") == 1073741824`
 
 ### L1: Hermetic Integration Tests (Go)
 - Uses real I/O in controlled environments: file-based SQLite, `t.TempDir()`, `FakeRunner` for subprocess calls that can't run in CI.
-- No networking, no KVM, no sudo.
+- Local loopback fixtures are allowed; no external network, KVM, or sudo.
 - Example: seed DB → call handler → verify JSON output via `cmp.Diff`.
-- Run via `go test ./...`.
+- Run the unprivileged CI selection in `scripts/run-go-ci-tests.sh`. The complete Jailer package includes root-owned
+  lifecycle effects and runs locally in a disposable root-test VM; CI exercises a selected unprivileged subset.
 
-### L2: Runner VM System Tests (Python in `tests/system/`)
-- Real binary, real subprocess, real infrastructure inside a disposable Firecracker VM with nested KVM.
+### L2: Real-binary system tests (Python in `tests/system/`)
+- Real binary, real subprocess, and real infrastructure. T1 and T2 run inside disposable Firecracker VMs. T3 runs only
+  on a clean host-direct qualification machine for behavior that cannot run correctly under nesting.
 - No mocking of any kind — the binary is real, the subprocesses are real.
+- Install the release candidate through `host install-system`; T1/T2 tests invoke exact `/usr/local/bin/mvm`.
+- Directly copying a binary onto the canonical path or relying on PATH lookup does not qualify the installer or release.
 - **Ground truth:** A feature is not tested until it has an L2 test. L0/L1 are fast pre-filters, not replacements.
-- Run via `pytest tests/system/` inside the runner VM.
+- Run through `scripts/run-system-tests.py`. It selects the execution tier and invokes pytest in the correct environment.
 
 ## 13. CLI Patterns
 
@@ -425,15 +437,13 @@ if net == nil { net = snap.Network }
 
 ## 17. Subprocess Services
 
-Long-running subprocess services in `internal/service/`:
+Ordinary-user subprocess services in `internal/service/`:
 - `console/` — PTY relay goroutine (entry: `mvm run console relay`)
 - `nocloudnet/` — NoCloud HTTP metadata server goroutine (entry: `mvm run nocloudnet serve`)
-- `loopmount/` — Loop-mount provisioner subprocess (entry: `mvm run provision`)
-- `agent/` — Embedded guest agent binary (cross-compiled, zstd-compressed, injected at runtime via vsock — no `mvm run` entry)
 
-Each subprocess service follows: `Config` struct → `Run(ctx, cfg)` (blocking) → `Spawn(ctx, cfg, extraFiles...)` (background via `system.SpawnService`).
+These services follow: `Config` struct → `Run(ctx, cfg)` (blocking) → `Spawn(ctx, cfg, extraFiles...)` (background via `system.SpawnService`, without elevation).
 
-All compiled into the same `mvm` binary.
+The same `mvm` binary also contains `loopmount/` (closed typed privileged rootfs receiver), `jailer/` (privileged launch and resource authority), and `agent/` (embedded cross-compiled guest binary injected at runtime). None has a public root service route; privileged host effects enter through the authenticated dispatcher.
 
 ## 18. Performance
 

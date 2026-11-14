@@ -6,12 +6,14 @@ package api
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cache"
 	"mvmctl/internal/core/config"
+	"mvmctl/internal/core/execpolicy"
 	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/core/kernel"
@@ -25,10 +27,13 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/db"
-	"mvmctl/internal/lib/firewall"
 	"mvmctl/internal/lib/logging"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/provisioner"
+	"mvmctl/internal/lib/system"
+	"mvmctl/internal/service/hostpolicy"
+	"mvmctl/internal/service/jailer"
+	networkservice "mvmctl/internal/service/network"
 	"mvmctl/pkg/errs"
 )
 
@@ -42,36 +47,59 @@ type Operation struct {
 	Services        Services
 	ProvisionerType provisioner.ProvisionerType
 	AuditLog        *logging.AuditLog
+
+	hostSystemBinaryInstaller hostSystemBinaryInstaller
+	hostSudoersConfigurer     hostSudoersConfigurer
+	hostPolicyObserver        hostPolicyObserver
+	trustedReleaseClient      trustedReleaseClient
+	consoleClient             consoleAuthorityClient
+	trafficPolicyClient       *networkservice.TrafficPolicyClient
+}
+
+type hostSystemBinaryInstaller interface {
+	InstallSystemBinary(ctx context.Context) (bool, error)
+}
+
+type hostSudoersConfigurer interface {
+	ConfigureSudoers(ctx context.Context) (bool, error)
+}
+
+type hostPolicyObserver interface {
+	Observe(context.Context) (hostpolicy.ObserveResult, error)
 }
 
 // Repos bundles all database repositories.
 type Repos struct {
-	VM       vm.Repository
-	Network  network.Repository
-	Lease    network.LeaseRepository
-	Image    image.Repository
-	Kernel   kernel.Repository
-	Binary   binary.Repository
-	Key      key.Repository
-	Volume   volume.Repository
-	Host     host.Repository
-	Config   config.SettingsRepository
-	Vsock    vsock.Repository
-	Snapshot snapshot.Repository
+	VM            vm.Repository
+	Network       network.Repository
+	Lease         network.LeaseRepository
+	Image         image.Repository
+	Kernel        kernel.Repository
+	Binary        binary.Repository
+	Key           key.Repository
+	Volume        volume.Repository
+	Host          host.Repository
+	Config        config.SettingsRepository
+	Vsock         vsock.Repository
+	Snapshot      snapshot.Repository
+	TrafficPolicy network.TrafficPolicyRepository
+	ExecPolicy    execpolicy.Repository
 }
 
 // Services bundles all domain services.
 type Services struct {
-	Binary  *binary.Service
-	Image   *image.Service
-	Kernel  *kernel.Service
-	Network *network.Service
-	Host    *host.Service
-	Config  *config.Service
-	Key     *key.Service
-	Volume  *volume.Service
-	Cache   *cache.Service
-	Vsock   *vsock.Service
+	Binary        *binary.Service
+	Image         *image.Service
+	Kernel        *kernel.Service
+	Network       *network.Service
+	Host          *host.Service
+	Config        *config.Service
+	Key           *key.Service
+	Volume        *volume.Service
+	Cache         *cache.Service
+	Vsock         *vsock.Service
+	ExecPolicy    *execpolicy.Service
+	TrafficPolicy *network.TrafficPolicyService
 }
 type RequiredService struct {
 	Name string
@@ -83,44 +111,44 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	sqlDB := conn.DB()
 
 	r := Repos{
-		VM:       vm.NewRepository(sqlDB),
-		Network:  network.NewRepository(sqlDB),
-		Lease:    network.NewLeaseRepository(sqlDB),
-		Image:    image.NewRepository(sqlDB),
-		Kernel:   kernel.NewRepository(sqlDB),
-		Binary:   binary.NewRepository(sqlDB),
-		Key:      key.NewRepository(sqlDB),
-		Volume:   volume.NewRepository(sqlDB),
-		Host:     host.NewRepository(sqlDB),
-		Config:   config.NewRepository(sqlDB),
-		Vsock:    vsock.NewRepository(sqlDB),
-		Snapshot: snapshot.NewRepository(sqlDB),
+		VM:            vm.NewRepository(sqlDB),
+		Network:       network.NewRepository(sqlDB),
+		Lease:         network.NewLeaseRepository(sqlDB),
+		Image:         image.NewRepository(sqlDB),
+		Kernel:        kernel.NewRepository(sqlDB),
+		Binary:        binary.NewRepository(sqlDB),
+		Key:           key.NewRepository(sqlDB),
+		Volume:        volume.NewRepository(sqlDB),
+		Host:          host.NewRepository(sqlDB),
+		Config:        config.NewRepository(sqlDB),
+		Vsock:         vsock.NewRepository(sqlDB),
+		Snapshot:      snapshot.NewRepository(sqlDB),
+		TrafficPolicy: network.NewTrafficPolicyRepository(sqlDB),
+		ExecPolicy:    execpolicy.NewRepository(sqlDB),
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
-	// Create a default firewall tracker (nftables, xtcomment enabled).
-	// HostInit will replace it with the properly configured tracker once
-	// firewall_backend and iptables_xtcomment settings are resolved.
-	defaultFwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, sqlDB)
-
 	s := Services{
-		Network: network.NewService(r.Network, defaultFwTracker),
-		Image:   image.NewService(r.Image),
-		Kernel:  kernel.NewService(r.Kernel, cacheDir),
-		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
-		Key:     key.NewService(r.Key, infra.GetKeysDir()),
-		Host:    host.NewService(r.Host),
-		Config:  config.NewService(r.Config, configReg),
-		Volume:  volume.NewService(r.Volume),
-		Cache:   cache.NewService(cacheDir, infra.GetTempDir()),
-		Vsock:   vsock.NewService(r.Vsock),
+		Network:       network.NewService(r.Network, r.TrafficPolicy),
+		Image:         image.NewService(r.Image),
+		Kernel:        kernel.NewService(r.Kernel, filepath.Join(cacheDir, "kernels")),
+		Binary:        binary.NewService(r.Binary, system.RuntimeArch()),
+		Key:           key.NewService(r.Key, infra.GetKeysDir()),
+		Host:          host.NewService(r.Host),
+		Config:        config.NewService(r.Config, configReg),
+		Volume:        volume.NewService(r.Volume),
+		Cache:         cache.NewService(cacheDir, infra.GetTempDir()),
+		Vsock:         vsock.NewService(r.Vsock),
+		ExecPolicy:    execpolicy.NewService(r.ExecPolicy),
+		TrafficPolicy: network.NewTrafficPolicyService(r.TrafficPolicy),
 	}
 	// Enforce that all required services are non-nil — fail fast at startup.
 	required := []RequiredService{
 		{"Config", s.Config}, {"Image", s.Image}, {"Kernel", s.Kernel},
 		{"Binary", s.Binary}, {"Network", s.Network}, {"Host", s.Host},
 		{"Key", s.Key}, {"Volume", s.Volume}, {"Cache", s.Cache},
-		{"Vsock", s.Vsock},
+		{"Vsock", s.Vsock}, {"ExecPolicy", s.ExecPolicy},
+		{"TrafficPolicy", s.TrafficPolicy},
 	}
 	for _, r := range required {
 		if r.Svc == nil {
@@ -133,6 +161,11 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	guestfsEnabled, _ := s.Config.GetBool(ctx, "settings", "guestfs_enabled")
 	if guestfsEnabled {
 		provisionerType = provisioner.ProvisionerGuestFS
+	}
+	var policyObserver hostPolicyObserver = hostpolicy.NewClient()
+	if os.Geteuid() == 0 {
+		// Already-root administration uses local observation, as with firewall readiness.
+		policyObserver = hostpolicy.NewObserver()
 	}
 
 	return &Operation{
@@ -149,10 +182,15 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 			r.Vsock,
 			r.Snapshot,
 		),
-		Repos:           r,
-		Services:        s,
-		ProvisionerType: provisionerType,
-		AuditLog:        logging.NewAuditLog(),
+		Repos:                     r,
+		Services:                  s,
+		ProvisionerType:           provisionerType,
+		AuditLog:                  logging.NewAuditLog(ctx),
+		hostSystemBinaryInstaller: s.Host,
+		hostSudoersConfigurer:     s.Host,
+		hostPolicyObserver:        policyObserver,
+		trustedReleaseClient:      jailer.NewTrustedReleaseClient(),
+		trafficPolicyClient:       networkservice.NewTrafficPolicyClient(),
 	}
 }
 
@@ -167,7 +205,7 @@ func emitProgress(onProgress event.OnProgressCallback, phase, status, msg string
 // resolveCIVersion returns the CI version from the default firecracker binary.
 // Returns error if no firecracker binary is installed or it has no CI version.
 func (op *Operation) resolveCIVersion(ctx context.Context) (string, error) {
-	defaultFC, err := op.Repos.Binary.GetDefault(ctx, "firecracker")
+	defaultFC, err := op.Repos.Binary.GetDefault(ctx, "firecracker", system.RuntimeArch())
 	if err != nil {
 		return "", errs.WrapMsg(
 			errs.CodeDatabaseError,

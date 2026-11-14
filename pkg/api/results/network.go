@@ -1,7 +1,5 @@
 package results
 
-import "mvmctl/internal/lib/model"
-
 // NetworkLease is a single lease entry in the network inspect response.
 type NetworkLease struct {
 	ID        any    `json:"id"`
@@ -33,15 +31,13 @@ type NetworkStatusInfo struct {
 
 // NetworkNATInfo groups network NAT info in an inspect response.
 type NetworkNATInfo struct {
-	NATEnabled  bool     `json:"nat_enabled"`
-	NATGateways []string `json:"nat_gateways"`
+	NATEnabled bool `json:"nat_enabled"`
 }
 
 // NetworkInspect is the structured response for network inspection.
 type NetworkInspect struct {
-	Network NetworkItemInfo       `json:"network"`
-	Status  NetworkStatusInfo     `json:"status"`
-	NAT     NetworkNATInfo        `json:"nat"`
-	Leases  []NetworkLease        `json:"leases"`
-	Rules   []*model.FirewallRule `json:"rules,omitempty"`
+	Network NetworkItemInfo   `json:"network"`
+	Status  NetworkStatusInfo `json:"status"`
+	NAT     NetworkNATInfo    `json:"nat"`
+	Leases  []NetworkLease    `json:"leases"`
 }

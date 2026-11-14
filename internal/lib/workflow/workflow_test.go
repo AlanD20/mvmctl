@@ -515,9 +515,18 @@ func TestPipeline_Destroy_WithSavedState(t *testing.T) {
 // Rationale: Destroy must propagate step errors — if a step's Destroy returns an error,
 // the pipeline must return it to the caller.
 func TestPipeline_Destroy_StepFails(t *testing.T) {
+	dependencyRemoved := false
 	steps := []Step{
+		&mockStep{
+			name: "dependency",
+			destroyFn: func(context.Context, model.ResourceState, StateWriter, event.OnProgressCallback) error {
+				dependencyRemoved = true
+				return nil
+			},
+		},
 		&mockStep{stepType: "",
 			name: "a",
+			deps: []string{"dependency"},
 			destroyFn: func(_ context.Context, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				return errSentinel
 			},
@@ -529,12 +538,14 @@ func TestPipeline_Destroy_StepFails(t *testing.T) {
 
 	saved := []model.AppliedResource{
 		{Name: "a", Type: "mock"},
+		{Name: "dependency", Type: "mock"},
 	}
 
 	ctx := context.Background()
 	err = p.Destroy(ctx, saved, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), errSentinel.Error())
+	assert.False(t, dependencyRemoved, "failed dependent cleanup must preserve its dependency")
 }
 
 // Rationale: Destroy must respect context cancellation — if context is cancelled before
@@ -766,19 +777,16 @@ func TestStatePersistence_WriteCreatesDirectory(t *testing.T) {
 
 // --- WriteWorkflowState EBADF Protection ---
 // Rationale: WriteWorkflowState uses a .tmp file before atomic rename. If a
-// crash leaves a FIFO/socket as the .tmp file, os.OpenFile opens it without
-// error but Write fails with EBADF (bad file descriptor). The fix removes any
-// stale .tmp file before writing. Parallel writes must also not corrupt each
-// other's file descriptors.
+// crash leaves a FIFO/socket at the legacy .tmp path, publication must use a
+// fresh temporary file without blocking on or modifying that unrelated entry.
 
-// Rationale: Verify WriteWorkflowState removes stale special files (.tmp FIFO)
-// before writing, preventing EBADF errors.
+// Rationale: A stale FIFO must neither block durable state publication nor be adopted.
 func TestWriteWorkflowState_StaleTmpFile_DoesNotCauseEBADF(t *testing.T) {
 	tests := map[string]struct {
 		setupFunc func(dir string) // sets up the pre-existing .tmp file
 		verify    func(dir string) // optional post-write verification
 	}{
-		"stale_fifo_is_removed": {
+		"stale_fifo_is_not_opened": {
 			setupFunc: func(dir string) {
 				tmpPath := filepath.Join(dir, "state.yaml.tmp")
 				require.NoError(t, syscall.Mkfifo(tmpPath, 0644),
@@ -786,12 +794,12 @@ func TestWriteWorkflowState_StaleTmpFile_DoesNotCauseEBADF(t *testing.T) {
 			},
 			verify: func(dir string) {
 				tmpPath := filepath.Join(dir, "state.yaml.tmp")
-				_, err := os.Stat(tmpPath)
-				assert.True(t, os.IsNotExist(err),
-					"stale .tmp file must be removed after successful write")
+				info, err := os.Stat(tmpPath)
+				require.NoError(t, err)
+				assert.NotZero(t, info.Mode()&os.ModeNamedPipe)
 			},
 		},
-		"stale_socket_file_is_removed": {
+		"stale_regular_file_is_not_used": {
 			setupFunc: func(dir string) {
 				tmpPath := filepath.Join(dir, "state.yaml.tmp")
 				f, err := os.Create(tmpPath)
@@ -813,6 +821,7 @@ func TestWriteWorkflowState_StaleTmpFile_DoesNotCauseEBADF(t *testing.T) {
 			state := &model.WorkflowState{
 				WorkflowID: "test-ebadf-fix",
 				SpecPath:   "/tmp/test.yaml",
+				Resources:  []model.AppliedResource{},
 			}
 
 			err := WriteWorkflowState(dir, state)
@@ -821,10 +830,11 @@ func TestWriteWorkflowState_StaleTmpFile_DoesNotCauseEBADF(t *testing.T) {
 				return
 			}
 
-			// State file must exist and be readable
-			statePath := filepath.Join(dir, "state.yaml")
-			_, statErr := os.Stat(statePath)
-			assert.NoError(t, statErr, "state.yaml must exist")
+			got, err := ReadWorkflowState(dir)
+			require.NoError(t, err)
+			if diff := cmp.Diff(state, got); diff != "" {
+				t.Errorf("published state (-want +got): %s", diff)
+			}
 
 			if tc.verify != nil {
 				tc.verify(dir)

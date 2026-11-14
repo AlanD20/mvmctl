@@ -1,7 +1,6 @@
 package host_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -14,48 +13,20 @@ import (
 )
 
 // --- GenerateSudoersContent ---
-// Rationale: This function produces the sudoers drop-in file for the mvm group.
-// A malformed sudoers file can lock out sudo access or leave privileged binaries
-// unwrapped, breaking network and firewall management.
+// Rationale: Exact bytes keep the passwordless grant scoped to the root-owned
+// system binary's early privileged marker, including for a different group.
 
 func TestGenerateSudoersContent(t *testing.T) {
-	t.Run("contains_group_name", func(t *testing.T) {
-		got := host.GenerateSudoersContent("mvm")
-		// Verify the group name is injected into the sudoers rule line.
-		assert.Contains(t, got, "%mvm ALL=(root) NOPASSWD:")
-	})
-
-	t.Run("contains_privileged_binaries", func(t *testing.T) {
-		got := host.GenerateSudoersContent("mvm")
-		// Every privileged binary path must appear in the output so that
-		// members of the mvm group can run them without a password.
-		for _, bin := range infra.PrivilegedBinariesOrdered {
-			assert.Contains(t, got, bin,
-				"sudoers content must include privileged binary %s", bin)
-		}
-	})
-
-	t.Run("contains_managed_header", func(t *testing.T) {
-		got := host.GenerateSudoersContent("mvm")
-		assert.Contains(t, got, "# Managed by mvmctl")
-	})
-
-	t.Run("contains_reset_instruction", func(t *testing.T) {
-		got := host.GenerateSudoersContent("mvm")
-		assert.Contains(t, got, "# To remove: mvmctl host reset")
-	})
-
-	t.Run("ends_with_newline", func(t *testing.T) {
-		got := host.GenerateSudoersContent("mvm")
-		assert.True(t, strings.HasSuffix(got, "\n"),
-			"sudoers content must end with newline")
-	})
-
-	t.Run("custom_group_name", func(t *testing.T) {
-		got := host.GenerateSudoersContent("customgroup")
-		assert.Contains(t, got, "%customgroup ALL=(root) NOPASSWD:")
-		assert.NotContains(t, got, "%mvm ALL=(root) NOPASSWD:")
-	})
+	for _, group := range []string{"mvm", "customgroup"} {
+		t.Run(group, func(t *testing.T) {
+			want := "# Managed by mvmctl — do not edit manually.\n" +
+				"# To remove: sudo /usr/local/bin/mvm host reset --force\n" +
+				"%" + group + " ALL=(root) NOPASSWD: /usr/local/bin/mvm __mvm_privileged_v1 *\n"
+			if diff := cmp.Diff(want, host.GenerateSudoersContent(group)); diff != "" {
+				t.Errorf("sudoers policy (-want +got):\n%s", diff)
+			}
+		})
+	}
 }
 
 // --- HardwareFromState ---

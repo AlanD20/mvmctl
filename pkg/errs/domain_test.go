@@ -157,6 +157,25 @@ func TestNew(t *testing.T) {
 	}
 }
 
+// Rationale: the VM-exec audit boundary must distinguish malformed records from failed durable recording while
+// retaining the vsock operation identity used by relay callers.
+func TestVMExecAuditCodeMappings(t *testing.T) {
+	tests := map[string]struct {
+		code      errs.Code
+		wantClass errs.Class
+	}{
+		"invalid record": {code: errs.CodeVsockAuditInvalid, wantClass: errs.ClassValidation},
+		"record failure": {code: errs.CodeVsockAuditFailed, wantClass: errs.ClassInternal},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			domainErr := errs.New(test.code, "audit error")
+			assert.Equal(t, test.wantClass, domainErr.Class)
+			assert.Equal(t, "vsock", domainErr.Op)
+		})
+	}
+}
+
 // Rationale: Options (WithClass, WithEntity, WithDetails) modify the
 // auto-derived error. Missing or incorrect option application causes
 // downstream consumers to misclassify or lose context.

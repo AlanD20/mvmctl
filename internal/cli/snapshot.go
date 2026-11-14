@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -74,18 +73,22 @@ func newSnapshotCreateCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 				input.Name = infraptr.Ptr(name)
 			}
 
-			prog := common.NewProgress()
-			prog.Start("Creating snapshot...")
-			defer prog.Stop()
+			if !common.StructuredOutput() {
+				fmt.Fprintln(cmd.ErrOrStderr(), "Creating snapshot...")
+			}
 
 			snapItem, err := snapshotAPI.SnapshotCreate(cmd.Context(), input, func(e event.Progress) {
-				if e.Message != "" {
-					prog.UpdateText(e.Message)
+				if e.Message != "" && (e.Phase == "snapshot_intent" || !common.StructuredOutput()) {
+					fmt.Fprintln(cmd.ErrOrStderr(), e.Message)
 				}
 			})
 			if err != nil {
+				if snapItem != nil {
+					common.RecordPartialResult(snapItem)
+				}
 				return fmt.Errorf("snapshot create failed: %w", err)
 			}
+			common.RecordResult(snapItem)
 
 			common.Cli.Success(
 				fmt.Sprintf("Snapshot created: %s (ID: %s)", snapItem.Name, common.Cli.FormatID(snapItem.ID)),
@@ -102,7 +105,6 @@ func newSnapshotCreateCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 // --- ls (list all snapshots) ---
 
 func newSnapshotListCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:     "ls",
@@ -112,12 +114,7 @@ func newSnapshotListCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 			return common.HandleErrors(func() error {
 				snapshots := snapshotAPI.SnapshotList(cmd.Context())
 
-				if jsonOutput {
-					if snapshots == nil {
-						snapshots = []*model.SnapshotItem{}
-					}
-					b, _ := json.MarshalIndent(snapshots, "", "  ")
-					fmt.Println(string(b))
+				if common.RecordListResult(snapshots) {
 					return nil
 				}
 
@@ -127,14 +124,12 @@ func newSnapshotListCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 
 // --- get ---
 
 func newSnapshotInspectCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:               "inspect [selector]",
@@ -149,9 +144,7 @@ func newSnapshotInspectCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 				return fmt.Errorf("get snapshot: %w", err)
 			}
 
-			if jsonOutput {
-				b, _ := json.MarshalIndent(snap, "", "  ")
-				fmt.Println(string(b))
+			if common.RecordResult(snap) {
 				return nil
 			}
 
@@ -160,7 +153,6 @@ func newSnapshotInspectCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
 
@@ -207,8 +199,12 @@ func newSnapshotRestoreCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 
 			vms, err := snapshotAPI.SnapshotRestore(cmd.Context(), input)
 			if err != nil {
+				if vms != nil {
+					common.RecordPartialResult(vms)
+				}
 				return fmt.Errorf("snapshot restore failed: %w", err)
 			}
+			common.RecordResult(vms)
 
 			names := make([]string, len(vms))
 			for i, v := range vms {
@@ -243,6 +239,9 @@ func newSnapshotRemoveCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 				Force:       force,
 			}
 			result := snapshotAPI.SnapshotRemove(cmd.Context(), input)
+			if common.StructuredOutput() {
+				return common.RecordBatch(result)
+			}
 			if result.HasErrors() {
 				for _, r := range result.Items {
 					if r.IsOK() {

@@ -6,6 +6,7 @@ import (
 
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/lib/model"
+	"mvmctl/pkg/errs"
 )
 
 // In-memory VM repository for testing.
@@ -118,7 +119,7 @@ func (r *VMRepo) FindByNetworkID(_ context.Context, networkID string) ([]*model.
 	defer r.mu.RUnlock()
 	var result []*model.VMItem
 	for _, v := range r.vms {
-		if v.NetworkID == networkID {
+		if string(v.NetworkID) == networkID {
 			result = append(result, v)
 		}
 	}
@@ -134,7 +135,7 @@ func (r *VMRepo) GetByNetworkIDs(_ context.Context, networkIDs []string) ([]*mod
 	}
 	var result []*model.VMItem
 	for _, v := range r.vms {
-		if set[v.NetworkID] {
+		if set[string(v.NetworkID)] {
 			result = append(result, v)
 		}
 	}
@@ -338,6 +339,29 @@ func (r *VMRepo) UpdateStatus(_ context.Context, id string, status model.VMStatu
 	defer r.mu.Unlock()
 	if v, ok := r.vms[id]; ok {
 		v.Status = status
+	}
+	return nil
+}
+
+func (r *VMRepo) UpdateRuntimeStatuses(ctx context.Context, updates []model.VMRuntimeStatusUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return errs.WrapMsg(errs.CodeDatabaseError, "begin VM runtime status projection", err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, update := range updates {
+		if _, ok := r.vms[update.VMID]; !ok {
+			return errs.New(errs.CodeDatabaseError, "VM disappeared during runtime status projection")
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return errs.WrapMsg(errs.CodeDatabaseError, "project VM runtime status", err)
+	}
+	for _, update := range updates {
+		r.vms[update.VMID].Status = update.Status
 	}
 	return nil
 }

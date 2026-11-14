@@ -7,378 +7,227 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra/ptr"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/lib/system"
 	"mvmctl/internal/testutil"
 	"mvmctl/pkg/errs"
 )
 
 // --- Service.CreateDisk ---
-// Rationale: Tests disk creation for raw and qcow2 formats, invalid format
-// rejection, and propagation of subprocess failures (context cancellation).
+// Rationale: Root admission requires an exact private backing mode even when
+// the operator's process umask permits group writes.
 
 func TestService_CreateDisk(t *testing.T) {
-	ctx := context.Background()
-
-	tests := map[string]struct {
-		vol     func(tmpDir string) *model.VolumeItem
-		stubErr error
-		wantErr bool
-		errCode errs.Code
-		wantCmd string // first element of args expected in FakeRunner call
-	}{
-		// --- Error paths ---
-		"error/invalid_format_returns_error": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:     "vol-bad",
-					Name:   "bad-format",
-					Path:   filepath.Join(tmpDir, "test.img"),
-					Format: "unsupported",
-				}
-			},
-			wantErr: true,
-			errCode: errs.CodeVolumeError,
-		},
-		"error/context_cancellation_returns_error": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:        "vol-cancel",
-					Name:      "cancel-test",
-					Path:      filepath.Join(tmpDir, "test.raw"),
-					Format:    model.VolumeFormatRaw,
-					SizeBytes: 1024,
-				}
-			},
-			stubErr: context.Canceled,
-			wantErr: true,
-			errCode: errs.CodeVolumeError,
-		},
-		// --- Success paths ---
-		"creates_raw_volume_with_fallocate": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:        "vol-raw-001",
-					Name:      "test-raw",
-					Path:      filepath.Join(tmpDir, "test.raw"),
-					Format:    model.VolumeFormatRaw,
-					SizeBytes: 1_048_576,
-					CreatedAt: "2025-01-01T00:00:00Z",
-				}
-			},
-			wantCmd: "fallocate",
-		},
-		"creates_qcow2_volume_with_qemu_img": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:        "vol-qcow2-001",
-					Name:      "test-qcow2",
-					Path:      filepath.Join(tmpDir, "test.qcow2"),
-					Format:    model.VolumeFormatQCOW2,
-					SizeBytes: 2_097_152,
-					CreatedAt: "2025-01-01T00:00:00Z",
-				}
-			},
-			wantCmd: "qemu-img",
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			repo := testutil.NewVolumeRepo()
-			fake := &testutil.FakeRunner{StubRunErr: tc.stubErr}
-			old := system.DefaultRunner
-			system.DefaultRunner = fake
-			t.Cleanup(func() { system.DefaultRunner = old })
-
-			svc := volume.NewService(repo)
-			tmpDir := t.TempDir()
-			vol := tc.vol(tmpDir)
-
-			got, err := svc.CreateDisk(ctx, vol)
-
-			if tc.wantErr {
-				require.Error(t, err)
-				var de *errs.DomainError
-				require.True(t, errors.As(err, &de))
-				assert.Equal(t, tc.errCode, de.Code)
-				assert.Nil(t, got)
-				return
-			}
-
-			require.NoError(t, err)
-			require.NotNil(t, got)
-
-			// Primary assertion: state change in repo
-			fromRepo, repoErr := repo.Get(ctx, vol.ID)
-			require.NoError(t, repoErr)
-			require.NotNil(t, fromRepo)
-			assert.Equal(t, vol.SizeBytes, fromRepo.SizeBytes)
-
-			// Verify the correct subprocess command was invoked
-			if tc.wantCmd != "" {
-				require.Len(t, fake.Calls, 1)
-				assert.Equal(t, tc.wantCmd, fake.Calls[0].Args[0])
-			}
+	t.Run("cancelled_before_creation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		repo := testutil.NewVolumeRepo()
+		path := filepath.Join(t.TempDir(), "cancelled.raw")
+		item, err := volume.NewService(repo).CreateDisk(ctx, &model.VolumeItem{
+			ID: "vol-cancel", Path: path, SizeBytes: 1024,
 		})
-	}
+		require.Error(t, err)
+		assert.Nil(t, item)
+		assert.ErrorIs(t, err, context.Canceled)
+		_, statErr := os.Lstat(path)
+		assert.True(t, os.IsNotExist(statErr))
+	})
+
+	t.Run("existing_path_is_not_overwritten", func(t *testing.T) {
+		repo := testutil.NewVolumeRepo()
+		path := filepath.Join(t.TempDir(), "existing.raw")
+		content := []byte("operator data")
+		require.NoError(t, os.WriteFile(path, content, 0600))
+		item, err := volume.NewService(repo).CreateDisk(t.Context(), &model.VolumeItem{
+			ID: "vol-existing", Path: path, SizeBytes: 1024,
+		})
+		require.Error(t, err)
+		assert.Nil(t, item)
+		got, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		if diff := cmp.Diff(content, got); diff != "" {
+			t.Errorf("existing raw bytes changed (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("failed_allocation_removes_new_backing", func(t *testing.T) {
+		repo := testutil.NewVolumeRepo()
+		path := filepath.Join(t.TempDir(), "failed.raw")
+		// Zero is rejected by the public input; here it deterministically makes
+		// fallocate fail after CreateDisk has created the private raw file.
+		item, err := volume.NewService(repo).CreateDisk(t.Context(), &model.VolumeItem{
+			ID: "vol-failed-allocation", Path: path, SizeBytes: 0,
+		})
+		require.Error(t, err)
+		assert.Nil(t, item)
+		_, statErr := os.Lstat(path)
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
+		fromRepo, repoErr := repo.Get(t.Context(), "vol-failed-allocation")
+		require.NoError(t, repoErr)
+		assert.Nil(t, fromRepo)
+	})
+
+	t.Run("private_allocated_file_under_permissive_umask", func(t *testing.T) {
+		repo := testutil.NewVolumeRepo()
+		path := filepath.Join(t.TempDir(), "private.raw")
+		vol := &model.VolumeItem{ID: "vol-private", Path: path, SizeBytes: 1 << 20}
+		// Umask is process-global, so this subtest must not run in parallel.
+		oldUmask := unix.Umask(0002)
+		defer unix.Umask(oldUmask)
+		item, err := volume.NewService(repo).CreateDisk(t.Context(), vol)
+		require.NoError(t, err)
+		require.NotNil(t, item)
+		stat, err := os.Lstat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0600), stat.Mode().Perm())
+		assert.Equal(t, vol.SizeBytes, stat.Size())
+		fromRepo, err := repo.Get(t.Context(), vol.ID)
+		require.NoError(t, err)
+		require.NotNil(t, fromRepo)
+		assert.Equal(t, vol.SizeBytes, fromRepo.SizeBytes)
+	})
 }
 
 // --- Service.Remove ---
-// Rationale: Tests volume removal from both the repository and filesystem,
-// and that nonexistent volumes are silently ignored.
+// Rationale: A rejected authoritative removal must retain the local projection
+// and must not touch a caller-supplied path.
 
 func TestService_Remove(t *testing.T) {
 	ctx := context.Background()
-
-	tests := map[string]struct {
-		vol         func(tmpDir string) *model.VolumeItem
-		upsertFirst bool
-		createFile  bool
-	}{
-		// --- Error paths (both succeed silently) ---
-		"nonexistent_volume_silently_ignored": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:   "ghost",
-					Name: "ghost",
-					Path: filepath.Join(tmpDir, "ghost.raw"),
-				}
-			},
-			upsertFirst: false,
-			createFile:  false,
-		},
-		// --- Success paths ---
-		"removes_from_repo_and_disk": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:   "vol-001",
-					Name: "remove-test",
-					Path: filepath.Join(tmpDir, "test.raw"),
-				}
-			},
-			upsertFirst: true,
-			createFile:  true,
-		},
+	t.Setenv("MVM_CACHE_DIR", t.TempDir())
+	repo := testutil.NewVolumeRepo()
+	svc := volume.NewService(repo)
+	vol := &model.VolumeItem{
+		ID:   "invalid-volume-id",
+		Name: "remove-test",
+		Path: filepath.Join(t.TempDir(), "caller-owned.raw"),
 	}
+	content := []byte("caller data")
+	require.NoError(t, repo.Upsert(ctx, vol))
+	require.NoError(t, os.WriteFile(vol.Path, content, 0o600))
 
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			repo := testutil.NewVolumeRepo()
-			svc := volume.NewService(repo)
-			tmpDir := t.TempDir()
-			vol := tc.vol(tmpDir)
+	err := svc.Remove(ctx, vol)
+	require.Error(t, err)
+	var de *errs.DomainError
+	require.ErrorAs(t, err, &de)
+	assert.Equal(t, errs.CodeValidationFailed, de.Code)
 
-			if tc.upsertFirst {
-				require.NoError(t, repo.Upsert(ctx, vol))
-			}
-			if tc.createFile {
-				require.NoError(t, os.WriteFile(vol.Path, []byte("data"), 0o644))
-			}
-
-			err := svc.Remove(ctx, vol)
-
-			// Primary assertion: always returns nil
-			require.NoError(t, err)
-
-			// State change: removed from repo
-			if tc.upsertFirst {
-				fromRepo, repoErr := repo.Get(ctx, vol.ID)
-				require.NoError(t, repoErr)
-				assert.Nil(t, fromRepo)
-			}
-
-			// State change: removed from filesystem
-			if tc.createFile {
-				_, statErr := os.Stat(vol.Path)
-				assert.True(t, os.IsNotExist(statErr))
-			}
-		})
+	fromRepo, repoErr := repo.Get(ctx, vol.ID)
+	require.NoError(t, repoErr)
+	require.NotNil(t, fromRepo)
+	gotContent, readErr := os.ReadFile(vol.Path)
+	require.NoError(t, readErr)
+	if diff := cmp.Diff(content, gotContent); diff != "" {
+		t.Errorf("caller-owned file changed (-want +got):\n%s", diff)
 	}
 }
 
 // --- Service.Remove (context cancellation) ---
-// Rationale: Remove silently discards all errors, including when the context is
-// cancelled. This test verifies that Remove returns nil and the repo is unchanged
-// when repo.Delete fails due to context cancellation.
+// Rationale: A cancelled removal must fail before deleting the local projection.
 
 func TestService_Remove_ContextCancellation(t *testing.T) {
 	ctx := context.Background()
-	tmpDir := t.TempDir()
-
+	t.Setenv("MVM_CACHE_DIR", t.TempDir())
 	vol := &model.VolumeItem{
-		ID:   "vol-cancel-rm",
+		ID:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Name: "cancel-rm",
-		Path: filepath.Join(tmpDir, "cancel-rm.raw"),
 	}
-
-	baseRepo := testutil.NewVolumeRepo()
-	require.NoError(t, baseRepo.Upsert(ctx, vol))
-
-	// Wrap with context-checking repo
-	testRepo := &repoWrapper{
-		Repository: baseRepo,
-		checkCtx:   true,
-	}
-
-	// Create the file on disk
-	require.NoError(t, os.WriteFile(vol.Path, []byte("data"), 0o644))
-
-	svc := volume.NewService(testRepo)
-
-	// Cancel context before calling Remove
+	repo := testutil.NewVolumeRepo()
+	require.NoError(t, repo.Upsert(ctx, vol))
+	svc := volume.NewService(repo)
 	cancelledCtx, cancel := context.WithCancel(ctx)
 	cancel()
 
 	err := svc.Remove(cancelledCtx, vol)
-
-	// Remove silently discards errors — returns nil even when repo.Delete fails
-	require.NoError(t, err)
-
-	// Repo state: volume should still exist because Delete was never called
-	// (the wrapper returned early due to context cancellation)
-	fromRepo, repoErr := baseRepo.Get(ctx, vol.ID)
+	require.ErrorIs(t, err, context.Canceled)
+	fromRepo, repoErr := repo.Get(ctx, vol.ID)
 	require.NoError(t, repoErr)
 	require.NotNil(t, fromRepo)
-	assert.Equal(t, vol.ID, fromRepo.ID)
-
-	// Filesystem: file should be removed because os.Remove is called
-	// regardless of repo.Delete result (context cancellation doesn't affect it)
-	_, statErr := os.Stat(vol.Path)
-	assert.True(t, os.IsNotExist(statErr), "file should have been removed by os.Remove")
 }
 
 // --- Service.ResizeDisk ---
-// Rationale: Tests raw and qcow2 resize operations, and error when the disk file
-// does not exist on the filesystem.
+// Rationale: Invalid growth and rejected authoritative requests must leave the
+// local projection unchanged.
 
 func TestService_ResizeDisk(t *testing.T) {
 	ctx := context.Background()
-
+	t.Setenv("MVM_CACHE_DIR", t.TempDir())
 	tests := map[string]struct {
-		vol        func(tmpDir string) *model.VolumeItem
-		newSize    int64
-		createFile bool
-		stubErr    error
-		wantErr    bool
-		errCode    errs.Code
-		wantCmd    string
+		volumeID string
+		newSize  int64
+		errCode  errs.Code
 	}{
-		// --- Error paths ---
-		"error/nonexistent_disk_file_returns_error": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:     "vol-missing",
-					Name:   "missing-disk",
-					Path:   filepath.Join(tmpDir, "missing.raw"),
-					Format: model.VolumeFormatRaw,
-				}
-			},
-			newSize:    2_097_152,
-			createFile: false,
-			wantErr:    true,
-			errCode:    errs.CodeVolumeError,
+		"zero_target": {
+			volumeID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			newSize:  0,
+			errCode:  errs.CodeVolumeResizeFailed,
 		},
-		"error/context_cancellation_returns_error": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:        "vol-cancel-resize",
-					Name:      "cancel-resize",
-					Path:      filepath.Join(tmpDir, "cancel.raw"),
-					Format:    model.VolumeFormatRaw,
-					SizeBytes: 1_048_576,
-				}
-			},
-			newSize:    2_097_152,
-			createFile: true,
-			stubErr:    context.Canceled,
-			wantErr:    true,
-			errCode:    errs.CodeVolumeError,
+		"negative_target": {
+			volumeID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			newSize:  -1,
+			errCode:  errs.CodeVolumeResizeFailed,
 		},
-		// --- Success paths ---
-		"raw_resize_with_fallocate": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:        "vol-resize-raw",
-					Name:      "resize-raw",
-					Path:      filepath.Join(tmpDir, "resize.raw"),
-					Format:    model.VolumeFormatRaw,
-					SizeBytes: 1_048_576,
-					CreatedAt: "2025-01-01T00:00:00Z",
-				}
-			},
-			newSize:    2_097_152,
-			createFile: true,
-			wantCmd:    "fallocate",
-		},
-		"qcow2_resize_with_qemu_img": {
-			vol: func(tmpDir string) *model.VolumeItem {
-				return &model.VolumeItem{
-					ID:        "vol-resize-qcow2",
-					Name:      "resize-qcow2",
-					Path:      filepath.Join(tmpDir, "resize.qcow2"),
-					Format:    model.VolumeFormatQCOW2,
-					SizeBytes: 1_048_576,
-					CreatedAt: "2025-01-01T00:00:00Z",
-				}
-			},
-			newSize:    4_194_304,
-			createFile: true,
-			wantCmd:    "qemu-img",
+		"authoritative_rejection": {
+			volumeID: "invalid-volume-id",
+			newSize:  2_097_152,
+			errCode:  errs.CodeValidationFailed,
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			repo := testutil.NewVolumeRepo()
-			fake := &testutil.FakeRunner{StubRunErr: tc.stubErr}
-			old := system.DefaultRunner
-			system.DefaultRunner = fake
-			t.Cleanup(func() { system.DefaultRunner = old })
-
 			svc := volume.NewService(repo)
-			tmpDir := t.TempDir()
-			vol := tc.vol(tmpDir)
-
-			// Upsert original volume so it exists in repo
+			vol := &model.VolumeItem{
+				ID:        tc.volumeID,
+				Name:      "resize-test",
+				Path:      filepath.Join(t.TempDir(), "caller-owned.raw"),
+				Format:    model.VolumeFormatRaw,
+				SizeBytes: 1_048_576,
+			}
 			require.NoError(t, repo.Upsert(ctx, vol))
-
-			if tc.createFile {
-				require.NoError(t, os.WriteFile(vol.Path, []byte("dummy"), 0o644))
-			}
-
 			got, err := svc.ResizeDisk(ctx, vol, tc.newSize)
-
-			if tc.wantErr {
-				require.Error(t, err)
-				var de *errs.DomainError
-				require.True(t, errors.As(err, &de))
-				assert.Equal(t, tc.errCode, de.Code)
-				assert.Nil(t, got)
-				return
-			}
-
-			require.NoError(t, err)
-			require.NotNil(t, got)
-
-			// Primary assertion: repo has the new size
+			require.Error(t, err)
+			var de *errs.DomainError
+			require.ErrorAs(t, err, &de)
+			assert.Equal(t, tc.errCode, de.Code)
+			assert.Nil(t, got)
 			fromRepo, repoErr := repo.Get(ctx, vol.ID)
 			require.NoError(t, repoErr)
 			require.NotNil(t, fromRepo)
-			assert.Equal(t, tc.newSize, fromRepo.SizeBytes)
-
-			// Verify the correct subprocess command was invoked
-			if tc.wantCmd != "" {
-				require.Len(t, fake.Calls, 1)
-				assert.Equal(t, tc.wantCmd, fake.Calls[0].Args[0])
-			}
+			assert.Equal(t, int64(1_048_576), fromRepo.SizeBytes)
 		})
 	}
+}
+
+// Rationale: Cancellation must stop growth before the local size projection changes.
+func TestService_ResizeDisk_ContextCancellation(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("MVM_CACHE_DIR", t.TempDir())
+	repo := testutil.NewVolumeRepo()
+	vol := &model.VolumeItem{
+		ID:        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Name:      "cancel-resize",
+		SizeBytes: 1_048_576,
+	}
+	require.NoError(t, repo.Upsert(ctx, vol))
+	svc := volume.NewService(repo)
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	got, err := svc.ResizeDisk(cancelledCtx, vol, 2_097_152)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, got)
+	fromRepo, repoErr := repo.Get(ctx, vol.ID)
+	require.NoError(t, repoErr)
+	require.NotNil(t, fromRepo)
+	assert.Equal(t, int64(1_048_576), fromRepo.SizeBytes)
 }
 
 // --- Service.SetVolumesState ---

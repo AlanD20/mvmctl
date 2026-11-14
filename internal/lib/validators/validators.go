@@ -320,46 +320,6 @@ func BridgeName(ctx context.Context, bridge string) error {
 	return nil
 }
 
-func NATGateways(ctx context.Context, gateways []string) ([]string, error) {
-	if len(gateways) == 0 {
-		return nil, errs.New(errs.CodeValidationFailed, "nat gateways cannot be empty")
-	}
-	var validated []string
-	for _, iface := range gateways {
-		iface = strings.TrimSpace(iface)
-		if iface == "" {
-			return nil, errs.New(errs.CodeValidationFailed, "nat gateway interface name cannot be empty")
-		}
-		if len(iface) > ifnamSiz {
-			return nil, errs.New(
-				errs.CodeValidationFailed,
-				fmt.Sprintf("invalid NAT gateway '%s': exceeds maximum length of %d", iface, ifnamSiz),
-			)
-		}
-		if infra.ContainsDangerousChars(iface) {
-			return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-				"invalid NAT gateway '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
-				iface,
-			))
-		}
-		if !validInterfaceNameRegex.MatchString(iface) {
-			return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-				"invalid NAT gateway '%s': must contain only lowercase alphanumeric, hyphen, and underscore characters",
-				iface,
-			))
-		}
-		// Check that interface actually exists on the host
-		if err := network.EnsureInterfaceReady(ctx, iface); err != nil {
-			return nil, errs.New(
-				errs.CodeValidationFailed,
-				fmt.Sprintf("nat gateway '%s': interface does not exist on this host", iface),
-			)
-		}
-		validated = append(validated, iface)
-	}
-	return validated, nil
-}
-
 // networkRange returns the first and last IP addresses in the given network.
 func networkRange(ipnet *net.IPNet) (net.IP, net.IP) {
 	first := ipnet.IP.To4()

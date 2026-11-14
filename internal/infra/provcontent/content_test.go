@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/provcontent"
 )
 
@@ -930,10 +931,10 @@ func TestBuilder_BuildAgentOps(t *testing.T) {
 		t.Errorf("BuildAgentOps() agent binary mismatch (-want +got):\n%s", diff)
 	}
 
-	// ops[1]: Auth token at /var/run/mvm-agent.token
+	// ops[1]: Auth token at the persistent fixed path.
 	op1, ok1 := ops[1].(provcontent.FileOp)
 	require.True(t, ok1, "ops[1] must be FileOp")
-	assert.Equal(t, "/var/run/mvm-agent.token", op1.Path)
+	assert.Equal(t, infra.GuestAgentTokenPath, op1.Path)
 	assert.Equal(t, 0600, op1.Mode, "token file mode must be 0600")
 	assert.Equal(t, token, string(op1.Data), "token file content must match")
 
@@ -946,7 +947,9 @@ func TestBuilder_BuildAgentOps(t *testing.T) {
 	unitContent := string(op2.Data)
 	assert.Contains(t, unitContent, "Description=MVM Agent")
 	assert.Contains(t, unitContent, "/usr/bin/mvm-agent -port 1024")
-	assert.NotContains(t, unitContent, "-token", "ExecStart must not expose the token flag")
+	assert.Contains(t, unitContent, "-token-file "+infra.GuestAgentTokenPath)
+	assert.Contains(t, unitContent, "WantedBy=sysinit.target")
+	assert.NotContains(t, unitContent, token, "ExecStart must not expose the token value")
 	assert.NotContains(t, unitContent, "After=", "systemd unit must not have After=")
 	assert.NotContains(t, unitContent, "Requires=", "systemd unit must not have Requires=")
 
@@ -957,14 +960,22 @@ func TestBuilder_BuildAgentOps(t *testing.T) {
 	assert.Equal(t, 0755, op3.Mode, "init script must be executable")
 
 	initContent := string(op3.Data)
-	assert.Contains(t, initContent, `command_args="-port 1024"`)
+	assert.Contains(t, initContent, `command_args="-port 1024 -token-file `+infra.GuestAgentTokenPath+`"`)
 	assert.Contains(t, initContent, "command_background=true")
 	assert.Contains(t, initContent, "depend()")
 
 	// ops[4]: Enable command (ChrootOp)
 	op4, ok4 := ops[4].(provcontent.ChrootOp)
 	require.True(t, ok4, "ops[4] must be ChrootOp")
-	assert.Contains(t, op4.Command, "ln -sf /etc/systemd/system/mvm-agent.service")
+	assert.Contains(t, op4.Command, "chmod 0700 "+infra.GuestAgentConfigDirectory)
+	assert.Contains(
+		t,
+		op4.Command,
+		"ln -sf /etc/systemd/system/mvm-agent.service /etc/systemd/system/sysinit.target.wants/mvm-agent.service",
+	)
+	assert.NotContains(t, op4.Command, "multi-user.target.wants")
 	assert.Contains(t, op4.Command, "rc-update add mvm-agent default")
-	assert.Contains(t, op4.Command, "unknown init system")
+	assert.Contains(t, op4.Command, "unsupported init system")
+	assert.Contains(t, op4.Command, "exit 1")
+	assert.NotContains(t, op4.Command, "warning")
 }

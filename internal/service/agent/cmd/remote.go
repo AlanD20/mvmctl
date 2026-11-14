@@ -1,91 +1,103 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"strings"
 
-	"mvmctl/internal/service/agent"
+	"mvmctl/internal/lib/vmexecwire"
 )
 
-// remoteFrame is the wire format for response frames from the guest agent daemon.
-type remoteFrame struct {
-	Type   string `json:"type"`
-	Status int    `json:"status,omitempty"`
-	Data   string `json:"data,omitempty"`
-	Error  string `json:"error,omitempty"`
-}
-
-// runRemoteSubcommand implements the "remote" subcommand: connect to the
-// guest agent daemon's local Unix socket, send a RemoteVMRequest, and
-// relay response frames to stdout/stderr. Returns the exit code.
+// runRemoteSubcommand sends one process-bound source request to the guest agent daemon.
 func runRemoteSubcommand(socketPath string, args []string) int {
-	if len(args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: mvm-agent remote <destination> -- <command>\n")
-		return 1
-	}
-
-	destination := args[0]
-	// Find the command part after "--" or use remaining args.
-	command := ""
-	cmdArgs := args[1:]
-	if len(cmdArgs) > 0 && cmdArgs[0] == "--" {
-		command = strings.Join(cmdArgs[1:], " ")
-	} else {
-		command = strings.Join(cmdArgs, " ")
-	}
-
-	if command == "" {
-		fmt.Fprintf(os.Stderr, "error: no command specified\n")
-		return 1
-	}
-
-	conn, err := net.Dial("unix", socketPath)
+	request, err := parseRemoteRequest(args)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to connect to daemon socket %s: %v\n", socketPath, err)
+		fmt.Fprintln(os.Stderr, "usage: mvm-agent remote --user <non-root> <destination> -- <command>")
+		return 1
+	}
+	conn, err := (&net.Dialer{}).DialContext(context.Background(), "unix", socketPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to connect to source broker")
 		return 1
 	}
 	defer conn.Close()
+	return runRemoteExchange(conn, request)
+}
 
-	// Send the remote_vm request.
-	req := agent.RemoteVMRequest{
-		Destination: destination,
-		Command:     command,
+func runRemoteExchange(conn net.Conn, request vmexecwire.SourceRequest) int {
+	if err := vmexecwire.EncodeSourceRequest(context.Background(), conn, request); err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to send source request")
+		return 1
 	}
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to send request: %v\n", err)
+	reader, err := vmexecwire.NewResponseReader(conn, request.RequestID)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: invalid source response")
 		return 1
 	}
 
-	// Relay response frames from the daemon to stdout/stderr.
-	// The daemon forwards frames from the host's relay loop.
-	var resp remoteFrame
-	decoder := json.NewDecoder(conn)
+	exitCode := -1
+	terminalError := false
 	for {
-		if err := decoder.Decode(&resp); err != nil {
-			if err == io.EOF {
-				break
+		frame, readErr := reader.Read(context.Background())
+		if errors.Is(readErr, io.EOF) {
+			if exitCode >= 0 {
+				return exitCode
 			}
-			fmt.Fprintf(os.Stderr, "error: failed to parse response frame: %v\n", err)
+			if terminalError {
+				fmt.Fprintln(os.Stderr, "error: source execution failed")
+				return 1
+			}
+			fmt.Fprintln(os.Stderr, "error: invalid source response")
 			return 1
 		}
-
-		switch resp.Type {
-		case "stdout":
-			os.Stdout.WriteString(resp.Data)
-		case "stderr":
-			os.Stderr.WriteString(resp.Data)
-		case "remote_vm":
-			if resp.Error != "" {
-				fmt.Fprintf(os.Stderr, "error: %s\n", resp.Error)
-				return resp.Status
+		if readErr != nil {
+			fmt.Fprintln(os.Stderr, "error: invalid source response")
+			return 1
+		}
+		switch value := frame.(type) {
+		case vmexecwire.StdoutFrame:
+			if _, err := os.Stdout.Write(value.Data); err != nil {
+				fmt.Fprintln(os.Stderr, "error: failed to write source output")
+				return 1
 			}
-			return resp.Status
+		case vmexecwire.StderrFrame:
+			if _, err := os.Stderr.Write(value.Data); err != nil {
+				return 1
+			}
+		case vmexecwire.ResultFrame:
+			exitCode = value.ExitCode
+		case vmexecwire.ErrorFrame:
+			terminalError = true
 		}
 	}
+}
 
-	return 0
+func parseRemoteRequest(args []string) (vmexecwire.SourceRequest, error) {
+	if len(args) < 5 || args[0] != "--user" || args[3] != "--" {
+		return vmexecwire.SourceRequest{}, fmt.Errorf("invalid remote arguments")
+	}
+	user := args[1]
+	if user == "" || user == "root" {
+		return vmexecwire.SourceRequest{}, fmt.Errorf("remote user must be non-root")
+	}
+	destination := args[2]
+	command := strings.Join(args[4:], " ")
+	requestID, err := vmexecwire.NewRequestID()
+	if err != nil {
+		return vmexecwire.SourceRequest{}, err
+	}
+	request := vmexecwire.SourceRequest{
+		RequestID:   requestID,
+		Destination: destination,
+		TargetUser:  user,
+		Command:     command,
+	}
+	if err := request.Validate(); err != nil {
+		return vmexecwire.SourceRequest{}, err
+	}
+	return request, nil
 }

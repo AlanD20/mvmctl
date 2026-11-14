@@ -141,14 +141,21 @@ func TestValidateTemplateData(t *testing.T) {
 	}
 
 	t.Run("all_fields_set_returns_nil", func(t *testing.T) {
-		err := validateTemplateData(validData)
+		err := validateTemplateData(validData, true)
 		assert.NoError(t, err)
+	})
+
+	t.Run("offline_mode_requires_no_endpoint", func(t *testing.T) {
+		data := validData
+		data.GuestIP = ""
+		data.IPv4Gateway = ""
+		assert.NoError(t, validateTemplateData(data, false))
 	})
 
 	t.Run("VMName_empty_returns_error", func(t *testing.T) {
 		d := validData
 		d.VMName = ""
-		err := validateTemplateData(d)
+		err := validateTemplateData(d, true)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), ".VMName")
 	})
@@ -156,7 +163,7 @@ func TestValidateTemplateData(t *testing.T) {
 	t.Run("User_empty_returns_error", func(t *testing.T) {
 		d := validData
 		d.User = ""
-		err := validateTemplateData(d)
+		err := validateTemplateData(d, true)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), ".User")
 	})
@@ -164,7 +171,7 @@ func TestValidateTemplateData(t *testing.T) {
 	t.Run("GuestIP_empty_returns_error", func(t *testing.T) {
 		d := validData
 		d.GuestIP = ""
-		err := validateTemplateData(d)
+		err := validateTemplateData(d, true)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), ".GuestIP")
 	})
@@ -172,7 +179,7 @@ func TestValidateTemplateData(t *testing.T) {
 	t.Run("IPv4Gateway_empty_returns_error", func(t *testing.T) {
 		d := validData
 		d.IPv4Gateway = ""
-		err := validateTemplateData(d)
+		err := validateTemplateData(d, true)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), ".IPv4Gateway")
 	})
@@ -180,7 +187,7 @@ func TestValidateTemplateData(t *testing.T) {
 	t.Run("PasswordHash_empty_returns_error", func(t *testing.T) {
 		d := validData
 		d.PasswordHash = ""
-		err := validateTemplateData(d)
+		err := validateTemplateData(d, true)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), ".PasswordHash")
 	})

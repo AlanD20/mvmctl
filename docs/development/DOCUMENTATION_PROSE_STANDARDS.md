@@ -4,13 +4,21 @@ Prose standards for mvmctl documentation. Every documentation file must follow t
 conventions for its type. These standards exist because mvmctl's docs serve real
 users and contributors — not as internal notes or AI chat logs.
 
+Use this guide as a reference, not an end-to-end reading prerequisite. The
+[universal principles](#universal-principles) are the common rules; use the table
+of contents to select the relevant doc type and the
+[pre-submit checklist](#pre-submit-checklist) for the changed surface. Consult
+the public-site guidance and rewriting examples only when they help the task.
+A focused edit does not require reading unrelated sections or auditing the
+whole repository.
+
 ## Table of Contents
 
 - [Universal principles](#universal-principles)
 - [General documentation workflow](#general-documentation-workflow)
   - [Before you start](#before-you-start)
   - [Link, do not duplicate](#link-do-not-duplicate)
-  - [Verify every claim against source code](#verify-every-claim-against-source-code)
+  - [Verify affected claims against source](#verify-affected-claims-against-source)
   - [Pre-submit checklist](#pre-submit-checklist)
   - [When a full documentation audit is needed](#when-a-full-documentation-audit-is-needed)
 - [Doc type: README](#doc-type-readme)
@@ -92,9 +100,9 @@ prerequisites through submission.
 
 Before writing or editing any documentation, confirm the following:
 
-- You have read this document — it defines the tone and structure for each doc type.
-- You have access to the codebase. Every claim you make must be traceable to Go
-  source code at a specific file and line.
+- You know the document type and have consulted the guidance relevant to the edit.
+- You can trace added or changed behavior claims to the relevant source code.
+  Proposed behavior must be labeled as design intent, not current behavior.
 - You know which audience you are writing for: users (public website at
   `mvmctl.com`) or contributors (the repo's `docs/` directory).
 
@@ -122,50 +130,66 @@ changes.
 - The public website may reference docs in the repo but should not inline large
   sections from them.
 
-### Verify every claim against source code
+### Verify affected claims against source
 
-Before committing any documentation change, trace every factual claim to the
-source:
+Before committing, verify added or changed factual claims and existing claims
+affected by the behavior change. A wording-only edit does not require rechecking
+unrelated claims. Choose evidence that fits the claim:
 
-1. **CLI flag names and behavior:** Run the command with `--help` or grep the
-   Cobra command definition in `internal/cli/`. Confirm the flag exists and does
-   what you describe.
-2. **File paths:** Run `ls <path>` to confirm the file exists at the documented
-   location.
-3. **Function signatures:** Run `grep -rn 'func MyFunction' internal/` to
-   confirm the function exists and its signature matches.
-4. **Error messages:** Run the command with bad input and verify the exact error
-   text.
-5. **Example commands:** Copy-paste every code block into a terminal and verify
-   it works.
+1. **CLI flag names and behavior:** Inspect the Cobra definition in
+   `internal/cli/` or safely invoke `--help`. Confirm behavior against the
+   implementation and relevant tests, not just the help text.
+2. **File paths and function signatures:** Use targeted filesystem checks and
+   source searches to confirm the documented location or signature.
+3. **Error messages:** Inspect the error construction and relevant tests.
+   Reproduce the error only when the command's effects are safe and authorized.
+4. **Examples:** Check changed examples and examples affected by a behavior
+   change. Distinguish runnable commands from output, configuration, templates,
+   and illustrative code. Use source inspection or non-mutating syntax checks
+   where sufficient; execute examples only in an appropriate authorized
+   environment. Do not paste every fenced block into a shell.
+
+Documentation verification does not itself authorize host installation, sudoers
+changes, or resource mutation. Follow the safety boundaries in
+[AGENTS.md](../../AGENTS.md#approval-and-workspace-safety) and the environment
+requirements in [How to Run System Tests](HOW_TO_RUN_SYSTEM_TESTS.md) when runtime
+verification is needed. Report checks that could not be executed; do not claim
+runtime verification from source inspection alone.
 
 If a claim cannot be traced, either remove it or mark it explicitly as a design
 intent rather than current behavior.
 
 ### Pre-submit checklist
 
-Before submitting any documentation change, run these checks:
+Before submitting, apply these checks to the changed surface:
 
-1. **Copy-paste every code block** into a terminal and verify it works. This
-   catches dead flags, renamed commands, and placeholder syntax.
-2. **Search for old patterns** — if you changed `set-default` subcommand to
-   `--default` flag, grep the entire project for `set-default`. If you changed
-   the image pull syntax, grep for the old slug.
-3. **Replace line number references** with function or type names. Line numbers
-   drift as code changes.
-4. **Verify links** — every internal section link and external URL must work.
-5. **Check for dead code examples** — if an error type is documented, verify it
-   still exists in Go source. If not, remove it.
+1. **Verify affected claims and examples** using the evidence and safety rules
+   above. A docs edit is not a reason to run unrelated code blocks or test suites.
+2. **Search for affected references** when behavior or terminology changes. For
+   example, search for a renamed flag across the project to find dependent docs;
+   this is a targeted search, not a requirement to audit every file.
+3. **Use function or type names** instead of new source line-number references,
+   which drift as code changes.
+4. **Verify affected links and paths** — check added or changed links, plus inbound
+   references affected by renamed headings or moved files.
+5. **Review the diff** for accuracy, document-type conventions, and unintended
+   scope changes. Report verification limits in the handoff.
 
 ### When a full documentation audit is needed
 
-A full documentation audit is required when any of these happen:
+Ordinary CLI, model, and architecture changes require reviewing the affected
+claims and their references. Adding an internal model field does not, by itself,
+require auditing unrelated docs or the public site.
 
-- **CLI refactor:** Flags renamed, commands removed, positional args changed.
-- **Model change:** Fields added or removed from model structs.
-- **Architecture change:** New domain, backend swap, layer boundary change.
-- **Pre-release:** Before any tagged release, all docs must be audited against
-  HEAD.
+A full documentation audit remains required before a tagged release, against
+the release candidate's HEAD. A genuinely cross-cutting change also requires a
+broad audit when its effects cannot be bounded to specific documentation, such
+as a replacement of the public lifecycle or privilege model. Record the scope
+and reason before broadening an ordinary change review.
+
+After corrections, verify the correction delta and affected references rather
+than restarting the full audit. Reuse valid evidence for unchanged material;
+expand verification when subsequent changes invalidate that evidence.
 
 During a full audit, divide the work by doc category:
 

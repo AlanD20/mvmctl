@@ -155,14 +155,50 @@ func ExtractViaBackend(
 		}
 	}()
 
-	cacheDir, err := infra.GetCacheDir()
+	backend, err := extractionBackend(ctx, rawPath, provisionerType)
 	if err != nil {
-		return "", fmt.Errorf("resolve cache dir: %w", err)
+		return "", err
 	}
 
-	backend, err := provisioner.NewBackend(ctx, provisioner.BackendOpts{
+	return backend.ExtractPartition(ctx, rawPath, outputPath, partition, disabledDetectors)
+}
+
+// CopyRootPartitionViaBackend extracts a root partition without consuming the raw source.
+func CopyRootPartitionViaBackend(
+	ctx context.Context,
+	rawPath, outputPath string,
+	partition int,
+	disabledDetectors []string,
+	provisionerType provisioner.ProvisionerType,
+) (result string, err error) {
+	defer func() {
+		if err != nil {
+			var de *errs.DomainError
+			if !errors.As(err, &de) {
+				err = errs.New(errs.CodeImageError, err.Error())
+			}
+		}
+	}()
+
+	backend, err := extractionBackend(ctx, rawPath, provisionerType)
+	if err != nil {
+		return "", err
+	}
+	return backend.CopyRootPartition(ctx, rawPath, outputPath, partition, disabledDetectors)
+}
+
+func extractionBackend(
+	ctx context.Context,
+	rawPath string,
+	provisionerType provisioner.ProvisionerType,
+) (provisioner.Backend, error) {
+	cacheDir, err := infra.GetCacheDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve cache dir: %w", err)
+	}
+	return provisioner.NewBackend(ctx, provisioner.BackendOpts{
 		RootfsPath:      rawPath,
-		FsType:          "ext4", // placeholder — backends detect fs from the image
+		FsType:          "ext4", // Placeholder; extraction detects the source filesystem.
 		CacheDir:        cacheDir,
 		ProvisionerType: provisionerType,
 		RootUID:         0,
@@ -170,9 +206,4 @@ func ExtractViaBackend(
 		UserUID:         1000,
 		UserGID:         1000,
 	})
-	if err != nil {
-		return "", err
-	}
-
-	return backend.ExtractPartition(ctx, rawPath, outputPath, partition, disabledDetectors)
 }

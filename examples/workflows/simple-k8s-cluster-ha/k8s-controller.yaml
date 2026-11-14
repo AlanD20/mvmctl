@@ -32,7 +32,6 @@ vm:
     mem: 2G
     disk_size: 8G
     writeback: true
-    allow_remote_exec: true
     depends_on:
       - "@network:k8s"
       - "@key:k8s-key"
@@ -50,7 +49,6 @@ vm:
     mem: 2G
     disk_size: 8G
     writeback: true
-    allow_remote_exec: true
     depends_on:
       - "@network:k8s"
       - "@key:k8s-key"

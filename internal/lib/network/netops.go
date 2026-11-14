@@ -2,17 +2,15 @@ package network
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
 	"mvmctl/internal/lib/system"
-	"mvmctl/pkg/errs"
 )
 
-// NetOps abstracts bridge and TAP operations that require system calls
-// (ip link, ip tuntap, etc.). The default implementation uses DefaultRunner.
-// Tests can inject a fake to avoid needing root access.
+// NetOps abstracts read-only bridge and TAP observations. Mutations are owned
+// by the authenticated network service, never by this unprivileged helper.
+// The default implementation uses DefaultRunner; tests can inject a fake.
 //
 // Each method matches the corresponding public function in this package.
 type NetOps interface {
@@ -23,9 +21,6 @@ type NetOps interface {
 	GetTapBridge(ctx context.Context, tap string) string
 	GetBridgeSlaves(ctx context.Context, bridge string) []string
 	GetSystemBridges(ctx context.Context) []string
-	RunBatch(ctx context.Context, commands []string) error
-	RemoveRawTap(ctx context.Context, tap string) error
-	RemoveRawBridge(ctx context.Context, bridge string) error
 }
 
 // DefaultNetOps is the package-level NetOps provider.
@@ -151,74 +146,4 @@ func (realNetOps) GetSystemBridges(ctx context.Context) []string {
 		}
 	}
 	return bridges
-}
-
-func (realNetOps) RunBatch(ctx context.Context, commands []string) error {
-	batch := strings.Join(commands, "\n") + "\n"
-	result, err := system.DefaultRunner.Run(ctx, []string{"ip", "-batch", "-"}, system.RunCmdOpts{
-		Check:      true,
-		Capture:    true,
-		Input:      batch,
-		Privileged: true,
-	})
-	if err != nil {
-		return fmt.Errorf("ip -batch failed: %w\n%s", err, result.Stderr)
-	}
-	return nil
-}
-
-func (realNetOps) RemoveRawTap(ctx context.Context, tap string) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", tap},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-	if result.Success() {
-		return nil
-	}
-	stderrFirst := strings.TrimSpace(result.Stderr)
-	result, _ = system.DefaultRunner.Run(ctx, []string{"ip", "tuntap", "del", "dev", tap, "mode", "tap"},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-	if result.Success() {
-		return nil
-	}
-	details := ""
-	if stderrFirst != "" {
-		details = fmt.Sprintf(" (%s)", stderrFirst)
-	}
-	return errs.Wrap(errs.CodeNetworkBridgeFailed,
-		fmt.Errorf("failed to remove TAP device '%s': tried 'ip link delete'%s and 'ip tuntap del'", tap, details))
-}
-
-func (realNetOps) RemoveRawBridge(ctx context.Context, bridge string) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	for _, slave := range DefaultNetOps.GetBridgeSlaves(ctx, bridge) {
-		system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", slave, "down"},
-			system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-		result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", slave},
-			system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-		if !result.Success() {
-			system.DefaultRunner.Run(ctx, []string{"ip", "tuntap", "del", "dev", slave, "mode", "tap"},
-				system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-		}
-	}
-	system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", bridge, "down"},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-	result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", bridge, "type", "bridge"},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-	if result.Success() {
-		return nil
-	}
-	stderrFirst := strings.TrimSpace(result.Stderr)
-	result, _ = system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", bridge},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-	if result.Success() {
-		return nil
-	}
-	details := ""
-	if stderrFirst != "" {
-		details = fmt.Sprintf(" (%s)", stderrFirst)
-	}
-	return errs.Wrap(errs.CodeNetworkBridgeFailed,
-		fmt.Errorf("failed to remove bridge '%s': tried 'ip link delete' with type%s and without", bridge, details))
 }

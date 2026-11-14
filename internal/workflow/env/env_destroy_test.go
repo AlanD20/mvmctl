@@ -181,38 +181,34 @@ func TestDestroy_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "no saved workflow state found")
 }
 
-// Rationale: An unknown step type in the saved state must be skipped with a
-// warning. The remaining known step must still be destroyed and the state
-// directory removed.
+// Rationale: An unknown saved type must stop cleanup and preserve the whole inventory.
 func TestDestroy_UnknownStepType(t *testing.T) {
 	replaceAndRestoreEntry(t, "known", noopDestroyFactory("known"))
 
 	wfID := "destroy-unknown-test"
 	stateDir := writeDestroyState(t, wfID, []model.AppliedResource{
 		{Name: "known:resource-a", Type: "known", State: model.ResourceState{}},
-		{Name: "unknown:resource-b", Type: "unknown_type", State: model.ResourceState{}},
-	})
-
-	err := Destroy(context.Background(), nil, wfID, nil)
-	require.NoError(t, err)
-
-	_, statErr := os.Stat(stateDir)
-	assert.True(t, os.IsNotExist(statErr), "state dir should be removed after destroying known step")
-}
-
-// Rationale: When all steps in the saved state have types not present in the
-// Registry, Destroy must return "no reconstructable steps in saved state"
-// because there is nothing it can destroy.
-func TestDestroy_NoReconstructableSteps(t *testing.T) {
-	wfID := "destroy-no-reconstruct-test"
-	_ = writeDestroyState(t, wfID, []model.AppliedResource{
-		{Name: "unknown:resource-a", Type: "unknown_type", State: model.ResourceState{}},
-		{Name: "unknown:resource-b", Type: "other_unknown", State: model.ResourceState{}},
+		{Name: "unknown_type:resource-b", Type: "unknown_type", State: model.ResourceState{}},
 	})
 
 	err := Destroy(context.Background(), nil, wfID, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no reconstructable steps in saved state")
+	saved, readErr := workflow.ReadWorkflowState(stateDir)
+	require.NoError(t, readErr)
+	require.Len(t, saved.Resources, 2, "unknown inventory must preserve all cleanup identities")
+}
+
+// Rationale: Unknown-only inventory cannot be discarded as an empty workflow.
+func TestDestroy_NoReconstructableSteps(t *testing.T) {
+	wfID := "destroy-no-reconstruct-test"
+	_ = writeDestroyState(t, wfID, []model.AppliedResource{
+		{Name: "unknown_type:resource-a", Type: "unknown_type", State: model.ResourceState{}},
+		{Name: "other_unknown:resource-b", Type: "other_unknown", State: model.ResourceState{}},
+	})
+
+	err := Destroy(context.Background(), nil, wfID, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown saved step")
 }
 
 // Rationale: A pre-cancelled context causes pipeline.Destroy to return the

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -100,20 +101,30 @@ func WriteWorkflowState(dir string, state *model.WorkflowState) error {
 		return fmt.Errorf("marshal workflow state: %w", err)
 	}
 
-	// Write to a temporary file, then rename atomically.
-	tmpPath := statePath + ".tmp"
-	os.Remove(tmpPath)
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("write temp state file %s: %w", tmpPath, err)
+	// Sync the identity inventory before publishing it, then sync its directory entry.
+	tmp, err := os.CreateTemp(dir, ".state-*")
+	if err != nil {
+		return fmt.Errorf("create temporary state: %w", err)
 	}
-
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		return errors.Join(fmt.Errorf("write state: %w", err), tmp.Close(), os.Remove(tmpPath))
+	}
+	if err := tmp.Sync(); err != nil {
+		return errors.Join(fmt.Errorf("sync state: %w", err), tmp.Close(), os.Remove(tmpPath))
+	}
+	if err := tmp.Close(); err != nil {
+		return errors.Join(err, os.Remove(tmpPath))
+	}
 	if err := os.Rename(tmpPath, statePath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("rename state file %s -> %s: %w", tmpPath, statePath, err)
+		return errors.Join(fmt.Errorf("publish state: %w", err), os.Remove(tmpPath))
 	}
+	directory, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	return errors.Join(directory.Sync(), directory.Close())
 
-	return nil
 }
 
 // --- ReadWorkflowState ---

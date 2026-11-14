@@ -1,6 +1,17 @@
 # Network Sync Atomicity — Zero-Downtime Firewall Rule Replacement
 
-> **STATUS: Current.** All mechanisms described below are implemented in `internal/lib/firewall/`. The nftables backend is the default (`firewall_backend: "nftables"` at `OverridableDefaults["settings"]["firewall_backend"]`); iptables is the legacy fallback. See also [ADR-0009](../adr/0009-firewall-backend-mutual-exclusion.md) (firewall backend mutual exclusion) and `internal/infra/constants.go` for defaults.
+> **Status: Historical implementation record, superseded in v0.3.0.** The dual-backend trackers, raw firewall
+> subprocesses, database-rule rebuild, and cost estimates below describe the former implementation. They are not
+> instructions for the current `network sync` path.
+>
+> Current `pkg/api/network.go:NetworkSync` calls `EnsureManagedNetwork` for each selected live network, which
+> readmits root-owned identity through the managed-network service. Its counters are per-network acknowledgements
+> (`verified: 1`, `added: 0`, `orphaned: 0`), not per-rule kernel measurements. Same-boot missing bridges are refused;
+> prior-boot recovery uses retained root authority rather than a missing-interface test alone.
+>
+> [ADR-0017](../adr/0017-per-vm-network-namespaces-and-typed-policies.md) defines the current nftables-only,
+> typed network and firewall authorities. See [CONTEXT.md](../../CONTEXT.md) for their implementation and
+> [the coverage checkpoint](../../tests/system/COVERAGE_MATRIX.md) for accepted candidate-bound evidence and limits.
 
 ## Overview
 
@@ -46,14 +57,17 @@ if bridgeActive != net.BridgeActive {
 
 The core sync logic lives in `SyncIPTablesRulesBatch()` at `internal/core/network/service.go`:
 
-1. **Collect active DB rules for all networks** that will participate in the rebuild. If the caller requested specific networks, every DB network is still included so that unrequested networks' rules are preserved in the kernel. Stats are returned only for the requested networks.
-2. **Pre-check kernel presence** for each rule via `s.firewallTracker.RuleExists()` so that `added` and `verified` reflect actual kernel state, not just DB state.
-3. **Batch-ensure all rules** in a single `BatchEnsureRules()` call — all active rules for all networks are queued and flushed atomically.
-4. **Count orphaned host rules** per network that reference the network but have no matching active DB record (informational only — orphans are not removed).
+1. **Compile and commit policy-derived rows** from current API-resolved network and VM identities.
+2. **Collect active DB rules for all networks** that will participate in the rebuild. If the caller requested specific networks, every DB network is still included so that unrequested networks' rules are preserved in the kernel. Stats are returned only for the requested networks.
+3. **Pre-check kernel presence** for each rule via `s.firewallTracker.RuleExists()` so that `added` and `verified` reflect actual kernel state, not just DB state.
+4. **Batch-ensure all rules** in a single `BatchEnsureRules()` call — all active rules for all networks are queued and flushed atomically.
+5. **Count orphaned host rules** per network that reference the network but have no matching active DB record (informational only — orphans are not removed).
 
 **Code reference:** `internal/core/network/service.go` — `SyncIPTablesRulesBatch()`
 
 ```go
+policyRules := CompileServiceAccessPolicyRules(policies, networks)
+err := s.firewallTracker.ReplacePolicyRules(ctx, policyRules)
 for _, net := range networks {
     dbRules, err := s.firewallTracker.GetByNetworkID(ctx, net.ID, true)
     // ...
@@ -67,13 +81,13 @@ result := s.firewallTracker.BatchEnsureRules(ctx, allRules)
 
 ## Backend-Specific Atomicity Mechanisms
 
-The `FirewallTracker` at `internal/lib/firewall/tracker.go` dispatches to one of two backends. During sync, `SyncIPTablesRulesBatch()` builds the union of all active DB rules and invokes `BatchEnsureRules()` once per sync invocation. The backend flushes the MVM chains and rebuilds them from that complete rule set.
+The `FirewallTracker` at `internal/lib/firewall/tracker.go` dispatches to one of two backends. During sync, `SyncIPTablesRulesBatch()` replaces policy-derived rows, builds the union of all active DB rules, and invokes `BatchEnsureRules()` once per sync invocation. The backend flushes the MVM chains and rebuilds them from that complete rule set.
 
 ### nftables (default) — Atomic Batch via `nft -f -`
 
 When inside a batch context, `EnsureRule` appends to an internal slice. On context exit, `flushBatch()` calls `NFTablesTracker.BatchEnsureRules()` which:
 
-1. **Flushes MVM custom chains** (MVM-FORWARD, MVM-POSTROUTING, MVM-NOCLOUDNET-INPUT) — removes all existing rules.
+1. **Flushes MVM custom chains** (MVM-FORWARD, MVM-POSTROUTING, MVM-NOCLOUDNET-INPUT, MVM-ROUTED-POLICY, MVM-HOST-INPUT) — removes all existing rules.
 2. **Inserts conntrack accept rules** at position 0 of filter chains — preserves established connections.
 3. **Adds all DB rules** as `add rule ip <table> <chain> <expr>` statements.
 4. **Pipes** the complete script to `nft -f -`.
@@ -146,7 +160,7 @@ This means:
 
 The sync uses a **replacement-style** approach within MVM custom chains:
 
-- **MVM custom chains** (MVM-FORWARD, MVM-POSTROUTING, MVM-NOCLOUDNET-INPUT) are flushed and all active DB rules are re-added atomically.
+- **MVM custom chains** (MVM-FORWARD, MVM-POSTROUTING, MVM-NOCLOUDNET-INPUT, MVM-ROUTED-POLICY, MVM-HOST-INPUT) are flushed and all active DB rules are re-added atomically.
 - **Built-in chains** (FORWARD, POSTROUTING, INPUT) are never touched — their jump-to-MVM-chain rules survive untouched.
 - **Conntrack accept rule** is inserted at position 0 of filter MVM chains, preserving established connections through the atomic swap (both backends).
 - **Orphaned host rules** within MVM chains are **automatically removed** by the flush-and-rebuild cycle. Orphans outside MVM chains (in built-in chains) are reported but **not removed**, guaranteeing zero disruption to third-party firewall rules.
@@ -155,14 +169,18 @@ The sync uses a **replacement-style** approach within MVM custom chains:
 
 ```
 Built-in chains (never flushed):
+  FORWARD ──[first MVM jump]────> MVM-ROUTED-POLICY
   FORWARD ──[jump position 0]──> MVM-FORWARD
   POSTROUTING ──[jump position 0]──> MVM-POSTROUTING
   INPUT ──[jump position 0]──> MVM-NOCLOUDNET-INPUT
+  INPUT ──[next MVM jump]─────> MVM-HOST-INPUT
 
 MVM custom chains (flushed and rebuilt from DB during sync):
   MVM-FORWARD          (ip filter) — FORWARD accept rules per TAP/NAT
   MVM-POSTROUTING      (ip nat)    — MASQUERADE rules per gateway
   MVM-NOCLOUDNET-INPUT (ip filter) — nocloud-net accept rules
+  MVM-ROUTED-POLICY    (ip filter) — service allows, then managed-network deny
+  MVM-HOST-INPUT       (ip filter) — managed-network host-input deny
 ```
 
 The jump rules at position 0 are established once by `NFTablesTracker.Initialize()` (or `IPTablesTracker.Initialize()`) and are never modified during sync. This guarantees that MVM rules are always evaluated before any third-party rules (UFW, etc.) without needing to touch the system's built-in chains.

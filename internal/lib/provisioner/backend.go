@@ -39,6 +39,13 @@ type Backend interface {
 		partition int,
 		disabledDetectors []string,
 	) (string, error)
+	// CopyRootPartition preserves the raw source, including whole-image extraction.
+	CopyRootPartition(
+		ctx context.Context,
+		rawPath, outputPath string,
+		partition int,
+		disabledDetectors []string,
+	) (string, error)
 	ConvertTo(ctx context.Context, targetFS string) error
 	Run(ctx context.Context) error
 	// InjectAgent queues the vsock guest agent binary, auth token, and

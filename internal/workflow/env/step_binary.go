@@ -57,6 +57,32 @@ func (s *BinaryStep) Apply(
 	}
 
 	// Recover WasCreated from saved meta.
+	if saved.Output != nil {
+		prior := StateFromMap[BinaryState](saved.Output)
+		if prior == nil || prior.BinaryID == "" {
+			return fmt.Errorf("%s: saved binary identity is invalid", s.Name())
+		}
+		if saved.Meta.SpecHash != s.specHash {
+			return fmt.Errorf("%s: declaration changed; destroy saved state before changing the declaration", s.Name())
+		}
+		items, err := s.op.BinaryGet(ctx, inputs.BinaryInput{Identifiers: []string{prior.BinaryID}})
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, item := range items {
+			if item.ID == prior.BinaryID {
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("%s: saved binary is missing", s.Name())
+		}
+		s.saved = prior
+		s.meta = saved.Meta
+		state.Set(s.Name(), prior)
+		return write(ctx, s.StateData())
+	}
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})

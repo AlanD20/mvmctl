@@ -1,0 +1,123 @@
+package vm
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/ptr"
+	"mvmctl/internal/lib/model"
+)
+
+const (
+	testJailerVMID      = "0123456789abcdef0123456789abcdef"
+	testJailerNetworkID = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	testDriveID         = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+)
+
+// Rationale: the unprivileged producer must use the compiled jail-visible
+// endpoint even if a caller manages to supply another host-side basename.
+func TestTranslateConfigForJailUsesFixedVsockEndpoint(t *testing.T) {
+	translated := translateConfigForJail(&model.FirecrackerVMConfig{Vsock: &model.VsockConfig{
+		GuestCID: 42,
+		UDSPath:  "/caller/selected.sock",
+	}})
+	require.NotNil(t, translated.Vsock)
+	assert.Equal(t, "/vmm-runtime/vsock.sock", translated.Vsock.UDSPath)
+}
+
+func TestFirecrackerSpawner_WriteToFileUsesJailedPathsWithoutMutatingHostConfig(t *testing.T) {
+	vmDir := filepath.Join(t.TempDir(), testJailerVMID)
+	config := jailerTestConfig(vmDir)
+	config.SnapshotMode = false
+	spawner := NewFirecrackerSpawner(config)
+
+	hostConfig, err := spawner.Generate()
+	require.NoError(t, err)
+	require.NoError(t, spawner.WriteToFile())
+	data, err := os.ReadFile(config.ConfigPath)
+	require.NoError(t, err)
+	var jailed model.FirecrackerVMConfig
+	require.NoError(t, json.Unmarshal(data, &jailed))
+
+	assert.Equal(t, config.KernelPath, hostConfig.BootSource.KernelImagePath)
+	assert.Equal(t, "/kernel", jailed.BootSource.KernelImagePath)
+	require.Len(t, hostConfig.Drives, 3)
+	require.Len(t, jailed.Drives, 3)
+	wantHostPaths := []string{config.RootfsPath, *config.CloudInitISOPath, config.ExtraDrives[0].PathOnHost}
+	wantJailedPaths := []string{"/rootfs", "/cloud-init.iso", "/volumes/" + testDriveID + ".raw"}
+	for i := range hostConfig.Drives {
+		assert.Equal(t, wantHostPaths[i], hostConfig.Drives[i].PathOnHost)
+		assert.Equal(t, wantJailedPaths[i], jailed.Drives[i].PathOnHost)
+	}
+	require.NotNil(t, hostConfig.Logger)
+	require.NotNil(t, jailed.Logger)
+	assert.Equal(t, config.LogPath, hostConfig.Logger.LogPath)
+	assert.Equal(t, "/run/mvm/"+filepath.Base(config.LogPath), jailed.Logger.LogPath)
+	require.NotNil(t, hostConfig.Metrics)
+	require.NotNil(t, jailed.Metrics)
+	assert.Equal(t, config.MetricsPath, hostConfig.Metrics.MetricsPath)
+	assert.Equal(t, "/run/mvm/"+filepath.Base(config.MetricsPath), jailed.Metrics.MetricsPath)
+	require.NotNil(t, hostConfig.Vsock)
+	require.NotNil(t, jailed.Vsock)
+	assert.Equal(t, filepath.Join(vmDir, infra.VMVsockSocketFilename), hostConfig.Vsock.UDSPath)
+	assert.Equal(t, "/vmm-runtime/"+infra.VMVsockSocketFilename, jailed.Vsock.UDSPath)
+}
+
+// Rationale: Mount destinations form a privileged filesystem boundary and
+// must remain absolute, normalized, and independent of attacker path segments.
+func TestJailedPathCalculation(t *testing.T) {
+	tests := map[string]struct {
+		got  string
+		want string
+	}{
+		"runtime_uses_basename": {got: jailedRuntimePath("/host/vms/id/api.socket"), want: "/run/mvm/api.socket"},
+		"runtime_cleans_parent_segments": {
+			got: jailedRuntimePath("/host/vms/id/../metrics.fifo"), want: "/run/mvm/metrics.fifo",
+		},
+		"volume_uses_validated_id": {got: jailedVolumePath(testDriveID), want: "/volumes/" + testDriveID + ".raw"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.got)
+			assert.Equal(t, tc.got, filepath.Clean(tc.got))
+		})
+	}
+}
+
+func jailerTestConfig(vmDir string) *model.FirecrackerConfig {
+	cloudInitMode := model.CloudInitModeISO
+	isoPath := filepath.Join(vmDir, infra.VMCloudInitISOFilename)
+	cid := 42
+	return &model.FirecrackerConfig{
+		VMDir: vmDir, NetworkPlacement: model.VMNetworkPlacementManaged, NetworkID: testJailerNetworkID,
+		RootfsPath: filepath.Join(vmDir, infra.VMRootfsFilename),
+		BinaryPath: "/var/lib/mvmctl/binaries/1.16.0/firecracker",
+		JailerPath: "/var/lib/mvmctl/binaries/1.16.0/jailer", BinaryVersion: "1.16.0",
+		KernelPath: filepath.Join(filepath.Dir(vmDir), "kernels", "vmlinux"),
+		VCPUCount:  2, MemSizeMiB: 512, GuestIP: "10.0.0.2", GuestMAC: "02:00:00:00:00:02",
+		CgroupLimits: model.NewVMCgroupLimits(2, 512, model.VMCgroupPolicy{
+			VMMHeadroomMiB: 128, CPUWeight: 100, PIDsMax: 256, SwapMaxBytes: 0,
+		}),
+		TapName: "tap-test", NetworkGateway: "10.0.0.1", NetworkNetmask: "255.255.255.0",
+		PCIEnabled: true, ImageFSUUID: "11111111-2222-3333-4444-555555555555", ImageFSType: "ext4",
+		EnableLogging: true, EnableMetrics: true, LogLevel: "Info",
+		LogPath:          filepath.Join(vmDir, infra.VMFirecrackerLogFilename),
+		MetricsPath:      filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename),
+		SerialOutputPath: filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename),
+		PIDPath:          filepath.Join(vmDir, infra.VMFirecrackerPIDFilename),
+		ConfigPath:       filepath.Join(vmDir, infra.VMFirecrackerConfigFilename), CloudInitMode: &cloudInitMode,
+		CloudInitISOPath: &isoPath,
+		ExtraDrives: []model.DriveConfig{{
+			DriveID: testDriveID, PathOnHost: filepath.Join(filepath.Dir(vmDir), "volumes", testDriveID+".raw"),
+			IsReadOnly: true, CacheType: model.CacheTypeUnsafe, IOEngine: "Sync",
+		}},
+		SnapshotMode: true, SnapshotDir: filepath.Join(filepath.Dir(vmDir), "snapshots", testDriveID),
+		VsockGuestCID: &cid, CPUVendor: ptr.Ptr("Intel"),
+	}
+}

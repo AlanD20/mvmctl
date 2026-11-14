@@ -2,138 +2,116 @@ package loopmount
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/provcontent"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/system"
+	"mvmctl/pkg/errs"
 
 	loopmountsvc "mvmctl/internal/service/loopmount"
 )
 
-// runWireOp serializes a WireInput to JSON, pipes it to
-// "sudo env mvm run provision" via stdin, and returns the parsed WireOutput.
-func runWireOp(ctx context.Context, input *loopmountsvc.WireInput) (*loopmountsvc.WireOutput, error) {
-	data, err := json.Marshal(input)
-	if err != nil {
-		return nil, fmt.Errorf("marshal wire input: %w", err)
-	}
-
-	mvmPath, _ := os.Executable()
-	provisionArgs := []string{mvmPath, "run", "provision"}
-	if !system.IsRoot() {
-		provisionArgs = append([]string{"sudo"}, provisionArgs...)
-	}
-	result, err := system.DefaultRunner.Run(ctx, provisionArgs,
-		system.RunCmdOpts{Capture: true, Check: true, Input: string(data)})
-	if err != nil {
-		return nil, fmt.Errorf("provision subprocess failed: %s: %w", result.Stderr, err)
-	}
-
-	var output loopmountsvc.WireOutput
-	if err := json.Unmarshal([]byte(result.Stdout), &output); err != nil {
-		return nil, fmt.Errorf("parse wire output: %s: %w", result.Stdout, err)
-	}
-	if output.Status == "error" {
-		return &output, fmt.Errorf("provision failed: %s (step: %s)", output.Error, output.Step)
-	}
-	return &output, nil
-}
-
-var pc = provcontent.Builder{}
-
 // LoopMountBackend implements the Backend interface using loop-mount
-// (mounts the rootfs via loop device, operates directly with host tools).
+// authority for managed VMs. Image effects use the image domain's canonical staging producer;
+// partition extraction stays in the normal process and never creates a privileged raw-path request.
 type LoopMountBackend struct {
-	rootfsPath string
-	fsType     string
-	cacheDir   string
-	ops        []provcontent.Operation
+	rootfsPath    string
+	fsType        string
+	cacheDir      string
+	managedVM     bool
+	vmID          string
+	plan          loopmountsvc.VMProvisionPlan
+	pending       bool
+	expectedBytes uint64
 }
 
 // NewLoopMountBackend creates a new LoopMountBackend.
 func NewLoopMountBackend(ctx context.Context, rootfsPath string, fsType string, cacheDir string) *LoopMountBackend {
-	return &LoopMountBackend{rootfsPath: rootfsPath, fsType: fsType, cacheDir: cacheDir}
+	backend := &LoopMountBackend{rootfsPath: rootfsPath, fsType: fsType, cacheDir: cacheDir}
+	relative, err := filepath.Rel(cacheDir, rootfsPath)
+	if err == nil && strings.HasPrefix(relative, "vms"+string(filepath.Separator)) {
+		backend.managedVM = true
+		parts := strings.Split(relative, string(filepath.Separator))
+		if len(parts) == 3 && parts[0] == "vms" && parts[2] == "rootfs.img" {
+			backend.vmID = parts[1]
+		}
+	}
+	return backend
 }
 
 // --- Builder methods -- queue provisioning operations ---
 
 func (b *LoopMountBackend) Resize(ctx context.Context, targetSizeBytes int64) error {
-	if targetSizeBytes == 0 {
-		b.ops = append(b.ops, pc.BuildShrinkOps(0)...)
-	} else {
-		b.ops = append(b.ops, pc.BuildResizeOps(targetSizeBytes)...)
+	if targetSizeBytes <= 0 {
+		return errs.New(
+			errs.CodeValidationFailed,
+			"managed VM resize requires a positive grow target; image shrink requires managed image staging",
+		)
 	}
+	b.plan.ResizeBytes, b.pending = uint64(targetSizeBytes), true
 	return nil
 }
 
 func (b *LoopMountBackend) SetHostname(ctx context.Context, hostname string) error {
-	b.ops = append(b.ops, pc.BuildHostnameOps(hostname)...)
+	b.plan.Hostname, b.pending = &hostname, true
 	return nil
 }
 
 func (b *LoopMountBackend) InjectDNS(ctx context.Context, dnsServer string) error {
-	b.ops = append(b.ops, pc.BuildDNSOps(dnsServer)...)
+	b.plan.DNS, b.pending = &dnsServer, true
 	return nil
 }
 
 func (b *LoopMountBackend) SetupSSH(ctx context.Context, user string, sshPubkeys []string) error {
-	b.ops = append(b.ops, pc.BuildSSHOps(user, sshPubkeys)...)
+	b.plan.SSH = &loopmountsvc.SSHSetup{User: user, PublicKeys: append([]string(nil), sshPubkeys...)}
+	b.pending = true
 	return nil
 }
 
 func (b *LoopMountBackend) SetupSudo(ctx context.Context, user string) error {
-	b.ops = append(b.ops, pc.SetupSudo(user)...)
+	b.plan.SudoUser, b.pending = &user, true
 	return nil
 }
 
 func (b *LoopMountBackend) DisableCloudInit(ctx context.Context) error {
-	return nil // no-op — cloud-init is disabled during image import, not VM creation
-}
-
-func (b *LoopMountBackend) InjectCloudInit(ctx context.Context, cloudInitDir string) error {
-	b.ops = append(b.ops, pc.BuildCloudInitInjectOps(cloudInitDir)...)
+	b.plan.DisableCloudInit, b.pending = true, true
 	return nil
 }
 
-// DetectOS detects OS type from the rootfs via the loopmount service subprocess.
+func (b *LoopMountBackend) InjectCloudInit(ctx context.Context, cloudInitDir string) error {
+	if !b.managedVM || cloudInitDir != filepath.Join(b.cacheDir, "vms", b.vmID, "cloud-init") {
+		return errs.New(errs.CodeValidationFailed, "managed VM cloud-init must use its fixed seed directory")
+	}
+	b.plan.InjectCloudInit, b.pending = true, true
+	return nil
+}
+
+// DetectOS requires the image domain's canonical staging producer for LoopMount images.
 func (b *LoopMountBackend) DetectOS(ctx context.Context) (string, error) {
-	out, err := runWireOp(ctx, &loopmountsvc.WireInput{
-		Image:  b.rootfsPath,
-		Action: "detect_os",
-		FsType: b.fsType,
-	})
-	if err != nil {
-		slog.Warn("OS detection failed, falling back to 'linux'", "error", err)
-		return "linux", nil
-	}
-	if out.OsType == "" {
-		return "linux", nil
-	}
-	return out.OsType, nil
+	return "", errs.New(
+		errs.CodeValidationFailed,
+		"LoopMount OS inspection requires managed image staging; VM provisioning uses its image OS metadata",
+	)
 }
 
 // Deblob queues deblob (OS cache cleanup) operations.
 func (b *LoopMountBackend) Deblob(ctx context.Context, osType *string) error {
 	if osType == nil || *osType == "" {
-		detected, err := b.DetectOS(ctx)
-		if err != nil {
-			return fmt.Errorf("OS detection for deblob failed: %w", err)
-		}
-		osType = &detected
+		return errs.New(errs.CodeValidationFailed, "managed VM deblob requires its image OS metadata")
 	}
-	b.ops = append(b.ops, pc.BuildDeblobOps(*osType)...)
+	value := *osType
+	b.plan.DeblobOS, b.pending = &value, true
 	return nil
 }
 
 func (b *LoopMountBackend) FixFstab(ctx context.Context) error {
-	b.ops = append(b.ops, pc.BuildFixFstabOps()...)
+	b.plan.FixFstab, b.pending = true, true
 	return nil
 }
 
@@ -143,71 +121,59 @@ func (b *LoopMountBackend) Shrink(ctx context.Context) error {
 
 // InjectAgent queues the vsock guest agent files into the rootfs.
 func (b *LoopMountBackend) InjectAgent(_ context.Context, agentBinary []byte, port int, token string) error {
-	ops := provcontent.Builder{}.BuildAgentOps(agentBinary, port, token)
-	b.ops = append(b.ops, ops...)
+	b.plan.Agent = &loopmountsvc.AgentSetup{Port: port, Token: token}
+	b.pending = true
 	return nil
 }
 
 // --- Execution ---
 
-// Run executes all queued operations via the loopmount service subprocess.
-// Clears queued ops after execution so subsequent calls only send new ops.
+// Run executes the exact queued managed-VM plan. An error retains the plan for replay.
 func (b *LoopMountBackend) Run(ctx context.Context) error {
-	winput := loopmountsvc.WireInput{
-		Image:  b.rootfsPath,
-		Action: "provision",
-		FsType: b.fsType,
+	if !b.managedVM {
+		return errs.New(
+			errs.CodeValidationFailed,
+			"LoopMount effects require a canonical managed VM or image staging resource",
+		)
 	}
-	for _, o := range b.ops {
-		switch o := o.(type) {
-		case provcontent.FileOp:
-			mode := o.Mode
-			if mode == 0 {
-				mode = infra.PublicKeyPerm
-			}
-			winput.Ops.Files = append(winput.Ops.Files, loopmountsvc.WireFileOp{
-				Path: o.Path,
-				Data: base64.StdEncoding.EncodeToString(o.Data),
-				Mode: mode,
-				UID:  o.UID,
-				GID:  o.GID,
-			})
-		case provcontent.ChrootOp:
-			winput.Ops.Commands = append(winput.Ops.Commands, o.Command)
-		case provcontent.CopyDirOp:
-			winput.Ops.CopyDirs = append(winput.Ops.CopyDirs, loopmountsvc.WireCopyDirOp{
-				Src: o.Src, Dst: o.Dst, Mode: infra.ExecutablePerm,
-			})
-		case provcontent.ResizeOp:
-			winput.Ops.Resize = &loopmountsvc.WireResizeOp{
-				Action: string(o.Action), Bytes: o.Bytes, Headroom: o.Headroom,
-			}
-		}
-	}
+	return b.runManagedVM(ctx)
+}
 
-	_, err := runWireOp(ctx, &winput)
-	// Clear queued ops so subsequent Run() calls don't re-execute stale ops.
-	b.ops = nil
-	return err
+func (b *LoopMountBackend) runManagedVM(ctx context.Context) error {
+	if !b.pending {
+		return nil
+	}
+	if b.expectedBytes == 0 {
+		info, err := os.Stat(b.rootfsPath)
+		if err != nil {
+			return errs.WrapMsg(errs.CodeLoopMountError, "inspect managed VM rootfs before provisioning", err)
+		}
+		if !info.Mode().IsRegular() || info.Size() <= 0 {
+			return errs.New(errs.CodeValidationFailed, "managed VM rootfs must be a nonempty regular file")
+		}
+		b.expectedBytes = uint64(info.Size())
+	}
+	request := loopmountsvc.VMProvisionRequest{
+		CacheLocator: b.cacheDir, VMID: b.vmID, ExpectedRootfsBytes: b.expectedBytes,
+		Filesystem: loopmountsvc.Filesystem(b.fsType), Plan: b.plan,
+	}
+	result, err := loopmountsvc.NewClient().ProvisionVM(ctx, request)
+	if err != nil {
+		return err // Keep the exact old-size intent for a convergent retry; never downgrade to raw sudo.
+	}
+	b.expectedBytes = result.RootfsBytes
+	b.plan, b.pending = loopmountsvc.VMProvisionPlan{}, false
+	return nil
 }
 
 // --- Other Backend interface methods ---
 
-// ConvertTo converts the image filesystem to targetFS via loop-mount subprocess.
-// On success, updates b.fsType so subsequent operations (deblob, shrink) use
-// the correct filesystem type for mounting.
+// ConvertTo requires the image domain's durable staged replacement transaction.
 func (b *LoopMountBackend) ConvertTo(ctx context.Context, targetFS string) error {
-	_, err := runWireOp(ctx, &loopmountsvc.WireInput{
-		Image:    b.rootfsPath,
-		Action:   "convert_fs",
-		FsType:   b.fsType,
-		TargetFS: targetFS,
-	})
-	if err != nil {
-		return err
-	}
-	b.fsType = targetFS
-	return nil
+	return errs.New(
+		errs.CodeValidationFailed,
+		"LoopMount filesystem conversion requires managed image staging before VM cloning",
+	)
 }
 
 // ExtractPartition extracts root partition from a raw disk image.
@@ -219,55 +185,86 @@ func (b *LoopMountBackend) ExtractPartition(
 	partition int,
 	disabledDetectors []string,
 ) (string, error) {
-	fsType := system.DetectFilesystemType(ctx, rawPath)
-	if fsType == "ext4" || fsType == "ext3" || fsType == "ext2" ||
-		fsType == "btrfs" || fsType == "xfs" {
-		slog.Info("Image is filesystem, using as-is", "type", fsType)
-		result, _ := system.DefaultRunner.Run(
-			ctx,
-			[]string{"cp", "--sparse=always", rawPath, outputPath},
-			system.RunCmdOpts{Capture: true, Check: false},
-		)
-		if !result.Success() {
-			if err := system.CopyBytesDD(ctx, rawPath, outputPath, 0, 0); err != nil {
-				return "", err
-			}
-		}
-		ext, ok := infra.FSTypeToExt[fsType]
-		if !ok {
-			ext = ".img"
-		}
-		finalPath := outputPath[:len(outputPath)-len(filepath.Ext(outputPath))] + ext
-		if err := infra.SafeMove(outputPath, finalPath); err != nil {
-			return "", fmt.Errorf("rename output to %s: %w", finalPath, err)
-		}
-		return finalPath, nil
+	source, err := detectRootPartition(ctx, rawPath, partition, disabledDetectors)
+	if err != nil {
+		return "", err
 	}
-
-	parsed := parsePartitionsSfdisk(ctx, rawPath, partition)
-	if parsed == nil {
-		parsed = parsePartitionsParted(ctx, rawPath, partition)
-	}
-	if parsed == nil {
-		return "", fmt.Errorf("Failed to parse partition table: neither sfdisk nor parted is available or succeeded")
-	}
-
-	if parsed.noPartitionTable {
-		slog.Info("No partition table found, using image as-is")
+	if source.wholeImage && source.fsType == "" {
 		if err := infra.SafeMove(rawPath, outputPath); err != nil {
 			return "", fmt.Errorf("rename raw to output: %w", err)
 		}
 		return outputPath, nil
+	}
+	return copyRootPartition(ctx, rawPath, outputPath, source)
+}
+
+// CopyRootPartition reads the raw image without renaming, removing, or modifying it.
+func (b *LoopMountBackend) CopyRootPartition(
+	ctx context.Context,
+	rawPath, outputPath string,
+	partition int,
+	disabledDetectors []string,
+) (string, error) {
+	source, err := detectRootPartition(ctx, rawPath, partition, disabledDetectors)
+	if err != nil {
+		return "", err
+	}
+	return copyRootPartition(ctx, rawPath, outputPath, source)
+}
+
+type rootPartitionSource struct {
+	wholeImage bool
+	fsType     string
+	skipBytes  int64
+	countBytes int64
+}
+
+func detectRootPartition(
+	ctx context.Context,
+	rawPath string,
+	partition int,
+	disabledDetectors []string,
+) (rootPartitionSource, error) {
+	if err := ctx.Err(); err != nil {
+		return rootPartitionSource{}, err
+	}
+	fsType := system.DetectFilesystemType(ctx, rawPath)
+	if err := ctx.Err(); err != nil {
+		return rootPartitionSource{}, err
+	}
+	if fsType == "ext4" || fsType == "ext3" || fsType == "ext2" ||
+		fsType == "btrfs" || fsType == "xfs" {
+		slog.Info("Image is filesystem, using as-is", "type", fsType)
+		return rootPartitionSource{wholeImage: true, fsType: fsType}, nil
+	}
+
+	parsed, sfdiskErr := parsePartitionsSfdisk(ctx, rawPath, partition)
+	if err := ctx.Err(); err != nil {
+		return rootPartitionSource{}, err
+	}
+	if sfdiskErr != nil {
+		var partedErr error
+		parsed, partedErr = parsePartitionsParted(ctx, rawPath, partition)
+		if err := ctx.Err(); err != nil {
+			return rootPartitionSource{}, err
+		}
+		if partedErr != nil {
+			return rootPartitionSource{}, errs.WrapMsg(
+				errs.CodeLoopMountError, "failed to parse partition table", errors.Join(sfdiskErr, partedErr),
+			)
+		}
+	}
+
+	if parsed.noPartitionTable {
+		slog.Info("No partition table found, using image as-is")
+		return rootPartitionSource{wholeImage: true}, nil
 	}
 
 	partitions := parsed.partitions
 	requestedPartition := parsed.requestedPartition
 	if len(partitions) == 0 {
 		slog.Info("No partitions found, using image as-is")
-		if err := infra.SafeMove(rawPath, outputPath); err != nil {
-			return "", fmt.Errorf("rename raw to output: %w", err)
-		}
-		return outputPath, nil
+		return rootPartitionSource{wholeImage: true}, nil
 	}
 
 	var chosen partitionEntry
@@ -290,17 +287,21 @@ func (b *LoopMountBackend) ExtractPartition(
 		detector := disk.NewRootPartitionDetector(disabledDetectors)
 		chosenIdx, err := detector.Detect(diskPartitions)
 		if err != nil {
-			return "", fmt.Errorf("root partition detection: %w", err)
+			return rootPartitionSource{}, fmt.Errorf("root partition detection: %w", err)
 		}
 		if chosenIdx < 1 || chosenIdx > len(partitions) {
-			return "", fmt.Errorf("RootPartitionDetector returned invalid index %d", chosenIdx)
+			return rootPartitionSource{}, fmt.Errorf("root partition detector returned invalid index %d", chosenIdx)
 		}
 		slog.Info("Detector selected partition as root", "partition", chosenIdx)
 		chosen = partitions[chosenIdx-1]
 		partitionNum = chosenIdx
 	} else if requestedPartition > 0 {
 		if requestedPartition > len(partitions) {
-			return "", fmt.Errorf("Partition %d out of range (1-%d)", requestedPartition, len(partitions))
+			return rootPartitionSource{}, fmt.Errorf(
+				"partition %d out of range (1-%d)",
+				requestedPartition,
+				len(partitions),
+			)
 		}
 		chosen = partitions[requestedPartition-1]
 		partitionNum = requestedPartition
@@ -322,15 +323,56 @@ func (b *LoopMountBackend) ExtractPartition(
 
 	rawFileInfo, err := os.Stat(rawPath)
 	if err != nil {
-		return "", fmt.Errorf("stat raw image: %w", err)
+		return rootPartitionSource{}, fmt.Errorf("stat raw image: %w", err)
 	}
 	if skipBytes >= rawFileInfo.Size() {
-		return "", fmt.Errorf("Partition %d start sector (%d) offset (%d bytes) exceeds file size (%d bytes)",
-			partitionNum, startSector, skipBytes, rawFileInfo.Size())
+		return rootPartitionSource{}, fmt.Errorf(
+			"partition %d start sector (%d) offset (%d bytes) exceeds file size (%d bytes)",
+			partitionNum,
+			startSector,
+			skipBytes,
+			rawFileInfo.Size(),
+		)
 	}
 
 	slog.Info("Extracting partition", "partition", partitionNum, "start_sector", startSector, "offset", skipBytes)
-	if err := system.CopyBytesDD(ctx, rawPath, outputPath, skipBytes, countBytes); err != nil {
+	return rootPartitionSource{skipBytes: skipBytes, countBytes: countBytes}, nil
+}
+
+func copyRootPartition(
+	ctx context.Context,
+	rawPath, outputPath string,
+	source rootPartitionSource,
+) (string, error) {
+	if source.wholeImage {
+		result, err := system.DefaultRunner.Run(
+			ctx,
+			[]string{"cp", "--sparse=always", rawPath, outputPath},
+			system.RunCmdOpts{Capture: true, Check: false},
+		)
+		// A failed copy can leave a read-only partial output; retrying dd would mask the original failure.
+		if err != nil {
+			return "", errs.WrapMsg(errs.CodeProcessError, "cp failed: "+strings.TrimSpace(result.Stderr), err)
+		}
+		if !result.Success() {
+			return "", errs.New(errs.CodeProcessError, fmt.Sprintf(
+				"cp failed (exit %d): %s", result.ExitCode, strings.TrimSpace(result.Stderr),
+			))
+		}
+		if source.fsType == "" {
+			return outputPath, nil
+		}
+		ext, ok := infra.FSTypeToExt[source.fsType]
+		if !ok {
+			ext = ".img"
+		}
+		finalPath := outputPath[:len(outputPath)-len(filepath.Ext(outputPath))] + ext
+		if err := infra.SafeMove(outputPath, finalPath); err != nil {
+			return "", fmt.Errorf("rename output to %s: %w", finalPath, err)
+		}
+		return finalPath, nil
+	}
+	if err := system.CopyBytesDD(ctx, rawPath, outputPath, source.skipBytes, source.countBytes); err != nil {
 		return "", err
 	}
 	outputPath = detectAndRenameFS(ctx, outputPath)

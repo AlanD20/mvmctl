@@ -62,7 +62,13 @@ func (s *ExecStep) Apply(
 		return fmt.Errorf("%s: empty command", s.Name())
 	}
 
-	result, err := s.op.Exec(ctx, s.input)
+	input := s.input
+	var err error
+	input.Identifier, err = resolveResourceReference(state, input.Identifier)
+	if err != nil {
+		return err
+	}
+	result, err := s.op.Exec(ctx, input)
 	if err != nil {
 		return err
 	}
@@ -135,11 +141,6 @@ func newExecStepFromSpec(
 ) (workflow.Step, error) {
 	if op == nil {
 		return nil, errors.New("operation not initialized")
-	}
-
-	// Strip "type:" prefix from step reference fields.
-	if s, ok := spec["target"].(string); ok {
-		spec["target"] = stripBareName(s)
 	}
 
 	data, err := yaml.Marshal(spec)

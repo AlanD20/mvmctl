@@ -1,14 +1,18 @@
 package cli_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/cli"
+	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/testutil"
@@ -101,28 +105,36 @@ func TestNewBinaryListCmd(t *testing.T) {
 		mock := &testutil.MockBinaryAPI{
 			BinaryListFunc: func(_ context.Context, _ bool, _ *int, _ event.OnProgressCallback) ([]*model.BinaryItem, []model.VersionInfo, error) {
 				return []*model.BinaryItem{
-					{ID: "bin-1", Type: "firecracker", Version: "1.15.0"},
+					{ID: "bin-1", Type: "firecracker", Architecture: "x86_64", Version: "1.15.0"},
 				}, nil, nil
 			},
 		}
 		cmd := cli.NewBinaryCmd(mock, nil)
 		listCmd, _, _ := cmd.Find([]string{"ls"})
-		require.NoError(t, listCmd.Flags().Set("json", "true"))
-		err := listCmd.RunE(listCmd, nil)
-		assert.NoError(t, err)
+		common.BeginOutput([]string{"--json"})
+		t.Cleanup(func() { common.BeginOutput(nil) })
+		require.NoError(t, listCmd.RunE(listCmd, nil))
+		var output bytes.Buffer
+		require.NoError(t, common.FinishOutput(&output, nil))
+		assert.Contains(t, output.String(), `"schema_version":1`)
+		assert.Contains(t, output.String(), `"architecture":"x86_64"`)
 	})
 
-	t.Run("json_output_with_nil_binaries", func(t *testing.T) {
+	t.Run("table includes architecture column", func(t *testing.T) {
 		mock := &testutil.MockBinaryAPI{
 			BinaryListFunc: func(_ context.Context, _ bool, _ *int, _ event.OnProgressCallback) ([]*model.BinaryItem, []model.VersionInfo, error) {
-				return nil, nil, nil
+				return []*model.BinaryItem{
+					{ID: "bin-1", Type: "firecracker", Architecture: "x86_64", Version: "1.15.0"},
+				}, nil, nil
 			},
 		}
 		cmd := cli.NewBinaryCmd(mock, nil)
 		listCmd, _, _ := cmd.Find([]string{"ls"})
-		require.NoError(t, listCmd.Flags().Set("json", "true"))
-		err := listCmd.RunE(listCmd, nil)
-		assert.NoError(t, err)
+		output := captureBinaryStdout(t, func() {
+			require.NoError(t, listCmd.RunE(listCmd, nil))
+		})
+		assert.Contains(t, output, "ARCHITECTURE")
+		assert.Contains(t, output, "x86_64")
 	})
 
 	t.Run("remote_list", func(t *testing.T) {
@@ -195,14 +207,32 @@ func TestNewBinaryListCmd(t *testing.T) {
 	})
 }
 
+func captureBinaryStdout(t *testing.T, run func()) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	original := os.Stdout
+	os.Stdout = writer
+	t.Cleanup(func() { os.Stdout = original })
+	run()
+	require.NoError(t, writer.Close())
+	os.Stdout = original
+	output, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	return string(output)
+}
+
 // --- Binary pull (via pull subcommand) ---
 // Rationale: Binary pull downloads Firecracker binaries. A broken pull command
 // prevents users from obtaining binaries needed to run VMs.
 
 func TestNewBinaryPullCmd(t *testing.T) {
-	t.Run("success_download_firecracker", func(t *testing.T) {
+	t.Run("exact_version_is_positional", func(t *testing.T) {
 		mock := &testutil.MockBinaryAPI{
 			BinaryPullFunc: func(_ context.Context, input inputs.BinaryPullInput, _ event.OnProgressCallback) ([]*model.BinaryItem, error) {
+				assert.Equal(t, "1.15.0", input.Version)
+				assert.Equal(t, "firecracker", input.Type)
 				return []*model.BinaryItem{
 					{ID: "bin-1", Type: "firecracker", Version: "1.15.0", Path: "/tmp/firecracker"},
 					{ID: "bin-2", Type: "jailer", Version: "1.15.0", Path: "/tmp/jailer"},
@@ -211,43 +241,35 @@ func TestNewBinaryPullCmd(t *testing.T) {
 		}
 		cmd := cli.NewBinaryCmd(mock, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
-		err := pullCmd.RunE(pullCmd, []string{"firecracker"})
-		assert.NoError(t, err)
+		output := captureBinaryStdout(t, func() {
+			require.NoError(t, pullCmd.RunE(pullCmd, []string{"1.15.0"}))
+		})
+		assert.Contains(t, output, "Trusted release ready: firecracker v1.15.0")
+		assert.NotContains(t, output, "Installed:")
 	})
 
-	t.Run("unsupported_binary_type", func(t *testing.T) {
-		mock := &testutil.MockBinaryAPI{}
-		cmd := cli.NewBinaryCmd(mock, nil)
+	t.Run("legacy source and version flags are absent", func(t *testing.T) {
+		cmd := cli.NewBinaryCmd(&testutil.MockBinaryAPI{}, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
-		err := pullCmd.RunE(pullCmd, []string{"jailer"})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unsupported binary")
+		assert.Nil(t, pullCmd.Flags().Lookup("git-ref"))
+		assert.Nil(t, pullCmd.Flags().Lookup("version"))
+		assert.Equal(t, "pull <version>", pullCmd.Use)
+		assert.NotContains(t, pullCmd.Short, "source")
 	})
 
-	t.Run("mutually_exclusive_version_and_gitref", func(t *testing.T) {
-		mock := &testutil.MockBinaryAPI{}
-		cmd := cli.NewBinaryCmd(mock, nil)
-		pullCmd, _, _ := cmd.Find([]string{"pull"})
-		require.NoError(t, pullCmd.Flags().Set("version", "1.15.0"))
-		require.NoError(t, pullCmd.Flags().Set("git-ref", "main"))
-		err := pullCmd.RunE(pullCmd, []string{"firecracker"})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "mutually exclusive")
-	})
-
-	t.Run("version_selector_with_colon", func(t *testing.T) {
+	t.Run("requires exactly one version", func(t *testing.T) {
+		called := false
 		mock := &testutil.MockBinaryAPI{
-			BinaryPullFunc: func(_ context.Context, input inputs.BinaryPullInput, _ event.OnProgressCallback) ([]*model.BinaryItem, error) {
-				assert.Equal(t, "1.15.0", input.Version)
-				return []*model.BinaryItem{
-					{ID: "bin-1", Type: "firecracker", Version: "1.15.0", Path: "/tmp/firecracker"},
-				}, nil
+			BinaryPullFunc: func(_ context.Context, _ inputs.BinaryPullInput, _ event.OnProgressCallback) ([]*model.BinaryItem, error) {
+				called = true
+				return nil, nil
 			},
 		}
 		cmd := cli.NewBinaryCmd(mock, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
-		err := pullCmd.RunE(pullCmd, []string{"firecracker:1.15.0"})
-		assert.NoError(t, err)
+		err := pullCmd.Args(pullCmd, nil)
+		require.Error(t, err)
+		assert.False(t, called)
 	})
 
 	t.Run("non_interactive_error_propagates", func(t *testing.T) {
@@ -258,20 +280,15 @@ func TestNewBinaryPullCmd(t *testing.T) {
 		}
 		cmd := cli.NewBinaryCmd(mock, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
-		err := pullCmd.RunE(pullCmd, []string{"firecracker"})
+		err := pullCmd.RunE(pullCmd, []string{"1.15.0"})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "network timeout")
 	})
 
-	t.Run("force_override_already_exists", func(t *testing.T) {
+	t.Run("force_is_forwarded_as_replacement_intent", func(t *testing.T) {
 		mock := &testutil.MockBinaryAPI{
 			BinaryPullFunc: func(_ context.Context, input inputs.BinaryPullInput, _ event.OnProgressCallback) ([]*model.BinaryItem, error) {
-				if !input.DownloadOverride {
-					return nil, errs.AlreadyExists(
-						errs.CodeBinaryAlreadyExists,
-						"Firecracker v1.15.0 already exists. Use --force to re-download.",
-					)
-				}
+				assert.True(t, input.DownloadOverride)
 				return []*model.BinaryItem{
 					{ID: "bin-1", Type: "firecracker", Version: "1.15.0", Path: "/tmp/firecracker"},
 				}, nil
@@ -280,24 +297,7 @@ func TestNewBinaryPullCmd(t *testing.T) {
 		cmd := cli.NewBinaryCmd(mock, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
 		require.NoError(t, pullCmd.Flags().Set("force", "true"))
-		err := pullCmd.RunE(pullCmd, []string{"firecracker"})
-		assert.NoError(t, err)
-	})
-
-	t.Run("git_ref_build_path", func(t *testing.T) {
-		mock := &testutil.MockBinaryAPI{
-			BinaryPullFunc: func(_ context.Context, input inputs.BinaryPullInput, _ event.OnProgressCallback) ([]*model.BinaryItem, error) {
-				assert.NotNil(t, input.GitRef)
-				assert.Equal(t, "main", *input.GitRef)
-				return []*model.BinaryItem{
-					{ID: "bin-1", Type: "firecracker", Version: "dev-main", Path: "/tmp/firecracker"},
-				}, nil
-			},
-		}
-		cmd := cli.NewBinaryCmd(mock, nil)
-		pullCmd, _, _ := cmd.Find([]string{"pull"})
-		require.NoError(t, pullCmd.Flags().Set("git-ref", "main"))
-		err := pullCmd.RunE(pullCmd, []string{"firecracker"})
+		err := pullCmd.RunE(pullCmd, []string{"1.15.0"})
 		assert.NoError(t, err)
 	})
 
@@ -313,7 +313,37 @@ func TestNewBinaryPullCmd(t *testing.T) {
 		cmd := cli.NewBinaryCmd(mock, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
 		require.NoError(t, pullCmd.Flags().Set("default", "true"))
-		err := pullCmd.RunE(pullCmd, []string{"firecracker"})
+		err := pullCmd.RunE(pullCmd, []string{"1.15.0"})
 		assert.NoError(t, err)
+	})
+}
+
+func TestNewBinaryRemoveCmdUsesPositionalExactVersions(t *testing.T) {
+	t.Run("passes all versions and force once", func(t *testing.T) {
+		calls := 0
+		mock := &testutil.MockBinaryAPI{
+			BinaryRemoveFunc: func(_ context.Context, input inputs.BinaryRemoveInput, force bool) *errs.BatchResult {
+				calls++
+				assert.Equal(t, []string{"1.16.1", "1.15.2"}, input.Versions)
+				assert.True(t, force)
+				return &errs.BatchResult{Items: []errs.OperationResult{
+					{Status: "success", Message: "removed"},
+					{Status: "skipped", Message: "absent"},
+				}}
+			},
+		}
+		cmd := cli.NewBinaryCmd(mock, nil)
+		removeCmd, _, _ := cmd.Find([]string{"rm"})
+		require.NoError(t, removeCmd.Flags().Set("force", "true"))
+		require.NoError(t, removeCmd.RunE(removeCmd, []string{"1.16.1", "1.15.2"}))
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("legacy version flag is absent and argument is required", func(t *testing.T) {
+		cmd := cli.NewBinaryCmd(&testutil.MockBinaryAPI{}, nil)
+		removeCmd, _, _ := cmd.Find([]string{"rm"})
+		assert.Nil(t, removeCmd.Flags().Lookup("version"))
+		assert.Equal(t, "rm <exact-version>...", removeCmd.Use)
+		require.Error(t, removeCmd.Args(removeCmd, nil))
 	})
 }

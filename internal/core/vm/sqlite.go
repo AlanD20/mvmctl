@@ -3,12 +3,14 @@ package vm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
 
 	"mvmctl/internal/lib/model"
+	"mvmctl/pkg/errs"
 )
 
 type sqliteRepo struct {
@@ -161,7 +163,14 @@ func (r *sqliteRepo) GetByKernelIDs(ctx context.Context, kernelIDs []string) ([]
 
 func (r *sqliteRepo) FindByBinaryID(ctx context.Context, binaryID string) ([]*model.VMItem, error) {
 	var rows []*model.VMItem
-	if err := sqlx.SelectContext(ctx, r.db, &rows, vmBaseQuery+" WHERE binary_id = ?", binaryID); err != nil {
+	if err := sqlx.SelectContext(
+		ctx,
+		r.db,
+		&rows,
+		vmBaseQuery+" WHERE binary_id = ? OR jailer_binary_id = ?",
+		binaryID,
+		binaryID,
+	); err != nil {
 		return nil, fmt.Errorf("find vms by binary id: %w", err)
 	}
 	return rows, nil
@@ -171,7 +180,11 @@ func (r *sqliteRepo) GetByBinaryIDs(ctx context.Context, binaryIDs []string) ([]
 	if len(binaryIDs) == 0 {
 		return nil, nil
 	}
-	query, args, err := sqlx.In(vmBaseQuery+" WHERE binary_id IN (?)", binaryIDs)
+	query, args, err := sqlx.In(
+		vmBaseQuery+" WHERE binary_id IN (?) OR jailer_binary_id IN (?)",
+		binaryIDs,
+		binaryIDs,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("get vms by binary ids: %w", err)
 	}
@@ -282,23 +295,23 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 	var err error
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO vm_instances (
-			id, name, status, pid, process_start_time, ipv4, mac, network_id, tap_device,
-			image_id, kernel_id, binary_id, api_socket_path,
+			id, name, status, pid, process_start_time, network_placement, ipv4, mac, network_id, tap_device,
+			image_id, kernel_id, binary_id, jailer_binary_id,
 			relay_socket_path, config_path, cloud_init_mode,
 			nocloud_net_port, nocloud_net_pid, relay_pid,
-			exit_code, vcpu_count, mem_size_mib, disk_size_mib,
+			exit_code, vcpu_count, mem_size_mib, cgroup_limits, disk_size_mib,
 			rootfs_path, rootfs_suffix, pci_enabled, nested_virt,
-			remote_exec,
 			enable_logging, enable_metrics, enable_console,
 			ssh_keys, ssh_user,
 			created_at, updated_at,
 			log_path, serial_output_path, lsm_flags, boot_args, volume_ids, cpu_config
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			status = excluded.status,
 			pid = excluded.pid,
 			process_start_time = excluded.process_start_time,
+			network_placement = excluded.network_placement,
 			ipv4 = excluded.ipv4,
 			mac = excluded.mac,
 			network_id = excluded.network_id,
@@ -306,7 +319,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 			image_id = excluded.image_id,
 			kernel_id = excluded.kernel_id,
 			binary_id = excluded.binary_id,
-			api_socket_path = excluded.api_socket_path,
+			jailer_binary_id = excluded.jailer_binary_id,
 			relay_socket_path = excluded.relay_socket_path,
 			config_path = excluded.config_path,
 			cloud_init_mode = excluded.cloud_init_mode,
@@ -316,12 +329,12 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 			exit_code = excluded.exit_code,
 			vcpu_count = excluded.vcpu_count,
 			mem_size_mib = excluded.mem_size_mib,
+			cgroup_limits = excluded.cgroup_limits,
 			disk_size_mib = excluded.disk_size_mib,
 			rootfs_path = excluded.rootfs_path,
 			rootfs_suffix = excluded.rootfs_suffix,
 			pci_enabled = excluded.pci_enabled,
 			nested_virt = excluded.nested_virt,
-			remote_exec = excluded.remote_exec,
 			enable_logging = excluded.enable_logging,
 			enable_metrics = excluded.enable_metrics,
 			enable_console = excluded.enable_console,
@@ -340,6 +353,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 		vm.Status,
 		vm.PID,
 		vm.ProcessStartTime,
+		vm.NetworkPlacement,
 		vm.IPv4,
 		vm.MAC,
 		vm.NetworkID,
@@ -347,7 +361,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 		vm.ImageID,
 		vm.KernelID,
 		vm.BinaryID,
-		vm.APISocketPath,
+		vm.JailerBinaryID,
 		vm.RelaySocketPath,
 		vm.ConfigPath,
 		vm.CloudInitMode,
@@ -357,12 +371,12 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 		vm.ExitCode,
 		vm.VCPUCount,
 		vm.MemSizeMiB,
+		vm.CgroupLimits,
 		vm.DiskSizeMiB,
 		vm.RootfsPath,
 		vm.RootfsSuffix,
 		vm.PCIEnabled,
 		vm.NestedVirt,
-		vm.RemoteExec,
 		vm.EnableLogging,
 		vm.EnableMetrics,
 		vm.EnableConsole,
@@ -388,6 +402,45 @@ func (r *sqliteRepo) UpdateStatus(ctx context.Context, id string, status model.V
 		id,
 	)
 	return err
+}
+
+// UpdateRuntimeStatuses commits every changed observation together or leaves the projection untouched.
+func (r *sqliteRepo) UpdateRuntimeStatuses(
+	ctx context.Context,
+	updates []model.VMRuntimeStatusUpdate,
+) (returnErr error) {
+	if len(updates) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return errs.WrapMsg(errs.CodeDatabaseError, "begin VM runtime status projection", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			returnErr = errs.WrapMsg(errs.CodeDatabaseError, "roll back VM runtime status projection",
+				errors.Join(returnErr, err))
+		}
+	}()
+	for _, update := range updates {
+		result, err := tx.ExecContext(ctx,
+			"UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+			update.Status, update.VMID)
+		if err != nil {
+			return errs.WrapMsg(errs.CodeDatabaseError, "project VM runtime status", err)
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return errs.WrapMsg(errs.CodeDatabaseError, "read VM runtime status projection count", err)
+		}
+		if count != 1 {
+			return errs.New(errs.CodeDatabaseError, "VM disappeared during runtime status projection")
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return errs.WrapMsg(errs.CodeDatabaseError, "commit VM runtime status projection", err)
+	}
+	return nil
 }
 
 func (r *sqliteRepo) UpdatePID(ctx context.Context, id string, pid *int) error {

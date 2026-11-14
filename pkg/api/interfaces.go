@@ -14,6 +14,7 @@ type API interface {
 	HostAPI
 	ConsoleAPI
 	ExecAPI
+	ReadyAPI
 	SSHAPI
 	ConfigAPI
 	CacheAPI
@@ -22,4 +23,6 @@ type API interface {
 	InitAPI
 	SnapshotAPI
 	UpdateAPI
+	PolicyAPI
+	EnvironmentPolicyAPI
 }

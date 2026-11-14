@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -46,7 +45,6 @@ func NewKeyCmd(keyAPI api.KeyAPI, configAPI api.ConfigAPI) *cobra.Command {
 }
 
 func newKeyListCmd(keyAPI api.KeyAPI, configAPI api.ConfigAPI) *cobra.Command {
-	var jsonOutput bool
 	var longOutput bool
 
 	cmd := &cobra.Command{
@@ -59,15 +57,7 @@ func newKeyListCmd(keyAPI api.KeyAPI, configAPI api.ConfigAPI) *cobra.Command {
 				return err
 			}
 
-			if jsonOutput {
-				if keys == nil {
-					keys = []*model.SSHKeyItem{}
-				}
-				data, err := json.MarshalIndent(keys, "", "  ")
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(data))
+			if common.RecordListResult(keys) {
 				return nil
 			}
 
@@ -77,7 +67,6 @@ func newKeyListCmd(keyAPI api.KeyAPI, configAPI api.ConfigAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&longOutput, "long", false, "Show full listing with all columns")
 
 	return cmd
@@ -129,6 +118,7 @@ func newKeyCreateCmd(keyAPI api.KeyAPI) *cobra.Command {
 			}
 
 			createdKey, err := keyAPI.KeyCreate(cmd.Context(), input)
+			common.RecordResult(createdKey)
 			if err != nil {
 				return err
 			}
@@ -164,6 +154,7 @@ func newKeyImportCmd(keyAPI api.KeyAPI) *cobra.Command {
 			keyItem, err := keyAPI.KeyImport(cmd.Context(), inputs.KeyImportInput{
 				Name: name, PubKeyPath: pubKeyPath, Overwrite: force, SetDefault: setDefault,
 			})
+			common.RecordResult(keyItem)
 			if err != nil {
 				return err
 			}
@@ -199,6 +190,9 @@ func newKeyRemoveCmd(keyAPI api.KeyAPI) *cobra.Command {
 
 			// Use API-side resolution for batch removal
 			removeResult := keyAPI.KeyRemove(cmd.Context(), inputs.KeyInput{Identifiers: args}, force)
+			if common.StructuredOutput() {
+				return common.RecordBatch(removeResult)
+			}
 			for _, r := range removeResult.Items {
 				if r.Status == "success" {
 					if keyItem, ok := r.Item.(*model.SSHKeyItem); ok {
@@ -223,7 +217,6 @@ func newKeyRemoveCmd(keyAPI api.KeyAPI) *cobra.Command {
 }
 
 func newKeyInspectCmd(keyAPI api.KeyAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:               "inspect [selector]",
@@ -241,9 +234,7 @@ func newKeyInspectCmd(keyAPI api.KeyAPI) *cobra.Command {
 				return err
 			}
 
-			if jsonOutput {
-				b, _ := json.MarshalIndent(info, "", "  ")
-				fmt.Println(string(b))
+			if common.RecordResult(info) {
 				return nil
 			}
 
@@ -255,8 +246,6 @@ func newKeyInspectCmd(keyAPI api.KeyAPI) *cobra.Command {
 			return nil
 		},
 	}
-
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 
 	return cmd
 }
@@ -283,6 +272,7 @@ func newKeyExportCmd(keyAPI api.KeyAPI) *cobra.Command {
 				path,
 				force,
 			)
+			common.RecordResult(paths)
 			if err != nil {
 				return err
 			}

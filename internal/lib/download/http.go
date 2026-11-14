@@ -3,10 +3,12 @@ package download
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 	"net/http"
@@ -388,14 +390,31 @@ func extractFilename(rawURL string) string {
 	return rawURL
 }
 
-// sha256File computes the SHA256 hex digest of a file.
-func sha256File(path string) (string, error) {
+type checksumAlgorithm uint8
+
+const (
+	checksumSHA256 checksumAlgorithm = iota
+	checksumSHA512
+)
+
+func (a checksumAlgorithm) newHash() (hash.Hash, error) {
+	switch a {
+	case checksumSHA256:
+		return sha256.New(), nil
+	case checksumSHA512:
+		return sha512.New(), nil
+	default:
+		return nil, errs.New(errs.CodeDownloadFailed, "unsupported checksum algorithm")
+	}
+}
+
+func checksumFile(path string, h hash.Hash) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
-	h := sha256.New()
+	h.Reset()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
@@ -414,6 +433,40 @@ func (d *Downloader) DownloadFile(
 	allowMissingChecksum, silentMissingChecksum bool,
 	progress event.OnDownloadCallback,
 ) error {
+	return d.downloadFile(ctx, url, dest, expectedSHA256, checksumSHA256,
+		allowMissingChecksum, silentMissingChecksum, progress)
+}
+
+// DownloadFileSHA512 downloads a file with optional SHA512 verification using
+// the same mirror, transfer, and missing-checksum policy as DownloadFile.
+func (d *Downloader) DownloadFileSHA512(
+	ctx context.Context,
+	url, dest, expectedSHA512 string,
+	allowMissingChecksum, silentMissingChecksum bool,
+	progress event.OnDownloadCallback,
+) error {
+	return d.downloadFile(ctx, url, dest, expectedSHA512, checksumSHA512,
+		allowMissingChecksum, silentMissingChecksum, progress)
+}
+
+func (d *Downloader) downloadFile(
+	ctx context.Context,
+	url, dest, expectedChecksum string,
+	algorithm checksumAlgorithm,
+	allowMissingChecksum, silentMissingChecksum bool,
+	progress event.OnDownloadCallback,
+) error {
+	checksumHash, err := algorithm.newHash()
+	if err != nil {
+		return err
+	}
+	// CRITICAL: Malformed metadata must never invalidate or remove a mirror object.
+	if expectedChecksum != "" {
+		digest, decodeErr := hex.DecodeString(expectedChecksum)
+		if decodeErr != nil || len(digest) != checksumHash.Size() {
+			return errs.New(errs.CodeDownloadFailed, "invalid checksum: expected a complete hexadecimal digest")
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), infra.DirPerm); err != nil {
 		return fmt.Errorf("create dest dir: %w", err)
 	}
@@ -425,12 +478,12 @@ func (d *Downloader) DownloadFile(
 		if err := infra.CopyFile(mirrorPath, dest); err != nil {
 			return fmt.Errorf("copy from mirror: %w", err)
 		}
-		if expectedSHA256 != "" {
-			actualHash, err := sha256File(dest)
+		if expectedChecksum != "" {
+			actualHash, err := checksumFile(dest, checksumHash)
 			if err != nil {
-				return fmt.Errorf("sha256 mirror file: %w", err)
+				return fmt.Errorf("checksum mirror file: %w", err)
 			}
-			if strings.EqualFold(actualHash, expectedSHA256) {
+			if strings.EqualFold(actualHash, expectedChecksum) {
 				return nil
 			}
 			slog.Warn("Mirror checksum mismatch, falling back to HTTP download", "url", url)
@@ -442,7 +495,7 @@ func (d *Downloader) DownloadFile(
 	}
 
 	// --- Handle missing checksum ---
-	if expectedSHA256 == "" {
+	if expectedChecksum == "" {
 		if silentMissingChecksum {
 			// pass — no warnings
 		} else if !allowMissingChecksum {
@@ -467,24 +520,25 @@ func (d *Downloader) DownloadFile(
 		}
 	}
 
-	// --- Setup SHA256 hashing + progress wrapping ---
-	sha256Hash := sha256.New()
+	// --- Setup checksum hashing + progress wrapping ---
 	downloaded := int64(0)
 	totalSizeCell := int64(-1)
 
 	onStart := func(totalSize int64) {
 		totalSizeCell = totalSize
+		// Discard any rejected mirror's digest before hashing the HTTP artifact.
+		checksumHash.Reset()
 	}
 
 	var chunkCallback ProgressFunc
-	if progress != nil || expectedSHA256 != "" {
+	if progress != nil || expectedChecksum != "" {
 		chunkCallback = func(chunk []byte) {
 			downloaded += int64(len(chunk))
 			if progress != nil {
 				progress(downloaded, totalSizeCell)
 			}
-			if expectedSHA256 != "" {
-				sha256Hash.Write(chunk)
+			if expectedChecksum != "" {
+				checksumHash.Write(chunk)
 			}
 		}
 	}
@@ -494,14 +548,14 @@ func (d *Downloader) DownloadFile(
 		return err
 	}
 
-	// --- SHA256 verification ---
-	if expectedSHA256 != "" {
-		actualSHA256 := hex.EncodeToString(sha256Hash.Sum(nil))
-		if !strings.EqualFold(actualSHA256, expectedSHA256) {
+	// --- Checksum verification ---
+	if expectedChecksum != "" {
+		actualChecksum := hex.EncodeToString(checksumHash.Sum(nil))
+		if !strings.EqualFold(actualChecksum, expectedChecksum) {
 			os.Remove(dest)
 			return errs.New(
 				errs.CodeImageChecksumMismatch,
-				fmt.Sprintf("Checksum mismatch! Expected %s, got %s", expectedSHA256, actualSHA256),
+				fmt.Sprintf("Checksum mismatch! Expected %s, got %s", expectedChecksum, actualChecksum),
 			)
 		}
 		slog.Info("Checksum verified")

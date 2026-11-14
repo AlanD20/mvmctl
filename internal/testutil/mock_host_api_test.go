@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/testutil"
 	"mvmctl/pkg/api/results"
@@ -20,12 +19,6 @@ import (
 
 func TestMockHostAPI_DefaultReturnsNil(t *testing.T) {
 	m := &testutil.MockHostAPI{}
-
-	t.Run("HostInit_returns_nil_nil", func(t *testing.T) {
-		result, err := m.HostInit(ctx, nil)
-		assert.NoError(t, err)
-		assert.Nil(t, result)
-	})
 
 	t.Run("HostInfo_returns_nil_nil", func(t *testing.T) {
 		result, err := m.HostInfo(ctx)
@@ -57,20 +50,6 @@ func TestMockHostAPI_DefaultReturnsNil(t *testing.T) {
 }
 
 func TestMockHostAPI_CustomFunc(t *testing.T) {
-	t.Run("HostInit_custom_func", func(t *testing.T) {
-		expected := map[string]string{"status": "ok"}
-		m := &testutil.MockHostAPI{
-			HostInitFunc: func(ctx context.Context, onProgress event.OnProgressCallback) (any, error) {
-				return expected, nil
-			},
-		}
-		result, err := m.HostInit(ctx, nil)
-		require.NoError(t, err)
-		if diff := cmp.Diff(expected, result); diff != "" {
-			t.Errorf("HostInit() mismatch (-want +got):\n%s", diff)
-		}
-	})
-
 	t.Run("HostInfo_custom_func", func(t *testing.T) {
 		expected := &results.HostInfo{
 			Hostname: "test-host",

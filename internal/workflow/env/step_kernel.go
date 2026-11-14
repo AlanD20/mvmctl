@@ -56,17 +56,39 @@ func (s *KernelStep) Apply(
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
 
+	lookup := s.input.KernelType
+	prior := StateFromMap[KernelState](saved.Output)
+	if saved.Output != nil {
+		if prior == nil || prior.KernelID == "" {
+			return fmt.Errorf("%s: saved resource identity is invalid", s.Name())
+		}
+		if saved.Meta.SpecHash != s.specHash {
+			return fmt.Errorf(
+				"%s: declaration changed; destroy the saved resource before changing its declaration",
+				s.Name(),
+			)
+		}
+		lookup = prior.KernelID
+	} else if selected := s.inputSpec.GetString("existing"); selected != "" {
+		lookup = selected
+	}
 	// Recover WasCreated from saved meta.
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.KernelGet(ctx, s.input.KernelType)
+	existing, err := s.op.KernelGet(ctx, lookup)
 	if err != nil && !errs.IsNotFound(err) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
 			fmt.Sprintf("check kernel type %q: %v", s.input.KernelType, err),
 			err,
 		)
+	}
+	if prior != nil && (existing == nil || existing.ID != prior.KernelID) {
+		return fmt.Errorf("%s: saved resource %s is missing; refusing replacement", s.Name(), prior.KernelID)
+	}
+	if s.inputSpec.GetString("existing") != "" && existing == nil {
+		return fmt.Errorf("%s: selected existing resource was not found", s.Name())
 	}
 	if existing != nil {
 		onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "already exists, skipping"})

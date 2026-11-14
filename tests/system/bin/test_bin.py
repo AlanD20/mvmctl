@@ -2,15 +2,61 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import platform
 import re
+import select
+import stat
+import subprocess
+import tarfile
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.system.conftest import _ensure_binary, _guest_run, _run_mvm, ensure_vm_deps
+from tests.system.conftest import (
+    _json_success_data,
+    _parse_vm_list,
+    _run_mvm,
+)
 
 pytestmark = [pytest.mark.system, pytest.mark.domain_bin]
+
+
+def _installed_pair(binaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Require the preinstalled launch pair without repairing runner defaults."""
+    pair = [item for item in binaries if item["is_default"]]
+    assert len(pair) == 2, pair
+    assert {item["type"] for item in pair} == {"firecracker", "jailer"}
+    for item in pair:
+        assert item["version"] == "1.17.0", item
+        assert item["architecture"] == platform.machine(), item
+        assert item["is_present"] is True, item
+        assert re.fullmatch(r"[0-9a-f]{64}", item["id"]), item
+        assert item["path"] == (
+            f"/var/lib/mvmctl/binaries/{item['architecture']}/1.17.0/{item['type']}"
+        ), item
+    return pair
+
+
+def _binary_identity(binaries: list[dict[str, Any]]) -> set[tuple]:
+    """Compare release identities and defaults while allowing projection timestamps to refresh."""
+    return {
+        (item["id"], item["type"], item["architecture"], item["version"],
+         item["path"], item["is_default"], item["is_present"])
+        for item in binaries
+    }
+
+
+def _file_identity(path: Path) -> tuple:
+    """Record exact regular files rather than following a substituted fixture leaf."""
+    info = path.lstat()
+    assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1, path
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+            info.st_mtime_ns, info.st_ctime_ns, info.st_size)
+
 
 # ============================================================================
 # Read-only listing tests (no state modification)
@@ -22,447 +68,457 @@ class TestBinLifecycle:
 
     def test_bin_list_cached(self, runner_vm):
         """List cached firecracker versions."""
-        _ensure_binary(runner_vm)
-
         result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert isinstance(data, list)
-        present = [e for e in data if e.get("is_present") is True]
-        assert present, (
-            "No binary with is_present=True found in listing.\n"
-            f"Full listing: {json.dumps(data, indent=2)}"
-        )
-        entry = present[0]
-        assert re.match(r"\d+\.\d+\.\d+", entry.get("version", "")), (
-            f"Invalid version format: {entry}"
-        )
-        assert isinstance(entry.get("id"), str) and entry["id"], (
-            f"Expected non-empty id: {entry}"
-        )
-
-    def test_bin_list_json(self, runner_vm):
-        """List binaries in JSON format."""
-        _ensure_binary(runner_vm)
-
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert isinstance(data, list)
+        data: list[dict[str, Any]] = _json_success_data(result.stdout, list)
         for entry in data:
-            assert isinstance(entry.get("version"), str) and entry["version"], (
-                f"Expected non-empty version: {entry}"
-            )
-            assert isinstance(entry.get("id"), str) and entry["id"], (
-                f"Expected non-empty id: {entry}"
-            )
-            assert isinstance(entry.get("is_present"), bool), (
-                f"is_present must be bool: {entry}"
-            )
-        assert any(e.get("is_present") for e in data), (
-            "No entry with is_present=True"
-        )
-
-    def test_bin_ls_structure(self, runner_vm):
-        """Verify bin ls --json returns a list with well-formed entries even if cache is empty."""
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert isinstance(data, list)
-        for entry in data:
-            assert isinstance(entry.get("version"), str) and entry["version"], (
-                f"Expected non-empty version: {entry}"
-            )
-            assert isinstance(entry.get("id"), str) and entry["id"], (
-                f"Expected non-empty id: {entry}"
-            )
-            assert isinstance(entry.get("is_present"), bool), (
-                f"is_present must be bool: {entry}"
-            )
-
-    def test_bin_list_empty_cache(self, runner_vm):
-        """bin ls --json returns valid empty list when no binaries are cached.
-
-        This test must run before any binary pull operations to verify
-        the empty-cache edge case.
-        """
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        assert result.returncode == 0, f"bin ls --json failed: {result.stderr}"
-        data = json.loads(result.stdout)
-        assert isinstance(data, list), (
-            f"Expected list, got {type(data).__name__}: {data}"
-        )
-        if len(data) == 0:
-            return
-        for entry in data:
-            assert isinstance(entry.get("version"), str) and entry["version"], (
-                f"Expected non-empty version: {entry}"
-            )
-            assert isinstance(entry.get("id"), str) and entry["id"], (
-                f"Expected non-empty id: {entry}"
-            )
-            assert isinstance(entry.get("is_present"), bool), (
-                f"is_present must be bool: {entry}"
-            )
+            assert isinstance(entry, dict), entry
+            assert isinstance(entry.get("version"), str) and entry["version"], entry
+            assert isinstance(entry.get("id"), str) and entry["id"], entry
+            assert isinstance(entry.get("is_present"), bool), entry
+        _installed_pair(data)
 
 
 # ============================================================================
-# Edge cases (error paths + some pull tests — NO destructive rm)
+# Edge cases (error paths and mirrored pull; no present-release removal)
 # ============================================================================
 
 
 class TestBinaryEdges:
     """Binary management edge case tests.
 
-    Read-only error-path tests appear first, followed by destructive pull
-    tests. This class contains NO test_remove_* or test_bin_rm_* methods,
-    so it can safely precede the rm-heavy classes below.
+    The exact absent-slot removal is a typed no-op; pull cases use mirrored
+    assets. Present-release removal is exercised separately below.
     """
 
-    def test_bin_ls_remote_works(self, runner_vm):
-        """Remote binary listing should work in Tier 2 environment."""
-        result = _run_mvm(runner_vm, "bin", "ls", "--remote", "--json", check=False)
-        assert result.returncode == 0, (
-            f"Remote listing failed — Tier 2 environment must have network access: "
-            f"{result.stderr}"
+    def test_bin_ls_remote_limit_applies_to_json(self, runner_vm: str) -> None:
+        """Remote release metadata is structured, and --limit bounds the JSON data."""
+        default = _json_success_data(
+            _run_mvm(runner_vm, "bin", "ls", "--remote", "--json", timeout=60).stdout,
+            list,
         )
-        data: list[dict[str, Any]] = json.loads(result.stdout)
-        assert len(data) > 0, "Expected at least one remote binary"
+        assert len(default) > 3, "remote source must expose enough releases to prove --limit"
+        limited = _json_success_data(
+            _run_mvm(
+                runner_vm, "bin", "ls", "--remote", "--limit", "3", "--json", timeout=60,
+            ).stdout,
+            list,
+        )
+        assert len(limited) == 3
+        assert [item["version"] for item in limited] == [item["version"] for item in default[:3]]
+        for item in limited:
+            assert re.fullmatch(r"\d+\.\d+\.\d+", item["version"])
+            assert item["type"] == "bin"
+            assert item["name"] == "firecracker"
 
-    def test_bin_ls_remote_with_limit(self, runner_vm):
-        """Remote listing with --limit flag should work (limit is display-only in JSON)."""
-        result = _run_mvm(
-            runner_vm,
-            "bin",
-            "ls",
-            "--remote",
-            "--limit",
-            "3",
-            "--json",
-            check=False,
-        )
-        assert result.returncode == 0, (
-            f"Remote listing with --limit failed — Tier 2 environment must have "
-            f"network access: {result.stderr}"
-        )
-        data = json.loads(result.stdout)
-        assert isinstance(data, list), f"Expected list, got {type(data)}"
-        assert len(data) >= 1, f"Expected at least one binary, got {len(data)}"
+    def test_bin_pull_invalid_version_rejected_before_effects(self, runner_vm: str) -> None:
+        """Malformed exact selectors fail locally without contacting the asset source."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        rejected = _run_mvm(runner_vm, "bin", "pull", "not-a-version", "--json", check=False)
+        assert rejected.returncode != 0
+        envelope = json.loads(rejected.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "error"
+        assert envelope["error"]["code"] == "binary.pull_failed"
+        assert "invalid version spec" in envelope["error"]["message"].lower()
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
-    def test_pull_nonexistent_version_fails(self, runner_vm):
-        """Pulling a nonexistent version via --version should fail gracefully."""
-        result = _run_mvm(
-            runner_vm,
-            "bin",
-            "pull",
-            "firecracker",
-            "--version",
-            "999.999.999",
-            check=False,
+    def test_bin_default_missing_id_rejected_before_effects(self, runner_vm: str) -> None:
+        """A missing binary ID leaves both default projections unchanged."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        rejected = _run_mvm(
+            runner_vm, "bin", "default", "totally-nonexistent-binary", "--json", check=False,
         )
-        assert result.returncode != 0, (
-            f"Expected failure for nonexistent version, "
-            f"got rc={result.returncode}: {result.stdout[:200]}"
-        )
-        combined = (result.stdout + result.stderr).lower()
-        assert "checksum required" in combined or "not found in remote versions" in combined, (
-            f"Expected error about checksum or version not found in output, "
-            f"got: {combined[:300]}"
-        )
+        assert rejected.returncode != 0
+        envelope = json.loads(rejected.stdout)
+        assert envelope["schema_version"] == 1
+        assert envelope["status"] == "error"
+        assert envelope["error"]["code"] == "binary.default_set_failed"
+        assert "could be resolved" in envelope["error"]["message"].lower()
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
-    def test_set_default_nonexistent_binary_fails(self, runner_vm):
-        """Setting default to nonexistent binary should fail."""
-        result = _run_mvm(
-            runner_vm,
-            "bin",
-            "default",
-            "totally-nonexistent-binary",
-            check=False,
+    def test_bin_rm_removed_version_flag_rejected_before_effects(self, runner_vm: str) -> None:
+        """A removed selector cannot alter any trusted release."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        rejected = _run_mvm(
+            runner_vm, "bin", "rm", "--version", "999.999.999", check=False,
         )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "could be resolved" in combined, (
-            f"Expected 'could be resolved' in output, got: {combined[:300]}"
-        )
+        assert rejected.returncode != 0
+        assert "unknown flag: --version" in (rejected.stdout + rejected.stderr).lower()
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
-    def test_remove_nonexistent_binary_fails(self, runner_vm):
-        """Removing nonexistent binary should fail gracefully."""
-        result = _run_mvm(
-            runner_vm, "bin", "rm", "totally-nonexistent-binary", check=False
+    def test_bin_pull_removed_git_ref_rejected_before_effects(self, runner_vm: str) -> None:
+        """The removed source-build selector must not change trusted-release state."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        rejected = _run_mvm(
+            runner_vm, "bin", "pull", "1.16.0", "--git-ref", "main", check=False,
         )
-        assert result.returncode != 0
-        combined = (result.stdout + result.stderr).lower()
-        assert "could be resolved" in combined, (
-            f"Expected 'could be resolved' in output, got: {combined[:300]}"
-        )
+        assert rejected.returncode != 0
+        assert "unknown flag: --git-ref" in (rejected.stdout + rejected.stderr).lower()
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
-    def test_bin_rm_version_nonexistent(self, runner_vm):
-        """Removing a nonexistent version via --version should fail."""
-        result = _run_mvm(
-            runner_vm, "bin", "rm", "--version", "999.999.999", check=False
+    def test_bin_rm_exact_absent_version_is_skipped(self, runner_vm: str) -> None:
+        """Root-authoritative removal reports a typed no-op for an absent exact slot."""
+        version = "999.999.999"
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert all(item["version"] != version for item in before)
+        data = _json_success_data(
+            _run_mvm(runner_vm, "bin", "rm", version, "--json").stdout,
+            dict,
         )
-        assert result.returncode != 0, (
-            f"Expected failure for nonexistent version, got: "
-            f"stdout={result.stdout}, stderr={result.stderr}"
-        )
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        assert item["error"] is None
+        assert item["result"]["status"] == "skipped"
+        assert item["result"]["code"] == "binary.remove_absent"
+        assert item["result"]["item"] == version
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
     # ---- Destructive pull tests (still no rm) ----
 
-    def test_bin_pull_specific_version_plain(self, runner_vm):
-        """Pull a binary version by name without --force or --default.
+    def test_bin_pull_present_exact_version_from_mirror(self, runner_vm: str) -> None:
+        """An exact mirrored release can be re-admitted without changing its pair or default."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        prior_pair = _installed_pair(before)
+        version = "1.17.0"
+        prior_ids = {item["type"]: item["id"] for item in prior_pair}
+        mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
+        archive = mirror / f"firecracker-v{version}-{platform.machine()}.tgz"
+        archive_identity = _file_identity(archive)
+        assert archive_identity[-1] > 0, archive
 
-        Uses a known version (1.15.1) that should be available in Tier 2.
-        """
-        _ensure_binary(runner_vm)
-
-        # Use a specific version that is not the default
-        cached = _run_mvm(runner_vm, "bin", "ls", "--json")
-        cached_bins: list[dict[str, Any]] = json.loads(cached.stdout)
-        default_version = next(
-            (b.get("version") for b in cached_bins if b.get("is_default")),
-            None,
+        pulled = _json_success_data(
+            _run_mvm(runner_vm, "bin", "pull", version, "--json", timeout=300).stdout,
+            list,
         )
-        target = "1.14.2" if default_version != "1.14.2" else "1.14.1"
-
-        pull_result = _run_mvm(
-            runner_vm, "bin", "pull", "firecracker", "--version", target,
-            check=False, timeout=120,
-        )
-        assert pull_result.returncode == 0, (
-            f"bin pull {target} failed in Tier 2 environment (should have network): "
-            f"{pull_result.stderr}"
-        )
-
-        listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-        entries: list[dict[str, Any]] = json.loads(listing.stdout)
-        assert any(e.get("version") == target for e in entries), (
-            f"Version {target} not found in listing after pull"
-        )
-
-    def test_pull_cached_binary_with_default_sets_default(
-        self, runner_vm: str
-    ) -> None:
-        """Pull already-cached binary with --default must set it as default.
-
-        Uses a dynamically-identified non-default version in the Tier 2 cache.
-        """
-        original_default_prefix: str | None = None
-
-        try:
-            result = _run_mvm(runner_vm, "bin", "ls", "--json")
-            binaries: list[dict[str, Any]] = json.loads(result.stdout)
-            assert binaries, "No cached binaries found in Tier 2 environment"
-
-            original_default = next(
-                (b for b in binaries if b.get("is_default")), None
-            )
-            if original_default:
-                original_default_prefix = original_default["id"][:6]
-
-            non_default_fc = [
-                b
-                for b in binaries
-                if b.get("type") == "firecracker"
-                and not b.get("is_default")
-                and b.get("is_present")
-            ]
-
-            # If no non-default binary exists, pull a different version
-            if not non_default_fc:
-                default_version = original_default["version"] if original_default else "1.15.1"
-                known = "1.14.2" if default_version != "1.14.2" else "1.14.1"
-                _run_mvm(
-                    runner_vm, "bin", "pull", "firecracker",
-                    "--version", known, "--force", timeout=120,
-                )
-                result = _run_mvm(runner_vm, "bin", "ls", "--json")
-                binaries = json.loads(result.stdout)
-                non_default_fc = [
-                    b for b in binaries
-                    if b.get("type") == "firecracker"
-                    and not b.get("is_default")
-                    and b.get("is_present")
-                ]
-
-            assert non_default_fc, "Could not obtain a non-default binary for testing"
-            target_version = non_default_fc[0]["version"]
-
-            pull_result = _run_mvm(
-                runner_vm,
-                "bin",
-                "pull",
-                "firecracker",
-                "--version",
-                target_version,
-                "--default",
-                "--force",
-                check=False,
-            )
-            assert pull_result.returncode == 0, (
-                f"bin pull {target_version} --default --force failed: {pull_result.stderr}"
-            )
-
-            result = _run_mvm(runner_vm, "bin", "ls", "--json")
-            binaries = json.loads(result.stdout)
-            fc_defaults = [
-                b for b in binaries
-                if b.get("is_default") and b.get("type") == "firecracker"
-            ]
-            actual_default = fc_defaults[0].get("version") if fc_defaults else None
-            assert actual_default == target_version, (
-                f"Pulled {target_version} with --default, "
-                f"but firecracker default is {actual_default}"
-            )
-        finally:
-            if original_default_prefix:
-                _run_mvm(
-                    runner_vm, "bin", "default", original_default_prefix,
-                    check=False,
-                )
-
-
-# ============================================================================
-# Destructive pull tests
-# ============================================================================
-
-
-class TestBinaryPullAdvanced:
-    """Test advanced binary pull operations."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.slow,
-        pytest.mark.domain_bin,
-    ]
-
-    def test_bin_pull_force(self, runner_vm):
-        """Pull a binary with --force to re-download an already cached version."""
-        _ensure_binary(runner_vm)
-
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        cached = json.loads(result.stdout)
-        cached_fc = [
-            b for b in cached
-            if b.get("type") == "firecracker" and b.get("is_present")
-        ]
-        assert cached_fc, "No cached firecracker binary in Tier 2 environment"
-        target = cached_fc[0]["version"]
-
-        pull_result = _run_mvm(
-            runner_vm, "bin", "pull", "firecracker", "--version", target,
-            "--force", check=False,
-        )
-        assert pull_result.returncode == 0, (
-            f"bin pull {target} --force failed: {pull_result.stderr}"
-        )
-        assert "downloaded" in pull_result.stdout.lower(), (
-            f"Expected 'Downloaded' in output after --force pull, "
-            f"got: {pull_result.stdout[:200]}"
-        )
-
-    def test_bin_pull_set_default(self, runner_vm):
-        """Pull a binary and set it as default atomically.
-
-        Uses a dynamically-identified non-default version from the cache.
-        """
-        _ensure_binary(runner_vm)
-
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        cached = json.loads(result.stdout)
-        non_default_fc = [
-            b for b in cached
-            if b.get("type") == "firecracker"
-            and b.get("is_present")
-            and not b.get("is_default")
-        ]
-
-        if not non_default_fc:
-            default_version = next(
-                (b.get("version") for b in cached if b.get("is_default")),
-                None,
-            )
-            target = "1.14.2" if default_version != "1.14.2" else "1.14.1"
-            _run_mvm(
-                runner_vm, "bin", "pull", "firecracker",
-                "--version", target, "--force", timeout=120,
-            )
-            result = _run_mvm(runner_vm, "bin", "ls", "--json")
-            cached = json.loads(result.stdout)
-            non_default_fc = [
-                b for b in cached
-                if b.get("type") == "firecracker"
-                and b.get("is_present")
-                and not b.get("is_default")
-            ]
-
-        assert non_default_fc, "No non-default firecracker binary available"
-        target = non_default_fc[0]["version"]
-
-        pull_result = _run_mvm(
-            runner_vm,
-            "bin",
-            "pull",
-            "firecracker",
-            "--version",
-            target,
-            "--default",
-            "--force",
-            check=False,
-        )
-        assert pull_result.returncode == 0, (
-            f"bin pull {target} --default failed: {pull_result.stderr}"
-        )
-
-        listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-        entries = json.loads(listing.stdout)
-        fc_defaults = [
-            e for e in entries
-            if e.get("is_default") and e.get("type") == "firecracker"
-        ]
-        assert len(fc_defaults) >= 1, (
-            "No default firecracker found after pull --default"
-        )
-        assert any(e.get("version") == target for e in fc_defaults), (
-            f"Version {target} not set as default after pull --default. "
-            f"Defaults: {[(e['version'], e['is_default']) for e in entries if e.get('name') == 'firecracker']}"
-        )
-
-    def test_bin_pull_git_ref_help(self, runner_vm: str) -> None:
-        """Verify CLI accepts --git-ref flag (syntax check)."""
-        result = _run_mvm(
-            runner_vm,
-            "bin",
-            "pull",
-            "--help",
-            check=False,
-            timeout=300,
-        )
-        assert "--git-ref" in result.stdout, (
-            "--git-ref flag should be documented in bin pull --help"
-        )
-
-    def test_bin_pull_version(self, runner_vm: str) -> None:
-        """Pull a Firecracker binary from asset mirror — uses pre-built version."""
-        result = _run_mvm(
-            runner_vm,
-            "bin",
-            "pull",
-            "firecracker",
-            "--version",
-            "1.15.0",
-            "--force",
-            check=False,
-            timeout=300,
-        )
-        assert result.returncode == 0, (
-            f"bin pull --version 1.16.0 failed: "
-            f"stdout={result.stdout} stderr={result.stderr}"
-        )
-        assert "firecracker" in result.stdout.lower(), (
-            f"Expected 'firecracker' in output: {result.stdout}"
-        )
-
+        assert len(pulled) == 2
+        assert {item["type"] for item in pulled} == {"firecracker", "jailer"}
+        assert {item["version"] for item in pulled} == {version}
+        assert all(item["is_present"] for item in pulled)
+        assert {item["type"]: item["id"] for item in pulled} == prior_ids
+        assert _binary_identity(pulled) == _binary_identity(prior_pair)
+        assert _file_identity(archive) == archive_identity
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert _binary_identity(after) == _binary_identity(before)
 
 # ============================================================================
 # Pull, set-default, and remove (includes rm — last destructive section)
 # ============================================================================
+
+
+_BIN_RELEASE_RECEIVER = r'''
+import hashlib, json, os, re, stat, sys
+
+fds, parents = [], []
+journal_baseline = None
+directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+file_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+def identity(info, directory=False):
+    basic = [info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode]
+    return basic if directory else basic + [info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        assert key not in result, "duplicate root receipt field"
+        result[key] = value
+    return result
+
+def open_directory(parent, name, managed=True):
+    fd = os.open(name, directory_flags, dir_fd=parent)
+    fds.append(fd)
+    info = os.fstat(fd)
+    assert info.st_uid == info.st_gid == 0 and stat.S_ISDIR(info.st_mode), name
+    assert stat.S_IMODE(info.st_mode) == 0o700 if managed else not info.st_mode & 0o022, name
+    parents.append((parent, name, fd, identity(info, True)))
+    return fd
+
+def verify_parents():
+    for parent, name, fd, expected in parents:
+        assert identity(os.fstat(fd), True) == expected, name
+        assert identity(os.stat(name, dir_fd=parent, follow_symlinks=False), True) == expected, name
+
+def read_file(fd, maximum):
+    before = identity(os.fstat(fd))
+    assert before[6] <= maximum
+    os.lseek(fd, 0, os.SEEK_SET)
+    data = bytearray()
+    while len(data) <= maximum:
+        part = os.read(fd, min(65536, maximum + 1 - len(data)))
+        if not part:
+            break
+        data.extend(part)
+    assert len(data) <= maximum and identity(os.fstat(fd)) == before
+    return bytes(data)
+
+def scan_instances():
+    verify_parents()
+    try:
+        root = os.open("instances", directory_flags, dir_fd=state)
+    except FileNotFoundError:
+        try:
+            os.stat("instances", dir_fd=state, follow_symlinks=False)
+        except FileNotFoundError:
+            verify_parents()
+            return {"directory": None, "owners": {}}
+        raise AssertionError("instance directory appeared during absence observation")
+
+    def directory_receipt(fd):
+        info = os.fstat(fd)
+        assert info.st_uid == info.st_gid == 0 and stat.S_ISDIR(info.st_mode)
+        assert stat.S_IMODE(info.st_mode) == 0o700
+        return identity(info)
+
+    def verify_directory(parent, name, fd, expected):
+        assert identity(os.fstat(fd)) == expected, name
+        assert identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) == expected, name
+
+    try:
+        root_identity = directory_receipt(root)
+        owners = sorted(os.listdir(root))
+        assert len(owners) <= 64
+        snapshot = {"directory": root_identity, "owners": {}}
+        for owner in owners:
+            assert re.fullmatch(r"[1-9][0-9]*", owner), owner
+            uid = os.open(owner, directory_flags, dir_fd=root)
+            try:
+                uid_identity = directory_receipt(uid)
+                names = sorted(os.listdir(uid))
+                assert len(names) <= 1000
+                records = {}
+                for name in names:
+                    assert re.fullmatch(r"[0-9a-f]{32}\.json", name), name
+                    fd = os.open(name, file_flags, dir_fd=uid)
+                    try:
+                        info = os.fstat(fd)
+                        assert info.st_uid == info.st_gid == 0 and stat.S_ISREG(info.st_mode)
+                        assert info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600
+                        raw = read_file(fd, 65536)
+                        record = json.loads(raw, object_pairs_hook=unique_object)
+                        assert type(record["schema_version"]) is int and record["schema_version"] == 6
+                        assert type(record["owner_uid"]) is int and record["owner_uid"] == int(owner)
+                        assert record["vm_id"] + ".json" == name and record["lifecycle"] == "cleaned", name
+                        expected = identity(info)
+                        assert identity(os.fstat(fd)) == expected, name
+                        assert identity(os.stat(name, dir_fd=uid, follow_symlinks=False)) == expected, name
+                        records[name] = {"identity": expected, "sha256": hashlib.sha256(raw).hexdigest()}
+                    finally:
+                        os.close(fd)
+                assert sorted(os.listdir(uid)) == names, owner
+                for name, receipt in records.items():
+                    assert identity(os.stat(name, dir_fd=uid, follow_symlinks=False)) == receipt["identity"], name
+                verify_directory(root, owner, uid, uid_identity)
+                snapshot["owners"][owner] = {"directory": uid_identity, "records": records}
+            finally:
+                os.close(uid)
+        assert sorted(os.listdir(root)) == owners
+        verify_directory(state, "instances", root, root_identity)
+        verify_parents()
+        return snapshot
+    finally:
+        os.close(root)
+
+def no_live_instances():
+    global journal_baseline
+    snapshot = scan_instances()
+    if journal_baseline is None:
+        journal_baseline = snapshot
+    else:
+        assert snapshot == journal_baseline, "instance journals changed; preserve release state"
+
+def absent_target():
+    verify_parents()
+    try:
+        os.stat("1.16.1", dir_fd=architecture, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    raise AssertionError("1.16.1 root slot exists; preserve it")
+
+def open_pair(version):
+    directory = open_directory(architecture, version)
+    assert set(os.listdir(directory)) == {"manifest.json", "firecracker", "jailer"}
+    leaves = {}
+    for name in ("manifest.json", "firecracker", "jailer"):
+        fd = os.open(name, file_flags, dir_fd=directory)
+        fds.append(fd)
+        info = os.fstat(fd)
+        assert info.st_uid == info.st_gid == 0 and stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+        assert stat.S_IMODE(info.st_mode) == (0o600 if name == "manifest.json" else 0o755)
+        leaves[name] = (fd, identity(info))
+    return directory, leaves
+
+def pair_receipt(pair, version):
+    directory, leaves = pair
+    verify_parents()
+    assert set(os.listdir(directory)) == set(leaves)
+    content, identities = {}, {}
+    for name, (fd, expected) in leaves.items():
+        assert identity(os.fstat(fd)) == expected, name
+        assert identity(os.stat(name, dir_fd=directory, follow_symlinks=False)) == expected, name
+        content[name] = read_file(fd, 4096 if name == "manifest.json" else 64 * 1024 * 1024)
+        identities[name] = expected
+    manifest = json.loads(content["manifest.json"], object_pairs_hook=unique_object)
+    assert set(manifest) == {"schema_version", "release", "archive_sha256", "firecracker", "jailer"}
+    assert type(manifest["schema_version"]) is int and manifest["schema_version"] == 1
+    assert manifest["release"] == {"version": version, "architecture": "x86_64"}
+    assert re.fullmatch(r"[0-9a-f]{64}", manifest["archive_sha256"])
+    for name in ("firecracker", "jailer"):
+        item = manifest[name]
+        assert set(item) == {"sha256", "size_bytes"} and type(item["size_bytes"]) is int
+        assert 120 <= item["size_bytes"] <= 64 * 1024 * 1024
+        assert item["size_bytes"] == len(content[name])
+        assert item["sha256"] == hashlib.sha256(content[name]).hexdigest()
+    for name, (fd, expected) in leaves.items():
+        assert identity(os.fstat(fd)) == expected, name
+        assert identity(os.stat(name, dir_fd=directory, follow_symlinks=False)) == expected, name
+    verify_parents()
+    return {"manifest": manifest, "directory": identity(os.fstat(directory), True), "files": identities}
+
+try:
+    root = open_directory(None, "/", False)
+    var = open_directory(root, "var", False)
+    lib = open_directory(var, "lib", False)
+    state = open_directory(lib, "mvmctl", False)
+    binaries = open_directory(state, "binaries")
+    architecture = open_directory(binaries, "x86_64")
+    original = open_pair("1.17.0")
+    original_receipt = pair_receipt(original, "1.17.0")
+    no_live_instances()
+    absent_target()
+    print(json.dumps({"original": original_receipt, "target_absent": True}), flush=True)
+    owned = None
+    for line in sys.stdin:
+        command = line.strip()
+        if command == "close":
+            break
+        if command == "removed":
+            assert owned is not None
+            # Root removal intentionally unlinks this pinned version directory.
+            parents[:] = [entry for entry in parents if entry[2] != owned[0]]
+        assert pair_receipt(original, "1.17.0") == original_receipt
+        no_live_instances()
+        if command == "absent":
+            assert owned is None
+            absent_target()
+            result = {"target_absent": True}
+        elif command == "admit":
+            assert owned is None
+            owned = open_pair("1.16.1")
+            result = pair_receipt(owned, "1.16.1")
+        elif command == "verify":
+            assert owned is not None
+            result = pair_receipt(owned, "1.16.1")
+        elif command == "removed":
+            absent_target()
+            result = {"target_absent": True, "original": original_receipt}
+        else:
+            raise AssertionError("unknown bin ownership phase")
+        print(json.dumps(result), flush=True)
+except BaseException as error:
+    print(json.dumps({"error": str(error)}), flush=True)
+    raise
+finally:
+    for fd in reversed(fds):
+        os.close(fd)
+'''
+
+
+class _BinReleaseOwnership:
+    """Keep fixed root receipts pinned; this oracle performs no root mutation."""
+
+    def __init__(self):
+        self.process = subprocess.Popen(
+            ["sudo", "-n", "/usr/bin/python3", "-I", "-u", "-c", _BIN_RELEASE_RECEIVER],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+
+    def read(self) -> dict:
+        assert select.select([self.process.stdout], [], [], 30)[0], "root receipt oracle timed out"
+        line = self.process.stdout.readline(16385)
+        assert line and len(line) <= 16384, "missing or oversized root receipt"
+        receipt = json.loads(line)
+        assert "error" not in receipt, receipt
+        return receipt
+
+    def require(self, phase: str) -> dict:
+        self.process.stdin.write(phase + "\n")
+        self.process.stdin.flush()
+        return self.read()
+
+    def close(self) -> None:
+        if self.process.poll() is None:
+            try:
+                self.process.stdin.write("close\n")
+                self.process.stdin.flush()
+            except BrokenPipeError:
+                # A rejected receipt may already have closed the root reader.
+                pass
+        try:
+            self.process.stdin.close()
+        except BrokenPipeError:
+            pass  # Its nonzero exit and stderr below retain the receiver failure.
+        try:
+            self.process.wait(timeout=30)
+            error = self.process.stderr.read(16385)
+        finally:
+            self.process.stdout.close()
+            self.process.stderr.close()
+        assert self.process.returncode == 0, error
+
+
+def _mirrored_bin_1161() -> tuple[Path, tuple, dict]:
+    """Hash only the audited mirrored archive and its exact executable members."""
+    assert platform.machine() == "x86_64", "this audited release fixture is x86_64 only"
+    archive = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser() / "firecracker-v1.16.1-x86_64.tgz"
+    identity = _file_identity(archive)
+    assert 0 < identity[-1] <= 128 * 1024 * 1024, archive
+    fd = os.open(archive, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as source:
+        assert _file_identity(archive) == identity
+        info = os.fstat(source.fileno())
+        assert (info.st_dev, info.st_ino) == identity[:2]
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
+        source.seek(0)
+        manifest = {"schema_version": 1, "release": {"version": "1.16.1", "architecture": "x86_64"},
+                    "archive_sha256": digest}
+        names = {f"release-v1.16.1-x86_64/{kind}-v1.16.1-x86_64": kind
+                 for kind in ("firecracker", "jailer")}
+        with tarfile.open(fileobj=source, mode="r|gz") as bundle:
+            for index, member in enumerate(bundle):
+                assert index < 128, "unexpected mirrored archive member count"
+                if member.name in names:
+                    kind = names[member.name]
+                    assert kind not in manifest and member.isfile()
+                    assert 120 <= member.size <= 64 * 1024 * 1024
+                    with bundle.extractfile(member) as executable:
+                        manifest[kind] = {"sha256": hashlib.file_digest(executable, "sha256").hexdigest(),
+                                          "size_bytes": member.size}
+        assert set(manifest) == {"schema_version", "release", "archive_sha256", "firecracker", "jailer"}
+        assert _file_identity(archive) == identity
+        assert os.fstat(source.fileno()).st_ctime_ns == identity[-2]
+    return archive, identity, manifest
+
+
+def _require_bin_root_projection(rows: list[dict], receipt: dict) -> list[dict]:
+    """Bind complete display IDs to the retained root executable digests."""
+    manifest = receipt["manifest"]
+    version = manifest["release"]["version"]
+    pair = [row for row in rows if row["version"] == version]
+    assert len(pair) == 2 and {row["type"] for row in pair} == {"firecracker", "jailer"}, pair
+    for row in pair:
+        kind = row["type"]
+        digest = manifest[kind]["sha256"]
+        assert row["id"] == hashlib.sha256(
+            f"mvmctl:binary-release:v1:{kind}:x86_64:{version}:{digest}".encode(),
+        ).hexdigest(), row
+        assert row["architecture"] == "x86_64" and row["is_present"] is True, row
+        assert row["path"] == f"/var/lib/mvmctl/binaries/x86_64/{version}/{kind}", row
+    return pair
 
 
 class TestBinaryPullAndLifecycle:
@@ -478,223 +534,142 @@ class TestBinaryPullAndLifecycle:
     ]
 
     @pytest.mark.slow
-    def test_bin_pull_and_set_default(self, runner_vm):
-        """Pull a specific binary version and set as default."""
-        _ensure_binary(runner_vm)
+    @pytest.mark.destructive
+    def test_bin_pull_and_set_default(self, runner_vm: str, record_property) -> None:
+        """Install an absent mirrored release, transfer defaults, then remove the test-owned slot."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        defaults = _installed_pair(before)
+        target = "1.16.1"
+        assert all(item["version"] != target for item in before), before
+        assert not _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+        archive, archive_identity, expected_manifest = _mirrored_bin_1161()
+        authority = _BinReleaseOwnership()
+        attempted = False
+        owned = None
+        failures: list[BaseException] = []
 
-        local_listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-        local_bins = json.loads(local_listing.stdout)
-
-        # Record original default to restore later
-        original_default_id: str | None = None
-        orig_default = next(
-            (b for b in local_bins if b.get("is_default")), None
-        )
-        if orig_default:
-            original_default_id = orig_default["id"][:6]
-
-        try:
-            # Pick a non-default target
-            non_default = [
-                b for b in local_bins
-                if b.get("type") == "firecracker"
-                and b.get("is_present")
-                and not b.get("is_default")
-            ]
-            if non_default:
-                target = non_default[0]["version"]
-            else:
-                target = "1.14.2"
-
-            pull_result = _run_mvm(
-                runner_vm,
-                "bin",
-                "pull",
-                "firecracker",
-                "--version",
-                target,
-                "--default",
-                "--force",
-                check=False,
-            )
-            assert pull_result.returncode == 0, (
-                f"bin pull {target} --default --force failed: {pull_result.stderr}"
-            )
-
-            listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-            entries = json.loads(listing.stdout)
-            pulled_entries = [
-                e for e in entries
-                if e.get("version") == target and e.get("type") == "firecracker"
-            ]
-            assert len(pulled_entries) > 0, (
-                f"Pulled version {target} not found in listing"
-            )
-            assert any(e.get("is_default") for e in pulled_entries), (
-                f"Version {target} was pulled with --default but "
-                f"is_default is False in listing"
-            )
-        finally:
-            if original_default_id:
-                _run_mvm(runner_vm, "bin", "default", original_default_id, check=False)
-
-    def test_bin_default(self, runner_vm):
-        """Set a cached binary as default using bin default <id>.
-
-        Finds a non-default cached firecracker, sets it as default, then
-        verifies the listing reflects the change. Restores the original
-        default in a finally block.
-        """
-        _ensure_binary(runner_vm)
-
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        binaries = json.loads(result.stdout)
-
-        original_default = next(
-            (b for b in binaries if b.get("is_default")), None
-        )
-        original_default_prefix: str | None = (
-            original_default["id"][:6] if original_default else None
-        )
-
-        non_default = [
-            b for b in binaries
-            if not b.get("is_default", False)
-            and b.get("is_present")
-            and b.get("type") in ("firecracker",)
-        ]
-
-        if not non_default:
-            _run_mvm(
-                runner_vm, "bin", "pull", "firecracker",
-                "--version", "1.14.2", "--force", timeout=120,
-            )
-            result = _run_mvm(runner_vm, "bin", "ls", "--json")
-            binaries = json.loads(result.stdout)
-            non_default = [
-                b for b in binaries
-                if not b.get("is_default", False)
-                and b.get("is_present")
-                and b.get("type") in ("firecracker",)
-            ]
-
-        assert binaries, "No cached binaries found in Tier 2 environment"
-        target = non_default[0] if non_default else binaries[0]
-        target_id = target["id"][:6]
+        def checked(label: str, operation) -> bool:
+            try:
+                operation()
+            except BaseException as error:
+                error.add_note(label)
+                failures.append(error)
+                return False
+            return True
 
         try:
-            set_result = _run_mvm(runner_vm, "bin", "default", target_id, check=False)
-            assert set_result.returncode == 0, (
-                f"bin default {target_id} failed: {set_result.stderr}"
+            original = authority.read()
+            record_property("bin_original_root_receipt", json.dumps(original))
+            _require_bin_root_projection(defaults, original["original"])
+            assert original["target_absent"] is True
+            assert authority.require("absent")["target_absent"] is True
+            attempted = True
+            pulled = _json_success_data(
+                _run_mvm(runner_vm, "bin", "pull", target, "--json", timeout=300).stdout,
+                list,
             )
-
-            verify = _run_mvm(runner_vm, "bin", "ls", "--json")
-            entries = json.loads(verify.stdout)
-            new_defaults = [
-                e for e in entries
-                if e.get("is_default") and e.get("type") == "firecracker"
-            ]
-            assert len(new_defaults) >= 1, (
-                "No default firecracker found after setting default"
+            admitted = authority.require("admit")
+            assert admitted["manifest"] == expected_manifest, admitted
+            assert _file_identity(archive) == archive_identity
+            _require_bin_root_projection(pulled, admitted)
+            owned = admitted
+            record_property("bin_owned_root_receipt", json.dumps(owned))
+            assert all(item["is_default"] is False for item in pulled), pulled
+            assert authority.require("verify") == owned
+            pulled = _json_success_data(
+                _run_mvm(runner_vm, "bin", "pull", target, "--default", "--json", timeout=300).stdout,
+                list,
             )
-            assert new_defaults[0].get("version") == target.get("version"), (
-                f"Expected default version {target.get('version')}, "
-                f"got {new_defaults[0].get('version')}"
-            )
+            _require_bin_root_projection(pulled, owned)
+            listing = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+            assert {
+                (item["type"], item["version"], item["id"])
+                for item in listing
+                if item["is_default"]
+            } == {(item["type"], target, item["id"]) for item in pulled}
+        except BaseException as error:
+            error.add_note("binary lifecycle assertion or operation failed")
+            failures.append(error)
         finally:
-            if original_default_prefix:
-                _run_mvm(runner_vm, "bin", "default", original_default_prefix, check=False)
+            # Default selection only changes the caller projection. Restore both
+            # captured IDs even when the root observer cannot prove target ownership.
+            restored = True
+            for item in defaults:
+                succeeded = checked(
+                    f"restore original {item['type']} default {item['id']}",
+                    lambda item=item: _run_mvm(runner_vm, "bin", "default", item["id"]),
+                )
+                restored = succeeded and restored
 
-    @pytest.mark.slow
-    def test_bin_remove_by_version(self, runner_vm):
-        """Fetch a specific version and remove by version."""
-        _ensure_binary(runner_vm)
+            def verify_defaults() -> None:
+                listing = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+                assert {item["id"] for item in listing if item["is_default"]} == {
+                    item["id"] for item in defaults
+                }, listing
+                assert _binary_identity([item for item in listing if item["version"] != target]) == (
+                    _binary_identity(before)
+                )
 
-        cached = _run_mvm(runner_vm, "bin", "ls", "--json")
-        cached_bins = json.loads(cached.stdout)
-        non_default_present = [
-            b for b in cached_bins
-            if b.get("is_present")
-            and not b.get("is_default")
-            and b.get("type") == "firecracker"
-        ]
+            defaults_verified = checked("verify both original defaults and unaffected projections", verify_defaults)
+            restored = defaults_verified and restored
+            if owned is not None:
+                def verify_owned() -> None:
+                    assert authority.require("verify") == owned
+                    listing = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+                    _require_bin_root_projection(listing, original["original"])
+                    _require_bin_root_projection(listing, owned)
 
-        if non_default_present:
-            target = non_default_present[0]["version"]
-        else:
-            # Pull a non-default version
-            _run_mvm(
-                runner_vm, "bin", "pull", "firecracker",
-                "--version", "1.14.2", "--force", timeout=120,
-            )
-            target = "1.14.2"
+                ownership_verified = checked("verify unchanged owned and original root releases", verify_owned)
+                if restored and ownership_verified:
+                    def remove_owned() -> None:
+                        verify_defaults()
+                        assert authority.require("verify") == owned
+                        removed = _json_success_data(
+                            _run_mvm(runner_vm, "bin", "rm", target, "--force", "--json").stdout,
+                            dict,
+                        )
+                        assert len(removed["items"]) == 1
+                        result = removed["items"][0]
+                        assert result["error"] is None and result["result"]["item"] == target
+                        assert result["result"]["status"] == "success"
+                        assert result["result"]["code"] == "binary.removed"
+                        absent = authority.require("removed")
+                        assert absent == {"target_absent": True, "original": original["original"]}
+                        record_property("bin_removed_root_receipt", json.dumps(absent))
+                        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+                        assert _binary_identity(after) == _binary_identity(before)
+                        assert {item["id"]: item["created_at"] for item in after} == {
+                            item["id"]: item["created_at"] for item in before
+                        }
 
-        result = _run_mvm(
-            runner_vm, "bin", "rm", "--version", target, "--force", check=False
+                    checked("remove only the verified owned release and verify exact restoration", remove_owned)
+                else:
+                    failures.append(AssertionError(
+                        "uncertain 1.16.1 root/projection state preserved; explicit recovery required"
+                    ))
+            elif attempted:
+                failures.append(AssertionError(
+                    "unadmitted or uncertain 1.16.1 root/projection state preserved; explicit recovery required"
+                ))
+            checked("close retained root release observations", authority.close)
+
+        if len(failures) == 1:
+            raise failures[0]
+        if failures:
+            raise BaseExceptionGroup("binary lifecycle and cleanup failures", failures)
+
+    def test_bin_rm_rejects_binary_id_without_effects(self, runner_vm: str) -> None:
+        """The exact-version removal API must not interpret a display ID as a release slot."""
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        selected = next(
+            item for item in before
+            if item["type"] == "firecracker" and item["is_default"]
         )
-        assert result.returncode == 0, (
-            f"bin rm --version {target} failed: {result.stderr}"
-        )
-
-        listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-        entries = json.loads(listing.stdout)
-        still_present = [
-            e for e in entries
-            if e.get("version") == target and e.get("is_present")
-        ]
-        assert len(still_present) == 0, (
-            f"Version {target} still has is_present=True entries "
-            f"after removal: {still_present}"
-        )
-
-    def test_bin_rm_by_id(self, runner_vm):
-        """Remove a cached binary by its 6-character ID prefix.
-
-        Verifies both L2 (listing) and L3 (file on disk) after removal.
-        """
-        _ensure_binary(runner_vm)
-
-        result = _run_mvm(runner_vm, "bin", "ls", "--json")
-        binaries = json.loads(result.stdout)
-
-        non_defaults = [b for b in binaries if not b.get("is_default", False)]
-        if not non_defaults:
-            _run_mvm(
-                runner_vm, "bin", "pull", "firecracker",
-                "--version", "1.14.2", "--force", timeout=120,
-            )
-            result = _run_mvm(runner_vm, "bin", "ls", "--json")
-            binaries = json.loads(result.stdout)
-            non_defaults = [b for b in binaries if not b.get("is_default", False)]
-
-        assert non_defaults, "No non-default binary available for removal test"
-        target = non_defaults[0]
-        target_prefix = target["id"][:6]
-        target_path_str = target.get("path", "")
-
-        result = _run_mvm(runner_vm, "bin", "rm", target_prefix, "--force", check=False)
-        assert result.returncode == 0, (
-            f"bin rm {target_prefix} failed: {result.stderr}"
-        )
-
-        # L2: Verify listing no longer shows the binary
-        listing = _run_mvm(runner_vm, "bin", "ls", "--json")
-        remaining = json.loads(listing.stdout)
-        ids = {b["id"][:6] for b in remaining}
-        assert target_prefix not in ids, (
-            f"Binary {target_prefix} still present in listing after removal"
-        )
-
-        # L3: Verify the file is gone from disk inside the VM
-        if target_path_str:
-            check = _guest_run(runner_vm,
-                f"test -f /root/.cache/mvmctl/bin/{target_path_str} && echo exists || echo not-found",
-                check=False,
-            )
-            assert "not-found" in check.stdout, (
-                f"Binary file still exists at /root/.cache/mvmctl/bin/{target_path_str} "
-                f"after removal"
-            )
+        rejected = _run_mvm(runner_vm, "bin", "rm", selected["id"], check=False)
+        assert rejected.returncode != 0
+        assert "requires exact versions" in (rejected.stdout + rejected.stderr).lower()
+        after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        assert after == before
 
 
 # ============================================================================
@@ -702,172 +677,150 @@ class TestBinaryPullAndLifecycle:
 # ============================================================================
 
 
-class TestBinaryStoppedVMDeletion:
-    """Test binary deletion behavior with stopped VM references."""
+class TestBinaryLiveVMReleaseLease:
+    """A running VM's trusted release cannot be removed."""
 
     pytestmark = [
         pytest.mark.system,
-        pytest.mark.requires_kvm,
         pytest.mark.domain_bin,
+        pytest.mark.tier2,
+        pytest.mark.needs_kvm,
     ]
 
-    def test_delete_binary_used_by_stopped_vm_does_not_error(
-        self, runner_vm: str, unique_vm_name: str, module_network: str
+    def test_force_remove_denied_and_identical_pull_keeps_live_release(
+        self, runner_vm: str, unique_vm_name: str
     ) -> None:
-        """Binary rm allows deleting binaries referenced by stopped VMs."""
+        """Removal is denied; identical force-pull leaves the live pair usable."""
         vm_name = unique_vm_name
-        ensure_vm_deps(runner_vm)
+        before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+        pair = _installed_pair(before)
+        version = "1.17.0"
+        mirror = Path(os.environ["MVM_ASSET_MIRROR"]).expanduser()
+        archive = mirror / f"firecracker-v{version}-{platform.machine()}.tgz"
+        archive_identity = _file_identity(archive)
+        assert archive_identity[-1] > 0, archive
+        guestfs = _json_success_data(
+            _run_mvm(runner_vm, "config", "get", "settings", "guestfs_enabled", "--json").stdout,
+            bool,
+        )
+        assert guestfs is False, "live release fixture requires the prepared LoopMount runner"
+        kernels = _json_success_data(_run_mvm(runner_vm, "kernel", "ls", "--json").stdout, list)
+        kernel = [item for item in kernels if item["is_default"] and item["is_present"]]
+        assert len(kernel) == 1, kernels
+        images = _json_success_data(_run_mvm(runner_vm, "image", "ls", "--json").stdout, list)
+        image = [item for item in images if item["type"] == "alpine"
+                 and item["version"] == "3.23" and item["is_present"]]
+        assert len(image) == 1, images
+        initial_vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+        assert all(item["name"] != vm_name for item in initial_vms), initial_vms
+        created = None
+        files: dict[Path, tuple] = {}
+        directory_identity = None
 
         try:
-            result = _run_mvm(
+            receipt = _json_success_data(_run_mvm(
                 runner_vm,
                 "vm",
                 "create",
                 vm_name,
-                "--network",
-                module_network,
                 "--image",
-                "alpine:3.23",
+                image[0]["id"],
+                "--kernel",
+                kernel[0]["id"],
+                "--no-network",
+                "--cloud-init-mode",
+                "off",
+                "--skip-deblob",
+                "--no-pci",
+                "-s",
+                "512M",
+                "--mem",
+                "256M",
+                "--vcpu",
+                "1",
+                "--json",
+                timeout=180,
+            ).stdout, list)
+            assert len(receipt) == 1, receipt
+            created = receipt[0]
+            assert created["name"] == vm_name, created
+            assert re.fullmatch(r"[0-9a-f]{32}", created["id"]), created
+            assert all(item["id"] != created["id"] for item in initial_vms), created
+            assert created["created_at"], created
+            cache = Path(os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")).expanduser()
+            vm_dir = cache / "vms" / created["id"]
+            directory = vm_dir.lstat()
+            assert stat.S_ISDIR(directory.st_mode) and directory.st_uid == os.getuid(), vm_dir
+            directory_identity = (directory.st_dev, directory.st_ino, directory.st_uid, directory.st_mode)
+            for field, leaf in (("config_path", "firecracker.json"), ("rootfs_path", "rootfs.img")):
+                path = Path(created[field])
+                assert path == vm_dir / leaf, created
+                identity = _file_identity(path)
+                assert identity[2] == os.getuid(), path
+                files[path] = identity
+            vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            vm = next(item for item in vms if item["id"] == created["id"])
+            assert vm["status"] == "running"
+            assert {vm["binary_id"], vm["jailer_binary_id"]} == {item["id"] for item in pair}
+            process_identity = (vm["pid"], vm["process_start_time"])
+            assert process_identity[0] > 0 and process_identity[1] > 0, vm
+            assert _run_mvm(
+                runner_vm, "exec", created["id"], "--", "printf bin-live-pair-ok",
+            ).stdout == "bin-live-pair-ok"
+
+            denied = _run_mvm(
+                runner_vm, "bin", "rm", version, "--force", "--json", check=False,
             )
+            assert denied.returncode != 0
+            envelope = json.loads(denied.stdout)
+            assert envelope["schema_version"] == 1
+            assert envelope["status"] == "error"
+            assert len(envelope["data"]["items"]) == 1
+            rejection = envelope["data"]["items"][0]
+            assert rejection["result"]["item"] == version
+            assert rejection["error"]["code"] == "vm.state.invalid"
+            assert rejection["error"]["class"] == 2  # errs.ClassConflict
+            assert "referenced by live privileged VM authority" in rejection["error"]["message"]
 
-            vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if vm_ls.returncode == 0 and vm_ls.stdout.strip():
-                vms: list[dict[str, Any]] = json.loads(vm_ls.stdout)
-                vm_names = [v.get("name") for v in vms]
-                assert vm_name in vm_names
-
-            result = _run_mvm(runner_vm, "bin", "ls", "--json")
-            binaries: list[dict[str, Any]] = json.loads(result.stdout)
-            present_bins = [b for b in binaries if b.get("is_present")]
-            assert present_bins, "No present binaries found in listing"
-            default_bin = next(
-                (b for b in present_bins if b.get("is_default")),
-                present_bins[0],
+            pulled = _json_success_data(
+                _run_mvm(
+                    runner_vm, "bin", "pull", version, "--force", "--json", timeout=300,
+                ).stdout,
+                list,
             )
-            binary_id_prefix = default_bin["id"][:6]
+            assert {item["id"] for item in pulled} == {item["id"] for item in pair}
+            assert {item["type"] for item in pulled} == {"firecracker", "jailer"}
+            assert _binary_identity(pulled) == _binary_identity(pair)
+            assert _file_identity(archive) == archive_identity
 
-            result = _run_mvm(runner_vm, "bin", "rm", binary_id_prefix, check=False)
-            assert result.returncode in (0, 1)
-
-            if result.returncode == 0:
-                bin_ls = _run_mvm(runner_vm, "bin", "ls", "--json", check=False)
-                if bin_ls.returncode == 0 and bin_ls.stdout.strip():
-                    bins_after: list[dict[str, Any]] = json.loads(bin_ls.stdout)
-                    bin_ids = [b.get("id", "")[:6] for b in bins_after]
-                    assert binary_id_prefix not in bin_ids
-            vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if vm_ls.returncode == 0 and vm_ls.stdout.strip():
-                vms: list[dict[str, Any]] = json.loads(vm_ls.stdout)
-                vm_names = [v.get("name") for v in vms]
-                assert vm_name in vm_names
+            after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
+            assert _binary_identity(after) == _binary_identity(before)
+            vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            vm = next(item for item in vms if item["id"] == created["id"])
+            assert vm["status"] == "running"
+            assert (vm["pid"], vm["process_start_time"]) == process_identity
+            assert _run_mvm(
+                runner_vm, "exec", created["id"], "--", "printf bin-live-pair-ok",
+            ).stdout == "bin-live-pair-ok"
         finally:
-            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
-
-
-# ============================================================================
-# Service binary symlinks (state-modifying, non-destructive)
-# ============================================================================
-
-
-class TestServiceBinarySymlinks:
-    """Test that service binary symlinks survive cache clean → cache init."""
-
-    pytestmark = [
-        pytest.mark.system,
-        pytest.mark.domain_bin,
-    ]
-
-    @pytest.mark.xfail(
-        reason="Service symlinks (console-relay, nocloud-server, provision) "
-        "are not created by the current mvmctl binary cache init. "
-        "Needs implementation in the cache service.",
-        strict=False,
-    )
-    def test_service_symlinks_survive_cache_clean_init(
-        self, runner_vm: str
-    ) -> None:
-        """Service symlinks must be recreated after cache clean and cache init.
-
-        All operations run INSIDE the test VM via _run_mvm.
-        """
-        # Inside the test VM, mvm runs as 'runner' user, so binaries
-        # are stored under the runner's home, not root.
-        bin_dir = "/home/runner/.cache/mvmctl/bin"
-        service_symlinks = [
-            "mvm-console-relay",
-            "mvm-nocloud-server",
-            "mvm-provision",
-        ]
-
-        # Ensure service binaries exist inside the VM via cache init
-        _run_mvm(runner_vm, "cache", "init", check=False)
-
-        # Check which symlinks already exist
-        existing_symlinks = []
-        for name in service_symlinks:
-            check = _guest_run(runner_vm,
-                f"test -L {bin_dir}/{name} && echo symlink || echo not",
-                check=False,
-            )
-            if "symlink" in check.stdout:
-                existing_symlinks.append(name)
-            else:
-                # Check if mvm-services exists and create symlink
-                svc_check = _guest_run(runner_vm,
-                    f"test -f {bin_dir}/mvm-services && echo exists || echo not",
-                    check=False,
-                )
-                if "exists" in svc_check.stdout:
-                    _guest_run(runner_vm,
-                        f"ln -sf mvm-services {bin_dir}/{name}", check=False,
-                    )
-                    existing_symlinks.append(name)
-
-        # Guard: all three symlinks must exist
-        for name in service_symlinks:
-            check = _guest_run(runner_vm,
-                f"test -L {bin_dir}/{name} && echo symlink || echo not",
-                check=False,
-            )
-            assert "symlink" in check.stdout, (
-                f"Expected symlink {name} not found in {bin_dir} inside VM"
-            )
-
-        # Verify pre-condition: all three symlinks point to mvm-services
-        for name in service_symlinks:
-            target = _guest_run(runner_vm,
-                f"readlink {bin_dir}/{name}",
-                check=False,
-            )
-            target_name = target.stdout.strip()
-            assert target_name == "mvm-services", (
-                f"Symlink {name} -> {target_name}, expected mvm-services"
-            )
-
-        try:
-            # Remove symlinks directly inside the VM
-            for name in service_symlinks:
-                _guest_run(runner_vm, f"rm -f {bin_dir}/{name}", check=False)
-
-            # Re-init cache inside the VM
-            _run_mvm(runner_vm, "cache", "init", check=False)
-
-            # Verify post-condition: all three symlinks were recreated
-            for name in service_symlinks:
-                check = _guest_run(runner_vm,
-                    f"test -L {bin_dir}/{name} && echo symlink || echo not",
-                    check=False,
-                )
-                assert "symlink" in check.stdout, (
-                    f"Symlink {name} was not recreated after cache init"
-                )
-                target = _guest_run(runner_vm,
-                    f"readlink {bin_dir}/{name}",
-                    check=False,
-                )
-                target_name = target.stdout.strip()
-                assert target_name == "mvm-services", (
-                    f"Symlink {name} -> {target_name}, expected mvm-services"
-                )
-        finally:
-            _run_mvm(runner_vm, "cache", "init", check=False)
+            vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            if created is not None:
+                matches = [item for item in vms if item["id"] == created["id"]]
+                assert len(matches) == 1, (created, matches)
+                current = matches[0]
+                for field in ("name", "created_at", "config_path", "rootfs_path", "binary_id", "jailer_binary_id"):
+                    assert current[field] == created[field], (field, created, current)
+                directory = Path(current["config_path"]).parent.lstat()
+                assert (directory.st_dev, directory.st_ino, directory.st_uid,
+                        directory.st_mode) == directory_identity
+                assert len(files) == 2, "incomplete file receipt; preserve fixture for explicit recovery"
+                for path, identity in files.items():
+                    assert _file_identity(path) == identity, path
+                _run_mvm(runner_vm, "vm", "rm", created["id"], "--force", timeout=120)
+                for path in (*files, Path(current["config_path"]).parent):
+                    with pytest.raises(FileNotFoundError):
+                        path.lstat()
+            vms = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(item["name"] != vm_name for item in vms)
+            if created is not None:
+                assert all(item["id"] != created["id"] for item in vms)

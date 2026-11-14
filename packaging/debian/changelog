@@ -1,3 +1,11 @@
+mvmctl (0.3.0) unstable; urgency=medium
+
+  * Clean installation with one system binary and typed root-owned lifecycle authority.
+  * Isolated VM networking, traffic and exec policies, protected storage and snapshots.
+  * Pressure-only memory control and verified status/recovery behavior.
+
+ -- AlanD20 <aland20@pm.me>  Fri, 13 Nov 2026 17:14:42 +0100
+
 mvmctl (0.2.0) unstable; urgency=medium
 
   * New --allow-remote-exec flag. When set, the VM can both issue and accept remote exec commands to/from other flagged VMs. Configurable via defaults.vm.allow_remote_exec (default false).

@@ -1,6 +1,10 @@
 package infra_test
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -9,6 +13,41 @@ import (
 
 	"mvmctl/internal/infra"
 )
+
+// The default must be writable by each operator independently; a shared
+// 0700 /tmp/mvmctl directory prevented a second enrolled user from pulling images.
+func TestGetTempDirDefaultsToCallerCache(t *testing.T) {
+	t.Setenv(infra.EnvKey("TEMP_DIR"), "")
+	cacheDir, err := infra.GetCacheDir()
+	require.NoError(t, err)
+
+	got := infra.GetTempDir()
+	want := filepath.Join(cacheDir, "tmp")
+	assert.Equal(t, want, got)
+
+	file, err := os.CreateTemp(got, "operator-write-*")
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+	t.Cleanup(func() { require.NoError(t, os.Remove(file.Name())) })
+}
+
+func TestGetWarmImagesDirKeepsTemporaryBackend(t *testing.T) {
+	t.Setenv(infra.EnvKey("WARM_POOL"), "")
+	t.Setenv(infra.EnvKey("TEMP_DIR"), "")
+
+	// The warm pool remains on the temporary filesystem but is scoped by the
+	// effective operator UID, so a second enrolled operator has a distinct path.
+	want := filepath.Join("/tmp", fmt.Sprintf("%s-%d", infra.ProjectName, os.Getuid()), "ready")
+	got, err := infra.GetWarmImagesDir(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	override := filepath.Join(t.TempDir(), "scratch")
+	t.Setenv(infra.EnvKey("TEMP_DIR"), override)
+	got, err = infra.GetWarmImagesDir(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(override, "ready"), got)
+}
 
 // --- GetDefault ---
 // Rationale: GetDefault is the primary config resolution path used by the entire
@@ -46,6 +85,12 @@ func TestGetDefault(t *testing.T) {
 		assert.Contains(t, err.Error(), "default key not found")
 	})
 
+	t.Run("removed_remote_exec_default", func(t *testing.T) {
+		_, err := infra.GetDefault("defaults.vm", "allow_remote_exec")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "default key not found")
+	})
+
 	t.Run("empty_category", func(t *testing.T) {
 		_, err := infra.GetDefault("", "key")
 		require.Error(t, err)
@@ -55,6 +100,69 @@ func TestGetDefault(t *testing.T) {
 		_, err := infra.GetDefault("defaults.vm", "")
 		require.Error(t, err)
 	})
+}
+
+func TestSystemBinaryPath(t *testing.T) {
+	assert.Equal(t, "/usr/local/bin/mvm", infra.SystemBinaryPath)
+}
+
+func TestManagedResourceFilenames(t *testing.T) {
+	want := map[string]string{
+		"vm rootfs":              "rootfs.img",
+		"cloud-init ISO":         "cloud-init.iso",
+		"Firecracker config":     "firecracker.json",
+		"Firecracker log":        "firecracker.log",
+		"Firecracker console":    "firecracker.console.log",
+		"Firecracker metrics":    "firecracker.metrics",
+		"Firecracker API socket": "firecracker.api.socket",
+		"vsock socket":           "vsock.sock",
+		"console socket":         "console.sock",
+		"Firecracker PID":        "firecracker.pid",
+		"console PID":            "console.pid",
+		"snapshot rootfs":        "rootfs.img",
+		"snapshot memory":        "memory",
+		"snapshot state":         "vmstate",
+	}
+	got := map[string]string{
+		"vm rootfs":              infra.VMRootfsFilename,
+		"cloud-init ISO":         infra.VMCloudInitISOFilename,
+		"Firecracker config":     infra.VMFirecrackerConfigFilename,
+		"Firecracker log":        infra.VMFirecrackerLogFilename,
+		"Firecracker console":    infra.VMFirecrackerConsoleLogFilename,
+		"Firecracker metrics":    infra.VMFirecrackerMetricsFilename,
+		"Firecracker API socket": infra.VMFirecrackerAPISocketFilename,
+		"vsock socket":           infra.VMVsockSocketFilename,
+		"console socket":         infra.VMConsoleSocketFilename,
+		"Firecracker PID":        infra.VMFirecrackerPIDFilename,
+		"console PID":            infra.VMConsolePIDFilename,
+		"snapshot rootfs":        infra.SnapshotRootfsFilename,
+		"snapshot memory":        infra.SnapshotMemoryFilename,
+		"snapshot state":         infra.SnapshotStateFilename,
+	}
+
+	assert.Equal(t, want, got)
+}
+
+func TestManagedResourceFilenamesAreNotConfigurable(t *testing.T) {
+	for _, key := range []string{
+		"log_filename",
+		"serial_output_filename",
+		"metrics_filename",
+		"api_socket_filename",
+		"pid_filename",
+		"config_filename",
+		"console_socket_filename",
+		"console_pid_filename",
+		"vsock_filename",
+	} {
+		t.Run(key, func(t *testing.T) {
+			_, err := infra.GetDefault("defaults.firecracker", key)
+			require.Error(t, err)
+		})
+	}
+
+	_, err := infra.GetDefault("defaults.cloudinit", "iso_name")
+	require.Error(t, err)
 }
 
 // --- EnvKey ---

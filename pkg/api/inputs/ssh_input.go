@@ -96,8 +96,15 @@ func (i *SSHInput) Resolve(
 func resolveTarget(ctx context.Context, identifier string, vmRepo vm.Repository) (string, *model.VMItem, error) {
 	vmResolver := vm.NewResolver(vmRepo)
 	vmEntity, err := vmResolver.Resolve(ctx, identifier)
-	if err == nil && vmEntity != nil && vmEntity.IPv4 != "" {
-		return vmEntity.IPv4, vmEntity, nil
+	if err == nil && vmEntity != nil {
+		if vmEntity.NetworkPlacement == model.VMNetworkPlacementNetworkless {
+			return "", nil, errs.New(errs.CodeSSHError,
+				"networkless VM has no SSH endpoint; use mvm exec over vsock",
+				errs.WithClass(errs.ClassValidation))
+		}
+		if vmEntity.IPv4 != "" {
+			return vmEntity.IPv4, vmEntity, nil
+		}
 	}
 	// Fallback: use raw identifier
 	return identifier, nil, nil

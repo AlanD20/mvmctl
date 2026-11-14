@@ -60,7 +60,9 @@ The host sends a `"version"` request type to the agent. The agent responds with 
 
 If the host version is greater than the agent version:
 
-1. **Set upgrade lock**: The `OnUpgradeStarted` callback is invoked, which sets `upgrading=1` in the `vm_vsock_config` table. The SQL UPDATE is conditional on `upgrading=0` — if another process beat us, zero rows are affected and the operation is rejected.
+1. **Attempt upgrade lock**: `OnUpgradeStarted` attempts to set `upgrading=1` where `upgrading=0` in
+   `vm_vsock_config`. The repository returns an error when no row changes, but the API callback logs that error and
+   returns no error to the client. This callback does not guarantee rejection of a racing upgrade.
 
 2. **Push new binary**: `upgradeAgent()` writes the embedded binary to a temp file on the host, then uses `FTCopyToVM()` (with `skipVersionCheck=true` to avoid circular calls) to transfer it to `/usr/bin/mvm-agent.new` inside the VM.
 
@@ -123,7 +125,8 @@ The DB-based lock has two levels of guard:
 
 1. **Before dial** — the API layer loads the vsock config and checks `upgrading`. If set and not stale (< 60s), returns `vsock.upgrade_in_progress` immediately. No connection attempt.
 
-2. **During upgrade** — `ensureAgent` invokes `OnUpgradeStarted`, which sets `upgrading=1` via a conditional UPDATE (`WHERE upgrading=0`). If zero rows affected, another process holds the lock.
+2. **During upgrade** — `ensureAgent` invokes `OnUpgradeStarted`, which attempts a conditional UPDATE
+   (`WHERE upgrading=0`). A failed acquisition is logged by the API callback; it does not abort the client upgrade.
 
 ### Stale lock recovery
 

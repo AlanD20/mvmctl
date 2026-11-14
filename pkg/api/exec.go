@@ -58,6 +58,9 @@ func (op *Operation) Exec(ctx context.Context, input inputs.ExecInput) (*results
 	if user == "" {
 		user, _ = op.Services.Config.GetString(ctx, "defaults.vm", "vsock_user")
 	}
+	if input.AllowVMExec {
+		return op.execWithVMRelay(ctx, input, resolved, client, user, probeTimeout)
+	}
 	// Pass 0 for command timeout — the probe timeout is handled by the client
 	// during connect; the command itself runs with no absolute timeout.
 	result, err := client.Exec(ctx, input.Command, user, 0, input.Env, input.NoSync)

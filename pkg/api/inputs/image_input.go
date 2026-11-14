@@ -19,11 +19,6 @@ func (i *ImageInput) Validate() error {
 	if len(i.Identifiers) == 0 {
 		return fmt.Errorf("at least one image identifier is required")
 	}
-	for _, ident := range i.Identifiers {
-		if len(ident) > 64 {
-			return fmt.Errorf("image identifier too long: %q exceeds maximum length of 64 characters", ident)
-		}
-	}
 	return nil
 }
 

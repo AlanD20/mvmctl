@@ -19,10 +19,6 @@ type SpawnConfig struct {
 	// ExtraFiles are passed to the child as FDs starting at 3 (stdin=0, stdout=1, stderr=2).
 	ExtraFiles []*os.File
 
-	// Privileged runs the subprocess via sudo when true.
-	// Needed for services that require root (e.g. loopmount provisioning).
-	Privileged bool
-
 	// Stdin is the optional reader for the subprocess's stdin.
 	// When nil, the child reads from /dev/null (daemon default).
 	Stdin io.Reader
@@ -53,18 +49,10 @@ func SpawnService(ctx context.Context, cfg SpawnConfig) (*exec.Cmd, error) {
 	}
 
 	var cmd *exec.Cmd
-	if cfg.Privileged && !IsRoot() {
-		if isCancelable(ctx) {
-			cmd = exec.CommandContext(ctx, "sudo", exe, "run", cfg.Name)
-		} else {
-			cmd = exec.Command("sudo", exe, "run", cfg.Name)
-		}
+	if isCancelable(ctx) {
+		cmd = exec.CommandContext(ctx, exe, "run", cfg.Name)
 	} else {
-		if isCancelable(ctx) {
-			cmd = exec.CommandContext(ctx, exe, "run", cfg.Name)
-		} else {
-			cmd = exec.Command(exe, "run", cfg.Name)
-		}
+		cmd = exec.Command(exe, "run", cfg.Name)
 	}
 	cmd.Args = append(cmd.Args, cfg.Args...)
 

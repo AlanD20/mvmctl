@@ -11,14 +11,13 @@ import (
 
 // MockBinaryAPI implements api.BinaryAPI for testing.
 type MockBinaryAPI struct {
-	BinaryPruneFunc           func(ctx context.Context, dryRun bool, force bool) ([]string, error)
-	BinaryPullFunc            func(ctx context.Context, input inputs.BinaryPullInput, onProgress event.OnProgressCallback) ([]*model.BinaryItem, error)
-	BinaryRemoveFunc          func(ctx context.Context, input inputs.BinaryInput, force bool) *errs.BatchResult
-	BinaryRemoveByVersionFunc func(ctx context.Context, version string, force bool) error
-	BinaryListFunc            func(ctx context.Context, remote bool, limit *int, onProgress event.OnProgressCallback) ([]*model.BinaryItem, []model.VersionInfo, error)
-	BinaryGetFunc             func(ctx context.Context, input inputs.BinaryInput) ([]*model.BinaryItem, error)
-	BinarySetDefaultFunc      func(ctx context.Context, input inputs.BinaryInput) (*model.BinaryItem, error)
-	BinaryEnsureDefaultFunc   func(ctx context.Context) (*model.BinaryItem, error)
+	BinaryPruneFunc         func(ctx context.Context, dryRun bool, force bool) ([]string, error)
+	BinaryPullFunc          func(ctx context.Context, input inputs.BinaryPullInput, onProgress event.OnProgressCallback) ([]*model.BinaryItem, error)
+	BinaryRemoveFunc        func(ctx context.Context, input inputs.BinaryRemoveInput, force bool) *errs.BatchResult
+	BinaryListFunc          func(ctx context.Context, remote bool, limit *int, onProgress event.OnProgressCallback) ([]*model.BinaryItem, []model.VersionInfo, error)
+	BinaryGetFunc           func(ctx context.Context, input inputs.BinaryInput) ([]*model.BinaryItem, error)
+	BinarySetDefaultFunc    func(ctx context.Context, input inputs.BinaryInput) (*model.BinaryItem, error)
+	BinaryEnsureDefaultFunc func(ctx context.Context) (*model.BinaryItem, error)
 }
 
 func (m *MockBinaryAPI) BinaryPrune(ctx context.Context, dryRun bool, force bool) ([]string, error) {
@@ -39,16 +38,13 @@ func (m *MockBinaryAPI) BinaryPull(
 	return nil, nil
 }
 
-func (m *MockBinaryAPI) BinaryRemove(ctx context.Context, input inputs.BinaryInput, force bool) *errs.BatchResult {
+func (m *MockBinaryAPI) BinaryRemove(
+	ctx context.Context,
+	input inputs.BinaryRemoveInput,
+	force bool,
+) *errs.BatchResult {
 	if m.BinaryRemoveFunc != nil {
 		return m.BinaryRemoveFunc(ctx, input, force)
-	}
-	return nil
-}
-
-func (m *MockBinaryAPI) BinaryRemoveByVersion(ctx context.Context, version string, force bool) error {
-	if m.BinaryRemoveByVersionFunc != nil {
-		return m.BinaryRemoveByVersionFunc(ctx, version, force)
 	}
 	return nil
 }

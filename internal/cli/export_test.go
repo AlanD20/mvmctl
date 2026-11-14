@@ -3,8 +3,6 @@ package cli
 
 // Exported for testing in package cli_test.
 var (
-	FormatChange              = formatChange
-	AbortIfVMsRunning         = abortIfVMsRunning
 	ResourceDisplayName       = resourceDisplayName
 	ResourceDisplayNamePlural = resourceDisplayNamePlural
 )

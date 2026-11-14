@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
@@ -46,14 +47,8 @@ func (op *Operation) InitCheckReadiness(ctx context.Context) *model.ProbeResult 
 
 // InitSetupHost sets up host configuration.
 func (op *Operation) InitSetupHost(ctx context.Context) error {
-	raw, err := op.HostInit(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if _, ok := raw.(*errs.NeedsInteraction); ok {
-		return errs.New(errs.CodePrivilegeRequired, "Root privileges required")
-	}
-	return nil
+	_, err := op.HostInit(ctx, nil)
+	return err
 }
 
 // InitRun runs the init wizard steps in sequence.
@@ -96,6 +91,9 @@ func (op *Operation) InitRunFull(
 	steps := make([]results.InitStepResult, 0)
 	// --- Step 1: Local state ---
 	steps = append(steps, op.initInitDatabase(ctx))
+	if !steps[len(steps)-1].Success {
+		return &results.InitResult{Steps: steps}
+	}
 	// --- Step 3: Host ---
 	hostResult, hostInteraction := op.initStepHost(ctx, skipHost, sudoCompleted, hostSetupMessage, onProgress)
 	steps = append(steps, hostResult)
@@ -105,6 +103,9 @@ func (op *Operation) InitRunFull(
 			HostReady:        false,
 			NeedsInteraction: hostInteraction,
 		}
+	}
+	if !hostResult.Success {
+		return &results.InitResult{Steps: steps}
 	}
 	// --- Step 4: Guestfs ---
 	guestfsResult, guestfsInteraction := op.initStepGuestfs(ctx, guestfsEnabled)
@@ -116,6 +117,9 @@ func (op *Operation) InitRunFull(
 			NeedsInteraction: guestfsInteraction,
 		}
 	}
+	if !guestfsResult.Success {
+		return &results.InitResult{Steps: steps}
+	}
 	// --- Step 5: Network setup ---
 	if skipNetwork {
 		steps = append(
@@ -125,8 +129,14 @@ func (op *Operation) InitRunFull(
 	} else {
 		steps = append(steps, op.initStepNetworkSetup(ctx))
 	}
+	if !steps[len(steps)-1].Success {
+		return &results.InitResult{Steps: steps}
+	}
 	// --- Step 6: Cache ---
 	steps = append(steps, op.initStepCache(ctx, onProgress))
+	if !steps[len(steps)-1].Success {
+		return &results.InitResult{Steps: steps}
+	}
 	// --- Step 7: Binary ---
 	binaryResult, binaryInteraction := op.initStepBinary(ctx, nonInteractive, downloadVersion)
 	steps = append(steps, binaryResult)
@@ -138,19 +148,13 @@ func (op *Operation) InitRunFull(
 		}
 	}
 	// Determine host_ready
-	hostReady := false
-	binaryReady := false
+	hostReady := true
 	for _, s := range steps {
-		if s.Step == "host" && s.Success {
-			hostReady = true
-		}
-		if s.Step == "binary" && s.Success {
-			binaryReady = true
-		}
+		hostReady = hostReady && s.Success
 	}
 	return &results.InitResult{
 		Steps:     steps,
-		HostReady: hostReady && binaryReady,
+		HostReady: hostReady,
 	}
 }
 func (op *Operation) initInitDatabase(ctx context.Context) results.InitStepResult {
@@ -181,11 +185,11 @@ func (op *Operation) initStepHost(
 	}
 	initResult, initErr := op.HostInit(ctx, onProgress)
 	if initErr != nil {
+		var interaction *errs.NeedsInteraction
+		if errors.As(initErr, &interaction) {
+			return results.InitStepResult{Step: "host", Message: interaction.Message}, interaction
+		}
 		return results.InitStepResult{Step: "host", Success: false, Message: initErr.Error()}, nil
-	}
-	// Check for NeedsInteraction.
-	if interaction, ok := initResult.(*errs.NeedsInteraction); ok {
-		return results.InitStepResult{Step: "host", Success: false, Message: "Root privileges required"}, interaction
 	}
 	if initResult == nil {
 		return results.InitStepResult{Step: "host", Success: true, Message: "Host already configured"}, nil
@@ -250,6 +254,9 @@ func (op *Operation) initStepBinary(
 			}, nil
 		}
 		repaired, err := op.BinaryEnsureDefault(ctx)
+		if err != nil {
+			return results.InitStepResult{Step: "binary", Message: err.Error()}, nil
+		}
 		if err == nil && repaired != nil {
 			return results.InitStepResult{
 				Step:    "binary",
@@ -259,8 +266,8 @@ func (op *Operation) initStepBinary(
 		}
 		return results.InitStepResult{
 			Step:    "binary",
-			Success: true,
-			Message: fmt.Sprintf("Binary available (v%s)", fcBinaries[0].Version),
+			Success: false,
+			Message: "No usable default binary pair",
 		}, nil
 	}
 	// No local binaries found
@@ -354,7 +361,9 @@ func (op *Operation) initStepGuestfs(
 	// When guestfs_enabled is provided (from a previous interaction round),
 	// the decision is persisted directly.
 	if guestfsEnabled != nil {
-		op.Services.Config.Set(ctx, "settings", "guestfs_enabled", *guestfsEnabled)
+		if err := op.Services.Config.Set(ctx, "settings", "guestfs_enabled", *guestfsEnabled); err != nil {
+			return results.InitStepResult{Step: "guestfs", Message: err.Error()}, nil
+		}
 		if *guestfsEnabled {
 			return results.InitStepResult{Step: "guestfs", Success: true, Message: "enabled"}, nil
 		}
@@ -368,7 +377,9 @@ func (op *Operation) initStepGuestfs(
 	}
 	if !available {
 		// libguestfs not installed — no point prompting.
-		op.Services.Config.Set(ctx, "settings", "guestfs_enabled", false)
+		if err := op.Services.Config.Set(ctx, "settings", "guestfs_enabled", false); err != nil {
+			return results.InitStepResult{Step: "guestfs", Message: err.Error()}, nil
+		}
 		return results.InitStepResult{Step: "guestfs", Success: true, Message: "not installed"}, nil
 	}
 	// Installed but user hasn't decided — prompt

@@ -14,6 +14,7 @@ import pytest
 
 from tests.system.conftest import (
     _guest_run,
+    _json_success_data,
     _run_mvm,
     _unique_subnet,
     ensure_vm_deps,
@@ -67,14 +68,15 @@ def _check_nested_virt_support(runner_vm: str) -> bool:
 
 def _ensure_image_cached(runner_vm: str, selector: str) -> str:
     """Ensure the image identified by *selector* is cached inside test VM."""
+    selector_type, _, selector_version = selector.partition(":")
     result = _run_mvm(runner_vm, "image", "ls", "--json", check=False)
     if result.returncode == 0 and result.stdout.strip():
-        images = json.loads(result.stdout)
-        selector_type = selector.split(":")[0] if ":" in selector else selector
+        images = _json_success_data(result.stdout, list)
         cached = [
             i
             for i in images
-            if i.get("type", "").startswith(selector_type)
+            if i.get("type") == selector_type
+            and i.get("version") == selector_version
             and i.get("is_present")
         ]
         if cached:
@@ -93,12 +95,13 @@ def _ensure_image_cached(runner_vm: str, selector: str) -> str:
     )
 
     result = _run_mvm(runner_vm, "image", "ls", "--json")
-    images = json.loads(result.stdout)
-    selector_type = selector.split(":")[0] if ":" in selector else selector
+    images = _json_success_data(result.stdout, list)
     cached = [
         i
         for i in images
-        if i.get("type", "").startswith(selector_type) and i.get("is_present")
+        if i.get("type") == selector_type
+        and i.get("version") == selector_version
+        and i.get("is_present")
     ]
     assert cached, f"Image '{selector}' not found in listing after pull"
     return cached[0]["id"][:6]
@@ -108,7 +111,7 @@ def _ensure_official_kernel_with_features(runner_vm: str) -> str:
     """Ensure an official kernel with KVM features is present inside test VM."""
     result = _run_mvm(runner_vm, "kernel", "ls", "--json", check=False)
     if result.returncode == 0 and result.stdout.strip():
-        kernels = json.loads(result.stdout)
+        kernels = _json_success_data(result.stdout, list)
         official = [
             k
             for k in kernels
@@ -135,7 +138,7 @@ def _ensure_official_kernel_with_features(runner_vm: str) -> str:
     )
 
     result = _run_mvm(runner_vm, "kernel", "ls", "--json")
-    kernels = json.loads(result.stdout)
+    kernels = _json_success_data(result.stdout, list)
     official = [
         k
         for k in kernels
@@ -173,7 +176,7 @@ def _ssh_cmd(
 def _read_firecracker_config(runner_vm: str, vm_name: str) -> dict:
     """Read the Firecracker JSON config from the VM directory inside the test VM."""
     inspect = _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json")
-    data = json.loads(inspect.stdout)
+    data = _json_success_data(inspect.stdout, dict)
     vm_dir = data.get("filesystem", {}).get("vm_dir", "")
 
     # Read the file inside the test VM
@@ -219,7 +222,6 @@ class TestFreshEnvVM:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         _run_mvm(
             runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
@@ -250,7 +252,7 @@ class TestFreshEnvVM:
             )
 
             result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
+            vms = _json_success_data(result.stdout, list)
             vm_entry = next((v for v in vms if v["name"] == vm_name), None)
             assert vm_entry is not None
             assert vm_entry["status"] == "running"
@@ -308,7 +310,6 @@ class TestFreshEnvVM:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         _run_mvm(
             runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
@@ -338,7 +339,9 @@ class TestFreshEnvVM:
                 timeout=VM_CREATE_TIMEOUT,
             )
 
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            vms = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
             vm_entry = next((v for v in vms if v["name"] == vm_name), None)
             assert vm_entry is not None
             assert vm_entry["status"] == "running"
@@ -351,8 +354,8 @@ class TestFreshEnvVM:
 
             _run_mvm(runner_vm, "vm", "start", vm_name)
 
-            vols = json.loads(
-                _run_mvm(runner_vm, "vol", "ls", "--json").stdout
+            vols = _json_success_data(
+                _run_mvm(runner_vm, "vol", "ls", "--json").stdout, list
             )
             vol_entry = next(
                 (v for v in vols if v.get("name") == vol_name), None
@@ -398,7 +401,6 @@ class TestFreshEnvVM:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         _run_mvm(
             runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
@@ -429,7 +431,7 @@ class TestFreshEnvVM:
             )
 
             result = _run_mvm(runner_vm, "vm", "ls", "--json")
-            vms = json.loads(result.stdout)
+            vms = _json_success_data(result.stdout, list)
             vm_entry = next((v for v in vms if v["name"] == vm_name), None)
             assert vm_entry is not None
             assert vm_entry["vcpu_count"] == VM_VCPUS
@@ -439,7 +441,7 @@ class TestFreshEnvVM:
             inspect_result = _run_mvm(
                 runner_vm, "vm", "inspect", vm_name, "--json"
             )
-            inspect_data = json.loads(inspect_result.stdout)
+            inspect_data = _json_success_data(inspect_result.stdout, dict)
             resources = inspect_data.get("resources", {})
             assert resources.get("vcpu") == VM_VCPUS
             assert resources.get("mem") == 4096
@@ -491,7 +493,6 @@ class TestFreshEnvVM:
             net_name,
             "--subnet",
             subnet,
-            "--non-interactive",
         )
         _run_mvm(
             runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
@@ -514,7 +515,9 @@ class TestFreshEnvVM:
                 timeout=VM_CREATE_TIMEOUT,
             )
 
-            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            vms = _json_success_data(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout, list
+            )
             vm_entry = next((v for v in vms if v["name"] == vm_name), None)
             assert vm_entry is not None
             assert vm_entry["status"] == "running"

@@ -2,6 +2,12 @@
 
 Kubernetes v1.36 cluster with Cilium CNI (kube-proxy replacement, VXLAN tunnel) and keepalived HA on Firecracker microVMs.
 
+> **v0.3.0 development status:** this workflow is not currently executable end to end. Its join helper depends on the
+> positive VM-to-VM relay, which remains unavailable until API-owned relay admission, runtime policy enforcement, and
+> release qualification land. The removed VM-wide trust flag cannot enable it. When the relay is activated, create an
+> exact directional exec policy for each join path and use `mvm-agent remote --user <non-root> <destination> --
+> <command>` inside the source guest.
+
 | Node | Role | IP | VIP |
 |------|------|----|-----|
 | controller-1 | control-plane | 10.10.0.10 | 10.10.0.100 (floating) |
@@ -59,7 +65,6 @@ vm:
     mem: 2G
     disk_size: 8G
     writeback: true
-    allow_remote_exec: true
     depends_on:
       - network:k8s
       - key:k8s-key
@@ -101,7 +106,6 @@ vm:
     mem: 2G
     disk_size: 8G
     writeback: true
-    allow_remote_exec: true
     depends_on:
       - network:k8s
       - key:k8s-key
@@ -146,7 +150,7 @@ mvm exec controller-1 -- ip a show eth0 | grep 10.10.0.100
 | `k8s-worker.yaml` | 3 workers that join via `k8s-join` |
 | `scripts/k8s-provision-base` | Baked — installs k8s packages, pulls images |
 | `scripts/k8s-controller-primary` | Baked — runs `kubeadm init` + writes both join scripts to `/srv/k8s/` |
-| `scripts/k8s-join` | Baked — fetches join command via `mvm-agent remote` and runs it (worker or controller) |
+| `scripts/k8s-join` | Baked join helper; its staged `mvm-agent remote` call is unavailable until the v0.3 relay lands |
 | `scripts/k8s-seed-token` | Baked — creates/renews the worker join token |
 | `scripts/k8s-seed-controller-token` | Baked — creates/renews the controller join token on primary |
 | `scripts/k8s-keepalived` | Baked — configures keepalived (VRRP) for HA VIP failover |

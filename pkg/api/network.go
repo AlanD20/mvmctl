@@ -1,494 +1,296 @@
-// Package api provides the public orchestration layer for all operations.
 package api
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
-	"log/slog"
+	"time"
+
 	"mvmctl/internal/core/network"
+	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
-	libnet "mvmctl/internal/lib/network"
-	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
-	"strings"
-	"time"
 )
 
-// NetworkAPI defines the public interface for network operations.
+// NetworkAPI defines logical network operations backed by root-owned network authority.
 type NetworkAPI interface {
-	NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error)
-	NetworkRemove(ctx context.Context, input inputs.NetworkInput, force bool) error
-	NetworkListAll(ctx context.Context) ([]*model.NetworkItem, error)
-	NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.NetworkItem, error)
-	NetworkToJSON(networks []*model.NetworkItem) []map[string]any
-	NetworkInspect(ctx context.Context, input inputs.NetworkInput) (*results.NetworkInspect, error)
-	NetworkSetDefault(ctx context.Context, input inputs.NetworkInput) error
-	NetworkSync(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error)
-	NetworkPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	NetworkCreateDefaultNetwork(ctx context.Context) (*model.NetworkItem, error)
+	NetworkCreate(context.Context, inputs.NetworkCreateInput) (*model.NetworkItem, error)
+	NetworkRemove(context.Context, inputs.NetworkInput, bool) error
+	NetworkListAll(context.Context) ([]*model.NetworkItem, error)
+	NetworkGet(context.Context, inputs.NetworkInput) (*model.NetworkItem, error)
+	NetworkToJSON([]*model.NetworkItem) []map[string]any
+	NetworkInspect(context.Context, inputs.NetworkInput) (*results.NetworkInspect, error)
+	NetworkSetDefault(context.Context, inputs.NetworkInput) error
+	NetworkSync(context.Context, inputs.NetworkInput) (map[string]map[string]int, error)
+	NetworkPrune(context.Context, bool, bool) ([]string, error)
+	NetworkCreateDefaultNetwork(context.Context) (*model.NetworkItem, error)
 }
 
-// NetworkCreate creates a new network.
+// NetworkCreate preserves a pending logical identity so an interrupted root transaction can be retried exactly.
 func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error) {
 	resolved, err := input.Resolve(ctx, op.Repos.Network)
 	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeNetworkCreateFailed, err.Error(), err)
+		return nil, err
 	}
-	createdAt := time.Now().Format(time.RFC3339)
-	hashInput := fmt.Sprintf("%s:%s:%s", resolved.Name, resolved.Subnet, createdAt)
-	networkID := fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput)))
-	networkItem := &model.NetworkItem{
-		ID:           networkID,
-		Name:         resolved.Name,
-		Subnet:       resolved.Subnet,
-		Bridge:       resolved.Bridge,
-		IPv4Gateway:  resolved.IPv4Gateway,
-		BridgeActive: false,
-		NATEnabled:   resolved.NATEnabled,
-		IsDefault:    false,
-		IsPresent:    true,
-		CreatedAt:    createdAt,
-		UpdatedAt:    createdAt,
-	}
-	if len(resolved.NATGateways) > 0 {
-		joined := strings.Join(resolved.NATGateways, ",")
-		networkItem.NATGateways = &joined
-	}
-	if err := op.Repos.Network.Upsert(ctx, networkItem); err != nil {
-		return nil, errs.WrapMsg(errs.CodeDatabaseError, "Failed to persist network: "+err.Error(), err)
-	}
-	bridgeAddr, bridgeErr := network.ComputeBridgeAddress(resolved.IPv4Gateway, resolved.Subnet)
-	if bridgeErr != nil {
-		_ = op.Repos.Network.Delete(ctx, networkID)
-		return nil, errs.WrapMsg(
-			errs.CodeNetworkBridgeFailed,
-			fmt.Sprintf("Failed to compute bridge address: %v", bridgeErr),
-			bridgeErr,
-		)
-	}
-	if err := op.Services.Network.EnsureBridge(ctx, resolved.Bridge, bridgeAddr); err != nil {
-		_ = op.Repos.Network.Delete(ctx, networkID)
-		return nil, errs.WrapMsg(
-			errs.CodeNetworkBridgeFailed,
-			fmt.Sprintf("Failed to create network '%s': %v", resolved.Name, err),
-			err,
-		)
-	}
-	if resolved.NATEnabled {
-		if err := op.Services.Network.EnsureNAT(
-			ctx,
-			resolved.Bridge,
-			resolved.NATGateways,
-			resolved.Subnet,
-			networkID,
-		); err != nil {
-			_ = op.Repos.Network.Delete(ctx, networkID)
-			return nil, errs.WrapMsg(
-				errs.CodeNetworkNATFailed,
-				fmt.Sprintf("Failed to create network '%s': %v", resolved.Name, err),
-				err,
-			)
+	item := resolved.Pending
+	if item == nil {
+		createdAt := time.Now().UTC().Format(time.RFC3339)
+		// A removed network ID is permanently retired by root authority. Two creations
+		// in the same second must not reuse that identity.
+		identitySeed := createdAt + ":" + crypto.UUIDV4()
+		item = &model.NetworkItem{ID: crypto.NetworkID(resolved.Name, resolved.Subnet, identitySeed),
+			Name: resolved.Name, Subnet: resolved.Subnet, IPv4Gateway: resolved.IPv4Gateway,
+			NATEnabled: resolved.NATEnabled, CreatedAt: createdAt, UpdatedAt: createdAt,
+			Bridge: "", BridgeActive: false, IsPresent: false}
+		// This row is desired state only. Root never reads it and acknowledgement alone publishes observed state.
+		if err := op.Repos.Network.Upsert(ctx, item); err != nil {
+			return nil, errs.WrapMsg(errs.CodeDatabaseError, "persist pending network intent", err)
 		}
 	}
-	// Update bridge_active
-	bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, resolved.Bridge)
-	_ = op.Repos.Network.UpdateBridgeActive(ctx, networkID, bridgeActive)
-	// Re-fetch
-	updated, err := op.Repos.Network.GetByName(ctx, resolved.Name)
-	if err != nil || updated == nil {
-		return nil, errs.NotFound(
-			errs.CodeNetworkNotFound,
-			fmt.Sprintf("Failed to fetch created network '%s'", resolved.Name),
-		)
+	if err := op.Services.Network.EnsureManagedNetwork(ctx, item); err != nil {
+		return item, err
 	}
 	if input.SetDefault {
-		if err := op.Repos.Network.SetDefault(ctx, updated.ID); err != nil {
-			slog.Warn("Failed to set network as default", "name", input.Name, "error", err)
+		if err := op.Repos.Network.SetDefault(ctx, item.ID); err != nil {
+			return item, err
 		}
+		item.IsDefault = true
 	}
-	// Audit log
-	op.AuditLog.LogOperation("network.create", map[string]any{"name": resolved.Name}, "")
-	return updated, nil
+	op.AuditLog.LogOperation("network.create", map[string]any{"id": item.ID, "name": item.Name}, "")
+	return item, nil
 }
 
-// NetworkRemove removes one or more networks.
+// NetworkRemove performs each root transaction before its local projection is removed.
 func (op *Operation) NetworkRemove(ctx context.Context, input inputs.NetworkInput, force bool) error {
 	networks, err := input.Resolve(ctx, op.Repos.Network)
 	if err != nil {
-		return errs.WrapMsg(errs.CodeNetworkRemoveFailed, err.Error(), err)
+		return err
 	}
-	// Batch-enrich with VM and snapshot references
-	op.Enr.EnrichNetwork(ctx, networks, "vm", "snapshots")
-	// service.Remove raises error on failure.
-	// Return the first error encountered.
-	for _, net := range networks {
-		if err := op.Services.Network.Remove(ctx, net, force); err != nil {
-			errorMsg := err.Error()
-			code := errs.Code("network.remove_failed")
-			if strings.Contains(strings.ToLower(errorMsg), "in use") {
-				code = "network.in_use"
-			}
-			return errs.WrapMsg(code, errorMsg, err)
+	if err := op.Enr.EnrichNetwork(ctx, networks, "vm", "snapshots"); err != nil {
+		return err
+	}
+	for _, item := range networks {
+		if err := op.Services.Network.Remove(ctx, item, force); err != nil {
+			return err
 		}
-		op.AuditLog.LogOperation("network.remove", map[string]any{"id": net.ID, "name": net.Name}, "")
+		op.AuditLog.LogOperation("network.remove", map[string]any{"id": item.ID, "name": item.Name}, "")
 	}
 	return nil
 }
 
-// NetworkListAll returns all networks with lease enrichment.
+// NetworkListAll returns networks with observed link presence and desired guest leases.
 func (op *Operation) NetworkListAll(ctx context.Context) ([]*model.NetworkItem, error) {
 	networks, err := op.Services.Network.ListAll(ctx, true)
 	if err != nil {
 		return nil, err
 	}
 	if len(networks) > 0 {
-		_ = op.Services.Network.EnrichWithLeases(ctx, networks, op.Repos.Lease)
+		if err := op.Services.Network.EnrichWithLeases(ctx, networks, op.Repos.Lease); err != nil {
+			return nil, err
+		}
 	}
 	return networks, nil
 }
 
-// NetworkGet returns a single network by identifier.
+// NetworkGet resolves one logical network.
 func (op *Operation) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.NetworkItem, error) {
 	networks, err := input.Resolve(ctx, op.Repos.Network)
 	if err != nil {
 		return nil, err
 	}
 	if len(networks) != 1 {
-		return nil, fmt.Errorf("expected exactly one network, got %d", len(networks))
+		return nil, errs.New(errs.CodeValidationFailed, "exactly one network is required")
 	}
 	return networks[0], nil
 }
 
-// NetworkToJSON converts networks to JSON-serializable dicts.
-// delegates to model field mapping.
+// NetworkToJSON exposes logical NAT intent without an uplink selector.
 func (op *Operation) NetworkToJSON(networks []*model.NetworkItem) []map[string]any {
-	result := make([]map[string]any, 0, len(networks))
-	for _, n := range networks {
-		result = append(result, map[string]any{
-			"id":            n.ID,
-			"name":          n.Name,
-			"subnet":        n.Subnet,
-			"bridge":        n.Bridge,
-			"ipv4_gateway":  n.IPv4Gateway,
-			"bridge_active": n.BridgeActive,
-			"nat_enabled":   n.NATEnabled,
-			"is_default":    n.IsDefault,
-			"is_present":    n.IsPresent,
-			"created_at":    n.CreatedAt,
-			"updated_at":    n.UpdatedAt,
-			"nat_gateways":  network.NatGatewaysList(n),
-		})
+	items := make([]map[string]any, 0, len(networks))
+	for _, item := range networks {
+		items = append(items, map[string]any{"id": item.ID, "name": item.Name, "subnet": item.Subnet,
+			"bridge": item.Bridge, "ipv4_gateway": item.IPv4Gateway, "bridge_active": item.BridgeActive,
+			"nat_enabled": item.NATEnabled, "is_default": item.IsDefault, "is_present": item.IsPresent,
+			"created_at": item.CreatedAt, "updated_at": item.UpdatedAt})
 	}
-	return result
+	return items
 }
 
-// NetworkInspect returns detailed network info.
-func (op *Operation) NetworkInspect(
-	ctx context.Context,
-	input inputs.NetworkInput,
-) (*results.NetworkInspect, error) {
-	networks, err := input.Resolve(ctx, op.Repos.Network)
+// NetworkInspect returns desired configuration, observed presence and allocations.
+func (op *Operation) NetworkInspect(ctx context.Context, input inputs.NetworkInput) (*results.NetworkInspect, error) {
+	item, err := op.NetworkGet(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	if len(networks) != 1 {
-		return nil, fmt.Errorf("expected exactly one network, got %d", len(networks))
+	observed, err := op.Services.Network.ListAll(ctx, true)
+	if err != nil {
+		return nil, err
 	}
-	net := networks[0]
-	bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge)
-	if bridgeActive != net.BridgeActive {
-		_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
-		net.BridgeActive = bridgeActive
-	}
-	updated, err := op.Repos.Network.GetByName(ctx, net.Name)
-	if err != nil || updated == nil {
-		return nil, fmt.Errorf("network '%s' not found after update", net.Name)
-	}
-	// Load leases
-	leases, err := op.Repos.Lease.ListAll(ctx, updated.ID)
-	leaseList := make([]results.NetworkLease, 0)
-	if err == nil {
-		leaseList = make([]results.NetworkLease, 0, len(leases))
-		for _, lease := range leases {
-			l := results.NetworkLease{
-				IPv4:     lease.IPv4,
-				LeasedAt: lease.LeasedAt,
-			}
-			if lease.ID != nil {
-				l.ID = *lease.ID
-			}
-			if lease.VMID != nil {
-				l.VMID = *lease.VMID
-			}
-			if lease.ExpiresAt != nil {
-				l.ExpiresAt = *lease.ExpiresAt
-			}
-			leaseList = append(leaseList, l)
+	for _, candidate := range observed {
+		if candidate.ID == item.ID {
+			item = candidate
+			break
 		}
 	}
-	// Load firewall rules
-	var ruleList []*model.FirewallRule
-	if ft := op.Services.Network.FirewallTracker(); ft != nil {
-		if rules, err := ft.GetByNetworkID(ctx, updated.ID, true); err == nil {
-			ruleList = rules
+	leases, err := op.Repos.Lease.ListAll(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	leaseList := make([]results.NetworkLease, 0, len(leases))
+	for _, lease := range leases {
+		value := results.NetworkLease{IPv4: lease.IPv4, LeasedAt: lease.LeasedAt}
+		if lease.ID != nil {
+			value.ID = *lease.ID
 		}
+		if lease.VMID != nil {
+			value.VMID = *lease.VMID
+		}
+		if lease.ExpiresAt != nil {
+			value.ExpiresAt = *lease.ExpiresAt
+		}
+		leaseList = append(leaseList, value)
 	}
 	return &results.NetworkInspect{
-		Network: results.NetworkItemInfo{
-			ID: updated.ID, Name: updated.Name, Subnet: updated.Subnet,
-			Bridge: updated.Bridge, IPv4Gateway: updated.IPv4Gateway,
-			IsDefault: updated.IsDefault, IsPresent: updated.IsPresent,
-			CreatedAt: updated.CreatedAt, UpdatedAt: updated.UpdatedAt,
-		},
+		Network: results.NetworkItemInfo{ID: item.ID, Name: item.Name, Subnet: item.Subnet,
+			Bridge: item.Bridge, IPv4Gateway: item.IPv4Gateway, IsDefault: item.IsDefault, IsPresent: item.IsPresent,
+			CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt},
 		Status: results.NetworkStatusInfo{
-			BridgeActive: updated.BridgeActive,
-			IsPresent:    updated.IsPresent,
-			IsDefault:    updated.IsDefault,
+			BridgeActive: item.BridgeActive,
+			IsPresent:    item.IsPresent,
+			IsDefault:    item.IsDefault,
 		},
-		NAT: results.NetworkNATInfo{
-			NATEnabled:  updated.NATEnabled,
-			NATGateways: network.NatGatewaysList(updated),
-		},
+		NAT:    results.NetworkNATInfo{NATEnabled: item.NATEnabled},
 		Leases: leaseList,
-		Rules:  ruleList,
 	}, nil
 }
 
-// NetworkSetDefault sets a network as default.
+// NetworkSetDefault changes only desired default selection.
 func (op *Operation) NetworkSetDefault(ctx context.Context, input inputs.NetworkInput) error {
-	networks, err := input.Resolve(ctx, op.Repos.Network)
+	item, err := op.NetworkGet(ctx, input)
 	if err != nil {
-		return errs.WrapMsg(errs.CodeNetworkDefaultSetFailed, fmt.Sprintf("Failed to resolve network: %v", err), err)
+		return err
 	}
-	if len(networks) != 1 {
-		return errs.New(
-			errs.CodeNetworkDefaultSetFailed,
-			fmt.Sprintf("Expected exactly one network, got %d", len(networks)),
-		)
+	if err := network.NewController(item, op.Repos.Network).SetDefault(ctx); err != nil {
+		return err
 	}
-	net := networks[0]
-	controller := network.NewController(net, op.Repos.Network)
-	if err := controller.SetDefault(ctx); err != nil {
-		return errs.WrapMsg(
-			errs.CodeNetworkDefaultSetFailed,
-			fmt.Sprintf("Failed to set network '%s' as default: %v", net.Name, err),
-			err,
-		)
-	}
-	op.AuditLog.LogOperation("network.set_default", map[string]any{"name": net.Name}, "")
+	op.AuditLog.LogOperation("network.set_default", map[string]any{"name": item.Name}, "")
 	return nil
 }
 
-// NetworkSync syncs firewall rules for one or more networks.
+// NetworkSync readmits exact root state and retries pending creation without scanning or deleting unrelated links.
 func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error) {
-	// 1. Resolve requested networks.
-	var requested []*model.NetworkItem
+	var items []*model.NetworkItem
 	var err error
-	if len(input.Identifiers) > 0 {
-		requested, err = input.Resolve(ctx, op.Repos.Network)
-		if err != nil {
-			return nil, errs.WrapMsg(errs.CodeNetworkNotFound, err.Error(), err)
-		}
+	if len(input.Identifiers) == 0 {
+		items, err = op.Repos.Network.ListAll(ctx)
 	} else {
-		requested, err = op.Repos.Network.ListAll(ctx)
-		if err != nil {
-			return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list networks: %v", err), err)
-		}
+		items, err = input.Resolve(ctx, op.Repos.Network)
 	}
-
-	// 2. Build the set of all networks to sync. When syncing a specific subset,
-	//    we must include ALL DB networks in the batch rebuild so that
-	//    unrequested networks' firewall rules are preserved in the kernel.
-	//    Stats are returned only for the requested networks.
-	allNetworks := requested
-	if len(input.Identifiers) > 0 {
-		allNetworks, err = op.Repos.Network.ListAll(ctx)
-		if err != nil {
-			return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list all networks: %v", err), err)
-		}
+	if err != nil {
+		return nil, err
 	}
-
-	// Capture batch results for stat extraction after the closure.
-	var batchResults map[string]*network.SyncResult
-
-	// Wrap the core sync logic in a NetworkError catch
-	syncErr := func() error {
-		// Step 1: Restore missing bridges (post-reboot recovery)
-		for _, net := range allNetworks {
-			if !libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge) {
-				bridgeAddr, calcErr := network.ComputeBridgeAddress(net.IPv4Gateway, net.Subnet)
-				if calcErr != nil {
-					return fmt.Errorf("compute bridge address: %w", calcErr)
-				}
-				if err := op.Services.Network.EnsureBridge(ctx, net.Bridge, bridgeAddr); err != nil {
-					return fmt.Errorf("ensure bridge: %w", err)
-				}
-				if net.NATEnabled {
-					if err := op.Services.Network.EnsureNAT(
-						ctx,
-						net.Bridge,
-						network.NatGatewaysList(net),
-						net.Subnet,
-						net.ID,
-					); err != nil {
-						return fmt.Errorf("ensure NAT: %w", err)
-					}
-				}
-			}
+	completed := make(map[string]map[string]int, len(items))
+	for _, item := range items {
+		if item.DeletedAt != nil {
+			continue
 		}
-		// Step 2: Reconcile bridge state (DB vs kernel)
-		for _, net := range allNetworks {
-			bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge)
-			if bridgeActive != net.BridgeActive {
-				_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
-			}
+		if err := op.Services.Network.EnsureManagedNetwork(ctx, item); err != nil {
+			return completed, err
 		}
-		// Step 3: Sync firewall rules — all networks in a single batch
-		var syncErr2 error
-		batchResults, syncErr2 = op.Services.Network.SyncIPTablesRulesBatch(ctx, allNetworks)
-		if syncErr2 != nil {
-			return fmt.Errorf("sync firewall rules: %w", syncErr2)
-		}
-		// Step 4: Clean up orphaned bridges
-		op.Services.Network.CleanupOrphanedBridges(ctx, allNetworks)
-		return nil
-	}()
-	if syncErr != nil {
-		return nil, errs.WrapMsg(errs.CodeNetworkBridgeFailed, fmt.Sprintf("Network sync failed: %v", syncErr), syncErr)
+		completed[item.ID] = map[string]int{"verified": 1, "added": 0, "orphaned": 0}
 	}
-
-	// Build flat map for only the requested networks
-	results := make(map[string]map[string]int, len(requested))
-	for _, net := range requested {
-		if r, ok := batchResults[net.ID]; ok && r != nil {
-			results[net.ID] = map[string]int{
-				"added":    r.Added,
-				"verified": r.Verified,
-				"orphaned": r.Orphaned,
-			}
-		}
-	}
-	return results, nil
+	return completed, nil
 }
 
-// NetworkPrune prunes unused networks.
+// NetworkPrune removes selected unused networks through the same exact root removal path.
 func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
-	if err := system.CheckPrivileges("/usr/sbin/ip", "prune networks"); err != nil {
-		return nil, errs.WrapMsg(errs.CodePrivilegeRequired, err.Error(), err)
-	}
 	networks, err := op.Repos.Network.ListAll(ctx)
 	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list networks: %v", err), err)
+		return nil, err
 	}
-	// Get referenced network IDs from VMs
-	allVMs, _ := op.Repos.VM.ListAll(ctx)
-	referencedIDs := make(map[string]bool)
-	for _, vm := range allVMs {
-		if vm.NetworkID != "" {
-			referencedIDs[vm.NetworkID] = true
+	if err := op.Enr.EnrichNetwork(ctx, networks, "vm", "snapshots"); err != nil {
+		return nil, err
+	}
+	removed := make([]string, 0)
+	for _, item := range networks {
+		if !includeAll && (item.IsDefault || len(item.VMs) > 0 || len(item.Snapshots) > 0) {
+			continue
 		}
-	}
-	defaultNetNameRaw, _ := op.ConfigGet(ctx, "defaults.network", "name")
-	defaultNetName, _ := defaultNetNameRaw.(string)
-	var removed []string
-	for _, network := range networks {
-		if !includeAll {
-			if network.Name == defaultNetName {
-				continue
-			}
-			if referencedIDs[network.ID] {
-				continue
-			}
-			leases, _ := op.Repos.Lease.ListAll(ctx, network.ID)
-			if len(leases) > 0 {
-				continue
-			}
+		leases, err := op.Repos.Lease.ListAll(ctx, item.ID)
+		if err != nil {
+			return removed, err
+		}
+		if !includeAll && len(leases) > 0 {
+			continue
 		}
 		if !dryRun {
-			if !network.IsPresent {
-				_ = op.Repos.Network.Delete(ctx, network.ID)
-			} else {
-				err := op.NetworkRemove(ctx, inputs.NetworkInput{Identifiers: []string{network.Name}}, includeAll)
-				if err != nil {
-					slog.Warn("Failed to remove network", "name", network.Name, "error", err)
-					continue
-				}
+			if err := op.Services.Network.Remove(ctx, item, includeAll); err != nil {
+				return removed, err
 			}
 		}
-		removed = append(removed, network.Name)
+		removed = append(removed, item.Name)
 	}
 	return removed, nil
 }
 
-// NetworkCreateDefaultNetwork creates the default network if it doesn't exist.
-// Updates Repository component tracking after creation.
+// NetworkCreateDefaultNetwork creates or readmits the configured default through root-owned authority.
 func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.NetworkItem, error) {
-	defaultNameRaw, _ := op.ConfigGet(ctx, "defaults.network", "name")
-	defaultName, _ := defaultNameRaw.(string)
-	defaultSubnetRaw, _ := op.ConfigGet(ctx, "defaults.network", "subnet")
-	defaultSubnet, _ := defaultSubnetRaw.(string)
-	defaultNATEnabledRaw, _ := op.ConfigGet(ctx, "defaults.network", "nat_enabled")
-	defaultNATEnabled, _ := defaultNATEnabledRaw.(bool)
-	// Check existing
-	internalNetwork, _ := op.Repos.Network.GetByName(ctx, defaultName)
-	if internalNetwork == nil {
-		outboundIf := libnet.DetectOutboundInterface(ctx)
-		var natGateways []string
-		if outboundIf != "" {
-			natGateways = []string{outboundIf}
+	nameValue, err := op.ConfigGet(ctx, "defaults.network", "name")
+	if err != nil {
+		return nil, err
+	}
+	name, ok := nameValue.(string)
+	if !ok {
+		return nil, errs.New(errs.CodeValidationFailed, "default network name must be text")
+	}
+	item, err := op.Repos.Network.GetByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		subnetValue, err := op.ConfigGet(ctx, "defaults.network", "subnet")
+		if err != nil {
+			return nil, err
 		}
-		createInput := inputs.NetworkCreateInput{
-			Name:        defaultName,
-			Subnet:      defaultSubnet,
-			NATEnabled:  defaultNATEnabled && len(natGateways) > 0,
-			NATGateways: natGateways,
+		subnet, ok := subnetValue.(string)
+		if !ok {
+			return nil, errs.New(errs.CodeValidationFailed, "default network subnet must be text")
 		}
-		createdNet, createErr := op.NetworkCreate(ctx, createInput)
-		// NeedsInteraction is not expected during default network creation
-		// (defensive check for NeedsInteraction)
-		if createErr != nil && errs.IsNeedsInteraction(createErr) {
-			return nil, errs.New(errs.CodeNetworkDefaultCreateFailed, createErr.Error())
+		natValue, err := op.ConfigGet(ctx, "defaults.network", "nat_enabled")
+		if err != nil {
+			return nil, err
 		}
-		if createErr != nil {
-			return nil, createErr
+		nat, ok := natValue.(bool)
+		if !ok {
+			return nil, errs.New(errs.CodeValidationFailed, "default network NAT setting must be boolean")
 		}
-		// Only set internalNetwork from NetworkCreate result directly
-		internalNetwork = createdNet
-		if internalNetwork != nil && op.Repos.Host != nil {
-			_ = op.Repos.Host.UpdateComponent(ctx, "default_network_created", true)
+		item, err = op.NetworkCreate(ctx, inputs.NetworkCreateInput{Name: name, Subnet: subnet, NATEnabled: nat})
+		if err != nil {
+			return item, err
+		}
+	} else if err := op.Services.Network.EnsureManagedNetwork(ctx, item); err != nil {
+		return item, err
+	}
+	selected, err := op.Repos.Network.GetDefault(ctx)
+	if err != nil {
+		return item, err
+	}
+	if selected == nil {
+		if err := op.Repos.Network.SetDefault(ctx, item.ID); err != nil {
+			return item, err
+		}
+		item.IsDefault = true
+		selected = item
+	}
+	if op.Repos.Host != nil {
+		if err := op.Repos.Host.UpdateComponent(ctx, "default_network_created", true); err != nil {
+			return selected, errs.WrapMsg(
+				errs.CodeNetworkDefaultCreateFailed,
+				fmt.Sprintf("network %s configured but host projection failed", selected.Name),
+				err,
+			)
 		}
 	}
-	// Ensure one network is default
-	defaultNetwork, _ := op.Repos.Network.GetDefault(ctx)
-	if defaultNetwork == nil && internalNetwork != nil {
-		_ = op.Repos.Network.SetDefault(ctx, internalNetwork.ID)
-		defaultNetwork = internalNetwork
-	}
-	if defaultNetwork == nil {
-		return nil, errs.New(errs.CodeNetworkDefaultCreateFailed, "Failed to create or locate default network")
-	}
-	// Materialize bridge and NAT
-	bridgeAddr, calcErr := network.ComputeBridgeAddress(defaultNetwork.IPv4Gateway, defaultNetwork.Subnet)
-	if calcErr != nil {
-		return nil, errs.New(
-			errs.CodeNetworkDefaultCreateFailed,
-			fmt.Sprintf("Failed to compute bridge address: %v", calcErr),
-		)
-	}
-	_ = op.Services.Network.EnsureBridge(ctx, defaultNetwork.Bridge, bridgeAddr)
-	if defaultNetwork.NATEnabled {
-		_ = op.Services.Network.EnsureNAT(
-			ctx,
-			defaultNetwork.Bridge,
-			network.NatGatewaysList(defaultNetwork),
-			defaultNetwork.Subnet,
-			defaultNetwork.ID,
-		)
-	}
-	bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, defaultNetwork.Bridge)
-	_ = op.Repos.Network.UpdateBridgeActive(ctx, defaultNetwork.ID, bridgeActive)
-	return defaultNetwork, nil
+	return selected, nil
 }

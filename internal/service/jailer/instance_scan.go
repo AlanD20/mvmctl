@@ -1,0 +1,291 @@
+package jailer
+
+import (
+	"context"
+	"errors"
+	"sort"
+	"strings"
+)
+
+type instanceLocation struct {
+	uid     uint32
+	stateFD int
+}
+
+// findRuntimeStatusOwners resolves the requested global claims in one owner-directory scan. The caller holds the
+// index lock until all per-VM observations finish; the returned owners are never process or cleanup authority.
+func (roots *instanceAuthorityRoots) findRuntimeStatusOwners(
+	ctx context.Context,
+	vmIDs []string,
+) (owners map[string]uint32, returnErr error) {
+	names, err := roots.deps.readDirNames(ctx, roots.stateFD)
+	if err != nil {
+		return nil, instanceAtomicError("enumerate runtime status authority owners", err)
+	}
+	sort.Strings(names)
+	owners = make(map[string]uint32)
+	for _, name := range names {
+		uid, valid := validateCanonicalUIDName(name)
+		if !valid {
+			return nil, instanceAtomicError("runtime status owner directory name is invalid", nil)
+		}
+		fd, err := openInstanceDirectory(
+			ctx,
+			roots.deps,
+			roots.stateFD,
+			name,
+			false,
+			instancePrivateDirectory,
+			roots.policy,
+		)
+		if err != nil {
+			return nil, err
+		}
+		directories := &instanceUIDDirectories{deps: roots.deps, policy: roots.policy, uid: uid, stateFD: fd}
+		for _, id := range vmIDs {
+			_, found, readErr := directories.readRecord(ctx, id)
+			if readErr != nil {
+				return nil, appendInstanceOperationError(
+					readErr,
+					"close rejected runtime status owner",
+					directories.Release(ctx),
+				)
+			}
+			if found {
+				if _, duplicate := owners[id]; duplicate {
+					return nil, appendInstanceOperationError(
+						instanceAtomicError("duplicate global VM authority claim", nil),
+						"close duplicate runtime status owner",
+						directories.Release(ctx),
+					)
+				}
+				owners[id] = uid
+			}
+		}
+		if err := directories.Release(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return owners, nil
+}
+
+func (roots *instanceAuthorityRoots) findInstance(
+	ctx context.Context,
+	vmID string,
+) (_ *instanceLocation, returnErr error) {
+	names, err := roots.deps.readDirNames(ctx, roots.stateFD)
+	if err != nil {
+		return nil, instanceAtomicError("enumerate instance authority owners", err)
+	}
+	sort.Strings(names)
+	var found *instanceLocation
+	defer func() {
+		if returnErr == nil || found == nil {
+			return
+		}
+		if err := roots.deps.close(context.WithoutCancel(ctx), found.stateFD); err != nil {
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"close matched instance authority directory",
+				err,
+			)
+		}
+	}()
+	for _, name := range names {
+		uid, ok := validateCanonicalUIDName(name)
+		if !ok {
+			return nil, instanceAtomicError("instance authority owner directory name is invalid", nil)
+		}
+		stateFD, err := openInstanceDirectory(
+			ctx,
+			roots.deps,
+			roots.stateFD,
+			name,
+			false,
+			instancePrivateDirectory,
+			roots.policy,
+		)
+		if err != nil {
+			return nil, err
+		}
+		directories := &instanceUIDDirectories{
+			deps: roots.deps, policy: roots.policy, uid: uid, stateFD: stateFD,
+		}
+		_, exists, readErr := directories.readRecord(ctx, vmID)
+		if readErr != nil {
+			return nil, appendInstanceOperationError(
+				readErr,
+				"close rejected instance authority owner directory",
+				roots.deps.close(context.WithoutCancel(ctx), stateFD),
+			)
+		}
+		if !exists {
+			if closeErr := roots.deps.close(context.WithoutCancel(ctx), stateFD); closeErr != nil {
+				return nil, instanceAtomicError("close scanned instance authority directory", closeErr)
+			}
+			continue
+		}
+		if found != nil {
+			closeErr := roots.deps.close(context.WithoutCancel(ctx), stateFD)
+			if closeErr != nil {
+				return nil, instanceAtomicError("close duplicate instance authority directory", closeErr)
+			}
+			return nil, instanceAtomicError("duplicate global VM authority claim", nil)
+		}
+		found = &instanceLocation{uid: uid, stateFD: stateFD}
+	}
+	return found, nil
+}
+
+func (roots *instanceAuthorityRoots) openAuthorityForLocation(
+	ctx context.Context,
+	location *instanceLocation,
+) (*instanceUIDDirectories, error) {
+	authority, err := roots.authority.openUID(ctx, location.uid)
+	if err != nil {
+		if closeErr := roots.deps.close(context.WithoutCancel(ctx), location.stateFD); closeErr != nil {
+			err = appendInstanceOperationError(err, "close located instance authority directory", closeErr)
+		}
+		return nil, err
+	}
+	return &instanceUIDDirectories{
+		deps:      roots.deps,
+		policy:    roots.policy,
+		uid:       location.uid,
+		stateFD:   location.stateFD,
+		authority: authority,
+	}, nil
+}
+
+func (roots *instanceAuthorityRoots) releaseIsReferenced(
+	ctx context.Context,
+	release releaseIdentity,
+) (bool, error) {
+	ownerNames, err := roots.deps.readDirNames(ctx, roots.stateFD)
+	if err != nil {
+		return false, instanceAtomicError("enumerate release authority owners", err)
+	}
+	sort.Strings(ownerNames)
+	seenVMs := make(map[string]struct{})
+	for _, ownerName := range ownerNames {
+		uid, ok := validateCanonicalUIDName(ownerName)
+		if !ok {
+			return false, instanceAtomicError("instance authority owner directory name is invalid", nil)
+		}
+		stateFD, err := openInstanceDirectory(
+			ctx,
+			roots.deps,
+			roots.stateFD,
+			ownerName,
+			false,
+			instancePrivateDirectory,
+			roots.policy,
+		)
+		if err != nil {
+			return false, err
+		}
+		referenced, scanErr := roots.releaseReferencedByOwner(ctx, release, uid, stateFD, seenVMs)
+		closeErr := roots.deps.close(context.WithoutCancel(ctx), stateFD)
+		if scanErr != nil {
+			return false, appendInstanceOperationError(
+				scanErr,
+				"close release-scan instance directory",
+				closeErr,
+			)
+		}
+		if closeErr != nil {
+			return false, instanceAtomicError("close release-scan instance directory", closeErr)
+		}
+		if referenced {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (roots *instanceAuthorityRoots) releaseReferencedByOwner(
+	ctx context.Context,
+	release releaseIdentity,
+	uid uint32,
+	stateFD int,
+	seenVMs map[string]struct{},
+) (bool, error) {
+	names, err := roots.deps.readDirNames(ctx, stateFD)
+	if err != nil {
+		return false, instanceAtomicError("enumerate instance authority records", err)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if isInstanceTempName(name) {
+			continue
+		}
+		if !strings.HasSuffix(name, ".json") {
+			return false, instanceAtomicError("unexpected instance authority entry", nil)
+		}
+		vmID := strings.TrimSuffix(name, ".json")
+		if !vmIDPattern.MatchString(vmID) {
+			return false, instanceAtomicError("instance authority record name is invalid", nil)
+		}
+		if _, exists := seenVMs[vmID]; exists {
+			return false, instanceAtomicError("duplicate global VM authority claim", nil)
+		}
+		seenVMs[vmID] = struct{}{}
+		authority, err := roots.authority.openUID(ctx, uid)
+		if err != nil {
+			return false, err
+		}
+		directories := &instanceUIDDirectories{
+			deps: roots.deps, policy: roots.policy, uid: uid, stateFD: stateFD, authority: authority,
+		}
+		vmLock, err := directories.acquireVMLock(ctx, vmID)
+		if err != nil {
+			return false, appendInstanceOperationError(
+				err,
+				"close rejected VM authority directory",
+				authority.Release(context.WithoutCancel(ctx)),
+			)
+		}
+		record, found, readErr := directories.readRecord(ctx, vmID)
+		releaseErr := vmLock.Release(context.WithoutCancel(ctx))
+		closeErr := authority.Release(context.WithoutCancel(ctx))
+		if readErr != nil {
+			return false, appendInstanceOperationError(
+				appendInstanceOperationError(readErr, "release scanned VM lock", releaseErr),
+				"close scanned VM authority directory",
+				closeErr,
+			)
+		}
+		if releaseErr != nil || closeErr != nil {
+			return false, instanceAtomicError(
+				"release scanned instance authority resources",
+				errors.Join(releaseErr, closeErr),
+			)
+		}
+		if !found {
+			return false, instanceAtomicError("instance authority record disappeared while locked", nil)
+		}
+		if (record.lifecycle == instanceLifecycleLaunching || record.lifecycle == instanceLifecycleActive ||
+			record.lifecycle == instanceLifecycleCleaning) && record.launch.release == release {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func isInstanceTempName(name string) bool {
+	const prefix = ".mvm-instance-"
+	const suffix = ".tmp"
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+		return false
+	}
+	hexValue := strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)
+	if len(hexValue) != 32 {
+		return false
+	}
+	for _, char := range hexValue {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
+}
