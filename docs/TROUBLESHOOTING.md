@@ -173,6 +173,9 @@ mvm bin ls
 
 **Problem:** You want to roll back the changes made by `mvm host init`.
 
+For complete v0.3.0 removal before a clean reinstall, use the [administrator uninstaller](UNINSTALL.md).
+It deletes managed data as well as restoring host setup; the commands below have narrower scopes.
+
 Caller-scoped network cleanup and administrator rollback have different scopes. Neither command is a supported
 legacy-state migration or removal procedure. See the [host command reference](REFERENCES.md#mvm-host).
 

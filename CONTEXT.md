@@ -324,6 +324,13 @@ recorded host settings through durable rollback receipts. Active, ambiguous, or 
 reset. Reset does not kill VMs, delete authority history, or unload kernel modules. Admission stays disabled after
 reset or a restoration error. Host activation and qualification remain separate work.
 
+[ADR-0026](docs/adr/0026-administrator-full-uninstall.md) adds the explicit complete administrator uninstall
+exception: `scripts/uninstall.py` performs typed cleanup for all enrolled operators, then native reset, before
+removing permanent root history under disabled admission. It is an optional root-run maintenance utility, not an
+operator RPC or additional sudoers grant. Terminal networkless journals and exactly bound committed empty
+prior-boot firewall history may pass reset only with the existing current namespace/table absence checks.
+See [uninstall](docs/UNINSTALL.md) for removal scope and preserved external files.
+
 The v0.3 privileged target splits state by authority and lifetime. Durable ownership and release records live beneath
 `/var/lib/mvmctl`; root-only locks and launch handshakes use `/run/mvmctl/authority/<uid>`. Caller-facing console
 outputs and display-only PID mirrors use the pinned caller-owned directory beneath

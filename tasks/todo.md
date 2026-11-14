@@ -4,6 +4,16 @@ This checklist implements `tasks/plan.md`. Go production and L0/L1 work belongs 
 `tests/system/` and release verification belongs to the `qa-engineer`; ADRs, plans, and documentation belong to the
 `architect`. The architect reviews the actual diff after every implementation slice.
 
+## Administrator uninstall (2026-11-14)
+
+- [x] Add a confirmed root-run uninstall utility using typed per-operator cleanup and native host reset.
+- [x] Admit terminal networkless history and committed empty prior-boot firewall history during reset, retaining
+  current namespace/table absence checks and strict record binding.
+- [x] Verify filesystem refusal/preservation tests and the affected Go packages inside the named QA runner.
+- [x] Exercise a real running-VM removal, fresh reinstall with guest exec, and two-operator cleanup with custom
+  cache/config paths; preserve external mirrors and original files.
+- [x] Complete one independent security review and document installation/removal scope.
+
 ## Accepted memory policy
 
 - [x] Implement the explicitly approved pressure-only policy from [ADR-0019](../docs/adr/0019-pressure-only-vm-memory-control.md).

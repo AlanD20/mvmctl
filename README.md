@@ -31,6 +31,7 @@ Think "Docker for VMs" — one command to create, start, and connect.
 
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
+- [Uninstall](#uninstall)
 - [Quick Start](#quick-start)
 - [Common Tasks](#common-tasks)
 - [Documentation](#documentation)
@@ -101,6 +102,20 @@ sudo /usr/local/bin/mvm host init
 See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference with all flags, options, and selectors.
 
 ---
+
+## Uninstall
+
+To remove an initialized v0.3.0 installation and all enrolled operators' managed data, preview the administrator
+script before confirming deletion:
+
+```bash
+sudo python3 scripts/uninstall.py --dry-run
+sudo python3 scripts/uninstall.py
+```
+
+This removes VMs, artifacts, managed keys and installation state. External asset mirrors, original external SSH
+files and shared system packages are preserved. See [uninstall and reinstall](docs/UNINSTALL.md) for custom paths,
+confirmation options and cleanup failures. It is not a legacy-state migration tool.
 
 ## Quick Start
 

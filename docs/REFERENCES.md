@@ -131,6 +131,9 @@ Host configuration commands for one-time, machine-global setup.
 | `mvm host clean` | `-f, --force` | Observe the caller's root VM inventory, then remove its locally registered networks through typed root authority. Refuses running VMs or incomplete observation; does not force-stop VMs or reset shared host settings. |
 | `mvm host reset` | `--force`, `--operator USER` (direct root only), `--json` | Early administrator rollback under retained global quiescence. Requires marker-only sudoers and compatible journals; refuses live or ambiguous state rather than force-stopping VMs. Admission remains disabled afterward. |
 
+For full v0.3.0 removal, the separate [administrator uninstall script](UNINSTALL.md) cleans all enrolled
+operators' managed data, performs host reset, then removes installation files and authority.
+
 `host install-system` accepts only the exact command shown: no flags or extra arguments, including `--json`,
 `--debug`, or `--verbose`. It runs before ordinary CLI initialization.
 

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a confirmed administrator uninstall script that removes enrolled operators' managed data through typed
+  cleanup, restores recorded host settings, then removes installation authority and binaries. External mirrors,
+  original external SSH files and shared dependencies are preserved. See [uninstall](docs/UNINSTALL.md).
 - Added `mvm image import --resume FULL_IMAGE_ID` for interrupted local-file optimization. It reuses checked
   retained staging and root receipts without extracting again; changed resources, registered IDs and VM sources
   are refused. Failed local imports expose their allocated ID in JSON error details.
@@ -172,6 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed administrator reset rejecting terminal networkless history or a committed empty firewall generation
+  from a previous boot. Reset still requires empty desired state and absent current managed namespaces/tables.
 - Fixed VM launch failures when host connection retries recreate an unresolved ARP entry after cleanup of a reused
   IP. Ordinary unresolved dynamic entries with no MAC are accepted; retained MACs, static/proxy entries and
   netlink failures still block launch. Neighbor-cleanup errors now include their underlying cause.
