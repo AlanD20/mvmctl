@@ -150,7 +150,7 @@ func (inventory *hostResetNetworkInventory) readOwner(ctx context.Context, owner
 	}
 	for _, name := range names {
 		switch name {
-		case "topologies", "removed", "cancelled":
+		case "topologies", "networkless", "removed", "cancelled":
 			if err := inventory.readHistory(ctx, owner, name); err != nil {
 				return err
 			}
@@ -204,11 +204,22 @@ func (inventory *hostResetNetworkInventory) readHistory(
 	for _, leaf := range names {
 		id := strings.TrimSuffix(leaf, ".json")
 		validID := networkIDPattern.MatchString(id)
-		if name == "topologies" {
+		if name == "topologies" || name == "networkless" {
 			validID = vmIDPattern.MatchString(id)
 		}
 		if leaf != id+".json" || !validID {
 			return networkAuthorityCorruptError("host reset network history contains incomplete or unknown state", nil)
+		}
+		if name == "networkless" {
+			journal := &networklessJournal{store: store, vmID: VMID(id)}
+			record, found, err := journal.read(ctx)
+			if err != nil || !found {
+				return networkAuthorityCorruptError("host reset networkless journal is unavailable", err)
+			}
+			if record.Lifecycle != networklessCleaned || record.Pending != "" {
+				return networkAuthorityCorruptError("host reset requires a terminal-cleaned networkless namespace", nil)
+			}
+			continue
 		}
 		if name == "topologies" {
 			if err := inventory.readTopology(ctx, store, VMID(id)); err != nil {

@@ -26,8 +26,8 @@ type hostResetGuardState struct {
 
 // AcquireHostResetGuard proves firewall reset readiness without applying, adopting, or deleting state.
 // CALLER MUST HOLD: exclusive host admission, Jailer index, then network index, through Release.
-// CRITICAL: Only committed empty current-boot state or fully absent metadata, plus observed table
-// absence, qualifies. Partial metadata never supplies reset authority.
+// CRITICAL: Only committed empty state with an exactly bound empty intent, or fully absent metadata,
+// plus observed current table absence, qualifies. Prior-boot records remain historical only.
 func AcquireHostResetGuard(ctx context.Context) (_ *HostResetGuard, returnErr error) {
 	if ctx == nil {
 		return nil, generationAuthorityError("firewall host reset context is required", nil, nil)
@@ -112,21 +112,14 @@ func AcquireHostResetGuard(ctx context.Context) (_ *HostResetGuard, returnErr er
 	if !recordFound || !intentFound {
 		return nil, generationAuthorityError("firewall reset authority metadata is partially missing", nil, nil)
 	}
-	if err := admitGenerationRecord(record, generationRecordBinding{bootID: bootID, namespace: identity}); err != nil {
+	if err := admitHostResetGenerationBinding(record, journal,
+		generationRecordBinding{bootID: bootID, namespace: identity}); err != nil {
 		return nil, err
 	}
 	if record.lifecycle != generationRecordCommitted ||
 		record.committed != generationRecordIdentityFromCompiled(empty) {
 		return nil, generationAuthorityError(
 			"firewall reset requires a committed empty generation; finish cleanup first",
-			nil,
-			nil,
-		)
-	}
-	if journal.BootID != bootID ||
-		journal.HostNamespace != (NamespaceIdentity{Device: identity.device, Inode: identity.inode}) {
-		return nil, generationAuthorityError(
-			"firewall reset intent binding differs from current host authority",
 			nil,
 			nil,
 		)
@@ -168,6 +161,33 @@ func AcquireHostResetGuard(ctx context.Context) (_ *HostResetGuard, returnErr er
 		return nil, err
 	}
 	return guard, nil
+}
+
+// A committed empty prior-boot generation is historical evidence, never authority
+// over current kernel objects. The caller still proves empty intent, absent current
+// tables and unchanged records while retaining the global reset guards.
+func admitHostResetGenerationBinding(
+	record generationRecord,
+	journal intentJournal,
+	current generationRecordBinding,
+) error {
+	if err := validateGenerationRecord(record); err != nil {
+		return err
+	}
+	if err := validateGenerationRecordBinding(current); err != nil {
+		return err
+	}
+	if record.binding.bootID == current.bootID {
+		if err := admitGenerationRecord(record, current); err != nil {
+			return err
+		}
+	}
+	if journal.BootID != record.binding.bootID || journal.HostNamespace != (NamespaceIdentity{
+		Device: record.binding.namespace.device, Inode: record.binding.namespace.inode,
+	}) {
+		return generationAuthorityError("firewall reset intent differs from recorded generation binding", nil, nil)
+	}
+	return nil
 }
 
 func hostResetIntentEmpty(intent Intent) bool {
