@@ -7,7 +7,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/AlanD20/mvmctl"
 license=('MIT')
 depends=(
-  'iproute2' 'nftables' 'iptables' # networking
+  'iproute2'                      # networking
   'qemu-img'                       # image conversion
   'openssh'                        # ssh-keygen
   'e2fsprogs' 'util-linux'         # filesystem tools

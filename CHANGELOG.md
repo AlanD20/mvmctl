@@ -81,6 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Linux packages no longer require the `iptables` or `nft` CLIs. Managed firewall operations use direct netlink;
+  the host kernel still needs the required nftables features.
 - Collapsed the development SQL migrations, including the host-grant tables, into one complete `001_baseline_0_3.sql` fresh-install schema at
   version 1. Existing databases require matching migration filenames and SHA-256 receipts; older or unknown state
   refuses unchanged with clean-install guidance. Future numbered migrations remain supported. SQL, receipts, and
