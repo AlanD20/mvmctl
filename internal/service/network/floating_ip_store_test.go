@@ -95,6 +95,20 @@ func TestFloatingIPStoreRefusesAmbiguousInventoryAndResetWithLiveReservation(t *
 	require.Error(t, err, "duplicate root address authority must not be projected as valid inventory")
 }
 
+func TestFloatingIPStoreAllowsSameNameInDifferentNetworks(t *testing.T) {
+	_, store := floatingIPStoreFixture(t)
+	first := floatingIPContractRecord()
+	require.NoError(t, store.persist(t.Context(), first, nil))
+	second := first
+	second.ID, second.NetworkID = strings.Repeat("c", 32), strings.Repeat("c", 64)
+	require.NoError(t, store.persist(t.Context(), second, nil))
+	items, err := store.list(t.Context())
+	require.NoError(t, err)
+	if diff := cmp.Diff([]floatingIPRecord{first, second}, items); diff != "" {
+		t.Fatalf("network-scoped names changed (-want +got):\n%s", diff)
+	}
+}
+
 func TestFloatingIPResetInventoryRefusesDisappearedDirectory(t *testing.T) {
 	fixture := newNetworkStoreFixture(t)
 	require.Error(t, requireRetiredFloatingIPs(t.Context(), fixture.uid),

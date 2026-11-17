@@ -145,14 +145,15 @@ func (store *floatingIPStore) list(ctx context.Context) ([]floatingIPRecord, err
 			return nil, networkAuthorityCorruptError("floating-IP inventory record is unavailable", err)
 		}
 		if !record.Retired {
-			if _, duplicate := namesSeen[record.Name]; duplicate {
+			nameKey := record.NetworkID + ":" + record.Name
+			if _, duplicate := namesSeen[nameKey]; duplicate {
 				return nil, networkAuthorityCorruptError("floating-IP name is reserved more than once", nil)
 			}
 			addressKey := record.NetworkID + ":" + record.IPv4
 			if _, duplicate := addressesSeen[addressKey]; duplicate {
 				return nil, networkAuthorityCorruptError("floating-IP address is reserved more than once", nil)
 			}
-			namesSeen[record.Name] = struct{}{}
+			namesSeen[nameKey] = struct{}{}
 			addressesSeen[addressKey] = struct{}{}
 		}
 		items = append(items, record)

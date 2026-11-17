@@ -69,7 +69,7 @@ func (server *FloatingIPServer) CreateFloatingIP(
 		if record.Retired {
 			continue
 		}
-		if record.Name == request.Name {
+		if record.NetworkID == request.NetworkID && record.Name == request.Name {
 			return FloatingIPResult{}, errs.New(errs.CodeNetworkAlreadyExists, "floating-IP name is already reserved")
 		}
 		if record.NetworkID == request.NetworkID {
