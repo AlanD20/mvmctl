@@ -18,7 +18,9 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   verify gateway, collision, exhaustion, corrupt-state and subnet boundaries in the named QA runner.
 - [x] Implement root reservation records, generation-checked retirement, persistent tombstones and paginated inventory.
   Include primary/stopped-primary collision checks, network-removal/reset guards and publication failure tests.
-- [ ] Implement operator-facing floating-IP resources, reservation ownership, fencing and transfer recovery.
+- [x] Wire closed root CRUD, the operator API/CLI and cache cleanup; exclude floating reservations from primary
+  allocation. Focused named-runner L2 passed all 11 cases across the initial run and one corrected-oracle retry.
+- [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.
 - [ ] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
@@ -26,10 +28,10 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [ ] Review and integrate the feature into `0.3.0-release`; complete integration CI and release qualification.
 - [ ] Obtain the user's separate authorization before merging the release PR, tagging or publishing.
 
-The codec and root reservation service are unregistered foundations. No Guest Control session or secondary-address
-firewall permission is active yet. Next wire the closed root client, operator API/CLI and cache cleanup before
-registering resource operations. Actual CLI QA must cover allocation against stopped primaries, stopped-policy
-registration against floating reservations, and reboot cleanup; hermetic helper tests do not qualify those journeys.
+Operator reservation CRUD is registered and exercised; no Guest Control session or secondary-address firewall
+permission is active yet. Next implement association and fencing. Actual CLI QA has covered allocation against
+stopped primaries; stopped-policy registration against floating reservations and reboot cleanup remain pending.
+Focused evidence is not a complete release qualification or proof of packet ownership/failover.
 
 ## Administrator uninstall (2026-11-14)
 

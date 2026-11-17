@@ -1,6 +1,6 @@
 # Floating IP Ownership
 
-**Status:** Proposed; implementation in progress, not release-qualified
+**Status:** Operator reservations implemented; ownership/failover proposed and not release-qualified
 **Date:** 2026-11-17
 **Amends:** [ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md), for explicitly authorized secondary IPv4 addresses
 **Requires:** [Guest Control authority](0027-guest-control-authority.md)
@@ -14,6 +14,7 @@ impersonation. Firecracker's existing NIC can carry a guest-configured secondary
 ## Decision
 
 A floating IP is an operator-owned resource within one managed network, separate from a VM's primary address.
+Names are unique within that network; immutable resource IDs identify grants and mutations.
 Allocate an explicit usable IPv4 address or select an available one. Exclude the gateway, network, broadcast,
 primary leases and every other floating reservation. Root serializes primary and floating reservations together;
 a SQLite-only uniqueness check does not exclude privileged launch races.
@@ -28,6 +29,12 @@ The current reservation-only schema grants no guest packet authority. It can the
 reservation under retained index/network locks without recreating the network. Adding ownership must extend
 this removal path with actual fencing; the reservation-only shortcut cannot retire an active guest association.
 Network removal requires live reservations to be removed first; reset admits only verified retirement history.
+
+The registered `floating-ip-create`, `floating-ip-list`, `floating-ip-get` and `floating-ip-remove` actions use
+the existing enrolled-operator dispatch, authenticated caller UID, zero-payload framing and EOF-before-effects
+contract. `mvm floating-ip` exposes reservation create/list/inspect/removal. Forced network cleanup retires its
+reservations first; ordinary pruning retains networks with floating resources. Automatic VM primary allocation
+excludes observed floating reservations, with final root admission still refusing concurrent conflicts.
 
 The CLI allocates, inspects, associates, moves, disassociates and removes resources. Guest delegation permits
 inspection and self-association, renewal or release of an exact resource, never allocation, grant creation or

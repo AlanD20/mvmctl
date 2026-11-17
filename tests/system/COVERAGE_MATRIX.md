@@ -172,6 +172,20 @@ The CLI tables retain their detailed command/flag evidence and gaps. Additional 
 
 ---
 
+## `mvm floating-ip` (feature branch)
+
+Focused installed-candidate checks used `0.3.0-rc.floating-ip` (`6200333b56bb`). Ten cases passed initially;
+one test's error-class expectation was corrected to the existing integer contract and its targeted retry passed.
+These 11 cases do not qualify Guest Control, packet ownership, automatic failover or a complete release matrix.
+
+| Command/Flag | Status | Test File | Test Cases | Notes |
+|---|---|---|---|---|
+| `floating-ip create --network --ip` | ⚡ Shallow | `network/test_floating_ip.py` | explicit/automatic allocation, unusable addresses, duplicates, network-scoped names | L2 root-backed inventory and refusal/preservation readback |
+| `floating-ip ls`, `inspect` | ⚡ Shallow | `network/test_floating_ip.py` | `test_floating_ip_create_inspect_and_explicit_removal` | Full JSON projection; name, ID-prefix and address selectors |
+| `floating-ip rm --force` | ⚡ Shallow | `network/test_floating_ip.py` | removal and reuse cases | Confirmation refusal, checked generation advance, new identity on reuse |
+| Forced network cleanup with floating resources | ⚡ Shallow | `network/test_floating_ip.py` | `test_network_removal_refuses_reservation_and_force_retires_it` | Normal removal refuses; forced cleanup retires children before parent removal |
+| Primary VM address coexistence | ⚡ Shallow | `network/test_floating_ip_lifecycle.py` | automatic primary and stopped-primary cases | L2 actual VMM launch/stop and allocator/status readback; packet/failover behavior remains unqualified |
+
 ## `mvm network`
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
