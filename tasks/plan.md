@@ -5,7 +5,7 @@
 **Feature branch:** `feature/guest-control-floating-ips`
 
 **Status (2026-11-17):** The previously qualified baseline is complete. The user has expanded 0.3.0 to include
-Guest Control, floating IPs and the HA Kubernetes example repair. These additions are not implemented or qualified;
+Guest Control, floating IPs and the HA Kubernetes example repair. These additions are in progress and not release-qualified;
 the release is no longer ready to tag. Develop them on the feature branch, then integrate into `0.3.0-release`
 after contract approval, implementation review and affected QA. Merge to `main`, tagging and publication remain on hold.
 

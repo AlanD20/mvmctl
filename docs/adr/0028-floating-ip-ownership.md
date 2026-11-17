@@ -18,6 +18,17 @@ Allocate an explicit usable IPv4 address or select an available one. Exclude the
 primary leases and every other floating reservation. Root serializes primary and floating reservations together;
 a SQLite-only uniqueness check does not exclude privileged launch races.
 
+The reservation foundation uses canonical records in the fixed per-operator `floating-ips` network-authority
+directory. Creation retains index, network and global firewall mutation authority. Primary admission checks that
+registry; allocation also checks durable stopped-primary reservations, not only current kernel topology. Removal
+retains an immutable identity tombstone and advances the generation; a new identity may reuse the freed name or
+address. Inventory is paginated to respect the existing privileged frame bound without capping resource count.
+
+The current reservation-only schema grants no guest packet authority. It can therefore retire a prior-boot
+reservation under retained index/network locks without recreating the network. Adding ownership must extend
+this removal path with actual fencing; the reservation-only shortcut cannot retire an active guest association.
+Network removal requires live reservations to be removed first; reset admits only verified retirement history.
+
 The CLI allocates, inspects, associates, moves, disassociates and removes resources. Guest delegation permits
 inspection and self-association, renewal or release of an exact resource, never allocation, grant creation or
 selection of another owner. Eligible VMs must belong to the resource's network and enrolled operator.

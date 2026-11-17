@@ -16,6 +16,8 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   exact integer decoding, bounds, cancellation checks and partial-write handling; verify with race tests and vet.
 - [x] Implement pure floating-IP address selection against canonical network authority and supplied reservations;
   verify gateway, collision, exhaustion, corrupt-state and subnet boundaries in the named QA runner.
+- [x] Implement root reservation records, generation-checked retirement, persistent tombstones and paginated inventory.
+  Include primary/stopped-primary collision checks, network-removal/reset guards and publication failure tests.
 - [ ] Implement operator-facing floating-IP resources, reservation ownership, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.
@@ -24,9 +26,10 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [ ] Review and integrate the feature into `0.3.0-release`; complete integration CI and release qualification.
 - [ ] Obtain the user's separate authorization before merging the release PR, tagging or publishing.
 
-The codec and address selector are unregistered foundations. No Guest Control session, persistent floating-IP
-reservation or secondary-address firewall permission is active yet. Root reservation publication is the next
-implementation slice; it must share existing primary-admission locks and participate in cleanup and inventory.
+The codec and root reservation service are unregistered foundations. No Guest Control session or secondary-address
+firewall permission is active yet. Next wire the closed root client, operator API/CLI and cache cleanup before
+registering resource operations. Actual CLI QA must cover allocation against stopped primaries, stopped-policy
+registration against floating reservations, and reboot cleanup; hermetic helper tests do not qualify those journeys.
 
 ## Administrator uninstall (2026-11-14)
 
