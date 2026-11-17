@@ -575,6 +575,8 @@ func decodeKernelExpression(name string, raw []byte, family nftables.TableFamily
 		return decodeKernelRange(raw)
 	case "immediate":
 		return decodeKernelVerdict(raw)
+	case "lookup":
+		return decodeSecondaryLeaseLookup(raw)
 	default:
 		return nil, invalidKernelObservation(fmt.Sprintf("unknown expression %q for family %d", name, family))
 	}
