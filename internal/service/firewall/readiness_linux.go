@@ -110,8 +110,8 @@ func probeReadinessOnThread(ctx context.Context) (returnErr error) {
 	if err != nil {
 		return err
 	}
-	queueKernelApplicationTable(connection, target.bridge)
-	queueKernelApplicationTable(connection, target.inet)
+	queueKernelApplicationTable(connection, target.bridge, false)
+	queueKernelApplicationTable(connection, target.inet, false)
 	if err := flushReadinessConnection(ctx, connection); err != nil {
 		return err
 	}

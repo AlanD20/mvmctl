@@ -11,6 +11,7 @@ type kernelApplicationConnection interface {
 	deleteTable(*nftables.Table)
 	addTable(*nftables.Table)
 	addChain(*nftables.Chain)
+	flushChain(*nftables.Chain)
 	addRule(compiledRule)
 	flush() error
 	interrupt() error
@@ -85,11 +86,14 @@ func (lease *persistentGenerationLease) applyKernelGenerationDuringApplication(
 		return kernelApplicationResult{}, errors.Join(err, connection.close())
 	}
 
-	for _, observed := range observedBefore.tables {
-		connection.deleteTable(&nftables.Table{Family: observed.family, Name: observed.name})
+	retainTables := !expectedBefore.empty && !target.empty
+	if !retainTables {
+		for _, observed := range observedBefore.tables {
+			connection.deleteTable(&nftables.Table{Family: observed.family, Name: observed.name})
+		}
 	}
-	queueKernelApplicationTable(connection, target.bridge)
-	queueKernelApplicationTable(connection, target.inet)
+	queueKernelApplicationTable(connection, target.bridge, retainTables)
+	queueKernelApplicationTable(connection, target.inet, retainTables)
 	if err := ctx.Err(); err != nil {
 		closeErr := connection.close()
 		return kernelApplicationResult{}, generationAuthorityError(
@@ -131,13 +135,21 @@ func (state *persistentGenerationLeaseState) kernelApplicationRecord() (generati
 	return record, nil
 }
 
-func queueKernelApplicationTable(connection kernelApplicationConnection, table compiledTable) {
+func queueKernelApplicationTable(connection kernelApplicationConnection, table compiledTable, retain bool) {
 	if table.table == nil {
 		return
 	}
-	connection.addTable(table.table)
-	for _, chain := range table.chains {
-		connection.addChain(chain)
+	if retain {
+		// Preserve kernel-owned lifetimes when changing rules. Recreating a timed set from its observed
+		// remaining duration would restart that duration after an unbounded delay before the batch commits.
+		for _, chain := range table.chains {
+			connection.flushChain(chain)
+		}
+	} else {
+		connection.addTable(table.table)
+		for _, chain := range table.chains {
+			connection.addChain(chain)
+		}
 	}
 	for _, rule := range table.rules {
 		connection.addRule(rule)

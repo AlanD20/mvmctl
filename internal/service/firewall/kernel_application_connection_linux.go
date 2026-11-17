@@ -58,6 +58,10 @@ func (connection *googleNFTablesApplicationConnection) addChain(chain *nftables.
 	connection.connection.AddChain(chain)
 }
 
+func (connection *googleNFTablesApplicationConnection) flushChain(chain *nftables.Chain) {
+	connection.connection.FlushChain(chain)
+}
+
 func (connection *googleNFTablesApplicationConnection) addRule(rule compiledRule) {
 	connection.connection.AddRule(rule.rule)
 }

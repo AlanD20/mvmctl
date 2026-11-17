@@ -20,7 +20,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestKernelGenerationApplicationQueuesOneCompleteReplacementBatch(t *testing.T) {
+func TestKernelGenerationApplicationPreservesTablesAndReplacesRulesAtomically(t *testing.T) {
 	t.Parallel()
 
 	before, err := compileGeneration(compatibilityIntent())
@@ -39,20 +39,14 @@ func TestKernelGenerationApplicationQueuesOneCompleteReplacementBatch(t *testing
 
 	want := make([]string, 0, 2+2+len(target.bridge.chains)+len(target.bridge.rules)+
 		len(target.inet.chains)+len(target.inet.rules))
-	want = append(want,
-		"delete table bridge/mvmctl_bridge",
-		"delete table inet/mvmctl_inet",
-		"add table bridge/mvmctl_bridge",
-	)
 	for _, chain := range target.bridge.chains {
-		want = append(want, "add chain bridge/mvmctl_bridge/"+chain.Name)
+		want = append(want, "flush chain bridge/mvmctl_bridge/"+chain.Name)
 	}
 	for _, rule := range target.bridge.rules {
 		want = append(want, "add rule bridge/mvmctl_bridge/"+rule.rule.Chain.Name+"/"+rule.identity)
 	}
-	want = append(want, "add table inet/mvmctl_inet")
 	for _, chain := range target.inet.chains {
-		want = append(want, "add chain inet/mvmctl_inet/"+chain.Name)
+		want = append(want, "flush chain inet/mvmctl_inet/"+chain.Name)
 	}
 	for _, rule := range target.inet.rules {
 		want = append(want, "add rule inet/mvmctl_inet/"+rule.rule.Chain.Name+"/"+rule.identity)
@@ -84,9 +78,36 @@ func TestKernelGenerationApplicationDoesNotDeleteAbsentTables(t *testing.T) {
 	assert.True(t, result.commitAttempted)
 	for _, event := range connection.events {
 		assert.NotContains(t, event, "delete table")
+		assert.NotContains(t, event, "flush chain")
 	}
+	assert.Contains(t, connection.events, "add table bridge/mvmctl_bridge")
+	assert.Contains(t, connection.events, "add table inet/mvmctl_inet")
 	assert.Equal(t, 1, connection.flushCalls)
 	assert.Equal(t, 1, connection.closeCalls)
+}
+
+func TestKernelGenerationApplicationDeletesTablesOnlyForAdmittedEmptyTarget(t *testing.T) {
+	t.Parallel()
+	before, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+	target, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
+	connection := &recordingKernelApplicationConnection{}
+	lease := kernelApplicationLease(t, before, target)
+	result, err := lease.applyKernelGeneration(
+		t.Context(),
+		connection,
+		kernelObservationFromCompiled(before),
+		before,
+		target,
+	)
+	require.NoError(t, err)
+	assert.True(t, result.commitAttempted)
+	if diff := cmp.Diff([]string{
+		"delete table bridge/mvmctl_bridge", "delete table inet/mvmctl_inet", "flush", "close",
+	}, connection.events); diff != "" {
+		t.Fatalf("teardown batch (-want +got):\n%s", diff)
+	}
 }
 
 func TestKernelGenerationApplicationRejectsEmptyBeforeWithoutEmptyRecordAuthority(t *testing.T) {
@@ -1017,6 +1038,10 @@ func (connection *recordingKernelApplicationConnection) addChain(chain *nftables
 	connection.record("add chain " + kernelApplicationTableIdentity(chain.Table) + "/" + chain.Name)
 }
 
+func (connection *recordingKernelApplicationConnection) flushChain(chain *nftables.Chain) {
+	connection.record("flush chain " + kernelApplicationTableIdentity(chain.Table) + "/" + chain.Name)
+}
+
 func (connection *recordingKernelApplicationConnection) addRule(rule compiledRule) {
 	connection.record("add rule " + kernelApplicationTableIdentity(rule.rule.Table) + "/" +
 		rule.rule.Chain.Name + "/" + rule.identity)
@@ -1096,27 +1121,11 @@ type kernelApplicationProtocolCommand struct {
 }
 
 func kernelApplicationProtocolCommands(target compiledGeneration) []kernelApplicationProtocolCommand {
-	commands := []kernelApplicationProtocolCommand{
-		{
-			messageType: kernelApplicationNetlinkMessageType(unix.NFT_MSG_DELTABLE),
-			family:      nftables.TableFamilyBridge,
-			table:       managedBridgeTableName,
-		},
-		{
-			messageType: kernelApplicationNetlinkMessageType(unix.NFT_MSG_DELTABLE),
-			family:      nftables.TableFamilyINet,
-			table:       managedINetTableName,
-		},
-	}
+	var commands []kernelApplicationProtocolCommand
 	for _, table := range [...]compiledTable{target.bridge, target.inet} {
-		commands = append(commands, kernelApplicationProtocolCommand{
-			messageType: kernelApplicationNetlinkMessageType(unix.NFT_MSG_NEWTABLE),
-			family:      table.table.Family,
-			table:       table.table.Name,
-		})
 		for _, chain := range table.chains {
 			commands = append(commands, kernelApplicationProtocolCommand{
-				messageType: kernelApplicationNetlinkMessageType(unix.NFT_MSG_NEWCHAIN),
+				messageType: kernelApplicationNetlinkMessageType(unix.NFT_MSG_DELRULE),
 				family:      table.table.Family,
 				table:       table.table.Name,
 				chain:       chain.Name,
@@ -1155,6 +1164,11 @@ func decodeKernelApplicationProtocolCommand(
 	case kernelApplicationNetlinkMessageType(unix.NFT_MSG_NEWCHAIN):
 		command.table = kernelApplicationProtocolAttribute(t, attributes, unix.NFTA_CHAIN_TABLE)
 		command.chain = kernelApplicationProtocolAttribute(t, attributes, unix.NFTA_CHAIN_NAME)
+	case kernelApplicationNetlinkMessageType(unix.NFT_MSG_DELRULE):
+		// No handle means flush this exact chain, rather than deleting one rule or another table's state.
+		require.Len(t, attributes, 2)
+		command.table = kernelApplicationProtocolAttribute(t, attributes, unix.NFTA_RULE_TABLE)
+		command.chain = kernelApplicationProtocolAttribute(t, attributes, unix.NFTA_RULE_CHAIN)
 	case kernelApplicationNetlinkMessageType(unix.NFT_MSG_NEWRULE):
 		command.table = kernelApplicationProtocolAttribute(t, attributes, unix.NFTA_RULE_TABLE)
 		command.chain = kernelApplicationProtocolAttribute(t, attributes, unix.NFTA_RULE_CHAIN)
