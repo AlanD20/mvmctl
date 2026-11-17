@@ -1,10 +1,44 @@
 # v0.3.0 Clean-Break Security Release Plan
 
-**Branch:** `0.3.0-release`
+**Release branch:** `0.3.0-release`
 
-**Status (2026-11-13):** Implementation and accepted local qualification are complete, including the
-subsequent host-policy, image-recovery, networkless-launch and neighbor-race fixes. Final integration checks,
-current remote CI and the user's release decision precede tagging. v0.3.0 remains unreleased.
+**Feature branch:** `feature/guest-control-floating-ips`
+
+**Status (2026-11-17):** The previously qualified baseline is complete. The user has expanded 0.3.0 to include
+Guest Control, floating IPs and the HA Kubernetes example repair. These additions are not implemented or qualified;
+the release is no longer ready to tag. Develop them on the feature branch, then integrate into `0.3.0-release`
+after contract approval, implementation review and affected QA. Merge to `main`, tagging and publication remain on hold.
+
+## Guest Control and floating IP scope
+
+Guest Control provides one authenticated, versioned mechanism for guest-initiated operations, with named, typed
+feature methods. Floating-IP association is the first feature. Both the operator CLI and the guest agent use the
+same feature implementation with separate authorization: guest requests retain their delegated VM identity and
+never inherit the operator's full authority. Do not introduce arbitrary CLI, shell, host-path or netlink execution.
+
+Floating IPs are network-owned reservations separate from a VM's primary address. Transfers must fence the old
+owner before authorizing the new one. The host remains authoritative even if the old guest is unresponsive.
+The address need not be `.100`; allocation must respect the managed subnet and existing reservations.
+
+### Delivery sequence
+
+1. Propose ADRs for Guest Control and floating-IP ownership. Resolve connection identity and VM incarnation,
+   delegation at privileged effects, host endpoint lifecycle, transfer recovery, traffic-policy semantics and
+   automatic failover integration before implementing those contracts. A persistent host endpoint changes the
+   current lifecycle architecture; keep the single installed binary and define reset, uninstall and upgrade behavior.
+2. Implement typed floating-IP resource operations for the operator CLI: allocation, inspection, association,
+   transfer, disassociation and removal, including root-authorized reservations and fencing.
+3. Implement the shared control transport and delegated admission for those operations, with bounded requests,
+   explicit errors, replay handling and revocation. Add no handlers for hypothetical future features.
+4. Extend the guest agent to request the same operations and apply guest addresses only after host authorization.
+   Define restart and restore behavior without treating guest claims as proof of identity.
+5. Repair the HA example: three control-plane nodes, current supported binary requirements, explicit traffic and
+   exec policies, current environment syntax, reliable helpers and host-authorized floating-IP failover.
+6. Complete behavior-focused Go and Python system coverage, public Markdown and website documentation, and
+   affected qualification in the named disposable runner. Review each slice once and verify correction deltas;
+   run complete integration gates before declaring the expanded release ready.
+
+Use isolated commits. Keep earlier qualification evidence as baseline evidence, not proof of these additions.
 
 ## Memory policy and sign-off
 

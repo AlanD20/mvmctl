@@ -4,6 +4,20 @@ This checklist implements `tasks/plan.md`. Go production and L0/L1 work belongs 
 `tests/system/` and release verification belongs to the `qa-engineer`; ADRs, plans, and documentation belong to the
 `architect`. The architect reviews the actual diff after every implementation slice.
 
+## Guest Control and floating IP expansion (2026-11-17)
+
+Work on `feature/guest-control-floating-ips`, then integrate into `0.3.0-release` after the gates below.
+Earlier checked items describe the qualified baseline; they do not qualify this expansion.
+
+- [ ] Approve Guest Control and floating-IP ADRs, including identity, delegation, endpoint lifecycle and failover.
+- [ ] Implement operator-facing floating-IP resources, reservation ownership, fencing and transfer recovery.
+- [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
+- [ ] Implement agent access to the same operations and guest address reconciliation.
+- [ ] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
+- [ ] Complete affected Go and Python system tests in `mvmctl-030-test`, plus documentation and website updates.
+- [ ] Review and integrate the feature into `0.3.0-release`; complete integration CI and release qualification.
+- [ ] Obtain the user's separate authorization before merging the release PR, tagging or publishing.
+
 ## Administrator uninstall (2026-11-14)
 
 - [x] Add a confirmed root-run uninstall utility using typed per-operator cleanup and native host reset.
