@@ -85,6 +85,12 @@ func (s *LeaseController) IsAvailable(ctx context.Context, ip string) (bool, err
 
 // Lease allocates the next available IP from this network's subnet.
 func (s *LeaseController) Lease(ctx context.Context, vmID string) (string, error) {
+	return s.LeaseExcluding(ctx, vmID, nil)
+}
+
+// LeaseExcluding avoids root-owned secondary reservations while allocating the primary address.
+// Root launch admission still serializes final ownership against concurrent reservations.
+func (s *LeaseController) LeaseExcluding(ctx context.Context, vmID string, excluded []string) (string, error) {
 	maxRetries := 10
 	var lastError error
 
@@ -93,9 +99,10 @@ func (s *LeaseController) Lease(ctx context.Context, vmID string) (string, error
 		if err != nil {
 			return "", err
 		}
-		usedIPs := make([]string, len(leases))
-		for i, l := range leases {
-			usedIPs[i] = l.IPv4
+		usedIPs := make([]string, 0, len(leases)+len(excluded))
+		usedIPs = append(usedIPs, excluded...)
+		for _, l := range leases {
+			usedIPs = append(usedIPs, l.IPv4)
 		}
 
 		allocatedIP, err := libnet.AllocateNextIP(usedIPs, s.net.Subnet, s.net.IPv4Gateway)
@@ -136,9 +143,16 @@ func (s *LeaseController) LeaseSpecific(ctx context.Context, ip, vmID string) (s
 	}
 
 	vmIDCopy := vmID
-	_, err = s.leaseRepo.Acquire(ctx, s.net.ID, ip, &vmIDCopy)
+	lease, err := s.leaseRepo.Acquire(ctx, s.net.ID, ip, &vmIDCopy)
 	if err != nil {
 		return "", err
+	}
+	if lease == nil {
+		return "", errs.New(
+			errs.CodeNetworkError,
+			"guest IP was claimed concurrently; choose another address",
+			errs.WithClass(errs.ClassConflict),
+		)
 	}
 	return ip, nil
 }
