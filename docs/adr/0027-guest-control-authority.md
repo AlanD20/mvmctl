@@ -1,0 +1,97 @@
+# Guest Control Authority
+
+**Status:** Proposed; implementation in progress, not release-qualified
+**Date:** 2026-11-17
+**Amends:** [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md), for the retained Guest Control worker
+
+## Context
+
+A guest needs to request specific mvmctl features without becoming an operator. Floating-IP association is the
+first use case. A raw CLI proxy would give a compromised guest access to unrelated operations. Reusing the
+command-bound VM-exec relay would also make background availability depend on an interactive host command.
+
+The existing console and NoCloud services establish the single-binary subprocess precedent. The retained
+VM-exec sidecar establishes exact Firecracker-peer binding. Neither already implements Guest Control.
+
+## Decision
+
+Provide a versioned Guest Control session with closed, typed feature methods. Both the operator CLI and guest
+agent exercise the floating-IP implementation. Operator admission and guest delegation remain separate.
+Adding another feature requires a named method and its own authorization contract, not a plugin or command hook.
+
+### Connection and identity
+
+The host establishes a dedicated connection to the agent through the VM's protected Firecracker vsock socket.
+The guest submits requests on that connection; it does not provide a VM ID, owner UID or incarnation as identity.
+Before accepting requests, root verifies the live VMM peer and current launch incarnation using the existing
+process, socket and active-record authorities. A guest token alone, numeric CID or cache record is insufficient.
+The session bootstrap must authenticate the agent endpoint as well as the VMM socket before it becomes ready.
+
+A managed worker of the installed `mvm` binary maintains the session while the VM is running and delegated
+features are enabled. No separate helper executable or broad sudoers permission is introduced. This is a new
+retained-lifetime exception: it must be registered explicitly, bounded per VM, and stopped by authenticated
+lifecycle cleanup. It must not retain a global network mutation lock while waiting for guest input.
+
+The exact worker spawn, recovery and bootstrap implementation must be reviewed before dispatch registration.
+It must survive an ordinary CLI exit, reconnect only to the same admitted incarnation, stop on VMM exit and
+invalidate the old session on stop, restore or replacement. Failed setup grants no authority.
+
+### Delegation and privileged effects
+
+An operator grants exact operations on exact resource IDs to an eligible VM. Delegations live in root-controlled
+authority; SQLite and caller-provided policy documents are display or desired-state inputs, never proof of a grant.
+Requests carry a guest principal derived from the retained session through to the privileged effect. They must
+not be converted into requests authorized merely because the worker runs as root or belongs to an enrolled operator.
+
+The effect checks the current incarnation, grant, resource ownership and operation precondition while holding
+the relevant mutation lock. Revocation and mutation share that serialization point. Revocation stops later
+effects and fences any ownership that the revoked grant sustained. Other root/CAP_NET_ADMIN administrators
+remain trusted; detected foreign state continues to refuse rather than being overwritten.
+
+Guest root can exercise every delegation granted to that VM. Local agent permissions restrict ordinary guest
+users but cannot isolate an application from guest root. The local control socket is privileged by default.
+
+### Protocol
+
+The transport is distinct from VM-exec and ordinary privileged-dispatch frames. Version 1 uses `MVMGCTL1`, a
+big-endian uint16 wire version and uint32 JSON-body length. Bodies are limited to 16 KiB. Requests contain the
+exact fields `schema_version`, `request_id`, `feature`, `operation` and `input`. Request IDs are canonical UUIDv4.
+The first feature is `floating_ip`; its initial guest methods are `inspect`, `associate`, `renew` and `release`.
+Its input names an exact resource ID and expected ownership generation. A guest can associate only itself.
+
+Unknown fields, duplicate fields, invalid UTF-8, unknown versions/methods, trailing JSON and invalid typed inputs
+refuse before effects. There are no paths, commands, arbitrary arguments, caller identities or raw kernel payloads.
+Decoding is structural admission, not authorization. The session owner supplies transport deadlines and closes
+the connection on cancellation; a context check alone cannot interrupt a blocked generic reader.
+
+One request is in flight per session. Bounded request IDs correlate results; they do not promise exactly-once
+execution. A timeout leaves the outcome unknown. Ownership generations and inspection support recovery without
+replaying a stale mutation. Reusing an old expected generation cannot reverse a newer ownership decision.
+Error responses use bounded public projections of `DomainError`, excluding host paths, tokens and wrapped causes.
+
+### Layer placement
+
+- `internal/lib/guestcontrolwire`: closed request/result framing, shared by host and embedded agent.
+- `pkg/api/inputs`: operator input validation and resolution.
+- `pkg/api`: operator orchestration across VM, network and policy domains.
+- `internal/core/network`: floating-IP desired-state repositories and network feature services.
+- `internal/service/jailer`: retained VMM process, socket and incarnation proof.
+- `internal/service/network`: root floating-IP resources, delegation and fencing under existing network locks.
+- `internal/service/privileged`: explicitly registered typed root dispatch and retained-worker boundary.
+- `internal/service/agent`: session client, local admission and guest address reconciliation.
+
+Services do not import the API layer. Core domains do not import each other. The shared root feature implementation
+accepts an admitted principal; the Guest Control worker is not an alternative cross-domain API orchestrator.
+
+## Consequences
+
+Background guest control introduces a managed process lifecycle. Host init, reset, cache cleanup, VM removal,
+uninstall and binary replacement must account for workers and revoke their authority before deleting records.
+No enabled delegation means no new background worker is needed. Guest Control does not grant guest-to-host
+network reachability or VM-to-VM exec permission.
+
+## Verification
+
+Verify codec refusal and framing boundaries, then guest spoofing, stale incarnations, revoked grants, worker
+failure, bounded concurrency and privileged-effect admission in the disposable runner. Registration is gated on
+the identity/bootstrap review and those tests. A codec implementation alone is not a working control plane.
