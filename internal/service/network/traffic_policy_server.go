@@ -343,6 +343,19 @@ func (authority *trafficPolicyAuthority) begin(ctx context.Context, sourceNetwor
 		return err
 	}
 	for _, reservation := range reservations {
+		addresses, err := floatingIPv4Reservations(
+			ctx,
+			networks[reservation.NetworkID].store,
+			NetworkID(reservation.NetworkID),
+		)
+		if err != nil {
+			return err
+		}
+		for _, address := range addresses {
+			if address == reservation.IPv4 {
+				return networkAuthorityValidationError("stopped guest address is reserved by a floating IP")
+			}
+		}
 		if err := authority.firewall.RegisterStoppedEndpoint(ctx, reservation); err != nil {
 			return err
 		}

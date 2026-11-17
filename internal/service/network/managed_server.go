@@ -255,6 +255,13 @@ func (server *ManagedNetworkServer) RemoveManagedNetwork(
 		return ManagedNetworkRemovalResult{}, err
 	}
 	defer func() { returnErr = tx.release(ctx, returnErr) }()
+	if addresses, err := floatingIPv4Reservations(ctx, tx.store, tx.key.networkID); err != nil {
+		return ManagedNetworkRemovalResult{}, err
+	} else if len(addresses) != 0 {
+		return ManagedNetworkRemovalResult{}, networkAuthorityValidationError(
+			"remove this network's floating IPs before removing the network",
+		)
+	}
 	if !tx.found || tx.removed {
 		if err := tx.completeAbsentRemoval(ctx); err != nil {
 			return ManagedNetworkRemovalResult{}, err
@@ -691,7 +698,8 @@ func (tx *managedNetworkTransaction) checkOwnerPrefixes(
 		return networkAuthorityEffectError("enumerate managed network records", err)
 	}
 	for _, name := range names {
-		if name == "topologies" || name == "removed" || name == "cancelled" || name == "networkless" {
+		if name == "topologies" || name == "removed" || name == "cancelled" || name == "networkless" ||
+			name == floatingIPDirectory {
 			continue
 		}
 		id := strings.TrimSuffix(name, ".json")

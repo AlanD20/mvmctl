@@ -32,7 +32,11 @@ func reserveTopologyEndpoint(
 		}
 		reservationErr := inspectOwnerEndpointReservations(ctx, uid, key, endpoint)
 		closeErr := uid.Release(context.WithoutCancel(ctx))
-		if err := appendNetworkAuthorityError(reservationErr, "release endpoint reservation owner", closeErr); err != nil {
+		if err := appendNetworkAuthorityError(
+			reservationErr,
+			"release endpoint reservation owner",
+			closeErr,
+		); err != nil {
 			return err
 		}
 	}
@@ -45,6 +49,15 @@ func inspectOwnerEndpointReservations(
 	key topologyKey,
 	endpoint endpointL3,
 ) (returnErr error) {
+	addresses, err := floatingIPv4Reservations(ctx, uid, key.networkID)
+	if err != nil {
+		return err
+	}
+	for _, address := range addresses {
+		if address == endpoint.guestAddress.value {
+			return networkAuthorityValidationError("guest address is reserved by a floating IP")
+		}
+	}
 	fd, err := uid.deps.openAt2(ctx, uid.stateFD, "topologies", &unix.OpenHow{
 		Flags: networkStoreDirectoryFlags, Resolve: networkStoreResolve,
 	})
@@ -61,7 +74,15 @@ func inspectOwnerEndpointReservations(
 			uid.deps.close(context.WithoutCancel(ctx), fd),
 		)
 	}()
-	if err := verifyNetworkStoreDirectory(ctx, uid.deps, fd, "topologies", uid.policy, networkStoreDirectoryMode, true); err != nil {
+	if err := verifyNetworkStoreDirectory(
+		ctx,
+		uid.deps,
+		fd,
+		"topologies",
+		uid.policy,
+		networkStoreDirectoryMode,
+		true,
+	); err != nil {
 		return err
 	}
 	store := &networkStoreUID{deps: uid.deps, policy: uid.policy, uid: uid.uid, stateFD: fd}

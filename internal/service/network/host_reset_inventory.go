@@ -150,6 +150,10 @@ func (inventory *hostResetNetworkInventory) readOwner(ctx context.Context, owner
 	}
 	for _, name := range names {
 		switch name {
+		case floatingIPDirectory:
+			if err := requireRetiredFloatingIPs(ctx, owner); err != nil {
+				return err
+			}
 		case "topologies", "networkless", "removed", "cancelled":
 			if err := inventory.readHistory(ctx, owner, name); err != nil {
 				return err
