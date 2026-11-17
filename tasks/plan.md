@@ -41,9 +41,10 @@ The address need not be `.100`; allocation must respect the managed subnet and e
 Use isolated commits. Keep earlier qualification evidence as baseline evidence, not proof of these additions.
 
 Proposed contracts: [Guest Control authority](../docs/adr/0027-guest-control-authority.md) and
-[floating-IP ownership](../docs/adr/0028-floating-ip-ownership.md). The implemented request codec and pure address
-selector are not registered runtime capabilities. In particular, selection does not reserve an address: root must
-gather primary and floating reservations and publish under the existing network and global firewall mutation locks.
+[floating-IP ownership](../docs/adr/0028-floating-ip-ownership.md). Operator reservation CRUD is implemented;
+the shared request/result codecs do not yet establish a Guest Control session. Root serializes reservations
+under the existing network and global firewall locks. Ordinary rule updates retain the admitted tables, preparing
+for timed secondary authority without restarting leases. Timed sets, packet fencing and association remain next.
 
 ## Memory policy and sign-off
 

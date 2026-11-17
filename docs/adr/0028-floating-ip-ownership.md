@@ -68,6 +68,18 @@ proposed mechanism; its interaction with complete firewall-generation replacemen
 Do not ship a userspace-only timer as a guarantee against split brain. Exact lease timings and the failover
 controller interface remain to be established with the enforcement implementation.
 
+The enforcement design uses a named timed set of host-veth/address pairs in the managed bridge table. Ordinary
+firewall updates now retain the admitted tables and chains and replace their rules in one batch. Initial creation
+still creates the tables; verified empty teardown deletes them. Timed sets and their observation are not yet
+implemented. Retention is necessary because the pinned nftables library writes relative element timeouts;
+recreating an element from its observed remaining time could extend its lease by the delay before commit.
+
+Source IPv4 and ARP checks must admit only primary addresses and live secondary pairs. A separate bridge
+postrouting fence must reject floating-IP delivery through an unauthorized output, including host-originated
+traffic and stale neighbor entries. This fence remains after lease expiry. Unrelated policy updates must preserve
+the timed elements; only an admitted association or renewal may start a new timeout. Kernel packet tests must
+prove these properties before secondary authority is enabled.
+
 An operator may explicitly transfer ownership. Host reboot expires delegated ownership; no old monotonic lease
 is revived. VM stop, deletion or restore fences its active secondary authority. Snapshot restore does not clone
 ownership or delegation into another incarnation. Paused VMs cannot sustain delegated leases by guest renewal.

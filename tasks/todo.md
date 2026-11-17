@@ -14,12 +14,18 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   [floating-IP ownership](../docs/adr/0028-floating-ip-ownership.md) contracts, recording unresolved runtime details.
 - [x] Implement strict typed Guest Control request framing, including duplicate/unknown-field refusal,
   exact integer decoding, bounds, cancellation checks and partial-write handling; verify with race tests and vet.
+- [x] Implement request-bound typed responses with a closed result/error union, ownership consistency checks and
+  bounded lease durations. Verify independent frames, ambiguous input refusal and error-detail exclusion.
 - [x] Implement pure floating-IP address selection against canonical network authority and supplied reservations;
   verify gateway, collision, exhaustion, corrupt-state and subnet boundaries in the named QA runner.
 - [x] Implement root reservation records, generation-checked retirement, persistent tombstones and paginated inventory.
   Include primary/stopped-primary collision checks, network-removal/reset guards and publication failure tests.
 - [x] Wire closed root CRUD, the operator API/CLI and cache cleanup; exclude floating reservations from primary
   allocation. Focused named-runner L2 passed all 11 cases across the initial run and one corrected-oracle retry.
+- [x] Retain admitted firewall tables across ordinary atomic rule updates. Focused vet/race checks, paired build
+  and both nested floating-IP lifecycle cases passed in the named QA runner.
+- [ ] Add timed secondary address pairs to the sealed firewall compiler and strict kernel readback, including
+  ingress IPv4/ARP and host-originated destination fencing without extending leases on unrelated updates.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.

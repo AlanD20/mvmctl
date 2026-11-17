@@ -69,6 +69,16 @@ execution. A timeout leaves the outcome unknown. Ownership generations and inspe
 replaying a stale mutation. Reusing an old expected generation cannot reverse a newer ownership decision.
 Error responses use bounded public projections of `DomainError`, excluding host paths, tokens and wrapped causes.
 
+The implemented response codec binds the request ID, operation and resource to the outstanding request. Its
+envelope contains `schema_version`, `request_id`, `feature`, `operation` and exactly one of `result` or `error`.
+A result reports the resource ID, private IPv4 address, generation, ownership relative to the guest
+(`unassociated`, `self` or `other`) and remaining lease milliseconds. Lease time is measured at the host's
+observation; receiving a response does not restart it. Association and renewal success require self ownership;
+renewal retains the generation, while release reports an unassociated resource with no remaining lease.
+Errors contain only a closed public code: `invalid`, `denied`, `conflict`, `unavailable`, `internal` or
+`outcome_unknown`. The host must select that projection explicitly rather than serialize an internal error.
+These codecs do not establish a session, authorize an operation or configure a guest address.
+
 ### Layer placement
 
 - `internal/lib/guestcontrolwire`: closed request/result framing, shared by host and embedded agent.
