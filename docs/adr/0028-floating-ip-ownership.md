@@ -70,8 +70,9 @@ controller interface remain to be established with the enforcement implementatio
 
 The enforcement design uses a named timed set of host-veth/address pairs in the managed bridge table. Ordinary
 firewall updates now retain the admitted tables and chains and replace their rules in one batch. Initial creation
-still creates the tables; verified empty teardown deletes them. Timed sets and their observation are not yet
-implemented. Retention is necessary because the pinned nftables library writes relative element timeouts;
+still creates the tables; verified empty teardown deletes them. Typed keys, guard helpers and strict metadata
+decoding are implemented; generation-bound sets and complete element observation are not yet connected.
+Retention is necessary because the pinned nftables library writes relative element timeouts;
 recreating an element from its observed remaining time could extend its lease by the delay before commit.
 
 Source IPv4 and ARP checks must admit only primary addresses and live secondary pairs. A separate bridge

@@ -24,6 +24,8 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   allocation. Focused named-runner L2 passed all 11 cases across the initial run and one corrected-oracle retry.
 - [x] Retain admitted firewall tables across ordinary atomic rule updates. Focused vet/race checks, paired build
   and both nested floating-IP lifecycle cases passed in the named QA runner.
+- [x] Implement strict secondary-set metadata, tuple-key and lookup grammar plus typed guard helpers. Confirm
+  concatenated lookup, retained timeout and expiry in an isolated QA network namespace; vet/race checks pass.
 - [ ] Add timed secondary address pairs to the sealed firewall compiler and strict kernel readback, including
   ingress IPv4/ARP and host-originated destination fencing without extending leases on unrelated updates.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
