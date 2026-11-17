@@ -10,6 +10,12 @@ Work on `feature/guest-control-floating-ips`, then integrate into `0.3.0-release
 Earlier checked items describe the qualified baseline; they do not qualify this expansion.
 
 - [ ] Approve Guest Control and floating-IP ADRs, including identity, delegation, endpoint lifecycle and failover.
+- [x] Draft [Guest Control authority](../docs/adr/0027-guest-control-authority.md) and
+  [floating-IP ownership](../docs/adr/0028-floating-ip-ownership.md) contracts, recording unresolved runtime details.
+- [x] Implement strict typed Guest Control request framing, including duplicate/unknown-field refusal,
+  exact integer decoding, bounds, cancellation checks and partial-write handling; verify with race tests and vet.
+- [x] Implement pure floating-IP address selection against canonical network authority and supplied reservations;
+  verify gateway, collision, exhaustion, corrupt-state and subnet boundaries in the named QA runner.
 - [ ] Implement operator-facing floating-IP resources, reservation ownership, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.
@@ -17,6 +23,10 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [ ] Complete affected Go and Python system tests in `mvmctl-030-test`, plus documentation and website updates.
 - [ ] Review and integrate the feature into `0.3.0-release`; complete integration CI and release qualification.
 - [ ] Obtain the user's separate authorization before merging the release PR, tagging or publishing.
+
+The codec and address selector are unregistered foundations. No Guest Control session, persistent floating-IP
+reservation or secondary-address firewall permission is active yet. Root reservation publication is the next
+implementation slice; it must share existing primary-admission locks and participate in cleanup and inventory.
 
 ## Administrator uninstall (2026-11-14)
 

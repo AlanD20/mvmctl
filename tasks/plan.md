@@ -40,6 +40,11 @@ The address need not be `.100`; allocation must respect the managed subnet and e
 
 Use isolated commits. Keep earlier qualification evidence as baseline evidence, not proof of these additions.
 
+Proposed contracts: [Guest Control authority](../docs/adr/0027-guest-control-authority.md) and
+[floating-IP ownership](../docs/adr/0028-floating-ip-ownership.md). The implemented request codec and pure address
+selector are not registered runtime capabilities. In particular, selection does not reserve an address: root must
+gather primary and floating reservations and publish under the existing network and global firewall mutation locks.
+
 ## Memory policy and sign-off
 
 [ADR-0019](../docs/adr/0019-pressure-only-vm-memory-control.md) records the user's approved replacement of
