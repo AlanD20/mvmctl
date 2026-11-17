@@ -112,6 +112,7 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	if op != nil {
 		cmd.AddCommand(NewVMCmd(op, op))
 		cmd.AddCommand(NewNetworkCmd(op, op))
+		cmd.AddCommand(NewFloatingIPCmd(op, op))
 		cmd.AddCommand(NewImageCmd(op, op))
 		cmd.AddCommand(NewKernelCmd(op, op))
 		cmd.AddCommand(NewBinaryCmd(op, op))

@@ -16,6 +16,7 @@ type Service struct {
 	repo        Repository
 	trafficRepo TrafficPolicyRepository
 	managed     *networkservice.ManagedNetworkClient
+	floating    *networkservice.FloatingIPClient
 }
 
 // NewService binds desired-state repositories to the fixed privileged network client.
@@ -27,6 +28,7 @@ func NewService(
 		repo:        repo,
 		trafficRepo: trafficRepo,
 		managed:     networkservice.NewManagedNetworkClient(),
+		floating:    networkservice.NewFloatingIPClient(),
 	}
 }
 
@@ -87,6 +89,17 @@ func (service *Service) Remove(ctx context.Context, network *model.NetworkItem, 
 			"network is referenced by VMs or snapshots",
 			errs.WithClass(errs.ClassConflict),
 		)
+	}
+	if force {
+		items, err := service.ListFloatingIPs(ctx, network.ID)
+		if err != nil && !errs.IsNotFound(err) {
+			return err
+		}
+		for _, item := range items {
+			if _, err := service.RemoveFloatingIP(ctx, item); err != nil {
+				return err
+			}
+		}
 	}
 	if _, err := service.managed.RemoveManagedNetwork(
 		ctx,

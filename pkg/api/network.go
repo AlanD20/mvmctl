@@ -224,6 +224,15 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 		if !includeAll && len(leases) > 0 {
 			continue
 		}
+		if !includeAll {
+			hasFloatingIPs, err := op.Services.Network.HasFloatingIPs(ctx, item.ID)
+			if err != nil && !errs.IsNotFound(err) {
+				return removed, err
+			}
+			if hasFloatingIPs {
+				continue
+			}
+		}
 		if !dryRun {
 			if err := op.Services.Network.Remove(ctx, item, includeAll); err != nil {
 				return removed, err

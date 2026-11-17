@@ -283,6 +283,23 @@ func (op *Operation) vmBuilderExecute(
 		emitProgress(builder.onProgress, "network", "running", "Configuring network...")
 		var networkErr error
 		tl.StageFunc("network", func() {
+			floatingIPs, err := op.Services.Network.ListFloatingIPs(ctx, resolved.Network.ID)
+			if err != nil {
+				networkErr = fmt.Errorf("read floating-IP reservations: %w", err)
+				return
+			}
+			var excluded []string
+			for _, item := range floatingIPs {
+				if resolved.RequestedGuestIP != nil && item.IPv4 == *resolved.RequestedGuestIP {
+					networkErr = errs.New(
+						errs.CodeNetworkError,
+						"guest IP is reserved by a floating IP",
+						errs.WithClass(errs.ClassConflict),
+					)
+					return
+				}
+				excluded = append(excluded, item.IPv4)
+			}
 			leaseCtrl, err := network.NewLeaseController(ctx, resolved.Network, op.Repos.Lease, nil)
 			if err != nil {
 				networkErr = fmt.Errorf("create lease controller: %w", err)
@@ -296,7 +313,7 @@ func (op *Operation) vmBuilderExecute(
 				}
 				builder.guestIP = ip
 			} else {
-				ip, leaseErr := leaseCtrl.Lease(ctx, builder.vmID)
+				ip, leaseErr := leaseCtrl.LeaseExcluding(ctx, builder.vmID, excluded)
 				if leaseErr != nil {
 					networkErr = fmt.Errorf("lease ip: %w", leaseErr)
 					return

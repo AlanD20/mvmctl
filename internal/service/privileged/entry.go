@@ -34,6 +34,7 @@ type runtimeDeps struct {
 	cgroupObservation      cgroupObservationObserve
 	runtimeOwnerInventory  runtimeOwnerInventoryObserve
 	hostPolicy             hostPolicyObserve
+	floatingIP             floatingIPHandlerEffects
 	loopMount              loopMountHandlerEffects
 	vmExecSession          vmExecSessionHandlerEffects
 	vmExecConnectionReader vmExecConnectionReaderDeps
@@ -95,6 +96,7 @@ func Run(ctx context.Context, args []string) error {
 	hostPolicy := hostpolicy.NewObserver()
 	loopMount := loopmount.NewProvisionInspectServer(systemLoopMountAgentBinary)
 	imageShrink := loopmount.NewImageShrinkServer()
+	floatingIP := network.NewFloatingIPServer()
 	vmExecSession, err := jailer.NewVMExecSessionServer()
 	if err != nil {
 		return err
@@ -117,6 +119,12 @@ func Run(ctx context.Context, args []string) error {
 		trustedRelease: trustedReleaseHandlerEffects{
 			install: trustedRelease.Install,
 			remove:  trustedRelease.Remove,
+		},
+		floatingIP: floatingIPHandlerEffects{
+			create: floatingIP.CreateFloatingIP,
+			remove: floatingIP.RemoveFloatingIP,
+			list:   floatingIP.ListFloatingIPs,
+			get:    floatingIP.GetFloatingIP,
 		},
 		loopMount: loopMountHandlerEffects{
 			provisionVM:   loopMount.ProvisionVM,
@@ -286,6 +294,14 @@ func dispatch(
 		return dispatchHandled, handleCreateManagedNetwork(ctx, endpoint, caller, deps.control)
 	case network.ManagedNetworkRemoveAction:
 		return dispatchHandled, handleRemoveManagedNetwork(ctx, endpoint, caller, deps.control)
+	case network.FloatingIPCreateAction:
+		return dispatchHandled, handleCreateFloatingIP(ctx, endpoint, caller, deps.floatingIP, deps.control)
+	case network.FloatingIPRemoveAction:
+		return dispatchHandled, handleRemoveFloatingIP(ctx, endpoint, caller, deps.floatingIP, deps.control)
+	case network.FloatingIPListAction:
+		return dispatchHandled, handleListFloatingIPs(ctx, endpoint, caller, deps.floatingIP, deps.control)
+	case network.FloatingIPGetAction:
+		return dispatchHandled, handleGetFloatingIP(ctx, endpoint, caller, deps.floatingIP, deps.control)
 	case jailer.VMLaunchAction:
 		return dispatchHandled, handleVMLaunch(ctx, endpoint, caller, deps.control)
 	case jailer.VMStopAction:

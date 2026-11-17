@@ -6,6 +6,13 @@ import (
 	"mvmctl/internal/lib/validators"
 )
 
+const (
+	FloatingIPCreateAction = "floating-ip-create"
+	FloatingIPRemoveAction = "floating-ip-remove"
+	FloatingIPListAction   = "floating-ip-list"
+	FloatingIPGetAction    = "floating-ip-get"
+)
+
 // FloatingIPCreateRequest describes a network reservation, never a host interface or filesystem path.
 type FloatingIPCreateRequest struct {
 	ID        string `json:"id"`
