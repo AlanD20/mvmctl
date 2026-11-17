@@ -650,6 +650,7 @@ TIER1_DOMAINS: dict[str, list[str]] = {
     ],
     "network": [
         "tests/system/network/test_network.py",
+        "tests/system/network/test_floating_ip.py",
     ],
     "host": ["tests/system/host/test_host.py"],
     "run": ["tests/system/run/test_run.py"],
@@ -657,6 +658,7 @@ TIER1_DOMAINS: dict[str, list[str]] = {
 
 # Tier 2: shared volume + nested virt (VM creation/interaction)
 TIER2_DOMAINS: dict[str, list[str]] = {
+    "floating_ip": ["tests/system/network/test_floating_ip_lifecycle.py"],
     "host_admin": ["tests/system/host/test_host_admin.py"],
     "guestfs": ["tests/system/cache/test_guestfs_appliance.py"],
     "kernel_successor": ["tests/system/kernel/test_kernel_successor.py"],
