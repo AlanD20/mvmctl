@@ -79,9 +79,11 @@ func conntrackExchange(
 				}
 				return replies, nil
 			default:
+				// An AF_INET conntrack dump marks flow records DUMP_FILTERED on Linux. It still
+				// requires MULTI; interruption and every other unexpected flag remain refusals.
 				if request.Header.Type != conntrackGet ||
 					message.Header.Type != conntrackNew ||
-					message.Header.Flags != netlink.Multi {
+					message.Header.Flags & ^netlink.DumpFiltered != netlink.Multi {
 					return nil, kernelObservationTransportError("conntrack response type or flags differ", nil, true)
 				}
 				replies = append(replies, message)

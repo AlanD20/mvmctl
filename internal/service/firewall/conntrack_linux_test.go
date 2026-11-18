@@ -3,6 +3,7 @@ package firewall
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"net/netip"
 	"testing"
@@ -348,4 +349,80 @@ func TestConntrackCancellationRevokesSocketAndPreservesCleanupError(t *testing.T
 	}
 	require.ErrorIs(t, transport.close(context.Background(), nil), connection.closeErr)
 	assert.Equal(t, 1, connection.closeCalls)
+}
+
+// This IPv4 IGMP record was captured from the Linux 7.0.11 qualification host using a read-only AF_INET dump.
+// Family filtering sets DUMP_FILTERED on flow messages; the terminal DONE remains MULTI with errno zero.
+func TestConntrackIPv4FamilyFilteredDumpPreservesFlowsAndProvesAbsence(t *testing.T) {
+	data, err := hex.DecodeString(
+		"020000002400018014000180080001000a62e40108000200e00000160c0002800500010002000000" +
+			"240002801400018008000100e0000016080002000a62e4010c000280050001000200000008000300" +
+			"00000188080008000000000008000c005807b99408000b00000000010800070000000156",
+	)
+	require.NoError(t, err)
+	for name, flags := range map[string]netlink.HeaderFlags{
+		"ordinary multipart":   netlink.Multi,
+		"IPv4 family filtered": netlink.Multi | netlink.DumpFiltered,
+	} {
+		t.Run(name, func(t *testing.T) {
+			connection, recv, _ := testKernelTransportConnection([]testKernelRecvmsgResult{
+				{data: testKernelTransportDatagram(t,
+					testKernelTransportMessage(conntrackNew, flags, data), testKernelTransportDone())},
+				{data: testKernelTransportDatagram(t, testKernelTransportDone())},
+			})
+			var sent []netlink.Message
+			connection.mutateSent = func(message netlink.Message) netlink.Message {
+				sent = append(sent, message)
+				return message
+			}
+			transport := newKernelObservationTransport(connection, recv)
+			require.NoError(t, invalidateConntrackFlows(t.Context(), transport, netip.MustParseAddr("10.98.228.100")))
+			require.Len(t, sent, 2, "unrelated captured flow must survive; absence needs a second fresh dump")
+			for _, request := range sent {
+				require.Equal(t, conntrackGet, request.Header.Type)
+				require.Equal(t, netlink.Request|netlink.Dump, request.Header.Flags)
+				require.Equal(t, []byte{unix.AF_INET, 0, 0, 0}, request.Data)
+			}
+		})
+	}
+}
+
+func TestConntrackDumpStillRefusesUnexpectedOrInterruptedFlowFlags(t *testing.T) {
+	request := netlink.Message{Header: netlink.Header{Type: conntrackGet, Flags: netlink.Request | netlink.Dump},
+		Data: []byte{unix.AF_INET, 0, 0, 0}}
+	for name, flags := range map[string]netlink.HeaderFlags{
+		"filtered without multipart": netlink.DumpFiltered,
+		"unexpected ack":             netlink.Multi | netlink.Acknowledge,
+		"filtered unexpected ack":    netlink.Multi | netlink.DumpFiltered | netlink.Acknowledge,
+		"interrupted":                netlink.Multi | netlink.DumpInterrupted,
+		"filtered interrupted":       netlink.Multi | netlink.DumpFiltered | netlink.DumpInterrupted,
+	} {
+		t.Run(name, func(t *testing.T) {
+			connection, recv, _ := testKernelTransportConnection([]testKernelRecvmsgResult{
+				{data: testKernelTransportDatagram(t,
+					testKernelTransportMessage(conntrackNew, flags, nil), testKernelTransportDone())},
+			})
+			_, err := conntrackExchange(t.Context(), newKernelObservationTransport(connection, recv), request)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestConntrackDumpPreservesKernelErrors(t *testing.T) {
+	request := netlink.Message{Header: netlink.Header{Type: conntrackGet, Flags: netlink.Request | netlink.Dump},
+		Data: []byte{unix.AF_INET, 0, 0, 0}}
+	for name, errno := range map[string]unix.Errno{
+		"permission denied": unix.EPERM,
+		"not found":         unix.ENOENT,
+		"unsupported":       unix.EOPNOTSUPP,
+	} {
+		t.Run(name, func(t *testing.T) {
+			connection, recv, _ := testKernelTransportConnection([]testKernelRecvmsgResult{
+				{data: testKernelTransportDatagram(t, testKernelTransportErrorReply(
+					testKernelTransportSentRequest(request), -int32(errno), false))},
+			})
+			_, err := conntrackExchange(t.Context(), newKernelObservationTransport(connection, recv), request)
+			require.ErrorIs(t, err, errno)
+		})
+	}
 }
