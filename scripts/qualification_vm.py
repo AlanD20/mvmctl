@@ -21,6 +21,14 @@ from system_test_outcomes import PYTEST_OUTCOME_REPORT_ENV, require_complete_pyt
 _ALLOWED = {"floating_ip", "env", "floating_ip_worker_fault"}  # env's registered journeys support this actual nesting level.
 _NAMESPACE_KEYS = {"schema_version", "runner", "runner_id", "operator", "paths"}
 
+# Shared verbatim with the isolated probe so tests exercise its authority check.
+# Host status deliberately leaves user-owned setup history (`state`) unset.
+_HOST_AUTHORITY_PROBE = '''
+def require_host_authority(status):
+ if not all(status.get(field) is True for field in ('group_exists','user_in_group','sudoers_exists')):
+  raise RuntimeError('qualification host administrator admission is missing')
+'''
+
 
 def validate_args(parser, args):
     if not args.qualification_vm:
@@ -95,7 +103,7 @@ def _exec(o, namespace, command, *, timeout=60, check=True):
 
 def observe(o, namespace):
     # The isolated interpreter ignores caller Python configuration. No provisioning or downloads.
-    script = r'''
+    script = _HOST_AUTHORITY_PROBE + r'''
 import hashlib,json,os,pathlib,pwd,stat,subprocess,socket
 expected = json.loads(EXPECTED)
 user,paths = expected['operator'],expected['paths']
@@ -130,7 +138,7 @@ assert inventory['vm']==[], 'qualification namespace must be quiescent'
 assert all(any(row['type']==kind and row['version']=='1.17.0' and row['is_default'] and row['is_present'] for row in inventory['bin']) for kind in ('firecracker','jailer'))
 assert any(row['type']=='alpine' and row['version']=='3.23' and row['is_present'] for row in inventory['image'])
 assert any(row['is_default'] and row['is_present'] for row in inventory['kernel'])
-status=data('host','status');assert status['user_in_group'] is True and status['state']['initialized'] is True
+require_host_authority(data('host','status'))
 assert data('host','info')['dependencies']['nftables_available'] is True
 hostkey=' '.join(pathlib.Path('/etc/ssh/ssh_host_ed25519_key.pub').read_text().split()[:2])
 print(json.dumps(dict(hostname=socket.gethostname(),boot_id=pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip(),

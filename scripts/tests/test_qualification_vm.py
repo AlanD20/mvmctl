@@ -13,6 +13,19 @@ from test_run_system_tests import orchestrator, _complete_pytest_outcome_report 
 from test_system_test_evidence import _junit, _node_report
 
 
+@pytest.mark.parametrize("missing", [None, "group_exists", "user_in_group", "sudoers_exists"])
+def test_probe_requires_live_authority_without_setup_history(orchestrator, missing):
+    probe = {}
+    exec(orchestrator.qualification_vm._HOST_AUTHORITY_PROBE, probe)
+    status = dict(group_exists=True, user_in_group=True, sudoers_exists=True, state=None)
+    if missing is None:
+        assert probe["require_host_authority"](status) is None
+    else:
+        status[missing] = False
+        with pytest.raises(RuntimeError, match="administrator admission is missing"):
+            probe["require_host_authority"](status)
+
+
 @pytest.fixture
 def namespace():
     return dict(schema_version=1, runner="mvmctl-030-test", runner_id="1" * 32,
