@@ -10,6 +10,11 @@ import (
 
 // MockEnvironmentFloatingIPAPI exposes explicit resource and owned workflow outcomes.
 type MockEnvironmentFloatingIPAPI struct {
+	FloatingIPAssociateFunc func(context.Context, inputs.FloatingIPAssociateInput) (*model.FloatingIPItem, error)
+	FloatingIPTransferFunc  func(context.Context, inputs.FloatingIPTransferInput) (*model.FloatingIPItem, error)
+	FloatingIPReleaseFunc   func(context.Context, inputs.FloatingIPReleaseInput) (*model.FloatingIPItem, error)
+	FloatingIPInspectFunc   func(context.Context, inputs.FloatingIPInput) (*model.FloatingIPItem, error)
+
 	FloatingIPDelegationGrantFunc  func(context.Context, inputs.FloatingIPDelegationGrantInput) (*model.FloatingIPDelegationItem, error)
 	FloatingIPDelegationListFunc   func(context.Context, inputs.FloatingIPInput) ([]*model.FloatingIPDelegationItem, error)
 	FloatingIPDelegationRevokeFunc func(context.Context, inputs.FloatingIPDelegationInput) (*model.FloatingIPDelegationItem, error)
@@ -181,4 +186,44 @@ func (m *MockEnvironmentFloatingIPAPI) FloatingIPDelegationRevoke(
 		return nil, fmt.Errorf("unexpected FloatingIPDelegationRevoke request")
 	}
 	return m.FloatingIPDelegationRevokeFunc(ctx, input)
+}
+
+func (m *MockEnvironmentFloatingIPAPI) FloatingIPAssociate(
+	ctx context.Context,
+	input inputs.FloatingIPAssociateInput,
+) (*model.FloatingIPItem, error) {
+	if m.FloatingIPAssociateFunc == nil {
+		return nil, fmt.Errorf("unexpected FloatingIPAssociate request")
+	}
+	return m.FloatingIPAssociateFunc(ctx, input)
+}
+
+func (m *MockEnvironmentFloatingIPAPI) FloatingIPTransfer(
+	ctx context.Context,
+	input inputs.FloatingIPTransferInput,
+) (*model.FloatingIPItem, error) {
+	if m.FloatingIPTransferFunc == nil {
+		return nil, fmt.Errorf("unexpected FloatingIPTransfer request")
+	}
+	return m.FloatingIPTransferFunc(ctx, input)
+}
+
+func (m *MockEnvironmentFloatingIPAPI) FloatingIPRelease(
+	ctx context.Context,
+	input inputs.FloatingIPReleaseInput,
+) (*model.FloatingIPItem, error) {
+	if m.FloatingIPReleaseFunc == nil {
+		return nil, fmt.Errorf("unexpected FloatingIPRelease request")
+	}
+	return m.FloatingIPReleaseFunc(ctx, input)
+}
+
+func (m *MockEnvironmentFloatingIPAPI) FloatingIPInspect(
+	ctx context.Context,
+	input inputs.FloatingIPInput,
+) (*model.FloatingIPItem, error) {
+	if m.FloatingIPInspectFunc == nil {
+		return nil, fmt.Errorf("unexpected FloatingIPInspect request")
+	}
+	return m.FloatingIPInspectFunc(ctx, input)
 }
