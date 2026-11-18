@@ -11,6 +11,8 @@ Complete reference for the `mvm env` workflow engine YAML spec format.
   - [Common fields](#common-fields)
 - [Step Types](#step-types)
   - [network](#network)
+  - [floating_ip](#floating_ip)
+  - [floating_ip_grant](#floating_ip_grant)
   - [key](#key)
   - [image](#image)
   - [image_import](#image_import)
@@ -66,7 +68,7 @@ The `@` sigil makes references visually distinct from literal values.
 
 ## Compatibility
 
-Only spec version `"1"` is supported. The available sections are `network`, `key`, `image`, `image_import`, `kernel`, `binary`, `vm`, `volume`, `traffic_policy`, `exec_policy`, `ready`, `exec`, `ssh`, and `copy`. Snapshot creation and restore are separate CLI operations.
+Only spec version `"1"` is supported. The available sections are `network`, `floating_ip`, `floating_ip_grant`, `key`, `image`, `image_import`, `kernel`, `binary`, `vm`, `volume`, `traffic_policy`, `exec_policy`, `ready`, `exec`, `ssh`, and `copy`. Snapshot creation and restore are separate CLI operations.
 
 VM steps use the current VM creation rules, including networkless placement, raw data volumes, and the Firecracker `1.17.0` launch requirement. `exec.allow_vm_exec` opts a command into VM-to-VM execution; a directional exec policy is also required. Neither a traffic grant nor an exec grant enables that option implicitly.
 
@@ -112,10 +114,10 @@ Every step supports dependency and removal lists:
 | `depends_on` | `[]string` | List of `"@type:name"` dependencies. |
 | `removes` | `[]string` | Resources to remove after the entire pipeline succeeds. |
 
-`network`, `key`, `vm`, `volume`, and `image_import` accept a `name` override, defaulting to the step name. `image.name` is an optional image name; omission uses image acquisition naming. Other steps do not use `name` as a resource-name override.
+`network`, `floating_ip`, `key`, `vm`, `volume`, and `image_import` accept a `name` override, defaulting to the step name. `image.name` is an optional image name; omission uses image acquisition naming. Other steps do not use `name` as a resource-name override.
 
-`network`, `key`, and `vm` also accept `existing: <name-or-id>` to select a pre-existing resource without taking
-ownership. Do not combine `existing` with creation fields. On reapply the saved identity is required; there is no
+`network`, `floating_ip`, `key`, and `vm` also accept `existing: <name-or-id>` to select a pre-existing resource without taking
+ownership. Do not combine `existing` with creation fields; `floating_ip` still requires `network`. On reapply the saved identity is required; there is no
 fallback to a replacement with the same name. The creation-field requirements below apply when `existing` is absent.
 
 ---
@@ -140,6 +142,9 @@ vm:
 The `@` prefix distinguishes references from literal string values. The type prefix (`network`, `key`, `image`, etc.) disambiguates steps with the same name under different types.
 
 References do not create dependencies automatically. Each referenced step must be reachable through `depends_on`, directly or transitively; independent steps can run concurrently. References resolve recorded resource identities, including when the resource has a different `name`. Use `@key:name` in `ssh_keys` and `@volume:name` in `volumes`, or literal names/IDs for existing resources. Copy endpoints can use `@vm:name:/path` or a literal `vm-name:/path`. Commands, local paths, environment values, and other literal strings keep their `@` characters.
+There is no generic output interpolation: `@floating_ip:api` resolves only in typed resource fields, not inside
+`cmd` or `env` strings. To pass a resource ID to a guest helper, inspect it on the host and supply the validated ID
+as an ordinary explicit command argument.
 
 ---
 
@@ -168,6 +173,78 @@ network:
 ```
 
 ---
+
+### `floating_ip`
+
+Reserve an IPv4 address without associating it. An explicit network is required; environment steps do not use
+the CLI's default network. See [Guest Control and floating IPs](GUEST_CONTROL.md) for delegation and fencing.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `network` | `string` | Yes | — | Network selector or `@network:name`. |
+| `name` | `string` | No | Step name | 1–63 characters, starting with a lowercase letter or digit; then lowercase letters, digits, `_` or `-`. Reserved names and IP literals are rejected; e.g. `api`. |
+| `ipv4` | `string` | No | Allocate | Canonical usable IPv4 in the selected subnet, e.g. `10.25.0.100`; excludes the gateway, primary and floating reservations. |
+| `existing` | `string` | No | — | Select and preserve an existing reservation by name, ID, prefix or IPv4. Keep `network`; omit `name` and `ipv4`. |
+
+This complete spec allocates an address before any VM uses the network:
+
+```yaml
+version: "1"
+network:
+  cluster:
+    subnet: 10.25.0.0/24
+floating_ip:
+  api:
+    network: "@network:cluster"
+    depends_on: ["@network:cluster"]
+```
+
+The workflow saves its chosen immutable resource ID before creation. Retries use that ID, including after an
+unknown outcome. Reapply refuses a replacement with the same name or address. Destroy removes only its saved
+owned reservation and preserves `existing` selections; active ownership must be fenced before retirement.
+
+### `floating_ip_grant`
+
+Store one guest method permission for an exact resource and VM incarnation. The VM must be eligible in the same
+network and operator. This step does not associate an address, start a lease loop or prove session readiness.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `network` | `string` | Yes | — | Network selector or `@network:name`. |
+| `resource` | `string` | Yes | — | Floating-IP selector or `@floating_ip:name`. |
+| `vm` | `string` | Yes | — | VM selector or `@vm:name`. |
+| `method` | `string` | Yes | — | One of `inspect`, `associate`, `renew`, `release`. |
+| `lease` | `string` | For associate/renew | — | Positive whole-second duration, e.g. `10s` or `1m`; forbidden for inspect/release. |
+
+For an existing network `cluster` and running VM `controller-1` in that network, this spec reserves `api` and
+delegates association. Add separate grant steps for other methods the application needs:
+
+```yaml
+version: "1"
+network:
+  cluster:
+    existing: cluster
+vm:
+  controller:
+    existing: controller-1
+floating_ip:
+  api:
+    network: "@network:cluster"
+    depends_on: ["@network:cluster"]
+floating_ip_grant:
+  controller-associate:
+    network: "@network:cluster"
+    resource: "@floating_ip:api"
+    vm: "@vm:controller"
+    method: associate
+    lease: 10s
+    depends_on: ["@floating_ip:api", "@vm:controller"]
+```
+
+The grant ID is saved before the effect. Reapply requires the exact grant lifetime; a stopped, restarted or
+restored incarnation is not silently adopted. Destroy revokes that saved grant, including after an uncertain
+creation result or VM stop. It does not revoke a different grant with matching names or permissions. There is
+no `existing` selection for grant steps.
 
 ### `key`
 
@@ -385,14 +462,16 @@ This fragment uses configured VM defaults. It creates an unformatted raw disk; f
 
 ### `traffic_policy`
 
-Allow TCP or UDP traffic to a destination VM or the source network's host gateway. Same-network VM traffic also requires grants. A policy does not grant command execution.
+Allow TCP or UDP traffic to a destination VM, floating IP or the source network's host gateway. Same-network VM traffic also requires grants. A policy does not grant command execution.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `source_network` | `string` | Source network selector or `@network:name`; mutually exclusive with `source_vm`. |
 | `source_vm` | `string` | Source VM selector or `@vm:name`; mutually exclusive with `source_network`. |
-| `destination_vm` | `string` | Destination VM selector or `@vm:name`; mutually exclusive with `destination_host: true`. |
+| `destination_vm` | `string` | Destination VM selector or `@vm:name`; mutually exclusive with the other destination fields. |
 | `destination_host` | `bool` | Set `true` for the source managed network's host gateway, not the host's LAN address or localhost. |
+| `destination_floating_ip` | `string` | Floating-IP selector or `@floating_ip:name`; mutually exclusive with VM/host destinations. Requires `destination_network`. |
+| `destination_network` | `string` | Explicit network selector or `@network:name`; required only with `destination_floating_ip`, forbidden otherwise. |
 | `protocol` | `string` | `tcp` or `udp`. |
 | `port` | `string` or `int` | Destination port or inclusive range, e.g. `5432` or `"8000-8080"`; bounds 1–65535. |
 | `existing` | `string` | Select an existing policy by exact ID, verified against the declared source, destination, protocol, and port/range. |
@@ -417,6 +496,36 @@ traffic_policy:
     port: 5432
     depends_on: ["@vm:app"]
 ```
+
+A floating-IP destination binds the immutable reservation and its exact address. Access follows the active owner;
+it does not expose that VM's primary address or other aliases. No delivery is granted while unassociated. Ownership
+requires separate delegation; a traffic policy does not create it.
+
+This complete spec selects an existing network and reservation and permits only TCP 6443 from that network:
+
+```yaml
+version: "1"
+network:
+  cluster:
+    existing: cluster
+floating_ip:
+  api:
+    network: "@network:cluster"
+    existing: api
+    depends_on: ["@network:cluster"]
+traffic_policy:
+  api-access:
+    source_network: "@network:cluster"
+    destination_floating_ip: "@floating_ip:api"
+    destination_network: "@network:cluster"
+    protocol: tcp
+    port: 6443
+    depends_on: ["@floating_ip:api"]
+```
+
+Floating-IP policy steps save exact resolved endpoint IDs and an ownership claim before applying the grant. Retries
+and destroy use those saved IDs, so a renamed or recreated endpoint is not adopted. Existing policy selections
+must match the declared floating resource and network and are preserved on destroy.
 
 ### `exec_policy`
 

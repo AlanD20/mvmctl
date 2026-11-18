@@ -87,8 +87,11 @@ Guest root can exercise every delegation granted to that VM. Local agent permiss
 users but cannot isolate an application from guest root. The implemented gateway uses a dedicated vsock port
 and a root-only local Unix socket. It forwards closed typed requests over one pinned TLS session and retires ambiguous or disconnected sessions. The
 `mvm-agent control floating-ip` commands expose inspect, associate, renew and release; they require the
-host worker before operations can succeed. Guest address reconciliation and live transport qualification remain
-pending. The local control socket is privileged by default.
+host worker before operations can succeed. Guest address reconciliation is implemented and reviewed: exact
+alias receipts authorize local cleanup only,
+a successful association/renewal bounds the local lifetime, and inspection never extends it. Session loss, expiry
+and restart clean up owned aliases without claiming host authority. The retained host worker and composed live
+transport qualification remain pending. The local control socket is root-only.
 
 ### Protocol
 

@@ -91,10 +91,12 @@ for these families remains pending.
 
 Delegated failover requires expiring ownership; an eligible guest may not evict a healthy current owner just
 because it requests association. Renewal is bound to the exact generation and incarnation. Expiration must
-fence packets even when the userspace worker is dead or stalled. Kernel-enforced timed address authority is the
-proposed mechanism; its interaction with complete firewall-generation replacement needs implementation proof.
-Do not ship a userspace-only timer as a guarantee against split brain. Exact lease timings and the failover
-controller interface remain to be established with the enforcement implementation.
+fence packets even when the userspace worker is dead or stalled. Kernel-enforced timed address authority is
+implemented with retained firewall tables; its composed packet behavior still requires qualification.
+Do not ship a userspace-only timer as a guarantee against split brain. Association and renewal grants require
+explicit positive whole-second lease durations; there is no default.
+A guest controller uses the typed inspect, associate, renew and release methods and current generations.
+The operator association persistence choice remains unresolved.
 
 The enforcement design uses a named timed set of host-veth/address pairs in the managed bridge table. Ordinary
 firewall updates now retain the admitted tables and chains and replace their rules in one batch. Initial creation

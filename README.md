@@ -165,6 +165,7 @@ default, run `mvm bin pull 1.17.0 --default` before creating a VM. When you're d
 | Document | What you'll find |
 |----------|-----------------|
 | [docs/REFERENCES.md](docs/REFERENCES.md) | Complete command reference, selectors, config, env vars, cloud-init |
+| [docs/GUEST_CONTROL.md](docs/GUEST_CONTROL.md) | Floating-IP reservations, exact guest delegations, finite leases and service access |
 | [docs/ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) | Full YAML spec for `mvm env` — all fields, types, examples |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues, firewall problems, nocloud-net failures |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | System dependencies by distro package names |

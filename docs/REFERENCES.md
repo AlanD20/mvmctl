@@ -20,6 +20,7 @@ not qualify every fault path, aarch64 runtime, remote CI or a different candidat
 - [mvm snapshot](#mvm-snapshot)
 - [mvm console](#mvm-console)
 - [mvm network](#mvm-network)
+- [mvm floating-ip](#mvm-floating-ip)
 - [mvm policy](#mvm-policy)
 - [mvm key](#mvm-key)
 - [mvm config](#mvm-config)
@@ -569,6 +570,32 @@ host-service grants and no longer uses the legacy tracker.
 
 ---
 
+### `mvm floating-ip`
+
+Reserve private IPv4 addresses and administer exact guest permissions. See the
+[Guest Control guide](GUEST_CONTROL.md) for ownership, fencing, guest commands and service access.
+
+All commands accept `--network, -n NETWORK`; omission selects the default network. Resource selectors accept a
+name, full ID, unambiguous ID prefix or IPv4 address in that network. Grant inspection and revocation require the
+complete lowercase 32-character grant ID.
+
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm floating-ip create NAME` | `--ip IPV4` | Reserve the explicit address, or allocate an available address when omitted |
+| `mvm floating-ip ls` | `--long`, `--json` | List reservations; `list` is an alias |
+| `mvm floating-ip inspect SELECTOR` | `--json` | Inspect the exact reservation and generation |
+| `mvm floating-ip rm SELECTOR` | `--force, -f` | Remove a reservation; force skips confirmation only |
+| `mvm floating-ip delegation grant RESOURCE` | `--vm VM`, `--method METHOD`, `--lease DURATION` | Store one permission for the current VM incarnation |
+| `mvm floating-ip delegation ls RESOURCE` | `--long`, `--json` | List grants, including revoked lifetimes |
+| `mvm floating-ip delegation inspect GRANT_ID` | `--json` | Inspect one exact grant |
+| `mvm floating-ip delegation revoke GRANT_ID` | — | Revoke and fence ownership sustained by that grant |
+
+`--vm` and `--method` are required for grant creation. Methods are `inspect`, `associate`, `renew` and `release`.
+Association and renewal require a positive whole-second duration, such as `10s`; inspect and release forbid it.
+There is no implicit lease. Stored permission does not prove session readiness.
+
+---
+
 ### `mvm policy`
 
 Policy management separates TCP/UDP traffic intent from directional VM-to-VM execution grants. The former flat
@@ -576,10 +603,10 @@ Policy management separates TCP/UDP traffic intent from directional VM-to-VM exe
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm policy traffic create` | Exactly one of `--from-network NETWORK` or `--from-vm VM`; exactly one of `--to-vm VM` or `--to-host`; `--protocol tcp\|udp`, `--port PORT\|START-END` | Apply a root-authorized traffic grant, then project it locally |
-| `mvm policy traffic ls` | `--json` | List VM and host-gateway grants with current resource names |
-| `mvm policy traffic inspect` | `POLICY_ID`, exactly one of `--from-network` or `--from-vm`, optional `--to-host`, `--json` | Inspect intent; add `--to-host` for a host-gateway grant |
-| `mvm policy traffic rm` | `POLICY_IDS...`, exactly one of `--from-network` or `--from-vm`, optional `--to-host`, `-f, --force` | Revoke the root grant or prove its absence before deleting the local projection |
+| `mvm policy traffic create` | Exactly one of `--from-network NETWORK` or `--from-vm VM`; exactly one of `--to-vm VM`, `--to-host` or `--to-floating-ip RESOURCE`; optional `--to-network NETWORK` for floating IPs; `--protocol tcp\|udp`, `--port PORT\|START-END` | Apply a root-authorized traffic grant, then project it locally |
+| `mvm policy traffic ls` | `--json` | List VM, host-gateway and floating-IP grants with current resource names |
+| `mvm policy traffic inspect` | `POLICY_ID`, exactly one of `--from-network` or `--from-vm`, optional `--to-host` or `--to-floating-ip`, `--json` | Inspect intent; add `--to-host` for a host-gateway grant |
+| `mvm policy traffic rm` | `POLICY_IDS...`, exactly one of `--from-network` or `--from-vm`, optional `--to-host` or `--to-floating-ip`, `-f, --force` | Revoke the root grant or prove its absence before deleting the local projection |
 | `mvm policy exec create` | `SOURCE_VM DESTINATION_VM TARGET_USER` | Persist one directional execution grant for an exact non-root destination user |
 | `mvm policy exec ls` | `--json` | List directional execution policies with current VM names |
 | `mvm policy exec rm` | `POLICY_IDS...`, `-f, --force` | Remove one or more execution policies by exact ID or unambiguous prefix |
@@ -602,7 +629,14 @@ mvm policy traffic rm POLICY_ID --from-vm --to-host --force
 Operators can select any destination port, but every policy must explicitly name its protocol and port/range.
 The service must listen on the gateway or a suitable wildcard address; the policy does not expose a localhost-only
 listener. `--from-network` grants the selected network's VMs access to its own gateway. Host-to-VM access is not
-managed by these policies. JSON lists separate `network_to_vm`, `vm_to_vm`, `network_to_host` and `vm_to_host` arrays.
+managed by these policies. JSON lists separate `network_to_vm`, `vm_to_vm`, `network_to_host`, `vm_to_host`,
+`network_to_floating_ip` and `vm_to_floating_ip` arrays.
+
+`--to-floating-ip` selects an exact reservation destination. `--to-network` resolves its network (the default
+network when omitted); it is invalid for other destinations. The grant follows only that floating address across
+owners and grants no delivery while unassociated. It does not grant ownership, the owner's primary address or
+other aliases. Inspect and remove select this family with the boolean `--to-floating-ip` alongside the source
+family flag. See [service access examples](GUEST_CONTROL.md#allow-service-traffic-separately).
 
 Execution grants are directional, independent of IP-network placement, and require an exact non-root target user.
 The opt-in API relay now reads and enforces them at runtime. It also requires root-admitted active VM identities;

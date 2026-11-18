@@ -65,7 +65,11 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [ ] Wire the retained root worker and typed delegated operations without operator impersonation; qualify live bootstrap.
 - [x] Implement the authenticated guest gateway and typed `mvm-agent control floating-ip` commands;
   independently review and pass focused named-runner tests, race checks and vet. Host worker remains unwired.
-- [ ] Implement guest address reconciliation and qualify the composed control path.
+- [x] Implement and review guest alias reconciliation with exact owned receipts, bounded local lifetime,
+  expiry/session-loss/restart cleanup and refusal of foreign addresses.
+- [x] Document public reservation/delegation commands, guest control, exact traffic destinations and version 1
+  environment fields and ownership semantics. Audit website changes read-only; publication remains held.
+- [ ] Qualify the composed control path and publish the separately reviewed website update.
 - [ ] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
 - [ ] Complete affected Go and Python system tests in `mvmctl-030-test`, plus documentation and website updates.
 - [ ] Review and integrate the feature into `0.3.0-release`; complete integration CI and release qualification.
@@ -73,7 +77,9 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 
 Operator reservation CRUD is registered and exercised. The guest gateway and root ownership backend are
 implemented separately; host session and worker composition remain pending, so no secondary-address permission
-is active through the public control path yet. Actual CLI QA has covered allocation against
+is active through the public control path yet. Version 1 environment reservation, grant and exact floating-IP
+policy steps are implemented; workflow state retains immutable creation identities and resolved endpoints before
+effects. Actual CLI QA has covered allocation against
 stopped primaries; stopped-policy registration against floating reservations and reboot cleanup remain pending.
 Focused evidence is not a complete release qualification or proof of packet ownership/failover.
 
