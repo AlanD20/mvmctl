@@ -36,12 +36,13 @@ const (
 )
 
 type kernelObservationMessages struct {
-	tableReplies     []netlink.Message
-	chainReplies     []netlink.Message
-	ruleReplies      []netlink.Message
-	setReplies       []netlink.Message
-	objectReplies    []netlink.Message
-	flowtableReplies []netlink.Message
+	tableReplies            []netlink.Message
+	chainReplies            []netlink.Message
+	ruleReplies             []netlink.Message
+	setReplies              []netlink.Message
+	objectReplies           []netlink.Message
+	flowtableReplies        []netlink.Message
+	secondaryElementReplies []netlink.Message
 }
 
 type kernelAttributeRule struct {
@@ -70,7 +71,7 @@ func decodeKernelObservation(raw kernelObservationMessages) (kernelObservation, 
 	if err := validateKernelObservationCaps(raw); err != nil {
 		return kernelObservation{}, err
 	}
-	if len(raw.setReplies) != 0 || len(raw.objectReplies) != 0 || len(raw.flowtableReplies) != 0 {
+	if len(raw.setReplies) > 1 || len(raw.objectReplies) != 0 || len(raw.flowtableReplies) != 0 {
 		return kernelObservation{}, invalidKernelObservation("managed tables contain a set, object, or flowtable")
 	}
 
@@ -78,6 +79,22 @@ func decodeKernelObservation(raw kernelObservationMessages) (kernelObservation, 
 	observed, tables, err := decodeKernelTables(raw.tableReplies, &sequence)
 	if err != nil {
 		return kernelObservation{}, err
+	}
+	if len(raw.setReplies) == 1 {
+		if observed.empty {
+			return kernelObservation{}, invalidKernelObservation("secondary lease set exists without managed tables")
+		}
+		set, err := decodeSecondaryLeaseSet(raw.setReplies[0], &sequence)
+		if err != nil {
+			return kernelObservation{}, err
+		}
+		elements, err := decodeSecondaryLeaseElements(raw.secondaryElementReplies, &sequence)
+		if err != nil {
+			return kernelObservation{}, err
+		}
+		observed.tables[0].secondarySet, observed.tables[0].secondaryElements = set, elements
+	} else if len(raw.secondaryElementReplies) != 0 {
+		return kernelObservation{}, invalidKernelObservation("secondary lease elements exist without their set")
 	}
 	if err := decodeKernelChains(raw.chainReplies, tables, &observed, &sequence); err != nil {
 		return kernelObservation{}, err
@@ -97,6 +114,7 @@ func validateKernelObservationCaps(raw kernelObservationMessages) error {
 		raw.setReplies,
 		raw.objectReplies,
 		raw.flowtableReplies,
+		raw.secondaryElementReplies,
 	}
 	totalMessages := 0
 	totalBytes := 0
@@ -119,7 +137,7 @@ func validateKernelObservationCaps(raw kernelObservationMessages) error {
 	if len(raw.tableReplies) > len(managedTableIdentities) {
 		return invalidKernelObservation("table object count exceeds limit")
 	}
-	if len(raw.chainReplies) > 5 {
+	if len(raw.chainReplies) > 6 {
 		return invalidKernelObservation("chain object count exceeds limit")
 	}
 	if len(raw.ruleReplies) > maxKernelObservationRules {
@@ -204,7 +222,11 @@ func decodeKernelChains(
 		}
 		return nil
 	}
-	if len(messages) != 5 {
+	expectedChains := 5
+	if observed.tables[0].secondarySet != nil {
+		expectedChains++
+	}
+	if len(messages) != expectedChains {
 		return invalidKernelObservation("managed chain observation is partial")
 	}
 
@@ -309,7 +331,11 @@ func decodeKernelChains(
 		})
 	}
 	for index := range observed.tables {
-		if uint32(len(observed.tables[index].chains)) != tables[index].use {
+		expectedUse := uint32(len(observed.tables[index].chains))
+		if observed.tables[index].secondarySet != nil {
+			expectedUse++
+		}
+		if expectedUse != tables[index].use {
 			return invalidKernelObservation("table use does not match observed chain count")
 		}
 	}

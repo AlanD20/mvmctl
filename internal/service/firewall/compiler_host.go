@@ -6,16 +6,22 @@ func (compiler *generationCompiler) compileHostTraffic(intent generationIntent) 
 	for _, grant := range sortedCopy(intent.vmHostGrants, func(grant vmHostTrafficGrant) string { return grant.id }) {
 		source := compiler.endpoints[grant.sourceVMID]
 		network := compiler.networks[source.networkID]
-		compiler.addRule(&compiler.generation.inet, input, "inet.input.allow.vm-host."+grant.id,
-			joinExpressions(
-				matchInputInterface(network.hostBridge),
-				matchIPv4Family(),
-				matchIPv4Address(12, source.ipv4),
-				matchIPv4Address(16, network.hostIPv4),
-				matchProtocol(grant.protocol),
-				matchDestinationPorts(grant.ports),
-				acceptVerdict(),
-			))
+		for _, sourceAddress := range compiler.endpointAddressVariants(source) {
+			compiler.addRule(
+				&compiler.generation.inet,
+				input,
+				"inet.input.allow.vm-host."+grant.id+sourceAddress.suffix,
+				joinExpressions(
+					matchInputInterface(network.hostBridge),
+					matchIPv4Family(),
+					matchIPv4Address(12, sourceAddress.endpoint.ipv4),
+					matchIPv4Address(16, network.hostIPv4),
+					matchProtocol(grant.protocol),
+					matchDestinationPorts(grant.ports),
+					acceptVerdict(),
+				),
+			)
+		}
 	}
 	for _, grant := range sortedCopy(intent.networkHostGrants,
 		func(grant networkHostTrafficGrant) string { return grant.id }) {

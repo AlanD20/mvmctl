@@ -3,6 +3,7 @@ package firewall
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/google/nftables"
 	"github.com/mdlayher/netlink"
@@ -159,6 +160,19 @@ func collectKernelObservationSnapshot(
 				switch kindIndex {
 				case 0:
 					raw.ruleReplies = append(raw.ruleReplies, replies...)
+				case 1:
+					if identity != managedTableIdentities[0] && len(replies) != 0 {
+						return kernelObservation{}, invalidKernelObservation("inet table contains an unexpected set")
+					}
+					for _, reply := range replies {
+						if len(raw.setReplies) != 0 {
+							return kernelObservation{}, invalidKernelObservation("managed tables contain extra sets")
+						}
+						if _, err := decodeSecondaryLeaseSet(reply, &kernelBaseSequence{}); err != nil {
+							return kernelObservation{}, err
+						}
+						raw.setReplies = append(raw.setReplies, reply)
+					}
 				default:
 					if len(replies) != 0 {
 						return kernelObservation{}, invalidKernelObservation(
@@ -166,6 +180,35 @@ func collectKernelObservationSnapshot(
 						)
 					}
 				}
+			}
+		}
+		if len(raw.setReplies) != 0 {
+			chainRequest, err := kernelSnapshotChainRequest(kernelSnapshotChainIdentity{
+				table: managedTableIdentities[0], name: managedBridgePostroutingChainName,
+			})
+			if err != nil {
+				return kernelObservation{}, err
+			}
+			chains, err := exchangeKernelSnapshot(ctx, factory, budget, chainRequest, kernelObservationReplySpec{
+				mode: kernelObservationReplySingular,
+			})
+			if err != nil {
+				return kernelObservation{}, err
+			}
+			if len(chains) != 1 {
+				return kernelObservation{}, invalidKernelObservation(
+					"secondary destination chain lookup is not singular",
+				)
+			}
+			raw.chainReplies = slices.Insert(raw.chainReplies, 2, chains[0])
+			elementRequest, err := kernelSnapshotSecondaryElementsRequest()
+			if err != nil {
+				return kernelObservation{}, err
+			}
+			raw.secondaryElementReplies, err = exchangeKernelSnapshot(ctx, factory, budget, elementRequest,
+				kernelObservationReplySpec{flags: netlink.Multi, mode: kernelObservationReplyMultipart})
+			if err != nil {
+				return kernelObservation{}, err
 			}
 		}
 	}
@@ -188,6 +231,20 @@ func collectKernelObservationSnapshot(
 		)
 	}
 	return observed, nil
+}
+
+func kernelSnapshotSecondaryElementsRequest() (netlink.Message, error) {
+	attributes, err := netlink.MarshalAttributes([]netlink.Attribute{
+		{Type: unix.NFTA_SET_ELEM_LIST_TABLE, Data: []byte(managedBridgeTableName + "\x00")},
+		{Type: unix.NFTA_SET_ELEM_LIST_SET, Data: []byte(secondaryLeaseSetName + "\x00")},
+	})
+	if err != nil {
+		return netlink.Message{}, generationAuthorityError("marshal secondary lease element request", err, nil)
+	}
+	return netlink.Message{Header: netlink.Header{
+		Type:  netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETSETELEM),
+		Flags: netlink.Request | netlink.Dump,
+	}, Data: append(kernelSnapshotNetfilterHeader(nftables.TableFamilyBridge), attributes...)}, nil
 }
 
 func exchangeKernelSnapshot(

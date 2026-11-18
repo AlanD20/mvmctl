@@ -76,10 +76,14 @@ func validateKernelApplicationTarget(target compiledGeneration) error {
 	if target.empty {
 		if target.bridge.table != nil || target.inet.table != nil || len(target.bridge.chains) != 0 ||
 			len(target.inet.chains) != 0 || len(target.bridge.rules) != 0 || len(target.inet.rules) != 0 ||
-			len(target.ingressGuards) != 0 || len(target.endpointIDs) != 0 || len(target.networkIDs) != 0 {
+			len(target.ingressGuards) != 0 || len(target.endpointIDs) != 0 || len(target.networkIDs) != 0 ||
+			target.bridge.secondarySet != nil || target.inet.secondarySet != nil || len(target.floatingIPs) != 0 {
 			return invalidGeneration("empty kernel application target contains managed state")
 		}
 		return nil
+	}
+	if target.inet.secondarySet != nil || (target.bridge.secondarySet != nil) != (len(target.floatingIPs) != 0) {
+		return invalidGeneration("secondary lease set disagrees with floating-IP authority")
 	}
 	if len(target.networkIDs) == 0 {
 		return invalidGeneration("kernel application target has no authoritative managed-network inventory")
@@ -124,7 +128,7 @@ type kernelApplicationChainSpec struct {
 }
 
 func validateKernelApplicationChains(target compiledGeneration) error {
-	specs := [...]kernelApplicationChainSpec{
+	specs := []kernelApplicationChainSpec{
 		{target.bridge.table, managedBridgePreroutingChainName, *nftables.ChainHookPrerouting,
 			*nftables.ChainPriorityRaw, nftables.ChainTypeFilter, true},
 		{target.bridge.table, managedBridgeForwardChainName, *nftables.ChainHookForward,
@@ -135,6 +139,12 @@ func validateKernelApplicationChains(target compiledGeneration) error {
 			*nftables.ChainPriorityFilter, nftables.ChainTypeFilter, true},
 		{target.inet.table, managedINetNATChainName, *nftables.ChainHookPostrouting,
 			*nftables.ChainPriorityNATSource, nftables.ChainTypeNAT, false},
+	}
+	if target.bridge.secondarySet != nil {
+		specs = slices.Insert(specs, 2, kernelApplicationChainSpec{
+			target.bridge.table, managedBridgePostroutingChainName, *nftables.ChainHookPostrouting,
+			*nftables.ChainPriorityFilter, nftables.ChainTypeFilter, true,
+		})
 	}
 	chains := append(slices.Clone(target.bridge.chains), target.inet.chains...)
 	if len(chains) != len(specs) {
@@ -267,6 +277,32 @@ func validateKernelApplicationDefaultDeny(
 		kernelApplicationRuleIdentities(target.endpointIDs, "bridge.default-deny."),
 	) {
 		return invalidGeneration("kernel application target bridge default-deny rules are not terminal")
+	}
+	floatingIDs := make([]string, 0, len(target.floatingIPs))
+	owned := 0
+	for _, resource := range target.floatingIPs {
+		floatingIDs = append(floatingIDs, resource.id)
+		if resource.ownerVMID != "" {
+			owned++
+			if _, found := target.bridge.secondaryOwners[resource.id]; !found {
+				return invalidGeneration("floating-IP owner has no compiled lease key")
+			}
+		}
+		if err := requireKernelApplicationRule(rules, "bridge.floating.destination."+resource.id,
+			target.bridge.chains[2], true); err != nil {
+			return err
+		}
+	}
+	if owned != len(target.bridge.secondaryOwners) {
+		return invalidGeneration("compiled secondary ownership inventory differs from floating resources")
+	}
+	slices.Sort(floatingIDs)
+	observedFloatingIDs, err := kernelApplicationResourceIDs(rules, []string{"bridge.floating.destination."})
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(floatingIDs, observedFloatingIDs) {
+		return invalidGeneration("secondary destination fence inventory is incomplete")
 	}
 
 	observedNetworkIDs, err := kernelApplicationResourceIDs(rules, []string{

@@ -28,6 +28,13 @@ func ProbeReadiness(ctx context.Context) (ReadinessResult, error) {
 	// thread; it is never returned to the Go scheduler carrying the probe's network namespace.
 	go func() { result <- probeReadinessOnThread(probeCtx) }()
 	if err := <-result; err != nil {
+		if errors.Is(err, unix.EOPNOTSUPP) {
+			return ReadinessResult{}, generationAuthorityError(
+				"kernel lacks required nftables expression support; enable the nftables kernel feature, including CONFIG_NFT_BRIDGE_META",
+				err,
+				nil,
+			)
+		}
 		return ReadinessResult{}, preserveGenerationAuthorityError("probe firewall kernel capabilities", err)
 	}
 	if err := probeCtx.Err(); err != nil {
@@ -110,8 +117,28 @@ func probeReadinessOnThread(ctx context.Context) (returnErr error) {
 	if err != nil {
 		return err
 	}
-	queueKernelApplicationTable(connection, target.bridge, false)
-	queueKernelApplicationTable(connection, target.inet, false)
+	if err := queueKernelApplicationTable(connection, target.bridge, compiledTable{}, nil); err != nil {
+		return errors.Join(err, connection.close())
+	}
+	if err := queueKernelApplicationTable(connection, target.inet, compiledTable{}, nil); err != nil {
+		return errors.Join(err, connection.close())
+	}
+	if err := flushReadinessConnection(ctx, connection); err != nil {
+		return err
+	}
+	if err := verifyExactCommittedGeneration(ctx, kernel, target); err != nil {
+		return err
+	}
+	connection, err = newGoogleNFTablesApplicationConnection(ctx)
+	if err != nil {
+		return err
+	}
+	if err := queueKernelApplicationTable(connection, target.bridge, target.bridge, nil); err != nil {
+		return errors.Join(err, connection.close())
+	}
+	if err := queueKernelApplicationTable(connection, target.inet, target.inet, nil); err != nil {
+		return errors.Join(err, connection.close())
+	}
 	if err := flushReadinessConnection(ctx, connection); err != nil {
 		return err
 	}
@@ -146,6 +173,8 @@ func flushReadinessConnection(ctx context.Context, connection kernelApplicationC
 
 func compileReadinessGeneration() (compiledGeneration, error) {
 	return compileGeneration(generationIntent{
+		floatingIPs: []floatingIPIntent{{id: "probe-floating", networkID: "probe-a",
+			ipv4: netip.MustParseAddr("10.253.0.100"), generation: 1}},
 		networks: []networkIntent{
 			{
 				id:              "probe-a",

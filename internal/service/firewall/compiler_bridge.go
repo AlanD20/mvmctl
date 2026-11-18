@@ -11,6 +11,12 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 
 	for _, endpoint := range endpoints {
 		guards := ingressGuardSet{}
+		ipv4Source := rejectIPv4AddressMismatch(12, endpoint.ipv4)
+		arpSource := matchARPAddress(14, endpoint.ipv4, expr.CmpOpNeq)
+		if compiler.generation.bridge.secondarySet != nil {
+			ipv4Source = rejectSecondaryIPv4Source(endpoint.ipv4)
+			arpSource = rejectSecondaryARPSource(endpoint.ipv4)
+		}
 		guards.mac = compiler.addRule(&compiler.generation.bridge, prerouting, "bridge.spoof.mac."+endpoint.id,
 			joinExpressions(
 				matchInputInterface(endpoint.hostVeth),
@@ -21,7 +27,7 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 			joinExpressions(
 				matchInputInterface(endpoint.hostVeth),
 				matchEtherType(etherTypeIPv4),
-				rejectIPv4AddressMismatch(12, endpoint.ipv4),
+				ipv4Source,
 				dropVerdict(),
 			))
 		// CRITICAL: Fixed sender-address offsets require the Ethernet/IPv4 ARP header shape first.
@@ -46,7 +52,7 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 		guards.arpIPv4 = compiler.addRule(&compiler.generation.bridge, prerouting, "bridge.spoof.arp-ipv4."+endpoint.id,
 			joinExpressions(
 				arpInput,
-				matchARPAddress(14, endpoint.ipv4, expr.CmpOpNeq),
+				arpSource,
 				dropVerdict(),
 			))
 		guards.unsupportedL3 = compiler.addRule(
@@ -75,8 +81,21 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 		if source.networkID != destination.networkID {
 			continue
 		}
-		compiler.addRule(&compiler.generation.bridge, forward, "bridge.allow.vm."+grant.id,
-			bridgeVMGrantExpressions(source, destination, grant.protocol, grant.ports))
+		for _, sourceAddress := range compiler.endpointAddressVariants(source) {
+			for _, destinationAddress := range compiler.endpointAddressVariants(destination) {
+				compiler.addRule(
+					&compiler.generation.bridge,
+					forward,
+					"bridge.allow.vm."+grant.id+addressPairRuleSuffix(sourceAddress, destinationAddress),
+					bridgeVMGrantExpressions(
+						sourceAddress.endpoint,
+						destinationAddress.endpoint,
+						grant.protocol,
+						grant.ports,
+					),
+				)
+			}
+		}
 	}
 
 	for _, grant := range sortedCopy(intent.networkGrants, func(grant networkTrafficGrant) string { return grant.id }) {
@@ -85,8 +104,14 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 		if source.id != destination.networkID {
 			continue
 		}
-		compiler.addRule(&compiler.generation.bridge, forward, "bridge.allow.network."+grant.id,
-			bridgeNetworkGrantExpressions(source, destination, grant.protocol, grant.ports))
+		for _, destinationAddress := range compiler.endpointAddressVariants(destination) {
+			compiler.addRule(
+				&compiler.generation.bridge,
+				forward,
+				"bridge.allow.network."+grant.id+destinationAddress.suffix,
+				bridgeNetworkGrantExpressions(source, destinationAddress.endpoint, grant.protocol, grant.ports),
+			)
+		}
 	}
 
 	for _, endpoint := range endpoints {

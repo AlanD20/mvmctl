@@ -256,6 +256,10 @@ func validateKernelObservationRequest(
 	request netlink.Message,
 	spec kernelObservationReplySpec,
 ) (netlink.HeaderType, error) {
+	if request.Header.Type == netlink.HeaderType(kernelNetfilterSubsystemType|unix.NFT_MSG_GETSETELEM) &&
+		spec.mode != kernelObservationReplyMultipart {
+		return 0, kernelObservationTransportError("secondary lease element observation requires a dump", nil, false)
+	}
 	expectedRequestFlags := netlink.Request
 	switch spec.mode {
 	case kernelObservationReplySingular:
@@ -304,7 +308,8 @@ func kernelObservationMultipartResponseFlags(requestType netlink.HeaderType) (ne
 	case netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETGEN),
 		netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETTABLE),
 		netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETCHAIN),
-		netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETSET):
+		netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETSET),
+		netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETSETELEM):
 		return netlink.Multi, true
 	default:
 		return 0, false
@@ -324,6 +329,8 @@ func kernelObservationResponseType(requestType netlink.HeaderType) (netlink.Head
 		responseType = unix.NFT_MSG_NEWRULE
 	case netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETSET):
 		responseType = unix.NFT_MSG_NEWSET
+	case netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETSETELEM):
+		responseType = unix.NFT_MSG_NEWSETELEM
 	case netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETOBJ):
 		responseType = unix.NFT_MSG_NEWOBJ
 	case netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETFLOWTABLE):

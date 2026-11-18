@@ -453,5 +453,6 @@ func cloneIntent(intent Intent) Intent {
 		HostServices:      slices.Clone(intent.HostServices),
 		VMHostGrants:      slices.Clone(intent.VMHostGrants),
 		NetworkHostGrants: slices.Clone(intent.NetworkHostGrants),
+		FloatingIPs:       slices.Clone(intent.FloatingIPs),
 	}
 }

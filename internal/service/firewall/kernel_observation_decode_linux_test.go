@@ -631,7 +631,7 @@ func TestKernelObservationCapsAcceptExactBoundsAndRejectOver(t *testing.T) {
 		tableReplies: make([]netlink.Message, len(managedTableIdentities)+1),
 	}))
 	requireKernelObservationRejected(t, validateKernelObservationCaps(kernelObservationMessages{
-		chainReplies: make([]netlink.Message, 6),
+		chainReplies: make([]netlink.Message, 7),
 	}))
 	requireKernelObservationRejected(t, validateKernelObservationCaps(kernelObservationMessages{
 		ruleReplies: make([]netlink.Message, maxKernelObservationRules+1),
@@ -1168,11 +1168,17 @@ func kernelMessagesFromObservation(t *testing.T, observed kernelObservation) ker
 	ruleHandle := uint64(1000)
 	for tableIndex := range observed.tables {
 		table := observed.tables[tableIndex]
+		use := uint32(len(table.chains))
+		if table.secondarySet != nil {
+			use++
+			result.setReplies = append(result.setReplies, secondaryLeaseSetFixture(t))
+			result.secondaryElementReplies = append(result.secondaryElementReplies, secondaryElementsMessage(t))
+		}
 		result.tableReplies = append(result.tableReplies, testKernelMessage(t, unix.NFT_MSG_NEWTABLE,
 			table.family, 0, []netlink.Attribute{
 				{Type: unix.NFTA_TABLE_NAME, Data: []byte(table.name + "\x00")},
 				{Type: unix.NFTA_TABLE_FLAGS, Data: testBigEndianUint32(table.flags)},
-				{Type: unix.NFTA_TABLE_USE, Data: testBigEndianUint32(uint32(len(table.chains)))},
+				{Type: unix.NFTA_TABLE_USE, Data: testBigEndianUint32(use)},
 				{Type: testNFTATableHandle, Data: testBigEndianUint64(tableHandle)},
 				{Type: kernelNFTATablePad},
 			}))
@@ -1266,6 +1272,13 @@ func testKernelExpression(t *testing.T, expression expr.Any) netlink.Attribute {
 	name := ""
 	data := []netlink.Attribute{}
 	switch value := expression.(type) {
+	case *expr.Lookup:
+		name = "lookup"
+		data = []netlink.Attribute{
+			{Type: unix.NFTA_LOOKUP_SET, Data: []byte(value.SetName + "\x00")},
+			{Type: unix.NFTA_LOOKUP_SREG, Data: testBigEndianUint32(value.SourceRegister)},
+			{Type: unix.NFTA_LOOKUP_FLAGS, Data: testBigEndianUint32(unix.NFT_LOOKUP_F_INV)},
+		}
 	case *expr.Meta:
 		name = "meta"
 		data = []netlink.Attribute{
@@ -1593,12 +1606,13 @@ func mustMarshalKernelAttributes(t *testing.T, attrs []netlink.Attribute) []byte
 // cloneKernelObservationMessages deep-copies message data for isolated mutation subtests.
 func cloneKernelObservationMessages(raw kernelObservationMessages) kernelObservationMessages {
 	return kernelObservationMessages{
-		tableReplies:     cloneKernelMessages(raw.tableReplies),
-		chainReplies:     cloneKernelMessages(raw.chainReplies),
-		ruleReplies:      cloneKernelMessages(raw.ruleReplies),
-		setReplies:       cloneKernelMessages(raw.setReplies),
-		objectReplies:    cloneKernelMessages(raw.objectReplies),
-		flowtableReplies: cloneKernelMessages(raw.flowtableReplies),
+		tableReplies:            cloneKernelMessages(raw.tableReplies),
+		chainReplies:            cloneKernelMessages(raw.chainReplies),
+		ruleReplies:             cloneKernelMessages(raw.ruleReplies),
+		setReplies:              cloneKernelMessages(raw.setReplies),
+		objectReplies:           cloneKernelMessages(raw.objectReplies),
+		flowtableReplies:        cloneKernelMessages(raw.flowtableReplies),
+		secondaryElementReplies: cloneKernelMessages(raw.secondaryElementReplies),
 	}
 }
 

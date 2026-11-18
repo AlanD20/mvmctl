@@ -11,7 +11,11 @@ type kernelApplicationConnection interface {
 	deleteTable(*nftables.Table)
 	addTable(*nftables.Table)
 	addChain(*nftables.Chain)
+	deleteChain(*nftables.Chain)
 	flushChain(*nftables.Chain)
+	addSecondarySet(*nftables.Set) error
+	deleteSecondarySet(*nftables.Set)
+	deleteSecondaryElements(*nftables.Set, []nftables.SetElement) error
 	addRule(compiledRule)
 	flush() error
 	interrupt() error
@@ -92,8 +96,17 @@ func (lease *persistentGenerationLease) applyKernelGenerationDuringApplication(
 			connection.deleteTable(&nftables.Table{Family: observed.family, Name: observed.name})
 		}
 	}
-	queueKernelApplicationTable(connection, target.bridge, retainTables)
-	queueKernelApplicationTable(connection, target.inet, retainTables)
+	bridgeBefore, inetBefore := compiledTable{}, compiledTable{}
+	if retainTables {
+		bridgeBefore, inetBefore = expectedBefore.bridge, expectedBefore.inet
+	}
+	revoked := secondaryLeaseRevocations(expectedBefore, target, observedBefore)
+	if err := queueKernelApplicationTable(connection, target.bridge, bridgeBefore, revoked); err != nil {
+		return kernelApplicationResult{}, errors.Join(err, connection.close())
+	}
+	if err := queueKernelApplicationTable(connection, target.inet, inetBefore, nil); err != nil {
+		return kernelApplicationResult{}, errors.Join(err, connection.close())
+	}
 	if err := ctx.Err(); err != nil {
 		closeErr := connection.close()
 		return kernelApplicationResult{}, generationAuthorityError(
@@ -135,23 +148,57 @@ func (state *persistentGenerationLeaseState) kernelApplicationRecord() (generati
 	return record, nil
 }
 
-func queueKernelApplicationTable(connection kernelApplicationConnection, table compiledTable, retain bool) {
+func queueKernelApplicationTable(
+	connection kernelApplicationConnection,
+	table compiledTable,
+	before compiledTable,
+	revoked []nftables.SetElement,
+) error {
 	if table.table == nil {
-		return
+		return nil
 	}
-	if retain {
+	if before.table != nil {
 		// Preserve kernel-owned lifetimes when changing rules. Recreating a timed set from its observed
 		// remaining duration would restart that duration after an unbounded delay before the batch commits.
-		for _, chain := range table.chains {
+		for _, chain := range before.chains {
 			connection.flushChain(chain)
+			if !kernelApplicationHasChain(table, chain.Name) {
+				connection.deleteChain(chain)
+			}
+		}
+		if before.secondarySet != nil && table.secondarySet == nil {
+			connection.deleteSecondarySet(before.secondarySet)
 		}
 	} else {
 		connection.addTable(table.table)
-		for _, chain := range table.chains {
+	}
+	for _, chain := range table.chains {
+		if !kernelApplicationHasChain(before, chain.Name) {
 			connection.addChain(chain)
+		}
+	}
+	if table.secondarySet != nil {
+		if before.secondarySet == nil {
+			if err := connection.addSecondarySet(table.secondarySet); err != nil {
+				return generationAuthorityError("queue secondary lease set creation", err, nil)
+			}
+		} else if len(revoked) != 0 {
+			if err := connection.deleteSecondaryElements(before.secondarySet, revoked); err != nil {
+				return generationAuthorityError("queue exact secondary lease revocation", err, nil)
+			}
 		}
 	}
 	for _, rule := range table.rules {
 		connection.addRule(rule)
 	}
+	return nil
+}
+
+func kernelApplicationHasChain(table compiledTable, name string) bool {
+	for _, chain := range table.chains {
+		if chain.Name == name {
+			return true
+		}
+	}
+	return false
 }

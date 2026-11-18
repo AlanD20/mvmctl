@@ -60,6 +60,9 @@ func encodeCanonicalGeneration(
 	if len(intent.vmHostGrants) != 0 || len(intent.networkHostGrants) != 0 {
 		schema = "mvmctl.firewall.generation.v2"
 	}
+	if len(intent.floatingIPs) != 0 {
+		schema = "mvmctl.firewall.generation.v3"
+	}
 	encoder.text("schema", schema)
 	encoder.boolean("generation.empty", generation.empty)
 	encodeCanonicalIntent(encoder, intent)
@@ -70,6 +73,7 @@ func encodeCanonicalGeneration(
 }
 
 func encodeCanonicalIntent(encoder *generationDigestEncoder, intent generationIntent) {
+	encodeCanonicalFloatingIPs(encoder, intent.floatingIPs)
 	endpoints := sortedCopy(intent.endpoints, func(endpoint endpointIntent) string { return endpoint.id })
 	encoder.count("intent.endpoints", len(endpoints))
 	for _, endpoint := range endpoints {
@@ -191,6 +195,9 @@ func encodeCanonicalTable(encoder *generationDigestEncoder, boundGenerationID st
 	encodeCanonicalTableIdentity(encoder, "table", table.table)
 	// Table.Use and Rule.Handle are kernel-assigned observations, not compiler output, so authority excludes them.
 	encoder.uint32("table.flags", table.table.Flags)
+	if err := encodeCanonicalSecondarySet(encoder, table); err != nil {
+		return err
+	}
 	encoder.count("chains", len(table.chains))
 	for _, chain := range table.chains {
 		if chain == nil || chain.Table == nil {
@@ -259,6 +266,18 @@ func encodeCanonicalTable(encoder *generationDigestEncoder, boundGenerationID st
 // making every compiler-emitted expression field authoritative. Unknown dependency types fail before an ID exists.
 func encodeCanonicalExpression(encoder *generationDigestEncoder, expression expr.Any) error {
 	switch value := expression.(type) {
+	case *expr.Lookup:
+		if value == nil {
+			return invalidGeneration("compiled rule contains an absent lookup expression")
+		}
+		encoder.beginRecord("expression.lookup")
+		encoder.uint32("source-register", value.SourceRegister)
+		encoder.uint32("destination-register", value.DestRegister)
+		encoder.boolean("destination-register-present", value.IsDestRegSet)
+		encoder.uint32("set-id", value.SetID)
+		encoder.text("set-name", value.SetName)
+		encoder.boolean("invert", value.Invert)
+		encoder.endRecord("expression.lookup")
 	case *expr.Meta:
 		if value == nil {
 			return invalidGeneration("compiled rule contains an absent meta expression")

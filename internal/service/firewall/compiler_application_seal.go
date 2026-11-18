@@ -25,6 +25,7 @@ func deriveGenerationApplicationSeal(generation compiledGeneration) ([sha256.Siz
 	encoder.text("schema", generationApplicationSealSchema)
 	encoder.text("generation-id", generation.id)
 	encoder.boolean("generation.empty", generation.empty)
+	encodeCanonicalFloatingIPs(&encoder, generation.floatingIPs)
 	encoder.count("authority.endpoints", len(generation.endpointIDs))
 	for _, identity := range generation.endpointIDs {
 		encoder.text("authority.endpoint", identity)

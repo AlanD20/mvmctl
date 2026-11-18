@@ -28,17 +28,42 @@ func (compiler *generationCompiler) compileINet(intent generationIntent) {
 	for _, grant := range sortedCopy(intent.vmGrants, func(grant vmTrafficGrant) string { return grant.id }) {
 		source := compiler.endpoints[grant.sourceVMID]
 		destination := compiler.endpoints[grant.destinationVMID]
-		compiler.addRule(&compiler.generation.inet, forward, "inet.forward.allow.vm."+grant.id,
-			inetVMGrantExpressions(compiler.networks[source.networkID], compiler.networks[destination.networkID],
-				source, destination, grant.protocol, grant.ports))
+		for _, sourceAddress := range compiler.endpointAddressVariants(source) {
+			for _, destinationAddress := range compiler.endpointAddressVariants(destination) {
+				compiler.addRule(
+					&compiler.generation.inet,
+					forward,
+					"inet.forward.allow.vm."+grant.id+addressPairRuleSuffix(sourceAddress, destinationAddress),
+					inetVMGrantExpressions(
+						compiler.networks[source.networkID],
+						compiler.networks[destination.networkID],
+						sourceAddress.endpoint,
+						destinationAddress.endpoint,
+						grant.protocol,
+						grant.ports,
+					),
+				)
+			}
+		}
 	}
 
 	for _, grant := range sortedCopy(intent.networkGrants, func(grant networkTrafficGrant) string { return grant.id }) {
 		source := compiler.networks[grant.sourceNetworkID]
 		destination := compiler.endpoints[grant.destinationVMID]
-		compiler.addRule(&compiler.generation.inet, forward, "inet.forward.allow.network."+grant.id,
-			inetNetworkGrantExpressions(source, compiler.networks[destination.networkID], destination,
-				grant.protocol, grant.ports))
+		for _, destinationAddress := range compiler.endpointAddressVariants(destination) {
+			compiler.addRule(
+				&compiler.generation.inet,
+				forward,
+				"inet.forward.allow.network."+grant.id+destinationAddress.suffix,
+				inetNetworkGrantExpressions(
+					source,
+					compiler.networks[destination.networkID],
+					destinationAddress.endpoint,
+					grant.protocol,
+					grant.ports,
+				),
+			)
+		}
 	}
 
 	for _, network := range networks {

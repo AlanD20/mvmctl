@@ -230,6 +230,11 @@ func kernelObservationFromCompiled(compiled compiledGeneration) kernelObservatio
 			name:   table.table.Name,
 			flags:  table.table.Flags,
 		}
+		if table.secondarySet != nil {
+			metadata := *table.secondarySet
+			metadata.ID = 0
+			observedTable.secondarySet = &metadata
+		}
 		for _, chain := range table.chains {
 			observedChain := kernelObservedChain{
 				name:      chain.Name,
@@ -280,6 +285,9 @@ func cloneObservedExpressions(values []expr.Any) []expr.Any {
 	result := make([]expr.Any, 0, len(values))
 	for _, value := range values {
 		switch typed := value.(type) {
+		case *expr.Lookup:
+			copy := *typed
+			result = append(result, &copy)
 		case *expr.Meta:
 			copy := *typed
 			result = append(result, &copy)

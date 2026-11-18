@@ -1038,6 +1038,29 @@ func (connection *recordingKernelApplicationConnection) addChain(chain *nftables
 	connection.record("add chain " + kernelApplicationTableIdentity(chain.Table) + "/" + chain.Name)
 }
 
+func (connection *recordingKernelApplicationConnection) deleteChain(chain *nftables.Chain) {
+	connection.record("delete chain " + kernelApplicationTableIdentity(chain.Table) + "/" + chain.Name)
+}
+
+func (connection *recordingKernelApplicationConnection) addSecondarySet(set *nftables.Set) error {
+	connection.record("add secondary set " + set.Name)
+	return nil
+}
+
+func (connection *recordingKernelApplicationConnection) deleteSecondarySet(set *nftables.Set) {
+	connection.record("delete secondary set " + set.Name)
+}
+
+func (connection *recordingKernelApplicationConnection) deleteSecondaryElements(
+	set *nftables.Set,
+	elements []nftables.SetElement,
+) error {
+	for _, element := range elements {
+		connection.record(fmt.Sprintf("delete secondary key %s/%x", set.Name, element.Key))
+	}
+	return nil
+}
+
 func (connection *recordingKernelApplicationConnection) flushChain(chain *nftables.Chain) {
 	connection.record("flush chain " + kernelApplicationTableIdentity(chain.Table) + "/" + chain.Name)
 }

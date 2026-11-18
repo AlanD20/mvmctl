@@ -339,18 +339,24 @@ func TestKernelObservationTransportEnforcesCapsAcrossDatagrams(t *testing.T) {
 }
 
 // Rationale: This is a read-only seam, not a generic nfnetlink passthrough. Only the seven nftables inspection
-// requests are admitted, their request flags determine singular versus multipart framing, and reply type is derived.
+// requests and the secondary-element dump are admitted; reply type is derived from the closed request contract.
 func TestKernelObservationTransportAdmitsOnlyClosedReadRequests(t *testing.T) {
 	requests := map[uint16]struct {
 		responseType   uint16
 		multipartFlags netlink.HeaderFlags
+		multipartOnly  bool
 	}{
 		unix.NFT_MSG_GETGEN:   {responseType: unix.NFT_MSG_NEWGEN, multipartFlags: netlink.Multi},
 		unix.NFT_MSG_GETTABLE: {responseType: unix.NFT_MSG_NEWTABLE, multipartFlags: netlink.Multi},
 		unix.NFT_MSG_GETCHAIN: {responseType: unix.NFT_MSG_NEWCHAIN, multipartFlags: netlink.Multi},
 		unix.NFT_MSG_GETRULE:  {responseType: unix.NFT_MSG_NEWRULE, multipartFlags: netlink.Multi | netlink.Append},
 		unix.NFT_MSG_GETSET:   {responseType: unix.NFT_MSG_NEWSET, multipartFlags: netlink.Multi},
-		unix.NFT_MSG_GETOBJ:   {responseType: unix.NFT_MSG_NEWOBJ, multipartFlags: netlink.Multi | netlink.Append},
+		unix.NFT_MSG_GETSETELEM: {
+			responseType:   unix.NFT_MSG_NEWSETELEM,
+			multipartFlags: netlink.Multi,
+			multipartOnly:  true,
+		},
+		unix.NFT_MSG_GETOBJ: {responseType: unix.NFT_MSG_NEWOBJ, multipartFlags: netlink.Multi | netlink.Append},
 		unix.NFT_MSG_GETFLOWTABLE: {
 			responseType:   unix.NFT_MSG_NEWFLOWTABLE,
 			multipartFlags: netlink.Multi | netlink.Append,
@@ -361,6 +367,9 @@ func TestKernelObservationTransportAdmitsOnlyClosedReadRequests(t *testing.T) {
 			kernelObservationReplySingular,
 			kernelObservationReplyMultipart,
 		} {
+			if contract.multipartOnly && mode != kernelObservationReplyMultipart {
+				continue
+			}
 			name := fmt.Sprintf("%d/%d", requestType, mode)
 			t.Run(name, func(t *testing.T) {
 				request := testKernelTransportRequestForType(requestType, mode)

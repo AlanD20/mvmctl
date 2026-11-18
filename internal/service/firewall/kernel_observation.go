@@ -16,11 +16,13 @@ type kernelObservation struct {
 }
 
 type kernelObservedTable struct {
-	family nftables.TableFamily
-	name   string
-	flags  uint32
-	chains []kernelObservedChain
-	rules  []kernelObservedRule
+	secondarySet      *nftables.Set
+	secondaryElements []secondaryLeaseElement
+	family            nftables.TableFamily
+	name              string
+	flags             uint32
+	chains            []kernelObservedChain
+	rules             []kernelObservedRule
 }
 
 type kernelObservedChain struct {
@@ -69,6 +71,9 @@ func compareKernelObservation(observed kernelObservation, expected compiledGener
 			return err
 		}
 	}
+	if err := compareSecondaryLeaseElements(observed.tables[0].secondaryElements, expected); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -76,6 +81,23 @@ func compareKernelObservedTable(observed kernelObservedTable, expected compiledT
 	if expected.table == nil || observed.family != expected.table.Family || observed.name != expected.table.Name ||
 		observed.flags != expected.table.Flags {
 		return invalidKernelObservation("table identity or flags do not match compiler output")
+	}
+	if (observed.secondarySet == nil) != (expected.secondarySet == nil) {
+		return invalidKernelObservation("secondary lease set presence does not match compiler output")
+	}
+	if observed.secondarySet == nil && len(observed.secondaryElements) != 0 {
+		return invalidKernelObservation("secondary elements exist outside their admitted set")
+	}
+	if observed.secondarySet != nil {
+		if observed.secondarySet.Table == nil || observed.secondarySet.Table.Family != expected.table.Family ||
+			observed.secondarySet.Table.Name != expected.table.Name || observed.secondarySet.ID != 0 {
+			return invalidKernelObservation("secondary lease set has foreign parent or transaction authority")
+		}
+		normalized := *observed.secondarySet
+		normalized.ID, normalized.Table = 1, expected.table
+		if err := validateSecondaryLeaseSet(&normalized, expected.table); err != nil {
+			return invalidKernelObservation("secondary lease set metadata does not match compiler output")
+		}
 	}
 	if len(observed.chains) != len(expected.chains) {
 		return invalidKernelObservation(
@@ -196,6 +218,9 @@ func kernelExpressionsEqual(observed []expr.Any, expected []expr.Any) bool {
 
 func kernelExpressionEqual(observed expr.Any, expected expr.Any) bool {
 	switch want := expected.(type) {
+	case *expr.Lookup:
+		got, ok := observed.(*expr.Lookup)
+		return ok && got != nil && want != nil && *got == *want
 	case *expr.Meta:
 		got, ok := observed.(*expr.Meta)
 		return ok && got != nil && want != nil && *got == *want

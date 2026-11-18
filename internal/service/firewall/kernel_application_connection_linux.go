@@ -58,6 +58,25 @@ func (connection *googleNFTablesApplicationConnection) addChain(chain *nftables.
 	connection.connection.AddChain(chain)
 }
 
+func (connection *googleNFTablesApplicationConnection) deleteChain(chain *nftables.Chain) {
+	connection.connection.DelChain(chain)
+}
+
+func (connection *googleNFTablesApplicationConnection) addSecondarySet(set *nftables.Set) error {
+	return connection.connection.AddSet(set, nil)
+}
+
+func (connection *googleNFTablesApplicationConnection) deleteSecondarySet(set *nftables.Set) {
+	connection.connection.DelSet(set)
+}
+
+func (connection *googleNFTablesApplicationConnection) deleteSecondaryElements(
+	set *nftables.Set,
+	elements []nftables.SetElement,
+) error {
+	return connection.connection.SetDeleteElements(set, elements)
+}
+
 func (connection *googleNFTablesApplicationConnection) flushChain(chain *nftables.Chain) {
 	connection.connection.FlushChain(chain)
 }

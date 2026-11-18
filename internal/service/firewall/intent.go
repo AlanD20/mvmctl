@@ -134,6 +134,7 @@ type Intent struct {
 	// Omitted empty extensions preserve the exact canonical encoding of existing root journals.
 	VMHostGrants      []VMHostTrafficGrant      `json:"vm_host_grants,omitempty"`
 	NetworkHostGrants []NetworkHostTrafficGrant `json:"network_host_grants,omitempty"`
+	FloatingIPs       []FloatingIPBinding       `json:"floating_ips,omitempty"`
 }
 
 func (intent Intent) compile() (compiledGeneration, error) {
@@ -218,6 +219,20 @@ func (intent Intent) compile() (compiledGeneration, error) {
 			id: grant.ID, sourceNetworkID: grant.SourceNetworkID, protocol: protocol(grant.Protocol),
 			ports: portInterval{first: grant.Ports.First, last: grant.Ports.Last},
 		})
+	}
+	for _, resource := range intent.FloatingIPs {
+		if _, found := activeNetworks[resource.NetworkID]; !found {
+			continue
+		}
+		binding := floatingIPIntent{
+			id: resource.ID, networkID: resource.NetworkID, ipv4: resource.IPv4, generation: resource.Generation,
+		}
+		if _, found := active[resource.OwnerVMID]; found {
+			binding.ownerVMID = resource.OwnerVMID
+			binding.ownerLaunchGeneration = resource.OwnerLaunchGeneration
+			binding.leaseDuration = resource.LeaseDuration
+		}
+		resolved.floatingIPs = append(resolved.floatingIPs, binding)
 	}
 	return compileGeneration(resolved)
 }
@@ -373,7 +388,7 @@ func (intent Intent) validateDurablePolicies() error {
 			return invalidGeneration("durable network-to-host grant references an absent network")
 		}
 	}
-	return nil
+	return validateFloatingIPBindings(intent.FloatingIPs, networks, reservations)
 }
 
 func validateEndpointBinding(binding EndpointBinding, preparing bool) error {

@@ -17,6 +17,7 @@ import (
 type generationCompiler struct {
 	generation *compiledGeneration
 	endpoints  map[string]endpointIntent
+	addresses  map[string][]endpointAddressVariant
 	networks   map[string]networkIntent
 }
 
@@ -40,6 +41,9 @@ func compileGeneration(intent generationIntent) (compiledGeneration, error) {
 	compiler := newGenerationCompiler(intent)
 
 	compiler.compileBridge(intent)
+	if err := compiler.compileFloatingIPs(intent); err != nil {
+		return compiledGeneration{}, err
+	}
 	compiler.compileINet(intent)
 	if err := validateIngressGuardInvariant(intent, *compiler.generation); err != nil {
 		return compiledGeneration{}, err
@@ -94,6 +98,7 @@ func newGenerationCompiler(intent generationIntent) *generationCompiler {
 	}
 
 	generation := &compiledGeneration{
+		floatingIPs:   slices.Clone(intent.floatingIPs),
 		ingressGuards: make(map[string]ingressGuardSet, len(intent.endpoints)),
 		endpointIDs:   make([]string, 0, len(intent.endpoints)),
 		networkIDs:    make([]string, 0, len(intent.networks)),
@@ -105,6 +110,12 @@ func newGenerationCompiler(intent generationIntent) *generationCompiler {
 			table:  inetTable,
 			chains: []*nftables.Chain{inetForward, inetInput, inetNAT},
 		},
+	}
+	if len(intent.floatingIPs) != 0 {
+		generation.bridge.secondarySet = newSecondaryLeaseSet(bridgeTable)
+		generation.bridge.chains = append(generation.bridge.chains,
+			filterChain(bridgeTable, managedBridgePostroutingChainName,
+				nftables.ChainHookPostrouting, nftables.ChainPriorityFilter))
 	}
 	for _, endpoint := range intent.endpoints {
 		generation.endpointIDs = append(generation.endpointIDs, endpoint.id)
@@ -118,10 +129,21 @@ func newGenerationCompiler(intent generationIntent) *generationCompiler {
 	compiler := &generationCompiler{
 		generation: generation,
 		endpoints:  make(map[string]endpointIntent, len(intent.endpoints)),
+		addresses:  make(map[string][]endpointAddressVariant, len(intent.endpoints)),
 		networks:   make(map[string]networkIntent, len(intent.networks)),
 	}
 	for _, endpoint := range intent.endpoints {
 		compiler.endpoints[endpoint.id] = endpoint
+		compiler.addresses[endpoint.id] = []endpointAddressVariant{{endpoint: endpoint}}
+	}
+	for _, resource := range sortedCopy(intent.floatingIPs, func(value floatingIPIntent) string { return value.id }) {
+		if resource.ownerVMID == "" {
+			continue
+		}
+		alias := compiler.endpoints[resource.ownerVMID]
+		alias.ipv4 = resource.ipv4
+		compiler.addresses[resource.ownerVMID] = append(compiler.addresses[resource.ownerVMID],
+			endpointAddressVariant{endpoint: alias, suffix: ".floating." + resource.id})
 	}
 	for _, network := range intent.networks {
 		compiler.networks[network.id] = network
@@ -212,6 +234,9 @@ func validateIntent(intent generationIntent) error {
 		endpointMACs[endpoint.mac] = endpoint.id
 	}
 
+	if err := validateFloatingIPIntent(intent.floatingIPs, networks, endpoints, endpointAddresses); err != nil {
+		return err
+	}
 	grantIDs := make(map[string]struct{}, len(intent.vmGrants)+len(intent.networkGrants)+len(intent.hostServices))
 	for _, grant := range intent.vmGrants {
 		if err := validateGrantBase(grant.id, grant.protocol, grant.ports, grantIDs); err != nil {
@@ -264,7 +289,7 @@ func validateIntent(intent generationIntent) error {
 func generationIntentIsEmpty(intent generationIntent) bool {
 	return len(intent.endpoints) == 0 && len(intent.networks) == 0 && len(intent.vmGrants) == 0 &&
 		len(intent.networkGrants) == 0 && len(intent.hostServices) == 0 &&
-		len(intent.vmHostGrants) == 0 && len(intent.networkHostGrants) == 0
+		len(intent.vmHostGrants) == 0 && len(intent.networkHostGrants) == 0 && len(intent.floatingIPs) == 0
 }
 
 func validateNetwork(

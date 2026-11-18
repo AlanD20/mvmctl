@@ -10,11 +10,12 @@ const (
 	managedBridgeTableName = "mvmctl_bridge"
 	managedINetTableName   = "mvmctl_inet"
 
-	managedBridgePreroutingChainName = "prerouting"
-	managedBridgeForwardChainName    = "forward"
-	managedINetForwardChainName      = "forward"
-	managedINetInputChainName        = "input"
-	managedINetNATChainName          = "postrouting"
+	managedBridgePreroutingChainName  = "prerouting"
+	managedBridgeForwardChainName     = "forward"
+	managedBridgePostroutingChainName = "postrouting"
+	managedINetForwardChainName       = "forward"
+	managedINetInputChainName         = "input"
+	managedINetNATChainName           = "postrouting"
 )
 
 type protocol uint8
@@ -88,6 +89,7 @@ type networkHostTrafficGrant struct {
 // generationIntent is fully resolved root-side intent. It deliberately exposes neither nftables expressions, generic
 // actions, nor a caller-selectable generation identity. The compiler derives identity from normalized semantic state.
 type generationIntent struct {
+	floatingIPs       []floatingIPIntent
 	endpoints         []endpointIntent
 	networks          []networkIntent
 	vmGrants          []vmTrafficGrant
@@ -108,9 +110,11 @@ var managedTableIdentities = [...]tableIdentity{
 }
 
 type compiledTable struct {
-	table  *nftables.Table
-	chains []*nftables.Chain
-	rules  []compiledRule
+	secondarySet    *nftables.Set
+	secondaryOwners map[string][secondaryLeaseKeyBytes]byte
+	table           *nftables.Table
+	chains          []*nftables.Chain
+	rules           []compiledRule
 }
 
 type compiledRule struct {
@@ -119,6 +123,7 @@ type compiledRule struct {
 }
 
 type compiledGeneration struct {
+	floatingIPs     []floatingIPIntent
 	id              string
 	empty           bool
 	applicationSeal [32]byte

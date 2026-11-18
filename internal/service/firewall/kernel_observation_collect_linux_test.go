@@ -276,7 +276,7 @@ func TestCollectKernelObservationSnapshotRejectsForbiddenObjectsImmediately(t *t
 
 			_, err := collectKernelObservationSnapshot(t.Context(), factory)
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "managed tables contain a set, object, or flowtable")
+			requireKernelObservationRejected(t, err)
 			require.Len(t, factory.connections, tc.stepIndex+1)
 			for _, connection := range factory.connections {
 				assert.Equal(t, 1, connection.closeCalls)
@@ -652,7 +652,10 @@ func successfulKernelSnapshotSteps(
 		{replies: []netlink.Message{raw.tableReplies[0]}},
 		{replies: []netlink.Message{raw.tableReplies[1]}},
 	}
-	for _, reply := range raw.chainReplies {
+	for index, reply := range raw.chainReplies {
+		if len(raw.setReplies) != 0 && index == 2 {
+			continue
+		}
 		steps = append(steps, fakeKernelSnapshotTransportStep{replies: []netlink.Message{reply}})
 	}
 	for _, family := range []nftables.TableFamily{nftables.TableFamilyBridge, nftables.TableFamilyINet} {
@@ -672,6 +675,13 @@ func successfulKernelSnapshotSteps(
 			testKernelGenerationReply(t, uint32(testNFTBaseSequence)),
 		}},
 	)
+	if len(raw.setReplies) != 0 {
+		steps[10].replies = raw.setReplies
+		steps = slices.Insert(steps, len(steps)-1,
+			fakeKernelSnapshotTransportStep{replies: []netlink.Message{raw.chainReplies[2]}},
+			fakeKernelSnapshotTransportStep{replies: raw.secondaryElementReplies},
+		)
+	}
 	return steps
 }
 
