@@ -35,6 +35,9 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Implement retained root VM admission through the protected Firecracker API peer, incarnation rechecks
   and genuine topology holds; independently review and run focused Jailer vet/race checks in the named runner.
 - [ ] Qualify that admission against a live Firecracker process when ownership is wired.
+- [x] Implement address-scoped conntrack invalidation after secondary authority is absent, using exact tuple,
+  zone and flow identity with absence readback. Independent review and focused QA vet/race checks pass.
+- [ ] Qualify real conntrack deletion with the replacement kernel and compose exact neighbor cleanup.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.

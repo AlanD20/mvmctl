@@ -58,6 +58,12 @@ and flow state, and only then admit the new incarnation. Failure after revocatio
 it must never leave both owners authorized. Recovery reconciles the recorded transition and exact managed state.
 No destructive recovery is authorized by a caller cache record or guest-provided interface name.
 
+The firewall mutation lease now derives the cleanup address from admitted resource scope and generation,
+requires observed secondary authority to be absent, and deletes only matching IPv4 conntrack entries using
+original tuple, zone and flow identity. A second dump must prove absence before return. Interrupted or uncertain
+effects refuse handover. This helper is independently reviewed and unit-tested; live conntrack qualification
+and composition with root ownership transitions and neighbor cleanup remain pending.
+
 The compiler permits the primary address plus only root-authorized active secondary addresses for IPv4 and ARP.
 These guards precede established-flow acceptance. Gratuitous ARP refreshes reachability but is not fencing proof.
 Removal of a guest alias is best-effort hygiene after fencing, not a prerequisite for safe transfer.
