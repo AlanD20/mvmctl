@@ -47,10 +47,10 @@ implemented and reviewed. Version 1 environment declarations save resource, gran
 effects. The retained worker, grant startup, start/resume recovery and lifecycle retirement are integrated;
 focused checks and activation review pass. Stored permission is not session readiness.
 Operator associations persist until explicit release, transfer or VM stop; guest leases remain finite.
-Host CLI parity and acknowledged guest alias synchronization are being implemented. Full kernel packet fencing, live
-control-path
-bootstrap/expiry/failover and release qualification remain pending. Integration Go CI and the complete root Jailer
-suite pass for the current production source. Thirteen new Python scenarios collect; this does not qualify their
+Host CLI parity, explicit lifetime authority and acknowledged guest alias synchronization are implemented and
+reviewed with focused QA. Full kernel packet fencing, live control-path bootstrap/expiry/failover and release
+qualification remain pending. Integration Go CI and the complete root Jailer suite passed for baseline `6a82392f`;
+the persistent-ownership production change at `9dc62390` still requires complete integration gates. Thirteen new Python scenarios collect; this does not qualify their
 runtime behavior. The public
 [Guest Control guide](../docs/GUEST_CONTROL.md) and [environment reference](../docs/ENV_SPEC_REFERENCE.md)
 describe the implemented surface; website publication remains held.

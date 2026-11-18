@@ -583,7 +583,10 @@ complete lowercase 32-character grant ID.
 |---------|-------|-------------|
 | `mvm floating-ip create NAME` | `--ip IPV4` | Reserve the explicit address, or allocate an available address when omitted |
 | `mvm floating-ip ls` | `--long`, `--json` | List reservations; `list` is an alias |
-| `mvm floating-ip inspect SELECTOR` | `--json` | Inspect the exact reservation and generation |
+| `mvm floating-ip inspect SELECTOR` | `--json` | Inspect fresh root ownership, lifetime, phase, packet authority and alias synchronization |
+| `mvm floating-ip associate SELECTOR VM` | `--generation N`, `--json` | Persist ownership until release, transfer or VM stop; requires an unassociated resource |
+| `mvm floating-ip transfer SELECTOR VM` | `--generation N`, `--json` | Fence the current owner and assign the target VM |
+| `mvm floating-ip release SELECTOR` | `--generation N`, `--json` | Fence and release ownership; alias: `disassociate` |
 | `mvm floating-ip rm SELECTOR` | `--force, -f` | Remove a reservation; force skips confirmation only |
 | `mvm floating-ip delegation grant RESOURCE` | `--vm VM`, `--method METHOD`, `--lease DURATION` | Store one permission for the current VM incarnation |
 | `mvm floating-ip delegation ls RESOURCE` | `--long`, `--json` | List grants, including revoked lifetimes |
@@ -592,7 +595,11 @@ complete lowercase 32-character grant ID.
 
 `--vm` and `--method` are required for grant creation. Methods are `inspect`, `associate`, `renew` and `release`.
 Association and renewal require a positive whole-second duration, such as `10s`; inspect and release forbid it.
-There is no implicit lease. Stored permission does not prove session readiness.
+There is no implicit guest lease. Host assignments are persistent and require no renewal grant. Optional host
+`--generation` binds an earlier observation; omission performs a fresh root observation before compare-and-swap.
+Association/transfer wait for exact guest alias acknowledgement. Errors after kernel commit do not imply rollback;
+inspect before retrying. A persistent lifetime with zero remaining lease is not expired.
+Stored permission does not prove session readiness.
 
 ---
 

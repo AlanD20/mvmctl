@@ -103,7 +103,8 @@ cannot authorize alias removal. One session reader demultiplexes these messages 
 No mutation lock is retained while waiting for the agent. A root-owned acknowledgement binds the worker,
 session and exact snapshot so an old response cannot complete a newer operator mutation. Guest receipts permit
 only exact local cleanup; they never restore host ownership or authorize another VM after snapshot restore.
-This extension is being implemented; the existing guest-request framing below describes the current baseline.
+This extension is implemented and reviewed with focused tests; live process/alias qualification remains pending.
+The guest-request framing below remains separate from host alias synchronization.
 
 The transport is distinct from VM-exec and ordinary privileged-dispatch frames. Version 1 uses `MVMGCTL1`, a
 big-endian uint16 wire version and uint32 JSON-body length. Bodies are limited to 16 KiB. Requests contain the

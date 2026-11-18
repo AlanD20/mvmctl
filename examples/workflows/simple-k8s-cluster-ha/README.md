@@ -6,7 +6,7 @@ retain a majority after either fails.
 
 **Development example, not HA-qualified.** This workflow requires the integrated Guest Control worker, floating-IP
 address reconciliation, finite kernel leases, env floating-IP/grant declarations and VM-to-VM execution admission.
-Those foundations are being integrated; this example has not completed a live bootstrap or failover journey.
+Those components are implemented; this example has not completed a live bootstrap or failover journey.
 Bash/YAML checks and offline helper behavior checks do not establish runtime availability or a failover bound.
 See [Guest Control authority](../../../docs/adr/0027-guest-control-authority.md) and
 [floating-IP ownership](../../../docs/adr/0028-floating-ip-ownership.md).
@@ -27,7 +27,9 @@ means unhealthy; the service starts before `kubeadm init` and claims only when t
 A healthy controller associates an unowned IP using the inspected generation, renews its own ownership, and waits
 when another controller owns it. A failed probe stops renewal and attempts release. Every iteration inspects again;
 conflicts, timeouts and unknown outcomes are never retried using stale mutation arguments. Recovery does not preempt
-a healthy owner. The host kernel's timed key fences expired ownership even if a guest or worker stops running.
+a healthy owner. Automation manages finite ownership only: it neither renews nor releases a manual persistent
+assignment, including during teardown. Zero remaining milliseconds does not make a persistent assignment expired.
+The host kernel's timed key fences expired ownership even if a guest or worker stops running.
 The loop selects ownership; it is not the fencing authority. There is no keepalived or VRRP exception.
 
 ## Run

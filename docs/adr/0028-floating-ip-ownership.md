@@ -1,6 +1,6 @@
 # Floating IP Ownership
 
-**Status:** Delegated ownership implemented; persistent operator ownership in progress; not release-qualified
+**Status:** Delegated and persistent operator ownership implemented; not release-qualified
 **Date:** 2026-11-17
 **Amends:** [ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md), for explicitly authorized secondary IPv4 addresses
 **Requires:** [Guest Control authority](0027-guest-control-authority.md)
@@ -25,11 +25,15 @@ registry; allocation also checks durable stopped-primary reservations, not only 
 retains an immutable identity tombstone and advances the generation; a new identity may reuse the freed name or
 address. Inventory is paginated to respect the existing privileged frame bound without capping resource count.
 
-The root record uses schema 2 with separate publication revision and ownership generation. Its closed phases
-record finite-lease association, renewal, release and recovery. Recovery of an interrupted timed install must
+The root record uses schema 3 with separate publication revision and ownership generation. Its closed phases
+record explicit finite or persistent association, renewal, release and recovery. Recovery of an interrupted timed install must
 fence before returning to unassociated state; journal replay cannot grant or renew a key. Phase validation is
 implemented, together with guest coordinator and timed effects. Authenticated guest dispatch and the retained
-worker are integrated; composed kernel qualification remains pending. Schema-1 records are rejected.
+worker are integrated; composed kernel qualification remains pending. Earlier floating-IP record schemas are rejected.
+Sealed firewall intent uses schema 2 with explicit lifetime; missing timeouts never infer persistent ownership.
+The terminal-history reader admits only canonical committed-empty history: an empty `Target`, nil `PriorBoot`,
+and at most dormant network metadata in `Before`, with no other intent fields. It requires exact boot/namespace
+binding and fresh kernel absence proof. This preserves terminal history, not compatibility with old active authority.
 Only a stable unassociated record may retire under retained index/network locks after reboot without recreating
 the network. Owned or unfinished records require fencing before retirement.
 Network removal requires live reservations to be removed first; reset admits only verified retirement history.
@@ -119,7 +123,7 @@ that grant sustained; it cannot cancel an independent operator assignment.
 The authenticated worker synchronizes operator-owned aliases with the exact admitted guest incarnation.
 Association and transfer report completion only after the matching alias acknowledgement. A bounded wait or
 agent failure must report committed root ownership separately from incomplete alias synchronization; it must
-not claim rollback. These operator paths are being implemented and require their own qualification.
+not claim rollback. These operator paths are implemented and reviewed; live process, alias and packet qualification remains pending.
 
 The enforcement design uses a named timed set of host-veth/address pairs in the managed bridge table. Ordinary
 firewall updates now retain the admitted tables and chains and replace their rules in one batch. Initial creation

@@ -5,7 +5,8 @@ for itself, renew its finite lease and release it. Clients keep the same destina
 The VM's primary address stays separate.
 
 **Development feature:** the retained host worker, delegated methods and guest address reconciliation are
-implemented. Live process lifecycle, packet fencing, expiry and HA failover still require qualification.
+implemented, including persistent host assignments. Live process lifecycle, packet fencing, expiry and HA failover
+still require qualification.
 A stored grant alone does not establish a working Guest Control session.
 
 ## Reserve an address
@@ -22,6 +23,31 @@ Use `--ip 10.25.0.100` at creation to request that exact usable address when it 
 Allocation excludes the gateway, network and broadcast addresses, primary VM reservations (including stopped VMs),
 and other floating IPs. Names are unique within a network. Inspection returns the immutable resource ID and current
 generation; reuse of a name or address after removal creates a different resource.
+
+## Assign ownership from the host
+
+For eligible running VMs `controller-1` and `controller-2` in `cluster`, associate the unowned reservation,
+explicitly transfer it, or release it:
+
+```bash
+mvm floating-ip associate api controller-1 --network cluster
+mvm floating-ip transfer api controller-2 --network cluster
+mvm floating-ip release api --network cluster
+```
+
+Host assignments persist until explicit release, transfer or VM stop. They require neither a delegation nor a
+renewal loop. Guest associations and renewals always use finite leases. Association cannot replace an owner;
+transfer fences the old owner before admitting the new one. `release` also accepts the alias `disassociate`.
+
+All three commands accept optional `--generation N` to bind a previous observation. When omitted, the command
+observes the root generation immediately before its compare-and-swap; a concurrent change can still conflict.
+Fresh `mvm floating-ip inspect api --network cluster --json` reports `phase`, `lifetime`, `owner_origin`,
+`owner_vm_id`, `authority_state`, `lease_remaining_ms` and `alias_synchronization` alongside identity/generation.
+A persistent lifetime with zero remaining lease is not expired. Interpret lifetime and current authority together.
+
+Association and transfer complete only after the exact target guest acknowledges its alias. An agent or bounded
+wait failure can occur after kernel ownership commits; it does not promise rollback. Inspect fresh ownership and
+alias synchronization before deciding whether to retry.
 
 ## Delegate exact methods
 
@@ -43,7 +69,9 @@ Each grant binds one resource, method and current VM incarnation under the same 
 cannot allocate resources, create grants, select another owner or call arbitrary host commands. Restart or restore
 does not transfer a grant to a new incarnation. Use the complete lowercase grant ID from inspection to inspect or
 revoke a delegation; prefixes and names are not accepted for those commands. Revocation fences ownership sustained
-by that exact grant and can finish after its VM stops. A revoked ID cannot be reactivated.
+by that exact grant and can finish after its VM stops. Revoking an unrelated grant does not fence an independent
+operator assignment. A current release grant for the owning VM can explicitly release its persistent assignment.
+A revoked ID cannot be reactivated.
 
 ## Request ownership from the guest
 
@@ -62,17 +90,19 @@ mvm-agent control floating-ip release --generation N RESOURCE_ID
 ```
 
 Results are JSON with `resource_id`, `ipv4`, `generation`, `ownership` (`unassociated`, `self` or `other`), and
-`lease_remaining_ms`. Remaining time is measured at the host; response delivery does not restart it. Association
+`lifetime` and `lease_remaining_ms`. `finite` ownership expires; `persistent` with zero remaining milliseconds does
+not. Remaining finite time is measured at the host; response delivery does not restart it. Guest association
 can claim an unowned address but cannot evict a healthy owner. Renewal retains the generation and requires the
-exact owner, incarnation and grant. Ownership changes advance the generation. A paused guest cannot renew.
+exact finite owner, incarnation and grant. It cannot convert or extend persistent ownership. Ownership changes
+advance the generation. A paused guest cannot renew.
 
 Inspect before each decision. Renew only while the local service is healthy, and stop renewal when it is not.
 A generation conflict requires another inspection. A timeout or `outcome_unknown` means the effect may have
 committed: inspect before deciding on another mutation. Blindly replaying an old request is not recovery.
 
-The agent installs the secondary address only after a successful authorized association or renewal. It tracks
+The agent applies host-authorized aliases through the authenticated session. For finite ownership, it tracks
 its own alias for cleanup on release, local expiry, session loss and restart. Inspect alone does not install an
-address or extend its local lifetime. Guest cleanup can fail or be delayed, so the host kernel enforces expiry
+address or extend its finite lifetime. Guest cleanup can fail or be delayed, so the host kernel enforces finite expiry
 independently of both the agent and host worker. Old owners lose source IPv4/ARP authority and delivery to the
 floating address before a new owner is admitted. Gratuitous ARP and removal of a guest alias are not fencing proof.
 
@@ -107,5 +137,6 @@ confirmation, not ownership checks. Ordinary network removal requires floating r
 VM stop, deletion and restore fence secondary authority; host reboot expires delegated ownership.
 
 The [Kubernetes HA example](../examples/workflows/simple-k8s-cluster-ha/README.md) uses three control-plane nodes
-and an application health loop. The loop chooses when to claim or renew; kernel leases enforce expiry. Its example
+and an application health loop. The loop manages finite ownership only and leaves manual persistent assignments
+alone. Kernel leases enforce finite expiry. Its example
 lease is not a product failover guarantee.

@@ -62,7 +62,9 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Implement delegated association ownership, kernel-enforced finite authority, fencing and transfer recovery.
 - [ ] Qualify live ownership transfer, kernel expiry and recovery under process/packet failures.
 - [x] Decide that operator associations persist until release, transfer or VM stop while guest leases remain finite.
-- [ ] Implement host association, transfer and release with explicit lifetime authority and acknowledged guest aliases.
+- [x] Implement and review host association, transfer and release with explicit lifetime authority and
+  acknowledged guest aliases; pass focused QA.
+- [ ] Complete integration CI, root Jailer and live alias/packet qualification for persistent ownership.
 - [x] Implement the owned host session with one protected VMM admission, expected credential lineage,
   pinned agent TLS and independent exit descriptor. Review and focused QA vet/race checks pass.
 - [x] Wire the retained root worker and typed delegated operations without operator impersonation, including
@@ -76,7 +78,8 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   environment fields and ownership semantics. Prepare the website source update for review; publication remains held.
 - [ ] Qualify the composed control path and publish the separately reviewed website update.
 - [x] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
-- [ ] Qualify live six-node bootstrap, quorum and floating-API failover.
+- [ ] Qualify live six-node bootstrap, quorum and floating-API failover in a runner with at least 12 GiB guest
+  memory plus host headroom; the current 3 GiB QA runner cannot run that topology.
 - [x] Add and register thirteen Python scenarios for guest control, floating-IP policy, renewal, lifecycle,
   stalled-worker fencing, memory restore and environment ownership; pass collection and affected registry checks.
 - [x] Review the stalled-worker observer and fix cleanup to attempt continuation through its retained pidfd
@@ -84,7 +87,7 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Extend the existing host-reboot continuation with floating-IP and delegation recovery coverage; pass
   receipt/preservation helper checks and collection from the exact staged payload.
 - [ ] Run both reboot phases across an actual host reboot and qualify delegation retirement and explicit recovery.
-- [x] Pass integration Go CI and the complete root Jailer suite for the current production source; build the
+- [x] Pass integration Go CI and the complete root Jailer suite for baseline `6a82392f`; build the
   paired host and guest agent and install the candidate inside the named QA VM.
 - [ ] Complete affected Go and Python system tests in `mvmctl-030-test`, plus documentation and website updates.
 - [ ] Review and integrate the feature into `0.3.0-release`; verify subsequent production changes and complete
