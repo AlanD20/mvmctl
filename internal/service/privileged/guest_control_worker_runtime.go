@@ -196,7 +196,13 @@ func executeAdmittedGuestControlRequest(
 	if err != nil {
 		return result, false, err
 	}
-	defer func() { returnErr = errors.Join(returnErr, gate.Release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		cleanup := gate.Release(context.WithoutCancel(ctx))
+		if cleanup != nil && request.Operation != guestcontrolwire.Inspect {
+			effectsStarted = true
+		}
+		returnErr = errors.Join(returnErr, cleanup)
+	}()
 	if err := authorizeCaller(callerIdentity{uid: p.OwnerUID, gid: p.OwnerGID}, realAuthorizationDeps()); err != nil {
 		return result, false, err
 	}

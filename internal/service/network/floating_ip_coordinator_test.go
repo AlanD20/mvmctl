@@ -5,7 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"mvmctl/pkg/errs"
+
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/service/firewall"
 )
@@ -22,7 +25,10 @@ func TestFloatingIPGuestMutationRefusesHealthyOwnerAndRequiresExactSelf(t *testi
 	require.Error(t, admitFloatingIPGuestMutation(resource, principal, grant, floatingIPDelegationAssociate, observed))
 	observed.Present = false
 	observed.Remaining = 0
-	require.NoError(t, admitFloatingIPGuestMutation(resource, principal, grant, floatingIPDelegationAssociate, observed))
+	require.NoError(
+		t,
+		admitFloatingIPGuestMutation(resource, principal, grant, floatingIPDelegationAssociate, observed),
+	)
 	require.Error(t, admitFloatingIPGuestMutation(resource, principal, grant, floatingIPDelegationRelease, observed))
 	resource.Owner = principal.owner(grant.LeaseDuration, grant.ID, grant.Revision)
 	require.Error(t, admitFloatingIPGuestMutation(resource, principal, grant, floatingIPDelegationAssociate, observed))
@@ -56,14 +62,18 @@ func TestFloatingIPGuestMethodsRefuseMissingRetainedAuthority(t *testing.T) {
 	for _, lease := range []*FloatingIPVMLease{
 		nil, {}, {state: &floatingIPVMLeaseState{}}, {state: &floatingIPVMLeaseState{released: true}},
 	} {
-		_, err := lease.GuestInspect(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1)
+		_, possible, err := lease.GuestInspect(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1)
 		require.Error(t, err)
-		_, err = lease.GuestAssociate(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1)
+		require.False(t, possible, "missing retained admission cannot attempt mutation")
+		_, possible, err = lease.GuestAssociate(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1)
 		require.Error(t, err)
-		_, err = lease.GuestRenew(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1)
+		require.False(t, possible, "missing retained admission cannot attempt mutation")
+		_, possible, err = lease.GuestRenew(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1)
 		require.Error(t, err)
-		_, err = lease.GuestRelease(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1)
+		require.False(t, possible, "missing retained admission cannot attempt mutation")
+		_, possible, err = lease.GuestRelease(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1)
 		require.Error(t, err)
+		require.False(t, possible, "missing retained admission cannot attempt mutation")
 	}
 }
 
@@ -114,4 +124,56 @@ func TestFloatingIPGuestAssociationRefusesPresentZeroRemainingOwner(t *testing.T
 	}
 	require.Error(t, admitFloatingIPGuestMutation(resource, principal, grant, floatingIPDelegationAssociate, observed),
 		"only absence proves revoked authority; zero remaining is still a present key")
+}
+
+func TestFloatingIPGuestAdmissionDeniesMissingMethodAndConflictsOnStaleGeneration(t *testing.T) {
+	record, principal, _ := delegationFixture(t)
+	_, err := findFloatingIPGuestGrant(t.Context(), nil, principal, record, floatingIPDelegationRenew)
+	require.Error(t, err)
+	require.Equal(t, errs.ClassValidation, errs.AsDomainError(err).Class)
+	err = admitFloatingIPGuestGeneration(record, record.Generation+1, floatingIPDelegationRenew)
+	require.Error(t, err)
+	require.Equal(t, errs.ClassConflict, errs.AsDomainError(err).Class)
+	require.NoError(t, admitFloatingIPGuestGeneration(record, record.Generation, floatingIPDelegationRenew))
+	require.NoError(t, admitFloatingIPGuestGeneration(record, 0, floatingIPDelegationInspect))
+}
+
+func TestFloatingIPGuestPublicationFaultsRemainPossibleMutations(t *testing.T) {
+	for _, afterPublication := range []bool{false, true} {
+		name := "before-write"
+		if afterPublication {
+			name = "after-rename"
+		}
+		t.Run(name, func(t *testing.T) {
+			fixture, store := floatingIPStoreFixture(t)
+			before := floatingIPAssociationRecords()[0]
+			target := floatingIPAssociationRecords()[1]
+			require.NoError(t, store.persist(t.Context(), before, nil))
+			if afterPublication {
+				realSync := store.owner.deps.fsync
+				store.owner.deps.fsync = func(ctx context.Context, fd int) error {
+					if fd == store.owner.stateFD {
+						return unix.EIO
+					}
+					return realSync(ctx, fd)
+				}
+			} else {
+				store.owner.deps.write = func(context.Context, int, []byte) (int, error) { return 0, unix.EIO }
+			}
+			possible, err := publishGuestFloatingIPIntent(t.Context(), store, target, before)
+			require.Error(t, err)
+			require.True(t, possible, "publication entry must never prove a pre-effect refusal")
+			reopened, err := openFloatingIPStore(t.Context(), fixture.uid, false)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, reopened.release(context.Background())) }()
+			observed, _, _, found, err := reopened.read(t.Context(), before.ID)
+			require.NoError(t, err)
+			require.True(t, found)
+			expected := before
+			if afterPublication {
+				expected = target
+			}
+			require.Equal(t, expected, observed)
+		})
+	}
 }

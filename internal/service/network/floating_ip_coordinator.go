@@ -7,12 +7,15 @@ import (
 	"time"
 
 	"mvmctl/internal/service/firewall"
+	"mvmctl/pkg/errs"
 )
 
 // GuestInspect is read-only, including when a previous mutation has an unknown outcome.
+// The bool returned by Guest methods reports possible mutation, including uncertain cleanup.
+// It is false only when this retained admission proves no mutation was attempted.
 func (lease *FloatingIPVMLease) GuestInspect(
 	ctx context.Context, resourceID string, expectedGeneration uint64,
-) (FloatingIPGuestResult, error) {
+) (FloatingIPGuestResult, bool, error) {
 	return lease.guestFloatingIP(ctx, resourceID, expectedGeneration, floatingIPDelegationInspect)
 }
 
@@ -20,7 +23,7 @@ func (lease *FloatingIPVMLease) GuestInspect(
 // call Jailer.RequireRunning and retain that same Jailer parent through network lease Release.
 func (lease *FloatingIPVMLease) GuestAssociate(
 	ctx context.Context, resourceID string, expectedGeneration uint64,
-) (FloatingIPGuestResult, error) {
+) (FloatingIPGuestResult, bool, error) {
 	return lease.guestFloatingIP(ctx, resourceID, expectedGeneration, floatingIPDelegationAssociate)
 }
 
@@ -28,75 +31,96 @@ func (lease *FloatingIPVMLease) GuestAssociate(
 // The privileged compositor must first call Jailer.RequireRunning on the retained parent admission.
 func (lease *FloatingIPVMLease) GuestRenew(
 	ctx context.Context, resourceID string, expectedGeneration uint64,
-) (FloatingIPGuestResult, error) {
+) (FloatingIPGuestResult, bool, error) {
 	return lease.guestFloatingIP(ctx, resourceID, expectedGeneration, floatingIPDelegationRenew)
 }
 
 // GuestRelease releases only the exact admitted owner's incarnation.
 func (lease *FloatingIPVMLease) GuestRelease(
 	ctx context.Context, resourceID string, expectedGeneration uint64,
-) (FloatingIPGuestResult, error) {
+) (FloatingIPGuestResult, bool, error) {
 	return lease.guestFloatingIP(ctx, resourceID, expectedGeneration, floatingIPDelegationRelease)
 }
 
 func (lease *FloatingIPVMLease) guestFloatingIP(
 	ctx context.Context, resourceID string, generation uint64, method floatingIPDelegationMethod,
-) (_ FloatingIPGuestResult, returnErr error) {
+) (_ FloatingIPGuestResult, mutationPossible bool, returnErr error) {
 	if lease == nil || lease.state == nil {
-		return FloatingIPGuestResult{}, networkAuthorityValidationError("floating-IP VM lease is required")
+		return FloatingIPGuestResult{}, mutationPossible, networkAuthorityValidationError(
+			"floating-IP VM lease is required",
+		)
 	}
 	state := lease.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if err := state.readyGuest(ctx); err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
 	principal := state.guestPrincipal()
 	store, err := openFloatingIPStore(ctx, state.network.store, false)
 	if err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
-	defer func() { returnErr = errors.Join(returnErr, store.release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		cleanup := store.release(context.WithoutCancel(ctx))
+		if cleanup != nil && method != floatingIPDelegationInspect {
+			mutationPossible = true
+		}
+		returnErr = errors.Join(returnErr, cleanup)
+	}()
 	if store == nil {
-		return FloatingIPGuestResult{}, networkAuthorityValidationError("floating-IP reservation is missing")
+		return FloatingIPGuestResult{}, mutationPossible, networkAuthorityValidationError(
+			"floating-IP reservation is missing",
+		)
 	}
 	record, _, _, found, err := store.read(ctx, resourceID)
 	if err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
 	if !found || record.Retired || record.NetworkID != principal.networkID || record.OwnerUID != principal.ownerUID {
-		return FloatingIPGuestResult{}, networkAuthorityValidationError(
+		return FloatingIPGuestResult{}, mutationPossible, networkAuthorityValidationError(
 			"floating-IP reservation is unavailable to this guest")
 	}
 	grants, err := openFloatingIPDelegationStore(ctx, state.network.store, false)
 	if err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
-	defer func() { returnErr = errors.Join(returnErr, grants.release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		cleanup := grants.release(context.WithoutCancel(ctx))
+		if cleanup != nil && method != floatingIPDelegationInspect {
+			mutationPossible = true
+		}
+		returnErr = errors.Join(returnErr, cleanup)
+	}()
 	grant, err := findFloatingIPGuestGrant(ctx, grants, principal, record, method)
 	if err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
-	if method != floatingIPDelegationInspect && (record.Generation != generation || generation == 0) {
-		return FloatingIPGuestResult{}, networkAuthorityValidationError("floating-IP generation is stale")
+	if err := admitFloatingIPGuestGeneration(record, generation, method); err != nil {
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
 	if record.Phase != floatingIPOwned && record.Phase != floatingIPUnassociated {
-		return FloatingIPGuestResult{}, networkAuthorityCorruptError("floating-IP transition requires root recovery", nil)
+		return FloatingIPGuestResult{}, mutationPossible, networkAuthorityCorruptError(
+			"floating-IP transition requires root recovery",
+			nil,
+		)
 	}
 	observed, err := state.firewall.ObserveFloatingIPLease(ctx, record.ID, record.Generation)
 	if err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
 	result, err := floatingIPGuestResult(record, principal, observed)
 	if err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
 	if method == floatingIPDelegationInspect {
-		return result, nil
+		return result, mutationPossible, nil
 	}
 	if err := admitFloatingIPGuestMutation(record, principal, grant, method, observed); err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
+	// CRITICAL: every path above is read-only admission under this same retained authority.
+	// From the first publication attempt onward, errors never prove that no mutation occurred.
 	tx := borrowFloatingIPTransaction(state.network, state.firewall)
 	if method == floatingIPDelegationRelease {
 		next := record
@@ -107,8 +131,8 @@ func (lease *FloatingIPVMLease) guestFloatingIP(
 		next.Owner = floatingIPOwner{}
 		next.BeforeOwner = record.Owner
 		next.TargetOwner = floatingIPOwner{}
-		if err = store.persist(ctx, next, &record); err != nil {
-			return FloatingIPGuestResult{}, err
+		if mutationPossible, err = publishGuestFloatingIPIntent(ctx, store, next, record); err != nil {
+			return FloatingIPGuestResult{}, mutationPossible, err
 		}
 		record, err = fenceFloatingIPOwnership(ctx, tx, store, next)
 	} else if method == floatingIPDelegationRenew {
@@ -119,8 +143,8 @@ func (lease *FloatingIPVMLease) guestFloatingIP(
 		next.Owner = floatingIPOwner{}
 		next.BeforeOwner = record.Owner
 		next.TargetOwner = principal.owner(grant.LeaseDuration, grant.ID, grant.Revision)
-		if err = store.persist(ctx, next, &record); err != nil {
-			return FloatingIPGuestResult{}, err
+		if mutationPossible, err = publishGuestFloatingIPIntent(ctx, store, next, record); err != nil {
+			return FloatingIPGuestResult{}, mutationPossible, err
 		}
 		record = next
 		// BeforeOwner survives until the one-shot renewal is acknowledged or recovery fences both histories.
@@ -136,59 +160,69 @@ func (lease *FloatingIPVMLease) guestFloatingIP(
 		next.Owner = floatingIPOwner{}
 		next.BeforeOwner = record.Owner
 		next.TargetOwner = principal.owner(grant.LeaseDuration, grant.ID, grant.Revision)
-		if err = store.persist(ctx, next, &record); err != nil {
-			return FloatingIPGuestResult{}, err
+		if mutationPossible, err = publishGuestFloatingIPIntent(ctx, store, next, record); err != nil {
+			return FloatingIPGuestResult{}, mutationPossible, err
 		}
 		record = next
 		if err = tx.firewall.FenceFloatingIP(ctx, floatingIPFirewallBinding(record, floatingIPOwner{})); err != nil {
-			return FloatingIPGuestResult{}, err
+			return FloatingIPGuestResult{}, mutationPossible, err
 		}
 		if err = tx.invalidateFloatingIPNetworkState(ctx, record); err != nil {
-			return FloatingIPGuestResult{}, err
+			return FloatingIPGuestResult{}, mutationPossible, err
 		}
 		record, err = advanceFloatingIPPhase(ctx, store, record, floatingIPFenced)
 		if err != nil {
-			return FloatingIPGuestResult{}, err
+			return FloatingIPGuestResult{}, mutationPossible, err
 		}
 		record, err = advanceFloatingIPPhase(ctx, store, record, floatingIPGranting)
 		if err != nil {
-			return FloatingIPGuestResult{}, err
+			return FloatingIPGuestResult{}, mutationPossible, err
 		}
 		if err = state.readyGuest(ctx); err != nil {
-			return FloatingIPGuestResult{}, err
+			return FloatingIPGuestResult{}, mutationPossible, err
 		}
 		if _, err = findFloatingIPGuestGrant(ctx, grants, principal, record, method); err != nil {
-			return FloatingIPGuestResult{}, err
+			return FloatingIPGuestResult{}, mutationPossible, err
 		}
 		binding := floatingIPFirewallBinding(record, record.TargetOwner)
 		if err = state.firewall.PublishFloatingIPOwner(ctx, binding); err != nil {
-			return FloatingIPGuestResult{}, err
+			return FloatingIPGuestResult{}, mutationPossible, err
 		}
 		if err = state.firewall.ActivateFloatingIPLease(ctx, record.ID, record.Generation); err == nil {
 			record, err = commitFloatingIPOwned(ctx, store, record)
 		}
 	}
 	if err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
 	observed, err = state.firewall.ObserveFloatingIPLease(ctx, record.ID, record.Generation)
 	if err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
 	result, err = floatingIPGuestResult(record, principal, observed)
 	if err != nil {
-		return FloatingIPGuestResult{}, err
+		return FloatingIPGuestResult{}, mutationPossible, err
 	}
 	if method != floatingIPDelegationRelease && result.Ownership != FloatingIPGuestSelf {
-		return FloatingIPGuestResult{}, networkAuthorityCorruptError("floating-IP lease expired before acknowledgement", nil)
+		return FloatingIPGuestResult{}, mutationPossible, networkAuthorityCorruptError(
+			"floating-IP lease expired before acknowledgement",
+			nil,
+		)
 	}
-	return result, nil
+	return result, mutationPossible, nil
 }
 
 func (state *floatingIPVMLeaseState) guestPrincipal() floatingIPGuestPrincipal {
-	return floatingIPGuestPrincipal{ownerUID: uint32(state.key.ownerUID), networkID: string(state.key.networkID),
-		vmID: string(state.key.vmID), bootID: state.incarnation.BootID, launchGeneration: state.incarnation.LaunchGeneration,
-		executionUID: state.incarnation.ExecutionUID}
+	return floatingIPGuestPrincipal{
+		ownerUID:  uint32(state.key.ownerUID),
+		networkID: string(state.key.networkID),
+		vmID: string(
+			state.key.vmID,
+		),
+		bootID:           state.incarnation.BootID,
+		launchGeneration: state.incarnation.LaunchGeneration,
+		executionUID:     state.incarnation.ExecutionUID,
+	}
 }
 func (principal floatingIPGuestPrincipal) owns(owner floatingIPOwner) bool {
 	return owner.BootID == principal.bootID && owner.VMID == principal.vmID &&
@@ -311,4 +345,31 @@ func commitFloatingIPOwned(
 		return record, err
 	}
 	return next, nil
+}
+
+func admitFloatingIPGuestGeneration(
+	record floatingIPRecord,
+	generation uint64,
+	method floatingIPDelegationMethod,
+) error {
+	if method != floatingIPDelegationInspect && (record.Generation != generation || generation == 0) {
+		return errs.New(
+			errs.CodeValidationFailed,
+			"floating-IP generation is stale",
+			errs.WithClass(errs.ClassConflict),
+		)
+	}
+	return nil
+}
+
+// publishGuestFloatingIPIntent is the guest coordinator's first possible mutation boundary.
+// Even refusal before a write is conservatively ambiguous once publication was attempted.
+func publishGuestFloatingIPIntent(
+	ctx context.Context,
+	store *floatingIPStore,
+	target, before floatingIPRecord,
+) (mutationPossible bool, returnErr error) {
+	mutationPossible = true
+	returnErr = store.persist(ctx, target, &before)
+	return mutationPossible, returnErr
 }

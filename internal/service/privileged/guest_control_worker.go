@@ -11,7 +11,7 @@ import (
 )
 
 // executeGuestControlRequest is a closed feature compositor, not operator CRUD or a command proxy.
-// Runtime workers/dispatch are deliberately not registered in this foundation.
+// The coordinator returns its precise admission/publication stage under the retained authority.
 func executeGuestControlRequest(
 	ctx context.Context, principal jailer.GuestControlPrincipal, request guestcontrolwire.Request,
 ) (result network.FloatingIPGuestResult, effectsStarted bool, returnErr error) {
@@ -23,7 +23,13 @@ func executeGuestControlRequest(
 	if err != nil {
 		return result, false, err
 	}
-	defer func() { returnErr = errors.Join(returnErr, admission.Release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		cleanup := admission.Release(context.WithoutCancel(ctx))
+		if cleanup != nil && request.Operation != guestcontrolwire.Inspect {
+			effectsStarted = true
+		}
+		returnErr = errors.Join(returnErr, cleanup)
+	}()
 	identity, err := admission.Identity(ctx)
 	if err != nil {
 		return result, false, err
@@ -40,27 +46,36 @@ func executeGuestControlRequest(
 	if err != nil {
 		return result, false, err
 	}
-	defer func() { returnErr = errors.Join(returnErr, hold.Release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		cleanup := hold.Release(context.WithoutCancel(ctx))
+		if cleanup != nil && request.Operation != guestcontrolwire.Inspect {
+			effectsStarted = true
+		}
+		returnErr = errors.Join(returnErr, cleanup)
+	}()
 	vm, err := network.NewFloatingIPServer().OpenVM(ctx, hold, network.FloatingIPVMIncarnation{
 		BootID: identity.BootID, LaunchGeneration: identity.LaunchGeneration, ExecutionUID: identity.ExecutionUID})
 	if err != nil {
 		return result, false, err
 	}
 	// This defer executes BEFORE child hold and parent Jailer admission release.
-	defer func() { returnErr = errors.Join(returnErr, vm.Release(context.WithoutCancel(ctx))) }()
+	defer func() {
+		cleanup := vm.Release(context.WithoutCancel(ctx))
+		if cleanup != nil && request.Operation != guestcontrolwire.Inspect {
+			effectsStarted = true
+		}
+		returnErr = errors.Join(returnErr, cleanup)
+	}()
 	input := request.Input
 	switch request.Operation {
 	case guestcontrolwire.Inspect:
-		result, err = vm.GuestInspect(ctx, input.ResourceID, input.ExpectedGeneration)
+		result, effectsStarted, err = vm.GuestInspect(ctx, input.ResourceID, input.ExpectedGeneration)
 	case guestcontrolwire.Associate:
-		effectsStarted = true
-		result, err = vm.GuestAssociate(ctx, input.ResourceID, input.ExpectedGeneration)
+		result, effectsStarted, err = vm.GuestAssociate(ctx, input.ResourceID, input.ExpectedGeneration)
 	case guestcontrolwire.Renew:
-		effectsStarted = true
-		result, err = vm.GuestRenew(ctx, input.ResourceID, input.ExpectedGeneration)
+		result, effectsStarted, err = vm.GuestRenew(ctx, input.ResourceID, input.ExpectedGeneration)
 	case guestcontrolwire.Release:
-		effectsStarted = true
-		result, err = vm.GuestRelease(ctx, input.ResourceID, input.ExpectedGeneration)
+		result, effectsStarted, err = vm.GuestRelease(ctx, input.ResourceID, input.ExpectedGeneration)
 	}
 	return result, effectsStarted, err
 }
@@ -84,8 +99,8 @@ func guestControlWorkerResponse(
 	if cause != nil {
 		code := guestcontrolwire.FailureUnavailable
 		domain := errs.AsDomainError(cause)
-		// The feature currently reports no pre/post-commit stage. Once a mutation method has
-		// been entered, conservatively require inspection even if its error class is validation.
+		// Only the coordinator admission stage can prove a pre-effect refusal. Any possible
+		// mutation or cleanup uncertainty overrides even validation/conflict error classes.
 		if effectsStarted {
 			code = guestcontrolwire.FailureOutcomeUnknown
 		} else if domain != nil && domain.Class == errs.ClassValidation {

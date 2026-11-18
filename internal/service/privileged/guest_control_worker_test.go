@@ -67,9 +67,12 @@ func TestGuestControlWorkerResponseUsesClosedProjectionAndConservativeUnknownOut
 			false, guestcontrolwire.FailureDenied},
 		{"conflict", errs.New(errs.CodeInternal, "secret", errs.WithClass(errs.ClassConflict)),
 			false, guestcontrolwire.FailureConflict},
+		{"conflict after publication entry", errs.New(errs.CodeValidationFailed, "secret", errs.WithClass(errs.ClassConflict)),
+			true, guestcontrolwire.FailureOutcomeUnknown},
+		{"cleanup uncertainty", errors.New("secret close failure"), true, guestcontrolwire.FailureOutcomeUnknown},
 		{"transport", errors.New("secret /var/lib/mvmctl/credentials"), false, guestcontrolwire.FailureUnavailable},
 		{"unknown mutation", errors.New("secret write failure"), true, guestcontrolwire.FailureOutcomeUnknown},
-		{"validation after mutation entry", errs.New(errs.CodeValidationFailed, "secret"),
+		{"validation after publication entry", errs.New(errs.CodeValidationFailed, "secret"),
 			true, guestcontrolwire.FailureOutcomeUnknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
