@@ -537,7 +537,10 @@ func (op *Operation) vmBuilderExecute(
 				if prepared.NeedsProvision {
 					agentMaterial, err := guestcontrolauth.DecodeAgentMaterial(prepared.AgentMaterial)
 					if err != nil {
-						provisionErr = errs.New(errs.CodeValidationFailed, "invalid Guest Control agent provisioning material")
+						provisionErr = errs.New(
+							errs.CodeValidationFailed,
+							"invalid Guest Control agent provisioning material",
+						)
 						return
 					}
 					if err := backend.InjectGuestControl(ctx, agentMaterial); err != nil {

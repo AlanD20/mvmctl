@@ -136,7 +136,10 @@ func newTrafficPolicyCreateCmd(policyAPI api.PolicyAPI) *cobra.Command {
 				destinationCount++
 			}
 			if destinationCount != 1 {
-				return errs.New(errs.CodeValidationFailed, "exactly one of --to-vm, --to-floating-ip or --to-host is required")
+				return errs.New(
+					errs.CodeValidationFailed,
+					"exactly one of --to-vm, --to-floating-ip or --to-host is required",
+				)
 			}
 			if destinationNetwork != "" && destinationFloatingIP == "" {
 				return errs.New(errs.CodeValidationFailed, "--to-network requires --to-floating-ip")
@@ -242,7 +245,8 @@ func newTrafficPolicyCreateCmd(policyAPI api.PolicyAPI) *cobra.Command {
 	cmd.Flags().StringVar(&sourceNetwork, "from-network", "", "Source managed network")
 	cmd.Flags().StringVar(&sourceVM, "from-vm", "", "Exact source VM")
 	cmd.Flags().StringVar(&destination, "to-vm", "", "Exact destination VM")
-	cmd.Flags().StringVar(&destinationFloatingIP, "to-floating-ip", "", "Destination floating-IP name, ID, prefix or IPv4")
+	cmd.Flags().
+		StringVar(&destinationFloatingIP, "to-floating-ip", "", "Destination floating-IP name, ID, prefix or IPv4")
 	cmd.Flags().StringVar(
 		&destinationNetwork,
 		"to-network",

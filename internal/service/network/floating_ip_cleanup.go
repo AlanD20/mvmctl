@@ -89,7 +89,10 @@ func retireFloatingIPVMDelegations(
 
 // revokeFloatingIPDelegation first publishes non-admission, then fences only exact sustaining provenance.
 func revokeFloatingIPDelegation(
-	ctx context.Context, tx *managedNetworkTransaction, store *floatingIPDelegationStore, grant floatingIPDelegationRecord,
+	ctx context.Context,
+	tx *managedNetworkTransaction,
+	store *floatingIPDelegationStore,
+	grant floatingIPDelegationRecord,
 ) (returnErr error) {
 	if grant.State == floatingIPDelegationRevoked {
 		return nil
@@ -145,7 +148,8 @@ func retireFloatingIPResourceDelegations(
 		return err
 	}
 	for _, grant := range grants {
-		if grant.ResourceID == resource.ID && grant.NetworkID == resource.NetworkID && grant.OwnerUID == resource.OwnerUID &&
+		if grant.ResourceID == resource.ID && grant.NetworkID == resource.NetworkID &&
+			grant.OwnerUID == resource.OwnerUID &&
 			grant.State != floatingIPDelegationRevoked {
 			if err := revokeFloatingIPDelegation(ctx, tx, store, grant); err != nil {
 				return err
@@ -179,7 +183,8 @@ func requireRetiredFloatingIPDelegations(ctx context.Context, owner *networkStor
 func beginFloatingIPRecovery(
 	ctx context.Context, store *floatingIPStore, record floatingIPRecord,
 ) (floatingIPRecord, error) {
-	if record.Operation != floatingIPRecover || (record.Phase != floatingIPFencing && record.Phase != floatingIPFenced) {
+	if record.Operation != floatingIPRecover ||
+		(record.Phase != floatingIPFencing && record.Phase != floatingIPFenced) {
 		next := record
 		next.Revision++
 		next.Phase = floatingIPFencing

@@ -27,7 +27,9 @@ func (lease *FloatingIPVMLease) GrantFloatingIPDelegation(
 	}
 	principal := state.guestPrincipal()
 	if request.NetworkID != principal.networkID || request.VMID != principal.vmID {
-		return FloatingIPDelegationResult{}, networkAuthorityValidationError("delegation target differs from admitted VM")
+		return FloatingIPDelegationResult{}, networkAuthorityValidationError(
+			"delegation target differs from admitted VM",
+		)
 	}
 	resources, err := openFloatingIPStore(ctx, state.network.store, false)
 	if err != nil {
@@ -189,7 +191,9 @@ func removeOwnedStoredFloatingIPDelegation(
 	projected := floatingIPDelegationProjection(current)
 	expected := request.Grant
 	if expected.Revision > projected.Revision {
-		return FloatingIPDelegationResult{}, networkAuthorityValidationError("delegation receipt is ahead of root lifetime")
+		return FloatingIPDelegationResult{}, networkAuthorityValidationError(
+			"delegation receipt is ahead of root lifetime",
+		)
 	}
 	expected.Revision, expected.State = projected.Revision, projected.State
 	if expected != projected {

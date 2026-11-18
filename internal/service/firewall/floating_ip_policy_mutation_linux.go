@@ -96,7 +96,11 @@ func (state *mutationLeaseState) vmFloatingIPTrafficGrantIntent(
 		if existing.ID == grant.ID {
 			grant.ClaimID, grant.Incarnation = existing.ClaimID, existing.Incarnation
 			if existing != grant {
-				return Intent{}, PolicyReceipt{}, generationAuthorityError("existing VM policy intent differs", nil, nil)
+				return Intent{}, PolicyReceipt{}, generationAuthorityError(
+					"existing VM policy intent differs",
+					nil,
+					nil,
+				)
 			}
 			if expected != "" && existing.Incarnation != expected {
 				return Intent{}, PolicyReceipt{}, policyOwnershipConflict()
@@ -161,7 +165,11 @@ func (state *mutationLeaseState) networkFloatingIPTrafficGrantIntent(
 		if existing.ID == grant.ID {
 			grant.ClaimID, grant.Incarnation = existing.ClaimID, existing.Incarnation
 			if existing != grant {
-				return Intent{}, PolicyReceipt{}, generationAuthorityError("existing network policy intent differs", nil, nil)
+				return Intent{}, PolicyReceipt{}, generationAuthorityError(
+					"existing network policy intent differs",
+					nil,
+					nil,
+				)
 			}
 			if expected != "" && existing.Incarnation != expected {
 				return Intent{}, PolicyReceipt{}, policyOwnershipConflict()
@@ -227,7 +235,11 @@ func (state *mutationLeaseState) removeOwnedVMFloatingIPTrafficGrantIntent(
 			return Intent{}, err
 		}
 		if source.NetworkID != state.binding.NetworkID {
-			return Intent{}, generationAuthorityError("VM revocation source differs from retained network lock", nil, nil)
+			return Intent{}, generationAuthorityError(
+				"VM revocation source differs from retained network lock",
+				nil,
+				nil,
+			)
 		}
 	}
 	target.VMFloatingIPGrants = slices.DeleteFunc(

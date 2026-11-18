@@ -29,7 +29,9 @@ func TestFloatingIPDelegationCanonicalAndClosedTransitions(t *testing.T) {
 	require.Equal(t, grant, got)
 	_, err = decodeFloatingIPDelegationRecord(append(raw, ' '))
 	require.Error(t, err)
-	_, err = decodeFloatingIPDelegationRecord(bytes.Replace(raw, []byte(`"schema":1`), []byte(`"schema":1,"schema":1`), 1))
+	_, err = decodeFloatingIPDelegationRecord(
+		bytes.Replace(raw, []byte(`"schema":1`), []byte(`"schema":1,"schema":1`), 1),
+	)
 	require.Error(t, err)
 	revoking := grant
 	revoking.Revision++

@@ -26,7 +26,11 @@ func (lease *MutationLease) ObserveFloatingIPLease(
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.uncertain {
-		return FloatingIPLeaseObservation{}, generationAuthorityError("floating-IP observation requires recovery", nil, nil)
+		return FloatingIPLeaseObservation{}, generationAuthorityError(
+			"floating-IP observation requires recovery",
+			nil,
+			nil,
+		)
 	}
 	if err := state.ready(ctx); err != nil {
 		return FloatingIPLeaseObservation{}, err
@@ -59,7 +63,11 @@ func (state *mutationLeaseState) observeFloatingIPLease(
 		}
 		key, found := state.compiled.bridge.secondaryOwners[resourceID]
 		if !found {
-			return FloatingIPLeaseObservation{}, generationAuthorityError("floating-IP owner has no compiled endpoint", nil, nil)
+			return FloatingIPLeaseObservation{}, generationAuthorityError(
+				"floating-IP owner has no compiled endpoint",
+				nil,
+				nil,
+			)
 		}
 		for _, element := range observed.tables[0].secondaryElements {
 			if element.key == key {
@@ -70,5 +78,9 @@ func (state *mutationLeaseState) observeFloatingIPLease(
 		}
 		return result, nil
 	}
-	return FloatingIPLeaseObservation{}, generationAuthorityError("floating-IP observation resource is missing", nil, nil)
+	return FloatingIPLeaseObservation{}, generationAuthorityError(
+		"floating-IP observation resource is missing",
+		nil,
+		nil,
+	)
 }

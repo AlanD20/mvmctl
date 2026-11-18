@@ -75,8 +75,11 @@ func readGuestControlCredential(
 		return guestControlCredentialRecord{}, instanceAtomicError("read Guest Control credential authority", err)
 	}
 	version, err := record.version()
-	if err != nil || version != receipt.Version || record.OwnerUID != ownerUID || record.SourceVMID != receipt.SourceVMID {
-		return guestControlCredentialRecord{}, instanceValidationError("Guest Control credential version or owner differs")
+	if err != nil || version != receipt.Version || record.OwnerUID != ownerUID ||
+		record.SourceVMID != receipt.SourceVMID {
+		return guestControlCredentialRecord{}, instanceValidationError(
+			"Guest Control credential version or owner differs",
+		)
 	}
 	return record, nil
 }
@@ -155,7 +158,9 @@ func prepareColdGuestControl(ctx context.Context, backing *protectedBackingLease
 	err := readProtectedRecord(ctx, backing.metadataFD, guestControlBindingLeaf, &receipt)
 	if err == nil {
 		if receipt.Phase != "pending" || receipt.SourceVMID != backing.record.ID {
-			return receipt, guestControlCredentialRecord{}, instanceValidationError("Guest Control cold binding differs")
+			return receipt, guestControlCredentialRecord{}, instanceValidationError(
+				"Guest Control cold binding differs",
+			)
 		}
 		record, err := readGuestControlCredential(ctx, backing.metadataFD, backing.ownerUID, receipt)
 		return receipt, record, err
@@ -304,7 +309,9 @@ func (backing *protectedBackingLease) readGuestControlHostMaterial(
 	}
 	if cache.ownerUID != backing.ownerUID || cache.identity != backing.cacheIdentity ||
 		backing.record.GuestControl == nil || backing.record.GuestControl.Phase != "bound" {
-		return guestcontrolauth.RootHostMaterial{}, instanceValidationError("Guest Control import credential is unavailable")
+		return guestcontrolauth.RootHostMaterial{}, instanceValidationError(
+			"Guest Control import credential is unavailable",
+		)
 	}
 	record, err := readBoundGuestControlCredential(ctx, cache, *backing.record.GuestControl)
 	if err != nil {
@@ -342,7 +349,8 @@ func (plan *protectedCacheCleanupPlan) admitGuestControlMetadata(
 			if err := readProtectedRecord(ctx, metadata, leaf, &receipt); err != nil {
 				return nil, err
 			}
-			if receipt.SourceVMID != sourceVMID || receipt.Phase != "pending" || validateGuestControlReceipt(receipt) != nil {
+			if receipt.SourceVMID != sourceVMID || receipt.Phase != "pending" ||
+				validateGuestControlReceipt(receipt) != nil {
 				return nil, instanceValidationError("Guest Control retired pending binding differs")
 			}
 			if _, err := readGuestControlCredential(ctx, metadata, plan.cache.ownerUID, receipt); err != nil {
@@ -399,7 +407,9 @@ func admitGuestControlRetirementLeaf(
 	}
 	actual, err := record.version()
 	if err != nil || actual != version || record.OwnerUID != ownerUID || record.SourceVMID != sourceVMID {
-		return guestControlRetirementLeaf{}, instanceValidationError("Guest Control retirement credential binding differs")
+		return guestControlRetirementLeaf{}, instanceValidationError(
+			"Guest Control retirement credential binding differs",
+		)
 	}
 	if err := unix.Fstatat(directory, name, &after, unix.AT_SYMLINK_NOFOLLOW); err != nil ||
 		!sameProtectedReadStat(before, after) {

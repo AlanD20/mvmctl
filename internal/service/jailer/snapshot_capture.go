@@ -139,7 +139,9 @@ func (server *VMSnapshotServer) Capture(
 		}
 		receipt := *backing.lease.record.GuestControl
 		if receipt.Phase != "bound" {
-			return model.SnapshotCaptureResult{}, instanceValidationError("snapshot Guest Control provisioning is incomplete")
+			return model.SnapshotCaptureResult{}, instanceValidationError(
+				"snapshot Guest Control provisioning is incomplete",
+			)
 		}
 		if _, err := readBoundGuestControlCredential(ctx, cache, receipt); err != nil {
 			return model.SnapshotCaptureResult{}, err

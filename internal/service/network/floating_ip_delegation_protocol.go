@@ -31,7 +31,8 @@ func (request FloatingIPDelegationGrantRequest) Validate() error {
 		!validFloatingIPDelegationMethod(floatingIPDelegationMethod(request.Method)) {
 		return networkAuthorityValidationError("delegation requires exact network, resource, VM and method")
 	}
-	timed := request.Method == string(floatingIPDelegationAssociate) || request.Method == string(floatingIPDelegationRenew)
+	timed := request.Method == string(floatingIPDelegationAssociate) ||
+		request.Method == string(floatingIPDelegationRenew)
 	if timed && (request.LeaseDuration <= 0 || request.LeaseDuration%time.Second != 0) ||
 		!timed && request.LeaseDuration != 0 {
 		return networkAuthorityValidationError(
@@ -103,12 +104,21 @@ func floatingIPDelegationProjection(record floatingIPDelegationRecord) FloatingI
 }
 
 func validateFloatingIPDelegationResult(result FloatingIPDelegationResult, networkID string) error {
-	if result.NetworkID != networkID || !vmIDPattern.MatchString(result.ID) || !bootIDPattern.MatchString(result.BootID) ||
-		result.LaunchGeneration == 0 || result.ExecutionUID == 0 || result.ExecutionUID == ^uint32(0) {
+	if result.NetworkID != networkID || !vmIDPattern.MatchString(result.ID) ||
+		!bootIDPattern.MatchString(result.BootID) ||
+		result.LaunchGeneration == 0 ||
+		result.ExecutionUID == 0 ||
+		result.ExecutionUID == ^uint32(0) {
 		return networkAuthorityValidationError("delegation result has invalid scope or incarnation")
 	}
-	request := FloatingIPDelegationGrantRequest{ID: result.ID, NetworkID: result.NetworkID, ResourceID: result.ResourceID,
-		VMID: result.VMID, Method: result.Method, LeaseDuration: result.LeaseDuration}
+	request := FloatingIPDelegationGrantRequest{
+		ID:            result.ID,
+		NetworkID:     result.NetworkID,
+		ResourceID:    result.ResourceID,
+		VMID:          result.VMID,
+		Method:        result.Method,
+		LeaseDuration: result.LeaseDuration,
+	}
 	if err := request.Validate(); err != nil {
 		return err
 	}

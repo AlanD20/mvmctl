@@ -18,7 +18,12 @@ func TestGuestControlGuestFSUsesPrivateUploadDuringOrdinaryProvisioning(t *testi
 	backend := NewGuestfsBackend("/caller/staging/rootfs.img", 0, 0, 1000, 1000)
 	require.NoError(t, backend.InjectGuestControl(t.Context(), agent))
 	directory := t.TempDir()
-	commands, err := buildScript(ProvisioningConfig{GuestControlAgent: backend.guestControl}, "/dev/sda", false, directory)
+	commands, err := buildScript(
+		ProvisioningConfig{GuestControlAgent: backend.guestControl},
+		"/dev/sda",
+		false,
+		directory,
+	)
 	require.NoError(t, err)
 	path := filepath.Join(directory, "guest-control-agent.json")
 	raw, err := os.ReadFile(path)

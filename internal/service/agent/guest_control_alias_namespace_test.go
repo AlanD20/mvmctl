@@ -94,8 +94,11 @@ func aliasNamespaceSetup(t *testing.T, kernel *guestControlAliasNetlink) guestCo
 		require.NoError(t, err)
 	}
 	require.Positive(t, index)
-	require.NoError(t, kernel.add(t.Context(), guestControlAliasAddress{Index: index, IP: netip.MustParseAddr("10.60.0.2"),
-		Prefix: 24, Scope: unix.RT_SCOPE_UNIVERSE, Flags: unix.IFA_F_PERMANENT, Label: "gc0"}))
+	require.NoError(
+		t,
+		kernel.add(t.Context(), guestControlAliasAddress{Index: index, IP: netip.MustParseAddr("10.60.0.2"),
+			Prefix: 24, Scope: unix.RT_SCOPE_UNIVERSE, Flags: unix.IFA_F_PERMANENT, Label: "gc0"}),
+	)
 	require.NoError(t, kernel.add(t.Context(), guestControlAliasAddress{
 		Index: index, IP: netip.MustParseAddr("10.60.0.90"),
 		Prefix: 32, Scope: unix.RT_SCOPE_UNIVERSE, Flags: unix.IFA_F_PERMANENT | unix.IFA_F_NOPREFIXROUTE,

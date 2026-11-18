@@ -105,7 +105,12 @@ func TestFloatingIPAdmissionRejectsCancellationAndIncompleteIdentity(t *testing.
 
 func TestFloatingIPAdmissionOpenRefusesInvalidSelectorBeforeAuthority(t *testing.T) {
 	server := &FloatingIPAdmissionServer{}
-	lease, err := server.Open(t.Context(), testAuthorityUID, testAuthorityGID, FloatingIPAdmissionRequest{VMID: "../vm"})
+	lease, err := server.Open(
+		t.Context(),
+		testAuthorityUID,
+		testAuthorityGID,
+		FloatingIPAdmissionRequest{VMID: "../vm"},
+	)
 	require.Error(t, err)
 	require.Nil(t, lease)
 	lease, err = server.Open(nil, testAuthorityUID, testAuthorityGID, FloatingIPAdmissionRequest{VMID: testVMID})
@@ -303,7 +308,12 @@ func TestFloatingIPAdmissionRequireRunningRechecksPeerAfterStateRead(t *testing.
 						identity.bootIDs[identity.bootIndex] = processOtherBootID
 					}
 					payload := `{"state":"Running"}`
-					_, err = fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s", len(payload), payload)
+					_, err = fmt.Fprintf(
+						server,
+						"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s",
+						len(payload),
+						payload,
+					)
 				}
 				done <- err
 			}()

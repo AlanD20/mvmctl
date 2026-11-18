@@ -56,7 +56,9 @@ func validateFloatingIPDelegationRecord(record floatingIPDelegationRecord) error
 	if record.Schema != 1 || !vmIDPattern.MatchString(record.ID) || record.OwnerUID == 0 ||
 		record.OwnerUID == ^uint32(0) ||
 		!networkIDPattern.MatchString(record.NetworkID) || !vmIDPattern.MatchString(record.ResourceID) ||
-		!vmIDPattern.MatchString(record.VMID) || !bootIDPattern.MatchString(record.BootID) || record.LaunchGeneration == 0 ||
+		!vmIDPattern.MatchString(
+			record.VMID,
+		) || !bootIDPattern.MatchString(record.BootID) || record.LaunchGeneration == 0 ||
 		record.ExecutionUID == 0 || record.ExecutionUID == record.OwnerUID || record.ExecutionUID == ^uint32(0) ||
 		!validFloatingIPDelegationMethod(record.Method) || record.Revision == 0 ||
 		(record.State != floatingIPDelegationActive && record.State != floatingIPDelegationRevoking &&
@@ -138,7 +140,10 @@ func newFloatingIPDelegation(
 		return floatingIPDelegationRecord{}, err
 	}
 	if resource.Retired || !principal.matchesResource(resource) {
-		return floatingIPDelegationRecord{}, networkAuthorityCorruptError("delegation resource and admitted VM differ", nil)
+		return floatingIPDelegationRecord{}, networkAuthorityCorruptError(
+			"delegation resource and admitted VM differ",
+			nil,
+		)
 	}
 	id, err := uuid.NewRandom()
 	if err != nil {

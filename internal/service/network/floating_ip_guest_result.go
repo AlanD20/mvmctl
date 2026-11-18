@@ -30,7 +30,10 @@ func floatingIPGuestResult(
 ) (FloatingIPGuestResult, error) {
 	expected := floatingIPFirewallBinding(record, record.Owner)
 	if observed.Binding != expected {
-		return FloatingIPGuestResult{}, networkAuthorityCorruptError("floating-IP root and firewall ownership disagree", nil)
+		return FloatingIPGuestResult{}, networkAuthorityCorruptError(
+			"floating-IP root and firewall ownership disagree",
+			nil,
+		)
 	}
 	result := FloatingIPGuestResult{
 		ResourceID: record.ID, IPv4: record.IPv4, Generation: record.Generation, Ownership: FloatingIPGuestUnassociated,
@@ -40,7 +43,10 @@ func floatingIPGuestResult(
 	}
 	millis := observed.Remaining / time.Millisecond
 	if millis <= 0 || uint64(millis) > uint64(math.MaxInt64/int64(time.Millisecond)) {
-		return FloatingIPGuestResult{}, networkAuthorityCorruptError("floating-IP remaining lease cannot be represented", nil)
+		return FloatingIPGuestResult{}, networkAuthorityCorruptError(
+			"floating-IP remaining lease cannot be represented",
+			nil,
+		)
 	}
 	result.Ownership = FloatingIPGuestOther
 	if principal.owns(record.Owner) {

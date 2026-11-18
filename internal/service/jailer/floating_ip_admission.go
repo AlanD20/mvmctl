@@ -267,7 +267,10 @@ func (lease *FloatingIPAdmissionLease) Release(ctx context.Context) error {
 		state.releaseErr = errors.Join(state.releaseErr, err)
 	}
 	if ctx == nil {
-		state.releaseErr = errors.Join(state.releaseErr, instanceValidationError("floating IP release context is required"))
+		state.releaseErr = errors.Join(
+			state.releaseErr,
+			instanceValidationError("floating IP release context is required"),
+		)
 	}
 	if state.peerPIDFD >= 0 {
 		state.releaseErr = errors.Join(state.releaseErr, unix.Close(state.peerPIDFD))

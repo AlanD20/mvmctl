@@ -57,7 +57,11 @@ func (state *mutationLeaseState) floatingIPFlowAddress(
 			resource.NetworkID != state.binding.NetworkID ||
 			resource.Generation != expectedGeneration ||
 			expectedGeneration == 0 {
-			return netip.Addr{}, generationAuthorityError("floating-IP flow resource scope or generation differs", nil, nil)
+			return netip.Addr{}, generationAuthorityError(
+				"floating-IP flow resource scope or generation differs",
+				nil,
+				nil,
+			)
 		}
 		// Reject every observed element for this address, even at remaining=0: absence alone proves expiry.
 		for _, table := range observed.tables {
@@ -67,7 +71,11 @@ func (state *mutationLeaseState) floatingIPFlowAddress(
 					return netip.Addr{}, err
 				}
 				if address == resource.IPv4 {
-					return netip.Addr{}, generationAuthorityError("floating-IP packet authority is still present", nil, nil)
+					return netip.Addr{}, generationAuthorityError(
+						"floating-IP packet authority is still present",
+						nil,
+						nil,
+					)
 				}
 			}
 		}

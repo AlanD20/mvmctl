@@ -184,7 +184,11 @@ func (r *trafficPolicySQLiteRepo) ListNetworkToFloatingIP(
 	ctx context.Context,
 ) ([]*model.NetworkToFloatingIPTrafficAllowIntent, error) {
 	var intents []*model.NetworkToFloatingIPTrafficAllowIntent
-	err := r.db.SelectContext(ctx, &intents, `SELECT * FROM network_floating_ip_traffic_policies ORDER BY created_at, id`)
+	err := r.db.SelectContext(
+		ctx,
+		&intents,
+		`SELECT * FROM network_floating_ip_traffic_policies ORDER BY created_at, id`,
+	)
 	return intents, err
 }
 

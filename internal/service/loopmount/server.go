@@ -209,7 +209,9 @@ func (server *Server) ProvisionVM(
 	}
 	if len(request.Plan.GuestControl) != 0 {
 		if provisionAuthority == nil {
-			return VMProvisionResult{}, rootfsValidationError("Guest Control requires root-selected pending credentials")
+			return VMProvisionResult{}, rootfsValidationError(
+				"Guest Control requires root-selected pending credentials",
+			)
 		}
 		if err := provisionAuthority.CheckGuestControlAgentMaterial(ctx, request.Plan.GuestControl); err != nil {
 			return VMProvisionResult{}, err

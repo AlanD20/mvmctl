@@ -229,7 +229,12 @@ type guestControlSession struct {
 }
 
 func newGuestControlSession(conn, transport net.Conn) *guestControlSession {
-	return &guestControlSession{conn: conn, transport: transport, gate: make(chan struct{}, 1), done: make(chan struct{})}
+	return &guestControlSession{
+		conn:      conn,
+		transport: transport,
+		gate:      make(chan struct{}, 1),
+		done:      make(chan struct{}),
+	}
 }
 func (session *guestControlSession) closed() bool {
 	select {

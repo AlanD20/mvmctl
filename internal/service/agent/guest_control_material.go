@@ -43,7 +43,9 @@ func loadGuestControlMaterialAt(
 	var parent unix.Stat_t
 	if err := unix.Fstat(directory, &parent); err != nil || parent.Mode&unix.S_IFMT != unix.S_IFDIR ||
 		parent.Uid != 0 || parent.Gid != 0 || parent.Mode&0777 != 0700 {
-		return guestcontrolauth.AgentMaterial{}, false, errors.New("guest control material directory is not root-private")
+		return guestcontrolauth.AgentMaterial{}, false, errors.New(
+			"guest control material directory is not root-private",
+		)
 	}
 	fd, err := unix.Openat2(directory, name, &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK,
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS})
@@ -63,7 +65,9 @@ func loadGuestControlMaterialAt(
 	if err := unix.Fstat(fd, &before); err != nil || before.Mode&unix.S_IFMT != unix.S_IFREG || before.Uid != 0 ||
 		before.Gid != 0 || before.Mode&0777 != 0600 || before.Nlink != 1 || before.Size <= 0 ||
 		before.Size > guestControlMaterialLimit {
-		return guestcontrolauth.AgentMaterial{}, false, errors.New("guest control material is not a private regular file")
+		return guestcontrolauth.AgentMaterial{}, false, errors.New(
+			"guest control material is not a private regular file",
+		)
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, guestControlMaterialLimit+1))
 	if err != nil || len(raw) > guestControlMaterialLimit {

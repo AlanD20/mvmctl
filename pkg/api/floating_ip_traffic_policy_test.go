@@ -85,7 +85,10 @@ func TestFloatingIPTrafficPolicyAPIRemovalRetainsProjectionOnRootFailureAndRetri
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	rootErr = nil
-	op.Repos.TrafficPolicy = floatingPolicyRepo{TrafficPolicyRepository: repo, deleteErr: errors.New("database refused")}
+	op.Repos.TrafficPolicy = floatingPolicyRepo{
+		TrafficPolicyRepository: repo,
+		deleteErr:               errors.New("database refused"),
+	}
 	err = op.NetworkToFloatingIPTrafficPolicyRemove(t.Context(), input)
 	require.Error(t, err)
 	require.Equal(t, errs.CodeDatabaseError, errs.AsDomainError(err).Code)

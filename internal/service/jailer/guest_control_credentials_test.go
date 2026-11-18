@@ -63,7 +63,12 @@ func TestGuestControlColdPreparationRetryRetainsRootSelectionAndBindsImport(t *t
 	after, err := os.ReadFile(filepath.Join(directory, "record.json"))
 	require.NoError(t, err)
 	require.Equal(t, unchanged, after)
-	observed, err := readGuestControlCredential(t.Context(), backing.metadataFD, testAuthorityUID, *published.GuestControl)
+	observed, err := readGuestControlCredential(
+		t.Context(),
+		backing.metadataFD,
+		testAuthorityUID,
+		*published.GuestControl,
+	)
 	require.NoError(t, err)
 	require.Equal(t, material.RootMaterial, observed.RootMaterial)
 }
@@ -177,7 +182,11 @@ func TestGuestControlPrepareResultDoesNotAcceptHostMaterialOrAnotherColdSource(t
 	result.Reference.SourceVMID = strings.Repeat("e", 32)
 	require.Error(t, result.Validate(request))
 	result.NeedsProvision, result.AgentMaterial = false, nil
-	require.NoError(t, result.Validate(request), "a bound root snapshot lineage may retain its original credential source")
+	require.NoError(
+		t,
+		result.Validate(request),
+		"a bound root snapshot lineage may retain its original credential source",
+	)
 	_, err = NewGuestControlCredentialServer().Prepare(context.Background(), 0, 0, request)
 	require.Error(t, err, "a root process is not an authenticated non-root operator")
 }

@@ -83,7 +83,11 @@ func TestFloatingIPPolicyCompilesOnlyExactDestinationInBothNetworkPaths(t *testi
 			assertFloatingPolicyExpressions(t, network.Exprs, true, true, sourceBridge, "mvmbr0", nil)
 			if !cross {
 				vm = requireCompiledRule(t, compiled, "bridge.allow.vm-floating-ip."+intent.VMFloatingIPGrants[0].ID)
-				network = requireCompiledRule(t, compiled, "bridge.allow.network-floating-ip."+intent.NetworkFloatingIPGrants[0].ID)
+				network = requireCompiledRule(
+					t,
+					compiled,
+					"bridge.allow.network-floating-ip."+intent.NetworkFloatingIPGrants[0].ID,
+				)
 				assertFloatingPolicyExpressions(t, vm.Exprs, false, false, "mvmb0", "mvma0", sourceAddress)
 				assertFloatingPolicyExpressions(t, network.Exprs, false, true, "", "mvma0", nil)
 			}
@@ -138,10 +142,17 @@ func assertFloatingPolicyExpressions(
 	} else {
 		want = append(want, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: sourceAddress})
 	}
-	want = append(want, &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4},
+	want = append(
+		want,
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{10, 0, 0, 100}},
-		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}},
-		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2})
+		&expr.Meta{
+			Key:      expr.MetaKeyL4PROTO,
+			Register: 1,
+		},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+	)
 	if networkSource {
 		want = append(want, &expr.Range{Op: expr.CmpOpEq, Register: 1,
 			FromData: []byte{0x1f, 0x40}, ToData: []byte{0x1f, 0x4a}})

@@ -59,7 +59,10 @@ func floatingIPReservationProjection(
 		return firewall.FloatingIPBinding{}, false, err
 	}
 	if record.OwnerUID != ownerUID || record.NetworkID != networkID {
-		return firewall.FloatingIPBinding{}, false, networkAuthorityCorruptError("floating-IP projection scope differs", nil)
+		return firewall.FloatingIPBinding{}, false, networkAuthorityCorruptError(
+			"floating-IP projection scope differs",
+			nil,
+		)
 	}
 	if record.Retired {
 		return firewall.FloatingIPBinding{}, false, nil

@@ -19,7 +19,10 @@ func conntrackWireTuple(t *testing.T, src, dst string, protocol byte) []byte {
 	t.Helper()
 	source := netip.MustParseAddr(src).As4()
 	destination := netip.MustParseAddr(dst).As4()
-	ips := mustMarshalKernelAttributes(t, []netlink.Attribute{{Type: 1, Data: source[:]}, {Type: 2, Data: destination[:]}})
+	ips := mustMarshalKernelAttributes(
+		t,
+		[]netlink.Attribute{{Type: 1, Data: source[:]}, {Type: 2, Data: destination[:]}},
+	)
 	proto := []netlink.Attribute{{Type: 1, Data: []byte{protocol}}}
 	switch protocol {
 	case 1:
@@ -69,7 +72,11 @@ func TestConntrackExactSelectorsCoverEveryIPv4TupleForm(t *testing.T) {
 			reply := conntrackWireTuple(t, "198.51.100.2", "10.0.0.100", protocol)
 			flow, err := decodeConntrackFlow(conntrackWireFlow(t, original, reply, []byte{0, 37}, []byte{1, 2, 3, 4}))
 			require.NoError(t, err)
-			assert.True(t, flow.matches(netip.MustParseAddr("10.0.0.100")), "reply-only NAT address must select the flow")
+			assert.True(
+				t,
+				flow.matches(netip.MustParseAddr("10.0.0.100")),
+				"reply-only NAT address must select the flow",
+			)
 			assert.False(t, flow.matches(netip.MustParseAddr("10.0.0.101")))
 			request, err := flow.deleteRequest()
 			require.NoError(t, err)

@@ -38,7 +38,11 @@ func TestFloatingIPPolicyDigestsUseIndependentDomainsAndStableResourceIdentity(t
 		t.Run(name, func(t *testing.T) {
 			changed := vm
 			mutate(&changed)
-			assert.NotEqual(t, crypto.VMToFloatingIPTrafficPolicyDigest(vm), crypto.VMToFloatingIPTrafficPolicyDigest(changed))
+			assert.NotEqual(
+				t,
+				crypto.VMToFloatingIPTrafficPolicyDigest(vm),
+				crypto.VMToFloatingIPTrafficPolicyDigest(changed),
+			)
 		})
 	}
 	changed := vm

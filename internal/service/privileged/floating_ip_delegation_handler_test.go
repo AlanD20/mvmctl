@@ -26,7 +26,10 @@ func TestFloatingIPDelegationDispatchBindsOwnerAndRequiresEOFBeforeEffects(t *te
 		network.FloatingIPDelegationGrantAction: network.FloatingIPDelegationGrantRequest{
 			ID: id, NetworkID: networkID, ResourceID: resource, VMID: vmID, Method: "associate", LeaseDuration: 5 * time.Second},
 		network.FloatingIPDelegationRemoveOwnedAction: network.FloatingIPDelegationRemoveOwnedRequest{Grant: result},
-		network.FloatingIPDelegationGetAction:         network.FloatingIPDelegationGetRequest{NetworkID: networkID, ID: id},
+		network.FloatingIPDelegationGetAction: network.FloatingIPDelegationGetRequest{
+			NetworkID: networkID,
+			ID:        id,
+		},
 		network.FloatingIPDelegationListAction: network.FloatingIPDelegationListRequest{NetworkID: networkID,
 			ResourceID: resource},
 		network.FloatingIPDelegationRevokeAction: network.FloatingIPDelegationRevokeRequest{
@@ -88,7 +91,9 @@ func TestFloatingIPDelegationDispatchBindsOwnerAndRequiresEOFBeforeEffects(t *te
 					list: func(_ context.Context, uid uint32,
 						r network.FloatingIPDelegationListRequest) (network.FloatingIPDelegationPage, error) {
 						check(uid, r)
-						return network.FloatingIPDelegationPage{Items: []network.FloatingIPDelegationResult{result}}, nil
+						return network.FloatingIPDelegationPage{
+							Items: []network.FloatingIPDelegationResult{result},
+						}, nil
 					},
 					revoke: func(_ context.Context, uid uint32,
 						r network.FloatingIPDelegationRevokeRequest) (network.FloatingIPDelegationResult, error) {

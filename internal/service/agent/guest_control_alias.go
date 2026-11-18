@@ -245,8 +245,18 @@ func (aliases *guestControlAliases) reconcile(
 	}
 	desired := guestControlAliasAddress{Index: link.Index, IP: address, Prefix: 32, Scope: unix.RT_SCOPE_UNIVERSE,
 		Flags: unix.IFA_F_PERMANENT | unix.IFA_F_NOPREFIXROUTE, Label: label}
-	record := guestControlAliasReceipt{Schema: 1, Resource: result.ResourceID, Generation: result.Generation, Revision: 1,
-		Session: session, BootID: aliases.bootID, Deadline: deadline, Link: link, Primary: primary, Address: desired}
+	record := guestControlAliasReceipt{
+		Schema:     1,
+		Resource:   result.ResourceID,
+		Generation: result.Generation,
+		Revision:   1,
+		Session:    session,
+		BootID:     aliases.bootID,
+		Deadline:   deadline,
+		Link:       link,
+		Primary:    primary,
+		Address:    desired,
+	}
 	if err := aliases.store.put(ctx, record, nil); err != nil {
 		return err
 	}
