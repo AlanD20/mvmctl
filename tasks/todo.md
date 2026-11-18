@@ -57,7 +57,9 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Implement guest ownership coordination, lifecycle fencing, bootstrap projection and removal guards;
   resolve the present-zero takeover review finding and pass focused integration checks.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
-- [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
+- [x] Implement the owned host session with one protected VMM admission, expected credential lineage,
+  pinned agent TLS and independent exit descriptor. Review and focused QA vet/race checks pass.
+- [ ] Wire the retained root worker and typed delegated operations without operator impersonation; qualify live bootstrap.
 - [x] Implement the authenticated guest gateway and typed `mvm-agent control floating-ip` commands;
   independently review and pass focused named-runner tests, race checks and vet. Host worker remains unwired.
 - [ ] Implement guest address reconciliation and qualify the composed control path.

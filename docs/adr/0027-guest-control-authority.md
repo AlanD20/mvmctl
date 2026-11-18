@@ -31,8 +31,11 @@ Endpoint authentication uses TLS 1.3 with mutually pinned, role-specific Ed25519
 application protocol. Pins identify provisioned keys; certificate subjects and clocks do not establish VM identity.
 The host private key stays in root authority. The guest receives only its own private material and the public
 host pin. A TLS-protected acceptance acknowledgement confirms mutual authentication before the host returns.
-The leaf authentication, backend-preserving credential preparation and root snapshot-reference integration
-are implemented and reviewed. Worker integration and live provisioning qualification remain pending. Memory
+Leaf authentication, backend-preserving credential preparation, snapshot-reference integration and the
+owned host session are implemented and reviewed. Bootstrap uses one protected VMM admission, verifies
+Running and the expected credential lineage, and authenticates the agent before releasing its locks. The
+session retains its stream and an independent VMM exit descriptor. Worker integration and live bootstrap
+qualification remain pending. Memory
 snapshots require a root-verified credential lineage. Each restored VM receives a fresh process/incarnation
 principal and no inherited grants or session.
 
