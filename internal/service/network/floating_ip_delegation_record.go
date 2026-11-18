@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -34,6 +35,7 @@ type floatingIPDelegationRecord struct {
 	LaunchGeneration uint64                     `json:"launch_generation"`
 	ExecutionUID     uint32                     `json:"execution_uid"`
 	Method           floatingIPDelegationMethod `json:"method"`
+	LeaseDuration    time.Duration              `json:"lease_duration_ns"`
 	Revision         uint64                     `json:"revision"`
 	State            floatingIPDelegationState  `json:"state"`
 }
@@ -60,6 +62,11 @@ func validateFloatingIPDelegationRecord(record floatingIPDelegationRecord) error
 		(record.State != floatingIPDelegationActive && record.State != floatingIPDelegationRevoking &&
 			record.State != floatingIPDelegationRevoked) {
 		return networkAuthorityCorruptError("delegation identity, method or state is invalid", nil)
+	}
+	timed := record.Method == floatingIPDelegationAssociate || record.Method == floatingIPDelegationRenew
+	if (timed && (record.LeaseDuration <= 0 || record.LeaseDuration%time.Second != 0)) ||
+		(!timed && record.LeaseDuration != 0) {
+		return networkAuthorityCorruptError("delegation requires an explicit method-specific lease policy", nil)
 	}
 	// This immutable grant lifetime has exactly three publications. Revision therefore
 	// also proves which active authority revision a revocation retires.
@@ -124,7 +131,8 @@ func validateFloatingIPDelegationReplacement(
 
 // newFloatingIPDelegation issues a new identity only from already admitted root resource and VM facts.
 func newFloatingIPDelegation(
-	resource floatingIPRecord, principal floatingIPGuestPrincipal, method floatingIPDelegationMethod,
+	resource floatingIPRecord, principal floatingIPGuestPrincipal,
+	method floatingIPDelegationMethod, duration time.Duration,
 ) (floatingIPDelegationRecord, error) {
 	if err := validateFloatingIPRecord(resource); err != nil {
 		return floatingIPDelegationRecord{}, err
@@ -140,7 +148,8 @@ func newFloatingIPDelegation(
 		Schema: 1, ID: strings.ReplaceAll(id.String(), "-", ""), OwnerUID: resource.OwnerUID,
 		NetworkID: resource.NetworkID, ResourceID: resource.ID, VMID: principal.vmID, BootID: principal.bootID,
 		LaunchGeneration: principal.launchGeneration, ExecutionUID: principal.executionUID,
-		Method: method, Revision: floatingIPDelegationActiveRevision, State: floatingIPDelegationActive,
+		Method: method, LeaseDuration: duration, Revision: floatingIPDelegationActiveRevision,
+		State: floatingIPDelegationActive,
 	}
 	return record, validateFloatingIPDelegationRecord(record)
 }

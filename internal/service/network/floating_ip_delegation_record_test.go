@@ -3,6 +3,7 @@ package network
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +16,7 @@ func delegationFixture(t *testing.T) (floatingIPRecord, floatingIPGuestPrincipal
 		ownerUID: resource.OwnerUID, networkID: resource.NetworkID, vmID: owner.VMID, bootID: owner.BootID,
 		launchGeneration: owner.LaunchGeneration, executionUID: owner.ExecutionUID,
 	}
-	grant, err := newFloatingIPDelegation(resource, principal, floatingIPDelegationAssociate)
+	grant, err := newFloatingIPDelegation(resource, principal, floatingIPDelegationAssociate, 5*time.Second)
 	require.NoError(t, err)
 	return resource, principal, grant
 }
@@ -79,4 +80,22 @@ func TestFloatingIPDelegationAdmissionAndExactProvenance(t *testing.T) {
 	resource.Operation = floatingIPRelease
 	resource.BeforeOwner = owner
 	require.True(t, floatingIPRecordSustainedByDelegation(resource, revoking))
+}
+
+func TestFloatingIPDelegationRequiresExplicitMethodLeasePolicy(t *testing.T) {
+	resource, principal, _ := delegationFixture(t)
+	for _, method := range []floatingIPDelegationMethod{floatingIPDelegationAssociate, floatingIPDelegationRenew} {
+		for _, duration := range []time.Duration{0, -time.Second, time.Millisecond} {
+			_, err := newFloatingIPDelegation(resource, principal, method, duration)
+			require.Error(t, err)
+		}
+		_, err := newFloatingIPDelegation(resource, principal, method, 3*time.Second)
+		require.NoError(t, err)
+	}
+	for _, method := range []floatingIPDelegationMethod{floatingIPDelegationInspect, floatingIPDelegationRelease} {
+		_, err := newFloatingIPDelegation(resource, principal, method, 0)
+		require.NoError(t, err)
+		_, err = newFloatingIPDelegation(resource, principal, method, time.Second)
+		require.Error(t, err)
+	}
 }
