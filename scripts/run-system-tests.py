@@ -663,6 +663,7 @@ TIER2_DOMAINS: dict[str, list[str]] = {
         "tests/system/network/test_guest_control_floating_ip.py",
         "tests/system/network/test_floating_ip_policies.py",
         "tests/system/network/test_floating_ip_lease_lifecycle.py",
+        "tests/system/network/test_floating_ip_snapshot.py",
     ],
     "floating_ip_worker_fault": ["tests/system/network/test_floating_ip_worker_fault.py"],
     "host_admin": ["tests/system/host/test_host_admin.py"],
@@ -706,7 +707,10 @@ TIER3_DOMAINS: dict[str, list[str]] = {
         "tests/system/volume/test_volume_hotplug.py",
     ],
     "cp": ["tests/system/cp/test_cp.py"],
-    "env": ["tests/system/env/test_env.py"],
+    "env": [
+        "tests/system/env/test_env.py",
+        "tests/system/env/test_env_floating_ip.py",
+    ],
 }
 
 # Tier classification for display
