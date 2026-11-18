@@ -37,7 +37,9 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [ ] Qualify that admission against a live Firecracker process when ownership is wired.
 - [x] Implement address-scoped conntrack invalidation after secondary authority is absent, using exact tuple,
   zone and flow identity with absence readback. Independent review and focused QA vet/race checks pass.
-- [ ] Qualify real conntrack deletion with the replacement kernel and compose exact neighbor cleanup.
+- [x] Compose flow and exact neighbor cleanup under retained network authority, with durable reservation and
+  bridge identity/L3 checks; independently review and run focused QA tests, vet and race checks.
+- [ ] Qualify genuine ownership-transition ordering and real flow/neighbor deletion with the replacement kernel.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.

@@ -62,7 +62,10 @@ The firewall mutation lease now derives the cleanup address from admitted resour
 requires observed secondary authority to be absent, and deletes only matching IPv4 conntrack entries using
 original tuple, zone and flow identity. A second dump must prove absence before return. Interrupted or uncertain
 effects refuse handover. This helper is independently reviewed and unit-tested; live conntrack qualification
-and composition with root ownership transitions and neighbor cleanup remain pending.
+and composition with root ownership transitions remain pending. The private network transaction now validates
+its durable reservation and exact managed bridge, runs flow cleanup, reinspects the bridge and removes only
+the selected dynamic neighbor. This does not require the old VM to be live or its primary veth to be down.
+Genuine transaction-ordering and live cleanup qualification remain pending.
 
 The compiler permits the primary address plus only root-authorized active secondary addresses for IPv4 and ARP.
 These guards precede established-flow acceptance. Gratuitous ARP refreshes reachability but is not fencing proof.
