@@ -16,6 +16,7 @@ type kernelApplicationConnection interface {
 	addSecondarySet(*nftables.Set) error
 	deleteSecondarySet(*nftables.Set)
 	deleteSecondaryElements(*nftables.Set, []nftables.SetElement) error
+	addSecondaryElements(*nftables.Set, []nftables.SetElement) error
 	addRule(compiledRule)
 	flush() error
 	interrupt() error

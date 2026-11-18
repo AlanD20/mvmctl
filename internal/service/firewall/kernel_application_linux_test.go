@@ -1061,6 +1061,16 @@ func (connection *recordingKernelApplicationConnection) deleteSecondaryElements(
 	return nil
 }
 
+func (connection *recordingKernelApplicationConnection) addSecondaryElements(
+	set *nftables.Set,
+	elements []nftables.SetElement,
+) error {
+	for _, element := range elements {
+		connection.record(fmt.Sprintf("add secondary key %s/%x timeout=%s", set.Name, element.Key, element.Timeout))
+	}
+	return nil
+}
+
 func (connection *recordingKernelApplicationConnection) flushChain(chain *nftables.Chain) {
 	connection.record("flush chain " + kernelApplicationTableIdentity(chain.Table) + "/" + chain.Name)
 }
