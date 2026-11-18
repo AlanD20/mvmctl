@@ -6,8 +6,11 @@ import base64
 import gzip
 import hashlib
 import ipaddress
+import inspect
 import json
+import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import uuid
@@ -205,7 +208,35 @@ def _fetch(o, namespace, path):
     return result.stdout.encode()
 
 
-def _pytest(o, namespace, guest_task, source, files, label, *, collect=False, capture=None):
+def _admit_source_kernel(o, namespace):
+    kernel_id, digest = (os.environ.get(key) for key in ("MVM_RUNNER_KERNEL_ID", "MVM_RUNNER_KERNEL_SHA256"))
+    if not kernel_id or not digest:
+        raise RuntimeError("qualification env requires explicit MVM_RUNNER_KERNEL_ID and MVM_RUNNER_KERNEL_SHA256 together")
+    binding = o.ImportedRunnerKernelBinding(kernel_id, digest)
+    if (re.fullmatch(r"[0-9a-f]{64}", binding.id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", binding.sha256) is None
+            or hashlib.sha256(f"{binding.sha256}:{binding.version}:{binding.arch}".encode()).hexdigest() != binding.id):
+        raise RuntimeError("qualification source kernel ID/SHA256 binding is invalid")
+    result = _exec(o, namespace, shlex.join(["/usr/local/bin/mvm", "kernel", "inspect", binding.id, "--json"]))
+    info = o._runner_binding_json(result.stdout)
+    kernel, storage = info.get("kernel", {}), info.get("storage", {})
+    path = namespace["paths"]["cache"] + "/kernels/" + binding.id
+    if (kernel.get("id"), kernel.get("type"), kernel.get("version"), kernel.get("arch"),
+            storage.get("path")) != (binding.id, "custom", binding.version, binding.arch, path) or kernel.get("is_present") is not True:
+        raise RuntimeError("qualification source kernel metadata/path differs from binding")
+    # Reuse the existing stable no-follow ELF/hash/GNU-note proof, on the QA filesystem.
+    program = "import os,stat,struct,hashlib; from pathlib import Path\n"
+    program += "\n".join(inspect.getsource(function) for function in (
+        o._open_directory_without_symlinks, o._imported_runner_elf_build_id, o._imported_runner_elf_identity,
+    ))
+    program += f"\nprint(_imported_runner_elf_identity(Path({path!r}), {binding.sha256!r}))\n"
+    build_id = _command(o, namespace, program).stdout.strip()
+    if re.fullmatch(r"[0-9a-f]+", build_id) is None:
+        raise RuntimeError("qualification source kernel GNU build ID is invalid")
+    return o.ImportedRunnerKernelBinding(binding.id, binding.sha256, build_id=build_id)
+
+
+def _pytest(o, namespace, guest_task, source, files, label, *, collect=False, capture=None, kernel_binding=None):
     report = guest_task + "/" + label
     _command(o, namespace, "import pathlib,sys;p=pathlib.Path(sys.argv[1]);p.mkdir(mode=0o700);(p/'tmp').mkdir(mode=0o700)", report)
     raw_source, expected = _runtime_source(o, namespace, guest_task, source)
@@ -218,6 +249,10 @@ def _pytest(o, namespace, guest_task, source, files, label, *, collect=False, ca
     env = ["env", "PYTHONPATH=" + root + "/scripts", "PYTHONDONTWRITEBYTECODE=1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "TMPDIR=" + report + "/tmp",
            "MVM_TEST_VM=" + namespace["runner"], "MVM_TEST_QUALIFICATION_HOST=" + namespace["runner"],
            NODE_REPORT_ENV + "=" + report + "/nodes.json", PYTEST_OUTCOME_REPORT_ENV + "=" + ("" if collect else report + "/outcomes.json")]
+    if kernel_binding is not None:
+        if collect or label != "env":
+            raise RuntimeError("source kernel binding is only for qualification env execution")
+        env += ["MVM_RUNNER_KERNEL_ID=" + kernel_binding.id, "MVM_RUNNER_KERNEL_SHA256=" + kernel_binding.sha256]
     result = _exec(o, namespace, "cd " + shlex.quote(root) + " && " + shlex.join([*env, *cmd]), timeout=1800, check=False)
     if collect:
         for name, raw in (("collection-native.json", _encode(dict(returncode=result.returncode))),
@@ -266,6 +301,7 @@ def run(o, args):
     candidate = dict(sha256=artifact_sha256, version=version)
     registry = o._evidence_registry()
     selection = registry if args.collect_release_nodes else {domain: registry[domain] for domain in args.domains}
+    kernel_binding = _admit_source_kernel(o, namespace) if "env" in selection and not args.collect_release_nodes else None
     if args.selected_node_file:
         collection = verify_collection_task(args.collection_task, source, candidate, registry)
         for task in (args.collection_task, *args.completed_matrix_task):
@@ -295,7 +331,14 @@ def run(o, args):
                 domain_capture = capture.domain(domain, selected["tier"], selected.get("nodes", selected["files"]))
                 try:
                     require_same(before, observe(o, namespace))
-                    _pytest(o, namespace, guest_task, source, domain_capture.files, domain, capture=domain_capture)
+                    if domain == "env" and _admit_source_kernel(o, namespace) != kernel_binding:
+                        raise RuntimeError("qualification source kernel changed before env execution")
+                    kwargs = {"kernel_binding": kernel_binding} if domain == "env" else {}
+                    try:
+                        _pytest(o, namespace, guest_task, source, domain_capture.files, domain, capture=domain_capture, **kwargs)
+                    finally:
+                        if domain == "env" and _admit_source_kernel(o, namespace) != kernel_binding:
+                            raise RuntimeError("qualification source kernel changed after env execution")
                     require_same(before, observe(o, namespace))
                     item["passed"] = True
                 except Exception as error:

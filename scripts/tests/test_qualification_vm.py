@@ -2,14 +2,16 @@
 
 import base64
 import copy
+import hashlib
 import json
 from pathlib import Path
+import shlex
 import subprocess
 from types import SimpleNamespace
 
 import pytest
 
-from test_run_system_tests import orchestrator, _complete_pytest_outcome_report  # noqa: F401
+from test_run_system_tests import orchestrator, _complete_pytest_outcome_report, _minimal_runner_elf  # noqa: F401
 from test_system_test_evidence import _junit, _node_report
 
 
@@ -83,6 +85,8 @@ def test_wire_observation_refuses_identity_drift_before_staging(orchestrator, na
 @pytest.fixture
 def execution(orchestrator, namespace, observed, monkeypatch, tmp_path):
     q = orchestrator.qualification_vm
+    original_admit = q._admit_source_kernel
+    monkeypatch.setattr(q, "_admit_source_kernel", lambda *a: orchestrator.ImportedRunnerKernelBinding("d"*64, "e"*64))
     registry = {"floating_ip": dict(tier=2, files=["tests/system/network/test_fixture.py"]),
                 "env": dict(tier=3, files=["tests/system/env/test_fixture.py"])}
     source = dict(revision="f"*40, tree="e"*40, payload={path: "d"*64 for row in registry.values() for path in row["files"]})
@@ -99,7 +103,7 @@ def execution(orchestrator, namespace, observed, monkeypatch, tmp_path):
                  "_install_system_binary_in_runner", "_initialize_system_binary_in_runner", "_run_local_pytest", "_get_mvm_version"):
         monkeypatch.setattr(orchestrator, name, forbidden)
     monkeypatch.setattr(q, "stage", lambda *a: "/home/runner/.cache/mvmctl-qualification-" + "a"*32)
-    def pytest_run(o, ns, guest_task, actual_source, files, label, *, collect=False, capture=None):
+    def pytest_run(o, ns, guest_task, actual_source, files, label, *, collect=False, capture=None, kernel_binding=None):
         calls.append((label, files))
         nodes = [path + "::test_fixture" for path in files]
         result = subprocess.CompletedProcess([], 0, "literal output", "")
@@ -117,7 +121,8 @@ def execution(orchestrator, namespace, observed, monkeypatch, tmp_path):
     task = tmp_path / "task";task.mkdir(mode=0o700)
     args = orchestrator._build_parser().parse_args(["floating_ip","env","--qualification-vm",namespace["runner"],
         "--qualification-namespace",str(tmp_path/"namespace.json"),"--record-evidence",str(task)])
-    return SimpleNamespace(q=q, o=orchestrator, args=args, task=task, calls=calls, source=source, registry=registry, before=observed)
+    return SimpleNamespace(q=q, o=orchestrator, args=args, task=task, calls=calls, source=source, registry=registry,
+                           before=observed, original_admit=original_admit)
 
 
 def test_retained_execution_preserves_tiers_and_never_provisions_or_runs_local(execution):
@@ -233,7 +238,77 @@ def test_remote_command_budget_keeps_default_probe_bounded(orchestrator, namespa
     assert "/usr/bin/python3" in argv[-1] and "print" in argv[-1]
 
 
-def test_remote_command_budget_reaches_actual_long_pytest_mvm_argv(orchestrator, namespace, monkeypatch, tmp_path):
+@pytest.mark.parametrize("fault", ["missing", "id_only", "sha_only", "malformed", "mismatch"])
+def test_env_source_kernel_pair_refuses_before_staging(execution, monkeypatch, fault):
+    e = execution
+    monkeypatch.setattr(e.q, "_admit_source_kernel", e.original_admit)
+    monkeypatch.setattr(e.q, "stage", lambda *a: pytest.fail("invalid kernel pair must not stage or test"))
+    monkeypatch.delenv("MVM_RUNNER_KERNEL_ID", raising=False)
+    monkeypatch.delenv("MVM_RUNNER_KERNEL_SHA256", raising=False)
+    if fault in ("id_only", "malformed", "mismatch"):
+        monkeypatch.setenv("MVM_RUNNER_KERNEL_ID", "bad" if fault == "malformed" else "d"*64)
+    if fault in ("sha_only", "malformed", "mismatch"):
+        monkeypatch.setenv("MVM_RUNNER_KERNEL_SHA256", "e"*64)
+    with pytest.raises(RuntimeError, match="explicit MVM_RUNNER_KERNEL|binding is invalid"):
+        e.q.run(e.o, e.args)
+    assert list(e.task.iterdir()) == []
+
+
+@pytest.mark.parametrize("fault", [None, "metadata", "hash", "symlink"])
+def test_source_kernel_admission_checks_target_metadata_and_actual_elf(orchestrator, namespace, monkeypatch, tmp_path, fault):
+    payload = _minimal_runner_elf()
+    digest = hashlib.sha256(payload).hexdigest()
+    kernel_id = hashlib.sha256(f"{digest}:7.0.11:x86_64".encode()).hexdigest()
+    monkeypatch.setenv("MVM_RUNNER_KERNEL_ID", kernel_id)
+    monkeypatch.setenv("MVM_RUNNER_KERNEL_SHA256", digest)
+    namespace["paths"]["cache"] = str(tmp_path / "cache")
+    path = Path(namespace["paths"]["cache"]) / "kernels" / kernel_id
+    path.parent.mkdir(parents=True)
+    path.write_bytes(payload if fault != "hash" else b"wrong ELF bytes")
+    if fault == "symlink":
+        target = path.with_name("other");path.rename(target);path.symlink_to(target)
+    info = dict(kernel=dict(id=kernel_id, type="custom", version="7.0.11", arch="x86_64", is_present=True),
+                storage=dict(path=str(path)))
+    if fault == "metadata":info["kernel"]["version"] = "7.0.10"
+    calls = []
+    def mvm(*args, **kwargs):
+        # Keep the real _exec/_command and run their actual isolated ELF reader.
+        command = shlex.split(shlex.split(args[-1])[-1]);calls.append(command)
+        if command[0] == "/usr/local/bin/mvm":
+            assert command == ["/usr/local/bin/mvm", "kernel", "inspect", kernel_id, "--json"]
+            return subprocess.CompletedProcess([], 0, json.dumps(info), "")
+        assert command[:5] == ["/usr/bin/python3", "-I", "-S", "-B", "-c"]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+        result.check_returncode()
+        return result
+    monkeypatch.setattr(orchestrator, "mvm", mvm)
+    if fault is None:
+        admitted = orchestrator.qualification_vm._admit_source_kernel(orchestrator, namespace)
+        assert (admitted.id, admitted.sha256) == (kernel_id, digest)
+        assert admitted.build_id and len(calls) == 2
+    else:
+        with pytest.raises((RuntimeError, subprocess.CalledProcessError)):
+            orchestrator.qualification_vm._admit_source_kernel(orchestrator, namespace)
+        assert len(calls) == (1 if fault == "metadata" else 2)
+
+
+@pytest.mark.parametrize("when", ["before", "after"])
+def test_source_kernel_drift_prevents_env_pass(execution, monkeypatch, when):
+    e = execution
+    calls = []
+    def admit(*args):
+        calls.append(None)
+        changed = len(calls) >= (2 if when == "before" else 3)
+        return e.o.ImportedRunnerKernelBinding("d"*64, "e"*64, build_id="bb" if changed else "aa")
+    monkeypatch.setattr(e.q, "_admit_source_kernel", admit)
+    assert e.q.run(e.o, e.args) is False
+    result = json.loads((e.task / "env.result.json").read_text())
+    assert result["passed"] is False and f"changed {when} env execution" in result["output"]
+    assert [label for label, files in e.calls] == (["floating_ip"] if when == "before" else ["floating_ip", "env"])
+
+
+@pytest.mark.parametrize("label", ["floating_ip", "env"])
+def test_remote_command_budget_reaches_actual_long_pytest_mvm_argv(orchestrator, namespace, monkeypatch, tmp_path, label):
     q = orchestrator.qualification_vm
     evidence = __import__("system_test_evidence")
     files = ["tests/system/network/test_fixture.py"]
@@ -253,13 +328,16 @@ def test_remote_command_budget_reaches_actual_long_pytest_mvm_argv(orchestrator,
         if path.endswith("pytest.xml"):return _junit(evidence, nodes)
         return _complete_pytest_outcome_report()
     monkeypatch.setattr(q, "_fetch", fetch)
+    binding = orchestrator.ImportedRunnerKernelBinding("d"*64, "e"*64) if label == "env" else None
     q._pytest(orchestrator, namespace, "/home/runner/.cache/mvmctl-qualification-" + "a" * 32,
-              dict(payload=expected), files, "floating_ip", capture=capture)
+              dict(payload=expected), files, label, capture=capture, kernel_binding=binding)
     pytest_calls = [(args, kwargs) for args, kwargs in calls if " -m pytest " in args[-1]]
     assert len(pytest_calls) == 1
     argv, options = pytest_calls[0]
     assert argv[:7] == ("exec", namespace["runner_id"], "--user", "runner", "--timeout", "1800", "--")
     assert options == {"check": False, "timeout": 1830}
+    assert ("MVM_RUNNER_KERNEL_ID=" + "d"*64 in argv[-1]) is (label == "env")
+    assert ("MVM_RUNNER_KERNEL_SHA256=" + "e"*64 in argv[-1]) is (label == "env")
     assert capture.report_cleanup is True
     short_calls = [(args, kwargs) for args, kwargs in calls if " -m pytest " not in args[-1]]
     assert short_calls and all(args[5] == "60" and kwargs["timeout"] == 90 for args, kwargs in short_calls)
