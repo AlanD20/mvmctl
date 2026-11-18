@@ -50,6 +50,10 @@ wait failure can occur after kernel ownership commits; it does not promise rollb
 before deciding whether to retry. Inspection reports alias synchronization as `unobserved`; it does not contact
 the guest or establish its current readiness.
 
+The agent announces newly installed ownership on the local network to refresh peers' cached MAC addresses.
+Announcements do not grant access or replace host fencing. A failed announcement prevents a success
+acknowledgment; a fresh authorized retry can finish it without extending a finite lease on its own.
+
 ## Delegate exact methods
 
 For an eligible running VM named `controller-1` in `cluster`, grant each required method separately:

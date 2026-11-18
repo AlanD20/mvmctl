@@ -183,6 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed stale peer MAC addresses after floating-IP ownership moves. The guest agent announces verified alias
+  installation before acknowledging it; policy and old-owner fencing remain enforced independently.
 - Fixed rejection of valid family-filtered conntrack dump replies, which prevented floating-IP retirement on
   affected kernels. Interrupted dumps, unexpected flags and kernel errors still fail closed.
 - Fixed administrator reset rejecting terminal networkless history or a committed empty firewall generation
