@@ -148,6 +148,44 @@ func sameGuestControlAliasFile(left, right unix.Stat_t) bool {
 		left.Gid == right.Gid && left.Nlink == right.Nlink && left.Size == right.Size && left.Mtim == right.Mtim &&
 		left.Ctim == right.Ctim
 }
+
+// An unpublished candidate never authorizes an effect. Preserve it for inspection;
+// only canonical published receipts participate in restart cleanup.
+func (store *guestControlAliasStore) unfinishedCandidate(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	id, err := uuid.Parse(strings.TrimSuffix(strings.TrimPrefix(name, "."), ".tmp"))
+	if err != nil || id.Version() != 4 || id.Variant() != uuid.RFC4122 || "."+id.String()+".tmp" != name {
+		return errors.New("guest alias inventory contains unknown state")
+	}
+	fd, err := unix.Openat2(store.directory, name, &unix.OpenHow{
+		Flags:   unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK,
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS})
+	if err != nil {
+		return err
+	}
+	file := os.NewFile(uintptr(fd), "guest-alias-unpublished-candidate")
+	defer file.Close()
+	var before, after, named unix.Stat_t
+	if err := unix.Fstat(fd, &before); err != nil || before.Mode&unix.S_IFMT != unix.S_IFREG || before.Uid != 0 ||
+		before.Gid != 0 || before.Mode&0777 != 0600 || before.Nlink != 1 ||
+		before.Size < 0 || before.Size > guestControlAliasRecordLimit {
+		return errors.New("guest alias candidate metadata is unsafe")
+	}
+	read, err := io.Copy(io.Discard, io.LimitReader(file, guestControlAliasRecordLimit+1))
+	if err != nil {
+		return err
+	}
+	if err := unix.Fstat(fd, &after); err != nil || !sameGuestControlAliasFile(before, after) || read != before.Size {
+		return errors.New("guest alias candidate changed during read")
+	}
+	if err := unix.Fstatat(store.directory, name, &named, unix.AT_SYMLINK_NOFOLLOW); err != nil ||
+		!sameGuestControlAliasFile(before, named) {
+		return errors.New("guest alias candidate identity changed")
+	}
+	return ctx.Err()
+}
 func (store *guestControlAliasStore) list(ctx context.Context) ([]guestControlAliasReceipt, error) {
 	fd, err := unix.Openat(store.directory, ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -164,7 +202,10 @@ func (store *guestControlAliasStore) list(ctx context.Context) ([]guestControlAl
 	for _, name := range names {
 		resource := strings.TrimSuffix(name, ".json")
 		if resource+".json" != name {
-			return nil, errors.New("guest alias inventory contains unfinished state")
+			if err := store.unfinishedCandidate(ctx, name); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		record, _, found, err := store.read(ctx, resource)
 		if err != nil || !found {

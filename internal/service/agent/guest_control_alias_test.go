@@ -324,3 +324,40 @@ func TestGuestControlAliasGatewayConfiguresBeforeLocalSuccessAndDoesNotReplayHos
 	require.NoError(t, err)
 	require.Len(t, snapshot.Addresses, 2)
 }
+
+func TestGuestControlAliasUnfinishedCandidateRefusesUnsafeFiles(t *testing.T) {
+	for _, kind := range []string{"foreign_name", "symlink", "hardlink", "foreign_owner", "unsafe_mode"} {
+		t.Run(kind, func(t *testing.T) {
+			store := aliasTestStore(t)
+			name := ".b524a876-14b5-4452-bff7-1adb35d65702.tmp"
+			if kind == "foreign_name" {
+				name = ".unknown.tmp"
+			}
+			if kind == "symlink" {
+				require.NoError(t, unix.Symlinkat("unrelated", store.directory, name))
+			} else {
+				fd, err := unix.Openat(store.directory, name,
+					unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC, 0600)
+				require.NoError(t, err)
+				_, err = unix.Write(fd, []byte("partial receipt"))
+				require.NoError(t, err)
+				if kind == "foreign_owner" {
+					require.NoError(t, unix.Fchown(fd, 65534, 65534))
+				}
+				if kind == "unsafe_mode" {
+					require.NoError(t, unix.Fchmod(fd, 0644))
+				}
+				require.NoError(t, unix.Close(fd))
+				if kind == "hardlink" {
+					require.NoError(t, unix.Linkat(store.directory, name, store.directory, "unrelated", 0))
+				}
+			}
+			var before, after unix.Stat_t
+			require.NoError(t, unix.Fstatat(store.directory, name, &before, unix.AT_SYMLINK_NOFOLLOW))
+			_, err := store.list(t.Context())
+			require.Error(t, err)
+			require.NoError(t, unix.Fstatat(store.directory, name, &after, unix.AT_SYMLINK_NOFOLLOW))
+			require.True(t, sameGuestControlAliasFile(before, after), "unsafe candidate must remain untouched")
+		})
+	}
+}

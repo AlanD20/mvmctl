@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/binary"
+	"io"
 	"net/netip"
 	"os"
 	"runtime"
@@ -154,4 +155,62 @@ func TestGuestControlAliasNamespaceReplacementLabelIsNeverDeleted(t *testing.T) 
 	require.True(t, found, "unrelated replacement must survive cleanup")
 	require.Equal(t, 1, aliasRecordCount(aliases))
 	require.Equal(t, before.Routes, snapshot.Routes)
+}
+
+func TestGuestControlAliasNamespaceRestartIgnoresUnpublishedCandidates(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		t.Run(map[bool]string{false: "partial", true: "complete"}[complete], func(t *testing.T) {
+			kernel := aliasNamespaceKernel(t)
+			before := aliasNamespaceSetup(t, kernel)
+			store := aliasTestStore(t)
+			aliases := aliasTestManager(t, kernel, store)
+			session, err := aliases.beginSession(t.Context())
+			require.NoError(t, err)
+			request, response := aliasSelfRequest(guestcontrolwire.Associate, 8, 60000)
+			require.NoError(t, aliases.reconcile(t.Context(), session, aliasNow(t), request, response))
+			record := aliasRecord(aliases, request.Input.ResourceID)
+			// Crash during renewal: the published receipt still owns the installed alias.
+			candidate := record
+			candidate.Revision++
+			candidate.Deadline++
+			raw, err := encodeGuestControlAliasReceipt(candidate)
+			require.NoError(t, err)
+			if !complete {
+				raw = raw[:len(raw)/2]
+			}
+			name := ".b524a876-14b5-4452-bff7-1adb35d65702.tmp"
+			fd, err := unix.Openat(store.directory, name,
+				unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC, 0600)
+			require.NoError(t, err)
+			file := os.NewFile(uintptr(fd), "crashed-renewal-candidate")
+			_, err = file.Write(raw)
+			require.NoError(t, err)
+			require.NoError(t, file.Close())
+			aliases.mu.Lock()
+			for _, timer := range aliases.timers {
+				timer.Stop()
+			}
+			aliases.closed = true // Process loss without its normal cleanup.
+			aliases.mu.Unlock()
+			restarted := aliasTestManager(t, kernel, store)
+			require.NoError(t, restarted.recover(t.Context()))
+			after, err := kernel.snapshot(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, before, after, "restart removes only the published owned alias")
+			_, _, found, err := store.read(t.Context(), record.Resource)
+			require.NoError(t, err)
+			require.False(t, found)
+			fd, err = unix.Openat(store.directory, name, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+			require.NoError(t, err)
+			file = os.NewFile(uintptr(fd), "preserved-candidate")
+			got, err := io.ReadAll(file)
+			require.NoError(t, err)
+			require.NoError(t, file.Close())
+			require.Equal(t, raw, got, "unpublished candidate is preserved, never replayed")
+			require.NoError(t, restarted.recover(t.Context()))
+			after, err = kernel.snapshot(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, before, after, "candidate cannot recreate an alias")
+		})
+	}
 }
