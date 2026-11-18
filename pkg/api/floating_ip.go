@@ -12,6 +12,7 @@ import (
 
 // FloatingIPAPI exposes root-backed resource management separately from VM lifecycle commands.
 type FloatingIPAPI interface {
+	FloatingIPDelegationAPI
 	FloatingIPCreate(context.Context, inputs.FloatingIPCreateInput) (*model.FloatingIPItem, error)
 	FloatingIPList(context.Context, inputs.FloatingIPNetworkInput) ([]*model.FloatingIPItem, error)
 	FloatingIPGet(context.Context, inputs.FloatingIPInput) (*model.FloatingIPItem, error)

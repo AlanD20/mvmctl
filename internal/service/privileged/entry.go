@@ -35,6 +35,7 @@ type runtimeDeps struct {
 	runtimeOwnerInventory  runtimeOwnerInventoryObserve
 	hostPolicy             hostPolicyObserve
 	floatingIP             floatingIPHandlerEffects
+	floatingIPDelegation   floatingIPDelegationHandlerEffects
 	loopMount              loopMountHandlerEffects
 	vmExecSession          vmExecSessionHandlerEffects
 	vmExecConnectionReader vmExecConnectionReaderDeps
@@ -119,6 +120,13 @@ func Run(ctx context.Context, args []string) error {
 		trustedRelease: trustedReleaseHandlerEffects{
 			install: trustedRelease.Install,
 			remove:  trustedRelease.Remove,
+		},
+		floatingIPDelegation: floatingIPDelegationHandlerEffects{
+			grant:       grantFloatingIPDelegation,
+			removeOwned: floatingIP.RemoveOwnedFloatingIPDelegation,
+			revoke:      floatingIP.RevokeFloatingIPDelegation,
+			list:        floatingIP.ListFloatingIPDelegations,
+			get:         floatingIP.GetFloatingIPDelegation,
 		},
 		floatingIP: floatingIPHandlerEffects{
 			create: floatingIP.CreateFloatingIP,
@@ -302,6 +310,22 @@ func dispatch(
 		return dispatchHandled, handleListFloatingIPs(ctx, endpoint, caller, deps.floatingIP, deps.control)
 	case network.FloatingIPGetAction:
 		return dispatchHandled, handleGetFloatingIP(ctx, endpoint, caller, deps.floatingIP, deps.control)
+	case network.FloatingIPDelegationRemoveOwnedAction:
+		return dispatchHandled, handleRemoveOwnedFloatingIPDelegation(
+			ctx, endpoint, caller, deps.floatingIPDelegation, deps.control,
+		)
+	case network.FloatingIPDelegationGrantAction:
+		return dispatchHandled, handleGrantFloatingIPDelegation(
+			ctx, endpoint, caller, deps.floatingIPDelegation, deps.control,
+		)
+	case network.FloatingIPDelegationListAction:
+		return dispatchHandled, handleListFloatingIPDelegation(ctx, endpoint, caller, deps.floatingIPDelegation, deps.control)
+	case network.FloatingIPDelegationGetAction:
+		return dispatchHandled, handleGetFloatingIPDelegation(ctx, endpoint, caller, deps.floatingIPDelegation, deps.control)
+	case network.FloatingIPDelegationRevokeAction:
+		return dispatchHandled, handleRevokeFloatingIPDelegation(
+			ctx, endpoint, caller, deps.floatingIPDelegation, deps.control,
+		)
 	case jailer.GuestControlPrepareAction:
 		return dispatchHandled, handleGuestControlPrepare(ctx, endpoint, caller, deps.control)
 	case jailer.VMLaunchAction:

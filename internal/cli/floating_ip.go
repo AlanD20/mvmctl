@@ -119,5 +119,6 @@ func NewFloatingIPCmd(floatingAPI api.FloatingIPAPI, configAPI api.ConfigAPI) *c
 	}
 	remove.Flags().BoolVarP(&force, "force", "f", false, "Remove without confirmation")
 	cmd.AddCommand(remove)
+	cmd.AddCommand(newFloatingIPDelegationCmd(floatingAPI, configAPI, &network))
 	return cmd
 }
