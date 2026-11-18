@@ -1547,3 +1547,56 @@ def test_collection_operation_observes_items_without_running_fixture_effects(
         task, source, binding["candidate"], registry
     )
     assert verified["nodes"] == {"one": ["tests/system/one/test_one.py::test_fixture"]}
+
+
+def _qualification_receipt(binding):
+    namespace = dict(schema_version=1, runner="mvmctl-030-test", runner_id="1"*32,
+        operator=dict(user="runner", uid=1000, gid=1000, home="/home/runner"),
+        paths=dict(cache="/home/runner/cache", config="/home/runner/config", mirror="/home/runner/mirror"),
+        expected_vm=dict(created_at="2026-11-18T00:00:00Z", boot_id=binding['boot_id'],ipv4="10.25.0.3",ssh_host_key="pinned-key"))
+    before = dict(outer=dict(id=namespace['runner_id'],name=namespace['runner'],created_at=namespace['expected_vm']['created_at'],
+                           pid=123,start_ticks=456,ipv4="10.25.0.3"),
+                  guest=dict(hostname=namespace['runner'],boot_id=binding['boot_id'],host_key="pinned-key",inventory=dict(vm=[]),
+                             namespace_identity={key:[1,index,1000,1000,0o700] for index,key in
+                                                 enumerate(('home','task_parent','cache','config','mirror'),1)},
+                             controller=binding['controller'],version=binding['candidate']['version']),outer_controller=dict(sha256="b"*64))
+    return dict(namespace=namespace,before=before,after=json.loads(json.dumps(before)),
+                guest_task="/home/runner/.cache/mvmctl-qualification-"+"a"*32,fixture_before=None,fixture_after=None)
+
+
+def _retain_qualification(evidence, task, binding, source):
+    (task/'terminal.json').unlink()  # Only this hermetic test's own receipt is republished.
+    evidence._write(task,'qualification-vm.json',json.dumps(_qualification_receipt(binding)).encode())
+    capture = object.__new__(evidence.MatrixEvidence)
+    capture.task, capture.binding = task, binding
+    capture.close([dict(domain=name,passed=True) for name in binding['selection']],source)
+
+
+def test_retained_target_evidence_does_not_claim_runner_destruction(evidence,tmp_path,inputs):
+    source,registry = inputs
+    task,binding = _record(evidence,tmp_path,source,registry,runner_cleanup=None)
+    _retain_qualification(evidence,task,binding,source)
+    assert evidence.verify_matrix_task(task,source,binding['candidate'],registry)['domains']
+
+
+@pytest.mark.parametrize('fault',['changed_boot','changed_process','candidate','unrelated_inventory','pretend_destroyed'])
+def test_retained_target_refuses_drift_or_false_destruction(evidence,tmp_path,inputs,fault):
+    source,registry = inputs
+    task,binding = _record(evidence,tmp_path,source,registry,runner_cleanup=True if fault=='pretend_destroyed' else None)
+    proof = _qualification_receipt(binding)
+    if fault=='changed_boot':proof['after']['guest']['boot_id']='22222222-2222-4222-8222-222222222222'
+    elif fault=='changed_process':proof['after']['outer']['start_ticks']+=1
+    elif fault=='candidate':proof['before']['guest']['version']='mvm other';proof['after']['guest']['version']='mvm other'
+    elif fault=='unrelated_inventory':proof['after']['guest']['inventory']['vm']=[{'id':'unrelated'}]
+    (task/'terminal.json').unlink()
+    evidence._write(task,'qualification-vm.json',json.dumps(proof).encode())
+    capture=object.__new__(evidence.MatrixEvidence);capture.task,capture.binding=task,binding
+    capture.close([dict(domain=name,passed=True) for name in binding['selection']],source)
+    with pytest.raises(RuntimeError):evidence.verify_matrix_task(task,source,binding['candidate'],registry)
+
+
+def test_missing_retention_cannot_waive_normal_tier2_destruction(evidence,tmp_path,inputs):
+    source,registry=inputs
+    task,binding=_record(evidence,tmp_path,source,registry,runner_cleanup=None)
+    with pytest.raises(RuntimeError,match='cleanup incomplete'):
+        evidence.verify_matrix_task(task,source,binding['candidate'],registry)

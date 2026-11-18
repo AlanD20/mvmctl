@@ -53,6 +53,8 @@ import tempfile
 import time
 import uuid
 import xml.etree.ElementTree as ET
+
+import qualification_vm
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -4027,6 +4029,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "qualification. Requires --all --host-direct --rebuild and an "
         "explicit --candidate-version.",
     )
+    parser.add_argument("--qualification-vm", help="Explicit retained mvmctl-030-test target; never provision or destroy it.")
+    parser.add_argument("--qualification-namespace", type=Path, help="Private pinned existing-VM/operator namespace receipt.")
     parser.add_argument(
         "--record-evidence", type=Path,
         help="Retain literal named-QA domain reports in an empty private owned directory; does not finalize a release.",
@@ -4309,6 +4313,16 @@ def main() -> None:
 
     _validate_release_qualification_args(parser, args)
     _validate_system_test_registry(parser)
+    qualification_vm.validate_args(parser, args)
+    if args.qualification_vm:
+        if not args.collect_release_nodes:
+            _validate_test_selection_args(parser, args)
+        try:
+            passed = qualification_vm.run(sys.modules[__name__], args)
+        except Exception as exc:
+            log(f"ERROR: retained qualification VM refused or incomplete: {exc}")
+            sys.exit(1)
+        sys.exit(0 if passed else 1)
     if args.collect_release_nodes:
         defaults = vars(parser.parse_args([]))
         if any(value != defaults[key] for key, value in vars(args).items() if key != "collect_release_nodes"):

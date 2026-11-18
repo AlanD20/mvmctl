@@ -5972,3 +5972,39 @@ def test_rebuild_rejects_candidate_controller_hardlink_before_build(
 
     with pytest.raises(RuntimeError, match="outer controller"):
         orchestrator._build_mvm_binary("0.3.0")
+
+
+@pytest.mark.parametrize("selection", [
+    ["floating_ip", "--qualification-vm", "other-vm"],
+    ["floating_ip", "--qualification-vm", "mvmctl-030-test"],
+    ["env", "--qualification-vm", "mvmctl-030-test", "--qualification-namespace", "/private/pins", "--record-evidence", "/private/task", "--host-direct"],
+    ["snapshot_load", "--qualification-vm", "mvmctl-030-test", "--qualification-namespace", "/private/pins", "--record-evidence", "/private/task"],
+    ["host_reboot", "--qualification-vm", "mvmctl-030-test", "--qualification-namespace", "/private/pins", "--record-evidence", "/private/task"],
+    ["floating_ip", "--qualification-vm", "mvmctl-030-test", "--qualification-namespace", "/private/pins", "--record-evidence", "/private/task", "--prepare"],
+    ["--qualification-namespace", "/private/pins"],
+])
+def test_existing_qualification_mode_rejects_unsafe_execution_shapes(orchestrator, selection):
+    parser = orchestrator._build_parser()
+    with pytest.raises(SystemExit) as rejected:
+        orchestrator.qualification_vm.validate_args(parser, parser.parse_args(selection))
+    assert rejected.value.code == 2
+
+
+@pytest.mark.parametrize("domain", ["floating_ip", "env"])
+def test_existing_qualification_route_bypasses_all_local_or_provisioning_paths(orchestrator, monkeypatch, tmp_path, domain):
+    def forbidden(*args, **kwargs):
+        pytest.fail("retained qualification route must not touch normal provisioning or local execution")
+    for name in ("_resolve_imported_runner_kernel_binding", "ensure_shared_volume", "ensure_test_network",
+                 "provision_t1", "provision_t2", "destroy_vm", "_run_local_pytest", "run_host_reboot_phase"):
+        monkeypatch.setattr(orchestrator, name, forbidden)
+    seen = []
+    def execute(module, args):
+        assert module is orchestrator and args.domains == [domain]
+        seen.append(args.qualification_vm)
+        return True
+    monkeypatch.setattr(orchestrator.qualification_vm, "run", execute)
+    monkeypatch.setattr(orchestrator.sys, "argv", ["run-system-tests.py", domain,
+        "--qualification-vm", "mvmctl-030-test", "--qualification-namespace", str(tmp_path/'namespace.json'),
+        "--record-evidence", str(tmp_path/'task')])
+    with pytest.raises(SystemExit) as completed:orchestrator.main()
+    assert completed.value.code == 0 and seen == ["mvmctl-030-test"]

@@ -427,6 +427,45 @@ class MatrixEvidence:
         )
 
 
+def _require_qualification_retention(task: Path, binding, *, collect_only=False) -> bool:
+    """A retained target is observed, never claimed destroyed or a privilege authority."""
+    path = task / "qualification-vm.json"
+    if not path.exists():
+        return False
+    proof = _json(_read(path, MAX_OUTPUT_BYTES))
+    if set(proof) != {"namespace", "before", "after", "guest_task", "fixture_before", "fixture_after"}:
+        raise RuntimeError("invalid retained qualification observation")
+    namespace, before = proof["namespace"], proof["before"]
+    if (before != proof["after"] or proof["fixture_before"] != proof["fixture_after"]
+            or set(namespace) != {"schema_version", "runner", "runner_id", "operator", "paths", "expected_vm"}
+            or namespace["schema_version"] != 1 or namespace["runner"] != NAMED_RUNNER
+            or set(before) != {"outer", "guest", "outer_controller"}):
+        raise RuntimeError("retained qualification VM or namespace changed")
+    outer, guest = before["outer"], before["guest"]
+    expected, operator = namespace["expected_vm"], namespace["operator"]
+    if (set(guest) != {"hostname", "boot_id", "namespace_identity", "host_key", "inventory", "controller", "version"}
+            or set(guest["namespace_identity"]) != {"home", "task_parent", "cache", "config", "mirror"}
+            or any(not isinstance(value, list) or len(value) != 5 or any(type(n) is not int for n in value)
+                   or value[2:4] != [operator["uid"], operator["gid"]] or value[4] & 0o022
+                   for value in guest["namespace_identity"].values())):
+        raise RuntimeError("retained qualification operator directory proof is invalid")
+    if (outer["id"] != namespace["runner_id"] or outer["name"] != NAMED_RUNNER
+            or outer["created_at"] != expected["created_at"] or outer["ipv4"] != expected["ipv4"]
+            or outer["pid"] <= 0 or outer["start_ticks"] <= 0
+            or guest["hostname"] != binding["host"] or guest["boot_id"] != binding["boot_id"]
+            or guest["boot_id"] != expected["boot_id"] or guest["host_key"] != expected["ssh_host_key"]
+            or guest["controller"] != binding["controller"] or guest["version"] != binding["candidate"]["version"]
+            or guest["controller"]["sha256"] != binding["candidate"]["sha256"]
+            or type(operator["uid"]) is not int or operator["uid"] <= 0 or operator["gid"] <= 0
+            or guest["inventory"]["vm"] != []
+            or re.fullmatch(re.escape(operator["home"] + "/.cache/mvmctl-qualification-") + "[0-9a-f]{32}", proof["guest_task"]) is None):
+        raise RuntimeError("retained qualification identity differs from installed candidate")
+    if ("floating_ip_worker_fault" in binding["selection"] and not collect_only
+            and proof["fixture_before"] is None):
+        raise RuntimeError("retained worker fault execution lacks fixed fixture observation")
+    return True
+
+
 def verify_matrix_task(
     task: Path,
     source: dict[str, Any],
@@ -489,6 +528,7 @@ def verify_matrix_task(
         or terminal["passed"] is not True
     ):
         raise RuntimeError("matrix terminal is incomplete or failed")
+    retained_qualification = _require_qualification_retention(task, binding)
     selection = binding["selection"]
     if (
         not isinstance(selection, dict)
@@ -499,6 +539,8 @@ def verify_matrix_task(
     if len(terminal["domains"]) != len(selection):
         raise RuntimeError("duplicate matrix terminal domain")
     expected_files = {"binding.json"}
+    if retained_qualification:
+        expected_files.add("qualification-vm.json")
     rows = {}
     for domain, selected in selection.items():
         node_selection = isinstance(selected, dict) and "nodes" in selected
@@ -541,7 +583,8 @@ def verify_matrix_task(
             or receipt["files"] != files
             or receipt["passed"] is not True
             or receipt["report_cleanup"] is not True
-            or (tier in (1, 2) and receipt["runner_cleanup"] is not True)
+            or (retained_qualification and receipt["runner_cleanup"] is not None)
+            or (not retained_qualification and tier in (1, 2) and receipt["runner_cleanup"] is not True)
             or (tier == 3 and receipt["runner_cleanup"] is not None)
         ):
             raise RuntimeError(f"matrix domain failed or cleanup incomplete: {domain}")
@@ -788,6 +831,8 @@ def verify_collection_task(task: Path, source, candidate, registry) -> dict[str,
         "collection-stderr",
         "collection-nodes.json",
     }
+    if _require_qualification_retention(task, binding, collect_only=True):
+        expected.add("qualification-vm.json")
     if set(terminal.get("proof_sha256", {})) != expected or {
         path.name for path in task.iterdir()
     } != expected | {"terminal.json"}:
