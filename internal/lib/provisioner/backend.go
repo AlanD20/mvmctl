@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"mvmctl/internal/lib/guestcontrolauth"
 	"mvmctl/internal/lib/provisioner/guestfs"
 	"mvmctl/internal/lib/provisioner/loopmount"
 )
@@ -52,6 +53,7 @@ type Backend interface {
 	// init system integration files into the rootfs. Called during VM creation
 	// to inject the agent before first boot.
 	InjectAgent(ctx context.Context, agentBinary []byte, port int, token string) error
+	InjectGuestControl(ctx context.Context, material guestcontrolauth.AgentMaterial) error
 }
 
 // BackendOpts configures a backend via NewBackend.

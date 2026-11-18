@@ -119,7 +119,7 @@ func sameProtectedNode(left, right protectedBackingIdentity) bool {
 }
 
 func readProtectedRecord[
-	T protectedBackingAnchor | protectedBackingRecord | protectedLogicalRecord | protectedKernelReceipt,
+	T protectedBackingAnchor | protectedBackingRecord | protectedLogicalRecord | protectedKernelReceipt | guestControlCredentialRecord | guestControlBackingReceipt,
 ](
 	ctx context.Context, directory int, name string, record *T,
 ) (returnErr error) {
@@ -167,7 +167,7 @@ func sameProtectedReadStat(before, after unix.Stat_t) bool {
 }
 
 func writeProtectedRecord[
-	T protectedBackingAnchor | protectedBackingRecord | protectedLogicalRecord | protectedKernelReceipt,
+	T protectedBackingAnchor | protectedBackingRecord | protectedLogicalRecord | protectedKernelReceipt | guestControlCredentialRecord | guestControlBackingReceipt,
 ](
 	ctx context.Context, directory int, name string, record T,
 ) (returnErr error) {

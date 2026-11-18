@@ -11,6 +11,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/disk"
+	"mvmctl/internal/lib/guestcontrolauth"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 
@@ -122,6 +123,17 @@ func (b *LoopMountBackend) Shrink(ctx context.Context) error {
 // InjectAgent queues the vsock guest agent files into the rootfs.
 func (b *LoopMountBackend) InjectAgent(_ context.Context, agentBinary []byte, port int, token string) error {
 	b.plan.Agent = &loopmountsvc.AgentSetup{Port: port, Token: token}
+	b.pending = true
+	return nil
+}
+
+// InjectGuestControl queues only agent material selected by root for this pending cold VM.
+func (b *LoopMountBackend) InjectGuestControl(ctx context.Context, material guestcontrolauth.AgentMaterial) error {
+	raw, err := material.Encode()
+	if err != nil {
+		return err
+	}
+	b.plan.GuestControl = raw
 	b.pending = true
 	return nil
 }

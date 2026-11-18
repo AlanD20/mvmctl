@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/guestcontrolauth"
 	"mvmctl/internal/lib/system"
 )
 
@@ -406,6 +407,17 @@ func (adapter *rootfsVMProvisionAdapter) ProvisionVM(
 	outcome.filesWritten = filesWritten
 	if err != nil {
 		return outcome, err
+	}
+	if len(plan.GuestControl) != 0 {
+		agent, err := guestcontrolauth.DecodeAgentMaterial(plan.GuestControl)
+		if err != nil {
+			return outcome, rootfsAtomicError("Guest Control agent material is invalid", nil)
+		}
+		written, err := writeGuestControlAgentMaterial(ctx, tree, agent)
+		if err != nil {
+			return outcome, err
+		}
+		outcome.filesWritten += written
 	}
 	if err := adapter.deps.syncfs(ctx, mountedRootFD); err != nil {
 		return outcome, rootfsCleanupError("sync provisioned guest filesystem", err)

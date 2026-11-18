@@ -7,16 +7,18 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra/provcontent"
+	"mvmctl/internal/lib/guestcontrolauth"
 )
 
 // GuestfsBackend implements the Backend interface using guestfish CLI.
 // Builder pattern: queue operations, call Run() to execute.
 type GuestfsBackend struct {
-	rootfsPath string
-	rootUID    int
-	rootGID    int
-	userUID    int
-	userGID    int
+	guestControl []byte
+	rootfsPath   string
+	rootUID      int
+	rootGID      int
+	userUID      int
+	userGID      int
 
 	// Builder state
 	targetSize   int64
@@ -105,26 +107,37 @@ func (b *GuestfsBackend) InjectAgent(_ context.Context, agentBinary []byte, port
 	return nil
 }
 
+// InjectGuestControl queues agent-only credentials for ordinary caller-staging provisioning.
+func (b *GuestfsBackend) InjectGuestControl(ctx context.Context, material guestcontrolauth.AgentMaterial) error {
+	raw, err := material.Encode()
+	if err != nil {
+		return err
+	}
+	b.guestControl = raw
+	return nil
+}
+
 // --- Execution ---
 
 // Run converts builder state to ProvisioningConfig and delegates to RunDeferred.
 func (b *GuestfsBackend) Run(ctx context.Context) error {
 	cfg := ProvisioningConfig{
-		RootfsPath:       b.rootfsPath,
-		RootUID:          b.rootUID,
-		RootGID:          b.rootGID,
-		UserUID:          b.userUID,
-		UserGID:          b.userGID,
-		TargetSize:       b.targetSize,
-		Hostname:         b.hostname,
-		User:             b.user,
-		SSHPubkeys:       b.sshPubkeys,
-		CloudInitDir:     b.cloudInitDir,
-		DNSServer:        b.dnsServer,
-		DisableCloudInit: false,
-		Shrink:           false,
-		Deblob:           false,
-		CustomOps:        b.customOps,
+		RootfsPath:        b.rootfsPath,
+		RootUID:           b.rootUID,
+		RootGID:           b.rootGID,
+		UserUID:           b.userUID,
+		UserGID:           b.userGID,
+		TargetSize:        b.targetSize,
+		Hostname:          b.hostname,
+		User:              b.user,
+		SSHPubkeys:        b.sshPubkeys,
+		CloudInitDir:      b.cloudInitDir,
+		DNSServer:         b.dnsServer,
+		DisableCloudInit:  false,
+		Shrink:            false,
+		Deblob:            false,
+		CustomOps:         b.customOps,
+		GuestControlAgent: b.guestControl,
 	}
 
 	for _, op := range b.ops {

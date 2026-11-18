@@ -63,6 +63,11 @@ func prepareSnapshotRestore(
 	if protectedCacheIdentity(metadata.Source.Rootfs.cacheIdentity) != protectedCacheIdentity(cache.identity) {
 		return nil, instanceValidationError("restore cache differs from immutable capture identity")
 	}
+	if metadata.GuestControl != nil {
+		if _, err := readBoundGuestControlCredential(ctx, cache, *metadata.GuestControl); err != nil {
+			return nil, err
+		}
+	}
 	prepared := &preparedSnapshotRestore{
 		snapshotID:    request.SnapshotID,
 		ownerUID:      cache.ownerUID,
@@ -226,6 +231,16 @@ func (prepared *preparedSnapshotRestore) prepareBackings(
 		switch item.kind {
 		case protectedBackingRootfs:
 			prepared.rootfs = lease
+			if lease != nil && err == nil && prepared.metadata.GuestControl != nil {
+				receipt := *prepared.metadata.GuestControl
+				next := lease.record
+				next.GuestControl = &receipt
+				if writeErr := writeProtectedRecord(ctx, lease.metadataFD, "record.json", next); writeErr != nil {
+					err = writeErr
+				} else {
+					lease.record = next
+				}
+			}
 		case protectedBackingKernel:
 			prepared.kernel = lease
 		case protectedBackingCloudInit:

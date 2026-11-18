@@ -207,6 +207,14 @@ func (server *Server) ProvisionVM(
 				"release VM provisioning authority", provisionAuthority.Release(context.WithoutCancel(ctx)))
 		}()
 	}
+	if len(request.Plan.GuestControl) != 0 {
+		if provisionAuthority == nil {
+			return VMProvisionResult{}, rootfsValidationError("Guest Control requires root-selected pending credentials")
+		}
+		if err := provisionAuthority.CheckGuestControlAgentMaterial(ctx, request.Plan.GuestControl); err != nil {
+			return VMProvisionResult{}, err
+		}
+	}
 	lockLease, acquireErr := server.locks.Acquire(ctx, caller, selection)
 	if lockLease != nil {
 		defer func() {

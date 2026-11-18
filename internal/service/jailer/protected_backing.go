@@ -79,6 +79,7 @@ type protectedBackingRecord struct {
 	KernelDigest    string                        `json:"kernel_digest,omitempty"`
 	Generation      uint64                        `json:"generation,omitempty"`
 	InitialRemoval  *initialVolumeRemovalProgress `json:"initial_removal,omitempty"`
+	GuestControl    *guestControlBackingReceipt   `json:"guest_control,omitempty"`
 }
 
 // protectedBackingLease retains the exact protected object and its root-owned logical-object lock.

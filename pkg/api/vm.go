@@ -21,6 +21,7 @@ import (
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/crypto"
+	"mvmctl/internal/lib/guestcontrolauth"
 	"mvmctl/internal/lib/model"
 	libnet "mvmctl/internal/lib/network"
 	"mvmctl/internal/lib/provisioner"
@@ -526,6 +527,23 @@ func (op *Operation) vmBuilderExecute(
 				if err := backend.InjectAgent(ctx, agentBin, builder.vsockPort, builder.vsockToken); err != nil {
 					provisionErr = fmt.Errorf("inject agent: %w", err)
 					return
+				}
+				request := jailer.GuestControlPrepareRequest{VMID: builder.vmID, CacheRoot: op.CacheDir}
+				prepared, err := jailer.NewGuestControlCredentialClient().Prepare(ctx, request)
+				if err != nil {
+					provisionErr = fmt.Errorf("prepare Guest Control credentials: %w", err)
+					return
+				}
+				if prepared.NeedsProvision {
+					agentMaterial, err := guestcontrolauth.DecodeAgentMaterial(prepared.AgentMaterial)
+					if err != nil {
+						provisionErr = errs.New(errs.CodeValidationFailed, "invalid Guest Control agent provisioning material")
+						return
+					}
+					if err := backend.InjectGuestControl(ctx, agentMaterial); err != nil {
+						provisionErr = fmt.Errorf("queue Guest Control agent material: %w", err)
+						return
+					}
 				}
 			} else {
 				slog.Warn("agent binary not available, skipping agent injection",

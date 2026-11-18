@@ -83,6 +83,9 @@ const GuestAgentConfigDirectory = "/etc/mvmctl"
 // GuestAgentTokenPath is the fixed persistent guest-agent authentication token leaf.
 const GuestAgentTokenPath = GuestAgentConfigDirectory + "/agent.token"
 
+// GuestControlAgentMaterialPath contains only the guest private material and public host pin.
+const GuestControlAgentMaterialPath = GuestAgentConfigDirectory + "/guest-control.json"
+
 const (
 	// VMRootfsFilename is the fixed managed VM root filesystem leaf.
 	VMRootfsFilename = "rootfs.img"

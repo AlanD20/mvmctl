@@ -73,16 +73,17 @@ func requireUnprotectedCache(ctx context.Context, cache *managedCacheLease) erro
 }
 
 type protectedCacheCleanupPlan struct {
-	cache       *managedCacheLease
-	anchor      int
-	store       int
-	retained    []int
-	directories []protectedCacheDirectory
-	opened      map[string]int
-	record      protectedBackingAnchor
-	quarantine  int
-	completed   bool
-	deps        protectedCacheCaptureDeps
+	cache                   *managedCacheLease
+	anchor                  int
+	store                   int
+	retained                []int
+	directories             []protectedCacheDirectory
+	opened                  map[string]int
+	record                  protectedBackingAnchor
+	quarantine              int
+	completed               bool
+	deps                    protectedCacheCaptureDeps
+	guestControlCredentials []guestControlRetirementLeaf
 }
 
 // retireProtectedCache consumes admitted descriptors, not caller-selected deletion paths.
@@ -144,6 +145,9 @@ func retireProtectedCacheWithCapture(ctx context.Context, cache *managedCacheLea
 		}
 	}
 	if err := plan.capture(ctx); err != nil {
+		return err
+	}
+	if err := plan.retireGuestControlCredentials(ctx); err != nil {
 		return err
 	}
 	if err := plan.removeParents(ctx); err != nil {
@@ -380,6 +384,20 @@ func (plan *protectedCacheCleanupPlan) preflightKind(ctx context.Context, owner 
 		if err := validateProtectedLogical(index, plan.cache.ownerUID, kind, id); err != nil {
 			return err
 		}
+		if kind == protectedBackingRootfs && !index.Initialized && index.Cache == plan.record.Cache {
+			leaves, err := protectedCleanupNames(ctx, metadata)
+			if err != nil {
+				return err
+			}
+			ordinary, err := plan.admitGuestControlMetadata(ctx, metadata, id, leaves)
+			if err != nil {
+				return err
+			}
+			if strings.Join(ordinary, ",") != "lock" {
+				return managedVMResourceValidationError("pending cold credential metadata retains unknown state")
+			}
+			continue
+		}
 		if kind != protectedBackingKernel && (index.Cache != plan.record.Cache || !index.Initialized) {
 			return managedVMResourceValidationError("protected cleanup logical authority conflicts")
 		}
@@ -425,7 +443,14 @@ func (plan *protectedCacheCleanupPlan) preflightKind(ctx context.Context, owner 
 		if err != nil {
 			return err
 		}
-		if strings.Join(leaves, ",") != "lock,record.json" {
+		ordinary := leaves
+		if kind == protectedBackingRootfs {
+			ordinary, err = plan.admitGuestControlMetadata(ctx, metadata, id, leaves)
+			if err != nil {
+				return err
+			}
+		}
+		if strings.Join(ordinary, ",") != "lock,record.json" {
 			return managedVMResourceValidationError("protected cleanup metadata retains unexpected entries")
 		}
 		if record.Directory.Inode != 0 {

@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"mvmctl/internal/lib/guestcontrolauth"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 )
@@ -73,6 +74,7 @@ type VMProvisionPlan struct {
 	DeblobOS         *string     `json:"deblob_os,omitempty"`
 	FixFstab         bool        `json:"fix_fstab"`
 	Agent            *AgentSetup `json:"agent,omitempty"`
+	GuestControl     []byte      `json:"guest_control,omitempty"`
 }
 
 // SSHSetup is exact guest SSH setup intent.
@@ -218,6 +220,12 @@ func (plan VMProvisionPlan) Validate(expectedRootfsBytes uint64) error {
 		hasOperation = true
 		if err := plan.Agent.Validate(); err != nil {
 			return err
+		}
+	}
+	if len(plan.GuestControl) != 0 {
+		hasOperation = true
+		if _, err := guestcontrolauth.DecodeAgentMaterial(plan.GuestControl); err != nil {
+			return validationError("Guest Control agent material is invalid")
 		}
 	}
 	if !hasOperation {

@@ -432,6 +432,9 @@ func (admission *protectedBackingAdmission) protect(
 	if lease.record.Phase != "ready" || (expectedBytes != 0 && uint64(lease.record.Backing.Size) != expectedBytes) {
 		return nil, managedVMResourceValidationError("protected backing size or phase differs from requested state")
 	}
+	if err := bindColdGuestControl(ctx, lease); err != nil {
+		return nil, err
+	}
 	if err := lease.commitKernelGeneration(ctx); err != nil {
 		return nil, err
 	}

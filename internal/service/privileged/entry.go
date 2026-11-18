@@ -302,6 +302,8 @@ func dispatch(
 		return dispatchHandled, handleListFloatingIPs(ctx, endpoint, caller, deps.floatingIP, deps.control)
 	case network.FloatingIPGetAction:
 		return dispatchHandled, handleGetFloatingIP(ctx, endpoint, caller, deps.floatingIP, deps.control)
+	case jailer.GuestControlPrepareAction:
+		return dispatchHandled, handleGuestControlPrepare(ctx, endpoint, caller, deps.control)
 	case jailer.VMLaunchAction:
 		return dispatchHandled, handleVMLaunch(ctx, endpoint, caller, deps.control)
 	case jailer.VMStopAction:

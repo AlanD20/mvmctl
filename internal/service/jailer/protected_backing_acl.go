@@ -99,6 +99,10 @@ func (lease *protectedBackingLease) Grant(
 	if err := lease.active(ctx); err != nil {
 		return err
 	}
+	if lease.record.GuestControl != nil && (lease.record.Kind != protectedBackingRootfs ||
+		validateGuestControlReceipt(*lease.record.GuestControl) != nil || lease.record.GuestControl.Phase != "bound") {
+		return managedVMResourceValidationError("protected rootfs Guest Control provisioning is incomplete")
+	}
 	if !isCanonicalManagedResourceID(vmID, 32) || executionUID == 0 || executionUID == math.MaxUint32 ||
 		executionUID == lease.ownerUID || (access != vmVolumeReadOnly && access != vmVolumeReadWrite) ||
 		(lease.record.Kind == protectedBackingRootfs && lease.record.ID != vmID) {

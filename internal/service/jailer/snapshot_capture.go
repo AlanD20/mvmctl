@@ -133,6 +133,19 @@ func (server *VMSnapshotServer) Capture(
 		Mode:       "disks",
 		Source:     source,
 	}
+	for _, backing := range backings {
+		if backing.name != "rootfs.img" || backing.lease.record.GuestControl == nil {
+			continue
+		}
+		receipt := *backing.lease.record.GuestControl
+		if receipt.Phase != "bound" {
+			return model.SnapshotCaptureResult{}, instanceValidationError("snapshot Guest Control provisioning is incomplete")
+		}
+		if _, err := readBoundGuestControlCredential(ctx, cache, receipt); err != nil {
+			return model.SnapshotCaptureResult{}, err
+		}
+		capture.GuestControl = &receipt
+	}
 	wasRunning := false
 	producerFD := -1
 	if session != nil {

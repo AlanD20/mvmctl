@@ -28,12 +28,13 @@ type snapshotArtifact struct {
 }
 
 type snapshotCaptureRecord struct {
-	Schema     uint32                  `json:"schema"`
-	SnapshotID string                  `json:"snapshot_id"`
-	OwnerUID   uint32                  `json:"owner_uid"`
-	Mode       string                  `json:"mode"`
-	Source     vmLaunchDeviceAuthority `json:"source"`
-	Artifacts  []snapshotArtifact      `json:"artifacts"`
+	Schema       uint32                      `json:"schema"`
+	SnapshotID   string                      `json:"snapshot_id"`
+	OwnerUID     uint32                      `json:"owner_uid"`
+	Mode         string                      `json:"mode"`
+	Source       vmLaunchDeviceAuthority     `json:"source"`
+	Artifacts    []snapshotArtifact          `json:"artifacts"`
+	GuestControl *guestControlBackingReceipt `json:"guest_control,omitempty"`
 }
 
 type snapshotStoreEntry struct {
@@ -237,6 +238,14 @@ func (entry *snapshotStoreEntry) readRecord(ctx context.Context, ownerUID uint32
 }
 
 func (record snapshotCaptureRecord) validate() error {
+	if record.GuestControl != nil {
+		if err := validateGuestControlReceipt(*record.GuestControl); err != nil {
+			return err
+		}
+		if record.GuestControl.Phase != "bound" {
+			return instanceValidationError("snapshot Guest Control credential is unfinished")
+		}
+	}
 	if record.Schema != 1 || !isCanonicalManagedResourceID(record.SnapshotID, 64) || record.OwnerUID == 0 ||
 		record.Source.OwnerUID != record.OwnerUID || (record.Mode != "full" && record.Mode != "disks") {
 		return instanceValidationError("snapshot capture record identity is invalid")
