@@ -58,7 +58,7 @@ func (aliases *guestControlAliases) announceOwnedAlias(ctx context.Context, reco
 	}
 	identity.Address.Flags = stableGuestControlAliasFlags(actual.Flags)
 	if previous, announced := aliases.announced[record.Resource]; announced && previous == identity {
-		return nil
+		return aliases.admitAnnouncementLifetime(ctx, record)
 	}
 	if err := aliases.kernel.announceIPv4(ctx, link, *actual); err != nil {
 		return err
@@ -98,7 +98,9 @@ func marshalGuestControlAliasAnnouncement(
 	address guestControlAliasAddress,
 ) ([]byte, error) {
 	if link.Index <= 0 || link.Name == "" || len(link.Name) >= unix.IFNAMSIZ || link.Flags&unix.IFF_UP == 0 || link.Flags&unix.IFF_LOOPBACK != 0 ||
-		link.MAC == ([6]byte{}) || link.MAC[0]&1 != 0 || address.Index != link.Index || !address.IP.Is4() || !address.IP.IsPrivate() || address.Prefix != 32 ||
+		link.MAC == ([6]byte{}) || link.MAC[0]&1 != 0 || address.Index != link.Index || !address.IP.Is4() ||
+		!address.IP.IsPrivate() ||
+		address.Prefix != 32 ||
 		address.Scope != unix.RT_SCOPE_UNIVERSE ||
 		!strings.HasPrefix(address.Label, link.Name+":") ||
 		len(address.Label) > 15 ||

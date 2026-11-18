@@ -223,3 +223,75 @@ func TestGuestControlAliasAnnouncementNamespaceFrameUsesAdmittedNIC(t *testing.T
 		"opening/sending in the pinned namespace must restore the caller",
 	)
 }
+
+// The observation barrier models cancellation or finite expiry after a successful kernel read.
+// It changes only test scheduling, without a production hook or packet effect.
+type aliasAnnouncementObservationKernel struct {
+	*aliasTestKernel
+	observations     int
+	trigger          int
+	afterObservation func()
+}
+
+func (kernel *aliasAnnouncementObservationKernel) snapshot(ctx context.Context) (guestControlAliasSnapshot, error) {
+	snapshot, err := kernel.aliasTestKernel.snapshot(ctx)
+	kernel.observations++
+	if err == nil && kernel.observations == kernel.trigger {
+		kernel.afterObservation()
+	}
+	return snapshot, err
+}
+
+func TestGuestControlAliasCachedAnnouncementRechecksCancellationAfterObservation(t *testing.T) {
+	kernel := &aliasAnnouncementObservationKernel{aliasTestKernel: &aliasTestKernel{state: aliasPrimarySnapshot()}}
+	aliases := aliasTestManager(t, kernel, aliasTestStore(t))
+	session, err := aliases.beginSession(t.Context())
+	require.NoError(t, err)
+	request, response := aliasSelfRequest(guestcontrolwire.Associate, 8, 10000)
+	require.NoError(t, aliases.reconcile(t.Context(), session, aliasNow(t), request, response))
+	current := aliasRecord(aliases, request.Input.ResourceID)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	// Renewal first observes its existing alias, then the cache-hit announcement path observes it again.
+	kernel.trigger = kernel.observations + 2
+	kernel.afterObservation = cancel
+	renew, renewed := aliasSelfRequest(guestcontrolwire.Renew, current.Generation, 10000)
+	started := aliasNow(t)
+	require.ErrorIs(t, aliases.reconcile(ctx, session, started, renew, renewed), context.Canceled)
+	require.Equal(t, 1, kernel.announceAttempts, "a cache hit must not send another announcement")
+	retained := aliasRecord(aliases, current.Resource)
+	require.True(t, retained.Installed)
+	require.Equal(
+		t,
+		started+uint64(10*time.Second),
+		retained.Deadline,
+		"cancellation must preserve the fresh finite ownership deadline",
+	)
+	observed, err := kernel.aliasTestKernel.snapshot(t.Context())
+	require.NoError(t, err)
+	require.Len(t, observed.Addresses, 2)
+	require.Equal(t, aliasPrimarySnapshot().Addresses[0], observed.Addresses[0])
+}
+func TestGuestControlAliasCachedAnnouncementRechecksExpiryAfterObservation(t *testing.T) {
+	kernel := &aliasAnnouncementObservationKernel{aliasTestKernel: &aliasTestKernel{state: aliasPrimarySnapshot()}}
+	aliases := aliasTestManager(t, kernel, aliasTestStore(t))
+	session, err := aliases.beginSession(t.Context())
+	require.NoError(t, err)
+	request, response := aliasSelfRequest(guestcontrolwire.Associate, 8, 10000)
+	require.NoError(t, aliases.reconcile(t.Context(), session, aliasNow(t), request, response))
+	current := aliasRecord(aliases, request.Input.ResourceID)
+	kernel.trigger = kernel.observations + 2
+	kernel.afterObservation = func() { timer := time.NewTimer(250 * time.Millisecond); defer timer.Stop(); <-timer.C }
+	renew, renewed := aliasSelfRequest(guestcontrolwire.Renew, current.Generation, 200)
+	require.ErrorContains(
+		t,
+		aliases.reconcile(t.Context(), session, aliasNow(t), renew, renewed),
+		"conservative lease deadline",
+	)
+	require.Equal(t, 1, kernel.announceAttempts, "cached permission must not announce or acknowledge an expired lease")
+	require.Zero(t, aliasRecordCount(aliases))
+	require.Empty(t, aliases.announced)
+	observed, err := kernel.aliasTestKernel.snapshot(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, aliasPrimarySnapshot(), observed, "expiry cleanup must preserve primary addressing and routes")
+}
