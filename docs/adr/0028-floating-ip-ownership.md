@@ -42,6 +42,13 @@ selection of another owner. Eligible VMs must belong to the resource's network a
 
 ### Ownership and fencing
 
+The Jailer admission lease retains the owned VM lock and verifies its current boot, launch generation,
+isolated execution identity, process locators and protected Firecracker API peer. It exposes a genuine child
+topology hold for later network composition; an observed identity alone cannot authorize effects. Admission
+requires no guest-agent connection and sends no API operation. This proves a live VMM, not an unpaused guest;
+delegated renewal still needs its running-state check. Root association dispatch remains unwired, and live
+admission qualification is pending.
+
 Every ownership change advances a durable generation. Requests must match the observed generation; stale
 requests refuse. A successful response describes the committed owner and generation. Requests after an unknown
 outcome inspect current state before deciding what to do next.

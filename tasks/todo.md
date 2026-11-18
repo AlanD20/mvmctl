@@ -32,6 +32,9 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   netlink enabled; retain source/config/toolchain receipts and verify the implementation symbols in the ELF.
 - [ ] Boot that kernel and qualify the complete kernel model and packet fencing. Focused firewall vet/race
   checks pass; the current kernel correctly refuses the unsupported bridge expression.
+- [x] Implement retained root VM admission through the protected Firecracker API peer, incarnation rechecks
+  and genuine topology holds; independently review and run focused Jailer vet/race checks in the named runner.
+- [ ] Qualify that admission against a live Firecracker process when ownership is wired.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.

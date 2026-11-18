@@ -44,7 +44,10 @@ Proposed contracts: [Guest Control authority](../docs/adr/0027-guest-control-aut
 [floating-IP ownership](../docs/adr/0028-floating-ip-ownership.md). Operator reservation CRUD is implemented;
 the shared request/result codecs do not yet establish a Guest Control session. Root serializes reservations
 under the existing network and global firewall locks. Ordinary rule updates retain the admitted tables, preparing
-for timed secondary authority without restarting leases. Timed sets, packet fencing and association remain next.
+for timed secondary authority without restarting leases. The sealed compiler and collector now bind timed-set
+metadata and exact owner keys; compilation never grants or renews ownership. Retained VM admission verifies the
+protected Firecracker peer and current incarnation. Association, Guest Control sessions and packet qualification
+remain pending.
 
 ## Memory policy and sign-off
 
