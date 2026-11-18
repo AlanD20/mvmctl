@@ -1,159 +1,75 @@
-# k8s on Firecracker (mvmctl)
+# Kubernetes with a delegated floating API address
 
-Kubernetes v1.36 cluster with Cilium CNI (kube-proxy replacement, VXLAN tunnel) and keepalived HA on Firecracker microVMs.
+Kubernetes v1.36, containerd and Cilium v1.19.3 (VXLAN, kube-proxy replacement) on six Firecracker VMs.
+Three control-plane nodes provide the etcd majority needed to tolerate one controller failure. Two controllers cannot
+retain a majority after either fails.
 
-> **v0.3.0 development status:** this workflow is not currently executable end to end. Its join helper depends on the
-> positive VM-to-VM relay, which remains unavailable until API-owned relay admission, runtime policy enforcement, and
-> release qualification land. The removed VM-wide trust flag cannot enable it. When the relay is activated, create an
-> exact directional exec policy for each join path and use `mvm-agent remote --user <non-root> <destination> --
-> <command>` inside the source guest.
+**Development example, not HA-qualified.** This workflow requires the integrated Guest Control worker, floating-IP
+address reconciliation, finite kernel leases, env floating-IP/grant declarations and VM-to-VM execution admission.
+Those foundations are being integrated; this example has not completed a live bootstrap or failover journey.
+Bash/YAML checks and offline helper behavior checks do not establish runtime availability or a failover bound.
+See [Guest Control authority](../../../docs/adr/0027-guest-control-authority.md) and
+[floating-IP ownership](../../../docs/adr/0028-floating-ip-ownership.md).
 
-| Node | Role | IP | VIP |
-|------|------|----|-----|
-| controller-1 | control-plane | 10.10.0.10 | 10.10.0.100 (floating) |
-| controller-2 | control-plane | 10.10.0.11 | same |
-| worker-1 | worker | 10.10.0.20 | — |
-| worker-2 | worker | 10.10.0.21 | — |
-| worker-3 | worker | 10.10.0.22 | — |
+| Nodes | Role | Primary IPv4 |
+|---|---|---|
+| controller-1, controller-2, controller-3 | control-plane + stacked etcd | 10.10.0.10, .11, .12 |
+| worker-1, worker-2, worker-3 | worker | 10.10.0.20, .21, .22 |
+| k8s-api | floating-IP resource, network `k8s` | 10.10.0.100 |
 
-All nodes point to `10.10.0.100` as the control-plane endpoint. keepalived (VRRP) floats this IP between controllers — if controller-1 dies, controller-2 takes over the VIP automatically.
+Each controller has exactly four grants for the immutable `k8s-api` resource: inspect, associate, renew and release.
+Association and renewal each specify a **10s** lease in `k8s-controller.yaml`. To change the example lease, change all
+six association/renewal values together before initial apply. This is an explicit example setting, not a product default.
+The one-second loop uses authenticated `kubectl --server=https://PRIMARY:6443 get --raw=/readyz` with the controller's
+admin kubeconfig. It never uses the VIP to decide whether the local API is healthy. Missing kubeconfig during bootstrap
+means unhealthy; the service starts before `kubeadm init` and claims only when the local API becomes ready.
 
-## Usage
+A healthy controller associates an unowned IP using the inspected generation, renews its own ownership, and waits
+when another controller owns it. A failed probe stops renewal and attempts release. Every iteration inspects again;
+conflicts, timeouts and unknown outcomes are never retried using stale mutation arguments. Recovery does not preempt
+a healthy owner. The host kernel's timed key fences expired ownership even if a guest or worker stops running.
+The loop selects ownership; it is not the fencing authority. There is no keepalived or VRRP exception.
+
+## Run
+
+Use a disposable runner sized for six VMs (12 GiB guest memory plus host headroom). Host prerequisites are an enrolled
+candidate with the features above, `jq`, and `kubectl`. Build provisioning needs network access to Ubuntu, Kubernetes
+and Cilium sources. Asset-consuming mvm workflows should use the existing mirror:
 
 ```bash
-# 1. Build base image (one time, ~8 min)
+export MVM_ASSET_MIRROR="$HOME/.cache/mvm-asset-mirror"
+cd examples/workflows/simple-k8s-cluster-ha
 mvm env apply build-base.yaml
-
-# 2. Create control-plane + init + Cilium
-mvm env apply k8s-controller.yaml
-
-# 3. Add workers
-mvm env apply k8s-worker.yaml
-
-# 4. Verify
-./kubeconfig.sh
-kubectl --kubeconfig=.kubeconfig get nodes
-
-# 5. Destroy (reverse order)
-mvm env destroy k8s-worker.yaml
-mvm env destroy k8s-controller.yaml
+./apply.sh
+./kubectl.sh get nodes
+./destroy.sh
 ```
 
-The `k8s-base` image survives destroys — no need to rebuild.
+`build-base.yaml` builds the reusable `k8s-base` image. `apply.sh` applies controller resources/grants, worker resources,
+and explicit traffic/exec policies, resolves the floating resource ID using root-backed `mvm floating-ip inspect`, and
+passes the validated immutable ID through ordinary `mvm exec` to the fixed guest setup helper. Env command strings
+cannot interpolate resource outputs. All three lease services start before initialization. Joining controllers and
+workers use `mvm exec --allow-vm-exec` and `mvm-agent remote --user` with exact directional policies to controller-1.
+Controller and worker join files have separate non-root reader groups, expire after two hours, and are never printed.
+Failed certificate upload aborts without publishing a fabricated certificate key. Root-only init/join logs contain secrets.
 
-## Helpers
+`k8s-policy.yaml` declares network-to-floating-IP TCP 6443, directional controller-pair TCP 2379–2380,
+controller-to-node TCP 10250, and directional node-pair UDP 8472 and TCP 4240. These are service-specific grants;
+there is no blanket network allow. Host access to the VIP is still subject to the host's existing routing and firewall.
+`kubectl.sh` uses the VIP exclusively, so a successful command exercises that endpoint. `kubeconfig.sh` fetches credentials
+from any reachable controller through operator exec and writes a private local `.kubeconfig`.
 
-| Command | What it does |
-|---------|-------------|
-| `./kubeconfig.sh` | Fetches admin.conf via VIP → `.kubeconfig` |
-| `./kubectl.sh get nodes` | Fetches kubeconfig via VIP (fallback to direct IPs), runs kubectl |
+`destroy.sh` stops and disables each lease loop, attempts current-generation release, then destroys policy, worker and
+controller environments in reverse order. It stops on unreachable controllers or uncertain release rather than blindly
+removing a live resource. Recover the controller and retry, or explicitly fence it through supported VM lifecycle
+operations before performing reviewed cleanup. The base image remains reusable. Do not run raw env destroy while
+lease loops are active.
 
-## Adding a worker
+## Qualification still required
 
-Add a `vm:` + `exec:` block to `k8s-worker.yaml` and re-apply:
-
-```yaml
-vm:
-  - name: worker-4
-    network: k8s
-    guest_ip: 10.10.0.23
-    key: k8s-key
-    image: k8s-base
-    kernel: full-kernel
-    binary: fc-binary
-    vcpu: 1
-    mem: 2G
-    disk_size: 8G
-    writeback: true
-    depends_on:
-      - network:k8s
-      - key:k8s-key
-      - kernel:full-kernel
-      - binary:fc-binary
-
-exec:
-  - name: join-w4
-    target: worker-4
-    cmd: k8s-join controller-1 join-worker
-    timeout: 120
-    depends_on:
-      - exec:seed-token
-```
-
-Re-apply is idempotent — existing resources are skipped.
-
-## Adding a controller
-
-Add a `vm:` + `exec:` block to `k8s-controller.yaml` and re-apply. The join
-command is served from controller-1's `/srv/k8s/join-controller` (generated by
-`k8s-controller-primary`). Re-run `k8s-seed-controller-token` on controller-1
-to regenerate a fresh token for each additional controller.
-
-Keepalived auto-detects the role from the hostname — controller-1 becomes MASTER
-(priority 100), all others become BACKUP (priority 90, 80, 70...). Adding any
-number of controllers works with the same one-liner.
-
-```yaml
-vm:
-  - name: controller-3
-    network: k8s
-    guest_ip: 10.10.0.12
-    key: k8s-key
-    image: k8s-base
-    kernel: full-kernel
-    binary: fc-binary
-    vcpu: 2
-    mem: 2G
-    disk_size: 8G
-    writeback: true
-    depends_on:
-      - network:k8s
-      - key:k8s-key
-      - kernel:full-kernel
-      - binary:fc-binary
-
-exec:
-  - name: join-c3
-    target: controller-3
-    cmd: |
-      hostnamectl set-hostname controller-3 2>/dev/null || true
-      timeout 120 k8s-join controller-1 join-controller
-    depends_on:
-      - exec:seed-controller-token
-
-  - name: keepalived-c3
-    target: controller-3
-    cmd: k8s-keepalived
-    depends_on:
-      - exec:join-c3
-```
-
-## HA testing
-
-```bash
-# Stop kubelet on controller-1 — VIP moves to controller-2 in ~4s
-mvm exec controller-1 -- systemctl stop kubelet
-mvm exec controller-2 -- ip a show eth0 | grep 10.10.0.100
-
-# Start it back — VIP preempts back to controller-1
-mvm exec controller-1 -- systemctl start kubelet
-sleep 10
-mvm exec controller-1 -- ip a show eth0 | grep 10.10.0.100
-```
-
-## Files
-
-| File | Purpose |
-|------|---------|
-| `build-base.yaml` | Builds `k8s-base` image (k8s tools + pre-pulled images) |
-| `k8s-controller.yaml` | 2 control-plane nodes + kubeadm init + Cilium |
-| `k8s-worker.yaml` | 3 workers that join via `k8s-join` |
-| `scripts/k8s-provision-base` | Baked — installs k8s packages, pulls images |
-| `scripts/k8s-controller-primary` | Baked — runs `kubeadm init` + writes both join scripts to `/srv/k8s/` |
-| `scripts/k8s-join` | Baked join helper; its staged `mvm-agent remote` call is unavailable until the v0.3 relay lands |
-| `scripts/k8s-seed-token` | Baked — creates/renews the worker join token |
-| `scripts/k8s-seed-controller-token` | Baked — creates/renews the controller join token on primary |
-| `scripts/k8s-keepalived` | Baked — configures keepalived (VRRP) for HA VIP failover |
-| `scripts/k8s-configure-hosts` | Baked — sets hostname and /etc/hosts entries |
-| `kubeconfig.sh` | Pulls admin.conf via VIP, writes `.kubeconfig` |
-| `kubectl.sh` | Fetches kubeconfig via VIP, falls back to direct controller IPs |
+A complete journey must bootstrap all six nodes, prove all three etcd members, exercise API requests through the VIP,
+and verify one-controller failure while retaining quorum. Stop the actual API process or stop a controller VM; merely
+stopping kubelet does not necessarily stop its static API pod. Observe current-generation ownership and service traffic
+on the new owner, prove the old owner cannot source or receive VIP traffic after lease expiry, then restart the old
+controller and verify that it does not preempt the healthy owner. Also exercise simultaneous claims, unknown outcomes,
+worker death beyond lease expiry, and teardown. No fixed recovery time is promised by this example.

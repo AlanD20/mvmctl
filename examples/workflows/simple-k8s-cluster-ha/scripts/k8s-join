@@ -1,26 +1,15 @@
 #!/bin/bash
-set -e
-
-CTRL_VM="${1:-controller-1}"
-FILENAME="${2:-join-worker}"
-
-for _ in $(seq 1 30); do
-  if [ -S /var/run/containerd/containerd.sock ]; then break; fi
-  sleep 2
-done
-
-if [ -f /etc/kubernetes/kubelet.conf ]; then
-  echo "already joined"
-  exit 0
-fi
-
-echo "fetching join command from $CTRL_VM:/srv/k8s/$FILENAME..."
-JOBS=$(timeout 60 mvm-agent remote "$CTRL_VM" -- cat "/srv/k8s/$FILENAME")
-
-if [ -z "$JOBS" ]; then
-  echo "failed to get join command"
-  exit 1
-fi
-
-echo "running: $JOBS"
-bash -c "$JOBS"
+set -euo pipefail
+umask 077
+[[ $# == 2 ]] || exit 1
+case $2 in
+  join-controller) reader=controller-reader ;;
+  join-worker) reader=worker-reader ;;
+  *) exit 1 ;;
+esac
+if [[ -f /etc/kubernetes/kubelet.conf ]]; then exit 0; fi
+join=$(timeout 60 mvm-agent remote --user "$reader" "$1" -- cat "/srv/k8s/$2")
+[[ -n $join && $join == 'kubeadm join '* ]] || exit 1
+# The exact controller reader policy and file ownership protect this command.
+# Never echo credentials into env/exec logs.
+bash -c "$join" > /var/log/k8s-join.log 2>&1

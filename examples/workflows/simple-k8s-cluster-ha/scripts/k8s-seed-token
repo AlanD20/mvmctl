@@ -1,12 +1,12 @@
 #!/bin/bash
-set -e
-
-if [ ! -f /etc/kubernetes/admin.conf ]; then
-  echo "controller-1 not initialized"
-  exit 1
-fi
-
+set -euo pipefail
+umask 077
 export KUBECONFIG=/etc/kubernetes/admin.conf
-kubeadm token create --print-join-command > /srv/k8s/join-worker
-
-echo "worker token updated"
+test -s "$KUBECONFIG"
+file=$(mktemp /srv/k8s/.join-worker.XXXXXX)
+trap 'rm -f "$file"' EXIT
+kubeadm token create --ttl 2h --print-join-command > "$file"
+test -s "$file"
+chown root:worker-reader "$file"
+chmod 0640 "$file"
+mv "$file" /srv/k8s/join-worker

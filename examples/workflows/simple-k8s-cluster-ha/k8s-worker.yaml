@@ -1,105 +1,66 @@
-version: "1"
-
+version: '1'
 network:
   k8s:
-    subnet: "10.10.0.0/16"
+    subnet: 10.10.0.0/16
     nat_enabled: true
-
 key:
   k8s-key:
     algorithm: ed25519
-
 kernel:
   full-kernel:
     type: official
-    version: "7.0.11"
-    features: "all"
-
+    version: 7.0.11
+    features: all
 binary:
   fc-binary:
     type: firecracker
-    version: "1.16.0"
-
+    version: 1.16.0
 vm:
   worker-1:
-    network: "@network:k8s"
+    network: '@network:k8s'
     guest_ip: 10.10.0.20
-    key: "@key:k8s-key"
+    key: '@key:k8s-key'
     image: k8s-base
-    kernel: "@kernel:full-kernel"
-    binary: "@binary:fc-binary"
+    kernel: '@kernel:full-kernel'
+    binary: '@binary:fc-binary'
     vcpu: 1
     mem: 2G
     disk_size: 8G
     writeback: true
     depends_on:
-      - "@network:k8s"
-      - "@key:k8s-key"
-      - "@kernel:full-kernel"
-      - "@binary:fc-binary"
-
+    - '@network:k8s'
+    - '@key:k8s-key'
+    - '@kernel:full-kernel'
+    - '@binary:fc-binary'
   worker-2:
-    network: "@network:k8s"
+    network: '@network:k8s'
     guest_ip: 10.10.0.21
-    key: "@key:k8s-key"
+    key: '@key:k8s-key'
     image: k8s-base
-    kernel: "@kernel:full-kernel"
-    binary: "@binary:fc-binary"
+    kernel: '@kernel:full-kernel'
+    binary: '@binary:fc-binary'
     vcpu: 1
     mem: 2G
     disk_size: 8G
     writeback: true
     depends_on:
-      - "@network:k8s"
-      - "@key:k8s-key"
-      - "@kernel:full-kernel"
-      - "@binary:fc-binary"
-
+    - '@network:k8s'
+    - '@key:k8s-key'
+    - '@kernel:full-kernel'
+    - '@binary:fc-binary'
   worker-3:
-    network: "@network:k8s"
+    network: '@network:k8s'
     guest_ip: 10.10.0.22
-    key: "@key:k8s-key"
+    key: '@key:k8s-key'
     image: k8s-base
-    kernel: "@kernel:full-kernel"
-    binary: "@binary:fc-binary"
+    kernel: '@kernel:full-kernel'
+    binary: '@binary:fc-binary'
     vcpu: 1
     mem: 2G
     disk_size: 8G
     writeback: true
     depends_on:
-      - "@network:k8s"
-      - "@key:k8s-key"
-      - "@kernel:full-kernel"
-      - "@binary:fc-binary"
-
-exec:
-  seed-token:
-    target: "@vm:controller-1"
-    cmd: timeout 10 k8s-seed-token
-
-  join-w1:
-    target: "@vm:worker-1"
-    cmd: |
-      hostnamectl set-hostname worker-1 2>/dev/null || true
-      timeout 120 k8s-join controller-1 join-worker
-    depends_on:
-      - "@exec:seed-token"
-      - "@vm:worker-1"
-
-  join-w2:
-    target: "@vm:worker-2"
-    cmd: |
-      hostnamectl set-hostname worker-2 2>/dev/null || true
-      timeout 120 k8s-join controller-1 join-worker
-    depends_on:
-      - "@exec:seed-token"
-      - "@vm:worker-2"
-
-  join-w3:
-    target: "@vm:worker-3"
-    cmd: |
-      hostnamectl set-hostname worker-3 2>/dev/null || true
-      timeout 120 k8s-join controller-1 join-worker
-    depends_on:
-      - "@exec:seed-token"
-      - "@vm:worker-3"
+    - '@network:k8s'
+    - '@key:k8s-key'
+    - '@kernel:full-kernel'
+    - '@binary:fc-binary'

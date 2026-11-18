@@ -1,0 +1,434 @@
+version: '1'
+traffic_policy:
+  api:
+    source_network: k8s
+    destination_floating_ip: k8s-api
+    destination_network: k8s
+    protocol: tcp
+    port: '6443'
+  controller-1-controller-2-vxlan:
+    source_vm: controller-1
+    destination_vm: controller-2
+    protocol: udp
+    port: '8472'
+  controller-1-controller-2-cilium-health:
+    source_vm: controller-1
+    destination_vm: controller-2
+    protocol: tcp
+    port: '4240'
+  controller-1-controller-2-kubelet:
+    source_vm: controller-1
+    destination_vm: controller-2
+    protocol: tcp
+    port: '10250'
+  controller-1-controller-2-etcd:
+    source_vm: controller-1
+    destination_vm: controller-2
+    protocol: tcp
+    port: 2379-2380
+  controller-1-controller-3-vxlan:
+    source_vm: controller-1
+    destination_vm: controller-3
+    protocol: udp
+    port: '8472'
+  controller-1-controller-3-cilium-health:
+    source_vm: controller-1
+    destination_vm: controller-3
+    protocol: tcp
+    port: '4240'
+  controller-1-controller-3-kubelet:
+    source_vm: controller-1
+    destination_vm: controller-3
+    protocol: tcp
+    port: '10250'
+  controller-1-controller-3-etcd:
+    source_vm: controller-1
+    destination_vm: controller-3
+    protocol: tcp
+    port: 2379-2380
+  controller-1-worker-1-vxlan:
+    source_vm: controller-1
+    destination_vm: worker-1
+    protocol: udp
+    port: '8472'
+  controller-1-worker-1-cilium-health:
+    source_vm: controller-1
+    destination_vm: worker-1
+    protocol: tcp
+    port: '4240'
+  controller-1-worker-1-kubelet:
+    source_vm: controller-1
+    destination_vm: worker-1
+    protocol: tcp
+    port: '10250'
+  controller-1-worker-2-vxlan:
+    source_vm: controller-1
+    destination_vm: worker-2
+    protocol: udp
+    port: '8472'
+  controller-1-worker-2-cilium-health:
+    source_vm: controller-1
+    destination_vm: worker-2
+    protocol: tcp
+    port: '4240'
+  controller-1-worker-2-kubelet:
+    source_vm: controller-1
+    destination_vm: worker-2
+    protocol: tcp
+    port: '10250'
+  controller-1-worker-3-vxlan:
+    source_vm: controller-1
+    destination_vm: worker-3
+    protocol: udp
+    port: '8472'
+  controller-1-worker-3-cilium-health:
+    source_vm: controller-1
+    destination_vm: worker-3
+    protocol: tcp
+    port: '4240'
+  controller-1-worker-3-kubelet:
+    source_vm: controller-1
+    destination_vm: worker-3
+    protocol: tcp
+    port: '10250'
+  controller-2-controller-1-vxlan:
+    source_vm: controller-2
+    destination_vm: controller-1
+    protocol: udp
+    port: '8472'
+  controller-2-controller-1-cilium-health:
+    source_vm: controller-2
+    destination_vm: controller-1
+    protocol: tcp
+    port: '4240'
+  controller-2-controller-1-kubelet:
+    source_vm: controller-2
+    destination_vm: controller-1
+    protocol: tcp
+    port: '10250'
+  controller-2-controller-1-etcd:
+    source_vm: controller-2
+    destination_vm: controller-1
+    protocol: tcp
+    port: 2379-2380
+  controller-2-controller-3-vxlan:
+    source_vm: controller-2
+    destination_vm: controller-3
+    protocol: udp
+    port: '8472'
+  controller-2-controller-3-cilium-health:
+    source_vm: controller-2
+    destination_vm: controller-3
+    protocol: tcp
+    port: '4240'
+  controller-2-controller-3-kubelet:
+    source_vm: controller-2
+    destination_vm: controller-3
+    protocol: tcp
+    port: '10250'
+  controller-2-controller-3-etcd:
+    source_vm: controller-2
+    destination_vm: controller-3
+    protocol: tcp
+    port: 2379-2380
+  controller-2-worker-1-vxlan:
+    source_vm: controller-2
+    destination_vm: worker-1
+    protocol: udp
+    port: '8472'
+  controller-2-worker-1-cilium-health:
+    source_vm: controller-2
+    destination_vm: worker-1
+    protocol: tcp
+    port: '4240'
+  controller-2-worker-1-kubelet:
+    source_vm: controller-2
+    destination_vm: worker-1
+    protocol: tcp
+    port: '10250'
+  controller-2-worker-2-vxlan:
+    source_vm: controller-2
+    destination_vm: worker-2
+    protocol: udp
+    port: '8472'
+  controller-2-worker-2-cilium-health:
+    source_vm: controller-2
+    destination_vm: worker-2
+    protocol: tcp
+    port: '4240'
+  controller-2-worker-2-kubelet:
+    source_vm: controller-2
+    destination_vm: worker-2
+    protocol: tcp
+    port: '10250'
+  controller-2-worker-3-vxlan:
+    source_vm: controller-2
+    destination_vm: worker-3
+    protocol: udp
+    port: '8472'
+  controller-2-worker-3-cilium-health:
+    source_vm: controller-2
+    destination_vm: worker-3
+    protocol: tcp
+    port: '4240'
+  controller-2-worker-3-kubelet:
+    source_vm: controller-2
+    destination_vm: worker-3
+    protocol: tcp
+    port: '10250'
+  controller-3-controller-1-vxlan:
+    source_vm: controller-3
+    destination_vm: controller-1
+    protocol: udp
+    port: '8472'
+  controller-3-controller-1-cilium-health:
+    source_vm: controller-3
+    destination_vm: controller-1
+    protocol: tcp
+    port: '4240'
+  controller-3-controller-1-kubelet:
+    source_vm: controller-3
+    destination_vm: controller-1
+    protocol: tcp
+    port: '10250'
+  controller-3-controller-1-etcd:
+    source_vm: controller-3
+    destination_vm: controller-1
+    protocol: tcp
+    port: 2379-2380
+  controller-3-controller-2-vxlan:
+    source_vm: controller-3
+    destination_vm: controller-2
+    protocol: udp
+    port: '8472'
+  controller-3-controller-2-cilium-health:
+    source_vm: controller-3
+    destination_vm: controller-2
+    protocol: tcp
+    port: '4240'
+  controller-3-controller-2-kubelet:
+    source_vm: controller-3
+    destination_vm: controller-2
+    protocol: tcp
+    port: '10250'
+  controller-3-controller-2-etcd:
+    source_vm: controller-3
+    destination_vm: controller-2
+    protocol: tcp
+    port: 2379-2380
+  controller-3-worker-1-vxlan:
+    source_vm: controller-3
+    destination_vm: worker-1
+    protocol: udp
+    port: '8472'
+  controller-3-worker-1-cilium-health:
+    source_vm: controller-3
+    destination_vm: worker-1
+    protocol: tcp
+    port: '4240'
+  controller-3-worker-1-kubelet:
+    source_vm: controller-3
+    destination_vm: worker-1
+    protocol: tcp
+    port: '10250'
+  controller-3-worker-2-vxlan:
+    source_vm: controller-3
+    destination_vm: worker-2
+    protocol: udp
+    port: '8472'
+  controller-3-worker-2-cilium-health:
+    source_vm: controller-3
+    destination_vm: worker-2
+    protocol: tcp
+    port: '4240'
+  controller-3-worker-2-kubelet:
+    source_vm: controller-3
+    destination_vm: worker-2
+    protocol: tcp
+    port: '10250'
+  controller-3-worker-3-vxlan:
+    source_vm: controller-3
+    destination_vm: worker-3
+    protocol: udp
+    port: '8472'
+  controller-3-worker-3-cilium-health:
+    source_vm: controller-3
+    destination_vm: worker-3
+    protocol: tcp
+    port: '4240'
+  controller-3-worker-3-kubelet:
+    source_vm: controller-3
+    destination_vm: worker-3
+    protocol: tcp
+    port: '10250'
+  worker-1-controller-1-vxlan:
+    source_vm: worker-1
+    destination_vm: controller-1
+    protocol: udp
+    port: '8472'
+  worker-1-controller-1-cilium-health:
+    source_vm: worker-1
+    destination_vm: controller-1
+    protocol: tcp
+    port: '4240'
+  worker-1-controller-2-vxlan:
+    source_vm: worker-1
+    destination_vm: controller-2
+    protocol: udp
+    port: '8472'
+  worker-1-controller-2-cilium-health:
+    source_vm: worker-1
+    destination_vm: controller-2
+    protocol: tcp
+    port: '4240'
+  worker-1-controller-3-vxlan:
+    source_vm: worker-1
+    destination_vm: controller-3
+    protocol: udp
+    port: '8472'
+  worker-1-controller-3-cilium-health:
+    source_vm: worker-1
+    destination_vm: controller-3
+    protocol: tcp
+    port: '4240'
+  worker-1-worker-2-vxlan:
+    source_vm: worker-1
+    destination_vm: worker-2
+    protocol: udp
+    port: '8472'
+  worker-1-worker-2-cilium-health:
+    source_vm: worker-1
+    destination_vm: worker-2
+    protocol: tcp
+    port: '4240'
+  worker-1-worker-3-vxlan:
+    source_vm: worker-1
+    destination_vm: worker-3
+    protocol: udp
+    port: '8472'
+  worker-1-worker-3-cilium-health:
+    source_vm: worker-1
+    destination_vm: worker-3
+    protocol: tcp
+    port: '4240'
+  worker-2-controller-1-vxlan:
+    source_vm: worker-2
+    destination_vm: controller-1
+    protocol: udp
+    port: '8472'
+  worker-2-controller-1-cilium-health:
+    source_vm: worker-2
+    destination_vm: controller-1
+    protocol: tcp
+    port: '4240'
+  worker-2-controller-2-vxlan:
+    source_vm: worker-2
+    destination_vm: controller-2
+    protocol: udp
+    port: '8472'
+  worker-2-controller-2-cilium-health:
+    source_vm: worker-2
+    destination_vm: controller-2
+    protocol: tcp
+    port: '4240'
+  worker-2-controller-3-vxlan:
+    source_vm: worker-2
+    destination_vm: controller-3
+    protocol: udp
+    port: '8472'
+  worker-2-controller-3-cilium-health:
+    source_vm: worker-2
+    destination_vm: controller-3
+    protocol: tcp
+    port: '4240'
+  worker-2-worker-1-vxlan:
+    source_vm: worker-2
+    destination_vm: worker-1
+    protocol: udp
+    port: '8472'
+  worker-2-worker-1-cilium-health:
+    source_vm: worker-2
+    destination_vm: worker-1
+    protocol: tcp
+    port: '4240'
+  worker-2-worker-3-vxlan:
+    source_vm: worker-2
+    destination_vm: worker-3
+    protocol: udp
+    port: '8472'
+  worker-2-worker-3-cilium-health:
+    source_vm: worker-2
+    destination_vm: worker-3
+    protocol: tcp
+    port: '4240'
+  worker-3-controller-1-vxlan:
+    source_vm: worker-3
+    destination_vm: controller-1
+    protocol: udp
+    port: '8472'
+  worker-3-controller-1-cilium-health:
+    source_vm: worker-3
+    destination_vm: controller-1
+    protocol: tcp
+    port: '4240'
+  worker-3-controller-2-vxlan:
+    source_vm: worker-3
+    destination_vm: controller-2
+    protocol: udp
+    port: '8472'
+  worker-3-controller-2-cilium-health:
+    source_vm: worker-3
+    destination_vm: controller-2
+    protocol: tcp
+    port: '4240'
+  worker-3-controller-3-vxlan:
+    source_vm: worker-3
+    destination_vm: controller-3
+    protocol: udp
+    port: '8472'
+  worker-3-controller-3-cilium-health:
+    source_vm: worker-3
+    destination_vm: controller-3
+    protocol: tcp
+    port: '4240'
+  worker-3-worker-1-vxlan:
+    source_vm: worker-3
+    destination_vm: worker-1
+    protocol: udp
+    port: '8472'
+  worker-3-worker-1-cilium-health:
+    source_vm: worker-3
+    destination_vm: worker-1
+    protocol: tcp
+    port: '4240'
+  worker-3-worker-2-vxlan:
+    source_vm: worker-3
+    destination_vm: worker-2
+    protocol: udp
+    port: '8472'
+  worker-3-worker-2-cilium-health:
+    source_vm: worker-3
+    destination_vm: worker-2
+    protocol: tcp
+    port: '4240'
+exec_policy:
+  controller-2-join:
+    source_vm: controller-2
+    destination_vm: controller-1
+    target_user: controller-reader
+  controller-3-join:
+    source_vm: controller-3
+    destination_vm: controller-1
+    target_user: controller-reader
+  worker-1-join:
+    source_vm: worker-1
+    destination_vm: controller-1
+    target_user: worker-reader
+  worker-2-join:
+    source_vm: worker-2
+    destination_vm: controller-1
+    target_user: worker-reader
+  worker-3-join:
+    source_vm: worker-3
+    destination_vm: controller-1
+    target_user: worker-reader
