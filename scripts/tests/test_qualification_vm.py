@@ -203,3 +203,50 @@ def test_full_collection_is_remote_and_uses_existing_collection_receipts(executi
     checked=__import__('system_test_evidence').verify_collection_task(e.task,e.source,binding['candidate'],e.registry)
     assert set(checked['nodes'])=={'floating_ip','env'}
     assert [name for name,_ in e.calls]==['collection']
+
+
+
+def test_remote_command_budget_keeps_default_probe_bounded(orchestrator, namespace, monkeypatch):
+    calls = []
+    def mvm(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess([], 0, "probe-ok", "")
+    monkeypatch.setattr(orchestrator, "mvm", mvm)
+    result = orchestrator.qualification_vm._command(orchestrator, namespace, "print('probe-ok')")
+    assert result.stdout == "probe-ok" and len(calls) == 1
+    argv, options = calls[0]
+    assert argv[:7] == ("exec", namespace["runner_id"], "--user", "runner", "--timeout", "60", "--")
+    assert options == {"check": True, "timeout": 90}
+    assert "/usr/bin/python3" in argv[-1] and "print" in argv[-1]
+
+
+def test_remote_command_budget_reaches_actual_long_pytest_mvm_argv(orchestrator, namespace, monkeypatch, tmp_path):
+    q = orchestrator.qualification_vm
+    evidence = __import__("system_test_evidence")
+    files = ["tests/system/network/test_fixture.py"]
+    nodes = [files[0] + "::test_fixture"]
+    expected = {files[0]: "d" * 64}
+    capture_task = tmp_path / "capture"; capture_task.mkdir(mode=0o700)
+    capture = evidence.DomainEvidence(capture_task, "floating_ip", 2, files, expected)
+    calls = []
+    def mvm(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess([], 0, "literal pytest output", "")
+    monkeypatch.setattr(orchestrator, "mvm", mvm)
+    # Keep _exec and _command real: only source/report observations are injected.
+    monkeypatch.setattr(q, "_runtime_source", lambda *a: (json.dumps(expected).encode(), expected))
+    def fetch(o, ns, path):
+        if path.endswith("nodes.json"):return _node_report(nodes)
+        if path.endswith("pytest.xml"):return _junit(evidence, nodes)
+        return _complete_pytest_outcome_report()
+    monkeypatch.setattr(q, "_fetch", fetch)
+    q._pytest(orchestrator, namespace, "/home/runner/.cache/mvmctl-qualification-" + "a" * 32,
+              dict(payload=expected), files, "floating_ip", capture=capture)
+    pytest_calls = [(args, kwargs) for args, kwargs in calls if " -m pytest " in args[-1]]
+    assert len(pytest_calls) == 1
+    argv, options = pytest_calls[0]
+    assert argv[:7] == ("exec", namespace["runner_id"], "--user", "runner", "--timeout", "1800", "--")
+    assert options == {"check": False, "timeout": 1830}
+    assert capture.report_cleanup is True
+    short_calls = [(args, kwargs) for args, kwargs in calls if " -m pytest " not in args[-1]]
+    assert short_calls and all(args[5] == "60" and kwargs["timeout"] == 90 for args, kwargs in short_calls)

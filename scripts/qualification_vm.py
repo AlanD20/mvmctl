@@ -87,8 +87,10 @@ def _exec(o, namespace, command, *, timeout=60, check=True):
     environment = ["env", "HOME=" + user["home"], "USER=" + user["user"], "LOGNAME=" + user["user"],
                    "MVM_CACHE_DIR=" + paths["cache"], "MVM_CONFIG_DIR=" + paths["config"], "MVM_ASSET_MIRROR=" + paths["mirror"],
                    "PYTHONDONTWRITEBYTECODE=1", "sh", "-c", command]
-    return o.mvm("exec", namespace["runner_id"], "--user", user["user"], "--timeout", "30", "--",
-                 shlex.join(environment), check=check, timeout=timeout)
+    # The retained controller may enforce this guest-command budget itself.
+    # Leave bounded transport time beyond it rather than racing the same deadline.
+    return o.mvm("exec", namespace["runner_id"], "--user", user["user"], "--timeout", str(timeout), "--",
+                 shlex.join(environment), check=check, timeout=timeout + 30)
 
 
 def observe(o, namespace):
