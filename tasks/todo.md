@@ -40,6 +40,11 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Compose flow and exact neighbor cleanup under retained network authority, with durable reservation and
   bridge identity/L3 checks; independently review and run focused QA tests, vet and race checks.
 - [ ] Qualify genuine ownership-transition ordering and real flow/neighbor deletion with the replacement kernel.
+- [x] Implement the canonical ownership journal with revision CAS, closed finite-lease transitions and
+  non-replaying recovery states; independently review and pass focused QA vet/race checks.
+- [x] Compile VM/network grants to exact floating-IP destinations with stable resource-based policy identity;
+  verify owner movement, dormancy, destination exclusions, canonical hashing and sealing in focused QA.
+- [ ] Wire floating-IP policy CRUD through operator inputs, repositories and authenticated root mutation.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.

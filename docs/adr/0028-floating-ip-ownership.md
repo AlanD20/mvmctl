@@ -25,9 +25,12 @@ registry; allocation also checks durable stopped-primary reservations, not only 
 retains an immutable identity tombstone and advances the generation; a new identity may reuse the freed name or
 address. Inventory is paginated to respect the existing privileged frame bound without capping resource count.
 
-The current reservation-only schema grants no guest packet authority. It can therefore retire a prior-boot
-reservation under retained index/network locks without recreating the network. Adding ownership must extend
-this removal path with actual fencing; the reservation-only shortcut cannot retire an active guest association.
+The root record uses schema 2 with separate publication revision and ownership generation. Its closed phases
+record finite-lease association, renewal, release and recovery. Recovery of an interrupted timed install must
+fence before returning to unassociated state; journal replay cannot grant or renew a key. Phase validation is
+implemented, but the runtime coordinator and timed activation remain unwired. Schema-1 records are rejected.
+Only a stable unassociated record may retire under retained index/network locks after reboot without recreating
+the network. Owned or unfinished records require fencing before retirement.
 Network removal requires live reservations to be removed first; reset admits only verified retirement history.
 
 The registered `floating-ip-create`, `floating-ip-list`, `floating-ip-get` and `floating-ip-remove` actions use
@@ -74,6 +77,10 @@ Removal of a guest alias is best-effort hygiene after fencing, not a prerequisit
 Traffic policies remain directional and explicit. VM-targeted policy follows the VM's admitted addresses;
 service access that must follow an IP across owners needs an explicit floating-IP destination in policy input.
 The example must declare this access rather than relying on a network-wide allow or an implicit firewall exception.
+The compiler now supports VM-to-floating-IP and network-to-floating-IP grants, bound to the immutable resource
+ID and exact address. Destination rules follow the active owner without admitting its primary or other aliases;
+unassociated resources emit no delivery grant. Operator policy CRUD, root mutation and live packet qualification
+for these families remain pending.
 
 ### Automatic failover
 
