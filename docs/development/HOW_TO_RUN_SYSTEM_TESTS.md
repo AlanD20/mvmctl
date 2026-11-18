@@ -707,8 +707,9 @@ python3 scripts/run-system-tests.py env \
   --record-evidence /absolute/path/to/empty-execution-task
 ```
 
-The initial implementation scope is ordinary `floating_ip` and `env`. Whole floating-IP execution still needs separate
-fault-fixture admission; this mode does not admit root-fault or reboot journeys. Registered tiers stay unchanged,
+The supported domains are `floating_ip`, `env` and `floating_ip_worker_fault`. The worker-fault domain requires the
+fixed root-owned observer fixture, installed explicitly by the qualification administrator; ordinary floating-IP
+and env tests need no additional root grant. Reboot remains a separate workflow. Registered tiers stay unchanged,
 including remote Tier 3 only where nesting represents the scenario. Do not add `--host-direct`, preparation,
 installation or provisioning flags. These commands describe the execution contract, not evidence that the mode
 or any runtime journey has passed.

@@ -461,8 +461,8 @@ binds test source, but does not provision, install, prepare a shared volume or d
 Domains execute serially and stop on the first failure. Their registered tiers do not change: a Tier 3 scenario
 may execute remotely only when nesting represents its required behavior. This is not bare-metal qualification
 and does not use `--host-direct`. No fixture privilege, root-fault admission or reboot requirement is waived.
-The initial implementation scope is ordinary `floating_ip` and `env` execution; the complete floating-IP domain
-still requires separately admitted fault fixtures. Mode implementation and live qualification are separate gates.
+Supported domains are `floating_ip`, `env` and `floating_ip_worker_fault`. Only the worker-fault domain requires
+the separately installed fixed root-owned observer fixture. Mode implementation and live qualification are separate gates.
 
 Full-registry collection uses `--collect-release-nodes`; execution requires positional domains and
 `--record-evidence`, with the existing exact-remainder flags when selecting nodes. The same strict native/JSON/
