@@ -46,7 +46,9 @@ policies, finite ownership effects, authenticated host session and guest gateway
 implemented and reviewed. Version 1 environment declarations save resource, grant and policy identities before
 effects. The retained worker, grant startup, start/resume recovery and lifecycle retirement are integrated;
 focused checks and activation review pass. Stored permission is not session readiness.
-Operator association persistence remains a decision gate. Full kernel packet fencing, live control-path
+Operator associations persist until explicit release, transfer or VM stop; guest leases remain finite.
+Host CLI parity and acknowledged guest alias synchronization are being implemented. Full kernel packet fencing, live
+control-path
 bootstrap/expiry/failover and release qualification remain pending. Integration Go CI and the complete root Jailer
 suite pass for the current production source. Thirteen new Python scenarios collect; this does not qualify their
 runtime behavior. The public

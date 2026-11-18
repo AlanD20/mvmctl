@@ -52,7 +52,8 @@ successful injection or endpoint readiness. Readiness still requires mutual TLS 
 Memory-snapshot inheritance requires root capture authority; cold imports always receive fresh root material.
 
 A managed worker of the installed `mvm` binary maintains the session while the VM is running and delegated
-features are enabled. No separate helper executable or broad sudoers permission is introduced. This is a new
+features or operator-owned floating IPs require it. No separate helper executable or broad sudoers permission is
+introduced. This is a new
 retained-lifetime exception: it must be registered explicitly, bounded per VM, and stopped by authenticated
 lifecycle cleanup. It must not retain a global network mutation lock while waiting for guest input.
 
@@ -94,6 +95,15 @@ and restart clean up owned aliases without claiming host authority. The retained
 composed live transport qualification remains pending. The local control socket is root-only.
 
 ### Protocol
+
+The approved operator-ownership extension adds a named host-to-agent floating-IP alias synchronization and
+acknowledgement, not a command channel. The host derives addresses and generations from root authority for the
+admitted incarnation. Paged snapshots apply only when complete and bound to the same session; partial delivery
+cannot authorize alias removal. One session reader demultiplexes these messages and guest-operation responses.
+No mutation lock is retained while waiting for the agent. A root-owned acknowledgement binds the worker,
+session and exact snapshot so an old response cannot complete a newer operator mutation. Guest receipts permit
+only exact local cleanup; they never restore host ownership or authorize another VM after snapshot restore.
+This extension is being implemented; the existing guest-request framing below describes the current baseline.
 
 The transport is distinct from VM-exec and ordinary privileged-dispatch frames. Version 1 uses `MVMGCTL1`, a
 big-endian uint16 wire version and uint32 JSON-body length. Bodies are limited to 16 KiB. Requests contain the

@@ -1,6 +1,6 @@
 # Floating IP Ownership
 
-**Status:** Delegated ownership and retained runtime implemented; ownership/failover not release-qualified
+**Status:** Delegated ownership implemented; persistent operator ownership in progress; not release-qualified
 **Date:** 2026-11-17
 **Amends:** [ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md), for explicitly authorized secondary IPv4 addresses
 **Requires:** [Guest Control authority](0027-guest-control-authority.md)
@@ -96,7 +96,30 @@ implemented with retained firewall tables; its composed packet behavior still re
 Do not ship a userspace-only timer as a guarantee against split brain. Association and renewal grants require
 explicit positive whole-second lease durations; there is no default.
 A guest controller uses the typed inspect, associate, renew and release methods and current generations.
-The operator association persistence choice remains unresolved.
+Operator associations use the persistent lifetime below; delegated leases remain finite.
+
+### Operator-managed ownership
+
+The operator's explicit association persists until release, transfer or VM stop. It does not require a guest
+delegation or renewal loop. Origin and lifetime are explicit authority fields: persistent ownership is valid only
+for an operator assignment; guest association and renewal always require a finite positive lease. The journal,
+sealed firewall intent and kernel readback must preserve this distinction. A missing timeout must never be
+interpreted as an expired finite lease. This extension requires a new closed journal schema; old records must
+not acquire persistent authority through defaults or inference.
+
+Association admits an unassociated resource. Transfer explicitly fences the old owner before assigning a new
+one. The API observes the current root generation before a compare-and-swap; an optional CLI generation may
+bind a caller's earlier observation. Compilation, reconnect and journal recovery never activate kernel authority.
+Kernel permissions survive ordinary CLI or worker exit, but stop, replacement and reboot cannot revive them.
+
+A valid release delegation may release the same VM's persistent assignment. Guest renewal cannot convert or
+extend it, and guest association cannot silently change its lifetime. Revoking a grant fences only ownership
+that grant sustained; it cannot cancel an independent operator assignment.
+
+The authenticated worker synchronizes operator-owned aliases with the exact admitted guest incarnation.
+Association and transfer report completion only after the matching alias acknowledgement. A bounded wait or
+agent failure must report committed root ownership separately from incomplete alias synchronization; it must
+not claim rollback. These operator paths are being implemented and require their own qualification.
 
 The enforcement design uses a named timed set of host-veth/address pairs in the managed bridge table. Ordinary
 firewall updates now retain the admitted tables and chains and replace their rules in one batch. Initial creation

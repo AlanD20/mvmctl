@@ -61,7 +61,8 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   resolve the present-zero takeover review finding and pass focused integration checks.
 - [x] Implement delegated association ownership, kernel-enforced finite authority, fencing and transfer recovery.
 - [ ] Qualify live ownership transfer, kernel expiry and recovery under process/packet failures.
-- [ ] Resolve operator association persistence and guest/operator CLI parity before adding host ownership commands.
+- [x] Decide that operator associations persist until release, transfer or VM stop while guest leases remain finite.
+- [ ] Implement host association, transfer and release with explicit lifetime authority and acknowledged guest aliases.
 - [x] Implement the owned host session with one protected VMM admission, expected credential lineage,
   pinned agent TLS and independent exit descriptor. Review and focused QA vet/race checks pass.
 - [x] Wire the retained root worker and typed delegated operations without operator impersonation, including
