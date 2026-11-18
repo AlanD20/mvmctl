@@ -16,6 +16,7 @@
 7. [Tier 3: Host-Level Domains (No Runner VM)](#7-tier-3-host-level-domains-no-runner-vm)
 8. [How Tests Call `mvm`](#8-how-tests-call-mvm)
 9. [Python Orchestrator (`scripts/run-system-tests.py`)](#9-python-orchestrator)
+   - [Explicit Existing Qualification VM](#explicit-existing-qualification-vm)
 10. [File Layout](#10-file-layout)
 11. [Per-Domain Tier Classification](#11-per-domain-tier-classification)
 12. [Fixture Scoping Strategy](#12-fixture-scoping-strategy)
@@ -345,7 +346,7 @@ These tests **create VMs as part of their own logic**. Running them inside a run
 
 ### Execution
 
-Tier 3 runs on the outer host and may create or destroy host VMs, kernels,
+In ordinary mode, Tier 3 runs on the outer host and may create or destroy host VMs, kernels,
 images, networks, and volumes. The orchestrator rejects Tier 3 before work
 unless `--host-direct` acknowledges outer-host mutation. Release mode also
 requires an unfiltered full matrix, explicit-version rebuild, safe canonical
@@ -448,6 +449,29 @@ python3 scripts/run-system-tests.py --tier 2
 python3 scripts/run-system-tests.py --host-direct --tier 3
 python3 scripts/run-system-tests.py --tier 2,1
 ```
+
+### Explicit Existing Qualification VM
+
+[ADR-0012](adr/0012-unified-test-architecture.md#explicit-existing-qualification-vm) permits an opt-in retained
+qualification VM. `--qualification-vm mvmctl-030-test` and `--qualification-namespace` select an exact existing VM,
+boot, non-root operator and preseeded cache/config/mirror. The installed root-owned candidate and approved
+Firecracker/Jailer pair must already be present; the outer controller remains separate. This mode stages and
+binds test source, but does not provision, install, prepare a shared volume or destroy the target.
+
+Domains execute serially and stop on the first failure. Their registered tiers do not change: a Tier 3 scenario
+may execute remotely only when nesting represents its required behavior. This is not bare-metal qualification
+and does not use `--host-direct`. No fixture privilege, root-fault admission or reboot requirement is waived.
+The initial implementation scope is ordinary `floating_ip` and `env` execution; the complete floating-IP domain
+still requires separately admitted fault fixtures. Mode implementation and live qualification are separate gates.
+
+Full-registry collection uses `--collect-release-nodes`; execution requires positional domains and
+`--record-evidence`, with the existing exact-remainder flags when selecting nodes. The same strict native/JSON/
+JUnit/node checks and full selected-remainder accounting apply. Retained-target proof binds identity before and
+after execution and records retention separately from destruction. A failed or unexecuted remainder stays
+incomplete; retaining a VM is neither cleanup proof nor permission to reuse uncertain state.
+
+The [run guide](development/HOW_TO_RUN_SYSTEM_TESTS.md#48-reuse-an-explicit-qualification-vm) specifies the
+namespace contract and invocation. Ordinary per-domain provisioning and destruction remain the default.
 
 ### Script Flow
 

@@ -7,7 +7,8 @@ builds on the previous one.
 The only workflow is the **orchestrator-based** approach:
 [`scripts/run-system-tests.py`](../../scripts/run-system-tests.py) creates
 per-domain VMs from a custom base image, runs tests in parallel, and destroys
-VMs. The three-tier architecture is documented in
+VMs by default. The explicit [qualification-VM mode](#48-reuse-an-explicit-qualification-vm) instead retains an
+already prepared disposable target. The three-tier architecture is documented in
 [system-test-architecture.md](../system-test-architecture.md).
 
 ---
@@ -18,6 +19,7 @@ VMs. The three-tier architecture is documented in
 2. [Build the Binary](#2-build-the-binary)
 3. [Prepare Shared Assets](#3-prepare-shared-assets)
 4. [Run System Tests via Orchestrator](#4-run-system-tests-via-orchestrator)
+   - [Reuse an Explicit Qualification VM](#48-reuse-an-explicit-qualification-vm)
 5. [Interpret Results](#5-interpret-results)
 6. [Collect Release Evidence](#6-collect-release-evidence)
    - [Retain the Full Current Collection](#61-retain-the-full-current-collection)
@@ -542,7 +544,9 @@ owned runtime state before another attempt; do not infer safe host cleanup from 
 |------|---------|-------------|
 | _domains_ (positional) | — | Specific domains to test (e.g., `cli network`) |
 | `--all` | `false` | Run all T1 + T2 + host-direct T3 domains; dedicated clean qualification host only |
-| `--host-direct` | `false` | Required acknowledgment before selecting any Tier 3 domain or `--all`; does not guarantee isolation or safe cleanup |
+| `--host-direct` | `false` | Required for ordinary outer-host Tier 3 or `--all`; incompatible with explicit qualification-VM mode |
+| `--qualification-vm` | — | Reuse exactly `mvmctl-030-test`; no provisioning, installation or destruction (§4.8) |
+| `--qualification-namespace` | — | Required private schema-1 binding of the existing VM, boot, operator and preseeded paths (§4.8) |
 | `--release-qualification` | `false` | Require the unfiltered full-matrix release identity gate and closed reboot proof; requires `--all --host-direct --rebuild --candidate-version --host-reboot-task` |
 | `--host-reboot-phase` | — | Explicit `pre` or `post` continuation against existing `mvmctl-030-test`; separate from ordinary tier batches |
 | `--host-reboot-task` | — | Absolute private owned receipt directory for explicit phases; completed strict POST proof is mandatory for full release qualification |
@@ -652,6 +656,69 @@ persistent inventory preservation, and typed owned cleanup. Both phases need nat
 singleton JSON/JUnit proof. Only a closed successful POST task can be supplied to full release qualification.
 Changing bound source, candidate, controller or namespace identity invalidates the proof; retained historical
 results are never relabeled as a run on different inputs.
+
+---
+
+### 4.8 Reuse an Explicit Qualification VM
+
+Use this opt-in mode only for the explicitly selected disposable `mvmctl-030-test`. The root-owned candidate,
+approved Firecracker/Jailer pair, enrolled non-root operator, dependencies and writable cache/config/mirror must
+already be prepared. Keep `MVM_BINARY` bound to the unchanged outer controller and `MVM_CANDIDATE_BINARY` to
+the matching candidate artifact. This mode neither installs nor initializes software, prepares a shared volume,
+provisions a VM, destroys the retained target, nor authorizes an outer reboot.
+
+The namespace file is private, absolute and closed schema 1. It reuses the
+[host-reboot namespace fields](#47-explicit-named-runner-host-reboot-journey) and adds `expected_vm`;
+extra or duplicate fields refuse. Supply observed values, never inferred defaults:
+
+| Field | Required format |
+|-------|-----------------|
+| `schema_version` | JSON integer `1`. |
+| `runner` | Exactly `"mvmctl-030-test"`. |
+| `runner_id` | Complete 32-character lowercase hexadecimal VM ID. |
+| `operator` | Exactly `user`, `uid`, `gid`, `home`: a non-root passwd name, positive integer UID/GID and canonical absolute home. |
+| `paths` | Exactly `cache`, `config`, `mirror`: canonical existing absolute operator-owned directories. |
+| `expected_vm` | Exactly the four fields below. |
+| `expected_vm.created_at` | Nonempty exact `created_at` string from public outer VM inspection. |
+| `expected_vm.boot_id` | Observed canonical lowercase boot UUID. |
+| `expected_vm.ipv4` | Canonical IPv4 matching public outer VM inspection. |
+| `expected_vm.ssh_host_key` | Exact two-field `ssh-ed25519 BASE64` public key, with valid base64 and no comment. |
+
+The existing namespace file/path ownership and permission requirements apply. Key comparison uses admitted
+VM exec; the field does not select an SSH transport. VM, boot, operator, installed-candidate and staged-source
+proof must match before execution, and retained-target identity is checked again afterward.
+
+From the clean exact source checkout, collect the full registered node list into a new empty private task:
+
+```bash
+python3 scripts/run-system-tests.py \
+  --qualification-vm mvmctl-030-test \
+  --qualification-namespace /absolute/path/to/private-qualification-namespace.json \
+  --collect-release-nodes /absolute/path/to/empty-collection-task
+```
+
+Collection takes no positional domains or preparation/runtime selectors and runs no fixtures. For an admitted
+ordinary domain, use a different empty evidence task; execution always requires `--record-evidence`:
+
+```bash
+python3 scripts/run-system-tests.py env \
+  --qualification-vm mvmctl-030-test \
+  --qualification-namespace /absolute/path/to/private-qualification-namespace.json \
+  --record-evidence /absolute/path/to/empty-execution-task
+```
+
+The initial implementation scope is ordinary `floating_ip` and `env`. Whole floating-IP execution still needs separate
+fault-fixture admission; this mode does not admit root-fault or reboot journeys. Registered tiers stay unchanged,
+including remote Tier 3 only where nesting represents the scenario. Do not add `--host-direct`, preparation,
+installation or provisioning flags. These commands describe the execution contract, not evidence that the mode
+or any runtime journey has passed.
+
+Domains run serially and fail fast. For an exact-node batch, add the unchanged
+[collection/remainder flags](#62-record-the-exact-selected-remainder), including every verified completed receipt
+used for subtraction. Native, JSON, JUnit and node reports must agree with the entire selected remainder; skips,
+deselections, fixture failures and unexecuted nodes remain failures or incomplete evidence. Retention is recorded
+separately from destruction and never waives owned fixture cleanup. Full-registry collection, reboot proof and
+final release verification remain separate requirements.
 
 ---
 
@@ -775,9 +842,10 @@ python3 scripts/run-system-tests.py cli \
 
 Add `--completed-matrix-task /absolute/path/to/completed-task` once per actual current receipt used in the subtraction.
 The three selection/evidence flags above are required together; do not combine them with `--release-qualification`,
-`--rebuild` or `--skip-volume-check`. Tier 3 selections still require `--host-direct` and an explicitly authorized clean
-qualification host; retain applicable preparation prerequisites. Preparation-only `--image` does not accept
-`--record-evidence`.
+`--rebuild` or `--skip-volume-check`. Ordinary outer-host Tier 3 selections still require `--host-direct` and an
+explicitly authorized clean qualification host; the [qualification-VM mode](#48-reuse-an-explicit-qualification-vm)
+executes only nesting-compatible scenarios remotely. Retain all applicable fixture prerequisites.
+Preparation-only `--image` does not accept `--record-evidence`.
 
 A recorded batch counts only when its literal native, JSON, JUnit and node-phase reports agree on the exact selected
 nodes, all pass, and cleanup closes successfully. Skips, deselections, failures, collection errors, xfails/xpasses,
