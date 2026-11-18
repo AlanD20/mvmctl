@@ -65,14 +65,14 @@ class FloatingIPJourney:
         intent["item"] = item
         return item
 
-    def grant(self, vm, resource, method):
+    def grant(self, vm, resource, method, *, lease_seconds=300):
         args = [
             "floating-ip", "--network", resource["network_id"], "delegation", "grant",
             resource["id"], "--vm", vm["binding"]["id"], "--method", method,
         ]
         # This is an explicit test policy, not an operator default.
         if method in ("associate", "renew"):
-            args += ["--lease", "300s"]
+            args += ["--lease", f"{lease_seconds}s"]
         item = _tcp_data(self.runner, *args)
         assert re.fullmatch(r"[0-9a-f]{32}", item["id"]), item
         assert item["vm_id"] == vm["binding"]["id"], item
@@ -80,7 +80,7 @@ class FloatingIPJourney:
         assert item["resource_id"] == resource["id"] and item["method"] == method, item
         assert item["state"] == "active" and item["launch_generation"] > 0, item
         assert item["lease_duration_ns"] == (
-            300_000_000_000 if method in ("associate", "renew") else 0
+            lease_seconds * 1_000_000_000 if method in ("associate", "renew") else 0
         ), item
         return item
 
@@ -152,6 +152,72 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         ]
         assert vm["binding"]["ipv4"] in addresses, addresses
         assert (resource["ipv4"] in addresses) is present, addresses
+
+    def refresh_after_start(self, vm):
+        """Keep entity binding, but explicitly observe the new process and guest boot."""
+        matches = [item for item in _tcp_data(self.runner, "vm", "ls", kind=list)
+                   if item["id"] == vm["binding"]["id"]]
+        assert len(matches) == 1, matches
+        current = matches[0]
+        assert _tcp_vm_binding(current) == vm["binding"], current
+        assert current["status"] == "running" and current["pid"] > 0, current
+        boot = _run_mvm(
+            self.runner, "exec", vm["binding"]["id"], "--user", "root", "--timeout", "30", "--",
+            "cat /proc/sys/kernel/random/boot_id",
+        ).stdout.strip()
+        assert re.fullmatch(r"[0-9a-f-]{36}", boot), boot
+        assert (current["pid"], current["process_start_time"]) != (vm["pid"], vm["process_start_time"])
+        assert boot != vm["boot_id"], boot
+        return {"binding": vm["binding"], "pid": current["pid"],
+                "process_start_time": current["process_start_time"], "boot_id": boot}
+
+    def stale_alias(self, vm, resource, *, previous=None):
+        """Replace only this VIP with a test-owned label, or verify the retained replacement.
+
+        Guest alias cleanup must preserve the changed unmanaged address. Keeping it
+        present across denied TCP probes prevents guest cleanup from proving fencing.
+        """
+        _assert_tcp_peer(self.runner, vm)
+        script = r"""
+import json, subprocess, sys
+vip, primary, label = sys.argv[1:4]
+previous = json.loads(sys.argv[4])
+def run(*args):
+    return subprocess.check_output(['ip', *args], text=True)
+def snapshot():
+    interfaces = json.loads(run('-j', '-4', 'addr', 'show'))
+    routes = json.loads(run('-j', '-4', 'route', 'show', 'table', 'all'))
+    owners = [interface for interface in interfaces
+              if any(address['local'] == primary for address in interface.get('addr_info', []))]
+    assert len(owners) == 1
+    interface = owners[0]
+    addresses = interface.get('addr_info', [])
+    aliases = [address for address in addresses if address['local'] == vip]
+    assert len(aliases) == 1 and aliases[0]['prefixlen'] == 32
+    return {'interface': interface['ifname'], 'ifindex': interface['ifindex'],
+            'primary_addresses': [address for address in addresses if address['local'] != vip],
+            'routes': sorted(routes, key=lambda route: json.dumps(route, sort_keys=True))}, aliases[0]
+before, address = snapshot()
+if previous is None:
+    name = before['interface']
+    label = name + ':' + label
+    assert len(label) <= 15 and address.get('label') != label
+    run('addr', 'del', vip + '/32', 'dev', name)
+    run('addr', 'add', vip + '/32', 'dev', name, 'label', label, 'noprefixroute')
+    after, address = snapshot()
+    assert after == before, (before, after)
+    previous = {'snapshot': after, 'label': label}
+else:
+    assert before == previous['snapshot'], (before, previous)
+assert address['label'] == previous['label'], address
+print(json.dumps(previous, sort_keys=True))
+"""
+        result = _run_mvm(
+            self.runner, "exec", vm["binding"]["id"], "--user", "root", "--",
+            shlex.join(["python3", "-c", script, resource["ipv4"], vm["binding"]["ipv4"],
+                        "f" + self.suffix[:6], json.dumps(previous)]),
+        )
+        return json.loads(result.stdout)
 
     def listener(self, vm):
         directory = f"/tmp/floating-{self.suffix}"
