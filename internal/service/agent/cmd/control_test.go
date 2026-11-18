@@ -74,9 +74,12 @@ func TestControlExchangeEmitsOnlyCompactTypedResult(t *testing.T) {
 	var output bytes.Buffer
 	require.NoError(t, runControlExchange(ctx, conn, request, &output))
 	require.NoError(t, <-done)
-	require.JSONEq(t, `{"resource_id":"`+strings.Repeat("a", 32)+`","ipv4":"10.0.0.100",`+
-		`"generation":7,"ownership":"unassociated","lease_remaining_ms":0}`, output.String())
-	require.NotContains(t, output.String(), "request_id")
+	outputJSON := strings.TrimSpace(output.String())
+	require.False(t, strings.ContainsAny(outputJSON, "\r\n"), "control result must occupy one JSON line")
+	// CONTRACT: unassociated results expose an empty lifetime and only the six typed public fields.
+	require.JSONEq(t, `{"lifetime":"","resource_id":"`+strings.Repeat("a", 32)+`","ipv4":"10.0.0.100",`+
+		`"generation":7,"ownership":"unassociated","lease_remaining_ms":0}`, outputJSON)
+	require.NotContains(t, outputJSON, "request_id")
 }
 
 func TestControlExchangeCancellationInterruptsPartialResponse(t *testing.T) {
