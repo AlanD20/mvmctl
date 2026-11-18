@@ -307,7 +307,8 @@ func validateGuestControlWorkerTransition(
 	}
 	allowed := before.Phase == "spawned" && target.Phase == "ready" ||
 		before.Phase == "prepared" && target.Phase == "spawned" ||
-		(before.Phase == "prepared" || before.Phase == "spawned" || before.Phase == "ready") && target.Phase == "stopping" ||
+		(before.Phase == "prepared" || before.Phase == "spawned" || before.Phase == "ready") &&
+			target.Phase == "stopping" ||
 		before.Phase == "stopping" && target.Phase == "stopped"
 	if !allowed {
 		return instanceValidationError("worker phase transition is invalid")

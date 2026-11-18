@@ -213,7 +213,12 @@ func (process *GuestControlWorkerProcess) Release(ctx context.Context) error {
 	}
 	state.released = true
 	if state.bootstrap != nil {
-		state.releaseErr = errors.Join(state.releaseErr, state.bootstrap.Close(), terminateProcessThroughPIDFD(context.WithoutCancel(ctx), state.pidfd), waitAndReapProcessThroughPIDFD(context.WithoutCancel(ctx), state.pidfd))
+		state.releaseErr = errors.Join(
+			state.releaseErr,
+			state.bootstrap.Close(),
+			terminateProcessThroughPIDFD(context.WithoutCancel(ctx), state.pidfd),
+			waitAndReapProcessThroughPIDFD(context.WithoutCancel(ctx), state.pidfd),
+		)
 		state.bootstrap = nil
 	}
 	if state.pidfd >= 0 {

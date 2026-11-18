@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,12 +26,14 @@ type GuestControlWorkerSetup struct {
 }
 
 func IsGuestControlWorkerInvocation(args []string) bool {
-	return len(args) > 0 && args[0] == guestControlWorkerMarker
+	return len(args) > 0 && strings.HasPrefix(args[0], "__mvm_guest_control_worker_v")
 }
 
 // SpawnBlocked creates only the installed trusted mvm process, with root execution credentials.
 // The child cannot bootstrap until the caller releases every VM and worker lock and calls Start.
-func (lease *GuestControlWorkerLease) SpawnBlocked(ctx context.Context) (processOut *GuestControlWorkerProcess, returnErr error) {
+func (lease *GuestControlWorkerLease) SpawnBlocked(
+	ctx context.Context,
+) (processOut *GuestControlWorkerProcess, returnErr error) {
 	if lease == nil || lease.state == nil || os.Geteuid() != 0 || os.Getegid() != 0 {
 		return nil, instanceValidationError("root worker spawn authority is required")
 	}
@@ -68,11 +71,20 @@ func (lease *GuestControlWorkerLease) SpawnBlocked(ctx context.Context) (process
 	}
 	defer func() { returnErr = errors.Join(returnErr, null.Close()) }()
 	pidfd := -1
-	spawned, err := os.StartProcess(infra.SystemBinaryPath, []string{infra.SystemBinaryPath, guestControlWorkerMarker}, &os.ProcAttr{
-		Dir: "/", Env: []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"},
-		Files: []*os.File{null, null, null, child},
-		Sys:   &syscall.SysProcAttr{Setsid: true, PidFD: &pidfd, Credential: &syscall.Credential{Uid: 0, Gid: 0, Groups: []uint32{}}},
-	})
+	spawned, err := os.StartProcess(
+		infra.SystemBinaryPath,
+		[]string{infra.SystemBinaryPath, guestControlWorkerMarker},
+		&os.ProcAttr{
+			Dir:   "/",
+			Env:   []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"},
+			Files: []*os.File{null, null, null, child},
+			Sys: &syscall.SysProcAttr{
+				Setsid:     true,
+				PidFD:      &pidfd,
+				Credential: &syscall.Credential{Uid: 0, Gid: 0, Groups: []uint32{}},
+			},
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +95,11 @@ func (lease *GuestControlWorkerLease) SpawnBlocked(ctx context.Context) (process
 	accepted := false
 	defer func() {
 		if !accepted {
-			returnErr = errors.Join(returnErr, terminateProcessThroughPIDFD(context.WithoutCancel(ctx), pidfd), waitAndReapProcessThroughPIDFD(context.WithoutCancel(ctx), pidfd))
+			returnErr = errors.Join(
+				returnErr,
+				terminateProcessThroughPIDFD(context.WithoutCancel(ctx), pidfd),
+				waitAndReapProcessThroughPIDFD(context.WithoutCancel(ctx), pidfd),
+			)
 		}
 		returnErr = errors.Join(returnErr, unix.Close(pidfd))
 	}()
@@ -147,7 +163,11 @@ func (process *GuestControlWorkerProcess) Start(ctx context.Context) (returnErr 
 		returnErr = errors.Join(returnErr, conn.Close())
 		s.bootstrap = nil
 		if returnErr != nil {
-			returnErr = errors.Join(returnErr, terminateProcessThroughPIDFD(context.WithoutCancel(ctx), s.pidfd), waitAndReapProcessThroughPIDFD(context.WithoutCancel(ctx), s.pidfd))
+			returnErr = errors.Join(
+				returnErr,
+				terminateProcessThroughPIDFD(context.WithoutCancel(ctx), s.pidfd),
+				waitAndReapProcessThroughPIDFD(context.WithoutCancel(ctx), s.pidfd),
+			)
 		}
 	}()
 	if err := ctx.Err(); err != nil {
@@ -180,7 +200,10 @@ func (process *GuestControlWorkerProcess) Start(ctx context.Context) (returnErr 
 }
 
 // ReceiveGuestControlWorkerSetup admits only the inherited root-owned socket before initialization.
-func ReceiveGuestControlWorkerSetup(ctx context.Context, args []string) (_ GuestControlWorkerSetup, _ net.Conn, returnErr error) {
+func ReceiveGuestControlWorkerSetup(
+	ctx context.Context,
+	args []string,
+) (_ GuestControlWorkerSetup, _ net.Conn, returnErr error) {
 	var setup GuestControlWorkerSetup
 	if ctx == nil || len(args) != 1 || args[0] != guestControlWorkerMarker || os.Geteuid() != 0 || os.Getegid() != 0 {
 		return setup, nil, instanceValidationError("invalid private worker invocation")

@@ -39,6 +39,9 @@ func TestGuestControlWorkerPrivateMarkerReservesMalformedInvocation(t *testing.T
 	require.True(t, IsGuestControlWorkerInvocation([]string{guestControlWorkerMarker, "unexpected"}))
 	_, _, err := ReceiveGuestControlWorkerSetup(t.Context(), []string{guestControlWorkerMarker, "unexpected"})
 	require.Error(t, err)
+	require.True(t, IsGuestControlWorkerInvocation([]string{"__mvm_guest_control_worker_v2"}))
+	_, _, err = ReceiveGuestControlWorkerSetup(t.Context(), []string{"__mvm_guest_control_worker_v2"})
+	require.Error(t, err)
 	require.False(t, IsGuestControlWorkerInvocation(nil))
 	require.False(t, IsGuestControlWorkerInvocation([]string{"run"}))
 }

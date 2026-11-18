@@ -12,7 +12,12 @@ import (
 
 // AdmitGuestControlWorker rechecks current VM and the exact recorded root process before readiness.
 // It releases all admission locks before the bootstrap acknowledgement can block.
-func AdmitGuestControlWorker(ctx context.Context, setup GuestControlWorkerSetup, session *GuestControlSession, bootstrap net.Conn) (returnErr error) {
+func AdmitGuestControlWorker(
+	ctx context.Context,
+	setup GuestControlWorkerSetup,
+	session *GuestControlSession,
+	bootstrap net.Conn,
+) (returnErr error) {
 	principal, err := session.Principal()
 	if err != nil {
 		return err
@@ -55,7 +60,10 @@ func admitGuestControlWorkerRecord(ctx context.Context, setup GuestControlWorker
 		return err
 	}
 	record := state.store.record
-	if !state.store.found || state.principal != p || record.principal() != p || record.Generation != setup.Generation || record.Phase != "spawned" || record.Process == nil || record.Process.PID != os.Getpid() {
+	if !state.store.found || state.principal != p || record.principal() != p || record.Generation != setup.Generation ||
+		record.Phase != "spawned" ||
+		record.Process == nil ||
+		record.Process.PID != os.Getpid() {
 		return instanceValidationError("worker bootstrap record differs from exact child")
 	}
 	fd, absent, err := reopenGuestControlWorkerProcess(ctx, record)
@@ -94,7 +102,10 @@ func RecheckGuestControlWorker(ctx context.Context, setup GuestControlWorkerSetu
 		return err
 	}
 	record := state.store.record
-	if !state.store.found || state.principal != p || record.principal() != p || record.Generation != setup.Generation || record.Phase != "ready" || record.Process == nil || record.Process.PID != os.Getpid() {
+	if !state.store.found || state.principal != p || record.principal() != p || record.Generation != setup.Generation ||
+		record.Phase != "ready" ||
+		record.Process == nil ||
+		record.Process.PID != os.Getpid() {
 		return instanceValidationError("worker is no longer current")
 	}
 	return nil
