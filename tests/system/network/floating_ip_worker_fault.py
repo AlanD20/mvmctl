@@ -139,6 +139,31 @@ def _observe_process(process, pidfd):
         for fd in reversed(descriptors):os.close(fd)
 
 
+def _continue_admitted_worker(process, pidfd, *, observe=_observe_process, send=signal.pidfd_send_signal):
+    """Always thaw the retained exact process; report all observation/signal failures afterward."""
+    failures = []
+    try:
+        observe(process, pidfd)
+    except BaseException as error:
+        failures.append(error)
+    # Initial admission already pinned this process. A fallible final observation
+    # must never prevent its continuation or cause a numeric-PID fallback.
+    try:
+        send(pidfd, signal.SIGCONT)
+    except BaseException as error:
+        failures.append(error)
+    else:
+        try:
+            deadline = time.monotonic() + 5
+            while any(state in ('T', 't') for state in observe(process, pidfd)):
+                assert time.monotonic() < deadline, 'root worker did not continue'
+                time.sleep(0.025)
+        except BaseException as error:
+            failures.append(error)
+    if failures:
+        raise BaseExceptionGroup('root worker continuation proof or signal failed', failures)
+
+
 def _root_observer(vm_id, owner, group):
     assert os.getuid() == os.geteuid() == 0
     assert int(os.environ["SUDO_UID"]) == owner > 0 and int(os.environ["SUDO_GID"]) == group > 0
@@ -207,15 +232,10 @@ def _root_observer(vm_id, owner, group):
     finally:
         try:
             if stopped:
-                # Even a test/record assertion failure must thaw this originally
-                # admitted process. pidfd plus full process proof forbids PID reuse.
-                _observe_process(process, pidfd)
-                signal.pidfd_send_signal(pidfd, signal.SIGCONT)
+                # The retained pidfd already binds the admitted process. Always
+                # attempt continuation before reporting final proof failures.
+                _continue_admitted_worker(process, pidfd)
                 stopped = False
-                deadline = time.monotonic() + 5
-                while any(state in ('T', 't') for state in _observe_process(process, pidfd)):
-                    assert time.monotonic() < deadline, 'root worker did not continue'
-                    time.sleep(0.025)
                 print('CONTINUED_EXACT_ROOT_WORKER', flush=True)
         finally:
             for fd in reversed(locks):fcntl.flock(fd, fcntl.LOCK_UN)

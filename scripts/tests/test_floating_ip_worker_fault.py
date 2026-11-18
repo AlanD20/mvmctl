@@ -4,12 +4,15 @@ from copy import deepcopy
 import fcntl
 import json
 import os
+import signal
 import stat
 import time
 
 import pytest
 
-from tests.system.network.floating_ip_worker_fault import _all_stopped, _bind_records, _unique, _wait_lock
+from tests.system.network.floating_ip_worker_fault import (
+    _all_stopped, _bind_records, _continue_admitted_worker, _unique, _wait_lock,
+)
 
 
 @pytest.fixture
@@ -75,3 +78,37 @@ def test_existing_authority_lock_timeout_never_unlocks_contender(tmp_path):
         _wait_lock(second, time.monotonic() + 0.1)
     finally:
         os.close(second); os.close(first)
+
+
+@pytest.mark.parametrize("fault", [None, "before", "signal", "after", "before-and-signal"])
+def test_retained_pidfd_continuation_survives_proof_failure_and_preserves_signal_errors(monkeypatch, fault):
+    process = {"pid": 987654}
+    retained_pidfd = 73
+    calls = []
+    before_error, signal_error, after_error = OSError("executable unlinked"), OSError("pidfd signal failed"), OSError("proc unavailable")
+    def no_numeric_pid_fallback(*args):
+        pytest.fail("cleanup must never fall back to a numeric PID")
+    monkeypatch.setattr(os, "kill", no_numeric_pid_fallback)
+    def observe(actual_process, actual_pidfd):
+        assert actual_process is process and actual_pidfd == retained_pidfd
+        stage = "after" if any(call[0] == "signal" for call in calls) else "before"
+        calls.append((stage, actual_pidfd))
+        if stage == "before" and fault in ("before", "before-and-signal"):raise before_error
+        if stage == "after" and fault == "after":raise after_error
+        return ["T"] if stage == "before" else ["S"]
+    def send(actual_pidfd, operation):
+        calls.append(("signal", actual_pidfd, operation))
+        assert (actual_pidfd, operation) == (retained_pidfd, signal.SIGCONT)
+        if fault in ("signal", "before-and-signal"):raise signal_error
+    if fault is None:
+        _continue_admitted_worker(process, retained_pidfd, observe=observe, send=send)
+    else:
+        with pytest.raises(BaseExceptionGroup) as raised:
+            _continue_admitted_worker(process, retained_pidfd, observe=observe, send=send)
+        expected = {"before": [before_error], "signal": [signal_error], "after": [after_error],
+                    "before-and-signal": [before_error, signal_error]}[fault]
+        assert list(raised.value.exceptions) == expected
+    assert [call for call in calls if call[0] == "signal"] == [("signal", retained_pidfd, signal.SIGCONT)]
+    assert calls[0] == ("before", retained_pidfd)
+    if fault not in ("signal", "before-and-signal"):
+        assert calls[-1] == ("after", retained_pidfd)
