@@ -3,8 +3,9 @@ package network
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/google/uuid"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type floatingIPDelegationMethod string

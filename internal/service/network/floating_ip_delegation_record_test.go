@@ -2,8 +2,9 @@ package network
 
 import (
 	"bytes"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func delegationFixture(t *testing.T) (floatingIPRecord, floatingIPGuestPrincipal, floatingIPDelegationRecord) {
