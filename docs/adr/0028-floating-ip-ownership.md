@@ -49,8 +49,9 @@ The Jailer admission lease retains the owned VM lock and verifies its current bo
 isolated execution identity, process locators and protected Firecracker API peer. It exposes a genuine child
 topology hold for later network composition; an observed identity alone cannot authorize effects. Admission
 requires no guest-agent connection and sends no API operation. This proves a live VMM, not an unpaused guest;
-delegated renewal still needs its running-state check. Root association dispatch remains unwired, and live
-admission qualification is pending.
+delegated renewal must separately call the implemented running-state check through the protected API. It accepts
+only Running, never resumes a paused VM, and discards failed HTTP streams before another observation. Root
+association dispatch remains unwired, and live admission qualification is pending.
 
 Every ownership change advances a durable generation. Requests must match the observed generation; stale
 requests refuse. A successful response describes the committed owner and generation. Requests after an unknown
@@ -96,7 +97,14 @@ firewall updates now retain the admitted tables and chains and replace their rul
 still creates the tables; verified empty teardown deletes them. The compiler and strict collector now bind
 set metadata, owner keys, IPv4/ARP guards and bridge-scoped destination fences. Readback admits expired elements
 disappearing, but rejects foreign keys or a timeout that differs from the owner's policy. Ownership changes revoke
-observed old keys; compilation never installs or renews an element. Root association and guest admission remain unwired.
+observed old keys; compilation never installs or renews an element. The typed fencing, metadata publication, activation and renewal effects are implemented, but root association
+and guest dispatch remain unwired. Read-only lease observation verifies the complete graph and exact binding;
+a missing binding is an error, while explicit ownerless state carries no timed permission.
+Renewal removes the exact old key, proves absence and inserts the configured finite lease once, under retained
+ownership serialization. It may briefly interrupt traffic. Repeating an add with the same timeout does not refresh
+expiration with the pinned library/kernel protocol. Unknown outcomes require recovery rather than blind replay.
+Focused tests and review cover these effects; genuine transaction ordering and live renewal/expiry timing remain
+qualification gates.
 Retention is necessary because the pinned nftables library writes relative element timeouts;
 recreating an element from its observed remaining time could extend its lease by the delay before commit.
 

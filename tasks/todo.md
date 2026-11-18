@@ -45,6 +45,14 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Compile VM/network grants to exact floating-IP destinations with stable resource-based policy identity;
   verify owner movement, dormancy, destination exclusions, canonical hashing and sealing in focused QA.
 - [ ] Wire floating-IP policy CRUD through operator inputs, repositories and authenticated root mutation.
+- [x] Implement and review typed fencing, owner publication and finite lease activation/renewal effects;
+  pass focused QA tests, vet and race checks without claiming live renewal timing.
+- [x] Add retained target-VM network admission, read-only endpoint/lease verification and authoritative Running
+  checks. Run genuine hold refusal/release tests; successful live admission remains unqualified.
+- [x] Implement root delegation persistence and exact sustaining-grant provenance with explicit lease policy;
+  verify the correction rejecting impossible ownership revisions.
+- [x] Implement and review pinned mutual TLS authentication with real handshake, refusal and cancellation tests.
+- [ ] Finish root credential provisioning for both backends, snapshot lineage and retirement integration.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.

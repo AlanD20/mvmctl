@@ -27,6 +27,27 @@ Before accepting requests, root verifies the live VMM peer and current launch in
 process, socket and active-record authorities. A guest token alone, numeric CID or cache record is insufficient.
 The session bootstrap must authenticate the agent endpoint as well as the VMM socket before it becomes ready.
 
+Endpoint authentication uses TLS 1.3 with mutually pinned, role-specific Ed25519 certificates and a dedicated
+application protocol. Pins identify provisioned keys; certificate subjects and clocks do not establish VM identity.
+The host private key stays in root authority. The guest receives only its own private material and the public
+host pin. A TLS-protected acceptance acknowledgement confirms mutual authentication before the host returns.
+The leaf codec and authentication implementation are reviewed and tested; protected provisioning, snapshot
+credential references and worker integration remain pending. Memory snapshots require a root-verified credential
+lineage, while each restored VM receives a fresh process/incarnation principal and no inherited grants or session.
+
+Cold credential preparation preserves the selected provisioning backend from start to finish. A typed,
+owner-authenticated preparation creates root material for the exact pending VM and returns only its agent
+material. The existing backend installs that material at a fixed guest-root-only path during normal cold
+provisioning; GuestFS continues to operate on caller staging without a privileged appliance or native mounts.
+Root then imports and protects the disk and binds the expected immutable credential version to that import.
+Neither a protected backing descriptor nor the host private key is returned to the provisioner.
+
+The operator already controls guest root and can read its own guest's agent key. Relaying that key to its cold
+provisioner adds no operator authority. This deliberately permits agent material in caller staging; it does not
+permit caller-selected root pins or host keys. The receipt proves expected lineage and protected import, not
+successful injection or endpoint readiness. Readiness still requires mutual TLS and the exact live VMM proof.
+Memory-snapshot inheritance requires root capture authority; cold imports always receive fresh root material.
+
 A managed worker of the installed `mvm` binary maintains the session while the VM is running and delegated
 features are enabled. No separate helper executable or broad sudoers permission is introduced. This is a new
 retained-lifetime exception: it must be registered explicitly, bounded per VM, and stopped by authenticated
@@ -47,6 +68,12 @@ The effect checks the current incarnation, grant, resource ownership and operati
 the relevant mutation lock. Revocation and mutation share that serialization point. Revocation stops later
 effects and fences any ownership that the revoked grant sustained. Other root/CAP_NET_ADMIN administrators
 remain trusted; detected foreign state continues to refuse rather than being overwritten.
+
+Root grant records now bind one immutable grant ID to an exact resource, VM incarnation and method. Revocation
+moves through recorded revoking and revoked states; old IDs cannot reactivate. Ownership records retain the
+exact sustaining grant revision, so revocation does not cancel operator ownership or a different grant's lease.
+Association and renewal grants require an explicit finite whole-second lease policy; inspect and release do not.
+Persistence and comparison helpers are implemented; authenticated grant dispatch and effects remain unwired.
 
 Guest root can exercise every delegation granted to that VM. Local agent permissions restrict ordinary guest
 users but cannot isolate an application from guest root. The local control socket is privileged by default.
