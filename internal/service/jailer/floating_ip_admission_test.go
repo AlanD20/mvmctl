@@ -1,14 +1,23 @@
 package jailer
 
 import (
+	"bufio"
 	"context"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"golang.org/x/sys/unix"
+	"mvmctl/pkg/errs"
 
 	"mvmctl/internal/lib/authorityfs"
 )
@@ -204,4 +213,151 @@ func TestFloatingIPAdmissionGenuineChildHoldBlocksReleaseUntilConsumed(t *testin
 	require.Error(t, err)
 	_, _, err = transferred.Binding()
 	require.Error(t, err)
+}
+
+func TestFloatingIPAdmissionRequireRunningUsesOnlyAuthoritativeRead(t *testing.T) {
+	for name, payload := range map[string]string{
+		"running": `{"state":"Running"}`, "paused": `{"state":"Paused"}`,
+		"not started": `{"state":"Not started"}`, "missing": `{}`, "malformed": `{"state":`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			lease, _, _ := floatingIPTestAdmission(t)
+			client, server := net.Pipe()
+			defer client.Close()
+			lease.state.connection = client
+			observed := make(chan resumeHTTPObservation, 1)
+			go func() { observed <- serveResumeHTTP(server, payload, name, http.StatusNoContent, false) }()
+			err := lease.RequireRunning(t.Context())
+			if name == "running" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.NotNil(t, errs.AsDomainError(err))
+			}
+			require.NoError(t, client.Close())
+			result := <-observed
+			require.NoError(t, result.err)
+			assert.Zero(t, result.mutations, "running admission must never start, resume, or pause the VM")
+		})
+	}
+}
+
+func TestFloatingIPAdmissionRequireRunningRefusesHTTPFailureAndConsumesBrokenStream(t *testing.T) {
+	for name, response := range map[string]string{
+		"status failure": "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 19\r\n\r\n{\"state\":\"Running\"}",
+		"truncated body": "HTTP/1.1 200 OK\r\nContent-Length: 99\r\n\r\n{\"state\":\"Running\"}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			lease, peer, _ := floatingIPTestAdmission(t)
+			client, server := net.Pipe()
+			lease.state.connection = client
+			done := make(chan error, 1)
+			go func() {
+				defer server.Close()
+				request, err := http.ReadRequest(bufio.NewReader(server))
+				if err == nil && (request.Method != http.MethodGet || request.URL.Path != "/") {
+					err = fmt.Errorf("unexpected state operation %s %s", request.Method, request.URL.Path)
+				}
+				if err == nil {
+					err = request.Body.Close()
+				}
+				if err == nil {
+					_, err = io.WriteString(server, response)
+				}
+				done <- err
+			}()
+			require.Error(t, lease.RequireRunning(t.Context()))
+			require.NoError(t, <-done)
+			assert.Nil(t, lease.state.connection)
+			assert.False(t, lease.state.released)
+			// A late response may never become the next call's Running observation.
+			before := peer.locatorIndex
+			require.Error(t, lease.RequireRunning(t.Context()))
+			assert.GreaterOrEqual(t, peer.locatorIndex, before)
+		})
+	}
+}
+
+func TestFloatingIPAdmissionRequireRunningRechecksPeerAfterStateRead(t *testing.T) {
+	// Rationale: A valid Running body cannot outlive the admitted boot, peer process, or incarnation.
+	for _, name := range []string{"peer exit", "locator drift", "boot change"} {
+		t.Run(name, func(t *testing.T) {
+			lease, peer, identity := floatingIPTestAdmission(t)
+			client, server := net.Pipe()
+			defer client.Close()
+			lease.state.connection = client
+			done := make(chan error, 1)
+			go func() {
+				defer server.Close()
+				request, err := http.ReadRequest(bufio.NewReader(server))
+				if err == nil {
+					err = request.Body.Close()
+				}
+				if err == nil {
+					switch name {
+					case "peer exit":
+						peer.liveness[peer.livenessIndex] = false
+					case "locator drift":
+						peer.locators[peer.locatorIndex].startTimeTicks++
+					case "boot change":
+						identity.bootIDs[identity.bootIndex] = processOtherBootID
+					}
+					payload := `{"state":"Running"}`
+					_, err = fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s", len(payload), payload)
+				}
+				done <- err
+			}()
+			require.Error(t, lease.RequireRunning(t.Context()))
+			require.NoError(t, <-done)
+		})
+	}
+}
+
+func TestFloatingIPAdmissionRequireRunningCancellationCannotReusePendingReply(t *testing.T) {
+	// Rationale: Interrupted HTTP reads must lose their stream so a later Running reply cannot authorize a retry.
+	lease, _, _ := floatingIPTestAdmission(t)
+	client, server := net.Pipe()
+	defer server.Close()
+	lease.state.connection = client
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		request, err := http.ReadRequest(bufio.NewReader(server))
+		if err == nil {
+			err = request.Body.Close()
+		}
+		cancel()
+		done <- err
+	}()
+	require.ErrorIs(t, lease.RequireRunning(ctx), context.Canceled)
+	require.NoError(t, <-done)
+	assert.Nil(t, lease.state.connection)
+	assert.False(t, lease.state.released)
+	require.Error(t, lease.RequireRunning(t.Context()))
+}
+
+func TestFloatingIPAdmissionRequireRunningSerializesCopiesAndRefusesReleasedProof(t *testing.T) {
+	lease, _, _ := floatingIPTestAdmission(t)
+	fd, err := unix.Open("/dev/null", unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	require.NoError(t, err)
+	lease.state.peerPIDFD = fd
+	client, server := net.Pipe()
+	lease.state.connection = client
+	copied := *lease
+	observed := make(chan resumeHTTPObservation, 1)
+	go func() {
+		observed <- serveResumeHTTP(server, `{"state":"Running"}`, "Running", http.StatusNoContent, false)
+	}()
+	results := make(chan error, 2)
+	go func() { results <- lease.RequireRunning(t.Context()) }()
+	go func() { results <- copied.RequireRunning(t.Context()) }()
+	require.NoError(t, <-results)
+	require.NoError(t, <-results)
+	require.NoError(t, copied.Release(t.Context()))
+	require.NoError(t, (<-observed).err)
+	require.Error(t, lease.RequireRunning(t.Context()))
+	require.Error(t, copied.RequireRunning(t.Context()))
+	var absent *FloatingIPAdmissionLease
+	require.Error(t, absent.RequireRunning(t.Context()))
 }

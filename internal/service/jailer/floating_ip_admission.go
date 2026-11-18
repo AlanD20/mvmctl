@@ -171,6 +171,44 @@ func (state *floatingIPAdmissionState) recheck(ctx context.Context) error {
 		state.record, state.processes, state.peerPIDFD, "floating IP")
 }
 
+// RequireRunning observes actual Firecracker state through the retained protected API connection.
+// It grants no network authority and never resumes a paused VM. Delegated association and renewal
+// must call this while retaining admission through their effects; failed HTTP exchanges require new admission.
+func (lease *FloatingIPAdmissionLease) RequireRunning(ctx context.Context) error {
+	if lease == nil || lease.state == nil {
+		return instanceStateError("", "floating IP admission is unavailable")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if ctx == nil {
+		return instanceValidationError("floating IP running-state context is required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := state.recheck(ctx); err != nil {
+		return err
+	}
+	if state.connection == nil {
+		return instanceStateError(state.record.vmID, "floating IP running-state connection is unavailable")
+	}
+	observed, err := observeVMAPIState(ctx, state.connection, state.record.vmID)
+	if err != nil {
+		// An interrupted read can leave a late response on the stream. Never let a retry consume
+		// that response as fresh running-state proof, and do not release genuine child/VM authority.
+		closeErr := state.connection.Close()
+		state.connection = nil
+		return vmAPIBrokerError("observe floating IP running state", errors.Join(err, closeErr))
+	}
+	if err := state.recheck(ctx); err != nil {
+		return err
+	}
+	if observed != "Running" {
+		return instanceStateError(state.record.vmID, "floating IP delegation requires a running VM")
+	}
+	return nil
+}
+
 // RetainTopologyHold transfers genuine child authority for the later network transaction.
 // The consumer must release it before releasing this admission; no network lock is acquired here.
 func (lease *FloatingIPAdmissionLease) RetainTopologyHold(ctx context.Context) (*authorityfs.TopologyHold, error) {
