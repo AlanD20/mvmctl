@@ -11,7 +11,8 @@ import (
 )
 
 func floatingIPTransitionOwner() floatingIPOwner {
-	return floatingIPOwner{BootID: "123e4567-e89b-42d3-a456-426614174000", VMID: strings.Repeat("a", 32),
+	return floatingIPOwner{
+		Origin: floatingIPOperatorOrigin, BootID: "123e4567-e89b-42d3-a456-426614174000", VMID: strings.Repeat("a", 32),
 		LaunchGeneration: 7, ExecutionUID: 2000, LeaseDuration: 5 * time.Second}
 }
 
@@ -233,4 +234,29 @@ func TestFloatingIPTransitionCanonicalCodecRefusesInvalidOwnership(t *testing.T)
 	} {
 		t.Run(name, func(t *testing.T) { _, err := decodeFloatingIPRecord(raw); require.Error(t, err) })
 	}
+}
+
+func TestFloatingIPTransitionRenewalMayChangeOnlyProvenance(t *testing.T) {
+	owned := floatingIPAssociationRecords()[4]
+	renewing := owned
+	renewing.Revision++
+	renewing.Phase = floatingIPRenewing
+	renewing.Operation = floatingIPRenew
+	renewing.Owner = floatingIPOwner{}
+	renewing.BeforeOwner = owned.Owner
+	renewing.TargetOwner = owned.Owner
+	renewing.TargetOwner.Origin = floatingIPDelegatedOrigin
+	renewing.TargetOwner.GrantID = strings.Repeat("c", 32)
+	renewing.TargetOwner.GrantRevision = 1
+	require.NoError(t, validateFloatingIPReplacement(renewing, &owned))
+	require.Equal(t, owned.Owner, renewing.BeforeOwner)
+	changed := renewing
+	changed.TargetOwner.LeaseDuration += time.Second
+	require.Error(t, validateFloatingIPReplacement(changed, &owned))
+	changed = renewing
+	changed.TargetOwner.LaunchGeneration++
+	require.Error(t, validateFloatingIPReplacement(changed, &owned))
+	legacy := owned
+	legacy.Owner.Origin = ""
+	require.Error(t, validateFloatingIPRecord(legacy))
 }

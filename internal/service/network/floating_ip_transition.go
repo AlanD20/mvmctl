@@ -19,18 +19,30 @@ const (
 	floatingIPRecover   floatingIPOperation = "recover"
 )
 
+type floatingIPOwnerOrigin string
+
+const (
+	floatingIPOperatorOrigin  floatingIPOwnerOrigin = "operator"
+	floatingIPDelegatedOrigin floatingIPOwnerOrigin = "delegated"
+)
+
 // floatingIPOwner is an exact incarnation and finite guest lease policy, never proof of a live kernel key.
 // Value-only fields keep complete records comparable for descriptor-backed CAS and network cleanup.
 type floatingIPOwner struct {
-	BootID           string        `json:"boot_id"`
-	VMID             string        `json:"vm_id"`
-	LaunchGeneration uint64        `json:"launch_generation"`
-	ExecutionUID     uint32        `json:"execution_uid"`
-	LeaseDuration    time.Duration `json:"lease_duration_ns"`
+	Origin           floatingIPOwnerOrigin `json:"origin"`
+	GrantID          string                `json:"grant_id"`
+	GrantRevision    uint64                `json:"grant_revision"`
+	BootID           string                `json:"boot_id"`
+	VMID             string                `json:"vm_id"`
+	LaunchGeneration uint64                `json:"launch_generation"`
+	ExecutionUID     uint32                `json:"execution_uid"`
+	LeaseDuration    time.Duration         `json:"lease_duration_ns"`
 }
 
 func validFloatingIPOwner(owner floatingIPOwner, operatorUID uint32) bool {
-	return bootIDPattern.MatchString(owner.BootID) && vmIDPattern.MatchString(owner.VMID) &&
+	validOrigin := owner.Origin == floatingIPOperatorOrigin && owner.GrantID == "" && owner.GrantRevision == 0 ||
+		owner.Origin == floatingIPDelegatedOrigin && vmIDPattern.MatchString(owner.GrantID) && owner.GrantRevision > 0
+	return validOrigin && bootIDPattern.MatchString(owner.BootID) && vmIDPattern.MatchString(owner.VMID) &&
 		owner.LaunchGeneration > 0 && owner.ExecutionUID != 0 && owner.ExecutionUID != operatorUID &&
 		owner.LeaseDuration > 0 && owner.LeaseDuration%time.Second == 0
 }
@@ -81,7 +93,8 @@ func validateFloatingIPOwnership(record floatingIPRecord) error {
 		}
 	case floatingIPRenewing:
 		if record.Owner == zero && record.Operation == floatingIPRenew && valid(record.BeforeOwner) &&
-			record.BeforeOwner == record.TargetOwner {
+			sameFloatingIPIncarnation(record.BeforeOwner, record.TargetOwner) &&
+			record.BeforeOwner.LeaseDuration == record.TargetOwner.LeaseDuration {
 			return nil
 		}
 	}
@@ -141,8 +154,9 @@ func validateFloatingIPReplacement(next floatingIPRecord, previous *floatingIPRe
 		expected.Owner, expected.BeforeOwner = floatingIPOwner{}, before.Owner
 		expected.Phase, expected.Operation = next.Phase, next.Operation
 		if next.Phase == floatingIPRenewing && next.Operation == floatingIPRenew {
-			expected.TargetOwner = before.Owner
-			allowed = true
+			expected.TargetOwner = next.TargetOwner
+			allowed = sameFloatingIPIncarnation(before.Owner, next.TargetOwner) &&
+				before.Owner.LeaseDuration == next.TargetOwner.LeaseDuration
 		} else if next.Phase == floatingIPFencing {
 			switch next.Operation {
 			case floatingIPAssociate:
