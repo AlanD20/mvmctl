@@ -36,6 +36,8 @@ commit, test result, reproduced blocker, or decision-changing review finding.
 - Inspect the live agent tree and its assigned worktree together. Agent listings can omit a still-running worker.
   Before reassigning an existing worktree, explicitly stop or interrupt every previously named owner and confirm its
   prior status; when that cannot be confirmed, give the replacement a fresh worktree.
+- A message to a completed worker may only queue instructions. Use the runtime's follow-up task action to resume
+  it, then confirm its live state before treating a resource handoff or test assignment as started.
 - A writer with no new evidence and no confirmed live command receives one concise status request. If the next check
   is still unchanged, stop it and reuse the slot for a non-overlapping dependency.
 - Stop an agent immediately when it duplicates another owner, edits outside its assignment, repeats an unchanged
