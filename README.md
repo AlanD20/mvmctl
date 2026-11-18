@@ -152,7 +152,7 @@ default, run `mvm bin pull 1.17.0 --default` before creating a VM. When you're d
 | List running VMs | `mvm vm ps` | [REFERENCES.md](docs/REFERENCES.md#mvm-vm) |
 | Download an image | `mvm image pull ubuntu:24.04` | [REFERENCES.md](docs/REFERENCES.md#mvm-image) |
 | Create a network | `mvm network create mynet --subnet 10.0.0.0/24` | [REFERENCES.md](docs/REFERENCES.md#mvm-network) |
-| Create a snapshot | `mvm snapshot create myvm --name daily` | [REFERENCES.md](docs/REFERENCES.md#mvm-snapshot) |
+| Create a snapshot | `mvm snapshot create myvm --name daily` | [REFERENCES.md](docs/REFERENCES.md#mvm-snapshot-alias-ss) |
 | Provision from YAML | `mvm env apply my-env.yaml` | [ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) |
 | Configure settings | `mvm config set defaults.vm vcpu_count 4` | [REFERENCES.md](docs/REFERENCES.md#mvm-config) |
 

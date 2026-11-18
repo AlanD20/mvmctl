@@ -17,7 +17,7 @@ not qualify every fault path, aarch64 runtime, remote CI or a different candidat
 - [mvm image](#mvm-image)
 - [mvm bin](#mvm-bin)
 - [mvm vm](#mvm-vm)
-- [mvm snapshot](#mvm-snapshot)
+- [mvm snapshot](#mvm-snapshot-alias-ss)
 - [mvm console](#mvm-console)
 - [mvm network](#mvm-network)
 - [mvm floating-ip](#mvm-floating-ip)
