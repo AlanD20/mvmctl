@@ -11,13 +11,14 @@ type floatingIPDelegationMethod string
 type floatingIPDelegationState string
 
 const (
-	floatingIPDelegationInspect   floatingIPDelegationMethod = "inspect"
-	floatingIPDelegationAssociate floatingIPDelegationMethod = "associate"
-	floatingIPDelegationRenew     floatingIPDelegationMethod = "renew"
-	floatingIPDelegationRelease   floatingIPDelegationMethod = "release"
-	floatingIPDelegationActive    floatingIPDelegationState  = "active"
-	floatingIPDelegationRevoking  floatingIPDelegationState  = "revoking"
-	floatingIPDelegationRevoked   floatingIPDelegationState  = "revoked"
+	floatingIPDelegationActiveRevision uint64                     = 1
+	floatingIPDelegationInspect        floatingIPDelegationMethod = "inspect"
+	floatingIPDelegationAssociate      floatingIPDelegationMethod = "associate"
+	floatingIPDelegationRenew          floatingIPDelegationMethod = "renew"
+	floatingIPDelegationRelease        floatingIPDelegationMethod = "release"
+	floatingIPDelegationActive         floatingIPDelegationState  = "active"
+	floatingIPDelegationRevoking       floatingIPDelegationState  = "revoking"
+	floatingIPDelegationRevoked        floatingIPDelegationState  = "revoked"
 )
 
 // floatingIPDelegationRecord binds one root-issued grant lifetime to one exact incarnation and method.
@@ -61,7 +62,7 @@ func validateFloatingIPDelegationRecord(record floatingIPDelegationRecord) error
 	}
 	// This immutable grant lifetime has exactly three publications. Revision therefore
 	// also proves which active authority revision a revocation retires.
-	if (record.State == floatingIPDelegationActive && record.Revision != 1) ||
+	if (record.State == floatingIPDelegationActive && record.Revision != floatingIPDelegationActiveRevision) ||
 		(record.State == floatingIPDelegationRevoking && record.Revision != 2) ||
 		(record.State == floatingIPDelegationRevoked && record.Revision != 3) {
 		return networkAuthorityCorruptError("delegation state and legal revision chain disagree", nil)
@@ -99,7 +100,7 @@ func validateFloatingIPDelegationReplacement(
 		return err
 	}
 	if previous == nil {
-		if next.State == floatingIPDelegationActive && next.Revision == 1 {
+		if next.State == floatingIPDelegationActive && next.Revision == floatingIPDelegationActiveRevision {
 			return nil
 		}
 	} else {
@@ -138,7 +139,7 @@ func newFloatingIPDelegation(
 		Schema: 1, ID: strings.ReplaceAll(id.String(), "-", ""), OwnerUID: resource.OwnerUID,
 		NetworkID: resource.NetworkID, ResourceID: resource.ID, VMID: principal.vmID, BootID: principal.bootID,
 		LaunchGeneration: principal.launchGeneration, ExecutionUID: principal.executionUID,
-		Method: method, Revision: 1, State: floatingIPDelegationActive,
+		Method: method, Revision: floatingIPDelegationActiveRevision, State: floatingIPDelegationActive,
 	}
 	return record, validateFloatingIPDelegationRecord(record)
 }

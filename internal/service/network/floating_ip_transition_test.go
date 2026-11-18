@@ -2,6 +2,8 @@ package network
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -259,4 +261,23 @@ func TestFloatingIPTransitionRenewalMayChangeOnlyProvenance(t *testing.T) {
 	legacy := owned
 	legacy.Owner.Origin = ""
 	require.Error(t, validateFloatingIPRecord(legacy))
+}
+
+func TestFloatingIPTransitionCanonicalCodecRefusesNonactiveGrantRevision(t *testing.T) {
+	owned := floatingIPAssociationRecords()[4]
+	owned.Owner.Origin = floatingIPDelegatedOrigin
+	owned.Owner.GrantID = strings.Repeat("c", 32)
+	owned.Owner.GrantRevision = floatingIPDelegationActiveRevision
+	_, err := encodeFloatingIPRecord(owned)
+	require.NoError(t, err)
+	for _, revision := range []uint64{0, 2, 3, 4, ^uint64(0)} {
+		t.Run(fmt.Sprint(revision), func(t *testing.T) {
+			invalid := owned
+			invalid.Owner.GrantRevision = revision
+			raw, err := json.Marshal(invalid)
+			require.NoError(t, err)
+			_, err = decodeFloatingIPRecord(raw)
+			require.Error(t, err)
+		})
+	}
 }

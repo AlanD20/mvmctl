@@ -41,7 +41,8 @@ type floatingIPOwner struct {
 
 func validFloatingIPOwner(owner floatingIPOwner, operatorUID uint32) bool {
 	validOrigin := owner.Origin == floatingIPOperatorOrigin && owner.GrantID == "" && owner.GrantRevision == 0 ||
-		owner.Origin == floatingIPDelegatedOrigin && vmIDPattern.MatchString(owner.GrantID) && owner.GrantRevision > 0
+		owner.Origin == floatingIPDelegatedOrigin && vmIDPattern.MatchString(owner.GrantID) &&
+			owner.GrantRevision == floatingIPDelegationActiveRevision
 	return validOrigin && bootIDPattern.MatchString(owner.BootID) && vmIDPattern.MatchString(owner.VMID) &&
 		owner.LaunchGeneration > 0 && owner.ExecutionUID != 0 && owner.ExecutionUID != operatorUID &&
 		owner.LeaseDuration > 0 && owner.LeaseDuration%time.Second == 0

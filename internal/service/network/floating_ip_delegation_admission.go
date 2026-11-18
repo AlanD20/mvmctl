@@ -49,9 +49,8 @@ func floatingIPOwnerSustainedByDelegation(owner floatingIPOwner, grant floatingI
 	if validateFloatingIPDelegationRecord(grant) != nil {
 		return false
 	}
-	const sustainingRevision = uint64(1)
 	return owner.Origin == floatingIPDelegatedOrigin && owner.GrantID == grant.ID &&
-		owner.GrantRevision == sustainingRevision &&
+		owner.GrantRevision == floatingIPDelegationActiveRevision &&
 		owner.VMID == grant.VMID && owner.BootID == grant.BootID && owner.LaunchGeneration == grant.LaunchGeneration &&
 		owner.ExecutionUID == grant.ExecutionUID
 }
