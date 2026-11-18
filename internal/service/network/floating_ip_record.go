@@ -8,23 +8,30 @@ import (
 	"mvmctl/internal/lib/validators"
 )
 
-const floatingIPRecordSchema = uint32(1)
+const floatingIPRecordSchema = uint32(2)
 
 // floatingIPRecord is root authority, not a projection of the operator database.
 // Retirement retains the resource identity so an old create cannot resurrect it.
 type floatingIPRecord struct {
-	Schema     uint32 `json:"schema"`
-	OwnerUID   uint32 `json:"owner_uid"`
-	ID         string `json:"id"`
-	NetworkID  string `json:"network_id"`
-	Name       string `json:"name"`
-	IPv4       string `json:"ipv4"`
-	Generation uint64 `json:"generation"`
-	Retired    bool   `json:"retired"`
+	Schema      uint32              `json:"schema"`
+	OwnerUID    uint32              `json:"owner_uid"`
+	ID          string              `json:"id"`
+	NetworkID   string              `json:"network_id"`
+	Name        string              `json:"name"`
+	IPv4        string              `json:"ipv4"`
+	Generation  uint64              `json:"generation"`
+	Revision    uint64              `json:"revision"`
+	Phase       floatingIPPhase     `json:"phase"`
+	Operation   floatingIPOperation `json:"operation"`
+	Owner       floatingIPOwner     `json:"owner"`
+	BeforeOwner floatingIPOwner     `json:"before_owner"`
+	TargetOwner floatingIPOwner     `json:"target_owner"`
+	Retired     bool                `json:"retired"`
 }
 
 func validateFloatingIPRecord(record floatingIPRecord) error {
 	if record.Schema != floatingIPRecordSchema || record.OwnerUID == 0 || record.Generation == 0 ||
+		record.Revision < record.Generation ||
 		!vmIDPattern.MatchString(record.ID) || !networkIDPattern.MatchString(record.NetworkID) {
 		return networkAuthorityCorruptError("floating-IP record identity or generation is invalid", nil)
 	}
@@ -35,7 +42,7 @@ func validateFloatingIPRecord(record floatingIPRecord) error {
 	if err != nil || !address.Is4() || address.String() != record.IPv4 {
 		return networkAuthorityCorruptError("floating-IP record address is invalid", err)
 	}
-	return nil
+	return validateFloatingIPOwnership(record)
 }
 
 func encodeFloatingIPRecord(record floatingIPRecord) ([]byte, error) {

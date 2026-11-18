@@ -22,6 +22,7 @@ func TestFloatingIPStoreRetirementSurvivesReopenAndRefusesResurrection(t *testin
 	duplicate.Name = "different-intent"
 	require.Error(t, store.persist(t.Context(), duplicate, nil))
 	retired := record
+	retired.Revision++
 	retired.Retired = true
 	retired.Generation = 2
 	require.NoError(t, store.persist(t.Context(), retired, &record))
@@ -59,6 +60,7 @@ func TestFloatingIPStoreRejectsStaleAndReboundReplacements(t *testing.T) {
 			record := floatingIPContractRecord()
 			require.NoError(t, store.persist(t.Context(), record, nil))
 			replacement := record
+			replacement.Revision++
 			replacement.Generation = 2
 			replacement.Retired = true
 			mutate(&replacement)
@@ -173,6 +175,7 @@ func TestFloatingIPStoreFailedWritePreservesOriginalAndCleansTemporary(t *testin
 	require.NoError(t, store.persist(t.Context(), record, nil))
 	observation := installNetworkStoreWriteFault(t, store.owner, "write", unix.EIO)
 	retired := record
+	retired.Revision++
 	retired.Generation = 2
 	retired.Retired = true
 	require.ErrorIs(t, store.persist(t.Context(), retired, &record), unix.EIO)
@@ -209,6 +212,7 @@ func TestFloatingIPReservationRetiresWithoutRecreatingPriorBootNetwork(t *testin
 	record := floatingIPContractRecord()
 	require.NoError(t, store.persist(t.Context(), record, nil))
 	retired := record
+	retired.Revision++
 	retired.Retired, retired.Generation = true, 2
 	require.NoError(t, store.persist(t.Context(), retired, &record))
 	require.NoError(t, requireRetiredFloatingIPs(t.Context(), fixture.uid))
@@ -236,6 +240,7 @@ func TestFloatingIPStoreRefusesChangedReplacementEvidence(t *testing.T) {
 		return nil
 	}
 	retired := record
+	retired.Revision++
 	retired.Generation, retired.Retired = 2, true
 	require.Error(t, store.persist(t.Context(), retired, &record))
 	got, _, _, found, err := store.read(t.Context(), record.ID)
@@ -264,6 +269,7 @@ func TestFloatingIPReservationBlocksPrimaryAdmissionUntilRetired(t *testing.T) {
 	require.Error(t, inspectOwnerEndpointReservations(t.Context(), fixture.uid, key, endpoint))
 
 	retired := record
+	retired.Revision++
 	retired.Retired = true
 	retired.Generation = 2
 	require.NoError(t, store.persist(t.Context(), retired, &record))
@@ -280,7 +286,7 @@ func TestFloatingIPRecordRefusesNoncanonicalState(t *testing.T) {
 		"null retired":    []byte(strings.Replace(string(raw), `"retired":false`, `"retired":null`, 1)),
 		"missing retired": []byte(strings.Replace(string(raw), `,"retired":false`, ``, 1)),
 		"unknown field": []byte(
-			strings.Replace(string(raw), `"schema":1`, `"schema":1,"path":"/etc/passwd"`, 1),
+			strings.Replace(string(raw), `"schema":2`, `"schema":2,"path":"/etc/passwd"`, 1),
 		),
 		"trailing value": append(append([]byte{}, raw...), []byte(`{}`)...),
 	}
@@ -294,8 +300,8 @@ func TestFloatingIPRecordRefusesNoncanonicalState(t *testing.T) {
 
 func floatingIPContractRecord() floatingIPRecord {
 	return floatingIPRecord{
-		Schema: 1, OwnerUID: testOwnerUID, ID: strings.Repeat("b", 32), NetworkID: testNetworkID,
-		Name: "api", IPv4: "10.10.0.100", Generation: 1,
+		Schema: floatingIPRecordSchema, OwnerUID: testOwnerUID, ID: strings.Repeat("b", 32), NetworkID: testNetworkID,
+		Name: "api", IPv4: "10.10.0.100", Generation: 1, Revision: 1, Phase: floatingIPUnassociated,
 	}
 }
 

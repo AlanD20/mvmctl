@@ -177,16 +177,8 @@ func (store *floatingIPStore) persist(ctx context.Context, record floatingIPReco
 	if (previous == nil && found) || (previous != nil && (!found || before != *previous)) {
 		return networkAuthorityCorruptError("floating-IP previous record changed", nil)
 	}
-	if previous == nil {
-		if record.Generation != 1 || record.Retired {
-			return networkAuthorityCorruptError("new floating-IP reservation must start at generation one", nil)
-		}
-	} else if previous.Retired || previous.Generation == ^uint64(0) || record.Generation != previous.Generation+1 ||
-		record.NetworkID != previous.NetworkID || record.Name != previous.Name || record.IPv4 != previous.IPv4 {
-		return networkAuthorityCorruptError(
-			"floating-IP replacement changes immutable authority or has a stale generation",
-			nil,
-		)
+	if err := validateFloatingIPReplacement(record, previous); err != nil {
+		return err
 	}
 	owner := store.owner
 	name, fd, err := createNetworkAuthorityTemp(ctx, owner)

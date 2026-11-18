@@ -88,7 +88,7 @@ func (server *FloatingIPServer) CreateFloatingIP(
 	}
 	record := floatingIPRecord{
 		Schema: floatingIPRecordSchema, OwnerUID: ownerUID, ID: request.ID, NetworkID: request.NetworkID,
-		Name: request.Name, IPv4: address.value.String(), Generation: 1,
+		Name: request.Name, IPv4: address.value.String(), Generation: 1, Revision: 1, Phase: floatingIPUnassociated,
 	}
 	if err := store.persist(ctx, record, nil); err != nil {
 		return FloatingIPResult{}, err
@@ -144,7 +144,13 @@ func (server *FloatingIPServer) RemoveFloatingIP(
 			"floating-IP removal generation is stale or exhausted",
 		)
 	}
+	if record.Phase != floatingIPUnassociated || record.Revision == ^uint64(0) {
+		return FloatingIPResult{}, networkAuthorityValidationError(
+			"floating-IP removal requires completed ownership fencing and an available revision",
+		)
+	}
 	previous := record
+	record.Revision++
 	record.Retired = true
 	record.Generation++
 	if err := store.persist(ctx, record, &previous); err != nil {
@@ -155,7 +161,7 @@ func (server *FloatingIPServer) RemoveFloatingIP(
 
 func admitFloatingIPRetirement(ctx context.Context, tx *managedNetworkTransaction) error {
 	if tx.found && tx.priorBoot != nil && !tx.removed && !tx.cancelled {
-		// Schema 1 stores reservations only: it cannot authorize packets or retain a guest owner.
+		// The per-record retirement guard permits only stable unassociated reservations.
 		// The retained index/network locks suffice for logical retirement after reboot. Recreating
 		// a bridge or firewall solely to remove this reservation would obstruct clean teardown.
 		return nil
