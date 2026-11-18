@@ -13,6 +13,8 @@ import json
 import os
 from pathlib import Path
 import re
+import pwd
+import socket
 import select
 import signal
 import stat
@@ -242,14 +244,78 @@ def _root_observer(vm_id, owner, group):
             for fd in reversed(descriptors):os.close(fd)
 
 
+_FIXTURE_EXECUTABLE = Path('/usr/local/libexec/mvmctl-qa-worker-stall')
+_FIXTURE_MANIFEST = Path('/var/lib/mvmctl-qa-worker-observer/manifest.json')
+_FIXTURE_PREFIX = b'#!/usr/bin/python3 -I\n'
+
+
+def _fixture_read(path, mode):
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    parent = os.open('/', flags)
+    try:
+        for name in path.parts[1:-1]:
+            child = os.open(name, flags, dir_fd=parent)
+            os.close(parent)
+            parent = child
+            row = os.fstat(parent)
+            assert row.st_uid == row.st_gid == 0 and not row.st_mode & 0o022
+        fd = os.open(path.name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            row = os.fstat(fd)
+            assert stat.S_ISREG(row.st_mode) and row.st_uid == row.st_gid == 0 and row.st_nlink == 1
+            assert stat.S_IMODE(row.st_mode) == mode and 0 < row.st_size <= 128 * 1024
+            raw = os.read(fd, 128 * 1024 + 1)
+            assert len(raw) == row.st_size and _fingerprint(os.fstat(fd)) == _fingerprint(row)
+            assert _fingerprint(os.stat(path.name, dir_fd=parent, follow_symlinks=False)) == _fingerprint(row)
+            return raw
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent)
+
+
+def _validate_fixture_values(manifest, payload, source, owner, group, hostname, boot):
+    assert set(manifest) == {'schema_version', 'hostname', 'boot_id', 'operator', 'source_sha256',
+                             'payload_sha256', 'tool_sha256', 'enrollment_sha256', 'policy_sha256'}
+    assert type(manifest['schema_version']) is int and manifest['schema_version'] == 1
+    assert hostname == manifest['hostname'] == 'mvmctl-030-test' and manifest['boot_id'] == boot
+    assert set(manifest['operator']) == {'user', 'uid', 'gid', 'home'}
+    assert type(owner) is int and type(group) is int and owner > 0 and group > 0
+    assert type(manifest['operator']['uid']) is int and type(manifest['operator']['gid']) is int
+    assert (manifest['operator']['uid'], manifest['operator']['gid']) == (owner, group)
+    for key in ('source_sha256', 'payload_sha256', 'tool_sha256', 'enrollment_sha256', 'policy_sha256'):
+        assert re.fullmatch(r'[0-9a-f]{64}', manifest[key])
+    assert payload == _FIXTURE_PREFIX + source
+    assert hashlib.sha256(payload).hexdigest() == manifest['payload_sha256']
+    assert hashlib.sha256(source).hexdigest() == manifest['source_sha256']
+    return manifest
+
+
+def validate_worker_fixture(owner=None, group=None):
+    """Read-only ordinary-mode admission; no environment-selected executable path."""
+    owner = os.getuid() if owner is None else owner
+    group = os.getgid() if group is None else group
+    raw = _fixture_read(_FIXTURE_MANIFEST, 0o644)
+    manifest = json.loads(raw, object_pairs_hook=_unique)
+    payload = _fixture_read(_FIXTURE_EXECUTABLE, 0o555)
+    installed = Path(__file__).absolute() == _FIXTURE_EXECUTABLE
+    source = payload[len(_FIXTURE_PREFIX):] if installed else Path(__file__).read_bytes()
+    _validate_fixture_values(manifest, payload, source, owner, group, socket.gethostname(),
+                             Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+    account = pwd.getpwuid(owner)
+    assert (account.pw_name, account.pw_gid, account.pw_dir) == (
+        manifest['operator']['user'], group, manifest['operator']['home'])
+    return manifest
+
+
 @contextmanager
 def stalled_root_worker(runner, vm):
     assert os.getuid() > 0 and os.geteuid() == os.getuid()
     assert os.environ.get('MVM_TEST_QUALIFICATION_HOST') == os.environ.get('MVM_TEST_VM') == runner
     assert runner
     vm_id = vm['binding']['id']
-    command = ['/usr/bin/sudo', '-n', '/usr/bin/python3', '-I', '-u', str(Path(__file__).resolve()),
-               vm_id, str(os.getuid()), str(os.getgid())]
+    validate_worker_fixture()
+    command = ['/usr/bin/sudo', '-n', str(_FIXTURE_EXECUTABLE), vm_id, str(os.getuid()), str(os.getgid())]
     child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         assert select.select([child.stdout], [], [], 40)[0], 'root stall observer failed to admit'
@@ -265,4 +331,9 @@ def stalled_root_worker(runner, vm):
 
 if __name__ == '__main__':
     assert len(sys.argv) == 4
-    _root_observer(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
+    assert Path(__file__).absolute() == _FIXTURE_EXECUTABLE
+    assert re.fullmatch(r'[0-9a-f]{32}', sys.argv[1])
+    owner, group = int(sys.argv[2]), int(sys.argv[3])
+    assert sys.argv[2:] == [str(owner), str(group)], 'canonical numeric principal arguments required'
+    validate_worker_fixture(owner, group)
+    _root_observer(sys.argv[1], owner, group)
