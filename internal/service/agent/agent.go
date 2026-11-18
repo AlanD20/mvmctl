@@ -88,6 +88,8 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 
+	wg.Go(func() { a.runGuestControl(ctx) })
+
 	// Vsock acceptor goroutine.
 	wg.Go(func() {
 		for {

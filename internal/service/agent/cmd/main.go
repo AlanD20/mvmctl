@@ -39,6 +39,10 @@ func main() {
 		os.Exit(runRemoteSubcommand(*localSocket, flag.Args()[1:]))
 	}
 
+	if flag.NArg() > 0 && flag.Arg(0) == "control" {
+		os.Exit(runControlSubcommand(flag.Args()[1:]))
+	}
+
 	resolvedToken, err := resolveAgentToken(*token, *tokenFile, os.ReadFile)
 	if err != nil {
 		log.Fatalf("agent authentication unavailable: %v", err)

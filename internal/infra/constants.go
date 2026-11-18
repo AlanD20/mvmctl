@@ -86,6 +86,15 @@ const GuestAgentTokenPath = GuestAgentConfigDirectory + "/agent.token"
 // GuestControlAgentMaterialPath contains only the guest private material and public host pin.
 const GuestControlAgentMaterialPath = GuestAgentConfigDirectory + "/guest-control.json"
 
+// GuestControlVsockPort is the dedicated authenticated Guest Control transport port.
+const GuestControlVsockPort = 10790
+
+// GuestControlLocalSocketFilename is the fixed leaf in the root-private guest runtime directory.
+const GuestControlLocalSocketFilename = "control.sock"
+
+// GuestControlLocalSocketPath is separate from the process-bound remote-exec socket.
+const GuestControlLocalSocketPath = "/run/mvm-agent/" + GuestControlLocalSocketFilename
+
 const (
 	// VMRootfsFilename is the fixed managed VM root filesystem leaf.
 	VMRootfsFilename = "rootfs.img"
