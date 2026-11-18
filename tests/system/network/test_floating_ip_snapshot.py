@@ -1,7 +1,6 @@
 """Full-memory restore keeps guest state but inherits no floating-IP authority."""
 
 import os
-import shlex
 
 import pytest
 
@@ -56,33 +55,6 @@ def snapshot_journey(runner_vm):
         except Exception as exc:
             errors.append(str(exc))
         assert not errors, "\n".join(errors)
-
-
-def _remove_stale_alias(journey, vm, resource, stale):
-    """Remove only the deliberately relabeled test alias after fencing is proved."""
-    journey.stale_alias(vm, resource, previous=stale)
-    script = """
-import json, subprocess, sys
-vip, label, interface, ifindex = sys.argv[1:5]
-def addresses():
-    return json.loads(subprocess.check_output(['ip', '-j', '-4', 'addr', 'show'], text=True))
-before = addresses()
-links = [item for item in before if item['ifname'] == interface and item['ifindex'] == int(ifindex)]
-assert len(links) == 1
-aliases = [item for item in links[0].get('addr_info', []) if item['local'] == vip]
-assert len(aliases) == 1 and aliases[0]['prefixlen'] == 32 and aliases[0]['label'] == label
-subprocess.run(['ip', 'addr', 'del', vip + '/32', 'dev', interface], check=True)
-after = addresses()
-for item in before:
-    item['addr_info'] = [address for address in item.get('addr_info', []) if address['local'] != vip]
-assert before == after, (before, after)
-print('OWNED_STALE_ALIAS_REMOVED')
-"""
-    result = _run_mvm(journey.runner, "exec", vm["binding"]["id"], "--user", "root", "--",
-                      shlex.join(["python3", "-c", script, resource["ipv4"], stale["label"],
-                                  stale["snapshot"]["interface"], str(stale["snapshot"]["ifindex"])]))
-    assert result.stdout.strip() == "OWNED_STALE_ALIAS_REMOVED", result.stdout
-    journey.alias(vm, resource, present=False)
 
 
 @pytest.mark.timeout(900, method="signal")
@@ -172,7 +144,7 @@ def test_memory_restore_requires_fresh_current_incarnation_grants(snapshot_journ
 
     # New session setup first recovers guest-local receipts. Remove the exact
     # deliberately changed alias after the denied packet proof.
-    _remove_stale_alias(journey, restored, resource, stale)
+    journey.remove_stale_alias(restored, resource, stale)
     current_inspect = journey.grant(restored, resource, "inspect")
     assert current_inspect["id"] not in {grant["id"] for grant in grants}
     assert current_inspect["vm_id"] == binding["id"]

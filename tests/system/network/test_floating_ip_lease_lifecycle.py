@@ -76,9 +76,14 @@ def test_renewal_survives_original_expiry_then_fences_stale_alias(floating_journ
     journey.stale_alias(owner, resource, previous=stale)
     journey.flow(source, owner, log, resource["ipv4"], allowed=False)
     journey.stale_alias(owner, resource, previous=stale)
+    # The changed label is deliberately not the agent receipt's alias. Kernel
+    # expiry must deny packets even while guest cleanup refuses that replacement.
+    journey.control(owner, resource, failure="internal")
+    journey.stale_alias(owner, resource, previous=stale)
+    journey.remove_stale_alias(owner, resource, stale)
     observed = journey.control(owner, resource)
     assert observed["ownership"] == "unassociated" and observed["lease_remaining_ms"] == 0
-    journey.stale_alias(owner, resource, previous=stale)
+    journey.alias(owner, resource, present=False)
 
 
 @pytest.mark.timeout(720, method="signal")

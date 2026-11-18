@@ -219,6 +219,46 @@ print(json.dumps(previous, sort_keys=True))
         )
         return json.loads(result.stdout)
 
+    def remove_stale_alias(self, vm, resource, stale):
+        """Remove only this journey's relabeled VIP after packet fencing is proved."""
+        expected_label = stale["snapshot"]["interface"] + ":f" + self.suffix[:6]
+        assert stale["label"] == expected_label, stale
+        self.stale_alias(vm, resource, previous=stale)
+        script = """
+import json, subprocess, sys
+vip, label, interface, ifindex = sys.argv[1:5]
+def run(*args):
+    return subprocess.check_output(['ip', *args], text=True)
+def addresses():
+    return json.loads(run('-j', '-4', 'addr', 'show'))
+def routes():
+    return sorted(json.loads(run('-j', '-4', 'route', 'show', 'table', 'all')),
+                  key=lambda route: json.dumps(route, sort_keys=True))
+before, before_routes = addresses(), routes()
+links = [item for item in before if item['ifname'] == interface and item['ifindex'] == int(ifindex)]
+assert len(links) == 1
+aliases = [item for item in links[0].get('addr_info', []) if item['local'] == vip]
+assert len(aliases) == 1 and aliases[0]['prefixlen'] == 32 and aliases[0]['label'] == label
+run('addr', 'del', vip + '/32', 'dev', interface)
+after, after_routes = addresses(), routes()
+links[0]['addr_info'] = [address for address in links[0].get('addr_info', []) if address['local'] != vip]
+assert before == after, (before, after)
+# Deleting an address also removes its kernel local-table route. Every other
+# route, including the primary address's connected/default routes, must remain.
+expected_routes = [route for route in before_routes
+                   if not (route.get('type') == 'local' and route.get('dev') == interface
+                           and route.get('dst') in (vip, vip + '/32'))]
+assert after_routes == expected_routes, (before_routes, after_routes)
+print('OWNED_STALE_ALIAS_REMOVED')
+"""
+        result = _run_mvm(
+            self.runner, "exec", vm["binding"]["id"], "--user", "root", "--",
+            shlex.join(["python3", "-c", script, resource["ipv4"], stale["label"],
+                        stale["snapshot"]["interface"], str(stale["snapshot"]["ifindex"])]),
+        )
+        assert result.stdout.strip() == "OWNED_STALE_ALIAS_REMOVED", result.stdout
+        self.alias(vm, resource, present=False)
+
     def listener(self, vm):
         directory = f"/tmp/floating-{self.suffix}"
         _start_tcp_listener(self.runner, vm, directory)
