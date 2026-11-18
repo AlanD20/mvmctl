@@ -77,8 +77,11 @@ Root grant records now bind one immutable grant ID to an exact resource, VM inca
 moves through recorded revoking and revoked states; old IDs cannot reactivate. Ownership records retain the
 exact sustaining grant revision, so revocation does not cancel operator ownership or a different grant's lease.
 Association and renewal grants require an explicit finite whole-second lease policy; inspect and release do not.
-Persistence, comparison helpers and guest ownership effects are implemented; public grant dispatch and the
-authenticated worker remain unwired.
+Persistence, guest ownership effects and operator delegation CRUD are implemented and reviewed. The
+`mvm floating-ip delegation` commands store, list, inspect and revoke exact method grants. Revocation can
+finish after the target VM stops. Workflow ensure and owned removal use exact immutable grant identities;
+matching names or permission tuples never transfer ownership. Stored permission does not prove worker
+readiness. The authenticated worker and integrated runtime qualification remain pending.
 
 Guest root can exercise every delegation granted to that VM. Local agent permissions restrict ordinary guest
 users but cannot isolate an application from guest root. The implemented gateway uses a dedicated vsock port

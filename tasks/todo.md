@@ -51,6 +51,8 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   checks. Run genuine hold refusal/release tests; successful live admission remains unqualified.
 - [x] Implement root delegation persistence and exact sustaining-grant provenance with explicit lease policy;
   verify the correction rejecting impossible ownership revisions.
+- [x] Wire operator delegation CRUD, exact-ID ensure and receipt-guarded resumable revocation; independently
+  review and pass focused QA vet/race checks. Integrated grant/fencing and worker readiness remain unqualified.
 - [x] Implement and review pinned mutual TLS authentication with real handshake, refusal and cancellation tests.
 - [x] Implement backend-preserving root credential preparation, expected-import receipts, snapshot lineage
   and restartable credential retirement. Focused QA and existing workflow regressions pass.
