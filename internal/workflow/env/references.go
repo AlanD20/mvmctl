@@ -17,6 +17,8 @@ func resolveResourceReference(state *workflow.SharedState, selector string) (str
 	}
 	var id string
 	switch item := value.(type) {
+	case *FloatingIPState:
+		id = item.ResourceID
 	case *VMState:
 		id = item.VMID
 	case *NetworkState:

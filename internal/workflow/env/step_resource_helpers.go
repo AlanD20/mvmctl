@@ -83,6 +83,10 @@ func resourceStepReference(state *workflow.SharedState, value, expectedType stri
 	}
 	var id string
 	switch output := raw.(type) {
+	case *FloatingIPState:
+		if expectedType == "floating_ip" && output != nil {
+			id = output.ResourceID
+		}
 	case *VMState:
 		if expectedType == "vm" && output != nil {
 			id = output.VMID

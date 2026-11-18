@@ -24,5 +24,6 @@ type API interface {
 	SnapshotAPI
 	UpdateAPI
 	PolicyAPI
+	EnvironmentFloatingIPAPI
 	EnvironmentPolicyAPI
 }

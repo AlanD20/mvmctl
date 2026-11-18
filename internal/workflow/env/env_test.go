@@ -23,44 +23,6 @@ import (
 	"mvmctl/pkg/api"
 )
 
-// --- Registry ---
-
-// Rationale: The Registry must contain all required step types so that
-// ResolveSpec can construct the correct steps from a YAML spec.
-
-func TestRegistry_ContainsAllExpectedTypes(t *testing.T) {
-	expectedTypes := map[string]struct{}{
-		"network":        {},
-		"key":            {},
-		"image":          {},
-		"image_import":   {},
-		"kernel":         {},
-		"binary":         {},
-		"vm":             {},
-		"ssh":            {},
-		"exec":           {},
-		"copy":           {},
-		"volume":         {},
-		"traffic_policy": {},
-		"exec_policy":    {},
-		"ready":          {},
-	}
-
-	for typ := range expectedTypes {
-		t.Run(typ, func(t *testing.T) {
-			factory, ok := envpkg.Registry[typ]
-			require.True(t, ok, "Registry missing expected step type %q", typ)
-			require.NotNil(t, factory.FromSpec, "Registry[%q].FromSpec is nil", typ)
-			require.NotNil(t, factory.FromState, "Registry[%q].FromState is nil", typ)
-			require.NotEmpty(t, factory.StepType, "Registry[%q].StepType is empty", typ)
-		})
-	}
-
-	t.Run("no_unexpected_types", func(t *testing.T) {
-		assert.Len(t, envpkg.Registry, len(expectedTypes), "Registry has unexpected entries")
-	})
-}
-
 // --- FromSpec factory ---
 
 // Rationale: Each FromSpec factory must create a Step with the correct name

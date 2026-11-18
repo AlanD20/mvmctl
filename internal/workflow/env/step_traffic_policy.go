@@ -19,25 +19,29 @@ import (
 
 // TrafficPolicyState binds a closed traffic grant to its creation claim and root incarnation.
 type TrafficPolicyState struct {
-	PolicyID        string `yaml:"policy_id"`
-	ClaimID         string `yaml:"claim_id"`
-	Incarnation     string `yaml:"incarnation"`
-	SourceNetworkID string `yaml:"source_network_id,omitempty"`
-	SourceVMID      string `yaml:"source_vm_id,omitempty"`
-	DestinationVMID string `yaml:"destination_vm_id,omitempty"`
-	DestinationHost bool   `yaml:"destination_host,omitempty"`
-	Protocol        string `yaml:"protocol"`
-	Port            string `yaml:"port"`
+	PolicyID                string `yaml:"policy_id"`
+	ClaimID                 string `yaml:"claim_id"`
+	Incarnation             string `yaml:"incarnation"`
+	SourceNetworkID         string `yaml:"source_network_id,omitempty"`
+	SourceVMID              string `yaml:"source_vm_id,omitempty"`
+	DestinationVMID         string `yaml:"destination_vm_id,omitempty"`
+	DestinationFloatingIPID string `yaml:"destination_floating_ip_id,omitempty"`
+	DestinationNetworkID    string `yaml:"destination_network_id,omitempty"`
+	DestinationHost         bool   `yaml:"destination_host,omitempty"`
+	Protocol                string `yaml:"protocol"`
+	Port                    string `yaml:"port"`
 }
 
 type trafficPolicyDeclaration struct {
-	SourceNetwork   string `yaml:"source_network"`
-	SourceVM        string `yaml:"source_vm"`
-	DestinationVM   string `yaml:"destination_vm"`
-	DestinationHost bool   `yaml:"destination_host"`
-	Protocol        string `yaml:"protocol"`
-	Port            string `yaml:"port"`
-	Existing        string `yaml:"existing"`
+	SourceNetwork         string `yaml:"source_network"`
+	SourceVM              string `yaml:"source_vm"`
+	DestinationVM         string `yaml:"destination_vm"`
+	DestinationFloatingIP string `yaml:"destination_floating_ip"`
+	DestinationNetwork    string `yaml:"destination_network"`
+	DestinationHost       bool   `yaml:"destination_host"`
+	Protocol              string `yaml:"protocol"`
+	Port                  string `yaml:"port"`
+	Existing              string `yaml:"existing"`
 }
 
 type trafficPolicyStepAPI interface {
@@ -45,6 +49,7 @@ type trafficPolicyStepAPI interface {
 	api.EnvironmentPolicyAPI
 	api.VMAPI
 	api.NetworkAPI
+	api.EnvironmentFloatingIPAPI
 }
 
 // TrafficPolicyStep applies typed VM or gateway grants through root policy authority.
@@ -90,7 +95,9 @@ func (s *TrafficPolicyStep) Apply(ctx context.Context, state *workflow.SharedSta
 	}
 	var receipt *results.EnvironmentPolicyReceipt
 	var applyErr error
-	if output.DestinationHost && output.SourceNetworkID != "" {
+	if output.DestinationFloatingIPID != "" {
+		receipt, applyErr = s.ensureFloatingIPPolicy(ctx, output)
+	} else if output.DestinationHost && output.SourceNetworkID != "" {
 		receipt, applyErr = s.op.NetworkToHostTrafficPolicyEnsure(ctx, output.networkHostInput(),
 			inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
 	} else if output.DestinationHost {
@@ -125,7 +132,11 @@ func (s *TrafficPolicyStep) resolveEndpoints(
 	output := &TrafficPolicyState{
 		DestinationHost: s.input.DestinationHost, Protocol: s.input.Protocol, Port: s.input.Port,
 	}
-	if !s.input.DestinationHost {
+	if s.input.DestinationFloatingIP != "" {
+		if err := s.resolveFloatingIPDestination(ctx, state, output); err != nil {
+			return nil, err
+		}
+	} else if !s.input.DestinationHost {
 		destination, err := resourceStepReference(state, s.input.DestinationVM, "vm")
 		if err != nil {
 			return nil, err
@@ -184,6 +195,9 @@ func (s *TrafficPolicyStep) inspectExisting(ctx context.Context, output *Traffic
 	if err != nil {
 		return err
 	}
+	if output.DestinationFloatingIPID != "" {
+		return s.inspectExistingFloatingIPPolicy(ctx, output, protocol, first, last)
+	}
 	if output.DestinationHost {
 		return s.inspectExistingHostPolicy(ctx, output, protocol, first, last)
 	}
@@ -236,7 +250,9 @@ func (s *TrafficPolicyStep) Destroy(ctx context.Context, saved model.ResourceSta
 		return s.persist(ctx, write)
 	}
 	var err error
-	if output.DestinationHost && output.SourceNetworkID != "" {
+	if output.DestinationFloatingIPID != "" {
+		err = s.removeOwnedFloatingIPPolicy(ctx, output)
+	} else if output.DestinationHost && output.SourceNetworkID != "" {
 		err = s.op.NetworkToHostTrafficPolicyRemoveOwned(ctx, output.networkHostInput(),
 			inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
 	} else if output.DestinationHost {
@@ -273,11 +289,29 @@ func newTrafficPolicyStepFromSpec(stepType, name string, spec model.ResourceMap,
 			"traffic policy requires exactly one source_network or source_vm",
 		)
 	}
-	if input.DestinationHost == (input.DestinationVM != "") {
-		return nil, errs.New(errs.CodeValidationFailed,
-			"traffic policy requires exactly one destination_vm or destination_host: true")
+	destinations := 0
+	if input.DestinationHost {
+		destinations++
 	}
-	if input.DestinationHost && input.SourceNetwork != "" {
+	if input.DestinationVM != "" {
+		destinations++
+	}
+	if input.DestinationFloatingIP != "" {
+		destinations++
+	}
+	if destinations != 1 {
+		return nil, errs.New(errs.CodeValidationFailed,
+			"traffic policy requires exactly one destination_vm, destination_host: true or destination_floating_ip")
+	}
+	if (input.DestinationFloatingIP != "") != (input.DestinationNetwork != "") {
+		return nil, errs.New(
+			errs.CodeValidationFailed,
+			"destination_network is required only with destination_floating_ip",
+		)
+	}
+	if input.DestinationFloatingIP != "" {
+		err = validateFloatingIPTrafficDeclaration(input)
+	} else if input.DestinationHost && input.SourceNetwork != "" {
 		validation := inputs.NetworkToHostTrafficPolicyCreateInput{SourceNetwork: input.SourceNetwork,
 			Protocol: input.Protocol, DestinationPort: input.Port}
 		err = validation.Validate()

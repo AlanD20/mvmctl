@@ -78,6 +78,12 @@ func validateStepInput(kind, name string, spec model.ResourceMap) error {
 					return fmt.Errorf("existing cannot be combined with creation field %q", field)
 				}
 			}
+		case "floating_ip":
+			for field := range spec {
+				if field != "existing" && field != "network" && field != "depends_on" && field != "removes" {
+					return fmt.Errorf("existing cannot be combined with creation field %q", field)
+				}
+			}
 		case "volume", "traffic_policy", "exec_policy":
 		default:
 			return fmt.Errorf("existing is unsupported for %s", kind)
@@ -192,12 +198,14 @@ func validateStepInput(kind, name string, spec model.ResourceMap) error {
 			return err
 		}
 		return in.Validate()
-	case "volume", "traffic_policy", "exec_policy", "ready":
+	case "floating_ip", "floating_ip_grant", "volume", "traffic_policy", "exec_policy", "ready":
 		allowed := map[string]string{
-			"volume":         "name size read_only shareable writeback retain existing",
-			"traffic_policy": "source_network source_vm destination_vm destination_host protocol port existing",
-			"exec_policy":    "source_vm destination_vm target_user existing",
-			"ready":          "target cmd timeout interval user",
+			"floating_ip":       "network name ipv4 existing",
+			"floating_ip_grant": "network resource vm method lease",
+			"volume":            "name size read_only shareable writeback retain existing",
+			"traffic_policy":    "source_network source_vm destination_vm destination_host destination_floating_ip destination_network protocol port existing",
+			"exec_policy":       "source_vm destination_vm target_user existing",
+			"ready":             "target cmd timeout interval user",
 		}
 		for field := range spec {
 			if field != "depends_on" && field != "removes" && !strings.Contains(" "+allowed[kind]+" ", " "+field+" ") {
@@ -240,8 +248,11 @@ func validateSpecReferences(spec EnvSpec, steps []workflow.Step) error {
 			for field, value := range fields {
 				expected := ""
 				switch kind + "/" + field {
-				case "vm/network", "traffic_policy/source_network":
+				case "vm/network", "traffic_policy/source_network", "traffic_policy/destination_network",
+					"floating_ip/network", "floating_ip_grant/network":
 					expected = "network"
+				case "traffic_policy/destination_floating_ip", "floating_ip_grant/resource":
+					expected = "floating_ip"
 				case "vm/key", "vm/ssh_keys", "ssh/key":
 					expected = "key"
 				case "vm/image":
@@ -258,6 +269,7 @@ func validateSpecReferences(spec EnvSpec, steps []workflow.Step) error {
 					"image_import/source",
 					"traffic_policy/source_vm",
 					"traffic_policy/destination_vm",
+					"floating_ip_grant/vm",
 					"exec_policy/source_vm",
 					"exec_policy/destination_vm",
 					"copy/src",
