@@ -80,7 +80,9 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   stalled-worker fencing, memory restore and environment ownership; pass collection and affected registry checks.
 - [x] Review the stalled-worker observer and fix cleanup to attempt continuation through its retained pidfd
   even when the final process observation fails; pass non-signaling helper checks.
-- [ ] Extend the existing host-reboot continuation with floating-IP and delegation recovery coverage.
+- [x] Extend the existing host-reboot continuation with floating-IP and delegation recovery coverage; pass
+  receipt/preservation helper checks and collection from the exact staged payload.
+- [ ] Run both reboot phases across an actual host reboot and qualify delegation retirement and explicit recovery.
 - [x] Pass integration Go CI and the complete root Jailer suite for the current production source; build the
   paired host and guest agent and install the candidate inside the named QA VM.
 - [ ] Complete affected Go and Python system tests in `mvmctl-030-test`, plus documentation and website updates.
