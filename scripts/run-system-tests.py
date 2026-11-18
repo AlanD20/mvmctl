@@ -664,6 +664,7 @@ TIER2_DOMAINS: dict[str, list[str]] = {
         "tests/system/network/test_floating_ip_policies.py",
         "tests/system/network/test_floating_ip_lease_lifecycle.py",
     ],
+    "floating_ip_worker_fault": ["tests/system/network/test_floating_ip_worker_fault.py"],
     "host_admin": ["tests/system/host/test_host_admin.py"],
     "guestfs": ["tests/system/cache/test_guestfs_appliance.py"],
     "kernel_successor": ["tests/system/kernel/test_kernel_successor.py"],
