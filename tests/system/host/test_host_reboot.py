@@ -16,6 +16,10 @@ import pytest
 
 from tests.system.conftest import _json_success_data, _run_mvm
 from tests.system.host.test_host import _host_administrator_state, _host_inventory
+from tests.system.host.floating_ip_reboot import (
+    cleanup as _floating_cleanup, prepare as _floating_prepare, resume as _floating_resume,
+    validate_pre as _floating_validate_pre, without_owned_policy as _without_owned_policy,
+)
 from tests.system.network.test_network import _inventory
 from tests.system.vm.test_vm_lifecycle import (
     _lifecycle_process_identity, _lifecycle_vm_state,
@@ -27,11 +31,12 @@ _SOURCE_FILES = ("tests/__init__.py", "tests/system/__init__.py", "tests/system/
                  "tests/system/pytest.ini", "tests/system/host/__init__.py", "tests/system/host/test_host.py",
                  "tests/system/host/test_host_reboot.py", "tests/system/network/__init__.py",
                  "tests/system/network/test_network.py", "tests/system/vm/__init__.py",
-                 "tests/system/vm/test_vm_lifecycle.py")
+                 "tests/system/vm/test_vm_lifecycle.py", "tests/system/host/floating_ip_reboot.py",
+                 "tests/system/network/floating_ip_helpers.py", "tests/system/network/test_policies.py")
 _FIELDS = {
     "schema_version", "source", "candidate", "boot_id", "vm", "process", "guest_boot_id",
     "marker", "baseline", "physical", "administrator", "kernel", "image", "vm_paths",
-    "namespace", "namespace_identity",
+    "namespace", "namespace_identity", "floating_ip",
 }
 
 
@@ -176,6 +181,7 @@ def _read_pre(task: Path) -> dict:
     assert data["vm"]["name"] == "sys-host-reboot-" + task.name.removeprefix("mvmctl-host-reboot-")
     assert re.fullmatch(r"[0-9a-f]{32}", data["marker"])
     assert len(data["process"]) == 2 and all(type(n) is int and n > 0 for n in data["process"])
+    _floating_validate_pre(data["floating_ip"], data["boot_id"])
     return data
 
 
@@ -186,11 +192,14 @@ def _owned_row(receipt: dict) -> dict:
     return rows[0]
 
 
-def _preserve_persistent_inventory(task: Path, before: dict, after_boot: dict, final: dict) -> None:
+def _preserve_persistent_inventory(task: Path, before: dict, after_boot: dict, final: dict, floating: dict) -> None:
     # Retain literal maps before asserting so a lost policy/snapshot remains diagnosable.
     _write_receipt(task, "preservation.json", dict(before=before, after_boot=after_boot, final=final))
     for domain in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec"):
-        assert after_boot[domain] == final[domain] == before[domain], domain
+        observed = after_boot[domain]
+        if domain == "traffic":
+            observed = _without_owned_policy(observed, floating["policy"])
+        assert observed == final[domain] == before[domain], domain
     # Namespace inode, ifindex, links/addresses/routes/firewall/mounts are boot-physical
     # observations, not durable records. Their raw values remain in preservation.json.
     # Owned VM and original network differences are checked separately by exact ID.
@@ -225,7 +234,7 @@ def test_host_reboot_pre() -> None:
     physical, administrator = _inventory(RUNNER), _host_administrator_state(RUNNER)
     name = "sys-host-reboot-" + task.name.removeprefix("mvmctl-host-reboot-")
     marker = uuid.uuid4().hex
-    vm = None
+    vm, floating = None, None
     try:
         rows = _json_success_data(_run_mvm(
             RUNNER, "vm", "create", name, "--image", images[0]["id"], "--kernel", kernels[0]["id"],
@@ -242,7 +251,8 @@ def test_host_reboot_pre() -> None:
         assert any(row["id"] == vm["id"] for row in _json_success_data(_run_mvm(RUNNER, "vm", "ps", "--json").stdout, list))
         _run_mvm(RUNNER, "exec", vm["id"], "--", f"printf %s {marker} > /root/host-reboot-marker && sync")
         inspection = _json_success_data(_run_mvm(RUNNER, "vm", "inspect", vm["id"], "--json").stdout, dict)
-        receipt = dict(schema_version=2, namespace=namespace, namespace_identity=identities,
+        floating = _floating_prepare(RUNNER, _boot())
+        receipt = dict(schema_version=2, floating_ip=floating, namespace=namespace, namespace_identity=identities,
                        source=source, candidate=candidate, boot_id=_boot(),
                        vm={key: vm[key] for key in ("id", "name", "created_at")}, process=list(process),
                        guest_boot_id=guest_boot, marker=marker, baseline=baseline, physical=physical,
@@ -252,8 +262,12 @@ def test_host_reboot_pre() -> None:
         print("PRE PHASE COMPLETE; RELEASE VERDICT INCOMPLETE", flush=True)
     except BaseException:
         # The only admissible cleanup identity is a successful exact create result.
-        if vm is not None:
-            _run_mvm(RUNNER, "vm", "rm", vm["id"], "--force", timeout=120)
+        try:
+            if floating is not None:
+                _floating_cleanup(RUNNER, floating)
+        finally:
+            if vm is not None:
+                _run_mvm(RUNNER, "vm", "rm", vm["id"], "--force", timeout=120)
         raise
 
 
@@ -263,6 +277,7 @@ def test_host_reboot_post() -> None:
     receipt = _read_pre(task)
     assert _boot() != receipt["boot_id"], "a nested VM reboot is not a host reboot"
     before_post = _inventory(RUNNER)
+    floating_post = _floating_resume(RUNNER, receipt["floating_ip"], _boot())
     row = _owned_row(receipt)
     assert row["status"] == "stopped"
     _lifecycle_vm_state(RUNNER, row["name"], "stopped")
@@ -305,7 +320,7 @@ def test_host_reboot_post() -> None:
         assert {key: value for key, value in restored[network_id].items() if key != "updated_at"} == {
             key: value for key, value in original.items() if key != "updated_at"}
     final = _inventory(RUNNER)
-    _preserve_persistent_inventory(task, receipt["physical"], before_post, final)
+    _preserve_persistent_inventory(task, receipt["physical"], before_post, final, receipt["floating_ip"])
     for domain, expected in receipt["baseline"].items():
         if domain != "network":
             assert _host_inventory(RUNNER, domain) == expected, domain
@@ -317,7 +332,7 @@ def test_host_reboot_post() -> None:
     alpine = next(item for item in receipt["baseline"]["image"] if item["type"] == "alpine" and item["version"] == "3.23")
     assert _file(Path(alpine["path"])) == receipt["image"]
     namespace, identities = _operator_namespace()
-    _write_receipt(task, "post.json", dict(schema_version=2, namespace=namespace, namespace_identity=identities,
+    _write_receipt(task, "post.json", dict(schema_version=2, floating_ip=floating_post, namespace=namespace, namespace_identity=identities,
         host_boot_id=_boot(), vm_id=row["id"],
         source=_source(), candidate=_candidate(), process=list(process), guest_boot_id=guest_boot,
         owned_cleanup=True, network_before=original_networks, network_after=restored_networks,

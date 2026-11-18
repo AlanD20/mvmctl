@@ -2704,7 +2704,9 @@ _HOST_REBOOT_TASK_FIELDS = {
 _HOST_REBOOT_SOURCE_FILES = ("tests/__init__.py", "tests/system/__init__.py", "tests/system/conftest.py",
                            "tests/system/pytest.ini", "tests/system/host/__init__.py", "tests/system/host/test_host.py",
                            _HOST_REBOOT_FILE, "tests/system/network/__init__.py", "tests/system/network/test_network.py",
-                           "tests/system/vm/__init__.py", "tests/system/vm/test_vm_lifecycle.py")
+                           "tests/system/vm/__init__.py", "tests/system/vm/test_vm_lifecycle.py",
+                           "tests/system/host/floating_ip_reboot.py", "tests/system/network/floating_ip_helpers.py",
+                           "tests/system/network/test_policies.py")
 
 
 def _host_reboot_json(raw: bytes) -> dict[str, Any]:
@@ -3105,7 +3107,16 @@ def _host_reboot_require_preservation(pre: dict, post: dict, raw: bytes) -> None
     if physical["before"] != pre["physical"]:
         raise RuntimeError("host_reboot preservation baseline differs from PRE")
     for domain in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec"):
-        if physical["before"][domain] != physical["after_boot"][domain] or physical["before"][domain] != physical["final"][domain]:
+        observed = physical["after_boot"][domain]
+        if domain == "traffic" and "floating_ip" in pre:
+            # Retain raw after-boot inventory; remove only the exact PRE-owned
+            # policy for unrelated-state comparison, never a policy family.
+            policy = pre["floating_ip"]["policy"]
+            rows = observed["vm_to_floating_ip"]
+            if [row for row in rows if row["id"] == policy["id"]] != [policy]:
+                raise RuntimeError("host_reboot exact owned floating-IP policy changed")
+            observed = dict(observed, vm_to_floating_ip=[row for row in rows if row["id"] != policy["id"]])
+        if physical["before"][domain] != observed or physical["before"][domain] != physical["final"][domain]:
             raise RuntimeError(f"host_reboot persistent {domain} changed")
 
 
