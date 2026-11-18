@@ -55,6 +55,21 @@ the level and tier numbers interchangeably.
 7. Keep the installed outer controller separate from the release candidate. Install the candidate inside T1 and T2
    runners. T3 requires exact candidate identity at the canonical system path on a clean qualification machine.
 
+### Explicit existing qualification VM
+
+The orchestrator may reuse an explicitly selected disposable qualification VM instead of creating another runner.
+This is an opt-in execution mode, not permission to run tests on the developer workstation. It must verify the
+selected VM, current boot, enrolled operator, installed candidate and staged test-source identities before execution.
+It must not provision, install into, or destroy that retained target as part of a domain run.
+
+Domains run serially in this mode and retain their registered tiers. Tier 3 runs inside the selected qualification
+machine; a test whose required behavior cannot be represented under nesting remains unqualified there. Reusing a VM
+does not waive fixture prerequisites, authorize an outer reboot, or grant additional root commands.
+
+Retained-target evidence must record the target identity before and after execution and distinguish retention from
+successful destruction. The same strict process, outcome, source and selected-node checks still apply. A failure stops
+further domains; unexecuted cases remain incomplete. Ordinary per-domain provisioning and destruction are unchanged.
+
 ## Considered options
 
 ### Rewrite the Python suite in Go
