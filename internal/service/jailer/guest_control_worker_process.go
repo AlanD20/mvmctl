@@ -3,6 +3,7 @@ package jailer
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 
 	"golang.org/x/sys/unix"
@@ -21,6 +22,8 @@ type guestControlWorkerProcessState struct {
 	principal  GuestControlPrincipal
 	record     guestControlWorkerProcessRecord
 	pidfd      int
+	bootstrap  net.Conn
+	started    bool
 	released   bool
 	releaseErr error
 }
@@ -209,8 +212,12 @@ func (process *GuestControlWorkerProcess) Release(ctx context.Context) error {
 		return state.releaseErr
 	}
 	state.released = true
+	if state.bootstrap != nil {
+		state.releaseErr = errors.Join(state.releaseErr, state.bootstrap.Close(), terminateProcessThroughPIDFD(context.WithoutCancel(ctx), state.pidfd), waitAndReapProcessThroughPIDFD(context.WithoutCancel(ctx), state.pidfd))
+		state.bootstrap = nil
+	}
 	if state.pidfd >= 0 {
-		state.releaseErr = unix.Close(state.pidfd)
+		state.releaseErr = errors.Join(state.releaseErr, unix.Close(state.pidfd))
 		state.pidfd = -1
 	}
 	return state.releaseErr

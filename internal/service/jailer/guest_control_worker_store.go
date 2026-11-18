@@ -46,7 +46,7 @@ func validateGuestControlWorkerRecord(record guestControlWorkerRecord) error {
 		if record.Process != nil {
 			return instanceValidationError("prepared worker carries process authority")
 		}
-	case "spawned":
+	case "spawned", "ready":
 		if record.Process == nil {
 			return instanceValidationError("spawned worker has no process proof")
 		}
@@ -305,8 +305,9 @@ func validateGuestControlWorkerTransition(
 	if before.principal() != target.principal() || target.Generation != before.Generation {
 		return instanceValidationError("worker incarnation changed without retirement")
 	}
-	allowed := before.Phase == "prepared" && target.Phase == "spawned" ||
-		(before.Phase == "prepared" || before.Phase == "spawned") && target.Phase == "stopping" ||
+	allowed := before.Phase == "spawned" && target.Phase == "ready" ||
+		before.Phase == "prepared" && target.Phase == "spawned" ||
+		(before.Phase == "prepared" || before.Phase == "spawned" || before.Phase == "ready") && target.Phase == "stopping" ||
 		before.Phase == "stopping" && target.Phase == "stopped"
 	if !allowed {
 		return instanceValidationError("worker phase transition is invalid")
