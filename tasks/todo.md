@@ -76,8 +76,16 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [ ] Qualify the composed control path and publish the separately reviewed website update.
 - [x] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
 - [ ] Qualify live six-node bootstrap, quorum and floating-API failover.
+- [x] Add and register thirteen Python scenarios for guest control, floating-IP policy, renewal, lifecycle,
+  stalled-worker fencing, memory restore and environment ownership; pass collection and affected registry checks.
+- [x] Review the stalled-worker observer and fix cleanup to attempt continuation through its retained pidfd
+  even when the final process observation fails; pass non-signaling helper checks.
+- [ ] Extend the existing host-reboot continuation with floating-IP and delegation recovery coverage.
+- [x] Pass integration Go CI and the complete root Jailer suite for the current production source; build the
+  paired host and guest agent and install the candidate inside the named QA VM.
 - [ ] Complete affected Go and Python system tests in `mvmctl-030-test`, plus documentation and website updates.
-- [ ] Review and integrate the feature into `0.3.0-release`; complete integration CI and release qualification.
+- [ ] Review and integrate the feature into `0.3.0-release`; verify subsequent production changes and complete
+  release qualification.
 - [ ] Obtain the user's separate authorization before merging the release PR, tagging or publishing.
 
 Operator reservation CRUD is registered and exercised. The guest gateway, root ownership backend and retained
