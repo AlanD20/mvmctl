@@ -583,7 +583,7 @@ complete lowercase 32-character grant ID.
 |---------|-------|-------------|
 | `mvm floating-ip create NAME` | `--ip IPV4` | Reserve the explicit address, or allocate an available address when omitted |
 | `mvm floating-ip ls` | `--long`, `--json` | List reservations; `list` is an alias |
-| `mvm floating-ip inspect SELECTOR` | `--json` | Inspect fresh root ownership, lifetime, phase, packet authority and alias synchronization |
+| `mvm floating-ip inspect SELECTOR` | `--json` | Inspect fresh root ownership, lifetime, phase and packet authority; guest alias readiness is unobserved |
 | `mvm floating-ip associate SELECTOR VM` | `--generation N`, `--json` | Persist ownership until release, transfer or VM stop; requires an unassociated resource |
 | `mvm floating-ip transfer SELECTOR VM` | `--generation N`, `--json` | Fence the current owner and assign the target VM |
 | `mvm floating-ip release SELECTOR` | `--generation N`, `--json` | Fence and release ownership; alias: `disassociate` |

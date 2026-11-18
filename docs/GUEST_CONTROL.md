@@ -46,8 +46,9 @@ Fresh `mvm floating-ip inspect api --network cluster --json` reports `phase`, `l
 A persistent lifetime with zero remaining lease is not expired. Interpret lifetime and current authority together.
 
 Association and transfer complete only after the exact target guest acknowledges its alias. An agent or bounded
-wait failure can occur after kernel ownership commits; it does not promise rollback. Inspect fresh ownership and
-alias synchronization before deciding whether to retry.
+wait failure can occur after kernel ownership commits; it does not promise rollback. Inspect fresh ownership
+before deciding whether to retry. Inspection reports alias synchronization as `unobserved`; it does not contact
+the guest or establish its current readiness.
 
 ## Delegate exact methods
 
@@ -89,7 +90,7 @@ mvm-agent control floating-ip renew --generation N RESOURCE_ID
 mvm-agent control floating-ip release --generation N RESOURCE_ID
 ```
 
-Results are JSON with `resource_id`, `ipv4`, `generation`, `ownership` (`unassociated`, `self` or `other`), and
+Results are JSON with `resource_id`, `ipv4`, `generation`, `ownership` (`unassociated`, `self` or `other`),
 `lifetime` and `lease_remaining_ms`. `finite` ownership expires; `persistent` with zero remaining milliseconds does
 not. Remaining finite time is measured at the host; response delivery does not restart it. Guest association
 can claim an unowned address but cannot evict a healthy owner. Renewal retains the generation and requires the
@@ -134,7 +135,7 @@ retries and teardown use the exact saved resource, grant and policy ownership, i
 Stop lease controllers and release ownership before removing their resources. Revoke obsolete grants, remove exact
 service policies, then remove the reservation with `mvm floating-ip rm api --network cluster`. `--force` skips its
 confirmation, not ownership checks. Ordinary network removal requires floating reservations to be removed first.
-VM stop, deletion and restore fence secondary authority; host reboot expires delegated ownership.
+VM stop, deletion and restore fence secondary authority. Host reboot does not restore either kind of ownership.
 
 The [Kubernetes HA example](../examples/workflows/simple-k8s-cluster-ha/README.md) uses three control-plane nodes
 and an application health loop. The loop manages finite ownership only and leaves manual persistent assignments
