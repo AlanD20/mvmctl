@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import ipaddress
 import json
 import re
@@ -23,6 +24,18 @@ from tests.system.network.test_policies import (
     _tcp_data,
     _tcp_vm_binding,
 )
+
+
+def _require_nonroot_socket_denial(item):
+    assert set(item) == {"user", "uids", "gids", "groups", "capabilities", "errno"}, item
+    assert item["user"] == "nobody", item
+    for key in ("uids", "gids"):
+        values = item[key]
+        assert len(values) == 4 and all(type(value) is int and value > 0 for value in values), item
+        assert len(set(values)) == 1, item
+    assert item["groups"] == [], item
+    assert item["capabilities"] == dict.fromkeys(("CapEff", "CapPrm", "CapInh", "CapAmb"), 0), item
+    assert item["errno"] in (errno.EACCES, errno.EPERM), item
 
 
 class FloatingIPJourney:
@@ -117,21 +130,36 @@ class FloatingIPJourney:
         # Root success on both sides prevents a dead gateway from satisfying denial.
         self.control(vm, resource)
         script = """
-import os, socket
-assert os.getuid() != 0 and os.geteuid() != 0
+import errno, json, os, pwd, socket
+account = pwd.getpwnam('nobody')
+assert account.pw_uid > 0 and account.pw_gid > 0
+os.setgroups([])
+os.setresgid(account.pw_gid, account.pw_gid, account.pw_gid)
+os.setresuid(account.pw_uid, account.pw_uid, account.pw_uid)
+assert os.getresuid() == (account.pw_uid,) * 3 and os.getresgid() == (account.pw_gid,) * 3
+assert os.getgroups() == []
+with open('/proc/self/status', encoding='ascii') as source:
+    values = dict(line.split(':', 1) for line in source if ':' in line)
+uids = [int(value) for value in values['Uid'].split()]
+gids = [int(value) for value in values['Gid'].split()]
+assert uids == [account.pw_uid] * 4 and gids == [account.pw_gid] * 4
+capabilities = {name: int(values[name], 16) for name in ('CapEff', 'CapPrm', 'CapInh', 'CapAmb')}
+assert all(value == 0 for value in capabilities.values())
 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
     try:
         client.connect('/run/mvm-agent/control.sock')
-    except PermissionError:
-        print('NONROOT_CONTROL_SOCKET_DENIED')
+    except OSError as error:
+        assert error.errno in (errno.EACCES, errno.EPERM), error
+        print(json.dumps(dict(user=account.pw_name, uids=uids, gids=gids, groups=os.getgroups(),
+                              capabilities=capabilities, errno=error.errno)))
     else:
         raise AssertionError('non-root process connected to the private control socket')
 """
         result = _run_mvm(
-            self.runner, "exec", vm["binding"]["id"], "--user", "nobody", "--",
+            self.runner, "exec", vm["binding"]["id"], "--user", "root", "--",
             shlex.join(["python3", "-c", script]),
         )
-        assert result.stdout.strip() == "NONROOT_CONTROL_SOCKET_DENIED", result.stdout
+        _require_nonroot_socket_denial(json.loads(result.stdout))
         self.control(vm, resource)
 
     def associate(self, vm, resource):
