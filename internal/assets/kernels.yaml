@@ -59,11 +59,12 @@ kernel-official:
         CONFIG_KVM_INTEL: y
         CONFIG_KVM_AMD: y
     nftables:
-      desc: "nftables NAT firewall backend"
+      desc: "Managed nftables bridge and NAT firewall"
       enforce:
         CONFIG_NFT_NAT: y
         CONFIG_NF_TABLES_INET: y
         CONFIG_NF_TABLES_BRIDGE: y
+        CONFIG_NFT_BRIDGE_META: y
         CONFIG_NF_CONNTRACK_BRIDGE: y
         CONFIG_NF_NAT_MASQUERADE: y
         CONFIG_NFT_MASQ: y
