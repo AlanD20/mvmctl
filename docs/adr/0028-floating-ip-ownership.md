@@ -1,6 +1,6 @@
 # Floating IP Ownership
 
-**Status:** Operator reservations implemented; ownership/failover proposed and not release-qualified
+**Status:** Reservations and secondary firewall backend implemented; ownership/failover not release-qualified
 **Date:** 2026-11-17
 **Amends:** [ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md), for explicitly authorized secondary IPv4 addresses
 **Requires:** [Guest Control authority](0027-guest-control-authority.md)
@@ -70,10 +70,16 @@ controller interface remain to be established with the enforcement implementatio
 
 The enforcement design uses a named timed set of host-veth/address pairs in the managed bridge table. Ordinary
 firewall updates now retain the admitted tables and chains and replace their rules in one batch. Initial creation
-still creates the tables; verified empty teardown deletes them. Typed keys, guard helpers and strict metadata
-decoding are implemented; generation-bound sets and complete element observation are not yet connected.
+still creates the tables; verified empty teardown deletes them. The compiler and strict collector now bind
+set metadata, owner keys, IPv4/ARP guards and bridge-scoped destination fences. Readback admits expired elements
+disappearing, but rejects foreign keys or a timeout that differs from the owner's policy. Ownership changes revoke
+observed old keys; compilation never installs or renews an element. Root association and guest admission remain unwired.
 Retention is necessary because the pinned nftables library writes relative element timeouts;
 recreating an element from its observed remaining time could extend its lease by the delay before commit.
+
+Kernel readiness exercises this model in a disposable namespace, including a retained rule update and exact
+readback. The producer's nftables feature includes `CONFIG_NFT_BRIDGE_META` for bridge-scoped destination checks.
+The current QA kernel lacks that option; its rebuild and packet qualification remain pending.
 
 Source IPv4 and ARP checks must admit only primary addresses and live secondary pairs. A separate bridge
 postrouting fence must reject floating-IP delivery through an unauthorized output, including host-originated

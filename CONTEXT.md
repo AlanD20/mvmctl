@@ -1195,8 +1195,14 @@ projection of normalized intent and the exact managed tables, chains, rules, exp
 The userdata generation slot uses a fixed placeholder while hashing to break self-reference; the derived digest and
 rule identity are then bound into every rule. Explicit empty intent emits no reserved tables or rules.
 
-The projection covers all fields of exactly the eight emitted `github.com/google/nftables v0.3.0` expression structs:
-`expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp`, `expr.Ct`, `expr.Payload`, `expr.Range`, and `expr.Verdict`.
+Floating-IP intent adds a named timed set and a bridge postrouting destination fence. Source IPv4/ARP checks
+admit the primary address or a live interface/address pair; VM policies expand only over their owner's addresses.
+The v3 projection binds resource generations, launch generations, lease policy, set metadata and expected keys.
+Compilation does not install or renew a live lease.
+
+The projection covers all fields of the emitted `github.com/google/nftables v0.3.0` expression structs:
+`expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp`, `expr.Ct`, `expr.Payload`, `expr.Range`, `expr.Verdict`
+and `expr.Lookup`.
 Typed-nil or unknown expressions fail closed. Digest encoding streams through a fixed 64-KiB buffer directly into
 SHA-256, and canonical validation, encoding, and finalization errors surface to the compiler caller. Any
 nftables-module upgrade or change to the emitted expression set requires an explicit schema audit and digest-version
@@ -1227,8 +1233,10 @@ between calls. Before any kernel effect, the adapter revalidates the compiled ge
 resource inventories, table/chain/rule shape, and terminal default-deny invariants against the durable applying record
 and a fresh exact kernel snapshot.
 
-The raw-netlink collector issues only receiver-chosen read requests for the two exact managed tables, five fixed chains,
-their rules, and the absence of sets, objects, and flowtables. It brackets collection with ruleset-generation reads,
+The raw-netlink collector issues only receiver-chosen read requests for the two exact managed tables and their
+fixed chains and rules. Floating-IP generations add one exact bridge postrouting chain and the named set's metadata
+and elements. Unknown sets, objects and flowtables refuse. Expired elements may disappear; remaining elements must
+match an expected owner's exact key and lease duration. Collection brackets these observations with ruleset-generation reads,
 uses a shared 32-MiB/20,000-message budget across fresh single-request transports, and feeds the replies to the strict
 raw decoder, which rejects unknown expressions and structural drift. The comparator covers every compiler-projected
 field in chain-by-chain rule order; the decoder checks exact predecessor-handle evidence and one consistent 16-bit
@@ -1240,7 +1248,9 @@ the exact current host network namespace, and supplies both fresh snapshot trans
 Application creates the lasting connection while a disposable locked OS thread is in the retained namespace, then
 restores and verifies the original namespace before returning it. The retained netlink socket has verified 32-MiB
 receive/send buffers and a deadline equal to the earlier of the caller deadline and 30 seconds. The adapter queues
-deletion only for the exact observed managed tables, queues the complete target, calls `Flush` once, and closes the
+initial creation or verified empty teardown of the exact managed tables. Ordinary updates retain their tables,
+replace rules, reconcile the optional secondary chain/set and revoke observed keys whose ownership changed.
+Unchanged timed elements are retained without restarting their timeout. The adapter calls `Flush` once and closes the
 lasting connection. Cancellation expires that retained socket's deadline without clearing the lasting connection
 before `Flush` completes, so it cannot redial a transient socket outside the selected namespace. Cancellation, socket
 interrupt, flush, and close errors are all preserved; cancellation cannot be reported as success.

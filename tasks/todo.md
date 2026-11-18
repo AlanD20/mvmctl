@@ -26,8 +26,10 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   and both nested floating-IP lifecycle cases passed in the named QA runner.
 - [x] Implement strict secondary-set metadata, tuple-key and lookup grammar plus typed guard helpers. Confirm
   concatenated lookup, retained timeout and expiry in an isolated QA network namespace; vet/race checks pass.
-- [ ] Add timed secondary address pairs to the sealed firewall compiler and strict kernel readback, including
-  ingress IPv4/ARP and host-originated destination fencing without extending leases on unrelated updates.
+- [x] Connect secondary ownership to the sealed compiler, typed guards, exact set/element collection and atomic
+  application. Preserve unchanged keys, revoke changed authority and bind VM policies to their owner's addresses.
+- [ ] Rebuild the named QA kernel with bridge metadata and qualify the complete kernel model and packet fencing.
+  Focused firewall vet/race checks pass; the current kernel correctly refuses the unsupported bridge expression.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.
