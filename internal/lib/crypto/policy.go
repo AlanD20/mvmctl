@@ -73,3 +73,27 @@ func appendTypedPolicyField(canonical []byte, value string) []byte {
 	canonical = append(canonical, value...)
 	return append(canonical, '\n')
 }
+
+// VMToFloatingIPTrafficPolicyDigest identifies an exact resource destination independently of its owner.
+func VMToFloatingIPTrafficPolicyDigest(intent model.VMToFloatingIPTrafficAllowIntent) string {
+	return digestTypedPolicy(
+		"traffic-vm-to-floating-ip",
+		intent.SourceVMID,
+		intent.DestinationFloatingIPID,
+		string(intent.Protocol),
+		strconv.Itoa(intent.DestinationPortStart),
+		strconv.Itoa(intent.DestinationPortEnd),
+	)
+}
+
+// NetworkToFloatingIPTrafficPolicyDigest identifies an exact resource destination independently of its owner.
+func NetworkToFloatingIPTrafficPolicyDigest(intent model.NetworkToFloatingIPTrafficAllowIntent) string {
+	return digestTypedPolicy(
+		"traffic-network-to-floating-ip",
+		intent.SourceNetworkID,
+		intent.DestinationFloatingIPID,
+		string(intent.Protocol),
+		strconv.Itoa(intent.DestinationPortStart),
+		strconv.Itoa(intent.DestinationPortEnd),
+	)
+}

@@ -66,6 +66,8 @@ func (compiler *generationCompiler) compileINet(intent generationIntent) {
 		}
 	}
 
+	compiler.compileINetFloatingIPGrants(intent)
+
 	for _, network := range networks {
 		compiler.addRule(&compiler.generation.inet, forward, "inet.forward.default-deny."+network.id,
 			joinExpressions(matchInputInterface(network.hostBridge), dropVerdict()))

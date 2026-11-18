@@ -114,6 +114,8 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 		}
 	}
 
+	compiler.compileBridgeFloatingIPGrants(intent)
+
 	for _, endpoint := range endpoints {
 		compiler.addRule(&compiler.generation.bridge, forward, "bridge.default-deny."+endpoint.id,
 			joinExpressions(matchInputInterface(endpoint.hostVeth), dropVerdict()))

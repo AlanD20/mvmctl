@@ -450,9 +450,11 @@ func cloneIntent(intent Intent) Intent {
 		Reservations:   slices.Clone(intent.Reservations),
 		Endpoints:      slices.Clone(intent.Endpoints), Networks: slices.Clone(intent.Networks),
 		VMGrants: slices.Clone(intent.VMGrants), NetworkGrants: slices.Clone(intent.NetworkGrants),
-		HostServices:      slices.Clone(intent.HostServices),
-		VMHostGrants:      slices.Clone(intent.VMHostGrants),
-		NetworkHostGrants: slices.Clone(intent.NetworkHostGrants),
-		FloatingIPs:       slices.Clone(intent.FloatingIPs),
+		HostServices:            slices.Clone(intent.HostServices),
+		VMHostGrants:            slices.Clone(intent.VMHostGrants),
+		NetworkHostGrants:       slices.Clone(intent.NetworkHostGrants),
+		FloatingIPs:             slices.Clone(intent.FloatingIPs),
+		VMFloatingIPGrants:      slices.Clone(intent.VMFloatingIPGrants),
+		NetworkFloatingIPGrants: slices.Clone(intent.NetworkFloatingIPGrants),
 	}
 }

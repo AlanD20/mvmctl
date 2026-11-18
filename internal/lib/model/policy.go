@@ -82,3 +82,33 @@ type VMToVMExecIdentity struct {
 	DestinationVMID string `json:"destination_vm_id" db:"destination_vm_id"`
 	TargetUser      string `json:"target_user"       db:"target_user"`
 }
+
+// VMToFloatingIPTrafficAllowIntent grants the exact resource address across ownership changes.
+// Policy identity contains no owner VM, launch generation, or current address authority.
+type VMToFloatingIPTrafficAllowIntent struct {
+	ClaimID                 string          `json:"claim_id,omitempty" db:"claim_id"`
+	Incarnation             string          `json:"incarnation,omitempty" db:"incarnation"`
+	ID                      string          `json:"id"                     db:"id"`
+	SourceVMID              string          `json:"source_vm_id"           db:"source_vm_id"`
+	DestinationFloatingIPID string          `json:"destination_floating_ip_id"      db:"destination_floating_ip_id"`
+	Protocol                TrafficProtocol `json:"protocol"               db:"protocol"`
+	DestinationPortStart    int             `json:"destination_port_start" db:"destination_port_start"`
+	DestinationPortEnd      int             `json:"destination_port_end"   db:"destination_port_end"`
+	CreatedAt               string          `json:"created_at"             db:"created_at"`
+	UpdatedAt               string          `json:"updated_at"             db:"updated_at"`
+}
+
+// NetworkToFloatingIPTrafficAllowIntent grants the exact resource address across ownership changes.
+// Policy identity contains no owner VM, launch generation, or current address authority.
+type NetworkToFloatingIPTrafficAllowIntent struct {
+	ClaimID                 string          `json:"claim_id,omitempty" db:"claim_id"`
+	Incarnation             string          `json:"incarnation,omitempty" db:"incarnation"`
+	ID                      string          `json:"id"                     db:"id"`
+	SourceNetworkID         string          `json:"source_network_id"      db:"source_network_id"`
+	DestinationFloatingIPID string          `json:"destination_floating_ip_id"      db:"destination_floating_ip_id"`
+	Protocol                TrafficProtocol `json:"protocol"               db:"protocol"`
+	DestinationPortStart    int             `json:"destination_port_start" db:"destination_port_start"`
+	DestinationPortEnd      int             `json:"destination_port_end"   db:"destination_port_end"`
+	CreatedAt               string          `json:"created_at"             db:"created_at"`
+	UpdatedAt               string          `json:"updated_at"             db:"updated_at"`
+}

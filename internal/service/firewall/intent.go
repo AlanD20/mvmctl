@@ -121,6 +121,28 @@ type NetworkHostTrafficGrant struct {
 	Ports           PortInterval `json:"ports"`
 }
 
+// VMFloatingIPTrafficGrant permits access to only one root-resolved floating-IP resource.
+type VMFloatingIPTrafficGrant struct {
+	ClaimID                 string       `json:"claim_id,omitempty"`
+	Incarnation             string       `json:"incarnation,omitempty"`
+	ID                      string       `json:"id"`
+	SourceVMID              string       `json:"source_vm_id"`
+	DestinationFloatingIPID string       `json:"destination_floating_ip_id"`
+	Protocol                Protocol     `json:"protocol"`
+	Ports                   PortInterval `json:"ports"`
+}
+
+// NetworkFloatingIPTrafficGrant permits access to only one root-resolved floating-IP resource.
+type NetworkFloatingIPTrafficGrant struct {
+	ClaimID                 string       `json:"claim_id,omitempty"`
+	Incarnation             string       `json:"incarnation,omitempty"`
+	ID                      string       `json:"id"`
+	SourceNetworkID         string       `json:"source_network_id"`
+	DestinationFloatingIPID string       `json:"destination_floating_ip_id"`
+	Protocol                Protocol     `json:"protocol"`
+	Ports                   PortInterval `json:"ports"`
+}
+
 // Intent is the full host-global graph stored beside the authoritative generation record.
 // A graph is admitted only when its compiler-derived identity agrees with that record.
 type Intent struct {
@@ -132,9 +154,11 @@ type Intent struct {
 	NetworkGrants  []NetworkTrafficGrant `json:"network_grants"`
 	HostServices   []HostServiceIntent   `json:"host_services"`
 	// Omitted empty extensions preserve the exact canonical encoding of existing root journals.
-	VMHostGrants      []VMHostTrafficGrant      `json:"vm_host_grants,omitempty"`
-	NetworkHostGrants []NetworkHostTrafficGrant `json:"network_host_grants,omitempty"`
-	FloatingIPs       []FloatingIPBinding       `json:"floating_ips,omitempty"`
+	VMHostGrants            []VMHostTrafficGrant            `json:"vm_host_grants,omitempty"`
+	NetworkHostGrants       []NetworkHostTrafficGrant       `json:"network_host_grants,omitempty"`
+	FloatingIPs             []FloatingIPBinding             `json:"floating_ips,omitempty"`
+	VMFloatingIPGrants      []VMFloatingIPTrafficGrant      `json:"vm_floating_ip_grants,omitempty"`
+	NetworkFloatingIPGrants []NetworkFloatingIPTrafficGrant `json:"network_floating_ip_grants,omitempty"`
 }
 
 func (intent Intent) compile() (compiledGeneration, error) {
@@ -234,6 +258,7 @@ func (intent Intent) compile() (compiledGeneration, error) {
 		}
 		resolved.floatingIPs = append(resolved.floatingIPs, binding)
 	}
+	intent.resolveFloatingIPGrants(&resolved, active, activeNetworks)
 	return compileGeneration(resolved)
 }
 
@@ -388,7 +413,10 @@ func (intent Intent) validateDurablePolicies() error {
 			return invalidGeneration("durable network-to-host grant references an absent network")
 		}
 	}
-	return validateFloatingIPBindings(intent.FloatingIPs, networks, reservations)
+	if err := validateFloatingIPBindings(intent.FloatingIPs, networks, reservations); err != nil {
+		return err
+	}
+	return intent.validateDurableFloatingIPGrants(networks, reservations, ids)
 }
 
 func validateEndpointBinding(binding EndpointBinding, preparing bool) error {

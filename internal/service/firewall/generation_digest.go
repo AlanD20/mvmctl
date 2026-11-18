@@ -63,6 +63,9 @@ func encodeCanonicalGeneration(
 	if len(intent.floatingIPs) != 0 {
 		schema = "mvmctl.firewall.generation.v3"
 	}
+	if len(intent.vmFloatingIPGrants) != 0 || len(intent.networkFloatingIPGrants) != 0 {
+		schema = "mvmctl.firewall.generation.v4"
+	}
 	encoder.text("schema", schema)
 	encoder.boolean("generation.empty", generation.empty)
 	encodeCanonicalIntent(encoder, intent)
@@ -74,6 +77,7 @@ func encodeCanonicalGeneration(
 
 func encodeCanonicalIntent(encoder *generationDigestEncoder, intent generationIntent) {
 	encodeCanonicalFloatingIPs(encoder, intent.floatingIPs)
+	encodeCanonicalFloatingIPGrants(encoder, intent)
 	endpoints := sortedCopy(intent.endpoints, func(endpoint endpointIntent) string { return endpoint.id })
 	encoder.count("intent.endpoints", len(endpoints))
 	for _, endpoint := range endpoints {

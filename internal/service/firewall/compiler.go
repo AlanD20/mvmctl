@@ -15,10 +15,11 @@ import (
 )
 
 type generationCompiler struct {
-	generation *compiledGeneration
-	endpoints  map[string]endpointIntent
-	addresses  map[string][]endpointAddressVariant
-	networks   map[string]networkIntent
+	floatingIPs map[string]floatingIPIntent
+	generation  *compiledGeneration
+	endpoints   map[string]endpointIntent
+	addresses   map[string][]endpointAddressVariant
+	networks    map[string]networkIntent
 }
 
 func compileGeneration(intent generationIntent) (compiledGeneration, error) {
@@ -127,16 +128,18 @@ func newGenerationCompiler(intent generationIntent) *generationCompiler {
 	slices.Sort(generation.networkIDs)
 
 	compiler := &generationCompiler{
-		generation: generation,
-		endpoints:  make(map[string]endpointIntent, len(intent.endpoints)),
-		addresses:  make(map[string][]endpointAddressVariant, len(intent.endpoints)),
-		networks:   make(map[string]networkIntent, len(intent.networks)),
+		generation:  generation,
+		floatingIPs: make(map[string]floatingIPIntent, len(intent.floatingIPs)),
+		endpoints:   make(map[string]endpointIntent, len(intent.endpoints)),
+		addresses:   make(map[string][]endpointAddressVariant, len(intent.endpoints)),
+		networks:    make(map[string]networkIntent, len(intent.networks)),
 	}
 	for _, endpoint := range intent.endpoints {
 		compiler.endpoints[endpoint.id] = endpoint
 		compiler.addresses[endpoint.id] = []endpointAddressVariant{{endpoint: endpoint}}
 	}
 	for _, resource := range sortedCopy(intent.floatingIPs, func(value floatingIPIntent) string { return value.id }) {
+		compiler.floatingIPs[resource.id] = resource
 		if resource.ownerVMID == "" {
 			continue
 		}
@@ -283,13 +286,14 @@ func validateIntent(intent generationIntent) error {
 			return invalidGeneration("network-to-host grant references an unknown source network")
 		}
 	}
-	return nil
+	return validateFloatingIPGrants(intent, endpoints, networks, grantIDs)
 }
 
 func generationIntentIsEmpty(intent generationIntent) bool {
 	return len(intent.endpoints) == 0 && len(intent.networks) == 0 && len(intent.vmGrants) == 0 &&
 		len(intent.networkGrants) == 0 && len(intent.hostServices) == 0 &&
-		len(intent.vmHostGrants) == 0 && len(intent.networkHostGrants) == 0 && len(intent.floatingIPs) == 0
+		len(intent.vmHostGrants) == 0 && len(intent.networkHostGrants) == 0 && len(intent.floatingIPs) == 0 &&
+		len(intent.vmFloatingIPGrants) == 0 && len(intent.networkFloatingIPGrants) == 0
 }
 
 func validateNetwork(
