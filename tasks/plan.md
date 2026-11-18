@@ -34,6 +34,8 @@ The address need not be `.100`; allocation must respect the managed subnet and e
    Define restart and restore behavior without treating guest claims as proof of identity.
 5. Repair the HA example: three control-plane nodes, current supported binary requirements, explicit traffic and
    exec policies, current environment syntax, reliable helpers and host-authorized floating-IP failover.
+   Qualification covers floating-IP association and disassociation on small VMs in the existing runner; running
+   the Kubernetes cluster, testing quorum and provisioning a larger runner are explicitly outside this goal.
 6. Complete behavior-focused Go and Python system coverage, public Markdown and website documentation, and
    affected qualification in the named disposable runner. Review each slice once and verify correction deltas;
    run complete integration gates before declaring the expanded release ready.
@@ -49,9 +51,9 @@ focused checks and activation review pass. Stored permission is not session read
 Operator associations persist until explicit release, transfer or VM stop; guest leases remain finite.
 Host CLI parity, explicit lifetime authority and acknowledged guest alias synchronization are implemented and
 reviewed with focused QA. Full kernel packet fencing, live control-path bootstrap/expiry/failover and release
-qualification remain pending. Integration Go CI and the complete root Jailer suite passed for baseline `6a82392f`;
-the persistent-ownership production change at `9dc62390` still requires complete integration gates. Thirteen new Python scenarios collect; this does not qualify their
-runtime behavior. The public
+qualification remain pending. Integration Go CI, the complete root Jailer suite and root agent alias tests passed
+for persistent ownership at `945bea5b`; its paired candidate is installed in the named QA VM. Python scenarios
+collect; this does not qualify their runtime behavior. The public
 [Guest Control guide](../docs/GUEST_CONTROL.md) and [environment reference](../docs/ENV_SPEC_REFERENCE.md)
 describe the implemented surface; website publication remains held.
 

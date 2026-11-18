@@ -64,7 +64,8 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Decide that operator associations persist until release, transfer or VM stop while guest leases remain finite.
 - [x] Implement and review host association, transfer and release with explicit lifetime authority and
   acknowledged guest aliases; pass focused QA.
-- [ ] Complete integration CI, root Jailer and live alias/packet qualification for persistent ownership.
+- [x] Complete integration CI and root Jailer/agent alias suites for persistent ownership at `945bea5b`.
+- [ ] Complete live alias and packet qualification for persistent ownership.
 - [x] Implement the owned host session with one protected VMM admission, expected credential lineage,
   pinned agent TLS and independent exit descriptor. Review and focused QA vet/race checks pass.
 - [x] Wire the retained root worker and typed delegated operations without operator impersonation, including
@@ -78,17 +79,17 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   environment fields and ownership semantics. Prepare the website source update for review; publication remains held.
 - [ ] Qualify the composed control path and publish the separately reviewed website update.
 - [x] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
-- [ ] Qualify live six-node bootstrap, quorum and floating-API failover in a runner with at least 12 GiB guest
-  memory plus host headroom; the current 3 GiB QA runner cannot run that topology.
-- [x] Add and register thirteen Python scenarios for guest control, floating-IP policy, renewal, lifecycle,
+- [ ] Test floating-IP association and disassociation with small VMs in the existing named QA runner.
+  Full Kubernetes cluster bootstrap, quorum testing and a larger runner are explicitly out of scope.
+- [x] Add and register Python scenarios for guest control, floating-IP policy, renewal, lifecycle,
   stalled-worker fencing, memory restore and environment ownership; pass collection and affected registry checks.
 - [x] Review the stalled-worker observer and fix cleanup to attempt continuation through its retained pidfd
   even when the final process observation fails; pass non-signaling helper checks.
 - [x] Extend the existing host-reboot continuation with floating-IP and delegation recovery coverage; pass
   receipt/preservation helper checks and collection from the exact staged payload.
 - [ ] Run both reboot phases across an actual host reboot and qualify delegation retirement and explicit recovery.
-- [x] Pass integration Go CI and the complete root Jailer suite for baseline `6a82392f`; build the
-  paired host and guest agent and install the candidate inside the named QA VM.
+- [x] Pass integration Go CI, complete root Jailer and root agent alias suites for `945bea5b`; build the
+  paired host and guest agent and install the candidate inside the named QA VM with inventories preserved.
 - [ ] Complete affected Go and Python system tests in `mvmctl-030-test`, plus documentation and website updates.
 - [ ] Review and integrate the feature into `0.3.0-release`; verify subsequent production changes and complete
   release qualification.
@@ -96,7 +97,7 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 
 Operator reservation CRUD is registered and exercised. The guest gateway, root ownership backend and retained
 host worker are integrated with startup, recovery and lifecycle retirement. Focused checks and activation review
-pass; live process, packet, lease expiry and HA qualification remain pending. Version 1 environment reservation,
+pass; live process, packet and lease expiry qualification remain pending. Version 1 environment reservation,
 grant and exact floating-IP policy steps are implemented; workflow state retains immutable creation identities
 and resolved endpoints before effects. Actual CLI QA has covered allocation against stopped primaries; stopped-policy registration against floating reservations and reboot cleanup remain pending.
 Focused evidence is not a complete release qualification or proof of packet ownership/failover.
