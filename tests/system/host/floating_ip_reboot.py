@@ -105,11 +105,11 @@ def prepare(runner, boot):
         raise
 
 
-def _stale_alias(runner, owner, resource, label, *, retained=None, remove=False):
+def _stale_alias(runner, owner, resource, label, *, retained=None, remove=False, replace=False):
     """Add/check/remove only the test-labeled VIP in the current guest incarnation."""
     script = r"""
 import json, subprocess, sys
-vip, primary, label, raw, remove = sys.argv[1:]
+vip, primary, label, raw, remove, replace = sys.argv[1:]
 retained = json.loads(raw)
 def run(*args):return subprocess.check_output(['ip', *args], text=True)
 def snapshot():
@@ -127,7 +127,11 @@ def snapshot():
 before, aliases = snapshot()
 assert label.startswith(before['interface'] + ':f') and len(label) <= 15
 if retained is None:
-    assert aliases == [], 'refusing existing guest alias'
+    if replace == 'yes':
+        assert len(aliases) == 1 and aliases[0]['prefixlen'] == 32 and aliases[0].get('label') != label
+        run('addr', 'del', vip + '/32', 'dev', before['interface'])
+    else:
+        assert aliases == [], 'refusing existing guest alias'
     run('addr', 'add', vip + '/32', 'dev', before['interface'], 'label', label, 'noprefixroute')
     retained = before
 else:
@@ -143,8 +147,20 @@ print(json.dumps(retained, sort_keys=True))
 """
     result = _run_mvm(runner, "exec", owner["binding"]["id"], "--user", "root", "--",
                       shlex.join(["python3", "-c", script, resource["ipv4"], owner["binding"]["ipv4"], label,
-                                  json.dumps(retained), "yes" if remove else "no"]))
+                                  json.dumps(retained), "yes" if remove else "no", "yes" if replace else "no"]))
     return json.loads(result.stdout)
+
+
+def _release_stale_claim(journey, source, owner, resource, log, generation, label, stale):
+    # Host release fences before agent-local cleanup. A changed label makes that
+    # cleanup refuse and the agent returns internal; this is not a host-state proof.
+    journey.control(owner, resource, "release", generation, failure="internal")
+    denied = journey.flow(source, owner, log, resource["ipv4"], allowed=False)
+    _stale_alias(journey.runner, owner, resource, label, retained=stale)
+    _stale_alias(journey.runner, owner, resource, label, retained=stale, remove=True)
+    observed = journey.control(owner, resource)
+    assert observed["ownership"] == "unassociated" and observed["lease_remaining_ms"] == 0
+    return denied
 
 
 def resume(runner, receipt, boot):
@@ -200,11 +216,9 @@ def resume(runner, receipt, boot):
         active = journey.control(owner, resource, "associate", observed["generation"])
         assert active["ownership"] == "self"
         allowed = journey.flow(source, owner, log, resource["ipv4"], allowed=True)
-        stale = journey.stale_alias(owner, resource)
-        released = journey.control(owner, resource, "release", active["generation"])
-        assert released["ownership"] == "unassociated"
-        released_denied = journey.flow(source, owner, log, resource["ipv4"], allowed=False)
-        journey.stale_alias(owner, resource, previous=stale)
+        label = receipt["alias"]["label"]
+        stale = _stale_alias(runner, owner, resource, label, replace=True)
+        released_denied = _release_stale_claim(journey, source, owner, resource, log, active["generation"], label, stale)
         return dict(schema_version=1, boot_id=boot, pre_boot_id=receipt["boot_id"], resource_id=resource["id"],
                     old_grant_ids=[item["id"] for item in receipt["grants"]],
                     current_grant_ids=[item["id"] for item in (inspect, associate, release)],

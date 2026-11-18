@@ -83,3 +83,33 @@ def test_absent_owned_policy_is_not_adopted_for_preservation(receipt):
     traffic = {"vm_to_floating_ip": [], "network_to_vm": []}
     with pytest.raises(AssertionError):without_owned_policy(traffic, receipt["policy"])
     assert without_owned_policy(traffic, receipt["policy"], allow_missing=True) == traffic
+
+
+@pytest.mark.parametrize("fault", [None, "still_owned", "remaining_lease", "packet_not_fenced"])
+def test_local_release_error_requires_packet_fencing_then_fresh_host_inspection(monkeypatch, fault):
+    from tests.system.host import floating_ip_reboot as helper
+    alias_actions = []
+    def alias(*args, **kwargs):
+        alias_actions.append(kwargs.get("remove", False))
+    monkeypatch.setattr(helper, "_stale_alias", alias)
+    class Journey:
+        runner = "qualification-runner"
+        def control(self, owner, resource, method="inspect", generation=None, *, failure=None):
+            if method == "release":
+                assert failure == "internal" and generation == 2
+                return None
+            return {"ownership": "self" if fault == "still_owned" else "unassociated",
+                    "lease_remaining_ms": 1 if fault == "remaining_lease" else 0}
+        def flow(self, source, owner, log, address, *, allowed):
+            assert allowed is False
+            assert fault != "packet_not_fenced", "packet was delivered after release"
+            return "packet-denied-nonce"
+    args = (Journey(), {}, {}, {"ipv4": "10.91.0.100"}, "/owned/log", 2, "eth0:f123456", {})
+    if fault is None:
+        assert helper._release_stale_claim(*args) == "packet-denied-nonce"
+    else:
+        with pytest.raises(AssertionError):helper._release_stale_claim(*args)
+    if fault == "packet_not_fenced":
+        assert alias_actions == [], "do not remove stale-alias evidence before denied packet proof"
+    else:
+        assert alias_actions == [False, True]
