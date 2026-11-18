@@ -78,8 +78,8 @@ Retention is necessary because the pinned nftables library writes relative eleme
 recreating an element from its observed remaining time could extend its lease by the delay before commit.
 
 Kernel readiness exercises this model in a disposable namespace, including a retained rule update and exact
-readback. The producer's nftables feature includes `CONFIG_NFT_BRIDGE_META` for bridge-scoped destination checks.
-The current QA kernel lacks that option; its rebuild and packet qualification remain pending.
+readback. The producer's nftables feature includes `CONFIG_NFT_BRIDGE_META` for bridge-scoped destination checks
+and `CONFIG_NF_CT_NETLINK` for exact flow invalidation. Full-model kernel and packet qualification remain pending.
 
 Source IPv4 and ARP checks must admit only primary addresses and live secondary pairs. A separate bridge
 postrouting fence must reject floating-IP delivery through an unauthorized output, including host-originated

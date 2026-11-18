@@ -57,8 +57,9 @@ resource limits still differ.
 Kernel capability must be checked on each exact runner. A bare inet-table probe is insufficient for bridge
 nftables, connection tracking or the modeled production expressions. The bundled `kernel-official` nftables
 feature requests `CONFIG_BRIDGE_NETFILTER`, `CONFIG_NF_TABLES_BRIDGE`, `CONFIG_NFT_BRIDGE_META` and
-`CONFIG_NF_CONNTRACK_BRIDGE`; verify the actual live configuration and readiness result. Bridge metadata is
-required to scope floating-IP destination fencing to the managed bridge. A rebuilt or
+`CONFIG_NF_CONNTRACK_BRIDGE`; it also enables `CONFIG_NF_CT_NETLINK` for exact flow invalidation during
+floating-IP transfer. Verify the actual live configuration and readiness result. Bridge metadata scopes
+floating-IP destination fencing to the managed bridge. A rebuilt or
 imported kernel does not replace a differently selected default, mirrored artifact or already-running kernel.
 Do not infer capability from a version or filename, or treat one runner's result as proof for future images.
 

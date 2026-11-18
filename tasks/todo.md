@@ -28,8 +28,10 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   concatenated lookup, retained timeout and expiry in an isolated QA network namespace; vet/race checks pass.
 - [x] Connect secondary ownership to the sealed compiler, typed guards, exact set/element collection and atomic
   application. Preserve unchanged keys, revoke changed authority and bind VM policies to their owner's addresses.
-- [ ] Rebuild the named QA kernel with bridge metadata and qualify the complete kernel model and packet fencing.
-  Focused firewall vet/race checks pass; the current kernel correctly refuses the unsupported bridge expression.
+- [x] Build the named QA runner's replacement kernel from cached source with bridge metadata and conntrack
+  netlink enabled; retain source/config/toolchain receipts and verify the implementation symbols in the ELF.
+- [ ] Boot that kernel and qualify the complete kernel model and packet fencing. Focused firewall vet/race
+  checks pass; the current kernel correctly refuses the unsupported bridge expression.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.
