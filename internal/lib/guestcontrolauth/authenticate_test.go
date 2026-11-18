@@ -171,16 +171,29 @@ func TestAuthenticationAcceptanceRejectsWrongOrTruncatedAndPreservesFollowingByt
 	for _, text := range []string{"MVMGAU02", "MVMG", acceptance + "next"} {
 		t.Run(text, func(t *testing.T) {
 			left, right := net.Pipe()
-			defer left.Close()
-			defer right.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
 			finished := make(chan struct{})
+			clientFinished := make(chan struct{})
+			t.Cleanup(func() {
+				close(clientFinished)
+				cancel()
+				_ = left.Close()
+				_ = right.Close()
+				<-finished
+			})
 			go func() {
 				defer close(finished)
 				secured := tls.Server(right, authenticatedConfig(agent.value))
 				if secured.HandshakeContext(ctx) == nil {
 					_, _ = io.WriteString(secured, text)
+					if text == acceptance+"next" {
+						// Keep the valid peer alive through authentication's deadline cleanup
+						// and the subsequent read; negative peers still close immediately.
+						select {
+						case <-clientFinished:
+						case <-ctx.Done():
+						}
+					}
 				}
 				_ = right.Close()
 			}()
@@ -195,7 +208,6 @@ func TestAuthenticationAcceptanceRejectsWrongOrTruncatedAndPreservesFollowingByt
 				require.Error(t, err)
 				require.Nil(t, secured)
 			}
-			<-finished
 		})
 	}
 }
