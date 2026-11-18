@@ -44,7 +44,8 @@ Contracts: [Guest Control authority](../docs/adr/0027-guest-control-authority.md
 [floating-IP ownership](../docs/adr/0028-floating-ip-ownership.md). Reservation/delegation CRUD, exact traffic
 policies, finite ownership effects, authenticated host session and guest gateway/address reconciliation are
 implemented and reviewed. Version 1 environment declarations save resource, grant and policy identities before
-effects. The retained worker is being integrated separately; stored permission is not session readiness.
+effects. The retained worker, grant startup, start/resume recovery and lifecycle retirement are integrated;
+focused checks and activation review pass. Stored permission is not session readiness.
 Operator association persistence remains a decision gate. Full kernel packet fencing, live control-path
 bootstrap/expiry/failover, integration CI and release qualification remain pending. The public
 [Guest Control guide](../docs/GUEST_CONTROL.md) and [environment reference](../docs/ENV_SPEC_REFERENCE.md)

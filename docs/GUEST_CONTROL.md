@@ -4,9 +4,9 @@ A floating IP reserves one private IPv4 address in a managed network. A delegate
 for itself, renew its finite lease and release it. Clients keep the same destination when ownership moves.
 The VM's primary address stays separate.
 
-**Development feature:** reservation, delegation, policy and guest-agent components are implemented; the retained
-host worker and composed runtime are still being integrated. Live packet fencing, expiry and failover remain
-qualification gates. A stored grant alone does not establish a working Guest Control session.
+**Development feature:** the retained host worker, delegated methods and guest address reconciliation are
+implemented. Live process lifecycle, packet fencing, expiry and HA failover still require qualification.
+A stored grant alone does not establish a working Guest Control session.
 
 ## Reserve an address
 

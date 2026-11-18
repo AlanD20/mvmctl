@@ -59,28 +59,32 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   and restartable credential retirement. Focused QA and existing workflow regressions pass.
 - [x] Implement guest ownership coordination, lifecycle fencing, bootstrap projection and removal guards;
   resolve the present-zero takeover review finding and pass focused integration checks.
-- [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
+- [x] Implement delegated association ownership, kernel-enforced finite authority, fencing and transfer recovery.
+- [ ] Qualify live ownership transfer, kernel expiry and recovery under process/packet failures.
+- [ ] Resolve operator association persistence and guest/operator CLI parity before adding host ownership commands.
 - [x] Implement the owned host session with one protected VMM admission, expected credential lineage,
   pinned agent TLS and independent exit descriptor. Review and focused QA vet/race checks pass.
-- [ ] Wire the retained root worker and typed delegated operations without operator impersonation; qualify live bootstrap.
+- [x] Wire the retained root worker and typed delegated operations without operator impersonation, including
+  grant startup, start/resume recovery and lifecycle retirement; pass activation review and focused unit/vet/race checks.
+- [ ] Qualify live worker bootstrap, reconnect, process exit and lifecycle retirement.
 - [x] Implement the authenticated guest gateway and typed `mvm-agent control floating-ip` commands;
-  independently review and pass focused named-runner tests, race checks and vet. Host worker remains unwired.
+  independently review and pass focused named-runner tests, race checks and vet; integrate the retained host worker.
 - [x] Implement and review guest alias reconciliation with exact owned receipts, bounded local lifetime,
   expiry/session-loss/restart cleanup and refusal of foreign addresses.
 - [x] Document public reservation/delegation commands, guest control, exact traffic destinations and version 1
-  environment fields and ownership semantics. Audit website changes read-only; publication remains held.
+  environment fields and ownership semantics. Prepare the website source update for review; publication remains held.
 - [ ] Qualify the composed control path and publish the separately reviewed website update.
-- [ ] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
+- [x] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
+- [ ] Qualify live six-node bootstrap, quorum and floating-API failover.
 - [ ] Complete affected Go and Python system tests in `mvmctl-030-test`, plus documentation and website updates.
 - [ ] Review and integrate the feature into `0.3.0-release`; complete integration CI and release qualification.
 - [ ] Obtain the user's separate authorization before merging the release PR, tagging or publishing.
 
-Operator reservation CRUD is registered and exercised. The guest gateway and root ownership backend are
-implemented separately; host session and worker composition remain pending, so no secondary-address permission
-is active through the public control path yet. Version 1 environment reservation, grant and exact floating-IP
-policy steps are implemented; workflow state retains immutable creation identities and resolved endpoints before
-effects. Actual CLI QA has covered allocation against
-stopped primaries; stopped-policy registration against floating reservations and reboot cleanup remain pending.
+Operator reservation CRUD is registered and exercised. The guest gateway, root ownership backend and retained
+host worker are integrated with startup, recovery and lifecycle retirement. Focused checks and activation review
+pass; live process, packet, lease expiry and HA qualification remain pending. Version 1 environment reservation,
+grant and exact floating-IP policy steps are implemented; workflow state retains immutable creation identities
+and resolved endpoints before effects. Actual CLI QA has covered allocation against stopped primaries; stopped-policy registration against floating reservations and reboot cleanup remain pending.
 Focused evidence is not a complete release qualification or proof of packet ownership/failover.
 
 ## Administrator uninstall (2026-11-14)

@@ -1,6 +1,6 @@
 # Floating IP Ownership
 
-**Status:** Reservations and secondary firewall backend implemented; ownership/failover not release-qualified
+**Status:** Delegated ownership and retained runtime implemented; ownership/failover not release-qualified
 **Date:** 2026-11-17
 **Amends:** [ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md), for explicitly authorized secondary IPv4 addresses
 **Requires:** [Guest Control authority](0027-guest-control-authority.md)
@@ -28,8 +28,8 @@ address. Inventory is paginated to respect the existing privileged frame bound w
 The root record uses schema 2 with separate publication revision and ownership generation. Its closed phases
 record finite-lease association, renewal, release and recovery. Recovery of an interrupted timed install must
 fence before returning to unassociated state; journal replay cannot grant or renew a key. Phase validation is
-implemented, together with guest coordinator and timed effects. Authenticated worker/public dispatch and
-composed kernel qualification remain pending. Schema-1 records are rejected.
+implemented, together with guest coordinator and timed effects. Authenticated guest dispatch and the retained
+worker are integrated; composed kernel qualification remains pending. Schema-1 records are rejected.
 Only a stable unassociated record may retire under retained index/network locks after reboot without recreating
 the network. Owned or unfinished records require fencing before retirement.
 Network removal requires live reservations to be removed first; reset admits only verified retirement history.
@@ -51,8 +51,8 @@ isolated execution identity, process locators and protected Firecracker API peer
 topology hold for later network composition; an observed identity alone cannot authorize effects. Admission
 requires no guest-agent connection and sends no API operation. This proves a live VMM, not an unpaused guest;
 delegated renewal must separately call the implemented running-state check through the protected API. It accepts
-only Running, never resumes a paused VM, and discards failed HTTP streams before another observation. Root
-association dispatch remains unwired, and live admission qualification is pending.
+only Running, never resumes a paused VM, and discards failed HTTP streams before another observation.
+Delegated ownership dispatch uses this admission; live admission qualification remains pending.
 
 Every ownership change advances a durable generation. Requests must match the observed generation; stale
 requests refuse. A successful response describes the committed owner and generation. Requests after an unknown
@@ -103,8 +103,9 @@ firewall updates now retain the admitted tables and chains and replace their rul
 still creates the tables; verified empty teardown deletes them. The compiler and strict collector now bind
 set metadata, owner keys, IPv4/ARP guards and bridge-scoped destination fences. Readback admits expired elements
 disappearing, but rejects foreign keys or a timeout that differs from the owner's policy. Ownership changes revoke
-observed old keys; compilation never installs or renews an element. The typed fencing, metadata publication, activation and renewal effects are implemented, but root association
-and guest dispatch remain unwired. Read-only lease observation verifies the complete graph and exact binding;
+observed old keys; compilation never installs or renews an element. Typed fencing, metadata publication,
+activation and renewal effects are wired to authenticated guest dispatch through the retained worker.
+Read-only lease observation verifies the complete graph and exact binding;
 a missing binding is an error, while explicit ownerless state carries no timed permission.
 Renewal removes the exact old key, proves absence and inserts the configured finite lease once, under retained
 ownership serialization. It may briefly interrupt traffic. Repeating an add with the same timeout does not refresh

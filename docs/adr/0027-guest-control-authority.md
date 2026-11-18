@@ -1,6 +1,6 @@
 # Guest Control Authority
 
-**Status:** Proposed; implementation in progress, not release-qualified
+**Status:** Proposed; retained runtime implemented, not release-qualified
 **Date:** 2026-11-17
 **Amends:** [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md), for the retained Guest Control worker
 
@@ -34,10 +34,9 @@ host pin. A TLS-protected acceptance acknowledgement confirms mutual authenticat
 Leaf authentication, backend-preserving credential preparation, snapshot-reference integration and the
 owned host session are implemented and reviewed. Bootstrap uses one protected VMM admission, verifies
 Running and the expected credential lineage, and authenticates the agent before releasing its locks. The
-session retains its stream and an independent VMM exit descriptor. Worker integration and live bootstrap
-qualification remain pending. Memory
-snapshots require a root-verified credential lineage. Each restored VM receives a fresh process/incarnation
-principal and no inherited grants or session.
+session retains its stream and an independent VMM exit descriptor. The retained worker is integrated;
+live bootstrap and process lifecycle qualification remain pending. Memory snapshots require a root-verified
+credential lineage. Each restored VM receives a fresh process/incarnation principal and no inherited grants or session.
 
 Cold credential preparation preserves the selected provisioning backend from start to finish. A typed,
 owner-authenticated preparation creates root material for the exact pending VM and returns only its agent
@@ -57,9 +56,10 @@ features are enabled. No separate helper executable or broad sudoers permission 
 retained-lifetime exception: it must be registered explicitly, bounded per VM, and stopped by authenticated
 lifecycle cleanup. It must not retain a global network mutation lock while waiting for guest input.
 
-The exact worker spawn, recovery and bootstrap implementation must be reviewed before dispatch registration.
-It must survive an ordinary CLI exit, reconnect only to the same admitted incarnation, stop on VMM exit and
-invalidate the old session on stop, restore or replacement. Failed setup grants no authority.
+The registered worker implements grant-triggered startup, start/resume recovery and authenticated lifecycle
+retirement. Its activation review and focused unit, vet and race checks pass. It must survive an ordinary CLI
+exit, reconnect only to the same admitted incarnation, stop on VMM exit and invalidate the old session on stop,
+restore or replacement; these live process journeys remain qualification gates. Failed setup grants no authority.
 
 ### Delegation and privileged effects
 
@@ -81,7 +81,7 @@ Persistence, guest ownership effects and operator delegation CRUD are implemente
 `mvm floating-ip delegation` commands store, list, inspect and revoke exact method grants. Revocation can
 finish after the target VM stops. Workflow ensure and owned removal use exact immutable grant identities;
 matching names or permission tuples never transfer ownership. Stored permission does not prove worker
-readiness. The authenticated worker and integrated runtime qualification remain pending.
+readiness. The authenticated worker is implemented and integrated; live runtime qualification remains pending.
 
 Guest root can exercise every delegation granted to that VM. Local agent permissions restrict ordinary guest
 users but cannot isolate an application from guest root. The implemented gateway uses a dedicated vsock port
@@ -90,8 +90,8 @@ and a root-only local Unix socket. It forwards closed typed requests over one pi
 host worker before operations can succeed. Guest address reconciliation is implemented and reviewed: exact
 alias receipts authorize local cleanup only,
 a successful association/renewal bounds the local lifetime, and inspection never extends it. Session loss, expiry
-and restart clean up owned aliases without claiming host authority. The retained host worker and composed live
-transport qualification remain pending. The local control socket is root-only.
+and restart clean up owned aliases without claiming host authority. The retained host worker is integrated;
+composed live transport qualification remains pending. The local control socket is root-only.
 
 ### Protocol
 
