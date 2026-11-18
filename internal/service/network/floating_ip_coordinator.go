@@ -262,8 +262,8 @@ func admitFloatingIPGuestMutation(
 		if record.Owner != (floatingIPOwner{}) && principal.owns(record.Owner) {
 			return networkAuthorityValidationError("current floating-IP owner must renew instead of associate")
 		}
-		if observed.Present && observed.Remaining > 0 {
-			return networkAuthorityValidationError("floating IP has a healthy current owner")
+		if observed.Present {
+			return networkAuthorityValidationError("floating IP retains current owner packet authority")
 		}
 	} else {
 		if record.Phase != floatingIPOwned || !principal.owns(record.Owner) {

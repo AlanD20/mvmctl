@@ -103,3 +103,15 @@ func TestFloatingIPDelegatedRenewalPreservesCleanupProvenanceOnInterruptedWrite(
 	_, err = commitFloatingIPOwned(t.Context(), store, recovery)
 	require.Error(t, err, "root recovery cannot acknowledge or replay interrupted renewal")
 }
+
+func TestFloatingIPGuestAssociationRefusesPresentZeroRemainingOwner(t *testing.T) {
+	resource, principal, grant := delegationFixture(t)
+	owner := floatingIPTransitionOwner()
+	owner.VMID = "cccccccccccccccccccccccccccccccc"
+	resource.Phase, resource.Owner = floatingIPOwned, owner
+	observed := firewall.FloatingIPLeaseObservation{
+		Binding: floatingIPFirewallBinding(resource, owner), Present: true, Remaining: 0,
+	}
+	require.Error(t, admitFloatingIPGuestMutation(resource, principal, grant, floatingIPDelegationAssociate, observed),
+		"only absence proves revoked authority; zero remaining is still a present key")
+}
