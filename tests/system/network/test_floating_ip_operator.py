@@ -37,10 +37,13 @@ def _persistent(item, resource, vm, *, synchronized=False):
         assert item["alias_synchronization"] == "synchronized", item
 
 
-def _ownerless(item, resource):
+def _ownerless(item, resource, *, inspection=False):
     for key in ("id", "network_id", "name", "ipv4"):
         assert item[key] == resource[key], item
-    assert item["phase"] == "unassociated" and item["authority_state"] == "absent", item
+    # Release acknowledges completed fencing; unowned inspection conservatively
+    # returns the root record without claiming a fresh kernel observation.
+    assert item["phase"] == "unassociated", item
+    assert item["authority_state"] == ("unobserved" if inspection else "absent"), item
     assert item["owner_vm_id"] == item["owner_origin"] == item["lifetime"] == item["owner_boot_id"] == "", item
     assert item["owner_launch_generation"] == item["lease_remaining_ms"] == 0, item
     assert item["retired"] is False, item
@@ -124,7 +127,7 @@ def test_host_ownership_is_usable_at_return_and_policy_follows_transfer(floating
     journey.flow(source, owner, log, resource["ipv4"], allowed=False)
     journey.stale_alias(owner, resource, previous=stale)
     journey.remove_stale_alias(owner, resource, stale)
-    _ownerless(_host(journey, resource), resource)
+    _ownerless(_host(journey, resource), resource, inspection=True)
     journey.assert_policy(policy, journey.policy_intents[-1])
 
 
@@ -159,7 +162,7 @@ def test_finite_guest_grants_cannot_convert_operator_ownership_but_can_release(f
     assert released["generation"] > active["generation"]
     journey.alias(owner, resource, present=False)
     journey.flow(source, owner, log, resource["ipv4"], allowed=False)
-    _ownerless(_host(journey, resource), resource)
+    _ownerless(_host(journey, resource), resource, inspection=True)
 
 
 @pytest.mark.timeout(900, method="signal")
@@ -174,7 +177,7 @@ def test_vm_stop_fences_persistent_owner_and_restart_requires_new_host_claim(flo
     _run_mvm(journey.runner, "vm", "stop", owner["binding"]["id"], "--force", timeout=120)
     assert _tcp_data(journey.runner, "vm", "inspect", owner["binding"]["id"])["vm"]["status"] == "stopped"
     fenced = _host(journey, resource)
-    _ownerless(fenced, resource)
+    _ownerless(fenced, resource, inspection=True)
     assert fenced["generation"] > active["generation"]
     for grant in grants:
         retired = _tcp_data(journey.runner, "floating-ip", "delegation", "inspect", grant["id"],
@@ -183,7 +186,7 @@ def test_vm_stop_fences_persistent_owner_and_restart_requires_new_host_claim(flo
     _run_mvm(journey.runner, "vm", "start", owner["binding"]["id"], timeout=120)
     restarted = journey.refresh_after_start(owner)
     journey.alias(restarted, resource, present=False)
-    _ownerless(_host(journey, resource), resource)
+    _ownerless(_host(journey, resource), resource, inspection=True)
     journey.control(restarted, resource, failure="unavailable")
     inspect = journey.grant(restarted, resource, "inspect")
     assert inspect["launch_generation"] > grants[0]["launch_generation"]
