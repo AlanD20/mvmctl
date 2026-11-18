@@ -58,14 +58,17 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   resolve the present-zero takeover review finding and pass focused integration checks.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
-- [ ] Implement agent access to the same operations and guest address reconciliation.
+- [x] Implement the authenticated guest gateway and typed `mvm-agent control floating-ip` commands;
+  independently review and pass focused named-runner tests, race checks and vet. Host worker remains unwired.
+- [ ] Implement guest address reconciliation and qualify the composed control path.
 - [ ] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
 - [ ] Complete affected Go and Python system tests in `mvmctl-030-test`, plus documentation and website updates.
 - [ ] Review and integrate the feature into `0.3.0-release`; complete integration CI and release qualification.
 - [ ] Obtain the user's separate authorization before merging the release PR, tagging or publishing.
 
-Operator reservation CRUD is registered and exercised; no Guest Control session or secondary-address firewall
-permission is active yet. Next implement association and fencing. Actual CLI QA has covered allocation against
+Operator reservation CRUD is registered and exercised. The guest gateway and root ownership backend are
+implemented separately; host session and worker composition remain pending, so no secondary-address permission
+is active through the public control path yet. Actual CLI QA has covered allocation against
 stopped primaries; stopped-policy registration against floating reservations and reboot cleanup remain pending.
 Focused evidence is not a complete release qualification or proof of packet ownership/failover.
 

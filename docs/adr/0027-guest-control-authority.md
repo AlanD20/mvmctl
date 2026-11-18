@@ -32,8 +32,9 @@ application protocol. Pins identify provisioned keys; certificate subjects and c
 The host private key stays in root authority. The guest receives only its own private material and the public
 host pin. A TLS-protected acceptance acknowledgement confirms mutual authentication before the host returns.
 The leaf authentication, backend-preserving credential preparation and root snapshot-reference integration
-are implemented and reviewed. Worker integration and live provisioning qualification remain pending. Memory snapshots require a root-verified credential
-lineage, while each restored VM receives a fresh process/incarnation principal and no inherited grants or session.
+are implemented and reviewed. Worker integration and live provisioning qualification remain pending. Memory
+snapshots require a root-verified credential lineage. Each restored VM receives a fresh process/incarnation
+principal and no inherited grants or session.
 
 Cold credential preparation preserves the selected provisioning backend from start to finish. A typed,
 owner-authenticated preparation creates root material for the exact pending VM and returns only its agent
@@ -77,7 +78,11 @@ Persistence, comparison helpers and guest ownership effects are implemented; pub
 authenticated worker remain unwired.
 
 Guest root can exercise every delegation granted to that VM. Local agent permissions restrict ordinary guest
-users but cannot isolate an application from guest root. The local control socket is privileged by default.
+users but cannot isolate an application from guest root. The implemented gateway uses a dedicated vsock port
+and a root-only local Unix socket. It forwards closed typed requests over one pinned TLS session and retires ambiguous or disconnected sessions. The
+`mvm-agent control floating-ip` commands expose inspect, associate, renew and release; they require the
+host worker before operations can succeed. Guest address reconciliation and live transport qualification remain
+pending. The local control socket is privileged by default.
 
 ### Protocol
 
