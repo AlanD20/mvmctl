@@ -97,8 +97,15 @@ func marshalGuestControlAliasAnnouncement(
 	link guestControlAliasLink,
 	address guestControlAliasAddress,
 ) ([]byte, error) {
-	if link.Index <= 0 || link.Name == "" || len(link.Name) >= unix.IFNAMSIZ || link.Flags&unix.IFF_UP == 0 || link.Flags&unix.IFF_LOOPBACK != 0 ||
-		link.MAC == ([6]byte{}) || link.MAC[0]&1 != 0 || address.Index != link.Index || !address.IP.Is4() ||
+	if link.Index <= 0 ||
+		link.Name == "" ||
+		len(link.Name) >= unix.IFNAMSIZ ||
+		link.Flags&unix.IFF_UP == 0 ||
+		link.Flags&unix.IFF_LOOPBACK != 0 ||
+		link.MAC == ([6]byte{}) ||
+		link.MAC[0]&1 != 0 ||
+		address.Index != link.Index ||
+		!address.IP.Is4() ||
 		!address.IP.IsPrivate() ||
 		address.Prefix != 32 ||
 		address.Scope != unix.RT_SCOPE_UNIVERSE ||
