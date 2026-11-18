@@ -44,6 +44,9 @@ observes the root generation immediately before its compare-and-swap; a concurre
 Fresh `mvm floating-ip inspect api --network cluster --json` reports `phase`, `lifetime`, `owner_origin`,
 `owner_vm_id`, `authority_state`, `lease_remaining_ms` and `alias_synchronization` alongside identity/generation.
 A persistent lifetime with zero remaining lease is not expired. Interpret lifetime and current authority together.
+For current, stable ownership, inspection observes kernel authority. Unassociated, retired or prior-boot records
+report `authority_state: unobserved`; this is not a kernel-absence claim. A successful release reports `absent`
+after completing its fencing checks.
 
 Association and transfer complete only after the exact target guest acknowledges its alias. An agent or bounded
 wait failure can occur after kernel ownership commits; it does not promise rollback. Inspect fresh ownership
