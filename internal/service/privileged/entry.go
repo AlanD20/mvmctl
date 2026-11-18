@@ -386,6 +386,14 @@ func dispatch(
 		return dispatchHandled, handleApplyNetworkHostTrafficPolicy(ctx, endpoint, caller, deps.control)
 	case network.NetworkHostTrafficPolicyRemoveAction:
 		return dispatchHandled, handleRemoveNetworkHostTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.VMFloatingIPTrafficPolicyApplyAction:
+		return dispatchHandled, handleApplyVMFloatingIPTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.VMFloatingIPTrafficPolicyRemoveAction:
+		return dispatchHandled, handleRemoveVMFloatingIPTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.NetworkFloatingIPTrafficPolicyApplyAction:
+		return dispatchHandled, handleApplyNetworkFloatingIPTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.NetworkFloatingIPTrafficPolicyRemoveAction:
+		return dispatchHandled, handleRemoveNetworkFloatingIPTrafficPolicy(ctx, endpoint, caller, deps.control)
 	case jailer.RuntimeStatusAction:
 		return dispatchHandled, handleRuntimeStatus(ctx, endpoint, caller, deps.runtimeStatus, deps.control)
 	case jailer.ConsoleObserveAction:

@@ -117,7 +117,7 @@ func newTrafficPolicyCmd(policyAPI api.PolicyAPI) *cobra.Command {
 }
 
 func newTrafficPolicyCreateCmd(policyAPI api.PolicyAPI) *cobra.Command {
-	var sourceNetwork, sourceVM, destination, protocol, port string
+	var sourceNetwork, sourceVM, destination, destinationFloatingIP, destinationNetwork, protocol, port string
 	var toHost bool
 	cmd := &cobra.Command{
 		Use: "create", Short: "Record one network-source or exact VM-source traffic allow intent.", Args: cobra.NoArgs,
@@ -125,8 +125,59 @@ func newTrafficPolicyCreateCmd(policyAPI api.PolicyAPI) *cobra.Command {
 			if (sourceNetwork == "") == (sourceVM == "") {
 				return errs.New(errs.CodeValidationFailed, "exactly one of --from-network or --from-vm is required")
 			}
-			if toHost == (destination != "") {
-				return errs.New(errs.CodeValidationFailed, "exactly one of --to-vm or --to-host is required")
+			destinationCount := 0
+			if destination != "" {
+				destinationCount++
+			}
+			if destinationFloatingIP != "" {
+				destinationCount++
+			}
+			if toHost {
+				destinationCount++
+			}
+			if destinationCount != 1 {
+				return errs.New(errs.CodeValidationFailed, "exactly one of --to-vm, --to-floating-ip or --to-host is required")
+			}
+			if destinationNetwork != "" && destinationFloatingIP == "" {
+				return errs.New(errs.CodeValidationFailed, "--to-network requires --to-floating-ip")
+			}
+			if destinationFloatingIP != "" && sourceNetwork != "" {
+				policy, err := policyAPI.NetworkToFloatingIPTrafficPolicyCreate(
+					cmd.Context(),
+					inputs.NetworkToFloatingIPTrafficPolicyCreateInput{
+						SourceNetwork:         sourceNetwork,
+						DestinationFloatingIP: destinationFloatingIP,
+						DestinationNetwork:    destinationNetwork,
+						Protocol:              protocol,
+						DestinationPort:       port,
+					})
+				if err != nil {
+					return err
+				}
+				if common.RecordResult(policy) {
+					return nil
+				}
+				common.Cli.PrintDictTree(common.Cli.ToMap(policy), "Network-to-floating-IP traffic allow intent")
+				return nil
+			}
+			if destinationFloatingIP != "" {
+				policy, err := policyAPI.VMToFloatingIPTrafficPolicyCreate(
+					cmd.Context(),
+					inputs.VMToFloatingIPTrafficPolicyCreateInput{
+						SourceVM:              sourceVM,
+						DestinationFloatingIP: destinationFloatingIP,
+						DestinationNetwork:    destinationNetwork,
+						Protocol:              protocol,
+						DestinationPort:       port,
+					})
+				if err != nil {
+					return err
+				}
+				if common.RecordResult(policy) {
+					return nil
+				}
+				common.Cli.PrintDictTree(common.Cli.ToMap(policy), "VM-to-floating-IP traffic allow intent")
+				return nil
 			}
 			if toHost && sourceNetwork != "" {
 				policy, err := policyAPI.NetworkToHostTrafficPolicyCreate(cmd.Context(),
@@ -191,11 +242,18 @@ func newTrafficPolicyCreateCmd(policyAPI api.PolicyAPI) *cobra.Command {
 	cmd.Flags().StringVar(&sourceNetwork, "from-network", "", "Source managed network")
 	cmd.Flags().StringVar(&sourceVM, "from-vm", "", "Exact source VM")
 	cmd.Flags().StringVar(&destination, "to-vm", "", "Exact destination VM")
+	cmd.Flags().StringVar(&destinationFloatingIP, "to-floating-ip", "", "Destination floating-IP name, ID, prefix or IPv4")
+	cmd.Flags().StringVar(
+		&destinationNetwork,
+		"to-network",
+		"",
+		"Floating-IP destination network (default: default network)",
+	)
 	cmd.Flags().BoolVar(&toHost, "to-host", false, "Destination is the source managed network's host gateway")
 	cmd.Flags().StringVar(&protocol, "protocol", "", "TCP/UDP protocol: tcp or udp")
 	cmd.Flags().StringVar(&port, "port", "", "Destination port or bounded range")
 	cmd.MarkFlagsMutuallyExclusive("from-network", "from-vm")
-	cmd.MarkFlagsMutuallyExclusive("to-vm", "to-host")
+	cmd.MarkFlagsMutuallyExclusive("to-vm", "to-host", "to-floating-ip")
 	if err := cmd.RegisterFlagCompletionFunc("from-network", completeNetworkNames); err != nil {
 		panic(err)
 	}
@@ -241,6 +299,20 @@ func newTrafficPolicyListCmd(policyAPI api.PolicyAPI) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			networkFloatingIPs, err := policyAPI.NetworkToFloatingIPTrafficPolicyList(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if networkFloatingIPs == nil {
+				networkFloatingIPs = []*results.NetworkToFloatingIPTrafficPolicy{}
+			}
+			vmFloatingIPs, err := policyAPI.VMToFloatingIPTrafficPolicyList(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if vmFloatingIPs == nil {
+				vmFloatingIPs = []*results.VMToFloatingIPTrafficPolicy{}
+			}
 			if networks == nil {
 				networks = []*results.NetworkToVMTrafficPolicy{}
 			}
@@ -255,6 +327,7 @@ func newTrafficPolicyListCmd(policyAPI api.PolicyAPI) *cobra.Command {
 			}
 			if common.RecordResult(&results.TrafficPolicies{
 				NetworkToVM: networks, VMToVM: vms, NetworkToHost: networkHosts, VMToHost: vmHosts,
+				NetworkToFloatingIP: networkFloatingIPs, VMToFloatingIP: vmFloatingIPs,
 			}) {
 				return nil
 			}
@@ -289,6 +362,26 @@ func newTrafficPolicyListCmd(policyAPI api.PolicyAPI) *cobra.Command {
 					"host (" + policy.Gateway + ")", string(policy.Protocol),
 					trafficPolicyPorts(policy.DestinationPortStart, policy.DestinationPortEnd)})
 			}
+			for _, policy := range networkFloatingIPs {
+				rows = append(rows, trafficPolicyRow{
+					policy.ID,
+					"network",
+					policy.SourceNetworkName,
+					"floating IP " + policy.DestinationFloatingIPName + " (" + policy.DestinationIPv4 + ")",
+					string(policy.Protocol),
+					trafficPolicyPorts(policy.DestinationPortStart, policy.DestinationPortEnd),
+				})
+			}
+			for _, policy := range vmFloatingIPs {
+				rows = append(rows, trafficPolicyRow{
+					policy.ID,
+					"vm",
+					policy.SourceVMName,
+					"floating IP " + policy.DestinationFloatingIPName + " (" + policy.DestinationIPv4 + ")",
+					string(policy.Protocol),
+					trafficPolicyPorts(policy.DestinationPortStart, policy.DestinationPortEnd),
+				})
+			}
 			common.RenderListing(rows, trafficPolicyColumns, "short")
 			return nil
 		},
@@ -303,13 +396,46 @@ func trafficPolicyPorts(start, end int) string {
 }
 
 func newTrafficPolicyInspectCmd(policyAPI api.PolicyAPI) *cobra.Command {
-	var networkSource, vmSource, toHost bool
+	var networkSource, vmSource, toHost, toFloatingIP bool
 	cmd := &cobra.Command{
 		Use: "inspect [policy]", Short: "Inspect desired traffic allow intent.", Args: cobra.ExactArgs(1),
 		ValidArgsFunction: completePolicyIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if networkSource == vmSource {
 				return errs.New(errs.CodeValidationFailed, "exactly one of --from-network or --from-vm is required")
+			}
+			if toHost && toFloatingIP {
+				return errs.New(errs.CodeValidationFailed, "--to-host and --to-floating-ip are mutually exclusive")
+			}
+			if toFloatingIP && networkSource {
+				policy, err := policyAPI.NetworkToFloatingIPTrafficPolicyInspect(
+					cmd.Context(),
+					inputs.NetworkToFloatingIPTrafficPolicyInput{
+						Identifiers: args,
+					})
+				if err != nil {
+					return err
+				}
+				if common.RecordResult(policy) {
+					return nil
+				}
+				common.Cli.PrintDictTree(common.Cli.ToMap(policy), "Network-to-floating-IP traffic allow intent")
+				return nil
+			}
+			if toFloatingIP {
+				policy, err := policyAPI.VMToFloatingIPTrafficPolicyInspect(
+					cmd.Context(),
+					inputs.VMToFloatingIPTrafficPolicyInput{
+						Identifiers: args,
+					})
+				if err != nil {
+					return err
+				}
+				if common.RecordResult(policy) {
+					return nil
+				}
+				common.Cli.PrintDictTree(common.Cli.ToMap(policy), "VM-to-floating-IP traffic allow intent")
+				return nil
 			}
 			if toHost && networkSource {
 				policy, err := policyAPI.NetworkToHostTrafficPolicyInspect(cmd.Context(),
@@ -366,11 +492,13 @@ func newTrafficPolicyInspectCmd(policyAPI api.PolicyAPI) *cobra.Command {
 	cmd.Flags().BoolVar(&networkSource, "from-network", false, "Select the network-source policy family")
 	cmd.Flags().BoolVar(&vmSource, "from-vm", false, "Select the VM-source policy family")
 	cmd.Flags().BoolVar(&toHost, "to-host", false, "Select grants to the managed host gateway")
+	cmd.Flags().BoolVar(&toFloatingIP, "to-floating-ip", false, "Select floating-IP destination grants")
+	cmd.MarkFlagsMutuallyExclusive("to-host", "to-floating-ip")
 	return cmd
 }
 
 func newTrafficPolicyRemoveCmd(policyAPI api.PolicyAPI) *cobra.Command {
-	var networkSource, vmSource, force, toHost bool
+	var networkSource, vmSource, force, toHost, toFloatingIP bool
 	cmd := &cobra.Command{
 		Use: "rm [policies...]", Aliases: []string{"remove", "delete", "del"},
 		Short: "Remove desired traffic allow intent after authoritative revocation.", Args: cobra.MinimumNArgs(1),
@@ -378,6 +506,9 @@ func newTrafficPolicyRemoveCmd(policyAPI api.PolicyAPI) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if networkSource == vmSource {
 				return errs.New(errs.CodeValidationFailed, "exactly one of --from-network or --from-vm is required")
+			}
+			if toHost && toFloatingIP {
+				return errs.New(errs.CodeValidationFailed, "--to-host and --to-floating-ip are mutually exclusive")
 			}
 			if !force {
 				confirmed, err := common.Cli.PromptConfirm(cmd.Context(),
@@ -391,6 +522,18 @@ func newTrafficPolicyRemoveCmd(policyAPI api.PolicyAPI) *cobra.Command {
 			}
 			var removeErr error
 			switch {
+			case toFloatingIP && networkSource:
+				removeErr = policyAPI.NetworkToFloatingIPTrafficPolicyRemove(
+					cmd.Context(),
+					inputs.NetworkToFloatingIPTrafficPolicyInput{
+						Identifiers: args,
+					})
+			case toFloatingIP:
+				removeErr = policyAPI.VMToFloatingIPTrafficPolicyRemove(
+					cmd.Context(),
+					inputs.VMToFloatingIPTrafficPolicyInput{
+						Identifiers: args,
+					})
 			case toHost && networkSource:
 				removeErr = policyAPI.NetworkToHostTrafficPolicyRemove(cmd.Context(),
 					inputs.NetworkToHostTrafficPolicyInput{Identifiers: args})
@@ -418,5 +561,7 @@ func newTrafficPolicyRemoveCmd(policyAPI api.PolicyAPI) *cobra.Command {
 	cmd.Flags().BoolVar(&vmSource, "from-vm", false, "Select the VM-source policy family")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 	cmd.Flags().BoolVar(&toHost, "to-host", false, "Select grants to the managed host gateway")
+	cmd.Flags().BoolVar(&toFloatingIP, "to-floating-ip", false, "Select floating-IP destination grants")
+	cmd.MarkFlagsMutuallyExclusive("to-host", "to-floating-ip")
 	return cmd
 }

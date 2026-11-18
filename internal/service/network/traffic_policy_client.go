@@ -61,7 +61,8 @@ func (client *TrafficPolicyClient) RemoveVMTrafficPolicy(
 }
 
 func exchangeTrafficPolicy[Request NetworkTrafficPolicyRequest | VMTrafficPolicyRequest |
-	VMHostTrafficPolicyRequest | NetworkHostTrafficPolicyRequest](
+	VMHostTrafficPolicyRequest | NetworkHostTrafficPolicyRequest |
+	VMFloatingIPTrafficPolicyRequest | NetworkFloatingIPTrafficPolicyRequest](
 	ctx context.Context, client *TrafficPolicyClient, action string, request Request, expectedID string,
 ) (TrafficPolicyMutationResult, error) {
 	if ctx == nil || client == nil {

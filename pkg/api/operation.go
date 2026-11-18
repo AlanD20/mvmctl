@@ -53,7 +53,58 @@ type Operation struct {
 	hostPolicyObserver        hostPolicyObserver
 	trustedReleaseClient      trustedReleaseClient
 	consoleClient             consoleAuthorityClient
-	trafficPolicyClient       *networkservice.TrafficPolicyClient
+	trafficPolicyClient       trafficPolicyClient
+}
+
+type trafficPolicyClient interface {
+	ApplyVMTrafficPolicy(
+		context.Context,
+		networkservice.VMTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	RemoveVMTrafficPolicy(
+		context.Context,
+		networkservice.VMTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	ApplyNetworkTrafficPolicy(
+		context.Context,
+		networkservice.NetworkTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	RemoveNetworkTrafficPolicy(
+		context.Context,
+		networkservice.NetworkTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	ApplyVMHostTrafficPolicy(
+		context.Context,
+		networkservice.VMHostTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	RemoveVMHostTrafficPolicy(
+		context.Context,
+		networkservice.VMHostTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	ApplyNetworkHostTrafficPolicy(
+		context.Context,
+		networkservice.NetworkHostTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	RemoveNetworkHostTrafficPolicy(
+		context.Context,
+		networkservice.NetworkHostTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	ApplyVMFloatingIPTrafficPolicy(
+		context.Context,
+		networkservice.VMFloatingIPTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	RemoveVMFloatingIPTrafficPolicy(
+		context.Context,
+		networkservice.VMFloatingIPTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	ApplyNetworkFloatingIPTrafficPolicy(
+		context.Context,
+		networkservice.NetworkFloatingIPTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
+	RemoveNetworkFloatingIPTrafficPolicy(
+		context.Context,
+		networkservice.NetworkFloatingIPTrafficPolicyRequest,
+	) (networkservice.TrafficPolicyMutationResult, error)
 }
 
 type hostSystemBinaryInstaller interface {

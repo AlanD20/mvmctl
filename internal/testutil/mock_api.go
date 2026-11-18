@@ -34,6 +34,35 @@ type MockOperation struct {
 
 // MockPolicyAPI implements api.PolicyAPI for composite-interface compatibility.
 type MockPolicyAPI struct {
+	VMToFloatingIPTrafficPolicyCreateFunc func(
+		ctx context.Context,
+		input inputs.VMToFloatingIPTrafficPolicyCreateInput,
+	) (*results.VMToFloatingIPTrafficPolicy, error)
+	VMToFloatingIPTrafficPolicyListFunc    func(ctx context.Context) ([]*results.VMToFloatingIPTrafficPolicy, error)
+	VMToFloatingIPTrafficPolicyInspectFunc func(
+		ctx context.Context,
+		input inputs.VMToFloatingIPTrafficPolicyInput,
+	) (*results.VMToFloatingIPTrafficPolicy, error)
+	VMToFloatingIPTrafficPolicyRemoveFunc func(
+		ctx context.Context,
+		input inputs.VMToFloatingIPTrafficPolicyInput,
+	) error
+	NetworkToFloatingIPTrafficPolicyCreateFunc func(
+		ctx context.Context,
+		input inputs.NetworkToFloatingIPTrafficPolicyCreateInput,
+	) (*results.NetworkToFloatingIPTrafficPolicy, error)
+	NetworkToFloatingIPTrafficPolicyListFunc func(
+		ctx context.Context,
+	) ([]*results.NetworkToFloatingIPTrafficPolicy, error)
+	NetworkToFloatingIPTrafficPolicyInspectFunc func(
+		ctx context.Context,
+		input inputs.NetworkToFloatingIPTrafficPolicyInput,
+	) (*results.NetworkToFloatingIPTrafficPolicy, error)
+	NetworkToFloatingIPTrafficPolicyRemoveFunc func(
+		ctx context.Context,
+		input inputs.NetworkToFloatingIPTrafficPolicyInput,
+	) error
+
 	VMToHostTrafficPolicyCreateFunc       func(context.Context, inputs.VMToHostTrafficPolicyCreateInput) (*results.VMToHostTrafficPolicy, error)
 	VMToHostTrafficPolicyListFunc         func(context.Context) ([]*results.VMToHostTrafficPolicy, error)
 	VMToHostTrafficPolicyInspectFunc      func(context.Context, inputs.VMToHostTrafficPolicyInput) (*results.VMToHostTrafficPolicy, error)

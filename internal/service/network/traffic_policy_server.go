@@ -259,7 +259,18 @@ func acquireTrafficPolicyAuthority(
 }
 
 func (authority *trafficPolicyAuthority) begin(ctx context.Context, sourceNetworkID string) error {
+	return authority.beginPolicyNetworks(ctx, sourceNetworkID, "")
+}
+
+func (authority *trafficPolicyAuthority) beginPolicyNetworks(
+	ctx context.Context,
+	sourceNetworkID,
+	floatingNetworkID string,
+) error {
 	networkIDs := []string{sourceNetworkID}
+	if floatingNetworkID != "" {
+		networkIDs = append(networkIDs, floatingNetworkID)
+	}
 	for _, record := range authority.topologies {
 		networkIDs = append(networkIDs, record.NetworkID)
 	}

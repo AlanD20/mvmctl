@@ -417,3 +417,41 @@ CREATE TABLE network_host_traffic_policies (
     UNIQUE(source_network_id, protocol, destination_port_start, destination_port_end)
 );
 CREATE INDEX idx_network_host_traffic_source ON network_host_traffic_policies(source_network_id);
+
+
+-- Root reservation identity; no local floating-IP ownership projection.
+CREATE TABLE vm_floating_ip_traffic_policies (
+    id TEXT PRIMARY KEY CHECK(length(id) = 64 AND id NOT GLOB '*[^0-9a-f]*'),
+    source_vm_id TEXT NOT NULL,
+    destination_floating_ip_id TEXT NOT NULL CHECK(length(destination_floating_ip_id) = 32 AND destination_floating_ip_id NOT GLOB '*[^0-9a-f]*'),
+    protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp')),
+    destination_port_start INTEGER NOT NULL CHECK(destination_port_start BETWEEN 1 AND 65535),
+    destination_port_end INTEGER NOT NULL CHECK(destination_port_end BETWEEN destination_port_start AND 65535),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    claim_id TEXT NOT NULL DEFAULT '',
+    incarnation TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (source_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    UNIQUE(source_vm_id, destination_floating_ip_id, protocol, destination_port_start, destination_port_end)
+);
+CREATE INDEX idx_vm_floating_ip_traffic_source ON vm_floating_ip_traffic_policies(source_vm_id);
+CREATE INDEX idx_vm_floating_ip_traffic_destination ON vm_floating_ip_traffic_policies(destination_floating_ip_id);
+
+
+-- Root reservation identity; no local floating-IP ownership projection.
+CREATE TABLE network_floating_ip_traffic_policies (
+    id TEXT PRIMARY KEY CHECK(length(id) = 64 AND id NOT GLOB '*[^0-9a-f]*'),
+    source_network_id TEXT NOT NULL,
+    destination_floating_ip_id TEXT NOT NULL CHECK(length(destination_floating_ip_id) = 32 AND destination_floating_ip_id NOT GLOB '*[^0-9a-f]*'),
+    protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp')),
+    destination_port_start INTEGER NOT NULL CHECK(destination_port_start BETWEEN 1 AND 65535),
+    destination_port_end INTEGER NOT NULL CHECK(destination_port_end BETWEEN destination_port_start AND 65535),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    claim_id TEXT NOT NULL DEFAULT '',
+    incarnation TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (source_network_id) REFERENCES networks(id) ON DELETE CASCADE,
+    UNIQUE(source_network_id, destination_floating_ip_id, protocol, destination_port_start, destination_port_end)
+);
+CREATE INDEX idx_network_floating_ip_traffic_source ON network_floating_ip_traffic_policies(source_network_id);
+CREATE INDEX idx_network_floating_ip_traffic_destination ON network_floating_ip_traffic_policies(destination_floating_ip_id);

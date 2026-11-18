@@ -79,6 +79,12 @@ func (service *Service) RemoveFloatingIP(
 		slog.Error("failed to retire floating IP", "id", item.ID, "network_id", item.NetworkID, "error", err)
 		return nil, err
 	}
+	if err := service.trafficRepo.InvalidateByFloatingIP(ctx, item.ID); err != nil {
+		return nil, errs.WrapMsg(
+			errs.CodeDatabaseError,
+			"floating IP retired but local policy projection cleanup failed; retry policy removal", err,
+			errs.WithDetails(map[string]any{"root_resource_retired": true, "projection_failed": true}))
+	}
 	return floatingIPProjection(result), nil
 }
 

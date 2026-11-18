@@ -156,6 +156,13 @@ func (r *trafficPolicySQLiteRepo) InvalidateByVM(ctx context.Context, vmID strin
 		`DELETE FROM vm_host_traffic_policies WHERE source_vm_id = ?`, vmID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM vm_floating_ip_traffic_policies WHERE source_vm_id=?`,
+		vmID,
+	); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -174,6 +181,13 @@ func (r *trafficPolicySQLiteRepo) InvalidateByNetwork(ctx context.Context, netwo
 	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM network_host_traffic_policies WHERE source_network_id = ?`, networkID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM network_floating_ip_traffic_policies WHERE source_network_id=?`,
+		networkID,
+	); err != nil {
 		return err
 	}
 	return tx.Commit()

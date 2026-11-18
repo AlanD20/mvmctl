@@ -13,6 +13,27 @@ import (
 
 // PolicyAPI exposes separate traffic allow-intent and directional execution policy families.
 type PolicyAPI interface {
+	VMToFloatingIPTrafficPolicyCreate(
+		context.Context,
+		inputs.VMToFloatingIPTrafficPolicyCreateInput,
+	) (*results.VMToFloatingIPTrafficPolicy, error)
+	VMToFloatingIPTrafficPolicyList(context.Context) ([]*results.VMToFloatingIPTrafficPolicy, error)
+	VMToFloatingIPTrafficPolicyInspect(
+		context.Context,
+		inputs.VMToFloatingIPTrafficPolicyInput,
+	) (*results.VMToFloatingIPTrafficPolicy, error)
+	VMToFloatingIPTrafficPolicyRemove(context.Context, inputs.VMToFloatingIPTrafficPolicyInput) error
+	NetworkToFloatingIPTrafficPolicyCreate(
+		context.Context,
+		inputs.NetworkToFloatingIPTrafficPolicyCreateInput,
+	) (*results.NetworkToFloatingIPTrafficPolicy, error)
+	NetworkToFloatingIPTrafficPolicyList(context.Context) ([]*results.NetworkToFloatingIPTrafficPolicy, error)
+	NetworkToFloatingIPTrafficPolicyInspect(
+		context.Context,
+		inputs.NetworkToFloatingIPTrafficPolicyInput,
+	) (*results.NetworkToFloatingIPTrafficPolicy, error)
+	NetworkToFloatingIPTrafficPolicyRemove(context.Context, inputs.NetworkToFloatingIPTrafficPolicyInput) error
+
 	VMToHostTrafficPolicyCreate(
 		ctx context.Context,
 		input inputs.VMToHostTrafficPolicyCreateInput,

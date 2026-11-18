@@ -16,10 +16,12 @@ type TrafficPolicyService struct {
 // TrafficPolicyAllowIntents contains persisted desired grants for VM and managed-host destinations.
 // These rows are not compiled firewall rules and do not describe applied kernel state.
 type TrafficPolicyAllowIntents struct {
-	NetworkToVM   []*model.NetworkToVMTrafficAllowIntent
-	VMToVM        []*model.VMToVMTrafficAllowIntent
-	NetworkToHost []*model.NetworkToHostTrafficAllowIntent
-	VMToHost      []*model.VMToHostTrafficAllowIntent
+	VMToFloatingIP      []*model.VMToFloatingIPTrafficAllowIntent
+	NetworkToFloatingIP []*model.NetworkToFloatingIPTrafficAllowIntent
+	NetworkToVM         []*model.NetworkToVMTrafficAllowIntent
+	VMToVM              []*model.VMToVMTrafficAllowIntent
+	NetworkToHost       []*model.NetworkToHostTrafficAllowIntent
+	VMToHost            []*model.VMToHostTrafficAllowIntent
 }
 
 // NewTrafficPolicyService creates a traffic policy service.
@@ -88,7 +90,16 @@ func (s *TrafficPolicyService) AllowIntents(ctx context.Context) (*TrafficPolicy
 		slog.Error("failed to list VM-to-host policy intents", "error", err)
 		return nil, errs.WrapMsg(errs.CodePolicyListFailed, "failed to list VM-to-host policy intents", err)
 	}
+	networkFloatingIPs, err := s.repo.ListNetworkToFloatingIP(ctx)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodePolicyListFailed, "failed to list floating-IP policy intents", err)
+	}
+	vmFloatingIPs, err := s.repo.ListVMToFloatingIP(ctx)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodePolicyListFailed, "failed to list floating-IP policy intents", err)
+	}
 	return &TrafficPolicyAllowIntents{
+		NetworkToFloatingIP: networkFloatingIPs, VMToFloatingIP: vmFloatingIPs,
 		NetworkToVM: fromNetworks, VMToVM: fromVMs, NetworkToHost: networkHosts, VMToHost: vmHosts,
 	}, nil
 }

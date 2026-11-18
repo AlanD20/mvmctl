@@ -9,6 +9,18 @@ import (
 // TrafficPolicyRepository persists closed VM and managed-host traffic allow intents.
 // InvalidateByVM spans all affected tables so callers cannot observe partial invalidation.
 type TrafficPolicyRepository interface {
+	ProjectVMToFloatingIP(context.Context, *model.VMToFloatingIPTrafficAllowIntent) error
+	GetVMToFloatingIP(context.Context, string) (*model.VMToFloatingIPTrafficAllowIntent, error)
+	FindVMToFloatingIPByPrefix(context.Context, string) ([]*model.VMToFloatingIPTrafficAllowIntent, error)
+	ListVMToFloatingIP(context.Context) ([]*model.VMToFloatingIPTrafficAllowIntent, error)
+	DeleteOwnedVMToFloatingIP(ctx context.Context, policyID, claim, incarnation string) error
+	ProjectNetworkToFloatingIP(context.Context, *model.NetworkToFloatingIPTrafficAllowIntent) error
+	GetNetworkToFloatingIP(context.Context, string) (*model.NetworkToFloatingIPTrafficAllowIntent, error)
+	FindNetworkToFloatingIPByPrefix(context.Context, string) ([]*model.NetworkToFloatingIPTrafficAllowIntent, error)
+	ListNetworkToFloatingIP(context.Context) ([]*model.NetworkToFloatingIPTrafficAllowIntent, error)
+	DeleteOwnedNetworkToFloatingIP(ctx context.Context, policyID, claim, incarnation string) error
+	InvalidateByFloatingIP(context.Context, string) error
+
 	ProjectVMToHost(ctx context.Context, intent *model.VMToHostTrafficAllowIntent) error
 	ProjectNetworkToHost(ctx context.Context, intent *model.NetworkToHostTrafficAllowIntent) error
 	GetVMToHost(ctx context.Context, policyID string) (*model.VMToHostTrafficAllowIntent, error)

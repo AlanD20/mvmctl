@@ -26,10 +26,12 @@ type VMToVMTrafficPolicy struct {
 
 // TrafficPolicies keeps closed source and destination forms distinct in list output.
 type TrafficPolicies struct {
-	NetworkToVM   []*NetworkToVMTrafficPolicy   `json:"network_to_vm"`
-	VMToVM        []*VMToVMTrafficPolicy        `json:"vm_to_vm"`
-	NetworkToHost []*NetworkToHostTrafficPolicy `json:"network_to_host"`
-	VMToHost      []*VMToHostTrafficPolicy      `json:"vm_to_host"`
+	VMToFloatingIP      []*VMToFloatingIPTrafficPolicy      `json:"vm_to_floating_ip"`
+	NetworkToFloatingIP []*NetworkToFloatingIPTrafficPolicy `json:"network_to_floating_ip"`
+	NetworkToVM         []*NetworkToVMTrafficPolicy         `json:"network_to_vm"`
+	VMToVM              []*VMToVMTrafficPolicy              `json:"vm_to_vm"`
+	NetworkToHost       []*NetworkToHostTrafficPolicy       `json:"network_to_host"`
+	VMToHost            []*VMToHostTrafficPolicy            `json:"vm_to_host"`
 }
 
 // VMToHostTrafficPolicy describes a gateway grant; Gateway is display data, not mutation authority.
@@ -58,4 +60,28 @@ type VMToVMExecPolicy struct {
 	TargetUser        string `json:"target_user"`
 	CreatedAt         string `json:"created_at"`
 	UpdatedAt         string `json:"updated_at"`
+}
+
+// VMToFloatingIPTrafficPolicy describes exact directional allow intent and current display names.
+type VMToFloatingIPTrafficPolicy struct {
+	model.VMToFloatingIPTrafficAllowIntent
+	SourceVMName              string                       `json:"source_vm_name"`
+	SourceNetworkID           string                       `json:"source_network_id"`
+	SourceNetworkName         string                       `json:"source_network_name"`
+	DestinationFloatingIPName string                       `json:"destination_floating_ip_name"`
+	DestinationNetworkID      string                       `json:"destination_network_id"`
+	DestinationNetworkName    string                       `json:"destination_network_name"`
+	DestinationIPv4           string                       `json:"destination_ipv4"`
+	NetworkRelation           model.ManagedNetworkRelation `json:"network_relation"`
+}
+
+// NetworkToFloatingIPTrafficPolicy describes immutable allow intent and current display names.
+type NetworkToFloatingIPTrafficPolicy struct {
+	model.NetworkToFloatingIPTrafficAllowIntent
+	SourceNetworkName         string                       `json:"source_network_name"`
+	DestinationFloatingIPName string                       `json:"destination_floating_ip_name"`
+	DestinationNetworkID      string                       `json:"destination_network_id"`
+	DestinationNetworkName    string                       `json:"destination_network_name"`
+	DestinationIPv4           string                       `json:"destination_ipv4"`
+	NetworkRelation           model.ManagedNetworkRelation `json:"network_relation"`
 }
