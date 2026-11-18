@@ -21,19 +21,14 @@ type FloatingIPDelegationAPI interface {
 		inputs.FloatingIPDelegationGrantInput) (*model.FloatingIPDelegationItem, error)
 	FloatingIPDelegationList(context.Context, inputs.FloatingIPInput) ([]*model.FloatingIPDelegationItem, error)
 	FloatingIPDelegationGet(context.Context, inputs.FloatingIPDelegationInput) (*model.FloatingIPDelegationItem, error)
-	FloatingIPDelegationRevoke(context.Context, inputs.FloatingIPDelegationInput) (*model.FloatingIPDelegationItem, error)
+	FloatingIPDelegationRevoke(
+		context.Context,
+		inputs.FloatingIPDelegationInput,
+	) (*model.FloatingIPDelegationItem, error)
 }
 
 func (op *Operation) FloatingIPDelegationGrant(
 	ctx context.Context, input inputs.FloatingIPDelegationGrantInput,
-) (*model.FloatingIPDelegationItem, error) {
-	return op.FloatingIPDelegationEnsure(ctx, inputs.FloatingIPDelegationEnsureInput{
-		FloatingIPDelegationGrantInput: input, ID: strings.ReplaceAll(crypto.UUIDV4(), "-", "")})
-}
-
-// FloatingIPDelegationEnsure uses a persisted exact creation identity for crash-safe immutable-intent retries.
-func (op *Operation) FloatingIPDelegationEnsure(
-	ctx context.Context, input inputs.FloatingIPDelegationEnsureInput,
 ) (*model.FloatingIPDelegationItem, error) {
 	if err := input.Validate(); err != nil {
 		return nil, err
@@ -46,15 +41,41 @@ func (op *Operation) FloatingIPDelegationEnsure(
 	if err != nil {
 		return nil, err
 	}
-	if string(target.NetworkID) != resource.NetworkID {
+	input.Network, input.Resource, input.VM = resource.NetworkID, resource.ID, target.ID
+	return op.FloatingIPDelegationEnsure(ctx, inputs.FloatingIPDelegationEnsureInput{
+		FloatingIPDelegationGrantInput: input, ID: strings.ReplaceAll(crypto.UUIDV4(), "-", "")})
+}
+
+// FloatingIPDelegationEnsure uses a persisted exact creation identity for crash-safe immutable-intent retries.
+func (op *Operation) FloatingIPDelegationEnsure(
+	ctx context.Context, input inputs.FloatingIPDelegationEnsureInput,
+) (*model.FloatingIPDelegationItem, error) {
+	if err := input.Validate(); err != nil {
+		return nil, err
+	}
+	network, err := op.Repos.Network.Get(ctx, input.Network)
+	if err != nil {
+		return nil, err
+	}
+	if network == nil || network.DeletedAt != nil {
+		return nil, errs.NotFound(errs.CodeNetworkNotFound, "saved delegation network no longer exists")
+	}
+	target, err := op.Repos.VM.Get(ctx, input.VM)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		return nil, errs.NotFound(errs.CodeVMNotFound, "saved delegation VM no longer exists")
+	}
+	if string(target.NetworkID) != input.Network {
 		return nil, errs.New(errs.CodeValidationFailed, "delegation VM must belong to the floating-IP network")
 	}
 	duration, err := input.LeaseDuration()
 	if err != nil {
 		return nil, err
 	}
-	result, err := op.Services.Network.GrantFloatingIPDelegation(ctx, input.ID, resource.NetworkID, resource.ID,
-		target.ID, input.Method, duration)
+	result, err := op.floatingIPAuthority.GrantFloatingIPDelegation(ctx, input.ID, input.Network, input.Resource,
+		input.VM, input.Method, duration)
 	if err != nil {
 		return nil, err
 	}

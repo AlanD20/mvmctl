@@ -59,7 +59,7 @@ func (op *Operation) FloatingIPGet(ctx context.Context, input inputs.FloatingIPI
 	if err != nil {
 		return nil, err
 	}
-	return network.NewFloatingIPResolver(op.Services.Network).Resolve(ctx, item.ID, input.Identifier)
+	return network.NewFloatingIPResolver(op.floatingIPAuthority).Resolve(ctx, item.ID, input.Identifier)
 }
 
 func (op *Operation) FloatingIPRemove(

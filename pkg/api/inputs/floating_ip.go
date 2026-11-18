@@ -53,18 +53,25 @@ func (input FloatingIPCreateInput) Resolve(ctx context.Context, repo network.Rep
 	if err != nil {
 		return nil, err
 	}
+	if err := input.validateNetworkAddress(item); err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+func (input FloatingIPCreateInput) validateNetworkAddress(item *model.NetworkItem) error {
 	if input.IPv4 != "" {
 		prefix, prefixErr := netip.ParsePrefix(item.Subnet)
 		address, addressErr := netip.ParseAddr(input.IPv4)
 		if prefixErr != nil || addressErr != nil || !prefix.Addr().Is4() || !prefix.Contains(address) ||
 			address == prefix.Masked().Addr() || !prefix.Contains(address.Next()) || input.IPv4 == item.IPv4Gateway {
-			return nil, errs.New(
+			return errs.New(
 				errs.CodeValidationFailed,
 				"floating IP must be a usable address in its network and differ from the gateway",
 			)
 		}
 	}
-	return item, nil
+	return nil
 }
 
 // FloatingIPNetworkInput resolves a network without trusting its cache projection as root authority.

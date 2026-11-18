@@ -74,6 +74,12 @@ func (input FloatingIPDelegationEnsureInput) Validate() error {
 	if err := input.FloatingIPDelegationGrantInput.Validate(); err != nil {
 		return err
 	}
+	if !environmentFloatingIPNetworkIDPattern.MatchString(input.Network) ||
+		!environmentPolicyVMIDPattern.MatchString(
+			input.Resource,
+		) || !environmentPolicyVMIDPattern.MatchString(input.VM) {
+		return errs.New(errs.CodeValidationFailed, "delegation ensure requires full network, resource and VM IDs")
+	}
 	return (FloatingIPDelegationInput{ID: input.ID}).Validate()
 }
 

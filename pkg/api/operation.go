@@ -54,6 +54,22 @@ type Operation struct {
 	trustedReleaseClient      trustedReleaseClient
 	consoleClient             consoleAuthorityClient
 	trafficPolicyClient       trafficPolicyClient
+	floatingIPAuthority       floatingIPAuthority
+}
+
+// floatingIPAuthority retains the fixed service's typed reservation and delegation effects.
+type floatingIPAuthority interface {
+	CreateFloatingIP(context.Context, string, string, string, string) (*model.FloatingIPItem, error)
+	GrantFloatingIPDelegation(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+		string,
+		time.Duration,
+	) (*model.FloatingIPDelegationItem, error)
+	ListFloatingIPs(context.Context, string) ([]*model.FloatingIPItem, error)
 }
 
 type trafficPolicyClient interface {
@@ -242,6 +258,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		hostPolicyObserver:        policyObserver,
 		trustedReleaseClient:      jailer.NewTrustedReleaseClient(),
 		trafficPolicyClient:       networkservice.NewTrafficPolicyClient(),
+		floatingIPAuthority:       s.Network,
 	}
 }
 

@@ -36,9 +36,9 @@ func (op *Operation) FloatingIPEnsure(
 	if err := ownership.Validate(); err != nil {
 		return nil, err
 	}
-	item, err := input.Resolve(ctx, op.Repos.Network)
+	item, err := input.ResolveOwnedNetwork(ctx, op.Repos.Network)
 	if err != nil {
 		return nil, err
 	}
-	return op.Services.Network.CreateFloatingIP(ctx, ownership.ResourceID, item.ID, input.Name, input.IPv4)
+	return op.floatingIPAuthority.CreateFloatingIP(ctx, ownership.ResourceID, item.ID, input.Name, input.IPv4)
 }
