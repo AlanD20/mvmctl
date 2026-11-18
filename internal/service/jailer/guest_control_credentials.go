@@ -410,23 +410,48 @@ func admitGuestControlRetirementLeaf(
 }
 
 func (plan *protectedCacheCleanupPlan) retireGuestControlCredentials(ctx context.Context) error {
+	// References must disappear durably before any material they name. Inventory sorting is
+	// insufficient: a version hash can sort before "binding", making an interrupted deletion
+	// leave a reference whose material is gone and permanently preventing safe admission.
 	for _, leaf := range plan.guestControlCredentials {
-		var pinned, current unix.Stat_t
-		if err := unix.Fstat(leaf.fd, &pinned); err != nil {
-			return err
+		if strings.TrimSuffix(leaf.name, ".next") == guestControlBindingLeaf {
+			if err := retireGuestControlLeaf(ctx, leaf); err != nil {
+				return err
+			}
 		}
-		if err := unix.Fstatat(leaf.directory, leaf.name, &current, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-			return err
+	}
+	for _, leaf := range plan.guestControlCredentials {
+		if strings.TrimSuffix(leaf.name, ".next") == guestControlBindingLeaf {
+			continue
 		}
-		if !sameProtectedReadStat(leaf.stat, pinned) || !sameProtectedReadStat(pinned, current) {
-			return instanceValidationError("Guest Control retired credential identity changed")
-		}
-		if err := unix.Unlinkat(leaf.directory, leaf.name, 0); err != nil {
-			return err
-		}
+		// A previous reference unlink may have succeeded but its fsync failed. On retry
+		// inventory sees no reference, so seal that observed absence AGAIN before deletion.
 		if err := unix.Fsync(leaf.directory); err != nil {
+			return err
+		}
+		if err := retireGuestControlLeaf(ctx, leaf); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func retireGuestControlLeaf(ctx context.Context, leaf guestControlRetirementLeaf) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var pinned, current unix.Stat_t
+	if err := unix.Fstat(leaf.fd, &pinned); err != nil {
+		return err
+	}
+	if err := unix.Fstatat(leaf.directory, leaf.name, &current, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return err
+	}
+	if !sameProtectedReadStat(leaf.stat, pinned) || !sameProtectedReadStat(pinned, current) {
+		return instanceValidationError("Guest Control retired credential identity changed")
+	}
+	if err := unix.Unlinkat(leaf.directory, leaf.name, 0); err != nil {
+		return err
+	}
+	return unix.Fsync(leaf.directory)
 }

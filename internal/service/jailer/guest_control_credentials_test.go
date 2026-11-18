@@ -120,6 +120,44 @@ func TestGuestControlWholeCacheRetirementAdmitsPendingAndImmutableLeaves(t *test
 	require.Empty(t, entries)
 }
 
+func TestGuestControlRetirementRetrySealsMissingBindingBeforeDeletingCredentials(t *testing.T) {
+	directory, backing := guestControlColdFixture(t)
+	receipt, _, err := prepareColdGuestControl(t.Context(), backing)
+	require.NoError(t, err)
+	materialLeaf := guestControlCredentialLeaf(receipt.Version)
+	// O_PATH admits real descriptor-relative lookup/unlink, but fsync deterministically fails.
+	// This exercises the actual reference-unlink/sync boundary without a generic effect hook.
+	pathFD, err := unix.Open(directory, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, unix.Close(pathFD)) })
+	admit := func(fd int, names []string) *protectedCacheCleanupPlan {
+		t.Helper()
+		plan := &protectedCacheCleanupPlan{cache: &managedCacheLease{ownerUID: testAuthorityUID}}
+		ordinary, err := plan.admitGuestControlMetadata(t.Context(), fd, testVMID, names)
+		require.NoError(t, err)
+		require.Empty(t, ordinary)
+		t.Cleanup(func() { require.NoError(t, closeProtectedFDs(plan.retained)) })
+		return plan
+	}
+	// Put material first deliberately: reference ordering must not depend on hash lexicography.
+	first := admit(pathFD, []string{materialLeaf, guestControlBindingLeaf})
+	require.ErrorIs(t, first.retireGuestControlCredentials(t.Context()), unix.EBADF)
+	_, err = os.Stat(filepath.Join(directory, guestControlBindingLeaf))
+	require.True(t, os.IsNotExist(err), "the failure occurred after reference unlink")
+	_, err = os.Stat(filepath.Join(directory, materialLeaf))
+	require.NoError(t, err, "failed reference sync must retain credential material")
+	// A fresh invocation sees the reference already absent. It still MUST sync the directory
+	// before touching material; treating absence as durable success would lose this credential.
+	retry := admit(pathFD, []string{materialLeaf})
+	require.ErrorIs(t, retry.retireGuestControlCredentials(t.Context()), unix.EBADF)
+	_, err = os.Stat(filepath.Join(directory, materialLeaf))
+	require.NoError(t, err)
+	completed := admit(backing.metadataFD, []string{materialLeaf})
+	require.NoError(t, completed.retireGuestControlCredentials(t.Context()))
+	_, err = os.Stat(filepath.Join(directory, materialLeaf))
+	require.True(t, os.IsNotExist(err))
+}
+
 func TestGuestControlPrepareResultDoesNotAcceptHostMaterialOrAnotherColdSource(t *testing.T) {
 	host, agent, err := guestcontrolauth.Generate(t.Context())
 	require.NoError(t, err)
