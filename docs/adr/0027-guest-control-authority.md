@@ -31,8 +31,8 @@ Endpoint authentication uses TLS 1.3 with mutually pinned, role-specific Ed25519
 application protocol. Pins identify provisioned keys; certificate subjects and clocks do not establish VM identity.
 The host private key stays in root authority. The guest receives only its own private material and the public
 host pin. A TLS-protected acceptance acknowledgement confirms mutual authentication before the host returns.
-The leaf codec and authentication implementation are reviewed and tested; protected provisioning, snapshot
-credential references and worker integration remain pending. Memory snapshots require a root-verified credential
+The leaf authentication, backend-preserving credential preparation and root snapshot-reference integration
+are implemented and reviewed. Worker integration and live provisioning qualification remain pending. Memory snapshots require a root-verified credential
 lineage, while each restored VM receives a fresh process/incarnation principal and no inherited grants or session.
 
 Cold credential preparation preserves the selected provisioning backend from start to finish. A typed,
@@ -73,7 +73,8 @@ Root grant records now bind one immutable grant ID to an exact resource, VM inca
 moves through recorded revoking and revoked states; old IDs cannot reactivate. Ownership records retain the
 exact sustaining grant revision, so revocation does not cancel operator ownership or a different grant's lease.
 Association and renewal grants require an explicit finite whole-second lease policy; inspect and release do not.
-Persistence and comparison helpers are implemented; authenticated grant dispatch and effects remain unwired.
+Persistence, comparison helpers and guest ownership effects are implemented; public grant dispatch and the
+authenticated worker remain unwired.
 
 Guest root can exercise every delegation granted to that VM. Local agent permissions restrict ordinary guest
 users but cannot isolate an application from guest root. The local control socket is privileged by default.

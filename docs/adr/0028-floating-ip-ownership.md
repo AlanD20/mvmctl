@@ -28,7 +28,8 @@ address. Inventory is paginated to respect the existing privileged frame bound w
 The root record uses schema 2 with separate publication revision and ownership generation. Its closed phases
 record finite-lease association, renewal, release and recovery. Recovery of an interrupted timed install must
 fence before returning to unassociated state; journal replay cannot grant or renew a key. Phase validation is
-implemented, but the runtime coordinator and timed activation remain unwired. Schema-1 records are rejected.
+implemented, together with guest coordinator and timed effects. Authenticated worker/public dispatch and
+composed kernel qualification remain pending. Schema-1 records are rejected.
 Only a stable unassociated record may retire under retained index/network locks after reboot without recreating
 the network. Owned or unfinished records require fencing before retirement.
 Network removal requires live reservations to be removed first; reset admits only verified retirement history.

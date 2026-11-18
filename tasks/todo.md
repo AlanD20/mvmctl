@@ -52,7 +52,10 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Implement root delegation persistence and exact sustaining-grant provenance with explicit lease policy;
   verify the correction rejecting impossible ownership revisions.
 - [x] Implement and review pinned mutual TLS authentication with real handshake, refusal and cancellation tests.
-- [ ] Finish root credential provisioning for both backends, snapshot lineage and retirement integration.
+- [x] Implement backend-preserving root credential preparation, expected-import receipts, snapshot lineage
+  and restartable credential retirement. Focused QA and existing workflow regressions pass.
+- [x] Implement guest ownership coordination, lifecycle fencing, bootstrap projection and removal guards;
+  resolve the present-zero takeover review finding and pass focused integration checks.
 - [ ] Implement association ownership, kernel-enforced expiry, fencing and transfer recovery.
 - [ ] Implement the authenticated control endpoint and typed delegated operations without operator impersonation.
 - [ ] Implement agent access to the same operations and guest address reconciliation.
