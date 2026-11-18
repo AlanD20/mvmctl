@@ -150,6 +150,10 @@ func (inventory *hostResetNetworkInventory) readOwner(ctx context.Context, owner
 	}
 	for _, name := range names {
 		switch name {
+		case floatingIPDelegationDirectory:
+			if err := requireRetiredFloatingIPDelegations(ctx, owner); err != nil {
+				return err
+			}
 		case floatingIPDirectory:
 			if err := requireRetiredFloatingIPs(ctx, owner); err != nil {
 				return err

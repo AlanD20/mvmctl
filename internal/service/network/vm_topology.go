@@ -329,6 +329,11 @@ func (lease *VMTopologyLease) Cleanup(ctx context.Context) error {
 			if err := lease.acquireFirewall(cleanup); err != nil {
 				return err
 			}
+			if err := cleanupFloatingIPVM(cleanup, borrowFloatingIPTransaction(lease.network, lease.mutation),
+				string(lease.key.vmID), lease.journal.record.BootID, lease.journal.record.LaunchGeneration,
+				lease.journal.record.Topology.TAPExecutionUID); err != nil {
+				return err
+			}
 			if err := lease.mutation.RemoveEndpoint(cleanup, lease.binding); err != nil {
 				return err
 			}

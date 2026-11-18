@@ -126,6 +126,10 @@ func ForgetVMEndpoint(ctx context.Context, hold *authorityfs.TopologyHold, launc
 	if err != nil || observedBoot != currentBoot {
 		return networkAuthorityCorruptError("host boot changed before final endpoint invalidation", err)
 	}
+	if err := cleanupFloatingIPVM(ctx, borrowFloatingIPTransaction(network, mutation),
+		record.VMID, record.BootID, record.LaunchGeneration, record.Topology.TAPExecutionUID); err != nil {
+		return err
+	}
 	return mutation.RemoveVMPolicies(ctx, record.VMID)
 }
 

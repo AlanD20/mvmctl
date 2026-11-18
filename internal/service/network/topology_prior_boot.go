@@ -71,6 +71,16 @@ func (lease *VMTopologyLease) retirePriorBoot(
 	if err := lease.verifyPriorBootProof(ctx, record, currentBoot, proof); err != nil {
 		return err
 	}
+	if err := cleanupPriorBootFloatingIPVM(ctx, borrowFloatingIPTransaction(network, lease.mutation),
+		record, lease.hold, proof); err != nil {
+		return err
+	}
+	if err := lease.requirePriorBootTopologyAbsent(ctx); err != nil {
+		return err
+	}
+	if err := lease.verifyPriorBootProof(ctx, record, currentBoot, proof); err != nil {
+		return err
+	}
 	_, found, err := lease.journal.read(ctx)
 	if err != nil || !found || !bytes.Equal(admittedRaw, lease.journal.raw) {
 		return networkAuthorityCorruptError("prior-boot topology changed before retirement", err)

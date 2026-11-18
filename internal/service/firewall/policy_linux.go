@@ -283,6 +283,9 @@ func (lease *MutationLease) RemoveNetwork(ctx context.Context, network NetworkIn
 	if network.OwnerUID != state.binding.OwnerUID || network.NetworkID != state.binding.NetworkID {
 		return generationAuthorityError("firewall network removal binding differs", nil, nil)
 	}
+	if err := requireFloatingIPNetworkAbsent(state.intent, network.NetworkID); err != nil {
+		return err
+	}
 	target := cloneIntent(state.intent)
 	for _, endpoint := range target.Endpoints {
 		if endpoint.NetworkID == network.NetworkID {
@@ -317,6 +320,7 @@ func (lease *MutationLease) RemoveNetwork(ctx context.Context, network NetworkIn
 	)
 	target.NetworkHostGrants = slices.DeleteFunc(target.NetworkHostGrants,
 		func(grant NetworkHostTrafficGrant) bool { return grant.SourceNetworkID == network.NetworkID })
+	removeFloatingIPNetworkSourcePolicies(&target, network.NetworkID)
 	return state.applyIntent(ctx, target)
 }
 

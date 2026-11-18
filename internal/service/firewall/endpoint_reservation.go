@@ -188,6 +188,9 @@ func (lease *MutationLease) RemoveVMPolicies(ctx context.Context, vmID string) e
 			return generationAuthorityError("firewall VM removal requires endpoint cleanup", nil, nil)
 		}
 	}
+	if err := requireFloatingIPVMOwnerAbsent(state.intent, vmID); err != nil {
+		return err
+	}
 	target := cloneIntent(state.intent)
 	for _, reservation := range target.Reservations {
 		if reservation.VMID != vmID {
@@ -211,5 +214,7 @@ func (lease *MutationLease) RemoveVMPolicies(ctx context.Context, vmID string) e
 	)
 	target.VMHostGrants = slices.DeleteFunc(target.VMHostGrants,
 		func(grant VMHostTrafficGrant) bool { return grant.SourceVMID == vmID })
+	target.VMFloatingIPGrants = slices.DeleteFunc(target.VMFloatingIPGrants,
+		func(grant VMFloatingIPTrafficGrant) bool { return grant.SourceVMID == vmID })
 	return state.applyIntent(ctx, target)
 }

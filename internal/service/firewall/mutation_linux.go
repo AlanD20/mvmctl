@@ -398,6 +398,9 @@ func (state *mutationLeaseState) removeEndpoint(ctx context.Context, binding End
 	if binding != state.binding {
 		return generationAuthorityError("firewall endpoint cleanup binding differs", nil, nil)
 	}
+	if err := requireFloatingIPVMOwnerAbsent(state.intent, binding.VMID); err != nil {
+		return err
+	}
 	target := cloneIntent(state.intent)
 	for _, endpoint := range target.Endpoints {
 		if endpoint.VMID == binding.VMID && endpoint != binding {

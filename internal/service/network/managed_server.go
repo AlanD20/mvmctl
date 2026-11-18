@@ -223,6 +223,9 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 	if err := tx.firewall.ApplyNetwork(ctx, tx.firewallIntent()); err != nil {
 		return ManagedNetworkResult{}, err
 	}
+	if err := tx.projectFloatingIPReservations(ctx); err != nil {
+		return ManagedNetworkResult{}, err
+	}
 	if tx.uplink != nil {
 		if err := tx.uplink.revalidate(ctx); err != nil {
 			return ManagedNetworkResult{}, err
@@ -699,7 +702,7 @@ func (tx *managedNetworkTransaction) checkOwnerPrefixes(
 	}
 	for _, name := range names {
 		if name == "topologies" || name == "removed" || name == "cancelled" || name == "networkless" ||
-			name == floatingIPDirectory {
+			name == floatingIPDirectory || name == floatingIPDelegationDirectory {
 			continue
 		}
 		id := strings.TrimSuffix(name, ".json")

@@ -80,6 +80,13 @@ func (server *FloatingIPServer) CreateFloatingIP(
 		if _, err := selectFloatingIPv4(tx.record.configuration.l3, existing.IPv4, reserved); err != nil {
 			return FloatingIPResult{}, err
 		}
+		if existing.Phase == floatingIPUnassociated {
+			if err := tx.firewall.FenceFloatingIP(ctx, floatingIPFirewallBinding(*existing, floatingIPOwner{})); err != nil {
+				return FloatingIPResult{}, err
+			}
+		} else if existing.Phase != floatingIPOwned {
+			return FloatingIPResult{}, networkAuthorityCorruptError("floating-IP creation retry requires root recovery", nil)
+		}
 		return existing.result(), nil
 	}
 	address, err := selectFloatingIPv4(tx.record.configuration.l3, request.IPv4, reserved)
@@ -91,6 +98,9 @@ func (server *FloatingIPServer) CreateFloatingIP(
 		Name: request.Name, IPv4: address.value.String(), Generation: 1, Revision: 1, Phase: floatingIPUnassociated,
 	}
 	if err := store.persist(ctx, record, nil); err != nil {
+		return FloatingIPResult{}, err
+	}
+	if err := tx.firewall.FenceFloatingIP(ctx, floatingIPFirewallBinding(record, floatingIPOwner{})); err != nil {
 		return FloatingIPResult{}, err
 	}
 	return record.result(), nil
@@ -148,6 +158,17 @@ func (server *FloatingIPServer) RemoveFloatingIP(
 		return FloatingIPResult{}, networkAuthorityValidationError(
 			"floating-IP removal requires completed ownership fencing and an available revision",
 		)
+	}
+	if err := retireFloatingIPResourceDelegations(ctx, tx, record); err != nil {
+		return FloatingIPResult{}, err
+	}
+	if tx.priorBoot == nil {
+		if _, err := recoverFloatingIPOwnership(ctx, tx, store, record); err != nil {
+			return FloatingIPResult{}, err
+		}
+		if err := tx.firewall.RemoveFloatingIP(ctx, floatingIPFirewallBinding(record, floatingIPOwner{})); err != nil {
+			return FloatingIPResult{}, err
+		}
 	}
 	previous := record
 	record.Revision++
