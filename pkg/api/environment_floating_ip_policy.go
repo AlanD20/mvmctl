@@ -82,21 +82,17 @@ func (op *Operation) environmentVMToFloatingIPIntent(
 	ctx context.Context,
 	input inputs.VMToFloatingIPTrafficPolicyCreateInput,
 ) (*model.VMToFloatingIPTrafficAllowIntent, error) {
-	source, err := input.ResolveSourceVM(ctx, op.Repos.VM)
+	if err := input.ValidateOwnedRemoval(); err != nil {
+		return nil, err
+	}
+	source, err := op.trafficPolicyVM(ctx, input.SourceVM)
 	if err != nil {
 		return nil, err
 	}
-	destination, err := op.FloatingIPGet(
-		ctx,
-		inputs.FloatingIPInput{Network: input.DestinationNetwork, Identifier: input.DestinationFloatingIP},
-	)
-	if err != nil {
+	if _, err := op.trafficPolicyNetwork(ctx, input.DestinationNetwork); err != nil {
 		return nil, err
 	}
 	if _, err := op.trafficPolicyNetwork(ctx, string(source.NetworkID)); err != nil {
-		return nil, err
-	}
-	if _, err := op.trafficPolicyNetwork(ctx, destination.NetworkID); err != nil {
 		return nil, err
 	}
 	protocol, start, end, err := input.ResolvedTraffic()
@@ -104,9 +100,10 @@ func (op *Operation) environmentVMToFloatingIPIntent(
 		return nil, err
 	}
 	timestamp := time.Now().UTC().Format(time.RFC3339)
+	// Root resolves only this saved immutable resource ID; a matching name cannot grant authority.
 	intent := &model.VMToFloatingIPTrafficAllowIntent{
 		SourceVMID:              source.ID,
-		DestinationFloatingIPID: destination.ID,
+		DestinationFloatingIPID: input.DestinationFloatingIP,
 		Protocol:                protocol,
 		DestinationPortStart:    start,
 		DestinationPortEnd:      end,
@@ -190,21 +187,14 @@ func (op *Operation) environmentNetworkToFloatingIPIntent(
 	ctx context.Context,
 	input inputs.NetworkToFloatingIPTrafficPolicyCreateInput,
 ) (*model.NetworkToFloatingIPTrafficAllowIntent, error) {
-	source, err := input.ResolveSourceNetwork(ctx, op.Repos.Network)
+	if err := input.ValidateOwnedRemoval(); err != nil {
+		return nil, err
+	}
+	source, err := op.trafficPolicyNetwork(ctx, input.SourceNetwork)
 	if err != nil {
 		return nil, err
 	}
-	destination, err := op.FloatingIPGet(
-		ctx,
-		inputs.FloatingIPInput{Network: input.DestinationNetwork, Identifier: input.DestinationFloatingIP},
-	)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := op.trafficPolicyNetwork(ctx, source.ID); err != nil {
-		return nil, err
-	}
-	if _, err := op.trafficPolicyNetwork(ctx, destination.NetworkID); err != nil {
+	if _, err := op.trafficPolicyNetwork(ctx, input.DestinationNetwork); err != nil {
 		return nil, err
 	}
 	protocol, start, end, err := input.ResolvedTraffic()
@@ -212,9 +202,10 @@ func (op *Operation) environmentNetworkToFloatingIPIntent(
 		return nil, err
 	}
 	timestamp := time.Now().UTC().Format(time.RFC3339)
+	// Root resolves only this saved immutable resource ID; a matching name cannot grant authority.
 	intent := &model.NetworkToFloatingIPTrafficAllowIntent{
 		SourceNetworkID:         source.ID,
-		DestinationFloatingIPID: destination.ID,
+		DestinationFloatingIPID: input.DestinationFloatingIP,
 		Protocol:                protocol,
 		DestinationPortStart:    start,
 		DestinationPortEnd:      end,

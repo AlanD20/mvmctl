@@ -13,8 +13,12 @@ func (input VMToFloatingIPTrafficPolicyCreateInput) ValidateOwnedRemoval() error
 		return err
 	}
 	if !environmentPolicyVMIDPattern.MatchString(input.SourceVM) ||
-		!environmentPolicyVMIDPattern.MatchString(input.DestinationFloatingIP) {
-		return errs.New(errs.CodeValidationFailed, "owned floating IP policy removal requires full VM and resource IDs")
+		!environmentPolicyVMIDPattern.MatchString(input.DestinationFloatingIP) ||
+		!environmentFloatingIPNetworkIDPattern.MatchString(input.DestinationNetwork) {
+		return errs.New(
+			errs.CodeValidationFailed,
+			"owned floating IP policy removal requires full VM, resource and destination network IDs",
+		)
 	}
 	return nil
 }
@@ -25,10 +29,11 @@ func (input NetworkToFloatingIPTrafficPolicyCreateInput) ValidateOwnedRemoval() 
 		return err
 	}
 	if !environmentFloatingIPNetworkIDPattern.MatchString(input.SourceNetwork) ||
-		!environmentPolicyVMIDPattern.MatchString(input.DestinationFloatingIP) {
+		!environmentPolicyVMIDPattern.MatchString(input.DestinationFloatingIP) ||
+		!environmentFloatingIPNetworkIDPattern.MatchString(input.DestinationNetwork) {
 		return errs.New(
 			errs.CodeValidationFailed,
-			"owned floating IP policy removal requires full network and resource IDs",
+			"owned floating IP policy removal requires full network, resource and destination network IDs",
 		)
 	}
 	return nil

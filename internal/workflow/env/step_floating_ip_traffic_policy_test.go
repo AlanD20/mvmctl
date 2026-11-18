@@ -92,3 +92,64 @@ func TestFloatingIPTrafficPolicyRetainsExactDestinationAndOwnedReceipt(t *testin
 		})
 	}
 }
+
+func TestFloatingIPTrafficPolicyPendingRetryPreservesSavedEndpointsAfterRefusal(t *testing.T) {
+	for _, source := range []string{"vm", "network"} {
+		t.Run(source, func(t *testing.T) {
+			op := floatingIPGrantTestAPI()
+			output := TrafficPolicyState{
+				ClaimID:                 "11111111-1111-4111-8111-111111111111",
+				DestinationFloatingIPID: "22222222222222222222222222222222",
+				DestinationNetworkID:    floatingIPTestNetworkID,
+				Protocol:                "tcp",
+				Port:                    "6443",
+			}
+			if source == "vm" {
+				output.SourceVMID = "33333333333333333333333333333333"
+			} else {
+				output.SourceNetworkID = floatingIPTestNetworkID
+			}
+			refused := errors.New("saved endpoint no longer exists")
+			op.VMToFloatingIPTrafficPolicyEnsureFunc = func(_ context.Context, input inputs.VMToFloatingIPTrafficPolicyCreateInput,
+				ownership inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error) {
+				require.Equal(t, output.vmFloatingIPInput(), input)
+				require.Equal(t, output.ClaimID, ownership.ClaimID)
+				return nil, refused
+			}
+			op.NetworkToFloatingIPTrafficPolicyEnsureFunc = func(_ context.Context, input inputs.NetworkToFloatingIPTrafficPolicyCreateInput,
+				ownership inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error) {
+				require.Equal(t, output.networkFloatingIPInput(), input)
+				require.Equal(t, output.ClaimID, ownership.ClaimID)
+				return nil, refused
+			}
+			spec := model.ResourceMap{"destination_floating_ip": "api", "destination_network": "cluster",
+				"protocol": "tcp", "port": "6443"}
+			if source == "vm" {
+				spec["source_vm"] = "controller"
+			} else {
+				spec["source_network"] = "cluster"
+			}
+			initial, err := newTrafficPolicyStepFromSpec("traffic_policy", "api", spec, op)
+			require.NoError(t, err)
+			saved := initial.StateData()
+			saved.Output = StructToMap(&output)
+			step, err := newTrafficPolicyStepFromState("traffic_policy", "api", saved, nil, op)
+			require.NoError(t, err)
+			writes := 0
+			err = step.Apply(t.Context(), workflow.NewSharedState(), saved,
+				func(_ context.Context, state model.ResourceState) error {
+					writes++
+					require.Equal(t, saved.Output, state.Output)
+					return nil
+				}, nil)
+			require.ErrorIs(t, err, refused)
+			require.Equal(
+				t,
+				1,
+				writes,
+				"the failed retry persists its original endpoints without a replacement receipt",
+			)
+			require.Equal(t, saved.Output, step.StateData().Output)
+		})
+	}
+}
