@@ -191,6 +191,7 @@ func TestFloatingIPPolicyDormancyRetainsIntentWithoutDeliveryRules(t *testing.T)
 				intent.FloatingIPs[0].OwnerVMID = ""
 				intent.FloatingIPs[0].OwnerLaunchGeneration = 0
 				intent.FloatingIPs[0].LeaseDuration = 0
+				intent.FloatingIPs[0].Lifetime = ""
 			case "owner stopped":
 				intent.Endpoints = intent.Endpoints[1:]
 			case "network inactive":

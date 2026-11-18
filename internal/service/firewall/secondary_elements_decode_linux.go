@@ -12,6 +12,7 @@ import (
 
 // These are kernel observations, not durable ownership or permission to renew a lease.
 type secondaryLeaseElement struct {
+	lifetime  FloatingIPLifetime
 	key       [20]byte
 	timeout   time.Duration
 	remaining time.Duration
@@ -89,8 +90,8 @@ func decodeSecondaryLeaseElement(raw []byte) (secondaryLeaseElement, error) {
 	var element secondaryLeaseElement
 	attrs, err := decodeUniqueKernelAttributes(raw, "secondary lease element", map[uint16]kernelAttributeRule{
 		unix.NFTA_SET_ELEM_KEY:        {required: true},
-		unix.NFTA_SET_ELEM_TIMEOUT:    {required: true},
-		unix.NFTA_SET_ELEM_EXPIRATION: {required: true},
+		unix.NFTA_SET_ELEM_TIMEOUT:    {},
+		unix.NFTA_SET_ELEM_EXPIRATION: {},
 		unix.NFTA_SET_ELEM_PAD:        {zeroLength: true},
 	})
 	if err != nil {
@@ -103,6 +104,17 @@ func decodeSecondaryLeaseElement(raw []byte) (secondaryLeaseElement, error) {
 	if _, _, err := decodeSecondaryLeaseKey(key); err != nil {
 		return element, err
 	}
+	copy(element.key[:], key)
+	_, timed := attrs[unix.NFTA_SET_ELEM_TIMEOUT]
+	_, expiring := attrs[unix.NFTA_SET_ELEM_EXPIRATION]
+	if !timed && !expiring {
+		element.lifetime = FloatingIPPersistent
+		return element, nil
+	}
+	if !timed || !expiring {
+		return element, invalidKernelObservation("secondary lease element has incomplete lifetime metadata")
+	}
+	element.lifetime = FloatingIPFinite
 	timeout, err := kernelAttributeUint64(attrs[unix.NFTA_SET_ELEM_TIMEOUT], "secondary lease element timeout")
 	if err != nil {
 		return element, err

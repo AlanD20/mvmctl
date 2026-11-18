@@ -11,11 +11,11 @@ from tests.system.network.floating_ip_helpers import FloatingIPJourney
 from tests.system.network.test_policies import _tcp_data
 
 _FIELDS = {"schema_version", "boot_id", "network", "source", "owner", "resource", "grants",
-           "policy", "alias", "associated", "nonce", "marker", "suffix"}
+           "policy", "alias", "associated", "nonce", "marker", "suffix", "operator"}
 
 
 def validate_pre(receipt, boot):
-    assert set(receipt) == _FIELDS and type(receipt["schema_version"]) is int and receipt["schema_version"] == 1
+    assert set(receipt) == _FIELDS and type(receipt["schema_version"]) is int and receipt["schema_version"] == 2
     assert receipt["boot_id"] == boot and str(uuid.UUID(boot)) == boot
     network, resource = receipt["network"], receipt["resource"]
     assert re.fullmatch(r"[0-9a-f]{64}", network["id"])
@@ -44,7 +44,47 @@ def validate_pre(receipt, boot):
     assert re.fullmatch(r"[0-9a-f]{32}", receipt["nonce"]) and re.fullmatch(r"[0-9a-f]{32}", receipt["marker"])
     assert re.fullmatch(r"[0-9a-f]{12}", receipt["suffix"])
     assert receipt["alias"]["label"].startswith(receipt["alias"]["snapshot"]["interface"] + ":f")
+    operator = receipt["operator"]
+    assert set(operator) == {"resource", "associated", "policy", "nonce"}
+    persistent = operator["resource"]
+    assert re.fullmatch(r"[0-9a-f]{32}", persistent["id"]) and persistent["network_id"] == network["id"]
+    assert persistent["id"] != resource["id"] and persistent["ipv4"] != resource["ipv4"]
+    _assert_persistent(operator["associated"], persistent, receipt["owner"], boot)
+    policy = operator["policy"]
+    assert re.fullmatch(r"[0-9a-f]{64}", policy["id"]) and policy["id"] != receipt["policy"]["id"]
+    assert policy["source_vm_id"] == receipt["source"]["binding"]["id"]
+    assert policy["destination_floating_ip_id"] == persistent["id"] and policy["protocol"] == "tcp"
+    assert policy["destination_port_start"] == policy["destination_port_end"] == 8080
+    assert re.fullmatch(r"[0-9a-f]{32}", operator["nonce"]) and operator["nonce"] != receipt["nonce"]
     return receipt
+
+
+def _host(journey, resource, method="inspect", vm=None, generation=None):
+    args = ["floating-ip", "--network", resource["network_id"], method, resource["id"]]
+    if vm is not None:
+        args.append(vm["binding"]["id"])
+    if generation is not None:
+        args += ["--generation", str(generation)]
+    return _tcp_data(journey.runner, *args)
+
+
+def _assert_persistent(item, resource, owner, boot):
+    for key in ("id", "network_id", "ipv4", "name"):
+        assert item[key] == resource[key], item
+    assert item["generation"] > resource["generation"] and item["retired"] is False, item
+    assert item["phase"] == "owned" and item["owner_vm_id"] == owner["binding"]["id"], item
+    assert item["owner_origin"] == "operator" and item["lifetime"] == "persistent", item
+    assert item["owner_boot_id"] == boot and item["owner_launch_generation"] > 0, item
+    assert item["authority_state"] == "active" and item["lease_remaining_ms"] == 0, item
+    assert item["alias_synchronization"] == "synchronized", item
+
+
+def _assert_ownerless(item, resource):
+    for key in ("id", "network_id", "ipv4", "name"):
+        assert item[key] == resource[key], item
+    assert item["phase"] == "unassociated" and item["authority_state"] == "absent", item
+    assert item["owner_vm_id"] == item["owner_origin"] == item["lifetime"] == item["owner_boot_id"] == "", item
+    assert item["owner_launch_generation"] == item["lease_remaining_ms"] == 0 and item["retired"] is False, item
 
 
 def without_owned_policy(traffic, policy, *, allow_missing=False):
@@ -57,6 +97,16 @@ def without_owned_policy(traffic, policy, *, allow_missing=False):
     return result
 
 
+def without_owned_policies(traffic, receipt, *, allow_missing=False):
+    """Exclude exactly both PRE receipts while preserving every raw unrelated row."""
+    policies = (receipt["policy"], receipt["operator"]["policy"])
+    assert policies[0]["id"] != policies[1]["id"], "owned reboot policy identities overlap"
+    result = traffic
+    for policy in policies:
+        result = without_owned_policy(result, policy, allow_missing=allow_missing)
+    return result
+
+
 def _journey(runner, receipt):
     """Reopen only exact PRE-owned identities; current unrelated inventory stays protected."""
     journey = FloatingIPJourney(runner)
@@ -65,11 +115,14 @@ def _journey(runner, receipt):
     owned = [receipt[name]["binding"] for name in ("source", "owner")]
     journey.before["vm"] = [row for row in journey.before["vm"] if row["id"] not in {vm["id"] for vm in owned}]
     journey.before["network"] = [row for row in journey.before["network"] if row["id"] != network["id"]]
-    journey.before["traffic"] = without_owned_policy(journey.before["traffic"], receipt["policy"], allow_missing=True)
+    journey.before["traffic"] = without_owned_policies(journey.before["traffic"], receipt, allow_missing=True)
     journey.networks = {network["name"]: network}
     journey.vms = {vm["name"]: (network["id"], vm) for vm in owned}
-    journey.resources = [{"network": network, "name": resource["name"], "ipv4": resource["ipv4"], "item": resource}]
-    journey.policy_intents = [("--from-vm", receipt["source"]["binding"]["id"], resource["id"])]
+    resources = (resource, receipt["operator"]["resource"])
+    journey.resources = [{"network": network, "name": item["name"], "ipv4": item["ipv4"], "item": item}
+                         for item in resources]
+    journey.policy_intents = [("--from-vm", receipt["source"]["binding"]["id"], item["id"])
+                              for item in resources]
     return journey
 
 
@@ -83,7 +136,16 @@ def prepare(runner, boot):
         network = journey.network("host-reboot")
         source, owner = journey.vm("source", network), journey.vm("owner", network)
         resource = journey.resource(network, "service")
+        persistent = journey.resource(network, "operator", offset=101)
         log = journey.listener(owner)
+        operator_policy = journey.policy(source, persistent, "vm")
+        journey.flow(source, owner, log, persistent["ipv4"], allowed=False)
+        operator_claim = _host(journey, persistent, "associate", owner, persistent["generation"])
+        _assert_persistent(operator_claim, persistent, owner, boot)
+        journey.alias(owner, persistent, present=True)
+        assert _tcp_data(runner, "floating-ip", "delegation", "ls", persistent["id"],
+                         "--network", network["id"], kind=list) == []
+        operator_nonce = journey.flow(source, owner, log, persistent["ipv4"], allowed=True)
         policy = journey.policy(source, resource, "vm")
         journey.flow(source, owner, log, resource["ipv4"], allowed=False)
         grants = [journey.grant(owner, resource, method) for method in ("inspect", "associate", "release")]
@@ -97,9 +159,11 @@ def prepare(runner, boot):
         _run_mvm(runner, "exec", owner["binding"]["id"], "--user", "root", "--",
                  shlex.join(["python3", "-c", "import pathlib,sys; pathlib.Path('/root/floating-reboot-marker').write_text(sys.argv[1])", marker]))
         _run_mvm(runner, "exec", owner["binding"]["id"], "--user", "root", "--", "sync")
-        return validate_pre(dict(schema_version=1, boot_id=boot, network=network, source=source, owner=owner,
+        return validate_pre(dict(schema_version=2, boot_id=boot, network=network, source=source, owner=owner,
                                  resource=resource, grants=grants, policy=policy, alias=alias, associated=associated,
-                                 nonce=nonce, marker=marker, suffix=journey.suffix), boot)
+                                 nonce=nonce, marker=marker, suffix=journey.suffix,
+                                 operator=dict(resource=persistent, associated=operator_claim,
+                                               policy=operator_policy, nonce=operator_nonce)), boot)
     except BaseException:
         journey.cleanup()
         raise
@@ -199,12 +263,27 @@ def resume(runner, receipt, boot):
             assert current["state"] == "revoked" and current["revision"] > grant["revision"]
             assert {key: value for key, value in current.items() if key not in ("state", "revision")} == {
                 key: value for key, value in grant.items() if key not in ("state", "revision")}
+        persistent = receipt["operator"]["resource"]
+        fenced = _host(journey, persistent)
+        _assert_ownerless(fenced, persistent)
+        assert fenced["generation"] > receipt["operator"]["associated"]["generation"]
+        assert _tcp_data(runner, "floating-ip", "delegation", "ls", persistent["id"],
+                         "--network", persistent["network_id"], kind=list) == []
+        journey.alias(owner, persistent, present=False)
         journey.alias(owner, resource, present=False)
+        for policy, item in ((receipt["policy"], resource), (receipt["operator"]["policy"], persistent)):
+            journey.assert_policy(policy, ("--from-vm", source["binding"]["id"], item["id"]))
         journey.suffix = uuid.uuid4().hex[:12]  # PRE listener directory survives on the guest disk.
         log = journey.listener(owner)
         stale = _stale_alias(runner, owner, resource, receipt["alias"]["label"])
         denied = journey.flow(source, owner, log, resource["ipv4"], allowed=False)
         _stale_alias(runner, owner, resource, receipt["alias"]["label"], retained=stale, remove=True)
+        # Re-add a test-owned persistent VIP before the probe. A removed guest
+        # alias cannot satisfy this post-boot kernel-fencing assertion.
+        operator_stale = _stale_alias(runner, owner, persistent, receipt["alias"]["label"])
+        operator_denied = journey.flow(source, owner, log, persistent["ipv4"], allowed=False)
+        _stale_alias(runner, owner, persistent, receipt["alias"]["label"], retained=operator_stale)
+        _stale_alias(runner, owner, persistent, receipt["alias"]["label"], retained=operator_stale, remove=True)
         journey.control(owner, resource, failure="unavailable")
         inspect = journey.grant(owner, resource, "inspect")
         assert inspect["boot_id"] == boot and inspect["id"] not in {item["id"] for item in receipt["grants"]}
@@ -219,11 +298,33 @@ def resume(runner, receipt, boot):
         label = receipt["alias"]["label"]
         stale = _stale_alias(runner, owner, resource, label, replace=True)
         released_denied = _release_stale_claim(journey, source, owner, resource, log, active["generation"], label, stale)
-        return dict(schema_version=1, boot_id=boot, pre_boot_id=receipt["boot_id"], resource_id=resource["id"],
+        operator_inspect = journey.grant(owner, persistent, "inspect")
+        assert operator_inspect["boot_id"] == boot
+        operator_observed = journey.control(owner, persistent)
+        assert operator_observed["ownership"] == "unassociated" and operator_observed["lease_remaining_ms"] == 0
+        journey.control(owner, persistent, "associate", operator_observed["generation"], failure="denied")
+        claimed = _host(journey, persistent, "associate", owner, operator_observed["generation"])
+        _assert_persistent(claimed, persistent, owner, boot)
+        assert claimed["owner_boot_id"] != receipt["operator"]["associated"]["owner_boot_id"]
+        journey.alias(owner, persistent, present=True)
+        operator_allowed = journey.flow(source, owner, log, persistent["ipv4"], allowed=True)
+        journey.assert_policy(receipt["operator"]["policy"],
+                              ("--from-vm", source["binding"]["id"], persistent["id"]))
+        operator_released = _host(journey, persistent, "release", generation=claimed["generation"])
+        _assert_ownerless(operator_released, persistent)
+        assert operator_released["alias_synchronization"] == "synchronized"
+        journey.alias(owner, persistent, present=False)
+        operator_stale = _stale_alias(runner, owner, persistent, receipt["alias"]["label"])
+        operator_released_denied = journey.flow(source, owner, log, persistent["ipv4"], allowed=False)
+        _stale_alias(runner, owner, persistent, receipt["alias"]["label"], retained=operator_stale, remove=True)
+        return dict(schema_version=2, boot_id=boot, pre_boot_id=receipt["boot_id"], resource_id=resource["id"],
                     old_grant_ids=[item["id"] for item in receipt["grants"]],
                     current_grant_ids=[item["id"] for item in (inspect, associate, release)],
                     old_owner=receipt["owner"], owner=owner, source=source,
                     initial_denied_nonce=denied, allowed_nonce=allowed, released_denied_nonce=released_denied,
-                    owned_cleanup=True)
+                    operator=dict(resource_id=persistent["id"], initial_denied_nonce=operator_denied,
+                                  associated=claimed, current_inspect_grant_id=operator_inspect["id"],
+                                  allowed_nonce=operator_allowed, released=operator_released,
+                                  released_denied_nonce=operator_released_denied), owned_cleanup=True)
     finally:
         journey.cleanup()

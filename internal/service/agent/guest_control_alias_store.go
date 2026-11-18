@@ -13,33 +13,36 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
+	"mvmctl/internal/lib/guestcontrolwire"
 )
 
 const guestControlAliasRecordLimit = 4096
 const guestControlAliasDirectory = "control-aliases"
 
 type guestControlAliasReceipt struct {
-	Schema     uint32                   `json:"schema"`
-	Resource   string                   `json:"resource"`
-	Generation uint64                   `json:"generation"`
-	Revision   uint64                   `json:"revision"`
-	Session    string                   `json:"session"`
-	BootID     string                   `json:"boot_id"`
-	Deadline   uint64                   `json:"deadline_boottime_ns"`
-	Link       guestControlAliasLink    `json:"link"`
-	Primary    guestControlAliasAddress `json:"primary"`
-	Address    guestControlAliasAddress `json:"address"`
-	Installed  bool                     `json:"installed"`
+	Lifetime   guestcontrolwire.Lifetime `json:"lifetime"`
+	Schema     uint32                    `json:"schema"`
+	Resource   string                    `json:"resource"`
+	Generation uint64                    `json:"generation"`
+	Revision   uint64                    `json:"revision"`
+	Session    string                    `json:"session"`
+	BootID     string                    `json:"boot_id"`
+	Deadline   uint64                    `json:"deadline_boottime_ns"`
+	Link       guestControlAliasLink     `json:"link"`
+	Primary    guestControlAliasAddress  `json:"primary"`
+	Address    guestControlAliasAddress  `json:"address"`
+	Installed  bool                      `json:"installed"`
 }
 
 func validGuestControlAliasReceipt(record guestControlAliasReceipt) bool {
 	resource, err := hex.DecodeString(record.Resource)
 	session, sessionErr := uuid.Parse(record.Session)
 	boot, bootErr := uuid.Parse(record.BootID)
-	return record.Schema == 1 && err == nil && len(resource) == 16 && hex.EncodeToString(resource) == record.Resource &&
+	return record.Schema == 2 && err == nil && len(resource) == 16 && hex.EncodeToString(resource) == record.Resource &&
 		sessionErr == nil && session.String() == record.Session && bootErr == nil && boot.String() == record.BootID &&
 		len(record.Link.Name) > 0 && len(record.Link.Name) <= 6 && record.Primary.Prefix <= 32 &&
-		record.Generation > 0 && record.Revision > 0 && record.Deadline > 0 && record.Link.Index > 0 &&
+		record.Generation > 0 && record.Revision > 0 &&
+		(record.Lifetime == guestcontrolwire.Finite && record.Deadline > 0 || record.Lifetime == guestcontrolwire.Persistent && record.Deadline == 0) && record.Link.Index > 0 &&
 		record.Link.MAC != ([6]byte{}) &&
 		record.Address.Index == record.Link.Index && record.Address.IP.Is4() && record.Address.IP.IsPrivate() &&
 		record.Address.Prefix == 32 && record.Address.Scope == unix.RT_SCOPE_UNIVERSE &&

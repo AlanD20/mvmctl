@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -75,7 +76,7 @@ func NewFloatingIPCmd(floatingAPI api.FloatingIPAPI, configAPI api.ConfigAPI) *c
 		Short: "Inspect a floating IP by name, ID, prefix or address",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			item, err := floatingAPI.FloatingIPGet(
+			item, err := floatingAPI.FloatingIPInspect(
 				cmd.Context(),
 				inputs.FloatingIPInput{Network: network, Identifier: args[0]},
 			)
@@ -119,6 +120,134 @@ func NewFloatingIPCmd(floatingAPI api.FloatingIPAPI, configAPI api.ConfigAPI) *c
 	}
 	remove.Flags().BoolVarP(&force, "force", "f", false, "Remove without confirmation")
 	cmd.AddCommand(remove)
+	cmd.AddCommand(
+		newFloatingIPAssociateCmd(floatingAPI, &network),
+		newFloatingIPTransferCmd(floatingAPI, &network),
+		newFloatingIPReleaseCmd(floatingAPI, &network),
+	)
 	cmd.AddCommand(newFloatingIPDelegationCmd(floatingAPI, configAPI, &network))
 	return cmd
+}
+
+func newFloatingIPAssociateCmd(floatingAPI api.FloatingIPAPI, network *string) *cobra.Command {
+	var generation uint64
+	cmd := &cobra.Command{
+		Use:               "associate SELECTOR VM",
+		Short:             "Associate a floating IP until release, transfer or VM stop",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeFloatingIPThenVM,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			item, err := floatingAPI.FloatingIPAssociate(
+				cmd.Context(),
+				inputs.FloatingIPAssociateInput{
+					Network:            *network,
+					Identifier:         args[0],
+					VM:                 args[1],
+					ExpectedGeneration: generation,
+				},
+			)
+			if err != nil {
+				return err
+			}
+			if !common.RecordResult(item) {
+				common.Cli.PrintDictTree(common.Cli.ToMap(item), "Floating IP: "+item.Name)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().
+		Uint64Var(&generation, "generation", 0, "Expected ownership generation (omit to observe immediately before mutation)")
+	return cmd
+}
+func newFloatingIPTransferCmd(floatingAPI api.FloatingIPAPI, network *string) *cobra.Command {
+	var generation uint64
+	cmd := &cobra.Command{
+		Use:               "transfer SELECTOR VM",
+		Short:             "Fence the current owner and transfer the floating IP",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeFloatingIPThenVM,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			item, err := floatingAPI.FloatingIPTransfer(
+				cmd.Context(),
+				inputs.FloatingIPTransferInput{
+					Network:            *network,
+					Identifier:         args[0],
+					VM:                 args[1],
+					ExpectedGeneration: generation,
+				},
+			)
+			if err != nil {
+				return err
+			}
+			if !common.RecordResult(item) {
+				common.Cli.PrintDictTree(common.Cli.ToMap(item), "Floating IP: "+item.Name)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().
+		Uint64Var(&generation, "generation", 0, "Expected ownership generation (omit to observe immediately before mutation)")
+	return cmd
+}
+func newFloatingIPReleaseCmd(floatingAPI api.FloatingIPAPI, network *string) *cobra.Command {
+	var generation uint64
+	cmd := &cobra.Command{
+		Use:               "release SELECTOR",
+		Aliases:           []string{"disassociate"},
+		Short:             "Fence and release the current floating-IP owner",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeFloatingIPNames,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			item, err := floatingAPI.FloatingIPRelease(
+				cmd.Context(),
+				inputs.FloatingIPReleaseInput{Network: *network, Identifier: args[0], ExpectedGeneration: generation},
+			)
+			if err != nil {
+				return err
+			}
+			if !common.RecordResult(item) {
+				common.Cli.PrintDictTree(common.Cli.ToMap(item), "Floating IP: "+item.Name)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().
+		Uint64Var(&generation, "generation", 0, "Expected ownership generation (omit to observe immediately before mutation)")
+	return cmd
+}
+
+func completeFloatingIPThenVM(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return completeFloatingIPNames(cmd, args, toComplete)
+	}
+	if len(args) == 1 {
+		return completeVMNames(cmd, args[1:], toComplete)
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeFloatingIPNames(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	if opRef == nil || len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	network, _ := cmd.Flags().GetString("network")
+	items, err := opRef.FloatingIPList(cmd.Context(), inputs.FloatingIPNetworkInput{Network: network})
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.HasPrefix(item.Name, toComplete) {
+			names = append(names, item.Name)
+		}
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
 }

@@ -664,6 +664,7 @@ TIER2_DOMAINS: dict[str, list[str]] = {
         "tests/system/network/test_floating_ip_policies.py",
         "tests/system/network/test_floating_ip_lease_lifecycle.py",
         "tests/system/network/test_floating_ip_snapshot.py",
+        "tests/system/network/test_floating_ip_operator.py",
     ],
     "floating_ip_worker_fault": ["tests/system/network/test_floating_ip_worker_fault.py"],
     "host_admin": ["tests/system/host/test_host_admin.py"],
@@ -3109,13 +3110,18 @@ def _host_reboot_require_preservation(pre: dict, post: dict, raw: bytes) -> None
     for domain in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec"):
         observed = physical["after_boot"][domain]
         if domain == "traffic" and "floating_ip" in pre:
-            # Retain raw after-boot inventory; remove only the exact PRE-owned
-            # policy for unrelated-state comparison, never a policy family.
-            policy = pre["floating_ip"]["policy"]
+            # Retain raw after-boot inventory; exclude only both exact PRE-owned
+            # receipts for unrelated-state comparison, never a policy family.
+            floating = pre["floating_ip"]
+            policies = (floating["policy"], floating["operator"]["policy"])
+            if policies[0]["id"] == policies[1]["id"]:
+                raise RuntimeError("host_reboot owned floating-IP policy identities overlap")
             rows = observed["vm_to_floating_ip"]
-            if [row for row in rows if row["id"] == policy["id"]] != [policy]:
-                raise RuntimeError("host_reboot exact owned floating-IP policy changed")
-            observed = dict(observed, vm_to_floating_ip=[row for row in rows if row["id"] != policy["id"]])
+            for policy in policies:
+                if [row for row in rows if row["id"] == policy["id"]] != [policy]:
+                    raise RuntimeError("host_reboot exact owned floating-IP policy changed")
+            owned_ids = {policy["id"] for policy in policies}
+            observed = dict(observed, vm_to_floating_ip=[row for row in rows if row["id"] not in owned_ids])
         if physical["before"][domain] != observed or physical["before"][domain] != physical["final"][domain]:
             raise RuntimeError(f"host_reboot persistent {domain} changed")
 

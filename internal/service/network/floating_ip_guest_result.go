@@ -21,6 +21,7 @@ type FloatingIPGuestResult struct {
 	ResourceID           string
 	IPv4                 string
 	Generation           uint64
+	Lifetime             string
 	Ownership            FloatingIPGuestOwnership
 	LeaseRemainingMillis uint64
 }
@@ -38,7 +39,15 @@ func floatingIPGuestResult(
 	result := FloatingIPGuestResult{
 		ResourceID: record.ID, IPv4: record.IPv4, Generation: record.Generation, Ownership: FloatingIPGuestUnassociated,
 	}
-	if !observed.Present || observed.Remaining <= 0 {
+	if !observed.Present || (record.Owner.Lifetime == firewall.FloatingIPFinite && observed.Remaining <= 0) {
+		return result, nil
+	}
+	result.Lifetime = string(record.Owner.Lifetime)
+	if record.Owner.Lifetime == firewall.FloatingIPPersistent {
+		result.Ownership = FloatingIPGuestOther
+		if principal.owns(record.Owner) {
+			result.Ownership = FloatingIPGuestSelf
+		}
 		return result, nil
 	}
 	millis := observed.Remaining / time.Millisecond

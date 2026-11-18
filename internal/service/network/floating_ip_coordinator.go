@@ -233,7 +233,7 @@ func (principal floatingIPGuestPrincipal) owner(
 	duration time.Duration, grantID string, revision uint64,
 ) floatingIPOwner {
 	return floatingIPOwner{
-		Origin: floatingIPDelegatedOrigin, GrantID: grantID, GrantRevision: revision, BootID: principal.bootID,
+		Lifetime: firewall.FloatingIPFinite, Origin: floatingIPDelegatedOrigin, GrantID: grantID, GrantRevision: revision, BootID: principal.bootID,
 		VMID: principal.vmID, LaunchGeneration: principal.launchGeneration, ExecutionUID: principal.executionUID,
 		LeaseDuration: duration,
 	}
@@ -293,6 +293,11 @@ func admitFloatingIPGuestMutation(
 	method floatingIPDelegationMethod, observed firewall.FloatingIPLeaseObservation,
 ) error {
 	if method == floatingIPDelegationAssociate {
+		if record.Owner.Lifetime == firewall.FloatingIPPersistent {
+			return networkAuthorityValidationError(
+				"persistent operator ownership requires explicit release or transfer",
+			)
+		}
 		if record.Owner != (floatingIPOwner{}) && principal.owns(record.Owner) {
 			return networkAuthorityValidationError("current floating-IP owner must renew instead of associate")
 		}
@@ -303,7 +308,8 @@ func admitFloatingIPGuestMutation(
 		if record.Phase != floatingIPOwned || !principal.owns(record.Owner) {
 			return networkAuthorityValidationError("guest does not own this floating-IP incarnation")
 		}
-		if method == floatingIPDelegationRenew && record.Owner.LeaseDuration != grant.LeaseDuration {
+		if method == floatingIPDelegationRenew && (record.Owner.Lifetime != firewall.FloatingIPFinite ||
+			record.Owner.Origin != floatingIPDelegatedOrigin || record.Owner.LeaseDuration != grant.LeaseDuration) {
 			return networkAuthorityValidationError("delegated renewal cannot change lease policy")
 		}
 	}
@@ -312,7 +318,7 @@ func admitFloatingIPGuestMutation(
 func floatingIPFirewallBinding(record floatingIPRecord, owner floatingIPOwner) firewall.FloatingIPBinding {
 	return firewall.FloatingIPBinding{OwnerUID: record.OwnerUID, ID: record.ID, NetworkID: record.NetworkID,
 		IPv4: netip.MustParseAddr(record.IPv4), Generation: record.Generation, OwnerVMID: owner.VMID,
-		OwnerLaunchGeneration: owner.LaunchGeneration, LeaseDuration: owner.LeaseDuration}
+		OwnerLaunchGeneration: owner.LaunchGeneration, LeaseDuration: owner.LeaseDuration, Lifetime: owner.Lifetime}
 }
 func borrowFloatingIPTransaction(
 	network *managedNetworkLease, mutation *firewall.MutationLease,

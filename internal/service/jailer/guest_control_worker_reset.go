@@ -65,7 +65,11 @@ func (guard *HostResetGuard) requireRetiredGuestControlWorkers(ctx context.Conte
 			if isInstanceTempName(leaf) {
 				return instanceValidationError("worker reset has unfinished publication")
 			}
+			ackVM, isAck := strings.CutSuffix(leaf, ".aliases.json")
 			vmID, isRecord := strings.CutSuffix(leaf, ".json")
+			if isAck {
+				vmID, isRecord = ackVM, true
+			}
 			if !isRecord {
 				var validLock bool
 				vmID, validLock = strings.CutSuffix(leaf, ".lock")
@@ -103,6 +107,16 @@ func (guard *HostResetGuard) requireRetiredGuestControlWorkers(ctx context.Conte
 			record, _, found, err := store.read(ctx)
 			if err != nil {
 				return err
+			}
+			if isAck {
+				receipt, ackFound, ackErr := store.readAliasAcknowledgement(ctx)
+				if ackErr != nil {
+					return ackErr
+				}
+				if !found || !ackFound || receipt.WorkerGeneration > record.Generation ||
+					receipt.WorkerGeneration == record.Generation && receipt.Principal != record.principal() {
+					return instanceValidationError("worker reset alias ACK has no matching worker history")
+				}
 			}
 			if !found || record.Phase != "stopped" {
 				return instanceStateError(vmID, "host reset requires every Guest Control worker retired")

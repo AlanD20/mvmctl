@@ -5,17 +5,33 @@ import (
 	"time"
 )
 
+// FloatingIPLifetime distinguishes a finite delegated lease from persistent operator ownership.
+type FloatingIPLifetime string
+
+const (
+	// FloatingIPFinite requires an explicit positive whole-second lease duration.
+	FloatingIPFinite FloatingIPLifetime = "finite"
+	// FloatingIPPersistent retains packet authority until an explicit fencing operation.
+	FloatingIPPersistent FloatingIPLifetime = "persistent"
+)
+
+func validFloatingIPLifetime(lifetime FloatingIPLifetime, duration time.Duration) bool {
+	return lifetime == FloatingIPFinite && duration > 0 && duration%time.Second == 0 ||
+		lifetime == FloatingIPPersistent && duration == 0
+}
+
 // FloatingIPBinding is a complete root-resolved resource projection. It is not a caller's association request.
 // LeaseDuration is policy, not remaining time; neither loading nor compiling this binding installs a live element.
 type FloatingIPBinding struct {
-	OwnerUID              uint32        `json:"owner_uid"`
-	ID                    string        `json:"id"`
-	NetworkID             string        `json:"network_id"`
-	IPv4                  netip.Addr    `json:"ipv4"`
-	Generation            uint64        `json:"generation"`
-	OwnerVMID             string        `json:"owner_vm_id"`
-	OwnerLaunchGeneration uint64        `json:"owner_launch_generation"`
-	LeaseDuration         time.Duration `json:"lease_duration_ns"`
+	OwnerUID              uint32             `json:"owner_uid"`
+	ID                    string             `json:"id"`
+	NetworkID             string             `json:"network_id"`
+	IPv4                  netip.Addr         `json:"ipv4"`
+	Generation            uint64             `json:"generation"`
+	OwnerVMID             string             `json:"owner_vm_id"`
+	OwnerLaunchGeneration uint64             `json:"owner_launch_generation"`
+	Lifetime              FloatingIPLifetime `json:"lifetime"`
+	LeaseDuration         time.Duration      `json:"lease_duration_ns"`
 }
 
 func validateFloatingIPBindings(
@@ -44,13 +60,13 @@ func validateFloatingIPBindings(
 			return invalidGeneration("durable floating-IP address conflicts with a reservation")
 		}
 		if resource.OwnerVMID == "" {
-			if resource.OwnerLaunchGeneration != 0 || resource.LeaseDuration != 0 {
+			if resource.OwnerLaunchGeneration != 0 || resource.Lifetime != "" || resource.LeaseDuration != 0 {
 				return invalidGeneration("unassociated durable floating IP carries ownership authority")
 			}
 		} else {
 			owner, found := reservations[resource.OwnerVMID]
 			if !found || owner.OwnerUID != resource.OwnerUID || owner.NetworkID != resource.NetworkID ||
-				resource.OwnerLaunchGeneration == 0 || resource.LeaseDuration <= 0 || resource.LeaseDuration%time.Second != 0 {
+				resource.OwnerLaunchGeneration == 0 || !validFloatingIPLifetime(resource.Lifetime, resource.LeaseDuration) {
 				return invalidGeneration("durable floating-IP owner or lease policy is invalid")
 			}
 		}

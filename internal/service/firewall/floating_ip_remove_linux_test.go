@@ -34,7 +34,7 @@ func TestFloatingIPRemovalRequiresFencingAndRemovesOnlyDestinationPolicies(t *te
 	}
 	require.Len(t, target.FloatingIPs, len(intent.FloatingIPs)-1)
 	observed.tables[0].secondaryElements = []secondaryLeaseElement{
-		{key: secondaryLiveKey(), timeout: 5 * time.Second, remaining: time.Second},
+		{key: secondaryLiveKey(), lifetime: FloatingIPFinite, timeout: 5 * time.Second, remaining: time.Second},
 	}
 	_, err = state.floatingIPRemovalIntent(intent.FloatingIPs[0], observed)
 	require.Error(t, err)

@@ -10,6 +10,7 @@ import (
 type FloatingIPLeaseObservation struct {
 	Binding   FloatingIPBinding
 	Present   bool
+	Lifetime  FloatingIPLifetime
 	Remaining time.Duration
 }
 
@@ -57,7 +58,7 @@ func (state *mutationLeaseState) observeFloatingIPLease(
 			return FloatingIPLeaseObservation{}, generationAuthorityError(
 				"floating-IP observation scope or generation differs", nil, nil)
 		}
-		result := FloatingIPLeaseObservation{Binding: binding}
+		result := FloatingIPLeaseObservation{Binding: binding, Lifetime: binding.Lifetime}
 		if binding.OwnerVMID == "" {
 			return result, nil
 		}

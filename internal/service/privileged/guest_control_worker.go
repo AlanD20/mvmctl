@@ -123,7 +123,7 @@ func guestControlWorkerResponse(
 		return response
 	}
 	response.Result = &guestcontrolwire.FloatingIPResult{ResourceID: result.ResourceID, IPv4: result.IPv4,
-		Generation: result.Generation, Ownership: ownership, LeaseRemainingMillis: result.LeaseRemainingMillis}
+		Generation: result.Generation, Ownership: ownership, LeaseRemainingMillis: result.LeaseRemainingMillis, Lifetime: guestcontrolwire.Lifetime(result.Lifetime)}
 	if err := response.ValidateFor(request); err != nil {
 		response.Result = nil
 		response.Failure = &guestcontrolwire.Failure{Code: guestcontrolwire.FailureInternal}

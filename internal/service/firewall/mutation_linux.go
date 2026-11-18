@@ -162,11 +162,18 @@ func (state *mutationLeaseState) loadIntent(ctx context.Context) error {
 			return err
 		}
 		journal = intentJournal{
-			SchemaVersion: 1,
+			SchemaVersion: intentJournalSchema,
 			BootID:        record.binding.bootID,
 			HostNamespace: state.binding.HostNamespace,
 		}
 		raw, evidence, err = state.store.writeIntent(ctx, nil, generationRecordFileEvidence{}, journal)
+		if err != nil {
+			return err
+		}
+	}
+	if journal.SchemaVersion == 1 {
+		journal, raw, evidence, err = publishLegacyTerminalIntent(ctx, state.store, state.network.kernel,
+			record, journal, raw, evidence)
 		if err != nil {
 			return err
 		}
@@ -254,7 +261,7 @@ func (state *mutationLeaseState) applyIntent(ctx context.Context, target Intent)
 		return err
 	}
 	journal := intentJournal{
-		SchemaVersion: 1, BootID: state.binding.BootID, HostNamespace: state.binding.HostNamespace,
+		SchemaVersion: intentJournalSchema, BootID: state.binding.BootID, HostNamespace: state.binding.HostNamespace,
 		Before: state.intent, Target: target,
 	}
 	state.uncertain = true

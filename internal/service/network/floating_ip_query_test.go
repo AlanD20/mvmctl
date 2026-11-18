@@ -17,7 +17,7 @@ func TestFloatingIPInventoryPaginationFitsPrivilegedFrameWithoutTruncation(t *te
 	wantFirst := FloatingIPPage{NextID: "00000000000000000000000000000040"}
 	for index := 1; index <= 65; index++ {
 		// The fixture defines distinct payloads; pagination must preserve every selected payload.
-		item := FloatingIPResult{
+		item := FloatingIPResult{AuthorityState: "unobserved",
 			NetworkID: testNetworkID, ID: fmt.Sprintf("%032x", index),
 			Name: strings.Repeat("n", 60) + fmt.Sprintf("%03d", index),
 			IPv4: fmt.Sprintf("10.10.0.%d", index+1), Generation: ^uint64(0),
@@ -38,7 +38,7 @@ func TestFloatingIPInventoryPaginationFitsPrivilegedFrameWithoutTruncation(t *te
 	require.NoError(t, privilegedwire.EncodeSuccess(t.Context(), &frame, "floating-ip-list", first),
 		"a full page at maximum name and generation sizes must fit the real response envelope")
 	second := floatingIPRecordPage(records, first.NextID)
-	want := FloatingIPPage{Items: []FloatingIPResult{{
+	want := FloatingIPPage{Items: []FloatingIPResult{{AuthorityState: "unobserved",
 		ID: "00000000000000000000000000000041", NetworkID: testNetworkID,
 		Name: strings.Repeat("n", 60) + "065", IPv4: "10.10.0.66", Generation: 18446744073709551615,
 	}}}
@@ -68,7 +68,7 @@ func TestFloatingIPInventoryCursorSkipsRetiredResource(t *testing.T) {
 	}
 	got := floatingIPRecordPage(records, "00000000000000000000000000000001")
 	want := FloatingIPPage{Items: []FloatingIPResult{
-		{
+		{AuthorityState: "unobserved",
 			ID:         "00000000000000000000000000000003",
 			Name:       "api",
 			IPv4:       "10.10.0.100",

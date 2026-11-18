@@ -286,7 +286,7 @@ func TestFloatingIPRecordRefusesNoncanonicalState(t *testing.T) {
 		"null retired":    []byte(strings.Replace(string(raw), `"retired":false`, `"retired":null`, 1)),
 		"missing retired": []byte(strings.Replace(string(raw), `,"retired":false`, ``, 1)),
 		"unknown field": []byte(
-			strings.Replace(string(raw), `"schema":2`, `"schema":2,"path":"/etc/passwd"`, 1),
+			strings.Replace(string(raw), `"schema":3`, `"schema":3,"path":"/etc/passwd"`, 1),
 		),
 		"trailing value": append(append([]byte{}, raw...), []byte(`{}`)...),
 	}

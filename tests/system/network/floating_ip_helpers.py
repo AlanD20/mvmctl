@@ -58,10 +58,14 @@ class FloatingIPJourney:
             "--ip", address,
         )
         assert re.fullmatch(r"[0-9a-f]{32}", item["id"]), item
-        assert item == {
+        expected = {
             "id": item["id"], "network_id": network["id"], "name": label,
             "ipv4": address, "generation": 1, "retired": False,
-        }, item
+            "phase": "unassociated", "owner_vm_id": "", "owner_origin": "",
+            "lifetime": "", "owner_boot_id": "", "owner_launch_generation": 0,
+            "lease_remaining_ms": 0,
+        }
+        assert {key: item[key] for key in expected} == expected, item
         intent["item"] = item
         return item
 

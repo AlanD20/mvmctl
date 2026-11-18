@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,10 +23,17 @@ import (
 // Real TLS and stream fixtures exercise transport ownership only; no fake VMM/process admission
 // is manufactured. A successful protected Firecracker/root-backing bootstrap remains a live gate.
 func guestControlSessionFixture(t *testing.T) (*GuestControlSession, *tls.Conn) {
+	return guestControlSessionConnFixture(t, nil)
+}
+
+func guestControlSessionConnFixture(t *testing.T, wrap func(net.Conn) net.Conn) (*GuestControlSession, *tls.Conn) {
 	t.Helper()
 	hostMaterial, agentMaterial, err := guestcontrolauth.Generate(t.Context())
 	require.NoError(t, err)
 	hostRaw, agentRaw := net.Pipe()
+	if wrap != nil {
+		hostRaw = wrap(hostRaw)
+	}
 	t.Cleanup(func() { _ = hostRaw.Close(); _ = agentRaw.Close() })
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
@@ -220,4 +228,87 @@ func TestGuestControlSessionPublicMethodsRejectMissingAuthority(t *testing.T) {
 	_, err = NewHostVsockServer().OpenGuestControlSession(nil, 1000, 1000,
 		HostVsockOpenRequest{VMID: strings.Repeat("a", 32)})
 	require.Error(t, err)
+}
+
+// responseWriteBarrierConn exposes the full second application write to its peer before returning it.
+// The wire encoder writes prefix then body; this barrier controls scheduling without sleeps or production hooks.
+type responseWriteBarrierConn struct {
+	net.Conn
+	mu        sync.Mutex
+	remaining int
+	visible   chan struct{}
+	release   chan struct{}
+	once      sync.Once
+}
+
+func (connection *responseWriteBarrierConn) Write(value []byte) (int, error) {
+	count, err := connection.Conn.Write(value)
+	if err != nil {
+		return count, err
+	}
+	connection.mu.Lock()
+	blocked := false
+	if connection.remaining > 0 {
+		connection.remaining--
+		blocked = connection.remaining == 0
+	}
+	connection.mu.Unlock()
+	if blocked {
+		close(connection.visible)
+		<-connection.release
+	}
+	return count, err
+}
+func (connection *responseWriteBarrierConn) unblock() {
+	connection.once.Do(func() { close(connection.release) })
+}
+
+func TestGuestControlSessionAcceptsImmediateSequentialRequestBeforeResponseWriteReturns(t *testing.T) {
+	var barrier *responseWriteBarrierConn
+	session, agent := guestControlSessionConnFixture(t, func(raw net.Conn) net.Conn {
+		barrier = &responseWriteBarrierConn{Conn: raw, visible: make(chan struct{}), release: make(chan struct{})}
+		return barrier
+	})
+	defer barrier.unblock()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	first := guestControlSessionRequest()
+	sent := make(chan error, 1)
+	go func() { sent <- guestcontrolwire.EncodeRequest(ctx, agent, first) }()
+	_, err := session.ReceiveRequest(ctx)
+	require.NoError(t, err)
+	require.NoError(t, <-sent)
+	barrier.mu.Lock()
+	barrier.remaining = 2
+	barrier.mu.Unlock()
+	response := guestcontrolwire.Response{
+		RequestID: first.RequestID,
+		Operation: first.Operation,
+		Failure:   &guestcontrolwire.Failure{Code: guestcontrolwire.FailureDenied},
+	}
+	delivered := make(chan error, 1)
+	go func() { delivered <- session.SendResponse(ctx, response) }()
+	_, err = guestcontrolwire.DecodeResponse(ctx, agent, first)
+	require.NoError(t, err)
+	select {
+	case <-barrier.visible:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	next := first
+	next.RequestID = "22222222-2222-4222-8222-222222222222"
+	// The first response is fully visible while its final host Write is still blocked.
+	require.NoError(t, guestcontrolwire.EncodeRequest(ctx, agent, next))
+	observed, err := session.ReceiveRequest(ctx)
+	require.NoError(t, err)
+	require.Equal(t, next, observed)
+	select {
+	case err := <-delivered:
+		t.Fatalf("response Write returned before barrier release: %v", err)
+	default:
+	}
+	barrier.unblock()
+	require.NoError(t, <-delivered)
+	_, err = session.Principal()
+	require.NoError(t, err, "sequential handoff must keep this authenticated stream alive")
 }

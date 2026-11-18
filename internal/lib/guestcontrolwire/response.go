@@ -11,6 +11,13 @@ import (
 
 // Ownership describes the resource relative to the authenticated guest session.
 // Other guests' identities and host launch records are never sent to the caller.
+type Lifetime string
+
+const (
+	Finite     Lifetime = "finite"
+	Persistent Lifetime = "persistent"
+)
+
 type Ownership string
 
 const (
@@ -22,6 +29,7 @@ const (
 // FloatingIPResult is an observation, not permission to retain an address indefinitely.
 // Remaining lease time starts at the host observation, not at response receipt.
 type FloatingIPResult struct {
+	Lifetime             Lifetime  `json:"lifetime"`
 	ResourceID           string    `json:"resource_id"`
 	IPv4                 string    `json:"ipv4"`
 	Generation           uint64    `json:"generation"`
@@ -97,11 +105,13 @@ func (response Response) ValidateFor(request Request) error {
 	}
 	switch result.Ownership {
 	case Unassociated:
-		if result.LeaseRemainingMillis != 0 {
+		if result.Lifetime != "" || result.LeaseRemainingMillis != 0 {
 			return invalid("unassociated floating IP must not report an active lease")
 		}
 	case OwnedBySelf, OwnedByOther:
-		if result.LeaseRemainingMillis == 0 {
+		if result.Lifetime != Finite && result.Lifetime != Persistent ||
+			result.Lifetime == Finite && result.LeaseRemainingMillis == 0 ||
+			result.Lifetime == Persistent && result.LeaseRemainingMillis != 0 {
 			return invalid("associated floating IP requires remaining lease time")
 		}
 	default:
@@ -112,7 +122,7 @@ func (response Response) ValidateFor(request Request) error {
 	}
 	switch request.Operation {
 	case Associate, Renew:
-		if result.Ownership != OwnedBySelf {
+		if result.Ownership != OwnedBySelf || result.Lifetime != Finite {
 			return invalid("successful floating-IP association or renewal requires self ownership")
 		}
 		if request.Operation == Renew && result.Generation != request.Input.ExpectedGeneration {
@@ -156,7 +166,7 @@ func DecodeResponse(ctx context.Context, reader io.Reader, request Request) (Res
 		return Response{}, invalid("cannot decode Guest Control response")
 	}
 	arm := "result"
-	nested := []string{"resource_id", "ipv4", "generation", "ownership", "lease_remaining_ms"}
+	nested := []string{"lifetime", "resource_id", "ipv4", "generation", "ownership", "lease_remaining_ms"}
 	if envelope.Failure != nil {
 		arm, nested = "error", []string{"code"}
 	}

@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 
 	"mvmctl/pkg/errs"
 )
@@ -83,16 +84,47 @@ func (server *FloatingIPServer) GetFloatingIP(
 	if err := request.Validate(); err != nil {
 		return FloatingIPResult{}, err
 	}
-	records, err := readFloatingIPNetwork(ctx, ownerUID, request.NetworkID)
+	tx, err := acquireManagedNetworkTransaction(ctx, ownerUID, NetworkID(request.NetworkID))
 	if err != nil {
 		return FloatingIPResult{}, err
 	}
-	for _, record := range records {
-		if record.ID == request.ID {
-			return record.result(), nil
-		}
+	var result FloatingIPResult
+	result, err = getObservedFloatingIP(ctx, tx, request)
+	return result, tx.release(ctx, err)
+}
+
+func getObservedFloatingIP(
+	ctx context.Context,
+	tx *managedNetworkTransaction,
+	request FloatingIPGetRequest,
+) (_ FloatingIPResult, returnErr error) {
+	store, err := openFloatingIPStore(ctx, tx.store, false)
+	if err != nil {
+		return FloatingIPResult{}, err
 	}
-	return FloatingIPResult{}, errs.NotFound(errs.CodeNetworkNotFound, request.ID)
+	defer func() { returnErr = errors.Join(returnErr, store.release(context.WithoutCancel(ctx))) }()
+	if store == nil {
+		return FloatingIPResult{}, errs.NotFound(errs.CodeNetworkNotFound, request.ID)
+	}
+	record, _, _, found, err := store.read(ctx, request.ID)
+	if err != nil {
+		return FloatingIPResult{}, err
+	}
+	if !found || record.NetworkID != request.NetworkID {
+		return FloatingIPResult{}, errs.NotFound(errs.CodeNetworkNotFound, request.ID)
+	}
+	result := record.result()
+	if record.Retired || tx.priorBoot != nil || record.Phase != floatingIPOwned {
+		return result, nil
+	}
+	if err := admitFloatingIPNetwork(ctx, tx); err != nil {
+		return FloatingIPResult{}, err
+	}
+	observed, err := tx.firewall.ObserveFloatingIPLease(ctx, record.ID, record.Generation)
+	if err != nil {
+		return FloatingIPResult{}, err
+	}
+	return observedFloatingIPResult(record, observed)
 }
 
 func readFloatingIPNetwork(

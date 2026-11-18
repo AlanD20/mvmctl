@@ -10,13 +10,14 @@ observe() {
   state=$(control inspect "$RESOURCE_ID") || return 1
   generation=$(jq -er --arg id "$RESOURCE_ID" \
     'select(.resource_id == $id) | .generation | select(type == "number" and . > 0 and floor == .)' <<<"$state") || return 1
-  ownership=$(jq -er '.ownership | select(. == "self" or . == "other" or . == "unassociated")' <<<"$state")
+  ownership=$(jq -er '.ownership | select(. == "self" or . == "other" or . == "unassociated")' <<<"$state") || return 1
+  lifetime=$(jq -er '.lifetime | select(. == "" or . == "finite" or . == "persistent")' <<<"$state")
 }
 
 release_self() {
   # A failed/unknown mutation is never replayed with the old generation.
   observe || return 1
-  if [[ $ownership == self ]]; then
+  if [[ $ownership == self && $lifetime == finite ]]; then
     control release --generation "$generation" "$RESOURCE_ID" >/dev/null || return 1
   fi
 }
@@ -30,10 +31,11 @@ healthy() {
 step() {
   if healthy; then
     observe || return 0
-    case $ownership in
-      unassociated) control associate --generation "$generation" "$RESOURCE_ID" >/dev/null || true ;;
-      self) control renew --generation "$generation" "$RESOURCE_ID" >/dev/null || true ;;
-      other) : ;; # A healthy owner is never preempted.
+    # Persistent assignments belong to the operator, including assignments to us.
+    case "$ownership:$lifetime" in
+      unassociated:) control associate --generation "$generation" "$RESOURCE_ID" >/dev/null || true ;;
+      self:finite) control renew --generation "$generation" "$RESOURCE_ID" >/dev/null || true ;;
+      *) : ;; # Never preempt another owner or manage persistent ownership.
     esac
   else
     release_self || true

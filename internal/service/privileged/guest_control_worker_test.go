@@ -94,13 +94,16 @@ func TestGuestControlWorkerResponseUsesClosedProjectionAndConservativeUnknownOut
 			Ownership: ownership}
 		if ownership != network.FloatingIPGuestUnassociated {
 			result.LeaseRemainingMillis = 1000
+			result.Lifetime = "finite"
 		}
 		response := guestControlWorkerResponse(request, result, false, nil)
 		require.NoError(t, response.ValidateFor(request))
 		require.NotNil(t, response.Result)
 		want := guestcontrolwire.FloatingIPResult{ResourceID: request.Input.ResourceID,
 			IPv4: "10.0.0.100", Generation: 3,
-			Ownership: guestcontrolwire.Ownership(ownership), LeaseRemainingMillis: result.LeaseRemainingMillis}
+			Ownership: guestcontrolwire.Ownership(
+				ownership,
+			), LeaseRemainingMillis: result.LeaseRemainingMillis, Lifetime: guestcontrolwire.Lifetime(result.Lifetime)}
 		if diff := cmp.Diff(want, *response.Result); diff != "" {
 			t.Errorf("public result (-want +got):\n%s", diff)
 		}

@@ -8,7 +8,7 @@ import (
 	"mvmctl/internal/lib/validators"
 )
 
-const floatingIPRecordSchema = uint32(2)
+const floatingIPRecordSchema = uint32(3)
 
 // floatingIPRecord is root authority, not a projection of the operator database.
 // Retirement retains the resource identity so an old create cannot resurrect it.

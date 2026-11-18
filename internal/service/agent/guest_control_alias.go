@@ -53,8 +53,12 @@ func (aliases *guestControlAliases) beginSession(ctx context.Context) (string, e
 	if aliases.closed {
 		return "", errors.New("guest alias manager is closed")
 	}
-	if err := aliases.recoverLocked(ctx); err != nil {
-		return "", err
+	for _, record := range aliases.records {
+		if record.Lifetime == guestcontrolwire.Finite {
+			if err := aliases.cleanup(ctx, record); err != nil {
+				return "", err
+			}
+		}
 	}
 	id, err := uuid.NewRandom()
 	if err != nil {
@@ -101,7 +105,7 @@ func (aliases *guestControlAliases) sessionLost(session string) {
 	ctx, cancel := context.WithTimeout(context.Background(), guestControlAliasIOTimeout)
 	defer cancel()
 	for _, record := range aliases.records {
-		if record.Session == session {
+		if record.Session == session && record.Lifetime == guestcontrolwire.Finite {
 			_ = aliases.cleanup(ctx, record)
 		}
 	}
@@ -141,7 +145,7 @@ func (aliases *guestControlAliases) reconcile(
 		return err
 	}
 	current, owned := aliases.records[request.Input.ResourceID]
-	if owned && current.Session != session {
+	if owned && current.Session != session && current.Lifetime != guestcontrolwire.Persistent {
 		return errors.New("guest alias retains another session receipt")
 	}
 	if response.Failure != nil {
@@ -165,10 +169,13 @@ func (aliases *guestControlAliases) reconcile(
 		return nil
 	}
 	if request.Operation == guestcontrolwire.Inspect {
-		if owned && now >= current.Deadline {
+		if owned && current.Lifetime == guestcontrolwire.Finite && now >= current.Deadline {
 			return aliases.cleanup(ctx, current)
 		}
 		return nil
+	}
+	if result.Lifetime != guestcontrolwire.Finite {
+		return errors.New("guest operation cannot configure persistent operator alias")
 	}
 	duration := result.LeaseRemainingMillis * uint64(time.Millisecond)
 	if duration > ^uint64(0)-started || started+duration <= now {
@@ -246,7 +253,8 @@ func (aliases *guestControlAliases) reconcile(
 	desired := guestControlAliasAddress{Index: link.Index, IP: address, Prefix: 32, Scope: unix.RT_SCOPE_UNIVERSE,
 		Flags: unix.IFA_F_PERMANENT | unix.IFA_F_NOPREFIXROUTE, Label: label}
 	record := guestControlAliasReceipt{
-		Schema:     1,
+		Schema:     2,
+		Lifetime:   guestcontrolwire.Finite,
 		Resource:   result.ResourceID,
 		Generation: result.Generation,
 		Revision:   1,

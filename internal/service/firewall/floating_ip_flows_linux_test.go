@@ -39,12 +39,12 @@ func TestFloatingIPFlowAuthorityRequiresScopeGenerationAndAbsentKey(t *testing.T
 
 		"live key": func(_ *mutationLeaseState, o *kernelObservation, _ *string, _ *uint64) {
 			o.tables[0].secondaryElements = []secondaryLeaseElement{{key: compiled.bridge.secondaryOwners[resource.ID],
-				timeout:   resource.LeaseDuration,
+				lifetime: FloatingIPFinite, timeout: resource.LeaseDuration,
 				remaining: time.Second}}
 		},
 		"expiry boundary key still present": func(_ *mutationLeaseState, o *kernelObservation, _ *string, _ *uint64) {
 			o.tables[0].secondaryElements = []secondaryLeaseElement{{key: compiled.bridge.secondaryOwners[resource.ID],
-				timeout: resource.LeaseDuration}}
+				lifetime: FloatingIPFinite, timeout: resource.LeaseDuration}}
 		},
 		"foreign generation": func(_ *mutationLeaseState,
 			o *kernelObservation,

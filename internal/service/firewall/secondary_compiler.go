@@ -16,6 +16,7 @@ type floatingIPIntent struct {
 	generation            uint64
 	ownerVMID             string
 	ownerLaunchGeneration uint64
+	lifetime              FloatingIPLifetime
 	leaseDuration         time.Duration
 }
 
@@ -59,13 +60,13 @@ func validateFloatingIPIntent(
 			return invalidGeneration("floating IP conflicts with a primary address")
 		}
 		if resource.ownerVMID == "" {
-			if resource.ownerLaunchGeneration != 0 || resource.leaseDuration != 0 {
+			if resource.ownerLaunchGeneration != 0 || resource.lifetime != "" || resource.leaseDuration != 0 {
 				return invalidGeneration("unassociated floating IP has launch authority")
 			}
 		} else {
 			owner, found := endpoints[resource.ownerVMID]
 			if !found || owner.networkID != resource.networkID || resource.ownerLaunchGeneration == 0 ||
-				resource.leaseDuration <= 0 || resource.leaseDuration%time.Second != 0 {
+				!validFloatingIPLifetime(resource.lifetime, resource.leaseDuration) {
 				return invalidGeneration("floating-IP owner is not an active endpoint in its network")
 			}
 		}
@@ -125,6 +126,7 @@ func encodeCanonicalFloatingIPs(encoder *generationDigestEncoder, resources []fl
 		encoder.uint64("generation", resource.generation)
 		encoder.text("owner-vm-id", resource.ownerVMID)
 		encoder.uint64("owner-launch-generation", resource.ownerLaunchGeneration)
+		encoder.text("lifetime", string(resource.lifetime))
 		encoder.uint64("lease-duration-ns", uint64(resource.leaseDuration))
 		encoder.endRecord("intent.floating-ip")
 	}

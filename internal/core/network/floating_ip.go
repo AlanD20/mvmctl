@@ -92,5 +92,8 @@ func floatingIPProjection(result networkservice.FloatingIPResult) *model.Floatin
 	return &model.FloatingIPItem{
 		ID: result.ID, NetworkID: result.NetworkID, Name: result.Name, IPv4: result.IPv4,
 		Generation: result.Generation, Retired: result.Retired,
+		Phase: result.Phase, OwnerVMID: result.OwnerVMID, OwnerOrigin: result.OwnerOrigin, Lifetime: result.Lifetime,
+		OwnerBootID: result.OwnerBootID, OwnerLaunchGeneration: result.OwnerLaunchGeneration,
+		AuthorityState: result.AuthorityState, LeaseRemainingMillis: result.LeaseRemainingMillis, AliasSynchronization: result.AliasSynchronization,
 	}
 }

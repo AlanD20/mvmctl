@@ -116,6 +116,11 @@ func AcquireHostResetGuard(ctx context.Context) (_ *HostResetGuard, returnErr er
 		generationRecordBinding{bootID: bootID, namespace: identity}); err != nil {
 		return nil, err
 	}
+	if journal.SchemaVersion == 1 {
+		if err := admitLegacyTerminalIntent(record, journal); err != nil {
+			return nil, err
+		}
+	}
 	if record.lifecycle != generationRecordCommitted ||
 		record.committed != generationRecordIdentityFromCompiled(empty) {
 		return nil, generationAuthorityError(
@@ -195,7 +200,8 @@ func hostResetIntentEmpty(intent Intent) bool {
 		len(
 			intent.Networks,
 		) == 0 && len(intent.VMGrants) == 0 && len(intent.NetworkGrants) == 0 && len(intent.HostServices) == 0 &&
-		len(intent.VMHostGrants) == 0 && len(intent.NetworkHostGrants) == 0
+		len(intent.VMHostGrants) == 0 && len(intent.NetworkHostGrants) == 0 &&
+		len(intent.FloatingIPs) == 0 && len(intent.VMFloatingIPGrants) == 0 && len(intent.NetworkFloatingIPGrants) == 0
 }
 
 // Release drops the namespace pin, existing store, firewall lock, and authority in reverse order.

@@ -18,7 +18,7 @@ from tests.system.conftest import _json_success_data, _run_mvm
 from tests.system.host.test_host import _host_administrator_state, _host_inventory
 from tests.system.host.floating_ip_reboot import (
     cleanup as _floating_cleanup, prepare as _floating_prepare, resume as _floating_resume,
-    validate_pre as _floating_validate_pre, without_owned_policy as _without_owned_policy,
+    validate_pre as _floating_validate_pre, without_owned_policies as _without_owned_policies,
 )
 from tests.system.network.test_network import _inventory
 from tests.system.vm.test_vm_lifecycle import (
@@ -198,7 +198,7 @@ def _preserve_persistent_inventory(task: Path, before: dict, after_boot: dict, f
     for domain in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec"):
         observed = after_boot[domain]
         if domain == "traffic":
-            observed = _without_owned_policy(observed, floating["policy"])
+            observed = _without_owned_policies(observed, floating)
         assert observed == final[domain] == before[domain], domain
     # Namespace inode, ifindex, links/addresses/routes/firewall/mounts are boot-physical
     # observations, not durable records. Their raw values remain in preservation.json.

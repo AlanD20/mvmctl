@@ -26,7 +26,7 @@ func secondaryDurableIntent() Intent {
 			Subnet: endpoint.Prefix, HostIPv4: endpoint.Gateway}},
 		FloatingIPs: []FloatingIPBinding{{OwnerUID: 1000, ID: strings.Repeat("4", 32), NetworkID: endpoint.NetworkID,
 			IPv4: netip.MustParseAddr("10.0.0.100"), Generation: 7, OwnerVMID: endpoint.VMID,
-			OwnerLaunchGeneration: 9, LeaseDuration: 5 * time.Second}},
+			OwnerLaunchGeneration: 9, Lifetime: FloatingIPFinite, LeaseDuration: 5 * time.Second}},
 	}
 }
 
@@ -44,6 +44,7 @@ func TestSecondaryDurableIntentSuppressesStoppedOwnerAuthority(t *testing.T) {
 				intent.FloatingIPs[0].OwnerVMID = ""
 				intent.FloatingIPs[0].OwnerLaunchGeneration = 0
 				intent.FloatingIPs[0].LeaseDuration = 0
+				intent.FloatingIPs[0].Lifetime = ""
 			}
 			compiled, err := intent.compile()
 			require.NoError(t, err)

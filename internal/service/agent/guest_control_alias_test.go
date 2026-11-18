@@ -170,6 +170,7 @@ func TestGuestControlAliasInspectCannotCreateOrExtendAndDelayedSelfRefuses(t *te
 	require.NoError(t, err)
 	inspect := controlTestRequest(guestcontrolwire.Inspect)
 	observed := controlTestResponse(inspect)
+	observed.Result.Lifetime = guestcontrolwire.Finite
 	observed.Result.Ownership = guestcontrolwire.OwnedBySelf
 	observed.Result.LeaseRemainingMillis = 1000
 	observed.Result.IPv4 = "10.60.0.100"

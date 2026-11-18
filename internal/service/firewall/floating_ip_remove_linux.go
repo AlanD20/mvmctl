@@ -33,7 +33,7 @@ func (state *mutationLeaseState) floatingIPRemovalIntent(
 ) (Intent, error) {
 	if binding.OwnerUID != state.binding.OwnerUID || binding.NetworkID != state.binding.NetworkID ||
 		binding.OwnerVMID != "" ||
-		binding.OwnerLaunchGeneration != 0 || binding.LeaseDuration != 0 {
+		binding.OwnerLaunchGeneration != 0 || binding.Lifetime != "" || binding.LeaseDuration != 0 {
 		return Intent{}, generationAuthorityError("floating-IP removal requires exact ownerless authority", nil, nil)
 	}
 	if _, err := state.floatingIPFlowAddress(binding.ID, binding.Generation, observed); err != nil {
@@ -100,7 +100,7 @@ func (lease *MutationLease) VerifyRetiredFloatingIP(ctx context.Context, binding
 func (state *mutationLeaseState) verifyRetiredFloatingIP(binding FloatingIPBinding, observed kernelObservation) error {
 	if binding.OwnerUID != state.binding.OwnerUID || binding.NetworkID != state.binding.NetworkID ||
 		binding.Generation == 0 ||
-		binding.OwnerVMID != "" || binding.OwnerLaunchGeneration != 0 || binding.LeaseDuration != 0 ||
+		binding.OwnerVMID != "" || binding.OwnerLaunchGeneration != 0 || binding.Lifetime != "" || binding.LeaseDuration != 0 ||
 		!validResourceID(binding.ID) || !binding.IPv4.Is4() || !binding.IPv4.IsPrivate() {
 		return generationAuthorityError("floating-IP retirement scope differs", nil, nil)
 	}

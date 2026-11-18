@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mvmctl/internal/service/firewall"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 
 func floatingIPTransitionOwner() floatingIPOwner {
 	return floatingIPOwner{
-		Origin: floatingIPOperatorOrigin, BootID: "123e4567-e89b-42d3-a456-426614174000", VMID: strings.Repeat("a", 32),
+		Lifetime: firewall.FloatingIPFinite, Origin: floatingIPDelegatedOrigin, GrantID: strings.Repeat("d", 32), GrantRevision: floatingIPDelegationActiveRevision, BootID: "123e4567-e89b-42d3-a456-426614174000", VMID: strings.Repeat("a", 32),
 		LaunchGeneration: 7, ExecutionUID: 2000, LeaseDuration: 5 * time.Second}
 }
 
@@ -205,6 +206,7 @@ func TestFloatingIPTransitionRefusesRevisionAndGenerationOverflow(t *testing.T) 
 func TestFloatingIPTransitionCanonicalCodecRefusesInvalidOwnership(t *testing.T) {
 	owned := floatingIPAssociationRecords()[4]
 	cases := map[string]func(*floatingIPRecord){
+		"schema2":                 func(r *floatingIPRecord) { r.Schema = 2 },
 		"schema1":                 func(r *floatingIPRecord) { r.Schema = 1 },
 		"zero_revision":           func(r *floatingIPRecord) { r.Revision = 0 },
 		"unknown_phase":           func(r *floatingIPRecord) { r.Phase = "pending" },

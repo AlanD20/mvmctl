@@ -159,14 +159,17 @@ func (page FloatingIPPage) validate(request FloatingIPListRequest) error {
 }
 
 func exchangeFloatingIP[
-	Request FloatingIPCreateRequest | FloatingIPRemoveRequest | FloatingIPListRequest | FloatingIPGetRequest,
+	Request FloatingIPCreateRequest | FloatingIPRemoveRequest | FloatingIPListRequest | FloatingIPGetRequest | FloatingIPAssociateRequest | FloatingIPTransferRequest | FloatingIPReleaseRequest,
 	Result FloatingIPResult | FloatingIPPage,
 ](ctx context.Context, client *FloatingIPClient, action string, request Request) (Result, error) {
 	var zero Result
 	if ctx == nil || client == nil {
 		return zero, networkAuthorityValidationError("floating-IP client and context are required")
 	}
-	mutation := action == FloatingIPCreateAction || action == FloatingIPRemoveAction
+	mutation := action == FloatingIPCreateAction || action == FloatingIPRemoveAction ||
+		action == FloatingIPAssociateAction ||
+		action == FloatingIPTransferAction ||
+		action == FloatingIPReleaseAction
 	var frame bytes.Buffer
 	if err := privilegedwire.EncodeRequest(ctx, &frame, action, request, 0); err != nil {
 		return zero, err

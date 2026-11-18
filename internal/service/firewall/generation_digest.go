@@ -60,11 +60,12 @@ func encodeCanonicalGeneration(
 	if len(intent.vmHostGrants) != 0 || len(intent.networkHostGrants) != 0 {
 		schema = "mvmctl.firewall.generation.v2"
 	}
-	if len(intent.floatingIPs) != 0 {
-		schema = "mvmctl.firewall.generation.v3"
-	}
 	if len(intent.vmFloatingIPGrants) != 0 || len(intent.networkFloatingIPGrants) != 0 {
 		schema = "mvmctl.firewall.generation.v4"
+	}
+	if len(intent.floatingIPs) != 0 {
+		// Explicit lifetime is a clean break from the implicit finite v3/v4 resource grammar.
+		schema = "mvmctl.firewall.generation.v5"
 	}
 	encoder.text("schema", schema)
 	encoder.boolean("generation.empty", generation.empty)

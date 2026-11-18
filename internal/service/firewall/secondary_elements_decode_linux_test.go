@@ -52,8 +52,8 @@ func TestDecodeSecondaryLeaseElementsPreservesReadback(t *testing.T) {
 			got, err := decodeSecondaryLeaseElements([]netlink.Message{message, secondaryElementsMessage(t)}, &sequence)
 			require.NoError(t, err)
 			want := []secondaryLeaseElement{{
-				key:     [20]byte{'m', 'v', 'm', 'v', '-', 't', 'e', 's', 't', 0, 0, 0, 0, 0, 0, 0, 10, 25, 0, 100},
-				timeout: 5 * time.Second, remaining: time.Duration(remaining) * time.Millisecond,
+				key:      [20]byte{'m', 'v', 'm', 'v', '-', 't', 'e', 's', 't', 0, 0, 0, 0, 0, 0, 0, 10, 25, 0, 100},
+				lifetime: FloatingIPFinite, timeout: 5 * time.Second, remaining: time.Duration(remaining) * time.Millisecond,
 			}}
 			if diff := cmp.Diff(want, got, cmp.AllowUnexported(secondaryLeaseElement{})); diff != "" {
 				t.Errorf("lease observations (-want +got):\n%s", diff)
@@ -217,8 +217,8 @@ func TestDecodeSecondaryLeaseElementsCapturedKernel(t *testing.T) {
 	got, err := decodeSecondaryLeaseElements(messages, &kernelBaseSequence{})
 	require.NoError(t, err)
 	want := []secondaryLeaseElement{{
-		key:     [20]byte{'m', 'v', 'm', 'v', '-', 't', 'e', 's', 't', 0, 0, 0, 0, 0, 0, 0, 10, 25, 0, 100},
-		timeout: 5 * time.Second, remaining: 5 * time.Second,
+		key:      [20]byte{'m', 'v', 'm', 'v', '-', 't', 'e', 's', 't', 0, 0, 0, 0, 0, 0, 0, 10, 25, 0, 100},
+		lifetime: FloatingIPFinite, timeout: 5 * time.Second, remaining: 5 * time.Second,
 	}}
 	if diff := cmp.Diff(want, got, cmp.AllowUnexported(secondaryLeaseElement{})); diff != "" {
 		t.Errorf("captured observations (-want +got):\n%s", diff)
@@ -285,7 +285,7 @@ func TestDecodeSecondaryLeaseElementsBoundsAggregateCount(t *testing.T) {
 				byte(index >> 8),
 				byte(index),
 			},
-			timeout:   5 * time.Second,
+			lifetime: FloatingIPFinite, timeout: 5 * time.Second,
 			remaining: 3210 * time.Millisecond,
 		}
 		if diff := cmp.Diff(want, element, cmp.AllowUnexported(secondaryLeaseElement{})); diff != "" {

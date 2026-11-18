@@ -20,7 +20,7 @@ func secondaryCompilerIntent() generationIntent {
 	intent.floatingIPs = []floatingIPIntent{
 		{id: strings.Repeat("4", 32), networkID: intent.networks[0].id,
 			ipv4: netip.MustParseAddr("10.0.0.100"), generation: 7,
-			ownerVMID: intent.endpoints[0].id, ownerLaunchGeneration: 9, leaseDuration: 5 * time.Second},
+			ownerVMID: intent.endpoints[0].id, ownerLaunchGeneration: 9, lifetime: FloatingIPFinite, leaseDuration: 5 * time.Second},
 		{id: strings.Repeat("5", 32), networkID: intent.networks[0].id,
 			ipv4: netip.MustParseAddr("10.0.0.101"), generation: 1},
 	}
@@ -72,8 +72,8 @@ func TestSecondaryObservationAcceptsExpiryButRejectsForeignOrExtendedLeases(t *t
 	require.NoError(t, err)
 	for name, elements := range map[string][]secondaryLeaseElement{
 		"missing after expiry": nil,
-		"live":                 {{key: secondaryLiveKey(), timeout: 5 * time.Second, remaining: 3 * time.Second}},
-		"expiry boundary":      {{key: secondaryLiveKey(), timeout: 5 * time.Second, remaining: 0}},
+		"live":                 {{key: secondaryLiveKey(), lifetime: FloatingIPFinite, timeout: 5 * time.Second, remaining: 3 * time.Second}},
+		"expiry boundary":      {{key: secondaryLiveKey(), lifetime: FloatingIPFinite, timeout: 5 * time.Second, remaining: 0}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			observed := kernelObservationFromCompiled(compiled)
@@ -86,11 +86,11 @@ func TestSecondaryObservationAcceptsExpiryButRejectsForeignOrExtendedLeases(t *t
 	unassociated := secondaryLiveKey()
 	unassociated[19] = 101
 	for name, elements := range map[string][]secondaryLeaseElement{
-		"wrong interface":          {{key: other, timeout: 5 * time.Second, remaining: time.Second}},
-		"unassociated resource":    {{key: unassociated, timeout: 5 * time.Second, remaining: time.Second}},
-		"extended timeout":         {{key: secondaryLiveKey(), timeout: 6 * time.Second, remaining: time.Second}},
-		"remaining beyond ceiling": {{key: secondaryLiveKey(), timeout: 5 * time.Second, remaining: 6 * time.Second}},
-		"duplicate key":            {{key: secondaryLiveKey(), timeout: 5 * time.Second}, {key: secondaryLiveKey(), timeout: 5 * time.Second}},
+		"wrong interface":          {{key: other, lifetime: FloatingIPFinite, timeout: 5 * time.Second, remaining: time.Second}},
+		"unassociated resource":    {{key: unassociated, lifetime: FloatingIPFinite, timeout: 5 * time.Second, remaining: time.Second}},
+		"extended timeout":         {{key: secondaryLiveKey(), lifetime: FloatingIPFinite, timeout: 6 * time.Second, remaining: time.Second}},
+		"remaining beyond ceiling": {{key: secondaryLiveKey(), lifetime: FloatingIPFinite, timeout: 5 * time.Second, remaining: 6 * time.Second}},
+		"duplicate key":            {{key: secondaryLiveKey(), lifetime: FloatingIPFinite, timeout: 5 * time.Second}, {key: secondaryLiveKey(), lifetime: FloatingIPFinite, timeout: 5 * time.Second}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			observed := kernelObservationFromCompiled(compiled)
@@ -140,7 +140,12 @@ func TestSecondaryApplicationPreservesUnchangedLeasesAndRevokesChangedAuthority(
 			observed := kernelObservationFromCompiled(before)
 			if change != "already expired" {
 				observed.tables[0].secondaryElements = []secondaryLeaseElement{
-					{key: secondaryLiveKey(), timeout: 5 * time.Second, remaining: time.Second},
+					{
+						key:       secondaryLiveKey(),
+						lifetime:  FloatingIPFinite,
+						timeout:   5 * time.Second,
+						remaining: time.Second,
+					},
 				}
 			}
 			connection := &recordingKernelApplicationConnection{}
@@ -259,7 +264,10 @@ func TestSecondaryCollectorUsesTheRealTransportForElementDump(t *testing.T) {
 func TestSecondaryAuthoritySurvivesAnIndependentDesiredStateClone(t *testing.T) {
 	original := Intent{FloatingIPs: []FloatingIPBinding{{OwnerUID: 1000, ID: strings.Repeat("4", 32),
 		NetworkID: strings.Repeat("b", 64), IPv4: netip.MustParseAddr("10.0.0.100"), Generation: 7,
-		OwnerVMID: strings.Repeat("1", 32), OwnerLaunchGeneration: 9, LeaseDuration: 5 * time.Second}}}
+		OwnerVMID: strings.Repeat(
+			"1",
+			32,
+		), OwnerLaunchGeneration: 9, Lifetime: FloatingIPFinite, LeaseDuration: 5 * time.Second}}}
 	cloned := cloneIntent(original)
 	require.Equal(
 		t,

@@ -16,7 +16,7 @@ import (
 
 const responseBody = `{"schema_version":1,"request_id":"09a92b07-065a-4fd9-878a-345b096d53dd",` +
 	`"feature":"floating_ip","operation":"associate","result":{` +
-	`"resource_id":"c598985a13454b019f7c4c07c0aaa1ec","ipv4":"10.25.0.100",` +
+	`"lifetime":"finite","resource_id":"c598985a13454b019f7c4c07c0aaa1ec","ipv4":"10.25.0.100",` +
 	`"generation":8,"ownership":"self","lease_remaining_ms":15000}}`
 
 func responseRequest() guestcontrolwire.Request {
@@ -33,6 +33,7 @@ func TestResponseBindsIndependentResultAndPreservesFollowingFrame(t *testing.T) 
 	want := guestcontrolwire.Response{
 		RequestID: request.RequestID, Operation: guestcontrolwire.Associate,
 		Result: &guestcontrolwire.FloatingIPResult{
+			Lifetime:   guestcontrolwire.Finite,
 			ResourceID: request.Input.ResourceID, IPv4: "10.25.0.100", Generation: 8,
 			Ownership: guestcontrolwire.OwnedBySelf, LeaseRemainingMillis: 15000,
 		},
@@ -128,6 +129,11 @@ func TestResponseOwnershipTransitions(t *testing.T) {
 				fmt.Sprintf(`"lease_remaining_ms":%d`, tc.remaining),
 				1,
 			)
+			lifetime := guestcontrolwire.Finite
+			if tc.ownership == guestcontrolwire.Unassociated {
+				lifetime = ""
+			}
+			body = strings.Replace(body, `"lifetime":"finite"`, fmt.Sprintf(`"lifetime":%q`, lifetime), 1)
 			got, err := guestcontrolwire.DecodeResponse(context.Background(), bytes.NewReader(frame(body)), request)
 			if !tc.valid {
 				require.Error(t, err)
@@ -135,6 +141,7 @@ func TestResponseOwnershipTransitions(t *testing.T) {
 			}
 			require.NoError(t, err)
 			want := &guestcontrolwire.FloatingIPResult{
+				Lifetime:   lifetime,
 				ResourceID: request.Input.ResourceID, IPv4: "10.25.0.100", Generation: tc.generation,
 				Ownership: tc.ownership, LeaseRemainingMillis: tc.remaining,
 			}

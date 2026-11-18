@@ -30,7 +30,7 @@ func floatingLeaseTestState(t *testing.T) *mutationLeaseState {
 }
 
 func ownerlessFloatingLease(binding FloatingIPBinding) FloatingIPBinding {
-	binding.OwnerVMID, binding.OwnerLaunchGeneration, binding.LeaseDuration = "", 0, 0
+	binding.OwnerVMID, binding.OwnerLaunchGeneration, binding.LeaseDuration, binding.Lifetime = "", 0, 0, ""
 	return binding
 }
 
@@ -144,7 +144,12 @@ func TestFloatingIPLeaseAuthorityRequiresExactGraphScopeGenerationAndOwner(t *te
 			resource := state.intent.FloatingIPs[0]
 			observed := kernelObservationFromCompiled(state.compiled)
 			id, generation := resource.ID, resource.Generation
-			element := secondaryLeaseElement{key: secondaryLiveKey(), timeout: 5 * time.Second, remaining: time.Second}
+			element := secondaryLeaseElement{
+				key:       secondaryLiveKey(),
+				lifetime:  FloatingIPFinite,
+				timeout:   5 * time.Second,
+				remaining: time.Second,
+			}
 			switch name {
 			case "live":
 				observed.tables[0].secondaryElements = []secondaryLeaseElement{element}
@@ -291,6 +296,7 @@ func TestFloatingIPLeasePublicMethodsRefuseMissingAuthority(t *testing.T) {
 	require.Error(t, lease.PublishFloatingIPOwner(t.Context(), binding))
 	require.Error(t, lease.ActivateFloatingIPLease(t.Context(), binding.ID, binding.Generation))
 	require.Error(t, lease.RenewFloatingIPLease(t.Context(), binding.ID, binding.Generation))
+	require.Error(t, lease.ActivateFloatingIPOwnership(t.Context(), binding.ID, binding.Generation))
 	lease = &MutationLease{state: &mutationLeaseState{released: true}}
 	require.Error(t, lease.ActivateFloatingIPLease(t.Context(), binding.ID, binding.Generation))
 }
@@ -298,12 +304,16 @@ func TestFloatingIPLeasePublicMethodsRefuseMissingAuthority(t *testing.T) {
 // Decode the actual pinned google/nftables wire batch: insertion and revocation each emit exactly
 // one element command, never a rule/table replacement or a refresh of another resource.
 func TestFloatingIPLeaseTypedAdapterUsesExactElementWire(t *testing.T) {
-	for _, insert := range []bool{false, true} {
-		t.Run(fmt.Sprintf("insert=%v", insert), func(t *testing.T) {
+	for _, tc := range []struct{ insert, persistent bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		insert := tc.insert
+		t.Run(fmt.Sprintf("insert=%v/persistent=%v", insert, tc.persistent), func(t *testing.T) {
 			state := floatingLeaseTestState(t)
+			if tc.persistent {
+				state = persistentFloatingLeaseTestState(t)
+			}
 			other := state.intent.FloatingIPs[0]
 			other.ID, other.IPv4 = strings.Repeat("5", 32), netip.MustParseAddr("10.0.0.101")
-			other.LeaseDuration = 11 * time.Second
+			other.Lifetime, other.LeaseDuration = FloatingIPFinite, 11*time.Second
 			state.intent.FloatingIPs = append(state.intent.FloatingIPs, other)
 			compiled, err := state.intent.compile()
 			require.NoError(t, err)
@@ -360,9 +370,14 @@ func TestFloatingIPLeaseTypedAdapterUsesExactElementWire(t *testing.T) {
 			if diff := cmp.Diff(expected[:], floatingLeaseWireAttribute(t, key, unix.NFTA_DATA_VALUE)); diff != "" {
 				t.Errorf("wire key (-want +got):\n%s", diff)
 			}
-			if insert {
+			if insert && !tc.persistent {
 				raw := floatingLeaseWireAttribute(t, element, unix.NFTA_SET_ELEM_TIMEOUT)
 				require.Equal(t, uint64(5000), binary.BigEndian.Uint64(raw))
+			} else {
+				for _, attr := range element {
+					require.NotEqual(t, uint16(unix.NFTA_SET_ELEM_TIMEOUT), attr.Type&0x3fff)
+					require.NotEqual(t, uint16(unix.NFTA_SET_ELEM_EXPIRATION), attr.Type&0x3fff)
+				}
 			}
 		})
 	}

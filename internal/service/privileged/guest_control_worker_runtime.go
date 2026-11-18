@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/guestcontrolwire"
 	"mvmctl/internal/lib/hostadmission"
 	"mvmctl/internal/service/jailer"
@@ -93,27 +94,34 @@ func serveGuestControlWorkerSession(
 ) error {
 	scoped, cancel := context.WithCancel(ctx)
 	defer cancel()
-	grantsStopped := make(chan struct{})
+	type received struct {
+		request   guestcontrolwire.Request
+		err       error
+		responded chan struct{}
+	}
+	requests := make(chan received)
+	receiverDone := make(chan struct{})
 	go func() {
-		defer close(grantsStopped)
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
+		defer close(receiverDone)
 		for {
+			request, err := session.ReceiveRequest(scoped)
+			item := received{request: request, err: err, responded: make(chan struct{})}
 			select {
+			case requests <- item:
 			case <-scoped.Done():
 				return
-			case <-ticker.C:
-				check, cancel := context.WithTimeout(scoped, 30*time.Second)
-				err := requireGuestControlWorkerGrants(check, setup.Principal)
-				cancel()
-				if err != nil {
-					_ = session.Close(context.Background())
-					return
-				}
+			}
+			if err != nil {
+				return
+			}
+			select {
+			case <-item.responded:
+			case <-scoped.Done():
+				return
 			}
 		}
 	}()
-	defer func() { cancel(); <-grantsStopped }()
+	defer func() { cancel(); _ = session.Close(context.Background()); <-receiverDone }()
 	exited := make(chan error, 1)
 	go func() {
 		err := session.WaitVMMExit(scoped)
@@ -123,19 +131,78 @@ func serveGuestControlWorkerSession(
 		exited <- err
 	}()
 	defer func() { cancel(); <-exited }()
-	for {
-		request, err := session.ReceiveRequest(scoped)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	// The sole reader is started before synchronization so ACKs can always make progress.
+	synchronize := func() (bool, error) {
+		operation, stop := context.WithTimeout(scoped, 30*time.Second)
+		defer stop()
+		active, aliases, err := observeGuestControlAliases(operation, setup.Principal)
 		if err != nil {
-			return err
+			return false, err
 		}
-		// Fresh operation admission and exact principal are retained only for the request effect.
-		operation, cancel := context.WithTimeout(scoped, 30*time.Second)
-		result, effectsStarted, cause := executeAdmittedGuestControlRequest(operation, setup.Principal, request)
-		response := guestControlWorkerResponse(request, result, effectsStarted, cause)
-		err = session.SendResponse(operation, response)
-		cancel()
+		snapshot := guestcontrolwire.FloatingIPAliasSnapshot{ID: crypto.UUIDV4(), Aliases: aliases}
+		if err := session.SyncFloatingIPAliases(operation, snapshot); err != nil {
+			return false, err
+		}
+		_, current, err := observeGuestControlAliases(operation, setup.Principal)
 		if err != nil {
-			return err
+			return false, err
+		}
+		currentSnapshot := guestcontrolwire.FloatingIPAliasSnapshot{ID: snapshot.ID, Aliases: current}
+		beforeDigest, err := snapshot.Digest()
+		if err != nil {
+			return false, err
+		}
+		afterDigest, err := currentSnapshot.Digest()
+		if err != nil {
+			return false, err
+		}
+		if beforeDigest != afterDigest {
+			return true, nil
+		}
+		if err := session.RecordFloatingIPAliasAcknowledgement(operation, setup, snapshot); err != nil {
+			return false, err
+		}
+		return active, nil
+	}
+	// ReceiveRequest itself starts the internal stream reader; wait for its initialization via Sync.
+	active, err := synchronize()
+	if err != nil {
+		return err
+	}
+	if !active {
+		return nil
+	}
+	for {
+		select {
+		case <-scoped.Done():
+			return scoped.Err()
+		case item := <-requests:
+			if item.err != nil {
+				return item.err
+			}
+			operation, stop := context.WithTimeout(scoped, 30*time.Second)
+			result, effectsStarted, cause := executeAdmittedGuestControlRequest(
+				operation,
+				setup.Principal,
+				item.request,
+			)
+			response := guestControlWorkerResponse(item.request, result, effectsStarted, cause)
+			err := session.SendResponse(operation, response)
+			stop()
+			close(item.responded)
+			if err != nil {
+				return err
+			}
+		case <-ticker.C:
+			active, err := synchronize()
+			if err != nil {
+				return err
+			}
+			if !active {
+				return nil
+			}
 		}
 	}
 }

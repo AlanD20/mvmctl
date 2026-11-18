@@ -254,6 +254,7 @@ func (intent Intent) compile() (compiledGeneration, error) {
 		if _, found := active[resource.OwnerVMID]; found {
 			binding.ownerVMID = resource.OwnerVMID
 			binding.ownerLaunchGeneration = resource.OwnerLaunchGeneration
+			binding.lifetime = resource.Lifetime
 			binding.leaseDuration = resource.LeaseDuration
 		}
 		resolved.floatingIPs = append(resolved.floatingIPs, binding)

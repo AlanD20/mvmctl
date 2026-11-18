@@ -217,15 +217,18 @@ type guestControlPending struct {
 	response chan guestcontrolwire.Response
 }
 type guestControlSession struct {
-	conn       net.Conn
-	transport  net.Conn
-	gate       chan struct{}
-	done       chan struct{}
-	once       sync.Once
-	mu         sync.Mutex
-	pending    *guestControlPending
-	aliases    *guestControlAliases
-	aliasEpoch string
+	conn         net.Conn
+	transport    net.Conn
+	gate         chan struct{}
+	done         chan struct{}
+	once         sync.Once
+	mu           sync.Mutex
+	writeMu      sync.Mutex
+	aliasSession string
+	aliasStage   *guestControlAliasStage
+	pending      *guestControlPending
+	aliases      *guestControlAliases
+	aliasEpoch   string
 }
 
 func newGuestControlSession(conn, transport net.Conn) *guestControlSession {
@@ -264,26 +267,28 @@ func (session *guestControlSession) readResponses(ctx context.Context) {
 		session.mu.Lock()
 		pending := session.pending
 		session.mu.Unlock()
-		if pending == nil {
-			return
+		var request *guestcontrolwire.Request
+		if pending != nil {
+			request = &pending.request
 		}
-		response, err := guestcontrolwire.DecodeResponse(ctx, reader, pending.request)
+		response, page, err := guestcontrolwire.DecodeHostMessage(ctx, reader, request)
 		if err != nil {
 			return
 		}
+		if page != nil {
+			if err := session.receiveAliasPage(ctx, *page); err != nil {
+				return
+			}
+			continue
+		}
 		session.mu.Lock()
-		if session.pending != pending {
+		if pending == nil || session.pending != pending {
 			session.mu.Unlock()
 			return
 		}
 		session.pending = nil
-		// Clear the request deadline before waiting for the next host response/idle EOF.
-		if err := session.conn.SetDeadline(time.Time{}); err != nil {
-			session.mu.Unlock()
-			return
-		}
 		session.mu.Unlock()
-		pending.response <- response
+		pending.response <- *response
 	}
 }
 
@@ -314,14 +319,10 @@ func (session *guestControlSession) exchange(
 	session.mu.Unlock()
 	stop := context.AfterFunc(ctx, session.close)
 	defer stop()
-	deadline, bounded := ctx.Deadline()
+	_, bounded := ctx.Deadline()
 	if !bounded {
 		session.close()
 		return guestcontrolwire.Response{}, errors.New("guest control exchange needs a deadline")
-	}
-	if err := session.conn.SetDeadline(deadline); err != nil {
-		session.close()
-		return guestcontrolwire.Response{}, err
 	}
 	var aliasStarted uint64
 	if session.aliases != nil {
@@ -332,7 +333,10 @@ func (session *guestControlSession) exchange(
 			return guestcontrolwire.Response{}, err
 		}
 	}
-	if err := guestcontrolwire.EncodeRequest(ctx, session.conn, request); err != nil {
+	session.writeMu.Lock()
+	writeErr := guestcontrolwire.EncodeRequest(ctx, session.conn, request)
+	session.writeMu.Unlock()
+	if err := writeErr; err != nil {
 		session.close()
 		return guestcontrolwire.Response{}, err
 	}

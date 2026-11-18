@@ -1,13 +1,9 @@
 package firewall
 
-import (
-	"time"
-
-	"github.com/google/nftables"
-)
+import "github.com/google/nftables"
 
 func compareSecondaryLeaseElements(elements []secondaryLeaseElement, expected compiledGeneration) error {
-	allowed := make(map[[secondaryLeaseKeyBytes]byte]time.Duration, len(expected.bridge.secondaryOwners))
+	allowed := make(map[[secondaryLeaseKeyBytes]byte]floatingIPIntent, len(expected.bridge.secondaryOwners))
 	for _, resource := range expected.floatingIPs {
 		if resource.ownerVMID == "" {
 			continue
@@ -16,7 +12,7 @@ func compareSecondaryLeaseElements(elements []secondaryLeaseElement, expected co
 		if !found {
 			return invalidKernelObservation("compiled floating-IP owner has no exact lease key")
 		}
-		allowed[key] = resource.leaseDuration
+		allowed[key] = resource
 	}
 	seen := make(map[[secondaryLeaseKeyBytes]byte]struct{}, len(elements))
 	for _, element := range elements {
@@ -24,8 +20,9 @@ func compareSecondaryLeaseElements(elements []secondaryLeaseElement, expected co
 			return invalidKernelObservation("duplicate observed secondary lease key")
 		}
 		seen[element.key] = struct{}{}
-		duration, found := allowed[element.key]
-		if !found || element.timeout != duration || element.remaining < 0 || element.remaining > duration {
+		resource, found := allowed[element.key]
+		if !found || element.lifetime != resource.lifetime || element.timeout != resource.leaseDuration ||
+			element.remaining < 0 || element.remaining > resource.leaseDuration {
 			return invalidKernelObservation("secondary lease key or timeout differs from ownership authority")
 		}
 	}

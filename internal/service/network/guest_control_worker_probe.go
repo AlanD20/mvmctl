@@ -56,7 +56,27 @@ func (server *FloatingIPServer) HasCurrentGuestControlDelegations(
 	if err != nil {
 		return false, err
 	}
-	return currentGuestControlDelegationExists(records, uid, vm.String(), incarnation), nil
+	if currentGuestControlDelegationExists(records, uid, vm.String(), incarnation) {
+		return true, nil
+	}
+	resources, err := openFloatingIPStore(ctx, owner, false)
+	if err != nil {
+		return false, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, resources.release(context.WithoutCancel(ctx))) }()
+	floating, err := resources.list(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, r := range floating {
+		if !r.Retired && r.Phase == floatingIPOwned && r.OwnerUID == uid && r.Owner.Origin == floatingIPOperatorOrigin &&
+			r.Owner.VMID == vm.String() && r.Owner.BootID == incarnation.BootID &&
+			r.Owner.LaunchGeneration == incarnation.LaunchGeneration &&
+			r.Owner.ExecutionUID == incarnation.ExecutionUID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func currentGuestControlDelegationExists(

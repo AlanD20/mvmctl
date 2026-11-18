@@ -35,6 +35,7 @@ type runtimeDeps struct {
 	runtimeOwnerInventory  runtimeOwnerInventoryObserve
 	hostPolicy             hostPolicyObserve
 	floatingIP             floatingIPHandlerEffects
+	floatingIPOperator     floatingIPOperatorEffects
 	floatingIPDelegation   floatingIPDelegationHandlerEffects
 	loopMount              loopMountHandlerEffects
 	vmExecSession          vmExecSessionHandlerEffects
@@ -127,6 +128,11 @@ func Run(ctx context.Context, args []string) error {
 			revoke:      floatingIP.RevokeFloatingIPDelegation,
 			list:        floatingIP.ListFloatingIPDelegations,
 			get:         floatingIP.GetFloatingIPDelegation,
+		},
+		floatingIPOperator: floatingIPOperatorEffects{
+			associate: associateOperatorFloatingIP,
+			transfer:  transferOperatorFloatingIP,
+			release:   releaseOperatorFloatingIP,
 		},
 		floatingIP: floatingIPHandlerEffects{
 			create: floatingIP.CreateFloatingIP,
@@ -302,6 +308,12 @@ func dispatch(
 		return dispatchHandled, handleCreateManagedNetwork(ctx, endpoint, caller, deps.control)
 	case network.ManagedNetworkRemoveAction:
 		return dispatchHandled, handleRemoveManagedNetwork(ctx, endpoint, caller, deps.control)
+	case network.FloatingIPAssociateAction:
+		return dispatchHandled, handleAssociateFloatingIP(ctx, endpoint, caller, deps.floatingIPOperator, deps.control)
+	case network.FloatingIPTransferAction:
+		return dispatchHandled, handleTransferFloatingIP(ctx, endpoint, caller, deps.floatingIPOperator, deps.control)
+	case network.FloatingIPReleaseAction:
+		return dispatchHandled, handleReleaseFloatingIP(ctx, endpoint, caller, deps.floatingIPOperator, deps.control)
 	case network.FloatingIPCreateAction:
 		return dispatchHandled, handleCreateFloatingIP(ctx, endpoint, caller, deps.floatingIP, deps.control)
 	case network.FloatingIPRemoveAction:

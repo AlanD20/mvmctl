@@ -47,6 +47,11 @@ func (authority *productionGenerationNetworkAuthority) retirePriorBootRecord(
 			nil,
 		)
 	}
+	if journal.SchemaVersion == 1 {
+		if err := admitLegacyTerminalIntent(previous, journal); err != nil {
+			return generationRecord{}, generationRecordFileEvidence{}, err
+		}
+	}
 	currentNamespace := NamespaceIdentity{Device: binding.namespace.device, Inode: binding.namespace.inode}
 	var prior priorBootIntent
 	switch {
@@ -93,7 +98,7 @@ func (authority *productionGenerationNetworkAuthority) retirePriorBootRecord(
 		)
 	}
 	reset := intentJournal{
-		SchemaVersion: 1, BootID: binding.bootID, HostNamespace: currentNamespace,
+		SchemaVersion: intentJournalSchema, BootID: binding.bootID, HostNamespace: currentNamespace,
 		Before: dormant, Target: dormant, PriorBoot: &prior,
 	}
 	if journal.BootID != previous.binding.bootID {

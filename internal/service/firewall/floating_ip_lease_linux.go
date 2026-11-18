@@ -3,7 +3,6 @@ package firewall
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/google/nftables"
 )
@@ -64,10 +63,10 @@ func (state *mutationLeaseState) floatingIPOwnershipIntent(binding FloatingIPBin
 	}
 	if publish {
 		if binding.OwnerVMID == "" || binding.OwnerLaunchGeneration == 0 ||
-			binding.LeaseDuration <= 0 || binding.LeaseDuration%time.Second != 0 {
+			!validFloatingIPLifetime(binding.Lifetime, binding.LeaseDuration) {
 			return Intent{}, generationAuthorityError("floating-IP owner or lease policy is invalid", nil, nil)
 		}
-	} else if binding.OwnerVMID != "" || binding.OwnerLaunchGeneration != 0 || binding.LeaseDuration != 0 {
+	} else if binding.OwnerVMID != "" || binding.OwnerLaunchGeneration != 0 || binding.Lifetime != "" || binding.LeaseDuration != 0 {
 		return Intent{}, generationAuthorityError("floating-IP fence must be ownerless", nil, nil)
 	}
 	target := cloneIntent(state.intent)
@@ -81,7 +80,7 @@ func (state *mutationLeaseState) floatingIPOwnershipIntent(binding FloatingIPBin
 			return Intent{}, generationAuthorityError("floating-IP identity rebound or generation rollback", nil, nil)
 		}
 		if publish && (resource.Generation != binding.Generation || resource.OwnerVMID != "" ||
-			resource.OwnerLaunchGeneration != 0 || resource.LeaseDuration != 0) {
+			resource.OwnerLaunchGeneration != 0 || resource.Lifetime != "" || resource.LeaseDuration != 0) {
 			return Intent{}, generationAuthorityError(
 				"floating-IP owner publication requires the exact fence", nil, nil)
 		}
@@ -112,17 +111,27 @@ func (state *mutationLeaseState) floatingIPOwnershipIntent(binding FloatingIPBin
 // ActivateFloatingIPLease installs one finite timed key after exact absent-authority proof.
 // An unknown insert outcome is never retried here, by loading intent, or by compiling metadata.
 func (lease *MutationLease) ActivateFloatingIPLease(ctx context.Context, resourceID string, generation uint64) error {
-	return lease.changeFloatingIPLease(ctx, resourceID, generation, false)
+	return lease.changeFloatingIPLease(ctx, resourceID, generation, FloatingIPFinite, false)
 }
 
 // RenewFloatingIPLease deletes the exact old key, proves absence and inserts once. Repeated Add with
 // the same timeout does not renew on the supported kernel/library protocol. This permits a fenced gap.
 func (lease *MutationLease) RenewFloatingIPLease(ctx context.Context, resourceID string, generation uint64) error {
-	return lease.changeFloatingIPLease(ctx, resourceID, generation, true)
+	return lease.changeFloatingIPLease(ctx, resourceID, generation, FloatingIPFinite, true)
+}
+
+// ActivateFloatingIPOwnership installs one non-expiring operator key after exact absent-authority proof.
+// Loading or compiling persistent intent never invokes this one-shot effect.
+func (lease *MutationLease) ActivateFloatingIPOwnership(
+	ctx context.Context,
+	resourceID string,
+	generation uint64,
+) error {
+	return lease.changeFloatingIPLease(ctx, resourceID, generation, FloatingIPPersistent, false)
 }
 
 func (lease *MutationLease) changeFloatingIPLease(
-	ctx context.Context, resourceID string, generation uint64, renew bool,
+	ctx context.Context, resourceID string, generation uint64, lifetime FloatingIPLifetime, renew bool,
 ) error {
 	if lease == nil || lease.state == nil {
 		return generationAuthorityError("floating-IP mutation authority is unavailable", nil, nil)
@@ -142,6 +151,9 @@ func (lease *MutationLease) changeFloatingIPLease(
 	resource, present, err := state.floatingIPLeaseAuthority(resourceID, generation, observed)
 	if err != nil {
 		return err
+	}
+	if resource.Lifetime != lifetime {
+		return generationAuthorityError("floating-IP lifetime does not permit this operation", nil, nil)
 	}
 	if present {
 		if !renew {
@@ -183,8 +195,7 @@ func (state *mutationLeaseState) floatingIPLeaseAuthority(
 		key, active := state.compiled.bridge.secondaryOwners[resourceID]
 		if !active || resource.OwnerUID != state.binding.OwnerUID || resource.NetworkID != state.binding.NetworkID ||
 			resource.Generation != generation || generation == 0 || resource.OwnerVMID == "" ||
-			resource.OwnerLaunchGeneration == 0 || resource.LeaseDuration <= 0 ||
-			resource.LeaseDuration%time.Second != 0 {
+			resource.OwnerLaunchGeneration == 0 || !validFloatingIPLifetime(resource.Lifetime, resource.LeaseDuration) {
 			return FloatingIPBinding{}, false, generationAuthorityError("floating-IP lease ownership differs", nil, nil)
 		}
 		for _, element := range observed.tables[0].secondaryElements {
@@ -200,7 +211,7 @@ func (state *mutationLeaseState) floatingIPLeaseAuthority(
 func (state *mutationLeaseState) verifyFloatingIPLeaseInstalled(
 	resourceID string, generation uint64, observed kernelObservation,
 ) error {
-	_, present, err := state.floatingIPLeaseAuthority(resourceID, generation, observed)
+	resource, present, err := state.floatingIPLeaseAuthority(resourceID, generation, observed)
 	if err != nil {
 		return err
 	}
@@ -208,7 +219,8 @@ func (state *mutationLeaseState) verifyFloatingIPLeaseInstalled(
 		return generationAuthorityError("floating-IP lease is absent after insertion", nil, nil)
 	}
 	for _, element := range observed.tables[0].secondaryElements {
-		if element.key == state.compiled.bridge.secondaryOwners[resourceID] && element.remaining <= 0 {
+		if element.key == state.compiled.bridge.secondaryOwners[resourceID] &&
+			resource.Lifetime == FloatingIPFinite && element.remaining <= 0 {
 			return generationAuthorityError("floating-IP lease has no positive remaining lifetime", nil, nil)
 		}
 	}
@@ -255,6 +267,7 @@ func (state *mutationLeaseState) mutateFloatingIPLeaseElement(
 	set.ID = 0
 	element := nftables.SetElement{Key: key[:]}
 	if insert {
+		// Zero timeout deliberately emits no timeout attribute for persistent ownership.
 		element.Timeout = resource.LeaseDuration
 		err = connection.addSecondaryElements(&set, []nftables.SetElement{element})
 	} else {

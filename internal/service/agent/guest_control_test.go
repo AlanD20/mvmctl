@@ -81,6 +81,7 @@ func controlTestResponse(request guestcontrolwire.Request) guestcontrolwire.Resp
 		result.Generation++
 	}
 	if request.Operation == guestcontrolwire.Associate || request.Operation == guestcontrolwire.Renew {
+		result.Lifetime = guestcontrolwire.Finite
 		result.Ownership = guestcontrolwire.OwnedBySelf
 		result.LeaseRemainingMillis = 5000
 	}

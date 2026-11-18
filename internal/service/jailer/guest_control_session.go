@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
@@ -37,14 +38,25 @@ type GuestControlSession struct{ state *guestControlSessionState }
 type guestControlSessionState struct {
 	// mu guards descriptor ownership and close state; ioMu serializes the one outstanding request.
 	// Close never waits on ioMu: it must interrupt a blocked receive or send.
-	mu        sync.Mutex
-	ioMu      sync.Mutex
-	conn      *tls.Conn
-	pidfd     int
-	principal GuestControlPrincipal
-	pending   *guestcontrolwire.Request
-	closed    bool
-	closeErr  error
+	mu              sync.Mutex
+	ioMu            sync.Mutex
+	receiveMu       sync.Mutex
+	readerStarted   bool
+	requests        chan guestcontrolwire.Request
+	readerDone      chan struct{}
+	readerErr       error
+	readOutstanding bool
+	syncMu          sync.Mutex
+	aliasSession    string
+	aliasExpected   *guestcontrolwire.FloatingIPAliasAck
+	aliasAck        chan guestcontrolwire.FloatingIPAliasAck
+	aliasConfirmed  *guestcontrolwire.FloatingIPAliasAck
+	conn            *tls.Conn
+	pidfd           int
+	principal       GuestControlPrincipal
+	pending         *guestcontrolwire.Request
+	closed          bool
+	closeErr        error
 }
 
 // OpenGuestControlSession authenticates the protected VMM peer and its provisioned agent endpoint
@@ -255,23 +267,132 @@ func (session *GuestControlSession) Principal() (GuestControlPrincipal, error) {
 	return state.principal, nil
 }
 
-func (session *GuestControlSession) ReceiveRequest(ctx context.Context) (_ guestcontrolwire.Request, returnErr error) {
-	if session == nil || session.state == nil {
-		return guestcontrolwire.Request{}, instanceStateError("", "Guest Control session is unavailable")
+func (session *GuestControlSession) ReceiveRequest(ctx context.Context) (guestcontrolwire.Request, error) {
+	if ctx == nil || session == nil || session.state == nil {
+		return guestcontrolwire.Request{}, instanceValidationError(
+			"Guest Control receive context and session are required",
+		)
 	}
 	state := session.state
-	state.ioMu.Lock()
-	defer state.ioMu.Unlock()
+	state.receiveMu.Lock()
+	defer state.receiveMu.Unlock()
+	state.mu.Lock()
 	if state.pending != nil {
+		state.mu.Unlock()
 		return guestcontrolwire.Request{}, instanceValidationError("Guest Control request is already outstanding")
 	}
+	if !state.readerStarted && !state.closed {
+		state.readerStarted = true
+		state.requests = make(chan guestcontrolwire.Request, 1)
+		state.readerDone = make(chan struct{})
+		go session.readMessages()
+	}
+	requests, done, closed := state.requests, state.readerDone, state.closed
+	state.mu.Unlock()
+	if closed {
+		return guestcontrolwire.Request{}, instanceStateError("", "Guest Control session is closed")
+	}
+	select {
+	case request := <-requests:
+		state.mu.Lock()
+		state.pending = &request
+		state.mu.Unlock()
+		return request, nil
+	case <-done:
+		state.mu.Lock()
+		err := state.readerErr
+		state.mu.Unlock()
+		return guestcontrolwire.Request{}, err
+	case <-ctx.Done():
+		return guestcontrolwire.Request{}, errors.Join(ctx.Err(), session.Close(context.Background()))
+	}
+}
+
+// readMessages owns the only authenticated-stream read, including while guest effects execute.
+// The reader retains no admission locks and Close interrupts its underlying descriptor directly.
+func (session *GuestControlSession) readMessages() {
+	state := session.state
+	var failure error
+	defer func() {
+		if failure == nil {
+			failure = instanceStateError("", "Guest Control stream stopped")
+		}
+		state.mu.Lock()
+		state.readerErr = failure
+		close(state.readerDone)
+		state.mu.Unlock()
+		_ = session.Close(context.Background())
+	}()
 	connection, err := session.connection()
 	if err != nil {
-		return guestcontrolwire.Request{}, err
+		failure = err
+		return
+	}
+	for {
+		request, ack, err := guestcontrolwire.DecodeGuestMessage(context.Background(), connection)
+		if err != nil {
+			failure = err
+			return
+		}
+		state.mu.Lock()
+		if ack != nil {
+			expected := state.aliasExpected
+			if expected == nil || ack.SessionID != expected.SessionID || ack.SnapshotID != expected.SnapshotID ||
+				ack.Digest != expected.Digest {
+				state.mu.Unlock()
+				failure = instanceValidationError("unsolicited operator alias acknowledgement")
+				return
+			}
+			select {
+			case state.aliasAck <- *ack:
+				state.aliasExpected = nil
+			default:
+				state.mu.Unlock()
+				failure = instanceValidationError("duplicate operator alias acknowledgement")
+				return
+			}
+			state.mu.Unlock()
+			continue
+		}
+		if state.readOutstanding {
+			state.mu.Unlock()
+			failure = instanceValidationError("Guest Control request is already outstanding")
+			return
+		}
+		state.readOutstanding = true
+		state.requests <- *request
+		state.mu.Unlock()
+	}
+}
+
+// SyncFloatingIPAliases sends one complete host-authorized snapshot and waits for its exact ACK.
+// ReceiveRequest must be running concurrently as the sole stream reader. No root mutation authority is retained.
+func (session *GuestControlSession) SyncFloatingIPAliases(
+	ctx context.Context,
+	snapshot guestcontrolwire.FloatingIPAliasSnapshot,
+) (returnErr error) {
+	if ctx == nil || session == nil || session.state == nil {
+		return instanceValidationError("operator alias sync requires a session and context")
+	}
+	if err := snapshot.Validate(); err != nil {
+		return err
+	}
+	digest, err := snapshot.Digest()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	state := session.state
+	state.syncMu.Lock()
+	defer state.syncMu.Unlock()
+	connection, err := session.connection()
+	if err != nil {
+		return err
 	}
 	watch, err := beginGuestControlIO(ctx, connection)
 	if err != nil {
-		return guestcontrolwire.Request{}, err
+		return err
 	}
 	defer func() {
 		returnErr = watch.finish(ctx, returnErr)
@@ -279,12 +400,65 @@ func (session *GuestControlSession) ReceiveRequest(ctx context.Context) (_ guest
 			returnErr = errors.Join(returnErr, session.Close(context.Background()))
 		}
 	}()
-	request, err := guestcontrolwire.DecodeRequest(ctx, connection)
-	if err != nil {
-		return guestcontrolwire.Request{}, err
+	state.mu.Lock()
+	if state.aliasSession == "" {
+		id, err := uuid.NewRandom()
+		if err != nil {
+			state.mu.Unlock()
+			return err
+		}
+		state.aliasSession = id.String()
 	}
-	state.pending = &request
-	return request, nil
+	expected := guestcontrolwire.FloatingIPAliasAck{
+		SchemaVersion: 1,
+		Feature:       "floating_ip_alias_ack",
+		SessionID:     state.aliasSession,
+		SnapshotID:    snapshot.ID,
+		Digest:        digest,
+	}
+	state.aliasExpected = &expected
+	channel := make(chan guestcontrolwire.FloatingIPAliasAck, 1)
+	state.aliasAck = channel
+	state.mu.Unlock()
+	state.ioMu.Lock()
+	writeErr := func() error {
+		count := len(snapshot.Aliases)
+		for offset, index := 0, uint32(0); ; offset, index = offset+guestcontrolwire.FloatingIPAliasPageSize, index+1 {
+			end := min(offset+guestcontrolwire.FloatingIPAliasPageSize, count)
+			page := guestcontrolwire.FloatingIPAliasPage{
+				SchemaVersion: 1,
+				Feature:       "floating_ip_alias_sync",
+				SessionID:     expected.SessionID,
+				SnapshotID:    snapshot.ID,
+				Index:         index,
+				Final:         end == count,
+				Digest:        digest,
+				Aliases:       snapshot.Aliases[offset:end],
+			}
+			if err := guestcontrolwire.EncodeFloatingIPAliasPage(ctx, connection, page); err != nil {
+				return err
+			}
+			if page.Final {
+				return nil
+			}
+		}
+	}()
+	state.ioMu.Unlock()
+	if writeErr != nil {
+		return writeErr
+	}
+	select {
+	case ack := <-channel:
+		if !ack.Accepted {
+			return instanceStateError("", "operator ownership committed but guest alias synchronization failed")
+		}
+		state.mu.Lock()
+		state.aliasConfirmed = &ack
+		state.mu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (session *GuestControlSession) SendResponse(
@@ -296,10 +470,13 @@ func (session *GuestControlSession) SendResponse(
 	state := session.state
 	state.ioMu.Lock()
 	defer state.ioMu.Unlock()
-	if state.pending == nil {
+	state.mu.Lock()
+	pending := state.pending
+	state.mu.Unlock()
+	if pending == nil {
 		return instanceValidationError("Guest Control response has no outstanding request")
 	}
-	if err := response.ValidateFor(*state.pending); err != nil {
+	if err := response.ValidateFor(*pending); err != nil {
 		return err
 	}
 	connection, err := session.connection()
@@ -316,10 +493,16 @@ func (session *GuestControlSession) SendResponse(
 			returnErr = errors.Join(returnErr, session.Close(context.Background()))
 		}
 	}()
-	if err := guestcontrolwire.EncodeResponse(ctx, connection, *state.pending, response); err != nil {
+	// Release the completed request before the peer can observe any response bytes.
+	// A legitimate sequential peer may send its next request before the final Write returns.
+	// ioMu still serializes response/snapshot writes, and any failed write closes the session.
+	state.mu.Lock()
+	state.pending = nil
+	state.readOutstanding = false
+	state.mu.Unlock()
+	if err := guestcontrolwire.EncodeResponse(ctx, connection, *pending, response); err != nil {
 		return err
 	}
-	state.pending = nil
 	return nil
 }
 
@@ -414,10 +597,6 @@ func beginGuestControlIO(ctx context.Context, connection net.Conn) (*guestContro
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	deadline, _ := ctx.Deadline()
-	if err := connection.SetDeadline(deadline); err != nil {
-		return nil, err
-	}
 	watch := &guestControlIOWatch{connection: connection, done: make(chan struct{})}
 	watch.stop = context.AfterFunc(ctx, func() { _ = closeGuestControlTransport(connection); close(watch.done) })
 	return watch, nil
@@ -428,9 +607,6 @@ func (watch *guestControlIOWatch) finish(ctx context.Context, primary error) err
 		<-watch.done
 	}
 	result := errors.Join(primary, ctx.Err())
-	if result == nil {
-		result = watch.connection.SetDeadline(time.Time{})
-	}
 	if result != nil {
 		result = errors.Join(result, closeGuestControlTransport(watch.connection))
 	}
