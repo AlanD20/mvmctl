@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added managed floating IPv4 reservations with host association, transfer and release. Host assignments persist
+  until release, transfer or VM stop; explicitly delegated guest operations use finite, kernel-enforced leases.
+  Guest Control authenticates each VM and grants exact methods, never arbitrary host commands.
+  See [Guest Control and floating IPs](docs/GUEST_CONTROL.md).
+- Added floating-IP resources, delegations and exact traffic destinations to version-1 environment specs, and
+  updated the HA example to use host-authorized floating-IP ownership.
 - Added a confirmed administrator uninstall script that removes enrolled operators' managed data through typed
   cleanup, restores recorded host settings, then removes installation authority and binaries. External mirrors,
   original external SSH files and shared dependencies are preserved. See [uninstall](docs/UNINSTALL.md).
@@ -177,6 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed rejection of valid family-filtered conntrack dump replies, which prevented floating-IP retirement on
+  affected kernels. Interrupted dumps, unexpected flags and kernel errors still fail closed.
 - Fixed administrator reset rejecting terminal networkless history or a committed empty firewall generation
   from a previous boot. Reset still requires empty desired state and absent current managed namespaces/tables.
 - Fixed VM launch failures when host connection retries recreate an unresolved ARP entry after cleanup of a reused
