@@ -81,8 +81,11 @@ service access that must follow an IP across owners needs an explicit floating-I
 The example must declare this access rather than relying on a network-wide allow or an implicit firewall exception.
 The compiler now supports VM-to-floating-IP and network-to-floating-IP grants, bound to the immutable resource
 ID and exact address. Destination rules follow the active owner without admitting its primary or other aliases;
-unassociated resources emit no delivery grant. Operator policy CRUD, root mutation and live packet qualification
-for these families remain pending.
+unassociated resources emit no delivery grant. Operator policy CRUD and root mutation are implemented and
+reviewed. `policy traffic create --to-floating-ip` selects this destination family; `--to-network` resolves
+the reservation scope. Root derives the address and network from its resource record. SQLite stores local
+projections with exact claim/incarnation receipts, while root remains authoritative. Live packet qualification
+for these families remains pending.
 
 ### Automatic failover
 

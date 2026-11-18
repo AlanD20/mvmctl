@@ -44,7 +44,8 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   non-replaying recovery states; independently review and pass focused QA vet/race checks.
 - [x] Compile VM/network grants to exact floating-IP destinations with stable resource-based policy identity;
   verify owner movement, dormancy, destination exclusions, canonical hashing and sealing in focused QA.
-- [ ] Wire floating-IP policy CRUD through operator inputs, repositories and authenticated root mutation.
+- [x] Wire floating-IP policy CRUD through operator inputs, repositories and authenticated root mutation;
+  independently review and pass focused QA tests, vet, race and existing policy regressions. Live packets remain unqualified.
 - [x] Implement and review typed fencing, owner publication and finite lease activation/renewal effects;
   pass focused QA tests, vet and race checks without claiming live renewal timing.
 - [x] Add retained target-VM network admission, read-only endpoint/lease verification and authoritative Running
