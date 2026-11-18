@@ -17,14 +17,15 @@ import (
 )
 
 type guestControlAliases struct {
-	mu      sync.Mutex
-	kernel  guestControlAliasKernel
-	store   *guestControlAliasStore
-	bootID  string
-	active  string
-	records map[string]guestControlAliasReceipt
-	timers  map[string]*time.Timer
-	closed  bool
+	mu        sync.Mutex
+	kernel    guestControlAliasKernel
+	store     *guestControlAliasStore
+	bootID    string
+	active    string
+	announced map[string]guestControlAliasAnnouncement
+	records   map[string]guestControlAliasReceipt
+	timers    map[string]*time.Timer
+	closed    bool
 }
 
 func newGuestControlAliases(
@@ -35,7 +36,9 @@ func newGuestControlAliases(
 		return nil, err
 	}
 	return &guestControlAliases{kernel: kernel, store: store, bootID: strings.TrimSpace(string(boot)),
-		records: make(map[string]guestControlAliasReceipt), timers: make(map[string]*time.Timer)}, nil
+		announced: make(
+			map[string]guestControlAliasAnnouncement,
+		), records: make(map[string]guestControlAliasReceipt), timers: make(map[string]*time.Timer)}, nil
 }
 func guestControlAliasNow() (uint64, error) {
 	var clock unix.Timespec
@@ -64,6 +67,7 @@ func (aliases *guestControlAliases) beginSession(ctx context.Context) (string, e
 	if err != nil {
 		return "", err
 	}
+	aliases.announced = make(map[string]guestControlAliasAnnouncement)
 	aliases.active = id.String()
 	return aliases.active, nil
 }
@@ -82,6 +86,7 @@ func (aliases *guestControlAliases) recoverLocked(ctx context.Context) error {
 		timer.Stop()
 	}
 	aliases.timers = make(map[string]*time.Timer)
+	aliases.announced = make(map[string]guestControlAliasAnnouncement)
 	aliases.records = make(map[string]guestControlAliasReceipt, len(records))
 	for _, record := range records {
 		aliases.records[record.Resource] = record
@@ -208,6 +213,9 @@ func (aliases *guestControlAliases) reconcile(
 			owned = false
 		} else {
 			next := current
+			next.Installed = true
+			next.Address = *actual
+			next.Address.Flags = stableGuestControlAliasFlags(actual.Flags)
 			next.Deadline = deadline
 			next.Revision++
 			if next.Revision == 0 {
@@ -225,7 +233,7 @@ func (aliases *guestControlAliases) reconcile(
 				return aliases.expiredResponse(ctx, next, true)
 			}
 			aliases.schedule(next, now)
-			return nil
+			return aliases.announceOwnedAlias(ctx, next)
 		}
 	}
 	snapshot, err := aliases.kernel.snapshot(ctx)
@@ -308,7 +316,7 @@ func (aliases *guestControlAliases) reconcile(
 		return aliases.expiredResponse(ctx, next, true)
 	}
 	aliases.schedule(next, now)
-	return nil
+	return aliases.announceOwnedAlias(ctx, next)
 }
 func (aliases *guestControlAliases) expiredResponse(
 	ctx context.Context, current guestControlAliasReceipt, owned bool,
@@ -383,6 +391,7 @@ func (aliases *guestControlAliases) cleanup(ctx context.Context, record guestCon
 		timer.Stop()
 		delete(aliases.timers, record.Resource)
 	}
+	delete(aliases.announced, record.Resource)
 	delete(aliases.records, record.Resource)
 	return nil
 }

@@ -134,6 +134,9 @@ func (aliases *guestControlAliases) syncOperatorAliases(
 				}
 				if present != nil {
 					next := current
+					next.Installed = true
+					next.Address = *present
+					next.Address.Flags = stableGuestControlAliasFlags(present.Flags)
 					next.Session = session
 					next.Revision++
 					if next.Revision == 0 {
@@ -143,6 +146,9 @@ func (aliases *guestControlAliases) syncOperatorAliases(
 						return err
 					}
 					aliases.records[next.Resource] = next
+					if err := aliases.announceOwnedAlias(ctx, next); err != nil {
+						return err
+					}
 					continue
 				}
 				if err := aliases.cleanup(ctx, current); err != nil {
@@ -235,5 +241,5 @@ func (aliases *guestControlAliases) installOperatorAlias(
 		return err
 	}
 	aliases.records[next.Resource] = next
-	return nil
+	return aliases.announceOwnedAlias(ctx, next)
 }

@@ -17,12 +17,42 @@ import (
 )
 
 type aliasTestKernel struct {
-	mu         sync.Mutex
-	state      guestControlAliasSnapshot
-	failRemove bool
-	created    uint32
+	mu               sync.Mutex
+	state            guestControlAliasSnapshot
+	failRemove       bool
+	failAnnounce     bool
+	announceAttempts int
+	announceDelay    time.Duration
+	announcements    []guestControlAliasAddress
+	created          uint32
 }
 
+func (kernel *aliasTestKernel) announceIPv4(
+	ctx context.Context,
+	link guestControlAliasLink,
+	address guestControlAliasAddress,
+) error {
+	kernel.mu.Lock()
+	defer kernel.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	kernel.announceAttempts++
+	if kernel.announceDelay > 0 {
+		timer := time.NewTimer(kernel.announceDelay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if kernel.failAnnounce {
+		return errors.New("injected alias announcement failure")
+	}
+	kernel.announcements = append(kernel.announcements, address)
+	return nil
+}
 func (kernel *aliasTestKernel) snapshot(ctx context.Context) (guestControlAliasSnapshot, error) {
 	kernel.mu.Lock()
 	defer kernel.mu.Unlock()

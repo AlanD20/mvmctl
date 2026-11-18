@@ -44,6 +44,7 @@ type guestControlAliasKernel interface {
 	snapshot(context.Context) (guestControlAliasSnapshot, error)
 	add(context.Context, guestControlAliasAddress) error
 	remove(context.Context, guestControlAliasAddress) error
+	announceIPv4(context.Context, guestControlAliasLink, guestControlAliasAddress) error
 }
 type guestControlAliasNetlink struct{ namespace int }
 
