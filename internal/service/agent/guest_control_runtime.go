@@ -14,8 +14,7 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// TODO: add authorization-bound guest address reconciliation and lease health/failover in the next agent slice.
-// This gateway transports typed requests only.
+// Automatic renewal, health policy and failover remain separate explicit features.
 // runGuestControl keeps malformed/absent provisioning and control-only port failures separate from legacy exec.
 func (a *Agent) runGuestControl(ctx context.Context) {
 	material, enabled, err := LoadGuestControlAgentMaterial(ctx)
@@ -36,6 +35,7 @@ func (a *Agent) runGuestControl(ctx context.Context) {
 		return
 	}
 	host := &guestControlVsockListener{listener: rawHost}
+	defer host.Close()
 	local, cleanup, err := listenGuestControlLocal()
 	if err != nil {
 		_ = host.Close()
@@ -49,6 +49,36 @@ func (a *Agent) runGuestControl(ctx context.Context) {
 		slog.Warn("guest control unavailable: gateway initialization failed")
 		return
 	}
+	store, err := openGuestControlAliasStore()
+	if err != nil {
+		slog.Warn("guest control unavailable: alias receipts are unsafe")
+		return
+	}
+	defer store.close()
+	kernel, err := newGuestControlAliasNetlink()
+	if err != nil {
+		slog.Warn("guest control unavailable: alias network authority is unavailable")
+		return
+	}
+	defer kernel.close()
+	aliases, err := newGuestControlAliases(kernel, store)
+	if err != nil {
+		slog.Warn("guest control unavailable: alias manager initialization failed")
+		return
+	}
+	defer func() {
+		if err := aliases.close(); err != nil {
+			slog.Warn("guest control alias cleanup remains pending")
+		}
+	}()
+	recovery, cancel := context.WithTimeout(ctx, guestControlAliasIOTimeout)
+	err = aliases.recover(recovery)
+	cancel()
+	if err != nil {
+		slog.Warn("guest control unavailable: alias cleanup needs recovery")
+		return
+	}
+	gateway.aliases = aliases
 	if err := gateway.Run(ctx); err != nil && ctx.Err() == nil {
 		slog.Warn("guest control gateway stopped")
 	}

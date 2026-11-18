@@ -28,6 +28,7 @@ type GuestControlGateway struct {
 	mu         sync.Mutex
 	connecting bool
 	session    *guestControlSession
+	aliases    *guestControlAliases
 }
 
 // NewGuestControlGateway owns both supplied listeners. Production supplies the fixed vsock and private Unix listeners.
@@ -119,6 +120,17 @@ func (gateway *GuestControlGateway) acceptHost(ctx context.Context, conn net.Con
 		return
 	}
 	session := newGuestControlSession(secured, conn)
+	if gateway.aliases != nil {
+		setup, cancel := context.WithTimeout(ctx, guestControlAliasIOTimeout)
+		epoch, err := gateway.aliases.beginSession(setup)
+		cancel()
+		if err != nil {
+			gateway.mu.Unlock()
+			_ = conn.Close()
+			return
+		}
+		session.aliases, session.aliasEpoch = gateway.aliases, epoch
+	}
 	gateway.session = session
 	gateway.mu.Unlock()
 	defer session.close()
@@ -205,13 +217,15 @@ type guestControlPending struct {
 	response chan guestcontrolwire.Response
 }
 type guestControlSession struct {
-	conn      net.Conn
-	transport net.Conn
-	gate      chan struct{}
-	done      chan struct{}
-	once      sync.Once
-	mu        sync.Mutex
-	pending   *guestControlPending
+	conn       net.Conn
+	transport  net.Conn
+	gate       chan struct{}
+	done       chan struct{}
+	once       sync.Once
+	mu         sync.Mutex
+	pending    *guestControlPending
+	aliases    *guestControlAliases
+	aliasEpoch string
 }
 
 func newGuestControlSession(conn, transport net.Conn) *guestControlSession {
@@ -226,7 +240,13 @@ func (session *guestControlSession) closed() bool {
 	}
 }
 func (session *guestControlSession) close() {
-	session.once.Do(func() { _ = session.transport.Close(); close(session.done) })
+	session.once.Do(func() {
+		_ = session.transport.Close()
+		if session.aliases != nil {
+			session.aliases.sessionLost(session.aliasEpoch)
+		}
+		close(session.done)
+	})
 }
 
 // readResponses is the sole TLS reader, including while idle. EOF or unsolicited/partial data poisons this session.
@@ -298,6 +318,15 @@ func (session *guestControlSession) exchange(
 		session.close()
 		return guestcontrolwire.Response{}, err
 	}
+	var aliasStarted uint64
+	if session.aliases != nil {
+		var err error
+		aliasStarted, err = guestControlAliasNow()
+		if err != nil {
+			session.close()
+			return guestcontrolwire.Response{}, err
+		}
+	}
 	if err := guestcontrolwire.EncodeRequest(ctx, session.conn, request); err != nil {
 		session.close()
 		return guestcontrolwire.Response{}, err
@@ -323,6 +352,12 @@ func (session *guestControlSession) exchange(
 	if err := response.ValidateFor(localRequest); err != nil {
 		session.close()
 		return guestcontrolwire.Response{}, err
+	}
+	if session.aliases != nil {
+		if err := session.aliases.reconcile(ctx, session.aliasEpoch, aliasStarted, localRequest, response); err != nil {
+			return guestcontrolwire.Response{RequestID: localRequest.RequestID, Operation: localRequest.Operation,
+				Failure: &guestcontrolwire.Failure{Code: guestcontrolwire.FailureInternal}}, nil
+		}
 	}
 	return response, nil
 }
