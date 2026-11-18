@@ -472,6 +472,10 @@ func (transport *kernelObservationTransport) parseDatagram(
 // Keep this decoder aligned with the pinned UAPI definition:
 // https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/include/uapi/linux/netlink.h?h=v6.19.9
 func decodeKernelObservationError(message netlink.Message, request netlink.Message) error {
+	return decodeKernelNetlinkAcknowledgement(message, request, false)
+}
+
+func decodeKernelNetlinkAcknowledgement(message netlink.Message, request netlink.Message, allowSuccess bool) error {
 	if message.Header.Flags & ^(netlink.Capped|netlink.AcknowledgeTLVs) != 0 {
 		return kernelObservationTransportError(fmt.Sprintf(
 			"kernel observation error flags are invalid (flags=%#x request_type=%#x)",
@@ -482,7 +486,7 @@ func decodeKernelObservationError(message netlink.Message, request netlink.Messa
 		return kernelObservationTransportError("kernel observation nlmsgerr is truncated", nil, true)
 	}
 	errno := int32(binary.NativeEndian.Uint32(message.Data[0:4]))
-	if errno == 0 {
+	if errno == 0 && !allowSuccess {
 		return kernelObservationTransportError("kernel observation acknowledgement is unexpected", nil, true)
 	}
 	if errno > 0 || -int64(errno) > kernelObservationMaxErrno {
@@ -531,6 +535,9 @@ func decodeKernelObservationError(message netlink.Message, request netlink.Messa
 		}
 	} else if !validKernelObservationExtendedAck(message.Data[payloadEnd:]) {
 		return kernelObservationTransportError("kernel observation extended acknowledgement is invalid", nil, true)
+	}
+	if errno == 0 {
+		return nil
 	}
 	return kernelObservationTransportError(
 		kernelObservationRejectedRequestMessage,
