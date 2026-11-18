@@ -69,8 +69,12 @@ func (server *FloatingIPServer) HasCurrentGuestControlDelegations(
 		return false, err
 	}
 	for _, r := range floating {
-		if !r.Retired && r.Phase == floatingIPOwned && r.OwnerUID == uid && r.Owner.Origin == floatingIPOperatorOrigin &&
-			r.Owner.VMID == vm.String() && r.Owner.BootID == incarnation.BootID &&
+		if !r.Retired &&
+			r.Phase == floatingIPOwned &&
+			r.OwnerUID == uid &&
+			r.Owner.Origin == floatingIPOperatorOrigin &&
+			r.Owner.VMID == vm.String() &&
+			r.Owner.BootID == incarnation.BootID &&
 			r.Owner.LaunchGeneration == incarnation.LaunchGeneration &&
 			r.Owner.ExecutionUID == incarnation.ExecutionUID {
 			return true, nil
@@ -86,7 +90,9 @@ func currentGuestControlDelegationExists(
 	incarnation FloatingIPVMIncarnation,
 ) bool {
 	for _, r := range records {
-		if r.State == floatingIPDelegationActive && r.OwnerUID == uid && r.VMID == vmID &&
+		if r.State == floatingIPDelegationActive &&
+			r.OwnerUID == uid &&
+			r.VMID == vmID &&
 			r.BootID == incarnation.BootID &&
 			r.LaunchGeneration == incarnation.LaunchGeneration &&
 			r.ExecutionUID == incarnation.ExecutionUID {
