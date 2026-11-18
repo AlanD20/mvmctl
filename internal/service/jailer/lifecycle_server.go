@@ -373,6 +373,9 @@ func (server *VMLifecycleServer) Cleanup(
 }
 
 func finishLifecycleCleanup(ctx context.Context, cleanup *cleanupLease, recoverTopology bool) error {
+	if err := retireGuestControlWorkerForCleanup(ctx, cleanup); err != nil {
+		return err
+	}
 	if recoverTopology {
 		if err := cleanup.recoverProductionTopology(ctx); err != nil {
 			return err

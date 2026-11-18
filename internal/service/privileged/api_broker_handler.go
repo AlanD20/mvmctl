@@ -60,5 +60,10 @@ func handleVMAPIBroker(
 	if err := result.Validate(request.Body); err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)
 	}
+	if action == jailer.VMResumeAction || action == jailer.VMStartInstanceAction {
+		if err := reconcileGuestControlWorker(ctx, caller.uid, caller.gid, request.Body.VMID); err != nil {
+			return deliverOperationError(ctx, endpoint, action, err, deps)
+		}
+	}
 	return deliverOperationSuccess(ctx, endpoint, action, result, deps)
 }

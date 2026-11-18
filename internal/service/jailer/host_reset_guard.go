@@ -82,6 +82,9 @@ func AcquireHostResetGuard(ctx context.Context) (_ *HostResetGuard, returnErr er
 	if err := guard.requireCleanedInstanceInventory(ctx); err != nil {
 		return nil, err
 	}
+	if err := guard.requireRetiredGuestControlWorkers(ctx); err != nil {
+		return nil, err
+	}
 	if err := guard.requireNoJailResources(ctx); err != nil {
 		return nil, err
 	}

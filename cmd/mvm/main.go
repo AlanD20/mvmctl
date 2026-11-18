@@ -12,26 +12,35 @@ import (
 )
 
 type entrypoints struct {
-	launchConsole     func(context.Context, []string) error
-	launchChild       func(context.Context, []string) error
-	privileged        func(context.Context, []string) error
-	systemInstall     func(context.Context, []string) error
-	hostAdministrator func(context.Context, []string) (*app.HostAdministratorResult, error)
-	normal            func() int
+	guestControlWorker func(context.Context, []string) error
+	launchConsole      func(context.Context, []string) error
+	launchChild        func(context.Context, []string) error
+	privileged         func(context.Context, []string) error
+	systemInstall      func(context.Context, []string) error
+	hostAdministrator  func(context.Context, []string) (*app.HostAdministratorResult, error)
+	normal             func() int
 }
 
 func main() {
 	os.Exit(run(context.Background(), os.Args[1:], entrypoints{
-		launchConsole:     jailer.RunLaunchConsole,
-		launchChild:       jailer.RunLaunchChild,
-		privileged:        privileged.Run,
-		systemInstall:     app.RunHostInstallSystemBinary,
-		hostAdministrator: app.RunHostAdministrator,
-		normal:            runCLI,
+		guestControlWorker: privileged.RunGuestControlWorker,
+		launchConsole:      jailer.RunLaunchConsole,
+		launchChild:        jailer.RunLaunchChild,
+		privileged:         privileged.Run,
+		systemInstall:      app.RunHostInstallSystemBinary,
+		hostAdministrator:  app.RunHostAdministrator,
+		normal:             runCLI,
 	}))
 }
 
 func run(ctx context.Context, args []string, entries entrypoints) int {
+	if jailer.IsGuestControlWorkerInvocation(args) {
+		if err := entries.guestControlWorker(ctx, args); err != nil {
+			slog.Error("Guest Control worker failed", "error", err)
+			return 1
+		}
+		return 0
+	}
 	if jailer.IsLaunchConsoleInvocation(args) {
 		// The console relay must never enter ordinary CLI initialization, even
 		// when its inherited setup channel rejects an unauthenticated invocation.

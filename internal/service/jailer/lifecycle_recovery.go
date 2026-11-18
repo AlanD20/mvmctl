@@ -38,6 +38,9 @@ func (authority *instanceAuthority) beginLifecycleCleanup(
 		}
 	}()
 	if locked.record.lifecycle == instanceLifecycleCleaned {
+		if err := retireGuestControlWorkerForOwnedInstance(ctx, locked); err != nil {
+			return nil, err
+		}
 		// Lifecycle cleanup may have committed before export retirement failed.
 		// Retain the VM lock while retrying the independent ImageID cleanup;
 		// a failed retirement must not be mistaken for an already-finished stop.

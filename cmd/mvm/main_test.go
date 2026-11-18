@@ -128,3 +128,17 @@ func TestRun_RoutesMalformedSystemInstallWithoutNormalFallthrough(t *testing.T) 
 		})
 	}
 }
+
+func TestRun_RoutesGuestControlWorkerBeforeNormalInitialization(t *testing.T) {
+	for _, args := range [][]string{{"__mvm_guest_control_worker_v1", "unexpected"}, {"__mvm_guest_control_worker_v999"}} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			calls := 0
+			exitCode := run(t.Context(), args, entrypoints{
+				guestControlWorker: func(context.Context, []string) error { calls++; return errors.New("private worker refused") },
+				normal:             func() int { t.Fatal("private worker entered application initialization"); return 0 },
+			})
+			assert.Equal(t, 1, exitCode)
+			assert.Equal(t, 1, calls)
+		})
+	}
+}

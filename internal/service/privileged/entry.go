@@ -122,7 +122,7 @@ func Run(ctx context.Context, args []string) error {
 			remove:  trustedRelease.Remove,
 		},
 		floatingIPDelegation: floatingIPDelegationHandlerEffects{
-			grant:       grantFloatingIPDelegation,
+			grant:       grantFloatingIPDelegationWithWorker,
 			removeOwned: floatingIP.RemoveOwnedFloatingIPDelegation,
 			revoke:      floatingIP.RevokeFloatingIPDelegation,
 			list:        floatingIP.ListFloatingIPDelegations,
@@ -319,9 +319,21 @@ func dispatch(
 			ctx, endpoint, caller, deps.floatingIPDelegation, deps.control,
 		)
 	case network.FloatingIPDelegationListAction:
-		return dispatchHandled, handleListFloatingIPDelegation(ctx, endpoint, caller, deps.floatingIPDelegation, deps.control)
+		return dispatchHandled, handleListFloatingIPDelegation(
+			ctx,
+			endpoint,
+			caller,
+			deps.floatingIPDelegation,
+			deps.control,
+		)
 	case network.FloatingIPDelegationGetAction:
-		return dispatchHandled, handleGetFloatingIPDelegation(ctx, endpoint, caller, deps.floatingIPDelegation, deps.control)
+		return dispatchHandled, handleGetFloatingIPDelegation(
+			ctx,
+			endpoint,
+			caller,
+			deps.floatingIPDelegation,
+			deps.control,
+		)
 	case network.FloatingIPDelegationRevokeAction:
 		return dispatchHandled, handleRevokeFloatingIPDelegation(
 			ctx, endpoint, caller, deps.floatingIPDelegation, deps.control,

@@ -31,7 +31,7 @@ WARM_ROOT = Path("/tmp")
 ROOT_CHILDREN = frozenset({
     "host", "instances", "networks", "firewall", "binaries", "jailer", "loopmount",
     "allocations", "execution-identities", "protected-backing", "launch-devices",
-    "vm-rootfs-export-data",
+    "vm-rootfs-export-data", "guest-control",
 })
 SAFE_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8", "HOME": "/root"}
 
