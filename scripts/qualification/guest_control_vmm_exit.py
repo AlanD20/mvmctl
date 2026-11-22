@@ -32,7 +32,10 @@ PAYLOAD = (SELF, OBSERVER, HELPER, "tests/__init__.py", "tests/system/__init__.p
            "tests/system/network/floating_ip_helpers.py", "tests/system/network/test_policies.py")
 
 _PROVIDER_PROBE = r'''
-import hashlib,json,os,pathlib,stat,subprocess
+import hashlib,json,os,pathlib,platform,stat,subprocess
+architecture=platform.machine();cmdline=pathlib.Path('/proc/cmdline').read_text().strip()
+assert architecture=='x86_64'
+assert [arg for arg in cmdline.split() if arg.startswith('reboot=')]==['reboot=k']
 fixed=pathlib.Path('/bin/busybox');actual=fixed.resolve(strict=True)
 fd=os.open(actual,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK)
 try:
@@ -45,13 +48,14 @@ try:
   p=subprocess.run([str(fixed),*args],capture_output=True,text=True,timeout=5)
   assert p.returncode in (0,1) and len(p.stdout)+len(p.stderr)<=16384
   return dict(returncode=p.returncode,stdout=p.stdout,stderr=p.stderr)
- public=help_for('--help');poweroff=help_for('poweroff','--help')
- text=public['stdout']+public['stderr'];shutdown=poweroff['stdout']+poweroff['stderr']
+ public=help_for('--help');reboot=help_for('reboot','--help')
+ text=public['stdout']+public['stderr'];shutdown=reboot['stdout']+reboot['stderr']
  version=next(line for line in text.splitlines() if line.startswith('BusyBox v'))
  assert '-f' in shutdown and 'init' in shutdown
  assert fixed.resolve(strict=True)==actual and identity(os.fstat(fd))==identity(row)==identity(actual.stat())
  print(json.dumps(dict(fixed_path=str(fixed),actual_path=str(actual),sha256=hashlib.sha256(raw).hexdigest(),
-                      identity=identity(row),version=version,help_native=public,poweroff_help_native=poweroff)))
+                      identity=identity(row),version=version,help_native=public,reboot_help_native=reboot,
+                      guest_architecture=architecture,guest_cmdline=cmdline)))
 finally:os.close(fd)
 '''
 
@@ -163,12 +167,15 @@ def _guest(phase, task):
             state["journey"] = journey.__dict__
             _write(state_path, state)
         print("PREPARED", flush=True)
-    elif phase == "poweroff":
+    elif phase == "reboot":
         state = _read(state_path)
         # The only effect between observer admission and exit proof. Delaying
-        # shutdown leaves time for the typed exec response to close normally.
+        # this inner-guest reboot leaves time for the typed exec response to close.
+        # On x86, poweroff halts the OS but leaves Firecracker alive; reboot=k
+        # makes guest reboot exit the VMM through its emulated i8042 reset.
+        # https://raw.githubusercontent.com/firecracker-microvm/firecracker/v1.17.0/FAQ.md
         delayed = ("sleep 3; printf 'TRIGGER_STARTED\\n' >> " + TRIGGER_LOG +
-                   "; /bin/busybox poweroff -f >> " + TRIGGER_LOG + " 2>&1; rc=$?; "
+                   "; /bin/busybox reboot -f >> " + TRIGGER_LOG + " 2>&1; rc=$?; "
                    "printf 'TRIGGER_RETURNED:%s\\n' \"$rc\" >> " + TRIGGER_LOG)
         command = ("test -x /bin/busybox || exit 1; umask 077; set -C; : > " + TRIGGER_LOG +
                    " || exit 1; set +C; nohup " + shlex.join(["/bin/busybox", "sh", "-c", delayed]) +
@@ -176,7 +183,7 @@ def _guest(phase, task):
         result = _run_mvm("mvmctl-030-test", "exec", state["vm"]["binding"]["id"], "--user", "root", "--",
                           command, timeout=30)
         assert result.returncode == 0
-        print("POWEROFF_SCHEDULED", flush=True)
+        print("REBOOT_SCHEDULED", flush=True)
     elif phase == "trigger-log":
         state = _read(state_path)
         script = ("import os,stat,sys;fd=os.open(" + repr(TRIGGER_LOG) +
@@ -216,7 +223,7 @@ def _phase(o, namespace, task, phase, payload):
             assert set(guest_exec) == {"returncode", "stdout", "stderr"}
         return dict(transport=transport, guest_exec=guest_exec)
     assert result.returncode == 0, (phase, result.stdout, result.stderr)
-    assert result.stdout.strip() == {"prepare": "PREPARED", "poweroff": "POWEROFF_SCHEDULED", "cleanup": "CLEANED"}[phase]
+    assert result.stdout.strip() == {"prepare": "PREPARED", "reboot": "REBOOT_SCHEDULED", "cleanup": "CLEANED"}[phase]
     return dict(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
 
 
@@ -279,7 +286,7 @@ def run(args):
         armed = _line(observer.stdout, 5)
         assert armed == dict(event="ARMED", vm_id=ready["vm_id"])
         _write(task / "observer-armed.json", armed)
-        _write(task / "poweroff-native.json", _phase(o, namespace, guest_task, "poweroff", payload))
+        _write(task / "reboot-native.json", _phase(o, namespace, guest_task, "reboot", payload))
         exited = _line(observer.stdout, 65)
         _exited(exited, ready)
         output, errors = observer.communicate(timeout=10)
