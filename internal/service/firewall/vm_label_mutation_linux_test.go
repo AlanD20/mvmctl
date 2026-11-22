@@ -21,7 +21,13 @@ func TestPublishVMLabelMetadataPreservesRevisionAndRetirement(t *testing.T) {
 	require.NoError(t, err)
 	binding := testGenerationRecordBinding()
 	record := mustCommittedGenerationRecord(t, binding, generationRecordIdentityFromCompiled(compiled))
+	_, err = store.create(ctx, record)
+	require.NoError(t, err)
 	vmID := strings.Repeat("a", 32)
+	labels, observedRevision, err := readCommittedVMLabels(ctx, store, 1000, vmID)
+	require.NoError(t, err)
+	assert.NotNil(t, labels)
+	assert.Zero(t, observedRevision)
 	change := vmLabelMetadataChange{labels: model.VMLabels{"role": "worker"}}
 	publish := func(owner uint32, change vmLabelMetadataChange) (uint64, error) {
 		return publishVMLabelMetadata(ctx, store, kernel, record, binding, owner, vmID, change)
@@ -35,6 +41,12 @@ func TestPublishVMLabelMetadataPreservesRevisionAndRetirement(t *testing.T) {
 	revision, err = publish(1000, vmLabelMetadataChange{expected: 1, labels: model.VMLabels{"role": "controller"}})
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, revision)
+	labels, observedRevision, err = readCommittedVMLabels(ctx, store, 1000, vmID)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, observedRevision)
+	assert.Equal(t, model.VMLabels{"role": "controller"}, labels)
+	_, _, err = readCommittedVMLabels(ctx, store, 1001, vmID)
+	require.Error(t, err)
 	_, err = publish(1000, vmLabelMetadataChange{expected: 1, labels: model.VMLabels{}})
 	require.Error(t, err)
 	for range 2 {
@@ -43,6 +55,8 @@ func TestPublishVMLabelMetadataPreservesRevisionAndRetirement(t *testing.T) {
 		assert.EqualValues(t, 3, revision)
 	}
 	_, err = publish(1000, change)
+	require.Error(t, err)
+	_, _, err = readCommittedVMLabels(ctx, store, 1000, vmID)
 	require.Error(t, err)
 	journal, _, _, found, err := store.readIntent(ctx)
 	require.NoError(t, err)

@@ -48,3 +48,40 @@ func UpdateVMLabels(ctx context.Context, request VMLabelUpdateRequest) (VMLabelU
 	return exchangeTrustedRelease(ctx, NewTrustedReleaseClient(), VMLabelUpdateAction, request, nil, 0,
 		func(result VMLabelUpdateResult) error { return result.Validate(request) })
 }
+
+// VMLabelInspectAction reads the committed labels for one protected VM.
+const VMLabelInspectAction = "jailer-vm-label-inspect"
+
+type VMLabelInspectRequest struct {
+	VMID      string `json:"vm_id"`
+	CacheRoot string `json:"cache_root"`
+}
+
+func (request VMLabelInspectRequest) Validate() error {
+	if !vmIDPattern.MatchString(request.VMID) {
+		return instanceValidationError("VM label inspection requires an exact VM ID")
+	}
+	_, err := parseManagedCacheLocator(request.CacheRoot)
+	return err
+}
+
+type VMLabelInspectResult struct {
+	VMID     string         `json:"vm_id"`
+	Revision uint64         `json:"revision"`
+	Labels   model.VMLabels `json:"labels"`
+}
+
+func (result VMLabelInspectResult) Validate(request VMLabelInspectRequest) error {
+	if result.VMID != request.VMID || result.Labels == nil || (result.Revision == 0 && len(result.Labels) != 0) {
+		return instanceValidationError("VM label inspection returned an invalid binding")
+	}
+	return result.Labels.Validate()
+}
+
+func InspectVMLabels(ctx context.Context, request VMLabelInspectRequest) (VMLabelInspectResult, error) {
+	if err := request.Validate(); err != nil {
+		return VMLabelInspectResult{}, err
+	}
+	return exchangeTrustedRelease(ctx, NewTrustedReleaseClient(), VMLabelInspectAction, request, nil, 0,
+		func(result VMLabelInspectResult) error { return result.Validate(request) })
+}

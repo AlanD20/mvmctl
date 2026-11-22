@@ -110,7 +110,9 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	// (e.g., "mvm run <service>" mode), we register only the infrastructure
 	// commands above — version, completion, run.
 	if op != nil {
-		cmd.AddCommand(NewVMCmd(op, op))
+		vmCmd := NewVMCmd(op, op)
+		vmCmd.AddCommand(newVMLabelsCmd(op))
+		cmd.AddCommand(vmCmd)
 		cmd.AddCommand(NewNetworkCmd(op, op))
 		cmd.AddCommand(NewFloatingIPCmd(op, op))
 		cmd.AddCommand(NewImageCmd(op, op))
