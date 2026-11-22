@@ -30,30 +30,31 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   application. Preserve unchanged keys, revoke changed authority and bind VM policies to their owner's addresses.
 - [x] Build the named QA runner's replacement kernel from cached source with bridge metadata and conntrack
   netlink enabled; retain source/config/toolchain receipts and verify the implementation symbols in the ELF.
-- [ ] Boot that kernel and qualify the complete kernel model and packet fencing. Focused firewall vet/race
-  checks pass; the current kernel correctly refuses the unsupported bridge expression.
+- [x] Boot the replacement kernel, pass modeled nftables readiness and qualify floating-IP packet fencing
+  through the complete 14-case runtime domain.
 - [x] Implement retained root VM admission through the protected Firecracker API peer, incarnation rechecks
   and genuine topology holds; independently review and run focused Jailer vet/race checks in the named runner.
-- [ ] Qualify that admission against a live Firecracker process when ownership is wired.
+- [x] Qualify that admission against live Firecracker processes through the floating-IP runtime suite.
 - [x] Implement address-scoped conntrack invalidation after secondary authority is absent, using exact tuple,
   zone and flow identity with absence readback. Independent review and focused QA vet/race checks pass.
 - [x] Compose flow and exact neighbor cleanup under retained network authority, with durable reservation and
   bridge identity/L3 checks; independently review and run focused QA tests, vet and race checks.
-- [ ] Qualify genuine ownership-transition ordering and real flow/neighbor deletion with the replacement kernel.
+- [x] Qualify ownership transitions and real flow/neighbor cleanup with the replacement kernel, including
+  policy-preserving owner movement and refusal of stale-owner traffic.
 - [x] Implement the canonical ownership journal with revision CAS, closed finite-lease transitions and
   non-replaying recovery states; independently review and pass focused QA vet/race checks.
 - [x] Compile VM/network grants to exact floating-IP destinations with stable resource-based policy identity;
   verify owner movement, dormancy, destination exclusions, canonical hashing and sealing in focused QA.
 - [x] Wire floating-IP policy CRUD through operator inputs, repositories and authenticated root mutation;
-  independently review and pass focused QA tests, vet, race and existing policy regressions. Live packets remain unqualified.
+  independently review and pass focused QA tests, vet, race and existing policy regressions. Live policy movement passes.
 - [x] Implement and review typed fencing, owner publication and finite lease activation/renewal effects;
   pass focused QA tests, vet and race checks without claiming live renewal timing.
 - [x] Add retained target-VM network admission, read-only endpoint/lease verification and authoritative Running
-  checks. Run genuine hold refusal/release tests; successful live admission remains unqualified.
+  checks. Run genuine hold refusal/release tests and qualify successful admission in the runtime domain.
 - [x] Implement root delegation persistence and exact sustaining-grant provenance with explicit lease policy;
   verify the correction rejecting impossible ownership revisions.
 - [x] Wire operator delegation CRUD, exact-ID ensure and receipt-guarded resumable revocation; independently
-  review and pass focused QA vet/race checks. Integrated grant/fencing and worker readiness remain unqualified.
+  review and pass focused QA vet/race checks. Ordinary guest grant and fencing journeys pass; worker-stall QA remains.
 - [x] Implement and review pinned mutual TLS authentication with real handshake, refusal and cancellation tests.
 - [x] Implement backend-preserving root credential preparation, expected-import receipts, snapshot lineage
   and restartable credential retirement. Focused QA and existing workflow regressions pass.
@@ -65,7 +66,8 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Implement and review host association, transfer and release with explicit lifetime authority and
   acknowledged guest aliases; pass focused QA.
 - [x] Complete integration CI and root Jailer/agent alias suites for persistent ownership at `945bea5b`.
-- [ ] Complete live alias and packet qualification for persistent ownership.
+- [x] Complete live alias and packet qualification for persistent ownership, including association, transfer,
+  release and VM-stop fencing.
 - [x] Implement the owned host session with one protected VMM admission, expected credential lineage,
   pinned agent TLS and independent exit descriptor. Review and focused QA vet/race checks pass.
 - [x] Wire the retained root worker and typed delegated operations without operator impersonation, including
@@ -79,7 +81,7 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   environment fields and ownership semantics. Prepare the website source update for review; publication remains held.
 - [ ] Qualify the composed control path and publish the separately reviewed website update.
 - [x] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
-- [ ] Test floating-IP association and disassociation with small VMs in the existing named QA runner.
+- [x] Test floating-IP association and disassociation with small VMs in the existing named QA runner.
   Full Kubernetes cluster bootstrap, quorum testing and a larger runner are explicitly out of scope.
 - [x] Add and register Python scenarios for guest control, floating-IP policy, renewal, lifecycle,
   stalled-worker fencing, memory restore and environment ownership; pass collection and affected registry checks.
@@ -95,12 +97,12 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   release qualification.
 - [ ] Obtain the user's separate authorization before merging the release PR, tagging or publishing.
 
-Operator reservation CRUD is registered and exercised. The guest gateway, root ownership backend and retained
-host worker are integrated with startup, recovery and lifecycle retirement. Focused checks and activation review
-pass; live process, packet and lease expiry qualification remain pending. Version 1 environment reservation,
-grant and exact floating-IP policy steps are implemented; workflow state retains immutable creation identities
-and resolved endpoints before effects. Actual CLI QA has covered allocation against stopped primaries; stopped-policy registration against floating reservations and reboot cleanup remain pending.
-Focused evidence is not a complete release qualification or proof of packet ownership/failover.
+The complete floating-IP domain passed all 14 runtime cases with source `789214bc` and the paired `8dd32bf8`
+candidate in the named QA runner. It covers host and guest ownership, packet isolation during owner movement,
+renewal and expiry, stop/start, pause and memory restore. Cleanup passed without manual neighbor intervention.
+Environment ownership, stalled-worker fencing and actual reboot continuation remain separate qualification gates.
+The QA-only kernel-binding correction is integrated at `ded3199c`; its 17 focused checks pass, but environment
+collection is not runtime qualification. These results do not qualify the full Kubernetes example or the release.
 
 ## Administrator uninstall (2026-11-14)
 

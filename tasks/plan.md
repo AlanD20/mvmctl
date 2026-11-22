@@ -50,10 +50,11 @@ effects. The retained worker, grant startup, start/resume recovery and lifecycle
 focused checks and activation review pass. Stored permission is not session readiness.
 Operator associations persist until explicit release, transfer or VM stop; guest leases remain finite.
 Host CLI parity, explicit lifetime authority and acknowledged guest alias synchronization are implemented and
-reviewed with focused QA. Full kernel packet fencing, live control-path bootstrap/expiry/failover and release
-qualification remain pending. Integration Go CI, the complete root Jailer suite and root agent alias tests passed
-for persistent ownership at `945bea5b`; its paired candidate is installed in the named QA VM. Python scenarios
-collect; this does not qualify their runtime behavior. The public
+reviewed. All 14 floating-IP runtime cases passed on source `789214bc` with paired candidate `8dd32bf8`, including
+host and guest ownership, policy-preserving transfer, expiry and lifecycle fencing. Integration Go CI, the complete
+root Jailer suite and root agent alias tests passed for that production candidate. Environment ownership,
+stalled-worker fencing and actual reboot continuation remain pending; collection does not qualify those journeys.
+The public
 [Guest Control guide](../docs/GUEST_CONTROL.md) and [environment reference](../docs/ENV_SPEC_REFERENCE.md)
 describe the implemented surface; website publication remains held.
 
