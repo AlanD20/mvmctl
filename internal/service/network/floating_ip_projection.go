@@ -26,6 +26,20 @@ func (tx *managedNetworkTransaction) projectFloatingIPReservations(ctx context.C
 		if record.NetworkID != string(tx.key.networkID) {
 			continue
 		}
+		if record.OwnerUID != uint32(tx.key.ownerUID) {
+			return networkAuthorityCorruptError("floating-IP projection owner differs", nil)
+		}
+		if record.Phase != floatingIPUnassociated && !record.Retired &&
+			record.Owner.BootID != tx.record.bootID {
+			history, fenced, err := priorBootFloatingIPBindings(record, tx.record.bootID)
+			if err != nil {
+				return err
+			}
+			if err := tx.firewall.VerifyDormantFloatingIP(ctx, history, fenced); err != nil {
+				return err
+			}
+			continue
+		}
 		binding, project, err := floatingIPReservationProjection(
 			record, uint32(tx.key.ownerUID), string(tx.key.networkID), tx.record.bootID,
 		)

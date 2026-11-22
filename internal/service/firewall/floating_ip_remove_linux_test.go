@@ -1,9 +1,13 @@
 package firewall
 
 import (
+	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,4 +79,103 @@ func TestFloatingIPNetworkRemovalRequiresResourcesRetiredAndClearsSourcePolicies
 	require.Equal(t, other, intent.NetworkFloatingIPGrants[0])
 	intent.FloatingIPs = nil
 	require.NoError(t, requireFloatingIPNetworkAbsent(intent, source))
+}
+
+// Rationale: reboot preserves logical owner history but clears endpoints and keys.
+// Network recovery may observe that history; only admitted lifecycle retirement
+// can replace it with the exact new ownerless generation, without reactivation.
+func TestDormantFloatingIPRetirementPreservesHistoryAndNeverActivates(t *testing.T) {
+	for _, persistent := range []bool{false, true} {
+		t.Run(map[bool]string{false: "finite", true: "persistent"}[persistent], func(t *testing.T) {
+			state := floatingLeaseTestState(t)
+			if persistent {
+				state.intent.FloatingIPs[0].Lifetime = FloatingIPPersistent
+				state.intent.FloatingIPs[0].LeaseDuration = 0
+			}
+			old := state.intent.FloatingIPs[0]
+			fenced := ownerlessFloatingLease(old)
+			fenced.Generation = 8
+			state.intent.Endpoints = nil
+			var err error
+			state.compiled, err = state.intent.compile()
+			require.NoError(t, err)
+			observed := kernelObservationFromCompiled(state.compiled)
+			before := cloneIntent(state.intent)
+			require.NoError(t, state.verifyDormantFloatingIP([]FloatingIPBinding{old}, fenced, observed))
+			require.Equal(t, old, state.intent.FloatingIPs[0], "projection must preserve historical ownership")
+			target, err := state.priorBootFloatingIPRetirementIntent([]FloatingIPBinding{old}, fenced, observed)
+			require.NoError(t, err)
+			if diff := cmp.Diff(before, state.intent, cmpopts.EquateComparable(netip.Addr{}, netip.Prefix{})); diff != "" {
+				t.Fatalf("retirement planning mutated source history (-want +got):\n%s", diff)
+			}
+			require.Equal(t, fenced, target.FloatingIPs[0])
+			compiled, err := target.compile()
+			require.NoError(t, err)
+			require.Empty(t, compiled.bridge.secondaryOwners, "no alias/key owner may be activated")
+			state.intent, state.compiled = target, compiled
+			observed = kernelObservationFromCompiled(compiled)
+			require.NoError(t, state.verifyRetiredFloatingIP(fenced, observed))
+			_, err = state.priorBootFloatingIPRetirementIntent([]FloatingIPBinding{old}, fenced, observed)
+			require.Error(t, err, "a stale owned root record cannot adopt a newer fenced generation")
+			retry, err := state.priorBootFloatingIPRetirementIntent([]FloatingIPBinding{old, fenced}, fenced, observed)
+			require.NoError(t, err, "the persisted recovery record explicitly permits its exact completed fence")
+			require.Equal(t, fenced, retry.FloatingIPs[0])
+		})
+	}
+}
+
+func TestDormantFloatingIPRetirementRefusesActiveOrReboundAuthority(t *testing.T) {
+	for _, name := range []string{"live endpoint", "foreign owner", "newer generation", "old generation",
+		"foreign resource", "rebound address", "missing resource", "current key", "unlisted fence"} {
+		t.Run(name, func(t *testing.T) {
+			state := floatingLeaseTestState(t)
+			old := state.intent.FloatingIPs[0]
+			fenced := ownerlessFloatingLease(old)
+			fenced.Generation++
+			if name != "live endpoint" {
+				state.intent.Endpoints = nil
+			}
+			switch name {
+			case "foreign owner":
+				reservation := state.intent.Reservations[0]
+				reservation.VMID = strings.Repeat("9", 32)
+				reservation.IPv4 = netip.MustParseAddr("10.0.0.3")
+				reservation.MAC[5]++
+				state.intent.Reservations = append(state.intent.Reservations, reservation)
+				state.intent.FloatingIPs[0].OwnerVMID = reservation.VMID
+			case "newer generation":
+				state.intent.FloatingIPs[0].Generation++
+			case "old generation":
+				state.intent.FloatingIPs[0].Generation--
+			case "foreign resource":
+				state.intent.FloatingIPs[0].ID = strings.Repeat("9", 32)
+			case "rebound address":
+				state.intent.FloatingIPs[0].IPv4 = netip.MustParseAddr("10.0.0.101")
+			case "missing resource":
+				state.intent.FloatingIPs = nil
+			case "unlisted fence":
+				state.intent.FloatingIPs[0] = fenced
+			}
+			var err error
+			state.compiled, err = state.intent.compile()
+			require.NoError(t, err)
+			observed := kernelObservationFromCompiled(state.compiled)
+			if name == "current key" {
+				observed.tables[0].secondaryElements = []secondaryLeaseElement{
+					{
+						key:       secondaryLiveKey(),
+						lifetime:  FloatingIPFinite,
+						timeout:   5 * time.Second,
+						remaining: time.Second,
+					},
+				}
+			}
+			before := cloneIntent(state.intent)
+			_, err = state.priorBootFloatingIPRetirementIntent([]FloatingIPBinding{old}, fenced, observed)
+			require.Error(t, err)
+			if diff := cmp.Diff(before, state.intent, cmpopts.EquateComparable(netip.Addr{}, netip.Prefix{})); diff != "" {
+				t.Fatalf("refused retirement mutated history (-want +got):\n%s", diff)
+			}
+		})
+	}
 }
