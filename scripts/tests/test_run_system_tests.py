@@ -161,14 +161,22 @@ def test_default_outer_controller_is_the_canonical_system_binary(
     assert module.MVM_BINARY == "/usr/local/bin/mvm"
 
 
+def _host_reboot_outer_info(memory=3072):
+    runner_id = "1" * 32
+    limits = dict(memory_high_bytes=3355443200, memory_max_bytes=0, memory_max_unlimited=True)
+    return dict(vm=dict(name="mvmctl-030-test", status="running", id=runner_id, pid=123,
+                        process_start_time=456, created_at="2026-10-10T00:00:00Z"),
+                resources=dict(mem=memory, cgroup=dict(path=f"/sys/fs/cgroup/mvmctl/{runner_id}",
+                    status="enforced", actual=dict(limits), requested=dict(limits),
+                    usage=dict(memory_bytes=100, cpu_usage_micros=1, swap_bytes=0, pids_current=1))))
+
+
 @pytest.mark.parametrize("memory", [3072, 6144, 1, 0, -1, True, "3072", 3072.0, None])
 def test_host_reboot_outer_identity_requires_positive_integral_observed_memory(
     orchestrator, monkeypatch, memory,
 ):
     runner_id = "1" * 32
-    info = dict(vm=dict(name="mvmctl-030-test", status="running", id=runner_id, pid=123,
-                       process_start_time=456, created_at="2026-10-10T00:00:00Z"),
-                resources=dict(mem=memory))
+    info = _host_reboot_outer_info(memory)
     calls = []
     def inspect(*args, **kwargs):
         calls.append(args)
@@ -177,8 +185,6 @@ def test_host_reboot_outer_identity_requires_positive_integral_observed_memory(
     files = {
         "/proc/123/stat": "123 (firecracker) " + " ".join(["S", *(["0"] * 18), "456"]),
         "/proc/123/cgroup": f"0::/mvmctl/{runner_id}\n",
-        f"/sys/fs/cgroup/mvmctl/{runner_id}/memory.high": "max\n",
-        f"/sys/fs/cgroup/mvmctl/{runner_id}/memory.max": "max\n",
     }
     monkeypatch.setattr(Path, "read_text", lambda path: files[str(path)])
     if type(memory) is int and memory > 0:
@@ -188,7 +194,106 @@ def test_host_reboot_outer_identity_requires_positive_integral_observed_memory(
     else:
         with pytest.raises(RuntimeError, match="positive integral observed guest memory"):
             orchestrator._host_reboot_outer_identity()
-    assert calls == [("vm", "inspect", "mvmctl-030-test", "--json")]
+    assert calls == [("vm", "inspect", "mvmctl-030-test", "--json")] * (2 if type(memory) is int and memory > 0 else 1)
+
+
+@pytest.fixture
+def reboot_outer_observation(orchestrator, monkeypatch):
+    initial = _host_reboot_outer_info()
+    fresh = json.loads(json.dumps(initial))
+    state = dict(initial=initial, fresh=fresh, calls=[], ticks=456,
+                 group=f"0::/mvmctl/{initial['vm']['id']}\n", stat_reads=0, before={}, during={})
+    def inspect(*args, **kwargs):
+        state["calls"].append(args)
+        if len(state["calls"]) == 2:
+            state.update(state["during"])
+        return subprocess.CompletedProcess(args, 0, json.dumps(initial if len(state["calls"]) == 1 else fresh), "")
+    def read(path):
+        if str(path) == "/proc/123/stat":
+            state["stat_reads"] += 1
+            if state["stat_reads"] == 2:
+                state.update(state["before"])
+            return "123 (firecracker) " + " ".join(["S", *(["0"] * 18), str(state["ticks"])])
+        if str(path) == "/proc/123/cgroup":
+            return state["group"]
+        pytest.fail(f"unexpected file read: {path}")
+    monkeypatch.setattr(orchestrator, "mvm", inspect)
+    monkeypatch.setattr(Path, "read_text", read)
+    return state
+
+
+@pytest.mark.parametrize("status", ["enforced", "mismatch"])
+@pytest.mark.parametrize("maximum,unlimited,expected", [(0, True, "max"), (0, False, "0"), (4294967296, False, "4294967296")])
+def test_host_reboot_outer_controls_use_fresh_actual_not_requested(
+    orchestrator, reboot_outer_observation, status, maximum, unlimited, expected,
+):
+    state = reboot_outer_observation
+    group = state["fresh"]["resources"]["cgroup"]
+    group["status"] = status
+    group["actual"] = dict(memory_high_bytes=6576668672, memory_max_bytes=maximum, memory_max_unlimited=unlimited)
+    group["requested"] = (dict(group["actual"]) if status == "enforced" else
+                          dict(memory_high_bytes=8589934592, memory_max_bytes=8589934592, memory_max_unlimited=False))
+    outer = orchestrator._host_reboot_outer_identity()
+    assert (outer["memory_high"], outer["memory_max"]) == ("6576668672", expected)
+    assert len(state["calls"]) == 2 and state["stat_reads"] == 3
+
+
+@pytest.mark.parametrize("fault", ["missing", "unavailable", "inactive", "actual", "usage", "path"])
+@pytest.mark.parametrize("sample", ["initial", "fresh"])
+def test_host_reboot_outer_controls_refuse_incomplete_root_observations(
+    orchestrator, reboot_outer_observation, fault, sample,
+):
+    state = reboot_outer_observation
+    resources = state[sample]["resources"]
+    if fault == "missing":
+        del resources["cgroup"]
+    elif fault in ("unavailable", "inactive"):
+        resources["cgroup"]["status"] = fault
+    elif fault in ("actual", "usage"):
+        resources["cgroup"][fault] = None
+    else:
+        resources["cgroup"]["path"] = "/sys/fs/cgroup/mvmctl/" + "2" * 32
+    with pytest.raises(RuntimeError, match="complete live root cgroup observations"):
+        orchestrator._host_reboot_outer_identity()
+    assert len(state["calls"]) == (1 if sample == "initial" else 2)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("memory_high_bytes", True), ("memory_high_bytes", -1), ("memory_high_bytes", "max"),
+    ("memory_high_bytes", 1.0), ("memory_max_bytes", True), ("memory_max_bytes", -1),
+    ("memory_max_bytes", "1"), ("memory_max_unlimited", None), ("memory_max_unlimited", 1),
+    ("memory_max_bytes", 1),
+])
+def test_host_reboot_outer_controls_refuse_malformed_or_contradictory_actual(
+    orchestrator, reboot_outer_observation, field, value,
+):
+    reboot_outer_observation["fresh"]["resources"]["cgroup"]["actual"][field] = value
+    with pytest.raises(RuntimeError, match="root-observed memory controls are invalid"):
+        orchestrator._host_reboot_outer_identity()
+
+
+@pytest.mark.parametrize("when", ["before", "during"])
+@pytest.mark.parametrize("drift", ["ticks", "group"])
+def test_host_reboot_outer_observation_brackets_process_and_membership(
+    orchestrator, reboot_outer_observation, when, drift,
+):
+    state = reboot_outer_observation
+    state[when][drift] = 789 if drift == "ticks" else "0::/mvmctl/" + "2" * 32 + "\n"
+    with pytest.raises(RuntimeError, match="runner task changed|exact observed runner cgroup"):
+        orchestrator._host_reboot_outer_identity()
+    assert len(state["calls"]) == (1 if when == "before" else 2)
+
+
+@pytest.mark.parametrize("field", ["id", "name", "pid", "created_at", "status", "mem", "process_start_time"])
+def test_host_reboot_outer_observation_refuses_changed_inspection_identity(
+    orchestrator, reboot_outer_observation, field,
+):
+    fresh = reboot_outer_observation["fresh"]
+    values = dict(id="2"*32, name="another", pid=124, created_at="later", status="stopped", mem=6144,
+                  process_start_time=789)
+    (fresh["resources"] if field == "mem" else fresh["vm"])[field] = values[field]
+    with pytest.raises(RuntimeError, match="runner inspection changed"):
+        orchestrator._host_reboot_outer_identity()
 
 
 def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path, guest_mem_size_mib=6144):

@@ -2761,35 +2761,69 @@ def _host_reboot_write(task: Path, name: str, raw: bytes) -> None:
         os.close(fd)
 
 
+def _host_reboot_actual_controls(info: dict[str, Any], runner_id: str) -> dict[str, str]:
+    """Decode live root observations from the existing trusted controller, never requested intent."""
+    resources = info.get("resources")
+    state = resources.get("cgroup") if isinstance(resources, dict) else None
+    if (not isinstance(state, dict) or state.get("path") != f"/sys/fs/cgroup/mvmctl/{runner_id}"
+            or state.get("status") not in ("enforced", "mismatch")
+            or not isinstance(state.get("actual"), dict) or not isinstance(state.get("usage"), dict)):
+        raise RuntimeError("host_reboot requires complete live root cgroup observations")
+    actual = state["actual"]
+    high, maximum, unlimited = (actual.get(key) for key in
+                                ("memory_high_bytes", "memory_max_bytes", "memory_max_unlimited"))
+    if (type(high) is not int or high < 0 or type(maximum) is not int or maximum < 0
+            or type(unlimited) is not bool or (unlimited and maximum != 0)):
+        raise RuntimeError("host_reboot root-observed memory controls are invalid")
+    return dict(memory_high=str(high), memory_max="max" if unlimited else str(maximum))
+
+
 def _host_reboot_outer_identity() -> dict[str, Any]:
     """Observe only the designated outer VM and its exact current process; no control writes."""
     info = _runner_binding_json(mvm("vm", "inspect", _HOST_REBOOT_RUNNER, "--json", timeout=15).stdout)
     row = info.get("vm", info)
-    if (row.get("name") != _HOST_REBOOT_RUNNER or row.get("status") != "running"
+    if (not isinstance(row, dict) or row.get("name") != _HOST_REBOOT_RUNNER or row.get("status") != "running"
             or re.fullmatch(r"[0-9a-f]{32}", row.get("id", "")) is None):
         raise RuntimeError("host_reboot requires the exact existing running named runner")
-    pid = int(row["pid"])
-    if pid <= 0:
+    pid = row.get("pid")
+    if type(pid) is not int or pid <= 0 or not isinstance(row.get("created_at"), str) or not row["created_at"]:
         raise RuntimeError("host_reboot runner process identity is incomplete")
-    fields = Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()
-    if len(fields) < 20 or fields[0] in ("Z", "X"):
-        raise RuntimeError("host_reboot runner task changed")
-    ticks = int(fields[19])
+    resources = info.get("resources")
+    memory = resources.get("mem") if isinstance(resources, dict) else None
+    if type(memory) is not int or memory <= 0:
+        raise RuntimeError("host_reboot requires positive integral observed guest memory geometry")
+    _host_reboot_actual_controls(info, row["id"])
+
+    def process_identity():
+        fields = Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()
+        if len(fields) < 20 or fields[0] in ("Z", "X") or int(fields[19]) <= 0:
+            raise RuntimeError("host_reboot runner task changed")
+        groups = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
+        if groups != [f"0::/mvmctl/{row['id']}"]:
+            raise RuntimeError("host_reboot requires its exact observed runner cgroup")
+        return int(fields[19]), groups
+
+    ticks, groups = process_identity()
     if ticks <= 0 or ("process_start_time" in row and int(row["process_start_time"]) != ticks):
         raise RuntimeError("host_reboot runner start tick changed")
-    groups = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
-    if groups != [f"0::/mvmctl/{row['id']}"]:
-        raise RuntimeError("host_reboot requires its exact observed runner cgroup")
-    group = Path("/sys/fs/cgroup/mvmctl") / row["id"]
-    controls = {key: (group / leaf).read_text().strip() for key, leaf in
-                (("memory_high", "memory.high"), ("memory_max", "memory.max"))}
-    if (Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()[19] != str(ticks)
-            or Path(f"/proc/{pid}/cgroup").read_text().splitlines() != groups):
+    # Pin again immediately before the fresh root observation, then bracket its return.
+    if process_identity() != (ticks, groups):
+        raise RuntimeError("host_reboot runner task changed before reading controls")
+    fresh = _runner_binding_json(mvm("vm", "inspect", _HOST_REBOOT_RUNNER, "--json", timeout=15).stdout)
+    if process_identity() != (ticks, groups):
         raise RuntimeError("host_reboot runner task changed while reading controls")
-    if type(info["resources"]["mem"]) is not int or info["resources"]["mem"] <= 0:
-        raise RuntimeError("host_reboot requires positive integral observed guest memory geometry")
+    fresh_row = fresh.get("vm", fresh)
+    fresh_resources = fresh.get("resources")
+    if (not isinstance(fresh_row, dict)
+            or any(fresh_row.get(key) != row[key] for key in ("id", "name", "pid", "created_at", "status"))
+            or type(fresh_row.get("pid")) is not int
+            or not isinstance(fresh_resources, dict) or type(fresh_resources.get("mem")) is not int
+            or fresh_resources["mem"] != memory
+            or ("process_start_time" in fresh_row and int(fresh_row["process_start_time"]) != ticks)):
+        raise RuntimeError("host_reboot runner inspection changed while reading controls")
+    controls = _host_reboot_actual_controls(fresh, row["id"])
     return dict(runner_id=row["id"], created_at=row["created_at"], pid=pid, start_ticks=ticks,
-                guest_mem_size_mib=info["resources"]["mem"], **controls)
+                guest_mem_size_mib=memory, **controls)
 
 
 class _HostRebootReconnectUnavailable(RuntimeError):
