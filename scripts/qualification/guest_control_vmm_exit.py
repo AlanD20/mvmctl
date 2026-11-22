@@ -26,9 +26,34 @@ ROOT = Path(__file__).resolve().parents[2]
 SELF = "scripts/qualification/guest_control_vmm_exit.py"
 OBSERVER = "scripts/qualification/guest_control_vmm_exit_observer.py"
 HELPER = "tests/system/network/floating_ip_worker_fault.py"
+TRIGGER_LOG = "/root/mvmctl-vmm-exit-trigger.log"
 PAYLOAD = (SELF, OBSERVER, HELPER, "tests/__init__.py", "tests/system/__init__.py",
            "tests/system/conftest.py", "tests/system/network/__init__.py",
            "tests/system/network/floating_ip_helpers.py", "tests/system/network/test_policies.py")
+
+_PROVIDER_PROBE = r'''
+import hashlib,json,os,pathlib,stat,subprocess
+fixed=pathlib.Path('/bin/busybox');actual=fixed.resolve(strict=True)
+fd=os.open(actual,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK)
+try:
+ row=os.fstat(fd)
+ assert stat.S_ISREG(row.st_mode) and row.st_uid==0 and not row.st_mode&0o022
+ assert 0<row.st_size<=16*1024*1024
+ raw=os.read(fd,16*1024*1024+1);assert len(raw)==row.st_size
+ identity=lambda s:[s.st_dev,s.st_ino,s.st_uid,s.st_gid,s.st_mode,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
+ def help_for(*args):
+  p=subprocess.run([str(fixed),*args],capture_output=True,text=True,timeout=5)
+  assert p.returncode in (0,1) and len(p.stdout)+len(p.stderr)<=16384
+  return dict(returncode=p.returncode,stdout=p.stdout,stderr=p.stderr)
+ public=help_for('--help');poweroff=help_for('poweroff','--help')
+ text=public['stdout']+public['stderr'];shutdown=poweroff['stdout']+poweroff['stderr']
+ version=next(line for line in text.splitlines() if line.startswith('BusyBox v'))
+ assert '-f' in shutdown and 'init' in shutdown
+ assert fixed.resolve(strict=True)==actual and identity(os.fstat(fd))==identity(row)==identity(actual.stat())
+ print(json.dumps(dict(fixed_path=str(fixed),actual_path=str(actual),sha256=hashlib.sha256(raw).hexdigest(),
+                      identity=identity(row),version=version,help_native=public,poweroff_help_native=poweroff)))
+finally:os.close(fd)
+'''
 
 
 def _orchestrator():
@@ -127,6 +152,12 @@ def _guest(phase, task):
             associated = journey.control(vm, resource, "associate", initial["generation"])
             assert associated["ownership"] == "self"
             journey.alias(vm, resource, present=True)
+            provider = _run_mvm("mvmctl-030-test", "exec", vm["binding"]["id"], "--user", "root", "--",
+                                shlex.join(["python3", "-c", _PROVIDER_PROBE]), check=False, timeout=30)
+            state["trigger_provider_native"] = dict(returncode=provider.returncode,
+                                                     stdout=provider.stdout, stderr=provider.stderr)
+            assert provider.returncode == 0, state["trigger_provider_native"]
+            state["trigger_provider"] = json.loads(provider.stdout)
             state.update(vm=vm, resource=resource, grants=grants, associated=associated)
         finally:
             state["journey"] = journey.__dict__
@@ -136,11 +167,26 @@ def _guest(phase, task):
         state = _read(state_path)
         # The only effect between observer admission and exit proof. Delaying
         # shutdown leaves time for the typed exec response to close normally.
+        delayed = ("sleep 3; printf 'TRIGGER_STARTED\\n' >> " + TRIGGER_LOG +
+                   "; /bin/busybox poweroff -f >> " + TRIGGER_LOG + " 2>&1; rc=$?; "
+                   "printf 'TRIGGER_RETURNED:%s\\n' \"$rc\" >> " + TRIGGER_LOG)
+        command = ("test -x /bin/busybox || exit 1; umask 077; set -C; : > " + TRIGGER_LOG +
+                   " || exit 1; set +C; nohup " + shlex.join(["/bin/busybox", "sh", "-c", delayed]) +
+                   " </dev/null >/dev/null 2>&1 &")
         result = _run_mvm("mvmctl-030-test", "exec", state["vm"]["binding"]["id"], "--user", "root", "--",
-                          "command -v poweroff >/dev/null || exit 1; nohup sh -c 'sleep 3; poweroff' "
-                          "</dev/null >/dev/null 2>&1 &", timeout=30)
+                          command, timeout=30)
         assert result.returncode == 0
         print("POWEROFF_SCHEDULED", flush=True)
+    elif phase == "trigger-log":
+        state = _read(state_path)
+        script = ("import os,stat,sys;fd=os.open(" + repr(TRIGGER_LOG) +
+                  ",os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK);s=os.fstat(fd);"
+                  "assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and stat.S_IMODE(s.st_mode)==0o600;"
+                  "raw=os.read(fd,16385);assert len(raw)<=16384,'trigger log exceeds bound';"
+                  "sys.stdout.buffer.write(raw);os.close(fd)")
+        result = _run_mvm("mvmctl-030-test", "exec", state["vm"]["binding"]["id"], "--user", "root",
+                          "--timeout", "15", "--", shlex.join(["python3", "-c", script]), check=False, timeout=30)
+        print(json.dumps(dict(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)), flush=True)
     elif phase == "cleanup":
         state = _read(state_path)
         journey = FloatingIPJourney.__new__(FloatingIPJourney)
@@ -162,6 +208,13 @@ def _phase(o, namespace, task, phase, payload):
     _remote_source(o, namespace, task, payload)
     command = shlex.join(["/usr/bin/python3", "-I", "-B", task + "/source/" + SELF, "--guest", phase, task])
     result = o.qualification_vm._exec(o, namespace, command, timeout=300, check=False)
+    if phase == "trigger-log":
+        transport = dict(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+        guest_exec = None
+        if result.returncode == 0:
+            guest_exec = o._host_reboot_json(result.stdout.encode())
+            assert set(guest_exec) == {"returncode", "stdout", "stderr"}
+        return dict(transport=transport, guest_exec=guest_exec)
     assert result.returncode == 0, (phase, result.stdout, result.stderr)
     assert result.stdout.strip() == {"prepare": "PREPARED", "poweroff": "POWEROFF_SCHEDULED", "cleanup": "CLEANED"}[phase]
     return dict(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
@@ -252,6 +305,11 @@ def run(args):
                 # while an observer could still be proving the unassisted exit.
                 failure = (failure or "") + "; observer close failed: " + str(error)
         if observer is None or observer.poll() is not None:
+            if observer is not None and proof is None:
+                try:
+                    _write(task / "trigger-log-native.json", _phase(o, namespace, guest_task, "trigger-log", payload))
+                except Exception as error:
+                    _write(task / "trigger-log-native.json", dict(capture_failure=repr(error)))
             try:
                 # prepare persists partial owned intents even if it fails.
                 _phase(o, namespace, guest_task, "cleanup", payload)
@@ -337,3 +395,20 @@ def test_observer_channel_rejects_duplicate_or_incomplete_message():
             else:
                 with pytest.raises(AssertionError):
                     _line(stream, 1)
+
+
+def test_trigger_log_phase_retains_returned_failure_and_unreachability(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(sys.modules[__name__], "_remote_source", lambda *args: None)
+    returned = dict(returncode=0, stdout="TRIGGER_STARTED\nOperation not permitted\nTRIGGER_RETURNED:1\n", stderr="")
+    unreachable = dict(returncode=1, stdout="", stderr="guest agent unavailable")
+    for guest_exec in (returned, unreachable):
+        result = SimpleNamespace(returncode=0, stdout=json.dumps(guest_exec), stderr="")
+        qualification = SimpleNamespace(_exec=lambda *args, **kwargs: result)
+        o = SimpleNamespace(qualification_vm=qualification, _host_reboot_json=json.loads)
+        retained = _phase(o, {}, "/private-task", "trigger-log", {})
+        assert retained["guest_exec"] == guest_exec
+        assert retained["transport"]["returncode"] == 0
+    result = SimpleNamespace(returncode=17, stdout="", stderr="QA transport unavailable")
+    retained = _phase(o, {}, "/private-task", "trigger-log", {})
+    assert retained == dict(guest_exec=None, transport=dict(returncode=17, stdout="", stderr="QA transport unavailable"))
