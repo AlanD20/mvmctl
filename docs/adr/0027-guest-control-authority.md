@@ -1,6 +1,6 @@
 # Guest Control Authority
 
-**Status:** Proposed; retained runtime implemented, not release-qualified
+**Status:** Accepted
 **Date:** 2026-11-17
 **Amends:** [ADR-0016](0016-root-owned-single-binary-privileged-dispatch.md), for the retained Guest Control worker
 
@@ -62,8 +62,9 @@ mutation lock while waiting for guest input.
 The registered worker implements grant-triggered startup, start/resume recovery and authenticated lifecycle
 retirement. Its activation review and focused unit, vet and race checks pass. It must survive an ordinary CLI
 exit, reconnect only to the same admitted incarnation, stop on VMM exit and invalidate the old session on stop,
-restore or replacement. Ordinary bootstrap, stop/start, pause and memory-restore journeys pass; deliberate
-worker-stall and actual host-reboot qualification remain pending. Failed setup grants no authority.
+restore or replacement. Ordinary bootstrap, stop/start, pause, memory restore, agent restart/reconnect,
+independent VMM exit, actual host-reboot recovery and deliberate worker-stall packet fencing pass. Failed setup
+grants no authority.
 
 ### Delegation and privileged effects
 
@@ -161,7 +162,12 @@ network reachability or VM-to-VM exec permission.
 Ordinary runtime qualification passes all 46 environment and floating-IP cases on QA source `0403ad4e`,
 using the paired host/agent candidate from production source `4f490ff0`. This includes authenticated denials,
 incarnation retirement, alias synchronization and environment ownership, with successful teardown and inventory
-cleanup. Deliberate worker-stall and actual host-reboot qualification remain pending; this is not release sign-off.
+cleanup. Incremental agent restart/reconnect passes. With the later paired host/agent candidate, both phases
+across a fresh host reboot pass, including delegation retirement, fencing and explicit recovery. An independent
+VMM-exit check observes the exact VMM and retained worker exit before lifecycle cleanup. Deliberate worker-stall
+qualification also passes, with every thread stopped, unchanged lease/traffic assertions and exact pidfd
+continuation. The prescribed Go CI, complete root Jailer suite and root agent alias/operator suite pass on
+the final implementation source. Release-branch integration and release sign-off remain separate.
 
 Verify codec refusal and framing boundaries, then guest spoofing, stale incarnations, revoked grants, worker
 failure, bounded concurrency and privileged-effect admission in the disposable runner. Registration is gated on

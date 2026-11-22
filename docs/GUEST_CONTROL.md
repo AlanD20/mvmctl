@@ -6,7 +6,8 @@ The VM's primary address stays separate.
 
 **Development feature:** delegated guest control and persistent host assignments are implemented. Runtime tests
 cover association, transfer, release, packet fencing, expiry, ordinary VM lifecycle changes and environment
-ownership. Deliberate worker-stall and actual host-reboot qualification remain pending. The Kubernetes
+ownership. Agent restart/reconnect, independent VMM exit, actual host-reboot recovery and deliberate
+worker-stall packet fencing also pass. The prescribed Go CI and root lifecycle checks pass. The Kubernetes
 example has not been qualified end to end.
 A stored grant alone does not establish a working Guest Control session.
 

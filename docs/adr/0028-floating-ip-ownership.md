@@ -1,6 +1,6 @@
 # Floating IP Ownership
 
-**Status:** Delegated and persistent operator ownership implemented; not release-qualified
+**Status:** Accepted
 **Date:** 2026-11-17
 **Amends:** [ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md), for explicitly authorized secondary IPv4 addresses
 **Requires:** [Guest Control authority](0027-guest-control-authority.md)
@@ -95,8 +95,8 @@ both destination families across owner movement.
 Delegated failover requires expiring ownership; an eligible guest may not evict a healthy current owner just
 because it requests association. Renewal is bound to the exact generation and incarnation. Expiration must
 fence packets even when the userspace worker is dead or stalled. Kernel-enforced timed address authority is
-implemented with retained firewall tables. Ordinary expiry and renewal packet tests pass; deliberate worker-stall
-qualification remains pending.
+implemented with retained firewall tables. Ordinary expiry, renewal and deliberate worker-stall packet
+fencing tests pass.
 Do not ship a userspace-only timer as a guarantee against split brain. Association and renewal grants require
 explicit positive whole-second lease durations; there is no default.
 A guest controller uses the typed inspect, associate, renew and release methods and current generations.
@@ -138,7 +138,7 @@ Renewal removes the exact old key, proves absence and inserts the configured fin
 ownership serialization. It may briefly interrupt traffic. Repeating an add with the same timeout does not refresh
 expiration with the pinned library/kernel protocol. Unknown outcomes require recovery rather than blind replay.
 Focused tests and review cover these effects; the runtime suite verifies renewal across the original deadline
-and fencing after expiry. Deliberate worker-stall and host-reboot qualification remain separate gates.
+and fencing after expiry. Actual host-reboot recovery and deliberate worker-stall packet fencing also pass.
 Retention is necessary because the pinned nftables library writes relative element timeouts;
 recreating an element from its observed remaining time could extend its lease by the delay before commit.
 
@@ -146,8 +146,12 @@ Kernel readiness exercises this model in a disposable namespace, including a ret
 readback. The producer's nftables feature includes `CONFIG_NFT_BRIDGE_META` for bridge-scoped destination checks
 and `CONFIG_NF_CT_NETLINK` for exact flow invalidation. The replacement kernel passes readiness and all 14
 floating-IP runtime cases, alongside all 32 environment cases, on QA source `0403ad4e` with the paired
-production candidate from `4f490ff0`. Teardown and inventory cleanup pass without intervention. Deliberately
-stalled workers and actual host reboot remain unqualified; this is not a release sign-off.
+production candidate from `4f490ff0`. Teardown and inventory cleanup pass without intervention. The later paired
+host/agent candidate passes both phases across an actual host reboot, including delegation retirement and
+explicit ownership recovery. Deliberate worker-stall qualification passes with unchanged lease deadlines and
+traffic assertions, strict reports, exact continuation and preserved inventory. The prescribed Go CI and root
+Jailer/agent alias checks pass on the final implementation source. Release-branch integration and release
+sign-off remain separate.
 
 Source IPv4 and ARP checks must admit only primary addresses and live secondary pairs. A separate bridge
 postrouting fence must reject floating-IP delivery through an unauthorized output, including host-originated

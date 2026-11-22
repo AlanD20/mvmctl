@@ -707,12 +707,36 @@ python3 scripts/run-system-tests.py env \
   --record-evidence /absolute/path/to/empty-execution-task
 ```
 
-The supported domains are `floating_ip`, `env` and `floating_ip_worker_fault`. The worker-fault domain requires the
-fixed root-owned observer fixture, installed explicitly by the qualification administrator; ordinary floating-IP
-and env tests need no additional root grant. Reboot remains a separate workflow. Registered tiers stay unchanged,
+The supported domains are `floating_ip`, `env` and `floating_ip_worker_fault`. The worker-fault domain uses either
+the fixed root-owned observer fixture, installed explicitly by the qualification administrator, or the explicit
+administrator transport below. Ordinary floating-IP and env tests need no additional root grant. Reboot remains
+a separate workflow. Registered tiers stay unchanged,
 including remote Tier 3 only where nesting represents the scenario. Do not add `--host-direct`, preparation,
 installation or provisioning flags. These commands describe the execution contract, not evidence that the mode
 or any runtime journey has passed.
+
+For an explicitly authorized one-shot administrator fault check, set `MVM_QUALIFICATION_ADMIN_STALL=1` on the
+whole `floating_ip_worker_fault` domain invocation above, using a new empty evidence task. This mode accepts
+neither collection nor selected-node batches. The existing test runs as the enrolled non-root operator and prints
+`ADMIN WORKER STALL PREPARE` with the exact inner VM identity before creating grants or associating an address.
+After reviewing that request, invoke the separate administrator entry from the same clean source checkout:
+
+```bash
+python3 scripts/qualification_vm.py admin-worker-stall \
+  --evidence /absolute/path/to/empty-execution-task \
+  --vm EXACT_INNER_VM_ID_FROM_REQUEST \
+  --key /absolute/path/to/administrator-ssh-key \
+  --known-hosts /absolute/path/to/pinned-known-hosts
+```
+
+The root SSH key stays outside the guest. The known-hosts entry must match the retained runner identity.
+Preparation allows 120 seconds for administrator setup before any lease begins. The root transport reports
+`READY_WITHOUT_SIGNALS`, holding no root locks or pidfds; only the later exact STOP request admits the worker.
+The 40-second admission and 90-second stopped-worker limits and original 24-second leases remain unchanged.
+The administrator observer verifies source/candidate and exact process authority, holds index then VM locks,
+stops every thread through the retained worker pidfd, and attempts continuation through that same pidfd in
+`finally`. Both operator and administrator receipts must join successfully. This transport installs no persistent
+helper or sudoers grant and never substitutes fabricated sudo metadata. A prepared transport is not a runtime pass.
 
 Domains run serially and fail fast. For an exact-node batch, add the unchanged
 [collection/remainder flags](#62-record-the-exact-selected-remainder), including every verified completed receipt

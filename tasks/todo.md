@@ -9,7 +9,7 @@ This checklist implements `tasks/plan.md`. Go production and L0/L1 work belongs 
 Work on `feature/guest-control-floating-ips`, then integrate into `0.3.0-release` after the gates below.
 Earlier checked items describe the qualified baseline; they do not qualify this expansion.
 
-- [ ] Approve Guest Control and floating-IP ADRs, including identity, delegation, endpoint lifecycle and failover.
+- [x] Approve Guest Control and floating-IP ADRs, including identity, delegation, endpoint lifecycle and failover.
 - [x] Draft [Guest Control authority](../docs/adr/0027-guest-control-authority.md) and
   [floating-IP ownership](../docs/adr/0028-floating-ip-ownership.md) contracts, recording unresolved runtime details.
 - [x] Implement strict typed Guest Control request framing, including duplicate/unknown-field refusal,
@@ -54,14 +54,14 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Implement root delegation persistence and exact sustaining-grant provenance with explicit lease policy;
   verify the correction rejecting impossible ownership revisions.
 - [x] Wire operator delegation CRUD, exact-ID ensure and receipt-guarded resumable revocation; independently
-  review and pass focused QA vet/race checks. Ordinary guest grant and fencing journeys pass; worker-stall QA remains.
+  review and pass focused QA vet/race checks. Ordinary guest grant, fencing and worker-stall journeys pass.
 - [x] Implement and review pinned mutual TLS authentication with real handshake, refusal and cancellation tests.
 - [x] Implement backend-preserving root credential preparation, expected-import receipts, snapshot lineage
   and restartable credential retirement. Focused QA and existing workflow regressions pass.
 - [x] Implement guest ownership coordination, lifecycle fencing, bootstrap projection and removal guards;
   resolve the present-zero takeover review finding and pass focused integration checks.
 - [x] Implement delegated association ownership, kernel-enforced finite authority, fencing and transfer recovery.
-- [ ] Qualify live ownership transfer, kernel expiry and recovery under process/packet failures.
+- [x] Qualify live ownership transfer, kernel expiry and recovery under process/packet failures.
 - [x] Decide that operator associations persist until release, transfer or VM stop while guest leases remain finite.
 - [x] Implement and review host association, transfer and release with explicit lifetime authority and
   acknowledged guest aliases; pass focused QA.
@@ -73,15 +73,17 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
 - [x] Wire the retained root worker and typed delegated operations without operator impersonation, including
   grant startup, start/resume recovery and lifecycle retirement; pass activation review and focused unit/vet/race checks.
 - [x] Qualify ordinary live worker bootstrap and incarnation retirement through stop/start and memory restore.
-- [ ] Complete live worker reconnect, process-exit and failure qualification, including deliberate worker-stall
-  fencing; the exact root observer sudo rule awaits approval.
+- [x] Qualify real-agent restart/reconnect and independent VMM/worker process exit before lifecycle cleanup.
+- [x] Complete deliberate worker-stall fencing qualification using the explicit administrator STOP/CONT mode,
+  pre-armed before grants or association; preserve the original lease deadlines and traffic assertions.
 - [x] Implement the authenticated guest gateway and typed `mvm-agent control floating-ip` commands;
   independently review and pass focused named-runner tests, race checks and vet; integrate the retained host worker.
 - [x] Implement and review guest alias reconciliation with exact owned receipts, bounded local lifetime,
   expiry/session-loss/restart cleanup and refusal of foreign addresses.
 - [x] Document public reservation/delegation commands, guest control, exact traffic destinations and version 1
   environment fields and ownership semantics. Prepare the website source update for review; publication remains held.
-- [ ] Qualify the composed control path and publish the separately reviewed website update.
+- [x] Qualify the composed control path, including reconnect, VMM exit, host reboot and stalled-worker fencing.
+- [ ] Publish the separately reviewed website update — HELD for separate user authorization.
 - [x] Repair the HA Kubernetes example and its policies, helpers and three-controller topology.
 - [x] Test floating-IP association and disassociation with small VMs in the existing named QA runner.
   Full Kubernetes cluster bootstrap, quorum testing and a larger runner are explicitly out of scope.
@@ -91,13 +93,17 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   even when the final process observation fails; pass non-signaling helper checks.
 - [x] Extend the existing host-reboot continuation with floating-IP and delegation recovery coverage; pass
   receipt/preservation helper checks and collection from the exact staged payload.
-- [ ] Run both reboot phases across an actual host reboot and qualify delegation retirement and explicit recovery.
+- [x] Run both reboot phases across an actual host reboot and qualify delegation retirement and explicit recovery.
+- [x] Complete final integration Go CI and full root Jailer/agent alias checks after the production startup
+  and prior-boot recovery corrections, on clean QA source `a84d8958`.
 - [x] Pass integration Go CI, complete root Jailer and root agent alias suites for `945bea5b`; build the
   paired host and guest agent and install the candidate inside the named QA VM with inventories preserved.
-- [ ] Complete affected Go and Python system tests in `mvmctl-030-test`, plus documentation and website updates.
-- [ ] Review and integrate the feature into `0.3.0-release`; verify subsequent production changes and complete
-  release qualification.
-- [ ] Obtain the user's separate authorization before merging the release PR, tagging or publishing.
+- [x] Complete affected Python system qualification in `mvmctl-030-test` and update public Markdown guidance.
+- [x] Prepare and review the website source update; source commit and publication remain HELD.
+- [ ] Integrate the reviewed feature into `0.3.0-release`; final CI passes, integration-owner sign-off pending.
+- [ ] Complete expanded release qualification after integration.
+- [ ] Obtain the user's separate authorization before merging the release PR to `main`, tagging or publishing
+  — all three remain HELD.
 
 All 46 ordinary runtime cases passed (32 environment and 14 floating-IP) on QA source `0403ad4e`, using
 candidate SHA-256 `44e2147e11f413a95998c6b9a56e46f82fb979667f2c0fb557642f24f878cf1c`
@@ -109,10 +115,25 @@ two intentional private-entrypoint skips (`TestProtectedKernelSuccessorCrashWork
 Evidence: `.tmp/qa-guest-control-final-0403-nov22/runtime-verification.json`, SHA-256
 `896b1f7c65bde77fcc7575b05e8d8ac0d09402739eaccfebd0d8aada662874c5`, and
 `.tmp/guest-control-final-candidate-nov22/{paired-build-manifest,gate-summary}.json`.
-Actual host reboot remains unqualified pending preflight and execution of both phases across a reboot.
-Deliberate worker stall remains unqualified pending approval of the exact root observer sudo rule and runtime
-execution. Neither gate is waived. Full Kubernetes bootstrap, quorum testing and larger-VM qualification remain
-outside this goal. These results do not qualify the release.
+Incremental real-agent restart/reconnect passes. Production source `f7666e5a` and paired candidate SHA-256
+`0efe49b93ad9154e0bcaeec87a77421591eff7a87153c1c85136107cf3eadf1e` pass actual host-reboot
+PRE (37.339s) and POST (83.588s), strict reports, owned cleanup and historical verification. Evidence:
+`.tmp/qa-host-reboot-recovery-f766-nov22/verification-summary.json`. Independent VMM/worker exit before cleanup
+also passes on QA source `9c55e34c` with the unchanged candidate; evidence:
+`.tmp/qa-vmm-exit-9c55-nov22/verification-summary.json`. These runs do not replay the ordinary 46 cases.
+Deliberate worker-stall qualification passes on QA source `a84d8958` with the unchanged candidate: one case
+passed in 98.86s, no skips/errors/deselections, canonical matrix/root-receipt verification and equal before/after
+inventory. Evidence: `.tmp/qa-worker-stall-prearmed-runtime-nov22/verification-summary.json`, SHA-256
+`cca906ee1ff88402ff8219f4f0f18c0171f6f9ffc412abbbd001b30a548efa77`. Explicit administrator pre-arming
+precedes grants/association; the original 24-second leases and all timing/traffic assertions remain unchanged.
+No persistent observer helper or grant is needed. Final integration Go CI passes on clean QA source `a84d8958`;
+every prescribed stage exits zero. Complete root Jailer has 923 top-level passes and the same two intentional
+private-entrypoint skips; root alias/operator has 21 top-level passes with no skips. Before/after source
+manifests match and the installed candidate is unchanged. Evidence:
+`.tmp/ci-final-guest-control-nov22/{summary,proof}.json`. Feature qualification is complete and prepared for
+release-branch integration; integration-owner sign-off is pending. No gate is waived.
+Full Kubernetes bootstrap, quorum testing and larger-VM qualification remain outside this goal. These results
+do not qualify the release.
 
 ## Administrator uninstall (2026-11-14)
 

@@ -5,9 +5,9 @@
 **Feature branch:** `feature/guest-control-floating-ips`
 
 **Status (2026-11-22):** The previously qualified baseline is complete. The user has expanded 0.3.0 to include
-Guest Control, floating IPs and the HA Kubernetes example repair. These additions are in progress and not release-qualified;
-the release is no longer ready to tag. Develop them on the feature branch, then integrate into `0.3.0-release`
-after contract approval, implementation review and affected QA. Merge to `main`, tagging and publication remain on hold.
+Guest Control, floating IPs and the HA Kubernetes example repair. Implementation, review and scoped feature
+qualification are complete and prepared for integration into `0.3.0-release`. Integration-owner sign-off and
+expanded release qualification remain pending. Merge to `main`, tagging and publication remain on hold.
 
 ## Guest Control and floating IP scope
 
@@ -55,8 +55,14 @@ with paired candidate SHA-256 `44e2147e11f413a95998c6b9a56e46f82fb979667f2c0fb55
 from production source `4f490ff0`. No cases skipped or errored; all teardowns and full inventory cleanup passed
 without intervention. The prescribed Go CI, complete root Jailer suite (923 passes and exactly two intentional
 private-entrypoint skips), root agent alias suite (21 passes, no skips) and paired real-agent build passed.
-Actual host reboot and deliberate worker-stall remain unqualified. Reboot preflight/PRE/POST work is pending;
-the stalled-worker observer awaits approval of its exact root sudo rule. Neither requirement is waived.
+Incremental real-agent restart/reconnect passes. After the startup and prior-boot recovery corrections, a fresh
+actual host reboot passes PRE and POST with strict reports, owned cleanup and historical verification. Independent
+VMM exit also passes: exact VMM and worker pidfds report exit before lifecycle cleanup. Deliberate worker-stall
+packet fencing passes with unchanged 24-second leases and timing/traffic assertions, exact pidfd continuation
+and preserved inventory. The explicit administrator transport pre-arms before any grant or association; no
+persistent helper or grant is needed. Final integration Go CI and complete root Jailer/agent alias checks pass
+on clean QA source `a84d8958`, including the production startup and prior-boot recovery corrections. The
+feature is prepared for release-branch integration; integration-owner sign-off remains pending. No gate is waived.
 The public
 [Guest Control guide](../docs/GUEST_CONTROL.md) and [environment reference](../docs/ENV_SPEC_REFERENCE.md)
 describe the implemented surface; website publication remains held.
@@ -64,7 +70,19 @@ describe the implemented surface; website publication remains held.
 Evidence: `.tmp/qa-guest-control-final-0403-nov22/runtime-verification.json` (SHA-256
 `896b1f7c65bde77fcc7575b05e8d8ac0d09402739eaccfebd0d8aada662874c5`) and
 `.tmp/guest-control-final-candidate-nov22/{paired-build-manifest,gate-summary}.json`.
-These local receipts qualify the ordinary matrix and production gates only; the expanded release remains unqualified.
+Later proof: production source `f7666e5a`, paired candidate SHA-256
+`0efe49b93ad9154e0bcaeec87a77421591eff7a87153c1c85136107cf3eadf1e`,
+`.tmp/qa-host-reboot-recovery-f766-nov22/verification-summary.json` (PRE 37.339s, POST 83.588s), and
+`.tmp/qa-vmm-exit-9c55-nov22/verification-summary.json` (QA source `9c55e34c`, unchanged candidate).
+The VMM-exit check uses inner x86 BusyBox `reboot -f` with verified `reboot=k`; it observes VMM exit at 3.803s
+and worker exit at 3.848s, independently of outer-runner reboot. These incremental results do not replay the
+ordinary 46 cases or complete the expanded release qualification. Worker-stall proof on QA source `a84d8958`
+with the same candidate: `.tmp/qa-worker-stall-prearmed-runtime-nov22/verification-summary.json`, SHA-256
+`cca906ee1ff88402ff8219f4f0f18c0171f6f9ffc412abbbd001b30a548efa77`; one case passed in 98.86s,
+with no skips, errors or deselections and successful canonical matrix/root-receipt verification. Final CI proof:
+`.tmp/ci-final-guest-control-nov22/{summary,proof}.json`; every prescribed stage exits zero, complete root Jailer
+has 923 top-level passes with the same two intentional private-entrypoint skips, and root alias/operator has
+21 top-level passes with no skips. Source manifests match before/after; the installed candidate remains unchanged.
 
 ## Memory policy and sign-off
 
