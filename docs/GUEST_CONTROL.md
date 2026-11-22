@@ -5,8 +5,9 @@ for itself, renew its finite lease and release it. Clients keep the same destina
 The VM's primary address stays separate.
 
 **Development feature:** delegated guest control and persistent host assignments are implemented. Runtime tests
-cover association, transfer, release, packet fencing, expiry and ordinary VM lifecycle changes. Stalled-worker,
-host-reboot and environment qualification remain pending; the full Kubernetes example has not been tested.
+cover association, transfer, release, packet fencing, expiry, ordinary VM lifecycle changes and environment
+ownership. Deliberate worker-stall and actual host-reboot qualification remain pending. The full Kubernetes
+cluster, quorum behavior and larger-VM qualification are outside the current scope.
 A stored grant alone does not establish a working Guest Control session.
 
 ## Reserve an address

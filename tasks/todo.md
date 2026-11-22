@@ -72,7 +72,9 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   pinned agent TLS and independent exit descriptor. Review and focused QA vet/race checks pass.
 - [x] Wire the retained root worker and typed delegated operations without operator impersonation, including
   grant startup, start/resume recovery and lifecycle retirement; pass activation review and focused unit/vet/race checks.
-- [ ] Qualify live worker bootstrap, reconnect, process exit and lifecycle retirement.
+- [x] Qualify ordinary live worker bootstrap and incarnation retirement through stop/start and memory restore.
+- [ ] Complete live worker reconnect, process-exit and failure qualification, including deliberate worker-stall
+  fencing; the exact root observer sudo rule awaits approval.
 - [x] Implement the authenticated guest gateway and typed `mvm-agent control floating-ip` commands;
   independently review and pass focused named-runner tests, race checks and vet; integrate the retained host worker.
 - [x] Implement and review guest alias reconciliation with exact owned receipts, bounded local lifetime,
@@ -97,12 +99,20 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   release qualification.
 - [ ] Obtain the user's separate authorization before merging the release PR, tagging or publishing.
 
-The complete floating-IP domain passed all 14 runtime cases with source `789214bc` and the paired `8dd32bf8`
-candidate in the named QA runner. It covers host and guest ownership, packet isolation during owner movement,
-renewal and expiry, stop/start, pause and memory restore. Cleanup passed without manual neighbor intervention.
-Environment ownership, stalled-worker fencing and actual reboot continuation remain separate qualification gates.
-The QA-only kernel-binding correction is integrated at `ded3199c`; its 17 focused checks pass, but environment
-collection is not runtime qualification. These results do not qualify the full Kubernetes example or the release.
+All 46 ordinary runtime cases passed (32 environment and 14 floating-IP) on QA source `0403ad4e`, using
+candidate SHA-256 `44e2147e11f413a95998c6b9a56e46f82fb979667f2c0fb557642f24f878cf1c`
+from production source `4f490ff0`. There were no skips, errors or interventions; all teardowns and full inventory
+cleanup passed. This includes environment apply/reapply/destroy and exact ownership preservation/refusal.
+The prescribed Go CI and paired real-agent build passed. Complete root Jailer results are 923 passes with exactly
+two intentional private-entrypoint skips (`TestProtectedKernelSuccessorCrashWorker` and
+`TestProtectedKernelSnapshotProducerCrashWorker`); root alias tests are 21 passes with no skips.
+Evidence: `.tmp/qa-guest-control-final-0403-nov22/runtime-verification.json`, SHA-256
+`896b1f7c65bde77fcc7575b05e8d8ac0d09402739eaccfebd0d8aada662874c5`, and
+`.tmp/guest-control-final-candidate-nov22/{paired-build-manifest,gate-summary}.json`.
+Actual host reboot remains unqualified pending preflight and execution of both phases across a reboot.
+Deliberate worker stall remains unqualified pending approval of the exact root observer sudo rule and runtime
+execution. Neither gate is waived. Full Kubernetes bootstrap, quorum testing and larger-VM qualification remain
+outside this goal. These results do not qualify the release.
 
 ## Administrator uninstall (2026-11-14)
 

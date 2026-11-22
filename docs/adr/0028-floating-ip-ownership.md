@@ -145,8 +145,9 @@ recreating an element from its observed remaining time could extend its lease by
 Kernel readiness exercises this model in a disposable namespace, including a retained rule update and exact
 readback. The producer's nftables feature includes `CONFIG_NFT_BRIDGE_META` for bridge-scoped destination checks
 and `CONFIG_NF_CT_NETLINK` for exact flow invalidation. The replacement kernel passes readiness and all 14
-floating-IP runtime cases on source `789214bc` with paired candidate `8dd32bf8`. Environment ownership,
-deliberately stalled workers and actual host reboot remain unqualified; this is not a release sign-off.
+floating-IP runtime cases, alongside all 32 environment cases, on QA source `0403ad4e` with the paired
+production candidate from `4f490ff0`. Teardown and inventory cleanup pass without intervention. Deliberately
+stalled workers and actual host reboot remain unqualified; this is not a release sign-off.
 
 Source IPv4 and ARP checks must admit only primary addresses and live secondary pairs. A separate bridge
 postrouting fence must reject floating-IP delivery through an unauthorized output, including host-originated
@@ -173,4 +174,5 @@ valid but does not implement the requested general floating-IP feature.
 Exercise concurrent reservations, primary/floating collisions, stale generations, two simultaneous claimants,
 crashes at transfer stages, failed neighbor/flow cleanup, old-owner spoofing and worker death past lease expiry.
 Verify allowed and denied service traffic before and after movement, plus stop/restore/reboot cleanup. Run the
-three-controller example only in a runner sized for it; codec or single-VM checks do not prove HA behavior.
+floating-IP feature checks on small VMs in the existing runner. Full Kubernetes cluster bootstrap, quorum
+testing and larger-VM qualification are outside the current goal; these checks do not prove HA behavior.

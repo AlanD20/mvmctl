@@ -187,6 +187,7 @@ Documented exceptions for direct `os/exec` / `os/exec.CommandContext`:
 | `internal/service/jailer/lifecycle_child_spawn.go` | Fixed-binary `os.StartProcess` creates the authenticated handshake-blocked child and closed inherited channels |
 | `internal/service/jailer/lifecycle_child.go` | Fixed admitted Jailer `syscall.Exec` preserves process identity and private descriptor-only mounts; the early child route always exits |
 | `internal/service/jailer/lifecycle_console_spawn.go` | Fixed-binary `os.StartProcess` drops to the admitted caller UID/GID with empty supplementary groups and passes only the root-created PTY and authenticated closed channels; the relay consumes pinned outputs rather than caller paths |
+| `internal/service/jailer/guest_control_worker_spawn.go` | Fixed-binary `os.StartProcess` creates the retained root Guest Control worker in a separate session with empty supplementary groups, fixed environment, null stdio and one authenticated inherited setup socket; pidfd-bound child verification precedes principal/generation setup, and bootstrap waits until parent VM/worker locks are released |
 | `internal/core/ssh/utils.go` | SSH connectivity probe uses `exec.CommandContext` with short-lived probe context |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine with chained losetup/mount/umount/chroot |
 | `internal/service/agent/exec.go` | Guest agent command execution via `su`/`sh` with `exec.CommandContext` |

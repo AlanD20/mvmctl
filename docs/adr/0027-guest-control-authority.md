@@ -54,14 +54,16 @@ Memory-snapshot inheritance requires root capture authority; cold imports always
 
 A managed worker of the installed `mvm` binary maintains the session while the VM is running and delegated
 features or operator-owned floating IPs require it. No separate helper executable or broad sudoers permission is
-introduced. This is a new
-retained-lifetime exception: it must be registered explicitly, bounded per VM, and stopped by authenticated
-lifecycle cleanup. It must not retain a global network mutation lock while waiting for guest input.
+introduced. The fixed-binary `os.StartProcess` in `internal/service/jailer/guest_control_worker_spawn.go`
+is registered in the `CONTEXT.md` and `docs/STANDARDS.md` subprocess exception tables. This retained-lifetime
+exception is bounded per VM and stopped by authenticated lifecycle cleanup. It must not retain a global network
+mutation lock while waiting for guest input.
 
 The registered worker implements grant-triggered startup, start/resume recovery and authenticated lifecycle
 retirement. Its activation review and focused unit, vet and race checks pass. It must survive an ordinary CLI
 exit, reconnect only to the same admitted incarnation, stop on VMM exit and invalidate the old session on stop,
-restore or replacement; these live process journeys remain qualification gates. Failed setup grants no authority.
+restore or replacement. Ordinary bootstrap, stop/start, pause and memory-restore journeys pass; deliberate
+worker-stall and actual host-reboot qualification remain pending. Failed setup grants no authority.
 
 ### Delegation and privileged effects
 
@@ -156,6 +158,8 @@ network reachability or VM-to-VM exec permission.
 
 ## Verification
 
-Verify codec refusal and framing boundaries, then guest spoofing, stale incarnations, revoked grants, worker
-failure, bounded concurrency and privileged-effect admission in the disposable runner. Registration is gated on
-the identity/bootstrap review and those tests. A codec implementation alone is not a working control plane.
+Ordinary runtime qualification passes all 46 environment and floating-IP cases on QA source `0403ad4e`,
+using the paired host/agent candidate from production source `4f490ff0`. This includes authenticated denials,
+incarnation retirement, alias synchronization and environment ownership, with successful teardown and inventory
+cleanup. Deliberate worker-stall and actual host-reboot qualification remain pending; this is not release sign-off.
+Worker failure, bounded concurrency and privileged-effect admission remain part of the verification contract.

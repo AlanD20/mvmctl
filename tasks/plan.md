@@ -4,7 +4,7 @@
 
 **Feature branch:** `feature/guest-control-floating-ips`
 
-**Status (2026-11-17):** The previously qualified baseline is complete. The user has expanded 0.3.0 to include
+**Status (2026-11-22):** The previously qualified baseline is complete. The user has expanded 0.3.0 to include
 Guest Control, floating IPs and the HA Kubernetes example repair. These additions are in progress and not release-qualified;
 the release is no longer ready to tag. Develop them on the feature branch, then integrate into `0.3.0-release`
 after contract approval, implementation review and affected QA. Merge to `main`, tagging and publication remain on hold.
@@ -50,13 +50,21 @@ effects. The retained worker, grant startup, start/resume recovery and lifecycle
 focused checks and activation review pass. Stored permission is not session readiness.
 Operator associations persist until explicit release, transfer or VM stop; guest leases remain finite.
 Host CLI parity, explicit lifetime authority and acknowledged guest alias synchronization are implemented and
-reviewed. All 14 floating-IP runtime cases passed on source `789214bc` with paired candidate `8dd32bf8`, including
-host and guest ownership, policy-preserving transfer, expiry and lifecycle fencing. Integration Go CI, the complete
-root Jailer suite and root agent alias tests passed for that production candidate. Environment ownership,
-stalled-worker fencing and actual reboot continuation remain pending; collection does not qualify those journeys.
+reviewed. All 46 ordinary runtime cases (32 environment and 14 floating-IP) passed on QA source `0403ad4e`
+with paired candidate SHA-256 `44e2147e11f413a95998c6b9a56e46f82fb979667f2c0fb557642f24f878cf1c`
+from production source `4f490ff0`. No cases skipped or errored; all teardowns and full inventory cleanup passed
+without intervention. The prescribed Go CI, complete root Jailer suite (923 passes and exactly two intentional
+private-entrypoint skips), root agent alias suite (21 passes, no skips) and paired real-agent build passed.
+Actual host reboot and deliberate worker-stall remain unqualified. Reboot preflight/PRE/POST work is pending;
+the stalled-worker observer awaits approval of its exact root sudo rule. Neither requirement is waived.
 The public
 [Guest Control guide](../docs/GUEST_CONTROL.md) and [environment reference](../docs/ENV_SPEC_REFERENCE.md)
 describe the implemented surface; website publication remains held.
+
+Evidence: `.tmp/qa-guest-control-final-0403-nov22/runtime-verification.json` (SHA-256
+`896b1f7c65bde77fcc7575b05e8d8ac0d09402739eaccfebd0d8aada662874c5`) and
+`.tmp/guest-control-final-candidate-nov22/{paired-build-manifest,gate-summary}.json`.
+These local receipts qualify the ordinary matrix and production gates only; the expanded release remains unqualified.
 
 ## Memory policy and sign-off
 

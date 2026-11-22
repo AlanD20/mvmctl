@@ -12,6 +12,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
   - [Service (stateless, intra-domain)](#service-stateless-intra-domain)
   - [Repository](#repository)
   - [Service subprocess pattern (internal/service/)](#service-subprocess-pattern-internalservice)
+  - [Guest Control](#guest-control)
   - [Resolver](#resolver)
   - [Enrichment pattern](#enrichment-pattern)
   - [Validation (caller's responsibility)](#validation-callers-responsibility)
@@ -120,6 +121,34 @@ Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudn
 Dependency direction: `cli/` -> `services/`. Services never import `cli/` or `pkg/api/`.
 
 Cloud-init domain (`internal/core/cloudinit/`) is distinct from services — it is a core domain that handles cloud-init config generation, not a subprocess.
+
+### Guest Control
+
+Guest Control is a dedicated authenticated guest-to-host session with named, typed feature methods, separate
+from VM-exec. Floating IPs are its first feature. Operator API orchestration remains in `pkg/api/`; the closed
+worker compositor in `internal/service/privileged/` admits the session principal through Jailer and calls the
+network service's `GuestInspect`, `GuestAssociate`, `GuestRenew` or `GuestRelease`. Guests cannot supply an
+operator identity or invoke arbitrary CLI commands. Root rechecks the current VM incarnation and delegation
+at the effect boundary; association and renewal also require the VMM to be Running.
+
+Jailer binds the principal to the enrolled owner, VM, host boot, launch generation and execution UID using the
+protected live VMM. Separate pinned mutual TLS authenticates the agent endpoint and credential lineage.
+The root-only local agent socket exposes the VM's grants to guest root. Neither a stored grant nor an agent
+key alone proves a ready session or authorizes a host effect.
+
+A retained worker of the installed `mvm` binary serves each enabled VM while grants or operator-owned floating
+IPs require it. Startup creates a root child blocked on an authenticated inherited socket; setup carries only
+the principal and worker generation, and credentials are reopened from protected backing. The parent records
+the child and releases VM/worker locks before opening the bootstrap gate. The worker survives ordinary CLI
+exit, reconnects only to its admitted incarnation and stops on VMM exit; stop, restore and replacement retire
+old authority. It holds no global network mutation lock while waiting for guest input.
+
+Root floating-IP authority is separate from SQLite projections and guest alias receipts. Operator assignments
+persist until release, transfer or VM stop; guest leases remain finite and kernel-enforced. Transfer fences the
+old owner before admitting the new one. Agent alias acknowledgement completes operator association. Guest
+alias cleanup is local hygiene; gratuitous ARP refreshes reachability. Neither grants or proves host authority.
+See [Guest Control authority](docs/adr/0027-guest-control-authority.md),
+[floating-IP ownership](docs/adr/0028-floating-ip-ownership.md) and the [operator guide](docs/GUEST_CONTROL.md).
 
 ### Resolver
 
@@ -1441,6 +1470,7 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 | `internal/service/jailer/lifecycle_child_spawn.go` | Fixed-binary `os.StartProcess` creates the authenticated handshake-blocked root child with its closed inherited channels |
 | `internal/service/jailer/lifecycle_child.go` | `syscall.Exec` preserves admitted child identity and descriptor-only mounts during the fixed Jailer handoff; the early route exits on every outcome |
 | `internal/service/jailer/lifecycle_console_spawn.go` | Root creates the exact PTY and authenticated gate, then `os.StartProcess` executes only the fixed system-binary console marker after dropping to the caller UID/GID with empty supplementary groups; pinned output descriptors are supplied through the closed setup channel |
+| `internal/service/jailer/guest_control_worker_spawn.go` | Fixed-binary `os.StartProcess` creates the retained root Guest Control worker in a separate session with empty supplementary groups, fixed environment, null stdio and one authenticated inherited setup socket; pidfd-bound child verification precedes principal/generation setup, and bootstrap waits until parent VM/worker locks are released |
 | `internal/core/ssh/utils.go` (SSH connectivity probe) | Uses `exec.CommandContext` with a short-lived probe context for SSH connectivity detection |
 | `internal/service/agent/exec.go` (command execution) | Uses `exec.CommandContext` for `su` user switching and `sh -c` command execution inside the guest agent |
 | `internal/service/agent/pty.go` (PTY session) | Uses `exec.CommandContext` for `su` user switching to establish PTY sessions |
