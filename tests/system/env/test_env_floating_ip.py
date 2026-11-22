@@ -89,7 +89,9 @@ def _snapshot(runner, network_name, vm_name):
         matches = [p for p in policies[f"{source}_to_floating_ip"]
                    if p["destination_floating_ip_id"] == reservation["id"]]
         assert len(matches) == 1, matches
-        policy = matches[0]
+        policy = dict(matches[0])
+        # Ensure refreshes projection updated_at; every other receipt field stays strict.
+        policy.pop("updated_at")
         assert (policy[f"source_{source}_id"], policy["destination_network_id"], policy["protocol"],
                 policy["destination_port_start"], policy["destination_port_end"]) == (
                     vm["id"] if source == "vm" else network["id"], network["id"], "tcp", 18080, 18080), policy
