@@ -168,7 +168,9 @@ func collectKernelObservationSnapshot(
 							return kernelObservation{}, err
 						}
 						if ref.table != identity {
-							return kernelObservation{}, invalidKernelObservation("managed set dump returned another table")
+							return kernelObservation{}, invalidKernelObservation(
+								"managed set dump returned another table",
+							)
 						}
 						if ref.name == secondaryLeaseSetName {
 							if secondaryPresent {
@@ -262,7 +264,9 @@ func collectKernelObservationSnapshot(
 }
 
 func kernelSnapshotSecondaryElementsRequest() (netlink.Message, error) {
-	return kernelSnapshotSetElementsRequest(managedSetRef{table: managedTableIdentities[0], name: secondaryLeaseSetName})
+	return kernelSnapshotSetElementsRequest(
+		managedSetRef{table: managedTableIdentities[0], name: secondaryLeaseSetName},
+	)
 }
 
 func kernelSnapshotSetElementsRequest(ref managedSetRef) (netlink.Message, error) {

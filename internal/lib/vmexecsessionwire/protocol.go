@@ -23,7 +23,15 @@ const (
 )
 
 var fixedPhaseFields = []string{"schema_version", "phase"}
-var openSourceFields = []string{"schema_version", "phase", "source_vm_id", "destination_vm_id", "target_user", "request_id"}
+
+var openSourceFields = []string{
+	"schema_version",
+	"phase",
+	"source_vm_id",
+	"destination_vm_id",
+	"target_user",
+	"request_id",
+}
 var failureFields = []string{"schema_version", "phase", "error"}
 
 // OpenSource identifies the exact distinct VM pair named by the first structural-control frame.

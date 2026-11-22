@@ -29,7 +29,10 @@ type LabelTrafficPolicyCreateInput struct {
 
 func (input LabelTrafficPolicyCreateInput) ResolveTraffic() (model.TrafficProtocol, uint16, uint16, error) {
 	if input.Source.VM != "" && input.Destination.VM != "" {
-		return "", 0, 0, errs.New(errs.CodeValidationFailed, "label traffic policies require at least one label selector")
+		return "", 0, 0, errs.New(
+			errs.CodeValidationFailed,
+			"label traffic policies require at least one label selector",
+		)
 	}
 	if err := input.Source.Validate(); err != nil {
 		return "", 0, 0, err

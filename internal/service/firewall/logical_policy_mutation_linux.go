@@ -45,7 +45,11 @@ func withLogicalPolicyMutation(
 	if _, err := verifyPinnedGenerationNamespace(ctx, kernel, identity); err != nil {
 		return err
 	}
-	store, err := openGenerationRecordStore(ctx, realGenerationRecordStoreDeps(), productionGenerationRecordStorePolicy())
+	store, err := openGenerationRecordStore(
+		ctx,
+		realGenerationRecordStoreDeps(),
+		productionGenerationRecordStorePolicy(),
+	)
 	if err != nil {
 		return err
 	}
@@ -79,7 +83,9 @@ func withLogicalPolicyMutation(
 		}
 	}
 	lease := &persistentGenerationLease{state: &persistentGenerationLeaseState{
-		global: &systemFirewallGlobalAuthority{authority: global}, lock: lock, store: store, record: cloneGenerationRecord(record), evidence: evidence, active: true,
+		global: &systemFirewallGlobalAuthority{
+			authority: global,
+		}, lock: lock, store: store, record: cloneGenerationRecord(record), evidence: evidence, active: true,
 	}}
 	transaction, err := loadLogicalPolicyMutation(ctx, store, kernel, lease, record, binding)
 	if err != nil {

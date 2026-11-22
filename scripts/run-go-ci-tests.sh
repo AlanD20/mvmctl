@@ -48,6 +48,7 @@ local_jailer_tests+='PostRename)|'
 local_jailer_tests+='Cleanup(LeaseCopies|WaitFailure|CompleteNilContext|LeaseDoesNotCommit)|'
 local_jailer_tests+='PreparedRelease(TransfersToSuccessfulLaunch|SerializesReleaseAgainstLaunchingTransfer|'
 local_jailer_tests+='RegistrationFailuresBeforeRenameRetainAuthority)|'
+local_jailer_tests+='InitialVMLabelsCannotBeReplayedOnCleanedInstance|'
 local_jailer_tests+='PersistentOutput|BeginFreshRecoveryCleanup(Verifies|BootMismatch)|'
 local_jailer_tests+='ActivateVerifiedProcess|ActiveCleanup)'
 go test ./internal/service/jailer \

@@ -28,7 +28,8 @@ func (request VMExecPolicyApplyRequest) Validate() error {
 	if _, err := parseManagedCacheLocator(request.CacheRoot); err != nil {
 		return err
 	}
-	if request.TargetUser == "root" || len(request.TargetUser) > 32 || validators.SSHUsername(request.TargetUser) != nil {
+	if request.TargetUser == "root" || len(request.TargetUser) > 32 ||
+		validators.SSHUsername(request.TargetUser) != nil {
 		return instanceValidationError("execution policy requires a non-root target user")
 	}
 	if request.Source.VMID != "" && request.Source.VMID == request.Destination.VMID {

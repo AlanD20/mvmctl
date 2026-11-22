@@ -102,7 +102,8 @@ func readExecPolicyIndexHeader(file io.ReaderAt, size int64, ownerUID uint32) (e
 func lookupExecPolicyIndex(
 	file io.ReaderAt, size int64, ownerUID uint32, sourceVMID, destinationVMID, targetUser string,
 ) (bool, error) {
-	if validateVMLabelIdentity(ownerUID, sourceVMID) != nil || validateVMLabelIdentity(ownerUID, destinationVMID) != nil ||
+	if validateVMLabelIdentity(ownerUID, sourceVMID) != nil ||
+		validateVMLabelIdentity(ownerUID, destinationVMID) != nil ||
 		!validExecPolicyTargetUser(targetUser) {
 		return false, invalidGeneration("invalid exec authorization identity")
 	}

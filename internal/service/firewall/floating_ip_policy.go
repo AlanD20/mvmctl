@@ -167,7 +167,13 @@ func (compiler *generationCompiler) compileBridgeFloatingIPGrants(intent generat
 			compiler.addDirectionalTrafficRules(&compiler.generation.bridge, forward,
 				"bridge.allow.vm-floating-ip."+grant.id+variant.suffix,
 				func(direction trafficDirection) []expr.Any {
-					return bridgeVMGrantExpressions(variant.endpoint, destination, grant.protocol, grant.ports, direction)
+					return bridgeVMGrantExpressions(
+						variant.endpoint,
+						destination,
+						grant.protocol,
+						grant.ports,
+						direction,
+					)
 				})
 		}
 	}
@@ -178,10 +184,14 @@ func (compiler *generationCompiler) compileBridgeFloatingIPGrants(intent generat
 		if !active || source.id != destination.networkID {
 			continue
 		}
-		compiler.addDirectionalTrafficRules(&compiler.generation.bridge, forward, "bridge.allow.network-floating-ip."+grant.id,
+		compiler.addDirectionalTrafficRules(
+			&compiler.generation.bridge,
+			forward,
+			"bridge.allow.network-floating-ip."+grant.id,
 			func(direction trafficDirection) []expr.Any {
 				return bridgeNetworkGrantExpressions(source, destination, grant.protocol, grant.ports, direction)
-			})
+			},
+		)
 	}
 }
 
@@ -198,8 +208,15 @@ func (compiler *generationCompiler) compileINetFloatingIPGrants(intent generatio
 			compiler.addDirectionalTrafficRules(&compiler.generation.inet, forward,
 				"inet.forward.allow.vm-floating-ip."+grant.id+variant.suffix,
 				func(direction trafficDirection) []expr.Any {
-					return inetVMGrantExpressions(compiler.networks[source.networkID], compiler.networks[destination.networkID],
-						variant.endpoint, destination, grant.protocol, grant.ports, direction)
+					return inetVMGrantExpressions(
+						compiler.networks[source.networkID],
+						compiler.networks[destination.networkID],
+						variant.endpoint,
+						destination,
+						grant.protocol,
+						grant.ports,
+						direction,
+					)
 				})
 		}
 	}
@@ -210,11 +227,15 @@ func (compiler *generationCompiler) compileINetFloatingIPGrants(intent generatio
 			continue
 		}
 		source := compiler.networks[grant.sourceNetworkID]
-		compiler.addDirectionalTrafficRules(&compiler.generation.inet, forward, "inet.forward.allow.network-floating-ip."+grant.id,
+		compiler.addDirectionalTrafficRules(
+			&compiler.generation.inet,
+			forward,
+			"inet.forward.allow.network-floating-ip."+grant.id,
 			func(direction trafficDirection) []expr.Any {
 				return inetNetworkGrantExpressions(source, compiler.networks[destination.networkID], destination,
 					grant.protocol, grant.ports, direction)
-			})
+			},
+		)
 	}
 }
 

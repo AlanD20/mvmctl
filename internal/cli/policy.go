@@ -26,7 +26,9 @@ var execPolicyColumns = []common.ListingColumn{
 		if policy.DestinationVMName != "" {
 			return policy.DestinationVMName
 		}
-		return formatPolicySelector(results.VMPolicySelector{VMID: policy.DestinationVMID, Labels: policy.DestinationLabels})
+		return formatPolicySelector(
+			results.VMPolicySelector{VMID: policy.DestinationVMID, Labels: policy.DestinationLabels},
+		)
 	}},
 	{Header: "Target User", Extract: func(v any) string { return v.(*results.VMToVMExecPolicy).TargetUser }},
 }
@@ -147,8 +149,15 @@ func newExecPolicyRemoveCmd(policyAPI api.PolicyAPI) *cobra.Command {
 
 func newTrafficPolicyCmd(policyAPI api.PolicyAPI) *cobra.Command {
 	cmd := &cobra.Command{Use: "traffic", Short: "Manage desired TCP/UDP allow intent"}
-	cmd.AddCommand(newTrafficPolicyCreateCmd(policyAPI), newTrafficPolicyListCmd(policyAPI),
-		newTrafficPolicyInspectCmd(policyAPI), newTrafficPolicyRemoveCmd(policyAPI), newLabelTrafficPolicyCmd(policyAPI))
+	cmd.AddCommand(
+		newTrafficPolicyCreateCmd(policyAPI),
+		newTrafficPolicyListCmd(policyAPI),
+		newTrafficPolicyInspectCmd(
+			policyAPI,
+		),
+		newTrafficPolicyRemoveCmd(policyAPI),
+		newLabelTrafficPolicyCmd(policyAPI),
+	)
 	return cmd
 }
 

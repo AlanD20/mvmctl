@@ -62,16 +62,25 @@ func (compiler *generationCompiler) compileLabelTraffic(
 		}
 		sets[source.name], sets[destination.name] = source, destination
 		policy := membership.policy
-		compiler.addDirectionalTrafficRules(table, forward, prefix+policy.ID, func(direction trafficDirection) []expr.Any {
-			sourceOffset, destinationOffset, sourceKey, destinationKey := direction.endpoints()
-			return joinExpressions(
-				matchFamily,
-				matchLabelMember(sourceKey, sourceOffset, source.name),
-				matchLabelMember(destinationKey, destinationOffset, destination.name),
-				matchOriginalTraffic(direction, protocol(policy.Protocol), portInterval{policy.Ports.First, policy.Ports.Last}),
-				acceptVerdict(),
-			)
-		})
+		compiler.addDirectionalTrafficRules(
+			table,
+			forward,
+			prefix+policy.ID,
+			func(direction trafficDirection) []expr.Any {
+				sourceOffset, destinationOffset, sourceKey, destinationKey := direction.endpoints()
+				return joinExpressions(
+					matchFamily,
+					matchLabelMember(sourceKey, sourceOffset, source.name),
+					matchLabelMember(destinationKey, destinationOffset, destination.name),
+					matchOriginalTraffic(
+						direction,
+						protocol(policy.Protocol),
+						portInterval{policy.Ports.First, policy.Ports.Last},
+					),
+					acceptVerdict(),
+				)
+			},
+		)
 	}
 	for _, set := range sets {
 		table.labelAddressSets = append(table.labelAddressSets, set)

@@ -106,8 +106,11 @@ func (s *ExecPolicyStep) Apply(ctx context.Context, state *workflow.SharedState,
 	if output.ClaimID == "" {
 		return resourceIdentityMismatch(s.Name())
 	}
-	ownership := inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation}
-	receipt, applyErr := s.op.ExecPolicyEnsure(ctx, output.policyInput(), ownership)
+	receipt, applyErr := s.op.ExecPolicyEnsure(
+		ctx,
+		output.policyInput(),
+		inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation},
+	)
 	if receipt != nil {
 		output.PolicyID, output.Incarnation = receipt.PolicyID, receipt.Incarnation
 		s.record.Meta.WasCreated = receipt.WasCreated
@@ -133,8 +136,7 @@ func (s *ExecPolicyStep) Destroy(ctx context.Context, saved model.ResourceState,
 		return s.persist(ctx, write)
 	}
 	// A pending claim has no receipt yet; conditional removal still cannot revoke a foreign grant.
-	ownership := inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation}
-	if err := s.op.ExecPolicyRemoveOwned(ctx, output.policyInput(), ownership); err != nil {
+	if err := s.op.ExecPolicyRemoveOwned(ctx, output.policyInput(), inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation}); err != nil {
 		return err
 	}
 	return s.persist(ctx, write)
@@ -147,7 +149,11 @@ func (output *ExecPolicyState) policyInput() inputs.VMToVMExecPolicyCreateInput 
 	}
 }
 
-func (s *ExecPolicyStep) resolveExactVM(ctx context.Context, state *workflow.SharedState, value string) (string, error) {
+func (s *ExecPolicyStep) resolveExactVM(
+	ctx context.Context,
+	state *workflow.SharedState,
+	value string,
+) (string, error) {
 	if value == "" {
 		return "", nil
 	}

@@ -65,7 +65,11 @@ func inspectPolicyAuthorityFile(
 ) (generationRecordFileEvidence, error) {
 	var stat unix.Stat_t
 	if err := state.deps.fstat(ctx, fd, &stat); err != nil {
-		return generationRecordFileEvidence{}, generationAuthorityError("inspect firewall policy authority file", err, nil)
+		return generationRecordFileEvidence{}, generationAuthorityError(
+			"inspect firewall policy authority file",
+			err,
+			nil,
+		)
 	}
 	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Nlink != 1 ||
 		stat.Uid != state.policy.expectedUID || stat.Gid != state.policy.expectedGID ||

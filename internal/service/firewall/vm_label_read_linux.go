@@ -73,7 +73,8 @@ func readCommittedLabelIntent(ctx context.Context, store *generationRecordStore)
 			if err != nil {
 				return Intent{}, err
 			}
-			if record.lifecycle != generationRecordCommitted || record.committed != generationRecordIdentityFromCompiled(empty) {
+			if record.lifecycle != generationRecordCommitted ||
+				record.committed != generationRecordIdentityFromCompiled(empty) {
 				return Intent{}, invalidGeneration("VM label read requires committed firewall intent")
 			}
 		}

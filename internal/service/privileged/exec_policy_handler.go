@@ -78,7 +78,13 @@ func handleRemoveExecPolicy(
 	); err != nil {
 		return deliverOperationError(ctx, endpoint, action, err, deps)
 	}
-	return deliverOperationSuccess(ctx, endpoint, action, jailer.VMExecPolicyRemoveResult{PolicyID: request.Body.PolicyID}, deps)
+	return deliverOperationSuccess(
+		ctx,
+		endpoint,
+		action,
+		jailer.VMExecPolicyRemoveResult{PolicyID: request.Body.PolicyID},
+		deps,
+	)
 }
 
 func handleListExecPolicies(

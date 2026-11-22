@@ -19,7 +19,9 @@ func EnsureLabelTrafficPolicy(
 	}
 	if ownerUID == 0 || !validPolicyOwnership(claim, policy.Incarnation) ||
 		!validPolicyOwnership("", expected) || (expected != "" && claim == "") {
-		return LabelTrafficPolicy{}, PolicyReceipt{}, invalidGeneration("invalid label traffic policy request ownership")
+		return LabelTrafficPolicy{}, PolicyReceipt{}, invalidGeneration(
+			"invalid label traffic policy request ownership",
+		)
 	}
 	policy.ID, err = policy.identity()
 	if err != nil {

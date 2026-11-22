@@ -83,7 +83,9 @@ func newLabelTrafficPolicyListCmd(policyAPI api.LabelTrafficPolicyAPI) *cobra.Co
 				}
 				rows = append(rows, trafficPolicyRow{
 					id: policy.ID, sourceKind: "vm", source: formatPolicySelector(policy.Source),
-					destination: formatPolicySelector(policy.Destination), protocol: string(policy.Protocol), port: port,
+					destination: formatPolicySelector(
+						policy.Destination,
+					), protocol: string(policy.Protocol), port: port,
 				})
 			}
 			common.RenderListing(rows, trafficPolicyColumns, "short")

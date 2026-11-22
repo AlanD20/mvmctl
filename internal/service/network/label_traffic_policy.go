@@ -138,7 +138,10 @@ func (client *TrafficPolicyClient) ListLabelTrafficPolicies(
 			return nil, trafficPolicyResponseError(true, err)
 		}
 		if policy.OwnerUID != ownerUID || policy.ID != id {
-			return nil, trafficPolicyResponseError(true, networkAuthorityValidationError("invalid label policy listing"))
+			return nil, trafficPolicyResponseError(
+				true,
+				networkAuthorityValidationError("invalid label policy listing"),
+			)
 		}
 	}
 	return result.Policies, nil

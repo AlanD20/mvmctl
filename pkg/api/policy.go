@@ -102,9 +102,10 @@ func (op *Operation) resolveExecPolicy(
 	if err := input.Validate(); err != nil {
 		return jailer.VMExecPolicyApplyRequest{}, err
 	}
-	source, err := op.resolveVMPolicySelector(ctx, inputs.VMPolicySelectorInput{
-		VM: input.SourceVM, Labels: input.SourceLabels,
-	})
+	source, err := op.resolveVMPolicySelector(
+		ctx,
+		inputs.VMPolicySelectorInput{VM: input.SourceVM, Labels: input.SourceLabels},
+	)
 	if err != nil {
 		return jailer.VMExecPolicyApplyRequest{}, err
 	}
