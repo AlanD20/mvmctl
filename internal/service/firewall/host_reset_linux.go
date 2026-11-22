@@ -116,11 +116,6 @@ func AcquireHostResetGuard(ctx context.Context) (_ *HostResetGuard, returnErr er
 		generationRecordBinding{bootID: bootID, namespace: identity}); err != nil {
 		return nil, err
 	}
-	if journal.SchemaVersion == 1 {
-		if err := admitLegacyTerminalIntent(record, journal); err != nil {
-			return nil, err
-		}
-	}
 	if record.lifecycle != generationRecordCommitted ||
 		record.committed != generationRecordIdentityFromCompiled(empty) {
 		return nil, generationAuthorityError(

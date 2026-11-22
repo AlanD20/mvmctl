@@ -171,13 +171,6 @@ func (state *mutationLeaseState) loadIntent(ctx context.Context) error {
 			return err
 		}
 	}
-	if journal.SchemaVersion == 1 {
-		journal, raw, evidence, err = publishLegacyTerminalIntent(ctx, state.store, state.network.kernel,
-			record, journal, raw, evidence)
-		if err != nil {
-			return err
-		}
-	}
 	if journal.BootID != record.binding.bootID || journal.HostNamespace != state.binding.HostNamespace {
 		return generationAuthorityError("firewall intent journal boot or namespace differs", nil, nil)
 	}

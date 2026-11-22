@@ -47,12 +47,7 @@ func decodeIntentJournal(raw []byte) (intentJournal, error) {
 	if err != nil || !bytes.Equal(raw, canonical) {
 		return intentJournal{}, generationAuthorityError("firewall intent journal is not canonical", err, nil)
 	}
-	if journal.SchemaVersion == 1 {
-		// Structural decoding does not admit authority. Each consumer separately proves committed empty state.
-		if err := validateLegacyTerminalIntent(journal); err != nil {
-			return intentJournal{}, err
-		}
-	} else if journal.SchemaVersion != intentJournalSchema {
+	if journal.SchemaVersion != intentJournalSchema {
 		return intentJournal{}, generationAuthorityError("unsupported firewall intent journal schema", nil, nil)
 	}
 	return journal, nil
