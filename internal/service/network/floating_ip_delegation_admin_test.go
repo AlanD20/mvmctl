@@ -9,6 +9,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"mvmctl/internal/lib/model"
 )
 
 func TestFloatingIPDelegationAdministrationPersistsImmutableGrantAndExactRetry(t *testing.T) {
@@ -118,6 +120,81 @@ func TestFloatingIPDelegationGrantWireRequiresExplicitLeaseAndNoPrincipal(t *tes
 			} else {
 				assert.Error(t, err)
 			}
+		})
+	}
+}
+
+func TestFloatingIPDelegationGrantWireValidatesExpectedIncarnation(t *testing.T) {
+	resource, principal, grant := delegationFixture(t)
+	request := FloatingIPDelegationGrantRequest{
+		ID: grant.ID, NetworkID: resource.NetworkID, ResourceID: resource.ID, VMID: principal.vmID, Method: "inspect",
+	}
+	valid := model.FloatingIPGrantIncarnation{
+		BootID: principal.bootID, LaunchGeneration: principal.launchGeneration, ExecutionUID: principal.executionUID,
+	}
+	badBoot, zeroGeneration, zeroUID, reservedUID := valid, valid, valid, valid
+	badBoot.BootID = "noncanonical"
+	zeroGeneration.LaunchGeneration = 0
+	zeroUID.ExecutionUID = 0
+	reservedUID.ExecutionUID = ^uint32(0)
+
+	for name, expected := range map[string]*model.FloatingIPGrantIncarnation{
+		"noncanonical boot": &badBoot, "zero generation": &zeroGeneration,
+		"zero UID": &zeroUID, "reserved UID": &reservedUID,
+	} {
+		t.Run(name, func(t *testing.T) {
+			request.Expected = expected
+			assert.ErrorContains(t, request.Validate(), "expected delegation launch identity is invalid")
+		})
+	}
+	t.Run("valid guard", func(t *testing.T) {
+		request.Expected = &valid
+		assert.NoError(t, request.Validate())
+	})
+}
+
+func TestFloatingIPDelegationGrantPublishesOnlyForExpectedIncarnation(t *testing.T) {
+	for _, name := range []string{"different boot", "different generation", "different execution UID", "exact"} {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			fixture, resources := floatingIPStoreFixture(t)
+			resource, principal, grant := delegationFixture(t)
+			require.NoError(t, resources.persist(ctx, resource, nil))
+			grants, err := openFloatingIPDelegationStore(ctx, fixture.uid, true)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, grants.release(context.Background())) })
+			expected := model.FloatingIPGrantIncarnation{
+				BootID: principal.bootID, LaunchGeneration: principal.launchGeneration, ExecutionUID: principal.executionUID,
+			}
+			switch name {
+			case "different boot":
+				expected.BootID = "22222222-2222-4222-8222-222222222222"
+			case "different generation":
+				expected.LaunchGeneration++
+			case "different execution UID":
+				expected.ExecutionUID++
+			}
+			request := FloatingIPDelegationGrantRequest{
+				ID: grant.ID, NetworkID: resource.NetworkID, ResourceID: resource.ID, VMID: principal.vmID,
+				Method: "inspect", Expected: &expected,
+			}
+			require.NoError(t, request.Validate())
+
+			_, publishErr := publishFloatingIPDelegation(ctx, fixture.uid, principal, request)
+			record, _, _, found, err := grants.read(ctx, request.ID)
+			require.NoError(t, err)
+			if name != "exact" {
+				assert.ErrorContains(t, publishErr, "delegation VM launch has changed")
+				assert.False(t, found, "mismatched incarnation must leave the fresh grant ID unpublished")
+				return
+			}
+			require.NoError(t, publishErr)
+			require.True(t, found)
+			assert.Equal(t, floatingIPDelegationActive, record.State)
+			assert.Equal(t, floatingIPDelegationInspect, record.Method)
+			assert.Equal(t, principal.bootID, record.BootID)
+			assert.Equal(t, principal.launchGeneration, record.LaunchGeneration)
+			assert.Equal(t, principal.executionUID, record.ExecutionUID)
 		})
 	}
 }

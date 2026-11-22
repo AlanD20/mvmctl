@@ -1,11 +1,13 @@
 package inputs_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
 )
 
@@ -31,4 +33,24 @@ func TestFloatingIPDelegationLeaseHasNoDefaultAndRejectsUntimedArguments(t *test
 			assert.Equal(t, test.want, value)
 		})
 	}
+}
+
+func TestFloatingIPDelegationEnsureValidatesExpectedIncarnation(t *testing.T) {
+	input := inputs.FloatingIPDelegationEnsureInput{
+		FloatingIPDelegationGrantInput: inputs.FloatingIPDelegationGrantInput{
+			Network: strings.Repeat("a", 64), Resource: strings.Repeat("b", 32), VM: strings.Repeat("c", 32),
+			Method: "inspect",
+		},
+		ID: strings.Repeat("d", 32),
+	}
+	t.Run("reserved execution UID", func(t *testing.T) {
+		input := input
+		input.Expected = &model.FloatingIPGrantIncarnation{
+			BootID: "11111111-1111-4111-8111-111111111111", LaunchGeneration: 1, ExecutionUID: ^uint32(0),
+		}
+		assert.ErrorContains(t, input.Validate(), "expected delegation launch identity is invalid")
+	})
+	t.Run("omitted guard", func(t *testing.T) {
+		assert.NoError(t, input.Validate())
+	})
 }

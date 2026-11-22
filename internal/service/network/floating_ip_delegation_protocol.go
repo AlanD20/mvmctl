@@ -16,13 +16,15 @@ const (
 
 // FloatingIPDelegationGrantRequest selects one permission; root independently derives its incarnation.
 type FloatingIPDelegationGrantRequest struct {
-	ID            string                            `json:"id"`
-	NetworkID     string                            `json:"network_id"`
-	ResourceID    string                            `json:"resource_id"`
-	VMID          string                            `json:"vm_id"`
-	Method        string                            `json:"method"`
-	LeaseDuration time.Duration                     `json:"lease_duration_ns"`
-	Expected      *model.FloatingIPGrantIncarnation `json:"expected_incarnation,omitempty"`
+	ID            string        `json:"id"`
+	NetworkID     string        `json:"network_id"`
+	ResourceID    string        `json:"resource_id"`
+	VMID          string        `json:"vm_id"`
+	Method        string        `json:"method"`
+	LeaseDuration time.Duration `json:"lease_duration_ns"`
+
+	// Expected is a comparison with the independently admitted launch when set.
+	Expected *model.FloatingIPGrantIncarnation `json:"expected_incarnation,omitempty"`
 }
 
 func (request FloatingIPDelegationGrantRequest) Validate() error {
@@ -32,8 +34,7 @@ func (request FloatingIPDelegationGrantRequest) Validate() error {
 		!validFloatingIPDelegationMethod(floatingIPDelegationMethod(request.Method)) {
 		return networkAuthorityValidationError("delegation requires exact network, resource, VM and method")
 	}
-	if expected := request.Expected; expected != nil &&
-		(!bootIDPattern.MatchString(expected.BootID) || expected.LaunchGeneration == 0 || expected.ExecutionUID == 0) {
+	if request.Expected != nil && !request.Expected.WellFormed() {
 		return networkAuthorityValidationError("expected delegation launch identity is invalid")
 	}
 	timed := request.Method == string(floatingIPDelegationAssociate) ||
@@ -109,11 +110,10 @@ func floatingIPDelegationProjection(record floatingIPDelegationRecord) FloatingI
 }
 
 func validateFloatingIPDelegationResult(result FloatingIPDelegationResult, networkID string) error {
-	if result.NetworkID != networkID || !vmIDPattern.MatchString(result.ID) ||
-		!bootIDPattern.MatchString(result.BootID) ||
-		result.LaunchGeneration == 0 ||
-		result.ExecutionUID == 0 ||
-		result.ExecutionUID == ^uint32(0) {
+	incarnation := model.FloatingIPGrantIncarnation{
+		BootID: result.BootID, LaunchGeneration: result.LaunchGeneration, ExecutionUID: result.ExecutionUID,
+	}
+	if result.NetworkID != networkID || !vmIDPattern.MatchString(result.ID) || !incarnation.WellFormed() {
 		return networkAuthorityValidationError("delegation result has invalid scope or incarnation")
 	}
 	request := FloatingIPDelegationGrantRequest{

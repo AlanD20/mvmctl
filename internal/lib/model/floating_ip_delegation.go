@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // FloatingIPDelegationItem projects stored root permission, never session readiness or guest identity authority.
 type FloatingIPDelegationItem struct {
@@ -24,6 +28,14 @@ type FloatingIPGrantIncarnation struct {
 	ExecutionUID     uint32 `json:"execution_uid"`
 }
 
+// WellFormed checks the shape of an incarnation without proving its authority.
+func (target FloatingIPGrantIncarnation) WellFormed() bool {
+	bootID, err := uuid.Parse(target.BootID)
+	return err == nil && bootID.String() == target.BootID && target.LaunchGeneration != 0 &&
+		target.ExecutionUID != 0 && target.ExecutionUID != ^uint32(0)
+}
+
+// Matches compares the incarnation with independently observed launch facts.
 func (target FloatingIPGrantIncarnation) Matches(bootID string, generation uint64, uid uint32) bool {
 	return target.BootID == bootID && target.LaunchGeneration == generation && target.ExecutionUID == uid
 }

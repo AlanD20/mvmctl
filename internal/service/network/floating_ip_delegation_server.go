@@ -12,7 +12,7 @@ import (
 // The privileged compositor retains its Jailer parent; this method never starts a worker or grants an address.
 func (lease *FloatingIPVMLease) GrantFloatingIPDelegation(
 	ctx context.Context, request FloatingIPDelegationGrantRequest,
-) (_ FloatingIPDelegationResult, returnErr error) {
+) (FloatingIPDelegationResult, error) {
 	if err := request.Validate(); err != nil {
 		return FloatingIPDelegationResult{}, err
 	}
@@ -25,7 +25,16 @@ func (lease *FloatingIPVMLease) GrantFloatingIPDelegation(
 	if err := state.readyGuest(ctx); err != nil {
 		return FloatingIPDelegationResult{}, err
 	}
-	principal := state.guestPrincipal()
+	return publishFloatingIPDelegation(ctx, state.network.store, state.guestPrincipal(), request)
+}
+
+// CALLER MUST HOLD: live VM admission and network mutation authority while publishing the grant.
+func publishFloatingIPDelegation(
+	ctx context.Context,
+	owner *networkStoreUID,
+	principal floatingIPGuestPrincipal,
+	request FloatingIPDelegationGrantRequest,
+) (_ FloatingIPDelegationResult, returnErr error) {
 	if request.NetworkID != principal.networkID || request.VMID != principal.vmID {
 		return FloatingIPDelegationResult{}, networkAuthorityValidationError(
 			"delegation target differs from admitted VM",
@@ -35,7 +44,7 @@ func (lease *FloatingIPVMLease) GrantFloatingIPDelegation(
 		!expected.Matches(principal.bootID, principal.launchGeneration, principal.executionUID) {
 		return FloatingIPDelegationResult{}, networkAuthorityValidationError("delegation VM launch has changed")
 	}
-	resources, err := openFloatingIPStore(ctx, state.network.store, false)
+	resources, err := openFloatingIPStore(ctx, owner, false)
 	if err != nil {
 		return FloatingIPDelegationResult{}, err
 	}
@@ -52,7 +61,7 @@ func (lease *FloatingIPVMLease) GrantFloatingIPDelegation(
 			"delegation resource is unavailable to admitted VM",
 		)
 	}
-	grants, err := openFloatingIPDelegationStore(ctx, state.network.store, true)
+	grants, err := openFloatingIPDelegationStore(ctx, owner, true)
 	if err != nil {
 		return FloatingIPDelegationResult{}, err
 	}
