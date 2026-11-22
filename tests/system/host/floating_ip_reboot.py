@@ -79,10 +79,11 @@ def _assert_persistent(item, resource, owner, boot):
     assert item["alias_synchronization"] == "synchronized", item
 
 
-def _assert_ownerless(item, resource):
+def _assert_ownerless(item, resource, *, inspection):
     for key in ("id", "network_id", "ipv4", "name"):
         assert item[key] == resource[key], item
-    assert item["phase"] == "unassociated" and item["authority_state"] == "absent", item
+    assert item["phase"] == "unassociated", item
+    assert item["authority_state"] == ("unobserved" if inspection else "absent"), item
     assert item["owner_vm_id"] == item["owner_origin"] == item["lifetime"] == item["owner_boot_id"] == "", item
     assert item["owner_launch_generation"] == item["lease_remaining_ms"] == 0 and item["retired"] is False, item
 
@@ -265,7 +266,7 @@ def resume(runner, receipt, boot):
                 key: value for key, value in grant.items() if key not in ("state", "revision")}
         persistent = receipt["operator"]["resource"]
         fenced = _host(journey, persistent)
-        _assert_ownerless(fenced, persistent)
+        _assert_ownerless(fenced, persistent, inspection=True)
         assert fenced["generation"] > receipt["operator"]["associated"]["generation"]
         assert _tcp_data(runner, "floating-ip", "delegation", "ls", persistent["id"],
                          "--network", persistent["network_id"], kind=list) == []
@@ -311,7 +312,7 @@ def resume(runner, receipt, boot):
         journey.assert_policy(receipt["operator"]["policy"],
                               ("--from-vm", source["binding"]["id"], persistent["id"]))
         operator_released = _host(journey, persistent, "release", generation=claimed["generation"])
-        _assert_ownerless(operator_released, persistent)
+        _assert_ownerless(operator_released, persistent, inspection=False)
         assert operator_released["alias_synchronization"] == "synchronized"
         journey.alias(owner, persistent, present=False)
         operator_stale = _stale_alias(runner, owner, persistent, receipt["alias"]["label"])

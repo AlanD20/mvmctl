@@ -6,7 +6,7 @@ import json
 import pytest
 
 from scripts.tests.test_run_system_tests import orchestrator  # noqa: F401
-from tests.system.host.floating_ip_reboot import validate_pre, without_owned_policy, without_owned_policies
+from tests.system.host.floating_ip_reboot import _assert_ownerless, validate_pre, without_owned_policy, without_owned_policies
 from tests.system.host.test_host_reboot import _preserve_persistent_inventory
 
 
@@ -176,3 +176,25 @@ def test_local_release_error_requires_packet_fencing_then_fresh_host_inspection(
         assert alias_actions == [], "do not remove stale-alias evidence before denied packet proof"
     else:
         assert alias_actions == [False, True]
+
+
+@pytest.mark.parametrize("inspection", [True, False])
+@pytest.mark.parametrize("fault", [None, "authority", "identity", "owner", "lease"])
+def test_ownerless_receipt_requires_exact_operation_context(receipt, inspection, fault):
+    resource = receipt["operator"]["resource"]
+    item = dict(resource, phase="unassociated", retired=False, owner_vm_id="", owner_origin="",
+                lifetime="", owner_boot_id="", owner_launch_generation=0, lease_remaining_ms=0,
+                authority_state="unobserved" if inspection else "absent")
+    if fault == "authority":
+        item["authority_state"] = "absent" if inspection else "unobserved"
+    elif fault == "identity":
+        item["id"] = "0" * 32
+    elif fault == "owner":
+        item["owner_vm_id"] = receipt["owner"]["binding"]["id"]
+    elif fault == "lease":
+        item["lease_remaining_ms"] = 1
+    if fault is None:
+        _assert_ownerless(item, resource, inspection=inspection)
+    else:
+        with pytest.raises(AssertionError):
+            _assert_ownerless(item, resource, inspection=inspection)
