@@ -59,11 +59,6 @@ type retainedKernelObservationTransportFactory struct {
 	state *kernelObservationNamespaceLeaseState
 }
 
-func newKernelObservationNamespaceAuthority() kernelObservationNamespaceAuthority {
-	deps := realKernelObservationNamespaceDeps()
-	return newKernelObservationNamespaceAuthorityWithAllDeps(deps, realKernelApplicationNamespaceDeps(deps))
-}
-
 func newKernelObservationNamespaceAuthorityWithDeps(
 	deps kernelObservationNamespaceDeps,
 ) *retainedKernelObservationNamespaceAuthority {

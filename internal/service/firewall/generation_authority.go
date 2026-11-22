@@ -81,10 +81,6 @@ type persistentGenerationLeaseState struct {
 	releaseError      error
 }
 
-func newPersistentGenerationAuthority() generationPersistentAuthority {
-	return newPersistentGenerationAuthorityWithDeps(realPersistentGenerationAuthorityDeps())
-}
-
 func newPersistentGenerationAuthorityWithDeps(
 	deps persistentGenerationAuthorityDeps,
 ) *persistentGenerationAuthority {

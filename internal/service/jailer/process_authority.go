@@ -131,14 +131,6 @@ func newBlockedLaunchProcesses(
 	return capability, nil
 }
 
-func cloneBlockedLaunchProcess(process *blockedLaunchProcess) *blockedLaunchProcess {
-	if process == nil {
-		return nil
-	}
-	cloned := *process
-	return &cloned
-}
-
 func validateBlockedLaunchProcessDeps(deps blockedLaunchProcessDeps) error {
 	if deps.pidfdAlive == nil || deps.descriptorFlags == nil || deps.deriveLocator == nil ||
 		deps.pinnedExecutableReinspect == nil ||

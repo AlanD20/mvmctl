@@ -13,14 +13,6 @@ type networkAuthority struct {
 	lockTree    networkAuthorityTree
 }
 
-func newNetworkAuthority() *networkAuthority {
-	return newNetworkAuthorityWithPolicy(
-		realNetworkStoreDeps(),
-		productionNetworkStorePolicy(),
-		systemNetworkAuthorityTree{},
-	)
-}
-
 func newNetworkAuthorityWithPolicy(
 	storeDeps networkStoreDeps,
 	storePolicy networkStorePolicy,

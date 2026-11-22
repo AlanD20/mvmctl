@@ -14,14 +14,6 @@ type vmExecReleaseFrameReader struct {
 	reader *vmExecConnectionReader
 }
 
-func newVMExecReleaseFrameReader(
-	ctx context.Context,
-	fd int,
-	deadline time.Time,
-) *vmExecReleaseFrameReader {
-	return newVMExecReleaseFrameReaderWithDeps(ctx, fd, deadline, realVMExecConnectionReaderDeps())
-}
-
 func newVMExecReleaseFrameReaderWithDeps(
 	ctx context.Context,
 	fd int,

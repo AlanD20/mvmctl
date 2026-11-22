@@ -360,13 +360,6 @@ func resolveManagedSnapshotArtifacts(cacheDir, snapshotID string) (*managedSnaps
 	}, nil
 }
 
-func jailedRuntimePathForAPI(hostPath string) string {
-	if hostPath == "" {
-		return ""
-	}
-	return filepath.Join("/run/mvm", filepath.Base(hostPath))
-}
-
 // --- SnapshotList ---
 
 // SnapshotList returns all snapshots.

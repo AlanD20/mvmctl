@@ -13,71 +13,6 @@ import (
 // The complete serialized file includes Firecracker's trailing CRC; no extra allowance applies.
 const managedSnapshotVMStateMaxBytes uint64 = 10_000_000
 
-type managedSnapshotCaptureMode uint8
-
-const (
-	managedSnapshotRootfsOnly managedSnapshotCaptureMode = iota + 1
-	managedSnapshotFull
-)
-
-// managedSnapshotCaptureMetadata records the resource policy inputs for a capture.
-// CRITICAL: This value is not restore authority. A root-owned capture record must authenticate
-// it and bind immutable artifact identities before any restore consumer may use these bounds.
-type managedSnapshotCaptureMetadata struct {
-	snapshotID     string
-	sourceVMID     vmResourceID
-	release        releaseIdentity
-	mode           managedSnapshotCaptureMode
-	rootfsBytes    uint64
-	capturedRAMMiB int
-}
-
-func newManagedSnapshotCaptureMetadata(
-	snapshotID string,
-	source vmLaunchResourceSpec,
-	release releaseIdentity,
-	mode managedSnapshotCaptureMode,
-) (managedSnapshotCaptureMetadata, error) {
-	if err := validateVMLaunchResourceSpec(source); err != nil {
-		return managedSnapshotCaptureMetadata{}, err
-	}
-	if len(source.firecracker.volumes) != 0 {
-		return managedSnapshotCaptureMetadata{}, managedVMResourceValidationError(
-			"managed snapshot data-volume capture semantics are not approved",
-		)
-	}
-	metadata := managedSnapshotCaptureMetadata{
-		snapshotID: snapshotID, sourceVMID: source.vmID, release: release, mode: mode,
-		rootfsBytes: source.expectedRootfsBytes, capturedRAMMiB: source.firecracker.memSizeMiB,
-	}
-	if err := validateManagedSnapshotCaptureMetadata(metadata); err != nil {
-		return managedSnapshotCaptureMetadata{}, err
-	}
-	return metadata, nil
-}
-
-func validateManagedSnapshotCaptureMetadata(metadata managedSnapshotCaptureMetadata) error {
-	if !isCanonicalManagedResourceID(metadata.snapshotID, 64) ||
-		!isCanonicalManagedResourceID(string(metadata.sourceVMID), 32) {
-		return managedVMResourceValidationError("managed snapshot capture identities are invalid")
-	}
-	if err := validateManagedDeviceRelease(metadata.release); err != nil {
-		return err
-	}
-	if metadata.rootfsBytes < managedVMRootfsMinBytes || metadata.rootfsBytes > managedVMRootfsMaxBytes {
-		return managedVMResourceValidationError("managed snapshot captured rootfs size is outside the supported range")
-	}
-	if _, err := managedSnapshotMemoryBytes(metadata.capturedRAMMiB); err != nil {
-		return err
-	}
-	switch metadata.mode {
-	case managedSnapshotRootfsOnly, managedSnapshotFull:
-		return nil
-	default:
-		return managedVMResourceValidationError("managed snapshot capture mode is unsupported")
-	}
-}
-
 // managedSnapshotMemoryBytes accepts captured root authority only; caller SQLite RAM is not evidence.
 func managedSnapshotMemoryBytes(capturedRAMMiB int) (uint64, error) {
 	if capturedRAMMiB < infra.MemMinMB || capturedRAMMiB > infra.MemMaxMB {
@@ -89,37 +24,6 @@ func managedSnapshotMemoryBytes(capturedRAMMiB int) (uint64, error) {
 		return 0, managedVMResourceValidationError("managed snapshot captured RAM extent overflows")
 	}
 	return ram * bytesPerMiB, nil
-}
-
-func validateManagedSnapshotArtifactSizes(
-	metadata managedSnapshotCaptureMetadata,
-	rootfsBytes uint64,
-	memoryBytes uint64,
-	stateBytes uint64,
-) error {
-	if err := validateManagedSnapshotCaptureMetadata(metadata); err != nil {
-		return err
-	}
-	if rootfsBytes != metadata.rootfsBytes {
-		return managedVMResourceValidationError("managed snapshot rootfs size does not match captured metadata")
-	}
-	if metadata.mode == managedSnapshotRootfsOnly {
-		if memoryBytes != 0 || stateBytes != 0 {
-			return managedVMResourceValidationError("managed rootfs-only snapshot has unexpected state artifacts")
-		}
-		return nil
-	}
-	expectedMemoryBytes, err := managedSnapshotMemoryBytes(metadata.capturedRAMMiB)
-	if err != nil {
-		return err
-	}
-	if memoryBytes != expectedMemoryBytes {
-		return managedVMResourceValidationError("managed snapshot memory length does not match trusted captured RAM")
-	}
-	if stateBytes == 0 || stateBytes > managedSnapshotVMStateMaxBytes {
-		return managedVMResourceValidationError("managed snapshot complete vmstate exceeds loader size policy")
-	}
-	return nil
 }
 
 // readBoundedManagedSnapshotState performs byte admission only. It does not authenticate capture,
