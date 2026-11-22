@@ -478,15 +478,8 @@ func (c *MVMCli) formatLeafValue(key string, value any) string {
 
 // --- Static helper functions ---
 
-// Timestamp format aliases for parsing/displaying timestamps.
-// All formats use stdlib constants — no hardcoded format strings.
-const (
-	// SecTZ is ISO8601 with seconds and timezone — identical to time.RFC3339.
-	SecTZ = time.RFC3339
-
-	// LegacyDisplayDateTime is the old display format — identical to time.DateTime.
-	LegacyDisplayDateTime = time.DateTime
-)
+// SecTZ is ISO8601 with seconds and timezone.
+const SecTZ = time.RFC3339
 
 func parseTime(isoString string) (time.Time, bool) {
 	// Only RFC3339 is valid. Nano-precision variants of RFC3339 are also accepted.

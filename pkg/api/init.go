@@ -17,15 +17,6 @@ import (
 type InitAPI interface {
 	InitCheckReadiness(ctx context.Context) *model.ProbeResult
 	InitSetupHost(ctx context.Context) error
-	InitRun(
-		ctx context.Context,
-		skipHost bool,
-		skipNetwork bool,
-		nonInteractive bool,
-		sudoCompleted bool,
-		downloadVersion string,
-		onProgress event.OnProgressCallback,
-	) *results.InitResult
 	InitRunFull(
 		ctx context.Context,
 		skipHost bool,
@@ -49,31 +40,6 @@ func (op *Operation) InitCheckReadiness(ctx context.Context) *model.ProbeResult 
 func (op *Operation) InitSetupHost(ctx context.Context) error {
 	_, err := op.HostInit(ctx, nil)
 	return err
-}
-
-// InitRun runs the init wizard steps in sequence.
-// with backward-compatible signature.
-// hostSetupMessage defaults to "", guestfsEnabled defaults to nil (auto-detect).
-func (op *Operation) InitRun(
-	ctx context.Context,
-	skipHost bool,
-	skipNetwork bool,
-	nonInteractive bool,
-	sudoCompleted bool,
-	downloadVersion string,
-	onProgress event.OnProgressCallback,
-) *results.InitResult {
-	return op.InitRunFull(
-		ctx,
-		skipHost,
-		skipNetwork,
-		nonInteractive,
-		sudoCompleted,
-		"",
-		downloadVersion,
-		nil,
-		onProgress,
-	)
 }
 
 // InitRunFull runs the init wizard steps with all parameters.
