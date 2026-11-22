@@ -223,8 +223,37 @@ def _assert_tcp_peer(runner_vm: str, peer: dict[str, Any]) -> None:
     assert matches[0]["process_start_time"] == peer["process_start_time"], matches
 
 
-_TCP_RESPONDER = """
-import pathlib, selectors, socket, sys, time
+_TCP_WAIT_FOR_FILE = """
+import pathlib, time
+
+def wait_for_file(path, timeout):
+    deadline = time.monotonic() + timeout
+    while not path.is_file() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert path.is_file(), f'missing guest checkpoint: {path}'
+"""
+
+_TCP_HELD_EXCHANGE = _TCP_WAIT_FOR_FILE + """
+import socket
+
+def held_exchange(connection, directory):
+    wait_for_file(directory / 'held-send', 120)
+    connection.sendall(b'after-label-removal\\n')
+    (directory / 'held-sent').touch()
+    wait_for_file(directory / 'held-observe', 120)
+    try:
+        received = connection.recv(64)
+    except socket.timeout:
+        outcome = 'timeout'
+    else:
+        outcome = f'unexpected receive: {received!r}'
+    (directory / 'held-result.tmp').write_text(outcome)
+    (directory / 'held-result.tmp').replace(directory / 'held-result')
+    wait_for_file(directory / 'held-close', 120)
+"""
+
+_TCP_RESPONDER = _TCP_HELD_EXCHANGE + """
+import selectors, sys
 directory = pathlib.Path(sys.argv[1])
 selector = selectors.DefaultSelector()
 for port in map(int, sys.argv[2:]):
@@ -249,10 +278,26 @@ try:
                 with (directory / f'{key.data}.received').open('ab') as log:
                     log.write(payload)
                 connection.sendall(b'ack:' + payload)
+                if payload.startswith(b'hold:'):
+                    held_exchange(connection, directory)
 finally:
     for key in list(selector.get_map().values()):
         key.fileobj.close()
     selector.close()
+"""
+
+_TCP_HELD_CLIENT = _TCP_HELD_EXCHANGE + """
+import sys
+directory, destination, nonce = sys.argv[1:]
+directory = pathlib.Path(directory)
+payload = b'hold:' + nonce.encode('ascii') + b'\\n'
+with socket.create_connection((destination, 8080), timeout=2) as connection:
+    connection.sendall(payload)
+    with connection.makefile('rb', buffering=0) as stream:
+        reply = stream.readline(64)
+    assert reply == b'ack:' + payload, repr(reply)
+    (directory / 'held-ready').touch()
+    held_exchange(connection, directory)
 """
 
 _TCP_REQUEST = """
@@ -319,6 +364,30 @@ assert path.is_file(), 'TCP responder failed to bind; inspect server.log'
         shlex.join(["python3", "-c", ready, directory + "/ready"]),
         timeout=15,
     )
+
+
+def _held_tcp_checkpoint(
+    runner_vm: str, peer: dict[str, Any], directory: str, read: str, *, signal: str = ""
+) -> str:
+    control = _TCP_WAIT_FOR_FILE + """
+import sys
+directory, read, signal = sys.argv[1:]
+directory = pathlib.Path(directory)
+if signal:
+    (directory / signal).touch()
+path = directory / read
+wait_for_file(path, 10)
+print(path.read_text())
+"""
+    return _run_mvm(
+        runner_vm,
+        "exec",
+        peer["binding"]["id"],
+        "--user",
+        "root",
+        "--",
+        shlex.join(["python3", "-c", control, directory, read, signal]),
+    ).stdout.strip()
 
 
 def _guest_probe(
@@ -997,7 +1066,7 @@ assert path.is_file(), 'UDP responder failed to bind; inspect server.log'
 @pytest.mark.parametrize("same_network", [True, False], ids=["bridged", "routed"])
 @pytest.mark.timeout(720, method="signal")
 def test_label_traffic_policy_tracks_current_vm_labels(runner_vm: str, same_network: bool) -> None:
-    """A current label match permits the selected port in both forwarding paths."""
+    """Removing a label match fences new and established TCP in both forwarding paths."""
     suffix = uuid.uuid4().hex[:12]
     case = f"traffic-{suffix}"
     directory = f"/tmp/{case}"
@@ -1039,7 +1108,36 @@ def test_label_traffic_policy_tracks_current_vm_labels(runner_vm: str, same_netw
         _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=True)
         _assert_tcp_flow(runner_vm, source, destination, directory, 8081, allowed=False)
 
+        client = shlex.join([
+            "python3", "-u", "-c", _TCP_HELD_CLIENT, directory,
+            destination["binding"]["ipv4"], uuid.uuid4().hex,
+        ])
+        _run_mvm(
+            runner_vm, "exec", source["binding"]["id"], "--user", "root", "--",
+            f"mkdir {shlex.quote(directory)} && "
+            f"nohup {client} </dev/null >{shlex.quote(directory + '/client.log')} 2>&1 &",
+        )
+        _held_tcp_checkpoint(runner_vm, source, directory, "held-ready")
         revision = set_labels(source, {**selector, "role": "excluded"}, revision)
+
+        # Wait for each peer to queue new bytes before starting either receive window.
+        peers = {"server to client": source, "client to server": destination}
+        for peer in peers.values():
+            _held_tcp_checkpoint(runner_vm, peer, directory, "held-sent", signal="held-send")
+        outcomes = {
+            direction: _held_tcp_checkpoint(
+                runner_vm, peer, directory, "held-result", signal="held-observe",
+            )
+            for direction, peer in peers.items()
+        }
+        # Keep both sockets open until both receive results are recorded.
+        for peer in peers.values():
+            _run_mvm(
+                runner_vm, "exec", peer["binding"]["id"], "--user", "root", "--",
+                shlex.join(["touch", directory + "/held-close"]),
+            )
+        assert outcomes == {direction: "timeout" for direction in peers}, outcomes
+
         _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=False)
         set_labels(source, selector, revision)
         _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=True)

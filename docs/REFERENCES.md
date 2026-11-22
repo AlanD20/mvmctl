@@ -401,6 +401,9 @@ The VM resolver tries selectors in priority order:
 | `mvm vm ps` | `--json` | List running VMs (active processes) |
 | `mvm vm inspect` | `SELECTOR`, `--json` | Show detailed information about a VM |
 
+If Firecracker resumes but Guest Control reconciliation fails, the VM is recorded as running and the command
+reports the Guest Control error. Retry `mvm vm resume` to reconcile the worker.
+
 If creation was interrupted before the VM reached the caller database, `mvm vm rm --force <full-id>` can request
 cleanup through the retained root authority. This recovery form accepts exactly one full 32-character lowercase
 hexadecimal ID, not a name or ID prefix; existing registered selectors retain their usual behavior and name precedence.
@@ -629,7 +632,8 @@ endpoint does not create a live network interface.
 
 Labels are exact `key=value` matches. Repeat a label flag to require all values. Use at least one label selector for
 `policy traffic labels create`. Exec accepts exact VMs, selectors, or one of each. Only VMs owned by the policy's
-operator can match.
+operator can match. Traffic grants follow each matched VM’s primary address and its currently admitted floating
+addresses. Use an explicit floating-IP destination when access should follow the address across owners.
 
 ```bash
 mvm policy traffic labels create --from-label role=worker --to-label role=controller --protocol tcp --port 6443
