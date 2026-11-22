@@ -29,7 +29,7 @@ The root record uses schema 3 with separate publication revision and ownership g
 record explicit finite or persistent association, renewal, release and recovery. Recovery of an interrupted timed install must
 fence before returning to unassociated state; journal replay cannot grant or renew a key. Phase validation is
 implemented, together with guest coordinator and timed effects. Authenticated guest dispatch and the retained
-worker are integrated; composed kernel qualification remains pending. Earlier floating-IP record schemas are rejected.
+worker are integrated. Earlier floating-IP record schemas are rejected.
 Sealed firewall intent uses schema 2 with explicit lifetime; missing timeouts never infer persistent ownership.
 The terminal-history reader admits only canonical committed-empty history: an empty `Target`, nil `PriorBoot`,
 and at most dormant network metadata in `Before`, with no other intent fields. It requires exact boot/namespace
@@ -56,7 +56,7 @@ topology hold for later network composition; an observed identity alone cannot a
 requires no guest-agent connection and sends no API operation. This proves a live VMM, not an unpaused guest;
 delegated renewal must separately call the implemented running-state check through the protected API. It accepts
 only Running, never resumes a paused VM, and discards failed HTTP streams before another observation.
-Delegated ownership dispatch uses this admission; live admission qualification remains pending.
+Delegated ownership dispatch uses this admission, exercised by the live floating-IP runtime suite.
 
 Every ownership change advances a durable generation. Requests must match the observed generation; stale
 requests refuse. A successful response describes the committed owner and generation. Requests after an unknown
@@ -70,11 +70,10 @@ No destructive recovery is authorized by a caller cache record or guest-provided
 The firewall mutation lease now derives the cleanup address from admitted resource scope and generation,
 requires observed secondary authority to be absent, and deletes only matching IPv4 conntrack entries using
 original tuple, zone and flow identity. A second dump must prove absence before return. Interrupted or uncertain
-effects refuse handover. This helper is independently reviewed and unit-tested; live conntrack qualification
-and composition with root ownership transitions remain pending. The private network transaction now validates
+effects refuse handover. This helper is independently reviewed and unit-tested. The private network transaction validates
 its durable reservation and exact managed bridge, runs flow cleanup, reinspects the bridge and removes only
 the selected dynamic neighbor. This does not require the old VM to be live or its primary veth to be down.
-Genuine transaction-ordering and live cleanup qualification remain pending.
+The runtime suite exercises owner movement with live traffic and stale-owner refusal.
 
 The compiler permits the primary address plus only root-authorized active secondary addresses for IPv4 and ARP.
 These guards precede established-flow acceptance. Gratuitous ARP refreshes reachability but is not fencing proof.
@@ -88,15 +87,16 @@ ID and exact address. Destination rules follow the active owner without admittin
 unassociated resources emit no delivery grant. Operator policy CRUD and root mutation are implemented and
 reviewed. `policy traffic create --to-floating-ip` selects this destination family; `--to-network` resolves
 the reservation scope. Root derives the address and network from its resource record. SQLite stores local
-projections with exact claim/incarnation receipts, while root remains authoritative. Live packet qualification
-for these families remains pending.
+projections with exact claim/incarnation receipts, while root remains authoritative. Live packet tests cover
+both destination families across owner movement.
 
 ### Automatic failover
 
 Delegated failover requires expiring ownership; an eligible guest may not evict a healthy current owner just
 because it requests association. Renewal is bound to the exact generation and incarnation. Expiration must
 fence packets even when the userspace worker is dead or stalled. Kernel-enforced timed address authority is
-implemented with retained firewall tables; its composed packet behavior still requires qualification.
+implemented with retained firewall tables. Ordinary expiry and renewal packet tests pass; deliberate worker-stall
+qualification remains pending.
 Do not ship a userspace-only timer as a guarantee against split brain. Association and renewal grants require
 explicit positive whole-second lease durations; there is no default.
 A guest controller uses the typed inspect, associate, renew and release methods and current generations.
@@ -123,7 +123,7 @@ that grant sustained; it cannot cancel an independent operator assignment.
 The authenticated worker synchronizes operator-owned aliases with the exact admitted guest incarnation.
 Association and transfer report completion only after the matching alias acknowledgement. A bounded wait or
 agent failure must report committed root ownership separately from incomplete alias synchronization; it must
-not claim rollback. These operator paths are implemented and reviewed; live process, alias and packet qualification remains pending.
+not claim rollback. Live operator association, transfer, release and stop-fencing tests pass.
 
 The enforcement design uses a named timed set of host-veth/address pairs in the managed bridge table. Ordinary
 firewall updates now retain the admitted tables and chains and replace their rules in one batch. Initial creation
@@ -137,14 +137,16 @@ a missing binding is an error, while explicit ownerless state carries no timed p
 Renewal removes the exact old key, proves absence and inserts the configured finite lease once, under retained
 ownership serialization. It may briefly interrupt traffic. Repeating an add with the same timeout does not refresh
 expiration with the pinned library/kernel protocol. Unknown outcomes require recovery rather than blind replay.
-Focused tests and review cover these effects; genuine transaction ordering and live renewal/expiry timing remain
-qualification gates.
+Focused tests and review cover these effects; the runtime suite verifies renewal across the original deadline
+and fencing after expiry. Deliberate worker-stall and host-reboot qualification remain separate gates.
 Retention is necessary because the pinned nftables library writes relative element timeouts;
 recreating an element from its observed remaining time could extend its lease by the delay before commit.
 
 Kernel readiness exercises this model in a disposable namespace, including a retained rule update and exact
 readback. The producer's nftables feature includes `CONFIG_NFT_BRIDGE_META` for bridge-scoped destination checks
-and `CONFIG_NF_CT_NETLINK` for exact flow invalidation. Full-model kernel and packet qualification remain pending.
+and `CONFIG_NF_CT_NETLINK` for exact flow invalidation. The replacement kernel passes readiness and all 14
+floating-IP runtime cases on source `789214bc` with paired candidate `8dd32bf8`. Environment ownership,
+deliberately stalled workers and actual host reboot remain unqualified; this is not a release sign-off.
 
 Source IPv4 and ARP checks must admit only primary addresses and live secondary pairs. A separate bridge
 postrouting fence must reject floating-IP delivery through an unauthorized output, including host-originated

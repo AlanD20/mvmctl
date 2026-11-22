@@ -35,8 +35,9 @@ Leaf authentication, backend-preserving credential preparation, snapshot-referen
 owned host session are implemented and reviewed. Bootstrap uses one protected VMM admission, verifies
 Running and the expected credential lineage, and authenticates the agent before releasing its locks. The
 session retains its stream and an independent VMM exit descriptor. The retained worker is integrated;
-live bootstrap and process lifecycle qualification remain pending. Memory snapshots require a root-verified
-credential lineage. Each restored VM receives a fresh process/incarnation principal and no inherited grants or session.
+live bootstrap, stop/start and memory-restore journeys pass the floating-IP runtime suite. Memory snapshots
+require a root-verified credential lineage. Each restored VM receives a fresh process/incarnation principal
+and no inherited grants or session.
 
 Cold credential preparation preserves the selected provisioning backend from start to finish. A typed,
 owner-authenticated preparation creates root material for the exact pending VM and returns only its agent
@@ -82,7 +83,7 @@ Persistence, guest ownership effects and operator delegation CRUD are implemente
 `mvm floating-ip delegation` commands store, list, inspect and revoke exact method grants. Revocation can
 finish after the target VM stops. Workflow ensure and owned removal use exact immutable grant identities;
 matching names or permission tuples never transfer ownership. Stored permission does not prove worker
-readiness. The authenticated worker is implemented and integrated; live runtime qualification remains pending.
+readiness. The authenticated worker is implemented and integrated; ordinary guest ownership journeys pass.
 
 Guest root can exercise every delegation granted to that VM. Local agent permissions restrict ordinary guest
 users but cannot isolate an application from guest root. The implemented gateway uses a dedicated vsock port
@@ -92,7 +93,7 @@ host worker before operations can succeed. Guest address reconciliation is imple
 alias receipts authorize local cleanup only,
 a successful association/renewal bounds the local lifetime, and inspection never extends it. Session loss, expiry
 and restart clean up owned aliases without claiming host authority. The retained host worker is integrated;
-composed live transport qualification remains pending. The local control socket is root-only.
+live transport and non-root socket-refusal tests pass. The local control socket is root-only.
 
 ### Protocol
 
@@ -103,7 +104,7 @@ cannot authorize alias removal. One session reader demultiplexes these messages 
 No mutation lock is retained while waiting for the agent. A root-owned acknowledgement binds the worker,
 session and exact snapshot so an old response cannot complete a newer operator mutation. Guest receipts permit
 only exact local cleanup; they never restore host ownership or authorize another VM after snapshot restore.
-This extension is implemented and reviewed with focused tests; live process/alias qualification remains pending.
+This extension is implemented and reviewed; live association, transfer and lifecycle alias tests pass.
 The guest-request framing below remains separate from host alias synchronization.
 
 The transport is distinct from VM-exec and ordinary privileged-dispatch frames. Version 1 uses `MVMGCTL1`, a

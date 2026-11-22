@@ -4,9 +4,9 @@ A floating IP reserves one private IPv4 address in a managed network. A delegate
 for itself, renew its finite lease and release it. Clients keep the same destination when ownership moves.
 The VM's primary address stays separate.
 
-**Development feature:** the retained host worker, delegated methods and guest address reconciliation are
-implemented, including persistent host assignments. Live process lifecycle, packet fencing, expiry and HA failover
-still require qualification.
+**Development feature:** delegated guest control and persistent host assignments are implemented. Runtime tests
+cover association, transfer, release, packet fencing, expiry and ordinary VM lifecycle changes. Stalled-worker,
+host-reboot and environment qualification remain pending; the full Kubernetes example has not been tested.
 A stored grant alone does not establish a working Guest Control session.
 
 ## Reserve an address
