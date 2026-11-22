@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 
+	"mvmctl/internal/lib/validators/username"
 	"mvmctl/pkg/errs"
 )
 
@@ -22,13 +23,15 @@ const (
 )
 
 var fixedPhaseFields = []string{"schema_version", "phase"}
-var openSourceFields = []string{"schema_version", "phase", "source_vm_id", "destination_vm_id"}
+var openSourceFields = []string{"schema_version", "phase", "source_vm_id", "destination_vm_id", "target_user", "request_id"}
 var failureFields = []string{"schema_version", "phase", "error"}
 
 // OpenSource identifies the exact distinct VM pair named by the first structural-control frame.
 type OpenSource struct {
 	SourceVMID      string `json:"source_vm_id"`
 	DestinationVMID string `json:"destination_vm_id"`
+	TargetUser      string `json:"target_user"`
+	RequestID       string `json:"request_id"`
 }
 
 type openSourceEnvelope struct {
@@ -36,6 +39,8 @@ type openSourceEnvelope struct {
 	Phase           string `json:"phase"`
 	SourceVMID      string `json:"source_vm_id"`
 	DestinationVMID string `json:"destination_vm_id"`
+	TargetUser      string `json:"target_user"`
+	RequestID       string `json:"request_id"`
 }
 
 type fixedPhaseEnvelope struct {
@@ -109,6 +114,12 @@ func (request OpenSource) Validate() error {
 	if request.SourceVMID == request.DestinationVMID {
 		return validationError("retained VM-exec source and destination VM IDs must be distinct")
 	}
+	if request.TargetUser == "root" || len(request.TargetUser) > 32 || !username.Valid(request.TargetUser) {
+		return validationError("retained VM-exec target user must be non-root")
+	}
+	if !validLowerHexVMID(request.RequestID) {
+		return validationError("retained VM-exec request ID must be 32 lowercase hexadecimal characters")
+	}
 	return nil
 }
 
@@ -122,6 +133,7 @@ func EncodeOpenSource(ctx context.Context, writer io.Writer, request OpenSource)
 		Phase:           phaseOpenSource,
 		SourceVMID:      request.SourceVMID,
 		DestinationVMID: request.DestinationVMID,
+		TargetUser:      request.TargetUser, RequestID: request.RequestID,
 	}, "open-source")
 }
 
@@ -147,7 +159,16 @@ func DecodeOpenSource(ctx context.Context, reader io.Reader) (OpenSource, error)
 	if err != nil {
 		return zero, err
 	}
-	request := OpenSource{SourceVMID: sourceVMID, DestinationVMID: destinationVMID}
+	targetUser, err := decodeField[string](fields["target_user"], "target user")
+	if err != nil {
+		return zero, err
+	}
+	requestID, err := decodeField[string](fields["request_id"], "request ID")
+	if err != nil {
+		return zero, err
+	}
+	request := OpenSource{SourceVMID: sourceVMID, DestinationVMID: destinationVMID,
+		TargetUser: targetUser, RequestID: requestID}
 	if err := request.Validate(); err != nil {
 		return zero, err
 	}

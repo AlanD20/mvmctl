@@ -19,6 +19,13 @@ type ExecPolicyIntent struct {
 	Incarnation string           `json:"incarnation"`
 }
 
+// VMExecPolicyID derives the immutable identity used by workflow cleanup.
+func VMExecPolicyID(ownerUID uint32, source, destination VMPolicyEndpoint, targetUser string) (string, error) {
+	return (ExecPolicyIntent{
+		OwnerUID: ownerUID, Source: source, Destination: destination, TargetUser: targetUser,
+	}).identity()
+}
+
 func (policy ExecPolicyIntent) identity() (string, error) {
 	canonical, err := json.Marshal(struct {
 		OwnerUID    uint32

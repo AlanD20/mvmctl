@@ -26,11 +26,12 @@ const (
 
 func TestOpenSourceCodecMatchesContract(t *testing.T) {
 	want := vmexecsessionwire.OpenSource{
+		TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 		SourceVMID:      testSourceVMID,
 		DestinationVMID: testDestinationVMID,
 	}
 	literal := `{"schema_version":1,"phase":"open_source","source_vm_id":"` + testSourceVMID +
-		`","destination_vm_id":"` + testDestinationVMID + `"}`
+		`","destination_vm_id":"` + testDestinationVMID + `","target_user":"alice","request_id":"1234567890abcdef1234567890abcdef"}`
 
 	t.Run("encoder", func(t *testing.T) {
 		var encoded bytes.Buffer
@@ -250,13 +251,13 @@ func TestTerminalOutcomeRequiresEOF(t *testing.T) {
 
 func TestDecodeOpenSourceRejectsStrictGrammar(t *testing.T) {
 	valid := `{"schema_version":1,"phase":"open_source","source_vm_id":"` + testSourceVMID +
-		`","destination_vm_id":"` + testDestinationVMID + `"}`
+		`","destination_vm_id":"` + testDestinationVMID + `","target_user":"alice","request_id":"1234567890abcdef1234567890abcdef"}`
 	tests := map[string]string{
 		"unknown_field": strings.TrimSuffix(valid, "}") + `,"command":"id"}`,
 		"duplicate_field": `{"schema_version":1,"phase":"open_source","source_vm_id":"` + testSourceVMID +
-			`","source_vm_id":"` + testSourceVMID + `","destination_vm_id":"` + testDestinationVMID + `"}`,
+			`","source_vm_id":"` + testSourceVMID + `","destination_vm_id":"` + testDestinationVMID + `","target_user":"alice","request_id":"1234567890abcdef1234567890abcdef"}`,
 		"case_folded_field": `{"schema_version":1,"phase":"open_source","source_vm_id":"` + testSourceVMID +
-			`","Source_VM_ID":"` + testSourceVMID + `","destination_vm_id":"` + testDestinationVMID + `"}`,
+			`","Source_VM_ID":"` + testSourceVMID + `","destination_vm_id":"` + testDestinationVMID + `","target_user":"alice","request_id":"1234567890abcdef1234567890abcdef"}`,
 		"trailing_json": valid + `{}`,
 		"null":          `null`,
 		"malformed":     `{"schema_version":1`,
@@ -334,7 +335,7 @@ func TestDecodeOpenSourceRejectsForgedVMIdentities(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			body := `{"schema_version":1,"phase":"open_source","source_vm_id":"` + test.source +
-				`","destination_vm_id":"` + test.destination + `"}`
+				`","destination_vm_id":"` + test.destination + `","target_user":"alice","request_id":"1234567890abcdef1234567890abcdef"}`
 			_, err := vmexecsessionwire.DecodeOpenSource(t.Context(), bytes.NewReader(testFrame(body)))
 			assertValidationError(t, err)
 		})
@@ -405,6 +406,7 @@ func TestCodecsHonorCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	err := vmexecsessionwire.EncodeOpenSource(ctx, io.Discard, vmexecsessionwire.OpenSource{
+		TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 		SourceVMID:      testSourceVMID,
 		DestinationVMID: testDestinationVMID,
 	})

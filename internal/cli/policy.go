@@ -14,8 +14,20 @@ import (
 
 var execPolicyColumns = []common.ListingColumn{
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*results.VMToVMExecPolicy).ID) }},
-	{Header: "Source VM", Extract: func(v any) string { return v.(*results.VMToVMExecPolicy).SourceVMName }},
-	{Header: "Destination VM", Extract: func(v any) string { return v.(*results.VMToVMExecPolicy).DestinationVMName }},
+	{Header: "Source", Extract: func(v any) string {
+		policy := v.(*results.VMToVMExecPolicy)
+		if policy.SourceVMName != "" {
+			return policy.SourceVMName
+		}
+		return formatPolicySelector(results.VMPolicySelector{VMID: policy.SourceVMID, Labels: policy.SourceLabels})
+	}},
+	{Header: "Destination", Extract: func(v any) string {
+		policy := v.(*results.VMToVMExecPolicy)
+		if policy.DestinationVMName != "" {
+			return policy.DestinationVMName
+		}
+		return formatPolicySelector(results.VMPolicySelector{VMID: policy.DestinationVMID, Labels: policy.DestinationLabels})
+	}},
 	{Header: "Target User", Extract: func(v any) string { return v.(*results.VMToVMExecPolicy).TargetUser }},
 }
 
@@ -37,25 +49,49 @@ func newExecPolicyCmd(policyAPI api.PolicyAPI) *cobra.Command {
 }
 
 func newExecPolicyCreateCmd(policyAPI api.PolicyAPI) *cobra.Command {
-	return &cobra.Command{
-		Use:               "create [source-vm] [destination-vm] [target-user]",
-		Short:             "Allow one VM to execute as one non-root user on another VM.",
-		Args:              cobra.ExactArgs(3),
+	var input inputs.VMToVMExecPolicyCreateInput
+	var sourceLabels, destinationLabels []string
+	cmd := &cobra.Command{
+		Use:               "create [source-vm destination-vm target-user]",
+		Short:             "Allow directional execution as one non-root user",
+		Args:              cobra.MaximumNArgs(3),
 		ValidArgsFunction: completeExecPolicyCreate,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			policy, err := policyAPI.ExecPolicyCreate(cmd.Context(), inputs.VMToVMExecPolicyCreateInput{
-				SourceVM: args[0], DestinationVM: args[1], TargetUser: args[2],
-			})
+			if len(args) != 0 {
+				if len(args) != 3 || input.SourceVM != "" || input.DestinationVM != "" ||
+					input.TargetUser != "" || len(sourceLabels) != 0 || len(destinationLabels) != 0 {
+					return errs.New(errs.CodeValidationFailed, "use three positional arguments or endpoint flags")
+				}
+				input.SourceVM, input.DestinationVM, input.TargetUser = args[0], args[1], args[2]
+			}
+			var err error
+			input.SourceLabels, err = parsePolicyLabels(sourceLabels)
 			if err != nil {
 				return err
 			}
-			if common.RecordResult(policy) {
-				return nil
+			input.DestinationLabels, err = parsePolicyLabels(destinationLabels)
+			if err != nil {
+				return err
 			}
-			common.Cli.PrintDictTree(common.Cli.ToMap(policy), "VM-to-VM execution policy")
+			if err := input.Validate(); err != nil {
+				return err
+			}
+			policy, err := policyAPI.ExecPolicyCreate(cmd.Context(), input)
+			if err != nil {
+				return err
+			}
+			if !common.RecordResult(policy) {
+				common.Cli.PrintDictTree(common.Cli.ToMap(policy), "VM-to-VM execution policy")
+			}
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&input.SourceVM, "from-vm", "", "Exact source VM name or ID")
+	cmd.Flags().StringArrayVar(&sourceLabels, "from-label", nil, "Source label key=value, repeat for AND")
+	cmd.Flags().StringVar(&input.DestinationVM, "to-vm", "", "Exact destination VM name or ID")
+	cmd.Flags().StringArrayVar(&destinationLabels, "to-label", nil, "Destination label key=value, repeat for AND")
+	cmd.Flags().StringVar(&input.TargetUser, "user", "", "Destination non-root account")
+	return cmd
 }
 
 func newExecPolicyListCmd(policyAPI api.PolicyAPI) *cobra.Command {

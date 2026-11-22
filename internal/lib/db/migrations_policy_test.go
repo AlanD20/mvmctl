@@ -89,23 +89,6 @@ func TestBaselineTypedPolicyConstraints(t *testing.T) {
 		"VM destination missing": fmt.Sprintf(`INSERT INTO vm_traffic_policies
 			(id,source_vm_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
 			VALUES ('%s','vm-a','missing','tcp',443,443)`, validPolicyID),
-		"exec self grant": fmt.Sprintf(`INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-a','app')`, validPolicyID),
-		"exec root user": fmt.Sprintf(`INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-b','root')`, validPolicyID),
-		"exec empty user": fmt.Sprintf(`INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-b','')`, validPolicyID),
-		"exec uppercase user": fmt.Sprintf(`INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-b','App')`, validPolicyID),
-		"exec numeric-leading user": fmt.Sprintf(`INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-b','1app')`, validPolicyID),
-		"exec user with spaces": fmt.Sprintf(`INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-b','app user')`, validPolicyID),
-		"exec user too long": fmt.Sprintf(`INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user)
-			VALUES ('%s','vm-a','vm-b','this-user-name-is-longer-than-32-characters')`, validPolicyID),
-		"exec source missing": fmt.Sprintf(`INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','missing','vm-b','app')`, validPolicyID),
 	}
 	for name, statement := range tests {
 		t.Run(name, func(t *testing.T) {

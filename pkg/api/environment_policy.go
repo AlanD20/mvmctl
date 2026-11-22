@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"mvmctl/internal/service/firewall"
+	"mvmctl/internal/service/jailer"
+	"os"
 	"time"
 
 	"mvmctl/internal/lib/crypto"
@@ -288,23 +291,18 @@ func (op *Operation) ExecPolicyEnsure(
 	if err := ownership.Validate(); err != nil {
 		return nil, err
 	}
-	source, destination, err := input.ResolveVMs(ctx, op.Repos.VM)
+	request, err := op.resolveExecPolicy(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	intent := &model.VMToVMExecAllowIntent{SourceVMID: source.ID, DestinationVMID: destination.ID,
-		TargetUser: input.TargetUser, CreatedAt: timestamp, UpdatedAt: timestamp, ClaimID: ownership.ClaimID}
-	intent.ID = crypto.VMToVMExecPolicyDigest(*intent)
-	existing, err := op.Services.ExecPolicy.EnsureOwned(ctx, intent, ownership.Incarnation)
+	request.ClaimID, request.Incarnation = ownership.ClaimID, ownership.Incarnation
+	result, err := jailer.ApplyVMExecPolicy(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	op.AuditLog.LogOperation("policy.exec.environment.ensure", map[string]any{"id": existing.ID}, "")
+	op.AuditLog.LogOperation("policy.exec.environment.ensure", map[string]any{"id": result.Policy.ID}, "")
 	return &results.EnvironmentPolicyReceipt{
-		PolicyID:    existing.ID,
-		Incarnation: existing.Incarnation,
-		WasCreated:  existing.ClaimID == ownership.ClaimID,
+		PolicyID: result.Policy.ID, Incarnation: result.Policy.Incarnation, WasCreated: result.WasCreated,
 	}, nil
 }
 
@@ -320,14 +318,17 @@ func (op *Operation) ExecPolicyRemoveOwned(
 	if err := input.ValidateOwnedRemoval(); err != nil {
 		return err
 	}
-	id := crypto.VMToVMExecPolicyDigest(
-		model.VMToVMExecAllowIntent{
-			SourceVMID:      input.SourceVM,
-			DestinationVMID: input.DestinationVM,
-			TargetUser:      input.TargetUser,
-		},
+	id, err := firewall.VMExecPolicyID(uint32(os.Getuid()),
+		firewall.VMPolicyEndpoint{VMID: input.SourceVM, Labels: input.SourceLabels},
+		firewall.VMPolicyEndpoint{VMID: input.DestinationVM, Labels: input.DestinationLabels},
+		input.TargetUser,
 	)
-	if err := op.Services.ExecPolicy.RemoveOwned(ctx, id, ownership.ClaimID, ownership.Incarnation); err != nil {
+	if err != nil {
+		return err
+	}
+	if err := jailer.RemoveVMExecPolicy(ctx, jailer.VMExecPolicyRemoveRequest{
+		PolicyID: id, ClaimID: ownership.ClaimID, Incarnation: ownership.Incarnation,
+	}); err != nil {
 		return err
 	}
 	op.AuditLog.LogOperation("policy.exec.environment.remove", map[string]any{"id": id}, "")

@@ -501,6 +501,7 @@ func TestVMExecConnectionReaderPollsExactDescriptorAndTimeout(t *testing.T) {
 
 func TestVMExecConnectionReaderDecodesTypedPhaseBeforeTransferring(t *testing.T) {
 	request := vmexecsessionwire.OpenSource{
+		TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 		SourceVMID:      "0123456789abcdef0123456789abcdef",
 		DestinationVMID: "fedcba9876543210fedcba9876543210",
 	}
@@ -547,6 +548,7 @@ func TestVMExecConnectionReaderDecodesTypedPhaseBeforeTransferring(t *testing.T)
 
 func TestVMExecConnectionReaderKeepsOwnershipWhenTypedPhaseDecodeFails(t *testing.T) {
 	request := vmexecsessionwire.OpenSource{
+		TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 		SourceVMID:      "0123456789abcdef0123456789abcdef",
 		DestinationVMID: "fedcba9876543210fedcba9876543210",
 	}

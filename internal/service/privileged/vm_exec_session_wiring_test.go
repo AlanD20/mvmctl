@@ -83,6 +83,7 @@ func TestVMExecSessionEffectsMapAuthenticatedCallerAndClosedRequest(t *testing.T
 		ctx,
 		callerIdentity{uid: 1001, gid: 1002},
 		vmexecsessionwire.OpenSource{
+			TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 			SourceVMID:      testVMExecHandlerSource,
 			DestinationVMID: testVMExecHandlerDestination,
 		},
@@ -97,6 +98,7 @@ func TestVMExecSessionEffectsMapAuthenticatedCallerAndClosedRequest(t *testing.T
 		t.Errorf("VM-exec caller mismatch (-want +got):\n%s", diff)
 	}
 	wantRequest := jailer.VMExecSessionOpenRequest{
+		TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 		SourceVMID:      testVMExecHandlerSource,
 		DestinationVMID: testVMExecHandlerDestination,
 	}

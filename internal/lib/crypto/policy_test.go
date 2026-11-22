@@ -30,13 +30,6 @@ func TestTypedPolicyDigestsUseClosedCanonicalDomains(t *testing.T) {
 			// CONTRACT: sha256sum of the documented length-delimited canonical byte vector.
 			want: "ac5100b8ea39d46e493e48dbfd83b0d5831721326a4854e49e9648e2f2a059c0",
 		},
-		"VM to VM exec": {
-			got: crypto.VMToVMExecPolicyDigest(model.VMToVMExecAllowIntent{
-				SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app",
-			}),
-			// CONTRACT: sha256sum of the documented length-delimited canonical byte vector.
-			want: "961d1718c9901e2cac702f3ebc53e007aeedf1b8fbd4918833d79405515f186e",
-		},
 	}
 
 	for name, tc := range tests {
@@ -57,7 +50,6 @@ func TestTypedPolicyDigestsIncludeEveryIdentityField(t *testing.T) {
 		SourceVMID: "vm-a", DestinationVMID: "vm-b", Protocol: model.TrafficProtocolUDP,
 		DestinationPortStart: 5000, DestinationPortEnd: 5005,
 	}
-	execBase := model.VMToVMExecAllowIntent{SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app"}
 	tests := map[string]struct {
 		base    string
 		changed string
@@ -112,21 +104,6 @@ func TestTypedPolicyDigestsIncludeEveryIdentityField(t *testing.T) {
 			intent.DestinationPortEnd = 5006
 			return crypto.VMToVMTrafficPolicyDigest(intent)
 		}()},
-		"exec source": {base: crypto.VMToVMExecPolicyDigest(execBase), changed: func() string {
-			intent := execBase
-			intent.SourceVMID = "vm-c"
-			return crypto.VMToVMExecPolicyDigest(intent)
-		}()},
-		"exec destination": {base: crypto.VMToVMExecPolicyDigest(execBase), changed: func() string {
-			intent := execBase
-			intent.DestinationVMID = "vm-c"
-			return crypto.VMToVMExecPolicyDigest(intent)
-		}()},
-		"exec target user": {base: crypto.VMToVMExecPolicyDigest(execBase), changed: func() string {
-			intent := execBase
-			intent.TargetUser = "worker"
-			return crypto.VMToVMExecPolicyDigest(intent)
-		}()},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -134,21 +111,6 @@ func TestTypedPolicyDigestsIncludeEveryIdentityField(t *testing.T) {
 				t.Fatal("changing one identity field must change the policy digest")
 			}
 		})
-	}
-}
-
-func TestTypedPolicyDigestsExcludeRecordMetadata(t *testing.T) {
-	first := model.VMToVMExecAllowIntent{
-		ID: "caller-supplied", SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app",
-		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
-	}
-	second := first
-	second.ID = "different"
-	second.CreatedAt = "2026-02-01T00:00:00Z"
-	second.UpdatedAt = "2026-02-01T00:00:00Z"
-
-	if diff := cmp.Diff(crypto.VMToVMExecPolicyDigest(first), crypto.VMToVMExecPolicyDigest(second)); diff != "" {
-		t.Errorf("record metadata changed policy identity (-first +second):\n%s", diff)
 	}
 }
 
@@ -165,11 +127,11 @@ func TestTypedPolicyDigestsSeparatePlanesAndFieldBoundaries(t *testing.T) {
 		t.Fatal("network-source and VM-source traffic policies must have distinct identities")
 	}
 
-	first := crypto.VMToVMExecPolicyDigest(model.VMToVMExecAllowIntent{
-		SourceVMID: "a", DestinationVMID: "bc", TargetUser: "app",
+	first := crypto.VMToVMTrafficPolicyDigest(model.VMToVMTrafficAllowIntent{
+		SourceVMID: "a", DestinationVMID: "bc", Protocol: model.TrafficProtocolTCP, DestinationPortStart: 443, DestinationPortEnd: 443,
 	})
-	second := crypto.VMToVMExecPolicyDigest(model.VMToVMExecAllowIntent{
-		SourceVMID: "ab", DestinationVMID: "c", TargetUser: "app",
+	second := crypto.VMToVMTrafficPolicyDigest(model.VMToVMTrafficAllowIntent{
+		SourceVMID: "ab", DestinationVMID: "c", Protocol: model.TrafficProtocolTCP, DestinationPortStart: 443, DestinationPortEnd: 443,
 	})
 	if first == second {
 		t.Fatal("length-delimited canonical fields must prevent concatenation collisions")

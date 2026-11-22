@@ -16,9 +16,13 @@ func (i *VMToVMExecPolicyCreateInput) ValidateOwnedRemoval() error {
 	if err := i.Validate(); err != nil {
 		return err
 	}
-	if !environmentPolicyVMIDPattern.MatchString(i.SourceVM) ||
-		!environmentPolicyVMIDPattern.MatchString(i.DestinationVM) || i.SourceVM == i.DestinationVM {
-		return errs.New(errs.CodeValidationFailed, "owned execution policy removal requires distinct full VM IDs")
+	for _, vmID := range []string{i.SourceVM, i.DestinationVM} {
+		if vmID != "" && !environmentPolicyVMIDPattern.MatchString(vmID) {
+			return errs.New(errs.CodeValidationFailed, "owned execution policy removal requires full VM IDs")
+		}
+	}
+	if i.SourceVM != "" && i.SourceVM == i.DestinationVM {
+		return errs.New(errs.CodeValidationFailed, "owned execution policy removal requires distinct VMs")
 	}
 	return nil
 }

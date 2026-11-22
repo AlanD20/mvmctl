@@ -15,6 +15,8 @@ import (
 
 // VMExecSessionOpenRequest carries the caller-supplied distinct VM identifiers for one execution session.
 type VMExecSessionOpenRequest struct {
+	TargetUser      string
+	RequestID       string
 	SourceVMID      string
 	DestinationVMID string
 }
@@ -27,6 +29,7 @@ func (request VMExecSessionOpenRequest) Validate() error {
 func (request VMExecSessionOpenRequest) wire() vmexecsessionwire.OpenSource {
 	return vmexecsessionwire.OpenSource{
 		SourceVMID: request.SourceVMID, DestinationVMID: request.DestinationVMID,
+		TargetUser: request.TargetUser, RequestID: request.RequestID,
 	}
 }
 

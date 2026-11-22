@@ -13,7 +13,6 @@ import (
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cache"
 	"mvmctl/internal/core/config"
-	"mvmctl/internal/core/execpolicy"
 	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/core/kernel"
@@ -150,7 +149,6 @@ type Repos struct {
 	Vsock         vsock.Repository
 	Snapshot      snapshot.Repository
 	TrafficPolicy network.TrafficPolicyRepository
-	ExecPolicy    execpolicy.Repository
 }
 
 // Services bundles all domain services.
@@ -165,7 +163,6 @@ type Services struct {
 	Volume        *volume.Service
 	Cache         *cache.Service
 	Vsock         *vsock.Service
-	ExecPolicy    *execpolicy.Service
 	TrafficPolicy *network.TrafficPolicyService
 }
 type RequiredService struct {
@@ -191,7 +188,6 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Vsock:         vsock.NewRepository(sqlDB),
 		Snapshot:      snapshot.NewRepository(sqlDB),
 		TrafficPolicy: network.NewTrafficPolicyRepository(sqlDB),
-		ExecPolicy:    execpolicy.NewRepository(sqlDB),
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
@@ -206,7 +202,6 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Volume:        volume.NewService(r.Volume),
 		Cache:         cache.NewService(cacheDir, infra.GetTempDir()),
 		Vsock:         vsock.NewService(r.Vsock),
-		ExecPolicy:    execpolicy.NewService(r.ExecPolicy),
 		TrafficPolicy: network.NewTrafficPolicyService(r.TrafficPolicy),
 	}
 	// Enforce that all required services are non-nil — fail fast at startup.
@@ -214,7 +209,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		{"Config", s.Config}, {"Image", s.Image}, {"Kernel", s.Kernel},
 		{"Binary", s.Binary}, {"Network", s.Network}, {"Host", s.Host},
 		{"Key", s.Key}, {"Volume", s.Volume}, {"Cache", s.Cache},
-		{"Vsock", s.Vsock}, {"ExecPolicy", s.ExecPolicy},
+		{"Vsock", s.Vsock},
 		{"TrafficPolicy", s.TrafficPolicy},
 	}
 	for _, r := range required {

@@ -46,16 +46,6 @@ func NetworkToHostTrafficPolicyDigest(intent model.NetworkToHostTrafficAllowInte
 		strconv.Itoa(intent.DestinationPortStart), strconv.Itoa(intent.DestinationPortEnd))
 }
 
-// VMToVMExecPolicyDigest returns the deterministic identity of one directional VM-to-VM exec grant.
-func VMToVMExecPolicyDigest(intent model.VMToVMExecAllowIntent) string {
-	return digestTypedPolicy(
-		"exec-vm-to-vm",
-		intent.SourceVMID,
-		intent.DestinationVMID,
-		intent.TargetUser,
-	)
-}
-
 func digestTypedPolicy(domain string, identityFields ...string) string {
 	canonical := make([]byte, 0, 256)
 	canonical = appendTypedPolicyField(canonical, typedPolicyCanonicalVersion)

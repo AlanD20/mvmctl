@@ -1102,6 +1102,7 @@ func vmExecSessionFrames(
 	if includeSource {
 		var frame bytes.Buffer
 		require.NoError(t, vmexecsessionwire.EncodeOpenSource(t.Context(), &frame, vmexecsessionwire.OpenSource{
+			TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 			SourceVMID:      testVMExecHandlerSource,
 			DestinationVMID: testVMExecHandlerDestination,
 		}))

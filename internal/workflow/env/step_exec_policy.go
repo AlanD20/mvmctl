@@ -3,6 +3,7 @@ package env
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -18,6 +19,9 @@ import (
 
 // ExecPolicyState retains the directional grant and its creation claim before any effect.
 type ExecPolicyState struct {
+	SourceLabels      model.VMLabelSelector `yaml:"source_labels,omitempty"`
+	DestinationLabels model.VMLabelSelector `yaml:"destination_labels,omitempty"`
+
 	PolicyID        string `yaml:"policy_id"`
 	ClaimID         string `yaml:"claim_id"`
 	Incarnation     string `yaml:"incarnation"`
@@ -27,6 +31,9 @@ type ExecPolicyState struct {
 }
 
 type execPolicyDeclaration struct {
+	SourceLabels      model.VMLabelSelector `yaml:"source_labels,omitempty"`
+	DestinationLabels model.VMLabelSelector `yaml:"destination_labels,omitempty"`
+
 	SourceVM      string `yaml:"source_vm"`
 	DestinationVM string `yaml:"destination_vm"`
 	TargetUser    string `yaml:"target_user"`
@@ -53,33 +60,17 @@ func (s *ExecPolicyStep) Apply(ctx context.Context, state *workflow.SharedState,
 	}
 	output := StateFromMap[ExecPolicyState](s.record.Output)
 	if output == nil {
-		source, err := resourceStepReference(state, s.input.SourceVM, "vm")
+		source, err := s.resolveExactVM(ctx, state, s.input.SourceVM)
 		if err != nil {
 			return err
 		}
-		destination, err := resourceStepReference(state, s.input.DestinationVM, "vm")
+		destination, err := s.resolveExactVM(ctx, state, s.input.DestinationVM)
 		if err != nil {
 			return err
-		}
-		sourceVM, err := s.op.VMGet(ctx, inputs.VMInput{Identifiers: []string{source}})
-		if err != nil {
-			return err
-		}
-		destinationVM, err := s.op.VMGet(ctx, inputs.VMInput{Identifiers: []string{destination}})
-		if err != nil {
-			return err
-		}
-		if sourceVM == nil || destinationVM == nil {
-			return resourceIdentityMismatch(s.Name())
-		}
-		if (strings.HasPrefix(s.input.SourceVM, "@") && sourceVM.ID != source) ||
-			(strings.HasPrefix(s.input.DestinationVM, "@") && destinationVM.ID != destination) {
-			return resourceIdentityMismatch(s.Name())
 		}
 		output = &ExecPolicyState{
-			SourceVMID:      sourceVM.ID,
-			DestinationVMID: destinationVM.ID,
-			TargetUser:      s.input.TargetUser,
+			SourceVMID: source, DestinationVMID: destination, TargetUser: s.input.TargetUser,
+			SourceLabels: s.input.SourceLabels, DestinationLabels: s.input.DestinationLabels,
 		}
 		if s.input.Existing == "" {
 			output.ClaimID = crypto.UUIDV4()
@@ -100,7 +91,8 @@ func (s *ExecPolicyStep) Apply(ctx context.Context, state *workflow.SharedState,
 				continue
 			}
 			if item.SourceVMID != output.SourceVMID || item.DestinationVMID != output.DestinationVMID ||
-				item.TargetUser != output.TargetUser {
+				item.TargetUser != output.TargetUser || !maps.Equal(item.SourceLabels, output.SourceLabels) ||
+				!maps.Equal(item.DestinationLabels, output.DestinationLabels) {
 				return resourceIdentityMismatch(s.Name())
 			}
 			output.PolicyID = item.ID
@@ -114,9 +106,8 @@ func (s *ExecPolicyStep) Apply(ctx context.Context, state *workflow.SharedState,
 	if output.ClaimID == "" {
 		return resourceIdentityMismatch(s.Name())
 	}
-	receipt, applyErr := s.op.ExecPolicyEnsure(ctx, inputs.VMToVMExecPolicyCreateInput{
-		SourceVM: output.SourceVMID, DestinationVM: output.DestinationVMID, TargetUser: output.TargetUser,
-	}, inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
+	ownership := inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation}
+	receipt, applyErr := s.op.ExecPolicyEnsure(ctx, output.policyInput(), ownership)
 	if receipt != nil {
 		output.PolicyID, output.Incarnation = receipt.PolicyID, receipt.Incarnation
 		s.record.Meta.WasCreated = receipt.WasCreated
@@ -142,12 +133,36 @@ func (s *ExecPolicyStep) Destroy(ctx context.Context, saved model.ResourceState,
 		return s.persist(ctx, write)
 	}
 	// A pending claim has no receipt yet; conditional removal still cannot revoke a foreign grant.
-	if err := s.op.ExecPolicyRemoveOwned(ctx, inputs.VMToVMExecPolicyCreateInput{
-		SourceVM: output.SourceVMID, DestinationVM: output.DestinationVMID, TargetUser: output.TargetUser,
-	}, inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation}); err != nil {
+	ownership := inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation}
+	if err := s.op.ExecPolicyRemoveOwned(ctx, output.policyInput(), ownership); err != nil {
 		return err
 	}
 	return s.persist(ctx, write)
+}
+
+func (output *ExecPolicyState) policyInput() inputs.VMToVMExecPolicyCreateInput {
+	return inputs.VMToVMExecPolicyCreateInput{
+		SourceVM: output.SourceVMID, DestinationVM: output.DestinationVMID, TargetUser: output.TargetUser,
+		SourceLabels: output.SourceLabels, DestinationLabels: output.DestinationLabels,
+	}
+}
+
+func (s *ExecPolicyStep) resolveExactVM(ctx context.Context, state *workflow.SharedState, value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	resolved, err := resourceStepReference(state, value, "vm")
+	if err != nil {
+		return "", err
+	}
+	vm, err := s.op.VMGet(ctx, inputs.VMInput{Identifiers: []string{resolved}})
+	if err != nil {
+		return "", err
+	}
+	if vm == nil || (strings.HasPrefix(value, "@") && vm.ID != resolved) {
+		return "", resourceIdentityMismatch(s.Name())
+	}
+	return vm.ID, nil
 }
 
 func newExecPolicyStepFromSpec(stepType, name string, spec model.ResourceMap, op api.API) (workflow.Step, error) {
@@ -162,8 +177,10 @@ func newExecPolicyStepFromSpec(stepType, name string, spec model.ResourceMap, op
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		return nil, err
 	}
-	validation := inputs.VMToVMExecPolicyCreateInput{SourceVM: input.SourceVM,
-		DestinationVM: input.DestinationVM, TargetUser: input.TargetUser}
+	validation := inputs.VMToVMExecPolicyCreateInput{
+		SourceVM: input.SourceVM, DestinationVM: input.DestinationVM, TargetUser: input.TargetUser,
+		SourceLabels: input.SourceLabels, DestinationLabels: input.DestinationLabels,
+	}
 	if err := validation.Validate(); err != nil {
 		return nil, err
 	}

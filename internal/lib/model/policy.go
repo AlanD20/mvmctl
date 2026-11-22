@@ -53,19 +53,6 @@ type VMToVMTrafficAllowIntent struct {
 	UpdatedAt            string          `json:"updated_at"             db:"updated_at"`
 }
 
-// VMToVMExecAllowIntent grants one exact source VM access to one exact destination VM user through the vsock relay.
-// It is directional, independent of managed-network placement, and never grants IP traffic or VM-to-host execution.
-type VMToVMExecAllowIntent struct {
-	ClaimID         string `json:"claim_id,omitempty" db:"claim_id"`
-	Incarnation     string `json:"incarnation,omitempty" db:"incarnation"`
-	ID              string `json:"id"                db:"id"`
-	SourceVMID      string `json:"source_vm_id"      db:"source_vm_id"`
-	DestinationVMID string `json:"destination_vm_id" db:"destination_vm_id"`
-	TargetUser      string `json:"target_user"       db:"target_user"`
-	CreatedAt       string `json:"created_at"        db:"created_at"`
-	UpdatedAt       string `json:"updated_at"        db:"updated_at"`
-}
-
 // HostToVMExecIdentity is the resolved authorization identity for an ordinary host-originated exec request.
 // Host authorization is owner-bound runtime state and is not represented by a VM-to-VM exec policy row.
 type HostToVMExecIdentity struct {

@@ -2,10 +2,10 @@ package api
 
 import (
 	"context"
-	"time"
+	"strings"
 
-	"mvmctl/internal/lib/crypto"
-	"mvmctl/internal/lib/model"
+	"mvmctl/internal/service/firewall"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
@@ -80,87 +80,130 @@ type PolicyAPI interface {
 	ExecPolicyRemove(ctx context.Context, input inputs.VMToVMExecPolicyInput) error
 }
 
-// ExecPolicyCreate persists one directional VM-to-VM non-root execution grant.
+// ExecPolicyCreate publishes a directional root-owned execution grant.
 func (op *Operation) ExecPolicyCreate(
-	ctx context.Context,
-	input inputs.VMToVMExecPolicyCreateInput,
+	ctx context.Context, input inputs.VMToVMExecPolicyCreateInput,
 ) (*results.VMToVMExecPolicy, error) {
-	source, destination, err := input.ResolveVMs(ctx, op.Repos.VM)
+	request, err := op.resolveExecPolicy(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	intent := &model.VMToVMExecAllowIntent{
-		SourceVMID: source.ID, DestinationVMID: destination.ID, TargetUser: input.TargetUser,
-		CreatedAt: timestamp, UpdatedAt: timestamp,
-	}
-	intent.ID = crypto.VMToVMExecPolicyDigest(*intent)
-	if err := op.Services.ExecPolicy.Create(ctx, intent); err != nil {
+	result, err := jailer.ApplyVMExecPolicy(ctx, request)
+	if err != nil {
 		return nil, err
 	}
-	op.AuditLog.LogOperation("policy.exec.create", map[string]any{"id": intent.ID}, "")
-	return execPolicyResult(intent, source, destination), nil
+	op.AuditLog.LogOperation("policy.exec.create", map[string]any{"id": result.Policy.ID}, "")
+	return op.execPolicyResult(ctx, result.Policy)
 }
 
-// ExecPolicyList returns directional execution grants with current VM names.
+func (op *Operation) resolveExecPolicy(
+	ctx context.Context, input inputs.VMToVMExecPolicyCreateInput,
+) (jailer.VMExecPolicyApplyRequest, error) {
+	if err := input.Validate(); err != nil {
+		return jailer.VMExecPolicyApplyRequest{}, err
+	}
+	source, err := op.resolveVMPolicySelector(ctx, inputs.VMPolicySelectorInput{
+		VM: input.SourceVM, Labels: input.SourceLabels,
+	})
+	if err != nil {
+		return jailer.VMExecPolicyApplyRequest{}, err
+	}
+	destination, err := op.resolveVMPolicySelector(ctx, inputs.VMPolicySelectorInput{
+		VM: input.DestinationVM, Labels: input.DestinationLabels,
+	})
+	if err != nil {
+		return jailer.VMExecPolicyApplyRequest{}, err
+	}
+	return jailer.VMExecPolicyApplyRequest{
+		CacheRoot: op.CacheDir, Source: source, Destination: destination, TargetUser: input.TargetUser,
+	}, nil
+}
+
+// ExecPolicyList returns the committed root inventory with current VM names where available.
 func (op *Operation) ExecPolicyList(ctx context.Context) ([]*results.VMToVMExecPolicy, error) {
-	intents, err := op.Services.ExecPolicy.AllowIntents(ctx)
+	intents, err := jailer.ListVMExecPolicies(ctx)
 	if err != nil {
 		return nil, err
 	}
 	items := make([]*results.VMToVMExecPolicy, 0, len(intents))
 	for _, intent := range intents {
-		source, err := op.execPolicyVM(ctx, intent.SourceVMID)
+		result, err := op.execPolicyResult(ctx, intent)
 		if err != nil {
 			return nil, err
 		}
-		destination, err := op.execPolicyVM(ctx, intent.DestinationVMID)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, execPolicyResult(intent, source, destination))
+		items = append(items, result)
 	}
 	return items, nil
 }
 
-// ExecPolicyRemove removes only directional execution grants.
 func (op *Operation) ExecPolicyRemove(ctx context.Context, input inputs.VMToVMExecPolicyInput) error {
-	intents, err := input.Resolve(ctx, op.Repos.ExecPolicy)
+	if err := input.Validate(); err != nil {
+		return err
+	}
+	policies, err := jailer.ListVMExecPolicies(ctx)
 	if err != nil {
 		return err
 	}
-	ids := make([]string, len(intents))
-	for index, intent := range intents {
-		ids[index] = intent.ID
+	resolved := make(map[string]firewall.ExecPolicyIntent, len(input.Identifiers))
+	for _, identifier := range input.Identifiers {
+		var match firewall.ExecPolicyIntent
+		for _, policy := range policies {
+			if !strings.HasPrefix(policy.ID, identifier) {
+				continue
+			}
+			if match.ID != "" {
+				return errs.New(errs.CodePolicyAmbiguous, "ambiguous exec policy", errs.WithEntity(identifier))
+			}
+			match = policy
+		}
+		if match.ID == "" {
+			return errs.NotFound(errs.CodePolicyNotFound, "exec policy not found", errs.WithEntity(identifier))
+		}
+		resolved[match.ID] = match
 	}
-	if err := op.Services.ExecPolicy.Remove(ctx, ids); err != nil {
-		return err
-	}
-	for _, id := range ids {
-		op.AuditLog.LogOperation("policy.exec.remove", map[string]any{"id": id}, "")
+	for _, policy := range policies {
+		if _, found := resolved[policy.ID]; !found {
+			continue
+		}
+		err := jailer.RemoveVMExecPolicy(ctx, jailer.VMExecPolicyRemoveRequest{
+			PolicyID: policy.ID, Incarnation: policy.Incarnation,
+		})
+		if err != nil {
+			return err
+		}
+		op.AuditLog.LogOperation("policy.exec.remove", map[string]any{"id": policy.ID}, "")
 	}
 	return nil
 }
 
-func (op *Operation) execPolicyVM(ctx context.Context, id string) (*model.VMItem, error) {
-	item, err := op.Repos.VM.Get(ctx, id)
+func (op *Operation) execPolicyResult(
+	ctx context.Context, policy firewall.ExecPolicyIntent,
+) (*results.VMToVMExecPolicy, error) {
+	name := func(id string) (string, error) {
+		if id == "" {
+			return "", nil
+		}
+		item, err := op.Repos.VM.Get(ctx, id)
+		if err != nil {
+			return "", errs.WrapMsg(errs.CodeDatabaseError, "failed to find exec policy VM name", err)
+		}
+		if item == nil {
+			return "", nil
+		}
+		return item.Name, nil
+	}
+	source, err := name(policy.Source.VMID)
 	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeDatabaseError, "failed to resolve execution-policy VM", err)
+		return nil, err
 	}
-	if item == nil {
-		return nil, errs.NotFound(errs.CodeVMNotFound, "execution-policy VM no longer exists", errs.WithEntity(id))
+	destination, err := name(policy.Destination.VMID)
+	if err != nil {
+		return nil, err
 	}
-	return item, nil
-}
-
-func execPolicyResult(
-	intent *model.VMToVMExecAllowIntent,
-	source *model.VMItem,
-	destination *model.VMItem,
-) *results.VMToVMExecPolicy {
 	return &results.VMToVMExecPolicy{
-		ID: intent.ID, SourceVMID: source.ID, SourceVMName: source.Name,
-		DestinationVMID: destination.ID, DestinationVMName: destination.Name,
-		TargetUser: intent.TargetUser, CreatedAt: intent.CreatedAt, UpdatedAt: intent.UpdatedAt,
-	}
+		ID: policy.ID, TargetUser: policy.TargetUser,
+		SourceVMID: policy.Source.VMID, SourceVMName: source, SourceLabels: policy.Source.Labels,
+		DestinationVMID: policy.Destination.VMID, DestinationVMName: destination,
+		DestinationLabels: policy.Destination.Labels,
+	}, nil
 }

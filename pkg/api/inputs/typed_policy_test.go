@@ -188,35 +188,24 @@ func TestTypedTrafficPolicyInputsResolveDomainFactsSeparately(t *testing.T) {
 	assert.Equal(t, 53, portEnd)
 }
 
-func TestExecPolicyInputIsDirectionalNonRootAndNetworkIndependent(t *testing.T) {
-	ctx := t.Context()
-	vmRepo := testutil.NewVMRepo()
-	require.NoError(t, vmRepo.Upsert(ctx, &model.VMItem{ID: "vm-a", Name: "vm-a", NetworkID: ""}))
-	require.NoError(t, vmRepo.Upsert(ctx, &model.VMItem{ID: "vm-b", Name: "vm-b", NetworkID: "net-b"}))
-
-	for name, input := range map[string]inputs.VMToVMExecPolicyCreateInput{
-		"root":       {SourceVM: "vm-a", DestinationVM: "vm-b", TargetUser: "root"},
-		"empty user": {SourceVM: "vm-a", DestinationVM: "vm-b", TargetUser: ""},
-		"oversized user": {
-			SourceVM: "vm-a", DestinationVM: "vm-b", TargetUser: "user_name_longer_than_thirty_two_chars",
+func TestExecPolicyInputRequiresOneSelectorPerEndpointAndNonRootUser(t *testing.T) {
+	policy := inputs.VMToVMExecPolicyCreateInput{
+		SourceVM: "vm-a", DestinationLabels: model.VMLabelSelector{"role": "controller"}, TargetUser: "app",
+	}
+	require.NoError(t, policy.Validate())
+	for name, change := range map[string]func(*inputs.VMToVMExecPolicyCreateInput){
+		"root user":  func(input *inputs.VMToVMExecPolicyCreateInput) { input.TargetUser = "root" },
+		"empty user": func(input *inputs.VMToVMExecPolicyCreateInput) { input.TargetUser = "" },
+		"oversized user": func(input *inputs.VMToVMExecPolicyCreateInput) {
+			input.TargetUser = "user_name_longer_than_thirty_two_chars"
 		},
+		"mixed endpoint":   func(input *inputs.VMToVMExecPolicyCreateInput) { input.DestinationVM = "vm-b" },
+		"missing endpoint": func(input *inputs.VMToVMExecPolicyCreateInput) { input.DestinationLabels = nil },
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := input.Validate()
-			assert.Error(t, err)
+			changed := policy
+			change(&changed)
+			assert.Error(t, changed.Validate())
 		})
 	}
-
-	input := &inputs.VMToVMExecPolicyCreateInput{
-		SourceVM: "vm-a", DestinationVM: "vm-b", TargetUser: "app",
-	}
-	source, destination, err := input.ResolveVMs(ctx, vmRepo)
-	require.NoError(t, err)
-	if diff := cmp.Diff([]string{"vm-a", "vm-b"}, []string{source.ID, destination.ID}); diff != "" {
-		t.Errorf("exec VM facts mismatch (-want +got):\n%s", diff)
-	}
-	_, _, err = (&inputs.VMToVMExecPolicyCreateInput{
-		SourceVM: "vm-a", DestinationVM: "vm-a", TargetUser: "app",
-	}).ResolveVMs(ctx, vmRepo)
-	assert.Error(t, err)
 }

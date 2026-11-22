@@ -21,6 +21,7 @@ const (
 )
 
 var testVMExecServerRequest = VMExecSessionOpenRequest{
+	TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 	SourceVMID:      "11111111111111111111111111111111",
 	DestinationVMID: "22222222222222222222222222222222",
 }

@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"mvmctl/internal/core/execpolicy"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/lib/model"
@@ -101,37 +100,6 @@ type VMToVMExecPolicyInput struct {
 
 // Validate checks the execution-policy identifiers.
 func (i *VMToVMExecPolicyInput) Validate() error { return validatePolicyIdentifiers(i.Identifiers) }
-
-// Resolve binds identifiers only within the VM-to-VM execution-policy family.
-func (i *VMToVMExecPolicyInput) Resolve(
-	ctx context.Context,
-	repo execpolicy.Repository,
-) ([]*model.VMToVMExecAllowIntent, error) {
-	if err := i.Validate(); err != nil {
-		return nil, err
-	}
-	intents := make([]*model.VMToVMExecAllowIntent, 0, len(i.Identifiers))
-	seen := make(map[string]bool, len(i.Identifiers))
-	for _, identifier := range i.Identifiers {
-		matches, err := repo.FindByPrefix(ctx, identifier)
-		if err != nil {
-			return nil, errs.WrapMsg(errs.CodePolicyNotFound, "failed to resolve execution policy", err)
-		}
-		if len(matches) == 0 {
-			return nil, errs.NotFound(errs.CodePolicyNotFound, "execution policy not found",
-				errs.WithEntity(identifier))
-		}
-		if len(matches) > 1 {
-			return nil, errs.New(errs.CodePolicyAmbiguous,
-				fmt.Sprintf("execution policy identifier %q is ambiguous", identifier))
-		}
-		if !seen[matches[0].ID] {
-			intents = append(intents, matches[0])
-			seen[matches[0].ID] = true
-		}
-	}
-	return intents, nil
-}
 
 func validatePolicyIdentifiers(identifiers []string) error {
 	if len(identifiers) == 0 {
@@ -255,18 +223,21 @@ func (i *VMToVMTrafficPolicyCreateInput) ResolvedTraffic() (model.TrafficProtoco
 
 // VMToVMExecPolicyCreateInput is the public input for one directional VM-to-VM vsock exec grant.
 type VMToVMExecPolicyCreateInput struct {
-	SourceVM      string `json:"source_vm"      yaml:"source_vm"`
-	DestinationVM string `json:"destination_vm" yaml:"destination_vm"`
-	TargetUser    string `json:"target_user"    yaml:"target_user"`
+	SourceVM          string                `json:"source_vm,omitempty" yaml:"source_vm,omitempty"`
+	SourceLabels      model.VMLabelSelector `json:"source_labels,omitempty" yaml:"source_labels,omitempty"`
+	DestinationVM     string                `json:"destination_vm,omitempty" yaml:"destination_vm,omitempty"`
+	DestinationLabels model.VMLabelSelector `json:"destination_labels,omitempty" yaml:"destination_labels,omitempty"`
+	TargetUser        string                `json:"target_user" yaml:"target_user"`
 }
 
 // Validate checks the closed VM-to-VM exec policy shape and rejects root execution.
 func (i *VMToVMExecPolicyCreateInput) Validate() error {
-	if strings.TrimSpace(i.SourceVM) == "" {
-		return errs.New(errs.CodeValidationFailed, "source VM is required")
-	}
-	if strings.TrimSpace(i.DestinationVM) == "" {
-		return errs.New(errs.CodeValidationFailed, "destination VM is required")
+	for _, endpoint := range []VMPolicySelectorInput{
+		{VM: i.SourceVM, Labels: i.SourceLabels}, {VM: i.DestinationVM, Labels: i.DestinationLabels},
+	} {
+		if err := endpoint.Validate(); err != nil {
+			return err
+		}
 	}
 	if i.TargetUser == "root" {
 		return errs.New(errs.CodePolicyExecUserInvalid, "VM-to-VM exec target user must not be root")
@@ -278,28 +249,6 @@ func (i *VMToVMExecPolicyCreateInput) Validate() error {
 		return errs.WrapMsg(errs.CodePolicyExecUserInvalid, "invalid VM-to-VM exec target user", err)
 	}
 	return nil
-}
-
-// ResolveVMs resolves only the VM-domain source and destination facts.
-func (i *VMToVMExecPolicyCreateInput) ResolveVMs(
-	ctx context.Context,
-	repo vm.Repository,
-) (*model.VMItem, *model.VMItem, error) {
-	if err := i.Validate(); err != nil {
-		return nil, nil, err
-	}
-	source, err := resolveOnePolicyVM(ctx, repo, i.SourceVM)
-	if err != nil {
-		return nil, nil, err
-	}
-	destination, err := resolveOnePolicyVM(ctx, repo, i.DestinationVM)
-	if err != nil {
-		return nil, nil, err
-	}
-	if source.ID == destination.ID {
-		return nil, nil, errs.New(errs.CodePolicyEndpointInvalid, "source and destination VM must differ")
-	}
-	return source, destination, nil
 }
 
 func resolveCanonicalTrafficValues(protocolValue, destinationPort string) (model.TrafficProtocol, int, int, error) {

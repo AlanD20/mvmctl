@@ -52,6 +52,7 @@ func TestVMExecSessionClientTransfersDuplicatesAndRetainsOriginalConnections(t *
 		) (vmExecSessionControl, error) {
 			assert.Same(t, t.Context(), ctx)
 			want := vmexecsessionwire.OpenSource{
+				TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 				SourceVMID: request.SourceVMID, DestinationVMID: request.DestinationVMID,
 			}
 			if diff := cmp.Diff(want, got); diff != "" {
@@ -181,6 +182,7 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 			ctx:    t.Context(),
 			client: &VMExecSessionClient{},
 			request: VMExecSessionOpenRequest{
+				TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 				SourceVMID:      valid.SourceVMID[:31],
 				DestinationVMID: valid.DestinationVMID,
 			},
@@ -190,6 +192,7 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 			ctx:    t.Context(),
 			client: &VMExecSessionClient{},
 			request: VMExecSessionOpenRequest{
+				TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 				SourceVMID:      strings.Repeat("g", 32),
 				DestinationVMID: valid.DestinationVMID,
 			},
@@ -199,6 +202,7 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 			ctx:    t.Context(),
 			client: &VMExecSessionClient{},
 			request: VMExecSessionOpenRequest{
+				TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 				SourceVMID:      valid.SourceVMID,
 				DestinationVMID: strings.ToUpper(valid.DestinationVMID),
 			},
@@ -512,6 +516,7 @@ func assertVMExecSessionClientErrorProjection(
 
 func validVMExecSessionOpenRequest() VMExecSessionOpenRequest {
 	return VMExecSessionOpenRequest{
+		TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 		SourceVMID: testVMExecClientSourceID, DestinationVMID: testVMExecClientDestinationID,
 	}
 }

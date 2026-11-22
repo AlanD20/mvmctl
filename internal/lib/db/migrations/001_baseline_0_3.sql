@@ -365,28 +365,6 @@ CREATE TABLE vm_traffic_policies (
 CREATE INDEX idx_vm_traffic_source ON vm_traffic_policies(source_vm_id);
 CREATE INDEX idx_vm_traffic_destination ON vm_traffic_policies(destination_vm_id);
 
-CREATE TABLE exec_policies (
-    id TEXT PRIMARY KEY CHECK(length(id) = 64 AND id NOT GLOB '*[^0-9a-f]*'),
-    source_vm_id TEXT NOT NULL,
-    destination_vm_id TEXT NOT NULL,
-    target_user TEXT NOT NULL CHECK(
-        length(target_user) BETWEEN 1 AND 32
-        AND target_user <> 'root'
-        AND substr(target_user, 1, 1) GLOB '[a-z_]'
-        AND target_user NOT GLOB '*[^a-z0-9_-]*'
-    ),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    claim_id TEXT NOT NULL DEFAULT '',
-    incarnation TEXT NOT NULL DEFAULT '',
-    FOREIGN KEY (source_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
-    FOREIGN KEY (destination_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
-    CHECK(source_vm_id <> destination_vm_id),
-    UNIQUE(source_vm_id, destination_vm_id, target_user)
-);
-CREATE INDEX idx_exec_policy_source ON exec_policies(source_vm_id);
-CREATE INDEX idx_exec_policy_destination ON exec_policies(destination_vm_id);
-
 -- Host traffic policy projections.
 CREATE TABLE vm_host_traffic_policies (
     id TEXT PRIMARY KEY CHECK(length(id) = 64 AND id NOT GLOB '*[^0-9a-f]*'),

@@ -52,14 +52,14 @@ type NetworkToHostTrafficPolicy struct {
 
 // VMToVMExecPolicy describes one directional non-root execution grant with current VM names.
 type VMToVMExecPolicy struct {
-	ID                string `json:"id"`
-	SourceVMID        string `json:"source_vm_id"`
-	SourceVMName      string `json:"source_vm_name"`
-	DestinationVMID   string `json:"destination_vm_id"`
-	DestinationVMName string `json:"destination_vm_name"`
-	TargetUser        string `json:"target_user"`
-	CreatedAt         string `json:"created_at"`
-	UpdatedAt         string `json:"updated_at"`
+	ID                string                `json:"id"`
+	SourceVMID        string                `json:"source_vm_id,omitempty"`
+	SourceVMName      string                `json:"source_vm_name,omitempty"`
+	SourceLabels      model.VMLabelSelector `json:"source_labels,omitempty"`
+	DestinationVMID   string                `json:"destination_vm_id,omitempty"`
+	DestinationVMName string                `json:"destination_vm_name,omitempty"`
+	DestinationLabels model.VMLabelSelector `json:"destination_labels,omitempty"`
+	TargetUser        string                `json:"target_user"`
 }
 
 // VMToFloatingIPTrafficPolicy describes exact directional allow intent and current display names.

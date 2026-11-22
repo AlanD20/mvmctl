@@ -3,7 +3,9 @@ package privileged
 import (
 	"context"
 
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/vmexecsessionwire"
+	"mvmctl/internal/service/firewall"
 	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
@@ -18,7 +20,8 @@ type vmExecSessionServer interface {
 }
 
 type vmExecSessionServerLeaseAdapter struct {
-	lease *jailer.VMExecSessionServerLease
+	lease    *jailer.VMExecSessionServerLease
+	identity model.VMToVMExecIdentity
 }
 
 type vmExecSessionStopWait interface {
@@ -56,13 +59,17 @@ func newVMExecSessionHandlerEffects(server vmExecSessionServer) vmExecSessionHan
 			jailer.VMExecSessionOpenRequest{
 				SourceVMID:      request.SourceVMID,
 				DestinationVMID: request.DestinationVMID,
+				TargetUser:      request.TargetUser, RequestID: request.RequestID,
 			},
 			connection,
 		)
 		if lease == nil {
 			return nil, err
 		}
-		return &vmExecSessionServerLeaseAdapter{lease: lease}, err
+		return &vmExecSessionServerLeaseAdapter{lease: lease, identity: model.VMToVMExecIdentity{
+			OwnerUID: caller.uid, SourceVMID: request.SourceVMID, DestinationVMID: request.DestinationVMID,
+			TargetUser: request.TargetUser,
+		}}, err
 	}}
 }
 
@@ -114,7 +121,16 @@ func (adapter *vmExecSessionServerLeaseAdapter) bindDestination(
 	if adapter == nil || adapter.lease == nil {
 		return errs.New(errs.CodeInternal, "retained VM-exec session lease is not active")
 	}
-	return adapter.lease.BindDestination(ctx, connection)
+	if err := adapter.lease.BindDestination(ctx, connection); err != nil {
+		return err
+	}
+	// Both retained peer proofs have succeeded. Hold the policy lock only
+	// for this decision, before the handler sends final ready.
+	allowed, err := firewall.AdmitVMExecPolicy(ctx, adapter.identity)
+	if err != nil || !allowed {
+		return errs.WrapMsg(errs.CodePolicyExecAuthorizeFailed, "VM-to-VM execution is not authorized", err)
+	}
+	return nil
 }
 
 func (adapter *vmExecSessionServerLeaseAdapter) waitStop(

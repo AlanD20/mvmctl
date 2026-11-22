@@ -156,11 +156,6 @@ func (op *Operation) relayVMExec(
 		denial = vmExecDenialRecord(record, request.Destination, logging.VMExecDestinationIsSource)
 		return vmExecDenied()
 	}
-	// Exec policy intentionally performs no IP-network or traffic-policy lookup.
-	allowed, err := op.Services.ExecPolicy.Allows(ctx, sourceVMID, destination.ID, request.TargetUser)
-	if err != nil || !allowed {
-		return vmExecDenied()
-	}
 	destinationConfig, err := op.Repos.Vsock.GetByVMID(ctx, destination.ID)
 	if err != nil || destinationConfig == nil || destinationConfig.VmID != destination.ID {
 		return vmExecDenied()
@@ -206,6 +201,7 @@ func (op *Operation) relayVMExec(
 	// and global capacity. SQLite status and the caller-selected socket are never authority.
 	authority, err = jailer.NewVMExecSessionClient().Open(requestCtx, jailer.VMExecSessionOpenRequest{
 		SourceVMID: sourceVMID, DestinationVMID: destination.ID,
+		TargetUser: request.TargetUser, RequestID: request.RequestID,
 	}, sourceConn)
 	if err != nil {
 		return vmExecDenied()

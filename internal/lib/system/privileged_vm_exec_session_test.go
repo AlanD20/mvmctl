@@ -28,6 +28,7 @@ import (
 const privilegedVMExecSessionHelperTest = "^TestPrivilegedVMExecSessionHelper$"
 
 var testVMExecOpenSource = vmexecsessionwire.OpenSource{
+	TargetUser: "alice", RequestID: "1234567890abcdef1234567890abcdef",
 	SourceVMID:      "0123456789abcdef0123456789abcdef",
 	DestinationVMID: "fedcba9876543210fedcba9876543210",
 }

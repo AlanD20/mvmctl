@@ -37,6 +37,9 @@ func EnsureVMExecPolicy(
 			if existing.OwnerUID != ownerUID || (expected != "" && existing.Incarnation != expected) {
 				return policyOwnershipConflict()
 			}
+			if claim == "" {
+				return policyOwnershipConflict()
+			}
 			policy = existing
 			return verifyExactCommittedGeneration(ctx, mutation.kernel, mutation.compiled)
 		}

@@ -9,6 +9,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/network"
+	"mvmctl/internal/lib/validators/username"
 	"mvmctl/pkg/errs"
 )
 
@@ -23,9 +24,6 @@ var (
 	// Valid interface/bridge name pattern — lowercase alphanumeric, hyphens, underscores.
 	validInterfaceNameRegex = regexp.MustCompile(`^[a-z0-9_-]+$`)
 )
-
-// --- Valid SSH username regex ---
-var validSSHUsernameRegex = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 
 // --- MAC address strict regex ---
 var ValidMACRegex = regexp.MustCompile(`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`)
@@ -417,7 +415,7 @@ func BootArgComponent(value, componentName string) error {
 }
 
 func SSHUsername(user string) error {
-	if !validSSHUsernameRegex.MatchString(user) {
+	if !username.Valid(user) {
 		return errs.New(
 			errs.CodeValidationFailed,
 			fmt.Sprintf("invalid SSH username '%s': must match ^[a-z_][a-z0-9_-]*$", user),

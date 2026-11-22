@@ -204,7 +204,7 @@ func validateStepInput(kind, name string, spec model.ResourceMap) error {
 			"floating_ip_grant": "network resource vm method lease",
 			"volume":            "name size read_only shareable writeback retain existing",
 			"traffic_policy":    "source_network source_vm source_labels destination_vm destination_labels destination_host destination_floating_ip destination_network protocol port existing",
-			"exec_policy":       "source_vm destination_vm target_user existing",
+			"exec_policy":       "source_vm source_labels destination_vm destination_labels target_user existing",
 			"ready":             "target cmd timeout interval user",
 		}
 		for field := range spec {
