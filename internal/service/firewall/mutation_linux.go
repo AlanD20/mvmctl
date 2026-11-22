@@ -449,6 +449,7 @@ func (lease *MutationLease) Release(ctx context.Context) error {
 
 func cloneIntent(intent Intent) Intent {
 	return Intent{
+		VMLabels:       intent.VMLabels.clone(),
 		ActiveNetworks: slices.Clone(intent.ActiveNetworks),
 		Reservations:   slices.Clone(intent.Reservations),
 		Endpoints:      slices.Clone(intent.Endpoints), Networks: slices.Clone(intent.Networks),

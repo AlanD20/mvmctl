@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	intentJournalSchema  = uint32(2)
+	intentJournalSchema  = uint32(3)
 	intentRecordName     = "intent.json"
 	maxIntentRecordBytes = 16 * 1024 * 1024
 )
@@ -41,15 +41,16 @@ func decodeIntentJournal(raw []byte) (intentJournal, error) {
 	if err := decoder.Decode(&journal); err != nil {
 		return intentJournal{}, generationAuthorityError("decode firewall intent journal", err, nil)
 	}
+	if journal.SchemaVersion != intentJournalSchema {
+		return intentJournal{}, generationAuthorityError("unsupported firewall intent journal schema", nil, nil)
+	}
 	// CRITICAL: Only our exact canonical encoding is admitted. This also rejects duplicate keys,
 	// case aliases, omitted fields, trailing input, and alternative scalar representations.
 	canonical, err := json.Marshal(journal)
 	if err != nil || !bytes.Equal(raw, canonical) {
 		return intentJournal{}, generationAuthorityError("firewall intent journal is not canonical", err, nil)
 	}
-	if journal.SchemaVersion != intentJournalSchema {
-		return intentJournal{}, generationAuthorityError("unsupported firewall intent journal schema", nil, nil)
-	}
+
 	return journal, nil
 }
 

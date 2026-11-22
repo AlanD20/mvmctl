@@ -173,7 +173,9 @@ func TestIntentJournalRefusesOldImplicitFloatingIPLifetime(t *testing.T) {
 	require.NoError(t, err)
 	_, err = decodeIntentJournal(raw)
 	require.NoError(t, err)
-	raw = []byte(strings.Replace(string(raw), `"schema_version":2`, `"schema_version":1`, 1))
+	journal.SchemaVersion = 1
+	raw, err = json.Marshal(journal)
+	require.NoError(t, err)
 	_, err = decodeIntentJournal(raw)
 	require.Error(t, err, "old lifetime grammar must not be reinterpreted as persistent authority")
 }

@@ -52,10 +52,10 @@ func TestHostTrafficDormantProjectionRetainsExactEmptyGeneration(t *testing.T) {
 
 func TestIntentJournalPreservesCanonicalHostTrafficFields(t *testing.T) {
 	// Rationale: The lifetime schema change preserves unrelated canonical host-traffic fields.
-	const oldIntent = `{"active_networks":null,"reservations":null,"endpoints":null,"networks":null,` +
+	const currentIntent = `{"vm_labels":null,"active_networks":null,"reservations":null,"endpoints":null,"networks":null,` +
 		`"vm_grants":null,"network_grants":null,"host_services":null}`
-	raw := []byte(`{"schema_version":2,"boot_id":"11111111-1111-4111-8111-111111111111",` +
-		`"host_namespace":{"device":1,"inode":2},"before":` + oldIntent + `,"target":` + oldIntent + `,"prior_boot":null}`)
+	raw := []byte(`{"schema_version":3,"boot_id":"11111111-1111-4111-8111-111111111111",` +
+		`"host_namespace":{"device":1,"inode":2},"before":` + currentIntent + `,"target":` + currentIntent + `,"prior_boot":null}`)
 	journal, err := decodeIntentJournal(raw)
 	require.NoError(t, err)
 	encoded, err := json.Marshal(journal)

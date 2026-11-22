@@ -146,6 +146,7 @@ type NetworkFloatingIPTrafficGrant struct {
 // Intent is the full host-global graph stored beside the authoritative generation record.
 // A graph is admitted only when its compiler-derived identity agrees with that record.
 type Intent struct {
+	VMLabels       vmLabelRecords        `json:"vm_labels"`
 	ActiveNetworks []string              `json:"active_networks"`
 	Reservations   []EndpointReservation `json:"reservations"`
 	Endpoints      []EndpointBinding     `json:"endpoints"`
@@ -283,6 +284,9 @@ func validateEndpointReservation(reservation EndpointReservation) error {
 // validateDurablePolicies admits the complete desired inventory before compiling its active projection.
 // A stopped endpoint may suppress a rule, but never bypass policy grammar or ownership admission.
 func (intent Intent) validateDurablePolicies() error {
+	if err := intent.VMLabels.validate(); err != nil {
+		return err
+	}
 	networks := make(map[string]NetworkIntent, len(intent.Networks))
 	for _, network := range intent.Networks {
 		if network.OwnerUID == 0 || !validResourceID(network.NetworkID) || !validIPv4Prefix(network.Subnet) ||
@@ -313,6 +317,10 @@ func (intent Intent) validateDurablePolicies() error {
 		}
 		if _, found := reservations[reservation.VMID]; found {
 			return invalidGeneration("duplicate durable VM reservation")
+		}
+		if labels, found := intent.VMLabels[reservation.VMID]; found &&
+			(labels.OwnerUID != reservation.OwnerUID || labels.Retired) {
+			return invalidGeneration("VM label record conflicts with durable endpoint")
 		}
 		network, found := networks[reservation.NetworkID]
 		if !found || network.OwnerUID != reservation.OwnerUID || network.Subnet != reservation.Prefix ||

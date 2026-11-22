@@ -191,6 +191,11 @@ func admitHostResetGenerationBinding(
 }
 
 func hostResetIntentEmpty(intent Intent) bool {
+	for _, labels := range intent.VMLabels {
+		if !labels.Retired {
+			return false
+		}
+	}
 	return len(intent.ActiveNetworks) == 0 && len(intent.Reservations) == 0 && len(intent.Endpoints) == 0 &&
 		len(
 			intent.Networks,
