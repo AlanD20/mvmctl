@@ -3,6 +3,7 @@ package firewall
 import (
 	"bytes"
 	"fmt"
+	"slices"
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
@@ -16,6 +17,7 @@ type kernelObservation struct {
 }
 
 type kernelObservedTable struct {
+	labelAddressSets  []labelAddressSet
 	secondarySet      *nftables.Set
 	secondaryElements []secondaryLeaseElement
 	family            nftables.TableFamily
@@ -81,6 +83,12 @@ func compareKernelObservedTable(observed kernelObservedTable, expected compiledT
 	if expected.table == nil || observed.family != expected.table.Family || observed.name != expected.table.Name ||
 		observed.flags != expected.table.Flags {
 		return invalidKernelObservation("table identity or flags do not match compiler output")
+	}
+	if !slices.EqualFunc(observed.labelAddressSets, expected.labelAddressSets,
+		func(observed, expected labelAddressSet) bool {
+			return observed.name == expected.name && slices.Equal(observed.keys, expected.keys)
+		}) {
+		return invalidKernelObservation("label address sets do not match compiler output")
 	}
 	if (observed.secondarySet == nil) != (expected.secondarySet == nil) {
 		return invalidKernelObservation("secondary lease set presence does not match compiler output")

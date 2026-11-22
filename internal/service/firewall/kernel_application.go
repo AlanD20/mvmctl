@@ -3,6 +3,8 @@ package firewall
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 
 	"github.com/google/nftables"
 )
@@ -13,6 +15,8 @@ type kernelApplicationConnection interface {
 	addChain(*nftables.Chain)
 	deleteChain(*nftables.Chain)
 	flushChain(*nftables.Chain)
+	addLabelAddressSet(*nftables.Set, []nftables.SetElement) error
+	deleteLabelAddressSet(*nftables.Set)
 	addSecondarySet(*nftables.Set) error
 	deleteSecondarySet(*nftables.Set)
 	deleteSecondaryElements(*nftables.Set, []nftables.SetElement) error
@@ -167,6 +171,11 @@ func queueKernelApplicationTable(
 				connection.deleteChain(chain)
 			}
 		}
+		for _, set := range before.labelAddressSets {
+			if !hasLabelAddressSet(table.labelAddressSets, set.name) {
+				connection.deleteLabelAddressSet(set.kernelSet(before.table))
+			}
+		}
 		if before.secondarySet != nil && table.secondarySet == nil {
 			connection.deleteSecondarySet(before.secondarySet)
 		}
@@ -189,6 +198,14 @@ func queueKernelApplicationTable(
 			}
 		}
 	}
+	for _, set := range table.labelAddressSets {
+		if hasLabelAddressSet(before.labelAddressSets, set.name) {
+			continue
+		}
+		if err := connection.addLabelAddressSet(set.kernelSet(table.table), set.elements()); err != nil {
+			return generationAuthorityError("queue label address set creation", err, nil)
+		}
+	}
 	for _, rule := range table.rules {
 		connection.addRule(rule)
 	}
@@ -202,4 +219,11 @@ func kernelApplicationHasChain(table compiledTable, name string) bool {
 		}
 	}
 	return false
+}
+
+func hasLabelAddressSet(sets []labelAddressSet, name string) bool {
+	_, found := slices.BinarySearchFunc(sets, name, func(set labelAddressSet, name string) int {
+		return strings.Compare(set.name, name)
+	})
+	return found
 }

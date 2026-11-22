@@ -62,6 +62,16 @@ func (connection *googleNFTablesApplicationConnection) deleteChain(chain *nftabl
 	connection.connection.DelChain(chain)
 }
 
+func (connection *googleNFTablesApplicationConnection) addLabelAddressSet(
+	set *nftables.Set, elements []nftables.SetElement,
+) error {
+	return connection.connection.AddSet(set, elements)
+}
+
+func (connection *googleNFTablesApplicationConnection) deleteLabelAddressSet(set *nftables.Set) {
+	connection.connection.DelSet(set)
+}
+
 func (connection *googleNFTablesApplicationConnection) addSecondarySet(set *nftables.Set) error {
 	return connection.connection.AddSet(set, nil)
 }

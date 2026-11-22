@@ -1042,6 +1042,17 @@ func (connection *recordingKernelApplicationConnection) deleteChain(chain *nftab
 	connection.record("delete chain " + kernelApplicationTableIdentity(chain.Table) + "/" + chain.Name)
 }
 
+func (connection *recordingKernelApplicationConnection) addLabelAddressSet(
+	set *nftables.Set, elements []nftables.SetElement,
+) error {
+	connection.record(fmt.Sprintf("add label address set %s keys=%d", set.Name, len(elements)))
+	return nil
+}
+
+func (connection *recordingKernelApplicationConnection) deleteLabelAddressSet(set *nftables.Set) {
+	connection.record("delete label address set " + set.Name)
+}
+
 func (connection *recordingKernelApplicationConnection) addSecondarySet(set *nftables.Set) error {
 	connection.record("add secondary set " + set.Name)
 	return nil

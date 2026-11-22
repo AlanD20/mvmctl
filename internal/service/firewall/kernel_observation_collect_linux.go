@@ -144,6 +144,7 @@ func collectKernelObservationSnapshot(
 				replyFlags: netlink.Multi | netlink.Append,
 			},
 		}
+		var secondaryPresent bool
 		for kindIndex, kind := range dumpKinds {
 			for _, identity := range managedTableIdentities {
 				request, err := kernelSnapshotTableDumpRequest(kind, identity)
@@ -161,15 +162,42 @@ func collectKernelObservationSnapshot(
 				case 0:
 					raw.ruleReplies = append(raw.ruleReplies, replies...)
 				case 1:
-					if identity != managedTableIdentities[0] && len(replies) != 0 {
-						return kernelObservation{}, invalidKernelObservation("inet table contains an unexpected set")
-					}
 					for _, reply := range replies {
-						if len(raw.setReplies) != 0 {
-							return kernelObservation{}, invalidKernelObservation("managed tables contain extra sets")
-						}
-						if _, err := decodeSecondaryLeaseSet(reply, &kernelBaseSequence{}); err != nil {
+						ref, _, attrs, err := decodeManagedSetHeader(reply)
+						if err != nil {
 							return kernelObservation{}, err
+						}
+						if ref.table != identity {
+							return kernelObservation{}, invalidKernelObservation("managed set dump returned another table")
+						}
+						if ref.name == secondaryLeaseSetName {
+							if secondaryPresent {
+								return kernelObservation{}, invalidKernelObservation("duplicate secondary lease set")
+							}
+							if _, err := decodeSecondaryLeaseSet(reply, &kernelBaseSequence{}); err != nil {
+								return kernelObservation{}, err
+							}
+							secondaryPresent = true
+						} else {
+							if err := decodeStaticLabelSetMetadata(attrs); err != nil {
+								return kernelObservation{}, err
+							}
+							if _, duplicate := raw.labelElementReplies[ref]; duplicate {
+								return kernelObservation{}, invalidKernelObservation("duplicate static label set")
+							}
+							elementRequest, err := kernelSnapshotSetElementsRequest(ref)
+							if err != nil {
+								return kernelObservation{}, err
+							}
+							elements, err := exchangeKernelSnapshot(ctx, factory, budget, elementRequest,
+								kernelObservationReplySpec{flags: netlink.Multi, mode: kernelObservationReplyMultipart})
+							if err != nil {
+								return kernelObservation{}, err
+							}
+							if raw.labelElementReplies == nil {
+								raw.labelElementReplies = make(map[managedSetRef][]netlink.Message)
+							}
+							raw.labelElementReplies[ref] = elements
 						}
 						raw.setReplies = append(raw.setReplies, reply)
 					}
@@ -182,7 +210,7 @@ func collectKernelObservationSnapshot(
 				}
 			}
 		}
-		if len(raw.setReplies) != 0 {
+		if secondaryPresent {
 			chainRequest, err := kernelSnapshotChainRequest(kernelSnapshotChainIdentity{
 				table: managedTableIdentities[0], name: managedBridgePostroutingChainName,
 			})
@@ -234,17 +262,21 @@ func collectKernelObservationSnapshot(
 }
 
 func kernelSnapshotSecondaryElementsRequest() (netlink.Message, error) {
+	return kernelSnapshotSetElementsRequest(managedSetRef{table: managedTableIdentities[0], name: secondaryLeaseSetName})
+}
+
+func kernelSnapshotSetElementsRequest(ref managedSetRef) (netlink.Message, error) {
 	attributes, err := netlink.MarshalAttributes([]netlink.Attribute{
-		{Type: unix.NFTA_SET_ELEM_LIST_TABLE, Data: []byte(managedBridgeTableName + "\x00")},
-		{Type: unix.NFTA_SET_ELEM_LIST_SET, Data: []byte(secondaryLeaseSetName + "\x00")},
+		{Type: unix.NFTA_SET_ELEM_LIST_TABLE, Data: []byte(ref.table.name + "\x00")},
+		{Type: unix.NFTA_SET_ELEM_LIST_SET, Data: []byte(ref.name + "\x00")},
 	})
 	if err != nil {
-		return netlink.Message{}, generationAuthorityError("marshal secondary lease element request", err, nil)
+		return netlink.Message{}, generationAuthorityError("marshal managed set element request", err, nil)
 	}
 	return netlink.Message{Header: netlink.Header{
 		Type:  netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETSETELEM),
 		Flags: netlink.Request | netlink.Dump,
-	}, Data: append(kernelSnapshotNetfilterHeader(nftables.TableFamilyBridge), attributes...)}, nil
+	}, Data: append(kernelSnapshotNetfilterHeader(ref.table.family), attributes...)}, nil
 }
 
 func exchangeKernelSnapshot(

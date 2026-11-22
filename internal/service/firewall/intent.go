@@ -146,14 +146,15 @@ type NetworkFloatingIPTrafficGrant struct {
 // Intent is the full host-global graph stored beside the authoritative generation record.
 // A graph is admitted only when its compiler-derived identity agrees with that record.
 type Intent struct {
-	VMLabels       vmLabelRecords        `json:"vm_labels"`
-	ActiveNetworks []string              `json:"active_networks"`
-	Reservations   []EndpointReservation `json:"reservations"`
-	Endpoints      []EndpointBinding     `json:"endpoints"`
-	Networks       []NetworkIntent       `json:"networks"`
-	VMGrants       []VMTrafficGrant      `json:"vm_grants"`
-	NetworkGrants  []NetworkTrafficGrant `json:"network_grants"`
-	HostServices   []HostServiceIntent   `json:"host_services"`
+	LabelTrafficPolicies []LabelTrafficPolicy  `json:"label_traffic_policies,omitempty"`
+	VMLabels             vmLabelRecords        `json:"vm_labels"`
+	ActiveNetworks       []string              `json:"active_networks"`
+	Reservations         []EndpointReservation `json:"reservations"`
+	Endpoints            []EndpointBinding     `json:"endpoints"`
+	Networks             []NetworkIntent       `json:"networks"`
+	VMGrants             []VMTrafficGrant      `json:"vm_grants"`
+	NetworkGrants        []NetworkTrafficGrant `json:"network_grants"`
+	HostServices         []HostServiceIntent   `json:"host_services"`
 	// Omitted empty extensions preserve the exact canonical encoding of existing root journals.
 	VMHostGrants            []VMHostTrafficGrant            `json:"vm_host_grants,omitempty"`
 	NetworkHostGrants       []NetworkHostTrafficGrant       `json:"network_host_grants,omitempty"`
@@ -165,6 +166,9 @@ type Intent struct {
 func (intent Intent) compile() (compiledGeneration, error) {
 	if err := intent.validateDurablePolicies(); err != nil {
 		return compiledGeneration{}, err
+	}
+	if len(intent.LabelTrafficPolicies) != 0 {
+		return compiledGeneration{}, invalidGeneration("label traffic policy enforcement is unavailable")
 	}
 	resolved := generationIntent{}
 	active := make(map[string]struct{}, len(intent.Endpoints))
@@ -348,6 +352,11 @@ func (intent Intent) validateDurablePolicies() error {
 		}
 	}
 	ids := make(map[string]struct{}, len(intent.VMGrants)+len(intent.NetworkGrants)+len(intent.HostServices))
+	for _, policy := range intent.LabelTrafficPolicies {
+		if err := policy.validate(reservations, ids); err != nil {
+			return err
+		}
+	}
 	for _, grant := range intent.VMGrants {
 		if !validPolicyOwnership(grant.ClaimID, grant.Incarnation) {
 			return invalidGeneration("invalid durable VM policy ownership")

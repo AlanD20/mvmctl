@@ -128,11 +128,12 @@ var managedTableIdentities = [...]tableIdentity{
 }
 
 type compiledTable struct {
-	secondarySet    *nftables.Set
-	secondaryOwners map[string][secondaryLeaseKeyBytes]byte
-	table           *nftables.Table
-	chains          []*nftables.Chain
-	rules           []compiledRule
+	labelAddressSets []labelAddressSet
+	secondarySet     *nftables.Set
+	secondaryOwners  map[string][secondaryLeaseKeyBytes]byte
+	table            *nftables.Table
+	chains           []*nftables.Chain
+	rules            []compiledRule
 }
 
 type compiledRule struct {

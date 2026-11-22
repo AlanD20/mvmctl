@@ -43,6 +43,7 @@ type kernelObservationMessages struct {
 	objectReplies           []netlink.Message
 	flowtableReplies        []netlink.Message
 	secondaryElementReplies []netlink.Message
+	labelElementReplies     map[managedSetRef][]netlink.Message
 }
 
 type kernelAttributeRule struct {
@@ -71,7 +72,7 @@ func decodeKernelObservation(raw kernelObservationMessages) (kernelObservation, 
 	if err := validateKernelObservationCaps(raw); err != nil {
 		return kernelObservation{}, err
 	}
-	if len(raw.setReplies) > 1 || len(raw.objectReplies) != 0 || len(raw.flowtableReplies) != 0 {
+	if len(raw.objectReplies) != 0 || len(raw.flowtableReplies) != 0 {
 		return kernelObservation{}, invalidKernelObservation("managed tables contain a set, object, or flowtable")
 	}
 
@@ -80,21 +81,8 @@ func decodeKernelObservation(raw kernelObservationMessages) (kernelObservation, 
 	if err != nil {
 		return kernelObservation{}, err
 	}
-	if len(raw.setReplies) == 1 {
-		if observed.empty {
-			return kernelObservation{}, invalidKernelObservation("secondary lease set exists without managed tables")
-		}
-		set, err := decodeSecondaryLeaseSet(raw.setReplies[0], &sequence)
-		if err != nil {
-			return kernelObservation{}, err
-		}
-		elements, err := decodeSecondaryLeaseElements(raw.secondaryElementReplies, &sequence)
-		if err != nil {
-			return kernelObservation{}, err
-		}
-		observed.tables[0].secondarySet, observed.tables[0].secondaryElements = set, elements
-	} else if len(raw.secondaryElementReplies) != 0 {
-		return kernelObservation{}, invalidKernelObservation("secondary lease elements exist without their set")
+	if err := decodeManagedSets(raw, &observed, &sequence); err != nil {
+		return kernelObservation{}, err
 	}
 	if err := decodeKernelChains(raw.chainReplies, tables, &observed, &sequence); err != nil {
 		return kernelObservation{}, err
@@ -107,7 +95,7 @@ func decodeKernelObservation(raw kernelObservationMessages) (kernelObservation, 
 }
 
 func validateKernelObservationCaps(raw kernelObservationMessages) error {
-	groups := [...][]netlink.Message{
+	groups := [][]netlink.Message{
 		raw.tableReplies,
 		raw.chainReplies,
 		raw.ruleReplies,
@@ -115,6 +103,9 @@ func validateKernelObservationCaps(raw kernelObservationMessages) error {
 		raw.objectReplies,
 		raw.flowtableReplies,
 		raw.secondaryElementReplies,
+	}
+	for _, replies := range raw.labelElementReplies {
+		groups = append(groups, replies)
 	}
 	totalMessages := 0
 	totalBytes := 0
@@ -331,7 +322,7 @@ func decodeKernelChains(
 		})
 	}
 	for index := range observed.tables {
-		expectedUse := uint32(len(observed.tables[index].chains))
+		expectedUse := uint32(len(observed.tables[index].chains) + len(observed.tables[index].labelAddressSets))
 		if observed.tables[index].secondarySet != nil {
 			expectedUse++
 		}

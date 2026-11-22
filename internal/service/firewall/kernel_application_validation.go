@@ -77,7 +77,8 @@ func validateKernelApplicationTarget(target compiledGeneration) error {
 		if target.bridge.table != nil || target.inet.table != nil || len(target.bridge.chains) != 0 ||
 			len(target.inet.chains) != 0 || len(target.bridge.rules) != 0 || len(target.inet.rules) != 0 ||
 			len(target.ingressGuards) != 0 || len(target.endpointIDs) != 0 || len(target.networkIDs) != 0 ||
-			target.bridge.secondarySet != nil || target.inet.secondarySet != nil || len(target.floatingIPs) != 0 {
+			target.bridge.secondarySet != nil || target.inet.secondarySet != nil || len(target.floatingIPs) != 0 ||
+			len(target.bridge.labelAddressSets) != 0 || len(target.inet.labelAddressSets) != 0 {
 			return invalidGeneration("empty kernel application target contains managed state")
 		}
 		return nil

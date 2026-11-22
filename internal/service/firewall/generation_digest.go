@@ -50,7 +50,8 @@ func encodeCanonicalGeneration(
 	}
 	if generation.empty && (generation.bridge.table != nil || generation.inet.table != nil ||
 		len(generation.bridge.chains) != 0 || len(generation.inet.chains) != 0 ||
-		len(generation.bridge.rules) != 0 || len(generation.inet.rules) != 0) {
+		len(generation.bridge.rules) != 0 || len(generation.inet.rules) != 0 ||
+		len(generation.bridge.labelAddressSets) != 0 || len(generation.inet.labelAddressSets) != 0) {
 		return invalidGeneration("compiled empty generation contains nftables output")
 	}
 
@@ -66,6 +67,9 @@ func encodeCanonicalGeneration(
 	if len(intent.floatingIPs) != 0 {
 		// Explicit lifetime is a clean break from the implicit finite v3/v4 resource grammar.
 		schema = "mvmctl.firewall.generation.v5"
+	}
+	if len(generation.bridge.labelAddressSets) != 0 || len(generation.inet.labelAddressSets) != 0 {
+		schema = "mvmctl.firewall.generation.v6"
 	}
 	encoder.text("schema", schema)
 	encoder.boolean("generation.empty", generation.empty)
@@ -201,6 +205,9 @@ func encodeCanonicalTable(encoder *generationDigestEncoder, boundGenerationID st
 	// Table.Use and Rule.Handle are kernel-assigned observations, not compiler output, so authority excludes them.
 	encoder.uint32("table.flags", table.table.Flags)
 	if err := encodeCanonicalSecondarySet(encoder, table); err != nil {
+		return err
+	}
+	if err := encodeCanonicalLabelAddressSets(encoder, table.labelAddressSets); err != nil {
 		return err
 	}
 	encoder.count("chains", len(table.chains))

@@ -196,7 +196,7 @@ func hostResetIntentEmpty(intent Intent) bool {
 			return false
 		}
 	}
-	return len(intent.ActiveNetworks) == 0 && len(intent.Reservations) == 0 && len(intent.Endpoints) == 0 &&
+	return len(intent.LabelTrafficPolicies) == 0 && len(intent.ActiveNetworks) == 0 && len(intent.Reservations) == 0 && len(intent.Endpoints) == 0 &&
 		len(
 			intent.Networks,
 		) == 0 && len(intent.VMGrants) == 0 && len(intent.NetworkGrants) == 0 && len(intent.HostServices) == 0 &&
