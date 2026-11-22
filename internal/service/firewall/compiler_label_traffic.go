@@ -52,11 +52,11 @@ func (compiler *generationCompiler) compileLabelTraffic(
 ) error {
 	sets := make(map[string]labelAddressSet)
 	for _, membership := range memberships {
-		source, err := newLabelAddressSet(table.table.Family, membership.sources)
+		source, err := compiler.labelAddressSet(table.table.Family, membership.sources)
 		if err != nil {
 			return err
 		}
-		destination, err := newLabelAddressSet(table.table.Family, membership.destinations)
+		destination, err := compiler.labelAddressSet(table.table.Family, membership.destinations)
 		if err != nil {
 			return err
 		}

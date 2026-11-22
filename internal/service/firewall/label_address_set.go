@@ -20,30 +20,40 @@ type labelAddressSet struct {
 
 type labelAddressKey = [secondaryLeaseKeyBytes]byte
 
-func newLabelAddressSet(family nftables.TableFamily, endpoints []EndpointBinding) (labelAddressSet, error) {
-	keys := make([]labelAddressKey, 0, len(endpoints))
-	for _, endpoint := range endpoints {
+func (compiler *generationCompiler) labelAddressSet(
+	family nftables.TableFamily, members []EndpointBinding,
+) (labelAddressSet, error) {
+	keys := make([]labelAddressKey, 0, len(members))
+	for _, member := range members {
 		var interfaceName string
 		switch family {
 		case nftables.TableFamilyBridge:
-			interfaceName = endpoint.HostVeth.Name
+			interfaceName = member.HostVeth.Name
 		case nftables.TableFamilyINet:
-			interfaceName = endpoint.ManagedBridge.Name
+			interfaceName = member.ManagedBridge.Name
 		default:
 			return labelAddressSet{}, invalidGeneration("label set requires a managed table family")
 		}
-		key, err := secondaryLeaseKey(interfaceName, endpoint.IPv4)
-		if err != nil {
-			return labelAddressSet{}, err
+		// Use the same owner-bound addresses as exact VM grants. Bridge ingress
+		// and destination guards still require the live lease for each alias.
+		for _, variant := range compiler.endpointAddressVariants(compiler.endpoints[member.VMID]) {
+			key, err := secondaryLeaseKey(interfaceName, variant.endpoint.ipv4)
+			if err != nil {
+				return labelAddressSet{}, err
+			}
+			keys = append(keys, key)
 		}
-		keys = append(keys, key)
 	}
-	slices.SortFunc(keys, compareLabelAddress)
-	keys = slices.Compact(keys)
 	if len(keys) == 0 {
 		return labelAddressSet{}, invalidGeneration("label address set membership is empty")
 	}
-	return labelAddressSet{name: labelAddressSetName(keys), keys: keys}, nil
+	return newLabelAddressSet(keys), nil
+}
+
+func newLabelAddressSet(keys []labelAddressKey) labelAddressSet {
+	slices.SortFunc(keys, compareLabelAddress)
+	keys = slices.Compact(keys)
+	return labelAddressSet{name: labelAddressSetName(keys), keys: keys}
 }
 
 func labelAddressSetName(keys []labelAddressKey) string {
