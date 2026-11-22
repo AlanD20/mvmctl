@@ -18,6 +18,7 @@ import (
 
 	"mvmctl/internal/lib/guestcontrolauth"
 	"mvmctl/internal/lib/guestcontrolwire"
+	"mvmctl/pkg/errs"
 )
 
 // Real TLS and stream fixtures exercise transport ownership only; no fake VMM/process admission
@@ -311,4 +312,56 @@ func TestGuestControlSessionAcceptsImmediateSequentialRequestBeforeResponseWrite
 	require.NoError(t, <-delivered)
 	_, err = session.Principal()
 	require.NoError(t, err, "sequential handoff must keep this authenticated stream alive")
+}
+
+// Rationale: cold startup must wait only for an explicit transport refusal before
+// authentication; truncated or malformed peer input must not gain retry semantics.
+func TestGuestControlConnectClassifiesOnlyUnavailableTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		ack       string
+		wantRetry bool
+	}{
+		{"not listening", "", true},
+		{"partial acknowledgement", "OK ", false},
+		{"malformed acknowledgement", "ERR unavailable\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			left, right := net.Pipe()
+			defer left.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				defer right.Close()
+				var request [14]byte
+				_, _ = io.ReadFull(right, request[:])
+				_, _ = io.WriteString(right, tc.ack)
+			}()
+			err := connectGuestControl(ctx, left)
+			require.Error(t, err)
+			de := errs.AsDomainError(err)
+			if tc.wantRetry {
+				require.NotNil(t, de)
+				require.Equal(t, errs.CodeAgentUnreachable, de.Code)
+				require.Equal(t, errs.ClassRetryable, de.Class)
+			} else if de != nil {
+				require.NotEqual(t, errs.CodeAgentUnreachable, de.Code)
+			}
+			<-done
+		})
+	}
+	for _, cause := range []error{unix.ECONNRESET, unix.EPIPE, unix.ECONNREFUSED} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			err := guestControlConnectTransportError(t.Context(), cause, true)
+			require.Equal(t, errs.CodeAgentUnreachable, errs.AsDomainError(err).Code)
+			require.ErrorIs(t, err, cause)
+			require.Equal(t, cause, guestControlConnectTransportError(t.Context(), cause, false))
+		})
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, guestControlConnectTransportError(ctx, io.EOF, true), io.EOF)
+	require.Nil(t, errs.AsDomainError(guestControlConnectTransportError(ctx, io.EOF, true)))
 }

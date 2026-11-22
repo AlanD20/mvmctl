@@ -15,7 +15,9 @@ import (
 
 // RunGuestControlWorker is a private inherited-descriptor entrypoint, before ordinary initialization.
 func RunGuestControlWorker(ctx context.Context, args []string) (returnErr error) {
-	setup, bootstrap, err := jailer.ReceiveGuestControlWorkerSetup(ctx, args)
+	startup, cancelStartup := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelStartup()
+	setup, bootstrap, err := jailer.ReceiveGuestControlWorkerSetup(startup, args)
 	if err != nil {
 		return err
 	}
@@ -24,7 +26,7 @@ func RunGuestControlWorker(ctx context.Context, args []string) (returnErr error)
 			returnErr = errors.Join(returnErr, bootstrap.Close())
 		}
 	}()
-	session, err := openGuestControlWorkerSession(ctx, setup)
+	session, err := waitGuestControlWorkerInitialSession(startup, setup, openGuestControlWorkerSession)
 	if err != nil {
 		return err
 	}
@@ -34,10 +36,11 @@ func RunGuestControlWorker(ctx context.Context, args []string) (returnErr error)
 		defer cancel()
 		returnErr = errors.Join(returnErr, closeErr, jailer.RetireGuestControlWorkerSelf(retire, setup))
 	}()
-	if err := jailer.AdmitGuestControlWorker(ctx, setup, session, bootstrap); err != nil {
+	if err := jailer.AdmitGuestControlWorker(startup, setup, session, bootstrap); err != nil {
 		return err
 	}
 	bootstrap = nil
+	cancelStartup()
 	// The bootstrap transport is now closed. No VM/network/global mutation lease remains idle.
 	for {
 		if err := serveGuestControlWorkerSession(ctx, setup, session); err == nil {
@@ -67,6 +70,42 @@ func RunGuestControlWorker(ctx context.Context, args []string) (returnErr error)
 	}
 }
 
+// Each attempt reopens full current grant, VMM and authenticated principal admission.
+// Only an explicitly classified pre-TLS refusal may wait; no feature request is replayed.
+func waitGuestControlWorkerInitialSession(
+	ctx context.Context,
+	setup jailer.GuestControlWorkerSetup,
+	openSession func(context.Context, jailer.GuestControlWorkerSetup) (*jailer.GuestControlSession, error),
+) (*jailer.GuestControlSession, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		session, err := openSession(ctx, setup)
+		if err == nil {
+			return session, nil
+		}
+		domain := errs.AsDomainError(err)
+		if domain == nil || domain.Code != errs.CodeAgentUnreachable || domain.Class != errs.ClassRetryable {
+			return nil, err
+		}
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func requireGuestControlWorkerSessionPrincipal(expected, actual jailer.GuestControlPrincipal) error {
+	if actual != expected {
+		return errGuestControlWorkerUnavailable()
+	}
+	return nil
+}
+
 func openGuestControlWorkerSession(
 	ctx context.Context,
 	setup jailer.GuestControlWorkerSetup,
@@ -81,8 +120,8 @@ func openGuestControlWorkerSession(
 		return nil, err
 	}
 	actual, err := session.Principal()
-	if err != nil || actual != p {
-		return nil, errors.Join(err, session.Close(context.WithoutCancel(ctx)), errGuestControlWorkerUnavailable())
+	if principalErr := requireGuestControlWorkerSessionPrincipal(p, actual); err != nil || principalErr != nil {
+		return nil, errors.Join(err, session.Close(context.WithoutCancel(ctx)), principalErr)
 	}
 	return session, nil
 }

@@ -18,6 +18,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/guestcontrolauth"
 	"mvmctl/internal/lib/guestcontrolwire"
+	"mvmctl/pkg/errs"
 )
 
 // GuestControlPrincipal is a root-derived observation, never authority minted from request fields.
@@ -229,13 +230,13 @@ func connectGuestControl(ctx context.Context, connection net.Conn) (returnErr er
 	defer func() { returnErr = watch.finish(ctx, returnErr) }()
 	request := fmt.Sprintf("CONNECT %d\n", infra.GuestControlVsockPort)
 	if n, err := io.WriteString(connection, request); err != nil || n != len(request) {
-		return errors.Join(err, io.ErrShortWrite)
+		return guestControlConnectTransportError(ctx, errors.Join(err, io.ErrShortWrite), true)
 	}
 	var line []byte
 	for len(line) < 64 {
 		var one [1]byte
 		if _, err := io.ReadFull(connection, one[:]); err != nil {
-			return err
+			return guestControlConnectTransportError(ctx, err, len(line) == 0)
 		}
 		if one[0] == '\n' {
 			text := string(line)
@@ -251,6 +252,18 @@ func connectGuestControl(ctx context.Context, connection net.Conn) (returnErr er
 		line = append(line, one[0])
 	}
 	return instanceValidationError("invalid Guest Control CONNECT acknowledgement")
+}
+
+// A transport refusal before the CONNECT acknowledgement is cold-agent unavailability,
+// not an authentication failure. Never retry a partial or malformed acknowledgement.
+func guestControlConnectTransportError(ctx context.Context, cause error, beforeAcknowledgement bool) error {
+	if ctx.Err() == nil && beforeAcknowledgement &&
+		(errors.Is(cause, io.EOF) || errors.Is(cause, unix.ECONNRESET) ||
+			errors.Is(cause, unix.EPIPE) || errors.Is(cause, unix.ECONNREFUSED)) {
+		return errs.WrapMsg(errs.CodeAgentUnreachable, "Guest Control agent is not accepting connections", cause,
+			errs.WithClass(errs.ClassRetryable))
+	}
+	return cause
 }
 
 // Principal returns only immutable observed identity, not network or process mutation authority.
