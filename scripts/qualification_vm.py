@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import gzip
 import hashlib
@@ -13,6 +14,12 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import select
+import sys
+import threading
+import time
+import runpy
+import importlib.util
 import uuid
 
 from system_test_evidence import (
@@ -236,7 +243,7 @@ def _admit_source_kernel(o, namespace):
     return o.ImportedRunnerKernelBinding(binding.id, binding.sha256, build_id=build_id)
 
 
-def _pytest(o, namespace, guest_task, source, files, label, *, collect=False, capture=None, kernel_binding=None):
+def _pytest(o, namespace, guest_task, source, files, label, *, collect=False, capture=None, kernel_binding=None, admin_stall=None):
     report = guest_task + "/" + label
     _command(o, namespace, "import pathlib,sys;p=pathlib.Path(sys.argv[1]);p.mkdir(mode=0o700);(p/'tmp').mkdir(mode=0o700)", report)
     raw_source, expected = _runtime_source(o, namespace, guest_task, source)
@@ -249,6 +256,10 @@ def _pytest(o, namespace, guest_task, source, files, label, *, collect=False, ca
     env = ["env", "PYTHONPATH=" + root + "/scripts", "PYTHONDONTWRITEBYTECODE=1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "TMPDIR=" + report + "/tmp",
            "MVM_TEST_VM=" + namespace["runner"], "MVM_TEST_QUALIFICATION_HOST=" + namespace["runner"],
            NODE_REPORT_ENV + "=" + report + "/nodes.json", PYTEST_OUTCOME_REPORT_ENV + "=" + ("" if collect else report + "/outcomes.json")]
+    if admin_stall is not None:
+        if collect or label != "floating_ip_worker_fault":
+            raise RuntimeError("administrator stall ticket is only for the whole worker-fault domain")
+        env += ["MVM_WORKER_STALL_ADMIN_TICKET=" + guest_task + "/worker-stall-admin.json"]
     if kernel_binding is not None:
         if collect or label != "env":
             raise RuntimeError("source kernel binding is only for qualification env execution")
@@ -287,6 +298,10 @@ def _worker_fixture(o, namespace, guest_task):
 
 
 def run(o, args):
+    admin_stall = os.environ.get("MVM_QUALIFICATION_ADMIN_STALL")
+    if admin_stall is not None and (admin_stall != "1" or args.collect_release_nodes
+            or args.domains != ["floating_ip_worker_fault"] or args.selected_node_file):
+        raise RuntimeError("administrator stall mode requires only the whole worker-fault domain")
     namespace = read_namespace(o, args.qualification_namespace)
     source = source_identity(o._REPO_ROOT)
     artifact_sha256 = o._sha256_runner_input(Path(o.MVM_CANDIDATE_BINARY))
@@ -314,9 +329,13 @@ def run(o, args):
     capture = MatrixEvidence(args.collect_release_nodes or args.record_evidence,
         dict(schema_version=1, host=namespace["runner"], boot_id=before["guest"]["boot_id"], source=source,
              candidate=candidate, controller=before["guest"]["controller"], registry=registry, selection=selection))
+    admin_task = Path(str(capture.task) + ".worker-stall-admin") if admin_stall else None
+    if admin_task is not None:admin_task.mkdir(mode=0o700)
     guest_task = stage(o, namespace, source)
     require_same(before, observe(o, namespace))
-    fixture = _worker_fixture(o, namespace, guest_task) if "floating_ip_worker_fault" in selection and not args.collect_release_nodes else None
+    fixture = (_prepare_admin_stall(o, namespace, guest_task, source, candidate, before, admin_task)
+               if admin_stall else _worker_fixture(o, namespace, guest_task)
+               if "floating_ip_worker_fault" in selection and not args.collect_release_nodes else None)
     observations = dict(namespace=namespace, before=before, after=None, guest_task=guest_task,
                         fixture_before=fixture, fixture_after=None)
     results = []
@@ -334,8 +353,14 @@ def run(o, args):
                     if domain == "env" and _admit_source_kernel(o, namespace) != kernel_binding:
                         raise RuntimeError("qualification source kernel changed before env execution")
                     kwargs = {"kernel_binding": kernel_binding} if domain == "env" else {}
+                    if admin_stall:kwargs["admin_stall"] = fixture
                     try:
-                        _pytest(o, namespace, guest_task, source, domain_capture.files, domain, capture=domain_capture, **kwargs)
+                        if admin_stall:
+                            proof = _run_admin_stall_case(o, fixture, admin_task, lambda: _pytest(
+                                o, namespace, guest_task, source, domain_capture.files, domain, capture=domain_capture, **kwargs))
+                            item["output"] = json.dumps(proof,sort_keys=True)
+                        else:
+                            _pytest(o, namespace, guest_task, source, domain_capture.files, domain, capture=domain_capture, **kwargs)
                     finally:
                         if domain == "env" and _admit_source_kernel(o, namespace) != kernel_binding:
                             raise RuntimeError("qualification source kernel changed after env execution")
@@ -352,7 +377,18 @@ def run(o, args):
     finally:
         observations["after"] = observe(o, namespace)
         require_same(before, observations["after"])
-        observations["fixture_after"] = _worker_fixture(o, namespace, guest_task) if fixture is not None else None
+        observations["fixture_after"] = (_read_admin_ticket(o, fixture) if admin_stall
+                                          else _worker_fixture(o, namespace, guest_task) if fixture is not None else None)
+        if admin_stall:
+            try:
+                proof = _join_admin_stall(o,fixture,admin_task)
+                if not results or json.loads(results[-1]["output"]) != proof:
+                    raise RuntimeError("administrator observer proof changed after domain validation")
+            except Exception as error:
+                _write(admin_task,"final-join-error.json",_encode(dict(error=str(error))))
+                for item in results:
+                    item["passed"] = False
+                    item["output"] = "final administrator observer proof failed: " + str(error)
         if observations["fixture_after"] != fixture:
             raise RuntimeError("qualification worker fixture changed")
         if source_identity(o._REPO_ROOT) != source:
@@ -362,3 +398,223 @@ def run(o, args):
     passed = bool(results) and len(results) == (1 if args.collect_release_nodes else len(selection)) and all(item["passed"] for item in results)
     print(json.dumps(dict(qualification_vm=namespace["runner_id"], passed=passed, results=results), sort_keys=True), flush=True)
     return passed
+
+
+# One explicit qualification operation: no command, path, PID or signal is accepted
+# from the guest request. The operator process never opens an administrator channel.
+_ADMIN_HELPER = "tests/system/network/floating_ip_worker_fault.py"
+
+
+def _admin_module(o):
+    return runpy.run_path(str(o._REPO_ROOT / _ADMIN_HELPER))
+
+
+def _prepare_admin_stall(o, namespace, guest_task, source, candidate, before, evidence):
+    ticket = dict(schema_version=1, nonce=uuid.uuid4().hex, hostname=namespace["runner"],
+                  boot_id=namespace["expected_vm"]["boot_id"], operator=namespace["operator"],
+                  source_sha256=source["payload"][_ADMIN_HELPER], candidate_sha256=candidate["sha256"])
+    _admin_module(o)["_admin_validate"](ticket)
+    script = "import os,sys;fd=os.open(sys.argv[1],os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600);os.write(fd,sys.argv[2].encode());os.fsync(fd);os.close(fd)"
+    _command(o, namespace, script, guest_task + "/worker-stall-admin.json", json.dumps(ticket,sort_keys=True))
+    descriptor = dict(namespace=namespace, guest_task=guest_task, source=source, candidate=candidate,
+                      ticket=ticket, before=before)
+    _write(evidence, "admin-worker-stall.json", _encode(descriptor))
+    return descriptor
+
+
+def _admin_guest_read(o, descriptor, name):
+    assert name in {"worker-stall-request.json", "worker-stall-continue.json", "worker-stall-admin.json"}
+    script = r"""
+import json,os,stat,sys
+try:fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NOFOLLOW)
+except FileNotFoundError:
+ print('ADMIN_STALL_PENDING');raise SystemExit(0)
+with os.fdopen(fd,'rb') as source:
+ row=os.fstat(source.fileno())
+ if row.st_nlink==2:
+  print('ADMIN_STALL_PENDING');raise SystemExit(0)
+ assert stat.S_ISREG(row.st_mode) and row.st_uid==os.getuid() and row.st_nlink==1
+ assert stat.S_IMODE(row.st_mode)==0o600 and row.st_size<=16384
+ raw=source.read(16385);assert len(raw)==row.st_size
+ print(raw.decode(),end='')
+"""
+    command=shlex.join(["/usr/bin/python3","-I","-S","-B","-c",script,descriptor["guest_task"]+"/"+name])
+    result=_exec(o,descriptor["namespace"],command,timeout=10,check=False)
+    if result.returncode==0 and result.stdout.strip()=="ADMIN_STALL_PENDING":return None
+    if result.returncode!=0:raise RuntimeError("administrator stall mailbox observation unavailable: "+result.stderr)
+    raw=result.stdout.encode()
+    if len(raw)>16384:raise RuntimeError("administrator stall receipt exceeds bound")
+    return o._host_reboot_json(raw)
+
+
+def _read_admin_ticket(o, descriptor):
+    if _admin_guest_read(o, descriptor, "worker-stall-admin.json") != descriptor["ticket"]:
+        raise RuntimeError("administrator stall ticket changed")
+    return descriptor
+
+
+def _require_admin_request(o, descriptor, request):
+    _admin_module(o)["_admin_validate"](request, request=True)
+    if {key:value for key,value in request.items() if key != "vm_id"} != descriptor["ticket"]:
+        raise RuntimeError("administrator stall request rebound")
+    return request
+
+
+def _admin_guest_write(o, descriptor, name, value):
+    assert name in {"worker-stall-admitted.json", "worker-stall-continued.json"}
+    # Load the pinned helper only as the ordinary operator, never as root.
+    script = "import runpy,sys,json;from pathlib import Path;m=runpy.run_path(sys.argv[1]);m['_admin_write'](Path(sys.argv[2]),json.loads(sys.argv[3]))"
+    _command(o, descriptor["namespace"], script, descriptor["guest_task"] + "/source/" + _ADMIN_HELPER,
+             descriptor["guest_task"] + "/" + name, json.dumps(value,sort_keys=True))
+
+
+def _run_admin_stall_case(o, descriptor, evidence, execute):
+    stop = threading.Event(); errors = []
+    def announce():
+        while not stop.is_set():
+            try:
+                request = _admin_guest_read(o, descriptor, "worker-stall-request.json")
+                if request is not None:
+                    _require_admin_request(o, descriptor, request)
+                    _write(evidence, "admin-worker-request.json", _encode(request))
+                    print("ADMIN WORKER STALL REQUEST " + json.dumps(request,sort_keys=True),flush=True)
+                    return
+            except Exception as error:
+                errors.append(error);return
+            stop.wait(0.5)
+    observer = threading.Thread(target=announce, name="worker-stall-request", daemon=True)
+    observer.start()
+    try:
+        result = execute()
+    finally:
+        stop.set();observer.join(timeout=45)
+    if observer.is_alive() or errors:
+        raise RuntimeError("administrator stall request observation unavailable")
+    return _join_admin_stall(o, descriptor, evidence)
+
+
+def _root_stall_payload(raw, request):
+    digest = hashlib.sha256(raw).hexdigest()
+    return ("import base64,hashlib,json;raw=base64.b64decode(" + repr(base64.b64encode(raw).decode()) + ");"
+            + "assert hashlib.sha256(raw).hexdigest()==" + repr(digest) + ";"
+            + "module={'__name__':'qualification_admin_observer'};exec(compile(raw,'<pinned-qa-worker-observer>','exec'),module);"
+            + "module['_administrator_root_observer'](json.loads(" + repr(json.dumps(request,sort_keys=True)) + ")," + repr(digest) + ","
+            + repr(request['candidate_sha256']) + ")")
+
+
+def _join_admin_stall(o, descriptor, evidence):
+    request = _require_admin_request(o, descriptor, json.loads(_read(evidence / "admin-worker-request.json",16384)))
+    proof = json.loads(_read(evidence / "admin-worker-observer.json",MAX_OUTPUT_BYTES))
+    expected = {"request", "admission", "returncode", "output", "stderr", "payload_sha256", "error"}
+    raw = (o._REPO_ROOT / _ADMIN_HELPER).read_bytes()
+    if (set(proof) != expected or proof["request"] != request or type(proof["returncode"]) is not int
+            or proof["returncode"] != 0 or proof["output"].strip() != "CONTINUED_EXACT_ROOT_WORKER"
+            or proof["error"] is not None
+            or proof["payload_sha256"] != hashlib.sha256(_root_stall_payload(raw,request).encode()).hexdigest()):
+        raise RuntimeError("administrator stall lacks independent exact root admission/thaw proof")
+    _admin_module(o)["_admin_admission"](request, proof["admission"])
+    return proof
+
+
+def _drive_admin_observer(o, descriptor, request, command, evidence, *, popen=subprocess.Popen):
+    """Only the separately invoked administrator entry calls this function."""
+    if _admin_guest_read(o,descriptor,"worker-stall-continue.json") is not None:
+        raise RuntimeError("administrator stall request already cancelled; no root observer launched")
+    child = popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    admission = None; output = errors = ""; failure = None
+    try:
+        if not select.select([child.stdout],[],[],40)[0]:raise RuntimeError("root observer admission unavailable")
+        line = child.stdout.readline(16385)
+        admission = json.loads(line)
+        _admin_module(o)["_admin_admission"](request,admission)
+        _admin_guest_write(o,descriptor,"worker-stall-admitted.json",dict(request=request,admission=admission))
+        deadline = time.monotonic()+90
+        while time.monotonic()<deadline:
+            continuation = _admin_guest_read(o,descriptor,"worker-stall-continue.json")
+            if continuation is not None:
+                if continuation != request:raise RuntimeError("administrator CONT request rebound")
+                break
+            time.sleep(.1)
+        else:raise RuntimeError("administrator CONT request unavailable")
+    except BaseException as error:
+        failure = str(error)
+    finally:
+        # Always attempt CONT through this exact retained SSH stdin. Never signal
+        # a guessed PID, kill the observer, or use a different root transport.
+        try:
+            output,errors = child.communicate('CONT\n',timeout=110)
+        except BaseException as error:
+            failure = failure or str(error)
+        raw = (o._REPO_ROOT / _ADMIN_HELPER).read_bytes()
+        proof = dict(request=request,admission=admission,returncode=child.returncode,output=output,stderr=errors,
+                     payload_sha256=hashlib.sha256(_root_stall_payload(raw,request).encode()).hexdigest(),error=failure)
+        _write(evidence,"admin-worker-observer.json",_encode(proof),MAX_OUTPUT_BYTES)
+        if child.returncode is not None:
+            _admin_guest_write(o,descriptor,"worker-stall-continued.json",dict(request=request,
+                               returncode=child.returncode,output=output))
+    if failure or child.returncode != 0:raise RuntimeError("administrator worker observer failed: " + str(failure or errors))
+    _join_admin_stall(o,descriptor,evidence)
+    return proof
+
+
+
+def _observe_admin_stall_target(o, descriptor, request):
+    namespace = descriptor["namespace"]
+    if _outer(o,namespace) != descriptor["before"]["outer"]:
+        raise RuntimeError("administrator outer VM process changed")
+    if o._host_reboot_controller() != descriptor["before"]["outer_controller"]:
+        raise RuntimeError("administrator outer controller changed")
+    script = r"""
+import hashlib,json,os,pathlib,stat,subprocess,sys,socket
+expected=json.loads(sys.argv[1]);request=json.loads(sys.argv[2]);user=expected['namespace']['operator']
+assert os.getuid()==os.geteuid()==user['uid'] and os.getgid()==user['gid']
+assert socket.gethostname()==request['hostname']
+assert pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()==request['boot_id']
+assert hashlib.sha256(pathlib.Path('/usr/local/bin/mvm').read_bytes()).hexdigest()==request['candidate_sha256']
+paths=dict(home=user['home'],task_parent=user['home']+'/.cache',**expected['namespace']['paths'])
+for key,name in paths.items():
+ p=pathlib.Path(name);row=p.lstat();assert p.resolve()==p and stat.S_ISDIR(row.st_mode)
+ assert [row.st_dev,row.st_ino,row.st_uid,row.st_gid,stat.S_IMODE(row.st_mode)]==expected['namespace_identity'][key]
+raw=subprocess.check_output(['/usr/local/bin/mvm','vm','inspect',request['vm_id'],'--json'],text=True,timeout=30)
+item=json.loads(raw);assert item['status']=='success' and item['error'] is None
+vm=item['data']['vm'];assert vm['id']==request['vm_id'] and vm['status']=='running' and vm['pid']>0
+"""
+    probe = dict(namespace=namespace,namespace_identity=descriptor["before"]["guest"]["namespace_identity"])
+    _command(o,namespace,script,json.dumps(probe),json.dumps(request))
+
+def administrator_main(argv=None):
+    parser = argparse.ArgumentParser(description="Explicit one-shot QA root-worker STOP/CONT administrator")
+    parser.add_argument("operation",choices=["admin-worker-stall"])
+    parser.add_argument("--evidence",type=Path,required=True)
+    parser.add_argument("--vm",required=True)
+    parser.add_argument("--key",type=Path,required=True)
+    parser.add_argument("--known-hosts",type=Path,required=True)
+    args = parser.parse_args(argv)
+    # Load the unchanged orchestrator interfaces without executing its CLI.
+    path = Path(__file__).with_name("run-system-tests.py")
+    spec = importlib.util.spec_from_file_location("worker_stall_admin_orchestrator",path)
+    o = importlib.util.module_from_spec(spec);sys.modules[spec.name]=o;spec.loader.exec_module(o)
+    evidence = Path(str(args.evidence) + ".worker-stall-admin")
+    descriptor = json.loads(_read(evidence / "admin-worker-stall.json",MAX_OUTPUT_BYTES))
+    request = _require_admin_request(o,descriptor,json.loads(_read(evidence / "admin-worker-request.json",16384)))
+    if request["vm_id"] != args.vm:raise RuntimeError("explicit administrator target differs from observed request")
+    if source_identity(o._REPO_ROOT) != descriptor["source"]:raise RuntimeError("administrator source changed")
+    _observe_admin_stall_target(o,descriptor,request)
+    raw = (o._REPO_ROOT / _ADMIN_HELPER).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != request["source_sha256"]:raise RuntimeError("administrator observer source changed")
+    namespace = descriptor["namespace"]
+    expected = namespace["expected_vm"]["ssh_host_key"].split()
+    entries = [line.split() for line in args.known_hosts.read_text().splitlines() if line.strip() and not line.startswith('#')]
+    if not any(len(row)==3 and namespace["expected_vm"]["ipv4"] in row[0].split(',') and row[1:]==expected for row in entries):
+        raise RuntimeError("administrator SSH host key differs from retained exact target")
+    command = ["ssh","-F","/dev/null","-i",str(args.key),"-o","BatchMode=yes","-o","StrictHostKeyChecking=yes",
+               "-o","UserKnownHostsFile="+str(args.known_hosts),"-o","ConnectTimeout=8",
+               "root@"+namespace["expected_vm"]["ipv4"],
+               shlex.join(["/usr/bin/python3","-I","-S","-B","-c",_root_stall_payload(raw,request)])]
+    _write(evidence,"admin-worker-command.json",_encode(command),MAX_OUTPUT_BYTES)
+    _drive_admin_observer(o,descriptor,request,command,evidence)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(administrator_main())

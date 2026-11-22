@@ -168,7 +168,7 @@ def _continue_admitted_worker(process, pidfd, *, observe=_observe_process, send=
 
 def _root_observer(vm_id, owner, group):
     assert os.getuid() == os.geteuid() == 0
-    assert int(os.environ["SUDO_UID"]) == owner > 0 and int(os.environ["SUDO_GID"]) == group > 0
+    assert type(owner) is int and type(group) is int and owner > 0 and group > 0
     assert re.fullmatch(r"[0-9a-f]{32}", vm_id)
     descriptors, locks, lock_bindings = [], [], []
     pidfd = None; process = None; stopped = False
@@ -314,6 +314,10 @@ def stalled_root_worker(runner, vm):
     assert os.environ.get('MVM_TEST_QUALIFICATION_HOST') == os.environ.get('MVM_TEST_VM') == runner
     assert runner
     vm_id = vm['binding']['id']
+    if os.environ.get('MVM_WORKER_STALL_ADMIN_TICKET'):
+        with _administrator_stall(vm_id) as receipt:
+            yield receipt
+        return
     validate_worker_fixture()
     command = ['/usr/bin/sudo', '-n', str(_FIXTURE_EXECUTABLE), vm_id, str(os.getuid()), str(os.getgid())]
     child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -329,11 +333,126 @@ def stalled_root_worker(runner, vm):
         assert child.returncode == 0 and output.strip() == 'CONTINUED_EXACT_ROOT_WORKER', (output, errors)
 
 
+_ADMIN_KEYS = {'schema_version', 'nonce', 'hostname', 'boot_id', 'operator', 'source_sha256', 'candidate_sha256'}
+
+
+class _AdminPublicationPending(Exception):
+    pass
+
+
+def _admin_read(path, owner):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, 'rb') as stream:
+        row = os.fstat(stream.fileno())
+        if row.st_nlink == 2:
+            raise _AdminPublicationPending
+        assert stat.S_ISREG(row.st_mode) and row.st_uid == owner and row.st_nlink == 1
+        assert stat.S_IMODE(row.st_mode) == 0o600 and row.st_size <= 16384
+        raw = stream.read(16385)
+        assert len(raw) == row.st_size and _fingerprint(os.fstat(stream.fileno())) == _fingerprint(row)
+    return json.loads(raw, object_pairs_hook=_unique)
+
+
+def _admin_write(path, value):
+    raw = (json.dumps(value, sort_keys=True) + '\n').encode()
+    assert len(raw) <= 16384
+    pending = path.with_name(path.name + '.publishing')
+    fd = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+    os.link(pending, path); pending.unlink()
+
+
+def _admin_validate(value, *, request=False):
+    assert set(value) == _ADMIN_KEYS | ({'vm_id'} if request else set())
+    assert type(value['schema_version']) is int and value['schema_version'] == 1
+    assert re.fullmatch(r'[0-9a-f]{32}', value['nonce'])
+    assert value['hostname'] == 'mvmctl-030-test'
+    assert re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', value['boot_id'])
+    assert set(value['operator']) == {'user', 'uid', 'gid', 'home'}
+    assert value['operator']['user'] == 'runner' and value['operator']['home'] == '/home/runner'
+    assert type(value['operator']['uid']) is int and type(value['operator']['gid']) is int
+    assert value['operator']['uid'] == value['operator']['gid'] == 1000
+    for key in ('source_sha256', 'candidate_sha256'):
+        assert re.fullmatch(r'[0-9a-f]{64}', value[key])
+    if request:assert re.fullmatch(r'[0-9a-f]{32}', value['vm_id'])
+    return value
+
+
+def _admin_admission(request, admission):
+    assert set(admission) == {'vm_id', 'owner_uid', 'boot_id', 'launch_generation', 'pid',
+                              'start_time_ticks', 'all_threads_stopped'}
+    assert admission['vm_id'] == request['vm_id'] and admission['owner_uid'] == request['operator']['uid']
+    assert admission['boot_id'] == request['boot_id'] and admission['all_threads_stopped'] is True
+    for key in ('launch_generation', 'pid', 'start_time_ticks'):
+        assert type(admission[key]) is int and admission[key] > 0
+    return admission
+
+
+def _admin_wait(path, owner, deadline):
+    while time.monotonic() < deadline:
+        try:
+            return _admin_read(path, owner)
+        except (FileNotFoundError, _AdminPublicationPending):
+            time.sleep(0.05)
+    raise AssertionError('administrator worker-stall handshake unavailable')
+
+
+@contextmanager
+def _administrator_stall(vm_id):
+    ticket_path = Path(os.environ['MVM_WORKER_STALL_ADMIN_TICKET'])
+    assert ticket_path.name == 'worker-stall-admin.json'
+    assert re.fullmatch(re.escape(str(Path.home() / '.cache/mvmctl-qualification-')) + r'[0-9a-f]{32}', str(ticket_path.parent))
+    directory = ticket_path.parent.lstat()
+    assert ticket_path.parent.resolve() == ticket_path.parent and stat.S_ISDIR(directory.st_mode)
+    assert directory.st_uid == os.getuid() and stat.S_IMODE(directory.st_mode) == 0o700
+    ticket = _admin_validate(_admin_read(ticket_path, os.getuid()))
+    assert ticket['operator']['uid'] == os.getuid() and ticket['operator']['gid'] == os.getgid()
+    assert ticket['hostname'] == socket.gethostname()
+    assert ticket['boot_id'] == Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    assert ticket['source_sha256'] == hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    request = dict(ticket, vm_id=vm_id)
+    request = _admin_validate(request, request=True)
+    _admin_write(ticket_path.parent / 'worker-stall-request.json', request)
+    try:
+        envelope = _admin_wait(ticket_path.parent / 'worker-stall-admitted.json', os.getuid(), time.monotonic() + 40)
+        assert set(envelope) == {'request', 'admission'} and envelope['request'] == request
+        yield _admin_admission(request, envelope['admission'])
+    finally:
+        # Always request CONT, including admission/report/test failures. The external
+        # administrator also sends CONT from its own finally using the retained pipe.
+        _admin_write(ticket_path.parent / 'worker-stall-continue.json', request)
+        ack = _admin_wait(ticket_path.parent / 'worker-stall-continued.json', os.getuid(), time.monotonic() + 20)
+        assert set(ack) == {'request', 'returncode', 'output'} and ack['request'] == request
+        assert type(ack['returncode']) is int and ack['returncode'] == 0
+        assert ack['output'].strip() == 'CONTINUED_EXACT_ROOT_WORKER'
+
+
+def _administrator_root_observer(request, source_sha256, candidate_sha256):
+    """Explicit root-SSH administrator entry; it never claims sudo provenance."""
+    assert os.getuid() == os.geteuid() == 0
+    _admin_validate(request, request=True)
+    assert request['source_sha256'] == source_sha256 and request['candidate_sha256'] == candidate_sha256
+    assert socket.gethostname() == request['hostname'] == 'mvmctl-030-test'
+    assert Path('/proc/sys/kernel/random/boot_id').read_text().strip() == request['boot_id']
+    user = request['operator']; account = pwd.getpwnam(user['user'])
+    assert (account.pw_uid, account.pw_gid, account.pw_dir) == (user['uid'], user['gid'], user['home'])
+    fd = os.open('/usr/local/bin/mvm', os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, 'rb') as stream:
+        row = os.fstat(stream.fileno())
+        assert stat.S_ISREG(row.st_mode) and row.st_uid == row.st_gid == 0
+        assert stat.S_IMODE(row.st_mode) == 0o755 and row.st_nlink == 1
+        assert hashlib.sha256(stream.read()).hexdigest() == candidate_sha256
+        assert _fingerprint(os.fstat(stream.fileno())) == _fingerprint(row)
+    _root_observer(request['vm_id'], user['uid'], user['gid'])
+
+
 if __name__ == '__main__':
     assert len(sys.argv) == 4
     assert Path(__file__).absolute() == _FIXTURE_EXECUTABLE
     assert re.fullmatch(r'[0-9a-f]{32}', sys.argv[1])
     owner, group = int(sys.argv[2]), int(sys.argv[3])
     assert sys.argv[2:] == [str(owner), str(group)], 'canonical numeric principal arguments required'
+    assert int(os.environ["SUDO_UID"]) == owner > 0 and int(os.environ["SUDO_GID"]) == group > 0
     validate_worker_fixture(owner, group)
     _root_observer(sys.argv[1], owner, group)

@@ -103,7 +103,7 @@ def execution(orchestrator, namespace, observed, monkeypatch, tmp_path):
                  "_install_system_binary_in_runner", "_initialize_system_binary_in_runner", "_run_local_pytest", "_get_mvm_version"):
         monkeypatch.setattr(orchestrator, name, forbidden)
     monkeypatch.setattr(q, "stage", lambda *a: "/home/runner/.cache/mvmctl-qualification-" + "a"*32)
-    def pytest_run(o, ns, guest_task, actual_source, files, label, *, collect=False, capture=None, kernel_binding=None):
+    def pytest_run(o, ns, guest_task, actual_source, files, label, *, collect=False, capture=None, kernel_binding=None, admin_stall=None):
         calls.append((label, files))
         nodes = [path + "::test_fixture" for path in files]
         result = subprocess.CompletedProcess([], 0, "literal output", "")
@@ -307,7 +307,7 @@ def test_source_kernel_drift_prevents_env_pass(execution, monkeypatch, when):
     assert [label for label, files in e.calls] == (["floating_ip"] if when == "before" else ["floating_ip", "env"])
 
 
-@pytest.mark.parametrize("label", ["floating_ip", "env"])
+@pytest.mark.parametrize("label", ["floating_ip", "env", "floating_ip_worker_fault"])
 def test_remote_command_budget_reaches_actual_long_pytest_mvm_argv(orchestrator, namespace, monkeypatch, tmp_path, label):
     q = orchestrator.qualification_vm
     evidence = __import__("system_test_evidence")
@@ -330,7 +330,8 @@ def test_remote_command_budget_reaches_actual_long_pytest_mvm_argv(orchestrator,
     monkeypatch.setattr(q, "_fetch", fetch)
     binding = orchestrator.ImportedRunnerKernelBinding("d"*64, "e"*64) if label == "env" else None
     q._pytest(orchestrator, namespace, "/home/runner/.cache/mvmctl-qualification-" + "a" * 32,
-              dict(payload=expected), files, label, capture=capture, kernel_binding=binding)
+              dict(payload=expected), files, label, capture=capture, kernel_binding=binding,
+              admin_stall={} if label == "floating_ip_worker_fault" else None)
     pytest_calls = [(args, kwargs) for args, kwargs in calls if " -m pytest " in args[-1]]
     assert len(pytest_calls) == 1
     argv, options = pytest_calls[0]
@@ -338,6 +339,219 @@ def test_remote_command_budget_reaches_actual_long_pytest_mvm_argv(orchestrator,
     assert options == {"check": False, "timeout": 1830}
     assert ("MVM_RUNNER_KERNEL_ID=" + "d"*64 in argv[-1]) is (label == "env")
     assert ("MVM_RUNNER_KERNEL_SHA256=" + "e"*64 in argv[-1]) is (label == "env")
+    assert ("MVM_WORKER_STALL_ADMIN_TICKET=" in argv[-1]) is (label == "floating_ip_worker_fault")
     assert capture.report_cleanup is True
     short_calls = [(args, kwargs) for args, kwargs in calls if " -m pytest " not in args[-1]]
     assert short_calls and all(args[5] == "60" and kwargs["timeout"] == 90 for args, kwargs in short_calls)
+
+
+@pytest.fixture
+def admin_stall(orchestrator, namespace, observed):
+    import os
+    helper = orchestrator.qualification_vm._admin_module(orchestrator)
+    raw = (orchestrator._REPO_ROOT / orchestrator.qualification_vm._ADMIN_HELPER).read_bytes()
+    ticket = dict(schema_version=1,nonce='a'*32,hostname='mvmctl-030-test',
+        boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),operator=namespace['operator'],
+        source_sha256=hashlib.sha256(raw).hexdigest(),candidate_sha256='b'*64)
+    descriptor = dict(namespace=namespace,source=dict(payload={orchestrator.qualification_vm._ADMIN_HELPER:ticket['source_sha256']}),
+        guest_task='/home/runner/.cache/mvmctl-qualification-'+'a'*32,ticket=ticket,before=observed,candidate=dict(sha256='b'*64))
+    request = dict(ticket,vm_id='c'*32)
+    admission = dict(vm_id=request['vm_id'],owner_uid=1000,boot_id=ticket['boot_id'],launch_generation=2,
+        pid=123,start_time_ticks=456,all_threads_stopped=True)
+    return helper,descriptor,request,admission
+
+
+@pytest.mark.parametrize('fault',[None,'argv','pid','path','signal','nonce','vm','principal','source'])
+def test_admin_worker_stall_request_is_one_closed_operation(admin_stall,fault):
+    helper,descriptor,request,admission=admin_stall
+    if fault in ('argv','pid','path','signal'):request[fault]='unapproved'
+    elif fault=='nonce':request['nonce']='bad'
+    elif fault=='vm':request['vm_id']='1'
+    elif fault=='principal':request['operator']['uid']=0
+    elif fault=='source':request['source_sha256']='wrong'
+    if fault is None:assert helper['_admin_validate'](request,request=True) is request
+    else:
+        with pytest.raises((AssertionError,TypeError)):helper['_admin_validate'](request,request=True)
+
+
+@pytest.mark.parametrize('fault',['nonce','source','boot','operator'])
+def test_admin_worker_request_cannot_rebind_ticket(orchestrator,admin_stall,fault):
+    _,descriptor,request,_=admin_stall
+    request=copy.deepcopy(request)
+    if fault=='nonce':request['nonce']='d'*32
+    elif fault=='source':request['source_sha256']='e'*64
+    elif fault=='boot':request['boot_id']='11111111-1111-4111-8111-111111111111'
+    else:request['operator']['gid']=0
+    with pytest.raises((RuntimeError,AssertionError)):
+        orchestrator.qualification_vm._require_admin_request(orchestrator,descriptor,request)
+
+
+@pytest.mark.parametrize('failure',[None,'admission','test','ack'])
+def test_operator_admin_stall_always_requests_exact_cont(orchestrator,admin_stall,monkeypatch,tmp_path,failure):
+    import os
+    helper,descriptor,request,admission=admin_stall
+    # Execute the real context manager with only its transport wait injected.
+    namespace=helper['_administrator_stall'].__wrapped__.__globals__
+    monkeypatch.setattr(Path,'home',classmethod(lambda cls:tmp_path))
+    task=tmp_path/'.cache'/('mvmctl-qualification-'+'a'*32);task.mkdir(parents=True,mode=0o700)
+    ticket=descriptor['ticket'];helper['_admin_write'](task/'worker-stall-admin.json',ticket)
+    monkeypatch.setenv('MVM_WORKER_STALL_ADMIN_TICKET',str(task/'worker-stall-admin.json'))
+    def wait(path,owner,deadline):
+        actual=helper['_admin_read'](task/'worker-stall-request.json',os.getuid())
+        if path.name=='worker-stall-admitted.json':
+            if failure=='admission':raise AssertionError('admission unavailable')
+            return dict(request=actual,admission=admission)
+        return dict(request=actual,returncode=1 if failure=='ack' else 0,output='CONTINUED_EXACT_ROOT_WORKER')
+    monkeypatch.setitem(namespace,'_admin_wait',wait)
+    def run():
+        with helper['_administrator_stall'](request['vm_id']) as received:
+            assert received==admission
+            if failure=='test':raise AssertionError('test failure')
+    if failure is None:run()
+    else:
+        with pytest.raises(AssertionError):run()
+    assert helper['_admin_read'](task/'worker-stall-continue.json',os.getuid())==request
+
+
+@pytest.mark.parametrize('fault',[None,'admission','publish','continue','native','output','cancelled'])
+def test_outside_admin_observer_finally_cont_and_independent_closure(
+    orchestrator,admin_stall,monkeypatch,tmp_path,fault,
+):
+    import io
+    q=orchestrator.qualification_vm;_,descriptor,request,admission=admin_stall
+    evidence=tmp_path/'evidence';evidence.mkdir(mode=0o700)
+    q._write(evidence,'admin-worker-request.json',q._encode(request))
+    sent=[];published=[]
+    class Channel:
+        returncode=None
+        stdout=io.StringIO('not json\n' if fault=='admission' else json.dumps(admission)+'\n')
+        def communicate(self,value,timeout):
+            sent.append(value);self.returncode=1 if fault=='native' else 0
+            return ('wrong' if fault=='output' else 'CONTINUED_EXACT_ROOT_WORKER\n','')
+    child=Channel()
+    monkeypatch.setattr(q.select,'select',lambda readers,*a:(readers,[],[]))
+    def publish(o,d,name,value):
+        published.append((name,value))
+        if fault=='publish' and name=='worker-stall-admitted.json':raise RuntimeError('publication unavailable')
+    monkeypatch.setattr(q,'_admin_guest_write',publish)
+    reads=[]
+    def read(*args):
+        reads.append(args[-1])
+        if len(reads)==1:return request if fault=='cancelled' else None
+        return dict(request,nonce='e'*32) if fault=='continue' else request
+    monkeypatch.setattr(q,'_admin_guest_read',read)
+    def run():return q._drive_admin_observer(orchestrator,descriptor,request,['explicit-root-observer'],evidence,popen=lambda *a,**k:child)
+    if fault is None:
+        proof=run();assert proof['returncode']==0 and proof['admission']==admission
+        assert q._join_admin_stall(orchestrator,descriptor,evidence)==proof
+    else:
+        with pytest.raises((RuntimeError,AssertionError)):run()
+    if fault=='cancelled':
+        assert sent==[] and not (evidence/'admin-worker-observer.json').exists()
+        return
+    assert sent==['CONT\n']
+    assert (evidence/'admin-worker-observer.json').exists()
+    assert published[-1][0]=='worker-stall-continued.json'
+
+
+@pytest.mark.parametrize('fault',['missing','wrong-request','nonzero','wrong-thaw','wrong-source'])
+def test_admin_stall_requires_independent_root_native_proof(orchestrator,admin_stall,tmp_path,fault):
+    q=orchestrator.qualification_vm;_,descriptor,request,admission=admin_stall
+    task=tmp_path/'proof';task.mkdir(mode=0o700)
+    q._write(task,'admin-worker-request.json',q._encode(request))
+    raw=(orchestrator._REPO_ROOT/q._ADMIN_HELPER).read_bytes()
+    proof=dict(request=copy.deepcopy(request),admission=admission,returncode=0,output='CONTINUED_EXACT_ROOT_WORKER',stderr='',
+        payload_sha256=hashlib.sha256(q._root_stall_payload(raw,request).encode()).hexdigest(),error=None)
+    if fault=='wrong-request':proof['request']['vm_id']='d'*32
+    elif fault=='nonzero':proof['returncode']=1
+    elif fault=='wrong-thaw':proof['output']='wrong'
+    elif fault=='wrong-source':proof['payload_sha256']='0'*64
+    if fault!='missing':q._write(task,'admin-worker-observer.json',q._encode(proof))
+    with pytest.raises((RuntimeError,OSError)):q._join_admin_stall(orchestrator,descriptor,task)
+
+
+@pytest.mark.parametrize('value,domains',[('true',['floating_ip_worker_fault']),('1',['floating_ip']),('1',['floating_ip_worker_fault','env'])])
+def test_admin_stall_mode_never_enables_other_domains(execution,orchestrator,monkeypatch,value,domains):
+    args=execution.args;args.domains=domains
+    monkeypatch.setenv('MVM_QUALIFICATION_ADMIN_STALL',value)
+    with pytest.raises(RuntimeError,match='whole worker-fault domain'):orchestrator.qualification_vm.run(orchestrator,args)
+
+
+def test_explicit_admin_mode_only_runs_whole_fault_case_without_sudo_fixture(execution,admin_stall,monkeypatch):
+    e=execution;q=e.q;_,descriptor,request,_=admin_stall
+    path='tests/system/network/test_floating_ip_worker_fault.py'
+    e.registry['floating_ip_worker_fault']=dict(tier=2,files=[path]);e.source['payload'][path]='d'*64
+    e.args.domains=['floating_ip_worker_fault']
+    monkeypatch.setenv('MVM_QUALIFICATION_ADMIN_STALL','1')
+    monkeypatch.setattr(q,'_prepare_admin_stall',lambda *a:descriptor)
+    monkeypatch.setattr(q,'_read_admin_ticket',lambda *a:descriptor)
+    monkeypatch.setattr(q,'_worker_fixture',lambda *a:pytest.fail('explicit administrator mode must not adopt sudo installation'))
+    proof=dict(request=request,returncode=0)
+    def operation(o,d,t,execute):execute();return proof
+    monkeypatch.setattr(q,'_run_admin_stall_case',operation)
+    monkeypatch.setattr(q,'_join_admin_stall',lambda *a:proof)
+    assert q.run(e.o,e.args) is True
+    assert [name for name,_ in e.calls]==['floating_ip_worker_fault']
+    assert set(json.loads((e.task/'qualification-vm.json').read_text()))=={'namespace','before','after','guest_task','fixture_before','fixture_after'}
+    assert json.loads(json.loads((e.task/'floating_ip_worker_fault.result.json').read_text())['output'])==proof
+    binding=json.loads((e.task/'binding.json').read_text())
+    verified=__import__('system_test_evidence').verify_matrix_task(e.task,e.source,binding['candidate'],e.registry)
+    assert verified['domains']=={'floating_ip_worker_fault':1}
+
+
+def test_admin_target_probe_uses_bounded_arguments_not_full_source_manifest(orchestrator,admin_stall,monkeypatch):
+    q=orchestrator.qualification_vm;_,descriptor,request,_=admin_stall
+    descriptor['source']['payload']={'tests/system/full_source_'+str(index)+'.py':'d'*64 for index in range(2212)}
+    assert len(json.dumps(descriptor))>128*1024
+    calls=[]
+    monkeypatch.setattr(q,'_outer',lambda *a:descriptor['before']['outer'])
+    monkeypatch.setattr(orchestrator,'_host_reboot_controller',lambda:descriptor['before']['outer_controller'])
+    def mvm(*args,**kwargs):
+        calls.append(args);return subprocess.CompletedProcess(args,0,'','')
+    monkeypatch.setattr(orchestrator,'mvm',mvm)
+    q._observe_admin_stall_target(orchestrator,descriptor,request)
+    assert len(calls)==1
+    environment=shlex.split(calls[0][-1]);guest=shlex.split(environment[-1])
+    probe=json.loads(guest[-2]);target=json.loads(guest[-1])
+    assert set(probe)=={'namespace','namespace_identity'}
+    assert probe['namespace']==descriptor['namespace']
+    assert probe['namespace_identity']==descriptor['before']['guest']['namespace_identity']
+    assert target==request
+    assert max(len(argument.encode()) for argument in calls[0])<16384
+
+
+@pytest.mark.parametrize('binding',['outer','controller'])
+def test_admin_target_changed_outer_binding_refuses_before_remote_probe(orchestrator,admin_stall,monkeypatch,binding):
+    q=orchestrator.qualification_vm;_,descriptor,request,_=admin_stall
+    monkeypatch.setattr(q,'_outer',lambda *a: {} if binding=='outer' else descriptor['before']['outer'])
+    monkeypatch.setattr(orchestrator,'_host_reboot_controller',lambda: {} if binding=='controller' else descriptor['before']['outer_controller'])
+    monkeypatch.setattr(q,'_command',lambda *a:pytest.fail('changed admission must refuse before remote probe'))
+    with pytest.raises(RuntimeError,match='changed'):q._observe_admin_stall_target(orchestrator,descriptor,request)
+
+
+@pytest.mark.parametrize('reason',['missing proof','changed proof'])
+def test_final_admin_proof_failure_cannot_emit_a_passing_matrix(execution,admin_stall,monkeypatch,reason):
+    e=execution;q=e.q;_,descriptor,request,_=admin_stall
+    path='tests/system/network/test_floating_ip_worker_fault.py'
+    e.registry['floating_ip_worker_fault']=dict(tier=2,files=[path]);e.source['payload'][path]='d'*64
+    e.args.domains=['floating_ip_worker_fault'];monkeypatch.setenv('MVM_QUALIFICATION_ADMIN_STALL','1')
+    monkeypatch.setattr(q,'_prepare_admin_stall',lambda *a:descriptor)
+    monkeypatch.setattr(q,'_read_admin_ticket',lambda *a:descriptor)
+    joins=[]
+    def join(*args):
+        joins.append(args)
+        if len(joins)>1:raise RuntimeError(reason)
+        return dict(request=request,returncode=0)
+    monkeypatch.setattr(q,'_join_admin_stall',join)
+    def execute(o,d,t,operation):
+        operation();return q._join_admin_stall(o,d,t)
+    monkeypatch.setattr(q,'_run_admin_stall_case',execute)
+    assert q.run(e.o,e.args) is False
+    assert len(joins)==2
+    terminal=json.loads((e.task/'terminal.json').read_text())
+    assert terminal['passed'] is False
+    error=json.loads((Path(str(e.task)+'.worker-stall-admin')/'final-join-error.json').read_text())
+    assert error['error']==reason
+    candidate=json.loads((e.task/'binding.json').read_text())['candidate']
+    with pytest.raises(RuntimeError,match='incomplete or failed'):
+        __import__('system_test_evidence').verify_matrix_task(e.task,e.source,candidate,e.registry)
