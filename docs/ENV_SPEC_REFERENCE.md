@@ -552,7 +552,8 @@ Create a directional VM-to-VM execution grant for one non-root destination user.
 ```yaml
 exec_policy:
   app-maintenance:
-    source_labels: {role: app}
+    source_labels:
+      role: app
     destination_vm: "@vm:database"
     target_user: app
     depends_on: ["@vm:database"]

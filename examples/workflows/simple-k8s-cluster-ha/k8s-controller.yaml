@@ -17,7 +17,9 @@ binary:
     version: 1.16.0
 vm:
   controller-1:
-    labels: {cluster: k8s-ha, role: controller}
+    labels:
+      cluster: k8s-ha
+      role: controller
     network: '@network:k8s'
     guest_ip: 10.10.0.10
     key: '@key:k8s-key'
@@ -34,7 +36,10 @@ vm:
     - '@kernel:full-kernel'
     - '@binary:fc-binary'
   controller-2:
-    labels: {cluster: k8s-ha, role: controller, joins: controller}
+    labels:
+      cluster: k8s-ha
+      role: controller
+      joins: controller
     network: '@network:k8s'
     guest_ip: 10.10.0.11
     key: '@key:k8s-key'
@@ -51,7 +56,10 @@ vm:
     - '@kernel:full-kernel'
     - '@binary:fc-binary'
   controller-3:
-    labels: {cluster: k8s-ha, role: controller, joins: controller}
+    labels:
+      cluster: k8s-ha
+      role: controller
+      joins: controller
     network: '@network:k8s'
     guest_ip: 10.10.0.12
     key: '@key:k8s-key'
