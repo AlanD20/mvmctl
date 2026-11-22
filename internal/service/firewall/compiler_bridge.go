@@ -4,7 +4,7 @@ import (
 	"github.com/google/nftables/expr"
 )
 
-func (compiler *generationCompiler) compileBridge(intent generationIntent) {
+func (compiler *generationCompiler) compileBridge(intent generationIntent) error {
 	prerouting := compiler.generation.bridge.chains[0]
 	forward := compiler.generation.bridge.chains[1]
 	endpoints := sortedCopy(intent.endpoints, func(endpoint endpointIntent) string { return endpoint.id })
@@ -71,8 +71,6 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 				matchSupportedARP(),
 				acceptVerdict(),
 			))
-		compiler.addRule(&compiler.generation.bridge, forward, "bridge.established."+endpoint.id,
-			joinExpressions(matchInputInterface(endpoint.hostVeth), acceptEstablishedRelated()))
 	}
 
 	for _, grant := range sortedCopy(intent.vmGrants, func(grant vmTrafficGrant) string { return grant.id }) {
@@ -83,16 +81,14 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 		}
 		for _, sourceAddress := range compiler.endpointAddressVariants(source) {
 			for _, destinationAddress := range compiler.endpointAddressVariants(destination) {
-				compiler.addRule(
+				compiler.addDirectionalTrafficRules(
 					&compiler.generation.bridge,
 					forward,
 					"bridge.allow.vm."+grant.id+addressPairRuleSuffix(sourceAddress, destinationAddress),
-					bridgeVMGrantExpressions(
-						sourceAddress.endpoint,
-						destinationAddress.endpoint,
-						grant.protocol,
-						grant.ports,
-					),
+					func(direction trafficDirection) []expr.Any {
+						return bridgeVMGrantExpressions(sourceAddress.endpoint, destinationAddress.endpoint,
+							grant.protocol, grant.ports, direction)
+					},
 				)
 			}
 		}
@@ -105,21 +101,29 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 			continue
 		}
 		for _, destinationAddress := range compiler.endpointAddressVariants(destination) {
-			compiler.addRule(
+			compiler.addDirectionalTrafficRules(
 				&compiler.generation.bridge,
 				forward,
 				"bridge.allow.network."+grant.id+destinationAddress.suffix,
-				bridgeNetworkGrantExpressions(source, destinationAddress.endpoint, grant.protocol, grant.ports),
+				func(direction trafficDirection) []expr.Any {
+					return bridgeNetworkGrantExpressions(source, destinationAddress.endpoint,
+						grant.protocol, grant.ports, direction)
+				},
 			)
 		}
 	}
 
 	compiler.compileBridgeFloatingIPGrants(intent)
+	if err := compiler.compileLabelTraffic(intent.labelTraffic, &compiler.generation.bridge,
+		forward, "bridge.allow.labels.", matchEtherType(etherTypeIPv4)); err != nil {
+		return err
+	}
 
 	for _, endpoint := range endpoints {
 		compiler.addRule(&compiler.generation.bridge, forward, "bridge.default-deny."+endpoint.id,
 			joinExpressions(matchInputInterface(endpoint.hostVeth), dropVerdict()))
 	}
+	return nil
 }
 
 func bridgeVMGrantExpressions(
@@ -127,15 +131,16 @@ func bridgeVMGrantExpressions(
 	destination endpointIntent,
 	protocolValue protocol,
 	ports portInterval,
+	direction trafficDirection,
 ) []expr.Any {
+	sourceOffset, destinationOffset, sourceKey, destinationKey := direction.endpoints()
 	return joinExpressions(
-		matchInputInterface(source.hostVeth),
-		matchOutputInterface(destination.hostVeth),
+		matchInterface(sourceKey, source.hostVeth),
+		matchInterface(destinationKey, destination.hostVeth),
 		matchEtherType(etherTypeIPv4),
-		matchIPv4Address(12, source.ipv4),
-		matchIPv4Address(16, destination.ipv4),
-		matchProtocol(protocolValue),
-		matchDestinationPorts(ports),
+		matchIPv4Address(sourceOffset, source.ipv4),
+		matchIPv4Address(destinationOffset, destination.ipv4),
+		matchOriginalTraffic(direction, protocolValue, ports),
 		acceptVerdict(),
 	)
 }
@@ -145,14 +150,15 @@ func bridgeNetworkGrantExpressions(
 	destination endpointIntent,
 	protocolValue protocol,
 	ports portInterval,
+	direction trafficDirection,
 ) []expr.Any {
+	sourceOffset, destinationOffset, _, destinationKey := direction.endpoints()
 	return joinExpressions(
-		matchOutputInterface(destination.hostVeth),
+		matchInterface(destinationKey, destination.hostVeth),
 		matchEtherType(etherTypeIPv4),
-		matchIPv4Prefix(12, source.subnet),
-		matchIPv4Address(16, destination.ipv4),
-		matchProtocol(protocolValue),
-		matchDestinationPorts(ports),
+		matchIPv4Prefix(sourceOffset, source.subnet),
+		matchIPv4Address(destinationOffset, destination.ipv4),
+		matchOriginalTraffic(direction, protocolValue, ports),
 		acceptVerdict(),
 	)
 }

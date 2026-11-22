@@ -219,7 +219,6 @@ func validateKernelApplicationDefaultDeny(
 		"bridge.spoof.arp-ipv4.",
 		"bridge.unsupported-l3.",
 		"bridge.arp.",
-		"bridge.established.",
 		"bridge.default-deny.",
 	})
 	if err != nil {
@@ -253,14 +252,6 @@ func validateKernelApplicationDefaultDeny(
 			}
 		}
 		if err := requireKernelApplicationRule(rules, "bridge.arp."+id, target.bridge.chains[1], false); err != nil {
-			return err
-		}
-		if err := requireKernelApplicationRule(
-			rules,
-			"bridge.established."+id,
-			target.bridge.chains[1],
-			false,
-		); err != nil {
 			return err
 		}
 		if err := requireKernelApplicationRule(
@@ -343,15 +334,13 @@ func validateKernelApplicationDefaultDeny(
 			}
 		}
 	}
-	forwardDenyIdentities := make([]string, 0, len(target.networkIDs)*2)
-	for _, id := range target.networkIDs {
-		forwardDenyIdentities = append(
-			forwardDenyIdentities,
-			"inet.forward.default-deny."+id,
-			"inet.forward.default-deny-inbound."+id,
-		)
-	}
-	if !kernelApplicationRuleTailMatches(target.inet.rules, target.inet.chains[0], forwardDenyIdentities) ||
+	// Managed-origin denies must precede every inbound established-flow rule.
+	forwardTail := kernelApplicationRuleIdentities(target.networkIDs, "inet.forward.default-deny.")
+	forwardTail = append(forwardTail,
+		kernelApplicationRuleIdentities(target.networkIDs, "inet.forward.established.")...)
+	forwardTail = append(forwardTail,
+		kernelApplicationRuleIdentities(target.networkIDs, "inet.forward.default-deny-inbound.")...)
+	if !kernelApplicationRuleTailMatches(target.inet.rules, target.inet.chains[0], forwardTail) ||
 		!kernelApplicationRuleTailMatches(
 			target.inet.rules,
 			target.inet.chains[1],

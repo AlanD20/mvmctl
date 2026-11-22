@@ -3,6 +3,7 @@ package firewall
 import (
 	"testing"
 
+	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
 	"github.com/mdlayher/netlink"
 	"github.com/stretchr/testify/assert"
@@ -11,7 +12,10 @@ import (
 )
 
 func TestDecodeManagedSetsReadsStaticMembershipInBothFamilies(t *testing.T) {
-	keys := [][4]byte{{10, 0, 0, 2}, {10, 0, 0, 3}}
+	keys := []labelAddressKey{
+		testLabelAddressKey("mvm0", [4]byte{10, 0, 0, 2}),
+		testLabelAddressKey("mvm1", [4]byte{10, 0, 0, 3}),
+	}
 	name := labelAddressSetName(keys)
 	raw := kernelObservationMessages{labelElementReplies: make(map[managedSetRef][]netlink.Message)}
 	for _, table := range managedTableIdentities {
@@ -28,7 +32,10 @@ func TestDecodeManagedSetsReadsStaticMembershipInBothFamilies(t *testing.T) {
 }
 
 func TestDecodeManagedSetsRejectsForeignMissingOrChangedMembership(t *testing.T) {
-	keys := [][4]byte{{10, 0, 0, 2}, {10, 0, 0, 3}}
+	keys := []labelAddressKey{
+		testLabelAddressKey("mvm0", [4]byte{10, 0, 0, 2}),
+		testLabelAddressKey("mvm1", [4]byte{10, 0, 0, 3}),
+	}
 	ref := managedSetRef{table: managedTableIdentities[0], name: labelAddressSetName(keys)}
 	for name, mutation := range map[string]func(*kernelObservationMessages){
 		"missing dump": func(raw *kernelObservationMessages) { delete(raw.labelElementReplies, ref) },
@@ -38,7 +45,7 @@ func TestDecodeManagedSetsRejectsForeignMissingOrChangedMembership(t *testing.T)
 		},
 		"extra member": func(raw *kernelObservationMessages) {
 			raw.labelElementReplies[ref] = []netlink.Message{
-				staticLabelElementReply(t, ref, keys[0], keys[1], [4]byte{10, 0, 0, 4}),
+				staticLabelElementReply(t, ref, keys[0], keys[1], testLabelAddressKey("mvm2", [4]byte{10, 0, 0, 4})),
 			}
 		},
 		"duplicate member": func(raw *kernelObservationMessages) {
@@ -66,16 +73,25 @@ func TestDecodeManagedSetsRejectsForeignMissingOrChangedMembership(t *testing.T)
 
 func staticLabelSetReply(t *testing.T, ref managedSetRef) netlink.Message {
 	t.Helper()
+	field := func(width uint32) netlink.Attribute {
+		return netlink.Attribute{Type: unix.NFTA_LIST_ELEM, Data: mustMarshalKernelAttributes(t, []netlink.Attribute{
+			{Type: secondarySetFieldLen, Data: testBigEndianUint32(width)},
+		})}
+	}
+	fields := mustMarshalKernelAttributes(t, []netlink.Attribute{field(16), field(4)})
+	desc := mustMarshalKernelAttributes(t, []netlink.Attribute{{Type: secondarySetDescConcat, Data: fields}})
 	return testKernelMessage(t, unix.NFT_MSG_NEWSET, ref.table.family, netlink.Multi, []netlink.Attribute{
 		{Type: unix.NFTA_SET_TABLE, Data: []byte(ref.table.name + "\x00")},
 		{Type: unix.NFTA_SET_NAME, Data: []byte(ref.name + "\x00")},
-		{Type: unix.NFTA_SET_KEY_TYPE, Data: testBigEndianUint32(7)},
-		{Type: unix.NFTA_SET_KEY_LEN, Data: testBigEndianUint32(4)},
+		{Type: unix.NFTA_SET_FLAGS, Data: testBigEndianUint32(nftables.NFT_SET_CONCAT)},
+		{Type: unix.NFTA_SET_KEY_TYPE, Data: testBigEndianUint32((41 << 6) | 7)},
+		{Type: unix.NFTA_SET_KEY_LEN, Data: testBigEndianUint32(20)},
+		{Type: unix.NFTA_SET_DESC, Data: desc},
 		{Type: unix.NFTA_SET_USERDATA, Data: []byte{0, 4, 2, 0, 0, 0}},
 	})
 }
 
-func staticLabelElementReply(t *testing.T, ref managedSetRef, keys ...[4]byte) netlink.Message {
+func staticLabelElementReply(t *testing.T, ref managedSetRef, keys ...labelAddressKey) netlink.Message {
 	t.Helper()
 	elements := make([]netlink.Attribute, 0, len(keys))
 	for _, key := range keys {
@@ -91,7 +107,7 @@ func staticLabelElementReply(t *testing.T, ref managedSetRef, keys ...[4]byte) n
 }
 
 func TestDecodeOriginalTupleAndPositiveLabelLookup(t *testing.T) {
-	name := labelAddressSetName([][4]byte{{10, 0, 0, 2}})
+	name := labelAddressSetName([]labelAddressKey{testLabelAddressKey("mvm0", [4]byte{10, 0, 0, 2})})
 	lookupAttrs := []netlink.Attribute{
 		{Type: unix.NFTA_LOOKUP_SET, Data: []byte(name + "\x00")},
 		{Type: unix.NFTA_LOOKUP_SREG, Data: testBigEndianUint32(1)},
@@ -116,4 +132,11 @@ func TestDecodeOriginalTupleAndPositiveLabelLookup(t *testing.T) {
 	tupleAttrs[2].Data = []byte{1}
 	_, err = decodeKernelConntrack(mustMarshalKernelAttributes(t, tupleAttrs))
 	require.Error(t, err)
+}
+
+func testLabelAddressKey(interfaceName string, address [4]byte) labelAddressKey {
+	var key labelAddressKey
+	copy(key[:16], interfaceName)
+	copy(key[16:], address[:])
+	return key
 }

@@ -24,7 +24,7 @@ const (
 	testNFTAChainFlags         = uint16(10)
 	testNFTChainBase           = uint32(1)
 	testNFTBaseSequence        = uint16(0x1234)
-	testKernelGenerationID     = "55003fdd06928dc2be2e8af48d62bd2f179f0f5add30987dc9b45c261a54d65c"
+	testKernelGenerationID     = "07c0e3b69bf265ac7da563b951e72d2b288aaedba62978cd1fe2d922d30fbbd3"
 )
 
 // Rationale: A hand-built dump fixture is independent of google/nftables marshaling and locks the Linux reply shape
@@ -1117,10 +1117,10 @@ func capturedKernelObservationFixture(t *testing.T) (kernelObservationMessages, 
 					},
 				},
 				rules: []kernelObservedRule{
-					rule(managedINetForwardChainName, "inet.forward.established."+networkID,
-						established(expr.MetaKeyOIFNAME)),
 					rule(managedINetForwardChainName, "inet.forward.default-deny."+networkID,
 						denied(expr.MetaKeyIIFNAME)),
+					rule(managedINetForwardChainName, "inet.forward.established."+networkID,
+						established(expr.MetaKeyOIFNAME)),
 					rule(managedINetForwardChainName, "inet.forward.default-deny-inbound."+networkID,
 						denied(expr.MetaKeyOIFNAME)),
 					rule(managedINetInputChainName, "inet.input.established."+networkID,
@@ -1311,6 +1311,9 @@ func testKernelExpression(t *testing.T, expression expr.Any) netlink.Attribute {
 		data = []netlink.Attribute{
 			{Type: unix.NFTA_CT_DREG, Data: testBigEndianUint32(value.Register)},
 			{Type: unix.NFTA_CT_KEY, Data: testBigEndianUint32(uint32(value.Key))},
+		}
+		if value.Key == expr.CtKeyPROTODST {
+			data = append(data, netlink.Attribute{Type: unix.NFTA_CT_DIRECTION, Data: []byte{byte(value.Direction)}})
 		}
 	case *expr.Payload:
 		name = "payload"

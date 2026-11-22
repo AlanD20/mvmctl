@@ -64,8 +64,11 @@ func decodeManagedSetHeader(
 }
 
 func decodeStaticLabelSetMetadata(attrs map[uint16]netlink.Attribute) error {
+	keyType := labelAddressSetKeyType()
 	for kind, want := range map[uint16]uint32{
-		unix.NFTA_SET_KEY_TYPE: nftables.TypeIPAddr.GetNFTMagic(), unix.NFTA_SET_KEY_LEN: 4,
+		unix.NFTA_SET_FLAGS:    nftables.NFT_SET_CONCAT,
+		unix.NFTA_SET_KEY_TYPE: keyType.GetNFTMagic(),
+		unix.NFTA_SET_KEY_LEN:  secondaryLeaseKeyBytes,
 	} {
 		got, err := kernelAttributeUint32(attrs[kind], "static label set metadata")
 		if err != nil {
@@ -73,13 +76,6 @@ func decodeStaticLabelSetMetadata(attrs map[uint16]netlink.Attribute) error {
 		}
 		if got != want {
 			return invalidKernelObservation("static label set metadata differs from closed definition")
-		}
-	}
-	// The kernel omits the attribute for a static set with zero flags.
-	if attr, exists := attrs[unix.NFTA_SET_FLAGS]; exists {
-		flags, err := kernelAttributeUint32(attr, "static label set flags")
-		if err != nil || flags != 0 {
-			return invalidKernelObservation("static label set has unexpected flags")
 		}
 	}
 	if !bytes.Equal(attrs[unix.NFTA_SET_USERDATA].Data, []byte{0, 4, 2, 0, 0, 0}) {
@@ -90,18 +86,8 @@ func decodeStaticLabelSetMetadata(attrs map[uint16]netlink.Attribute) error {
 			return invalidKernelObservation("static label set has timer metadata")
 		}
 	}
-	if attr, exists := attrs[unix.NFTA_SET_DESC]; exists {
-		desc, err := decodeUniqueKernelAttributes(attr.Data, "static label set descriptor",
-			map[uint16]kernelAttributeRule{unix.NFTA_SET_DESC_SIZE: {}})
-		if err != nil {
-			return err
-		}
-		if size, exists := desc[unix.NFTA_SET_DESC_SIZE]; exists {
-			value, err := kernelAttributeUint32(size, "static label set size")
-			if err != nil || value != 0 {
-				return invalidKernelObservation("static label set has unexpected capacity")
-			}
-		}
+	if err := decodeSecondaryLeaseSetDescriptor(attrs[unix.NFTA_SET_DESC].Data); err != nil {
+		return err
 	}
 	if attr, exists := attrs[unix.NFTA_SET_POLICY]; exists {
 		policy, err := kernelAttributeUint32(attr, "static label set policy")
@@ -182,8 +168,8 @@ func decodeStaticLabelSetElements(
 	return set, nil
 }
 
-func decodeStaticLabelElement(raw []byte) ([4]byte, error) {
-	var result [4]byte
+func decodeStaticLabelElement(raw []byte) (labelAddressKey, error) {
+	var result labelAddressKey
 	wrappers, err := decodeKernelAttributeList(raw, "static label element wrapper")
 	if err != nil {
 		return result, err
@@ -201,8 +187,8 @@ func decodeStaticLabelElement(raw []byte) ([4]byte, error) {
 	if err != nil {
 		return result, err
 	}
-	if len(key) != len(result) {
-		return result, invalidKernelObservation("static label element key is not IPv4")
+	if _, _, err := decodeSecondaryLeaseKey(key); err != nil {
+		return result, err
 	}
 	copy(result[:], key)
 	return result, nil

@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	// CRITICAL: v1 explicitly projects every field of the closed google/nftables expression set emitted by this compiler.
+	// CRITICAL: The digest projects every field of the closed google/nftables expressions emitted by this compiler.
 	// Adding an expression type or dependency field requires a schema audit and version change before it can reach output.
-	generationDigestSchema      = "mvmctl.firewall.generation.v1"
+	generationDigestSchema      = "mvmctl.firewall.generation.v7"
 	generationDigestPlaceholder = "0000000000000000000000000000000000000000000000000000000000000000"
 )
 
@@ -55,23 +55,7 @@ func encodeCanonicalGeneration(
 		return invalidGeneration("compiled empty generation contains nftables output")
 	}
 
-	// CRITICAL: Existing generations retain their exact v1 identity; new host-policy projections use v2.
-	// This permits exact-before observation without resetting or adopting an installed authority record.
-	schema := generationDigestSchema
-	if len(intent.vmHostGrants) != 0 || len(intent.networkHostGrants) != 0 {
-		schema = "mvmctl.firewall.generation.v2"
-	}
-	if len(intent.vmFloatingIPGrants) != 0 || len(intent.networkFloatingIPGrants) != 0 {
-		schema = "mvmctl.firewall.generation.v4"
-	}
-	if len(intent.floatingIPs) != 0 {
-		// Explicit lifetime is a clean break from the implicit finite v3/v4 resource grammar.
-		schema = "mvmctl.firewall.generation.v5"
-	}
-	if len(generation.bridge.labelAddressSets) != 0 || len(generation.inet.labelAddressSets) != 0 {
-		schema = "mvmctl.firewall.generation.v6"
-	}
-	encoder.text("schema", schema)
+	encoder.text("schema", generationDigestSchema)
 	encoder.boolean("generation.empty", generation.empty)
 	encodeCanonicalIntent(encoder, intent)
 	if err := encodeCanonicalOutput(encoder, generation); err != nil {

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/google/nftables"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,14 +15,14 @@ func TestLabelAddressSetUpdatePreservesUnchangedAndTimedSets(t *testing.T) {
 	generation, err := intent.compile()
 	require.NoError(t, err)
 	endpoint := intent.Endpoints[0]
-	old, err := newLabelAddressSet([]EndpointBinding{endpoint})
+	old, err := newLabelAddressSet(nftables.TableFamilyBridge, []EndpointBinding{endpoint})
 	require.NoError(t, err)
 	endpoint.IPv4 = netip.MustParseAddr("10.0.0.3")
-	retained, err := newLabelAddressSet([]EndpointBinding{endpoint, endpoint})
+	retained, err := newLabelAddressSet(nftables.TableFamilyBridge, []EndpointBinding{endpoint, endpoint})
 	require.NoError(t, err)
 	require.Len(t, retained.keys, 1)
 	endpoint.IPv4 = netip.MustParseAddr("10.0.0.4")
-	added, err := newLabelAddressSet([]EndpointBinding{endpoint})
+	added, err := newLabelAddressSet(nftables.TableFamilyBridge, []EndpointBinding{endpoint})
 	require.NoError(t, err)
 
 	before, target := generation.bridge, generation.bridge
@@ -51,7 +52,7 @@ func TestKernelComparisonRefusesChangedLabelSetMembership(t *testing.T) {
 	intent := secondaryDurableIntent()
 	generation, err := intent.compile()
 	require.NoError(t, err)
-	set, err := newLabelAddressSet(intent.Endpoints)
+	set, err := newLabelAddressSet(nftables.TableFamilyBridge, intent.Endpoints)
 	require.NoError(t, err)
 	generation.bridge.labelAddressSets = []labelAddressSet{set}
 	observed := kernelObservationFromCompiled(generation).tables[0]
@@ -59,6 +60,6 @@ func TestKernelComparisonRefusesChangedLabelSetMembership(t *testing.T) {
 
 	observed.labelAddressSets = []labelAddressSet{set}
 	require.NoError(t, compareKernelObservedTable(observed, generation.bridge, generation.id))
-	observed.labelAddressSets[0].keys = [][4]byte{{10, 0, 0, 3}}
+	observed.labelAddressSets[0].keys = []labelAddressKey{testLabelAddressKey("foreign-veth", [4]byte{10, 0, 0, 2})}
 	require.ErrorContains(t, compareKernelObservedTable(observed, generation.bridge, generation.id), "label address sets")
 }

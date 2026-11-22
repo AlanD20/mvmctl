@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/nftables"
-	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,24 +46,10 @@ func TestCompileGenerationBuildsClosedRuleFamilies(t *testing.T) {
 	assert.Equal(t, expr.VerdictDrop,
 		finalVerdict(t, requireCompiledRule(t, compiled, "bridge.unsupported-l3."+intent.endpoints[0].id).Exprs).Kind)
 
-	established := requireCompiledRule(t, compiled, "bridge.established."+intent.endpoints[0].id)
-	stateMask := binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED)
-	wantEstablished := []expr.Any{
-		&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: expectedInterfaceName("mvma0")},
-		&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
-		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 4, Mask: stateMask, Xor: make([]byte, 4)},
-		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: make([]byte, 4)},
-		&expr.Verdict{Kind: expr.VerdictAccept},
-	}
-	if diff := cmp.Diff(wantEstablished, established.Exprs); diff != "" {
-		t.Errorf("established/related expressions mismatch (-want +got):\n%s", diff)
-	}
-
 	sameNetwork := requireCompiledRule(t, compiled, "bridge.allow.vm."+intent.vmGrants[0].id)
 	assertExpressionKinds(t, sameNetwork.Exprs, []string{
 		"meta", "cmp", "meta", "cmp", "payload", "cmp", "payload", "cmp", "payload", "cmp",
-		"meta", "cmp", "payload", "cmp", "immediate",
+		"ct", "cmp", "ct", "cmp", "ct", "cmp", "immediate",
 	})
 	assert.Contains(t, expressionData(sameNetwork.Exprs), []byte{0x01, 0xbb},
 		"TCP destination port 443 must be encoded in network byte order")
@@ -78,7 +63,7 @@ func TestCompileGenerationBuildsClosedRuleFamilies(t *testing.T) {
 	routed := requireCompiledRule(t, compiled, "inet.forward.allow.network."+intent.networkGrants[1].id)
 	assertExpressionKinds(t, routed.Exprs, []string{
 		"meta", "cmp", "meta", "cmp", "meta", "cmp", "payload", "bitwise", "cmp", "payload", "cmp",
-		"meta", "cmp", "payload", "range", "immediate",
+		"ct", "cmp", "ct", "cmp", "ct", "range", "immediate",
 	})
 
 	input := requireCompiledRule(t, compiled, "inet.input.allow."+intent.hostServices[0].id)
@@ -132,7 +117,6 @@ func TestCompileGenerationSeparatesIngressGuardsFromForwardPolicy(t *testing.T) 
 	}
 	for _, identity := range []string{
 		"bridge.arp." + intent.endpoints[0].id,
-		"bridge.established." + intent.endpoints[0].id,
 		"bridge.allow.vm." + intent.vmGrants[0].id,
 		"bridge.default-deny." + intent.endpoints[0].id,
 	} {
@@ -181,9 +165,11 @@ func TestCompileGenerationCompilesExactSameNetworkINetForwardGrants(t *testing.T
 				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{10, 0, 0, 2}},
 				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4},
 				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{10, 0, 0, 3}},
-				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				&expr.Ct{Register: 1, Key: expr.CtKeyDIRECTION},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0}},
+				&expr.Ct{Register: 1, Key: expr.CtKeyPROTOCOL},
 				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{6}},
-				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+				&expr.Ct{Register: 1, Key: expr.CtKeyPROTODST},
 				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0x01, 0xbb}},
 				&expr.Verdict{Kind: expr.VerdictAccept},
 			},
@@ -203,9 +189,11 @@ func TestCompileGenerationCompilesExactSameNetworkINetForwardGrants(t *testing.T
 				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{10, 0, 0, 0}},
 				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4},
 				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{10, 0, 0, 3}},
-				&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+				&expr.Ct{Register: 1, Key: expr.CtKeyDIRECTION},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0}},
+				&expr.Ct{Register: 1, Key: expr.CtKeyPROTOCOL},
 				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{17}},
-				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+				&expr.Ct{Register: 1, Key: expr.CtKeyPROTODST},
 				&expr.Range{Op: expr.CmpOpEq, Register: 1,
 					FromData: []byte{0x1f, 0x40}, ToData: []byte{0x1f, 0x4a}},
 				&expr.Verdict{Kind: expr.VerdictAccept},
@@ -233,12 +221,16 @@ func TestCompileGenerationCompilesExactSameNetworkINetForwardGrants(t *testing.T
 	}
 	wantPolicyOrder := []string{
 		"inet.forward.allow.vm." + routedVMGrant.id,
+		"inet.forward.allow.vm." + routedVMGrant.id + ".reply",
 		"inet.forward.allow.vm." + intent.vmGrants[0].id,
+		"inet.forward.allow.vm." + intent.vmGrants[0].id + ".reply",
 		"inet.forward.allow.network." + intent.networkGrants[0].id,
+		"inet.forward.allow.network." + intent.networkGrants[0].id + ".reply",
 		"inet.forward.allow.network." + intent.networkGrants[1].id,
+		"inet.forward.allow.network." + intent.networkGrants[1].id + ".reply",
 		"inet.forward.default-deny." + intent.networks[0].id,
-		"inet.forward.default-deny-inbound." + intent.networks[0].id,
 		"inet.forward.default-deny." + intent.networks[1].id,
+		"inet.forward.default-deny-inbound." + intent.networks[0].id,
 		"inet.forward.default-deny-inbound." + intent.networks[1].id,
 	}
 	if diff := cmp.Diff(wantPolicyOrder, policyOrder); diff != "" {
@@ -441,8 +433,8 @@ func TestCompileGenerationIsDeterministicAcrossInputOrder(t *testing.T) {
 }
 
 func TestCompileGenerationCanonicalDigestGoldenVectors(t *testing.T) {
-	// Rationale: fixed literals lock the v1 digest grammar against accidental drift. The empty vector is independently
-	// reproducible from the scalar TLV sequence; the complete vector is a regression lock whose semantics are proven by
+	// Rationale: fixed literals lock the generation digest grammar against accidental drift. The empty vector is
+	// independently reproducible from the scalar TLV sequence; the complete vector is a regression lock whose semantics are proven by
 	// the separate field-mutation tests below.
 	tests := map[string]struct {
 		intent    generationIntent
@@ -451,12 +443,12 @@ func TestCompileGenerationCanonicalDigestGoldenVectors(t *testing.T) {
 	}{
 		"explicit empty generation": {
 			intent:    generationIntent{},
-			wantID:    "a686883941eb9b92f4c31e6fd9e82861b1f0135f64954041cb890a4f5826f4bb",
+			wantID:    "d3247079812de3999b311fd528caf5c3d31bbdcc4399dcb80217c2f7ce17277c",
 			wantEmpty: true,
 		},
-		"complete compatibility generation": {
+		"complete managed generation": {
 			intent: compatibilityIntent(),
-			wantID: "805b217ed40bda18d5492d13374bfb0f9dd01c76a264660cd9762a320a4fd3db",
+			wantID: "9bb7d1fa8bb92b3b3a6253e67af3f9135863123b33ac736887e3617d1c472744",
 		},
 	}
 

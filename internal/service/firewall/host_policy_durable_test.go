@@ -34,7 +34,7 @@ func TestHostTrafficDormantProjectionRetainsExactEmptyGeneration(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, compiled.empty)
 	// CONTRACT: Existing canonical v1 empty vector, independently fixed by the original digest grammar.
-	assert.Equal(t, "a686883941eb9b92f4c31e6fd9e82861b1f0135f64954041cb890a4f5826f4bb", compiled.id)
+	assert.Equal(t, "d3247079812de3999b311fd528caf5c3d31bbdcc4399dcb80217c2f7ce17277c", compiled.id)
 	for name, mutate := range map[string]func(*Intent){
 		"implicit ports":     func(i *Intent) { i.VMHostGrants[0].Ports = PortInterval{} },
 		"foreign network":    func(i *Intent) { i.NetworkHostGrants[0].SourceNetworkID = "foreign" },

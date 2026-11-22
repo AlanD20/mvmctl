@@ -146,12 +146,11 @@ func assertFloatingPolicyExpressions(
 		want,
 		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{10, 0, 0, 100}},
-		&expr.Meta{
-			Key:      expr.MetaKeyL4PROTO,
-			Register: 1,
-		},
-		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}},
-		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+		&expr.Ct{Register: 1, Key: expr.CtKeyDIRECTION},
+		&expr.Cmp{Register: 1, Op: expr.CmpOpEq, Data: []byte{0}},
+		&expr.Ct{Register: 1, Key: expr.CtKeyPROTOCOL},
+		&expr.Cmp{Register: 1, Op: expr.CmpOpEq, Data: []byte{proto}},
+		&expr.Ct{Register: 1, Key: expr.CtKeyPROTODST},
 	)
 	if networkSource {
 		want = append(want, &expr.Range{Op: expr.CmpOpEq, Register: 1,

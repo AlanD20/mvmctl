@@ -10,7 +10,7 @@ import (
 )
 
 func TestCompileGeneration1000VMAllocationGrowthIsBounded(t *testing.T) {
-	const maximumLargeGenerationAllocations = 290_000
+	const maximumLargeGenerationAllocations = 356_000
 
 	small := largeCompatibilityIntent(250)
 	large := largeCompatibilityIntent(1000)
@@ -31,8 +31,8 @@ func TestCompileGeneration1000VMAllocationGrowthIsBounded(t *testing.T) {
 	// steps while rejecting quadratic allocation growth.
 	assert.Less(t, largeAllocations, smallAllocations*6)
 	// Rationale: A ratio-only ceiling misses large constant-factor regressions. Each of the 1,000 same-network grants
-	// intentionally emits both a bridge allow and an inet forward companion. This fixed ceiling leaves narrow headroom
-	// over the measured dual-rule baseline, while the 6x guard above still rejects superlinear growth.
+	// intentionally emits an original and a reply rule in both families. This fixed ceiling leaves narrow headroom
+	// over the measured directional-rule baseline, while the 6x guard above still rejects superlinear growth.
 	assert.Less(t, largeAllocations, float64(maximumLargeGenerationAllocations))
 }
 

@@ -167,10 +167,11 @@ func (intent Intent) compile() (compiledGeneration, error) {
 	if err := intent.validateDurablePolicies(); err != nil {
 		return compiledGeneration{}, err
 	}
-	if len(intent.LabelTrafficPolicies) != 0 {
-		return compiledGeneration{}, invalidGeneration("label traffic policy enforcement is unavailable")
+	memberships, err := intent.materializeLabelTraffic()
+	if err != nil {
+		return compiledGeneration{}, err
 	}
-	resolved := generationIntent{}
+	resolved := generationIntent{labelTraffic: memberships}
 	active := make(map[string]struct{}, len(intent.Endpoints))
 	activeNetworks := make(map[string]struct{}, len(intent.ActiveNetworks))
 	for _, id := range intent.ActiveNetworks {

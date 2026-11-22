@@ -105,6 +105,7 @@ type networkFloatingIPTrafficGrant struct {
 // generationIntent is fully resolved root-side intent. It deliberately exposes neither nftables expressions, generic
 // actions, nor a caller-selectable generation identity. The compiler derives identity from normalized semantic state.
 type generationIntent struct {
+	labelTraffic            []labelTrafficMembership
 	vmFloatingIPGrants      []vmFloatingIPTrafficGrant
 	networkFloatingIPGrants []networkFloatingIPTrafficGrant
 	floatingIPs             []floatingIPIntent

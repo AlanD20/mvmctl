@@ -162,19 +162,19 @@ func matchProtocol(value protocol) []expr.Any {
 }
 
 func matchDestinationPorts(ports portInterval) []expr.Any {
-	first := make([]byte, 2)
-	binary.BigEndian.PutUint16(first, ports.first)
-	payload := &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2}
-	if ports.first == ports.last {
-		return []expr.Any{payload, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: first}}
-	}
+	first := binary.BigEndian.AppendUint16(nil, ports.first)
+	return joinExpressions(
+		[]expr.Any{&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2}},
+		matchPortInterval(ports, first),
+	)
+}
 
-	last := make([]byte, 2)
-	binary.BigEndian.PutUint16(last, ports.last)
-	return []expr.Any{
-		payload,
-		&expr.Range{Op: expr.CmpOpEq, Register: 1, FromData: first, ToData: last},
+func matchPortInterval(ports portInterval, first []byte) []expr.Any {
+	if ports.first == ports.last {
+		return []expr.Any{&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: first}}
 	}
+	last := binary.BigEndian.AppendUint16(nil, ports.last)
+	return []expr.Any{&expr.Range{Op: expr.CmpOpEq, Register: 1, FromData: first, ToData: last}}
 }
 
 func acceptEstablishedRelated() []expr.Any {

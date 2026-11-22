@@ -41,11 +41,15 @@ func compileGeneration(intent generationIntent) (compiledGeneration, error) {
 
 	compiler := newGenerationCompiler(intent)
 
-	compiler.compileBridge(intent)
+	if err := compiler.compileBridge(intent); err != nil {
+		return compiledGeneration{}, err
+	}
 	if err := compiler.compileFloatingIPs(intent); err != nil {
 		return compiledGeneration{}, err
 	}
-	compiler.compileINet(intent)
+	if err := compiler.compileINet(intent); err != nil {
+		return compiledGeneration{}, err
+	}
 	if err := validateIngressGuardInvariant(intent, *compiler.generation); err != nil {
 		return compiledGeneration{}, err
 	}
