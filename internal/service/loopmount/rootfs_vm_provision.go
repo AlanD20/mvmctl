@@ -44,7 +44,7 @@ const (
 	rootfsAgentOpenRCRunlevelPath   = "/etc/runlevels/boot"
 	rootfsAgentOpenRCRunlevelLink   = rootfsAgentOpenRCRunlevelPath + "/mvm-agent"
 	rootfsAgentOpenRCRunlevelTarget = "/etc/init.d/mvm-agent"
-	rootfsAgentOpenRCLegacyLink     = rootfsAgentOpenRCDefaultPath + "/mvm-agent"
+	rootfsAgentOpenRCDefaultLink    = rootfsAgentOpenRCDefaultPath + "/mvm-agent"
 	rootfsSSHConfigPath             = "/etc/ssh/sshd_config.d/mvm.conf"
 	rootfsSudoPolicyPath            = "/etc/sudoers.d/mvm-guest"
 	rootfsPasswdPath                = "/etc/passwd"
@@ -788,10 +788,9 @@ func applyRootfsProvisionPlan(
 	tree rootfsGuestTree,
 	deps rootfsVMProvisionDeps,
 	plan VMProvisionPlan,
-) (_ uint32, returnErr error) {
+) (uint32, error) {
 	var filesWritten uint32
 	var agentLayout rootfsAgentInitLayout
-	var legacyAgent *rootfsLegacyAgentEnablement
 	if plan.Agent != nil {
 		var err error
 		agentLayout, err = detectRootfsAgentInitLayout(ctx, tree)
@@ -799,15 +798,9 @@ func applyRootfsProvisionPlan(
 			return 0, err
 		}
 		if agentLayout == rootfsAgentInitOpenRC {
-			// CRITICAL: Refuse foreign legacy enablement before deblob or any provisioning write.
-			legacyAgent, err = tree.pinLegacyAgentEnablement(ctx)
-			if err != nil {
+			if err := tree.requireNoDefaultRunlevelAgent(ctx); err != nil {
 				return 0, err
 			}
-			defer func() {
-				returnErr = appendRootfsProvisionCleanupError(returnErr, "close legacy agent runlevel directory",
-					tree.deps.close(context.WithoutCancel(ctx), legacyAgent.parentFD))
-			}()
 		}
 	}
 	write := func(file rootfsProvisionFile) error {
@@ -988,15 +981,6 @@ func applyRootfsProvisionPlan(
 		}
 		for _, file := range files {
 			if err := write(file); err != nil {
-				return filesWritten, err
-			}
-		}
-		if legacyAgent != nil {
-			changed, err := tree.removeLegacyAgentEnablement(ctx, legacyAgent)
-			if changed {
-				filesWritten++
-			}
-			if err != nil {
 				return filesWritten, err
 			}
 		}

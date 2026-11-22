@@ -806,16 +806,13 @@ func TestApplyRootfsProvisionPlanRejectsUnsafeOpenRCBinaryParentBeforeWrites(t *
 	}
 }
 
-// Rationale: Management starts in boot independently of IP/clock startup; legacy default enablement
-// converges to exactly one boot link, without changing SSH or the guest's other services.
+// Rationale: Management starts in boot independently of IP/clock startup and preserves other services.
 func TestApplyRootfsProvisionPlanEnablesAgentForExistingOpenRCLayout(t *testing.T) {
 	t.Parallel()
 
 	for name, links := range map[string][]string{
-		"fresh":      nil,
-		"legacy":     {"default"},
-		"boot_only":  {"boot"},
-		"both_known": {"boot", "default"},
+		"fresh":     nil,
+		"boot_only": {"boot"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
@@ -869,12 +866,11 @@ func TestApplyRootfsProvisionPlanEnablesAgentForExistingOpenRCLayout(t *testing.
 	}
 }
 
-// Rationale: A foreign/malformed legacy leaf must be preserved before deblob, account, hostname,
-// or agent writes; a fixed path alone cannot authorize destructive convergence.
-func TestApplyRootfsProvisionPlanRejectsUnsafeLegacyAgentBeforeWrites(t *testing.T) {
+// Rationale: An existing default-runlevel agent must stop provisioning before any guest filesystem write.
+func TestApplyRootfsProvisionPlanRejectsDefaultRunlevelAgentBeforeWrites(t *testing.T) {
 	t.Parallel()
 
-	for _, kind := range []string{"regular", "directory", "foreign_target", "multiple_links"} {
+	for _, kind := range []string{"regular", "directory", "foreign_target", "former_target", "multiple_links"} {
 		t.Run(kind, func(t *testing.T) {
 			root := t.TempDir()
 			for _, path := range []string{"usr", "sbin", "etc/init.d", "etc/runlevels/default"} {
@@ -889,6 +885,8 @@ func TestApplyRootfsProvisionPlanRejectsUnsafeLegacyAgentBeforeWrites(t *testing
 				require.NoError(t, os.Mkdir(path, 0755))
 			case "foreign_target":
 				require.NoError(t, os.Symlink("/etc/init.d/foreign", path))
+			case "former_target":
+				require.NoError(t, os.Symlink("/etc/init.d/mvm-agent", path))
 			case "multiple_links":
 				require.NoError(t, os.Symlink("/etc/init.d/mvm-agent", path))
 				require.NoError(t, os.Link(path, filepath.Join(root, "second-link")))
@@ -903,11 +901,7 @@ func TestApplyRootfsProvisionPlanRejectsUnsafeLegacyAgentBeforeWrites(t *testing
 				Port: 1024, Token: "5c9a355a-eafa-48e5-9305-76b95e9967ca",
 			}})
 			require.Error(t, err)
-			if kind == "foreign_target" {
-				assert.ErrorContains(t, err, "does not match the fixed agent target")
-			} else {
-				assert.ErrorContains(t, err, "unsafe type")
-			}
+			assert.ErrorContains(t, err, "OpenRC default-runlevel agent entry exists")
 			assert.Zero(t, filesWritten)
 			assert.Equal(t, vmProvisionEffectStateUnchanged, tree.tracker.state())
 			after, statErr := os.Lstat(path)
@@ -932,110 +926,6 @@ func TestApplyRootfsProvisionPlanRejectsUnsafeLegacyAgentBeforeWrites(t *testing
 				_, err := os.Lstat(filepath.Join(root, unpublished))
 				assert.ErrorIs(t, err, os.ErrNotExist)
 			}
-		})
-	}
-}
-
-// Rationale: A failed transition cannot publish boot before durable default removal, and an
-// interrupted unlink or publication must converge on retry without a second enablement.
-func TestRootfsGuestTreeLegacyAgentTransitionClassifiesFaultsAndConverges(t *testing.T) {
-	t.Parallel()
-
-	for _, fault := range []string{"unlink_before", "unlink_after", "unlink_sync", "boot_publish", "boot_sync", "replaced"} {
-		t.Run(fault, func(t *testing.T) {
-			root := t.TempDir()
-			for _, level := range []string{"default", "boot"} {
-				require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/runlevels", level), 0755))
-			}
-			oldPath := filepath.Join(root, "etc/runlevels/default/mvm-agent")
-			require.NoError(t, os.Symlink("/etc/init.d/mvm-agent", oldPath))
-			tree := newTestUnprivilegedRootfsGuestTree(t, root)
-			original := tree.deps
-			legacy, err := tree.pinLegacyAgentEnablement(t.Context())
-			require.NoError(t, err)
-			defer func() { require.NoError(t, original.close(t.Context(), legacy.parentFD)) }()
-			injected := errors.New("injected transition failure")
-			wantError := ""
-			wantState := vmProvisionEffectStateModifiedDurabilityUncertain
-			bootParentFD := -1
-			switch fault {
-			case "unlink_before", "unlink_after":
-				wantError, wantState = "remove legacy agent enablement", vmProvisionEffectStateOutcomeUnknown
-				tree.deps.unlinkAt = func(ctx context.Context, fd int, leaf string, flags int) error {
-					if fd == legacy.parentFD && leaf == "mvm-agent" {
-						if fault == "unlink_after" {
-							if err := original.unlinkAt(ctx, fd, leaf, flags); err != nil {
-								return err
-							}
-						}
-						return injected
-					}
-					return original.unlinkAt(ctx, fd, leaf, flags)
-				}
-			case "unlink_sync":
-				wantError = "sync legacy agent runlevel directory"
-				tree.deps.fsync = func(ctx context.Context, fd int) error {
-					if fd == legacy.parentFD {
-						return injected
-					}
-					return original.fsync(ctx, fd)
-				}
-			case "boot_publish", "boot_sync":
-				wantError = "publish managed guest agent enablement link"
-				if fault == "boot_sync" {
-					wantError = "sync managed guest agent link parent"
-				}
-				tree.deps.renameAt = func(ctx context.Context, oldFD int, oldName string, newFD int, newName string) error {
-					if fault == "boot_publish" {
-						return injected
-					}
-					bootParentFD = newFD
-					return original.renameAt(ctx, oldFD, oldName, newFD, newName)
-				}
-				tree.deps.fsync = func(ctx context.Context, fd int) error {
-					if fd == bootParentFD {
-						return injected
-					}
-					return original.fsync(ctx, fd)
-				}
-			case "replaced":
-				wantError, wantState = "identity changed", vmProvisionEffectStateUnchanged
-				// Retain the old inode under another name so recreation cannot reuse it.
-				require.NoError(t, os.Rename(oldPath, filepath.Join(root, "retained-old-link")))
-				require.NoError(t, os.Symlink("/etc/init.d/mvm-agent", oldPath))
-			}
-			_, err = tree.removeLegacyAgentEnablement(t.Context(), legacy)
-			if err == nil {
-				_, err = tree.replaceAgentEnablementLink(t.Context(), rootfsAgentInitOpenRC)
-			}
-			require.Error(t, err)
-			assert.ErrorContains(t, err, wantError)
-			assert.Equal(t, wantState, tree.tracker.state())
-			if fault == "unlink_before" || fault == "replaced" {
-				assertRootfsProvisionedSymlink(t, root, "/etc/runlevels/default/mvm-agent", "/etc/init.d/mvm-agent")
-			} else {
-				_, err := os.Lstat(oldPath)
-				assert.ErrorIs(t, err, os.ErrNotExist)
-			}
-			if fault == "boot_sync" {
-				assertRootfsProvisionedSymlink(t, root, "/etc/runlevels/boot/mvm-agent", "/etc/init.d/mvm-agent")
-			} else {
-				_, err := os.Lstat(filepath.Join(root, "etc/runlevels/boot/mvm-agent"))
-				assert.ErrorIs(t, err, os.ErrNotExist)
-			}
-			assertNoRootfsProvisionTemporaryLeaves(t, filepath.Join(root, "etc/runlevels/boot"))
-
-			tree.deps, tree.tracker = original, &rootfsProvisionTracker{}
-			retry, err := tree.pinLegacyAgentEnablement(t.Context())
-			require.NoError(t, err)
-			defer func() { require.NoError(t, original.close(t.Context(), retry.parentFD)) }()
-			_, err = tree.removeLegacyAgentEnablement(t.Context(), retry)
-			require.NoError(t, err)
-			_, err = tree.replaceAgentEnablementLink(t.Context(), rootfsAgentInitOpenRC)
-			require.NoError(t, err)
-			assertRootfsProvisionedSymlink(t, root, "/etc/runlevels/boot/mvm-agent", "/etc/init.d/mvm-agent")
-			_, err = os.Lstat(oldPath)
-			assert.ErrorIs(t, err, os.ErrNotExist)
 		})
 	}
 }

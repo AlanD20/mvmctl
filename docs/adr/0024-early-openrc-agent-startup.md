@@ -28,11 +28,11 @@ would hide this dependency without making network-independent management start i
 - Keep systemd agent activation at `sysinit.target`, SSH activation in its existing runlevel, and all
   authentication, token ownership, port, process and transport contracts unchanged. Do not parallelize
   the whole guest, disable distribution services, or extend exec deadlines.
-- Successful provisioning must leave exactly one admitted agent enablement. Converge a retained
-  default-runlevel link only when its exact fixed target and safe identity are proved through the
-  confined guest-root descriptor. Refuse foreign or unsafe entries rather than deleting them.
+- Successful provisioning leaves exactly one admitted agent enablement. Refuse any existing
+  default-runlevel agent entry before applying the provisioning plan. Use a clean image if the former
+  entry is present.
 - Retain descriptor-relative mutation, parent synchronization, mutation-state reporting and safe retry
-  after interrupted removal or publication. Do not add a caller-selected path or generic cleanup hook.
+  after interrupted boot-link publication.
 
 ## Alternatives considered
 
@@ -46,12 +46,10 @@ would hide this dependency without making network-independent management start i
 
 ## Implementation and qualification boundary
 
-The confined adapter now implements boot-only enablement and exact legacy-link convergence, including
-pre-mutation admission, retained link identity, removal-parent synchronization and safe retry. Behavior-owned
-tests cover idempotence, unsafe-link refusal and interrupted mutation/durability boundaries while preserving
-systemd and ambiguous-layout refusal. Formatting, line-length, focused vet, affected ordinary tests and the
-full root loopmount package passed inside the approved named runner on the exact integrated source.
-These are provisioning checks, not evidence of live guest startup or full release qualification.
+The confined adapter enables the agent in the boot runlevel and refuses existing default-runlevel
+entries. Tests cover fresh enablement, idempotent provisioning, and refusal without changing the
+existing entry or publishing plan files. The earlier qualification below predates the clean-break
+refusal change.
 
 The real-agent candidate `0.3.0-rc.openrc-c54bfe88` subsequently passed exactly three installed cases
 inside `mvmctl-030-test`: immediate ordinary five-second networkless boot-ID exec before the readiness
