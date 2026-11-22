@@ -127,13 +127,13 @@ Cloud-init domain (`internal/core/cloudinit/`) is distinct from services — it 
 Guest Control is a dedicated authenticated guest-to-host session with named, typed feature methods, separate
 from VM-exec. Floating IPs are its first feature. Operator API orchestration remains in `pkg/api/`; the closed
 worker compositor in `internal/service/privileged/` admits the session principal through Jailer and calls the
-network service's `GuestInspect`, `GuestAssociate`, `GuestRenew` or `GuestRelease`. Guests cannot supply an
-operator identity or invoke arbitrary CLI commands. Root rechecks the current VM incarnation and delegation
+`internal/service/network/` methods `GuestInspect`, `GuestAssociate`, `GuestRenew` or `GuestRelease`. Guests
+cannot supply an operator identity or invoke arbitrary CLI commands. Root rechecks the current VM incarnation and delegation
 at the effect boundary; association and renewal also require the VMM to be Running.
 
 Jailer binds the principal to the enrolled owner, VM, host boot, launch generation and execution UID using the
 protected live VMM. Separate pinned mutual TLS authenticates the agent endpoint and credential lineage.
-The root-only local agent socket exposes the VM's grants to guest root. Neither a stored grant nor an agent
+The root-only local agent socket exposes delegated operations to guest root. Neither a stored grant nor an agent
 key alone proves a ready session or authorizes a host effect.
 
 A retained worker of the installed `mvm` binary serves each enabled VM while grants or operator-owned floating
@@ -146,7 +146,7 @@ old authority. It holds no global network mutation lock while waiting for guest 
 Root floating-IP authority is separate from SQLite projections and guest alias receipts. Operator assignments
 persist until release, transfer or VM stop; guest leases remain finite and kernel-enforced. Transfer fences the
 old owner before admitting the new one. Agent alias acknowledgement completes operator association. Guest
-alias cleanup is local hygiene; gratuitous ARP refreshes reachability. Neither grants or proves host authority.
+alias cleanup is local hygiene; gratuitous ARP refreshes reachability. Neither action establishes host authority.
 See [Guest Control authority](docs/adr/0027-guest-control-authority.md),
 [floating-IP ownership](docs/adr/0028-floating-ip-ownership.md) and the [operator guide](docs/GUEST_CONTROL.md).
 

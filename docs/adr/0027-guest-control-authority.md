@@ -162,4 +162,7 @@ Ordinary runtime qualification passes all 46 environment and floating-IP cases o
 using the paired host/agent candidate from production source `4f490ff0`. This includes authenticated denials,
 incarnation retirement, alias synchronization and environment ownership, with successful teardown and inventory
 cleanup. Deliberate worker-stall and actual host-reboot qualification remain pending; this is not release sign-off.
-Worker failure, bounded concurrency and privileged-effect admission remain part of the verification contract.
+
+Verify codec refusal and framing boundaries, then guest spoofing, stale incarnations, revoked grants, worker
+failure, bounded concurrency and privileged-effect admission in the disposable runner. Registration is gated on
+the identity/bootstrap review and those tests. A codec implementation alone is not a working control plane.
