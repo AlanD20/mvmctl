@@ -2702,8 +2702,9 @@ _HOST_REBOOT_TASK_FIELDS = {
     "schema_version", "runner", "outer_before", "outer_after", "controller", "source_revision",
     "test_sha256", "candidate_sha256", "candidate_version", "kernel_id", "kernel_sha256", "guest_task",
     "before_boot", "after_boot", "pre_sha256", "pre_outcomes_sha256", "source_payload",
-    "namespace", "namespace_identity",
+    "namespace", "namespace_identity", "phase_helper_sha256",
 }
+_HOST_REBOOT_PHASE_HELPER = "scripts/host_reboot_phase.py"
 _HOST_REBOOT_SOURCE_FILES = ("tests/__init__.py", "tests/system/__init__.py", "tests/system/conftest.py",
                            "tests/system/pytest.ini", "tests/system/host/__init__.py", "tests/system/host/test_host.py",
                            _HOST_REBOOT_FILE, "tests/system/network/__init__.py", "tests/system/network/test_network.py",
@@ -2915,9 +2916,10 @@ def _host_reboot_require_guest_namespace(bound: dict[str, Any]) -> None:
 
 def _host_reboot_stage_source(bound: dict[str, Any]) -> None:
     """Copy only the fixed phase inputs over the same SSH transport, without vsock cp."""
-    for relative in _HOST_REBOOT_SOURCE_FILES:
+    for relative in (*_HOST_REBOOT_SOURCE_FILES, _HOST_REBOOT_PHASE_HELPER):
         raw = (_REPO_ROOT / relative).read_bytes()
-        digest = bound["source_payload"][relative]
+        digest = (bound["phase_helper_sha256"] if relative == _HOST_REBOOT_PHASE_HELPER
+                  else bound["source_payload"][relative])
         if hashlib.sha256(raw).hexdigest() != digest:
             raise RuntimeError("host_reboot source changed before staging")
         encoded = base64.b64encode(gzip.compress(raw, mtime=0)).decode("ascii")
@@ -2952,18 +2954,19 @@ def _host_reboot_probe(bound: dict[str, Any]) -> str:
 
 def _host_reboot_require_source(bound: dict[str, Any]) -> None:
     """Refuse lost or changed fixed phase inputs; never repair a rebooted task."""
-    paths = [bound["guest_task"] + "/source/" + relative for relative in _HOST_REBOOT_SOURCE_FILES]
+    inputs = (*_HOST_REBOOT_SOURCE_FILES, _HOST_REBOOT_PHASE_HELPER)
+    paths = [bound["guest_task"] + "/source/" + relative for relative in inputs]
     result = _host_reboot_ssh(bound, shlex.join(["sha256sum", "--", *paths]), connect_timeout=10, timeout=30)
-    expected = [f"{bound['source_payload'][relative]}  {path}"
-                for relative, path in zip(_HOST_REBOOT_SOURCE_FILES, paths)]
+    expected = [f"{bound['phase_helper_sha256'] if relative == _HOST_REBOOT_PHASE_HELPER else bound['source_payload'][relative]}  {path}"
+                for relative, path in zip(inputs, paths)]
     if result.stdout.splitlines() != expected:
         raise RuntimeError("host_reboot staged source changed across reboot")
 
 
-def _host_reboot_fetch(bound: dict[str, Any], name: str) -> bytes:
+def _host_reboot_fetch(bound: dict[str, Any], name: str, *, timeout: int = 30) -> bytes:
     path = bound["guest_task"] + "/" + name
     result = _host_reboot_ssh(bound, f"head -c {_HOST_REBOOT_LIMIT + 1} -- {shlex.quote(path)}",
-                              connect_timeout=10, timeout=30)
+                              connect_timeout=10, timeout=timeout)
     raw = result.stdout.encode()
     if len(raw) > _HOST_REBOOT_LIMIT:
         raise RuntimeError("host_reboot remote receipt exceeds bound")
@@ -2990,22 +2993,80 @@ def _host_reboot_pytest(bound: dict[str, Any], phase: str, task: Path) -> bytes:
         "PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
         PYTEST_OUTCOME_REPORT_ENV: report,
     }
-    command = (f"cd {shlex.quote(source)} && " + " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
-               + " " + shlex.join(["python3", "-B", "-m", "pytest", "-c", "tests/system/pytest.ini",
+    argv = ["python3", "-B", "-m", "pytest", "-c", "tests/system/pytest.ini",
                     "--rootdir=.", "--strict-markers", "-p", "no:cacheprovider", "-p", "pytest_timeout", "--timeout=600",
                     "--timeout-method=signal", f"--basetemp={bound['guest_task']}/{phase}-tmp",
                     f"--junitxml={bound['guest_task']}/{phase}.xml", "-x", "-s", "-q",
-                    _HOST_REBOOT_FILE + f"::test_host_reboot_{phase}"]))
-    result = _host_reboot_ssh(bound, command, connect_timeout=10, check=False, timeout=660)
-    _host_reboot_write(task, f"{phase}.stdout", (result.stdout or "").encode())
-    _host_reboot_write(task, f"{phase}.stderr", (result.stderr or "").encode())
-    _host_reboot_write(task, f"{phase}.native.json", json.dumps(dict(phase=phase, returncode=result.returncode)).encode())
-    raw = _host_reboot_fetch(bound, f"{phase}.outcomes.json")
+                    _HOST_REBOOT_FILE + f"::test_host_reboot_{phase}"]
+    deadline = time.monotonic() + 660
+    def remaining():
+        budget = int(deadline - time.monotonic())
+        if budget <= 0:
+            raise RuntimeError("host_reboot phase deadline expired; containment uncertain; never relaunch")
+        return budget
+    nonce = uuid.uuid4().hex
+    namespace = bound["namespace"]
+    paths = {"home": namespace["operator"]["home"], "task_parent": namespace["operator"]["home"] + "/.cache",
+             **namespace["paths"]}
+    helper = source + "/" + _HOST_REBOOT_PHASE_HELPER
+    spec = dict(argv=argv, cwd=source, env={**env, "PATH": "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "HOME": namespace["operator"]["home"], "USER": namespace["operator"]["user"],
+                "LOGNAME": namespace["operator"]["user"]}, nonce=nonce,
+                uid=namespace["operator"]["uid"], gid=namespace["operator"]["gid"],
+                boot_id=bound["before_boot"] if phase == "pre" else bound["after_boot"],
+                source={source + "/" + name: digest for name, digest in bound["source_payload"].items()},
+                namespace={path: bound["namespace_identity"][key] for key, path in paths.items()})
+    spec["source"][helper] = bound["phase_helper_sha256"]
+    command = shlex.join(["/usr/bin/python3", "-I", "-S", "-B", helper, "launch", bound["guest_task"], phase,
+                          json.dumps(spec, sort_keys=True)])
+    # A failed/uncertain launch is never retried: the detached child may already exist.
+    launched = _host_reboot_ssh(bound, command, connect_timeout=10, timeout=min(30, remaining()))
+    identity = _host_reboot_json(launched.stdout.encode())
+    if (set(identity) != {"pid", "start_ticks"}
+            or any(type(value) is not int or value <= 0 for value in identity.values())):
+        raise RuntimeError("host_reboot phase launch identity invalid; containment uncertain")
+    _host_reboot_write(task, phase + ".launch.json", json.dumps(identity).encode())
+    observed_start = None
+    while True:
+        command = shlex.join(["/usr/bin/python3", "-I", "-S", "-B", helper, "observe", bound["guest_task"], phase, nonce])
+        try:
+            status_result = _host_reboot_ssh(bound, command, connect_timeout=2,
+                                            timeout=min(15, remaining()), check=False)
+        except subprocess.TimeoutExpired:
+            status_result = None
+        if status_result is not None and status_result.returncode == 0:
+            status = _host_reboot_json(status_result.stdout.encode())
+            state = status.get("state")
+            if state == "error":
+                raise RuntimeError("host_reboot phase observation refused: " + str(status.get("error")))
+            if state not in ("starting", "publishing", "running", "finishing", "complete"):
+                raise RuntimeError("host_reboot phase status invalid")
+            if state not in ("starting", "publishing"):
+                start = status.get("start")
+                if (not isinstance(start, dict) or start.get("supervisor") != identity
+                        or start.get("phase") != phase or start.get("nonce") != nonce
+                        or start.get("boot_id") != spec["boot_id"]
+                        or observed_start is not None and observed_start != start):
+                    raise RuntimeError("host_reboot phase process identity changed")
+                observed_start = start
+            if state == "complete":
+                if type(status.get("returncode")) is not int:
+                    raise RuntimeError("host_reboot phase native status invalid")
+                _host_reboot_write(task, phase + ".completion.json", json.dumps(status).encode())
+                code = status["returncode"]
+                break
+        # An unavailable observation is neither process death nor permission to relaunch.
+        time.sleep(min(1, remaining()))
+    for name in ("stdout", "stderr"):
+        _host_reboot_write(task, f"{phase}.{name}", _host_reboot_fetch(bound, f"{phase}.{name}", timeout=min(30, remaining())))
+    result = subprocess.CompletedProcess(argv, code)
+    _host_reboot_write(task, f"{phase}.native.json", json.dumps(dict(phase=phase, returncode=code)).encode())
+    raw = _host_reboot_fetch(bound, f"{phase}.outcomes.json", timeout=min(30, remaining()))
     _host_reboot_write(task, f"{phase}.outcomes.json", raw)
-    xml = _host_reboot_fetch(bound, f"{phase}.xml")
+    xml = _host_reboot_fetch(bound, f"{phase}.xml", timeout=min(30, remaining()))
     _host_reboot_write(task, f"{phase}.xml", xml)
     _host_reboot_require_phase_report(phase, raw, xml, result.returncode)
-    receipt = _host_reboot_fetch(bound, f"{phase}.json")
+    receipt = _host_reboot_fetch(bound, f"{phase}.json", timeout=min(30, remaining()))
     _host_reboot_write(task, f"{phase}.json", receipt)
     return receipt
 
@@ -3087,6 +3148,7 @@ def _host_reboot_read_pre_for_source(task: Path, controller: dict, source_root: 
             or bound["before_boot"] == bound["after_boot"] or controller != bound["controller"]
             or _sha256_runner_input(Path(MVM_CANDIDATE_BINARY)) != bound["candidate_sha256"]
             or "mvm " + _get_mvm_version() != bound["candidate_version"]
+            or _sha256_runner_input(source_root / _HOST_REBOOT_PHASE_HELPER) != bound["phase_helper_sha256"]
             or _sha256_runner_input(source_root / _HOST_REBOOT_FILE) != bound["test_sha256"]
             or {relative: _sha256_runner_input(source_root / relative) for relative in _HOST_REBOOT_SOURCE_FILES}
                != bound["source_payload"]
@@ -3268,6 +3330,7 @@ def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None, namespa
                 raise RuntimeError("host_reboot namespace names a different outer runner identity")
             bound = dict(schema_version=2, runner=_HOST_REBOOT_RUNNER, controller=controller,
                 namespace=admitted, namespace_identity=None,
+                phase_helper_sha256=_sha256_runner_input(_REPO_ROOT / _HOST_REBOOT_PHASE_HELPER),
                 source_revision=revision, test_sha256=_sha256_runner_input(_REPO_ROOT / _HOST_REBOOT_FILE),
                 source_payload={relative: _sha256_runner_input(_REPO_ROOT / relative) for relative in _HOST_REBOOT_SOURCE_FILES},
                 candidate_sha256=_sha256_runner_input(Path(MVM_CANDIDATE_BINARY)), candidate_version="mvm " + _get_mvm_version(),

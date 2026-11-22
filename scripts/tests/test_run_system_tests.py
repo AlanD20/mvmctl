@@ -925,32 +925,32 @@ def test_host_reboot_mixed_or_incomplete_selection_fails_before_side_effects(
 def test_host_reboot_retains_literal_reports_and_rejects_incomplete_phase(
     orchestrator, monkeypatch, tmp_path, fault,
 ):
-    actual_fetch = orchestrator._host_reboot_fetch
     actual_pytest = orchestrator._host_reboot_pytest
     task = tmp_path / "phase"
     task.mkdir(mode=0o700)
     _, _, _, _, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
     monkeypatch.setattr(orchestrator, "_host_reboot_pytest", actual_pytest)
-    bound = dict(guest_task=state["namespace"]["operator"]["home"] + "/.cache/mvmctl-host-reboot-" + "1" * 32,
-        namespace=state["namespace"], namespace_identity=state["namespace_identity"],
-        source_revision="f" * 40, candidate_sha256="a" * 64, candidate_version="mvm 0.3.0",
-        kernel_id="b" * 64, kernel_sha256="c" * 64)
+    bound = _durable_phase_bound(state)
     calls = []
-    def mvm(*args, **kwargs):
-        calls.append(args)
-        assert args[0] == "ssh", "phase execution/report retrieval cannot fall back to outer exec"
-        if "head -c" in args[-1]:
-            raise RuntimeError("SSH report unavailable: literal diagnostic")
-        return subprocess.CompletedProcess(args, 1 if fault == "native-failure" else 0, stdout="literal pytest", stderr="literal diagnostic")
-    monkeypatch.setattr(orchestrator, "mvm", mvm)
+    launched = dict(pid=123, start_ticks=456)
+    def ssh(bound, command, **kwargs):
+        calls.append(shlex.split(command))
+        if calls[-1][5] == "launch":
+            state["phase_spec"] = json.loads(calls[-1][-1])
+            return subprocess.CompletedProcess([], 0, stdout=json.dumps(launched))
+        spec = state["phase_spec"]
+        start = dict(supervisor=launched, phase="pre", nonce=spec["nonce"], boot_id=spec["boot_id"])
+        return subprocess.CompletedProcess([], 0, stdout=json.dumps(dict(state="complete", start=start,
+            returncode=1 if fault == "native-failure" else 0)))
+    monkeypatch.setattr(orchestrator, "_host_reboot_ssh", ssh)
     outcomes = json.loads(_complete_pytest_outcome_report(2 if fault == "two-items" else 1))
-    if fault == "skipped":
-        outcomes.update(passed=0, skipped=1)
+    if fault == "skipped":outcomes.update(passed=0, skipped=1)
     method = "test_host_reboot_post" if fault == "wrong-junit" else "test_host_reboot_pre"
     xml = f'<testsuites><testsuite tests="1" failures="0" errors="0" skipped="0"><testcase classname="tests.system.host.test_host_reboot" name="{method}"/></testsuite></testsuites>'.encode()
-    def fetch(bound, name):
-        if fault == "ssh-report-unavailable":
-            return actual_fetch(bound, name)
+    def fetch(bound, name, **kwargs):
+        if name.endswith(".stdout"):return b"literal pytest"
+        if name.endswith(".stderr"):return b"literal diagnostic"
+        if fault == "ssh-report-unavailable":raise RuntimeError("SSH report unavailable: literal diagnostic")
         return xml if name.endswith(".xml") else json.dumps(outcomes).encode()
     monkeypatch.setattr(orchestrator, "_host_reboot_fetch", fetch)
     with pytest.raises(RuntimeError) as failure:
@@ -960,14 +960,16 @@ def test_host_reboot_retains_literal_reports_and_rejects_incomplete_phase(
     assert json.loads((task / "pre.native.json").read_bytes()) == dict(phase="pre", returncode=1 if fault == "native-failure" else 0)
     if fault == "ssh-report-unavailable":
         assert "SSH report unavailable: literal diagnostic" in str(failure.value)
-        assert not (task / "pre.outcomes.json").exists() and not (task / "pre.xml").exists()
+        assert not (task / "pre.outcomes.json").exists()
     else:
         assert (task / "pre.outcomes.json").read_bytes() == json.dumps(outcomes).encode()
         assert (task / "pre.xml").read_bytes() == xml
-    assert len(calls) == (2 if fault == "ssh-report-unavailable" else 1) and calls[0][1] == "mvmctl-030-test"
-    command = shlex.split(calls[0][-1])[-1]
-    assert "::test_host_reboot_pre" in command and "MVM_CONFIG_DIR=" + state["namespace"]["paths"]["config"] in command
-    assert "--rootdir=." in calls[0][-1]
+    assert [call[5] for call in calls] == ["launch", "observe"]
+    spec = state["phase_spec"]
+    assert spec["argv"][-1] == "tests/system/host/test_host_reboot.py::test_host_reboot_pre"
+    assert spec["env"]["MVM_CONFIG_DIR"] == state["namespace"]["paths"]["config"]
+    assert spec["env"]["MVM_RUNNER_KERNEL_ID"] == bound["kernel_id"]
+    assert spec["boot_id"] == bound["before_boot"]
 
 
 def test_registry_uses_exec_tier2_and_one_canonical_fresh_env_domain(
@@ -6191,3 +6193,148 @@ def test_existing_qualification_route_bypasses_all_local_or_provisioning_paths(o
         "--record-evidence", str(tmp_path/'task')])
     with pytest.raises(SystemExit) as completed:orchestrator.main()
     assert completed.value.code == 0 and seen == ["mvmctl-030-test"]
+
+
+def _durable_phase_bound(state):
+    return dict(guest_task=state["namespace"]["operator"]["home"] + "/.cache/mvmctl-host-reboot-" + "1" * 32,
+        namespace=state["namespace"], namespace_identity=state["namespace_identity"], before_boot="1" * 36,
+        source_revision="f" * 40, source_payload={}, phase_helper_sha256="d" * 64,
+        candidate_sha256="a" * 64, candidate_version="mvm 0.3.0", kernel_id="b" * 64, kernel_sha256="c" * 64)
+
+
+@pytest.fixture
+def durable_phase(tmp_path):
+    import hashlib
+    from scripts import host_reboot_phase as helper
+    task = tmp_path / "detached-phase"
+    task.mkdir(mode=0o700)
+    module = Path(helper.__file__).resolve()
+    info = task.stat()
+    spec = dict(nonce="a" * 32, argv=[], cwd=str(task), env={"PATH": os.environ["PATH"], "PYTHONDONTWRITEBYTECODE": "1"},
+        boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(), uid=os.getuid(), gid=os.getgid(),
+        source={str(module): hashlib.sha256(module.read_bytes()).hexdigest()},
+        namespace={str(task): [info.st_dev, info.st_ino, info.st_uid, info.st_gid, 0o700]})
+    return helper, task, spec
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_host_reboot_detached_phase_retains_output_after_initiating_pipe_closes(durable_phase, exit_code):
+    helper, task, spec = durable_phase
+    spec["argv"] = [sys.executable, "-c", "import time,sys; time.sleep(.1); print('actual stdout',flush=True); print('actual stderr',file=sys.stderr,flush=True); sys.exit("+str(exit_code)+")"]
+    program = "import json,sys; sys.path.insert(0,"+repr(str(Path(helper.__file__).resolve().parents[1]))+"); from scripts.host_reboot_phase import launch; from pathlib import Path; print(json.dumps(launch(Path("+repr(str(task))+"),'pre',json.loads("+repr(json.dumps(spec))+"))),flush=True)"
+    initiating = subprocess.Popen([sys.executable, "-B", "-c", program], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    identity = json.loads(initiating.stdout.readline())
+    initiating.stdout.close()
+    assert initiating.wait(timeout=5) == 0
+    deadline = time.monotonic()+10
+    while True:
+        status = helper.observe(task, 'pre', spec['nonce'])
+        if status['state'] == 'complete':break
+        assert time.monotonic()<deadline
+        time.sleep(.02)
+    assert status['start']['supervisor']==identity and status['returncode']==exit_code
+    assert (task/'pre.stdout').read_text()=='actual stdout\n'
+    assert (task/'pre.stderr').read_text()=='actual stderr\n'
+    # Completion remains valid after its process exits; /proc is no longer required.
+    assert helper.observe(task,'pre',spec['nonce'])==status
+    with pytest.raises(FileExistsError):helper.launch(task,'pre',spec)
+
+
+@pytest.mark.parametrize("fault", ["missing", "malformed", "identity", "nonce", "boot", "source"])
+def test_host_reboot_detached_phase_refuses_unproved_receipts(durable_phase, fault):
+    helper, task, spec = durable_phase
+    helper._write(task/'pre.input.json',spec)
+    start = dict(schema_version=1,phase='pre',nonce=spec['nonce'],boot_id=spec['boot_id'],
+                 supervisor=helper._identity(os.getpid()),pytest=helper._identity(os.getpid()))
+    if fault=='missing':
+        (task/'pre.input.json').unlink()
+    elif fault=='malformed':
+        (task/'pre.start.json').write_text('{');(task/'pre.start.json').chmod(0o600)
+    else:
+        if fault=='identity':start['supervisor']['start_ticks']+=1
+        if fault=='nonce':start['nonce']='b'*32
+        if fault=='boot':spec['boot_id']='changed';(task/'pre.input.json').unlink();helper._write(task/'pre.input.json',spec)
+        if fault=='source':spec['source'][next(iter(spec['source']))]='0'*64;(task/'pre.input.json').unlink();helper._write(task/'pre.input.json',spec)
+        helper._write(task/'pre.start.json',start)
+    with pytest.raises((OSError,RuntimeError,ValueError)):helper.observe(task,'pre','a'*32)
+
+
+@pytest.mark.parametrize("failure", ["outage", "wrong-identity", "malformed", "uncertain-launch"])
+def test_host_reboot_phase_observation_cannot_pass_or_relaunch(orchestrator, monkeypatch, tmp_path, failure):
+    original = orchestrator._host_reboot_pytest
+    _,_,_,_,state = _host_reboot_fixture(orchestrator,monkeypatch,tmp_path)
+    task=tmp_path/'durable';task.mkdir(mode=0o700)
+    calls=[]
+    now=[0]
+    monkeypatch.setattr(orchestrator.time,'monotonic',lambda:now[0])
+    monkeypatch.setattr(orchestrator.time,'sleep',lambda seconds:now.__setitem__(0,now[0]+400))
+    def ssh(bound,command,**kwargs):
+        args=shlex.split(command);calls.append(args[5]);now[0]+=1
+        if args[5]=='launch':
+            if failure=='uncertain-launch':raise RuntimeError('launch transport unavailable; containment uncertain')
+            return subprocess.CompletedProcess([],0,stdout=json.dumps(dict(pid=123,start_ticks=456)))
+        if failure=='outage':return subprocess.CompletedProcess([],1,stdout='',stderr='transport unavailable')
+        if failure=='malformed':return subprocess.CompletedProcess([],0,stdout='{')
+        return subprocess.CompletedProcess([],0,stdout=json.dumps(dict(state='complete',start=dict(supervisor=dict(pid=124,start_ticks=456)),returncode=0)))
+    monkeypatch.setattr(orchestrator,'_host_reboot_ssh',ssh)
+    with pytest.raises((RuntimeError, ValueError)):original(_durable_phase_bound(state),'pre',task)
+    assert calls.count('launch')==1
+    assert not (task/'pre.native.json').exists() and not (task/'pre.json').exists()
+
+
+def test_host_reboot_phase_completion_survives_child_reap_race(durable_phase, monkeypatch):
+    helper, task, spec = durable_phase
+    helper._write(task/'pre.input.json', spec)
+    start = dict(schema_version=1,phase='pre',nonce=spec['nonce'],boot_id=spec['boot_id'],
+        supervisor=helper._identity(os.getpid()),pytest=dict(pid=999999999,start_ticks=1))
+    helper._write(task/'pre.start.json',start)
+    assert helper.observe(task,'pre',spec['nonce'])['state']=='finishing'
+    helper._write(task/'pre.complete.json',dict(start=start,returncode=0))
+    def no_live_process_needed(pid):
+        raise AssertionError('closed completion must survive normal process exit')
+    monkeypatch.setattr(helper,'_identity',no_live_process_needed)
+    assert helper.observe(task,'pre',spec['nonce'])==dict(state='complete',start=start,returncode=0)
+
+
+@pytest.mark.parametrize('fault',['missing-completion','completion-identity','completion-code'])
+def test_host_reboot_phase_refuses_lost_or_rebound_completion(durable_phase,fault):
+    helper,task,spec=durable_phase
+    helper._write(task/'pre.input.json',spec)
+    start=dict(schema_version=1,phase='pre',nonce=spec['nonce'],boot_id=spec['boot_id'],
+        supervisor=dict(pid=999999999,start_ticks=1),pytest=dict(pid=999999998,start_ticks=1))
+    helper._write(task/'pre.start.json',start)
+    if fault!='missing-completion':
+        complete=dict(start=json.loads(json.dumps(start)),returncode=0)
+        if fault=='completion-identity':complete['start']['pytest']['start_ticks']=2
+        else:complete['returncode']=True
+        helper._write(task/'pre.complete.json',complete)
+    with pytest.raises(RuntimeError):helper.observe(task,'pre',spec['nonce'])
+
+
+@pytest.mark.parametrize('receipt',['start','complete'])
+def test_host_reboot_receipt_hardlink_publication_is_pending_not_failure_or_pass(durable_phase,monkeypatch,receipt):
+    helper,task,spec=durable_phase
+    helper._write(task/'pre.input.json',spec)
+    start=dict(schema_version=1,phase='pre',nonce=spec['nonce'],boot_id=spec['boot_id'],
+        supervisor=helper._identity(os.getpid()),pytest=helper._identity(os.getpid()))
+    if receipt=='complete':helper._write(task/'pre.start.json',start)
+    real_link=helper.os.link
+    observed=[]
+    target=task/('pre.'+receipt+'.json')
+    def overlapping_link(source,destination):
+        real_link(source,destination)
+        if Path(destination)==target:
+            assert target.stat().st_nlink==2
+            observed.append(helper.observe(task,'pre',spec['nonce']))
+    monkeypatch.setattr(helper.os,'link',overlapping_link)
+    if receipt=='start':helper._write(target,start)
+    else:
+        pending=task/'pre.complete.pending.json'
+        helper._write(pending,dict(start=start,returncode=7))
+        helper.os.link(pending,target)
+        pending.unlink()
+    assert observed==[dict(state='publishing')]
+    assert target.stat().st_nlink==1
+    status=helper.observe(task,'pre',spec['nonce'])
+    assert status['state']==('running' if receipt=='start' else 'complete')
+    if receipt=='complete':assert status['returncode']==7
