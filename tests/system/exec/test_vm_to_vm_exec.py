@@ -669,7 +669,7 @@ def owned_exec_pair(runner_vm: str):
             # A partial policy publication is still owned by these exact endpoints.
             ids = {vm_id for values in owned["vms"].values() for vm_id in values}
             for policy in _exec_policies(runner_vm):
-                if policy["source_vm_id"] in ids and policy["destination_vm_id"] in ids:
+                if policy.get("source_vm_id") in ids and policy.get("destination_vm_id") in ids:
                     owned["policy_ids"].add(policy["id"])
             for policy_id in sorted(owned["policy_ids"]):
                 if any(item["id"] == policy_id for item in _exec_policies(runner_vm)):
@@ -755,6 +755,85 @@ def test_vm_to_vm_exec_requires_opt_in_and_exact_nonroot_user(runner_vm: str, ow
     assert [item for item in _exec_policies(runner_vm) if item["id"] == policy["id"]] == [policy]
     allowed = _run_mvm(runner_vm, *_extra_remote_args(owned, "id -un"))
     assert allowed.stdout.strip() == "runner", (allowed.stdout, allowed.stderr)
+
+
+def test_vm_to_vm_exec_labels_revoke_new_sessions_without_revoking_an_exact_grant(
+    runner_vm: str, owned_exec_pair: dict,
+):
+    """Label and exact grants are additive, with admission bound to the current revision."""
+    owned = owned_exec_pair
+    vm_id = owned["source_id"]
+    case = f"exec-{owned['suffix']}"
+    selector = {"qa-case": case, "role": "eligible"}
+    labels = _json_success_data(
+        _run_mvm(runner_vm, "vm", "labels", "inspect", vm_id, "--json").stdout, dict,
+    )
+
+    def set_role(role: str) -> None:
+        nonlocal labels
+        labels = _json_success_data(
+            _run_mvm(
+                runner_vm, "vm", "labels", "set", vm_id, "--revision", str(labels["revision"]),
+                f"qa-case={case}", f"role={role}", "--json",
+            ).stdout, dict,
+        )
+        assert labels["labels"] == {"qa-case": case, "role": role}
+
+    def assert_allowed() -> None:
+        result = _run_mvm(runner_vm, *_extra_remote_args(owned, "id -un"))
+        assert result.stdout.strip() == "runner", (result.stdout, result.stderr)
+
+    set_role("eligible")
+    try:
+        created = _json_success_data(
+            _run_mvm(
+                runner_vm, "policy", "exec", "create", "--from-label", f"qa-case={case}",
+                "--from-label", "role=eligible", "--to-vm", owned["destination_id"],
+                "--user", "runner", "--json",
+            ).stdout, dict,
+        )
+        owned["policy_ids"].add(created["id"])
+        assert created["source_labels"] == selector
+        assert created["destination_vm_id"] == owned["destination_id"]
+        assert_allowed()
+
+        exact = _extra_exec_grant(runner_vm, owned)
+        set_role("ineligible")
+        assert_allowed()
+        _run_mvm(runner_vm, "policy", "exec", "rm", exact["id"], "--force")
+
+        sentinel = f"/tmp/{case}-denied"
+        denied = _run_mvm(runner_vm, *_extra_remote_args(owned, join(["touch", sentinel])), check=False)
+        assert denied.returncode != 0, (denied.stdout, denied.stderr)
+        _sentinel_absent(runner_vm, owned["destination_id"], sentinel)
+        assert any(policy["id"] == created["id"] for policy in _exec_policies(runner_vm))
+
+        set_role("eligible")
+        assert_allowed()
+        admitted = _extra_remote_args(owned, "printf 'admitted\\n'; sleep 8; printf 'completed\\n'")
+        with subprocess.Popen(
+            [SYSTEM_MVM_BINARY, *admitted], stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        ) as process:
+            try:
+                assert process.stdout is not None
+                ready, _, _ = select.select([process.stdout], [], [], 20)
+                assert ready and process.stdout.readline().strip() == "admitted"
+                set_role("ineligible")
+                assert process.poll() is None, "label replacement waited for command completion"
+                output, stderr = process.communicate(timeout=20)
+                assert process.returncode == 0 and output.strip() == "completed", (output, stderr)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate(timeout=10)
+        denied = _run_mvm(runner_vm, *_extra_remote_args(owned, "id -un"), check=False)
+        assert denied.returncode != 0, (denied.stdout, denied.stderr)
+    finally:
+        # A lost create response must not leave this test's selector policy behind.
+        for policy in _exec_policies(runner_vm):
+            if policy.get("source_labels") == selector and policy.get("destination_vm_id") == owned["destination_id"]:
+                owned["policy_ids"].add(policy["id"])
 
 
 @contextmanager

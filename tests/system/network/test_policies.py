@@ -992,3 +992,65 @@ assert path.is_file(), 'UDP responder failed to bind; inspect server.log'
             except Exception as exc:
                 errors.append(f"network cleanup {network}: {exc}")
         assert not errors, "\n".join(errors)
+
+
+@pytest.mark.parametrize("same_network", [True, False], ids=["bridged", "routed"])
+@pytest.mark.timeout(720, method="signal")
+def test_label_traffic_policy_tracks_current_vm_labels(runner_vm: str, same_network: bool) -> None:
+    """A current label match permits the selected port in both forwarding paths."""
+    suffix = uuid.uuid4().hex[:12]
+    case = f"traffic-{suffix}"
+    directory = f"/tmp/{case}"
+    selector = {"qa-case": case, "role": "client"}
+    target = {"qa-case": case, "role": "server"}
+    before = _tcp_baseline(runner_vm)
+    _require_tcp_preseed(before)
+    existing_policies = _tcp_data(runner_vm, "policy", "traffic", "labels", "ls", kind=list)
+    networks: dict[str, dict[str, Any] | None] = {}
+    vms: dict[str, tuple[str, dict[str, Any] | None]] = {}
+
+    def set_labels(vm: dict[str, Any], labels: dict[str, str], revision: int) -> int:
+        updated = _tcp_data(
+            runner_vm, "vm", "labels", "set", vm["binding"]["id"], "--revision", str(revision),
+            *(f"{key}={value}" for key, value in labels.items()),
+        )
+        assert updated["labels"] == labels
+        return updated["revision"]
+
+    try:
+        source_network = _create_tcp_network(runner_vm, f"pol-label-src-{suffix}", networks)
+        destination_network = source_network if same_network else _create_tcp_network(
+            runner_vm, f"pol-label-dst-{suffix}", networks,
+        )
+        source = _create_tcp_vm(runner_vm, f"pol-label-client-{suffix}", source_network["id"], vms)
+        destination = _create_tcp_vm(runner_vm, f"pol-label-server-{suffix}", destination_network["id"], vms)
+        revision = set_labels(source, selector, 0)
+        set_labels(destination, target, 0)
+        _start_tcp_listener(runner_vm, destination, directory)
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=False)
+
+        policy = _tcp_data(
+            runner_vm, "policy", "traffic", "labels", "create",
+            "--from-label", f"qa-case={case}", "--from-label", "role=client",
+            "--to-label", f"qa-case={case}", "--to-label", "role=server",
+            "--protocol", "tcp", "--port", "8080",
+        )
+        assert policy["source"]["labels"] == selector and policy["destination"]["labels"] == target, policy
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=True)
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8081, allowed=False)
+
+        revision = set_labels(source, {**selector, "role": "excluded"}, revision)
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=False)
+        set_labels(source, selector, revision)
+        _assert_tcp_flow(runner_vm, source, destination, directory, 8080, allowed=True)
+    finally:
+        try:
+            for policy in _tcp_data(runner_vm, "policy", "traffic", "labels", "ls", kind=list):
+                if policy["source"].get("labels") == selector and policy["destination"].get("labels") == target:
+                    _run_mvm(runner_vm, "policy", "traffic", "labels", "rm", policy["id"], "--force")
+            assert _tcp_data(runner_vm, "policy", "traffic", "labels", "ls", kind=list) == existing_policies
+        finally:
+            _cleanup_tcp_resources(
+                runner_vm, before, networks, vms, policy_attempted=False,
+                source_network=None, destination=None, policy=None,
+            )
