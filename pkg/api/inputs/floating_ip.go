@@ -90,5 +90,5 @@ func (input FloatingIPNetworkInput) Resolve(ctx context.Context, repo network.Re
 		}
 		return item, nil
 	}
-	return network.NewResolver(repo, nil).Resolve(ctx, input.Network)
+	return network.NewResolver(repo).Resolve(ctx, input.Network)
 }

@@ -37,7 +37,7 @@ func NewLeaseController(
 			return nil, errs.Wrap(errs.CodeNetworkNotFound,
 				fmt.Errorf("cannot resolve network entity %q: no network repository provided", e))
 		}
-		resolver := NewResolver(networkRepo, nil)
+		resolver := NewResolver(networkRepo)
 		net, err := resolver.Resolve(ctx, e)
 		if err != nil {
 			return nil, err

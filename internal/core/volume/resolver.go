@@ -10,18 +10,6 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// RELATIONS defines the cross-domain relations for volume enrichment.
-var RELATIONS = map[string]model.RelationSpec{
-	"vm": {
-		FKField:      "id",
-		Resolver:     "vm",
-		Method:       "find_by_volume_ids",
-		RelationName: "vms",
-		IsReverse:    true,
-		BatchMethod:  "by_volume_id_batch",
-	},
-}
-
 // ResolveResult holds the result of resolving multiple volume identifiers.
 type ResolveResult struct {
 	Volumes  []*model.VolumeItem
@@ -29,39 +17,14 @@ type ResolveResult struct {
 	ExitCode int
 }
 
-// EnrichFunc is a function that enriches volumes in-place with relations.
-// Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(ctx context.Context, volumes []*model.VolumeItem, include []string, relations map[string]model.RelationSpec)
-
 // Resolver resolves volume identifiers (name, ID prefix) to volume objects.
 type Resolver struct {
-	repo       Repository
-	include    []string
-	enrichFunc EnrichFunc
+	repo Repository
 }
 
 // NewResolver creates a new volume resolver.
 func NewResolver(repo Repository) *Resolver {
 	return &Resolver{repo: repo}
-}
-
-// SetEnrichFunc sets the enrichment function called after each resolution.
-// Must be set for cross-domain relation enrichment.
-func (r *Resolver) SetEnrichFunc(fn EnrichFunc) {
-	r.enrichFunc = fn
-}
-
-// SetInclude sets the relation names to include during resolution.
-func (r *Resolver) SetInclude(include []string) {
-	r.include = include
-}
-
-// enrich enriches volumes with relations if include is set.
-func (r *Resolver) enrich(ctx context.Context, volumes []*model.VolumeItem) []*model.VolumeItem {
-	if r.include != nil && len(volumes) > 0 && r.enrichFunc != nil {
-		r.enrichFunc(ctx, volumes, r.include, RELATIONS)
-	}
-	return volumes
 }
 
 // ByID resolves a volume by ID prefix. Returns error if not found or ambiguous.
@@ -77,7 +40,7 @@ func (r *Resolver) ByID(ctx context.Context, volumeID string) (*model.VolumeItem
 	if len(matches) > 1 {
 		return nil, errs.New(errs.CodeVolumeNotFound, fmt.Sprintf("Volume ID is ambiguous: '%s'", volumeID))
 	}
-	return r.enrich(ctx, matches)[0], nil
+	return matches[0], nil
 }
 
 // ByName resolves a volume by exact name.
@@ -89,12 +52,12 @@ func (r *Resolver) ByName(ctx context.Context, name string) (*model.VolumeItem, 
 	if v == nil {
 		return nil, errs.NotFound(errs.CodeVolumeNotFound, fmt.Sprintf("Volume not found by name: '%s'", name))
 	}
-	return r.enrich(ctx, []*model.VolumeItem{v})[0], nil
+	return v, nil
 }
 
 // Resolve resolves a volume by name or ID prefix (tries name first).
 func (r *Resolver) Resolve(ctx context.Context, identifier string) (*model.VolumeItem, error) {
-	// Try name first. ByName() already enriches, so return directly.
+	// Try the name first.
 	v, err := r.ByName(ctx, identifier)
 	if err == nil {
 		return v, nil
@@ -103,7 +66,7 @@ func (r *Resolver) Resolve(ctx context.Context, identifier string) (*model.Volum
 		return nil, err
 	}
 
-	// Fall back to ID prefix. ByID() already enriches.
+	// Fall back to an ID prefix.
 	return r.ByID(ctx, identifier)
 }
 
@@ -128,8 +91,6 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 			volumes = append(volumes, v)
 		}
 	}
-
-	volumes = r.enrich(ctx, volumes)
 
 	exitCode := 0
 	if len(errList) > 0 && len(volumes) == 0 {
