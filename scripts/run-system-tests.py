@@ -2786,8 +2786,8 @@ def _host_reboot_outer_identity() -> dict[str, Any]:
     if (Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()[19] != str(ticks)
             or Path(f"/proc/{pid}/cgroup").read_text().splitlines() != groups):
         raise RuntimeError("host_reboot runner task changed while reading controls")
-    if info["resources"]["mem"] != 6144:
-        raise RuntimeError("host_reboot must preserve the approved 6 GiB guest geometry")
+    if type(info["resources"]["mem"]) is not int or info["resources"]["mem"] <= 0:
+        raise RuntimeError("host_reboot requires positive integral observed guest memory geometry")
     return dict(runner_id=row["id"], created_at=row["created_at"], pid=pid, start_ticks=ticks,
                 guest_mem_size_mib=info["resources"]["mem"], **controls)
 
@@ -3039,6 +3039,10 @@ def _host_reboot_read_pre_for_source(task: Path, controller: dict, source_root: 
     namespace = bound["namespace"]
     if (namespace["runner_id"] != bound["outer_before"]["runner_id"]
             or namespace["runner_id"] != bound["outer_after"]["runner_id"]
+            or type(bound["outer_before"]["guest_mem_size_mib"]) is not int
+            or bound["outer_before"]["guest_mem_size_mib"] <= 0
+            or type(bound["outer_after"]["guest_mem_size_mib"]) is not int
+            or bound["outer_after"]["guest_mem_size_mib"] != bound["outer_before"]["guest_mem_size_mib"]
             or set(bound["namespace_identity"]) != {"home", "task_parent", "cache", "config", "mirror"}
             or any(not isinstance(value, list) or len(value) != 5
                    or any(type(n) is not int for n in value)
@@ -3088,7 +3092,8 @@ def _host_reboot_validate_pre(task: Path, controller: dict, namespace: Path | No
     if _host_reboot_probe(bound) != bound["after_boot"]:
         raise RuntimeError("host_reboot current runner boot changed again")
     outer = _host_reboot_outer_identity()
-    if any(outer[key] != bound["outer_after"][key] for key in ("runner_id", "created_at", "pid", "start_ticks")):
+    if any(outer[key] != bound["outer_after"][key]
+           for key in ("runner_id", "created_at", "pid", "start_ticks", "guest_mem_size_mib")):
         raise RuntimeError("host_reboot POST outer task identity changed")
     _host_reboot_require_source(bound)
     return bound, pre, outer
@@ -3177,7 +3182,8 @@ def _require_completed_host_reboot_for_source(task: Path, source_root: Path) -> 
             or type(authority["schema_version"]) is not int or authority["schema_version"] != 1
             or authority["runner"] != _HOST_REBOOT_RUNNER or authority["host_boot_id"] != bound["after_boot"]
             or authority["controller"] != controller
-            or authority["outer"]["guest_mem_size_mib"] != 6144
+            or type(authority["outer"]["guest_mem_size_mib"]) is not int
+            or authority["outer"]["guest_mem_size_mib"] <= 0
             or any(authority["outer"][key] != bound["outer_after"][key]
                    for key in ("runner_id", "created_at", "pid", "start_ticks", "guest_mem_size_mib"))):
         raise RuntimeError("host_reboot historical POST authority differs from its bound reboot")
@@ -3273,7 +3279,8 @@ def run_host_reboot_phase(phase: str, task: Path, envelope: Path | None, namespa
                     time.sleep(1)
             bound["after_boot"] = boot
             bound["outer_after"] = _host_reboot_outer_identity()
-            if any(bound["outer_after"][key] != bound["outer_before"][key] for key in ("runner_id", "created_at")):
+            if any(bound["outer_after"][key] != bound["outer_before"][key]
+                   for key in ("runner_id", "created_at", "guest_mem_size_mib")):
                 raise RuntimeError("host_reboot replaced the runner identity")
             if _host_reboot_controller() != controller:
                 raise RuntimeError("host_reboot changed the outer controller")

@@ -161,13 +161,43 @@ def test_default_outer_controller_is_the_canonical_system_binary(
     assert module.MVM_BINARY == "/usr/local/bin/mvm"
 
 
-def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
+@pytest.mark.parametrize("memory", [3072, 6144, 1, 0, -1, True, "3072", 3072.0, None])
+def test_host_reboot_outer_identity_requires_positive_integral_observed_memory(
+    orchestrator, monkeypatch, memory,
+):
+    runner_id = "1" * 32
+    info = dict(vm=dict(name="mvmctl-030-test", status="running", id=runner_id, pid=123,
+                       process_start_time=456, created_at="2026-10-10T00:00:00Z"),
+                resources=dict(mem=memory))
+    calls = []
+    def inspect(*args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(info), stderr="")
+    monkeypatch.setattr(orchestrator, "mvm", inspect)
+    files = {
+        "/proc/123/stat": "123 (firecracker) " + " ".join(["S", *(["0"] * 18), "456"]),
+        "/proc/123/cgroup": f"0::/mvmctl/{runner_id}\n",
+        f"/sys/fs/cgroup/mvmctl/{runner_id}/memory.high": "max\n",
+        f"/sys/fs/cgroup/mvmctl/{runner_id}/memory.max": "max\n",
+    }
+    monkeypatch.setattr(Path, "read_text", lambda path: files[str(path)])
+    if type(memory) is int and memory > 0:
+        outer = orchestrator._host_reboot_outer_identity()
+        assert outer["guest_mem_size_mib"] == memory
+        assert outer["runner_id"] == runner_id and outer["start_ticks"] == 456
+    else:
+        with pytest.raises(RuntimeError, match="positive integral observed guest memory"):
+            orchestrator._host_reboot_outer_identity()
+    assert calls == [("vm", "inspect", "mvmctl-030-test", "--json")]
+
+
+def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path, guest_mem_size_mib=6144):
     """Closed phase simulator: lifecycle is recorded, never executed."""
     task = tmp_path / "host-reboot"
     task.mkdir(mode=0o700)
     before_boot, after_boot = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
     outer = dict(runner_id="1" * 32, created_at="2026-10-10T00:00:00Z", pid=123, start_ticks=456,
-                 guest_mem_size_mib=6144, memory_high="8589934592", memory_max="8589934592")
+                 guest_mem_size_mib=guest_mem_size_mib, memory_high="8589934592", memory_max="8589934592")
     calls, phases = [], []
     controller = dict(path="/home/www/.local/bin/mvm", command=["/home/www/.local/bin/mvm"],
                       identity=[1, 2, 1000, 1000, 0o755, 1, 21586222, 3, 4], sha256="c" * 64)
@@ -247,7 +277,7 @@ def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
     envelope = tmp_path / "envelope.json"
     payload = dict(schema_version=1, runner="mvmctl-030-test", runner_id=outer["runner_id"], host_boot_id=after_boot,
                    outer_pid=outer["pid"], outer_start_ticks=outer["start_ticks"], memory_high=8589934592,
-                   memory_max=8589934592, guest_mem_size_mib=6144)
+                   memory_max=8589934592, guest_mem_size_mib=guest_mem_size_mib)
     envelope.write_text(json.dumps(payload))
     envelope.chmod(0o600)
     return task, envelope, calls, phases, state
@@ -257,12 +287,15 @@ def _host_reboot_fixture(orchestrator, monkeypatch, tmp_path):
     (8589934592, 8589934592), (6576668672, 6576668672),
     (6576668672, "max"), ("max", 6576668672), ("max", "max"),
 ], ids=["retained-8g", "observed-6.125g", "observed-max-limit", "observed-max-high", "observed-both-max"])
+@pytest.mark.parametrize("guest_mem_size_mib", [3072, 6144])
 def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(
-    orchestrator, monkeypatch, tmp_path, memory_high, memory_max,
+    orchestrator, monkeypatch, tmp_path, memory_high, memory_max, guest_mem_size_mib,
 ):
     stage_source = orchestrator._host_reboot_stage_source
     source_hash = orchestrator._sha256_runner_input
-    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path)
+    task, envelope, calls, phases, state = _host_reboot_fixture(
+        orchestrator, monkeypatch, tmp_path, guest_mem_size_mib,
+    )
     monkeypatch.setattr(orchestrator, "_host_reboot_stage_source", stage_source)
     monkeypatch.setattr(orchestrator, "_sha256_runner_input",
                         lambda path: source_hash(path) if path.is_file() else "a" * 64)
@@ -275,6 +308,8 @@ def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(
     assert json.loads((task / "task.json").read_bytes())["after_boot"] != json.loads(state["pre"])["boot_id"]
     assert json.loads((task / "task.json").read_bytes())["controller"] == state["controller"]
     bound = json.loads((task / "task.json").read_bytes())
+    assert bound["outer_before"]["guest_mem_size_mib"] == guest_mem_size_mib
+    assert bound["outer_after"]["guest_mem_size_mib"] == guest_mem_size_mib
     assert bound["schema_version"] == 2 and bound["namespace"] == state["namespace"]
     assert bound["namespace_identity"] == state["namespace_identity"]
     assert bound["guest_task"].startswith(state["namespace"]["operator"]["home"] + "/.cache/")
@@ -305,6 +340,42 @@ def test_host_reboot_pre_retains_proof_but_never_claims_journey_success(
     monkeypatch.setattr(orchestrator, "_host_reboot_outer_identity", lambda: dict(state["outer"]))
     replay = orchestrator.run_host_reboot_phase("post", task, envelope)
     assert replay["passed"] is False and phases == ["pre", "post"]
+
+
+@pytest.mark.parametrize("boundary", ["reboot", "post", "retained-pre"])
+def test_host_reboot_refuses_changed_observed_guest_memory(
+    orchestrator, monkeypatch, tmp_path, boundary,
+):
+    task, envelope, calls, phases, state = _host_reboot_fixture(orchestrator, monkeypatch, tmp_path, 3072)
+    if boundary == "reboot":
+        transport = orchestrator.mvm
+        def reboot(*args, **kwargs):
+            result = transport(*args, **kwargs)
+            if args[:2] == ("vm", "reboot"):
+                state["outer"]["guest_mem_size_mib"] = 4096
+            return result
+        monkeypatch.setattr(orchestrator, "mvm", reboot)
+    pre = orchestrator.run_host_reboot_phase("pre", task, None, state["namespace_path"])
+    if boundary == "reboot":
+        assert not pre["phase_complete"] and not (task / "task.json").exists()
+        assert "replaced the runner identity" in pre["output"]
+    else:
+        assert pre["phase_complete"]
+        if boundary == "retained-pre":
+            bound = json.loads((task / "task.json").read_bytes())
+            bound["outer_after"]["guest_mem_size_mib"] = 4096
+            (task / "task.json").write_bytes(json.dumps(bound).encode())
+        else:
+            state["outer"]["guest_mem_size_mib"] = 4096
+            payload = json.loads(envelope.read_bytes())
+            payload["guest_mem_size_mib"] = 4096
+            envelope.write_text(json.dumps(payload))
+        post = orchestrator.run_host_reboot_phase("post", task, envelope)
+        assert not post["passed"] and not post["phase_complete"]
+        assert ("retained PRE binding" if boundary == "retained-pre" else "POST outer task identity") in post["output"]
+        assert not (task / "admin-envelope.json").exists()
+    assert phases == ["pre"]
+    assert len([call for call in calls if call[:2] == ("vm", "reboot")]) == 1
 
 
 @pytest.mark.parametrize("field,value", [("host_boot_id", "11111111-1111-4111-8111-111111111111"),
@@ -710,16 +781,23 @@ def test_host_reboot_guest_preservation_refuses_persistent_changes_but_allows_bo
     from tests.system.host.test_host_reboot import _preserve_persistent_inventory
     before = {key: [] for key in ("image", "kernel", "bin", "volume", "key", "snapshot", "config", "traffic", "exec")}
     before.update(namespace=[1, 2], links=[{"ifindex": 3}], addresses=[], routes=[], firewall=[], namespace_mounts={})
+    before["traffic"] = {"vm_to_floating_ip": [], "network_to_vm": []}
+    floating = dict(policy=dict(id="owned-source"), operator=dict(policy=dict(id="owned-operator")))
     after_boot, final = json.loads(json.dumps(before)), json.loads(json.dumps(before))
+    after_boot["traffic"]["vm_to_floating_ip"] = [floating["policy"], floating["operator"]["policy"]]
     after_boot.update(namespace=[5, 6], links=[{"ifindex": 7}])
     final.update(namespace=[5, 6], links=[{"ifindex": 8}])
     if fault:
         domain, point = fault.split("-")
-        (after_boot if point == "after_boot" else final)[domain] = [{"id": "changed"}]
+        observed = after_boot if point == "after_boot" else final
+        if domain == "traffic":
+            observed[domain]["vm_to_floating_ip"].append({"id": "changed"})
+        else:
+            observed[domain] = [{"id": "changed"}]
         with pytest.raises(AssertionError, match=domain):
-            _preserve_persistent_inventory(tmp_path, before, after_boot, final)
+            _preserve_persistent_inventory(tmp_path, before, after_boot, final, floating)
     else:
-        _preserve_persistent_inventory(tmp_path, before, after_boot, final)
+        _preserve_persistent_inventory(tmp_path, before, after_boot, final, floating)
     assert json.loads((tmp_path / "preservation.json").read_bytes()) == dict(before=before, after_boot=after_boot, final=final)
 
 
