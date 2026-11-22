@@ -25,7 +25,13 @@ func (authority *productionGenerationNetworkAuthority) firewallGenerationNamespa
 	if err := authority.mutation.Verify(ctx); err != nil {
 		return generationNamespaceIdentity{}, preserveGenerationAuthorityError("verify network mutation lock", err)
 	}
-	state := authority.kernel.state
+	return verifyPinnedGenerationNamespace(ctx, authority.kernel, authority.identity)
+}
+
+func verifyPinnedGenerationNamespace(
+	ctx context.Context, kernel *kernelObservationNamespaceLease, expected generationNamespaceIdentity,
+) (generationNamespaceIdentity, error) {
+	state := kernel.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if !state.active || state.released {
@@ -39,7 +45,7 @@ func (authority *productionGenerationNetworkAuthority) firewallGenerationNamespa
 	if err != nil {
 		return generationNamespaceIdentity{}, err
 	}
-	if identity != authority.identity {
+	if identity != expected {
 		return generationNamespaceIdentity{}, generationAuthorityError(
 			"host network namespace identity changed",
 			nil,
@@ -57,11 +63,18 @@ func (authority *productionGenerationNetworkAuthority) createInitialRecord(
 	if _, err := authority.firewallGenerationNamespace(ctx); err != nil {
 		return generationRecord{}, generationRecordFileEvidence{}, err
 	}
+	return initializeEmptyGeneration(ctx, authority.kernel, store, binding)
+}
+
+func initializeEmptyGeneration(
+	ctx context.Context, kernel *kernelObservationNamespaceLease, store *generationRecordStore,
+	binding generationRecordBinding,
+) (generationRecord, generationRecordFileEvidence, error) {
 	empty, err := compileGeneration(generationIntent{})
 	if err != nil {
 		return generationRecord{}, generationRecordFileEvidence{}, err
 	}
-	if err := verifyExactCommittedGeneration(ctx, authority.kernel, empty); err != nil {
+	if err := verifyExactCommittedGeneration(ctx, kernel, empty); err != nil {
 		return generationRecord{}, generationRecordFileEvidence{}, err
 	}
 	record, err := newCommittedGenerationRecord(binding, generationRecordIdentityFromCompiled(empty))

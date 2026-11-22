@@ -6,6 +6,7 @@ import (
 	"net/netip"
 
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/service/firewall"
 	"mvmctl/internal/service/network"
 )
 
@@ -434,6 +435,9 @@ func (server *VMLifecycleServer) Remove(
 		if err := network.ForgetVMEndpoint(ctx, hold, locked.record.launchGeneration); err != nil {
 			return VMCleanupResult{}, err
 		}
+	}
+	if err := firewall.RetireVMLabels(ctx, ownerUID, request.VMID); err != nil {
+		return VMCleanupResult{}, err
 	}
 	if err := retireRemovedVMExecution(ctx, locked, instanceCaller{uid: ownerUID, gid: ownerGID}); err != nil {
 		return VMCleanupResult{}, err

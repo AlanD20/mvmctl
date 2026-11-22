@@ -350,6 +350,8 @@ func dispatch(
 		return dispatchHandled, handleRevokeFloatingIPDelegation(
 			ctx, endpoint, caller, deps.floatingIPDelegation, deps.control,
 		)
+	case jailer.VMLabelUpdateAction:
+		return dispatchHandled, handleVMLabelUpdate(ctx, endpoint, caller, deps.control)
 	case jailer.GuestControlPrepareAction:
 		return dispatchHandled, handleGuestControlPrepare(ctx, endpoint, caller, deps.control)
 	case jailer.VMLaunchAction:

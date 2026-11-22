@@ -16,6 +16,17 @@ func (authority *productionGenerationNetworkAuthority) retirePriorBootRecord(
 	previous generationRecord,
 	previousEvidence generationRecordFileEvidence,
 ) (generationRecord, generationRecordFileEvidence, error) {
+	if _, err := authority.firewallGenerationNamespace(ctx); err != nil {
+		return generationRecord{}, generationRecordFileEvidence{}, err
+	}
+	return retirePriorBootGeneration(ctx, authority.kernel, store, binding, previous, previousEvidence)
+}
+
+// A separate network hold is unnecessary for verified empty-namespace retirement by metadata operations.
+func retirePriorBootGeneration(
+	ctx context.Context, kernel *kernelObservationNamespaceLease, store *generationRecordStore,
+	binding generationRecordBinding, previous generationRecord, previousEvidence generationRecordFileEvidence,
+) (generationRecord, generationRecordFileEvidence, error) {
 	if err := validateGenerationRecord(previous); err != nil {
 		return generationRecord{}, generationRecordFileEvidence{}, err
 	}
@@ -26,14 +37,11 @@ func (authority *productionGenerationNetworkAuthority) retirePriorBootRecord(
 			nil,
 		)
 	}
-	if _, err := authority.firewallGenerationNamespace(ctx); err != nil {
-		return generationRecord{}, generationRecordFileEvidence{}, err
-	}
 	empty, err := compileGeneration(generationIntent{})
 	if err != nil {
 		return generationRecord{}, generationRecordFileEvidence{}, err
 	}
-	if err := verifyExactCommittedGeneration(ctx, authority.kernel, empty); err != nil {
+	if err := verifyExactCommittedGeneration(ctx, kernel, empty); err != nil {
 		return generationRecord{}, generationRecordFileEvidence{}, err
 	}
 	journal, raw, evidence, found, err := store.readIntent(ctx)
@@ -122,7 +130,7 @@ func (authority *productionGenerationNetworkAuthority) retirePriorBootRecord(
 	}
 	// CRITICAL: Recheck both tables immediately before rebinding the durable record to this boot.
 	// A crash after the journal rename resumes only from its exact old-record transition evidence.
-	if err := verifyExactCommittedGeneration(ctx, authority.kernel, empty); err != nil {
+	if err := verifyExactCommittedGeneration(ctx, kernel, empty); err != nil {
 		return generationRecord{}, generationRecordFileEvidence{}, err
 	}
 	current, err := newCommittedGenerationRecord(binding, generationRecordIdentityFromCompiled(empty))
