@@ -200,6 +200,7 @@ func (lease *MutationLease) RemoveVMPolicies(ctx context.Context, vmID string) e
 			return generationAuthorityError("firewall VM removal reservation ownership differs", nil, nil)
 		}
 	}
+	target.removeLabelTrafficForVM(state.binding.OwnerUID, vmID)
 	target.Reservations = slices.DeleteFunc(
 		target.Reservations,
 		func(reservation EndpointReservation) bool { return reservation.VMID == vmID },

@@ -230,6 +230,10 @@ func kernelObservationFromCompiled(compiled compiledGeneration) kernelObservatio
 			name:   table.table.Name,
 			flags:  table.table.Flags,
 		}
+		for _, set := range table.labelAddressSets {
+			observedTable.labelAddressSets = append(observedTable.labelAddressSets,
+				labelAddressSet{name: set.name, keys: slices.Clone(set.keys)})
+		}
 		if table.secondarySet != nil {
 			metadata := *table.secondarySet
 			metadata.ID = 0

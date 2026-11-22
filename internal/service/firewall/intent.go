@@ -357,6 +357,9 @@ func (intent Intent) validateDurablePolicies() error {
 		if err := policy.validate(reservations, ids); err != nil {
 			return err
 		}
+		if intent.VMLabels[policy.Source.VMID].Retired || intent.VMLabels[policy.Destination.VMID].Retired {
+			return invalidGeneration("label traffic policy references a retired VM")
+		}
 	}
 	for _, grant := range intent.VMGrants {
 		if !validPolicyOwnership(grant.ClaimID, grant.Incarnation) {

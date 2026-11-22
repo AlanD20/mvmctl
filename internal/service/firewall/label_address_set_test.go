@@ -56,6 +56,7 @@ func TestKernelComparisonRefusesChangedLabelSetMembership(t *testing.T) {
 	require.NoError(t, err)
 	generation.bridge.labelAddressSets = []labelAddressSet{set}
 	observed := kernelObservationFromCompiled(generation).tables[0]
+	observed.labelAddressSets = nil
 	require.ErrorContains(t, compareKernelObservedTable(observed, generation.bridge, generation.id), "label address sets")
 
 	observed.labelAddressSets = []labelAddressSet{set}
