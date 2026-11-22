@@ -1,6 +1,7 @@
 package firewall
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -126,4 +127,13 @@ func TestPublishVMLabelsRevokesActiveTrafficGeneration(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, change.labels, labels)
 	assert.EqualValues(t, 2, revision)
+}
+func readCommittedVMLabels(
+	ctx context.Context, store *generationRecordStore, ownerUID uint32, vmID string,
+) (model.VMLabels, uint64, error) {
+	intent, err := readCommittedLabelIntent(ctx, store)
+	if err != nil {
+		return nil, 0, err
+	}
+	return readVMLabels(intent, ownerUID, vmID)
 }

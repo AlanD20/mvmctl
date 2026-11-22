@@ -13,6 +13,7 @@ import (
 
 // PolicyAPI exposes separate traffic allow-intent and directional execution policy families.
 type PolicyAPI interface {
+	LabelTrafficPolicyAPI
 	VMToFloatingIPTrafficPolicyCreate(
 		context.Context,
 		inputs.VMToFloatingIPTrafficPolicyCreateInput,

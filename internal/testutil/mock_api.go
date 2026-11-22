@@ -35,6 +35,10 @@ type MockOperation struct {
 
 // MockPolicyAPI implements api.PolicyAPI for composite-interface compatibility.
 type MockPolicyAPI struct {
+	LabelTrafficPolicyCreateFunc func(context.Context, inputs.LabelTrafficPolicyCreateInput) (results.LabelTrafficPolicy, error)
+	LabelTrafficPolicyListFunc   func(context.Context) ([]results.LabelTrafficPolicy, error)
+	LabelTrafficPolicyRemoveFunc func(context.Context, inputs.LabelTrafficPolicyInput) error
+
 	VMToFloatingIPTrafficPolicyCreateFunc func(
 		ctx context.Context,
 		input inputs.VMToFloatingIPTrafficPolicyCreateInput,
@@ -196,6 +200,29 @@ func (m *MockUpdateAPI) SelfUpdateCheck(ctx context.Context) (*results.UpdateChe
 func (m *MockUpdateAPI) SelfUpdateApply(ctx context.Context, force bool) error {
 	if m.SelfUpdateApplyFunc != nil {
 		return m.SelfUpdateApplyFunc(ctx, force)
+	}
+	return nil
+}
+
+func (m *MockPolicyAPI) LabelTrafficPolicyCreate(
+	ctx context.Context, input inputs.LabelTrafficPolicyCreateInput,
+) (results.LabelTrafficPolicy, error) {
+	if m.LabelTrafficPolicyCreateFunc != nil {
+		return m.LabelTrafficPolicyCreateFunc(ctx, input)
+	}
+	return results.LabelTrafficPolicy{}, nil
+}
+
+func (m *MockPolicyAPI) LabelTrafficPolicyList(ctx context.Context) ([]results.LabelTrafficPolicy, error) {
+	if m.LabelTrafficPolicyListFunc != nil {
+		return m.LabelTrafficPolicyListFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *MockPolicyAPI) LabelTrafficPolicyRemove(ctx context.Context, input inputs.LabelTrafficPolicyInput) error {
+	if m.LabelTrafficPolicyRemoveFunc != nil {
+		return m.LabelTrafficPolicyRemoveFunc(ctx, input)
 	}
 	return nil
 }

@@ -27,6 +27,15 @@ type LabelTrafficPolicy struct {
 	Incarnation string           `json:"incarnation"`
 }
 
+// LabelTrafficPolicyID is scoped to the authenticated operator and immutable policy tuple.
+func LabelTrafficPolicyID(
+	ownerUID uint32, source, destination VMPolicyEndpoint, transport Protocol, ports PortInterval,
+) (string, error) {
+	return (LabelTrafficPolicy{
+		OwnerUID: ownerUID, Source: source, Destination: destination, Protocol: transport, Ports: ports,
+	}).identity()
+}
+
 func (policy LabelTrafficPolicy) identity() (string, error) {
 	canonical, err := json.Marshal(struct {
 		OwnerUID    uint32

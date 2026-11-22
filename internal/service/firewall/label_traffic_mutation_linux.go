@@ -56,7 +56,7 @@ func EnsureLabelTrafficPolicy(
 // RemoveLabelTrafficPolicy removes the exact rule instance when a workflow supplies its claim.
 func RemoveLabelTrafficPolicy(ctx context.Context, ownerUID uint32, policyID, claim, expected string) error {
 	if ownerUID == 0 || validateGenerationID(policyID) != nil || !validPolicyOwnership("", expected) ||
-		(claim != "" && !policyOwnershipPattern.MatchString(claim)) || (expected != "" && claim == "") {
+		(claim != "" && !policyOwnershipPattern.MatchString(claim)) {
 		return invalidGeneration("invalid label traffic policy removal ownership")
 	}
 	return withLogicalPolicyMutation(ctx, func(mutation *logicalPolicyMutation) error {
@@ -64,7 +64,7 @@ func RemoveLabelTrafficPolicy(ctx context.Context, ownerUID uint32, policyID, cl
 			if policy.ID != policyID || policy.OwnerUID != ownerUID {
 				continue
 			}
-			if claim != "" && (policy.ClaimID != claim || (expected != "" && policy.Incarnation != expected)) {
+			if (claim != "" && policy.ClaimID != claim) || (expected != "" && policy.Incarnation != expected) {
 				return policyOwnershipConflict()
 			}
 			target := cloneIntent(mutation.before)
@@ -79,4 +79,21 @@ func (intent *Intent) removeLabelTrafficForVM(ownerUID uint32, vmID string) {
 	intent.LabelTrafficPolicies = slices.DeleteFunc(intent.LabelTrafficPolicies, func(policy LabelTrafficPolicy) bool {
 		return policy.OwnerUID == ownerUID && (policy.Source.VMID == vmID || policy.Destination.VMID == vmID)
 	})
+}
+
+// ListLabelTrafficPolicies returns committed desired policies for the authenticated operator.
+func ListLabelTrafficPolicies(ctx context.Context, ownerUID uint32) ([]LabelTrafficPolicy, error) {
+	if ownerUID == 0 {
+		return nil, invalidGeneration("label traffic policy listing requires an authenticated owner")
+	}
+	policies := make([]LabelTrafficPolicy, 0)
+	err := withCommittedLabelIntent(ctx, func(intent Intent) error {
+		for _, policy := range intent.LabelTrafficPolicies {
+			if policy.OwnerUID == ownerUID {
+				policies = append(policies, policy)
+			}
+		}
+		return nil
+	})
+	return sortedCopy(policies, func(policy LabelTrafficPolicy) string { return policy.ID }), err
 }

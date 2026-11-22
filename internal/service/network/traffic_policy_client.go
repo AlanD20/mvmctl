@@ -62,40 +62,50 @@ func (client *TrafficPolicyClient) RemoveVMTrafficPolicy(
 
 func exchangeTrafficPolicy[Request NetworkTrafficPolicyRequest | VMTrafficPolicyRequest |
 	VMHostTrafficPolicyRequest | NetworkHostTrafficPolicyRequest |
-	VMFloatingIPTrafficPolicyRequest | NetworkFloatingIPTrafficPolicyRequest](
+	VMFloatingIPTrafficPolicyRequest | NetworkFloatingIPTrafficPolicyRequest | LabelTrafficPolicyRequest](
 	ctx context.Context, client *TrafficPolicyClient, action string, request Request, expectedID string,
 ) (TrafficPolicyMutationResult, error) {
+	result, err := exchangeTrafficPolicyFrame[TrafficPolicyMutationResult](ctx, client, action, request)
+	if err != nil {
+		return TrafficPolicyMutationResult{}, err
+	}
+	if err := result.Validate(expectedID); err != nil {
+		return TrafficPolicyMutationResult{}, trafficPolicyResponseError(true, err)
+	}
+	return result, nil
+}
+
+func exchangeTrafficPolicyFrame[Result any, Request any](
+	ctx context.Context, client *TrafficPolicyClient, action string, request Request,
+) (Result, error) {
+	var zero Result
 	if ctx == nil || client == nil {
-		return TrafficPolicyMutationResult{}, errs.New(
+		return zero, errs.New(
 			errs.CodeValidationFailed,
 			"traffic policy client and context are required",
 		)
 	}
 	var frame bytes.Buffer
 	if err := privilegedwire.EncodeRequest(ctx, &frame, action, request, 0); err != nil {
-		return TrafficPolicyMutationResult{}, err
+		return zero, err
 	}
 	control, err := system.NewPrivilegedControlRequest(action, frame.Bytes(), 0, nil)
 	if err != nil {
-		return TrafficPolicyMutationResult{}, err
+		return zero, err
 	}
 	outcome := (system.PrivilegedControlTransport{}).Exchange(ctx, control)
 	if !outcome.ProcessStarted() || !outcome.ResponseEOF() {
-		return TrafficPolicyMutationResult{}, trafficPolicyResponseError(outcome.ProcessStarted(), outcome.Diagnostic())
+		return zero, trafficPolicyResponseError(outcome.ProcessStarted(), outcome.Diagnostic())
 	}
-	response, err := privilegedwire.DecodeResponse[TrafficPolicyMutationResult](
+	response, err := privilegedwire.DecodeResponse[Result](
 		context.WithoutCancel(ctx), bytes.NewReader(outcome.Response()), action)
 	if err != nil {
-		return TrafficPolicyMutationResult{}, trafficPolicyResponseError(true, errors.Join(err, outcome.Diagnostic()))
+		return zero, trafficPolicyResponseError(true, errors.Join(err, outcome.Diagnostic()))
 	}
 	if operationErr := response.OperationError(); operationErr != nil {
-		return TrafficPolicyMutationResult{}, operationErr
+		return zero, operationErr
 	}
-	result := response.Result()
-	if err := result.Validate(expectedID); err != nil {
-		return TrafficPolicyMutationResult{}, trafficPolicyResponseError(true, err)
-	}
-	return result, nil
+	return response.Result(), nil
 }
 
 func trafficPolicyResponseError(started bool, cause error) error {

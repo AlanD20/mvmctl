@@ -112,7 +112,7 @@ func newExecPolicyRemoveCmd(policyAPI api.PolicyAPI) *cobra.Command {
 func newTrafficPolicyCmd(policyAPI api.PolicyAPI) *cobra.Command {
 	cmd := &cobra.Command{Use: "traffic", Short: "Manage desired TCP/UDP allow intent"}
 	cmd.AddCommand(newTrafficPolicyCreateCmd(policyAPI), newTrafficPolicyListCmd(policyAPI),
-		newTrafficPolicyInspectCmd(policyAPI), newTrafficPolicyRemoveCmd(policyAPI))
+		newTrafficPolicyInspectCmd(policyAPI), newTrafficPolicyRemoveCmd(policyAPI), newLabelTrafficPolicyCmd(policyAPI))
 	return cmd
 }
 

@@ -414,6 +414,10 @@ func dispatch(
 		return dispatchHandled, handleApplyNetworkHostTrafficPolicy(ctx, endpoint, caller, deps.control)
 	case network.NetworkHostTrafficPolicyRemoveAction:
 		return dispatchHandled, handleRemoveNetworkHostTrafficPolicy(ctx, endpoint, caller, deps.control)
+	case network.LabelTrafficPolicyListAction:
+		return dispatchHandled, handleListLabelTrafficPolicies(ctx, endpoint, caller, deps.control)
+	case network.LabelTrafficPolicyApplyAction, network.LabelTrafficPolicyRemoveAction:
+		return dispatchHandled, handleLabelTrafficPolicy(ctx, endpoint, caller, deps.control, request.action)
 	case network.VMFloatingIPTrafficPolicyApplyAction:
 		return dispatchHandled, handleApplyVMFloatingIPTrafficPolicy(ctx, endpoint, caller, deps.control)
 	case network.VMFloatingIPTrafficPolicyRemoveAction:
