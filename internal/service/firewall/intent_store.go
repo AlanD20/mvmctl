@@ -57,15 +57,21 @@ func decodeIntentJournal(raw []byte) (intentJournal, error) {
 func inspectIntentFile(
 	ctx context.Context, state *generationRecordStoreState, fd int,
 ) (generationRecordFileEvidence, error) {
+	return inspectPolicyAuthorityFile(ctx, state, fd, maxIntentRecordBytes)
+}
+
+func inspectPolicyAuthorityFile(
+	ctx context.Context, state *generationRecordStoreState, fd int, maxBytes int64,
+) (generationRecordFileEvidence, error) {
 	var stat unix.Stat_t
 	if err := state.deps.fstat(ctx, fd, &stat); err != nil {
-		return generationRecordFileEvidence{}, generationAuthorityError("inspect firewall intent journal", err, nil)
+		return generationRecordFileEvidence{}, generationAuthorityError("inspect firewall policy authority file", err, nil)
 	}
 	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Nlink != 1 ||
 		stat.Uid != state.policy.expectedUID || stat.Gid != state.policy.expectedGID ||
-		stat.Mode&07777 != generationRecordFileMode || stat.Size <= 0 || stat.Size > maxIntentRecordBytes {
+		stat.Mode&07777 != generationRecordFileMode || stat.Size <= 0 || stat.Size > maxBytes {
 		return generationRecordFileEvidence{}, generationAuthorityError(
-			"firewall intent journal metadata is unsafe",
+			"firewall policy authority file metadata is unsafe",
 			nil,
 			nil,
 		)

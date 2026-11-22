@@ -135,7 +135,7 @@ func loadLogicalPolicyMutation(
 	return &logicalPolicyMutation{store, kernel, lease, binding, current, compiled, raw, evidence}, nil
 }
 
-func (mutation *logicalPolicyMutation) publish(ctx context.Context, target Intent) error {
+func (mutation *logicalPolicyMutation) publish(ctx context.Context, target Intent, execOwner uint32) error {
 	if err := requireLogicalPolicyDelta(mutation.before, target); err != nil {
 		return err
 	}
@@ -158,17 +158,61 @@ func (mutation *logicalPolicyMutation) publish(ctx context.Context, target Inten
 		// because the kernel generation cannot distinguish the revisions.
 		journal.Before = target
 	}
+	// Persist a denial before accepting a label or exec transition that can
+	// change this owner's index. A crash leaves new admissions denied until
+	// a subsequent logical transaction rebuilds from committed authority.
+	var projection execPolicyProjection
+	publishExec := execOwner != 0 && (mutation.before.hasExecPolicies(execOwner) || target.hasExecPolicies(execOwner))
+	if publishExec {
+		projection, err = target.projectExecPolicies(execOwner)
+		if err != nil {
+			return err
+		}
+		if err := mutation.store.writeExecPolicyIndex(ctx, execOwner, execPolicyProjection{}, false); err != nil {
+			return err
+		}
+	}
 	if _, _, err := mutation.store.writeIntent(ctx, mutation.raw, mutation.evidence, journal); err != nil {
 		return err
 	}
-	if sameProjection {
+	if !sameProjection {
+		if err := mutation.lease.applyCompiledGeneration(ctx, mutation.kernel, mutation.compiled, compiled); err != nil {
+			return err
+		}
+	}
+	if publishExec {
+		return mutation.store.writeExecPolicyIndex(ctx, execOwner, projection, true)
+	}
+	return nil
+}
+
+func (mutation *logicalPolicyMutation) recoverExecPolicyIndex(ctx context.Context, ownerUID uint32) error {
+	status, found, err := mutation.store.execPolicyIndexState(ctx, ownerUID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		if mutation.before.hasExecPolicies(ownerUID) {
+			return invalidGeneration("committed exec policies lack their authorization index")
+		}
 		return nil
 	}
-	return mutation.lease.applyCompiledGeneration(ctx, mutation.kernel, mutation.compiled, compiled)
+	if status == execPolicyIndexCommitted {
+		return nil
+	}
+	projection, err := mutation.before.projectExecPolicies(ownerUID)
+	if err != nil {
+		return err
+	}
+	if err := verifyExactCommittedGeneration(ctx, mutation.kernel, mutation.compiled); err != nil {
+		return err
+	}
+	return mutation.store.writeExecPolicyIndex(ctx, ownerUID, projection, true)
 }
 
 func requireLogicalPolicyDelta(before, target Intent) error {
 	before.VMLabels, target.VMLabels = nil, nil
+	before.ExecPolicies, target.ExecPolicies = nil, nil
 	before.LabelTrafficPolicies, target.LabelTrafficPolicies = nil, nil
 	left, err := json.Marshal(before)
 	if err != nil {

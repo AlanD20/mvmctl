@@ -3,6 +3,7 @@ package firewall
 import (
 	"context"
 	"mvmctl/internal/lib/model"
+	"slices"
 )
 
 // UpdateVMLabels publishes one already-admitted VM's metadata under the firewall lock.
@@ -41,6 +42,9 @@ func mutateVMLabelMetadata(
 	}
 	var revision uint64
 	err := withLogicalPolicyMutation(ctx, func(mutation *logicalPolicyMutation) error {
+		if err := mutation.recoverExecPolicyIndex(ctx, ownerUID); err != nil {
+			return err
+		}
 		var err error
 		revision, err = mutation.publishVMLabels(ctx, ownerUID, vmID, change)
 		return err
@@ -64,8 +68,11 @@ func (mutation *logicalPolicyMutation) publishVMLabels(
 	}
 	if change.retire {
 		target.removeLabelTrafficForVM(ownerUID, vmID)
+		target.ExecPolicies = slices.DeleteFunc(target.ExecPolicies, func(policy ExecPolicyIntent) bool {
+			return policy.OwnerUID == ownerUID && (policy.Source.VMID == vmID || policy.Destination.VMID == vmID)
+		})
 	}
-	if err := mutation.publish(ctx, target); err != nil {
+	if err := mutation.publish(ctx, target, ownerUID); err != nil {
 		return 0, err
 	}
 	return next.Revision, nil

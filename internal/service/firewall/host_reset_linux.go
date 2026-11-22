@@ -196,11 +196,10 @@ func hostResetIntentEmpty(intent Intent) bool {
 			return false
 		}
 	}
-	return len(intent.LabelTrafficPolicies) == 0 && len(intent.ActiveNetworks) == 0 && len(intent.Reservations) == 0 && len(intent.Endpoints) == 0 &&
-		len(
-			intent.Networks,
-		) == 0 && len(intent.VMGrants) == 0 && len(intent.NetworkGrants) == 0 && len(intent.HostServices) == 0 &&
-		len(intent.VMHostGrants) == 0 && len(intent.NetworkHostGrants) == 0 &&
+	return len(intent.ExecPolicies) == 0 && len(intent.LabelTrafficPolicies) == 0 &&
+		len(intent.ActiveNetworks) == 0 && len(intent.Reservations) == 0 && len(intent.Endpoints) == 0 &&
+		len(intent.Networks) == 0 && len(intent.VMGrants) == 0 && len(intent.NetworkGrants) == 0 &&
+		len(intent.HostServices) == 0 && len(intent.VMHostGrants) == 0 && len(intent.NetworkHostGrants) == 0 &&
 		len(intent.FloatingIPs) == 0 && len(intent.VMFloatingIPGrants) == 0 && len(intent.NetworkFloatingIPGrants) == 0
 }
 

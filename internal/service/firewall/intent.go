@@ -146,6 +146,7 @@ type NetworkFloatingIPTrafficGrant struct {
 // Intent is the full host-global graph stored beside the authoritative generation record.
 // A graph is admitted only when its compiler-derived identity agrees with that record.
 type Intent struct {
+	ExecPolicies         []ExecPolicyIntent    `json:"exec_policies,omitempty"`
 	LabelTrafficPolicies []LabelTrafficPolicy  `json:"label_traffic_policies,omitempty"`
 	VMLabels             vmLabelRecords        `json:"vm_labels"`
 	ActiveNetworks       []string              `json:"active_networks"`
@@ -290,6 +291,9 @@ func validateEndpointReservation(reservation EndpointReservation) error {
 // A stopped endpoint may suppress a rule, but never bypass policy grammar or ownership admission.
 func (intent Intent) validateDurablePolicies() error {
 	if err := intent.VMLabels.validate(); err != nil {
+		return err
+	}
+	if err := validateExecPolicies(intent.ExecPolicies, intent.VMLabels); err != nil {
 		return err
 	}
 	networks := make(map[string]NetworkIntent, len(intent.Networks))

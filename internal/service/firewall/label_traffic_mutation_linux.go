@@ -42,7 +42,7 @@ func EnsureLabelTrafficPolicy(
 		}
 		target := cloneIntent(mutation.before)
 		target.LabelTrafficPolicies = append(target.LabelTrafficPolicies, policy)
-		return mutation.publish(ctx, target)
+		return mutation.publish(ctx, target, 0)
 	})
 	if err != nil {
 		return LabelTrafficPolicy{}, PolicyReceipt{}, err
@@ -69,7 +69,7 @@ func RemoveLabelTrafficPolicy(ctx context.Context, ownerUID uint32, policyID, cl
 			}
 			target := cloneIntent(mutation.before)
 			target.LabelTrafficPolicies = slices.Delete(target.LabelTrafficPolicies, index, index+1)
-			return mutation.publish(ctx, target)
+			return mutation.publish(ctx, target, 0)
 		}
 		return verifyExactCommittedGeneration(ctx, mutation.kernel, mutation.compiled)
 	})
