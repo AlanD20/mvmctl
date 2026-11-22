@@ -91,20 +91,26 @@ def _observe_vmm(instance, pidfd, *, proc_root=Path("/proc"), poll_factory=selec
 
 
 def _wait_exits(handles, timeout, *, poll_factory=select.poll, clock=time.monotonic):
-    poller = poll_factory()
-    for fd in handles.values():
-        poller.register(fd, select.POLLIN)
-    started = clock()
     events = {}
-    while len(events) != len(handles):
-        remaining = timeout - (clock() - started)
-        assert remaining > 0, "exact retained process exit deadline expired"
-        for fd, flags in poller.poll(min(250, max(1, int(remaining * 1000)))):
-            assert flags & select.POLLIN and not flags & (select.POLLERR | select.POLLNVAL), "invalid pidfd event"
-            name = next(key for key, value in handles.items() if value == fd)
-            assert name not in events, "duplicate exit event"
-            events[name] = clock() - started
-            poller.unregister(fd)
+    try:
+        poller = poll_factory()
+        for fd in handles.values():
+            poller.register(fd, select.POLLIN)
+        started = clock()
+        while len(events) != len(handles):
+            remaining = timeout - (clock() - started)
+            if not remaining > 0:
+                raise TimeoutError("exact retained process exit deadline expired")
+            for fd, flags in poller.poll(min(250, max(1, int(remaining * 1000)))):
+                assert flags & select.POLLIN and not flags & (select.POLLERR | select.POLLNVAL), "invalid pidfd event"
+                name = next(key for key, value in handles.items() if value == fd)
+                assert name not in events, "duplicate exit event"
+                events[name] = clock() - started
+                poller.unregister(fd)
+    except Exception as error:
+        diagnostic = dict(reason=str(error), exited=events, pending=sorted(set(handles) - set(events)))
+        raise AssertionError("exact retained process exit observation failed: " +
+                             json.dumps(diagnostic, sort_keys=True)) from error
     return events
 
 
@@ -210,6 +216,20 @@ def test_exit_wait_rejects_timeout_and_invalid_descriptor():
         _wait_exits(dict(vmm=1), 1, poll_factory=Poll)
     with pytest.raises(AssertionError, match="deadline"):
         _wait_exits(dict(vmm=1), 0, poll_factory=Poll)
+
+
+def test_exit_timeout_identifies_observed_and_pending_bound_processes():
+    import pytest
+    class Poll:
+        def register(self, fd, flags): pass
+        def unregister(self, fd): assert fd == 11
+        def poll(self, timeout): return [(11, select.POLLIN)]
+    ticks = iter((0.0, 0.0, 1.25, 60.0))
+    with pytest.raises(AssertionError) as caught:
+        _wait_exits(dict(vmm=11, worker=22), 60, poll_factory=Poll, clock=lambda: next(ticks))
+    diagnostic = json.loads(str(caught.value).split(": ", 1)[1])
+    assert diagnostic == dict(reason="exact retained process exit deadline expired",
+                              exited=dict(vmm=1.25), pending=["worker"])
 
 
 def test_vmm_observation_checks_live_start_credentials_and_executable(tmp_path):
